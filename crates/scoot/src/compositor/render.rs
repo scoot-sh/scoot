@@ -67,7 +67,6 @@ use smithay::utils::{Buffer, Physical, Rectangle};
 use crate::cli::RendererKind;
 
 use super::State;
-use super::tty::Tty;
 #[cfg(feature = "gpu-scanout")]
 use elements::Elements;
 use elements::{FrameContext, Rings, ring_elements};
@@ -872,7 +871,7 @@ impl State {
             "capture forces a composite frame: the recording is stale"
         );
         let reset = force_needs_reset(stale);
-        self.force_scanout_composite(reset);
+        self.force_scanout_composite(id, reset);
         if reset
             || !self
                 .backends
@@ -891,13 +890,16 @@ impl State {
             output = id.0,
             "the forced composite drew nothing; resetting the swapchain and forcing again"
         );
-        self.force_scanout_composite(true);
+        self.force_scanout_composite(id, true);
     }
 
-    /// Arms one composite-only frame, optionally resets the swapchain (full
-    /// damage), and renders it now. See [`State::ensure_scanout_capture_current`].
-    fn force_scanout_composite(&mut self, reset: bool) {
-        if let Some(presenter) = self.tty.as_mut().and_then(Tty::scanout_mut) {
+    /// Arms one composite-only frame on output `id`, optionally resets its
+    /// swapchain (full damage), and renders it now. See
+    /// [`State::ensure_scanout_capture_current`]. Only the captured output's
+    /// presenter is armed: another screen's next frame is none of this
+    /// capture's business.
+    fn force_scanout_composite(&mut self, id: OutputId, reset: bool) {
+        if let Some(presenter) = self.tty.as_mut().and_then(|tty| tty.scanout_mut(id)) {
             presenter.arm_force_composite();
             if reset {
                 presenter.invalidate_scanout();
@@ -1242,7 +1244,12 @@ fn draw_frame_scanout(
         // because a panic on the frame path would take every client's
         // unsaved state with it. The default `FrameOutcome` says "nothing
         // happened", which confirms no lock and stamps no feedback.
-        let Some(presenter) = state.tty.as_mut().and_then(Tty::scanout_mut) else {
+        let Some(presenter) = state
+            .tty
+            .as_mut()
+            .zip(output_id)
+            .and_then(|(tty, id)| tty.scanout_mut(id))
+        else {
             tracing::warn!("the scanout pipeline has no drm compositor to present to");
             return outcome;
         };
@@ -1565,7 +1572,10 @@ where
             // that rate is exactly the multi-MB/s memcpy the roadmap calls
             // out. Neither `--headless` nor `--nested` draws a cursor, so
             // neither has a new reason to render more often than before.
-            let age = state.tty.as_ref().map_or(0, Tty::next_buffer_age);
+            let age = match (&state.tty, frame.output) {
+                (Some(tty), Some(id)) => tty.next_buffer_age(id),
+                _ => 0,
+            };
             // The backdrop element already covers the output opaquely while
             // locked; this is the second line of defence behind it, so that
             // even a frame whose elements somehow produced nothing clears to
@@ -1607,8 +1617,8 @@ where
                     // be nothing to present below -- see
                     // `BufferPool::advance_generation`'s doc for why this
                     // can't be skipped just because this frame is.
-                    if let Some(tty) = &mut state.tty {
-                        tty.advance_generation();
+                    if let (Some(tty), Some(id)) = (&mut state.tty, frame.output) {
+                        tty.advance_generation(id);
                     }
                     // Both presenters read back the same frame the same way;
                     // only what happens with the pixels afterward differs, so
@@ -1655,9 +1665,10 @@ where
                                 outcome.host_committed =
                                     host.present(pixels, region.size.w, region.size.h);
                             }
-                            if let Some(tty) = &mut state.tty {
-                                outcome.blank_seq = tty.present(pixels, region, (width, height));
-                                outcome.retry_render = tty.take_retry_render();
+                            if let (Some(tty), Some(id)) = (&mut state.tty, frame.output) {
+                                outcome.blank_seq =
+                                    tty.present(id, pixels, region, (width, height));
+                                outcome.retry_render = tty.take_retry_render(id);
                             }
                         });
                         if let Err(failure) = read {

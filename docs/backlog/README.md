@@ -326,7 +326,7 @@ falsify. Read `flexwm` there as `scoot`.
   Gamma LUT length re-read per CRTC, live control failed only on change.
   Four fail-first harness tests; the switch itself unverified live
   (single-CRTC dev VM), legacy blind-probe limit stated in the record.
-- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — gh #48 stays open: new-mode-list on the same connector, and fallback to a *different* connector, both need vfkit/laptop hardware with before/after proof.
+- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — gh #48 stays open: new-mode-list on the same connector, and fallback to a *different* connector, both need vfkit/laptop hardware with before/after proof. Since multi-output phase E the fallback applies only when no driven connector is left; with another screen lit an unplug removes an output instead (confirmed by a physical DP-1 replug on the Asahi M2 Air, 2026-09-25).
 
 ### Core / config / rendering
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.
@@ -528,8 +528,8 @@ be revisited.
   is the security-relevant one. Promoted 2026-09-20 to **Milestone 19**
   ([plan](../roadmap/19-multi-output.md), in progress, phases A–D
   VM-testable, E hardware-gated) — this entry stays the detailed spec.
-  Phases A–F have landed (render, layer shell, lock, workspaces, moves);
-  only phase E (`--tty` multi-CRTC) waits on hardware.
+  Phases A–F have landed (render, layer shell, lock, workspaces, moves),
+  E included (2026-09-25, `--tty` drives every connected monitor).
 - [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
   — deliberately left out of milestone 19: design answered 2026-09-22
   (`[[outputs]]` config shape, per-output scale enumeration, apply/test
@@ -743,11 +743,26 @@ binds → scale/mode surface; Asahi proof gates scanout planes; autostart
 policy → renderer/GPU reword. Batch Asahi trips (multi-CRTC + scanout +
 scale/mode) into one hardware session.
 
+- [Restore windows, workspaces and binds when a monitor reconnects](./core/output-reconnect-restore.md)
+  — OPEN, **HIGH** (daily-drive): a replugged monitor (DP monitors drop
+  hot-plug detect in standby) returns as a new output id with an empty
+  workspace while its windows stay piled on the panel, and the default
+  output-2 binds stop reaching it. niri-style restore by connector identity
+  (name + EDID make/model/serial); subsumes the remainder ticket's
+  replug-id follow-up. Filed from PR #247's review.
+- [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./core/lock-vblank-bound-hardening.md)
+  — OPEN, low: `await_vblank`'s "late, never early" should say "within one
+  bound of the first blank drawn"; `stale_vblanks` entries should age out so
+  a driver that never delivers an owed vblank can't freeze a reused CRTC.
+  Filed from PR #247's round-2 review.
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
   — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
   + H (default `Super+comma/period` output binds) LANDED 2026-09-21
-  (PR #208). Remaining: E1 enumerate, E2 render + hotplug add/remove.
-  E + scale/mode hardware-gated. Pairs with the existing
+  (PR #208). E1 (every connector driven at startup) + E2 (per-head
+  rendering, per-output lock waits, hotplug add/remove) LANDED 2026-09-25,
+  live on the Asahi M2 Air including a physical unplug and replug. Left:
+  GPU-tier runtime add and #48 `MoveTo` on hardware,
+  [reconnect restore](./core/output-reconnect-restore.md), and the
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland: drops onto X windows do not land](./protocols/xwayland-pointer-focus-x11.md)

@@ -633,6 +633,34 @@ impl State {
         }
     }
 
+    /// Output `id` is going away (a `--tty` monitor unplugged): every window
+    /// last announced on it is told `output_leave` now, while its `wl_output`
+    /// objects can still be looked up, and its stored membership is cleared.
+    /// The `apply()` that follows the removal then sends the `output_enter`
+    /// for whichever output adopted it, closed by `done` -- the same
+    /// leave-then-enter pair a move sends. Without this the refresh would
+    /// find no old output to leave (it is no longer in `State::outputs`) and
+    /// a taskbar would believe the window is on both screens.
+    pub(super) fn leave_removed_output(&mut self, id: OutputId) {
+        let Some(output) = self.outputs.get(id).cloned() else {
+            return;
+        };
+        for toplevel in self.foreign_toplevel_management.toplevels.values_mut() {
+            if toplevel.output != Some(id) {
+                continue;
+            }
+            for handle in &toplevel.handles {
+                let Some(client) = handle.client() else {
+                    continue;
+                };
+                for wl_output in output.client_outputs(&client) {
+                    handle.output_leave(&wl_output);
+                }
+            }
+            toplevel.output = None;
+        }
+    }
+
     /// A client bound a `wl_output`. Every handle it already holds has to be
     /// told the window is on that screen.
     ///

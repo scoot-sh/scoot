@@ -31,3 +31,38 @@ two-connector/relayout-capable hardware), with the exact commands,
 `wlr-randr` before/after, and screenshot proof recorded — not a
 paraphrase. If a path fails on hardware, it becomes its own fix ticket;
 if both confirm, close this entry with the evidence and close #48.
+
+
+## Update 2026-09-25 (Asahi M2 Air, external monitor via the `fairydust` kernel)
+
+Hotplug events on real hardware are received and handled: unplugging and
+replugging an external monitor while scoot drove the panel produced two udev
+change events and left the session running on `eDP-1` with no disruption
+(`Asahi.md` Test 3 results). The two paths this ticket tracks remain
+unconfirmed on this machine: the panel can't be unplugged, and the
+experimental kernel kept `DP-1` reading `connected` across the unplug. A
+machine with two unpluggable outputs (or a kernel that reports DP HPD loss)
+is still needed.
+
+
+## Update 2026-09-25, later: multi-output phase E changes what path 2 means
+
+`--tty` now drives every connected connector (milestone 19 phase E). Path 2
+(falling back to a *different* connector) now applies only when **no**
+driven connector is still connected. That is `hotplug::heads::replan`'s
+`MoveTo`, pinned in its unit tests. With another screen still lit, an unplug
+*removes* that screen's output instead (`State::remove_output`, harness
+suites `outputs/removal.rs` and friends), and a plug *adds* one. The old
+"second display stays dark" behaviour is gone.
+
+**Corrected the same day.** A physical replug at 17:59Z *did* read
+`disconnected` (33 samples at 0.5 s in `~/fx/replug/dp-status.log`), and
+scoot removed output 2 and then added output 3 on CRTC 68. The morning's
+"DP-1 kept reading connected" came from a quicker unplug and is not a
+property of the kernel. The multi-output remove/add paths are therefore
+confirmed on hardware (see `Asahi.md` Test 3). What this ticket tracks is
+still open:
+- **path 2 (fallback to a different connector):** it needs the *only* lit
+  screen to be unpluggable, and this machine's panel is not;
+- **path 1 (a new mode list on the same connector):** it needs vfkit-style
+  host rescaling.

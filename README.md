@@ -16,7 +16,7 @@ Two needs drove scoot's creation:
 
 - **Running with no GPU and no OpenGL.** scoot renders on the CPU with
   [pixman](http://pixman.org/) by default, so it runs as a full `--tty`
-  session on a KMS display (one monitor for now), including VMs and machines
+  session on a KMS display (every connected monitor), including VMs and machines
   with no 3D acceleration; `--headless` with no display at all
   (`--outputs N` for several virtual screens); or `--nested` inside another
   compositor, including a GPU-less container such as
@@ -48,14 +48,25 @@ inspired this project.
 
 ## Not yet
 
-- **Multi-output is partial.** `--headless --outputs N` now creates several virtual outputs for testing,
-  each with its own geometry, its own scrolling strip and its own composited
-  framebuffer (screenshots, screen captures, gamma and frame callbacks all
-  work per output) — and workspace groups, output-management heads and the
-  pointer clamp are per-output too — but new windows still open on the first
-  output (moving one across, and focusing another output from the keyboard,
-  is a config bind away — no defaults ship for either yet), and `--tty`
-  still drives one connector (a second monitor there stays dark).
+- **Multi-output is missing per-output configuration.** `--tty` drives
+  every connected monitor at once, each its own output with its own
+  scrolling strip, framebuffer, lock surface, workspace group and gamma
+  control. New windows open on the output under the pointer, and
+  `Super+comma`/`Super+period` (with `Shift` to carry the focused window)
+  move between the first two outputs. Plugging a monitor in while the session runs adds
+  an output for it. Pulling one out removes its output and moves its
+  windows to a remaining one; the last screen is never taken away. What is
+  not there yet:
+  - **Per-output scale, mode and position.** One `[output] scale` applies
+    to every screen and `--mode WxH` to every connector that offers that
+    size. Screens sit side by side, left to right: in connector order at
+    startup, and a monitor plugged in later goes on the right.
+    `wlr-output-management` `apply`/`test` stay refused.
+  - **A replugged monitor comes back empty, under a new id.** Its windows
+    stay on the screen they were moved to when it went away, and the
+    default output-2 binds stop reaching it until scoot restarts
+    (`scootctl outputs` shows the current ids). Restoring both on
+    reconnect is planned.
 - **XWayland is opt-in, and partial.** X11 applications run with
   `--xwayland` (or `[xwayland] enabled`) in an `xwayland` build (`cargo
   build --release --features xwayland`, with `Xwayland` on `PATH`; no flake
@@ -198,8 +209,9 @@ own lock surface, its own workspace group and output-management head — so
 pixels, a bar on one output reserves space only there, the pointer crosses
 onto the second screen instead of trapping on the first, and a session lock
 blanks every output before it confirms.
-`--nested` and `--tty` warn and ignore the flag, having one host window and
-one CRTC respectively. See
+`--nested` and `--tty` warn and ignore the flag: `--nested` has one host
+window, and `--tty` already makes one output per connected monitor (see
+[docs/tty.md](docs/tty.md#more-than-one-monitor)). See
 [docs/configuration.md](docs/configuration.md#more-than-one-output) for what a
 second output does and does not do yet.
 

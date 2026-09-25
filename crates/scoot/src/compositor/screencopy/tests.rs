@@ -589,7 +589,10 @@ fn park_across_deferred_lock(fixture: &mut Fixture) -> Instant {
     // 7. The fallback timer the real path arms alongside is deliberately not
     // armed here: the test drives the deadline by hand.
     let t0 = Instant::now();
-    let _ = fixture.state.session_lock.await_vblank(Some(7), t0);
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(scoot_core::OutputId(1), Some(7), t0);
     // The blank tick consuming the dirty flag: nothing in the re-arm set is
     // left, so a real tick drops the timer -- the mechanism under test.
     fixture.state.needs_render = false;
@@ -611,7 +614,9 @@ fn a_parked_capture_is_delivered_once_a_vblank_confirms_the_lock() {
     park_across_deferred_lock(&mut fixture);
 
     // The DRM vblank handler's own call, for flip 7's completion.
-    fixture.state.note_flip_completed(Some(7));
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(7));
     assert!(
         !fixture.state.session_lock.awaiting_blank(),
         "the tracked flip's vblank confirms the lock"
@@ -714,16 +719,19 @@ fn a_confirm_with_no_parked_capture_costs_one_tick() {
     let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run(Step::LockNoWait);
     assert!(fixture.state.session_lock.awaiting_blank());
-    let _ = fixture
-        .state
-        .session_lock
-        .await_vblank(Some(7), Instant::now());
+    let _ =
+        fixture
+            .state
+            .session_lock
+            .await_vblank(scoot_core::OutputId(1), Some(7), Instant::now());
     fixture.state.needs_render = false;
     fixture.tick(Duration::from_millis(50));
     assert!(!fixture.state.timer_armed);
     fixture.state.put_primary_backend(backend);
 
-    fixture.state.note_flip_completed(Some(7));
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(7));
     assert!(
         !fixture.state.session_lock.awaiting_blank(),
         "the tracked flip's vblank confirms the lock"
@@ -841,16 +849,19 @@ fn parked_captures_on_two_sessions_are_all_delivered_by_one_confirm() {
     let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run(Step::LockNoWait);
     assert!(fixture.state.session_lock.awaiting_blank());
-    let _ = fixture
-        .state
-        .session_lock
-        .await_vblank(Some(7), Instant::now());
+    let _ =
+        fixture
+            .state
+            .session_lock
+            .await_vblank(scoot_core::OutputId(1), Some(7), Instant::now());
     fixture.state.needs_render = false;
     fixture.tick(Duration::from_millis(50));
     assert!(!fixture.state.timer_armed);
     fixture.state.put_primary_backend(backend);
 
-    fixture.state.note_flip_completed(Some(7));
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(7));
     assert!(
         fixture.state.timer_armed,
         "the confirm must re-arm the ticker whatever is parked"
@@ -901,10 +912,11 @@ fn a_parked_capture_outlives_a_locker_that_dies_mid_wait() {
     let backend = fixture.state.take_primary_backend().expect("a backend");
     fixture.run_on(locker, Step::LockNoWait);
     assert!(fixture.state.session_lock.awaiting_blank());
-    let _ = fixture
-        .state
-        .session_lock
-        .await_vblank(Some(7), Instant::now());
+    let _ =
+        fixture
+            .state
+            .session_lock
+            .await_vblank(scoot_core::OutputId(1), Some(7), Instant::now());
     fixture.disconnect(locker);
     assert!(
         fixture.state.session_lock.is_locked(),
@@ -915,7 +927,9 @@ fn a_parked_capture_outlives_a_locker_that_dies_mid_wait() {
     assert!(!fixture.state.timer_armed);
     fixture.state.put_primary_backend(backend);
 
-    fixture.state.note_flip_completed(Some(7));
+    fixture
+        .state
+        .note_flip_completed(scoot_core::OutputId(1), Some(7));
     assert!(
         !fixture.state.session_lock.awaiting_blank(),
         "a dead locker's vblank still takes the wait"

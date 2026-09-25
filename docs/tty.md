@@ -51,6 +51,10 @@ drm: device unusable path=/dev/dri/card1 reason=has no usable KMS pipeline
 drm: driving this device path=/dev/dri/card2 connector=eDP-1 width=2560 height=1600
 ```
 
+(Since multi-output the line also names the CRTC and the presenter tier, and
+there is one per connected monitor -- see
+[More than one monitor](#more-than-one-monitor).)
+
 So **`--gpu` is not needed there** — don't reach for it first on Apple
 Silicon. Naming a device is not a guarantee either: it skips the *search*,
 not the checks, so it still has to open through the session and pass the same
@@ -100,9 +104,50 @@ scoot --tty --mode 1920x1080 -- foot
 ```
 
 `--mode WxH` picks the connector mode of exactly that size, and falls back to
-the preferred one with a warning if the connector lists no such mode (`cat
-/sys/class/drm/card*-*/modes` shows what it lists). Like `--gpu`, it is
-ignored with a warning outside `--tty`.
+the preferred one with a warning naming the connector if the connector lists
+no such mode (`cat /sys/class/drm/card*-*/modes` shows what it lists). With
+several monitors it applies to each one independently: a panel that does not
+offer the size keeps its own preferred mode while a monitor that does takes
+it. Like `--gpu`, it is ignored with a warning outside `--tty`.
+
+### More than one monitor
+
+`--tty` drives every connected connector that offers a mode, each as an
+output of its own, up to eight. Each output gets its own `wl_output` named
+after its connector, its own scrolling strip, framebuffer and render loop
+pass, its own flip bookkeeping and vblank on its own CRTC, and its own gamma
+LUT. The startup log has one line per monitor:
+
+```
+drm: driving this device path=/dev/dri/card2 connector=eDP-1 crtc=crtc::Handle(50) width=2560 height=1600 scanout="dumb"
+drm: driving this device path=/dev/dri/card2 connector=DP-1 crtc=crtc::Handle(68) width=1920 height=1080 scanout="dumb"
+```
+
+- **Layout.** Outputs sit side by side, left to right, each as wide as its
+  mode at the shared `[output] scale`: in the kernel's connector order at
+  startup, and in the order they were added after that (a monitor plugged
+  in later goes on the right; the others close the gap when one is
+  removed).
+  The first is the primary: the pointer starts there, and windows open on
+  whichever output the pointer is over. There is no per-output scale, mode or
+  position setting yet.
+- **CRTCs.** Each connector is matched to a CRTC its encoders can reach,
+  read from `possible_crtcs` rather than tried in order. That matters on SoC
+  display controllers: Apple's DCP wires `eDP-1` to one CRTC and `DP-1` to
+  the other. A connector no free CRTC can reach stays dark, with a warning.
+- **One presenter tier for the session.** The first monitor decides it. On a
+  `--renderer gles` session in a `gpu-scanout` build, every monitor scans out
+  from the GPU. A monitor that cannot join the GPU tier stays dark rather
+  than mixing tiers. If the first falls back to dumb buffers, every monitor
+  uses dumb buffers.
+- **Startup never refuses over a second monitor.** One monitor that builds
+  is enough. A connector whose CRTC, surface, buffers or output fails is
+  left dark with a warning.
+- **Pointer, tablet, lock, VT switch.** Relative motion crosses from screen
+  to screen. Absolute devices (tablets, vfkit's digitizer) map across the
+  whole desktop. A session lock blanks every screen and confirms only once
+  each screen's blanked frame has reached scanout on its own CRTC. A VT
+  switch pauses every screen and restores every screen.
 
 ### When nothing works
 
@@ -129,14 +174,33 @@ for c in /sys/class/drm/card*/device/driver; do echo "$c -> $(readlink -f "$c")"
 the display underneath it moves, so nothing here is a once-at-startup
 decision:
 
-- **Plug a monitor in or pull one out.** Unplugging the connector scoot is
-  driving makes it pick another connected one and mode-set onto it — moving
-  to a different CRTC when the display controller only routes that connector
-  there (ordinary PC graphics route any connector to any CRTC; ARM SoCs often
-  wire encoders to specific CRTCs). If no CRTC on the device can drive the
-  new connector it logs `no other crtc on this device can drive the new
-  connector` and stays put, retrying on the next hotplug. Plugging one back
-  in after everything was unplugged mode-sets back onto it.
+- **Plug a monitor in.** The new monitor gets an output of its own, placed
+  to the right of the others, on a CRTC no lit screen is using. Screens that
+  are already lit are left alone: a monitor plugged into a laptop never moves
+  the session off the panel. Clients see a new `wl_output`, a new
+  output-management head and a new workspace group. Logged as `drm: a display
+  was connected; added an output for it`. The output gets a new id every
+  time, even for a monitor that was plugged in before, so binds naming an
+  output id (the default `super+period` targets id 2) may need the new one
+  (`scootctl outputs`).
+- **Pull a monitor out.** If other screens are still lit, its output is
+  removed:
+  - its windows and workspaces move to the output that adopts them;
+  - its layer surfaces are closed, its screen captures stopped and its gamma
+    control failed;
+  - its `wl_output` global is withdrawn at once and destroyed a few seconds
+    later, so a client binding it at that moment is not killed;
+  - the remaining outputs close the gap.
+
+  The last screen is never removed. When the monitor scoot is showing is
+  the only one lit, scoot picks another connected one and mode-sets onto
+  it. That can mean moving to a different CRTC when the display controller
+  only routes that connector there: ordinary PC graphics route any connector
+  to any CRTC, while ARM SoCs often wire encoders to specific CRTCs. If no
+  CRTC on the device can drive the new connector, it logs `no other crtc on
+  this device can drive the new connector` and stays put, retrying on the
+  next hotplug. Plugging one back in after everything was unplugged
+  mode-sets back onto it.
 - **Resize, rescale or full-screen a VM window.** Apple's Virtualization
   framework reconfigures the guest display when you do, which reaches the
   guest as a hotplug with a new mode list and a new preferred mode; scoot
@@ -144,7 +208,14 @@ decision:
 
 A change reaches everything that cares: the render target, `wl_output` (`mode`
 + `done`), `wlr-output-management`, layer-shell surfaces (bars re-anchor and
-re-arrange), the window layout, and `scoot msg outputs`.
+re-arrange), the window layout, and `scoot msg outputs`. A screen that
+changes width moves the screens to its right.
+
+Every hotplug event re-probes every connector, not only the lit ones,
+because a monitor plugged into an unused connector only shows up when that
+connector is probed. That is one EDID read per connected connector per
+event, the same cost wlroots pays; a disconnected connector answers without
+one.
 
 With nothing connected at all, scoot holds the last frame, keeps the session
 running and logs `nothing is connected to this device any more` — plug a
@@ -154,16 +225,24 @@ without DRM master cannot mode-set when they happen.
 
 Two limits:
 
-- **Still one output.** Plugging a second monitor into a laptop already
-  running on `eDP-1` keeps the session on `eDP-1` rather than jumping to the
-  new screen — scoot drives one output, so one of the two has to be dark, and
-  the one you are looking at is the one it keeps. Real multi-output is a
-  separate, larger piece of work.
-- **The output keeps the name it started with.** A session that started on
-  `HDMI-A-1` and fell back to `eDP-1` when the cable came out still reports
-  `HDMI-A-1`. Renaming a `wl_output` is not something the protocol allows;
-  recreating it would make every client re-enter the output and re-map its
-  surfaces, which is a bigger lie about what happened than a stale name.
+- **A moved screen keeps its old name.** When the only lit screen was
+  `HDMI-A-1` and scoot fell back to `eDP-1` because the cable came out, it
+  still reports `HDMI-A-1`. The protocol does not allow renaming a
+  `wl_output`, and recreating it would make every client re-enter the output
+  and re-map its surfaces. That is a bigger lie about what happened than a
+  stale name. An output added for a newly plugged monitor always gets its
+  own connector's name.
+- **A replugged monitor comes back empty.** Windows moved off a screen
+  that went away stay where they were moved, and the screen returns under
+  a new output id. Monitors that drop hot-plug detect in standby make this
+  visible: every window piles onto the remaining screen. Restoring windows
+  and workspaces on reconnect is tracked in
+  `docs/backlog/core/output-reconnect-restore.md`.
+- **Only what the kernel reports is followed.** On the M2 Air with the
+  experimental `fairydust` kernel, one quick unplug earlier on 2026-09-25
+  never read `disconnected`, while a later ~16 s one did and was followed
+  ([`../Asahi.md`](../Asahi.md) Test 3). A disconnect the kernel does not
+  report leaves scoot driving a screen that is no longer there.
 
 Under `--tty` the output is named after its connector — `HDMI-A-1`, `eDP-1`,
 `Virtual-1`, the same spelling as `/sys/class/drm/card*-*` — so bars and

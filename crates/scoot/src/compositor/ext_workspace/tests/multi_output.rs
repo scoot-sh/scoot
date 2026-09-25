@@ -256,3 +256,42 @@ fn moving_a_window_across_outputs_reassigns_no_group() {
     assert_eq!(workspaces_of(&fixture, 1), (1, 0));
     assert_eq!(workspaces_of(&fixture, 2), (2, 0));
 }
+
+/// An output taken away (a `--tty` monitor unplugged) removes its group the
+/// way `ext-workspace-v1` requires: each of its workspaces leaves the group
+/// and is removed, then the group is removed -- and the other output's group
+/// is left alone.
+#[test]
+fn removing_an_output_removes_its_group_in_protocol_order() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    let burst = fixture.take_log();
+    let handle = handle_in_group(&burst, 1) as u32;
+
+    assert!(fixture.state.remove_output(OutputId(2)));
+    fixture.settle();
+    let log = fixture.take_log();
+    let leave = log
+        .iter()
+        .position(|seen| *seen == Seen::WorkspaceLeave(1, handle))
+        .expect("the workspace leaves the removed group");
+    let removed = log
+        .iter()
+        .position(|seen| *seen == Seen::Removed(handle))
+        .expect("the workspace is removed");
+    let group_removed = log
+        .iter()
+        .position(|seen| *seen == Seen::GroupRemoved(1))
+        .expect("the group is removed");
+    assert!(leave < removed && removed < group_removed, "{log:?}");
+    assert!(
+        !log.contains(&Seen::GroupRemoved(0)),
+        "the remaining output's group stays: {log:?}"
+    );
+    assert!(
+        matches!(log.get(group_removed + 1), Some(Seen::Done(_))),
+        "a done closes the removal: {log:?}"
+    );
+}

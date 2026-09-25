@@ -93,10 +93,14 @@ pub struct GammaControlState {
     /// `output_manager_state`, nothing reads this field again after `new`.
     #[allow(dead_code)]
     manager_global: GlobalId,
-    /// Entries per ramp. Fixed at construction on headless/nested
-    /// ([`FALLBACK_GAMMA_SIZE`]); overwritten from the real CRTC by
-    /// `tty::init` once the DRM surface exists.
-    size: u32,
+    /// Entries per ramp, per output: each `--tty` output's own CRTC LUT
+    /// length, recorded by `tty::attach` once the output and its DRM surface
+    /// both exist, and moved by a CRTC switch ([`crtc_changed`](Self::crtc_changed)).
+    /// An output with no entry -- every headless/nested output -- uses
+    /// [`FALLBACK_GAMMA_SIZE`] (see [`size_of`](Self::size_of)). A `Vec`, not
+    /// a map: at most `MAX_OUTPUTS` entries, read per request, never per
+    /// frame.
+    sizes: Vec<(OutputId, u32)>,
     /// The live control per output, if any. Compared by object identity on
     /// destroy, so tearing down a superseded (already `failed`) control
     /// cannot clear a newer one -- on its own output or any other. This is
@@ -115,33 +119,58 @@ impl GammaControlState {
             );
         Self {
             manager_global,
-            size: FALLBACK_GAMMA_SIZE,
+            sizes: Vec::new(),
             current: HashMap::new(),
         }
     }
 
-    /// Records the real CRTC size once `--tty` knows it. Called once from
-    /// `tty::init`, still before any client can bind (see its call site); a
-    /// later CRTC switch goes through [`crtc_changed`](Self::crtc_changed)
-    /// instead, which is the same write plus the live-control question below.
-    pub(super) fn set_size(&mut self, size: u32) {
-        self.size = size;
+    /// Entries per ramp on output `id`: its CRTC's LUT length under
+    /// `--tty`, [`FALLBACK_GAMMA_SIZE`] everywhere else.
+    fn size_of(&self, id: OutputId) -> u32 {
+        self.sizes
+            .iter()
+            .find(|(known, _)| *known == id)
+            .map_or(FALLBACK_GAMMA_SIZE, |(_, size)| *size)
     }
 
-    /// Re-records the CRTC's LUT length after `--tty` moves to a different
-    /// CRTC (see `tty/hotplug.rs`'s CRTC switch, the only caller). A live
-    /// control was sized for the old CRTC, so it is told it lost control --
-    /// the same transfer shape `get_gamma_control` uses, so it re-reads
-    /// `gamma_size` and re-sets -- rather than eating `invalid_gamma`
-    /// (a protocol error, i.e. a killed night-light) on its next `set_gamma`,
-    /// which is still validated against the new length. This holds even
-    /// when the length did not change: nothing pushes the old ramp to the
-    /// new CRTC (a modeset carries plane state, not LUT contents), so a
-    /// kept control would show un-warmed white until the client's next
-    /// periodic set -- failing it makes the client re-push promptly.
-    pub(super) fn crtc_changed(&mut self, size: u32) {
-        self.size = size;
-        for (_, current) in self.current.drain() {
+    /// Records output `id`'s real CRTC size once `--tty` knows it. Called
+    /// from `tty::attach`, still before any client can bind (see its call
+    /// site); a later CRTC switch goes through
+    /// [`crtc_changed`](Self::crtc_changed) instead, which is the same write
+    /// plus the live-control question below.
+    pub(super) fn set_output_size(&mut self, id: OutputId, size: u32) {
+        match self.sizes.iter_mut().find(|(known, _)| *known == id) {
+            Some((_, recorded)) => *recorded = size,
+            None => self.sizes.push((id, size)),
+        }
+    }
+
+    /// Re-records output `id`'s LUT length after `--tty` moves it to a
+    /// different CRTC (see `tty/hotplug.rs`'s CRTC switch, the only caller).
+    /// A live control on that output was sized for the old CRTC, so it is
+    /// told it lost control -- the same transfer shape `get_gamma_control`
+    /// uses, so it re-reads `gamma_size` and re-sets -- rather than eating
+    /// `invalid_gamma` (a protocol error, i.e. a killed night-light) on its
+    /// next `set_gamma`, which is still validated against the new length.
+    /// This holds even when the length did not change: nothing pushes the
+    /// old ramp to the new CRTC (a modeset carries plane state, not LUT
+    /// contents), so a kept control would show un-warmed white until the
+    /// client's next periodic set -- failing it makes the client re-push
+    /// promptly. A control on any other output is untouched: its CRTC did not
+    /// move.
+    pub(super) fn crtc_changed(&mut self, id: OutputId, size: u32) {
+        self.set_output_size(id, size);
+        if let Some(current) = self.current.remove(&id) {
+            current.failed();
+        }
+    }
+
+    /// Forgets output `id` entirely: its size record, and its live control,
+    /// which is told it failed -- the protocol's answer for an output that
+    /// went away. Called when a `--tty` hotplug removes the output.
+    pub(super) fn forget_output(&mut self, id: OutputId) {
+        self.sizes.retain(|(known, _)| *known != id);
+        if let Some(current) = self.current.remove(&id) {
             current.failed();
         }
     }
@@ -168,16 +197,10 @@ impl GammaControlState {
         self.current.len()
     }
 
-    /// The expected `set_gamma` fd length in bytes: three ramps of `size`
-    /// little-endian `u16` entries.
-    fn expected_len(&self) -> usize {
-        self.size as usize * 6
-    }
-
-    /// The default linear ramp for the current size: entry `i` of each ramp
-    /// is `i * 65535 / (size - 1)`.
-    fn linear_ramp(&self) -> Vec<u16> {
-        linear_ramp(self.size)
+    /// The expected `set_gamma` fd length in bytes for output `id`: three
+    /// ramps of its size in little-endian `u16` entries.
+    fn expected_len(&self, id: OutputId) -> usize {
+        self.size_of(id) as usize * 6
     }
 }
 
@@ -275,7 +298,7 @@ impl Dispatch2<ZwlrGammaControlV1, State> for GammaControlUserData {
         // the live one's ramp, on its own output or any other.
         if let Some(id) = state.gamma_control.output_of(resource) {
             state.gamma_control.current.remove(&id);
-            restore_default(state);
+            restore_default(state, id);
         }
     }
 }
@@ -327,7 +350,7 @@ fn get_gamma_control(
     {
         old.failed();
     }
-    control.gamma_size(state.gamma_control.size);
+    control.gamma_size(state.gamma_control.size_of(output_id));
 }
 
 /// Reads, validates and (on `--tty`) applies one `set_gamma`.
@@ -338,15 +361,20 @@ fn get_gamma_control(
 /// protocol's own answer and what `gammastep` expects from a compositor that
 /// cannot use what it sent.
 fn set_gamma(state: &mut State, resource: &ZwlrGammaControlV1, fd: OwnedFd) {
-    let expected = state.gamma_control.expected_len();
+    // The caller has already checked this control is live, so it names an
+    // output; the `let else` is the proof, not a new refusal path.
+    let Some(id) = state.gamma_control.output_of(resource) else {
+        return;
+    };
+    let size = state.gamma_control.size_of(id);
+    let expected = state.gamma_control.expected_len(id);
     let bytes = match read_bounded(fd, expected) {
         Some(bytes) if bytes.len() == expected => bytes,
         _ => {
             resource.post_error(
                 zwlr_gamma_control_v1::Error::InvalidGamma,
                 format!(
-                    "gamma table must be exactly three ramps of {} u16 entries ({} bytes)",
-                    state.gamma_control.size, expected,
+                    "gamma table must be exactly three ramps of {size} u16 entries ({expected} bytes)",
                 ),
             );
             return;
@@ -369,11 +397,12 @@ fn set_gamma(state: &mut State, resource: &ZwlrGammaControlV1, fd: OwnedFd) {
     // is a multiple of 6), so this always holds -- and a short ramp here
     // would misalign the three channels, which is worth a hard guarantee
     // rather than a silent slice.
-    debug_assert_eq!(ramp.len(), state.gamma_control.size as usize * 3);
+    let size = size as usize;
+    debug_assert_eq!(ramp.len(), size * 3);
 
-    let size = state.gamma_control.size as usize;
+    // Onto this control's own output's CRTC -- never another screen's.
     if tty
-        .set_gamma_ramp(&ramp[..size], &ramp[size..2 * size], &ramp[2 * size..])
+        .set_gamma_ramp(id, &ramp[..size], &ramp[size..2 * size], &ramp[2 * size..])
         .is_err()
     {
         // The object is dead from here: `failed` means "no longer valid"
@@ -381,32 +410,32 @@ fn set_gamma(state: &mut State, resource: &ZwlrGammaControlV1, fd: OwnedFd) {
         // last ramp it accepted; there is no record to update, so nothing
         // can go stale. Removed from its own output only -- a control on any
         // other output is untouched.
-        if let Some(id) = state.gamma_control.output_of(resource) {
-            state.gamma_control.current.remove(&id);
-        }
+        state.gamma_control.current.remove(&id);
         resource.failed();
     }
 }
 
-/// Restores the default linear ramp when a live control goes away --
-/// explicit destroy or client disconnect.
+/// Restores the default linear ramp on output `id` when its live control
+/// goes away -- explicit destroy or client disconnect.
 ///
 /// Takes no control to remove: `destroyed` (the only caller) has already
 /// taken it out of its output's slot, so reaching here with a stale entry
 /// would mean restoring the default over another output's live ramp.
-fn restore_default(state: &mut State) {
+fn restore_default(state: &mut State, id: OutputId) {
     if let Some(tty) = state.tty.as_ref() {
         // Nothing to signal failure on: the object this would be about is
         // already gone. A failed restore leaves the last ramp on the hardware
         // rather than crashing the session; the next control starts clean
-        // either way.
-        let ramp = state.gamma_control.linear_ramp();
-        let size = state.gamma_control.size as usize;
+        // either way. Only this output's CRTC: another screen's ramp is its
+        // own control's business.
+        let size = state.gamma_control.size_of(id);
+        let ramp = linear_ramp(size);
+        let size = size as usize;
         if tty
-            .set_gamma_ramp(&ramp[..size], &ramp[size..2 * size], &ramp[2 * size..])
+            .set_gamma_ramp(id, &ramp[..size], &ramp[size..2 * size], &ramp[2 * size..])
             .is_err()
         {
-            tracing::warn!("could not restore the default gamma ramp");
+            tracing::warn!(output = id.0, "could not restore the default gamma ramp");
         }
     }
 }

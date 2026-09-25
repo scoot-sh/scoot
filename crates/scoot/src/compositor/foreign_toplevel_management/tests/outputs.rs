@@ -467,3 +467,39 @@ fn a_new_window_with_the_pointer_over_no_output_falls_back_to_primary() {
         "a window opened with the pointer over no output did not fall back to the primary"
     );
 }
+
+/// A window on an output that is taken away (a `--tty` monitor unplugged)
+/// moves with its workspace to the output that adopts it, and a taskbar is
+/// told so the same way as for a move: leave the old screen, enter the new
+/// one, `done`.
+#[test]
+fn a_window_on_a_removed_output_is_told_leave_then_enter() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.run(Step::MapWindow);
+    fixture
+        .state
+        .act(Action::MoveFocusedWindowToOutput(OutputId(2)));
+    fixture.settle();
+    fixture.take_log();
+
+    assert!(fixture.state.remove_output(OutputId(2)));
+    fixture.settle();
+    let log = fixture.take_log();
+    assert_eq!(
+        output_events(&log),
+        vec![Seen::OutputLeave(0), Seen::OutputEnter(0)],
+        "the adopted window was not told it changed screens"
+    );
+    assert!(log.contains(&Seen::Done(0)), "{log:?}");
+    let arrangement = fixture.state.world.arrange();
+    assert!(
+        arrangement
+            .placements
+            .iter()
+            .all(|placement| placement.output == OutputId(1)),
+        "every window is on the remaining output"
+    );
+}

@@ -1295,3 +1295,58 @@ fn test_is_still_refused_with_two_heads() {
     fixture.run(Step::Test);
     assert_eq!(fixture.take_log(), vec![Seen::ConfigurationFailed]);
 }
+
+/// An output taken away while a manager is bound (a `--tty` monitor
+/// unplugged) retires its head -- every mode under it `finished`, then the
+/// head -- and closes the batch with `done`; the other head is untouched.
+#[test]
+fn removing_an_output_finishes_its_head_and_only_its_head() {
+    let mut fixture = two_outputs();
+    fixture.run(Step::BindManager(4));
+    fixture.take_log();
+
+    assert!(fixture.state.remove_output(scoot_core::OutputId(2)));
+    fixture.settle();
+    let log = fixture.take_log();
+    let finished = log
+        .iter()
+        .position(|seen| *seen == Seen::HeadFinished(1))
+        .expect("the removed output's head is finished");
+    assert!(
+        log[..finished]
+            .iter()
+            .any(|seen| matches!(seen, Seen::ModeFinished(_))),
+        "its modes are finished before it: {log:?}"
+    );
+    assert!(
+        !log.contains(&Seen::HeadFinished(0)),
+        "the remaining output's head stays: {log:?}"
+    );
+    assert!(
+        matches!(log.last(), Some(Seen::Done(_))),
+        "one done closes the batch: {log:?}"
+    );
+}
+
+/// Removing the *first* output moves the second to the origin, and the
+/// second head is told its new position in the same batch that retires the
+/// first head.
+#[test]
+fn removing_the_first_output_moves_the_second_heads_position() {
+    let mut fixture = two_outputs();
+    fixture.run(Step::BindManager(4));
+    fixture.take_log();
+
+    assert!(fixture.state.remove_output(scoot_core::OutputId(1)));
+    fixture.settle();
+    let log = fixture.take_log();
+    assert!(log.contains(&Seen::HeadFinished(0)), "{log:?}");
+    assert!(log.contains(&Seen::Position(1, 0, 0)), "{log:?}");
+    assert_eq!(
+        log.iter()
+            .filter(|seen| matches!(seen, Seen::Done(_)))
+            .count(),
+        1,
+        "one batch: {log:?}"
+    );
+}
