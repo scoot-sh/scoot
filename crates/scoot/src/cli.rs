@@ -188,8 +188,8 @@ pub struct CompositorOptions {
     ///
     /// `--headless` only, and `compositor::run` warns and ignores it on the
     /// other two backends -- `--nested` presents one window in its host and
-    /// `--tty` drives one CRTC, so neither has anywhere to put a second
-    /// output. Every output gets a render target of its own, alongside its
+    /// `--tty` already drives every connected monitor, so a virtual output
+    /// there would be a session quietly different from the one asked for. Every output gets a render target of its own, alongside its
     /// `wl_output` global, its geometry and its own scrolling strip in the
     /// core, which is what makes per-output rendering and protocol
     /// behaviour testable without a second monitor. Nothing is shown on a

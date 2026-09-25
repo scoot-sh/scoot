@@ -479,8 +479,9 @@ struct Capture {
     /// targets and the IPC layer know it by.
     ///
     /// Resolved once in `new_session` from the session's source rather than
-    /// per tick: sources name an output that lives as long as the session
-    /// does (outputs are never removed), so the binding cannot go stale.
+    /// per tick: an output that goes away (a `--tty` hotplug) stops every
+    /// session on it first (`State::stop_captures_on`), so the binding cannot
+    /// go stale.
     /// `None` is a source that named nothing usable -- refused with
     /// `stopped` at creation by `capture_constraints`, and failed the same
     /// way here if a frame ever parks on it. What this buys is the rule
@@ -739,10 +740,11 @@ impl OutputCaptureSourceHandler for State {
     /// Records which output a source names, which is the only thing that makes
     /// the opaque source object mean anything later.
     ///
-    /// A [`WeakOutput`], not an [`Output`]: a source outlives nothing here
-    /// today (scoot has one output for the process's life), but holding a
-    /// strong `Output` in a client-owned object's user data would make a
-    /// client's lifetime decide the compositor's.
+    /// A [`WeakOutput`], not an [`Output`]: a source can outlive its output
+    /// (a `--tty` monitor unplugged -- `capture_constraints` then refuses a
+    /// session built from it), and holding a strong `Output` in a
+    /// client-owned object's user data would make a client's lifetime decide
+    /// the compositor's.
     fn output_source_created(&mut self, source: ImageCaptureSource, output: &Output) {
         source.user_data().insert_if_missing(|| output.downgrade());
     }
@@ -1018,6 +1020,26 @@ impl State {
             frame: self.frame_serial,
             cursor: self.cursor_serial,
         }
+    }
+
+    /// Ends every capture session on output `id`, which is going away (a
+    /// `--tty` connector unplugged): a parked frame fails with `stopped`, and
+    /// dropping the session sends the session's own `stopped` -- the
+    /// protocol's answer for a source that no longer exists. Sessions on
+    /// other outputs are untouched. Called by `State::remove_output` before
+    /// the output leaves `State::outputs`, so no tick can serve one of these
+    /// from another output's framebuffer in between.
+    pub(super) fn stop_captures_on(&mut self, id: OutputId) {
+        self.screencopy.sessions.retain_mut(|capture| {
+            if capture.output != Some(id) {
+                return true;
+            }
+            if let Some(frame) = capture.pending.take() {
+                frame.fail(CaptureFailureReason::Stopped);
+            }
+            false
+        });
+        self.screencopy.capture.cleanup();
     }
 
     /// Re-advertises the buffer size to every live session.

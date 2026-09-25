@@ -655,9 +655,9 @@ impl State {
 /// bound rather than the ~2x10^9 no-op a flag-spelled output used to make it.
 ///
 /// With no outputs at all the limit is zero, which drops the hint entirely.
-/// That is unreachable today (`headless::init` adds the output before the
-/// event loop starts, and nothing removes one), and if output removal ever
-/// lands the consequence is a hint lost until the client's next
+/// That is unreachable (`headless::init` adds the output before the event
+/// loop starts, and `State::remove_output` refuses to remove the last one),
+/// and were it reached the consequence is a hint lost until the client's next
 /// `app_id`/`title` change re-reads it -- not a bad size: a window the core
 /// has no output for is `unplaced`, so it is neither arranged nor rendered.
 pub(super) fn hint_limit(areas: impl Iterator<Item = Rect>, gap: i32) -> Size {

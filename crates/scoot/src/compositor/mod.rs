@@ -176,18 +176,13 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // both the `--tty` init below and the not-`--tty` warnings read the
     // same answer.
     let gpu = tty::resolve(options.gpu.as_deref(), loaded.gpu.as_deref())?;
-    // Carries the GPU scanout renderer from `tty::init` (which must build it,
-    // because the `DrmCompositor` needs its formats) to `init_named` (which
-    // owns every renderer). Empty on every other path; see `ScanoutHandoff`.
-    let mut scanout = render::ScanoutHandoff::default();
-    let (width, height, output_name) = if options.tty {
-        tty::init(
-            state.loop_handle.clone(),
-            &mut state,
-            gpu,
-            options.mode,
-            &mut scanout,
-        )?
+    // One entry per output to create, in order (the first becomes the
+    // primary): every connector `--tty` drives, each carrying the GPU scanout
+    // renderer `tty::init` built alongside its `DrmCompositor` (which must be
+    // built there, because it needs the renderer's formats) on its way to the
+    // render target; or the one headless/nested output. See `ScanoutHandoff`.
+    let heads: Vec<tty::StartupHead> = if options.tty {
+        tty::init(state.loop_handle.clone(), &mut state, gpu, options.mode)?
     } else {
         // Not silently dropped the way `--width`/`--height` are under
         // `--tty`: those have a sensible reading on the backend that
@@ -203,22 +198,60 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         if options.mode.is_some() {
             tracing::warn!("--mode picks the display mode for --tty; ignoring it on this backend");
         }
-        (
-            options.width,
-            options.height,
-            headless::OUTPUT_NAME.to_owned(),
-        )
+        vec![tty::StartupHead {
+            width: options.width,
+            height: options.height,
+            name: headless::OUTPUT_NAME.to_owned(),
+            scanout: render::ScanoutHandoff::default(),
+        }]
     };
-    headless::init_named(&mut state, &output_name, width, height, scanout)?;
+    let mut heads = heads.into_iter().enumerate();
+    let Some((_, first)) = heads.next() else {
+        // `tty::init` refuses a device with no head that builds, and the
+        // other two backends always have their one output -- so this is
+        // unreachable, and an error rather than a panic all the same.
+        return Err("no output to create".into());
+    };
+    let output_name = first.name.clone();
+    let primary = headless::init_named(
+        &mut state,
+        &first.name,
+        first.width,
+        first.height,
+        first.scanout,
+    )?;
+    tty::attach(&mut state, 0, primary);
+    // Every further `--tty` connector, side by side to the right of the one
+    // before (`add_output_with` measures off the previous output's logical
+    // geometry, so each output's own scale is respected). A connector whose
+    // output cannot be created is a warning and a dark screen, never a
+    // refused session -- under `--tty` that would be a lockout.
+    for (index, head) in heads {
+        match headless::add_output_with(
+            &mut state,
+            &head.name,
+            head.width,
+            head.height,
+            head.scanout,
+        ) {
+            Ok(id) => tty::attach(&mut state, index, id),
+            Err(error) => tracing::warn!(
+                %error,
+                connector = %head.name,
+                "could not create an output for this connector"
+            ),
+        }
+    }
+    tty::retain_attached(&mut state);
 
     // The extra `--headless --outputs N` outputs, after the primary one --
     // `add_output` refuses to run before it, so this order is checked rather
-    // than assumed. Warned about and ignored on the other two backends for the
-    // same reason `--gpu` and `--mode` are ignored off `--tty`: `--nested`
-    // presents one window in its host and `--tty` drives one CRTC, so a
-    // second output there would be a session quietly different from the one
-    // that was asked for. Each is named after the first (`headless-2`,
-    // `headless-3`, ...), which is what a client sees as `wl_output.name`.
+    // than assumed. Warned about and ignored on the other two backends:
+    // `--nested` presents one window in its host, and `--tty` already drives
+    // every connected monitor, so a virtual output there would be a session
+    // quietly different from the one that was asked for. Each is named after
+    // the first (`headless-2`, `headless-3`, ...), which is what a client
+    // sees as `wl_output.name`.
     if options.tty || options.nested {
         if options.outputs != 1 {
             tracing::warn!(
@@ -228,7 +261,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     } else {
         for index in 2..=options.outputs {
             let name = format!("{output_name}-{index}");
-            headless::add_output(&mut state, &name, width, height)?;
+            headless::add_output(&mut state, &name, options.width, options.height)?;
         }
     }
 

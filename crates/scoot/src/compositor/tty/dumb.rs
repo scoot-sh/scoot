@@ -258,6 +258,14 @@ impl DumbPresenter {
         }
     }
 
+    /// Whether a flip this presenter issued has not been confirmed yet --
+    /// its `VBlank` is still owed. Read when a hotplug drops this head, so a
+    /// head built on the same CRTC does not mistake that late event for its
+    /// own (see `Tty::stale_vblanks`).
+    pub(super) fn flip_in_flight(&self) -> bool {
+        self.flips.is_busy()
+    }
+
     /// Takes whether the last [`present`](Self::present) was a refused flip
     /// owed a timer-driven retry (see `present_retry.rs`). Read once per frame
     /// by the render tail, which re-arms the frame timer for it -- the only

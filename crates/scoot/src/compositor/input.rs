@@ -8,7 +8,7 @@ use smithay::input::pointer::{
     AxisFrame, ButtonEvent, MotionEvent, PointerHandle, RelativeMotionEvent,
 };
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
+use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial};
 use smithay::wayland::pointer_constraints::with_pointer_constraint;
 use smithay::wayland::seat::WaylandFocus;
 
@@ -389,6 +389,20 @@ impl State {
     pub(super) fn place_pointer_at_output_centre(&mut self) {
         let (width, height) = self.outputs.primary().map(logical_size).unwrap_or((0, 0));
         self.pointer_move_quietly(f64::from(width) / 2.0, f64::from(height) / 2.0);
+    }
+
+    /// Puts the pointer back inside the desktop after the outputs changed
+    /// under it -- an output it sat on was removed, or the rest were
+    /// repacked -- clamped into the union exactly as relative motion is,
+    /// quietly (the compositor moving its own pointer is not user activity).
+    /// A pointer already inside stays where it is and is only re-hit-tested.
+    pub(super) fn rehome_pointer(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let location = pointer.current_location();
+        let (x, y) = self.clamp_to_output_union(location.x, location.y);
+        self.pointer_move_quietly(x, y);
     }
 
     /// Re-runs the hit test where the pointer already is, so pointer focus
@@ -1112,27 +1126,45 @@ impl State {
 impl State {
     fn clamp_to_output_union(&self, x: f64, y: f64) -> (f64, f64) {
         if self.outputs.len() == 1 {
-            // The fast path, and the only production shape until phase E drives
-            // a second `--tty` connector: relative motion is `--tty` libinput's,
-            // and `--tty` has one output. The old expression exactly -- the
+            // The fast path, and the one-screen `--tty` shape: relative motion
+            // is `--tty` libinput's. The old expression exactly -- the
             // primary's logical extent through `clamp_to_extent` -- so the
             // single-output motion path keeps its measured cost (release, dev
             // VM, 200k `pointer_move_relative` x5: 561ns/event median before,
             // 665ns without this branch, back to overlapping after) as well as
-            // its behavior. The branch predicts perfectly in production: this
-            // is `--tty`'s only pointer source, and it never sees two outputs
-            // before phase E.
+            // its behavior. The branch predicts perfectly in production: the
+            // output count only changes on a hotplug.
             let (width, height) = self.outputs.primary().map(logical_size).unwrap_or((0, 0));
             return (clamp_to_extent(x, width), clamp_to_extent(y, height));
         }
+        let Some(union) = self.output_union() else {
+            // No output yet: the old path read a `(0, 0)` extent here, which
+            // clamps every coordinate to `0.0`.
+            return (0.0, 0.0);
+        };
+        let (left, top) = (union.loc.x, union.loc.y);
+        (
+            clamp_to_extent(x - f64::from(left), union.size.w) + f64::from(left),
+            clamp_to_extent(y - f64::from(top), union.size.h) + f64::from(top),
+        )
+    }
+
+    /// The bounding box of every output's logical geometry -- the desktop's
+    /// extent, which relative motion is clamped into and absolute devices
+    /// (tablets, vfkit's digitizer) are mapped across. `None` before any
+    /// output exists. Uneven outputs leave dead zones inside the box, which
+    /// is the documented clamp shape (see [`State::clamp_to_output_union`]).
+    ///
+    /// Saturating: the sum is config-derived, not client-derived, and a
+    /// saturated edge merely stacks two outputs rather than wrapping one into
+    /// negative coordinates (same reasoning as `add_output`'s). No
+    /// allocation: one pass over at most `MAX_OUTPUTS` outputs.
+    pub(super) fn output_union(&self) -> Option<Rectangle<i32, Logical>> {
         let mut bounds: Option<(i32, i32, i32, i32)> = None;
         for output in self.outputs.iter() {
             let Some(geometry) = self.space.output_geometry(output) else {
                 continue;
             };
-            // Saturating: the sum is config-derived, not client-derived, and a
-            // saturated edge merely stacks two outputs rather than wrapping one
-            // into negative coordinates (same reasoning as `add_output`'s).
             let right = geometry.loc.x.saturating_add(geometry.size.w);
             let bottom = geometry.loc.y.saturating_add(geometry.size.h);
             bounds = Some(match bounds {
@@ -1145,15 +1177,12 @@ impl State {
                 None => (geometry.loc.x, geometry.loc.y, right, bottom),
             });
         }
-        let Some((left, top, right, bottom)) = bounds else {
-            // No output yet: the old path read a `(0, 0)` extent here, which
-            // clamps every coordinate to `0.0`.
-            return (0.0, 0.0);
-        };
-        (
-            clamp_to_extent(x - left as f64, right.saturating_sub(left)) + left as f64,
-            clamp_to_extent(y - top as f64, bottom.saturating_sub(top)) + top as f64,
-        )
+        bounds.map(|(left, top, right, bottom)| {
+            Rectangle::new(
+                (left, top).into(),
+                (right.saturating_sub(left), bottom.saturating_sub(top)).into(),
+            )
+        })
     }
 }
 

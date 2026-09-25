@@ -157,8 +157,15 @@ What a second output **is**, today:
   trapping on the first — the seam pixel belongs to the output on its right,
   and absolute motion is never clamped.
 
-What it is **not**, yet — the work tracked in
-`docs/backlog/core/multi-output.md` (milestone 19, phase E and beyond):
+Under `--tty` every connected monitor is an output like these. It is named
+after its connector and placed left to right at its own mode (in connector
+order at startup, a later one on the right), and it is added or removed
+when a monitor is plugged in or pulled out
+(see [tty.md](tty.md#more-than-one-monitor)).
+
+What it is **not**, yet, is tracked in
+`docs/backlog/core/multi-output-remainder.md` and
+`docs/backlog/core/per-output-scale-mode.md`:
 
 - new windows open on the output under the pointer (falling back to the
   first output when the pointer is over no output); moving one across
@@ -167,7 +174,6 @@ What it is **not**, yet — the work tracked in
   outputs](#moving-across-outputs)) — ids 3+ stay manual;
 - no per-output mode/scale/position configuration surface:
   `wlr-output-management` `apply`/`test` stay refused;
-- `--tty` driving two connectors at once (phase E, hardware-gated);
 - a menu left open while its window scrolls, or while an output changes, is
   not re-fitted to the new position (tracked in
   `docs/backlog/core/popup-reactive-reconstrain.md`).
@@ -529,7 +535,10 @@ Those four lines are the defaults: uncommenting them in a file printed by
 manual — add your own binds naming those ids, in the same form.
 
 The ids are what `scootctl outputs` reports (stable for the session, unlike
-workspace positions). `move-window-to-output` carries the focused window to
+workspace positions, and never reused). Under `--tty` a monitor that is
+unplugged and plugged back in comes back as a new output under a new id. The
+default `output 2` binds then no longer reach it: check `scootctl outputs`
+and bind the new id, or restart the session. `move-window-to-output` carries the focused window to
 that output's active workspace and follows it there; `focus-output` focuses
 that output's active workspace (or nothing, when it holds no windows). An
 unknown id does nothing. Both are refused while the session is locked, like

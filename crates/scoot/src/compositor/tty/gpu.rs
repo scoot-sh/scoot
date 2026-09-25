@@ -22,8 +22,8 @@
 //! of the file descriptor, that KMS resources load and some connector is
 //! connected with a usable mode.
 //!
-//! Connector and mode choice ([`find_connector_and_mode`], and
-//! [`reselect`] for the hotplug path) lives here too, for the same reason:
+//! Connector and mode choice ([`find_all`], and [`connector_mode`] for the
+//! hotplug path) lives here too, for the same reason:
 //! it is the other half of "can this device drive a display", and it has to
 //! run twice -- once on a borrowed fd before the device is adopted, and
 //! again on the live `DrmDevice` every time the connectors change underneath
@@ -49,15 +49,15 @@ use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::udev::{all_gpus, primary_gpu};
 use smithay::reexports::drm::Device as BasicDevice;
 use smithay::reexports::drm::control::{
-    Device as ControlDevice, Mode, ModeTypeFlags, ResourceHandles, connector,
+    Device as ControlDevice, Mode, ModeTypeFlags, ResourceHandles, connector, crtc,
 };
 use smithay::reexports::rustix::fs::OFlags;
 
 /// A device that has been opened through the session and proven to have a
-/// display pipeline: its KMS resources loaded and one of its connectors is
-/// connected with a usable mode.
+/// display pipeline: its KMS resources loaded and at least one of its
+/// connectors is connected with a usable mode.
 ///
-/// The `connector`/`mode` pair was read through [`Probe`], which borrows
+/// The connectors were read through [`Probe`], which borrows
 /// *this same fd* -- the one the caller goes on to build its `DrmDevice`
 /// from -- rather than opening the device a second time. That is
 /// deliberate, not incidental: Smithay's `LibSeatSession` keys its device
@@ -74,6 +74,17 @@ pub struct OpenGpu {
     /// path in this module that does *not* return an `OpenGpu` has
     /// already handed the device back to the session.
     pub fd: OwnedFd,
+    /// Every connector that can drive a display, in the kernel's own order.
+    /// Never empty: a device with none is rejected in [`open`]. The first
+    /// entry is exactly the one the single-output search used to return, so
+    /// a one-connector machine is driven exactly as before.
+    pub connected: Vec<Connected>,
+}
+
+/// One connector that can drive a display right now, and what driving it
+/// would take.
+#[derive(Clone, Debug)]
+pub struct Connected {
     pub connector: connector::Handle,
     pub mode: Mode,
     /// The connector's conventional name -- `HDMI-A-1`, `eDP-1`, `Virtual-1`
@@ -82,6 +93,12 @@ pub struct OpenGpu {
     /// name, so bars and shells label the screen by it; before this the
     /// output was called `headless` on every backend, this one included.
     pub name: String,
+    /// The CRTCs this connector's encoders can be routed to (their
+    /// `possible_crtcs` masks, resolved against the device's CRTC list), in
+    /// the device's CRTC order -- what `crtcs::assign` matches over. Empty
+    /// when no encoder could be read, which leaves the connector dark rather
+    /// than guessing a route.
+    pub crtcs: Vec<crtc::Handle>,
 }
 
 /// An explicitly named DRM device: the path, and where the name came from.
@@ -359,12 +376,7 @@ pub fn open(
     })?;
 
     match probe(fd.as_fd(), requested) {
-        Ok((connector, mode, name)) => Ok(OpenGpu {
-            fd,
-            connector,
-            mode,
-            name,
-        }),
+        Ok(connected) => Ok(OpenGpu { fd, connected }),
         Err(reason) => {
             // Back to libseat, not merely dropped: dropping closes our fd
             // but leaves seatd holding the device open for the life of the
@@ -385,10 +397,7 @@ pub fn open(
 
 /// Reads KMS state through a borrowed fd -- see this module's doc for why
 /// the check happens before anything takes ownership of it.
-fn probe(
-    fd: BorrowedFd<'_>,
-    requested: Option<(u16, u16)>,
-) -> Result<(connector::Handle, Mode, String), String> {
+fn probe(fd: BorrowedFd<'_>, requested: Option<(u16, u16)>) -> Result<Vec<Connected>, String> {
     let device = Probe(fd);
     // The wording stops at what the kernel actually said, and says nothing
     // about *why*: the errno varies with the cause (`ENOTSUP` from a driver
@@ -407,8 +416,14 @@ fn probe(
     })?;
     // `Cached`, deliberately -- see [`Freshness`] for why a startup probe
     // does not need to force one and a hotplug re-probe absolutely does.
-    find_connector_and_mode(&device, &resources, requested, Freshness::Cached)
-        .ok_or_else(|| "has no connected connector with a usable mode".to_owned())
+    // Every connector, not the first: `--tty` drives each one it can (the
+    // caller matches them to CRTCs). With one connector the list is exactly
+    // the one entry the old first-wins search returned.
+    let connected = find_all(&device, &resources, requested, Freshness::Cached);
+    if connected.is_empty() {
+        return Err("has no connected connector with a usable mode".to_owned());
+    }
+    Ok(connected)
 }
 
 /// A borrowed fd viewed as a DRM device, for read-only KMS queries.
@@ -480,19 +495,22 @@ pub(super) enum Freshness {
     /// cable or an adapter that needs retries -- synchronously, on the
     /// calloop thread, once per connector examined. That happens on every
     /// `change` uevent for this device and on every VT-switch-back (see
-    /// `tty/hotplug.rs`'s `Tty::reconfigure` callers), which is why
-    /// [`reselect`] is careful to examine as few connectors as it can.
+    /// `tty/hotplug.rs`'s `Tty::reconfigure` callers). With more than one
+    /// output that is every connector, not only the driven ones: a monitor
+    /// plugged into an undriven connector is only visible to a probe of
+    /// that connector, and a disconnected one answers without an EDID read.
     /// wlroots pays exactly the same cost on the same path for the same
     /// reason; there is no cheaper way to learn what a connector is
     /// actually offering now.
     Reprobe,
 }
 
-/// The first `Connected` connector with at least one mode, and that mode:
-/// the one whose size is `requested` (`--mode WxH`) if the connector lists
-/// one, else its `PREFERRED`-flagged one if any, else its first. One
-/// output only (multi-output is out of scope for this backend), so the
-/// first match wins.
+/// Every `Connected` connector with at least one mode, in the kernel's own
+/// connector order, each with its mode: the one whose size is `requested`
+/// (`--mode WxH`) if that connector lists one, else its `PREFERRED`-flagged
+/// one if any, else its first. `--mode` applies to each connector
+/// independently -- a panel that does not offer the size keeps its own
+/// preferred mode while a monitor that does takes it.
 ///
 /// Generic over the device so the same search runs on a [`Probe`] at
 /// startup and on the live `DrmDevice` when a hotplug event asks what the
@@ -501,78 +519,35 @@ pub(super) enum Freshness {
 /// all" (the Asahi failure) apart from "this device has KMS but nothing is
 /// plugged in", and so the hotplug path can read a *fresh* set rather than
 /// the one cached at startup.
-pub(super) fn find_connector_and_mode(
+///
+/// One small allocation per usable connector (its name and CRTC list) plus
+/// the list itself, on paths that run at startup and when a cable moves.
+pub(super) fn find_all(
     device: &impl ControlDevice,
     resources: &ResourceHandles,
     requested: Option<(u16, u16)>,
     freshness: Freshness,
-) -> Option<(connector::Handle, Mode, String)> {
-    search(
-        device,
-        resources.connectors().iter().copied(),
-        requested,
-        freshness,
-    )
-}
-
-/// The same search, but biased towards `current` -- the connector this
-/// backend is already driving. Used by the hotplug path, never at startup
-/// (there is nothing current then), so it always re-probes; see
-/// [`Freshness`].
-///
-/// Staying on `current` while it is still `Connected` is what keeps
-/// plugging a *second* display into a laptop from moving the session off
-/// the panel the user is looking at: this backend drives one output, so one
-/// of the two connectors has to be dark, and the one already lit is the
-/// only defensible choice. Only when `current` is gone -- unplugged, or its
-/// mode list emptied -- does the search widen to the rest, which is exactly
-/// what issue #48 asks for ("if the connector is gone, pick another
-/// `Connected` one").
-///
-/// `current` is excluded from that widened search rather than left in it:
-/// it has just been re-probed and rejected a few lines up, and a second
-/// forced probe of the same connector would be a second EDID read for an
-/// answer already in hand. On a dock with several dead connectors that is
-/// the difference between one redundant read and one per fallback.
-pub(super) fn reselect(
-    device: &impl ControlDevice,
-    resources: &ResourceHandles,
-    current: connector::Handle,
-    requested: Option<(u16, u16)>,
-) -> Option<(connector::Handle, Mode, String)> {
-    if let Some((mode, name)) = connector_mode(device, current, requested, Freshness::Reprobe) {
-        return Some((current, mode, name));
-    }
-    search(
-        device,
-        resources
-            .connectors()
-            .iter()
-            .copied()
-            .filter(|&conn| conn != current),
-        requested,
-        Freshness::Reprobe,
-    )
-}
-
-/// Walks `connectors` in order and returns the first one that can drive a
-/// display. The shared body of [`find_connector_and_mode`] and
-/// [`reselect`], which differ only in which connectors they offer it.
-fn search(
-    device: &impl ControlDevice,
-    mut connectors: impl Iterator<Item = connector::Handle>,
-    requested: Option<(u16, u16)>,
-    freshness: Freshness,
-) -> Option<(connector::Handle, Mode, String)> {
-    connectors.find_map(|conn| {
-        connector_mode(device, conn, requested, freshness).map(|(mode, name)| (conn, mode, name))
+) -> Vec<Connected> {
+    search_all(resources.connectors().iter().copied(), |conn| {
+        connector_mode(device, resources, conn, requested, freshness)
     })
 }
 
-/// One connector's mode and name, or `None` if it isn't `Connected` or
-/// lists no mode at all. The per-connector half of [`search`], split out so
-/// [`reselect`] can ask about one specific connector without duplicating
-/// the choice of mode.
+/// Every connector in `connectors` that `probe` says can drive a display,
+/// in the order given. The pure half of [`find_all`], split out so the
+/// ordering and filtering are pinnable without a DRM device (see this
+/// module's tests): `probe` stands in for [`connector_mode`].
+fn search_all<T>(
+    connectors: impl Iterator<Item = connector::Handle>,
+    probe: impl FnMut(connector::Handle) -> Option<T>,
+) -> Vec<T> {
+    connectors.filter_map(probe).collect()
+}
+
+/// One connector's mode, name and reachable CRTCs, or `None` if it isn't
+/// `Connected` or lists no mode at all. The per-connector half of
+/// [`find_all`], split out so the hotplug path can ask about
+/// one specific connector without duplicating the choice of mode.
 ///
 /// A `requested` size the connector does not offer is a warning, not a
 /// rejection: falling through to the preferred mode leaves the user with a
@@ -587,12 +562,13 @@ fn search(
 /// any per-frame or input-dispatch path. Handing back the whole
 /// `connector::Info` to let the caller build it only when it logs would
 /// trade this for a much larger one.
-fn connector_mode(
+pub(super) fn connector_mode(
     device: &impl ControlDevice,
+    resources: &ResourceHandles,
     conn: connector::Handle,
     requested: Option<(u16, u16)>,
     freshness: Freshness,
-) -> Option<(Mode, String)> {
+) -> Option<Connected> {
     let info = device
         .get_connector(conn, freshness == Freshness::Reprobe)
         .ok()?;
@@ -600,11 +576,18 @@ fn connector_mode(
         return None;
     }
     let modes = info.modes();
+    // `HDMI-A-1`, not `HDMI-A` + `1`: the same spelling the kernel
+    // uses in sysfs (`/sys/class/drm/card0-HDMI-A-1`) and every
+    // wlroots/Smithay compositor uses for `wl_output.name`.
+    let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
     let requested_mode = requested.and_then(|size| modes.iter().find(|mode| mode.size() == size));
     if let (Some((width, height)), None, false) = (requested, requested_mode, modes.is_empty()) {
         // warn!, not debug!: the size on screen is about to disagree
         // with what the user asked for, and this is the only explanation.
+        // Names the connector: with several driven, two identical lines
+        // would not say which screen ignored the flag.
         tracing::warn!(
+            connector = %name,
             width,
             height,
             "drm: connector offers no mode of the requested size; using its preferred mode"
@@ -618,11 +601,47 @@ fn connector_mode(
         })
         .or_else(|| modes.first())
         .copied()?;
-    // `HDMI-A-1`, not `HDMI-A` + `1`: the same spelling the kernel
-    // uses in sysfs (`/sys/class/drm/card0-HDMI-A-1`) and every
-    // wlroots/Smithay compositor uses for `wl_output.name`.
-    let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
-    Some((mode, name))
+    let crtcs = reachable_crtcs(device, resources, info.encoders());
+    Some(Connected {
+        connector: conn,
+        mode,
+        name,
+        crtcs,
+    })
+}
+
+/// The CRTCs any of `encoders` can be routed to, in the device's CRTC order
+/// and without repeats. An encoder that cannot be read contributes nothing:
+/// a connector left with no route stays dark (and says so where it is
+/// skipped), which beats guessing a CRTC the hardware may refuse at the
+/// first commit.
+fn reachable_crtcs(
+    device: &impl ControlDevice,
+    resources: &ResourceHandles,
+    encoders: &[smithay::reexports::drm::control::encoder::Handle],
+) -> Vec<crtc::Handle> {
+    let mut reachable: Vec<crtc::Handle> = Vec::new();
+    for &encoder in encoders {
+        let Ok(info) = device.get_encoder(encoder) else {
+            continue;
+        };
+        for crtc in resources.filter_crtcs(info.possible_crtcs()) {
+            if !reachable.contains(&crtc) {
+                reachable.push(crtc);
+            }
+        }
+    }
+    // `filter_crtcs` yields each mask in resource order, but two encoders'
+    // masks interleave; resource order is the preference `crtcs::assign`
+    // expects.
+    reachable.sort_by_key(|crtc| {
+        resources
+            .crtcs()
+            .iter()
+            .position(|known| known == crtc)
+            .unwrap_or(usize::MAX)
+    });
+    reachable
 }
 
 /// What to tell the user when no candidate worked, given the same
@@ -1127,6 +1146,33 @@ mod tests {
             unusable_device_error("seat0", Some(ExplicitGpu::Flag(chosen.as_path())), &[]),
             "the device given by `--gpu /dev/dri/card9` is not usable"
         );
+    }
+
+    fn conn(raw: u32) -> connector::Handle {
+        connector::Handle::from(std::num::NonZeroU32::new(raw).expect("connector ids start at 1"))
+    }
+
+    #[test]
+    fn every_usable_connector_is_kept_in_kernel_order() {
+        // The E1 generalisation: first-wins became collect-all, and the order
+        // is still the kernel's -- so the first entry is exactly what the old
+        // single-output search returned.
+        let found = search_all([conn(52), conn(60), conn(70)].into_iter(), |c| {
+            (c != conn(60)).then_some(c)
+        });
+        assert_eq!(found, vec![conn(52), conn(70)]);
+    }
+
+    #[test]
+    fn one_usable_connector_is_the_old_single_output_answer() {
+        let found = search_all([conn(52)].into_iter(), Some);
+        assert_eq!(found, vec![conn(52)]);
+    }
+
+    #[test]
+    fn nothing_usable_is_an_empty_list() {
+        let found = search_all([conn(52), conn(70)].into_iter(), |_| None::<()>);
+        assert!(found.is_empty());
     }
 
     #[test]

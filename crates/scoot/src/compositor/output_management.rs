@@ -192,8 +192,8 @@ const VERSION: u32 = 4;
 /// the two meet in exactly one place ([`State::refresh_output_heads`]), which
 /// is also the only writer. Keeping every manager in lockstep is what makes
 /// one shared snapshot correct rather than one per client. One entry per
-/// output, in creation order; outputs are never removed, so entries only ever
-/// arrive.
+/// output, in creation order; an output removed by a `--tty` hotplug leaves
+/// with the refresh that follows it (its head retired in every manager).
 #[derive(Debug, Default)]
 pub struct OutputManagement {
     managers: Vec<Manager>,
@@ -358,9 +358,10 @@ impl Manager {
                 return false;
             }
         }
-        // Heads for outputs that no longer exist. Unreachable -- outputs are
-        // never removed -- kept so a head object can never outlive its output
-        // if that ever changes.
+        // Heads for outputs that no longer exist: a `--tty` monitor unplugged
+        // (`State::remove_output` refreshes the heads right after the output
+        // leaves `State::outputs`), so a head object never outlives its
+        // output.
         let gone: Vec<OutputId> = self
             .heads
             .iter()

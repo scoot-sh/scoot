@@ -39,9 +39,10 @@
 //! phase by phase after that -- layer shell (B), session lock (C),
 //! workspaces, output management and the pointer clamp (D) -- so
 //! `grep primary()` now enumerates only what is deliberately single-output:
-//! startup placement, new-window placement, and the single-output backends'
-//! resize. Driving a second connector (milestone 19, phase E) is what is
-//! left.
+//! startup placement, new-window placement, the pointer clamp's one-output
+//! fast path, and `--nested`'s resize. `--tty` drives one output per
+//! connected connector since phase E, and adds and removes them on hotplug
+//! (`State::remove_output`).
 //!
 //! [`State`]: super::State
 
@@ -50,6 +51,8 @@ use smithay::output::Output;
 
 #[cfg(test)]
 mod per_output;
+#[cfg(test)]
+mod removal;
 #[cfg(test)]
 mod tests;
 
@@ -73,8 +76,10 @@ struct Entry {
 pub struct Outputs {
     entries: Vec<Entry>,
     /// The id the next [`Outputs::add`] hands out. Monotonic and never
-    /// reused, so an id stays stable for the life of the process even if this
-    /// ever grows a removal path.
+    /// reused, so an id stays stable for the life of the process across
+    /// [`Outputs::remove`]: a connector unplugged and plugged back in comes
+    /// back under a new id, never a stale one some client-facing record
+    /// still holds.
     next: OutputId,
 }
 
@@ -90,8 +95,9 @@ impl Default for Outputs {
 impl Outputs {
     /// Registers `output` and hands back the id the core will know it by.
     ///
-    /// The count is bounded at startup (`--outputs`, see `cli.rs`) and
-    /// nothing adds one later, so the counter cannot realistically be driven
+    /// The count is bounded (`--outputs`, see `cli.rs`, and at most
+    /// `MAX_OUTPUTS` `--tty` connectors at once), and a hotplug adds one per
+    /// cable plugged in, so the counter cannot realistically be driven
     /// anywhere near wrapping. It saturates rather than wraps all the same --
     /// but be clear about what that buys, because an earlier version of this
     /// comment had it backwards: *both* behaviours repeat an id at the
@@ -103,6 +109,15 @@ impl Outputs {
         self.next = OutputId(self.next.0.saturating_add(1));
         self.entries.push(Entry { id, output });
         id
+    }
+
+    /// Forgets output `id` and hands its [`Output`] back, or `None` if this
+    /// compositor has no such output. The rest keep their order, so the
+    /// output after a removed primary becomes the primary. The caller
+    /// (`State::remove_output`) owns everything else an output is part of.
+    pub(crate) fn remove(&mut self, id: OutputId) -> Option<Output> {
+        let index = self.entries.iter().position(|entry| entry.id == id)?;
+        Some(self.entries.remove(index).output)
     }
 
     /// The output every site that still assumes a single output acts on.
@@ -137,10 +152,12 @@ impl Outputs {
     /// output -- `MoveFocusedWindowToOutput` is what moves them across
     /// outputs afterwards, and `foreign_toplevel_management.rs`'s
     /// `output_of_window` reports the pointer's output for a window that
-    /// has never been mapped), and `resize_output`, which only the
-    /// single-output backends (`--nested`'s host configure, `--tty` hotplug)
-    /// can reach. Per-output resize is the `--tty` multi-CRTC phase's
-    /// (milestone 19, phase E).
+    /// has never been mapped), `resize_output`, which only `--nested`'s host
+    /// configure reaches (`--tty` resizes the output a hotplug changed,
+    /// through `resize_output_of`), and the pointer clamp's one-output fast
+    /// path (the primary is at the origin: outputs are repacked from there).
+    /// After a removal the output after a removed primary becomes the
+    /// primary.
     ///
     /// The sites that already resolve an output *per surface* rather than
     /// through here are `layer_shell.rs`'s `new_layer_surface` (which honours

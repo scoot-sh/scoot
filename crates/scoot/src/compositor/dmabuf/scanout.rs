@@ -479,7 +479,8 @@ fn send(surface: &WlSurface, feedback: &DmabufFeedback) {
 
 /// One [`ScanoutFeedback`] per output that has drawn a scanout frame, in
 /// `State`. An entry is made on an output's first frame (the one
-/// allocation), and never removed: outputs are never removed mid-session.
+/// allocation), and removed with its output ([`ScanoutFeedbacks::forget`],
+/// on a `--tty` hotplug).
 #[derive(Default)]
 pub(crate) struct ScanoutFeedbacks {
     outputs: Vec<(OutputId, ScanoutFeedback)>,
@@ -496,6 +497,14 @@ impl ScanoutFeedbacks {
             }
         };
         &mut self.outputs[index].1
+    }
+
+    /// Drops `output`'s tracker, for an output that went away. The caller
+    /// reverts any surface it was steering first (see
+    /// `State::remove_output`), so nothing is left on a tranche built for a
+    /// plane no frame will use again.
+    pub(crate) fn forget(&mut self, output: OutputId) {
+        self.outputs.retain(|(id, _)| *id != output);
     }
 
     /// Rebuilds `output`'s scanout feedback if it was built for anything

@@ -284,6 +284,144 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
   there was the GPU, which that machine has; the constraint here is a
   **second connector**, which it does not — only `card2-eDP-1` exists
   until a USB-C/DP-alt display is attached. Does not block A–D.
+  - **DONE (2026-09-25, phase E PR; E1 `b782b06`, E2 `2bd7d47`).** The
+    second connector arrived: the M2 Air drives an external 1920x1080
+    Samsung over USB-C DP alt mode on the experimental `fairydust` kernel
+    (`card2-DP-1`, CRTC 68, beside `eDP-1` on CRTC 50; `drm_info`: each
+    encoder reaches exactly one CRTC, gamma size 0 on both).
+  - **E1, enumeration + startup.** `gpu::find_all` collects every
+    connected connector with a mode in kernel order (the first entry is
+    exactly the old first-wins answer, so one connector is driven as
+    before), each with the CRTCs its encoders reach. `tty/crtcs.rs` matches
+    connectors to CRTCs from `possible_crtcs` (maximum bipartite matching,
+    free-first, an earlier connector never displaced) instead of the old
+    "first CRTC that accepts a surface", which only worked on the DCP by
+    luck of order (Smithay refuses a CRTC only once its primary plane is
+    claimed). One `Head` per connector (`tty/head.rs`: connector, name,
+    presenter, mode size, output id) under a `Tty` that keeps only
+    session/device state; the `Presenter` enum moved to
+    `tty/presenter.rs`. Startup degrades, never refuses: one head that
+    builds is enough, and a connector whose CRTC, surface, buffers or
+    `wl_output` fails is left dark with a warning. One tier per session:
+    the first head decides, and a later head that cannot join the GPU
+    tier stays dark rather than mixing tiers (`State::renderer` is one
+    value, and `resize_output` rebuilds from it). Capped at `MAX_OUTPUTS`.
+    Outputs are created side by side (`add_output_with`, measured off the
+    previous output's logical geometry, so the shared scale is respected).
+  - **Every per-output tty path keyed by `OutputId`:** present, buffer age,
+    retry, `scanout_mut` (so one screen's frame can never be queued on
+    another's swapchain, incl. the capture-forced composite), gamma size
+    and ramp (per-output sizes in `GammaControlState`, a CRTC switch fails
+    only its own output's control), and vblank routing by CRTC. A
+    `DrmEvent::Error` names no CRTC, so it settles every head and confirms
+    nothing (the `invalidate_scanout` asymmetry argument). Absolute pointer
+    and tablet map across the output union. `resize_output_of(id, ..)`
+    files the output's real origin and repacks the outputs to its right.
+  - **Session lock, the security-relevant part.** Phase C held on `--tty`
+    only because it had one output: `blank_flip` was one `Option<u64>`, and
+    each head numbers its flips from zero, so head 1's flip-0 vblank would
+    have confirmed a lock whose blanked frame on head 2 (also flip 0) was
+    still in flight. Now `blank_flips` is per output, a completion must
+    match its own output's flip, `locked` needs every output recorded,
+    Phase C's placeholder rule (an admitted, undrawn surface blocks its
+    output) applies on the tty path too, and the fallback timeout stands in
+    for missing vblanks, never for missing surfaces. Pinned in
+    `session_lock/tests/tty_multi_output.rs` (8 tests): with the old
+    semantics restored by mutation (any output's matching seq confirms at
+    once), 7 of the 8 fail; the eighth, the timeout-over-placeholder pin,
+    exercises a path the mutation does not touch. Live: both screens
+    blank (swaylock colour on both IPC screenshots) and the log's
+    confirmation reads "every output's blanked frame reached scanout" ~60 ms
+    after `locking the session`, on both tiers.
+  - **E2, hotplug add/remove.** `tty/hotplug/heads.rs` re-plans every head
+    at once (pure, 12 pins): a plugged-in connector gets a head on a CRTC no
+    lit head holds (lit heads are never re-routed), a driven connector that
+    goes away is removed, a mode change is followed per head, and only when
+    nothing driven is left do the #48 single-output rules apply to the
+    primary (move to another connected connector, or hold the last frame).
+    The last output is never removed. `State::remove_output` takes an
+    output away with clients connected, in protocol order (layer surfaces
+    `closed`; capture sessions `stopped`, parked frames failed; gamma
+    `failed`; `ext-workspace-v1` group removed after its workspaces leave;
+    foreign-toplevel `output_leave` now, `output_enter` from the `apply()`;
+    scanout feedback reverted), then drops the render target, withdraws the
+    `wl_output` global (destroyed after 5 s, so a racing bind survives),
+    files `OutputRemoved`, repacks, forgets the output in the lock wait,
+    re-homes the pointer and refreshes once. Pinned with real clients:
+    `outputs/removal.rs` (8), plus head retirement (`output_management`),
+    group removal order (`ext_workspace`), leave/enter (`foreign_toplevel_management`).
+  - **Live on the Asahi machine** (final product code `2bd7d47`, `nix
+    build .#scoot-gpu`, `~/fx/e-live.sh`, both tiers; pixman also at
+    `b782b06` earlier): `scoot msg outputs` names `eDP-1` (1707x1067 at
+    `[output] scale = 1.5`) and `DP-1` (1280x720 at x=1707); a window on
+    each output (`Super+Shift+period` carried the second across); the
+    pointer driven onto DP-1 is drawn there; per-output IPC screenshots
+    show each window on its own screen only; VT switch away and back logs
+    a full modeset on both CRTCs and both screens come back; the lock
+    covers both. CPU (jiffies, 30 s, `foot` printing every 20 ms): pixman
+    idle 0.00%, both screens damaged 37.27%, eDP-1 only 36.20% (vs
+    single-output `main` `0785420` 35.20/35.67% for the same eDP-1
+    workload, one full-width window); GPU tier idle 0.00%, both 13.73%,
+    eDP-1 only 9.27% (single-output `main` 9.43/8.63%, same two-column
+    layout). Hot paths benchmarked (release, thin LTO, both trees on the
+    Asahi machine): relative motion 318-319 ns (main) vs 315 ns (branch)
+    with one output, 368-369 vs 367-368 ns with two; headless
+    `render_frame_cost` best-of-5 empty 41.8/41.8 µs (main) vs 41.3/40.4 µs,
+    8 windows 57.1/57.5 vs 57.2/57.7 µs, and the two-output render
+    overlapping likewise -- no measurable change. Page flips with both
+    screens damaged: 705 in 10 s across the two heads (about 35/s each,
+    below 60/s each: flips never exceed one per CRTC vblank).
+  - **The physical replug (2026-09-25, 17:59Z, `2bd7d47`, pixman).** The
+    user pulled DP-1 and plugged it back in. This time the kernel did
+    report it: `card2-DP-1/status` read `disconnected` for 33 samples at
+    0.5 s. (An earlier, quicker unplug that morning never did.) So the tty
+    half of E2 ran on hardware:
+    - `drm: this connector went away connector=DP-1`, then `removing its
+      output output=2`;
+    - on replug, `driving a newly connected display connector=DP-1
+      crtc=crtc::Handle(68)`, `added an output for it ... output=3`, and a
+      full modeset;
+    - both windows ended on output 1, and the returned monitor showed an
+      empty workspace.
+
+    Review of that run found foot logging `unmapped from unknown output`:
+    the window's `wl_surface.leave` went out after the `global_remove`.
+    Fixed in the review round (below). Still unexecuted on hardware: a
+    GPU-tier runtime add (the replug ran dumb), the #48 `MoveTo` fallback,
+    and a mode change with several heads. The GPU tier
+    ran with Mesa's paths passed by environment (`GBM_BACKENDS_PATH`,
+    `__EGL_VENDOR_LIBRARY_DIRS`) because the booted generation has no
+    `/run/opengl-driver`; no system change was made. Gamma: both CRTCs
+    report size 0, so each output advertises the fallback and a `set_gamma`
+    would answer `failed` there.
+  - **Decided, recorded.** Frame pacing: each head flips at most once per
+    its own vblank (its own flip tracker/`DrmCompositor`), but a render
+    walks every output, so damage on one screen costs the other a no-damage
+    pass and a frame callback round; measured at ~1 pp of CPU with the
+    second screen idle (above), so per-output render scheduling is left as
+    an optimisation, not a correctness gap.
+  - **Review round (PR #247), each fix shown red under its mutation first.**
+    - **Lock fallback, deadline.** The deadline is armed once per wait and
+      never extended. Every issued flip used to re-arm it, so an
+      already-blanked screen that kept flipping held `locked` back
+      indefinitely while another screen's completion was lost (the probe
+      ran to 9.6 s), and each of those frames inserted another timer.
+    - **Lock fallback, what it records.** It records only outputs that
+      *drew* a blank for this lock (`SessionLock::drawn`), so a failed
+      render on one screen no longer sends `locked` over its pre-lock
+      desktop.
+    - **Leave before `global_remove`.** `remove_output` refreshes the
+      `Space` before withdrawing the global, so the leave arrives first.
+    - **Stale vblank after a same-CRTC swap.** A dumb-tier head dropped
+      with a flip in flight records its CRTC, so the late vblank does not
+      settle a head built on the same CRTC in the same uevent
+      (`Tty::stale_vblanks`).
+    - **Pins.** The single-output "re-present restarts the bound" test
+      became "re-present keeps the first bound".
+  - **Output identity on replug.** Output ids are never reused, so a
+    monitor unplugged and replugged returns under a new id and the
+    default output-2 binds stop reaching it (documented; follow-up in the
+    remainder ticket).
 - **F. Cross-output window moves + focus (staged 2026-09-21, the last
   "partially implemented" gap).** All of A–D deliberately left windows
   opening on output 1 with no way across: no move primitive, no
