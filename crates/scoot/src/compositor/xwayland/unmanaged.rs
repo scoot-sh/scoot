@@ -11,7 +11,10 @@
 //! The session lock replaces all of it exactly as it replaces every
 //! window: a locked frame gathers the lock screen and nothing else, the
 //! pointer finds only lock surfaces, and none of these gets a frame
-//! callback. Nothing here is lock-aware on its own; each caller -- the
+//! callback. It does not close them -- nothing here can unmap an
+//! override-redirect window, and toolkits keep their menus open through the
+//! lock's focus release (see `mod.rs`) -- so a menu open at lock is hidden
+//! and inert until unlock, then shown again. Nothing here is lock-aware on its own; each caller -- the
 //! hit test, the frame gathering in `render/elements.rs`, the frame
 //! callback and presentation passes -- sits behind the lock branch of its
 //! path.

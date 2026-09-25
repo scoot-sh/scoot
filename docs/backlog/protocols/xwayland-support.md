@@ -396,6 +396,16 @@ input-model-`None` window gets no keyboard; the focused X window is raised in
 X stacking; the keyboard-grab protocol stays refused. X input feeds idle and
 `interaction_serials` through the same paths as Wayland input.
 
+**Known limits, measured and stated rather than hidden:** (1) the startup-id
+chain is copyable -- `_NET_STARTUP_ID` is a readable property, so a watching
+X client can race a scoot-launched app to its token within its 30 s and take
+focus once; binding the redemption to the spawned process (ppid walk) is
+filed as [`xwayland-startup-id-race.md`](./xwayland-startup-id-race.md). (2)
+The brief asked the lock to *dismiss* X menus; it hides them and refuses
+them input, but cannot close them: the WM cannot unmap an override-redirect
+window and GTK 3 keeps its context menu through the focus release (measured:
+still mapped 5 s after locking), so a menu open at lock reappears at unlock.
+
 **Hostile X properties** (found while building it, each reproduced first):
 a NUL in `WM_NAME`/`_NET_WM_NAME`/`WM_CLASS` reached a foreign-toplevel
 `title`/`app_id` and panicked the compositor (`NulError` in
@@ -407,7 +417,7 @@ and withdrawn if it grows one. A Smithay-side clamp (the fork, then
 upstream) would let such a window be managed rather than refused; not
 needed for safety.
 
-**Evidence** (details and raw logs in the PR): 30 `xwayland::tests` on `Harness` (25 live against a real XWayland, 5 hermetic)
+**Evidence** (details and raw logs in the PR): 33 `xwayland::tests` on `Harness` (32 in every `xwayland` build -- 27 live against a real XWayland, 5 hermetic -- plus the scanout one in `gpu-scanout,xwayland` builds)
 (mapping, lists, floating/centring, rules, position policy, override-
 redirect, fullscreen, close, ring/rounded clip, focus gate, typing, click,
 taskbar activate/close, lock blanking and input refusal, server death

@@ -760,7 +760,10 @@ scale/mode) into one hardware session.
   XIM (Phase 4) → capture pins/packaging (5–7). The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its
   rival-claimant recipe cannot work: XWayland admits no X client before the
-  WM attaches).
+  WM attaches). Follow-up filed: [bind startup-id redemption to the spawned
+  process](./protocols/xwayland-startup-id-race.md) (low: a watching X
+  client can race a launched app to its `_NET_STARTUP_ID` within the
+  token's 30 s).
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes

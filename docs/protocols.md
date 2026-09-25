@@ -422,7 +422,8 @@ isolated from each other and from X clients as before, keystrokes go to an
 X window only while scoot has focused one (the X server's own input focus
 is set by scoot, never left to "whatever is under the pointer"), and the
 focus gate below keeps an X client from taking the keyboard off a Wayland
-window.
+window by asking — with one known window: for up to 30 seconds after scoot
+launches an X app, another X client can race it to its startup id (below).
 
 ### X windows in the layout
 
@@ -465,7 +466,11 @@ window.
   client that does not speak it has its window destroyed.
 - **The session lock** blanks X windows and their menus like every other
   window and refuses them the keyboard and pointer; the X server itself
-  keeps running (lock is not logout).
+  keeps running (lock is not logout). An X menu open at lock is hidden and
+  inert, not closed: a window manager cannot unmap an override-redirect
+  window, and toolkits keep their menus through the focus release (a GTK 3
+  context menu measured still open 5 s after locking), so it reappears at
+  unlock.
 - **Not yet:** X clients draw at scale 1 (upscaled at a fractional
   `[output] scale`), `_NET_WM_MOVERESIZE` (an X app's own titlebar drag) is
   ignored, `_NET_WM_ICON` is not read, and clipboard, drag-and-drop and XIM
@@ -505,7 +510,12 @@ taskbar and in `scoot msg windows` — and a click, a keybinding, a taskbar's
 clients cannot be told apart by anything they send, and inside the X server
 one can move the other's focus directly (`XSetInputFocus`) anyway. The gate
 is about the Wayland keyboard — which window scoot gives the keys to — and
-that is the one no X client can take by asking.
+that is the one no X client can take by asking, with one known window: a
+startup id is a property on the launched app's window, readable by every X
+client, so while a scoot-launched X app's token is live (up to 30 seconds,
+until the app's own window spends it) an X client watching for new windows
+can copy the id onto a window of its own, map first, and take focus once.
+Binding the redemption to the spawned process is filed as a follow-up.
 
 ## Layer shell (bars, wallpapers, launchers)
 
@@ -1689,8 +1699,9 @@ break the one case this protocol exists for.
 
 An app scoot itself started — a keybinding or `msg action spawn` — gets its
 token a different way: the compositor mints one and hands it to the child in
-`$XDG_ACTIVATION_TOKEN`, so the child can activate its own window when it
-maps one. That covers the slow cold start, where focus has moved elsewhere
+`$XDG_ACTIVATION_TOKEN` (and, while XWayland is live, `$DESKTOP_STARTUP_ID`
+for X toolkits — see [XWayland](#xwayland-opt-in)), so the child can
+activate its own window when it maps one. That covers the slow cold start, where focus has moved elsewhere
 before the window appears. The token lives under the same two bounds; a spawn
 past a full table simply gets no token, and the window is still focused on
 map.

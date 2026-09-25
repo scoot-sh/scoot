@@ -253,7 +253,8 @@ pub struct CompositorOptions {
     pub mode: Option<(u16, u16)>,
     /// Run an XWayland server inside the session, so X11-only applications
     /// get a `DISPLAY` to connect to. Opt-in and off by default: the server
-    /// costs a whole extra process (~55 MB RSS measured) plus a hard `PATH`
+    /// costs a whole extra process (~55 MB RSS idle, ~87 MB with three X
+    /// clients mapped, measured) plus a hard `PATH`
     /// dependency on the `Xwayland` binary, and any X client can
     /// keylog/snoop by design (see `docs/protocols.md`'s trust note), so it
     /// is an explicit choice, never a default. The config-file form is

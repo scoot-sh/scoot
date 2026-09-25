@@ -36,7 +36,8 @@
 //! ## Why this shape
 //!
 //! - **Opt-in, default off.** The server is a whole extra process (~55 MB
-//!   RSS measured on the dev VM -- re-measured per change, see the ticket),
+//!   RSS idle on the dev VM; 86.7-87.8 MB with three X clients mapped --
+//!   xterm, zenity, xclock -- re-measured for Phases 2+3, see the ticket),
 //!   a hard `PATH` dependency on the `Xwayland` binary, and a trust-model
 //!   change: any X client can keylog and snoop by design, so running one
 //!   extends full trust to it (see `docs/protocols.md`'s trust note).
@@ -99,9 +100,14 @@
 //!   -- killing it would take every X client with it, and lock is not
 //!   logout). Its windows are windows: a locked frame gathers the lock
 //!   screen and nothing else, the pointer finds only lock surfaces, the
-//!   keyboard goes only to the lock surface (and the X focus is released
-//!   when it leaves an X window, which is what closes a toolkit's open
-//!   menu), and override-redirect windows are skipped by the same branches.
+//!   keyboard goes only to the lock surface (Smithay releases the X input
+//!   focus when it leaves an X window), and override-redirect windows are
+//!   skipped by the same branches. An open X menu is hidden and inert
+//!   under the lock but *not dismissed*: the window manager cannot unmap
+//!   an override-redirect window, and a toolkit keeps its menu (and its X
+//!   grab) through the focus release -- measured: a GTK 3 context menu
+//!   (`mousepad`) was still mapped 5 s after the lock -- so it reappears
+//!   at unlock, where the user left it.
 //! - **Spawned children get `DISPLAY`, and their activation token doubles
 //!   as `DESKTOP_STARTUP_ID`.** `State::spawn` exports `DISPLAY` to every
 //!   child while the server is live, and -- only then -- hands the child's

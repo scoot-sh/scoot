@@ -62,9 +62,25 @@
 //! `XSetInputFocus` another X client's window, read its keystrokes while one
 //! of them is focused, and synthesize input into it. That is X11 by design,
 //! and why running XWayland extends full trust to every X client (see
-//! `docs/protocols.md`). What no X client can do through the gate is take
-//! focus from a Wayland window, or while the user is typing into a
-//! different X application.
+//! `docs/protocols.md`). What the gate stops is an X client taking focus
+//! from a Wayland window, or from a different X application, by asking --
+//! with one known window, below.
+//!
+//! # The startup-id race (known, filed)
+//!
+//! A startup id is a property on the launched app's window, so any X client
+//! can read it: one watching the root for new windows can copy a freshly
+//! launched app's `_NET_STARTUP_ID` onto a window of its own and map first,
+//! redeeming the token and taking focus once, for as long as that token is
+//! live (up to 30 seconds after the launch, until the app's own window
+//! spends it). The redemption does not check that the redeeming window's
+//! process is the one the token was minted for. The tightening -- when the
+//! token carries a [`SpawnedPid`], accept a startup-id redemption only from
+//! that process or a descendant (a bounded parent walk, so wrapper scripts
+//! still work) -- is `docs/backlog/protocols/xwayland-startup-id-race.md`.
+//! (Any same-uid process can also read a child's token out of
+//! `/proc/<pid>/environ`; that is the project's same-uid trust boundary, and
+//! applies to every activation token, X or not.)
 
 use smithay::wayland::xdg_activation::XdgActivationToken;
 use smithay::xwayland::X11Surface;
