@@ -446,6 +446,10 @@ fn focusing_over_ipc_takes_the_keyboard_back_from_a_clicked_taskbar() {
         // switch -- the real switch is `focus_output_moves_focus_across`
         // below.
         scoot_ipc::Action::FocusOutput { output: 1 },
+        // The positional half, same already-there shape on this fixture --
+        // and the form the default binds actually send, so its spend is
+        // pinned here rather than trusted to match the id form's.
+        scoot_ipc::Action::FocusOutputIndex { index: 0 },
     ];
     for (n, action) in covered.into_iter().enumerate() {
         fixture.click_taskbar();
@@ -1147,6 +1151,66 @@ fn focus_output_moves_focus_across_outputs_over_ipc() {
         fixture.state.focus,
         Some(moved),
         "an unknown-output focus moved window focus"
+    );
+}
+
+#[test]
+fn positional_output_actions_reach_outputs_by_position_over_ipc() {
+    // The index halves of the two legs above: position 1 is the second
+    // screen whatever id it carries, and out of range is served without
+    // moving anything -- the same contract the id forms keep.
+    let mut fixture = drive_two_outputs();
+    let moved = fixture.state.focus.expect("a focused window");
+
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveFocusedWindowToOutputIndex { index: 5 },
+    ));
+    assert!(matches!(response, Response::Ok { .. }));
+    assert_eq!(
+        snapshot_output(&fixture, moved),
+        1,
+        "an out-of-range positional move relocated the window"
+    );
+
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveFocusedWindowToOutputIndex { index: 1 },
+    ));
+    assert!(matches!(response, Response::Ok { .. }));
+    assert_eq!(
+        snapshot_output(&fixture, moved),
+        2,
+        "the positional move did not carry the window to the second screen"
+    );
+    fixture.assert_keyboard_follows_focus("a real positional move-to-output");
+
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::FocusOutputIndex {
+                index: 0,
+            }));
+    assert!(matches!(response, Response::Ok { .. }));
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(1)),
+        "focusing position 0 did not move the focused output"
+    );
+    fixture.assert_keyboard_follows_focus("focusing position 0");
+
+    // Out of range: served, focus untouched -- like the unknown id form,
+    // it stays on the full path (only the already-there case is fast-pathed),
+    // so no `needs_render` pin here, just the focus one.
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::FocusOutputIndex {
+                index: 5,
+            }));
+    assert!(matches!(response, Response::Ok { locked: false }));
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(1)),
+        "an out-of-range positional focus moved the focused output"
     );
 }
 

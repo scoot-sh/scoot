@@ -53,6 +53,8 @@ use smithay::reexports::drm::control::{
 };
 use smithay::reexports::rustix::fs::OFlags;
 
+use crate::compositor::output_identity::{EdidIdentity, parse_edid};
+
 /// A device that has been opened through the session and proven to have a
 /// display pipeline: its KMS resources loaded and at least one of its
 /// connectors is connected with a usable mode.
@@ -99,6 +101,15 @@ pub struct Connected {
     /// when no encoder could be read, which leaves the connector dark rather
     /// than guessing a route.
     pub crtcs: Vec<crtc::Handle>,
+    /// The connector's EDID summary, where it has an EDID blob to read
+    /// (`None` for a panel with no serial, a KVM hiding the blob, or a blob
+    /// that refuses). Read here, beside the mode choice, so startup and the
+    /// hotplug re-probe learn the same identity the same way: it becomes the
+    /// output's [`OutputIdentity`](crate::compositor::output_identity::OutputIdentity),
+    /// which is what tells a replugged monitor apart from a different one on
+    /// the same connector. Two small ioctls per usable connector, on paths
+    /// that run at startup and when a cable moves -- never per frame.
+    pub edid: Option<EdidIdentity>,
 }
 
 /// An explicitly named DRM device: the path, and where the name came from.
@@ -602,12 +613,42 @@ pub(super) fn connector_mode(
         .or_else(|| modes.first())
         .copied()?;
     let crtcs = reachable_crtcs(device, resources, info.encoders());
+    let edid = connector_edid(device, conn);
     Some(Connected {
         connector: conn,
         mode,
         name,
         crtcs,
+        edid,
     })
+}
+
+/// One connector's EDID summary, or `None` where there is none to read: no
+/// `EDID` property on the connector, a blob id of zero (nothing behind it),
+/// a blob that refuses, or bytes that are not an EDID base block (see
+/// [`parse_edid`](crate::compositor::output_identity::parse_edid)).
+///
+/// Quiet on every one of those: a panel with no serial and a KVM hiding the
+/// blob are ordinary hardware, and the name alone still identifies the
+/// connector -- the `None` is the fallback working, not a failure to log.
+fn connector_edid(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+) -> Option<EdidIdentity> {
+    let set = device.get_properties(connector).ok()?;
+    let (handles, values) = set.as_props_and_values();
+    for (handle, value) in handles.iter().zip(values.iter()) {
+        let info = device.get_property(*handle).ok()?;
+        if info.name().to_str().ok()? != "EDID" {
+            continue;
+        }
+        if *value == 0 {
+            return None;
+        }
+        let bytes = device.get_property_blob(*value).ok()?;
+        return parse_edid(&bytes);
+    }
+    None
 }
 
 /// The CRTCs any of `encoders` can be routed to, in the device's CRTC order

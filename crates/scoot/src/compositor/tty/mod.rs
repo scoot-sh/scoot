@@ -217,6 +217,11 @@ pub struct StartupHead {
     pub width: i32,
     pub height: i32,
     pub name: String,
+    /// Which monitor this head was built for (see
+    /// [`Head::identity`](head::Head::identity)): `run` registers it on the
+    /// output it creates, so a later unplug records the right record and a
+    /// replug restores it.
+    pub identity: crate::compositor::output_identity::OutputIdentity,
     pub(crate) scanout: ScanoutHandoff,
 }
 
@@ -315,6 +320,7 @@ pub fn init(
             width: head.width,
             height: head.height,
             name: head.name.clone(),
+            identity: head.identity.clone(),
             scanout,
         });
         heads.push(head);
@@ -801,6 +807,10 @@ fn build_head(
         output: None,
         connector: found.connector,
         name: found.name.clone(),
+        identity: crate::compositor::output_identity::OutputIdentity {
+            name: found.name.clone(),
+            edid: found.edid,
+        },
         presenter,
         width,
         height,

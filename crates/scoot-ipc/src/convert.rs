@@ -41,6 +41,10 @@ impl From<Action> for scoot_core::Action {
                 Self::MoveFocusedWindowToOutput(scoot_core::OutputId(output))
             }
             Action::FocusOutput { output } => Self::FocusOutput(scoot_core::OutputId(output)),
+            Action::FocusOutputIndex { index } => Self::FocusOutputIndex(index),
+            Action::MoveFocusedWindowToOutputIndex { index } => {
+                Self::MoveFocusedWindowToOutputIndex(index)
+            }
             Action::ToggleFullscreen => Self::ToggleFullscreen,
             Action::SetFullscreen { id, fullscreen } => Self::SetFullscreen {
                 id: scoot_core::WindowId(id),
@@ -110,6 +114,14 @@ mod tests {
         assert_eq!(
             scoot_core::Action::from(Action::FocusOutput { output: 2 }),
             scoot_core::Action::FocusOutput(scoot_core::OutputId(2))
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::FocusOutputIndex { index: 1 }),
+            scoot_core::Action::FocusOutputIndex(1)
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::MoveFocusedWindowToOutputIndex { index: 1 }),
+            scoot_core::Action::MoveFocusedWindowToOutputIndex(1)
         );
         assert_eq!(
             scoot_core::Action::from(Action::ToggleFullscreen),

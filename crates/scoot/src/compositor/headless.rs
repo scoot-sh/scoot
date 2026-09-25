@@ -14,7 +14,9 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::utils::{Logical, Point, Transform};
 
 use super::State;
+use super::output_identity::OutputIdentity;
 use super::output_scale::smithay_scale;
+use super::reconnect::DisplacedOutput;
 use super::render::{self, Backend, InPlace, ScanoutHandoff};
 use super::session_lock::LOCK_VBLANK_TIMEOUT;
 use super::tty::Tty;
@@ -121,6 +123,14 @@ pub fn init_named(
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
+    // Name-only: the connector-less backends (and every test) identify by
+    // name alone. `--tty` upgrades this to the full connector identity once
+    // it knows it (`State::note_output_identity`); the primary is the first
+    // output, so nothing displaced can be waiting for it and no restore runs
+    // here (unlike `add_output_with` below).
+    state
+        .output_identities
+        .insert(id, OutputIdentity::named(name));
     // The cursor's startup position: centred, not at the origin Smithay
     // leaves it at. Here rather than per-backend, so all three backends
     // place it at the same init point -- the cursor draws only under `--tty`
@@ -233,6 +243,13 @@ pub fn add_output_with(
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
+    // Name-only, like the primary above (`--tty` upgrades it after). Then
+    // the restore: an output added under an identity a removed output filed
+    // gets that output's still-open windows back (`State::restore_displaced`
+    // is a no-op when nothing was filed).
+    state
+        .output_identities
+        .insert(id, OutputIdentity::named(name));
     state
         .world
         .handle_event(CoreEvent::OutputAdded { id, area });
@@ -245,6 +262,7 @@ pub fn add_output_with(
     // The core lays out against one more output now, and `apply()` is what
     // pushes that arrangement onto the windows; it ends in `request_render()`.
     state.apply();
+    state.restore_displaced(id);
     Ok(id)
 }
 
@@ -266,9 +284,16 @@ pub(crate) fn add_output_without_backend(
     let output = create_output(state, name, width, height, (0, 0));
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
+    // Name-only, like the other add paths, and the restore: a harness output
+    // added under a removed output's name gets its windows back the same way
+    // a hotplugged monitor does.
+    state
+        .output_identities
+        .insert(id, OutputIdentity::named(name));
     state
         .world
         .handle_event(CoreEvent::OutputAdded { id, area });
+    state.restore_displaced(id);
     id
 }
 
@@ -1285,8 +1310,11 @@ impl State {
     /// removed is unresolvable to it), its render target dropped, its
     /// `wl_output` global
     /// retired (withdrawn now, destroyed later -- see [`retire_global`]), and
-    /// `OutputRemoved` filed with the core, which hands its workspaces and
-    /// windows to the focused output. The remaining outputs are repacked side
+    /// the core evicted (`evict_output`, the `OutputRemoved` event's
+    /// reporting half), which hands its workspaces and
+    /// windows to the focused output. What left is filed keyed by this
+    /// monitor's identity, so a later add under a matching identity brings
+    /// the still-open ones back (see `reconnect.rs`). The remaining outputs are repacked side
     /// by side, the session-lock wait forgets it (and confirms if it was the
     /// only screen still owing a blank), the pointer is brought back inside
     /// the desktop, and one refresh of heads, capture constraints, layer
@@ -1346,7 +1374,30 @@ impl State {
         self.backends.remove(&id);
         self.outputs.remove(id);
         retire_global(self, &output);
-        self.world.handle_event(CoreEvent::OutputRemoved { id });
+        // The core adopts the removed output's workspaces onto the focused
+        // output and reports what left (`evict_output`, the `OutputRemoved`
+        // event's reporting half). Filed here keyed by this monitor's
+        // identity, so a later add under a matching identity brings the
+        // still-open windows back (`State::restore_displaced`). An empty
+        // snapshot files nothing: an output that held no windows has nothing
+        // to come back to. A second removal under the same identity
+        // overwrites the first -- the latest state wins.
+        let identity = self.take_output_identity(id);
+        if let Some(evicted) = self.world.evict_output(id) {
+            if !evicted.snapshot.workspaces.is_empty() {
+                self.displaced.insert(identity, DisplacedOutput { evicted });
+            }
+        } else {
+            // Unreachable: the output was in `State::outputs` (checked at
+            // the top), and every output there is filed with the core at
+            // creation. error!, not debug!: silently dropping the record
+            // would strand the monitor's workspaces on the adopter with no
+            // restore possible.
+            tracing::error!(
+                output = id.0,
+                "drm: the removed output was unknown to the layout; its windows stay adopted"
+            );
+        }
         self.repack_outputs();
         if self.session_lock.forget_output(id, self.outputs.len()) {
             tracing::debug!(

@@ -96,6 +96,21 @@ impl World {
             // touches the focused output's tree.
             Action::MoveFocusedWindowToOutput(id) => self.move_focused_window_to_output(id),
             Action::FocusOutput(id) => self.focus_output(id),
+            // The positional halves of the two above: the index counts
+            // within the output list in creation order (the order
+            // `OutputAdded` arrived in), so the first screen is 0. Out of
+            // range resolves to no output and does nothing -- the same
+            // ignore rule the id forms keep for an unknown id.
+            Action::MoveFocusedWindowToOutputIndex(index) => {
+                if let Some(id) = self.output_at(index) {
+                    self.move_focused_window_to_output(id);
+                }
+            }
+            Action::FocusOutputIndex(index) => {
+                if let Some(id) = self.output_at(index) {
+                    self.focus_output(id);
+                }
+            }
             Action::FocusWindowId(id) => {
                 if let Some(loc) = self.locate(id) {
                     self.focus_location(loc);

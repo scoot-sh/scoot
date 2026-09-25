@@ -885,6 +885,10 @@ fn action_string(action: &Action) -> String {
         }
         Action::MoveFocusedWindowToOutput(id) => format!("move-window-to-output {}", id.0),
         Action::FocusOutput(id) => format!("focus-output {}", id.0),
+        Action::MoveFocusedWindowToOutputIndex(index) => {
+            format!("move-window-to-output-index {index}")
+        }
+        Action::FocusOutputIndex(index) => format!("focus-output-index {index}"),
         Action::CycleColumnWidth => "cycle-column-width".to_owned(),
         Action::SetColumnWidth(index) => format!("set-column-width {index}"),
         Action::ToggleFullscreen => "toggle-fullscreen".to_owned(),

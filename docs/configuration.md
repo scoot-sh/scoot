@@ -170,8 +170,8 @@ What it is **not**, yet, is tracked in
 - new windows open on the output under the pointer (falling back to the
   first output when the pointer is over no output); moving one across
   outputs, and focusing another output from the keyboard, is bound by
-  default for outputs 1 and 2 (see [Moving across
-  outputs](#moving-across-outputs)) — ids 3+ stay manual;
+  default for the first two screens (see [Moving across
+  outputs](#moving-across-outputs)) — positions 2 and up stay manual;
 - no per-output mode/scale/position configuration surface:
   `wlr-output-management` `apply`/`test` stay refused;
 - a menu left open while its window scrolls, or while an output changes, is
@@ -518,31 +518,48 @@ can't be expressed this way).
 ### Moving across outputs
 
 With more than one output, two actions reach across screens — and the first
-two outputs have default binds, promoted from the manual example (bare Super
+two screens have default binds, promoted from the manual example (bare Super
 focuses, Shift carries the focused window there, the same split the
 workspace digits keep):
 
 ```toml
 [binds]
-"super+comma" = "focus-output 1"
-"super+period" = "focus-output 2"
-"super+shift+comma" = "move-window-to-output 1"
-"super+shift+period" = "move-window-to-output 2"
+"super+comma" = "focus-output-index 0"
+"super+period" = "focus-output-index 1"
+"super+shift+comma" = "move-window-to-output-index 0"
+"super+shift+period" = "move-window-to-output-index 1"
 ```
 
 Those four lines are the defaults: uncommenting them in a file printed by
-`scoot --print-default-config` changes nothing. Outputs 3 and up stay
-manual — add your own binds naming those ids, in the same form.
+`scoot --print-default-config` changes nothing. Positions 2 and up stay
+manual — add your own binds naming those positions, in the same form.
 
-The ids are what `scootctl outputs` reports (stable for the session, unlike
-workspace positions, and never reused). Under `--tty` a monitor that is
-unplugged and plugged back in comes back as a new output under a new id. The
-default `output 2` binds then no longer reach it: check `scootctl outputs`
-and bind the new id, or restart the session. `move-window-to-output` carries the focused window to
+**Positions, not ids — that is the stability rule.** Output ids are what
+`scootctl outputs` reports: stable for the session and never reused, so a
+monitor that is unplugged and plugged back in comes back as a *new* output
+under a *new* id. The default binds name screen positions instead (0-based
+in creation order, left to right as the outputs are packed), so they keep
+reaching a monitor across a replug: after the return it sits in the same
+position under its fresh id. An explicit bind naming an id (`focus-output
+2`, `move-window-to-output 2`) keeps meaning that exact id — check
+`scootctl outputs` after a replug and bind the new one, or restart the
+session. An unknown id, and an out-of-range position, both do nothing.
+`move-window-to-output` carries the focused window to
 that output's active workspace and follows it there; `focus-output` focuses
 that output's active workspace (or nothing, when it holds no windows). An
 unknown id does nothing. Both are refused while the session is locked, like
 every other action.
+
+A returning monitor also gets its windows back: when an output is removed,
+its workspaces (and their windows, in order) are adopted by the remaining
+output and stay there, and when an output with a matching identity is added
+the still-open ones move back — the same workspaces, active index and column
+order. A window moved elsewhere by hand in between stays where it was put;
+a closed window drops out. Matching is by connector identity: the connector
+name (`DP-1`) plus the EDID make/model/serial where the connector has an
+EDID blob to read (name alone for panels without one, KVMs hiding it, and
+the connector-less backends) — so a *different* monitor plugged into the
+same connector does not inherit the old one's windows.
 
 Two failure behaviors specific to `[binds]`, both worth knowing since they
 fail silently rather than as a startup error:
@@ -817,8 +834,8 @@ bind — at startup and on every `scootctl reload`, which layers them back on
 last rather than letting a reloaded file strip the recovery path.
 
 Moving a window across outputs, or focusing another output, is bound by
-default for outputs 1 and 2 (`Super+comma`/`Super+period` and Shift for the
-carry — see [Moving across outputs](#moving-across-outputs)); outputs 3 and
+default for the first two screens (`Super+comma`/`Super+period` and Shift for the
+carry — see [Moving across outputs](#moving-across-outputs)); positions 2 and
 up are config binds you add yourself.
 
 ## Example `config.toml`

@@ -14,6 +14,7 @@ mod floating;
 mod floating_move;
 mod floating_order;
 mod fullscreen;
+mod reconnect;
 mod tree;
 
 #[cfg(test)]
@@ -23,6 +24,7 @@ use std::collections::HashMap;
 
 pub use arrange::{Arrangement, Placement};
 pub use floating_move::FloatingGeometry;
+pub use reconnect::{ColumnSnapshot, EvictedOutput, OutputSnapshot, WorkspaceSnapshot};
 
 use crate::config::Config;
 use crate::geometry::Rect;
@@ -132,6 +134,17 @@ impl World {
 
     pub fn focused_output(&self) -> Option<OutputId> {
         self.outputs.get(self.focused_output).map(|o| o.id)
+    }
+
+    /// One output's id by its position in the output list (0-based, creation
+    /// order -- the order `OutputAdded` arrived in), or `None` past the end.
+    ///
+    /// What the positional output actions
+    /// ([`Action::FocusOutputIndex`](crate::Action::FocusOutputIndex))
+    /// resolve through, and what a shell's already-there fast path compares
+    /// against without allocating a `Vec` of every output to answer it.
+    pub fn output_at(&self, index: usize) -> Option<OutputId> {
+        self.outputs.get(index).map(|o| o.id)
     }
 
     pub fn window_info(&self, id: WindowId) -> Option<&WindowInfo> {

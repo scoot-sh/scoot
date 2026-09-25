@@ -52,6 +52,8 @@ use smithay::output::Output;
 #[cfg(test)]
 mod per_output;
 #[cfg(test)]
+mod reconnect;
+#[cfg(test)]
 mod removal;
 #[cfg(test)]
 mod tests;

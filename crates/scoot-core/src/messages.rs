@@ -213,6 +213,26 @@ pub enum Action {
     /// empty, which is what "focused" already means on an output with no
     /// windows. An id this core doesn't know does nothing.
     FocusOutput(OutputId),
+    /// Move keyboard focus to another output by its position in the output
+    /// list (0-based, creation order) -- the first screen, the second screen
+    /// -- rather than by [`OutputId`](crate::OutputId).
+    ///
+    /// Beside [`Action::FocusOutput`] rather than replacing it: an id names
+    /// one specific output for the whole session (ids are never reused, so a
+    /// replugged monitor comes back under a fresh one), while a position
+    /// follows whatever output sits there now. The default keybindings use
+    /// this form so they keep reaching a monitor that went away and came
+    /// back; an explicit bind or an agent that wants one specific output
+    /// uses the id form. Out of range does nothing, like
+    /// [`Action::FocusWorkspaceIndex`].
+    FocusOutputIndex(usize),
+    /// Carry the focused window to the *active* workspace of the output at
+    /// position `index` in the output list (0-based, creation order), and
+    /// follow it there -- the positional half of
+    /// [`Action::MoveFocusedWindowToOutput`]'s mirror, with the same rules
+    /// otherwise (preset carried, floating re-centred, fullscreen left).
+    /// Out of range does nothing, like the id form's unknown id.
+    MoveFocusedWindowToOutputIndex(usize),
     /// Put the focused window into fullscreen, or take it out. With no window
     /// focused, does nothing.
     ///

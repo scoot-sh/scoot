@@ -1,6 +1,7 @@
 //! Applying what a platform shell observed.
 
 use super::World;
+use super::reconnect::Removal;
 use super::tree::{Output, WindowState};
 use crate::geometry::{Rect, Size};
 use crate::messages::Event;
@@ -18,7 +19,9 @@ impl World {
                 self.upsert_output(id, area);
             }
             Event::OutputUsableAreaChanged { id, area } => self.set_usable_area(id, area),
-            Event::OutputRemoved { id } => self.remove_output(id),
+            Event::OutputRemoved { id } => {
+                self.remove_output(id);
+            }
             Event::WindowOpened {
                 id,
                 info,
@@ -109,9 +112,17 @@ impl World {
     /// The removed output's workspaces join the focused output, after its own,
     /// without moving focus. With no output left to take them, their windows
     /// wait, as single columns, for the next output.
-    fn remove_output(&mut self, id: OutputId) {
+    ///
+    /// Answers what it did with them: the adopter, if any, and the workspace
+    /// index in it the adopted block starts at -- what
+    /// [`World::restore_output`](super::World::restore_output) verifies each
+    /// window against before moving it back.
+    pub(super) fn remove_output(&mut self, id: OutputId) -> Removal {
         let Some(o) = self.output_index(id) else {
-            return;
+            return Removal {
+                adopted_by: None,
+                adopted_at: 0,
+            };
         };
         let removed = self.outputs.remove(o);
         if self.focused_output > o {
@@ -131,11 +142,27 @@ impl World {
             .collect();
         match self.outputs.get_mut(target) {
             Some(output) => {
+                // Before the adopt: the adopted block starts where the
+                // trailing empty workspace is now. Every output ends in
+                // exactly one (`Output::normalize`), so this always has one
+                // to read.
+                let adopted_at = output.workspaces.len() - 1;
+                let adopted_by = output.id;
                 output.adopt(removed.workspaces);
                 self.fix_view(target);
                 self.recentre_floating_on_output(target, &floating);
+                Removal {
+                    adopted_by: Some(adopted_by),
+                    adopted_at,
+                }
             }
-            None => self.unplaced.extend(removed.into_windows()),
+            None => {
+                self.unplaced.extend(removed.into_windows());
+                Removal {
+                    adopted_by: None,
+                    adopted_at: 0,
+                }
+            }
         }
     }
 

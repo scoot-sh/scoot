@@ -64,7 +64,9 @@ unlike a quicker unplug that morning.
    [output-reconnect-restore](./output-reconnect-restore.md): match a
    returning monitor by connector identity, give its windows and workspaces
    back, and have the default output-2 binds follow the connector, not the
-   id.
+   id. **Subsumed by that ticket's implementation** (positional default binds
+   for the first/second screen plus workspace restore on identity match) —
+   this follow-up needs no separate work.
 3. **Per-output render scheduling.** A render walks every output. With
    damage on one screen the other costs a no-damage pass, about 1 pp of CPU
    measured. This is an optimisation, not a correctness gap.

@@ -232,6 +232,30 @@ fn the_output_actions_travel_as_snake_case_with_an_output() {
 }
 
 #[test]
+fn the_positional_output_actions_travel_as_snake_case_with_an_index() {
+    // The same pin for the position-based halves: what the default output
+    // binds send, so a client can name the second screen without knowing its
+    // id.
+    for (action, tag) in [
+        (
+            Action::MoveFocusedWindowToOutputIndex { index: 1 },
+            "move_focused_window_to_output_index",
+        ),
+        (Action::FocusOutputIndex { index: 1 }, "focus_output_index"),
+    ] {
+        let request = Request::Action(action);
+        assert_eq!(
+            json_of(&request),
+            json!({ "type": "action", "action": tag, "index": 1 })
+        );
+        assert_eq!(
+            decode::<Request>(&encode(&request).unwrap()).unwrap(),
+            request
+        );
+    }
+}
+
+#[test]
 fn unknown_action_tags_are_rejected_like_unknown_request_types() {
     // The no-`PROTOCOL_VERSION`-bump half of the argument: a new action tag
     // is nested inside `Request::Action`, so an older server's decode of the
