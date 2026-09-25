@@ -22,7 +22,9 @@
 //!   stale serial finds no grab. A request from a tiled window (or a
 //!   fullscreen one) is ignored: nothing in the strip is placed by
 //!   dragging, and a toolkit whose request goes unanswered simply stays in
-//!   its own drag. A request while locked is ignored too.
+//!   its own drag. A request while locked is ignored too, and so is one on
+//!   a touch serial: only the pointer's grab is checked (scoot has no touch
+//!   seat; a touch-started move would need its own `TouchGrab` path).
 //!
 //! What the grab does per motion is the whole hot path, and it allocates
 //! nothing: it asks the core to move or resize the window

@@ -18,9 +18,13 @@ A client can create as many `xdg_toplevel`s as it likes, and every one
 enters the core. The costs scale with the count, on paths that run often:
 
 - **`World::arrange` runs per frame per output** (the render path calls
-  it) and per `apply()`. It is linear in windows for tiled and unrelated
-  floating windows, but still multi-millisecond at a few thousand (table
-  below), and floods of 10k-100k windows reach tens of milliseconds -- a
+  it) and per `apply()`. It is multi-millisecond at a few thousand windows
+  (table below: roughly linear for the flat and tiled shapes measured, but
+  not proven linear in every shape -- each column's heights and every
+  workspace's spans are recomputed and allocated per call, and PR #243's
+  re-review found one quadratic shape, n dialogs on an n-long tiled chain
+  under a covering fullscreen window, fixed there by bounding the ancestry
+  walk), and floods of 10k-100k windows reach tens of milliseconds -- a
   stall per frame.
 - **Floating a window with a parent runs a full `arrange`**
   (`World::parent_centre`, once per float): opening n transient windows is

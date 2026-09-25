@@ -270,7 +270,9 @@ installed under whatever key or enter serial the client offered) is refused
 ignored: tiled windows are placed by the strip, and the client's own drag
 simply carries on with nothing moving. So is one from a fullscreen window,
 and any while the session is locked. `resize` with edge `none` resizes
-nothing. While the compositor holds the drag, the client gets a pointer
+nothing. Only a pointer press can carry a move: scoot has no touch
+input, and a request on a touch serial would find no pointer click grab, so
+it is refused. While the compositor holds the drag, the client gets a pointer
 `leave`, no button events, and an `enter` when it ends.
 
 The same drag starts from `[floating] modifier` (Super) held with the left
