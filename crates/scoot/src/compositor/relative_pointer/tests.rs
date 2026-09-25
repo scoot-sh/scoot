@@ -2156,3 +2156,55 @@ fn a_session_lock_deactivates_only_the_focused_constraint() {
         "unlocking engaged a lock whose surface was never entered"
     );
 }
+
+/// A floating window holding a persistent pointer lock, dragged with the
+/// floating modifier (see `floating/grab.rs`): the drag clears pointer focus,
+/// so the lock deactivates (`unlocked`), and when the drag ends the pointer
+/// re-enters the window through the ordinary arrival path -- which re-arms
+/// the persistent lock (`locked`) with no new request, as unlocking the
+/// session does. A drag that handed focus back inside Smithay instead would
+/// leave the game's lock dead until the pointer left and came back.
+#[test]
+fn a_dragged_floating_window_s_pointer_lock_re_arms_when_the_drag_ends() {
+    use smithay::backend::input::KeyState;
+    use smithay::input::keyboard::Keycode;
+
+    let (mut fixture, run) = Fixture::start();
+    let id = *fixture
+        .state
+        .windows
+        .keys()
+        .next()
+        .expect("the mapped window");
+    fixture
+        .state
+        .act(scoot_core::Action::SetFloating { id, floating: true });
+    fixture.settle();
+    fixture.focus(0, run.surface);
+    let Ack::Locked = fixture.run_on(0, Step::Lock) else {
+        panic!("locking answered with something other than `locked`");
+    };
+    let (x, y) = window_point(&fixture, 0, run.surface);
+    // `KEY_LEFTMETA`: Super, the default floating modifier.
+    fixture.state.key(Keycode::new(125 + 8), KeyState::Pressed);
+    fixture.state.pointer_button(PointerButton::Left, true);
+    assert_eq!(
+        fixture.state.floating_grab_window(),
+        Some(id),
+        "the drag began"
+    );
+    let _ = fixture.state.display_handle.flush_clients();
+    let during = fixture.report(0);
+    assert!(during.unlocked, "the drag left the lock active");
+    fixture.state.pointer_move(x + 10.0, y + 10.0);
+    fixture.state.pointer_button(PointerButton::Left, false);
+    fixture.state.key(Keycode::new(125 + 8), KeyState::Released);
+    let _ = fixture.state.display_handle.flush_clients();
+    assert_eq!(fixture.state.floating_grab_window(), None);
+    let after = fixture.report(0);
+    assert!(after.enters >= 1, "the pointer did not re-enter the window");
+    assert!(
+        after.locked,
+        "the persistent lock did not re-arm after the drag"
+    );
+}

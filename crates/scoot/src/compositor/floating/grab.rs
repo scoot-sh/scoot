@@ -30,10 +30,12 @@
 //! the same arithmetic `arrange` uses), and moves the window's element in
 //! the space to match -- no `apply()`, which arranges everything and would
 //! allocate per motion. A resize also sends the client a configure with the
-//! `resizing` state, but only when the size asked for changed (the
-//! configure's state array is Smithay's allocation, one per new size); the
-//! window's position follows when it draws that size (`observe_frame`),
-//! the edge the user is not dragging held by the core.
+//! `resizing` state -- only when the size asked for changed and the client
+//! has acked every configure before it, so configures go out at the rate
+//! the client answers them, not the mouse's (a configure is Smithay's
+//! allocation, about eleven of them, measured); the window's position
+//! follows when it draws that size (`observe_frame`), the edge the user is
+//! not dragging held by the core.
 //!
 //! **Every callback runs inside Smithay's pointer lock** (`PointerHandle`
 //! holds its mutex around the grab), so nothing here may reach the pointer:
@@ -68,7 +70,8 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
-use smithay::wayland::shell::xdg::ToplevelSurface;
+use smithay::wayland::compositor::with_states;
+use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 
 use crate::compositor::State;
 use crate::compositor::input::button_code;
@@ -150,7 +153,17 @@ impl FloatingGrab {
                 .space
                 .relocate_element(&self.window, (geometry.rect.x, geometry.rect.y));
         }
-        if matches!(self.drag, Drag::Resize(_)) && geometry.requested != self.requested {
+        // A new size goes out once the client has answered every configure
+        // it was already sent: a mouse reports at up to 1000Hz and a client
+        // draws at its frame rate, so a configure per motion would only queue
+        // sizes it has to skip (and cost Smithay's allocations per
+        // configure). The size the core asks for is current either way; the
+        // next motion after the ack sends it, and so does the `apply()` the
+        // client's resized frame provokes (`observe_frame`).
+        if matches!(self.drag, Drag::Resize(_))
+            && geometry.requested != self.requested
+            && !awaiting_ack(&self.window)
+        {
             self.requested = geometry.requested;
             configure_resizing(&self.window, Some(geometry.requested), true);
         }
@@ -173,7 +186,7 @@ impl PointerGrab<State> for FloatingGrab {
         // No client gets pointer events while a window is dragged.
         handle.motion(data, None, event);
         if !self.follow(data, event.location) {
-            handle.unset_grab(self, data, event.serial, event.time, true);
+            handle.unset_grab(self, data, event.serial, event.time, false);
         }
     }
 
@@ -210,7 +223,7 @@ impl PointerGrab<State> for FloatingGrab {
             ButtonState::Released => event.button == self.start_data.button,
         };
         if ends {
-            handle.unset_grab(self, data, event.serial, event.time, true);
+            handle.unset_grab(self, data, event.serial, event.time, false);
         }
     }
 
@@ -305,7 +318,9 @@ impl PointerGrab<State> for FloatingGrab {
 
     /// The grab is over, however it ended. Inside the pointer lock like
     /// every callback, so the full `apply()` it wants is left to
-    /// [`State::settle_floating_grab`].
+    /// [`State::settle_floating_grab`] -- which also gives pointer focus
+    /// back: the grab's own ends unset without Smithay's focus restore, so
+    /// the surface under the pointer is entered the ordinary way.
     fn unset(&mut self, data: &mut State) {
         if std::mem::replace(&mut self.ended, true) {
             return;
@@ -362,6 +377,26 @@ fn configure_resizing(window: &Window, size: Option<Option<Size>>, resizing: boo
         }
     });
     toplevel.send_pending_configure();
+}
+
+/// Whether the toplevel has configures it has not acked yet. One lock of
+/// its role data; nothing allocated. A toplevel that is already gone is
+/// awaiting nothing (and `configure_resizing` sends it nothing either).
+fn awaiting_ack(window: &Window) -> bool {
+    let Some(toplevel) = window.toplevel().filter(|toplevel| toplevel.alive()) else {
+        return false;
+    };
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|data| {
+                data.lock()
+                    .ok()
+                    .map(|data| !data.pending_configures().is_empty())
+            })
+            .unwrap_or(false)
+    })
 }
 
 /// Which edges a modifier resize moves when it grabs `rect` at `at`: the
@@ -646,8 +681,18 @@ impl State {
     /// lock, if it asked. One `bool` test otherwise, which is what the
     /// per-motion path pays.
     pub(in crate::compositor) fn settle_floating_grab(&mut self) {
-        if self.floating_grab_resync {
-            self.apply();
+        if !self.floating_grab_resync {
+            return;
+        }
+        self.apply();
+        // A drag the grab ended itself left pointer focus empty (it unsets
+        // without Smithay's focus restore): re-derived here through the
+        // ordinary arrival path, so the window under the pointer gets its
+        // `enter` -- and a pointer lock or confinement waiting on it
+        // engages, as on any arrival (`move_absolute`). Idempotent where
+        // `apply()` already re-derived it.
+        if self.floating_grab_window().is_none() {
+            self.refresh_pointer_focus();
         }
     }
 

@@ -128,6 +128,9 @@ fn a_modifier_right_drag_resizes_from_the_nearest_corner() {
     move_pointer(&mut fixture, before.right() - 3, before.bottom() - 3);
     hold(&mut fixture, SUPER, true);
     press(&mut fixture, PointerButton::Right);
+    // The client answers what it has been sent (the press focused it), as a
+    // live client does before the drag gets anywhere.
+    fixture.done(Step::Draw { window: dialog });
     move_pointer(&mut fixture, before.right() + 27, before.bottom() + 17);
     let asked = fixture.last_configure(dialog);
     assert_eq!((asked.width, asked.height), (before.w + 30, before.h + 20));
@@ -162,6 +165,7 @@ fn a_top_left_resize_keeps_the_bottom_right_corner() {
     move_pointer(&mut fixture, before.x + 2, before.y + 2);
     hold(&mut fixture, SUPER, true);
     press(&mut fixture, PointerButton::Right);
+    fixture.done(Step::Draw { window: dialog });
     move_pointer(&mut fixture, before.x - 18, before.y - 8);
     fixture.done(Step::Draw { window: dialog });
     let resized = fixture.placement(dialog).rect;
@@ -173,6 +177,46 @@ fn a_top_left_resize_keeps_the_bottom_right_corner() {
         (resized.right(), resized.bottom()),
         (before.right(), before.bottom())
     );
+    release(&mut fixture, PointerButton::Right);
+    hold(&mut fixture, SUPER, false);
+}
+
+/// Configures go out at the rate the client answers them, not the
+/// mouse's: while one is unacked, motion only moves the size the core asks
+/// for, and the client's next frame brings the newest size.
+#[test]
+fn a_resize_drag_sends_a_new_size_only_once_the_last_is_answered() {
+    let (mut fixture, dialog) = dialog_scene();
+    let before = fixture.placement(dialog).rect;
+    move_pointer(&mut fixture, before.right() - 3, before.bottom() - 3);
+    hold(&mut fixture, SUPER, true);
+    press(&mut fixture, PointerButton::Right);
+    fixture.done(Step::Draw { window: dialog });
+    move_pointer(&mut fixture, before.right() + 7, before.bottom() + 7);
+    let sent = fixture.configures(dialog).len();
+    let first = fixture.last_configure(dialog);
+    assert_eq!((first.width, first.height), (before.w + 10, before.h + 10));
+    // Unanswered: more motion sends nothing...
+    for step in 1..=5 {
+        move_pointer(
+            &mut fixture,
+            before.right() + 7 + step,
+            before.bottom() + 7 + step,
+        );
+    }
+    assert_eq!(
+        fixture.configures(dialog).len(),
+        sent,
+        "a configure per motion"
+    );
+    // ...until the client draws the first, which brings the newest.
+    fixture.done(Step::Draw { window: dialog });
+    let newest = fixture.last_configure(dialog);
+    assert_eq!(
+        (newest.width, newest.height),
+        (before.w + 15, before.h + 15)
+    );
+    assert!(newest.resizing);
     release(&mut fixture, PointerButton::Right);
     hold(&mut fixture, SUPER, false);
 }
@@ -243,7 +287,17 @@ fn a_modifier_press_is_not_an_interaction_serial() {
     press(&mut fixture, PointerButton::Left);
     assert_eq!(fixture.state.interaction_serials.latest(), before);
     release(&mut fixture, PointerButton::Left);
-    assert_eq!(fixture.state.interaction_serials.latest(), before);
+    // The release is swallowed too. What the end of the drag does deliver
+    // is the pointer's `enter` back onto the dialog, which is recorded as
+    // an enter -- one the activation gate never accepts.
+    let after = fixture.state.interaction_serials.latest();
+    if after != before {
+        let (serial, client) = after.expect("an entry");
+        assert!(
+            !fixture.state.interaction_serials.contains(serial, &client),
+            "the end of a drag recorded an input serial"
+        );
+    }
     hold(&mut fixture, SUPER, false);
 }
 
@@ -360,6 +414,7 @@ fn a_client_resize_request_resizes_within_the_window_s_limits() {
     let asked = fixture.last_configure(dialog);
     assert_eq!((asked.width, asked.height), (100, 60), "the maximum");
     assert!(asked.resizing);
+    fixture.done(Step::Draw { window: dialog });
     move_pointer(&mut fixture, cx - 200, cy - 200);
     let asked = fixture.last_configure(dialog);
     assert_eq!((asked.width, asked.height), (50, 30), "the minimum");
