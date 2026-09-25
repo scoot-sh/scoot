@@ -1371,6 +1371,10 @@ impl State {
         // outputs until the `apply()` at the end, so this sends leaves only;
         // the matching enters come with that layout.
         self.space.refresh();
+        // Before `outputs.remove` below: the name-only fallback in
+        // `take_output_identity` reads the output's `wl_output` name, so
+        // taking after the removal would always file under "".
+        let identity = self.take_output_identity(id);
         self.backends.remove(&id);
         self.outputs.remove(id);
         retire_global(self, &output);
@@ -1382,7 +1386,6 @@ impl State {
         // snapshot files nothing: an output that held no windows has nothing
         // to come back to. A second removal under the same identity
         // overwrites the first -- the latest state wins.
-        let identity = self.take_output_identity(id);
         if let Some(evicted) = self.world.evict_output(id) {
             if !evicted.snapshot.workspaces.is_empty() {
                 self.displaced.insert(identity, DisplacedOutput { evicted });

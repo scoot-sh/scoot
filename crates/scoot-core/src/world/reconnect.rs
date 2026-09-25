@@ -135,20 +135,21 @@ impl World {
     ///
     /// Unknown outputs (new or adopter) are ignored, as is restoring onto
     /// the adopter itself: there is nothing to pull back to itself.
-    pub fn restore_output(&mut self, id: OutputId, evicted: EvictedOutput) {
+    /// Hands the record back: how many still-open windows actually moved.
+    pub fn restore_output(&mut self, id: OutputId, evicted: EvictedOutput) -> usize {
         let EvictedOutput {
             snapshot,
             adopted_by,
             adopted_at,
         } = evicted;
         if snapshot.workspaces.is_empty() {
-            return;
+            return 0;
         }
         let Some(n) = self.output_index(id) else {
-            return;
+            return 0;
         };
         if adopted_by == Some(id) {
-            return;
+            return 0;
         }
         let a = adopted_by.and_then(|by| self.output_index(by));
 
@@ -251,7 +252,7 @@ impl World {
             });
         }
         if carries.is_empty() {
-            return;
+            return 0;
         }
 
         // Phase 2: take them off the adopter or out of `unplaced`.
@@ -259,8 +260,8 @@ impl World {
         // Descending indices, so each take names a position the earlier ones
         // did not shift: floating lists and columns are disjoint, and takes
         // address one workspace each, so sorting the whole list at once is
-        // enough (workspace, column-or-layer, index -- floating takes sort
-        // before tiled ones of the same workspace, which only reads better).
+        // enough (workspace, column-or-layer, index -- tiled takes sort
+        // before floating ones of the same workspace, which only reads better).
         if let Some(ax) = a {
             let mut takes: Vec<(usize, Option<usize>, usize)> = carries
                 .iter()
@@ -345,6 +346,7 @@ impl World {
         // screen of another size -- the same re-centring the removal does on
         // the way out.
         self.recentre_floating_on_output(n, &moved_floating);
+        carries.len()
     }
 
     /// One output's non-empty workspaces in order, with its active index.

@@ -76,24 +76,11 @@ impl State {
         let Some(displaced) = self.displaced.remove(&identity) else {
             return;
         };
-        let windows: usize = displaced
-            .evicted
-            .snapshot
-            .workspaces
-            .iter()
-            .map(|ws| {
-                ws.columns
-                    .iter()
-                    .map(|col| col.windows.len())
-                    .sum::<usize>()
-                    + ws.floating.len()
-            })
-            .sum();
-        self.world.restore_output(id, displaced.evicted);
+        let moved = self.world.restore_output(id, displaced.evicted);
         tracing::info!(
             connector = %identity.name,
             output = id.0,
-            windows,
+            windows = moved,
             "a display came back; restored its workspaces"
         );
         self.apply();
