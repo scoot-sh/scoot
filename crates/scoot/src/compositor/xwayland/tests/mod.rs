@@ -614,7 +614,7 @@ fn a_window_manager_that_cannot_attach_withdraws_the_display() {
     fixture.state.xdisplay = Some(display);
     let ready: Rc<RefCell<Option<std::os::unix::net::UnixStream>>> = Rc::default();
     let seen = ready.clone();
-    fixture
+    let token = fixture
         .state
         .loop_handle
         .insert_source(xwayland, move |event, _, _| {
@@ -623,6 +623,11 @@ fn a_window_manager_that_cannot_attach_withdraws_the_display() {
             }
         })
         .expect("a readiness source");
+    // Released with the harness, like `start`'s (the X display lock).
+    fixture
+        .state
+        .xwayland_tokens_for_test
+        .push((token, display));
     wait_until(
         &mut fixture,
         "XWayland READY (recorded, not attached)",

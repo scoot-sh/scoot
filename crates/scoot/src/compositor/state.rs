@@ -395,6 +395,11 @@ pub struct State {
     /// `release_listener_sources`).
     #[cfg(test)]
     pub(crate) listener_tokens: Vec<smithay::reexports::calloop::RegistrationToken>,
+    /// Test-only: every XWayland server source `xwayland::start` inserted,
+    /// with its display number, for the same teardown (see
+    /// `release_listener_sources`).
+    #[cfg(test)]
+    pub(crate) xwayland_tokens_for_test: Vec<(smithay::reexports::calloop::RegistrationToken, u32)>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -1089,6 +1094,8 @@ impl State {
             fail_next_draw_for_test: false,
             #[cfg(test)]
             listener_tokens: listener_tokens.to_vec(),
+            #[cfg(test)]
+            xwayland_tokens_for_test: Vec::new(),
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),

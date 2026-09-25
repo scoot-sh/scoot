@@ -282,7 +282,7 @@ pub fn start(
 
     let wm_handle = loop_handle.clone();
     let wm_display = display_handle.clone();
-    loop_handle
+    let token = loop_handle
         .insert_source(xwayland, move |event, _, state: &mut State| match event {
             XWaylandEvent::Ready {
                 x11_socket,
@@ -306,6 +306,13 @@ pub fn start(
             }
         })
         .map_err(|error| StartError::Insert(format!("{error:?}")))?;
+    // Test-only: the source owns the server's `/tmp/.X<N>-lock`, and the
+    // display number names the server process, so a harness whose loop leaks
+    // can release both (see `test_support`'s `release_listener_sources`).
+    #[cfg(test)]
+    state.xwayland_tokens_for_test.push((token, display));
+    #[cfg(not(test))]
+    let _ = token;
     Ok(display)
 }
 
