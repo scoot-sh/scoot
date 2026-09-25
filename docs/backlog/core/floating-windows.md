@@ -215,3 +215,15 @@ live runs with real dialogs (GTK file chooser via `zenity --file-selection`,
 a GTK settings/about dialog, `foot` via rule) with screenshots; docs for the
 config syntax, binds and IPC actions (README gets a short user-facing line —
 it is for users and prospective users).
+
+## Carried into PR 2 from the PR #242 re-review (2026-09-25)
+
+- **A floating fullscreen game can end up above its own dialog.** Clicking
+  the game raises it above its dialog; if an unrelated floating window then
+  takes focus, the game shows behind it but its dialog stays hidden beneath
+  the game. Clicking the game brings the dialog back. Rare; fix by keeping a
+  window's own floating dialogs stacked above it whenever both show.
+- **Doc precision (`docs/protocols.md`):** "With a dialog above it, direct
+  scanout composites" overstates it. The frame stays eligible and Smithay
+  only composites when the dialog cannot get a plane of its own; on
+  overlay-capable hardware it may still go direct, which is correct. Reword.
