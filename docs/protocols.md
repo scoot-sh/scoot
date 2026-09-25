@@ -12,7 +12,7 @@ read your files anyway.
 
 | Protocol | Version | State |
 | --- | --- | --- |
-| `xdg-shell` | 7 | Windows and popups. Every `xdg_toplevel` is a column entry; [`set_fullscreen`](#fullscreen) is honoured. |
+| `xdg-shell` | 7 | Windows and popups. Every `xdg_toplevel` is a column entry, told it is [tiled](#tiled-windows) on all four edges; [`set_fullscreen`](#fullscreen) is honoured. |
 | `xdg-decoration-v1` | 1 | `zxdg_decoration_manager_v1` — server-side decorations, so a client stops drawing its own titlebar; see [`prefer_no_csd`](configuration.md#appearance). scoot draws a focus ring, never a titlebar. |
 | `wlr-layer-shell-v1` | 5 | [Bars, docks, wallpapers, launchers](#layer-shell-bars-wallpapers-launchers). |
 | `ext-workspace-v1` | 1 | [Workspaces](#workspaces-ext-workspace-v1). |
@@ -123,6 +123,28 @@ client has just released can linger for a moment until scoot next clears
 the renderer's cache. With one software-GLES output, one client stays
 under that point even counting those; with several outputs the lingering
 copies can take it past for that moment.)
+
+## Tiled windows
+
+Every window in the scrolling layout is sent all four `xdg_toplevel` tiled
+states (`tiled_left`, `tiled_right`, `tiled_top`, `tiled_bottom`) in the same
+configure as its size, from its first configure on. A fullscreen window is
+sent `fullscreen` instead, never both, and gets the four back when it leaves.
+scoot has no floating windows, so no window is sent neither. A client bound
+to `xdg_wm_base` below version 2 is sent none of the tiled states (they do
+not exist at its version).
+
+Being told it is tiled is what makes a client fill its slot exactly. A
+client that believes it floats may size itself: `foot`'s default
+`resize-by-cells` rounds a floating window down to whole character cells,
+which left a sliver of background along its right and bottom edges. GTK
+also trims the shadow it draws around a tiled window's edges.
+
+Some clients still draw less than their slot, tiled or not. On the dev VM a
+GTK 4 dialog (`zenity --info`) kept its own 300x223 size in a 966x1083 slot,
+and `mpv` kept its video's size. scoot rounds the corners and draws the focus
+ring around what such a window actually draws, and reports that area as its
+`rect` over IPC ([ipc.md](ipc.md#what-the-replies-carry)). It does not use the whole slot.
 
 ## Fullscreen
 

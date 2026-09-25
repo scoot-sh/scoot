@@ -692,8 +692,8 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Many light connections can still pressure the table and shed scootctl](./core/pressure-many-light-connections.md) — medium; cheapest fix is a lower pressure line for IPC accepts.
 
 ### From the gh #205 re-verification (2026-09-24)
-- [Clip and ring the committed size; send tiled states](./core/clip-to-committed-size.md) — high: foot defaults still show mismatched corners (gh #205 reopened).
-- [Ring outer corners have square shoulders](./core/ring-outer-corner-shoulders.md) — medium.
+- [Clip and ring the committed size; send tiled states](./resolved/clip-to-committed-size-done.md) — RESOLVED 2026-09-24: layout windows are told they are tiled on all four edges (default foot now fills its slot: 958x1068 → 966x1083 at 1.5), and the rounded clip, both rings and IPC `rect` follow the committed size clamped to the slot (`drawn.rs`), so a client that still draws short (GTK 4 dialogs, mpv) is clipped and ringed where it drew. Default foot at 1.0/1.5, headless and `--tty`: all four corners pass (right and bottom failed on `main`).
+- [Ring outer corners have square shoulders](./resolved/ring-outer-corner-shoulders-done.md) — RESOLVED 2026-09-24: the painted ring's side bars span only the rows between its strips (from the strips' own physical geometry), so the outer edge is a concentric arc in every row. Pixman and GLES, 1.0–2.0.
 
 ### GPU tier, after primary-direct (2026-09-23)
 - [A/B resource usage vs niri](./resolved/niri-ab-benchmark-done.md) — RESOLVED 2026-09-24 (PR #237, dev VM half), at the user's direct request: both compositors nested in the same cage host on llvmpipe, three rotating rounds, results and caveats in [`docs/benchmarks.md`](../benchmarks.md). The real-GPU half is the next entry.

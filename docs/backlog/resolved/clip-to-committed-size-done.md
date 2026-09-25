@@ -1,0 +1,166 @@
+---
+title: "Rounded clip and focus ring follow the layout slot, not the client's committed size: a client that doesn't fill its slot shows mismatched corners (gh #205, reopened) — DONE"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
+---
+
+# Clip and ring the committed size; tell clients they're tiled — DONE
+
+RESOLVED 2026-09-24, together with
+[`ring-outer-corner-shoulders-done.md`](./ring-outer-corner-shoulders-done.md)
+in one PR (the user asked for both in one). The ticket as filed is kept
+verbatim below the resolution.
+
+## Resolution
+
+Both halves, as the ticket suggested.
+
+**(a) Tiled states.** `fullscreen::set_layout_states` (was
+`set_fullscreen_state`) puts a window's pending state in step with the
+layout: `fullscreen`, or all four `tiled_*` states. The two are exclusive,
+and scoot has no floating windows. Its two callers, `apply()` and
+`answer_fullscreen_request`, each send it in the same configure as the size,
+so PR #223's size-and-bit atomicity holds for the tiled bits too. The
+initial configure carries them (`apply()` runs in `add_window`). A
+`foot --fullscreen` first frame carries `fullscreen` and no tiled state
+(pinned). Smithay's `into_filtered_states` removes the tiled states for a
+client bound below xdg_toplevel v2. `observe_frame` reads only size and
+`fullscreen` from the acked state, so it is untouched.
+
+**(b) Clip and ring what was drawn.** New `drawn.rs`. The drawn rect is
+the slot's origin plus, per axis, `min(slot, committed window geometry)`.
+With nothing committed it falls back to the slot. The origin is the slot's
+top-left because that is where the window's geometry origin is mapped, so
+a short client only moves its right and bottom edges. It has three readers
+and no writers. None of them configures a client or teaches the core:
+
+- the rounded clip in `window_elements`, from the geometry it already
+  reads;
+- both ring paths, through a `drawn` closure that `ring_elements` builds
+  from `&state.windows`. The compiler forced all three callers: the frame
+  body, the scanout tier and the capture-cursor re-render. The square ring
+  follows too, so the ring and IPC `rect` never disagree at radius 0;
+- IPC `windows` `rect`.
+
+**Rect semantics (decided).** `rect` is what is drawn and clickable, and
+it never reaches past the slot. Hit-testing was always by surface, so a
+click in the undrawn part of a slot never reached the window. The old
+`rect` promised an area that was not clickable. A window stacked behind a
+fullscreen sibling reports the sibling's origin with its own size. A
+fullscreen window reports the output's rect as long as it draws the whole
+output. `docs/ipc.md` says both.
+
+**Resize behaviour (decided).** The drawn rect is read fresh each frame
+from committed state, so the ring and clip move on the frame the client's
+commit lands. A growing slot keeps the ring around the old content until
+the larger frame arrives. On `main` the ring jumped to the new slot at
+once and circled empty slot for a frame or two. A shrinking slot clamps
+the ring at once, as before. Nothing is tracked per resize.
+
+**Cost.** Per placed window per frame there is one extra `Window::geometry()`
+on the ring path: two uncontended locks and no allocation. The clip path
+already read the geometry.
+
+## Evidence
+
+Fail-first commit `b755f11` (main `1a8c5c1` plus tests only), fixed at
+`7164226`. Dev VM, 9p mount, `cargo nextest run -p scoot`:
+
+- `rounded/tests/committed.rs`:
+  - a client drawing `(13, 7)` logical px short of each configure gets a
+    matching clip and ring at 1.0, 1.5 and 2.0;
+  - the square ring hugs it too;
+  - the ring follows short, full, then short-by-another-amount redraws;
+  - IPC `rect` is the drawn rect: short, full, and clamped past the slot.
+
+  All six failed on `b755f11` under pixman and GLES and pass at `7164226`.
+  On `b755f11` the red census counted the unclipped short corners: at 1.5,
+  54824 against 54686 expected. IPC reported `116x243` for a `103x236`
+  window.
+- `fullscreen/tests/transitions.rs` (client bound at xdg_wm_base v3):
+  - tiled on every edge from the first sized configure;
+  - fullscreen replaces tiled, and leaving restores it;
+  - the fullscreen-first frame is not tiled;
+  - an invisible window made fullscreen over IPC loses tiled.
+
+  The first two failed on `b755f11` (`tiled: false` everywhere).
+- `drawn/tests.rs`: `clamp_to_slot` edge cases (zero or negative sizes,
+  per-axis clamp, `i32::MAX`).
+
+Live repro (release binaries, sha256 `ffce3c34…` before, `f9eec41e…` after,
+`~/evidence/r205/` on the dev VM). Default `foot` (`resize-by-cells` on,
+alpha 0.95), `corner_radius = 10`, `focus_ring_width = 4`, the coordinator's
+`check_corners.py` with an outer-arc check added:
+
+| run | before (`1a8c5c1`) | after (`7164226`) |
+| --- | --- | --- |
+| headless 2952x1660 @1.5 | TL inner pass; TR, BL, BR fail (bg inside clip 242/506/518); outer arc 11/21 rows at every corner | all four pass, outer arc 21/21 |
+| headless @1.0 | TR, BL, BR fail; outer 8/14 | all four pass, 14/14 |
+| `--tty` pixman 1600x1000 @1.5 | BL, BR fail; outer 11/21 | all four pass, 21/21 |
+| `--tty` pixman @1.0 | TR, BL, BR fail; outer 8/14 | all four pass, 14/14 |
+
+foot's commits under `WAYLAND_DEBUG` at 1.5. Before, it was told 966x1083
+with states `array[4]` (activated) and committed a viewport of 958x1068.
+After, it is told `array[20]` (activated plus four tiled) and commits
+966x1083. It fills its slot.
+
+(b) was also checked on its own, with an uncommitted experiment binary
+that never sends tiled states (`2afb3097…`). foot under-fills again (IPC
+`rect` 958x1068 at 1.5, the 1437x1602 physical of the report) and all four
+corners still pass, 21/21 outer rows. At 1.0 it reports 1452x1628, also all
+pass.
+
+Other clients, headless @1.5, before → after (Qt and GTK 3 apps are not
+installed on the dev VM, so not measured):
+
+- `zenity --info` (GTK 4): a fixed-size dialog. It keeps a 300x223
+  geometry either way, and its CSD margin shrinks 22 → 20 once tiled.
+  Before, the ring circled the 966x1083 slot. After, it hugs the dialog and
+  IPC `rect` is 300x223.
+- `mpv` testsrc (`--vo=wlshm`): keeps its own 644x722 size tiled or not.
+  After, the ring and rounded corners follow the video.
+- `weston-terminal`: ignores the tiled states. It commits a 967x1087
+  geometry, larger than its slot, so the rect is clamped to the 966x1083
+  slot, the same as before.
+
+Screenshots are in the coordinator's scratchpad `r205-fixed/`.
+
+Filed 2026-09-24 from a live re-verification of gh #205 on `main` `1f2fe5c`
+(scale 1.5, `corner_radius = 10`, `focus_ring_width = 4`). Serves
+**daily-drive** (the default look of the default terminal) and
+**computer use** (window rects that match what is drawn).
+
+## What is wrong
+
+foot (default `resize-by-cells=yes`) commits a buffer rounded down to whole
+cells: 1437x1602 physical in a 1449x1625 slot. scoot's rounded clip and ring
+use the layout slot (`clip_rect(placement)`), so the ring rounds a corner
+the content never reaches (a green gap between square content and a curved
+ring) at the right and bottom corners. Not fractional-specific (reproduces at
+1.0). With `resize-by-cells=no` all four corners pass a per-pixel check, so
+PR #207's fix itself holds.
+
+foot's CHANGELOG says cell-rounding applies to *floating* windows; scoot
+sends no `xdg_toplevel` tiled states (`tiled_left/right/top/bottom`, v2+).
+
+## What to do (both, likely)
+
+1. Send tiled states for windows in the scrolling layout (not for
+   fullscreen, which has its own state; check what floating means for
+   scoot, which has none today). Measure that foot, GTK, Qt then fill the
+   slot exactly.
+2. Clip and ring what the client actually committed (the window geometry
+   of its last commit, clamped to the slot, centred/aligned per layout
+   rules), so any client that still under-fills (e.g. a fixed-size dialog,
+   an old client) gets a matching ring. Decide how the ring and rounded clip
+   follow a mid-resize commit without flicker.
+
+## Evidence
+
+Repro artifacts: scratchpad `r205/` (the coordinator has the paths) and
+`check_corners.py` (a per-corner pixel check that can become a harness
+test). Fail-first harness test with a client committing a buffer smaller
+than its slot; live foot defaults at 1.0 and 1.5 on headless and `--tty`,
+all four corners passing; screenshot for the issue.
