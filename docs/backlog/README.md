@@ -750,6 +750,11 @@ scale/mode) into one hardware session.
   output-2 binds stop reaching it. niri-style restore by connector identity
   (name + EDID make/model/serial); subsumes the remainder ticket's
   replug-id follow-up. Filed from PR #247's review.
+- [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./core/lock-vblank-bound-hardening.md)
+  — OPEN, low: `await_vblank`'s "late, never early" should say "within one
+  bound of the first blank drawn"; `stale_vblanks` entries should age out so
+  a driver that never delivers an owed vblank can't freeze a reused CRTC.
+  Filed from PR #247's round-2 review.
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
   — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
   + H (default `Super+comma/period` output binds) LANDED 2026-09-21
