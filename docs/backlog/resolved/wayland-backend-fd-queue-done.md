@@ -8,7 +8,7 @@ blocked: null
 
 # Unbounded per-connection received-fd queue (wayland-backend) — RESOLVED
 
-RESOLVED 2026-09-24 (PR #PRNUM) by route 2 below: scoot now builds against
+RESOLVED 2026-09-24 (PR #241) by route 2 below: scoot now builds against
 a scoot-sh fork of wayland-backend (`docs/forks.md`), pinned through the
 root `Cargo.toml`'s `[patch.crates-io]` at `a39311b8` (the 0.3.17 release
 `72f7fe0d` plus one server-side commit). Nothing was filed upstream.

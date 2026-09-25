@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[wayland-backend's received-fd queue is bounded](docs/backlog/resolved/wayland-backend-fd-queue-done.md)**
-  (2026-09-24, PR #PRNUM) — wayland-backend 0.3.17 kept the fds a client
+  (2026-09-24, PR #241) — wayland-backend 0.3.17 kept the fds a client
   attaches to fd-less requests for the connection's life; one idle client
   took scoot from 18 to 999 fds and shed every newcomer, `scootctl`
   included. scoot now builds against the scoot-sh fork (`docs/forks.md`,
