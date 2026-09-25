@@ -145,6 +145,27 @@ fn x11_size(window: &X11Surface) -> Size {
     Size::new(size.w.clamp(1, X_MAX_SIZE), size.h.clamp(1, X_MAX_SIZE))
 }
 
+/// Whether Smithay can derive this window's geometry without overflowing.
+///
+/// `X11Surface::geometry()` is its size minus `_GTK_FRAME_EXTENTS`, and the
+/// extents are client-set 32-bit numbers (Smithay only floors them at zero):
+/// with two near `i32::MAX`, the subtraction in Smithay's `Rectangle -
+/// FrameExtents` overflows -- a panic in a debug build (measured: `attempt to
+/// subtract with overflow`, `utils/geometry.rs:1858`), garbage geometry in a
+/// release one. Scoot cannot reach inside Smithay's stored copy, and every
+/// window path (the render gather, the ring, the hit test, the `Space`
+/// itself) asks for the geometry -- so a window whose extents are bigger than
+/// any X window can be is not managed at all: refused at its map request,
+/// withdrawn if it grows them later (see [`State::x11_frame_extents_changed`]).
+/// Real toolkit shadows are tens of pixels; the bound is the X server's own
+/// window-size limit.
+fn frame_extents_are_sane(window: &X11Surface) -> bool {
+    let extents = window.frame_extents();
+    [extents.left, extents.right, extents.top, extents.bottom]
+        .into_iter()
+        .all(|extent| (0..=X_MAX_SIZE).contains(&extent))
+}
+
 /// Whether `inner` lies wholly inside `outer`. In `i64`, so a rect near the
 /// `i32` edge cannot overflow its own far edge.
 fn contains(outer: Rect, inner: Rect) -> bool {
@@ -198,6 +219,14 @@ impl State {
             // itself, with no request), and if it ever were reachable the
             // unmanaged path is the right one: the XWM cannot configure it.
             self.map_x11_unmanaged(window);
+            return;
+        }
+        if !frame_extents_are_sane(&window) {
+            tracing::warn!(
+                id = window.window_id(),
+                extents = ?window.frame_extents(),
+                "refusing to map an X11 window: its _GTK_FRAME_EXTENTS are larger than any window can be"
+            );
             return;
         }
         if self.id_of_x11(&window).is_some() {
@@ -408,6 +437,31 @@ impl State {
             // Refused or already so: the property states the answer.
             tracing::debug!(?id, %error, "could not restate an X11 window's fullscreen state");
         }
+    }
+
+    /// `_GTK_FRAME_EXTENTS` changed. Smithay has already stored the new
+    /// numbers, and nothing has asked for the geometry since (its property
+    /// handler calls this straight after the update): a managed window whose
+    /// extents are now past any window's size is withdrawn -- unmapped
+    /// X-side and taken out of the layout -- before anything can. See
+    /// [`frame_extents_are_sane`].
+    pub(super) fn x11_frame_extents_changed(&mut self, window: &X11Surface) {
+        if frame_extents_are_sane(window) {
+            return;
+        }
+        let Some(id) = self.id_of_x11(window) else {
+            return;
+        };
+        tracing::warn!(
+            ?id,
+            xid = window.window_id(),
+            extents = ?window.frame_extents(),
+            "withdrawing an X11 window: its _GTK_FRAME_EXTENTS are larger than any window can be"
+        );
+        if let Err(error) = window.set_mapped(false) {
+            tracing::debug!(?id, %error, "could not unmap an X11 window");
+        }
+        self.remove_window(id);
     }
 
     /// A title, class, size-hint or transient change: re-read, the way an

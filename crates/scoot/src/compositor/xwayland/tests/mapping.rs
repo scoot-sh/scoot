@@ -530,3 +530,54 @@ fn a_nul_in_an_x_title_is_cut_not_a_crash() {
             .contains(&("still".to_owned(), "Evil".to_owned()))
     );
 }
+
+/// `_GTK_FRAME_EXTENTS` is client-set numbers that Smithay subtracts from
+/// the window's size to get its geometry, which the render gather, the
+/// ring, the hit test and floating-frame reporting all read -- and with two
+/// near `i32::MAX` that subtraction overflows inside Smithay (a debug-build
+/// panic). A window growing such extents after it mapped is withdrawn
+/// before anything asks for its geometry; one mapping with them is refused;
+/// ordinary shadow-sized extents are left alone. The session survives all
+/// of it.
+#[test]
+fn absurd_frame_extents_do_not_take_the_session_down() {
+    let Some(mut live) = live("absurd_frame_extents_do_not_take_the_session_down") else {
+        return;
+    };
+    // Shadow-sized extents: managed as usual.
+    let shadowed = live.x.map(&Props::new(RED));
+    live.x.set_frame_extents(shadowed, [8, 8, 8, 8]);
+    let shadowed_id = live.managed(shadowed);
+
+    let xid = live.x.map(&Props::new(RED));
+    let id = live.managed(xid);
+    live.x
+        .set_frame_extents(xid, [0x7fff_ffff, 0x7fff_ffff, 0x7fff_ffff, 0x7fff_ffff]);
+    eventually(
+        &mut live.fixture,
+        "the absurd window withdrawn",
+        |fixture| id_of_xid(&fixture.state, xid).is_none(),
+    );
+    assert!(live.fixture.state.world.window_info(id).is_none());
+    // Everything that reads a window's geometry, with the survivor in place.
+    let rect = live.placement(shadowed_id).rect;
+    let (x, y) = (f64::from(rect.x + 5), f64::from(rect.y + 5));
+    let _ = live.pixel_at(rect.x + 5, rect.y + 5);
+    let _ = live.fixture.state.surface_under((x, y).into());
+    live.fixture.state.pointer_move(x, y);
+    let _ = live.fixture.state.window_snapshots();
+    live.fixture.state.apply();
+    live.drain();
+
+    // Mapping with them already set: refused.
+    let mut props = Props::new(RED);
+    props.frame_extents = Some([0x7fff_ffff, 0x7fff_ffff, 0, 0]);
+    let preset = live.x.map(&props);
+    live.drain();
+    let _ = live.fixture.render();
+    assert!(
+        id_of_xid(&live.fixture.state, preset).is_none(),
+        "a window mapping with absurd extents entered the layout"
+    );
+    assert!(id_of_xid(&live.fixture.state, shadowed).is_some());
+}

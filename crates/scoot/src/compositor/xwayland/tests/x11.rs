@@ -42,6 +42,8 @@ pub(super) struct Props {
     pub(super) startup_id: Option<String>,
     /// An override-redirect window.
     pub(super) override_redirect: bool,
+    /// `_GTK_FRAME_EXTENTS` (left, right, top, bottom), set before mapping.
+    pub(super) frame_extents: Option<[u32; 4]>,
 }
 
 impl Props {
@@ -58,6 +60,7 @@ impl Props {
             min_max: None,
             startup_id: None,
             override_redirect: false,
+            frame_extents: None,
         }
     }
 }
@@ -214,6 +217,9 @@ impl XClient {
                 .set_normal_hints(&self.conn, window)
                 .expect("a hints request");
         }
+        if let Some(extents) = props.frame_extents {
+            self.set_frame_extents(window, extents);
+        }
         if let Some(startup) = &props.startup_id {
             self.string(window, self.atoms.startup_id, self.atoms.utf8, startup);
         }
@@ -351,5 +357,30 @@ pub(super) fn eventually<S, A>(
             return;
         }
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
+    }
+}
+
+impl XClient {
+    /// Sets `_GTK_FRAME_EXTENTS` (left, right, top, bottom) on a window, as
+    /// a GTK client with client-side shadows does -- or a hostile one, with
+    /// whatever numbers it likes.
+    pub(super) fn set_frame_extents(&self, window: Window, extents: [u32; 4]) {
+        let atom = self
+            .conn
+            .intern_atom(false, b"_GTK_FRAME_EXTENTS")
+            .expect("an intern request")
+            .reply()
+            .expect("an atom")
+            .atom;
+        self.conn
+            .change_property32(
+                PropMode::REPLACE,
+                window,
+                atom,
+                AtomEnum::CARDINAL,
+                &extents,
+            )
+            .expect("a property request");
+        self.conn.flush().expect("the property hit the wire");
     }
 }

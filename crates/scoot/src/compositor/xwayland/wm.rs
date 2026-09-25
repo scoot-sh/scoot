@@ -117,6 +117,7 @@ impl XwmHandler for State {
             | WmWindowProperty::Class
             | WmWindowProperty::NormalHints
             | WmWindowProperty::TransientFor => self.x11_properties_changed(&window),
+            WmWindowProperty::FrameExtents => self.x11_frame_extents_changed(&window),
             _ => {}
         }
     }
