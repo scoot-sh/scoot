@@ -429,33 +429,37 @@ fn a_dead_server_is_loud_and_the_session_survives() {
         );
         return;
     }
-    let mut fixture = Fixture::unstarted();
-    let handle = fixture.state.loop_handle.clone();
-    let display = super::start(handle, &mut fixture.state).expect("XWayland should start");
-    wait_until(&mut fixture, "XWayland READY", |fixture| {
-        fixture.state.xwm.is_some()
-    });
-    // A managed window and an override-redirect one, so the death has
-    // something to sweep: a dead server sends no unmap for either.
-    let x = x11::XClient::connect(display);
-    let managed = x.map(&x11::Props::new(0x00ff_0000));
-    let mut overlay = x11::Props::new(0x0000_00ff);
-    overlay.override_redirect = true;
-    let overlay = x.map(&overlay);
-    x11::eventually(
-        &mut fixture,
-        "both windows reaching the compositor",
-        |fixture| {
-            live::id_of_xid(&fixture.state, managed).is_some()
-                && fixture
-                    .state
-                    .x11_unmanaged
-                    .iter()
-                    .any(|known| known.window_id() == overlay)
-        },
-    );
-
+    // The whole session inside one capture, not just the kill: the XWM's
+    // span is made at `start` and entered on every X event, and a span made
+    // outside a capture panics the registry when entered inside one under
+    // `cargo test`'s shared process (see `capture_logs`).
     let ((), logs) = capture_logs(|| {
+        let mut fixture = Fixture::unstarted();
+        let handle = fixture.state.loop_handle.clone();
+        let display = super::start(handle, &mut fixture.state).expect("XWayland should start");
+        wait_until(&mut fixture, "XWayland READY", |fixture| {
+            fixture.state.xwm.is_some()
+        });
+        // A managed window and an override-redirect one, so the death has
+        // something to sweep: a dead server sends no unmap for either.
+        let x = x11::XClient::connect(display);
+        let managed = x.map(&x11::Props::new(0x00ff_0000));
+        let mut overlay = x11::Props::new(0x0000_00ff);
+        overlay.override_redirect = true;
+        let overlay = x.map(&overlay);
+        x11::eventually(
+            &mut fixture,
+            "both windows reaching the compositor",
+            |fixture| {
+                live::id_of_xid(&fixture.state, managed).is_some()
+                    && fixture
+                        .state
+                        .x11_unmanaged
+                        .iter()
+                        .any(|known| known.window_id() == overlay)
+            },
+        );
+
         // The bracket keeps `pkill -f` from matching this very command:
         // the pattern text contains `[X]wayland`, which the regex does
         // not match, while the server's `Xwayland :N` does. (Learned the
@@ -479,32 +483,32 @@ fn a_dead_server_is_loud_and_the_session_survives() {
         // fine around the corpse.
         assert!(fixture.state.spawn(&["true".to_owned()]));
         fixture.settle();
+        // Swept: no empty column, no stale taskbar entry, nothing drawn or
+        // hit-tested from the dead server.
+        assert!(
+            fixture.state.windows.is_empty(),
+            "a dead server's window stayed in the layout: {:?}",
+            fixture.state.windows.keys()
+        );
+        assert!(
+            fixture.state.x11_unmanaged.is_empty(),
+            "a dead server's override-redirect window stayed on the draw list"
+        );
+        drop(x);
+
+        // And a restart comes back: a fresh server, a fresh READY, no wedge
+        // from the killed one's sockets (the lock scan moves on where the
+        // dead one's locks linger).
+        let handle = fixture.state.loop_handle.clone();
+        let display = super::start(handle, &mut fixture.state).expect("a restart should start");
+        wait_until(&mut fixture, "XWayland READY again", |fixture| {
+            fixture.state.xwm.is_some() && fixture.state.xdisplay == Some(display)
+        });
     });
     assert!(
         logs.contains("continuing Wayland-only") || logs.contains("connection lost"),
         "the server died but the session never logged it loudly: {logs}"
     );
-    // Swept: no empty column, no stale taskbar entry, nothing drawn or
-    // hit-tested from the dead server.
-    assert!(
-        fixture.state.windows.is_empty(),
-        "a dead server's window stayed in the layout: {:?}",
-        fixture.state.windows.keys()
-    );
-    assert!(
-        fixture.state.x11_unmanaged.is_empty(),
-        "a dead server's override-redirect window stayed on the draw list"
-    );
-    drop(x);
-
-    // And a restart comes back: a fresh server, a fresh READY, no wedge
-    // from the killed one's sockets (the lock scan moves on where the
-    // dead one's locks linger).
-    let handle = fixture.state.loop_handle.clone();
-    let display = super::start(handle, &mut fixture.state).expect("a restart should start");
-    wait_until(&mut fixture, "XWayland READY again", |fixture| {
-        fixture.state.xwm.is_some() && fixture.state.xdisplay == Some(display)
-    });
 }
 
 /// A window manager that cannot attach to a server that just became ready
