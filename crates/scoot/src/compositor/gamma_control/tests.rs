@@ -595,22 +595,9 @@ fn gamma_rapid_sets_stay_alive() {
         wait_for_event(&mut conn, "gamma_size", |client| client.sizes[0].is_some())?;
         // Two hundred back-to-back ramps: `set_gamma` at well past any real
         // daemon's rate must neither kill the client nor lose the control.
-        //
-        // Flushed every 64, with no round trip between: still back to back,
-        // but under wayland-backend's received-fd bound. This client (on
-        // `wayland-client`'s pure-Rust backend) grows its outgoing buffer
-        // without limit and sends every fd past the
-        // last 28 of a flush ahead of the requests that claim them, so a
-        // single flush of more than 140 fd-carrying requests leaves more than
-        // 128 unclaimed and is disconnected before scoot sees a request (see
-        // `fd_pressure/tests/backend_queue.rs`). Batching is the client
-        // library's shape, not the rate under test here.
         for i in 0..200u16 {
             let file = ramp_fd(FALLBACK_GAMMA_SIZE, i);
             control.set_gamma(file.as_fd());
-            if i % 64 == 63 {
-                conn.queue.flush().map_err(|e| e.to_string())?;
-            }
         }
         conn.roundtrip()?;
         conn.roundtrip()?;

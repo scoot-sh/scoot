@@ -34,6 +34,7 @@ mod layer_shell;
 mod nested;
 mod nested_dispatch;
 mod no_memory;
+pub(crate) mod nofile;
 mod output_clip;
 mod output_management;
 mod output_scale;
@@ -81,6 +82,12 @@ pub use state::State;
 
 pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     init_logging();
+
+    // Before anything opens more than a handful of fds, and before the first
+    // client connects: wayland-backend reads the limit when each client is
+    // created to size its unclaimed-fd cap. Children get the original back
+    // (see `nofile.rs`).
+    nofile::raise();
 
     // Loaded before `State::new` so its `Config`/`Keybindings` can be handed
     // in directly rather than built as defaults and patched after the fact.

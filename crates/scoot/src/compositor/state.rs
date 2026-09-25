@@ -820,6 +820,11 @@ impl State {
         scale: f64,
         renderer: RendererKind,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        // A no-op in a session (`run` raised it first); here so that every
+        // `State`, a test harness's included, runs with the fd limit a
+        // session runs with, before any client connects to it (see
+        // `nofile.rs`).
+        super::nofile::raise();
         let dh = display.handle();
         let compositor_state = CompositorState::new_v6::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
@@ -1205,6 +1210,10 @@ impl State {
         };
         let mut child = Command::new(program);
         child.args(args).env("WAYLAND_DISPLAY", &self.socket_name);
+        // The soft fd limit this process was started with, not the raised
+        // one: a child using `select()` cannot watch an fd past 1023 (see
+        // `nofile.rs`).
+        super::nofile::restore_for_child(&mut child);
         if let Some(path) = &self.ipc_path {
             child.env(scoot_ipc::SOCKET_ENV, path);
         }

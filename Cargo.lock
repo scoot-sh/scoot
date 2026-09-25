@@ -1198,7 +1198,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "wayland-backend"
 version = "0.3.17"
-source = "git+https://github.com/scoot-sh/wayland-rs?rev=a39311b8956e2f01983d26a5a6e517d0b8de4170#a39311b8956e2f01983d26a5a6e517d0b8de4170"
+source = "git+https://github.com/scoot-sh/wayland-rs?rev=70f81e005179463fb4d46ac68045a7f21eb5aff2#70f81e005179463fb4d46ac68045a7f21eb5aff2"
 dependencies = [
  "cc",
  "downcast-rs",
@@ -1287,7 +1287,7 @@ dependencies = [
 [[package]]
 name = "wayland-sys"
 version = "0.31.11"
-source = "git+https://github.com/scoot-sh/wayland-rs?rev=a39311b8956e2f01983d26a5a6e517d0b8de4170#a39311b8956e2f01983d26a5a6e517d0b8de4170"
+source = "git+https://github.com/scoot-sh/wayland-rs?rev=70f81e005179463fb4d46ac68045a7f21eb5aff2#70f81e005179463fb4d46ac68045a7f21eb5aff2"
 dependencies = [
  "pkg-config",
 ]

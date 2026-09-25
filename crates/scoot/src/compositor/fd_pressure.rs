@@ -223,6 +223,15 @@
 //! admits on `None`. Shedding on unknown would deny innocents for a
 //! broken gauge; the `EMFILE` shed still catches real exhaustion underneath.
 
+/// How many received fds wayland-backend lets one client leave unclaimed on a
+/// table of `soft` fds: one eighth of it, clamped to 128..=1024. This mirrors
+/// the scoot-sh fork's `max_queued_fds` (crate-private there, read when each
+/// client is created) so the arithmetic below and the startup log can name
+/// it; `tests/backend_queue.rs` pins it against the real backend.
+pub(crate) fn backend_queued_fds(soft: u64) -> u64 {
+    (soft / 8).clamp(128, 1024)
+}
+
 /// How many free fds must remain before newcomers shed and past-grace
 /// creations refuse. See the module doc for the sizing.
 pub(crate) const RESERVE_FDS: u64 = 128;
