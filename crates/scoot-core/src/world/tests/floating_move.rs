@@ -445,3 +445,32 @@ fn windows_parented_in_a_loop_are_each_drawn_once() {
     ids.sort_unstable();
     assert_eq!(ids, vec![1, 2, 3]);
 }
+
+/// The covering rule's ancestry walk is bounded ([`MAX_PARENT_WALK`]):
+/// floating links are resolved by the drawing order at any depth, and what
+/// is left walks through tiled windows. Unbounded, n dialogs on the tip of
+/// an n-long tiled chain under an unrelated fullscreen window made every
+/// `arrange` n x n (PR #243's re-review). This pins the bound: past it the
+/// walk gives up, within it it finds the ancestor.
+///
+/// [`MAX_PARENT_WALK`]: crate::world::floating::MAX_PARENT_WALK
+#[test]
+fn the_covering_ancestry_walk_is_bounded() {
+    let mut world = world();
+    for id in 1..=40 {
+        open(&mut world, id);
+    }
+    for id in 2..=40 {
+        world.handle_event(Event::WindowChanged {
+            id: WindowId(id),
+            info: WindowInfo {
+                parent: Some(WindowId(id - 1)),
+                ..WindowInfo::default()
+            },
+        });
+    }
+    let bound = super::super::floating::MAX_PARENT_WALK as u64;
+    assert!(world.descends_from(WindowId(40), WindowId(40 - bound)));
+    assert!(!world.descends_from(WindowId(40), WindowId(40 - bound - 1)));
+    assert!(!world.descends_from(WindowId(40), WindowId(1)));
+}

@@ -28,6 +28,11 @@ use super::{Location, World};
 use crate::geometry::{Point, Size};
 use crate::types::WindowId;
 
+/// How many parents [`World::descends_from`] follows before giving up.
+/// Far past any real chain of tiled transients; see its doc for why it is
+/// bounded and why that does not bound floating dialog depth.
+pub(super) const MAX_PARENT_WALK: usize = 16;
+
 impl World {
     /// Whether the window floats. False for an unknown window.
     pub fn is_floating(&self, id: WindowId) -> bool {
@@ -52,16 +57,24 @@ impl World {
     }
 
     /// Whether `ancestor` is reached by following `id`'s parents
-    /// ([`WindowInfo::parent`](crate::WindowInfo::parent)), at any depth. A
-    /// client can name any parent, loops included, so the walk is bounded
-    /// by the number of windows: a chain that has not arrived by then is
-    /// going round a loop. Map lookups only, O(chain length); `arrange`
-    /// asks it for the floating windows while a fullscreen window covers
-    /// the output, and only where no floating window's parent floats (see
-    /// `floating_order.rs`, which resolves those links once per window).
+    /// ([`WindowInfo::parent`](crate::WindowInfo::parent)), at most
+    /// [`MAX_PARENT_WALK`] steps. Map lookups only.
+    ///
+    /// Bounded on purpose, and the bound costs no correctness where depth
+    /// is real: `arrange` asks this once per floating window while a
+    /// fullscreen window covers the output, and links between floating
+    /// windows of the workspace -- the chains a client can make deep, a
+    /// dialog of a dialog of a dialog -- are resolved at any depth by the
+    /// drawing-order pass (`floating_order.rs`), which asks this only for a
+    /// window whose parent is not floating there. What is left is a walk
+    /// through tiled windows, where more than a few ancestors is not a real
+    /// shape -- and an unbounded one made `arrange` quadratic: n dialogs on
+    /// the tip of an n-long tiled chain under an unrelated fullscreen window
+    /// cost n x n lookups per frame (PR #243's re-review: 142 ms at n = 1000
+    /// in debug). A loop must end either way.
     pub(super) fn descends_from(&self, id: WindowId, ancestor: WindowId) -> bool {
         let mut current = id;
-        for _ in 0..self.windows.len() {
+        for _ in 0..MAX_PARENT_WALK {
             match self.windows.get(&current).and_then(|w| w.info.parent) {
                 Some(parent) if parent == ancestor => return true,
                 Some(parent) => current = parent,

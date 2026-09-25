@@ -55,19 +55,23 @@ fn scene() -> World {
     world
 }
 
-fn time(label: &str, mut body: impl FnMut()) {
+fn time(label: &str, body: impl FnMut()) {
+    time_rounds(label, ROUNDS, body);
+}
+
+fn time_rounds(label: &str, rounds: u32, mut body: impl FnMut()) {
     let mut runs: Vec<Duration> = (0..RUNS)
         .map(|_| {
             let start = Instant::now();
-            for _ in 0..ROUNDS {
+            for _ in 0..rounds {
                 body();
             }
-            start.elapsed() / ROUNDS
+            start.elapsed() / rounds
         })
         .collect();
     runs.sort();
     println!(
-        "{label}: median {:?}/call (min {:?}, max {:?}; {RUNS} runs x {ROUNDS})",
+        "{label}: median {:?}/call (min {:?}, max {:?}; {RUNS} runs x {rounds})",
         runs[runs.len() / 2],
         runs[0],
         runs[runs.len() - 1],
@@ -149,6 +153,68 @@ fn arrange_cost() {
     long.handle_action(Action::FocusWindowId(WindowId(WINDOWS + 1)));
     long.handle_action(Action::ToggleFloatingFocus);
     measure("floating chain of 1000", long);
+    // PR #243's re-review scene: a tiled chain (each window the transient
+    // of the previous, set after it mapped so it stays tiled), as many
+    // floating dialogs on the chain's tip, and an unrelated window
+    // fullscreen over them -- the covering rule asks each dialog whether it
+    // descends from the fullscreen window.
+    for n in [250, 1000] {
+        measure(
+            &format!("covered tiled chain + {n} dialogs"),
+            covered_chain(n),
+        );
+    }
+}
+
+/// The re-review scene above, with `n` tiled windows and `n` dialogs.
+fn covered_chain(n: u64) -> World {
+    let mut world = World::new(config());
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(1),
+        area: SCREEN,
+    });
+    for id in 1..=n {
+        open(&mut world, id);
+    }
+    for id in 2..=n {
+        world.handle_event(Event::WindowChanged {
+            id: WindowId(id),
+            info: WindowInfo {
+                parent: Some(WindowId(id - 1)),
+                ..WindowInfo::default()
+            },
+        });
+    }
+    let fullscreen = 100_000;
+    open(&mut world, fullscreen);
+    for k in 0..n {
+        let id = 200_000 + k;
+        open_with(
+            &mut world,
+            id,
+            WindowInfo {
+                parent: Some(WindowId(n)),
+                ..WindowInfo::default()
+            },
+        );
+        world.handle_event(Event::FloatingRequested {
+            id: WindowId(id),
+            floating: true,
+            size: None,
+        });
+        world.handle_event(Event::FrameObserved {
+            id: WindowId(id),
+            requested: crate::Size::default(),
+            actual: crate::Size::new(300, 200),
+        });
+    }
+    world.handle_action(Action::FocusWindowId(WindowId(fullscreen)));
+    world.handle_event(Event::FullscreenRequested {
+        id: WindowId(fullscreen),
+        fullscreen: true,
+    });
+    assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(fullscreen)));
+    world
 }
 
 /// The focused workspace's floating windows: in stacking order, or in the

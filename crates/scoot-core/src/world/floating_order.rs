@@ -23,8 +23,13 @@
 //! window it must be drawn above -- and a depth, its parent's plus one.
 //! Drawing in (level, depth, stack index) order puts every window after its
 //! parent (a child's level is at least its parent's, and at an equal level
-//! its depth is greater), lifts a dialog to just above the window it
-//! belongs to, and otherwise keeps the stack's order. Levels and depths are
+//! its depth is greater) and lifts a dialog to the level of the highest
+//! window of its chain. Windows keep their stack order except for that
+//! lift: a lifted dialog draws above everything stacked between it and the
+//! window it was lifted to, siblings included -- so a dialog of a lower
+//! sibling can draw above a higher sibling of the same parent. The focused
+//! window (the top of the stack) is only ever drawn under its own
+//! descendants. Levels and depths are
 //! computed once per window from its parent's, iteratively (no recursion,
 //! however deep the chain), and a parent link that closes a loop is dropped.
 //!

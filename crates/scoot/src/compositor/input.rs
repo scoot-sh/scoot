@@ -795,7 +795,8 @@ impl State {
     /// Presses the modifiers among `evdev` (a `wl_keyboard.enter`'s key
     /// array) that this seat does not believe held, so a modifier held as
     /// focus arrives counts. Modifiers only: pressing an ordinary held key
-    /// would deliver a keystroke nobody typed, and could fire a binding.
+    /// would deliver a keystroke nobody typed. And without binding
+    /// dispatch: a bind on a bare modifier (`Super_L`) must not fire.
     /// Matched by evdev code against the default layout the seat uses (see
     /// `nested_dispatch.rs`).
     pub(super) fn press_held_modifiers(&mut self, evdev: &[u32]) {
@@ -804,7 +805,9 @@ impl State {
         for &code in evdev.iter().filter(|code| MODIFIERS.contains(code)) {
             let keycode = Keycode::new(code + 8);
             if !self.held_keys.contains(&keycode) {
-                self.key(keycode, KeyState::Pressed);
+                // No bindings: this re-states a key already down, it is not
+                // a keystroke (see `key_with`).
+                self.key_with(keycode, KeyState::Pressed, false);
             }
         }
     }
@@ -814,6 +817,14 @@ impl State {
     /// presses already use, rather than duplicating the `keyboard.input`
     /// call.
     pub(super) fn key(&mut self, keycode: Keycode, state: KeyState) -> KeyOutcome {
+        self.key_with(keycode, state, true)
+    }
+
+    /// [`State::key`], with keybinding dispatch on (`bindings`) or off. Off
+    /// is for a press that re-states a key already down rather than a
+    /// keystroke (`press_held_modifiers`): a `Super_L = "spawn ..."`
+    /// launcher bind must not fire because focus came back with Super held.
+    fn key_with(&mut self, keycode: Keycode, state: KeyState, bindings: bool) -> KeyOutcome {
         // Announced before the keyboard check, not after: a key event with
         // no keyboard on the seat reaches no client, but it is still a
         // user at the machine rather than an idle one.
@@ -835,6 +846,7 @@ impl State {
         let outcome = keyboard
             .input::<KeyOutcome, _>(self, keycode, state, serial, time, |data, mods, handle| {
                 match state {
+                    KeyState::Pressed if !bindings => FilterResult::Forward,
                     KeyState::Pressed => {
                         // The unshifted (level 0) symbol: see the module
                         // comment on `keybindings` for why this, not
@@ -930,13 +942,15 @@ impl State {
     /// said forward", so [`KeyOutcome`] alone cannot tell a delivered key from
     /// an absorbed one, and neither can `pressed_keys()` (it clones a
     /// `HashSet` per call, which this path must not do). Both absorbed cases
-    /// are reachable here: a lone release arrives under `--nested` when a
-    /// modifier was held as the pointer entered scoot's window
-    /// (`nested_dispatch` forwards keys but not `enter`'s held-key array), and
-    /// under `--tty` when a press lands while the session is paused.
+    /// are reachable here: a lone release arrives under `--nested` for an
+    /// ordinary key held as the keyboard entered scoot's window
+    /// (`nested_dispatch` re-states only the modifiers of `enter`'s held-key
+    /// array, see `press_held_modifiers`), and under `--tty` when a press
+    /// lands while the session is paused.
     ///
     /// Invariant, same as [`State::suppressed_keys`]: this stays in step with
-    /// Smithay's own set only because [`State::key`] is the one caller of
+    /// Smithay's own set only because [`State::key`] (through `key_with`) is
+    /// the one caller of
     /// `KeyboardHandle::input` in this compositor. Anything that ever feeds
     /// the seat keyboard another way (`input_forward`, `release_source`) must
     /// update this too, or a real key will be mistaken for an absorbed one.

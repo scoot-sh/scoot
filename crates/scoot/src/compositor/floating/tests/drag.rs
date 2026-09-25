@@ -320,6 +320,51 @@ fn a_host_focus_change_leaves_no_modifier_stuck() {
     hold(&mut fixture, ALT, false);
 }
 
+/// The `enter` resync re-states held modifiers without dispatching
+/// bindings: a bind on a bare modifier key (a `Super_L` launcher) must not
+/// fire because focus came back with it held.
+#[test]
+fn a_resynced_modifier_fires_no_binding() {
+    use crate::compositor::keybindings::{Bound, Modifiers};
+    use smithay::input::keyboard::Keysym;
+    let (mut fixture, _) = dialog_scene();
+    // The tiled window focused; a bind that toggles floating on bare
+    // Super_L, whichever modifier state the press is matched in.
+    fixture.act(Action::FocusWindowId(fixture.id(0)));
+    for mods in [
+        Modifiers::default(),
+        Modifiers {
+            super_: true,
+            ..Modifiers::default()
+        },
+    ] {
+        fixture.state.keybindings.insert(
+            mods,
+            Keysym::Super_L,
+            Bound::Action(Action::ToggleFloating),
+        );
+    }
+    // Control: a real Super press fires it.
+    hold(&mut fixture, SUPER, true);
+    hold(&mut fixture, SUPER, false);
+    assert!(
+        fixture.floating(0),
+        "the bare-modifier bind did not fire on a press"
+    );
+    fixture.act(Action::SetFloating {
+        id: fixture.id(0),
+        floating: false,
+    });
+    fixture.act(Action::FocusWindowId(fixture.id(0)));
+    // The resync does not.
+    fixture.state.press_held_modifiers(&[125]);
+    fixture.settle();
+    assert!(fixture.state.held_keys.contains(&Keycode::new(SUPER)));
+    assert!(!fixture.floating(0), "the resync fired a binding");
+    hold(&mut fixture, SUPER, false);
+    assert!(!fixture.floating(0), "nor did its release");
+}
+
 /// The swallowed press must not become an activation serial the client
 /// could mint a token from: it never received it.
 #[test]
