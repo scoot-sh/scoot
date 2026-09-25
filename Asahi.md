@@ -379,6 +379,30 @@ unplugging the first should keep the session where it is: this is a
 one-output backend, and staying on the panel the user is looking at is
 deliberate.
 
+### Results, 2026-09-25 (partial; scoot `e1dce6f` build, kernel `fairydust` 7.1.13)
+
+An external 1920x1080 monitor on the M2 Air's front-left USB-C port is now
+driven by Linux, via the `fairydust` Asahi kernel (USB-C DisplayPort alt
+mode; the machine's config pins AsahiLinux/linux `fairydust`
+`ce9f2eba`). It appears as `card2-DP-1` and connects after being plugged in
+*after* boot (plugged in across the reboot, it read `disconnected` until
+replugged); the DCP then set `1920x1080@60`.
+
+- **Started with both connected**, `scoot --tty` (pixman) chose `eDP-1`
+  (`drm: driving this device ... connector=eDP-1`), as designed.
+- **Unplugging and replugging the external monitor** while scoot drove the
+  panel: scoot received both udev change events (13 s apart) and stayed on
+  `eDP-1`, running, with no re-modeset on the panel — the
+  second-display-plugged-in case this test describes ("keep the session
+  where it is") holds on real hardware.
+- **Not reachable here:** the connector-*loss* fallback (`Plan::NewConnector`)
+  needs scoot driving the connector that disappears. scoot always opens on
+  the panel, which cannot be unplugged, and with this kernel `DP-1` kept
+  reading `connected` in sysfs across the unplug (an alt-mode HPD quirk of
+  the experimental kernel), so no connector ever went away from scoot's
+  point of view. The new-mode-list-on-the-same-connector path is likewise
+  not exercised. Both stay open on #48.
+
 ---
 
 ## Test 4 — CPU vs GPU rendering, on a GPU that is actually a GPU

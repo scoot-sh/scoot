@@ -31,3 +31,15 @@ two-connector/relayout-capable hardware), with the exact commands,
 `wlr-randr` before/after, and screenshot proof recorded — not a
 paraphrase. If a path fails on hardware, it becomes its own fix ticket;
 if both confirm, close this entry with the evidence and close #48.
+
+
+## Update 2026-09-25 (Asahi M2 Air, external monitor via the `fairydust` kernel)
+
+Hotplug events on real hardware are received and handled: unplugging and
+replugging an external monitor while scoot drove the panel produced two udev
+change events and left the session running on `eDP-1` with no disruption
+(`Asahi.md` Test 3 results). The two paths this ticket tracks remain
+unconfirmed on this machine: the panel can't be unplugged, and the
+experimental kernel kept `DP-1` reading `connected` across the unplug. A
+machine with two unpluggable outputs (or a kernel that reports DP HPD loss)
+is still needed.
