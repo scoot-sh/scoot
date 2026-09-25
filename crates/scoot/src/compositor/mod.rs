@@ -31,6 +31,7 @@ mod input;
 mod input_method;
 mod ipc;
 mod keybindings;
+mod keyboard_focus;
 mod layer_shell;
 mod nested;
 mod nested_dispatch;

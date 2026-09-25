@@ -6,11 +6,13 @@ use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_to
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::compositor::with_states;
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::SurfaceCachedState;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 
 use super::State;
 use super::fullscreen::{LayoutState, set_layout_states};
+use super::keyboard_focus::KeyboardFocus;
 use super::output_clip;
 
 #[cfg(test)]
@@ -403,7 +405,7 @@ impl State {
             // committing while locked would re-derive focus for nothing.
             self.keyboard_on_layer = false;
             self.dismiss_popup_grab();
-            self.lock_keyboard_focus()
+            self.lock_keyboard_focus().map(KeyboardFocus::Surface)
         } else {
             // Owned, so the layer-map guard is already gone by the time
             // `dismiss_popup_grab` re-enters Smithay -- see this module's
@@ -422,12 +424,9 @@ impl State {
             if pre_empted {
                 self.dismiss_popup_grab();
             }
-            layer.map(|found| found.surface).or_else(|| {
-                self.focus
-                    .and_then(|id| self.windows.get(&id))
-                    .and_then(Window::toplevel)
-                    .map(|toplevel| toplevel.wl_surface().clone())
-            })
+            layer
+                .map(|found| KeyboardFocus::Surface(found.surface))
+                .or_else(|| self.window_keyboard_focus())
         };
         let serial = SERIAL_COUNTER.next_serial();
         // The keyboard half of the popup-grab history (`popup.rs`): when
@@ -456,12 +455,21 @@ impl State {
         // derivation -- not per event or per frame, so no hot-path concern.
         if self.popup_grab.as_ref().is_none_or(|grab| grab.has_ended())
             && keyboard.current_focus().as_ref() != surface.as_ref()
-            && let Some(ref entered) = surface
-            && let Some(client) = self.client_of(entered)
+            && let Some(entered) = surface.as_ref().and_then(WaylandFocus::wl_surface)
+            && let Some(client) = self.client_of(&entered)
         {
             self.interaction_serials.record_focus(serial, client);
         }
         keyboard.set_focus(self, surface, serial);
+    }
+
+    /// The keyboard focus the focused *window* takes, if any: its toplevel's
+    /// surface. Only `refresh_keyboard_focus` asks, once per derivation.
+    fn window_keyboard_focus(&self) -> Option<KeyboardFocus> {
+        let window = self.focus.and_then(|id| self.windows.get(&id))?;
+        window
+            .toplevel()
+            .map(|toplevel| KeyboardFocus::Surface(toplevel.wl_surface().clone()))
     }
 
     pub(super) fn info_of(&self, id: WindowId) -> WindowInfo {

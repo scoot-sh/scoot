@@ -839,6 +839,7 @@ impl Fixture {
             .get_keyboard()
             .expect("a keyboard")
             .current_focus()
+            .map(WlSurface::from)
     }
 
     /// The `wl_surface` of the `id`-th window's toplevel.

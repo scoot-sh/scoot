@@ -24,6 +24,7 @@ use smithay::wayland::compositor::{
     get_role, is_sync_subsurface, with_states,
 };
 use smithay::wayland::output::OutputHandler;
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
@@ -671,7 +672,10 @@ impl XwmHandler for State {
 /// to design, not a default to fall into here.
 #[cfg(feature = "xwayland")]
 impl XWaylandKeyboardGrabHandler for State {
-    fn keyboard_focus_for_xsurface(&self, _surface: &WlSurface) -> Option<WlSurface> {
+    fn keyboard_focus_for_xsurface(
+        &self,
+        _surface: &WlSurface,
+    ) -> Option<super::keyboard_focus::KeyboardFocus> {
         None
     }
 }
@@ -731,7 +735,9 @@ impl XdgDecorationHandler for State {
 }
 
 impl SeatHandler for State {
-    type KeyboardFocus = WlSurface;
+    /// A Wayland surface or an X11 window -- see `keyboard_focus.rs` for why
+    /// the X half cannot be its `wl_surface`.
+    type KeyboardFocus = super::keyboard_focus::KeyboardFocus;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -754,9 +760,18 @@ impl SeatHandler for State {
         self.cursor_changed();
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+    fn focus_changed(
+        &mut self,
+        seat: &Seat<Self>,
+        focused: Option<&super::keyboard_focus::KeyboardFocus>,
+    ) {
         let handle = &self.display_handle;
-        let client = focused.and_then(|surface| handle.get_client(surface.id()).ok());
+        // The surface keys go to, whichever kind of window owns it: an X
+        // window's is XWayland's own client, which is who the selection is
+        // offered to on its behalf.
+        let client = focused
+            .and_then(WaylandFocus::wl_surface)
+            .and_then(|surface| handle.get_client(surface.id()).ok());
         set_data_device_focus(handle, seat, client.clone());
         // Without this, no regular primary-selection device is ever offered
         // anything: Smithay only sends the primary selection to a device
