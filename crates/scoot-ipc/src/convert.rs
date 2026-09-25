@@ -52,6 +52,22 @@ impl From<Action> for scoot_core::Action {
                 floating,
             },
             Action::ToggleFloatingFocus => Self::ToggleFloatingFocus,
+            Action::MoveFloating { id, x, y } => Self::MoveFloating {
+                id: scoot_core::WindowId(id),
+                x,
+                y,
+            },
+            // A size by number keeps the top-left corner: the bottom-right
+            // edges move. Past `i32::MAX` saturates; the core clamps to the
+            // output long before that matters.
+            Action::ResizeFloating { id, width, height } => Self::ResizeFloating {
+                id: scoot_core::WindowId(id),
+                size: scoot_core::Size::new(
+                    i32::try_from(width).unwrap_or(i32::MAX),
+                    i32::try_from(height).unwrap_or(i32::MAX),
+                ),
+                edges: scoot_core::Edges::BOTTOM_RIGHT,
+            },
             Action::CloseFocused => Self::CloseFocused,
             Action::Spawn { command } => Self::Spawn(command),
             Action::Quit => Self::Quit,
@@ -126,6 +142,30 @@ mod tests {
         assert_eq!(
             scoot_core::Action::from(Action::ToggleFloatingFocus),
             scoot_core::Action::ToggleFloatingFocus
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::MoveFloating {
+                id: 7,
+                x: -20,
+                y: 40
+            }),
+            scoot_core::Action::MoveFloating {
+                id: scoot_core::WindowId(7),
+                x: -20,
+                y: 40
+            }
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::ResizeFloating {
+                id: 7,
+                width: 640,
+                height: u32::MAX
+            }),
+            scoot_core::Action::ResizeFloating {
+                id: scoot_core::WindowId(7),
+                size: scoot_core::Size::new(640, i32::MAX),
+                edges: scoot_core::Edges::BOTTOM_RIGHT
+            }
         );
     }
 }

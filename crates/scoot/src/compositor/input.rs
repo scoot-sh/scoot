@@ -230,6 +230,11 @@ impl State {
                 pointer.frame(self);
             }
         }
+        // A floating window dragged onto another output, or a drag that
+        // ended at this motion, asked for a full `apply()` it could not run
+        // inside the pointer lock (see `floating/grab.rs`). One `bool` test
+        // on every other motion.
+        self.settle_floating_grab();
     }
 
     /// Records a focus-changing motion's `enter` serial for the popup-grab
@@ -450,6 +455,15 @@ impl State {
             self.focus_under_pointer();
         }
         let serial = SERIAL_COUNTER.next_serial();
+        // After the focus change (which may `apply()`, outside any pointer
+        // lock) and before the press is delivered: a modifier press on a
+        // floating window starts dragging it, and the grab then swallows
+        // this press -- which also keeps it out of `interaction_serials`
+        // below, the grab having cleared pointer focus. See
+        // `floating/grab.rs`.
+        if pressed {
+            self.begin_modifier_drag(&pointer, button, serial);
+        }
         // Recorded against whoever `pointer.button` below is about to deliver
         // this to -- the surface the pointer last *entered*, which is what
         // the pointer's own focus is, not what is under it now and not
@@ -474,7 +488,7 @@ impl State {
         pointer.button(
             self,
             &ButtonEvent {
-                button: code(button),
+                button: button_code(button),
                 state,
                 serial,
                 time,
@@ -488,6 +502,9 @@ impl State {
         // client's follow-up traffic keeps the two in step within the same
         // event. One `Option` check when no menu is open.
         self.settle_popup_grab();
+        // A release (or a second press) that ended a floating window's drag
+        // did it inside the pointer lock; the arrangement catches up here.
+        self.settle_floating_grab();
     }
 
     pub fn scroll(&mut self, dx: f64, dy: f64) {
@@ -759,11 +776,55 @@ impl State {
         })
     }
 
+    /// Releases every key this seat believes held: what a keyboard that
+    /// lost focus without delivering its releases needs (`--nested`'s host
+    /// keyboard `leave` -- an Alt+Tab in the host keeps Alt's release on the
+    /// host side). Without it the seat's modifier state stays held, which
+    /// with `[floating] modifier` set to that key turns every click on a
+    /// floating window into a drag. Each goes through [`State::key`], so a
+    /// release a binding intercepted is still intercepted and the focused
+    /// client sees the rest. Rare (a focus change), so the snapshot's
+    /// allocation is fine.
+    pub(super) fn release_held_keys(&mut self) {
+        let held: Vec<Keycode> = self.held_keys.iter().copied().collect();
+        for keycode in held {
+            self.key(keycode, KeyState::Released);
+        }
+    }
+
+    /// Presses the modifiers among `evdev` (a `wl_keyboard.enter`'s key
+    /// array) that this seat does not believe held, so a modifier held as
+    /// focus arrives counts. Modifiers only: pressing an ordinary held key
+    /// would deliver a keystroke nobody typed. And without binding
+    /// dispatch: a bind on a bare modifier (`Super_L`) must not fire.
+    /// Matched by evdev code against the default layout the seat uses (see
+    /// `nested_dispatch.rs`).
+    pub(super) fn press_held_modifiers(&mut self, evdev: &[u32]) {
+        // Ctrl, Shift, Alt and Meta, left and right.
+        const MODIFIERS: [u32; 8] = [29, 97, 42, 54, 56, 100, 125, 126];
+        for &code in evdev.iter().filter(|code| MODIFIERS.contains(code)) {
+            let keycode = Keycode::new(code + 8);
+            if !self.held_keys.contains(&keycode) {
+                // No bindings: this re-states a key already down, it is not
+                // a keystroke (see `key_with`).
+                self.key_with(keycode, KeyState::Pressed, false);
+            }
+        }
+    }
+
     /// `pub(super)` rather than private: `nested_dispatch.rs` forwards real
     /// host keyboard events through this exact same path IPC-injected key
     /// presses already use, rather than duplicating the `keyboard.input`
     /// call.
     pub(super) fn key(&mut self, keycode: Keycode, state: KeyState) -> KeyOutcome {
+        self.key_with(keycode, state, true)
+    }
+
+    /// [`State::key`], with keybinding dispatch on (`bindings`) or off. Off
+    /// is for a press that re-states a key already down rather than a
+    /// keystroke (`press_held_modifiers`): a `Super_L = "spawn ..."`
+    /// launcher bind must not fire because focus came back with Super held.
+    fn key_with(&mut self, keycode: Keycode, state: KeyState, bindings: bool) -> KeyOutcome {
         // Announced before the keyboard check, not after: a key event with
         // no keyboard on the seat reaches no client, but it is still a
         // user at the machine rather than an idle one.
@@ -785,6 +846,7 @@ impl State {
         let outcome = keyboard
             .input::<KeyOutcome, _>(self, keycode, state, serial, time, |data, mods, handle| {
                 match state {
+                    KeyState::Pressed if !bindings => FilterResult::Forward,
                     KeyState::Pressed => {
                         // The unshifted (level 0) symbol: see the module
                         // comment on `keybindings` for why this, not
@@ -880,13 +942,15 @@ impl State {
     /// said forward", so [`KeyOutcome`] alone cannot tell a delivered key from
     /// an absorbed one, and neither can `pressed_keys()` (it clones a
     /// `HashSet` per call, which this path must not do). Both absorbed cases
-    /// are reachable here: a lone release arrives under `--nested` when a
-    /// modifier was held as the pointer entered scoot's window
-    /// (`nested_dispatch` forwards keys but not `enter`'s held-key array), and
-    /// under `--tty` when a press lands while the session is paused.
+    /// are reachable here: a lone release arrives under `--nested` for an
+    /// ordinary key held as the keyboard entered scoot's window
+    /// (`nested_dispatch` re-states only the modifiers of `enter`'s held-key
+    /// array, see `press_held_modifiers`), and under `--tty` when a press
+    /// lands while the session is paused.
     ///
     /// Invariant, same as [`State::suppressed_keys`]: this stays in step with
-    /// Smithay's own set only because [`State::key`] is the one caller of
+    /// Smithay's own set only because [`State::key`] (through `key_with`) is
+    /// the one caller of
     /// `KeyboardHandle::input` in this compositor. Anything that ever feeds
     /// the seat keyboard another way (`input_forward`, `release_source`) must
     /// update this too, or a real key will be mistaken for an absorbed one.
@@ -1096,7 +1160,9 @@ fn clamp_to_extent(value: f64, extent: i32) -> f64 {
     value.clamp(0.0, (extent - 1).max(0) as f64)
 }
 
-fn code(button: PointerButton) -> u32 {
+/// The Linux `BTN_*` code Wayland carries for a button (`pub(super)` for
+/// the floating grab, which ends on its own button's release).
+pub(super) fn button_code(button: PointerButton) -> u32 {
     match button {
         PointerButton::Left => BTN_LEFT,
         PointerButton::Right => BTN_RIGHT,

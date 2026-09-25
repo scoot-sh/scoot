@@ -69,6 +69,9 @@
 //!   (accepted spawns, refused non-spawns), which is why a second identical
 //!   reload is silent.
 //!
+//! - `[floating] modifier`: applied -- the next Mod+press reads it (a drag
+//!   under way when the reload lands carries on). A value that is not a
+//!   modifier is refused by name, and the session keeps its own.
 //! - `[floating] auto` and `[[window_rule]]`: applied -- swapped in whole
 //!   and read at every window's first commit from then on. Windows already
 //!   mapped are not re-decided (rules apply at map time; see
@@ -145,6 +148,7 @@ mod field {
     pub const XWAYLAND: &str = "xwayland.enabled";
     pub const AUTOSTART: &str = "autostart.commands";
     pub const FLOATING_AUTO: &str = "floating.auto";
+    pub const FLOATING_MODIFIER: &str = "floating.modifier";
     pub const WINDOW_RULES: &str = "window_rule";
     pub const BINDS: &str = "binds";
 }
@@ -526,6 +530,19 @@ impl State {
             report
                 .refused
                 .push(format!("{skipped}: skipped as unusable"));
+        }
+        // Read at each Mod+press, so the next one uses it; a drag already
+        // under way is not ended by it. A value that names no modifier is
+        // refused and the session keeps its own, like any refusal here.
+        if let Some(name) = &fresh.invalid_floating_modifier {
+            report.refused.push(format!(
+                "{} (`{name}` is not one of super, alt, ctrl or shift; kept {})",
+                field::FLOATING_MODIFIER,
+                self.floating_modifier.name()
+            ));
+        } else if fresh.floating_modifier != self.floating_modifier {
+            self.floating_modifier = fresh.floating_modifier;
+            report.applied.push(field::FLOATING_MODIFIER.to_owned());
         }
     }
 

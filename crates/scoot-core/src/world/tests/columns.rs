@@ -5,6 +5,7 @@ fn min_height(h: i32) -> WindowInfo {
     WindowInfo {
         hints: SizeHints {
             min: Size::new(0, h),
+            ..SizeHints::default()
         },
         ..WindowInfo::default()
     }

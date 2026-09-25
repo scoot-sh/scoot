@@ -1010,6 +1010,9 @@ impl State {
         // explanation. After the new backend is in place, because the size
         // re-advertised is read from it. See `screencopy.rs`.
         self.refresh_capture_constraints();
+        // A floating window being dragged was measured against the old size
+        // (see `floating/grab.rs`); the drag ends here.
+        self.end_floating_grab();
         self.world.handle_event(CoreEvent::OutputChanged {
             id,
             area: Rect::new(0, 0, logical.0, logical.1),
@@ -1137,6 +1140,10 @@ impl State {
                 ),
             ));
         }
+        if !moved.is_empty() {
+            // As on a resize: a drag measured against the old geometry ends.
+            self.end_floating_grab();
+        }
         for (id, output, area) in &moved {
             // A lock surface's configured size is an *exact* requirement
             // (see `resize_output`); a rescaled output reconfigures its own
@@ -1158,6 +1165,7 @@ impl State {
         self.refresh_output_heads();
         self.refresh_capture_constraints();
         self.refresh_layer_zone();
+        self.settle_floating_grab();
     }
 
     /// Marks the screen dirty and makes sure the frame ticker is running to

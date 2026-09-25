@@ -1,22 +1,171 @@
 ---
-title: "Floating windows: dialogs and chosen apps float above the scrolling layout (auto for dialogs, window rules, toggle)"
-status: "open"
-area: "core"
-priority: "high"
+title: "Floating windows: dialogs and chosen apps float above the scrolling layout, and move and resize with the pointer — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
 # Floating windows
 
-**Status (2026-09-25): PR 1 of 2 landed (PR #242); PR 2 remains.** PR 1
-is the floating layer, map-time auto-float, window rules, the toggle and
-the focus switch, and IPC. **PR 2 is pointer move/resize**: Super+drag,
-and the client's own `xdg_toplevel.move`/`resize` (a CSD titlebar drag or
-resize edge), plus whatever repositioning surface comes with it. Until
-then a floating window sits where scoot centred it; there is no IPC move
-either (the ticket made one optional, and it would pre-empt PR 2's
-position model). The ticket stays open for PR 2; the original entry is
-below the design record.
+**RESOLVED (2026-09-25) in two PRs.** PR 1 (#242) is the floating layer,
+map-time auto-float, window rules, the toggle and the focus switch, and
+IPC. PR 2 is moving and resizing: the modifier drag, the client's own
+`xdg_toplevel.move`/`resize`, IPC `move-floating`/`resize-floating`, and
+the two notes carried from PR 1's re-review. PR 2's record comes first;
+PR 1's design record and the original entry follow.
+
+## PR 2 record: moving and resizing
+
+### Decisions
+
+- **Core state: an anchor, not a centre.** `Floating::centre` became
+  `Floating::anchor`: a point (relative to the output's area origin, as
+  before) and, per axis, which point of the window sits on it (start,
+  middle, end). Placement is `floating_move.rs`'s `floating_rect`, the only
+  placement arithmetic for floating windows (`arrange` and the new
+  allocation-free `World::floating_geometry` both use it). A window keeps
+  the point it is held by when it draws a new size: its middle for a
+  centred or moved window (PR 1's rule, unchanged), the edge a resize did
+  not move for a resized one -- so a terminal rounding to whole cells, or a
+  client refusing a size, never moves the edge the user did not drag.
+- **Two core actions**, platform-independent and property-tested:
+  `Action::MoveFloating { id, x, y }` (the top-left corner; clamped into
+  the usable area; the window keeps its alignment) and
+  `Action::ResizeFloating { id, size, edges }` (the edges named move, the
+  others hold; per resized axis the size is clamped to the window's
+  `SizeHints` -- `max` is new, the minimum wins where they disagree -- to
+  the room between the fixed edge and the far side of the usable area, and
+  to at least 1; an axis with no moving edge keeps its placed size). A
+  resize holds the anchor the window already has when it already holds that
+  edge from inside the usable area, so the resizes of one drag never drift
+  even when the client over-draws and is shifted in by the clamp (a core
+  test fails if the pin is recomputed from the placed rect).
+- **Crossing outputs is cheap, so it is done.** A move whose asked-for
+  rect has its middle over another output (with a usable area) carries the
+  window to that output's active workspace, on top, focused there when it
+  was the focused window (focus follows it); a middle over no output keeps
+  it on its own output, clamped. It is the one allocating step of a move
+  (`normalize`, `fix_view`), once per crossing, and the shell answers it
+  with one full `apply()`.
+- **The carried stacking note, fixed in general.** A window's own floating
+  dialogs (parent links between floating windows of the workspace, at any
+  depth) are drawn above it whatever the stack says (`floating_order.rs`):
+  each window's level is the higher of its stack index and its parent's
+  level, its depth its parent's plus one, and windows draw in (level,
+  depth, index) order. Review round 1 found the first cut (a walk of
+  nearest-ancestor-above links, bounded at 16 steps) drawing window 18 of a
+  40-deep chain under window 17, and allocating five `Vec`s per `arrange`;
+  levels are computed once per window from the parent's, iteratively, a
+  link that closes a loop is dropped, and the buffers live in the `World`.
+  Clicking a floating parent (or a fullscreen game) still raises and
+  focuses it; its dialog stays drawn over it. This covers the re-review's
+  case (game clicked above its dialog, then another window focused: the
+  dialog showed under the game) and the non-fullscreen one it implies (a
+  floated app clicked above its modal dialog hid it completely, the same
+  "looks like a hang" harm). The common case -- no floating window's
+  parent floats, which includes every dialog of a tiled window -- is one
+  map lookup per floating window; otherwise O(n log n) into reused buffers.
+  `descends_from` (the covering rule's walk, asked only for a window whose
+  parent is not floating on the workspace, i.e. through tiled windows)
+  stays bounded at 16: review round 1 had unbounded it, and the re-review
+  found that quadratic -- n dialogs on the tip of an n-long tiled chain
+  under an unrelated fullscreen window, 142 ms per `arrange` at n = 1000 in
+  debug. The bound is pinned by a test and the scene is in the arrange
+  bench. Mac release: a 64-deep floating chain arranges in ~5 µs (main
+  3.7), 1000-deep in ~49 µs (main 16).
+- **Tiled windows.** A modifier press on a tiled window is an ordinary
+  click, and a tiled window's `xdg_toplevel.move`/`resize` is ignored
+  (debug log): tiled windows are placed by the strip, and a toolkit whose
+  request goes unanswered stays in its own drag with nothing moving. The
+  niri-style "drag a tiled window out to float it" was considered and not
+  taken: it changes a window's layer as a side effect of a titlebar drag,
+  which a user reaching for a GTK headerbar in the strip does not expect.
+- **The modifier.** `[floating] modifier`, Super by default (every default
+  binding's modifier), any single modifier name a `[binds]` combo accepts;
+  a bad value warns and falls back at startup, and is refused by name on a
+  reload (the session keeps its modifier). Reloadable. It exists mainly for
+  `--nested`, where the host usually keeps Super.
+- **One grab** (`scoot/src/compositor/floating/grab.rs`), started by either
+  path. The client request is honoured only if the pointer's active grab
+  is Smithay's `ClickGrab` under the request's serial (the implicit grab
+  of a press still held) and that press went to the requesting client's
+  surface. Review round 1 found the first cut checking `has_grab(serial)`,
+  which compares serials only: a popup grab is installed under any recent
+  key/button/enter serial with the client's own toplevel as its focus, so
+  `xdg_popup.grab(K)` then `xdg_toplevel.move(K)` started a drag with no
+  button held (the window jumped by the pointer's absolute position, until
+  the next press). A popup grab, a drag-and-drop and a modifier drag are
+  all refused now; a harness test drives the popup case.
+  The grab clears pointer focus (the client gets `leave`), swallows the
+  modifier press and every button, shows the grab/resize cursor (set after
+  the focus clear, whose `leave` resets the cursor -- found on the `--tty`
+  screenshot, fixed, pinned by test), and per motion calls the core and
+  moves the element with `Space::relocate_element` (no `apply()`).
+- **Lock discipline.** Every grab callback runs inside Smithay's pointer
+  mutex; `apply()` can reach the pointer. What needs a full `apply()` (the
+  end, a crossing) sets `State::floating_grab_resync`, drained by
+  `settle_floating_grab` right after the pointer call returns (in
+  `move_absolute` and `pointer_button`), and cleared by any `apply()`.
+- **Focus back through the arrival path.** The grab's own ends unset
+  without Smithay's focus restore; settling re-derives pointer focus
+  through `move_absolute`, so the window under the pointer gets its
+  `enter` the ordinary way -- and a persistent pointer lock on a dragged
+  window re-arms, as after a session unlock (a relative-pointer test fails
+  with Smithay's restore instead).
+- **Resize configures are paced to the client.** A configure carries
+  `resizing` and the size asked for, and goes out only when that size
+  changed and the client has acked every configure before it; the
+  client's resized frame (`observe_frame` -> `apply()`) and the next motion
+  after an ack send the newest. A 1000Hz mouse no longer queues sizes a
+  60Hz client must skip, and Smithay's per-configure allocations (11,
+  measured) happen at the client's rate. The drag's end drops `resizing`.
+  Limits are re-read into the core when a resize drag starts (the core's
+  copy of `min` is otherwise refreshed only on a title/app-id/parent
+  change; that staleness is PR 1's and unchanged for tiled windows).
+- **Ending.** Release of the button that started it; any press (a second
+  button, or the same one after a lost release); the window closing (at
+  once, from `remove_window`), un-floating, going fullscreen or being
+  hidden by a workspace switch (checked per motion); the session locking
+  (the lock transition's `drop_input_grabs`); a VT switch
+  (`session_event`'s pause: its release would never arrive); an output
+  changing size (the geometry it started from no longer holds); under
+  `--nested`, the host pointer leaving scoot's window (review round 1:
+  the release would go elsewhere). An output
+  being *removed* cannot happen in scoot today (nothing sends
+  `OutputRemoved`); the per-motion check would end the grab if the window
+  left the space.
+- **Stuck modifiers under `--nested`** (review round 1). The host
+  keyboard's `leave` now releases every key scoot believes held and its
+  `enter` presses the modifiers the host reports down (modifiers only; an
+  ordinary held key is not typed). Before, an Alt+Tab in the host left Alt
+  held in scoot, and with `modifier = "alt"` -- which the docs suggest for
+  nested -- every click on a floating window became a swallowed drag. The
+  `--tty` VT switch was measured separately: no stuck Super after it.
+- **IPC.** `move-floating ID X Y` and `resize-floating ID W H` (unsigned;
+  keeps the top-left corner, i.e. `Edges::BOTTOM_RIGHT`), additive, no
+  `PROTOCOL_VERSION` bump; `windows`' `rect` reports the result. A resize
+  re-reads the window's limits first. Where a minimum does not fit the room
+  to the usable area's edge, the room wins.
+- **The carried doc note.** `protocols.md` no longer says direct scanout
+  composites under a dialog: the frame stays eligible and Smithay
+  composites only when the dialog cannot get a plane.
+- **Not changed:** `focus-column left|right` with a floating window
+  focused still returns to the strip (PR 1 said to revisit once windows
+  can move); geometric floating focus is a design of its own and nobody has
+  asked for it. X11 move/resize stays refused (XWayland Phase 1).
+
+### Evidence
+
+In the PR description: core property tests (`world/tests/floating_move.rs`,
+the randomized invariants extended with both actions, wild values,
+cross-output moves and a drawn-above-ancestors invariant), 22 harness
+tests (`floating/tests/drag.rs`) plus a relative-pointer test, mutation
+checks for each guard, the headless and `--tty` live runs
+(`~/evidence/fpg/`), the pointer-motion bench before/after and the
+allocation probe (0 allocations per motion on the no-drag and move paths
+and per unanswered resize motion; a resize allocates only for the
+configures it sends, ~11 each, about one per client ack).
 
 ## PR 1 design record
 
@@ -216,7 +365,7 @@ a GTK settings/about dialog, `foot` via rule) with screenshots; docs for the
 config syntax, binds and IPC actions (README gets a short user-facing line —
 it is for users and prospective users).
 
-## Carried into PR 2 from the PR #242 re-review (2026-09-25)
+## Carried into PR 2 from the PR #242 re-review (2026-09-25) -- both fixed in PR 2
 
 - **A floating fullscreen game can end up above its own dialog.** Clicking
   the game raises it above its dialog; if an unrelated floating window then

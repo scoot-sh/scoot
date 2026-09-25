@@ -9,6 +9,24 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-25 — move and resize floating windows
+
+- **Drag floating windows.** Hold Super and drag with the left button to
+  move a floating window, or with the right button to resize it from the
+  nearest edge or corner. A dialog's own titlebar and borders work too
+  (GTK headerbars, client-side decorations). Windows stay where you put
+  them, inside the screen's usable area, and a resize respects the window's
+  own minimum and maximum size wherever the screen has room for them (it
+  never grows a window past the usable area, even to reach its minimum). Dropping one over another output moves it
+  there. Under `--nested`, where the host often keeps Super, set
+  `[floating] modifier = "alt"` (or `ctrl`, `shift`). Tiled windows are not
+  dragged: a titlebar drag or Super+drag on one does nothing special.
+- **For agents:** `scootctl action move-floating ID X Y` and
+  `resize-floating ID WIDTH HEIGHT` (clamped; `windows` reports where the
+  window went).
+- **A window's dialogs stay on top of it.** Clicking a floating app (or a
+  fullscreen game) no longer hides the dialog it opened underneath it.
+
 ### 2026-09-25 — dialogs and chosen apps float above the scrolling strip
 
 - **Dialogs float.** A confirmation dialog, file picker, About box or

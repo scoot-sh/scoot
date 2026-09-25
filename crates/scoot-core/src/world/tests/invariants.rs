@@ -2,7 +2,7 @@
 //! every step.
 
 use super::*;
-use crate::{Action, Horizontal, Size, SizeHints, Vertical};
+use crate::{Action, Edges, Horizontal, Size, SizeHints, Vertical};
 
 /// xorshift64*: deterministic and dependency-free.
 struct Rng(u64);
@@ -36,11 +36,18 @@ fn random_info(rng: &mut Rng, windows: &[WindowId]) -> WindowInfo {
     } else {
         Size::default()
     };
+    // A maximum as a client might declare one: usually none, sometimes
+    // plausible, sometimes below the minimum or i32-extreme.
+    let max = match rng.below(6) {
+        0 => Size::new(rng.size(1500), rng.size(1000)),
+        1 => Size::new(i32::MAX, i32::MIN),
+        _ => Size::default(),
+    };
     // Sometimes transient for another window -- usually a live one,
     // sometimes a stale or wild id, and now and then itself.
     let parent = rng.chance(30).then(|| random_window(rng, windows));
     WindowInfo {
-        hints: SizeHints { min },
+        hints: SizeHints { min, max },
         parent,
         ..WindowInfo::default()
     }
@@ -86,7 +93,15 @@ fn random_usable_area(rng: &mut Rng) -> Rect {
     }
 }
 
-fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> Action {
+fn random_action(
+    rng: &mut Rng,
+    windows: &[WindowId],
+    floating: &[WindowId],
+    outputs: &[(OutputId, Rect)],
+) -> Action {
+    let areas: Vec<Rect> = outputs.iter().map(|&(_, area)| area).collect();
+    let outputs: Vec<OutputId> = outputs.iter().map(|&(id, _)| id).collect();
+    let outputs = outputs.as_slice();
     let horizontal = if rng.chance(50) {
         Horizontal::Left
     } else {
@@ -97,7 +112,16 @@ fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> A
     } else {
         Vertical::Down
     };
-    match rng.below(20) {
+    // A move or resize names a floating window most of the time: that is
+    // what a drag or an agent names, and anything else is ignored.
+    let target = |rng: &mut Rng| {
+        if !floating.is_empty() && rng.chance(80) {
+            floating[rng.below(floating.len())]
+        } else {
+            random_window(rng, windows)
+        }
+    };
+    match rng.below(24) {
         0 => Action::FocusColumn(horizontal),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
@@ -150,7 +174,43 @@ fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> A
             floating: rng.chance(60),
         },
         18 => Action::ToggleFloatingFocus,
+        // Off the IPC wire (and a pointer drag): usually a floating window
+        // and a plausible spot, sometimes anything at all.
+        19 | 20 => {
+            let id = target(rng);
+            let (x, y) = random_point(rng, &areas);
+            Action::MoveFloating { id, x, y }
+        }
+        21 | 22 => Action::ResizeFloating {
+            id: target(rng),
+            size: random_float_size(rng).unwrap_or(Size::new(-1, i32::MIN)),
+            edges: Edges {
+                left: rng.chance(40),
+                right: rng.chance(40),
+                top: rng.chance(40),
+                bottom: rng.chance(40),
+            },
+        },
         _ => Action::CloseFocused,
+    }
+}
+
+/// A point a move might ask for: usually somewhere on one of the outputs
+/// (often another one than the window's), sometimes near or between them,
+/// sometimes i32-extreme.
+fn random_point(rng: &mut Rng, areas: &[Rect]) -> (i32, i32) {
+    match rng.below(8) {
+        0 => (i32::MIN, i32::MAX),
+        1 => (i32::MAX, i32::MIN),
+        2 | 3 => (rng.size(6500) - 500, rng.size(1600) - 200),
+        _ if !areas.is_empty() => {
+            let area = areas[rng.below(areas.len())];
+            (
+                area.x.saturating_add(rng.size(area.w.max(1) as usize)),
+                area.y.saturating_add(rng.size(area.h.max(1) as usize)),
+            )
+        }
+        _ => (0, 0),
     }
 }
 
@@ -207,6 +267,11 @@ impl Step {
             Step::Action(Action::FocusWindowId(id)) => here(id),
             Step::Action(Action::ToggleFloatingFocus) => true,
             Step::Action(Action::FocusWindow(_)) => world.floating_has_focus(),
+            // Even onto another output: the strips it leaves and joins are
+            // not changed by a floating window going.
+            Step::Action(Action::MoveFloating { id, .. } | Action::ResizeFloating { id, .. }) => {
+                floating(id)
+            }
             _ => false,
         }
     }
@@ -231,7 +296,13 @@ impl Step {
 
 fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) -> Step {
     let windows: Vec<WindowId> = world.windows().into_iter().map(|(id, _)| id).collect();
-    let outputs: Vec<OutputId> = world.outputs().into_iter().map(|(id, _)| id).collect();
+    let areas = world.outputs();
+    let outputs: Vec<OutputId> = areas.iter().map(|&(id, _)| id).collect();
+    let floating: Vec<WindowId> = windows
+        .iter()
+        .copied()
+        .filter(|id| world.is_floating(*id))
+        .collect();
     *next_id += 1;
     let event = match rng.below(16) {
         0 | 1 => Event::WindowOpened {
@@ -266,10 +337,19 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) -> Step {
             id: windows[rng.below(windows.len())],
             info: random_info(rng, &windows),
         },
-        9 if !outputs.is_empty() => Event::OutputUsableAreaChanged {
-            id: outputs[rng.below(outputs.len())],
-            area: random_usable_area(rng),
-        },
+        9 if !outputs.is_empty() => {
+            let (id, area) = areas[rng.below(areas.len())];
+            Event::OutputUsableAreaChanged {
+                id,
+                // Half the time the reservation goes away (a bar exits),
+                // so outputs spend time with room to move windows in.
+                area: if rng.chance(50) {
+                    area
+                } else {
+                    random_usable_area(rng)
+                },
+            }
+        }
         10 => Event::FullscreenRequested {
             id: random_window(rng, &windows),
             fullscreen: rng.chance(60),
@@ -285,7 +365,7 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) -> Step {
             floating: rng.chance(80),
             size: random_float_size(rng),
         },
-        _ => return Step::Action(random_action(rng, &windows, &outputs)),
+        _ => return Step::Action(random_action(rng, &windows, &floating, &areas)),
     };
     Step::Event(event)
 }
@@ -385,6 +465,66 @@ fn assert_invariants(world: &World) {
     );
     assert!(world.outputs.is_empty() || world.focused_output < world.outputs.len());
     let arrangement = world.arrange();
+    // The drawing order reorders floating windows; it must neither lose nor
+    // repeat one.
+    let mut arranged: Vec<WindowId> = arrangement.placements.iter().map(|p| p.id).collect();
+    arranged.sort();
+    let mut in_tree: Vec<WindowId> = world
+        .windows
+        .keys()
+        .copied()
+        .filter(|id| !world.unplaced.contains(id))
+        .collect();
+    in_tree.sort();
+    assert_eq!(
+        arranged, in_tree,
+        "every placed window is arranged exactly once"
+    );
+    // A visible floating window is drawn above each of its floating
+    // ancestors on its workspace -- followed through floating parents on
+    // the same workspace, at any depth (see `floating_order.rs`); a chain
+    // that loops back to the window is skipped (one of its links is
+    // dropped, so no order can satisfy every window in it).
+    let at = |id: WindowId| arrangement.placements.iter().position(|p| p.id == id);
+    for placement in arrangement
+        .placements
+        .iter()
+        .filter(|p| p.floating && p.visible)
+    {
+        let Some(home) = world.locate(placement.id) else {
+            continue;
+        };
+        let mut ancestors = Vec::new();
+        let mut current = placement.id;
+        let mut looped = false;
+        for _ in 0..world.windows.len() {
+            let Some(parent) = world.window_info(current).and_then(|info| info.parent) else {
+                break;
+            };
+            if parent == placement.id {
+                looped = true;
+                break;
+            }
+            let same_layer = world.is_floating(parent)
+                && world.locate(parent).is_some_and(|loc| {
+                    loc.output == home.output && loc.workspace == home.workspace
+                });
+            if !same_layer {
+                break;
+            }
+            ancestors.push(parent);
+            current = parent;
+        }
+        if looped {
+            continue;
+        }
+        for ancestor in ancestors {
+            assert!(
+                at(ancestor) < at(placement.id),
+                "{placement:?} drawn under its ancestor {ancestor:?}"
+            );
+        }
+    }
     for placement in &arrangement.placements {
         assert!(
             placement.rect.w >= 1 && placement.rect.h >= 1,
@@ -499,6 +639,10 @@ fn random_sequences_keep_the_tree_consistent() {
     // steps whose strip was compared before and after.
     let (mut floating_steps, mut floating_focus_steps, mut strip_checks) = (0, 0, 0);
     let mut focus_checks = 0;
+    // And for moving and resizing: steps that moved or resized a floating
+    // window, moves that carried one to another output, and steps ending
+    // with a visible dialog drawn over a visible floating parent.
+    let (mut geometry_steps, mut transfers, mut lifted_steps) = (0, 0, 0);
     for seed in 1..=24 {
         let mut rng = Rng(seed);
         let mut world = World::new(config());
@@ -511,7 +655,22 @@ fn random_sequences_keep_the_tree_consistent() {
             let focus_before = random
                 .keeps_focus(&world)
                 .then(|| (world.focused_window(), format!("{random:?}")));
+            let geometry_of = match &random {
+                Step::Action(
+                    Action::MoveFloating { id, .. } | Action::ResizeFloating { id, .. },
+                ) => world.floating_geometry(*id).map(|g| (*id, g)),
+                _ => None,
+            };
             apply_step(&mut world, random);
+            if let Some((id, before)) = geometry_of {
+                let after = world.floating_geometry(id);
+                if after != Some(before) {
+                    geometry_steps += 1;
+                }
+                if after.is_some_and(|g| g.output != before.output) {
+                    transfers += 1;
+                }
+            }
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| assert_invariants(&world)))
                 .is_err()
             {
@@ -551,8 +710,35 @@ fn random_sequences_keep_the_tree_consistent() {
             if world.floating_has_focus() {
                 floating_focus_steps += 1;
             }
+            let arranged = world.arrange();
+            let shown = |id: WindowId| {
+                arranged
+                    .get(id)
+                    .is_some_and(|p| p.floating && p.visible && !p.fullscreen)
+            };
+            if arranged.placements.iter().any(|p| {
+                shown(p.id)
+                    && world
+                        .window_info(p.id)
+                        .and_then(|info| info.parent)
+                        .is_some_and(|parent| parent != p.id && shown(parent))
+            }) {
+                lifted_steps += 1;
+            }
         }
     }
+    assert!(
+        geometry_steps > 200,
+        "only {geometry_steps} steps moved or resized a floating window"
+    );
+    assert!(
+        transfers > 20,
+        "only {transfers} moves carried a window to another output"
+    );
+    assert!(
+        lifted_steps > 400,
+        "only {lifted_steps} steps showed a dialog over a floating parent"
+    );
     assert!(
         covered_steps > 1000,
         "only {covered_steps} steps had a covering fullscreen window"
@@ -573,4 +759,60 @@ fn random_sequences_keep_the_tree_consistent() {
         focus_checks > 500,
         "only {focus_checks} focus-keeping steps were checked"
     );
+}
+
+/// A chain of floating dialogs far deeper than any real one (40), with the
+/// root raised over all of them and random raises in between: every window
+/// is drawn above its parent at every step (PR #243's review found window 18
+/// drawn under window 17 past a 16-step bound).
+#[test]
+fn a_deep_dialog_chain_draws_every_window_above_its_parent() {
+    let mut world = World::new(config());
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(1),
+        area: Rect::new(0, 0, 1000, 600),
+    });
+    for id in 1..=40u64 {
+        world.handle_event(Event::WindowOpened {
+            id: WindowId(id),
+            info: WindowInfo {
+                parent: (id > 1).then(|| WindowId(id - 1)),
+                ..WindowInfo::default()
+            },
+            output: None,
+            focus: true,
+        });
+        world.handle_event(Event::FloatingRequested {
+            id: WindowId(id),
+            floating: true,
+            size: None,
+        });
+        world.handle_event(Event::FrameObserved {
+            id: WindowId(id),
+            requested: Size::default(),
+            actual: Size::new(100, 100),
+        });
+    }
+    let mut rng = Rng(7);
+    for step in 0..200 {
+        let raise = WindowId(if step == 0 {
+            1
+        } else {
+            1 + rng.below(40) as u64
+        });
+        world.handle_event(Event::FocusObserved { id: raise });
+        assert_invariants(&world);
+        let order: Vec<u64> = world
+            .arrange()
+            .placements
+            .iter()
+            .filter(|p| p.floating)
+            .map(|p| p.id.0)
+            .collect();
+        assert_eq!(
+            order,
+            (1..=40).collect::<Vec<_>>(),
+            "after raising {raise:?}"
+        );
+    }
 }

@@ -73,6 +73,7 @@ fn window_changed_updates_size_hints() {
     let wide = WindowInfo {
         hints: SizeHints {
             min: Size::new(700, 0),
+            ..SizeHints::default()
         },
         ..WindowInfo::default()
     };

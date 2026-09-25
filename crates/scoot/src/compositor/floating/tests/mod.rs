@@ -37,6 +37,7 @@ use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::test_support::{self, Harness, wait_for};
 
 mod auto;
+mod drag;
 mod scene;
 mod toggle;
 
@@ -117,6 +118,8 @@ struct Configured {
     tiled: bool,
     /// Whether it carried any of them.
     any_tiled: bool,
+    /// Whether it carried `resizing`.
+    resizing: bool,
 }
 
 enum Step {
@@ -155,14 +158,46 @@ enum Step {
         anchor: (i32, i32, i32, i32),
         size: (i32, i32),
     },
+    /// Like [`Step::Popup`], with `xdg_popup.grab(seat, serial)` before
+    /// its first commit.
+    GrabbingPopup {
+        window: usize,
+        serial: u32,
+    },
     /// Which of this client's surfaces the pointer last entered.
     ReportPointer,
     /// Lock the session and keep the lock (abandoned: it stays locked).
     LockSession,
+    /// Every `wl_pointer.button` this client has received.
+    Buttons,
+    /// `xdg_toplevel.move` on the `window`-th toplevel with `serial`.
+    RequestMove {
+        window: usize,
+        serial: u32,
+    },
+    /// `xdg_toplevel.resize` on the `window`-th toplevel with `serial`.
+    RequestResize {
+        window: usize,
+        serial: u32,
+        edges: xdg_toplevel::ResizeEdge,
+    },
+    /// Destroy the `window`-th toplevel (its role objects and surface).
+    Destroy {
+        window: usize,
+    },
+}
+
+/// One `wl_pointer.button` a client received.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Button {
+    serial: u32,
+    button: u32,
+    pressed: bool,
 }
 
 enum Ack {
     Done,
+    Buttons(Vec<Button>),
     Configures(Vec<Configured>),
     Popup((i32, i32, i32, i32)),
     Pointer(Option<Entered>),
@@ -184,6 +219,7 @@ struct TestClient {
     seat: Option<wl_seat::WlSeat>,
     pointer: Option<wl_pointer::WlPointer>,
     pointer_focus: Option<wl_surface::WlSurface>,
+    buttons: Vec<Button>,
     lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
     /// Per toplevel, by creation order: the `xdg_toplevel.configure` state
     /// waiting for its `xdg_surface.configure`, and every completed one.
@@ -271,6 +307,16 @@ impl Dispatch<wl_pointer::WlPointer, ()> for TestClient {
         match event {
             wl_pointer::Event::Enter { surface, .. } => client.pointer_focus = Some(surface),
             wl_pointer::Event::Leave { .. } => client.pointer_focus = None,
+            wl_pointer::Event::Button {
+                serial,
+                button,
+                state,
+                ..
+            } => client.buttons.push(Button {
+                serial,
+                button,
+                pressed: state == WEnum::Value(wl_pointer::ButtonState::Pressed),
+            }),
             _ => {}
         }
     }
@@ -329,6 +375,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, Role> for TestClient {
                 fullscreen: has(xdg_toplevel::State::Fullscreen),
                 tiled: tiled_states.into_iter().all(has),
                 any_tiled: tiled_states.into_iter().any(has),
+                resizing: has(xdg_toplevel::State::Resizing),
             };
         }
     }
@@ -619,6 +666,29 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 popups.push((surface, xdg, popup, positioner));
                 Ack::Popup(geometry)
             }
+            Step::GrabbingPopup { window, serial } => {
+                let index = client.popups.len();
+                client.popups.push(None);
+                let seat = client.seat.clone().ok_or("no wl_seat")?;
+                let positioner = wm_base.create_positioner(&qh, ());
+                positioner.set_size(20, 20);
+                positioner.set_anchor_rect(0, 0, 10, 10);
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, Role::Popup(index));
+                let popup = xdg.get_popup(
+                    Some(&windows[window].xdg),
+                    &positioner,
+                    &qh,
+                    Role::Popup(index),
+                );
+                popup.grab(&seat, serial);
+                surface.commit();
+                wait_for(&mut queue, &mut client, "a popup configure", |client| {
+                    client.popups[index]
+                })?;
+                popups.push((surface, xdg, popup, positioner));
+                Ack::Done
+            }
             Step::ReportPointer => {
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 let entered = client.pointer_focus.as_ref().map(|focus| {
@@ -628,6 +698,34 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         .map_or(Entered::Other, Entered::Window)
                 });
                 Ack::Pointer(entered)
+            }
+            Step::Buttons => {
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Buttons(client.buttons.clone())
+            }
+            Step::RequestMove { window, serial } => {
+                let seat = client.seat.clone().ok_or("no wl_seat")?;
+                windows[window].toplevel._move(&seat, serial);
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::RequestResize {
+                window,
+                serial,
+                edges,
+            } => {
+                let seat = client.seat.clone().ok_or("no wl_seat")?;
+                windows[window].toplevel.resize(&seat, serial, edges);
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::Destroy { window } => {
+                let window = &windows[window];
+                window.toplevel.destroy();
+                window.xdg.destroy();
+                window.surface.destroy();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
             }
             Step::LockSession => {
                 let manager = client
@@ -683,6 +781,13 @@ impl Fixture {
         }) {
             Ack::Popup((x, y, w, h)) => Rect::new(x, y, w, h),
             _ => panic!("expected a popup geometry"),
+        }
+    }
+
+    fn buttons(&mut self) -> Vec<Button> {
+        match self.run(Step::Buttons) {
+            Ack::Buttons(all) => all,
+            _ => panic!("expected buttons"),
         }
     }
 

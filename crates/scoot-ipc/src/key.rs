@@ -15,7 +15,11 @@ pub enum Modifier {
 }
 
 impl Modifier {
-    fn parse(name: &str) -> Option<Self> {
+    /// A modifier by name, case-insensitively, with the aliases a key combo
+    /// accepts (`control`; `logo`, `meta`, `cmd` for Super). Public for a
+    /// shell's config that names a modifier on its own (scoot's `[floating]
+    /// modifier`), so both spell modifiers the same way.
+    pub fn parse(name: &str) -> Option<Self> {
         match name.to_ascii_lowercase().as_str() {
             "ctrl" | "control" => Some(Self::Ctrl),
             "shift" => Some(Self::Shift),

@@ -1,4 +1,6 @@
-//! `[floating]` and `[[window_rule]]`: which windows float when they map.
+//! `[floating]` and `[[window_rule]]`: which windows float when they map,
+//! and the modifier that drags them (`[floating] modifier`, see
+//! [`drag_modifier`]).
 //!
 //! The decision is made once per window, at its first commit (see
 //! `floating.rs`), from what the window has said about itself by then and
@@ -48,6 +50,7 @@
 //! rule in its `refused` reply, since a reload has somewhere to say so.
 
 use scoot_core::Size;
+use scoot_ipc::Modifier;
 use serde::Deserialize;
 
 #[cfg(test)]
@@ -69,6 +72,29 @@ pub const MAX_RULE_SIZE: i64 = 65_535;
 #[serde(deny_unknown_fields)]
 pub struct FloatingConfig {
     auto: Option<bool>,
+    /// The modifier held to move (left button) and resize (right button) a
+    /// floating window by dragging anywhere on it: a modifier name as a
+    /// `[binds]` combo spells one (`super`, `alt`, `ctrl`, `shift`, or an
+    /// alias). A string rather than an enum so a typo falls back to the
+    /// default with a warning instead of failing the whole file.
+    modifier: Option<String>,
+}
+
+/// The modifier the session drags floating windows with, when the file
+/// names none (or one that is not a modifier): Super, the modifier every
+/// default binding already uses.
+pub const DEFAULT_DRAG_MODIFIER: Modifier = Modifier::Super;
+
+/// `[floating] modifier`, resolved: the named modifier, or
+/// [`DEFAULT_DRAG_MODIFIER`] when the table or key is absent. `Err` carries
+/// a value that is not a single modifier (a combo like `super+shift`
+/// included: one modifier drags) -- startup warns and uses the default, a
+/// reload refuses it by name and keeps what the session has.
+pub fn drag_modifier(floating: Option<&FloatingConfig>) -> Result<Modifier, String> {
+    let Some(name) = floating.and_then(|floating| floating.modifier.as_deref()) else {
+        return Ok(DEFAULT_DRAG_MODIFIER);
+    };
+    Modifier::parse(name.trim()).ok_or_else(|| name.to_owned())
 }
 
 /// One `[[window_rule]]` as written.
