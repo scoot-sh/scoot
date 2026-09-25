@@ -380,15 +380,18 @@ feedback -- all behind the lock branches. `fullscreen_surface` now returns a
 steering (rule 6 walks it like any root). No X "tiled" state is set;
 Motif hints are ignored (scoot draws no titlebar); X clients draw at scale 1.
 
-**Phase 3 (`xwayland/focus.rs`):** focus on map only if nothing is focused
-or the window redeems its spawn's activation token -- by `_NET_STARTUP_ID`
+**Phase 3 (`xwayland/focus.rs`):** focus on map only if nothing is focused,
+the focused window is an X window of the same client process (X-Resource
+pid -- a deliberate addition to the brief: without it a GTK app's file
+chooser opened unfocused, measured with `mousepad`, because GTK sends no
+`_NET_ACTIVE_WINDOW` for a new dialog), or the window redeems its spawn's
+activation token -- by `_NET_STARTUP_ID`
 (`State::spawn` now exports the token as `DESKTOP_STARTUP_ID` too while
 XWayland is live; this reverses Phase 1's documented "must not mint", which
 predated any X redemption path) or by its X-Resource client pid being an
 unreaped spawned child with a live token (covers `xterm`, which sets no
 startup id; `_NET_WM_PID` is never read). `_NET_ACTIVE_WINDOW` passes the
-same gate plus "the focused window is the same X process", refused while
-locked, cheap checks before any round trip, pid cached per window. An
+same gate, refused while locked, cheap checks before any round trip, pid cached per window. An
 input-model-`None` window gets no keyboard; the focused X window is raised in
 X stacking; the keyboard-grab protocol stays refused. X input feeds idle and
 `interaction_serials` through the same paths as Wayland input.

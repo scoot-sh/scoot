@@ -258,9 +258,8 @@ pub struct CompositorOptions {
     /// keylog/snoop by design (see `docs/protocols.md`'s trust note), so it
     /// is an explicit choice, never a default. The config-file form is
     /// `[xwayland] enabled`; either one turns it on (a flag can only say
-    /// yes, so the two are OR-ed in `compositor::run`). Phase-1 skeleton:
-    /// the server starts and `DISPLAY` is exported, but no X window enters
-    /// the layout yet -- X clients connect and map nowhere (see
+    /// yes, so the two are OR-ed in `compositor::run`). X windows map into
+    /// the layout like any other, behind a focus gate (see
     /// `compositor::xwayland`). Needs an `xwayland` Cargo-feature build;
     /// without one this warns and the session runs Wayland-only, the way
     /// `--renderer gles` degrades without `gpu-scanout`.

@@ -116,10 +116,12 @@ each item's own file records why it landed when it did.
   `SeatHandler::KeyboardFocus` to become an enum first: XWayland ignores
   `wl_keyboard.enter` for X focus (measured: `PointerRoot` before and
   after), so only Smithay's `X11Surface` target routes keys. Focus gate: an
-  X window takes focus only with nothing focused or by redeeming its spawn's
-  token (`_NET_STARTUP_ID` via a new `DESKTOP_STARTUP_ID` export, or the
-  X-Resource pid of an unreaped spawned child); `_NET_ACTIVE_WINDOW` goes
-  through the same gate plus same-process, refused while locked. The lock
+  X window takes focus only with nothing focused, from its own app's focused
+  window (same X-Resource pid -- measured: GTK maps a file chooser with no
+  `_NET_ACTIVE_WINDOW`), or by redeeming its spawn's token (`_NET_STARTUP_ID`
+  via a new `DESKTOP_STARTUP_ID` export, or the X-Resource pid of an
+  unreaped spawned child); `_NET_ACTIVE_WINDOW` goes through the same gate,
+  refused while locked. The lock
   blanks and refuses X windows and menus (mutation-checked). Also resolved
   the [WM-failure pin](docs/backlog/resolved/xwayland-phase1-wm-failure-pin-done.md)
   (the rival recipe cannot work: XWayland admits no client before the WM)

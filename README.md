@@ -58,10 +58,10 @@ inspired this project.
   still drives one connector (a second monitor there stays dark).
 - **XWayland is opt-in, and partial.** X11 applications run with
   `--xwayland` (or `[xwayland] enabled`) in an `xwayland` build
-  (`cargo build --features xwayland`, with `Xwayland` on `PATH`; no flake
+  (`cargo build --release --features xwayland`, with `Xwayland` on `PATH`; no flake
   output ships it yet): their windows tile, dialogs float, fullscreen
-  works, and they take focus by themselves only when nothing is focused or
-  scoot started them. Running one extends full trust to it — X11 clients
+  works, and they take focus by themselves only when nothing is focused,
+  when they are a dialog of the X app in use, or when scoot started them. Running one extends full trust to it — X11 clients
   can read each other's
   keystrokes and screens by design ([protocols.md](docs/protocols.md#xwayland-opt-in)).
   Not there yet: copy/paste and drag-and-drop between X and Wayland apps,

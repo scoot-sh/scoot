@@ -35,13 +35,22 @@
 //!      reused), and a token minted for that spawn is live. This is what
 //!      covers the clients that do no startup notification at all (`xterm`).
 //!
-//! A redeemed token is removed, so one spawn focuses one window: a second
-//! window the same process maps later is announced, not focused.
+//! 3. **the focused window is an X window of the same client process** --
+//!    again by X-Resource pid -- which is an application opening its own
+//!    dialog, or moving focus between its own windows. Not a steal: that
+//!    process already holds the keyboard, and inside the X server one X
+//!    client can move another's focus anyway. Without this an X app's file
+//!    chooser opened unfocused under its own window (measured: GTK 3's
+//!    `mousepad` Ctrl+O, token already spent -- GTK sends no
+//!    `_NET_ACTIVE_WINDOW` for a new dialog). Only the pid counts, never
+//!    `WM_TRANSIENT_FOR`: that is client-set, and any background X client
+//!    could name the focused window as its parent.
 //!
-//! `_NET_ACTIVE_WINDOW` passes the same gate, plus one more case: **the
-//! focused window is an X window of the same X client process** (again by
-//! X-Resource pid), which is an application moving focus between its own
-//! windows -- a toolbox raising its dialog. The message's own "currently
+//! A redeemed token is removed, so one spawn focuses one window: a second
+//! window the same process maps later takes focus only through rule 3 (its
+//! own window is focused) or rule 1.
+//!
+//! `_NET_ACTIVE_WINDOW` passes the same gate. The message's own "currently
 //! active window" field is ignored: it is part of the request, so it proves
 //! nothing about who sent it. And while the session is locked the request is
 //! refused outright, like every activation.
@@ -80,7 +89,9 @@ impl State {
     /// Whether a newly mapped X window takes focus (the module doc's gate).
     /// Redeems the token that lets it, when one does.
     pub(super) fn x11_focus_on_map(&mut self, window: &X11Surface) -> bool {
-        self.focus.is_none() || self.redeem_x11_spawn_token(window)
+        self.focus.is_none()
+            || self.same_client_as_focused(window)
+            || self.redeem_x11_spawn_token(window)
     }
 
     /// `_NET_ACTIVE_WINDOW` for `window`: honoured only through the gate.

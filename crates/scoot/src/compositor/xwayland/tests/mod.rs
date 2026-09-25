@@ -84,7 +84,7 @@ fn read_marker(marker: &std::path::Path) -> String {
     }
 }
 
-/// A live compositor with no backend: the skeleton needs no framebuffer,
+/// A live compositor with no backend: the server-only tests need no framebuffer,
 /// and [`Harness::bare`] is what the wire-only suites use.
 type Fixture = Harness<Step, Ack>;
 
@@ -470,7 +470,7 @@ fn a_dead_server_is_loud_and_the_session_survives() {
         // Error or the XWM's `disconnected`. Both fire within a few
         // dispatches of the kill -- the drain below is bounded (not a
         // probe: the death paths deliberately change no state the loop
-        // could watch, see `xwayland.rs`'s staleness note), and the
+        // could watch, see `xwayland/mod.rs`'s staleness note), and the
         // assertion after reads the captured logs.
         for _ in 0..200 {
             fixture.settle();

@@ -167,18 +167,59 @@ fn net_active_window_is_honoured_only_within_the_focused_client() {
         );
     }
 
+    // The application's own second window takes focus as it maps (see
+    // the dialog test below); focus the first again, then ask for the
+    // second with `_NET_ACTIVE_WINDOW`: honoured, same process.
     let own = live.x.map(&Props::new(RED));
     let own_id = live.managed(own);
-    assert_eq!(
-        live.fixture.state.focus,
-        Some(first),
-        "the second window took focus on map"
-    );
+    assert_eq!(live.fixture.state.focus, Some(own_id));
+    live.fixture
+        .state
+        .act(scoot_core::Action::FocusWindowId(first));
+    assert_eq!(live.fixture.state.focus, Some(first));
     live.x.request_activation(own);
     eventually(
         &mut live.fixture,
         "the client's own window taking focus",
         |fixture| fixture.state.focus == Some(own_id),
+    );
+}
+
+/// An X application's own dialog takes focus when it maps over the
+/// application's focused window -- even with the launch token spent, and
+/// with a Wayland window having held focus before -- because the same
+/// process already holds the keyboard. GTK sends no `_NET_ACTIVE_WINDOW`
+/// for a new dialog (measured with `mousepad`'s Ctrl+O), so without this
+/// rule its file chooser opened unfocused.
+#[test]
+fn an_x_apps_own_dialog_takes_focus_from_its_focused_window() {
+    let Some(mut live) = live("an_x_apps_own_dialog_takes_focus_from_its_focused_window") else {
+        return;
+    };
+    live.map_peer("wayland");
+    let token = live
+        .fixture
+        .state
+        .mint_spawn_token("xprobe")
+        .expect("a spawn token");
+    let mut main = Props::new(RED);
+    main.startup_id = Some(token.as_str().to_owned());
+    let main = live.x.map(&main);
+    let main_id = live.managed(main);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(main_id),
+        "the launch took focus"
+    );
+    let mut dialog = Props::new(RED);
+    dialog.transient_for = Some(main);
+    dialog.dialog = true;
+    let dialog = live.x.map(&dialog);
+    let dialog_id = live.managed(dialog);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(dialog_id),
+        "the application's own dialog opened unfocused"
     );
 }
 

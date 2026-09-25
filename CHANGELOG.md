@@ -20,7 +20,8 @@ scoot has not cut a numbered release yet; entries are dated.
   taskbars under their `WM_CLASS` class (`XTerm`, `Gimp`), which is also
   what a `[[window_rule]]` `match_app_id` matches.
 - **X apps do not steal focus.** A new X window takes focus only when no
-  window has it or scoot itself started the app (a keybinding, `scootctl
+  window has it, when it is a dialog of the X app you are using (same
+  process), or when scoot itself started the app (a keybinding, `scootctl
   action spawn`, autostart) moments ago; otherwise it opens without focus
   and a click, a keybinding or a taskbar focuses it. An X app asking to be
   activated (`_NET_ACTIVE_WINDOW`, `xdotool windowactivate`) gets the same

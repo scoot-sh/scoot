@@ -21,8 +21,9 @@
 //!   (menus, tooltips) are drawn where they put themselves, above every
 //!   window, and never enter the core.
 //! - **Phase 3, the focus gate** -- `focus.rs`: an X window takes focus by
-//!   itself only when nothing is focused or scoot spawned it (the spawn's
-//!   token, redeemed once); `_NET_ACTIVE_WINDOW` is a request through the
+//!   itself only when nothing is focused, the focused window is the same X
+//!   process, or scoot spawned it (the spawn's token, redeemed once);
+//!   `_NET_ACTIVE_WINDOW` is a request through the
 //!   same gate. The keyboard reaches an X window through its `X11Surface`,
 //!   which moves the X server's own input focus (see `keyboard_focus.rs`
 //!   for why the `wl_surface` alone does not).

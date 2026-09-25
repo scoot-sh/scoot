@@ -392,8 +392,8 @@ pub struct State {
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
-    /// `xwayland_shell_v1`: the association half of the opt-in XWayland
-    /// skeleton (see `xwayland.rs`). Always constructed, like
+    /// `xwayland_shell_v1`: the association half of opt-in XWayland (see
+    /// `xwayland/mod.rs`). Always constructed, like
     /// `xdg_shell_state` above -- and harmless when the session never asked:
     /// Smithay's `can_view` gate admits only XWayland's own client, which
     /// exists solely between a successful `XWayland::spawn` and session end,
@@ -412,7 +412,7 @@ pub struct State {
     pub xwm: Option<xwayland::X11Wm>,
     /// The X display number while our server is believed live: set from the
     /// synchronous lock at spawn, cleared on a pre-`READY` death or a failed
-    /// window-manager attach (see `xwayland.rs` -- a WM-less server is not
+    /// window-manager attach (see `xwayland/mod.rs` -- a WM-less server is not
     /// live for our purposes). `State::spawn` and `run`'s process export read
     /// exactly this -- `Some` sets `DISPLAY`, `None` leaves it untouched
     /// (no clobber of a host `DISPLAY` under `--nested`). Unconditional
@@ -1259,7 +1259,7 @@ impl State {
     /// theme (`XCURSOR_THEME`/`XCURSOR_SIZE`, read off the rebuilt `Cursor`
     /// so a reloaded theme reaches future children), and -- while the
     /// session's XWayland server is believed live -- `DISPLAY` for X11
-    /// clients (see `xwayland.rs`; unset there means inherit, so a
+    /// clients (see `xwayland/mod.rs`; unset there means inherit, so a
     /// host-provided `DISPLAY` under `--nested` survives when XWayland is
     /// off), and -- unless the
     /// token table is full -- a fresh activation token in

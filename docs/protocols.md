@@ -479,7 +479,12 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
 *request*, and it is honoured only when:
 
 1. **no window has focus**; or
-2. **scoot started it, and the start's activation token is still unspent.**
+2. **the focused window is an X window of the same application** -- the
+   same process, as the X server reports it (below) -- which is an app
+   opening its own dialog: a file chooser must be typed into without a
+   click, and GTK sends nothing when it maps one. `WM_TRANSIENT_FOR` does
+   not count: any X client can name any window as its parent; or
+3. **scoot started it, and the start's activation token is still unspent.**
    `State::spawn` hands every child a token (see
    [focus handoff](#focus-handoff-xdg-activation-v1)); while XWayland is
    live the child also gets it as `DESKTOP_STARTUP_ID`, which X toolkits
@@ -490,9 +495,9 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
    scoot spawned whose token is still live counts. A token is spent by the
    first window it focuses and expires after 30 seconds.
 
-`_NET_ACTIVE_WINDOW` is also honoured between two windows of the focused X
-application (the same process), and never while the session is locked. A
-window that is refused is still announced — it is in the layout, on the
+`_NET_ACTIVE_WINDOW` goes through the same three rules, and is never
+honoured while the session is locked. A window that is refused is still
+announced — it is in the layout, on the
 taskbar and in `scoot msg windows` — and a click, a keybinding, a taskbar's
 `activate` or IPC `focus-window-id` focuses it like any other window.
 
