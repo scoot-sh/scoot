@@ -1,12 +1,33 @@
 ---
 title: "smoke-test.sh's xwayland step keys on `Xwayland` in PATH, not on the build's `xwayland` feature"
-status: "open"
-area: "testing"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
 # Smoke xwayland step: gate on the build feature, not the binary
+
+**RESOLVED (2026-09-25) with XWayland Phases 2+3.** Both defects fixed in
+`scripts/smoke-test.sh`'s xwayland section:
+
+- **The feature gate.** The step no longer asks whether `Xwayland` is on
+  `PATH`; it waits for whichever of the three startup lines the binary under
+  test logs for `--xwayland` -- `XWayland is ready`, the no-feature warning
+  (`has no xwayland support`), or the spawn failure (`could not be
+  started`) -- and branches on that. A default build (cage's wrapper puts
+  `Xwayland` on `PATH`) now prints `skipped -- this build has no xwayland
+  feature` instead of waiting for a READY that cannot come; an `xwayland`
+  build that fails to start its server with the binary present is still a
+  `BUG`.
+- **The `--tty` seat.** Under `MODE=--tty` the section runs `--headless`
+  (the opt-in path is backend-agnostic) instead of launching a second
+  `--tty` compositor into the seat the main session holds.
+- With `READY` and `xeyes` on `PATH` the section now also spawns `xeyes`,
+  asserts it is listed (`app_id` `XEyes`) and closes it -- the Phase 2
+  mapping, end to end over IPC.
+
+The original report follows.
 
 Filed 2026-09-23 by the PR #223 review (pre-existing since `772dbc0`, PR
 #221). `scripts/smoke-test.sh` runs its `--xwayland` step whenever

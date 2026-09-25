@@ -660,12 +660,23 @@ where
                     .map(Elements::Surface),
                 );
             }
+            // An X window's `_NET_WM_WINDOW_OPACITY`, as Smithay's own
+            // square-path impl for `X11Surface` applies it; 1.0 for an xdg
+            // window (its opacity is `wp_alpha_modifier_v1`'s, applied inside
+            // the surface tree either way).
+            #[cfg(feature = "xwayland")]
+            let alpha = window
+                .x11_surface()
+                .and_then(smithay::xwayland::X11Surface::opacity)
+                .map_or(1.0, |opacity| opacity as f32 / u32::MAX as f32);
+            #[cfg(not(feature = "xwayland"))]
+            let alpha = 1.0;
             let main: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
                 renderer,
                 surface,
                 location,
                 scale,
-                1.0,
+                alpha,
                 Kind::Unspecified,
             );
             // What the client drew, not the slot: a short client's corners are

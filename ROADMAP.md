@@ -104,6 +104,30 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[XWayland Phases 2+3: X windows in the layout, behind a focus gate](docs/backlog/protocols/xwayland-support.md)**
+  (2026-09-25, PR #PRNUM) — with `--xwayland` in an `xwayland` build, X11
+  windows map as columns (`WM_CLASS` class as app id, `_NET_WM_NAME` title,
+  hints through the xdg clamp), float by the xdg rules (transients centred
+  on an X parent, non-normal types, modal, fixed size; `[[window_rule]]`
+  matches the class; a fitting `USPosition`/`PPosition` kept), go
+  fullscreen through `_NET_WM_STATE` both ways, get the ring and rounded
+  clip, and appear in `windows` and both toplevel lists; override-redirect
+  menus are drawn unmanaged above windows. The keyboard needed
+  `SeatHandler::KeyboardFocus` to become an enum first: XWayland ignores
+  `wl_keyboard.enter` for X focus (measured: `PointerRoot` before and
+  after), so only Smithay's `X11Surface` target routes keys. Focus gate: an
+  X window takes focus only with nothing focused or by redeeming its spawn's
+  token (`_NET_STARTUP_ID` via a new `DESKTOP_STARTUP_ID` export, or the
+  X-Resource pid of an unreaped spawned child); `_NET_ACTIVE_WINDOW` goes
+  through the same gate plus same-process, refused while locked. The lock
+  blanks and refuses X windows and menus (mutation-checked). Also resolved
+  the [WM-failure pin](docs/backlog/resolved/xwayland-phase1-wm-failure-pin-done.md)
+  (the rival recipe cannot work: XWayland admits no client before the WM)
+  and the [smoke feature-gate](docs/backlog/resolved/smoke-xwayland-step-feature-gate-done.md)
+  defects. Live on the dev VM under `--headless`, `--nested` and `--tty`
+  with xterm/xeyes/xclock/GTK4 zenity; default-build hot paths unchanged.
+  Ticket stays OPEN for clipboard/DnD/XIM and packaging.
+
 - **[Floating windows, PR 2 of 2: move and resize](docs/backlog/resolved/floating-windows-done.md)**
   (2026-09-25, PR #243) — `[floating] modifier` (Super) with the left button moves a
   floating window, with the right resizes it from the nearest edge or
@@ -557,7 +581,7 @@ each item's own file records why it landed when it did.
   lows fixed in-round (WM-failure `DISPLAY` withdrawal, emission guard).
   Ticket stays OPEN for mapping → focus gate → clipboard → capture.
   Remainder filed as [WM-failure
-  pin](./docs/backlog/protocols/xwayland-phase1-wm-failure-pin.md).
+  pin](./docs/backlog/resolved/xwayland-phase1-wm-failure-pin-done.md) (resolved with Phases 2+3).
 
 - **[XWayland Phase 0 spike](docs/backlog/protocols/xwayland-support.md)**
   (2026-09-22, PR #220, docs-only) — break-site inventory re-verified at

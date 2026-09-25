@@ -496,7 +496,7 @@ fn a_dead_server_is_loud_and_the_session_survives() {
 /// A window manager that cannot attach to a server that just became ready
 /// -- the server's end gone between `READY` and `start_wm` -- leaves the
 /// session Wayland-only with `DISPLAY` withdrawn: the WM-attach-failure arm
-/// (`xwayland-phase1-wm-failure-pin.md`).
+/// (`docs/backlog/resolved/xwayland-phase1-wm-failure-pin-done.md`).
 ///
 /// Not the ticket's recipe, which does not hold: it had a rival X client
 /// claim `SubstructureRedirect` on the root before the first dispatch, but

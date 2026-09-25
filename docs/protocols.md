@@ -45,14 +45,15 @@ read your files anyway.
 | `wp-presentation-time` | 2 | [Presentation feedback](#presentation-time-feedback-wp_presentation); `zero_copy` for a buffer scanned out directly. |
 | `wp-alpha-modifier-v1` | 1 | [Whole-surface opacity](#rendering-hints). |
 | `wp-content-type-v1` | 1 | Accepted, [no effect](#rendering-hints). |
-| `xwayland_shell_v1` | 1 | [XWayland, opt-in skeleton](#xwayland-opt-in-skeleton): X-window-to-surface association; no X window enters the layout yet. |
-| `zwp_xwayland_keyboard_grab_manager_v1` | 1 | [XWayland, opt-in skeleton](#xwayland-opt-in-skeleton): the grab manager exists; no grab is ever granted yet. |
+| `xwayland_shell_v1` | 1 | [XWayland (opt-in)](#xwayland-opt-in): pairs each X window with the surface XWayland draws it into; offered to XWayland's own client only. |
+| `zwp_xwayland_keyboard_grab_manager_v1` | 1 | [XWayland (opt-in)](#xwayland-opt-in): no grab is ever granted -- an X client's keyboard grab stays inside the X server. |
 
 **Not implemented:**
 
-- **XWayland window mapping.** The server half above is an opt-in skeleton
-  (`--xwayland`, needs an `xwayland` build): X11 clients connect and get a
-  `DISPLAY`, but their windows map nowhere yet. See below.
+- **XWayland clipboard, drag-and-drop and XIM.** X11 windows map, float,
+  go fullscreen and take the keyboard (see [XWayland](#xwayland-opt-in)),
+  but copying between an X app and a Wayland app, dragging between them,
+  and X input methods (XIM) are not bridged yet.
 
 The rest of this list *is* deliberate:
 
@@ -288,8 +289,9 @@ Best effort, not a guarantee of one outstanding configure: any other
 relayout meanwhile (the client's own resized frame, say) also sends the
 newest size. The edge not being dragged stays put whatever size the client settles
 on (a terminal rounding to whole cells, say). The drag's last configure
-drops `resizing` and keeps the size. X11 windows (the XWayland skeleton)
-stay refused: their `move_request`/`resize_request` start nothing.
+drops `resizing` and keeps the size. An X11 window's own titlebar drag
+(`_NET_WM_MOVERESIZE`) is not honoured yet; the modifier drag moves and
+resizes a floating X window like any other.
 
 ## Fullscreen
 
@@ -398,30 +400,107 @@ same for a fullscreen window in either layer:
 - **While focus is anywhere else** it is not in front: a column keeps its
   strip slot as usual, a floating fullscreen window is hidden.
 
-## XWayland (opt-in skeleton)
+## XWayland (opt-in)
 
 `--xwayland` (or `[xwayland] enabled` in the config file — either one turns
 it on) starts an XWayland server inside the session, and `DISPLAY` is
-exported to everything the session spawns. Off by default, and needs a
-build with the `xwayland` Cargo feature: without one the knob warns and
-the session runs Wayland-only, and a missing `Xwayland` binary at startup
-is the same shape (a loud log line, then a Wayland-only session — the
-session never fails to start over X).
-
-Phase-1 skeleton means exactly this: the server starts, X11 clients
-connect, and their windows map nowhere. No X window enters the layout,
-`scoot msg windows`, or either foreign-toplevel list; map and configure
-requests are refused (logged at `debug`), and no keyboard grab is ever
-granted. "Xwayland starts" is not "X apps work" — window mapping, the
-focus/activation gate, and clipboard/DnD/IME are later phases (see
-`docs/backlog/protocols/xwayland-support.md`, which stays open).
+exported to everything the session spawns, so X11-only applications run.
+Off by default, and needs a build with the `xwayland` Cargo feature:
+without one the knob warns and the session runs Wayland-only, and a missing
+`Xwayland` binary at startup is the same shape (a loud log line, then a
+Wayland-only session — the session never fails to start over X).
 
 **Trust model: running one X client extends full trust to it.** The
 same-uid boundary above bites harder here than anywhere else in this file:
 X11 clients can keylog and snoop on each other *by design* — no exploit,
-no bug, the protocol works that way. Starting the server is harmless on
-its own; connecting your first X client is the trust decision. Wayland
-clients stay isolated from each other as before.
+no bug, the protocol works that way. Any X client can read what is typed
+into another X client while one of them has the keyboard, capture any X
+window's contents, and synthesize input into them. Starting the server is
+harmless on its own; connecting your first X client is the trust decision.
+What X clients cannot do is reach past the X server: Wayland clients stay
+isolated from each other and from X clients as before, keystrokes go to an
+X window only while scoot has focused one (the X server's own input focus
+is set by scoot, never left to "whatever is under the pointer"), and the
+focus gate below keeps an X client from taking the keyboard off a Wayland
+window.
+
+### X windows in the layout
+
+- **A normal X window is a column**, placed by the layout like any other;
+  the position it asks for is ignored. Its app id is its `WM_CLASS`
+  *class* (the second string: `XTerm` for `xterm`, what `.desktop` files'
+  `StartupWMClass` names), falling back to the instance when a client sets
+  only that; its title is `_NET_WM_NAME`, falling back to `WM_NAME`. Both
+  follow the window as it changes them, into `scoot msg windows`, both
+  foreign-toplevel lists and the `[[window_rule]]` matchers.
+- **Dialogs float**, by the same rules as an xdg window
+  ([configuration.md](configuration.md#floating)): a transient
+  (`WM_TRANSIENT_FOR`), a window typed anything but
+  `_NET_WM_WINDOW_TYPE_NORMAL` (dialog, utility, splash, and the
+  menu/tooltip/notification types a client maps as managed windows),
+  `_NET_WM_STATE_MODAL`, or a fixed size (`WM_NORMAL_HINTS` minimum equal to
+  maximum). A transient is centred on its X parent; one naming no window
+  scoot manages (a group transient) still floats, centred on the screen. A
+  floating X window keeps the position it asked for (`USPosition` or
+  `PPosition`) when the whole window fits inside one output's usable area
+  there, and is centred otherwise. It is asked for the size it mapped at,
+  or a rule's `size`, and a later size request (`ConfigureRequest`) is
+  honoured as a floating resize, clamped like any. A tiled or fullscreen X
+  window's own size and position requests are answered with the geometry
+  the layout gave it.
+- **Fullscreen** is `_NET_WM_STATE_FULLSCREEN`, both ways: an X app's
+  fullscreen button (or the state set before it maps) is the window's own
+  request, like `xdg_toplevel.set_fullscreen`, and the property follows the
+  layout's answer — including when `Super+f`, a taskbar or IPC changed it.
+- **Menus, tooltips and drop-downs** (override-redirect windows) never
+  enter the layout: they are drawn where they put themselves, above every
+  window and below the `top` and `overlay` layers, and take the pointer
+  there. A click in one focuses nothing.
+- **Decorations.** X windows get the focus ring and rounded corners like any
+  window. Motif decoration hints are ignored: scoot draws no titlebar for a
+  client to opt out of. X has no equivalent of xdg's tiled states, and
+  scoot sets none (`_NET_WM_STATE_MAXIMIZED_*` would make clients change
+  their chrome for a state they are not in).
+- **Closing** (`close`, a taskbar's close) sends `WM_DELETE_WINDOW`; a
+  client that does not speak it has its window destroyed.
+- **The session lock** blanks X windows and their menus like every other
+  window and refuses them the keyboard and pointer; the X server itself
+  keeps running (lock is not logout).
+- **Not yet:** X clients draw at scale 1 (upscaled at a fractional
+  `[output] scale`), `_NET_WM_MOVERESIZE` (an X app's own titlebar drag) is
+  ignored, `_NET_WM_ICON` is not read, and clipboard, drag-and-drop and XIM
+  between X and Wayland are not bridged.
+
+### Focus: X windows ask, scoot decides
+
+X11 has no activation serials — nothing in an X client's request says which
+input event, if any, caused it. So an X window mapping, or an X client
+sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
+*request*, and it is honoured only when:
+
+1. **no window has focus**; or
+2. **scoot started it, and the start's activation token is still unspent.**
+   `State::spawn` hands every child a token (see
+   [focus handoff](#focus-handoff-xdg-activation-v1)); while XWayland is
+   live the child also gets it as `DESKTOP_STARTUP_ID`, which X toolkits
+   (GTK, Qt) set as `_NET_STARTUP_ID` on the windows they map. A client that
+   sets no startup id (`xterm`) is matched by process instead: the X server
+   reports each client's process id (the X-Resource extension, from the
+   socket's credentials — never the forgeable `_NET_WM_PID`), and a process
+   scoot spawned whose token is still live counts. A token is spent by the
+   first window it focuses and expires after 30 seconds.
+
+`_NET_ACTIVE_WINDOW` is also honoured between two windows of the focused X
+application (the same process), and never while the session is locked. A
+window that is refused is still announced — it is in the layout, on the
+taskbar and in `scoot msg windows` — and a click, a keybinding, a taskbar's
+`activate` or IPC `focus-window-id` focuses it like any other window.
+
+"The same process" is the boundary because it is the only one X11 has: two X
+clients cannot be told apart by anything they send, and inside the X server
+one can move the other's focus directly (`XSetInputFocus`) anyway. The gate
+is about the Wayland keyboard — which window scoot gives the keys to — and
+that is the one no X client can take by asking.
 
 ## Layer shell (bars, wallpapers, launchers)
 

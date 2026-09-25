@@ -338,3 +338,76 @@ compositor's production default is INFO, the handler refusals log at
 DEBUG); `/var/cargo-target` on the dev VM fills fast with per-flavour
 test binaries (freed 10.8 GiB with `cargo clean -p scoot` mid-branch —
 shared cache, every agent rebuilds only `scoot` itself afterwards).
+
+## PROGRESS — Phases 2 + 3 (mapping + focus gate) landed together; ticket stays OPEN for Phase 4+
+
+Shipped as one PR (2026-09-25, `xwayland-phase2-3`) because either half
+alone is unsafe or useless: mapping without the gate hands X clients the
+focus-steal hole, the gate without mapping has nothing to gate.
+
+**The keyboard needed a focus-type change first (measured, not assumed).**
+XWayland does not move the X server's input focus on `wl_keyboard.enter`:
+with the seat focused on an X window's `wl_surface`, `GetInputFocus` read
+`PointerRoot` (`0x1`) before and after and an injected key reached neither
+of two mapped X windows; only Smithay's `X11Surface` keyboard target
+(`SetInputFocus` + `WM_TAKE_FOCUS` per ICCCM input model) moved it
+(`0x400000`). `PointerRoot` sends keys to whatever X window is under the X
+pointer -- a keylogging hole the compositor would open. So
+`SeatHandler::KeyboardFocus` became `keyboard_focus::KeyboardFocus`
+(`Surface(WlSurface)` in every build, `X11 { window, surface }` under the
+feature; the X arm carries its surface so the pointer-focus conversion the
+popup grab needs stays total). Landed alone first, behaviour-neutral, all
+flavours green.
+
+**Phase 2 (`xwayland/manage.rs`, `unmanaged.rs`):** a map request is
+granted and the window enters the core (`WM_CLASS` class → app id,
+`_NET_WM_NAME`/`WM_NAME` → title, `WM_NORMAL_HINTS` → hints through the xdg
+clamp, `WM_TRANSIENT_FOR` → parent); it leaves on unmap/destroy (by X id --
+Smithay marks a destroyed surface dead before `destroyed_window`, so `==`
+never matches) and on the server's death (a sweep: a dead server sends no
+unmaps). Float policy updated for floating windows (#242/#243): transients,
+any non-`NORMAL` window type, `_NET_WM_STATE_MODAL` and fixed sizes float
+through `window_rules.rs`, centred on an X parent; rules match the class. A
+floating X window keeps a `USPosition`/`PPosition` that fits one output's
+usable area, else centres; later size requests are floating resizes; tiled
+windows' requests get Smithay's synthetic notify. `apply()` configures
+visible X windows at their placement (clamped to `INT16`/`CARD16`, and only
+when the rect changed) and keeps `_NET_WM_STATE_FULLSCREEN` in step both
+ways. Override-redirect windows are drawn unmanaged above windows (below
+top/overlay), hit-tested there, given frame callbacks and presentation
+feedback -- all behind the lock branches. `fullscreen_surface` now returns a
+`Cow`, so a fullscreen X window's surface is eligible for direct scanout and
+steering (rule 6 walks it like any root). No X "tiled" state is set;
+Motif hints are ignored (scoot draws no titlebar); X clients draw at scale 1.
+
+**Phase 3 (`xwayland/focus.rs`):** focus on map only if nothing is focused
+or the window redeems its spawn's activation token -- by `_NET_STARTUP_ID`
+(`State::spawn` now exports the token as `DESKTOP_STARTUP_ID` too while
+XWayland is live; this reverses Phase 1's documented "must not mint", which
+predated any X redemption path) or by its X-Resource client pid being an
+unreaped spawned child with a live token (covers `xterm`, which sets no
+startup id; `_NET_WM_PID` is never read). `_NET_ACTIVE_WINDOW` passes the
+same gate plus "the focused window is the same X process", refused while
+locked, cheap checks before any round trip, pid cached per window. An
+input-model-`None` window gets no keyboard; the focused X window is raised in
+X stacking; the keyboard-grab protocol stays refused. X input feeds idle and
+`interaction_serials` through the same paths as Wayland input.
+
+**Evidence** (details and raw logs in the PR): 29 live tests on `Harness`
+(mapping, lists, floating/centring, rules, position policy, override-
+redirect, fullscreen, close, ring/rounded clip, focus gate, typing, click,
+taskbar activate/close, lock blanking and input refusal, server death
+sweep, WM-attach failure); the gate and lock tests were run against
+mutations that disable each branch and fail at the intended assertion; live
+matrix on the dev VM under `--headless`, `--nested` (cage) and `--tty`
+(pixman) with `xterm`, `xeyes`, `xclock` and GTK4 `zenity` over
+`GDK_BACKEND=x11` (typing reached xterm, a background `xdotool
+windowactivate` was refused, a click focused it, the dialog floated
+centred); default-build hot paths unchanged within noise (key 2.00 vs 2.00
+µs, pointer 4.12-4.18 vs 4.16-4.35 µs, frames identical).
+
+What stays open here: **Phase 4** (clipboard/DnD bridge through the
+selection focus gate, XIM), **Phases 5–7** (capture pins, `vm/compositor-deps.nix`
++ session `PATH` packaging and a flake output for the feature). Smaller
+follow-ups noted in the code: `_NET_WM_MOVERESIZE` (client titlebar drags)
+not honoured, `_NET_WM_ICON` not read, X windows not scale-aware.

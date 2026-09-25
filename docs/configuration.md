@@ -34,7 +34,7 @@ duplicated here.
 | `--renderer pixman\|gles` | Which renderer composites each frame. Config-file form: `[renderer] backend`. See [tty.md](tty.md#which-renderer-draws-the-frames). |
 | `--gpu PATH` | Which DRM device `--tty` drives. Config-file form: `[tty] gpu`. Ignored with a warning outside `--tty`. See [tty.md](tty.md#which-drm-device---tty-drives). |
 | `--mode WxH` | Which connector mode `--tty` picks. Ignored with a warning outside `--tty`. |
-| `--xwayland` | Run an XWayland server inside the session, so X11-only applications get a `DISPLAY` to connect to. Config-file form: `[xwayland] enabled` (either one turns it on). Opt-in and off by default — the server costs a whole extra process (~55 MB RSS) plus a `Xwayland` binary on `PATH`, and any X client can keylog/snoop by design (see [protocols.md](protocols.md#xwayland-opt-in-skeleton)). Needs an `xwayland` build; without one it warns and the session runs Wayland-only. Phase-1 skeleton: the server starts and `DISPLAY` is exported, but no X window enters the layout yet. |
+| `--xwayland` | Run an XWayland server inside the session, so X11-only applications get a `DISPLAY` to connect to. Config-file form: `[xwayland] enabled` (either one turns it on). Opt-in and off by default — the server costs a whole extra process (~55 MB RSS) plus a `Xwayland` binary on `PATH`, and any X client can keylog/snoop by design (see [protocols.md](protocols.md#xwayland-opt-in)). Needs an `xwayland` build; without one it warns and the session runs Wayland-only. X windows map into the layout like any other (dialogs float, `[[window_rule]]`s match their `WM_CLASS` class), and take focus by themselves only when nothing is focused or scoot started them. |
 | `--socket PATH` | Where the IPC control socket lives, overriding `$SCOOT_SOCKET` and the default `$XDG_RUNTIME_DIR/scoot.sock`. See [ipc.md](ipc.md#the-socket). |
 | `--config PATH` | Load this TOML file instead of searching the default paths. |
 | `-- COMMAND...` | Spawn this command once the session is up, after `[autostart]` entries (see [Starting a session](#starting-a-session)). |
@@ -459,7 +459,7 @@ pure white *is* exactly representable.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `enabled` | boolean | `false` | Whether to run an XWayland server inside the session, so X11-only applications get a `DISPLAY` to connect to — the config-file form of `--xwayland`, and either one turns it on (a flag can only say yes, so the two are OR-ed). Off unless asked: the server is a whole extra process (~55 MB RSS) plus a hard `PATH` dependency on the `Xwayland` binary, and any X client can keylog/snoop by design (see [protocols.md](protocols.md#xwayland-opt-in-skeleton)). Needs an `xwayland` Cargo-feature build; without one the knob parses but warns and the session runs Wayland-only. A missing binary at startup is the same shape: a loud log line, then a Wayland-only session, never a crash. Takes effect on restart — a reload refuses changes with a message naming that. Phase-1 skeleton: the server starts and `DISPLAY` is exported to spawned children (add it to the `dbus-update-activation-environment` line in your session script alongside `WAYLAND_DISPLAY` if anything D-Bus activated needs X), but no X window enters the layout yet — X clients connect and map nowhere. |
+| `enabled` | boolean | `false` | Whether to run an XWayland server inside the session, so X11-only applications get a `DISPLAY` to connect to — the config-file form of `--xwayland`, and either one turns it on (a flag can only say yes, so the two are OR-ed). Off unless asked: the server is a whole extra process (~55 MB RSS) plus a hard `PATH` dependency on the `Xwayland` binary, and any X client can keylog/snoop by design (see [protocols.md](protocols.md#xwayland-opt-in)). Needs an `xwayland` Cargo-feature build; without one the knob parses but warns and the session runs Wayland-only. A missing binary at startup is the same shape: a loud log line, then a Wayland-only session, never a crash. Takes effect on restart — a reload refuses changes with a message naming that. `DISPLAY` is exported to spawned children (add it to the `dbus-update-activation-environment` line in your session script alongside `WAYLAND_DISPLAY` if anything D-Bus activated needs X), and so is each child's activation token as `DESKTOP_STARTUP_ID`, which is how an X app scoot started takes focus when it maps. X windows are columns (their own position ignored), dialogs and transients float, and `[[window_rule]]` `match_app_id` matches an X window's `WM_CLASS` class — see [protocols.md](protocols.md#xwayland-opt-in) for the whole policy and the trust model. Clipboard, drag-and-drop and XIM between X and Wayland apps are not bridged yet. |
 
 ## `[binds]`
 
@@ -677,7 +677,7 @@ Each rule is its own `[[window_rule]]` table; repeat the header for more.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `match_app_id` | string (glob) | Matches the window's app id. |
+| `match_app_id` | string (glob) | Matches the window's app id -- for an X11 window (under [`--xwayland`](#xwayland)), its `WM_CLASS` class: `XTerm` for `xterm`, `Gimp` for GIMP. |
 | `match_title` | string (glob) | Matches the window's title. |
 | `float` | bool | `true` floats a matching window when it maps; `false` keeps it in the strip even if `[floating] auto` would float it. |
 | `size` | `[width, height]`, logical px | The size to ask a floating window for when it maps (each axis `1..=65535`, clamped to the output's usable area). No effect on a window that tiles. |
@@ -705,6 +705,11 @@ float = true
 match_title = "*Picture-in-Picture*"
 float = true
 size = [640, 360]
+
+# An X11 app (under --xwayland), matched by its WM_CLASS class:
+[[window_rule]]
+match_app_id = "XCalc"
+float = true
 
 # A dialog you would rather have as a column:
 [[window_rule]]

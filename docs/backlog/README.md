@@ -716,7 +716,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Reactive popup re-constraining](./core/popup-reactive-reconstrain.md) — low: a `reactive` popup is not re-fitted when its window scrolls or an output changes while it is open.
 - [Output membership read from geometry](./core/output-membership-by-geometry.md) — low: frame callbacks, `wl_surface.enter` and foreign-toplevel `output_of_window` still use bbox overlap.
 - [Frame learning never flushes its own relayout](./core/frame-learning-apply-flush.md) — low: learned minimum waits for the next event.
-- [Smoke xwayland step keys on PATH, not the build feature](./testing/smoke-xwayland-step-feature-gate.md) — medium: nested smoke in cage hangs then fails on any default build; pre-existing since PR #221.
+- [Smoke xwayland step keys on PATH, not the build feature](./resolved/smoke-xwayland-step-feature-gate-done.md) — RESOLVED 2026-09-25 (with XWayland Phases 2+3): the step branches on what the binary logs for `--xwayland` (READY / no-feature warning / spawn failure), runs `--headless` under `MODE=--tty`, and maps and closes an `xeyes` when one is on `PATH`.
 
 ### Found implementing the popup depth bound (2026-09-23)
 - [Deeply nested subsurfaces overflow the stack](./resolved/subsurface-depth-bound-done.md) — RESOLVED 2026-09-23 (PR #227): no surface is ever more than 64 subsurface levels below its tree's root. Checked in a `dispatch.rs` guard before Smithay links the surfaces or runs its recursive `is_ancestor`, against the new parent's depth *plus the height of the subtree being attached* (a per-surface bound, never lowered), since a subsurface can be re-attached after `wl_subsurface.destroy` or its parent's destruction and a role-less surface can be given children first. Refused as `wl_subcompositor.bad_parent`.
@@ -750,13 +750,16 @@ scale/mode) into one hardware session.
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland support](./protocols/xwayland-support.md)
-  — OPEN, low: spike (PR #220) + skeleton (PR #221) landed; remaining core
-  mapping → focus-gate security half → clipboard/DnD → capture/packaging/
-  docs. No Smithay bump needed (pinned 0.7.0 carries `xwayland/`). Opt-in
-  flag recommended; X11 trust consequences documented, not waived.
-  Review remainder filed as [WM-failure
-  pin](./protocols/xwayland-phase1-wm-failure-pin.md) (deterministic rival-
-  claimant test recipe for the `xdisplay` clear).
+  — OPEN, low: spike (PR #220), skeleton (PR #221) and mapping + focus gate
+  (Phases 2+3, 2026-09-25) landed: X windows tile, dialogs float, rules
+  match `WM_CLASS`, fullscreen both ways, override-redirect menus drawn
+  unmanaged; an X window takes focus only when nothing is focused or it
+  redeems its spawn's token (`_NET_STARTUP_ID` or X-Resource pid), and
+  `_NET_ACTIVE_WINDOW` goes through the same gate. Remaining: clipboard/DnD/
+  XIM (Phase 4) → capture pins/packaging (5–7). The [WM-failure
+  pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its
+  rival-claimant recipe cannot work: XWayland admits no X client before the
+  WM attaches).
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes
