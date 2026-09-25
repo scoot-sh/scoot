@@ -28,7 +28,10 @@
 //!
 //! Parked fds are counted by name: each test sends copies of one memfd whose
 //! name no other test uses, so the count is exact while other tests in the
-//! same `cargo test` process open and close fds of their own.
+//! same `cargo test` process open and close fds of their own. Every test here
+//! holds up to ~170 fds at once, more than the neighbour slack the fd floods
+//! budget for, so each takes the flood lock (`dispatch/tests.rs`) rather than
+//! risk a truncated receive here or an exhausted table there.
 //!
 //! [`State`]: crate::compositor::State
 
@@ -224,6 +227,7 @@ fn send_with_fds(stream: &UnixStream, bytes: &[u8], fds: &[RawFd]) {
 /// 0.3.17 all 140 stay parked and the client stays connected.
 #[test]
 fn fds_parked_on_fd_less_requests_disconnect_the_client_and_close() {
+    let _flood = hold_flood_lock();
     let mut rig = Rig::new("scoot-fdq-attack");
     rig.park(140);
     rig.dispatch();
@@ -237,6 +241,7 @@ fn fds_parked_on_fd_less_requests_disconnect_the_client_and_close() {
 /// is what lets `fd_pressure.rs` add the bound as a term.
 #[test]
 fn the_bound_is_exactly_the_one_the_reserve_arithmetic_adds() {
+    let _flood = hold_flood_lock();
     let bound = BACKEND_QUEUED_FDS as usize;
     let mut rig = Rig::new("scoot-fdq-bound");
     rig.park(bound);
@@ -264,6 +269,7 @@ fn the_bound_is_exactly_the_one_the_reserve_arithmetic_adds() {
 /// the client at the bound or under it, never past it.
 #[test]
 fn one_read_adds_at_most_one_receive_buffer_of_fds() {
+    let _flood = hold_flood_lock();
     let bound = BACKEND_QUEUED_FDS as usize;
     let read = BACKEND_READ_FDS as usize;
     let mut rig = Rig::new("scoot-fdq-read");
