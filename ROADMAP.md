@@ -118,10 +118,11 @@ each item's own file records why it landed when it did.
   X drags now need a recent press on a window of the dragging client --
   any X client could hijack any held press, a Wayland one included, since
   Phase 1 (fail-first); presses on X windows stay open to a stranger naming
-  the pressed window (X11 limit, pinned). Eleven measured XWM bugs and hooks went into the
-  scoot-sh Smithay fork (`53aafc36`, `docs/forks.md`; four from review:
+  the pressed window (X11 limit, pinned). Thirteen measured XWM bugs and hooks went into the
+  scoot-sh Smithay fork (`5b575329`, `docs/forks.md`; six from two review rounds:
   a forgeable owner check, unbounded memory and fds, a bound exhausted for
-  good by stalled pastes): 64 KiB truncation
+  good by stalled or trickling pastes, orphaned transfers waiting on an
+  unrelated event): 64 KiB truncation
   both ways, unbounded buffering behind a stuck X reader, unbounded pastes
   behind a silent owner, an unsent ownership change, and the owner/drag
   hooks. X → Wayland drags work live; drops onto X windows do not (filed,

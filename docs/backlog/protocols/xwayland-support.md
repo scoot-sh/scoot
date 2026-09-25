@@ -581,7 +581,30 @@ with the reviewer's probes (`~/review246/`, baseline outputs
   draws, checked against its source; the review's "stricter than sway" was
   not right for wlroots).
 
-**Evidence**: `tests/clipboard.rs` (23, including a stuck reader on each
+**Review round 2 (same PR), two blocking findings, one should-fix and a
+flaky test, each reproduced first (reviewer probe `probe6.sh`, before at
+`cfe5525`: `~/evidence/xw4/review2/baseline-cfe5525-probe6.txt`):**
+
+- **The sweep ran only on the next selection event.** An owner killed
+  mid-transfer (probe H) left the reader waiting 40 s+, until an unrelated
+  copy; closing an X app mid-paste does that with no attacker. Fork
+  `0d553527` sweeps on a timer while transfers are in flight, and treats a
+  transfer as orphaned by ownership count, so the paste ends about a second
+  after it stalls; unanswered conversions now also check their reader.
+- **One owner could hold every incoming slot by trickling** a byte per
+  chunk (probe G: a different owner's paste empty for 35 s+). Fork
+  `5b575329` gives each owner X client 4 of the 8. Remaining limit: an app
+  can trickle its own share indefinitely, and one with two X connections
+  gets two shares.
+- **`an_owner_appending_without_waiting_is_read_once` was flaky under
+  `cargo test`** (1 in 5): its prefix assertion was wrong -- appends landing
+  between the window manager's last read and its delete are lost, as they
+  should be for an owner breaking ICCCM. It now checks what matters: whole
+  chunks, each at most once, in order.
+- Nit: the outgoing per-client count, like the incoming one, can be moved
+  onto another client's share by naming its window; documented.
+
+**Evidence**: `tests/clipboard.rs` (26, including a stuck reader on each
 side, the owner-borrowing hijack, appends without waiting, a single huge
 property, the outgoing and stalled-paste bounds, a moving paste surviving an
 owner change and the idle timeout), `tests/dnd.rs` (4, one pinning the

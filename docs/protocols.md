@@ -571,14 +571,21 @@ chunks for a Wayland source feeding an X reader) however large the
 selection, and a slow or stuck reader on either side stops the transfer, not
 the compositor. The property itself lives in XWayland's memory, not the
 compositor's. How many can be in flight is bounded too: per selection, 8
-pastes waiting on their X owner and 8 under way, and 4 transfers out to any
-one X client with 16 in all. **A paste past a bound is refused -- it reads
-nothing, at once -- not queued.** Transfers that will not finish are ended:
-one whose reader has gone, one that has not moved for 30 seconds, and, when
-the selection changes hands, a paste still waiting on the old owner's answer
-or stalled for over a second waiting on its next chunk. A paste that is
-moving is left to finish across a change of owner, since ending it would
-hand its reader part of the selection as if it were all of it.
+pastes waiting on their X owner and 8 under way -- no more than 4 of those
+from one X app, so an app trickling its data a byte at a time cannot keep a
+different app's paste out -- and 4 transfers out to any one X client with
+16 in all. (The per-app counts go by X window ids, and an app can name
+another app's window; that moves whose share it uses, and the totals still
+hold.) **A paste past a bound is refused -- it reads nothing, at once --
+not queued.** Transfers that will not finish are ended, checked every
+second while any are in flight: one whose reader has gone, one that has not
+moved for 30 seconds, and, once the selection has changed hands or its X
+app has quit, a paste still waiting on the old owner's answer or stalled
+for over a second waiting on its next chunk -- so closing an X app
+mid-paste ends the paste within a couple of seconds. A paste that is moving
+is left to finish across a change of owner, since ending it would hand its
+reader part of the selection as if it were all of it. One app can still
+trickle its own share indefinitely; that costs it, not the compositor.
 
 **Only while an X window has the keyboard.** A Wayland client may set a
 selection only while it holds the keyboard, and only the focused client is

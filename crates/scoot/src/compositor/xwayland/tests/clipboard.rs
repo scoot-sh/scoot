@@ -12,7 +12,10 @@ use scoot_core::{Action, WindowId};
 use super::live::{Live, RED, live};
 use super::peer::{Ack, ClipStep, Step, Which};
 use super::x11::{Props, eventually};
-use super::xsel::{DataManner, Owner, OwnerManner, Pace, Read, Reader, flood, patterned};
+use super::xsel::{
+    DataManner, OWNER_CHUNK, Owner, OwnerManner, Pace, Read, Reader, flood, indexed_chunks,
+    patterned,
+};
 use crate::compositor::keyboard_focus::KeyboardFocus;
 
 /// The X target and the Wayland mime type Smithay maps it to.
@@ -755,7 +758,7 @@ fn an_owner_appending_without_waiting_is_read_once() {
     else {
         return;
     };
-    let payload = patterned(4 * 1024 * 1024);
+    let payload = indexed_chunks(64);
     let _owner = Owner::start(
         live.display,
         "CLIPBOARD",
@@ -786,17 +789,36 @@ fn an_owner_appending_without_waiting_is_read_once() {
         Ack::Bytes(Ok(got)) => got,
         other => panic!("the stalled read never ended: {other:?}"),
     };
-    assert!(
-        got.len() <= payload.len(),
-        "the reader got {} bytes of a {}-byte payload: bytes were read more than once",
-        got.len(),
-        payload.len()
-    );
-    assert!(
-        got[..] == payload[..got.len()],
-        "the reader's bytes are not the owner's, in order"
-    );
+    // The owner broke ICCCM, so how much arrives depends on timing: anything
+    // it appended between the window manager's last read of a property and
+    // its delete is gone. What must hold regardless: whole chunks of the
+    // owner's, each at most once, in the owner's order.
     assert!(!got.is_empty(), "nothing of the appends reached the reader");
+    assert_eq!(
+        got.len() % OWNER_CHUNK,
+        0,
+        "the reader got a part of a chunk ({} bytes)",
+        got.len()
+    );
+    let mut last = None;
+    for piece in got.chunks(OWNER_CHUNK) {
+        let index = u64::from_le_bytes(piece[..8].try_into().expect("eight bytes"));
+        let index = usize::try_from(index).expect("a chunk index");
+        assert!(
+            index < payload.len() / OWNER_CHUNK,
+            "a chunk the owner never sent: {index}"
+        );
+        assert_eq!(
+            piece,
+            &payload[index * OWNER_CHUNK..(index + 1) * OWNER_CHUNK],
+            "chunk {index} arrived altered"
+        );
+        assert!(
+            last.is_none_or(|last| index > last),
+            "chunk {index} arrived after chunk {last:?}: repeated or out of order"
+        );
+        last = Some(index);
+    }
 }
 
 /// An owner answering with a single property far larger than one read --
@@ -877,28 +899,28 @@ fn stalled_pastes_do_not_hold_the_bound_for_good() {
     );
     live.drain();
     focus(&mut live, wayland);
-    for _ in 0..8 {
+    // One owner holds at most its share (4) of the transfers under way; a
+    // paste past it reads nothing at once -- refused, not queued.
+    for _ in 0..5 {
         receive_later(&mut live);
     }
     live.drain();
     let ends = ended(&mut live);
-    assert!(ends.iter().all(|&(ended, _)| !ended), "{ends:?}");
-    receive_later(&mut live);
-    live.drain();
+    assert!(ends[..4].iter().all(|&(ended, _)| !ended), "{ends:?}");
     assert_eq!(
-        ended(&mut live)[8],
+        ends[4],
         (true, 0),
-        "a ninth paste past the bound should read nothing at once"
+        "a paste past the owner's share should read nothing at once"
     );
-    // The eight readers go away; their slots come back.
+    // The readers go away; their slots come back.
     assert!(matches!(clip(&mut live, ClipStep::DropLater), Ack::Done));
     receive_later(&mut live);
     live.drain();
     assert!(
-        !ended(&mut live)[9].0,
+        !ended(&mut live)[5].0,
         "the bound was still full of transfers whose readers had gone"
     );
-    // A new owner ends the paste still stalled on the old one...
+    // A new owner: the paste still stalled on the old one is ended...
     outlast_the_owner_change_grace(&mut live);
     focus(&mut live, x);
     let payload = patterned(100);
@@ -911,7 +933,7 @@ fn stalled_pastes_do_not_hold_the_bound_for_good() {
     );
     live.drain();
     assert!(
-        ended(&mut live)[9].0,
+        ended(&mut live)[5].0,
         "a paste stalled on the previous owner outlived the change of owner"
     );
     // ... and pasting works.
@@ -999,4 +1021,143 @@ fn an_idle_transfer_is_dropped_after_the_timeout() {
     let ends = ended(&mut live);
     assert!(ends[0].0, "an idle transfer outlived the timeout: {ends:?}");
     assert!(!ends[1].0, "the fresh transfer was dropped too: {ends:?}");
+}
+
+/// Waits, pumping the compositor but causing no selection event of any
+/// kind, until the `index`th later read has ended -- or fails after `bound`.
+fn ends_on_its_own(live: &mut Live, index: usize, bound: std::time::Duration, what: &str) {
+    let deadline = std::time::Instant::now() + bound;
+    loop {
+        live.fixture.tick(std::time::Duration::from_millis(100));
+        if ended(live)[index].0 {
+            return;
+        }
+        assert!(std::time::Instant::now() < deadline, "{what}");
+    }
+}
+
+/// An X app closed mid-paste: the owner dies while its transfer is still
+/// moving, and nothing else happens on any selection. The Wayland paste
+/// still ends, within a couple of seconds -- not whenever some unrelated
+/// copy next arrives.
+#[test]
+fn a_paste_whose_owner_dies_mid_transfer_ends_by_itself() {
+    let Some((mut live, _, wayland)) =
+        clipboard("a_paste_whose_owner_dies_mid_transfer_ends_by_itself")
+    else {
+        return;
+    };
+    let owner = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        patterned(1024 * 1024),
+        OwnerManner {
+            data: DataManner::Trickle(std::time::Duration::from_millis(200)),
+            ..OwnerManner::default()
+        },
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    receive_later(&mut live);
+    live.fixture.tick(std::time::Duration::from_millis(1000));
+    assert!(owner.sent() > 0, "the trickle never started");
+    assert!(
+        !ended(&mut live)[0].0,
+        "the paste ended while its owner lived"
+    );
+    drop(owner);
+    ends_on_its_own(
+        &mut live,
+        0,
+        std::time::Duration::from_secs(5),
+        "a paste whose owner died was still waiting 5 s later",
+    );
+}
+
+/// A paste still waiting for its owner's answer whose reader leaves frees
+/// its slot by itself -- no further selection event needed.
+#[test]
+fn an_unanswered_paste_whose_reader_left_frees_its_slot() {
+    let Some((mut live, _, wayland)) =
+        clipboard("an_unanswered_paste_whose_reader_left_frees_its_slot")
+    else {
+        return;
+    };
+    let _silent = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        patterned(64),
+        OwnerManner {
+            answers_data: false,
+            ..OwnerManner::default()
+        },
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    for _ in 0..8 {
+        receive_later(&mut live);
+    }
+    live.drain();
+    assert!(ended(&mut live).iter().all(|&(ended, _)| !ended));
+    assert!(matches!(clip(&mut live, ClipStep::DropLater), Ack::Done));
+    // The sweep runs every second while anything is in flight.
+    live.fixture.tick(std::time::Duration::from_millis(2500));
+    receive_later(&mut live);
+    live.drain();
+    assert!(
+        !ended(&mut live)[8].0,
+        "a paste was refused: the slots of readers that left were never freed"
+    );
+}
+
+/// One owner trickling its data -- a byte per chunk, progress enough never
+/// to time out -- can hold only its share of the transfers under way, so a
+/// different owner's paste still works.
+#[test]
+fn a_trickling_owner_cannot_keep_another_owners_paste_out() {
+    let Some((mut live, x, wayland)) =
+        clipboard("a_trickling_owner_cannot_keep_another_owners_paste_out")
+    else {
+        return;
+    };
+    let trickler = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        patterned(1024 * 1024),
+        OwnerManner {
+            data: DataManner::Trickle(std::time::Duration::from_millis(300)),
+            ..OwnerManner::default()
+        },
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    for _ in 0..8 {
+        receive_later(&mut live);
+    }
+    live.drain();
+    let under_way = ended(&mut live)
+        .iter()
+        .filter(|&&(ended, _)| !ended)
+        .count();
+    assert_eq!(under_way, 4, "one owner holds more than its share");
+    focus(&mut live, x);
+    let payload = patterned(100);
+    let _other = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        payload.clone(),
+        OwnerManner::default(),
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    assert_eq!(
+        receive(&mut live, Which::Clipboard).as_deref(),
+        Ok(payload.as_slice()),
+        "a different owner's paste was kept out by a trickling one"
+    );
+    assert!(trickler.sent() > 0);
 }

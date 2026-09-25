@@ -116,6 +116,9 @@ pub(super) enum DataManner {
     /// Announce `INCR`, and on the first delete append the whole payload in
     /// chunks without waiting for any further delete.
     AppendWithoutWaiting,
+    /// Announce `INCR`, then answer each delete with a single byte, this
+    /// long after it -- forever: progress enough never to look idle.
+    Trickle(Duration),
 }
 
 impl Default for OwnerManner {
@@ -224,6 +227,8 @@ struct Outgoing {
     property: Atom,
     sent: usize,
     finished: bool,
+    /// A trickled byte due at this moment.
+    due: Option<Instant>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -287,6 +292,25 @@ fn serve(
     // property, and the bridge uses a fresh window per transfer.
     let mut outgoing: HashMap<Window, Outgoing> = HashMap::new();
     while !stop.load(Ordering::Acquire) {
+        if let DataManner::Trickle(_) = manner.data {
+            let now = Instant::now();
+            for (requestor, transfer) in &mut outgoing {
+                if transfer.due.is_some_and(|due| due <= now) {
+                    transfer.due = None;
+                    x.conn
+                        .change_property8(
+                            PropMode::REPLACE,
+                            *requestor,
+                            transfer.property,
+                            target_atom,
+                            b"x",
+                        )
+                        .map_err(|e| e.to_string())?;
+                    x.conn.flush().map_err(|e| e.to_string())?;
+                    sent.fetch_add(1, Ordering::AcqRel);
+                }
+            }
+        }
         let Some(event) = x.conn.poll_for_event().map_err(|e| e.to_string())? else {
             std::thread::sleep(Duration::from_millis(1));
             continue;
@@ -373,6 +397,7 @@ fn serve(
                                 property,
                                 sent: 0,
                                 finished: false,
+                                due: None,
                             },
                         );
                     }
@@ -411,6 +436,10 @@ fn serve(
                 }
                 match manner.data {
                     DataManner::StallAfterIncr => continue,
+                    DataManner::Trickle(interval) => {
+                        transfer.due = Some(Instant::now() + interval);
+                        continue;
+                    }
                     DataManner::AppendWithoutWaiting => {
                         for piece in payload.chunks(CHUNK) {
                             x.conn
@@ -712,3 +741,16 @@ pub(super) fn flood<S, A>(
     let _ = thread.join();
     counts
 }
+
+/// A payload of `chunks` whole `INCR` chunks, each starting with its own
+/// index, so the chunks a reader got can be told apart and put in order.
+pub(super) fn indexed_chunks(chunks: usize) -> Arc<Vec<u8>> {
+    let mut payload = patterned(chunks * CHUNK).to_vec();
+    for (index, chunk) in payload.chunks_mut(CHUNK).enumerate() {
+        chunk[..8].copy_from_slice(&(index as u64).to_le_bytes());
+    }
+    Arc::new(payload)
+}
+
+/// The `INCR` chunk size an [`Owner`] sends in.
+pub(super) const OWNER_CHUNK: usize = CHUNK;

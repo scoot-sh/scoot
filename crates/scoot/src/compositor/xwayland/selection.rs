@@ -75,18 +75,25 @@
 //! nothing to close it.
 //!
 //! What happens to transfers in flight when the selection changes hands
-//! (every ownership change, including an owner re-claiming it or the window
-//! manager taking it for a Wayland selection): a paste still waiting for the
-//! owner's answer is ended -- its reader reads nothing; one stalled waiting
-//! on the previous owner for its next chunk, idle for over a second, is
-//! ended too; one that is moving is left to finish, since ending it would
-//! hand its reader part of the selection as if it were all of it. The
-//! window manager also ends a transfer whose reader has gone, or that has
-//! not moved for 30 seconds, and caps what is in flight: at most 8 pastes of
-//! one selection waiting on their owner and 8 under way (a paste past that
-//! reads nothing at once -- it is refused, not queued), and at most 4
-//! transfers out to one X client and 16 in all. Each transfer buffers at
-//! most one 64 KiB slice (two for a Wayland source feeding an X reader),
+//! (every ownership change, including an owner re-claiming it, the window
+//! manager taking it for a Wayland selection, or the owner quitting): a
+//! paste still waiting for the owner's answer is ended -- its reader reads
+//! nothing; one answered by a previous owner and waiting on it for a chunk
+//! is ended once it has been idle for over a second; one that is moving is
+//! left to finish, since ending it would hand its reader part of the
+//! selection as if it were all of it. The window manager also ends a
+//! transfer whose reader has gone, or that has not moved for 30 seconds --
+//! checked by a timer every second while any transfer is in flight, so a
+//! paste orphaned by an X app quitting ends by itself. It caps what is in
+//! flight: at most 8 pastes of one selection waiting on their owner and 8
+//! under way, no more than 4 of those from one owner X client (so an owner
+//! trickling a byte per chunk -- progress enough never to time out -- cannot
+//! keep a different owner out), and at most 4 transfers out to one X client
+//! and 16 in all. A paste past a cap reads nothing at once: it is refused,
+//! not queued. X clients are counted by the client bits of a window id,
+//! which a client can borrow by naming another client's window; that moves
+//! whose share it spends, and the totals still hold. Each transfer buffers
+//! at most one 64 KiB slice (two for a Wayland source feeding an X reader),
 //! however large the selection.
 //!
 //! One more window, not a way around the gate: the ownership count is read
