@@ -19,11 +19,13 @@ scoot has not cut a numbered release yet; entries are dated.
   new app and `scootctl`. scoot now disconnects an app that leaves more
   than 128 unused, and everything else keeps working. Apps built on
   libwayland (GTK, Qt, foot, Firefox, mpv and nearly everything else) never
-  come near it. **For developers of Rust Wayland clients:** an app on the
-  Rust `wayland-client` that queues more than 140 requests carrying file
-  descriptors (shm pools, dma-buf planes, timelines, gamma ramps) between
-  two flushes is now disconnected; flush at least every 140. Nothing to
-  configure. Details: [protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps).
+  come near it, and neither do Rust apps built on winit (it uses
+  libwayland underneath). **For developers of Rust Wayland clients using
+  `wayland-client`'s pure-Rust backend** (the default without its `system`
+  feature, as in Smithay's client toolkit): an app that queues more than
+  140 requests carrying file descriptors (shm pools, dma-buf planes,
+  timelines, gamma ramps) between two flushes is now disconnected; flush at
+  least every 140. Nothing to configure. Details: [protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps).
 
 ### 2026-09-24 — rounded corners and the focus ring now match the window
 

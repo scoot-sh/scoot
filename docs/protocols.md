@@ -113,11 +113,13 @@ buffer it is, from the moment the plane is added.
   `wl_display.error` `invalid_method` ("too many file descriptors
   queued"), and the fds are closed. The count includes fds sent ahead of
   the requests that will use them. A libwayland client sends each fd with
-  its request and never comes near it. A client on the Rust
-  `wayland-client` sends a flush's fds ahead of its requests (all but the
-  last 28), so one that queues **more than 140** fd-carrying requests
-  (pools, planes, timelines, gamma ramps) between flushes is disconnected:
-  flush at least every 140. This limit lives in scoot's fork of
+  its request and never comes near it; so does a Rust client on
+  `wayland-client`'s `system` (libwayland) backend, which winit and anything
+  rendering with GL or Vulkan use. A client on `wayland-client`'s pure-Rust
+  backend (its default, and Smithay's client toolkit's) sends a flush's fds
+  ahead of its requests (all but the last 28), so one that queues **more
+  than 140** fd-carrying requests (pools, planes, timelines, gamma ramps)
+  between flushes is disconnected: flush at least every 140. This limit lives in scoot's fork of
   wayland-backend ([forks.md](forks.md)).
 - **Object limits on top**, unchanged: 512 live `wl_buffer`s, 128 live
   `wl_shm_pool`s, 32 planes added to params objects not yet made into a

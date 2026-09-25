@@ -118,9 +118,9 @@ each item's own file records why it landed when it did.
   GPU tier. Dev VM: the PR #236 probe went from 999 fds and shed
   newcomers to the attacker disconnected at 140 parked, 18 fds,
   `wayland-info` and `scootctl` served; real clients unchanged. One cost to
-  legitimate clients, measured and documented: a Rust `wayland-client`
-  that queues more than 140 fd-carrying requests between flushes is now
-  disconnected (one scoot test did; it now flushes every 64). Left open:
+  legitimate clients, measured and documented: a client on
+  `wayland-client`'s pure-Rust backend that queues more than 140
+  fd-carrying requests between flushes is now disconnected (one scoot test did; it now flushes every 64). Left open:
   the software-GLES drain window can put one connection past the line (and,
   for one instant, the table), and seven idle connections parking 128 each
   reach the line with nobody killed, recorded on

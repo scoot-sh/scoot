@@ -132,10 +132,10 @@
 //!   moment, the figures above (`docs/backlog/resolved/wayland-backend-fd-queue-done.md`).
 //!   The check runs before each read, so fds whose requests are still in
 //!   flight are counted: a libwayland client sends each fd with its request
-//!   and never comes near it, but a Rust `wayland-client` client sends every
-//!   fd past the last 28 of a flush ahead of the requests, and one flush of
-//!   more than 140 fd-carrying requests is disconnected (pinned both ways in
-//!   `tests/backend_queue.rs`).
+//!   and never comes near it, but a client on `wayland-client`'s pure-Rust
+//!   backend sends every fd past the last 28 of a flush ahead of the
+//!   requests, and one flush of more than 140 fd-carrying requests is
+//!   disconnected (pinned both ways in `tests/backend_queue.rs`).
 //! - **Outgoing fds**: an event carrying an fd (a keymap, a dma-buf format
 //!   table, a selection `send`) is written into the client's outgoing buffer
 //!   with a duplicate of the fd, which closes once the buffer is flushed to
@@ -195,9 +195,11 @@
 //! The wayland-backend queue bound makes that cheaper still, while making
 //! the single-connection case impossible: fds parked there need no object at
 //! all, and the grace never sees them, so each idle connection can hold 129
-//! (128 parked and its socket). Seven reach the line on the default tier
-//! (7 x 129 + 14 = 917) and eight pass the 1024 table (1046). Before the
-//! bound, one connection could do either. That residual, and what it costs
+//! (128 parked and its socket). Measured on the default tier (headless
+//! pixman, idle at 18): six such connections held 792 fds with everyone
+//! served, seven 921, past the line (newcomers shed, `scootctl` refused),
+//! and eight filled the 1024 table. Before the bound, one connection could
+//! do either. That residual, and what it costs
 //! `scootctl`, is `docs/backlog/core/pressure-many-light-connections.md`.
 //!
 //! ## Observation cost and disciplines

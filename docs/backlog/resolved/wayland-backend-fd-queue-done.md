@@ -33,30 +33,55 @@ root `Cargo.toml`'s `[patch.crates-io]` at `a39311b8` (the 0.3.17 release
   pins the numbers scoot's arithmetic uses: exactly 128 parked fds are kept
   and the 129th disconnects with the fork's error, the parked fds close,
   one read adds at most 30 (the receive buffer rustix sizes for 28, padded
-  by `cmsghdr` alignment), and a Rust `wayland-client` flush of 140
-  fd-carrying requests is served while 141 is disconnected.
+  by `cmsghdr` alignment), and a flush of 140 fd-carrying requests from a
+  `wayland-client` on its pure-Rust backend is served while 141 is
+  disconnected.
 - **fd pressure's arithmetic** (`fd_pressure.rs`) adds the queue: 128 at
   rest, 158 for a moment inside the read past the bound.
 
 ## What it costs a legitimate client (a finding, not hidden)
 
 The check counts fds a client has sent ahead of their requests. A client
-on the Rust `wayland-client` (rs backend) grows its outgoing buffer without
-limit and, on flush, sends every fd past the last 28 ahead of the bytes, 28
-per `sendmsg` with one byte each. So a Rust client that queues **more than
-140 fd-carrying requests between flushes** (pools, planes, timelines, gamma
-ramps, selection receives) now has 140 queued before the final write and is
-disconnected. 0.3.17 served it. Measured on the dev VM with a standalone
-Rust client against the real binary: 28, 100, 128 and 140 served, 141 and
-200 disconnected with the fork's error (`main` served all six). One scoot
-test hit it: `gamma_rapid_sets_stay_alive` queued 200 `set_gamma` before
-one round trip; it now flushes every 64 ramps (still back to back, which is
-what it tests). No libwayland client can hit it, and no real client seen
-batches that many.
+on `wayland-client`'s pure-Rust backend (the rs backend, its default)
+grows its outgoing buffer without limit (`max_buffer_size: None` in
+`client_impl`) and, on flush, sends every fd past the last 28 ahead of the
+bytes, 28 per `sendmsg` with one byte each. So such a client that queues
+**more than 140 fd-carrying requests between flushes** (pools, planes,
+timelines, gamma ramps, selection receives) has 140 queued before the
+final write and is disconnected. 0.3.17 served it. Measured on the dev VM
+with a standalone pure-Rust client against the real binary: 28, 100, 128
+and 140 served, 141 and 200 disconnected with the fork's error (`main`
+served all six). One scoot test hit it: `gamma_rapid_sets_stay_alive`
+queued 200 `set_gamma` before one round trip; it now flushes every 64
+ramps (still back to back, which is what it tests).
 
-The bound cannot simply be raised to cover larger batches: with 158 on top
-of one connection's 620, the GPU tier sits at 778 against the 896 pressure
-line, and a bound of 256 would put it past.
+Who can hit it, as far as was checked (Cargo manifests on 2026-09-24, no
+client measured beyond the probe):
+
+- **Not** libwayland clients (C/C++, GTK, Qt, foot, Firefox, mpv...):
+  libwayland flushes before its 29th pending fd, so its fds never run more
+  than one `sendmsg` ahead.
+- **Not** Rust clients whose dependency tree enables wayland-backend's
+  `client_system` feature, which switches every `wayland-client` in the
+  program to libwayland: winit 0.30.x and master (`winit-wayland`) force
+  it, so iced, egui/eframe, Bevy, Alacritty-class apps are on libwayland;
+  softbuffer enables it too; and any client rendering with EGL or Vulkan
+  needs a libwayland `wl_display*` to hand the driver, which only that
+  backend provides.
+- **Exposed:** pure-Rust clients on the rs backend, e.g. ones built
+  directly on Smithay's client toolkit (its `system` feature is opt-in)
+  drawing into shm, when they queue more than 140 fd-carrying requests
+  before returning to their event loop. No such client was found or
+  measured; typical ones create a few buffers per surface.
+
+This is a new client disconnect for a legitimate (if unusual) shape, so it
+is a harm-rule decision (`CLAUDE.md`, "Never defer a user-facing harm"),
+left to review. The numbers for weighing a different bound: the GPU tier's
+steady state is 620 + bound + 30 (the read), so the largest bound that
+keeps it under the 896 line is **245**, which would serve a pure-Rust
+flush of up to **252** fd-carrying requests (28 x floor(bound / 28) + 28)
+and put the drain-window figure at 1151. The bound is the fork's
+`MAX_QUEUED_FDS`; changing it means a new fork commit and repin.
 
 ## What is left
 
@@ -119,7 +144,7 @@ contains the string "too many file descriptors queued").
   all map and run with identical fd counts on both builds, and no protocol
   error is logged. mpv `--vo=dmabuf-wayland` fails to find an output format
   on both builds identically (headless has no NV12 path). scoot `--nested`
-  inside a forked scoot (the Rust client against the forked server), pixman
+  inside a forked scoot (a pure-Rust client against the forked server), pixman
   and GLES: foot maps inside, both screenshots are correct, no protocol
   error on either side (`runs/nested-*-fork-8b01249.*`).
 - **Smoke:** headless `rc=0` (23 `ok:`). Nested in cage: 20 `ok:`, then

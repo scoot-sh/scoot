@@ -597,8 +597,9 @@ fn gamma_rapid_sets_stay_alive() {
         // daemon's rate must neither kill the client nor lose the control.
         //
         // Flushed every 64, with no round trip between: still back to back,
-        // but under wayland-backend's received-fd bound. This Rust client
-        // grows its outgoing buffer without limit and sends every fd past the
+        // but under wayland-backend's received-fd bound. This client (on
+        // `wayland-client`'s pure-Rust backend) grows its outgoing buffer
+        // without limit and sends every fd past the
         // last 28 of a flush ahead of the requests that claim them, so a
         // single flush of more than 140 fd-carrying requests leaves more than
         // 128 unclaimed and is disconnected before scoot sees a request (see

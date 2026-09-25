@@ -19,8 +19,9 @@
 //! - The attack shape and the exact bound go through a bare `Display` and a
 //!   raw socket, since no `wayland-client` sends fds on fd-less requests.
 //! - The legitimate shape that comes closest goes through a real [`State`]
-//!   and a real `wayland-client`. That is the Rust backend's client, which
-//!   is the one that can run ahead: it grows its outgoing buffer without
+//!   and a real `wayland-client` on its pure-Rust backend (this crate's; winit
+//!   and GL/Vulkan clients use the libwayland one instead), which is the one
+//!   that can run ahead: it grows its outgoing buffer without
 //!   limit and sends every fd past the last 28 ahead of the bytes that claim
 //!   them, 28 at a time with one byte each. (libwayland's client flushes
 //!   before its 29th fd, so its fds never run ahead of their requests by more
@@ -310,7 +311,7 @@ struct TestClient {
     synced: bool,
 }
 
-/// The largest batch of fd-carrying requests a Rust-backend client can send
+/// The largest batch of fd-carrying requests a pure-Rust-backend client can send
 /// in one flush and still be served: 140. Its flush sends every fd past the
 /// last 28 ahead of their bytes, 28 at a time with one byte each, so 112 are
 /// queued (under the bound) when the final write brings the rest and every
@@ -329,7 +330,7 @@ fn a_rust_client_batching_140_fd_requests_in_one_flush_is_served() {
 /// One more and the same flush has 140 queued before its final write, past
 /// the bound: the client is disconnected by wayland-backend before scoot
 /// sees any of its pools. This is the one legitimate-shaped client the bound
-/// refuses (a Rust client queueing more than 140 fd-carrying requests
+/// refuses (a pure-Rust-backend client queueing more than 140 fd-carrying requests
 /// between flushes); pinned so that the documented limit
 /// (`docs/protocols.md`) cannot drift from the real one.
 #[test]

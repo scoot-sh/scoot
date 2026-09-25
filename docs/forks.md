@@ -50,11 +50,14 @@ top**, so it stays easy to review, rebase, and drop.
   which fails if the patch is lost to a repin, `cargo update` or rebase.
   `fd_pressure.rs` adds both figures to its reserve arithmetic.
 - **Its one cost to legitimate clients:** the check runs before each read,
-  so fds a client has sent ahead of their requests count. A client on the
-  Rust `wayland-client` sends every fd past the last 28 of a flush ahead,
-  so one that queues more than 140 fd-carrying requests between flushes is
-  disconnected (served on 0.3.17). libwayland clients cannot hit it. The
-  same tests pin 140 served and 141 refused.
+  so fds a client has sent ahead of their requests count. A client using
+  `wayland-client`'s pure-Rust backend sends every fd past the last 28 of a
+  flush ahead, so one that queues more than 140 fd-carrying requests
+  between flushes is disconnected (served on 0.3.17). libwayland clients,
+  and Rust clients on its `client_system` backend (everything built on
+  winit, which forces it, and every GL/Vulkan-rendering one, which needs a
+  libwayland display), cannot hit it. The same tests pin 140 served and 141
+  refused.
 - **Upstream status (last checked 2026-09-24):** unbounded in 0.3.17 and
   on master (the 0.4 rewrite). No issue or PR exists. Nothing has been
   filed from here. There is no AI-contribution policy file.
