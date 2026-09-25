@@ -52,6 +52,7 @@ use self::connection::Limits;
 pub(crate) use self::outbound::Outbound;
 use self::slots::{MAX_CONNECTIONS, Slot, Slots};
 use super::State;
+use super::drawn::drawn_rect;
 use super::fd_pressure::{RESERVE_FDS, Table};
 use super::headless::FRAME_INTERVAL;
 use super::tty::VtSwitchOutcome;
@@ -585,7 +586,13 @@ impl State {
                     // asking for a list -- not a per-frame path.
                     icon: self.icon_name_of(placement.id),
                     output: placement.output.0,
-                    rect: wire(placement.rect),
+                    // What is drawn and clickable, not the slot: the slot's
+                    // origin and the part of it the client committed (see
+                    // `drawn.rs`) -- the same rect the ring surrounds and
+                    // the rounded clip cuts, so an agent aiming inside it
+                    // lands on the window. One geometry read per window per
+                    // `windows` request, not a per-frame path.
+                    rect: wire(drawn_rect(placement.rect, self.windows.get(&placement.id))),
                     visible: placement.visible,
                     focused: arrangement.focused == Some(placement.id),
                     popup_grab: grab_holder == Some(placement.id),

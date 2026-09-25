@@ -9,7 +9,7 @@ use smithay::wayland::shell::xdg::SurfaceCachedState;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 
 use super::State;
-use super::fullscreen::set_fullscreen_state;
+use super::fullscreen::set_layout_states;
 use super::output_clip;
 
 #[cfg(test)]
@@ -199,15 +199,15 @@ impl State {
             output_clip::stamp(&window, placement.output);
             if let Some(toplevel) = window.toplevel() {
                 let size = Size::new(placement.rect.w, placement.rect.h);
-                // The size and the `fullscreen` bit in one configure, so a
-                // client entering fullscreen is never told the output's size
-                // without being told why (or leaving it, its tiled size while
-                // still flagged fullscreen). Invisible windows are not
-                // configured here at all; `fullscreen.rs` answers the one
-                // that asked while invisible.
+                // The size and the `fullscreen`-or-tiled states in one
+                // configure, so a client entering fullscreen is never told
+                // the output's size without being told why (or leaving it,
+                // its tiled size while still flagged fullscreen). Invisible
+                // windows are not configured here at all; `fullscreen.rs`
+                // answers the one that asked while invisible.
                 toplevel.with_pending_state(|state| {
                     state.size = Some((size.w, size.h).into());
-                    set_fullscreen_state(state, placement.fullscreen);
+                    set_layout_states(state, placement.fullscreen);
                 });
                 toplevel.send_pending_configure();
             }

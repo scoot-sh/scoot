@@ -175,8 +175,8 @@ fn the_square_ring_hugs_what_the_client_drew() {
 
 /// IPC `rect` is what is drawn and clickable: the slot's origin and the part
 /// of it the client committed. Short, it is the drawn rect; full, the slot;
-/// past the slot (a shrink still in flight), the slot -- whatever spills
-/// past it is cut to it in the report the way the layout owns that space.
+/// past the slot (a shrink still in flight), the slot -- clamped, so the
+/// report never claims space the layout gave a neighbor.
 #[test]
 fn the_ipc_rect_is_what_the_window_drew_clamped_to_its_slot() {
     let mut fixture = Fixture::with_radius_at_scale(10, 4, 1.5);
@@ -200,9 +200,19 @@ fn the_ipc_rect_is_what_the_window_drew_clamped_to_its_slot() {
     });
     assert_eq!(reported(&mut fixture), slot, "full");
 
+    // Past the slot. The core learns a width the window refuses to shrink
+    // below (a frame wider than asked widens its column -- `observe_frame`),
+    // so the slot itself may move; a column's height is the output's, so
+    // the extra height stays past the slot and is what gets clamped.
     fixture.run(Step::Redraw {
         window: 0,
         shrink: (-20, -30),
     });
-    assert_eq!(reported(&mut fixture), slot, "past the slot");
+    let reported_now = reported(&mut fixture);
+    let slot_now = fixture.placement();
+    assert_eq!(reported_now, slot_now, "past the slot");
+    assert!(
+        slot_now.h < slot.h + 30,
+        "the test needs a frame that really is taller than its slot: {slot_now:?}"
+    );
 }

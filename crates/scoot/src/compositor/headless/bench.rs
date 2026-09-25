@@ -513,9 +513,11 @@ fn time_rounded_tier(fixture: &mut RoundedFixture, radius: i32, rounds: u32) -> 
 ///   adjacent windows, gaps, one painted ring each.
 /// - **overhang3**: the same three windows with double-size buffers, the
 ///   shape a shrink still in flight has (content bleeding past its
-///   placement into the neighbor). Square, the bleed draws; rounded, the
-///   clip cuts it to the placement -- so this scene also shows whether the
-///   clip's removal of overlap outweighs its own cost.
+///   placement into the neighbor). The bleed draws on both tiers -- the
+///   rounded clip cuts only the corner staircases, at the placement's
+///   corners (a window's committed size is clamped to its slot before it
+///   becomes the clip; see `drawn.rs`) -- so this scene prices the clip on
+///   content that overlaps its neighbors.
 ///
 /// Tiers alternate per run and the table reports min/median/max per tier:
 /// this is a VM sharing a host's cores (see `render_frame_cost`), so a

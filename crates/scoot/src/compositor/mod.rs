@@ -15,6 +15,7 @@ mod cursor;
 mod decorations;
 mod dispatch;
 mod dmabuf;
+mod drawn;
 mod drm_syncobj;
 mod ext_workspace;
 mod fd_pressure;

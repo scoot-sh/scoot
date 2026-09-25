@@ -13,7 +13,8 @@
 //!   `foreign_toplevel_management.rs` for the first).
 //! - **State out.** `shell.rs`'s `apply()` sets the `fullscreen` state bit
 //!   and the output-sized frame on every visible window's configure, from
-//!   `Placement::fullscreen`; [`State::answer_fullscreen_request`] covers the
+//!   `Placement::fullscreen` -- or, for every other window, the four tiled
+//!   states (see [`set_layout_states`]); [`State::answer_fullscreen_request`] covers the
 //!   window the arrangement did not configure (an invisible one) and the
 //!   request that changed nothing.
 //! - **What stays above.** [`State::covered_by_fullscreen`] is the one
@@ -52,17 +53,48 @@ use super::State;
 #[cfg(test)]
 mod tests;
 
-/// Sets or clears the `fullscreen` state bit in a toplevel's pending state.
+/// The four `tiled_*` states (xdg_toplevel v2+) a window in the scrolling
+/// layout carries: a column entry is constrained on every edge.
+const TILED: [xdg_toplevel::State; 4] = [
+    xdg_toplevel::State::TiledLeft,
+    xdg_toplevel::State::TiledRight,
+    xdg_toplevel::State::TiledTop,
+    xdg_toplevel::State::TiledBottom,
+];
+
+/// Puts a toplevel's pending state in step with where the layout has it:
+/// `fullscreen`, or tiled on all four edges -- exclusive, since every window
+/// scoot manages is one or the other (scoot has no floating windows).
+///
+/// Tiled is what tells a client its size is the compositor's to choose.
+/// A client that believes it floats may size itself short of its slot --
+/// `foot`'s default `resize-by-cells` rounds down to whole character cells,
+/// only for a window that is neither tiled, maximized nor fullscreen -- or
+/// draw its own drop shadow and rounded corners around it (GTK's CSD). The
+/// renderer copes with a short client either way (the clip and the ring
+/// follow what it drew; see `render/elements.rs`), but a client that fills
+/// its slot is the look the layout means.
 ///
 /// Shared by `apply()`'s per-placement configure and the request answer
-/// below, so the two cannot disagree about what "fullscreen" puts on the
-/// wire. `ToplevelStateSet::set`/`unset` are no-ops when the bit is already
-/// what is asked, so this never manufactures a pending change on its own.
-pub(super) fn set_fullscreen_state(state: &mut ToplevelState, fullscreen: bool) {
+/// below, so the two cannot disagree about what the layout puts on the wire,
+/// and both send it in the same configure as the size it goes with.
+/// `ToplevelStateSet::set`/`unset` are no-ops for a state already as asked,
+/// so once a window's states are right this manufactures no pending change
+/// (the first call for a window does: it adds the tiled states). Smithay
+/// drops the tiled states on the wire for a client bound below
+/// xdg_toplevel v2 (`ToplevelStateSet::into_filtered_states`), so an old
+/// client is never sent a value it cannot know.
+pub(super) fn set_layout_states(state: &mut ToplevelState, fullscreen: bool) {
     if fullscreen {
         state.states.set(xdg_toplevel::State::Fullscreen);
+        for tiled in TILED {
+            state.states.unset(tiled);
+        }
     } else {
         state.states.unset(xdg_toplevel::State::Fullscreen);
+        for tiled in TILED {
+            state.states.set(tiled);
+        }
     }
 }
 
@@ -224,7 +256,7 @@ impl State {
             if flips && let Some(size) = size {
                 state.size = Some((size.w, size.h).into());
             }
-            set_fullscreen_state(state, now);
+            set_layout_states(state, now);
         });
         let sent = surface.send_pending_configure().is_some();
         if !sent && before == Some(now) {
