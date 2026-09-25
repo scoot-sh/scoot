@@ -57,15 +57,16 @@ inspired this project.
   is a config bind away — no defaults ship for either yet), and `--tty`
   still drives one connector (a second monitor there stays dark).
 - **XWayland is opt-in, and partial.** X11 applications run with
-  `--xwayland` (or `[xwayland] enabled`) in an `xwayland` build
-  (`cargo build --release --features xwayland`, with `Xwayland` on `PATH`; no flake
+  `--xwayland` (or `[xwayland] enabled`) in an `xwayland` build (`cargo
+  build --release --features xwayland`, with `Xwayland` on `PATH`; no flake
   output ships it yet): their windows tile, dialogs float, fullscreen
   works, and they take focus by themselves only when nothing is focused,
-  when they are a dialog of the X app in use, or when scoot started them. Running one extends full trust to it — X11 clients
-  can read each other's
-  keystrokes and screens by design ([protocols.md](docs/protocols.md#xwayland-opt-in)).
-  Not there yet: copy/paste and drag-and-drop between X and Wayland apps,
-  and X input methods (XIM).
+  when they are a dialog of the X app in use, or when scoot started them.
+  Running one extends full trust to it — X11 clients can read each other's
+  keystrokes and screens by design
+  ([protocols.md](docs/protocols.md#xwayland-opt-in)). Not there yet:
+  copy/paste and drag-and-drop between X and Wayland apps, and X input
+  methods (XIM).
 - **GPU scanout is opt-in.** With a real GPU it is worth trying: on an
   Apple M2 under Asahi Linux it uses **4–5x less CPU** than the default under
   load, puts the same pixels on screen, and costs 7–16 MB more memory
