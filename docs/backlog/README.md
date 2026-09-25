@@ -686,6 +686,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### Requested 2026-09-24
+- [Raise RLIMIT_NOFILE, then give the fd-queue cap libwayland parity](./core/raise-nofile-limit.md) — high; right after PR #241, before floating windows.
 - [Floating windows (dialogs auto-float, window rules, toggle)](./core/floating-windows.md) — high, user request; queued after PR #240 and the wayland-rs fork repin.
 
 ### From the PR #239 review (2026-09-24)
