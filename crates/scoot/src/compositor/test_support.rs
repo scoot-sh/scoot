@@ -605,9 +605,11 @@ impl<S, A> Harness<S, A> {
     /// `wayland-1`..`wayland-32` (run 36146821701: "wayland-1 through
     /// wayland-32 are all in use").
     ///
-    /// Any XWayland server goes too, and first: its source is removed
-    /// (dropping it releases the `/tmp/.X<N>-lock`) and the server process is
-    /// sent `SIGTERM` (see [`terminate_child_xwayland`]). Dropping the
+    /// Any XWayland server goes too, and first: the server process is sent
+    /// `SIGTERM` (see [`terminate_child_xwayland`]) while its source still
+    /// holds the display's `/tmp/.X<N>-lock` -- so no other test can be on
+    /// that number yet -- and then the source is removed, releasing the lock.
+    /// Dropping the
     /// source does ask the backend to disconnect the server, but a kill only
     /// takes effect when the backend next cleans up, which needs an event on
     /// some client socket -- after teardown there may never be one, and the
@@ -620,8 +622,12 @@ impl<S, A> Harness<S, A> {
     fn release_listener_sources(&mut self) {
         let handle = self.event_loop.handle();
         for (token, display) in self.state.xwayland_tokens_for_test.drain(..) {
-            handle.remove(token);
+            // Signal first, while the source still holds `:display`'s lock:
+            // released first, another test could take the number and exec
+            // its own `Xwayland :display` before the scan below, which would
+            // then match -- and end -- that test's server.
             terminate_child_xwayland(display);
+            handle.remove(token);
         }
         for token in self.state.listener_tokens.drain(..) {
             handle.remove(token);
