@@ -689,6 +689,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 ### Requested 2026-09-24
 - [Floating windows (dialogs auto-float, window rules, toggle, move/resize)](./resolved/floating-windows-done.md) — RESOLVED 2026-09-25 in two PRs. PR 1 (#242): the floating layer, auto-float by `xdg-dialog-v1`/parent/fixed size, `[[window_rule]]`, the toggle and focus switch, IPC. PR 2 (#243): `[floating] modifier` (Super) + left/right drag moves/resizes, the client's own `xdg_toplevel.move`/`resize` honoured on its held press (tiled windows' ignored), IPC `move-floating`/`resize-floating`, cross-output moves, a window's dialogs always drawn above it (the re-review's fullscreen-game case), resize configures paced to client acks; no allocation per pointer motion (a resize allocates only for its configures, ~11 each, about one per client ack).
 
+### From the PR #243 review (2026-09-25)
+- [No per-client toplevel cap: floods or chains of toplevels stall arrange](./core/per-client-toplevel-cap.md) — medium: `arrange` runs per frame per output and is multi-ms at a few thousand windows; floating a transient window runs a full `arrange` (`parent_centre`), so n transients are O(n^2) (4000-chain build 7.3 s debug), and `recentre_floating` does the same per floating window on an output change. Model a cap on the popup/subsurface caps (64).
+
 ### From the PR #239 review (2026-09-24)
 - [Many light connections can still pressure the table and shed scootctl](./core/pressure-many-light-connections.md) — medium; cheapest fix is a lower pressure line for IPC accepts. Since PR #241's raised table it takes 64 idle connections parking 1024 fds each (no objects) to fill it, measured; still 7 where the hard limit is 1024.
 
