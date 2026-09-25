@@ -212,21 +212,16 @@ pub fn start(
     use std::process::Stdio;
 
     let display_handle: DisplayHandle = state.display_handle.clone();
-    // Smithay builds the server's `Command` itself, with no `pre_exec` hook,
-    // so the original soft fd limit is put back around the spawn instead
-    // (see `nofile.rs`): the X server gets what every other child gets.
-    let (xwayland, client) = crate::compositor::nofile::with_original_soft(|| {
-        XWayland::spawn(
-            &display_handle,
-            None::<u32>,
-            std::iter::empty::<(String, String)>(),
-            std::iter::empty::<String>(),
-            true,
-            Stdio::null(),
-            Stdio::null(),
-            |_| (),
-        )
-    })
+    let (xwayland, client) = XWayland::spawn(
+        &display_handle,
+        None::<u32>,
+        std::iter::empty::<(String, String)>(),
+        std::iter::empty::<String>(),
+        true,
+        Stdio::null(),
+        Stdio::null(),
+        |_| (),
+    )
     .map_err(StartError::Spawn)?;
     // Synchronous, from the just-acquired display lock -- the same number
     // `READY` will carry back. Read before the move into the event source

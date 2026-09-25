@@ -15,12 +15,22 @@
 //! **Children get the original back.** A program that still uses `select()`
 //! cannot watch an fd numbered 1024 or above (`FD_SETSIZE`), and one that
 //! inherits a raised soft limit may open such fds and break in ways that
-//! have nothing to do with scoot. Every process scoot starts runs with the
-//! soft limit scoot itself was started with: [`restore_for_child`] on the
-//! `Command` in `State::spawn` (the one path keybindings, IPC `spawn`,
-//! `[autostart]` and the session command all go through), and
-//! `with_original_soft` around the XWayland launch, whose `Command` is
-//! built inside Smithay with no `pre_exec` hook.
+//! have nothing to do with scoot. Every process scoot starts through
+//! `State::spawn` (the one path keybindings, IPC `spawn`, `[autostart]` and
+//! the session command all go through) runs with the soft limit scoot itself
+//! was started with: [`restore_for_child`] sets it in the child before
+//! `exec`.
+//!
+//! **The XWayland server is the exception, deliberately.** Its `Command` is
+//! built inside Smithay's `XWayland::spawn`, with no `pre_exec` hook, and
+//! restoring the limit around that call would not reach it anyway: Xwayland
+//! raises its own soft limit to the hard limit at startup
+//! (`try_raising_nofile_limit` in upstream `hw/xwayland/xwayland.c`, skipped
+//! only for an explicit `-lf`), because an X server holds an fd per X client
+//! and polls with epoll. Measured on the dev VM: Xwayland 24.1.13 started by
+//! scoot runs at soft 524288, its hard limit, whatever it inherited. Putting
+//! 1024 back first would have meant lowering this whole process's limit for
+//! the length of the spawn, for nothing.
 //!
 //! **The cap, [`RAISED_SOFT_CAP`] = 65536.** Raising costs nothing until
 //! fds are used (the kernel grows a process's fd table on demand), and
@@ -163,53 +173,6 @@ pub(crate) fn restore_for_child(command: &mut Command) {
             }
         });
     }
-}
-
-/// Runs `spawn` with this process's soft limit set back to the original for
-/// its duration, for a child whose `Command` scoot cannot reach (the
-/// XWayland server, built inside Smithay's `XWayland::spawn`).
-///
-/// The limit is process-wide, so this is only for startup, where nothing
-/// else is opening fds: it is skipped (the child inherits the raised limit,
-/// with a warning) when this process already has as many fds open as the
-/// original limit allows, since every fd `spawn` itself opens would then
-/// fail.
-#[cfg(feature = "xwayland")]
-pub(crate) fn with_original_soft<T>(spawn: impl FnOnce() -> T) -> T {
-    let Some(limits) = raised().filter(Limits::raised) else {
-        return spawn();
-    };
-    match open_fds() {
-        Some(open) if open < limits.original_soft => {}
-        open => {
-            tracing::warn!(
-                ?open,
-                original = limits.original_soft,
-                "too many fds open to lower the fd limit for this child; it inherits {}",
-                limits.soft
-            );
-            return spawn();
-        }
-    }
-    if let Err(error) = set(limits.original_soft, limits.hard) {
-        tracing::warn!(%error, "cannot lower the fd limit for this child; it inherits {}", limits.soft);
-        return spawn();
-    }
-    let out = spawn();
-    if let Err(error) = set(limits.soft, limits.hard) {
-        tracing::warn!(
-            %error,
-            "cannot restore the raised fd limit after starting a child; staying at {}",
-            limits.original_soft
-        );
-    }
-    out
-}
-
-/// This process's open fds, or `None` if `/proc/self/fd` cannot be read.
-#[cfg(feature = "xwayland")]
-fn open_fds() -> Option<u64> {
-    Some(std::fs::read_dir("/proc/self/fd").ok()?.count() as u64)
 }
 
 fn rlimit(soft: u64, hard: u64) -> libc::rlimit {
