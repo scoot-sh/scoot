@@ -24,6 +24,12 @@
 //!
 //! A refused drag leaves the press an ordinary press: the X client's own
 //! XDND traffic with other X windows is X-side and untouched.
+//!
+//! "The same X client" means the same X *connection*, not the same process:
+//! an app whose pressed window and drag source sit on two connections of its
+//! own is refused. No toolkit measured does that (GTK and Qt drag from the
+//! connection that owns the window); the process check `focus.rs` uses (an
+//! X-Resource round trip) would cover it, if one ever turns up.
 
 use smithay::input::Seat;
 use smithay::input::dnd::GrabType;

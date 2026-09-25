@@ -530,7 +530,13 @@ drags, X input fine afterwards, measured), filed as
 checked with `strings`); an `input-method-v2` keyboard grab pre-empts an X
 window's keyboard like any other (`tests/ime.rs`).
 
-**Evidence**: `tests/clipboard.rs` (16), `tests/dnd.rs` (3),
+Known limit: the drag rule compares X connections, so an app whose pressed
+window and drag source are on two connections of its own is refused (none
+measured does this).
+
+**Evidence**: `tests/clipboard.rs` (16, including a stuck reader on each
+side: an X one holds the Wayland source, a Wayland one the X owner, to a
+few chunks), `tests/dnd.rs` (3),
 `tests/ime.rs` (1), the hermetic type filter; the gate's lock and focus
 branches mutation-checked (`mutation-gate-M*.txt`: the lock test is pinned
 by either branch, the background tests by the focus branch; the DnD gate's

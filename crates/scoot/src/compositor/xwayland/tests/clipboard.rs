@@ -105,6 +105,12 @@ fn x_to_wayland(test: &str, which: Which, len: usize) {
         OwnerManner::default(),
     );
     live.drain();
+    // No echo: had the bridge announced the crossed selection back to X,
+    // the window manager would have taken it from the X owner.
+    assert!(
+        !owner.lost(),
+        "the bridge took the selection back from its X owner"
+    );
     let control = control_offered(&mut live, which);
     assert!(
         control
@@ -127,6 +133,10 @@ fn x_to_wayland(test: &str, which: Which, len: usize) {
         "the paste's bytes differ from the X owner's"
     );
     assert!(owner.served() >= 1);
+    assert!(
+        !owner.lost(),
+        "the X owner lost its selection to the bridge"
+    );
 }
 
 /// Wayland to X, the other way round: the Wayland window sets it while
@@ -598,4 +608,67 @@ fn a_data_control_copy_reaches_the_next_x_read() {
         Ok(Read::Data(payload.to_vec()))
     );
     assert!(old.lost(), "the previous X owner never lost the clipboard");
+}
+
+/// The other direction's bound: a Wayland client that asks for a large X
+/// selection and never reads it holds the X owner to a few chunks -- the
+/// window manager asks for the next chunk only once it has written the last
+/// one into the reader's pipe -- rather than pulling the whole selection
+/// into the compositor. (Before the fork's pacing fix the second chunk was
+/// deleted unread and the transfer ended at one chunk instead.)
+#[test]
+fn a_stuck_wayland_reader_holds_the_x_owner_to_a_few_chunks() {
+    let Some((mut live, x, wayland)) =
+        clipboard("a_stuck_wayland_reader_holds_the_x_owner_to_a_few_chunks")
+    else {
+        return;
+    };
+    let payload = patterned(16 * 1024 * 1024);
+    let owner = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        payload,
+        OwnerManner::default(),
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    assert!(matches!(
+        clip(
+            &mut live,
+            ClipStep::ReceiveLater {
+                which: Which::Clipboard,
+                mime: UTF8
+            }
+        ),
+        Ack::Done
+    ));
+    for _ in 0..200 {
+        live.fixture.settle();
+    }
+    let sent = owner.sent();
+    assert!(
+        sent > 0,
+        "the transfer never started: nothing to measure the bound against"
+    );
+    assert!(
+        sent < 1024 * 1024,
+        "the X owner handed out {sent} bytes to a Wayland reader that read none"
+    );
+    // The loop still serves: a paste of a fresh, small X copy works.
+    focus(&mut live, x);
+    let fresh = Arc::new(b"after the stuck reader".to_vec());
+    let _fresh = Owner::start(
+        live.display,
+        "CLIPBOARD",
+        X_UTF8,
+        fresh.clone(),
+        OwnerManner::default(),
+    );
+    live.drain();
+    focus(&mut live, wayland);
+    assert_eq!(
+        receive(&mut live, Which::Clipboard).as_deref(),
+        Ok(fresh.as_slice())
+    );
 }

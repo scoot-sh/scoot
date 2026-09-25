@@ -20,7 +20,8 @@ scoot has not cut a numbered release yet; entries are dated.
   or replace your clipboard (`xclip -o` there fails with `target STRING not
   available`). Something an X app copies while a Wayland window is focused
   stays with the X apps.
-- **Drag from an X app into a Wayland app** (text, files). Only the X app
+- **Drag from an X app into a Wayland app** (text measured; files
+  untested). Only the X app
   you pressed the button on can start that drag -- before this, any X app
   could take over a drag you started anywhere, a Wayland window included.
   Dropping *onto* an X window still does not work (from a Wayland app, from

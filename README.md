@@ -62,14 +62,15 @@ inspired this project.
   output ships it yet): their windows tile, dialogs float, fullscreen
   works, and they take focus by themselves only when nothing is focused,
   when they belong to the X app in use, or when scoot started them.
+  Running one extends full trust to it — an X11 client can read and cover
+  other windows by design ([protocols.md](docs/protocols.md#xwayland-opt-in)).
   Copy and paste works between X and Wayland apps both ways (clipboard
   and middle-click primary; `xclip`/`xsel` and `wl-copy`/`wl-paste` see
   each other), but an X app reads or sets it only while an X window has
   the keyboard. Dragging from an X app into a Wayland app works; dropping
   *onto* an X window does not land (from a Wayland app, from another X app,
-  or within the same X app — nothing is lost, the drop just does nothing).
-  Running one extends full trust to it — an X11 client can read and cover
-  other windows by design ([protocols.md](docs/protocols.md#clipboard-drag-and-drop-and-input-methods)).
+  or within the same X app — nothing is lost, the drop just does nothing;
+  [details](docs/protocols.md#clipboard-drag-and-drop-and-input-methods)).
   Not there yet: drops onto X windows, and X input methods (XIM).
 - **GPU scanout is opt-in.** With a real GPU it is worth trying: on an
   Apple M2 under Asahi Linux it uses **4–5x less CPU** than the default under

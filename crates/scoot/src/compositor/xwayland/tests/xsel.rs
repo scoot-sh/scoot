@@ -112,6 +112,7 @@ pub(super) struct Owner {
     stop: Arc<AtomicBool>,
     lost: Arc<AtomicBool>,
     served: Arc<AtomicUsize>,
+    sent: Arc<AtomicUsize>,
     thread: Option<JoinHandle<Result<(), String>>>,
 }
 
@@ -128,12 +129,19 @@ impl Owner {
         let stop = Arc::new(AtomicBool::new(false));
         let lost = Arc::new(AtomicBool::new(false));
         let served = Arc::new(AtomicUsize::new(0));
+        let sent = Arc::new(AtomicUsize::new(0));
         let (ready_tx, ready_rx) = channel();
         let thread = {
-            let (stop, lost, served) = (stop.clone(), lost.clone(), served.clone());
+            let (stop, lost, served, sent) =
+                (stop.clone(), lost.clone(), served.clone(), sent.clone());
             std::thread::spawn(move || {
+                let counters = Counters {
+                    lost: &lost,
+                    served: &served,
+                    sent: &sent,
+                };
                 serve(
-                    display, selection, target, &payload, manner, &stop, &lost, &served, ready_tx,
+                    display, selection, target, &payload, manner, &stop, counters, ready_tx,
                 )
             })
         };
@@ -144,6 +152,7 @@ impl Owner {
             stop,
             lost,
             served,
+            sent,
             thread: Some(thread),
         }
     }
@@ -152,6 +161,12 @@ impl Owner {
     /// (`SelectionClear`) -- what happens when someone else takes it.
     pub(super) fn lost(&self) -> bool {
         self.lost.load(Ordering::Acquire)
+    }
+
+    /// How many payload bytes the owner has handed out in `INCR` chunks, all
+    /// transfers together -- how far a reader has let it get.
+    pub(super) fn sent(&self) -> usize {
+        self.sent.load(Ordering::Acquire)
     }
 
     /// How many conversions of its payload the owner has completed.
@@ -172,6 +187,13 @@ impl Drop for Owner {
     }
 }
 
+/// What an owner reports back to its [`Owner`].
+struct Counters<'a> {
+    lost: &'a AtomicBool,
+    served: &'a AtomicUsize,
+    sent: &'a AtomicUsize,
+}
+
 /// One `INCR` transfer in flight from the owner: where it goes and how much
 /// has been sent.
 struct Outgoing {
@@ -188,10 +210,10 @@ fn serve(
     payload: &[u8],
     manner: OwnerManner,
     stop: &AtomicBool,
-    lost: &AtomicBool,
-    served: &AtomicUsize,
+    counters: Counters<'_>,
     ready: std::sync::mpsc::Sender<()>,
 ) -> Result<(), String> {
+    let Counters { lost, served, sent } = counters;
     let x = Conn::open(display)?;
     let selection_atom = x.atom(selection)?;
     let target_atom = x.atom(target)?;
@@ -347,6 +369,7 @@ fn serve(
                     transfer.finished = true;
                     served.fetch_add(1, Ordering::AcqRel);
                 }
+                sent.fetch_add(chunk.len(), Ordering::AcqRel);
                 transfer.sent = end;
             }
             _ => {}

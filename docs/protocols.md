@@ -552,9 +552,13 @@ app and paste in a Wayland app, or the reverse; `xclip`/`xsel` and
 selections, both directions, including a 2.9 MB payload). Large
 transfers are streamed in chunks (X's `INCR`) with backpressure both ways,
 so a slow or stuck reader on either side holds the compositor to a couple
-of 64 KiB chunks, never the whole selection; at most 8 pastes of one X
-selection wait on its X owner at a time (more are refused, reading
-nothing), and ones waiting on an owner that loses the selection are ended.
+of 64 KiB chunks per transfer, never the whole selection -- as long as the
+X side sends in chunks, which X toolkits do for anything large. An X owner
+may instead answer with a single property, up to the X server's request
+size (about 16 MiB), and the compositor holds that until the Wayland
+reader takes it; at most 8 pastes of one X selection are in flight at a
+time (more are refused, reading nothing), which bounds that too, and ones
+still waiting on an owner that loses the selection are ended.
 A clipboard manager on `zwlr_data_control` or `ext_data_control` is told
 about an X selection like any other, and one setting the clipboard reaches X
 clients too.
@@ -583,7 +587,8 @@ client.
 an X app drops into Wayland apps (text from `mousepad` over X into a
 Wayland `mousepad`, measured). It starts only where a Wayland drag would:
 from a real, recent button press delivered to a window of the *same* X
-client that starts it -- never while locked, and never from touch. Without
+client (X connection) that starts it -- never while locked, and never from
+touch. Without
 that check (upstream's behaviour, and scoot's before this), any X client
 could turn a press you were holding on a Wayland window into a drag of its
 own data and drop it wherever you released. A drop onto an X window --
