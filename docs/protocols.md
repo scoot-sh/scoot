@@ -246,16 +246,43 @@ drawn with its own window, so a menu opened from a *tiled* window draws
 below any floating window it runs under; open floating windows are above the
 strip, its menus included, by design.
 
-**Output changes.** A floating window keeps its centre relative to its
+**Output changes.** A floating window keeps its place relative to its
 output. When the output changes size (a scale change, a `--nested` window
 resized), or the window lands on another output because its own went away,
 it is re-centred on its parent (or the output) there rather than left at a
-position measured on the old one.
+position measured on the old one -- including a window the user had moved
+there, and a drag under way ends.
 
-**Not yet:** moving or resizing a floating window with the pointer — a
-client-side titlebar drag (`xdg_toplevel.move`) or resize edge
-(`xdg_toplevel.resize`) does nothing, and neither does a Super+drag. scoot
-centres it; the toggle is the only way to change what it is.
+**Stacking.** Floating windows are drawn in stacking order (the most
+recently focused on top), except that a window's own floating dialogs are
+always drawn above it: clicking an app raises and focuses it, and its modal
+dialog stays visible over it rather than going under it.
+
+**Moving and resizing: `xdg_toplevel.move` and `.resize`.** A client-side
+titlebar drag (GTK's headerbar) or border drag works on a floating window.
+The request is honoured only while the button press it rides on is still
+held: its serial must be the press serial of the pointer's live implicit
+grab, and that press must have gone to the requesting client's own surface
+-- so a stale serial, a guessed one, or another client's press is refused
+(logged at debug), and nothing happens. A request from a tiled window is
+ignored: tiled windows are placed by the strip, and the client's own drag
+simply carries on with nothing moving. So is one from a fullscreen window,
+and any while the session is locked. `resize` with edge `none` resizes
+nothing. While the compositor holds the drag, the client gets a pointer
+`leave`, no button events, and an `enter` when it ends.
+
+The same drag starts from `[floating] modifier` (Super) held with the left
+button (move) or the right (resize from the nearest edge or corner) anywhere
+on a floating window; that press and its release are never delivered to the
+client. During a resize the window is sent configures carrying the
+`resizing` state and the size the drag asks for (clamped to its own
+`min_size`/`max_size`, re-read when the drag starts, and to the room to the
+usable area's edge), one at a time: a new size goes out once the client has
+acked the last, so a 1000Hz mouse does not queue sizes a 60Hz client has to
+skip. The edge not being dragged stays put whatever size the client settles
+on (a terminal rounding to whole cells, say). The drag's last configure
+drops `resizing` and keeps the size. X11 windows (the XWayland skeleton)
+stay refused: their `move_request`/`resize_request` start nothing.
 
 ## Fullscreen
 
@@ -351,11 +378,16 @@ same for a fullscreen window in either layer:
   whose parent chain reaches it), which stay up and are drawn and clicked
   above it. Clicking a fullscreen app does not hide the dialog it opened: a
   modal dialog blocks input to its app, and one hidden under it would make
-  the app look hung. With a dialog above it, direct scanout composites.
+  the app look hung. With a dialog above it the frame stays eligible for
+  direct scanout: Smithay composites only when the dialog cannot be given a
+  plane of its own (on hardware with a free overlay plane the fullscreen
+  window can still go direct, the dialog on the overlay).
 - **While a floating window above it has focus** (typically that dialog),
   it stays in place, full size, under the floating layer; nothing counts as
   covering the output then (so the `top` layer is drawn again, and direct
-  scanout pauses). A floating fullscreen window also hides the strip then.
+  scanout pauses). A floating fullscreen window also hides the strip then,
+  and the floating windows drawn under it -- never its own dialogs, which
+  are drawn above it even when it was clicked above them in the stack.
 - **While focus is anywhere else** it is not in front: a column keeps its
   strip slot as usual, a floating fullscreen window is hidden.
 

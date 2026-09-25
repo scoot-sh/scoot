@@ -202,6 +202,8 @@ second output does and does not do yet.
 | `Super+f` | Toggle fullscreen |
 | `Super+Shift+Space` | Float the focused window, or put it back in the strip |
 | `Super+Space` | Move focus between floating windows and the strip |
+| `Super` + left-drag | Move a floating window (the modifier is `[floating] modifier`) |
+| `Super` + right-drag | Resize a floating window from the nearest edge or corner |
 | `Super+q` | Close focused window |
 | `Super+Return` | Spawn `foot` |
 | `Super+Shift+e` | Quit |
@@ -255,7 +257,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | If you want to… | scoot has | Detail |
 | --- | --- | --- |
 | Run a bar, dock, wallpaper, launcher or notification daemon | `wlr-layer-shell-v1`, with keyboard focus | [protocols.md](docs/protocols.md#layer-shell-bars-wallpapers-launchers) |
-| Have dialogs and pop-ups float instead of taking a column | confirmation dialogs, file pickers and other transient or fixed-size windows float centred above the strip automatically; `[[window_rule]]` floats (or keeps tiled) any app by app id or title; `Super+Shift+Space` or `scootctl action toggle-floating` toggles one. Moving and resizing them with the pointer is not there yet | [configuration.md](docs/configuration.md#floating) |
+| Have dialogs and pop-ups float instead of taking a column | confirmation dialogs, file pickers and other transient or fixed-size windows float centred above the strip automatically; `[[window_rule]]` floats (or keeps tiled) any app by app id or title; `Super+Shift+Space` or `scootctl action toggle-floating` toggles one. Drag one with `Super`+left, resize it with `Super`+right, or by its own titlebar and borders; agents use `scootctl action move-floating`/`resize-floating` | [configuration.md](docs/configuration.md#floating) |
 | Watch a video or play a game fullscreen | the app's own fullscreen button, `Super+f`, a taskbar, or `scootctl action toggle-fullscreen` — edge to edge, bar hidden; notifications on the `overlay` layer stay on top (mako defaults to `top`: set `layer=overlay`) | [protocols.md](docs/protocols.md#fullscreen) |
 | List and switch workspaces from a bar | `ext-workspace-v1` | [protocols.md](docs/protocols.md#workspaces-ext-workspace-v1) |
 | List, focus and close windows from a taskbar | `ext-foreign-toplevel-list-v1` **and** the wlr one | [protocols.md](docs/protocols.md#window-lists-two-protocols) |

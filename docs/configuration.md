@@ -336,7 +336,8 @@ never acted on; a `spawn` whose program fails to start is refused by name
 instead of reported applied, and stays pending -- the next reload retries
 it. Seen is by value per occurrence: an edited entry counts as
 new, a removed-then-re-added entry runs again, and a second identical
-reload is silent), and `[floating] auto` and the `[[window_rule]]` list
+reload is silent), `[floating] modifier` (the next drag uses it), and
+`[floating] auto` and the `[[window_rule]]` list
 (swapped whole; they decide for windows that map after the reload, and
 windows already mapped keep their place -- a rule that cannot be used is
 refused by name, e.g. `window_rule #3 (sets neither float nor size): skipped
@@ -496,6 +497,7 @@ focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
 focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
 toggle-floating | set-floating ID on|off | toggle-floating-focus
+move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ```
 
 e.g. `"focus-column left"`, `"close"`, or `"spawn foot -e htop"` (split on
@@ -611,6 +613,7 @@ Three behaviors worth knowing, plus the reload rule:
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `auto` | bool | `true` | Float a window automatically when it first maps if it says it is a dialog (`xdg-dialog-v1`), names a parent (`xdg_toplevel.set_parent`, a transient window), or has a fixed size (equal non-zero minimum and maximum). `false` turns all three off; `[[window_rule]]`s still apply. Re-applied live by `scootctl reload`, for windows that map after it. |
+| `modifier` | string | `"super"` | The modifier held to drag floating windows: with the left button anywhere on one it moves it, with the right button it resizes it. `super`, `alt`, `ctrl` or `shift` (or an alias a `[binds]` combo accepts: `logo`, `meta`, `cmd`, `control`); anything else falls back to `super` with a warning. Worth changing under `--nested`, where the host compositor often keeps Super for itself. Re-applied live by `scootctl reload`. |
 
 What floating is — a layer above each workspace's scrolling strip, for
 confirmation dialogs, file pickers, settings windows and anything you pick
@@ -621,10 +624,28 @@ with a rule:
   usable area (a bar's reserved strip excluded). The window picks its own
   size (a rule's `size` asks for one); one larger than the usable area is
   asked to fit it. It keeps its centre as it resizes itself, and is re-centred
-  when carried to another output. It cannot be dragged or resized with the
-  pointer yet (a client-side titlebar drag does nothing); that is planned.
+  when carried to another output (or its output changes size).
+- **Moving and resizing.** Hold the `modifier` (Super) and drag with the
+  left button to move a floating window, or with the right button to resize
+  it: the edge or corner nearest the pointer follows it (the window is split
+  in thirds each way; the middle goes to the nearest corner), and the
+  opposite edge stays put. A window's own titlebar and borders work too
+  (`xdg_toplevel.move`/`resize`, what GTK's headerbar and client-side
+  borders send). Either way the window stays where you leave it, inside the
+  usable area; a resize stops at the usable area rather than pushing the
+  far edge, and respects the window's own minimum and maximum size. Drop a
+  window with its middle over another output and it moves to that output's
+  active workspace. A drag ends when the button is released, another button
+  is pressed, the window closes or stops floating, its workspace is switched
+  away, the screen locks, the session switches VT, or the output changes
+  size. The modifier on a tiled window, and a tiled window's own titlebar
+  drag, do nothing special: tiled windows are placed by the strip. Agents
+  use `move-floating ID X Y` and `resize-floating ID WIDTH HEIGHT` (see
+  [ipc.md](ipc.md)).
 - **Stacking.** The most recently focused floating window is on top; a click,
-  `focus-window-id`, or a taskbar activating it raises it.
+  `focus-window-id`, or a taskbar activating it raises it -- but a window's
+  own floating dialogs are always drawn above it, so clicking an app never
+  buries the dialog it opened.
 - **Focus.** `Super+Space` (`toggle-floating-focus`) moves focus between
   the floating windows and the strip. With a floating window focused,
   `focus-column left|right` goes back to the strip's focused column,
@@ -716,11 +737,14 @@ float = false
 | `Super+f` | Toggle fullscreen |
 | `Super+Shift+Space` | Float the focused window, or put it back in the strip |
 | `Super+Space` | Move focus between the floating windows and the strip |
+| `Super` + left-drag | Move a floating window (`[floating] modifier`) |
+| `Super` + right-drag | Resize a floating window from the nearest edge or corner |
 | `Super+q` | Close focused window |
 | `Super+Return` | Spawn `foot` |
 | `Super+Shift+e` | Quit |
 
-All 43 of them — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
+All 43 key bindings (plus the two drags, which are not `[binds]` entries:
+their modifier is `[floating] modifier`) — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
 scoot's own modifier throughout. Quit is deliberately `Super+Shift+e`, not
 `Super+Shift+q`: that combo is one slipped Shift away from `Super+q` (close
 focused window), and a slip of the finger shouldn't be able to end the whole
@@ -837,6 +861,8 @@ commands = [
 # Dialogs, transient and fixed-size windows float when they map; false
 # tiles everything except what a rule floats.
 auto = true
+# Alt+drag moves and resizes floating windows (Super is the default).
+modifier = "alt"
 
 # pavucontrol's app id is org.pulseaudio.pavucontrol (`scootctl windows`
 # shows any window's).
