@@ -13,8 +13,10 @@
 //!   to place.
 //! - **The client's own request** (`xdg_toplevel.move` / `.resize`, what a
 //!   CSD titlebar or border sends while its button is held). Honoured only
-//!   while that button is still held: the request's serial must be the
-//!   press serial of the pointer's live implicit grab (`has_grab`), and the
+//!   while that button is still held: the pointer's grab must be Smithay's
+//!   implicit click grab, installed by the press with the request's serial
+//!   (a matching serial on any other grab -- a popup's, installed under a
+//!   key or enter serial -- is not a held button), and the
 //!   surface that press went to must be the requesting client's -- so a
 //!   client can drag only with its own press, never borrow another's, and a
 //!   stale serial finds no grab. A request from a tiled window (or a
@@ -61,7 +63,7 @@ use smithay::backend::input::{ButtonState, InputTime};
 use smithay::desktop::Window;
 use smithay::input::Seat;
 use smithay::input::pointer::{
-    AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GestureHoldBeginEvent,
+    AxisFrame, ButtonEvent, ClickGrab, CursorIcon, CursorImageStatus, Focus, GestureHoldBeginEvent,
     GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
     GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData,
     MotionEvent, PointerGrab, PointerHandle, PointerInnerHandle, RelativeMotionEvent,
@@ -550,20 +552,32 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        // The press this request rides on must still be held, and be the one
-        // with this serial.
-        if !pointer.has_grab(serial) {
+        // The press this request rides on must still be held: the pointer's
+        // grab must be Smithay's implicit click grab, installed by that very
+        // press, under this serial. The serial alone is not enough --
+        // `has_grab` compares serials only, and a popup grab is installed
+        // under whatever recent key, button or enter serial the client
+        // offered (`popup.rs`), with start data naming the client's own
+        // toplevel and no button: a client could open a menu on a key
+        // serial and then "move" on it with no button held. Any other grab
+        // (a popup's, a drag-and-drop, a modifier drag) is refused the same
+        // way. One lock, nothing cloned unless it is a click grab.
+        let Some(start) = pointer
+            .with_grab(|grabbed, grab| {
+                (grabbed == serial)
+                    .then(|| grab.downcast_ref::<ClickGrab<State>>())
+                    .flatten()
+                    .map(|click| click.start_data().clone())
+            })
+            .flatten()
+        else {
             tracing::debug!(
                 ?serial,
                 "refusing an interactive move/resize: no button press held with that serial"
             );
             return;
-        }
-        let Some(start) = pointer.grab_start_data() else {
-            return;
         };
-        // ...and it must have gone to this client (a modifier drag's own
-        // grab has no focus, so no client can take it over either).
+        // ...and it must have gone to this client.
         let pressed_here = start
             .focus
             .as_ref()

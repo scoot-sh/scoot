@@ -401,6 +401,42 @@ fn a_move_request_on_another_client_s_press_is_refused() {
     release(&mut fixture, PointerButton::Left);
 }
 
+/// A popup grab is installed under whatever recent serial the client
+/// offered -- here a click's, released -- and its start data names the
+/// client's own toplevel. A move on that serial matches the grab's serial
+/// but holds no button: refused (PR #243's review).
+#[test]
+fn a_move_request_on_a_popup_grab_s_serial_is_refused() {
+    let (mut fixture, dialog) = dialog_scene();
+    let before = fixture.placement(dialog).rect;
+    let serial = client_press(&mut fixture, dialog);
+    release(&mut fixture, PointerButton::Left);
+    fixture.done(Step::GrabbingPopup {
+        window: dialog,
+        serial,
+    });
+    let pointer = fixture.state.seat.get_pointer().expect("a pointer");
+    assert!(
+        pointer.has_grab(smithay::utils::Serial::from(serial)),
+        "the popup grab is installed under the click's serial"
+    );
+    fixture.done(Step::RequestMove {
+        window: dialog,
+        serial,
+    });
+    assert_eq!(fixture.state.floating_grab_window(), None);
+    let (cx, cy) = centre(before);
+    move_pointer(&mut fixture, cx + 40, cy + 30);
+    assert_eq!(fixture.placement(dialog).rect, before);
+    // Nor a resize.
+    fixture.done(Step::RequestResize {
+        window: dialog,
+        serial,
+        edges: xdg_toplevel::ResizeEdge::BottomRight,
+    });
+    assert_eq!(fixture.state.floating_grab_window(), None);
+}
+
 #[test]
 fn a_client_resize_request_resizes_within_the_window_s_limits() {
     let mut fixture = Fixture::new();

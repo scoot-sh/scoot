@@ -158,6 +158,12 @@ enum Step {
         anchor: (i32, i32, i32, i32),
         size: (i32, i32),
     },
+    /// Like [`Step::Popup`], with `xdg_popup.grab(seat, serial)` before
+    /// its first commit.
+    GrabbingPopup {
+        window: usize,
+        serial: u32,
+    },
     /// Which of this client's surfaces the pointer last entered.
     ReportPointer,
     /// Lock the session and keep the lock (abandoned: it stays locked).
@@ -659,6 +665,29 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 })?;
                 popups.push((surface, xdg, popup, positioner));
                 Ack::Popup(geometry)
+            }
+            Step::GrabbingPopup { window, serial } => {
+                let index = client.popups.len();
+                client.popups.push(None);
+                let seat = client.seat.clone().ok_or("no wl_seat")?;
+                let positioner = wm_base.create_positioner(&qh, ());
+                positioner.set_size(20, 20);
+                positioner.set_anchor_rect(0, 0, 10, 10);
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, Role::Popup(index));
+                let popup = xdg.get_popup(
+                    Some(&windows[window].xdg),
+                    &positioner,
+                    &qh,
+                    Role::Popup(index),
+                );
+                popup.grab(&seat, serial);
+                surface.commit();
+                wait_for(&mut queue, &mut client, "a popup configure", |client| {
+                    client.popups[index]
+                })?;
+                popups.push((surface, xdg, popup, positioner));
+                Ack::Done
             }
             Step::ReportPointer => {
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
