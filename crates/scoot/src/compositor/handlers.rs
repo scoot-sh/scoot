@@ -325,7 +325,9 @@ fn send_popup_initial_configure(state: &State, surface: &WlSurface) {
     }
 }
 
-/// A toplevel needs one configure before it may attach a buffer.
+/// A toplevel needs one configure before it may attach a buffer. On a
+/// re-map Smithay has discarded everything pending, so it is rebuilt from
+/// the layout first (`State::restore_layout_state`).
 fn send_initial_configure(state: &State, surface: &WlSurface) {
     let sent = with_states(surface, |states| {
         states.data_map.get::<XdgToplevelSurfaceData>().map(|data| {
@@ -335,11 +337,10 @@ fn send_initial_configure(state: &State, surface: &WlSurface) {
         })
     });
     if sent == Some(false)
-        && let Some(toplevel) = state
-            .id_of(surface)
-            .and_then(|id| state.window(id))
-            .and_then(|w| w.toplevel())
+        && let Some(id) = state.id_of(surface)
+        && let Some(toplevel) = state.window(id).and_then(|w| w.toplevel())
     {
+        state.restore_layout_state(id);
         toplevel.send_configure();
     }
 }

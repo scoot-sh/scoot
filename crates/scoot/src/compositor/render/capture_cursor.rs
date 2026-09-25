@@ -751,6 +751,7 @@ where
     let ring = ring_elements(
         &mut state.decorations,
         &state.appearance,
+        &state.windows,
         arrangement.as_ref(),
         &frame,
         renderer,

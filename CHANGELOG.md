@@ -9,6 +9,33 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-24 — rounded corners and the focus ring now match the window
+
+- **Rounded corners and the focus ring now match the window**, including
+  terminals that size themselves to whole character cells. With
+  `corner_radius` set, `foot`'s default settings left a sliver of
+  background along the right and bottom edges. The ring and the rounded
+  corners then curved around empty space instead of the terminal (gh #205).
+  scoot now tells every window in the layout that it is tiled, so `foot`
+  fills its space exactly (GTK apps also trim their shadows). A window
+  that still draws less than its space, such as a fixed-size dialog or a
+  video player at its video's size, has its own corners rounded and the
+  ring drawn around it. One exception remains: libadwaita dialogs (GNOME
+  apps' message boxes) round their own corners more than scoot does. A
+  small crescent of background still shows between their corner and the
+  ring. It is much closer than before, when the ring circled empty space,
+  and it is tracked for a follow-up.
+- **The focus ring's outer corners are round all the way round.** They
+  used to have square "shoulders" beside the window's top and bottom
+  edges.
+- **For scripts and agents:** `scootctl windows` / IPC `rect` now reports
+  the area a window has actually drawn. That is its layout slot, or less
+  if the window draws less. Clicks there land on the window, unless a bar
+  or other layer surface covers that spot or the window's own input region
+  excludes it. Clicks in the undrawn part of a slot never reached the
+  window. Details:
+  [ipc.md](docs/ipc.md#what-the-replies-carry).
+
 ### 2026-09-24 — one app can no longer make scoot turn everything else away by keeping old buffers on screen
 
 - **An app could still make scoot hold almost all of its file

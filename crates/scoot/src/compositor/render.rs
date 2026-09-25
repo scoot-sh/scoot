@@ -1348,6 +1348,7 @@ where
     let ring_elements: Vec<Elements<R>> = ring_elements(
         &mut state.decorations,
         &state.appearance,
+        &state.windows,
         arrangement.as_ref(),
         &frame,
         renderer,
@@ -1537,6 +1538,7 @@ where
     let ring_elements: Vec<Elements<_>> = ring_elements(
         &mut state.decorations,
         &state.appearance,
+        &state.windows,
         arrangement.as_ref(),
         &frame,
         renderer,

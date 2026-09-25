@@ -33,6 +33,9 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols::wp::alpha_modifier::v1::client::{
     wp_alpha_modifier_surface_v1, wp_alpha_modifier_v1,
 };
+use wayland_protocols::xdg::decoration::zv1::client::{
+    zxdg_decoration_manager_v1, zxdg_toplevel_decoration_v1,
+};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
@@ -118,6 +121,10 @@ struct Configured {
     width: i32,
     height: i32,
     fullscreen: bool,
+    /// Whether it carried all four `tiled_*` states (xdg_toplevel v2+).
+    tiled: bool,
+    /// Whether it carried `activated`.
+    activated: bool,
 }
 
 enum Step {
@@ -160,6 +167,12 @@ enum Step {
     /// Map an unmapped toplevel again: commit without a buffer, then ack
     /// the newest configure and draw. Answers with the configure it used.
     Remap { window: usize, color: [u8; 4] },
+    /// Give the `window`-th toplevel a `zxdg_toplevel_decoration_v1` (the
+    /// way `foot` asks for server-side decorations), then round-trip.
+    Decorate { window: usize },
+    /// Report every decoration mode the `window`-th toplevel's decoration
+    /// object has been sent, oldest first.
+    DecorationModes { window: usize },
     /// Report every configure the `window`-th toplevel has been sent.
     Configures { window: usize },
     /// Map a layer-shell surface.
@@ -207,6 +220,7 @@ enum Ack {
     Done,
     Configured(Configured),
     Configures(Vec<Configured>),
+    DecorationModes(Vec<u32>),
     Pointer(Option<Entered>),
     #[cfg(feature = "gpu-scanout")]
     Feedbacks(Vec<scanout_feedback::SeenFeedback>),
@@ -251,6 +265,11 @@ struct TestClient {
     /// waiting for its `xdg_surface.configure`, and every completed one.
     pending: Vec<Configured>,
     configures: Vec<Vec<Configured>>,
+    decoration_manager: Option<zxdg_decoration_manager_v1::ZxdgDecorationManagerV1>,
+    /// Per toplevel: its decoration object (if [`Step::Decorate`] made one)
+    /// and every mode that object was sent.
+    decorations: Vec<Option<zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1>>,
+    decoration_modes: Vec<Vec<u32>>,
     /// Per toplevel: the serial it acked last.
     acked: Vec<Option<u32>>,
     /// Per layer surface: the newest configure's `(serial, width, height)`.
@@ -287,6 +306,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 client.layer_shell = Some(registry.bind(name, version.min(4), qh, ()));
             }
             "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
+            "zxdg_decoration_manager_v1" => {
+                client.decoration_manager = Some(registry.bind(name, version.min(1), qh, ()));
+            }
             "wl_output" => client
                 .outputs
                 .push(registry.bind(name, version.min(4), qh, ())),
@@ -384,19 +406,54 @@ impl Dispatch<xdg_toplevel::XdgToplevel, Index> for TestClient {
         } = event
             && let Some(pending) = client.pending.get_mut(index.0)
         {
-            let fullscreen = states
-                .chunks_exact(4)
-                .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
-                .any(|state| state == xdg_toplevel::State::Fullscreen as u32);
+            let has = |wanted: xdg_toplevel::State| {
+                states
+                    .chunks_exact(4)
+                    .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
+                    .any(|state| state == wanted as u32)
+            };
+            let fullscreen = has(xdg_toplevel::State::Fullscreen);
+            let activated = has(xdg_toplevel::State::Activated);
+            let tiled = [
+                xdg_toplevel::State::TiledLeft,
+                xdg_toplevel::State::TiledRight,
+                xdg_toplevel::State::TiledTop,
+                xdg_toplevel::State::TiledBottom,
+            ]
+            .into_iter()
+            .all(has);
             *pending = Configured {
                 serial: 0,
                 width,
                 height,
                 fullscreen,
+                tiled,
+                activated,
             };
         }
     }
 }
+
+impl Dispatch<zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1, Index> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1,
+        event: zxdg_toplevel_decoration_v1::Event,
+        index: &Index,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zxdg_toplevel_decoration_v1::Event::Configure { mode } = event
+            && let Some(modes) = client.decoration_modes.get_mut(index.0)
+        {
+            modes.push(u32::from(mode));
+        }
+    }
+}
+
+wayland_client::delegate_noop!(
+    TestClient: ignore zxdg_decoration_manager_v1::ZxdgDecorationManagerV1
+);
 
 impl Dispatch<xdg_surface::XdgSurface, Index> for TestClient {
     fn event(
@@ -598,6 +655,8 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 client.pending.push(Configured::default());
                 client.configures.push(Vec::new());
                 client.acked.push(None);
+                client.decorations.push(None);
+                client.decoration_modes.push(Vec::new());
                 let surface = compositor.create_surface(&qh, ());
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, Index(index));
                 let toplevel = xdg.get_toplevel(&qh, Index(index));
@@ -697,6 +756,21 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let used = draw(&mut client, &qh, &shm, &windows[window], window, color)?;
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Configured(used)
+            }
+            Step::Decorate { window } => {
+                let manager = client
+                    .decoration_manager
+                    .clone()
+                    .ok_or("no zxdg_decoration_manager_v1")?;
+                let decoration =
+                    manager.get_toplevel_decoration(&windows[window].toplevel, &qh, Index(window));
+                client.decorations[window] = Some(decoration);
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::DecorationModes { window } => {
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::DecorationModes(client.decoration_modes[window].clone())
             }
             Step::Configures { window } => {
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;

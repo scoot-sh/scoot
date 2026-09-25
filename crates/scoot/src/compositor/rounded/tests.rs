@@ -37,8 +37,10 @@ use wayland_protocols::xdg::shell::client::{
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 use crate::compositor::decorations::{Appearance, ring_rects};
-use crate::compositor::rounded::{clip_rect, cut_width, physical_radius};
+use crate::compositor::rounded::{clip_rect, cut_width, physical_radius, ring_layout};
 use crate::compositor::test_support::{Harness, assert_pixel, find_color, pixel, wait_for};
+
+mod committed;
 
 /// The framebuffer these tests render into.
 const CANVAS: i32 = 400;
@@ -59,17 +61,31 @@ enum Step {
     /// Map a toplevel drawing a solid `color` buffer sized to whatever the
     /// compositor configures (like a real toolkit).
     Window { color: [u8; 4] },
+    /// Map a toplevel that draws `shrink` logical pixels short of what it
+    /// was configured to, per axis -- a terminal rounding down to whole
+    /// character cells (`foot`'s default `resize-by-cells`), a fixed-size
+    /// dialog, an older client.
+    ShortWindow { color: [u8; 4], shrink: (i32, i32) },
+    /// Redraw the `window`-th toplevel (by creation order) `shrink` short
+    /// of the size it last acked, with no new configure: a client whose
+    /// next frame changes how much of its slot it fills.
+    Redraw { window: usize, shrink: (i32, i32) },
     /// Map a no-grab popup parented to the first window, sized `w` x `h`,
     /// anchored to grow down-right from the parent's origin -- over the
     /// parent's top-left rounded corner.
     Popup { color: [u8; 4], w: i32, h: i32 },
     /// Map a fullscreen background-layer wallpaper drawing a solid `color`.
     Wallpaper { color: [u8; 4] },
+    /// Report whether any toplevel configure so far carried a `tiled_*`
+    /// state. This client binds `xdg_wm_base` at version 1, where those
+    /// states do not exist.
+    SawTiled,
 }
 
 #[derive(Debug)]
 enum Ack {
     Done,
+    SawTiled(bool),
 }
 
 /// Which `xdg_surface` a configure belongs to.
@@ -100,6 +116,8 @@ struct TestClient {
     window_serials: Vec<Option<u32>>,
     window_sizes: Vec<Option<(i32, i32)>>,
     layer_size: Option<(u32, u32)>,
+    /// Whether any toplevel configure carried a `tiled_*` state.
+    saw_tiled: bool,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
@@ -185,7 +203,25 @@ impl Dispatch<xdg_toplevel::XdgToplevel, SurfaceKind> for TestClient {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let xdg_toplevel::Event::Configure { width, height, .. } = event {
+        if let xdg_toplevel::Event::Configure {
+            width,
+            height,
+            ref states,
+        } = event
+        {
+            client.saw_tiled |= states
+                .chunks_exact(4)
+                .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
+                .any(|state| {
+                    [
+                        xdg_toplevel::State::TiledLeft,
+                        xdg_toplevel::State::TiledRight,
+                        xdg_toplevel::State::TiledTop,
+                        xdg_toplevel::State::TiledBottom,
+                    ]
+                    .into_iter()
+                    .any(|tiled| state == tiled as u32)
+                });
             if width > 0 && height > 0 {
                 if let SurfaceKind::Window(index) = kind {
                     if let Some(slot) = client.window_sizes.get_mut(*index) {
@@ -269,6 +305,33 @@ fn solid_buffer(
     buffer
 }
 
+/// Commits one solid `color` frame `shrink` logical pixels short of `size`
+/// per axis, the way a fractional-aware toolkit draws: the viewport
+/// destination at the logical size, the buffer at that size times the
+/// preferred scale.
+#[allow(clippy::too_many_arguments)]
+fn draw_short(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    surface: &wl_surface::WlSurface,
+    viewport: &wp_viewport::WpViewport,
+    preferred: f64,
+    size: (i32, i32),
+    shrink: (i32, i32),
+    color: [u8; 4],
+) {
+    let (w, h) = (size.0 - shrink.0, size.1 - shrink.1);
+    viewport.set_destination(w, h);
+    let (bw, bh) = (
+        (f64::from(w) * preferred).round() as i32,
+        (f64::from(h) * preferred).round() as i32,
+    );
+    let buffer = solid_buffer(shm, qh, bw, bh, color);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage_buffer(0, 0, bw, bh);
+    surface.commit();
+}
+
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let mut queue = conn.new_event_queue();
@@ -288,6 +351,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let viewporter = client.viewporter.clone().ok_or("no wp_viewporter")?;
     // Held so every mapped surface stays alive for the run.
     let mut surfaces: Vec<wl_surface::WlSurface> = Vec::new();
+    // Per toplevel, by creation order: what `Step::Redraw` needs to commit
+    // a new frame -- the surface, its viewport and the size it acked.
+    let mut toplevels: Vec<(wl_surface::WlSurface, wp_viewport::WpViewport, (i32, i32))> =
+        Vec::new();
     let mut roles: Vec<xdg_surface::XdgSurface> = Vec::new();
     // The fractional-scale objects and viewports: dropping either could
     // release surface state the compositor still reads, so they live as
@@ -298,7 +365,11 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
 
     while let Ok(step) = steps.recv() {
         match step {
-            Step::Window { color } => {
+            Step::Window { color } | Step::ShortWindow { color, .. } => {
+                let shrink = match step {
+                    Step::ShortWindow { shrink, .. } => shrink,
+                    _ => (0, 0),
+                };
                 let index = client.window_serials.len();
                 client.window_serials.push(None);
                 client.window_sizes.push(None);
@@ -326,22 +397,45 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 })?;
                 xdg.ack_configure(serial);
                 let viewport = viewporter.get_viewport(&surface, &qh, ());
-                viewport.set_destination(w, h);
-                let (bw, bh) = (
-                    (f64::from(w) * preferred).round() as i32,
-                    (f64::from(h) * preferred).round() as i32,
+                draw_short(
+                    &shm,
+                    &qh,
+                    &surface,
+                    &viewport,
+                    preferred,
+                    (w, h),
+                    shrink,
+                    color,
                 );
-                let buffer = solid_buffer(&shm, &qh, bw, bh, color);
-                surface.attach(Some(&buffer), 0, 0);
-                surface.damage_buffer(0, 0, bw, bh);
-                surface.commit();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                toplevels.push((surface.clone(), viewport.clone(), (w, h)));
                 parent = Some(xdg.clone());
                 roles.push(xdg);
                 surfaces.push(surface);
                 fractional_scales.push(fractional);
                 viewports.push(viewport);
                 acks.send(Ack::Done).map_err(|e| e.to_string())?;
+            }
+            Step::Redraw { window, shrink } => {
+                let (surface, viewport, size) = toplevels.get(window).ok_or("no such toplevel")?;
+                let preferred = client.preferred_scale.ok_or("no preferred scale")?;
+                draw_short(
+                    &shm,
+                    &qh,
+                    surface,
+                    viewport,
+                    preferred,
+                    *size,
+                    shrink,
+                    WINDOW_BGRA,
+                );
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
+            }
+            Step::SawTiled => {
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                acks.send(Ack::SawTiled(client.saw_tiled))
+                    .map_err(|e| e.to_string())?;
             }
             Step::Popup { color, w, h } => {
                 let parent = parent.clone().ok_or("no parent window")?;
@@ -878,8 +972,23 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
     fixture.run(Step::Window { color: WINDOW_BGRA });
     let placement = fixture.placement();
     let pixels = fixture.render();
+    assert_ring_hugs_content(&pixels, placement, scale, configured, thickness);
+}
 
-    let clip = clip_rect(placement, scale);
+/// Everything "the ring and the content line up" means for one window whose
+/// drawn rect (in logical pixels) is `drawn`, on a frame with nothing else in
+/// it: the red census, every inner corner row on the staircase with ring
+/// just outside, and the ring's *outer* edge a concentric arc -- radius plus
+/// ring thickness, around the same corner -- in every row of the outer
+/// corner band, the rows beside the window's own edge included.
+fn assert_ring_hugs_content(
+    pixels: &[u8],
+    drawn: Rect,
+    scale: f64,
+    configured: i32,
+    thickness: i32,
+) {
+    let clip = clip_rect(drawn, scale);
     let radius = physical_radius(configured, clip, scale);
     assert!(
         radius > 1,
@@ -902,7 +1011,7 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
     // so a shifted or resized content rect fails here no matter which
     // corner it hides in.
     let cut: i32 = (0..radius).map(|row| cut_width(radius, row)).sum();
-    let counts = census(&pixels);
+    let counts = census(pixels);
     assert_eq!(
         counts.get(&WINDOW_BGRA).copied().unwrap_or(0),
         (w * h - 4 * cut) as usize,
@@ -924,7 +1033,7 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
         "scale {scale}: the sampled ring pixel must not be background"
     );
     assert_pixel(
-        &pixels,
+        pixels,
         CANVAS,
         ring_sample[0],
         ring_sample[1],
@@ -939,7 +1048,7 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
         for (py, what) in [(y + row, "top"), (y + h - 1 - row, "bottom")] {
             if cut > 0 {
                 assert_pixel(
-                    &pixels,
+                    pixels,
                     CANVAS,
                     x + cut - 1,
                     py,
@@ -947,7 +1056,7 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
                     &format!("scale {scale}: {what} row {row}, ring hugs the staircase"),
                 );
                 assert_pixel(
-                    &pixels,
+                    pixels,
                     CANVAS,
                     x + w - cut,
                     py,
@@ -956,7 +1065,7 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
                 );
             }
             assert_pixel(
-                &pixels,
+                pixels,
                 CANVAS,
                 x + cut,
                 py,
@@ -964,7 +1073,7 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
                 &format!("scale {scale}: {what} row {row}, first kept pixel"),
             );
             assert_pixel(
-                &pixels,
+                pixels,
                 CANVAS,
                 x + w - 1 - cut,
                 py,
@@ -976,7 +1085,7 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
     // Center still window; the diagonal just outside the outer corner is
     // background (a square ring would paint there).
     assert_pixel(
-        &pixels,
+        pixels,
         CANVAS,
         x + w / 2,
         y + h / 2,
@@ -993,7 +1102,7 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
     // past it must re-derive rather than widen the gate).
     if radius > thickness_phys * 2 {
         assert_pixel(
-            &pixels,
+            pixels,
             CANVAS,
             x - 1,
             y - 1,
@@ -1002,13 +1111,70 @@ fn check_ring_content_alignment(scale: f64, configured: i32, thickness: i32) {
         );
     } else {
         assert_pixel(
-            &pixels,
+            pixels,
             CANVAS,
             x - 1,
             y - 1,
             ring,
             &format!("scale {scale}: the outer arc still covers the diagonal"),
         );
+    }
+
+    // The outer edge: the ring's own outer rect (the painted canvas, where
+    // the element draws it) rounded by `radius + thickness_phys` -- the
+    // circle concentric with the window's corner. Every row of that corner
+    // band, top and bottom, left and right: the cut pixels are background
+    // and the first kept one is ring. The rows level with the window's own
+    // edge are the ones a full-height side bar would square off.
+    let (ring_loc, _, canvas) = ring_layout(drawn, thickness, scale);
+    let origin: Point<i32, Physical> = ring_loc.to_i32_round();
+    let radius_outer = radius + thickness_phys;
+    assert!(
+        radius_outer * 2 <= canvas.h.min(canvas.w),
+        "scale {scale}: the test needs a ring whose outer corners do not meet"
+    );
+    for row in 0..radius_outer {
+        let cut = cut_width(radius_outer, row);
+        for (py, what) in [
+            (origin.y + row, "top"),
+            (origin.y + canvas.h - 1 - row, "bottom"),
+        ] {
+            let (left, right) = (origin.x + cut, origin.x + canvas.w - 1 - cut);
+            if cut > 0 {
+                assert_pixel(
+                    pixels,
+                    CANVAS,
+                    left - 1,
+                    py,
+                    bg,
+                    &format!("scale {scale}: {what} outer row {row}, cut on the left"),
+                );
+                assert_pixel(
+                    pixels,
+                    CANVAS,
+                    right + 1,
+                    py,
+                    bg,
+                    &format!("scale {scale}: {what} outer row {row}, cut on the right"),
+                );
+            }
+            assert_pixel(
+                pixels,
+                CANVAS,
+                left,
+                py,
+                ring,
+                &format!("scale {scale}: {what} outer row {row}, first ring pixel on the left"),
+            );
+            assert_pixel(
+                pixels,
+                CANVAS,
+                right,
+                py,
+                ring,
+                &format!("scale {scale}: {what} outer row {row}, first ring pixel on the right"),
+            );
+        }
     }
 }
 

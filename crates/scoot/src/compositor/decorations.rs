@@ -65,7 +65,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use scoot_core::{Arrangement, OutputId, Rect, WindowId};
+use scoot_core::{Arrangement, OutputId, Placement, Rect, WindowId};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::Color32F;
 use smithay::backend::renderer::element::Kind;
@@ -249,8 +249,8 @@ impl Default for Appearance {
             focus_ring_inactive_color: Color::new(0.35, 0.35, 0.38, 1.0),
             background_color: Color::new(0.08, 0.08, 0.1, 1.0),
             // Square until configured: any non-zero radius opts the session
-            // into the rounded window + ring path (see `rounded.rs`), so the
-            // default session is byte-identical to before it existed.
+            // into the rounded window + ring path (see `rounded.rs`); the
+            // default session never takes it.
             corner_radius: 0,
             // The shape `cursor.rs` has drawn since it existed: a 16x16
             // triangle with a white fill. Unchanged defaults, so an existing
@@ -371,7 +371,8 @@ pub struct RingRects {
     pub right: Option<Rect>,
 }
 
-/// Computes the ring drawn *outside* `rect` (a window's placement), `width`
+/// Computes the ring drawn *outside* `rect` (the part of a window's slot it
+/// drew -- see `drawn.rs`), `width`
 /// pixels wide, clipped to `bounds` (normally the output's own rect).
 ///
 /// The frame is decomposed into 4 rectangles with the top and bottom strips
@@ -484,7 +485,9 @@ struct PaintedKey {
 /// frame for pixels that change nothing -- most of what an early benchmark
 /// measured as the rounding cost. The strips cover only rows that hold ring
 /// pixels (top band plus upper arcs, bottom band plus lower arcs); the
-/// straight side runs stay solid rects through the existing `rings` buffers.
+/// straight side runs between them are two solid rects (`left`/`right`, see
+/// [`painted_side_bars`]).
+#[derive(Default)]
 struct PaintedRing {
     top: Option<MemoryRenderBuffer>,
     bottom: Option<MemoryRenderBuffer>,
@@ -505,6 +508,15 @@ struct PaintedRing {
     /// below keys off `top_at`, and these follow it.
     inner_at: Option<Rectangle<i32, Physical>>,
     outer_at: Option<Rectangle<i32, Physical>>,
+    /// The straight side runs between the strips, one persistent buffer
+    /// each (stable element `Id`s, like every other ring segment). Sized in
+    /// *physical* pixels and drawn at scale 1 -- unlike [`WindowRing`]'s
+    /// bars, which are logical -- because their edges are the strips' own
+    /// physical row boundaries, which no logical size lands on exactly at a
+    /// fractional scale. Kept apart from `WindowRing` so no buffer ever
+    /// holds a size in two different units.
+    left: SolidColorBuffer,
+    right: SolidColorBuffer,
     pixels: Vec<u8>,
     key: Option<PaintedKey>,
 }
@@ -579,11 +591,15 @@ impl Decorations {
     /// no other. Its buffers are left alone, so each window's `Id`s are only
     /// ever updated by the one output that draws it.
     ///
-    /// This is the square ring, unchanged: the rounded session reaches
-    /// [`Decorations::elements_rounded`] instead, so this path stays
-    /// byte-identical with no branch on the radius. Painted buffers from an
-    /// earlier rounded stretch are dropped here, so toggling the radius back
-    /// to square frees them instead of leaking them for the session.
+    /// Each ring surrounds `drawn(placement)` -- the part of its slot the
+    /// window actually drew (see `drawn.rs`; the caller looks the window up),
+    /// in the same global logical coordinates as `placement.rect`.
+    ///
+    /// This is the square ring: the rounded session reaches
+    /// [`Decorations::elements_rounded`] instead, so this path has no branch
+    /// on the radius. Painted buffers from an earlier rounded stretch are
+    /// dropped here, so toggling the radius back to square frees them
+    /// instead of leaking them for the session.
     pub fn elements(
         &mut self,
         arrangement: &Arrangement,
@@ -591,6 +607,7 @@ impl Decorations {
         output: OutputId,
         bounds: Rect,
         scale: f64,
+        drawn: impl Fn(&Placement) -> Rect,
     ) -> Vec<SolidColorRenderElement> {
         self.retain(arrangement);
         self.painted.clear();
@@ -601,7 +618,7 @@ impl Decorations {
                 continue;
             }
             let color = ring_color(arrangement, placement.id, appearance);
-            let rect = to_output_local(placement.rect, bounds);
+            let rect = to_output_local(drawn(placement), bounds);
             let rects = ring_rects(rect, appearance.focus_ring_width, local_bounds);
             let ring = self.rings.entry(placement.id).or_default();
             push(&mut elements, &mut ring.top, rects.top, color, scale);
@@ -623,7 +640,8 @@ impl Decorations {
     /// never calls this), so toggling the radius does not leak them. The
     /// same windows get no ring here as there: invisible ones, fullscreen
     /// ones and other outputs' ones -- and the same output-local
-    /// coordinates.
+    /// coordinates, around the same `drawn` rect.
+    #[allow(clippy::too_many_arguments)]
     pub fn elements_rounded<R>(
         &mut self,
         arrangement: &Arrangement,
@@ -631,6 +649,7 @@ impl Decorations {
         output: OutputId,
         bounds: Rect,
         scale: f64,
+        drawn: impl Fn(&Placement) -> Rect,
         renderer: &mut R,
     ) -> Vec<RingElement<R>>
     where
@@ -648,7 +667,7 @@ impl Decorations {
             self.push_painted(
                 &mut elements,
                 placement.id,
-                to_output_local(placement.rect, bounds),
+                to_output_local(drawn(placement), bounds),
                 appearance,
                 color,
                 local_bounds,
@@ -705,16 +724,7 @@ impl Decorations {
             color: color.to_argb8888(),
             scale_bits: scale.to_bits(),
         };
-        let entry = self.painted.entry(id).or_insert_with(|| PaintedRing {
-            top: None,
-            bottom: None,
-            top_at: None,
-            bottom_at: None,
-            inner_at: None,
-            outer_at: None,
-            pixels: Vec::new(),
-            key: None,
-        });
+        let entry = self.painted.entry(id).or_default();
         if entry.key != Some(key) {
             entry.key = Some(key);
             build_strips(rect, appearance, color, scale, entry);
@@ -771,10 +781,19 @@ impl Decorations {
             (Ok(top), Ok(bottom)) => {
                 elements.push(RingElement::Painted(Box::new(top)));
                 elements.push(RingElement::Painted(Box::new(bottom)));
-                let rects = ring_rects(rect, thickness, bounds);
-                let ring = self.rings.entry(id).or_default();
-                push_painted_rect(elements, &mut ring.left, rects.left, color, scale);
-                push_painted_rect(elements, &mut ring.right, rects.right, color, scale);
+                // The side runs span only the rows between the two strips:
+                // the strips carry both arcs, and a bar reaching into them
+                // would square off the outer corner the strip leaves
+                // transparent. `inner_at`/`outer_at` are set whenever the
+                // strips are (see `build_strips`).
+                let [left, right] = match (entry.inner_at, entry.outer_at) {
+                    (Some(inner), Some(outer)) => {
+                        painted_side_bars(top_at, bottom_at, inner, outer)
+                    }
+                    _ => [None, None],
+                };
+                push_physical_rect(elements, &mut entry.left, left, color);
+                push_physical_rect(elements, &mut entry.right, right, color);
             }
             (Err(error), _) | (_, Err(error)) => {
                 // Import-time failure (the paint succeeded): poison the entry
@@ -974,6 +993,51 @@ fn refresh_strip_origins(
     true
 }
 
+/// The two straight side runs of a painted ring, in output-physical pixels:
+/// the band between the ring's outer edge and the window's edge, on the rows
+/// strictly between the top strip and the bottom strip.
+///
+/// Derived from exactly what the strips were painted and placed from --
+/// their canvases, where the top one draws, and the full-canvas `inner` /
+/// `outer` rects -- so the bars start on the row the top strip ends, end on
+/// the row the bottom strip starts, and span the columns the strips paint as
+/// band: no gap and no overlap at any scale. (No overlap matters beyond
+/// tidiness: with a translucent ring color an overlapped row would blend
+/// twice.) The strips always reach past both arcs -- `plan_strips` makes
+/// them at least `thickness + radius_outer` physical rows tall, while the
+/// outer arc spans the first `radius_outer` rows and the window's own arc
+/// ends about there too (`thickness + radius_inner`, give or take a
+/// rounding row) -- so every row a bar covers is straight on both edges
+/// (swept in the tests below).
+///
+/// `None` for a side with no area: a window too short to leave rows between
+/// its strips (they meet or overlap), or a zero-width band.
+fn painted_side_bars(
+    top: &StripGeometry,
+    bottom: &StripGeometry,
+    inner: Rectangle<i32, Physical>,
+    outer: Rectangle<i32, Physical>,
+) -> [Option<Rectangle<i32, Physical>>; 2] {
+    // The element draws at its origin rounded, which is where full-canvas
+    // row and column 0 land (see `ring_layout`/`element_canvas`).
+    let origin: Point<i32, Physical> = top.loc.to_i32_round();
+    let first_row = top.canvas.h;
+    let end_row = outer.size.h - bottom.canvas.h;
+    let rows = end_row - first_row;
+    let band = |x0: i32, x1: i32| {
+        (rows > 0 && x1 > x0).then(|| {
+            Rectangle::new(
+                (origin.x + x0, origin.y + first_row).into(),
+                (x1 - x0, rows).into(),
+            )
+        })
+    };
+    [
+        band(outer.loc.x, inner.loc.x),
+        band(inner.loc.x + inner.size.w, outer.loc.x + outer.size.w),
+    ]
+}
+
 /// Repaints `entry`'s two strips for `rect`: computes the full-canvas ring
 /// geometry once (the band both strips share -- see [`plan_strips`]), then
 /// paints the top rows and the bottom rows into the shared scratch,
@@ -1128,10 +1192,35 @@ fn push_painted_rect<R: Renderer>(
     )));
 }
 
+/// [`push_painted_rect`] for a rect already in output-physical pixels: the
+/// buffer holds the physical size and the element is built at scale 1, so
+/// Smithay's own logical-to-physical rounding never moves an edge.
+fn push_physical_rect<R: Renderer>(
+    elements: &mut Vec<RingElement<R>>,
+    buffer: &mut SolidColorBuffer,
+    rect: Option<Rectangle<i32, Physical>>,
+    color: Color,
+) {
+    let Some(rect) = rect else {
+        buffer.resize((0, 0));
+        return;
+    };
+    // `SolidColorBuffer` types its size as logical; at scale 1 the two are
+    // the same numbers, which is the point.
+    buffer.update((rect.size.w, rect.size.h), color);
+    elements.push(RingElement::Rect(SolidColorRenderElement::from_buffer(
+        buffer,
+        rect.loc,
+        1.0,
+        1.0,
+        Kind::Unspecified,
+    )));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scoot_core::{OutputId, Placement};
+    use scoot_core::OutputId;
     use smithay::backend::renderer::element::Element;
 
     // -- Color::parse -----------------------------------------------------
@@ -1438,6 +1527,14 @@ mod tests {
 
     // -- Decorations::elements -----------------------------------------------
 
+    /// The `drawn` lookup for a window that fills its slot: what every
+    /// `elements` call below passes, since these tests map no client (the
+    /// committed-size behaviour is pinned end to end in
+    /// `rounded/tests/committed.rs`).
+    fn slot(placement: &Placement) -> Rect {
+        placement.rect
+    }
+
     fn placement(id: u64, rect: Rect) -> Placement {
         Placement {
             id: WindowId(id),
@@ -1462,7 +1559,8 @@ mod tests {
         let arrangement = arrangement(vec![placement(1, Rect::new(100, 100, 200, 150))], 1);
         let mut decorations = Decorations::default();
 
-        let elements = decorations.elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0);
+        let elements =
+            decorations.elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0, slot);
 
         assert_eq!(elements.len(), 4);
         let expected: Color32F = appearance.focus_ring_active_color.into();
@@ -1481,7 +1579,7 @@ mod tests {
 
         assert!(
             decorations
-                .elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0)
+                .elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0, slot)
                 .is_empty()
         );
     }
@@ -1500,7 +1598,8 @@ mod tests {
         );
         let mut decorations = Decorations::default();
 
-        let elements = decorations.elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0);
+        let elements =
+            decorations.elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0, slot);
         assert_eq!(elements.len(), 4, "only the focused tiled window is ringed");
     }
 
@@ -1519,13 +1618,13 @@ mod tests {
 
         assert!(
             decorations
-                .elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0)
+                .elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0, slot)
                 .is_empty(),
             "the first output drew the second output's ring"
         );
         assert_eq!(
             decorations
-                .elements(&arrangement, &appearance, OutputId(2), SECOND, 1.0)
+                .elements(&arrangement, &appearance, OutputId(2), SECOND, 1.0, slot)
                 .len(),
             3,
             "its own output draws the ring, minus the side cut off at its left edge"
@@ -1541,7 +1640,8 @@ mod tests {
         let arrangement = arrangement(vec![window], 1);
         let mut decorations = Decorations::default();
 
-        let elements = decorations.elements(&arrangement, &appearance, OutputId(2), SECOND, 1.0);
+        let elements =
+            decorations.elements(&arrangement, &appearance, OutputId(2), SECOND, 1.0, slot);
         let top = elements
             .iter()
             .map(|element| element.geometry(1.0.into()))
@@ -1559,11 +1659,11 @@ mod tests {
         let appearance = Appearance::default();
         let mut decorations = Decorations::default();
         let with_window = arrangement(vec![placement(1, Rect::new(100, 100, 200, 150))], 1);
-        decorations.elements(&with_window, &appearance, OutputId(1), SCREEN, 1.0);
+        decorations.elements(&with_window, &appearance, OutputId(1), SCREEN, 1.0, slot);
         assert_eq!(decorations.rings.len(), 1);
 
         let closed = Arrangement::default();
-        decorations.elements(&closed, &appearance, OutputId(1), SCREEN, 1.0);
+        decorations.elements(&closed, &appearance, OutputId(1), SCREEN, 1.0, slot);
         assert!(decorations.rings.is_empty());
     }
 
@@ -1584,7 +1684,8 @@ mod tests {
         let b = placement(2, Rect::new(400, 100, 200, 150));
 
         let a_focused = arrangement(vec![a, b], 1);
-        let elements = decorations.elements(&a_focused, &appearance, OutputId(1), SCREEN, 1.0);
+        let elements =
+            decorations.elements(&a_focused, &appearance, OutputId(1), SCREEN, 1.0, slot);
         assert_eq!(elements.len(), 8);
         for element in &elements {
             let expected = if element.geometry(1.0.into()).loc.x < 350 {
@@ -1596,7 +1697,8 @@ mod tests {
         }
 
         let b_focused = arrangement(vec![a, b], 2);
-        let elements = decorations.elements(&b_focused, &appearance, OutputId(1), SCREEN, 1.0);
+        let elements =
+            decorations.elements(&b_focused, &appearance, OutputId(1), SCREEN, 1.0, slot);
         assert_eq!(elements.len(), 8);
         for element in &elements {
             let expected = if element.geometry(1.0.into()).loc.x < 350 {
@@ -1618,6 +1720,143 @@ mod tests {
         }
     }
 
+    // -- painted_side_bars (the outer-corner shoulders) ----------------------
+
+    /// The side runs of a painted ring cover exactly the rows between the two
+    /// strips -- starting on the row the top strip's element ends, ending on
+    /// the row the bottom strip's element starts -- and exactly the band's
+    /// columns, and every row they cover is straight on both edges (below
+    /// the outer arc and the window's own arc). Swept over scales,
+    /// thicknesses and sub-pixel positions, since the rounding phases are
+    /// where a bar could land a row into an arc (the shoulders) or leave a
+    /// one-row gap.
+    #[test]
+    fn painted_side_bars_fill_exactly_the_straight_rows_between_the_strips() {
+        for scale in [1.0, 1.25, 4.0 / 3.0, 1.5, 1.75, 2.0] {
+            for thickness in 1..=4 {
+                let appearance = Appearance {
+                    focus_ring_width: thickness,
+                    corner_radius: 10,
+                    ..Appearance::default()
+                };
+                for (dx, dy) in (0..4).flat_map(|dx| (0..4).map(move |dy| (dx, dy))) {
+                    let rect = Rect::new(10 + dx, 20 + dy, 97, 83);
+                    let what = format!("scale {scale} thickness {thickness} rect {rect:?}");
+                    let plan = plan_strips(rect, &appearance, scale).expect("a plan");
+                    let [left, right] =
+                        painted_side_bars(&plan.top, &plan.bottom, plan.inner, plan.outer);
+                    let (left, right) = (left.expect("a left bar"), right.expect("a right bar"));
+                    let origin: Point<i32, Physical> = plan.top.loc.to_i32_round();
+                    let bottom_start = plan.bottom.loc.to_i32_round::<i32>().y;
+                    for bar in [left, right] {
+                        assert_eq!(
+                            bar.loc.y,
+                            origin.y + plan.top.canvas.h,
+                            "{what}: a bar starts where the top strip ends"
+                        );
+                        assert_eq!(
+                            bar.loc.y + bar.size.h,
+                            bottom_start,
+                            "{what}: a bar ends where the bottom strip starts"
+                        );
+                        let (first, end) =
+                            (bar.loc.y - origin.y, bar.loc.y - origin.y + bar.size.h);
+                        assert!(
+                            first >= plan.radius_outer && end <= plan.canvas.h - plan.radius_outer,
+                            "{what}: a bar reaches into the outer arc (rows {first}..{end})"
+                        );
+                        assert!(
+                            first >= plan.inner.loc.y + plan.radius_inner
+                                && end <= plan.inner.loc.y + plan.inner.size.h - plan.radius_inner,
+                            "{what}: a bar reaches into the window's arc (rows {first}..{end})"
+                        );
+                    }
+                    let clip = clip_rect(rect, scale);
+                    assert_eq!(left.loc.x, origin.x, "{what}: left bar's outer edge");
+                    assert_eq!(
+                        left.loc.x + left.size.w,
+                        clip.loc.x,
+                        "{what}: left bar meets the window"
+                    );
+                    assert_eq!(
+                        right.loc.x,
+                        clip.loc.x + clip.size.w,
+                        "{what}: right bar meets the window"
+                    );
+                    assert_eq!(
+                        right.loc.x + right.size.w,
+                        origin.x + plan.canvas.w,
+                        "{what}: right bar's outer edge"
+                    );
+                }
+            }
+        }
+    }
+
+    /// What one ring repaint costs, for a human: [`build_strips`] (paint both
+    /// strips into the reused scratch, copy each into a fresh
+    /// `MemoryRenderBuffer`) against the cache-hit path
+    /// ([`refresh_strip_origins`]), at the gh #205 window sizes. The texture
+    /// import that follows a repaint is the renderer's and is priced by
+    /// `headless::bench::rounded_resize_churn_cost` instead.
+    #[test]
+    #[ignore = "prints repaint timings for a human; asserts nothing"]
+    fn ring_repaint_cost() {
+        const CALLS: u32 = 2000;
+        let appearance = Appearance {
+            focus_ring_width: 4,
+            corner_radius: 10,
+            ..Appearance::default()
+        };
+        for (scale, rect) in [
+            (1.5, Rect::new(12, 12, 966, 1083)),
+            (1.0, Rect::new(12, 12, 1458, 1636)),
+        ] {
+            let mut entry = painted_entry(rect, &appearance, scale);
+            let start = std::time::Instant::now();
+            for _ in 0..CALLS {
+                build_strips(
+                    rect,
+                    &appearance,
+                    appearance.focus_ring_active_color,
+                    scale,
+                    &mut entry,
+                );
+            }
+            let repaint = start.elapsed() / CALLS;
+            let start = std::time::Instant::now();
+            for _ in 0..CALLS {
+                assert!(refresh_strip_origins(rect, &appearance, scale, &mut entry));
+            }
+            let hit = start.elapsed() / CALLS;
+            println!(
+                "ring repaint at scale {scale}, {}x{} logical: {repaint:?} per repaint vs \
+                 {hit:?} per cache hit",
+                rect.w, rect.h
+            );
+        }
+    }
+
+    /// A window too short to leave any row between its two strips has no
+    /// side bars (the strips meet and paint the whole band themselves),
+    /// rather than a bar of zero or negative height.
+    #[test]
+    fn a_window_too_short_for_rows_between_the_strips_has_no_side_bars() {
+        let appearance = Appearance {
+            focus_ring_width: 4,
+            corner_radius: 10,
+            ..Appearance::default()
+        };
+        for scale in [1.0, 1.5, 2.0] {
+            let plan = plan_strips(Rect::new(10, 10, 97, 6), &appearance, scale).expect("a plan");
+            assert_eq!(
+                painted_side_bars(&plan.top, &plan.bottom, plan.inner, plan.outer),
+                [None, None],
+                "scale {scale}"
+            );
+        }
+    }
+
     // -- refresh_strip_origins (fractional-scale ring-hole drift) ---------------
 
     /// The painted path's inputs for the drift tests: thickness 2 (the
@@ -1631,16 +1870,7 @@ mod tests {
     }
 
     fn painted_entry(rect: Rect, appearance: &Appearance, scale: f64) -> PaintedRing {
-        let mut entry = PaintedRing {
-            top: None,
-            bottom: None,
-            top_at: None,
-            bottom_at: None,
-            inner_at: None,
-            outer_at: None,
-            pixels: Vec::new(),
-            key: None,
-        };
+        let mut entry = PaintedRing::default();
         build_strips(
             rect,
             appearance,
@@ -1809,16 +2039,7 @@ mod tests {
     #[test]
     fn refresh_on_a_poisoned_entry_reports_a_miss() {
         let appearance = painted_appearance();
-        let mut entry = PaintedRing {
-            top: None,
-            bottom: None,
-            top_at: None,
-            bottom_at: None,
-            inner_at: None,
-            outer_at: None,
-            pixels: Vec::new(),
-            key: None,
-        };
+        let mut entry = PaintedRing::default();
         assert!(
             !refresh_strip_origins(Rect::new(10, 50, 100, 100), &appearance, 1.0, &mut entry),
             "a poisoned entry must never report a hit"

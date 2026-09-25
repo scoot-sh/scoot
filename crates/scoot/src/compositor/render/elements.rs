@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use scoot_core::{Arrangement, OutputId, Rect, WindowId};
+use scoot_core::{Arrangement, OutputId, Placement, Rect, WindowId};
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
@@ -32,6 +32,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 use crate::compositor::State;
 use crate::compositor::cursor::CursorElement;
 use crate::compositor::decorations::{Appearance, Decorations, RingElement};
+use crate::compositor::drawn::{clamp_to_slot, drawn_rect};
 use crate::compositor::layer_shell;
 use crate::compositor::output_clip::to_output_local;
 use crate::compositor::rounded::{Rounded, clip_rect, physical_radius};
@@ -378,12 +379,18 @@ pub(super) fn map_ring<R: Renderer>(element: RingElement<R>) -> Elements<R> {
 /// windows placed on this frame's output, in that output's coordinates --
 /// see `output_clip.rs`.
 ///
-/// Shared by both frame bodies (`draw_frame_with` and the scanout tier), so
-/// the radius branch cannot drift between them. Built before the framebuffer
-/// is bound, like the arrangement it comes from.
+/// Shared by both frame bodies (`draw_frame_with` and the scanout tier) and
+/// the capture path's cursor re-render, so the radius branch cannot drift
+/// between them. Built before the framebuffer is bound, like the arrangement
+/// it comes from.
+///
+/// Each ring surrounds what its window drew (`drawn.rs`), looked up in
+/// `windows` -- the same rect `window_elements` clips to, so the ring's inner
+/// edge and the content's edge are one rect on every path that draws them.
 pub(super) fn ring_elements<R>(
     decorations: &mut Decorations,
     appearance: &Appearance,
+    windows: &HashMap<WindowId, Window>,
     arrangement: Option<&Arrangement>,
     frame: &FrameContext,
     renderer: &mut R,
@@ -392,6 +399,7 @@ where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Texture + Send + Clone + 'static,
 {
+    let drawn = |placement: &Placement| drawn_rect(placement.rect, windows.get(&placement.id));
     match (arrangement, frame.output) {
         (Some(arranged), Some(output)) if appearance.corner_radius > 0 => decorations
             .elements_rounded(
@@ -400,13 +408,21 @@ where
                 output,
                 frame.bounds(),
                 frame.scale,
+                drawn,
                 renderer,
             )
             .into_iter()
             .map(map_ring)
             .collect(),
         (Some(arranged), Some(output)) => decorations
-            .elements(arranged, appearance, output, frame.bounds(), frame.scale)
+            .elements(
+                arranged,
+                appearance,
+                output,
+                frame.bounds(),
+                frame.scale,
+                drawn,
+            )
             .into_iter()
             .map(Elements::Decoration)
             .collect(),
@@ -438,14 +454,16 @@ where
 /// while its popups stay square: the same split `Window`'s own impl makes at
 /// the pinned rev (`desktop/space/wayland/window.rs`), popups first, with a
 /// [`Rounded`] wrap on the toplevel half. A window whose effective radius is
-/// zero pushes its elements plain, so tiny windows cost nothing. The clip
-/// comes from the arrangement placement (the layout rect the ring is painted
-/// from too), not from the drawn surface: both edges then coincide by
-/// construction. A surface temporarily larger than its placement (a shrink
-/// still in flight) is cut to the placement rather than bleeding into the
-/// gap -- a behavior change, but only with rounding opted in. A fullscreen
-/// window is pushed plain, never wrapped: its corners are the output's
-/// corners.
+/// zero pushes its elements plain, so tiny windows cost nothing. The clip is
+/// the placement clamped to what the client last committed (see
+/// `drawn.rs`), the same rect the ring is painted from: both edges coincide
+/// by construction, and a client that draws short of its slot has its own
+/// corners rounded rather than a corner of empty slot. Only the corner
+/// staircases are cut, so a surface temporarily larger than its placement (a
+/// shrink still in flight) still draws past it -- over the ring, never under
+/// it -- until its smaller frame lands, or for as long as it keeps drawing
+/// past its slot (some clients do for good). A fullscreen window is pushed plain,
+/// never wrapped: its corners are the output's corners.
 ///
 /// Both clip and location are in *this output's* coordinates (the placement
 /// minus the region's origin), which is what the framebuffer and the damage
@@ -551,7 +569,10 @@ where
             1.0,
             Kind::Unspecified,
         );
-        let clip = clip_rect(to_output_local(placement.rect, origin), scale);
+        // What the client drew, not the slot: a short client's corners are
+        // its own, and they are where the ring rounds too (`drawn.rs`).
+        let drawn = clamp_to_slot(placement.rect, geometry.size.w, geometry.size.h);
+        let clip = clip_rect(to_output_local(drawn, origin), scale);
         // Never rounded while fullscreen: it covers the output edge to edge,
         // and a rounded clip would cut its corners back to the background.
         let radius = if placement.fullscreen {

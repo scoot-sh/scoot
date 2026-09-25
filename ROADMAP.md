@@ -104,6 +104,31 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Rounded corners and the focus ring match the window](docs/backlog/resolved/clip-to-committed-size-done.md)**
+  (2026-09-24, gh #205 reopened) — default `foot` commits a buffer rounded
+  down to whole character cells when it believes it floats, and scoot
+  clipped and ringed the layout slot, so the right and bottom corners
+  rounded empty slot. Layout windows are now told `tiled_*` on all four
+  edges, in the same configure as their size (`set_layout_states`, which
+  excludes fullscreen), and foot fills its slot. The rounded clip, both
+  ring paths and IPC `rect` follow the committed geometry clamped to the
+  slot (`drawn.rs`), so clients that still draw short (a GTK 4 dialog, mpv
+  at its video's size) are clipped and ringed where they drew. `rect` is
+  now what is drawn and clickable. In the same PR, the
+  [outer-corner shoulders](docs/backlog/resolved/ring-outer-corner-shoulders-done.md)
+  fix: the painted ring's side bars stop where its strips begin, so the
+  outer edge is a concentric arc in every row. Default foot at 1.0 and 1.5,
+  headless and `--tty`: all four corners pass the per-pixel check, inner
+  and outer (on `main`, the right and bottom corners failed inner in every
+  run, the top-right as well in three of the four, and every outer edge
+  failed). A re-mapped window is rebuilt from the layout (size, tiled
+  states, activation, `ServerSide`), where it used to come back unsized,
+  untiled and told `ClientSide`. Residual: libadwaita dialogs round their
+  own corners wider than the ring
+  ([`client-rounded-corners-vs-ring`](docs/backlog/core/client-rounded-corners-vs-ring.md)). No
+  measurable frame cost (debug-profile `rounded_corners_cost` and
+  `render_frame_cost` within run-to-run noise, pixman and GLES).
+
 - **[Every fd a client hands scoot is counted until it really closes](docs/backlog/resolved/buffer-fds-past-their-object-done.md)**
   (2026-09-24, PR #239) — a buffer a surface still showed kept its pool's
   (or its planes') fds after the client destroyed the `wl_buffer` and the
