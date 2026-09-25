@@ -751,7 +751,7 @@ scale/mode) into one hardware session.
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland: drops onto X windows do not land](./protocols/xwayland-pointer-focus-x11.md)
-  — OPEN, medium (filed by XWayland Phase 4): Wayland → X, X → X and
+  — OPEN, medium (filed by XWayland Phase 4, PR #246): Wayland → X, X → X and
   in-app X drops do nothing because `DnDGrab` targets scoot's `WlSurface`
   pointer focus and XWayland binds no `wl_data_device`; needs an X arm on
   the pointer focus (behaviour-neutral first, benchmarked -- hot path).
@@ -763,7 +763,7 @@ scale/mode) into one hardware session.
   focused window is the same X process, or it redeems its spawn's token
   (`_NET_STARTUP_ID` on the window or its client leader, or X-Resource pid;
   spent whichever rule grants focus), and
-  `_NET_ACTIVE_WINDOW` goes through the same gate. Phase 4 landed: the
+  `_NET_ACTIVE_WINDOW` goes through the same gate. Phase 4 (PR #246) landed: the
   clipboard and primary selection cross both ways while an X window is
   focused (never while locked), a paste is served only by the X owner the
   gate let through, X drags need a press on the dragging client's own

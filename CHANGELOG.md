@@ -9,7 +9,7 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
-### 2026-09-25 — copy, paste and drag between X and Wayland apps
+### 2026-09-25 — copy, paste and drag between X and Wayland apps (PR #246)
 
 - **Copy and paste crosses between X11 and Wayland apps**, both ways, for
   the clipboard and the middle-click primary selection (`xclip`/`xsel` and

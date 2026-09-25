@@ -8,7 +8,7 @@ blocked: null
 
 # XWayland: give the pointer focus an X arm, so drops onto X windows land
 
-Filed 2026-09-25 by XWayland Phase 4 (see
+Filed 2026-09-25 by XWayland Phase 4, PR #246 (see
 [`xwayland-support.md`](./xwayland-support.md)'s Phase 4 record). Serves
 daily use: dragging a file into an X file manager, text into an X editor, or
 a tab within an X app are ordinary actions an X user hits before any

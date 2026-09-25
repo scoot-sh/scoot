@@ -462,6 +462,8 @@ not honoured, `_NET_WM_ICON` not read, X windows not scale-aware.
 
 ## PROGRESS — Phase 4 (clipboard, primary, drag-and-drop, input methods) landed; ticket stays OPEN for Phases 5–7
 
+Shipped 2026-09-25 as PR #246.
+
 **Clipboard and primary selection cross both ways** (`xwayland/selection.rs`)
 through Smithay's XWM bridge, hooked into the same selection state the
 Wayland devices use -- so a clipboard manager on either data-control

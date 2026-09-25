@@ -109,7 +109,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[XWayland Phase 4: clipboard, primary selection, drags, input methods](docs/backlog/protocols/xwayland-support.md)**
-  (2026-09-25) — the clipboard and primary selection cross between X and
+  (2026-09-25, PR #246) — the clipboard and primary selection cross between X and
   Wayland both ways (clipboard managers included), gated like Wayland's own
   rule with XWayland as the client: only while an X window holds the
   keyboard, never while locked. A Wayland paste is served only by the X
