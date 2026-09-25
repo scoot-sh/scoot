@@ -210,6 +210,23 @@ impl Step {
             _ => false,
         }
     }
+
+    /// Whether this step, applied to `world`, must leave
+    /// `World::focused_window` alone: `set-floating` on a window that is not
+    /// the focused one (it never moves focus), and a window opening without
+    /// focus -- while some window has focus to keep (a window opening into
+    /// a workspace with nothing on it is that workspace's focus, there being
+    /// nothing else).
+    fn keeps_focus(&self, world: &World) -> bool {
+        if world.focused_window().is_none() {
+            return false;
+        }
+        match self {
+            Step::Action(Action::SetFloating { id, .. }) => world.focused_window() != Some(*id),
+            Step::Event(Event::WindowOpened { focus, .. }) => !focus,
+            _ => false,
+        }
+    }
 }
 
 fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) -> Step {
@@ -425,6 +442,18 @@ fn assert_invariants(world: &World) {
             if placement.id == covering {
                 assert!(placement.visible, "covering {placement:?} is not visible");
                 assert_eq!(placement.rect, output.area, "covering {placement:?}");
+            } else if placement.floating
+                && !placement.fullscreen
+                && world.descends_from(placement.id, covering)
+            {
+                // Its own dialogs stay up, above it.
+                if placement.visible {
+                    let at = |id| arrangement.placements.iter().position(|p| p.id == id);
+                    assert!(
+                        at(placement.id) > at(covering),
+                        "{placement:?} under its parent"
+                    );
+                }
             } else {
                 assert!(
                     !placement.visible,
@@ -469,6 +498,7 @@ fn random_sequences_keep_the_tree_consistent() {
     // steps that ended with the floating layer focused, and floating-only
     // steps whose strip was compared before and after.
     let (mut floating_steps, mut floating_focus_steps, mut strip_checks) = (0, 0, 0);
+    let mut focus_checks = 0;
     for seed in 1..=24 {
         let mut rng = Rng(seed);
         let mut world = World::new(config());
@@ -478,11 +508,22 @@ fn random_sequences_keep_the_tree_consistent() {
             let strip_before = random
                 .floating_only(&world)
                 .then(|| (tiled_rects(&world), format!("{random:?}")));
+            let focus_before = random
+                .keeps_focus(&world)
+                .then(|| (world.focused_window(), format!("{random:?}")));
             apply_step(&mut world, random);
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| assert_invariants(&world)))
                 .is_err()
             {
                 panic!("invariant broken with seed {seed} at step {step}");
+            }
+            if let Some((before, what)) = focus_before {
+                assert_eq!(
+                    world.focused_window(),
+                    before,
+                    "{what} moved focus (seed {seed}, step {step})"
+                );
+                focus_checks += 1;
             }
             if let Some((before, what)) = strip_before {
                 assert_eq!(
@@ -527,5 +568,9 @@ fn random_sequences_keep_the_tree_consistent() {
     assert!(
         strip_checks > 500,
         "only {strip_checks} floating-only steps were checked"
+    );
+    assert!(
+        focus_checks > 500,
+        "only {focus_checks} focus-keeping steps were checked"
     );
 }

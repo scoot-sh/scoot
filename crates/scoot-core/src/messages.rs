@@ -277,22 +277,35 @@ pub enum Action {
     /// - **Floating takes the window out of its column**; when that empties
     ///   the strip's focused column, strip focus lands on the column to its
     ///   left (for a window that floats as it first maps, that is the column
-    ///   that was focused before it opened,
-    ///   and the strip's scroll is put back too, so the dialog leaves the
-    ///   strip exactly as it found it). **Un-floating inserts it as a new
-    ///   column right of the strip's focused column**, at the width it had
-    ///   when it was floated (the default width if it was never a column),
-    ///   focused if it was the focused window.
-    /// - **Fullscreen.** A floating window can go fullscreen. It covers its
-    ///   output ([`World::fullscreen_on`](crate::World::fullscreen_on)) while
-    ///   it is the focused window, and is placed invisible while focus is
-    ///   elsewhere; leaving fullscreen puts it back where it floated. A
-    ///   fullscreen window in the strip that covers its output hides the
-    ///   floating layer while it has focus; once a floating window on that
-    ///   workspace takes focus (a dialog the fullscreen app opened), the
-    ///   floating layer shows above it and nothing covers the output until
-    ///   focus returns to the strip. Floating or un-floating a fullscreen
-    ///   window ends its fullscreen first.
+    ///   that was focused before it opened, and the strip's scroll is put
+    ///   back too, so the dialog leaves the strip exactly as it found it).
+    ///   **Un-floating inserts it as a new column right of the strip's
+    ///   focused column**, at the width it had when it was floated (the
+    ///   default width if it was never a column), focused if it was the
+    ///   focused window. So floating a focused column and un-floating it
+    ///   again puts it back right of its left neighbour: where it was,
+    ///   except the leftmost column (it comes back second) and a window
+    ///   floated out of a stacked column (it comes back as its own column).
+    /// - **Fullscreen.** A floating window can go fullscreen; leaving
+    ///   fullscreen puts it back where it floated. Whichever layer a
+    ///   fullscreen window is in, the same three rules hold:
+    ///   - While it is the focused window it covers its output
+    ///     ([`World::fullscreen_on`](crate::World::fullscreen_on)): the rest
+    ///     of the workspace is hidden **except its own floating dialogs**
+    ///     (windows whose [`parent`](crate::WindowInfo::parent) chain
+    ///     reaches it), which stay up, placed above it. Clicking a
+    ///     fullscreen app must not hide the dialog it opened: a modal dialog
+    ///     blocks its app, and one hidden under it looks like a hang.
+    ///   - While a floating window above it has focus (typically that
+    ///     dialog), it stays in place, full size, under the floating layer,
+    ///     and nothing counts as covering the output. A floating fullscreen
+    ///     window then hides the strip and the floating windows below it.
+    ///   - While focus is anywhere else it is not shown in front: a column
+    ///     stays in its strip slot as usual, a floating one is placed
+    ///     invisible.
+    ///
+    ///   Floating or un-floating a fullscreen window ends its fullscreen
+    ///   first.
     /// - A floating window that closes while focused hands focus to its
     ///   parent when the parent is on the same workspace (unless the parent
     ///   is stacked in a column behind a fullscreen sibling: focusing it

@@ -7,7 +7,8 @@ use super::*;
 
 /// Floating a column tells the client it chooses its own size and is not
 /// tiled; un-floating tells it its column's size and that it is tiled again,
-/// and puts it back where it was in the strip.
+/// and puts it back in the strip right of its left neighbour -- where it
+/// was, for a column with one.
 #[test]
 fn the_toggle_flips_the_tiled_states_and_the_size_both_ways() {
     let mut fixture = Fixture::new();
@@ -172,4 +173,32 @@ fn a_floating_window_goes_fullscreen_and_comes_back_floating() {
     fixture.done(Step::Draw { window: dialog });
     assert!(fixture.floating(dialog));
     assert_eq!(fixture.placement(dialog), floated);
+}
+
+/// A fullscreen app opens a dialog, and the user clicks the app (anywhere
+/// the dialog is not): the app covers the screen again, and its dialog
+/// stays drawn above it and clickable -- a modal dialog hidden under its
+/// app would look like a hung app.
+#[test]
+fn clicking_a_fullscreen_parent_keeps_its_dialog_up() {
+    let mut fixture = Fixture::new();
+    let app = fixture.map(Spec::tiled());
+    fixture.done(Step::SetFullscreen { window: app });
+    fixture.done(Step::Draw { window: app });
+    let dialog = fixture.map(Spec::dialog_of(app));
+    let placed = fixture.placement(dialog).rect;
+    assert!(fixture.placement(dialog).visible);
+    fixture.click(5.0, 5.0);
+    assert_eq!(fixture.state.focus, Some(fixture.id(app)));
+    assert_eq!(
+        fixture.state.world.fullscreen_on(scoot_core::OutputId(1)),
+        Some(fixture.id(app))
+    );
+    assert!(fixture.placement(dialog).visible, "the dialog was hidden");
+    let (cx, cy) = centre(placed);
+    let pixels = fixture.render();
+    assert_eq!(pixel(&pixels, cx, cy), DIALOG_BGRA);
+    assert_eq!(pixel(&pixels, 5, 5), TILED_BGRA);
+    fixture.click(f64::from(cx), f64::from(cy));
+    assert_eq!(fixture.state.focus, Some(fixture.id(dialog)));
 }

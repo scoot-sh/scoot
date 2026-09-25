@@ -575,10 +575,28 @@ fn a_dialog_over_a_covering_fullscreen_window_shows_while_it_has_focus() {
     let video = placement(&world, 1);
     assert!(video.visible && video.fullscreen);
     assert_eq!(video.rect, SCREEN);
-    // Back to the fullscreen window: it covers again, and the dialog hides.
+    // Back to the fullscreen window (a click on it): it covers again, and
+    // its own dialog stays up, placed after it so it draws and takes clicks
+    // above it -- a modal dialog hidden under its app looks like a hang.
     world.handle_action(Action::ToggleFloatingFocus);
     assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(1)));
-    assert!(!placement(&world, 9).visible);
+    assert!(placement(&world, 9).visible);
+    let order: Vec<u64> = world
+        .arrange()
+        .placements
+        .iter()
+        .filter(|p| p.visible)
+        .map(|p| p.id.0)
+        .collect();
+    assert_eq!(order, vec![1, 9], "the dialog is above its parent");
+    // Another floating window, not the fullscreen window's, still hides.
+    open(&mut world, 8);
+    float_on_map(&mut world, 8);
+    draw(&mut world, 8, 100, 100);
+    world.handle_action(Action::FocusWindowId(WindowId(1)));
+    assert!(!placement(&world, 8).visible);
+    assert!(placement(&world, 9).visible);
+    world.handle_event(Event::WindowClosed { id: WindowId(8) });
     // Closing the dialog while it has focus returns focus to its parent,
     // which covers again.
     world.handle_action(Action::ToggleFloatingFocus);
@@ -687,4 +705,218 @@ fn closing_a_lone_dialog_on_an_inactive_workspace_moves_no_other_focus() {
     });
     world.handle_event(Event::WindowClosed { id: WindowId(9) });
     assert_eq!(focused(&world), Some(2));
+}
+
+/// The review's repro: the strip empties while a floating window has focus
+/// by default; un-floating a *different* floating window by id must not
+/// take focus with it (`set-floating` never moves focus), and neither may a
+/// window opening without focus.
+#[test]
+fn un_floating_into_an_empty_strip_leaves_focus_where_it_was() {
+    let mut world = world();
+    open(&mut world, 1);
+    draw(&mut world, 1, 485, 580);
+    for id in [2, 3] {
+        open(&mut world, id);
+        float_on_map(&mut world, id);
+        draw(&mut world, id, 100, 100);
+    }
+    world.handle_action(Action::FocusWindowId(WindowId(1)));
+    world.handle_event(Event::WindowClosed { id: WindowId(1) });
+    assert_eq!(focused(&world), Some(3));
+    world.handle_action(Action::SetFloating {
+        id: WindowId(2),
+        floating: false,
+    });
+    assert_eq!(focused(&world), Some(3));
+    assert!(!world.is_floating(WindowId(2)));
+    world.handle_event(Event::WindowOpened {
+        id: WindowId(4),
+        info: WindowInfo::default(),
+        output: None,
+        focus: false,
+    });
+    assert_eq!(focused(&world), Some(3));
+    // The strip still works: the toggle reaches the un-floated column.
+    world.handle_action(Action::ToggleFloatingFocus);
+    assert!(matches!(focused(&world), Some(2) | Some(4)));
+}
+
+/// A floating fullscreen window (a fixed-size game floated as it opened)
+/// that opens a dialog: it stays up behind the dialog, full size, as a
+/// fullscreen column does -- the strip does not show through -- and a
+/// click back on it keeps the dialog up above it.
+#[test]
+fn a_floating_fullscreen_parent_stays_up_behind_its_dialog() {
+    let mut world = strip_of(2, 1);
+    open(&mut world, 7);
+    float_on_map(&mut world, 7);
+    draw(&mut world, 7, 300, 200);
+    world.handle_action(Action::ToggleFullscreen);
+    assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(7)));
+    open_with(&mut world, 9, with_parent(7));
+    float_on_map(&mut world, 9);
+    draw(&mut world, 9, 200, 100);
+    assert_eq!(focused(&world), Some(9));
+    let game = placement(&world, 7);
+    assert!(game.visible && game.fullscreen, "{game:?}");
+    assert_eq!(game.rect, SCREEN);
+    assert!(placement(&world, 9).visible);
+    assert!(
+        strip(&world).iter().all(|(_, _, visible)| !visible),
+        "the strip shows through a fullscreen window"
+    );
+    let order: Vec<u64> = world
+        .arrange()
+        .placements
+        .iter()
+        .filter(|p| p.visible)
+        .map(|p| p.id.0)
+        .collect();
+    assert_eq!(order, vec![7, 9]);
+    // Nothing covers while the dialog has focus (the same rule as for a
+    // fullscreen column under a focused dialog).
+    assert_eq!(world.fullscreen_on(OutputId(1)), None);
+    // A click on the game: it covers again, its dialog stays above it.
+    world.handle_event(Event::FocusObserved { id: WindowId(7) });
+    assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(7)));
+    let order: Vec<u64> = world
+        .arrange()
+        .placements
+        .iter()
+        .filter(|p| p.visible)
+        .map(|p| p.id.0)
+        .collect();
+    assert_eq!(order, vec![7, 9]);
+    // Focus on the strip: the unfocused fullscreen game hides and the strip
+    // shows; its dialog is then an ordinary floating window over the strip.
+    world.handle_action(Action::ToggleFloatingFocus);
+    assert!(!placement(&world, 7).visible);
+    assert!(placement(&world, 9).visible);
+    assert!(strip(&world).iter().any(|(_, _, visible)| *visible));
+}
+
+/// The centre of `rect`'s part inside `within`.
+fn visible_centre(rect: Rect, within: Rect) -> (i32, i32) {
+    let shown = rect.intersection(within);
+    (shown.x + shown.w / 2, shown.y + shown.h / 2)
+}
+
+fn rect_centre(rect: Rect) -> (i32, i32) {
+    (rect.x + rect.w / 2, rect.y + rect.h / 2)
+}
+
+/// A dialog centred on its parent, then the output shrinks (a scale change,
+/// a nested window resized): re-centred on the parent where it now is, not
+/// left at a centre measured against the old size (on 4K -> 1080p that
+/// clamped it into a corner).
+#[test]
+fn a_dialog_is_re_centred_when_its_output_changes_size() {
+    let mut world = World::new(config());
+    let big = Rect::new(0, 0, 3840, 2160);
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(1),
+        area: big,
+    });
+    for id in 1..=3 {
+        open(&mut world, id);
+        draw(&mut world, id, 1000, 1000);
+    }
+    world.handle_action(Action::FocusWindowId(WindowId(3)));
+    open_with(&mut world, 9, with_parent(3));
+    float_on_map(&mut world, 9);
+    draw(&mut world, 9, 200, 100);
+    assert_eq!(
+        rect_centre(placement(&world, 9).rect),
+        visible_centre(placement(&world, 3).rect, big)
+    );
+    let small = Rect::new(0, 0, 1920, 1080);
+    world.handle_event(Event::OutputChanged {
+        id: OutputId(1),
+        area: small,
+    });
+    let parent = placement(&world, 3);
+    assert!(parent.visible, "{parent:?}");
+    assert_eq!(
+        rect_centre(placement(&world, 9).rect),
+        visible_centre(parent.rect, small)
+    );
+    // The same area again moves nothing.
+    let before = world.arrange();
+    world.handle_event(Event::OutputChanged {
+        id: OutputId(1),
+        area: small,
+    });
+    assert_eq!(world.arrange(), before);
+}
+
+/// Unplugged: a dialog and its parent adopted by the remaining output are
+/// re-centred there on the parent -- on the adopted workspace, which is not
+/// the active one, as the parent would be placed -- and show so once that
+/// workspace is switched to.
+#[test]
+fn a_dialog_adopted_from_an_unplugged_output_is_re_centred() {
+    let mut world = world();
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(2),
+        area: Rect::new(1000, 0, 3840, 2160),
+    });
+    world.handle_action(Action::FocusOutput(OutputId(2)));
+    for id in 1..=2 {
+        open(&mut world, id);
+        draw(&mut world, id, 1000, 1000);
+    }
+    open_with(&mut world, 9, with_parent(2));
+    float_on_map(&mut world, 9);
+    draw(&mut world, 9, 200, 100);
+    world.handle_event(Event::OutputRemoved { id: OutputId(2) });
+    world.handle_action(Action::FocusWindowId(WindowId(9)));
+    let dialog = placement(&world, 9);
+    assert_eq!(dialog.output, OutputId(1));
+    assert!(dialog.visible, "{dialog:?}");
+    let usable = world.usable_area(OutputId(1)).expect("output 1");
+    let parent = placement(&world, 2);
+    assert_eq!(
+        rect_centre(dialog.rect),
+        visible_centre(parent.rect, usable)
+    );
+}
+
+/// Every output gone: the dialog and its parent wait unplaced, and on the
+/// next output -- of another size -- the dialog is centred on its parent
+/// again, not wherever the old output's centre lands.
+#[test]
+fn a_dialog_that_waited_for_an_output_is_centred_on_its_parent_there() {
+    let mut world = World::new(config());
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(1),
+        area: Rect::new(0, 0, 3840, 2160),
+    });
+    for id in 1..=3 {
+        open(&mut world, id);
+        draw(&mut world, id, 1000, 1000);
+    }
+    // The first column: in view on the next output too, where the windows
+    // are placed from the left again. (A parent out of view there centres
+    // the dialog on the output instead, like any parent out of view.)
+    world.handle_action(Action::FocusWindowId(WindowId(1)));
+    open_with(&mut world, 9, with_parent(1));
+    float_on_map(&mut world, 9);
+    draw(&mut world, 9, 200, 100);
+    world.handle_event(Event::OutputRemoved { id: OutputId(1) });
+    assert!(world.is_floating(WindowId(9)));
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(2),
+        area: SCREEN,
+    });
+    world.handle_action(Action::FocusWindowId(WindowId(9)));
+    let dialog = placement(&world, 9);
+    assert!(dialog.visible && dialog.floating, "{dialog:?}");
+    let parent = placement(&world, 1);
+    assert!(parent.visible, "{parent:?}");
+    let usable = world.usable_area(OutputId(2)).expect("output 2");
+    assert_eq!(
+        rect_centre(dialog.rect),
+        visible_centre(parent.rect, usable)
+    );
 }

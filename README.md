@@ -231,9 +231,11 @@ background_color = "#101014"
 [autostart]
 commands = ["spawn waybar"]
 
-# Float this app's windows above the strip instead of giving them a column.
+# Float this app's windows above the strip instead of giving them a column
+# (pavucontrol's app id is org.pulseaudio.pavucontrol; `scootctl windows`
+# shows any window's).
 [[window_rule]]
-match_app_id = "pavucontrol"
+match_app_id = "*pavucontrol"
 float = true
 ```
 

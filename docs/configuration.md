@@ -566,16 +566,6 @@ commands = [
     "spawn waybar",
     "spawn mako",
 ]
-
-# [floating]
-# Dialogs, transient and fixed-size windows float when they map; set false
-# to tile everything except what a rule floats.
-# auto = true
-
-[[window_rule]]
-match_app_id = "pavucontrol"
-float = true
-size = [700, 500]
 ```
 
 Deliberately the *action* grammar, not a bare argv list: every string here
@@ -646,10 +636,15 @@ with a rule:
   leaves every column, width and scroll position exactly as it found them.
   Floating a column takes it out (focus in the strip goes to the column on
   its left); un-floating (`Super+Shift+Space`) puts it back as a column right
-  of the strip's focused column, at the width it had.
+  of the strip's focused column, at the width it had -- back where it was,
+  except the leftmost column (it comes back second) and a window floated out
+  of a stacked column (it comes back as a column of its own).
 - **Fullscreen.** A floating window can go fullscreen and comes back floating.
-  A dialog opened by a fullscreen app shows above it while the dialog has
-  focus.
+  A dialog opened by a fullscreen app shows above it, and stays up when you
+  click the app (a modal dialog hidden under its app would look like a hung
+  app); other floating windows hide while a fullscreen window has focus.
+  A fullscreen window, tiled or floating, stays in place under a floating
+  window that has focus.
 - **Decided once.** Whether a window floats is decided when it first maps; a
   title change later does not re-decide it. The toggle changes it any time.
 
@@ -669,7 +664,10 @@ when it names both matchers, both must match. Matchers are **globs over the
 whole string**, case-sensitive: `*` matches any run of characters, `?`
 exactly one, everything else itself — so `"foot"` matches only `foot`, not
 `footclient`, and `"*Preferences*"` matches any title containing
-`Preferences`. `match_app_id = "*"` matches every window. Rules apply in
+`Preferences`. `match_app_id = "*"` matches every window. There is no
+escape: a literal `*` or `?` in an app id or title cannot be matched as
+itself -- use `?` in its place (it matches any one character, the `*`
+included). Rules apply in
 file order; a later matching rule overrides an earlier one for each field it
 sets. Rules are checked when a window first maps, after `[floating] auto`'s
 heuristics, so a rule always has the last word. `scootctl windows` shows the
@@ -834,4 +832,16 @@ commands = [
     "spawn waybar",
     "spawn mako",
 ]
+
+[floating]
+# Dialogs, transient and fixed-size windows float when they map; false
+# tiles everything except what a rule floats.
+auto = true
+
+# pavucontrol's app id is org.pulseaudio.pavucontrol (`scootctl windows`
+# shows any window's).
+[[window_rule]]
+match_app_id = "*pavucontrol"
+float = true
+size = [700, 500]
 ```

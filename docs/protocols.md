@@ -234,10 +234,23 @@ and `overlay` layer surfaces. The pointer and clicks follow the same order.
 A lock screen covers it like everything else. It is drawn and clickable only
 on its own output. When a floating window appears, moves or is raised under
 a pointer that is not moving, the pointer is re-entered on whatever is now
-under it, so the next click goes to the dialog, not the window beneath.
+under it, so the next click goes to the dialog, not the window beneath —
+what is drawn under the pointer is what a click reaches, the same rule a
+fullscreen window appearing follows. A click meant for the window beneath,
+made in the instant a dialog appears there, lands on the dialog; for a
+window the user is looking at that is the right target.
 
 **Popups** of a floating window are fitted into its output's usable area
-like any window's (see [Popup menus](#popup-menus-xdg_popup)).
+like any window's (see [Popup menus](#popup-menus-xdg_popup)). A popup is
+drawn with its own window, so a menu opened from a *tiled* window draws
+below any floating window it runs under; open floating windows are above the
+strip, its menus included, by design.
+
+**Output changes.** A floating window keeps its centre relative to its
+output. When the output changes size (a scale change, a `--nested` window
+resized), or the window lands on another output because its own went away,
+it is re-centred on its parent (or the output) there rather than left at a
+position measured on the old one.
 
 **Not yet:** moving or resizing a floating window with the pointer — a
 client-side titlebar drag (`xdg_toplevel.move`) or resize edge
@@ -329,14 +342,22 @@ not looking at to another screen.
 the session is as the client left it at unlock); requests on the user's
 behalf — a taskbar, the bind, IPC — are refused like every other action.
 
-**Floating windows.** A floating window can go fullscreen. It covers its
-output while it has focus, is hidden while focus is elsewhere, and leaving
-puts it back where it floated, told `0x0` with no tiled state. While a
-fullscreen window in the strip covers the output, the floating windows on
-that workspace are hidden — until one of them takes focus (a dialog the
-fullscreen app opened does), which shows the floating layer above it; nothing
-counts as covering the output then (so the `top` layer is drawn again, and
-direct scanout pauses), until focus returns to the strip.
+**Floating windows.** A floating window can go fullscreen; leaving puts it
+back where it floated, told `0x0` with no tiled state. The rules are the
+same for a fullscreen window in either layer:
+
+- **While it has focus it covers the output**, and the other floating
+  windows on that workspace are hidden — except its own dialogs (windows
+  whose parent chain reaches it), which stay up and are drawn and clicked
+  above it. Clicking a fullscreen app does not hide the dialog it opened: a
+  modal dialog blocks input to its app, and one hidden under it would make
+  the app look hung. With a dialog above it, direct scanout composites.
+- **While a floating window above it has focus** (typically that dialog),
+  it stays in place, full size, under the floating layer; nothing counts as
+  covering the output then (so the `top` layer is drawn again, and direct
+  scanout pauses). A floating fullscreen window also hides the strip then.
+- **While focus is anywhere else** it is not in front: a column keeps its
+  strip slot as usual, a floating fullscreen window is hidden.
 
 ## XWayland (opt-in skeleton)
 

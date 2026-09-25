@@ -51,17 +51,37 @@ known for exactly these two actions), and differs on matching (globs, below).
   for (usually none), and the width preset it had as a column. The strip is
   computed as if the layer did not exist; the randomized invariant test
   checks every tiled rect is unchanged across floating-only steps.
-- **Placement**: centred once, when it floats, on its parent's visible part
-  when the parent is visible on the same output and workspace, else on the
-  usable area; then kept as a centre point, so a window that resizes itself
-  grows around it. Always inside the usable area (bars excluded); re-centred
-  when carried to another output. `arrange` does no parent lookup.
+- **Placement**: centred once, when it floats, on the part of its parent
+  inside the usable area, when the parent is on the same output and
+  workspace, else on the usable area; then kept as a centre point, so a
+  window that resizes itself grows around it. Always inside the usable area
+  (bars excluded). Re-centred (on the parent, or the output) when carried to
+  another output, when its output changes size, when adopted from an
+  unplugged output, and when it waited for an output with none left --
+  review round 1 measured a 4K->1080p change clamping a dialog into a corner.
+  `arrange` does no parent walk except for the dialogs of a covering
+  fullscreen window.
+- **Pointer re-entry** when what floats changes under a still pointer:
+  accepted in review. What is drawn under the pointer is what a click
+  reaches (the same rule fullscreen covering already follows); the cost is
+  that a click aimed at the window beneath in the instant a dialog appears
+  lands on the dialog, which is the window the user is looking at.
+- **Menus** from tiled windows draw below floating windows (a popup draws
+  with its window): accepted as ordinary stacking.
+- **Globs have no escape**: a literal `*` or `?` cannot be matched as
+  itself; `?` (any one character) stands in. Documented.
 - **Size**: the client's choice (configure `0x0`), placed at what it drew
   (`FrameObserved.actual`); a rule's `size`, or a window that drew larger
   than the usable area, makes the core ask for a clamped size from then on
   (sticky, so asking to fit does not oscillate). Invisible until it has
   drawn, unless it was asked for a size.
-- **Focus**: `toggle-floating-focus` (`Super+Space`) switches layer. With a
+- **Focus**: `toggle-floating-focus` (`Super+Space`) switches layer. A
+  workspace's floating layer has focus when its flag says so *or* its strip
+  is empty; a column going into an empty strip without focus (un-floating
+  by id, a window opening unfocused) sets the flag, so the floating window
+  that had focus by default keeps it -- review round 1 found `set-floating
+  ID off` moving focus there, contradicting its own contract. The randomized
+  test now asserts both never move the focused window. With a
   floating window focused: `focus-column left|right` returns to the strip's
   focused column without stepping (floating windows are all centred in
   PR 1, so geometric left/right has nothing to go on -- revisit in PR 2
@@ -77,17 +97,22 @@ known for exactly these two actions), and differs on matching (globs, below).
   column; strip focus moves to the column on its left, and a window that
   floats before it ever drew (the map-time case) also puts the strip's
   scroll back, so the strip is exactly as it was. Un-floating inserts the
-  window as a column right of the strip's focused column (the likely answer,
-  and the one that makes float-then-unfloat restore the column order) at
-  its old width.
-- **Fullscreen**: a floating window can go fullscreen; it covers while it is
-  the focused window and hides while focus is elsewhere; leaving returns it
-  to floating (`0x0`, no tiled state). A covering tiled fullscreen window
-  hides the floating layer while the strip has focus; a floating window
-  taking focus (a dialog the fullscreen app opened) shows above it, and
-  nothing counts as covering meanwhile (the `top` layer shows, direct
-  scanout pauses) -- a dialog behind a fullscreen app looks like a hang.
-  Floating or un-floating a fullscreen window ends the fullscreen first.
+  window as a column right of the strip's focused column (the likely
+  answer) at its old width -- so a focused column floated and un-floated
+  comes back right of its left neighbour, where it was, except the leftmost
+  column (it comes back second: `[1,2]` -> `[2,1]`) and a window floated out
+  of a stacked column (it comes back as a column of its own).
+- **Fullscreen**: a floating window can go fullscreen, and leaving returns
+  it to floating (`0x0`, no tiled state). One set of rules for a fullscreen
+  window in either layer (review round 1 found the floating case hid the
+  window and let the strip show through): focused, it covers, and every
+  other floating window hides except **its own dialogs** (parent chain), which
+  stay up, placed above it -- review found that clicking a fullscreen app hid
+  its modal dialog, which looks like a hang; under a focused floating window
+  it stays in place, full size (a floating one then hides the strip), and
+  nothing covers (the `top` layer shows, direct scanout pauses); focused
+  elsewhere, it is not in front. Floating or un-floating a fullscreen window
+  ends the fullscreen first.
 - **Auto-float, decided once at the first commit** (`scoot/src/compositor/floating.rs`):
   `xdg-dialog-v1` is implemented by the pinned Smithay fork (`dialog.rs`),
   so it is advertised (no fork change); then a parent; then a fixed size;

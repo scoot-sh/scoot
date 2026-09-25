@@ -26,6 +26,10 @@ use super::{Location, World};
 use crate::geometry::{Point, Rect, Size};
 use crate::types::WindowId;
 
+/// How many parents [`World::descends_from`] follows before giving up. Far
+/// past any real dialog-of-a-dialog chain.
+const MAX_PARENT_DEPTH: usize = 16;
+
 impl World {
     /// Whether the window floats. False for an unknown window.
     pub fn is_floating(&self, id: WindowId) -> bool {
@@ -47,6 +51,24 @@ impl World {
         let window = self.windows.get(&id)?;
         let floating = window.floating?;
         Some((window.drawn, floating.request))
+    }
+
+    /// Whether `ancestor` is reached by following `id`'s parents
+    /// ([`WindowInfo::parent`](crate::WindowInfo::parent)), at most
+    /// [`MAX_PARENT_DEPTH`] steps -- a bound, not a real depth: a client can
+    /// name any parent, and a chain that loops must still end. Map lookups
+    /// only; `arrange` asks it for each floating window while a fullscreen
+    /// window covers the output.
+    pub(super) fn descends_from(&self, id: WindowId, ancestor: WindowId) -> bool {
+        let mut current = id;
+        for _ in 0..MAX_PARENT_DEPTH {
+            match self.windows.get(&current).and_then(|w| w.info.parent) {
+                Some(parent) if parent == ancestor => return true,
+                Some(parent) => current = parent,
+                None => return false,
+            }
+        }
+        false
     }
 
     /// Whether the focused output's active workspace has its focus on its
@@ -173,12 +195,15 @@ impl World {
     }
 
     /// Where a window floated at `loc` is centred, relative to its output's
-    /// area origin: the middle of its parent's visible part, when the parent
-    /// is placed visible on the same output's same workspace -- otherwise
-    /// `None`, which centres it on the output's usable area.
+    /// area origin: the middle of the part of its parent inside the usable
+    /// area, when the parent is on the same output's same workspace and some
+    /// of it is there (on an inactive workspace, where it would be) --
+    /// otherwise `None`, which centres it on the output's usable area. A
+    /// parent scrolled out of view has no part there.
     ///
     /// Reads a whole arrangement, which is fine for something that happens
-    /// once per float and would not be on `arrange`'s own per-frame path.
+    /// once per float (or per output change) and would not be on `arrange`'s
+    /// own per-frame path.
     fn parent_centre(&self, id: WindowId, loc: Location) -> Option<Point> {
         let parent = self.windows.get(&id)?.info.parent?;
         if parent == id {
@@ -191,7 +216,7 @@ impl World {
         let output = &self.outputs[loc.output];
         let arrangement = self.arrange();
         let placed = arrangement.get(parent)?;
-        if !placed.visible || placed.output != output.id {
+        if placed.output != output.id {
             return None;
         }
         let shown = placed.rect.intersection(output.usable);
@@ -208,6 +233,56 @@ impl World {
                 .saturating_add(shown.h / 2)
                 .saturating_sub(output.area.y),
         ))
+    }
+
+    /// Re-centres floating windows whose output changed under them -- an
+    /// output resized or rescaled, or a window arriving on another one when
+    /// its own went away -- on their parent, or the output. A centre is
+    /// kept relative to its output's origin, so on a different area it
+    /// names somewhere else: a dialog centred on a 4K output would be
+    /// clamped into a corner of a 1080p one. Ids that are not floating (or
+    /// not placed) are skipped.
+    pub(super) fn recentre_floating(&mut self, ids: &[WindowId]) {
+        for &id in ids {
+            let Some(loc) = self.locate(id) else {
+                continue;
+            };
+            if !matches!(loc.slot, Slot::Floating { .. }) {
+                continue;
+            }
+            let centre = self.parent_centre(id, loc);
+            if let Some(floating) = self.windows.get_mut(&id).and_then(|w| w.floating.as_mut()) {
+                floating.centre = centre;
+            }
+        }
+    }
+
+    /// After output `o`'s geometry changed or it adopted workspaces:
+    /// scrolls every one of its workspaces (not only the active one, so a
+    /// parent on an inactive workspace is measured where it will be) and
+    /// re-centres `ids` there.
+    pub(super) fn recentre_floating_on_output(&mut self, o: usize, ids: &[WindowId]) {
+        let count = self
+            .outputs
+            .get(o)
+            .map_or(0, |output| output.workspaces.len());
+        for w in 0..count {
+            self.fix_workspace_view(o, w);
+        }
+        self.recentre_floating(ids);
+    }
+
+    /// The floating windows on output `o`, every workspace: what an output
+    /// change re-centres. Collected, because re-centring reads the whole
+    /// world; output changes are rare, not per frame.
+    pub(super) fn floating_on_output(&self, o: usize) -> Vec<WindowId> {
+        self.outputs.get(o).map_or_else(Vec::new, |output| {
+            output
+                .workspaces
+                .iter()
+                .flat_map(|ws| ws.floating.iter().copied())
+                .collect()
+        })
     }
 
     /// Switches the focused workspace's focus between its floating layer

@@ -76,8 +76,13 @@ impl World {
     /// Adds an output, or updates its area if it is already known.
     fn upsert_output(&mut self, id: OutputId, area: Rect) {
         if let Some(o) = self.output_index(id) {
+            let changed = self.outputs[o].area != area;
             self.outputs[o].set_area(area);
             self.fix_view(o);
+            if changed {
+                let floating = self.floating_on_output(o);
+                self.recentre_floating_on_output(o, &floating);
+            }
             return;
         }
         self.outputs.push(Output::new(id, area));
@@ -116,10 +121,19 @@ impl World {
             .focused_output
             .min(self.outputs.len().saturating_sub(1));
         let target = self.focused_output;
+        // Its floating windows, re-centred once they are on the output that
+        // takes them (see `World::recentre_floating`); the unplaced ones are
+        // when an output appears for them (`World::place_window`).
+        let floating: Vec<WindowId> = removed
+            .workspaces
+            .iter()
+            .flat_map(|ws| ws.floating.iter().copied())
+            .collect();
         match self.outputs.get_mut(target) {
             Some(output) => {
                 output.adopt(removed.workspaces);
                 self.fix_view(target);
+                self.recentre_floating_on_output(target, &floating);
             }
             None => self.unplaced.extend(removed.into_windows()),
         }

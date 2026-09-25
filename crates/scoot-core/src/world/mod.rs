@@ -219,6 +219,10 @@ impl World {
             self.focused_output = o;
         }
         self.fix_view(o);
+        if floating {
+            // Any centre it had was measured against an output that is gone.
+            self.recentre_floating(&[id]);
+        }
     }
 
     fn focus_location(&mut self, loc: Location) {

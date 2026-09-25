@@ -198,10 +198,16 @@ impl Workspace {
             .chain(self.floating)
     }
 
-    /// Opens `id` as a new column right of focus. It takes focus when asked, or
-    /// when it is the only column. Taking focus takes it off the floating
-    /// layer too.
+    /// Opens `id` as a new column right of focus. It takes the workspace's
+    /// focus when asked (off the floating layer too). Otherwise the
+    /// workspace's focus stays exactly where it was: a column going into an
+    /// empty strip becomes the strip's focused column (it is the only one),
+    /// but a floating window that had focus by default -- the strip was
+    /// empty, so `floating_has_focus` was true whatever the flag said --
+    /// keeps it, which is why the flag is set rather than left to mean
+    /// "the strip".
     pub(super) fn insert_column(&mut self, id: WindowId, preset: usize, focus: bool) {
+        let floating_had_focus = self.floating_has_focus();
         let at = if self.columns.is_empty() {
             0
         } else {
@@ -211,9 +217,7 @@ impl Workspace {
         if focus || self.columns.len() == 1 {
             self.focused = at;
         }
-        if focus {
-            self.floating_focused = false;
-        }
+        self.floating_focused = !focus && floating_had_focus;
     }
 
     /// Removes a window, dropping its column if that leaves it empty, and moves
@@ -235,8 +239,11 @@ impl Workspace {
     /// first maps was inserted right of the focused column
     /// ([`Workspace::insert_column`]), so this is the column that had focus
     /// before it opened; and un-floating inserts right of the focused
-    /// column, so floating a column and un-floating it again puts it back
-    /// where it was.
+    /// column, so floating a focused column and un-floating it again puts it
+    /// back right of its left neighbour -- where it was, except for the
+    /// leftmost column, which comes back second (there is no left neighbour
+    /// to land on), and a window floated out of a stacked column, which
+    /// comes back as a column of its own.
     pub(super) fn take_for_float(&mut self, column: usize, index: usize) -> WindowId {
         let emptied_focused = column == self.focused && self.columns[column].windows.len() == 1;
         let id = self.take(column, index);
