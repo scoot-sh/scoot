@@ -396,6 +396,17 @@ input-model-`None` window gets no keyboard; the focused X window is raised in
 X stacking; the keyboard-grab protocol stays refused. X input feeds idle and
 `interaction_serials` through the same paths as Wayland input.
 
+**Hostile X properties** (found while building it, each reproduced first):
+a NUL in `WM_NAME`/`_NET_WM_NAME`/`WM_CLASS` reached a foreign-toplevel
+`title`/`app_id` and panicked the compositor (`NulError` in
+wayland-scanner's `CString::new(..).unwrap()`) -- X strings are now cut at
+the first NUL; `_GTK_FRAME_EXTENTS` near `i32::MAX` overflowed Smithay's
+`Rectangle - FrameExtents` in `X11Surface::geometry()` (a debug panic,
+garbage in release) -- a window with an extent past 32767 is refused at map
+and withdrawn if it grows one. A Smithay-side clamp (the fork, then
+upstream) would let such a window be managed rather than refused; not
+needed for safety.
+
 **Evidence** (details and raw logs in the PR): 30 `xwayland::tests` on `Harness` (25 live against a real XWayland, 5 hermetic)
 (mapping, lists, floating/centring, rules, position policy, override-
 redirect, fullscreen, close, ring/rounded clip, focus gate, typing, click,

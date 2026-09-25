@@ -122,7 +122,12 @@ each item's own file records why it landed when it did.
   via a new `DESKTOP_STARTUP_ID` export, or the X-Resource pid of an
   unreaped spawned child); `_NET_ACTIVE_WINDOW` goes through the same gate,
   refused while locked. The lock
-  blanks and refuses X windows and menus (mutation-checked). Also resolved
+  blanks and refuses X windows and menus (mutation-checked). Hardened
+  against hostile X properties found while building it: a NUL in a title or
+  class panicked the compositor in wayland-scanner's `CString::new().unwrap()`
+  (now cut at the NUL), and `_GTK_FRAME_EXTENTS` near `i32::MAX` overflowed
+  Smithay's geometry subtraction (such windows are refused or withdrawn).
+  Also resolved
   the [WM-failure pin](docs/backlog/resolved/xwayland-phase1-wm-failure-pin-done.md)
   (the rival recipe cannot work: XWayland admits no client before the WM)
   and the [smoke feature-gate](docs/backlog/resolved/smoke-xwayland-step-feature-gate-done.md)
