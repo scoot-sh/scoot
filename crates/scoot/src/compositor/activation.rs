@@ -144,7 +144,7 @@ mod tests;
 /// the figure Smithay's own documentation uses, was measurably too short for
 /// exactly that cold-start case; a minute would make "the user just asked for
 /// this" untrue.
-const TOKEN_LIFETIME: Duration = Duration::from_secs(30);
+pub(super) const TOKEN_LIFETIME: Duration = Duration::from_secs(30);
 
 /// How many unredeemed tokens may exist at once, across every client.
 ///
@@ -315,6 +315,13 @@ impl State {
     /// [`State::spawn`] sets it for every child it mints a token for; a
     /// toolkit reads the literal name, so this is the one spelling.
     pub(super) const ACTIVATION_TOKEN_ENV: &str = "XDG_ACTIVATION_TOKEN";
+
+    /// The X11 startup-notification variable: what an X toolkit reads its
+    /// startup id from, and sets as `_NET_STARTUP_ID` on the windows it
+    /// maps. [`State::spawn`] sets it to the child's activation token while
+    /// XWayland is live, so the X focus gate can redeem it
+    /// (`xwayland/focus.rs`).
+    pub(super) const STARTUP_ID_ENV: &str = "DESKTOP_STARTUP_ID";
 
     /// Mints the activation token a process scoot spawned itself carries in
     /// [`Self::ACTIVATION_TOKEN_ENV`].

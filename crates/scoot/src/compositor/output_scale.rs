@@ -47,6 +47,8 @@
 //! double-count it. `compositor::run` warns and forces 1.0 there, and a
 //! reload refuses a non-1.0 value rather than applying it.
 
+use std::borrow::Cow;
+
 use smithay::desktop::{PopupManager, layer_map_for_output};
 use smithay::output::{Output, Scale};
 use smithay::reexports::wayland_server::DisplayHandle;
@@ -54,6 +56,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Size, Transform};
 use smithay::wayland::compositor::{get_children, send_surface_state, with_states};
 use smithay::wayland::fractional_scale::{FractionalScaleHandler, with_fractional_scale};
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::viewporter::ViewporterState;
 
 use super::State;
@@ -249,11 +252,13 @@ impl State {
         // before any protocol send, so no borrow of the state outlives into
         // the walk. One small `Vec`, on the cold reload path only.
         let mut roots: Vec<WlSurface> = Vec::new();
+        // Every window's root surface: an xdg toplevel's, or the one
+        // XWayland associated with an X window (which XWayland may or may
+        // not act on, but is a surface like any other).
         roots.extend(
             self.windows
                 .values()
-                .filter_map(|window| window.toplevel())
-                .map(|toplevel| toplevel.wl_surface().clone()),
+                .filter_map(|window| window.wl_surface().map(Cow::into_owned)),
         );
         for output in self.outputs.iter() {
             roots.extend(

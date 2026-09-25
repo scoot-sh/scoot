@@ -1033,6 +1033,13 @@ impl State {
             self.click_layer(&layer);
             return;
         }
+        // A click in an override-redirect X window -- a menu item, a
+        // drop-down entry -- focuses nothing: the window is not a window
+        // scoot manages, and the click must not reach the one beneath it.
+        #[cfg(feature = "xwayland")]
+        if self.x11_unmanaged_under(location).is_some() {
+            return;
+        }
         // The same output-confined search the pointer focus uses (see
         // `output_clip.rs`): a click lands on what is drawn under it, never
         // on another output's window overhanging this one.

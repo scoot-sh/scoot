@@ -21,12 +21,11 @@ use smithay::backend::renderer::element::surface::{
 use smithay::backend::renderer::element::{AsRenderElements, Kind, render_elements};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
 use smithay::desktop::space::SpaceElement;
-use smithay::desktop::{
-    LayerMap, PopupManager, Space, Window, WindowSurface, layer_map_for_output,
-};
+use smithay::desktop::{LayerMap, PopupManager, Space, Window, layer_map_for_output};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Scale};
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::compositor::State;
@@ -390,6 +389,14 @@ impl State {
             );
             out.extend(cursor_elements.into_iter().map(Elements::Cursor));
             layer_elements(&layers, above, renderer, scale, out);
+            // Override-redirect X windows (menus, tooltips): above every
+            // window, below the top and overlay layers -- where an xdg
+            // popup, drawn with its window, is too. See
+            // `xwayland/unmanaged.rs`.
+            #[cfg(feature = "xwayland")]
+            if let Some(region) = geometry {
+                x11_unmanaged_elements(&self.x11_unmanaged, renderer, region, scale, out);
+            }
             out.extend(window_elements);
             out.extend(ring_elements);
             layer_elements(&layers, &layer_shell::BELOW_WINDOWS, renderer, scale, out);
@@ -626,24 +633,17 @@ where
                 );
                 break 'draw;
             }
-            // No X11 arm: without the `xwayland` feature `Wayland` is the only
-            // variant -- and if that ever changes this match fails to compile
-            // rather than silently dropping windows. With the feature the `X11`
-            // variant exists, and the Phase-1 skeleton answers it loudly: no
-            // X11 window can exist yet (nothing constructs
-            // `Window::new_x11_window` until Phase 2 maps one), so reaching
-            // here is a bug, and a bug that logs per frame beats one that
-            // silently drops the window -- or one that panics the session.
-            #[cfg(not(feature = "xwayland"))]
-            let WindowSurface::Wayland(toplevel) = window.underlying_surface();
-            #[cfg(feature = "xwayland")]
-            let WindowSurface::Wayland(toplevel) = window.underlying_surface() else {
-                tracing::error!(
-                    "an X11 window reached the render path before Phase 2 maps one; skipping it"
-                );
+            // Either kind of window: an xdg toplevel's own surface (borrowed),
+            // or the one XWayland associated with a managed X window (a
+            // reference-count bump, no allocation). An X window XWayland has
+            // not paired yet has nothing to draw -- and no ring below is
+            // skipped for it. An X window has no xdg popups; its menus are
+            // override-redirect windows, drawn above every window instead
+            // (see `xwayland/unmanaged.rs`), so the popup walk finds nothing.
+            let Some(surface) = window.wl_surface() else {
                 break 'draw;
             };
-            let surface = toplevel.wl_surface();
+            let surface: &WlSurface = &surface;
             for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
                 let offset = (geometry.loc + popup_offset - popup.geometry().loc)
                     .to_physical_precise_round(scale);
@@ -698,6 +698,41 @@ where
         }
     }
     out
+}
+
+/// Appends this output's override-redirect X windows, front-most first:
+/// every one overlapping `region` (the output's logical rectangle), at the
+/// position it gave itself -- so one drawn across two outputs appears on
+/// both. Nothing is allocated when there are none, which is nearly always.
+#[cfg(feature = "xwayland")]
+fn x11_unmanaged_elements<R>(
+    windows: &[smithay::xwayland::X11Surface],
+    renderer: &mut R,
+    region: Rectangle<i32, Logical>,
+    scale: f64,
+    out: &mut Vec<Elements<R>>,
+) where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Send + Clone + 'static,
+{
+    for window in windows.iter().rev() {
+        let rect = crate::compositor::xwayland::unmanaged::rect_of(window);
+        if !region.overlaps(rect) {
+            continue;
+        }
+        let location = (rect.loc - region.loc).to_physical_precise_round(scale);
+        out.extend(
+            AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+                window,
+                renderer,
+                location,
+                Scale::from(scale),
+                1.0,
+            )
+            .into_iter()
+            .map(Elements::Surface),
+        );
+    }
 }
 
 /// Appends the render elements of every mapped layer surface on `layers`,

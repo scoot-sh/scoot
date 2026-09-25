@@ -704,6 +704,10 @@ impl State {
                         });
                     }
                 }
+                // Override-redirect X windows are not in `self.space` either
+                // (see `xwayland/unmanaged.rs`).
+                #[cfg(feature = "xwayland")]
+                self.x11_unmanaged_frames(&output, geometry, time);
                 // Layer surfaces aren't in `self.space` either, and a bar's clock
                 // stops at whatever second it first drew without this -- the same
                 // frame-callback starvation the cursor surface had. Sent to every

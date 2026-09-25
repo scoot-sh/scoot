@@ -847,7 +847,7 @@ impl Fixture {
         self.state
             .windows
             .get(&WindowId(id))
-            .and_then(Window::toplevel)
+            .and_then(smithay::desktop::Window::toplevel)
             .expect("a live window")
             .wl_surface()
             .clone()

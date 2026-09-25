@@ -407,7 +407,7 @@ pub struct State {
     /// and its server reached `READY` (see `xwayland::start`). `None`
     /// otherwise -- never asked, binary absent, server died pre-`READY`, or
     /// the WM attach failed. Read by `XwmHandler::xwm_state` (see
-    /// `handlers.rs`); Phase 1 never maps through it.
+    /// `xwayland/wm.rs`), which is how every X window reaches the layout.
     #[cfg(feature = "xwayland")]
     pub xwm: Option<xwayland::X11Wm>,
     /// The X display number while our server is believed live: set from the
@@ -422,10 +422,21 @@ pub struct State {
     /// `zwp_xwayland_keyboard_grab_manager_v1`: created alongside a
     /// successful spawn, never in `new` (see `xwayland::start` for why the
     /// timing matters and why a never-asked session stays
-    /// byte-identical). Phase 1 answers no grab for any surface (see
-    /// `handlers.rs`); the focus half is Phase 3.
+    /// byte-identical). Answers no grab for any surface (see
+    /// `xwayland/wm.rs`): an X client's keyboard grab stays inside the X
+    /// server.
     #[cfg(feature = "xwayland")]
     pub xwayland_grab: Option<xwayland::XWaylandKeyboardGrabState>,
+    /// The override-redirect X windows currently mapped -- menus, tooltips,
+    /// drop-downs -- in mapping order, newest last (on top). Never in the
+    /// core or the `Space`: they place themselves, and are drawn and
+    /// hit-tested from here (see `xwayland/unmanaged.rs`). Written only by
+    /// that module (on map, unmap/destroy, and the server's death); read by
+    /// the hit test, the frame gathering, and the frame-callback and
+    /// presentation passes -- each behind its lock branch. Empty in every
+    /// session without an X client, so each reader costs an empty-`Vec` test.
+    #[cfg(feature = "xwayland")]
+    pub x11_unmanaged: Vec<smithay::xwayland::X11Surface>,
     /// `zwlr_layer_shell_v1`: bars, docks, wallpapers and notification
     /// daemons. Unlike the two `#[allow(dead_code)]` states below this one is
     /// read again -- `WlrLayerShellHandler::shell_state` (see
@@ -982,6 +993,8 @@ impl State {
             xdisplay: None,
             #[cfg(feature = "xwayland")]
             xwayland_grab: None,
+            #[cfg(feature = "xwayland")]
+            x11_unmanaged: Vec::new(),
             layer_shell_state,
             ext_workspace,
             foreign_toplevels,
@@ -1142,10 +1155,24 @@ impl State {
         self.windows.get(&id)
     }
 
+    /// The window whose root surface `surface` is: an xdg toplevel's, or --
+    /// in an `xwayland` build -- the surface XWayland associated with a
+    /// managed X window. On the commit path, so allocation-free: the X arm
+    /// takes that window's state lock and a reference-count bump to compare,
+    /// and only X windows pay it.
     pub fn id_of(&self, surface: &WlSurface) -> Option<WindowId> {
         self.windows
             .iter()
-            .find(|(_, window)| window.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .find(|(_, window)| {
+                if let Some(toplevel) = window.toplevel() {
+                    return toplevel.wl_surface() == surface;
+                }
+                #[cfg(feature = "xwayland")]
+                if let Some(x11) = window.x11_surface() {
+                    return x11.wl_surface().as_ref() == Some(surface);
+                }
+                false
+            })
             .map(|(&id, _)| id)
     }
 
@@ -1197,7 +1224,13 @@ impl State {
         if self.session_lock.is_locked() {
             return self.lock_surface_under(pos);
         }
-        self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos)
+        let above = self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos);
+        // Override-redirect X windows (menus, tooltips) sit between the top
+        // layers and the windows, as they are drawn (see
+        // `xwayland/unmanaged.rs`).
+        #[cfg(feature = "xwayland")]
+        let above = above.or_else(|| self.x11_unmanaged_under(pos));
+        above
             .or_else(|| self.window_under(pos))
             .or_else(|| self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos))
     }
@@ -1306,8 +1339,34 @@ impl State {
         if let Some(token) = &token {
             child.env(State::ACTIVATION_TOKEN_ENV, token.as_str());
         }
+        // While XWayland is live, the same token again as the X toolkits'
+        // startup id -- the chain the X focus gate redeems (see
+        // `xwayland/focus.rs`). Removed first for the same reason as above:
+        // an inherited one is a receipt for someone else's action. Only
+        // while live, so a session without XWayland spawns exactly as it
+        // always has.
+        if self.xdisplay.is_some() {
+            child.env_remove(State::STARTUP_ID_ENV);
+            if let Some(token) = &token {
+                child.env(State::STARTUP_ID_ENV, token.as_str());
+            }
+        }
         match child.spawn() {
             Ok(child) => {
+                // The other half of that chain, for X clients that set no
+                // startup id at all: which process this token was minted
+                // for, so an X window whose client is this process (as the
+                // X server reports it) can be matched to it.
+                #[cfg(feature = "xwayland")]
+                if self.xdisplay.is_some()
+                    && let Some(data) = token
+                        .as_ref()
+                        .and_then(|token| self.xdg_activation.data_for_token(token))
+                {
+                    let pid = child.id();
+                    data.user_data
+                        .insert_if_missing_threadsafe(|| super::xwayland::SpawnedPid(pid));
+                }
                 // Tracked for the SIGCHLD drain, which reaps exactly these
                 // pids and nothing else (see `child_reaper.rs`). Inserted
                 // synchronously here, before the child can possibly exit and

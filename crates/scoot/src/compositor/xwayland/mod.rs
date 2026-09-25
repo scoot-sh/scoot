@@ -1,4 +1,5 @@
-//! Opt-in XWayland: an X11 server inside the session. Phase-1 skeleton.
+//! Opt-in XWayland: an X11 server inside the session, and the window
+//! management that puts its windows in the layout.
 //!
 //! When the session asks for it (`--xwayland` or `[xwayland] enabled`, either
 //! one -- see [`resolve`]), this starts Smithay's `XWayland` around the
@@ -7,19 +8,29 @@
 //! session spawns. When the session does not ask, or the binary is absent,
 //! nothing here runs and the session is Wayland-only.
 //!
-//! ## The Phase-1 boundary, stated so nobody mistakes "Xwayland starts" for
-//! "X apps work"
+//! ## What is here, by phase
 //!
-//! No X window enters the core in this phase. `XwmHandler::map_window_request`
-//! (see `handlers.rs`) deliberately never calls `X11Surface::set_mapped`, so
-//! an X client connects, gets a display, creates windows -- and maps nowhere:
-//! `State::windows`, the `Space`, `scoot msg windows` and both
-//! foreign-toplevel lists never learn they exist. Window mapping is Phase 2
-//! (`shell.rs`/`elements.rs` branches, explicitly NOT this phase); the
-//! focus/activation gate is Phase 3; clipboard/DnD/IME is Phase 4. An X
-//! client in a Phase-1 session is observable only in the compositor log
-//! (its map/configure requests, refused) and in `xwininfo`/`xprop` against
-//! the X display itself.
+//! - **Phase 1, the server** -- this file: start, `READY`, `DISPLAY`, and
+//!   the loud Wayland-only fallback.
+//! - **Phase 2, mapping** -- `manage.rs`: a normal X window that asks to be
+//!   mapped enters the core as a column (or floats, by the same signals and
+//!   `[[window_rule]]`s an xdg window floats by), appears in `scoot msg
+//!   windows` and both foreign-toplevel lists, is drawn with scoot's ring
+//!   and rounded clip, and goes fullscreen through
+//!   `_NET_WM_STATE_FULLSCREEN`. `unmanaged.rs`: override-redirect windows
+//!   (menus, tooltips) are drawn where they put themselves, above every
+//!   window, and never enter the core.
+//! - **Phase 3, the focus gate** -- `focus.rs`: an X window takes focus by
+//!   itself only when nothing is focused or scoot spawned it (the spawn's
+//!   token, redeemed once); `_NET_ACTIVE_WINDOW` is a request through the
+//!   same gate. The keyboard reaches an X window through its `X11Surface`,
+//!   which moves the X server's own input focus (see `keyboard_focus.rs`
+//!   for why the `wl_surface` alone does not).
+//! - **Phase 4 onward** (clipboard, drag-and-drop, XIM, packaging) is
+//!   not here yet: see `docs/backlog/protocols/xwayland-support.md`.
+//!
+//! `wm.rs` holds the Smithay handler impls, each a dispatch into the
+//! module that owns its policy.
 //!
 //! ## Why this shape
 //!
@@ -82,22 +93,22 @@
 //!   a known Phase-1 edge: restart the session. A `--tty` login without the
 //!   binary on `PATH` is the same shape (loud fallback), which is why the
 //!   packaging phase must put the binary on the session `PATH`.
-//! - **The session lock changes nothing here.** The X server keeps running
-//!   under lock (it must -- killing it would take every X client with it,
-//!   and lock is not logout); its windows are not mapped yet in this phase,
-//!   so there is nothing to blank and no input to refuse. Stated, not
-//!   fixed: Phase 2's mapping will route through the same lock gates every
-//!   other window passes.
-//! - **Spawned children get `DISPLAY`, not activation tokens, for X.**
-//!   `State::spawn` exports `DISPLAY` to every child while the server is
-//!   live. It does *not* distinguish X children from Wayland ones in this
-//!   phase -- no launch path can -- so every child still gets the standard
-//!   environment including its minted activation token. The no-token rule
-//!   binds the future X-specific launch path (Phase 2+): it must not mint,
-//!   because X11 has no activation-token channel to redeem one through (the
-//!   Phase-3 focus gate uses spawned-chain-or-nothing-focused instead), so
-//!   a minted token would both waste a table slot and imply a focus
-//!   guarantee the compositor will not honour.
+//! - **The session lock blanks X windows like every other window, and
+//!   refuses them input.** The X server keeps running under lock (it must
+//!   -- killing it would take every X client with it, and lock is not
+//!   logout). Its windows are windows: a locked frame gathers the lock
+//!   screen and nothing else, the pointer finds only lock surfaces, the
+//!   keyboard goes only to the lock surface (and the X focus is released
+//!   when it leaves an X window, which is what closes a toolkit's open
+//!   menu), and override-redirect windows are skipped by the same branches.
+//! - **Spawned children get `DISPLAY`, and their activation token doubles
+//!   as `DESKTOP_STARTUP_ID`.** `State::spawn` exports `DISPLAY` to every
+//!   child while the server is live, and -- only then -- hands the child's
+//!   activation token over in `DESKTOP_STARTUP_ID` as well, the variable X
+//!   toolkits turn into `_NET_STARTUP_ID`, and records the child's pid on
+//!   the token. That is the chain `focus.rs` redeems. (Phase 1 said the
+//!   opposite -- "must not mint" -- when no X launch path existed to redeem a
+//!   token through; the startup id and the X-Resource pid are that path.)
 //!
 //! [`resolve`]: resolve()
 //! [`StartError::Spawn`]: StartError::Spawn
@@ -115,8 +126,19 @@ use smithay::xwayland::{XWayland, XWaylandEvent};
 #[cfg(feature = "xwayland")]
 use super::State;
 
+#[cfg(feature = "xwayland")]
+mod focus;
+#[cfg(feature = "xwayland")]
+pub(in crate::compositor) mod manage;
 #[cfg(test)]
 mod tests;
+#[cfg(feature = "xwayland")]
+pub(in crate::compositor) mod unmanaged;
+#[cfg(feature = "xwayland")]
+mod wm;
+
+#[cfg(feature = "xwayland")]
+pub(in crate::compositor) use focus::SpawnedPid;
 
 /// The Smithay XWayland types the rest of the compositor names, re-exported
 /// so `state.rs` and `handlers.rs` have one seam to read them through rather
@@ -245,65 +267,81 @@ pub fn start(
     let wm_handle = loop_handle.clone();
     let wm_display = display_handle.clone();
     loop_handle
-        .insert_source(
-            xwayland,
-            move |event, _, state: &mut State| match event {
-                XWaylandEvent::Ready {
-                    x11_socket,
-                    display_number,
-                } => {
-                    match X11Wm::start_wm(
-                        wm_handle.clone(),
-                        &wm_display,
-                        x11_socket,
-                        client.clone(),
-                    ) {
-                        Ok(wm) => {
-                            state.xwm = Some(wm);
-                            tracing::info!(
-                                display = display_number,
-                                "XWayland is ready; X11 clients can connect (Phase-1 skeleton: their windows do not enter the layout)"
-                            );
-                        }
-                        Err(error) => {
-                            // No window manager means no reparenting, no
-                            // surface association, no map requests -- X
-                            // clients could still connect, but to a bare
-                            // server this session cannot manage. Withdraw
-                            // the number (the `xdisplay` invariant is "set
-                            // only while our server is believed live", and
-                            // a WM-less server is not live for our
-                            // purposes -- same as the pre-READY death
-                            // below), so no explicit `DISPLAY` is handed
-                            // out anymore. The process-wide staleness is
-                            // unchanged (see the module doc): later spawns
-                            // still inherit the exported `:N`. The grab
-                            // manager
-                            // stays (created at spawn, `can_view`-gated,
-                            // harmless without X surfaces), and the server
-                            // process itself is untouched (reaped with the
-                            // session through `XWaylandClientData`).
-                            state.xdisplay = None;
-                            tracing::error!(
-                                %error,
-                                "XWayland is up but its window manager could not attach; withdrawing DISPLAY and continuing Wayland-only"
-                            );
-                        }
-                    }
-                }
-                XWaylandEvent::Error => {
-                    // The server died before `READY`: retract the number so
-                    // later spawns inherit (a host `DISPLAY`, if any) rather
-                    // than point at a dead `:N`. Already-spawned children
-                    // and the process environment keep the stale value --
-                    // the documented edge in this module's doc.
-                    state.xdisplay = None;
-                    tracing::warn!(
-                        "XWayland exited before it was ready; continuing Wayland-only"
-                    );
-                }
-            },
-        )
+        .insert_source(xwayland, move |event, _, state: &mut State| match event {
+            XWaylandEvent::Ready {
+                x11_socket,
+                display_number,
+            } => attach_window_manager(
+                state,
+                wm_handle.clone(),
+                &wm_display,
+                x11_socket,
+                client.clone(),
+                display_number,
+            ),
+            XWaylandEvent::Error => {
+                // The server died before `READY`: retract the number so
+                // later spawns inherit (a host `DISPLAY`, if any) rather
+                // than point at a dead `:N`. Already-spawned children
+                // and the process environment keep the stale value --
+                // the documented edge in this module's doc.
+                state.xdisplay = None;
+                tracing::warn!("XWayland exited before it was ready; continuing Wayland-only");
+            }
+        })
         .map_err(|error| StartError::Insert(format!("{error:?}")))?;
     Ok(display)
+}
+
+/// `READY`'s half of [`start`]: attaches the window manager to the server
+/// that just became ready, or -- when it cannot attach -- withdraws the
+/// display number and leaves the session Wayland-only.
+///
+/// A named function rather than the callback's body so the failure arm can
+/// be driven deterministically: a test holds `READY` back, lets a rival
+/// window manager claim the display, then calls this (see the
+/// `a_rival_window_manager_withdraws_the_display` test). Driving it through
+/// `start` cannot be made deterministic: XWayland only finishes starting --
+/// and only then answers any X client, rival included -- once the
+/// compositor has dispatched its Wayland setup, and the dispatch that
+/// completes it can deliver `READY` and attach before the rival claims
+/// anything.
+#[cfg(feature = "xwayland")]
+fn attach_window_manager(
+    state: &mut State,
+    loop_handle: LoopHandle<'static, State>,
+    display_handle: &DisplayHandle,
+    x11_socket: std::os::unix::net::UnixStream,
+    client: smithay::reexports::wayland_server::Client,
+    display_number: u32,
+) {
+    match X11Wm::start_wm(loop_handle, display_handle, x11_socket, client) {
+        Ok(wm) => {
+            state.xwm = Some(wm);
+            tracing::info!(
+                display = display_number,
+                "XWayland is ready; X11 clients can connect"
+            );
+        }
+        Err(error) => {
+            // No window manager means no reparenting, no surface
+            // association, no map requests -- X clients could still
+            // connect, but to a bare server this session cannot manage.
+            // Withdraw the number (the `xdisplay` invariant is "set only
+            // while our server is believed live", and a WM-less server is
+            // not live for our purposes -- same as the pre-READY death in
+            // `start`), so no explicit `DISPLAY` is handed out anymore. The
+            // process-wide staleness is unchanged (see the module doc):
+            // later spawns still inherit the exported `:N`. The grab
+            // manager stays (created at spawn, `can_view`-gated, harmless
+            // without X surfaces), and the server process itself is
+            // untouched (reaped with the session through
+            // `XWaylandClientData`).
+            state.xdisplay = None;
+            tracing::error!(
+                %error,
+                "XWayland is up but its window manager could not attach; withdrawing DISPLAY and continuing Wayland-only"
+            );
+        }
+    }
 }
