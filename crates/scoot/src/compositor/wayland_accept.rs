@@ -167,7 +167,8 @@ impl EventSource for WaylandListener {
 ///
 /// Takes the observed `table` rather than reading it so tests can drive
 /// every shape with a canned reading; the one production caller (the
-/// `listen` callback in `state.rs`) passes `fd_pressure::table()`.
+/// `listen` callback in `state.rs`) passes `fd_pressure::table()`, which is
+/// cached: a whole backlog drained in one callback costs one observation.
 /// Allocation is fine here: this runs on the loop thread in the accept
 /// callback, never in a forked exhaustion-test child (which drives
 /// [`drain`] directly with its own stub).
@@ -186,11 +187,15 @@ pub(super) fn admit(state: &mut State, stream: UnixStream, table: Option<Table>)
     // A new connection can fail under fd/id exhaustion; that's the
     // misbehaving-client's problem; a single bad file descriptor
     // shouldn't take down every other client's session.
-    if let Err(error) = state
+    match state
         .display_handle
         .insert_client(stream, Arc::new(ClientState::default()))
     {
-        tracing::warn!(%error, "could not accept a new wayland client");
+        // Counted against the cached table reading, so the rest of this
+        // burst is judged against a count that includes this connection
+        // (see `fd_pressure::table`).
+        Ok(_) => super::fd_pressure::note_opened(1),
+        Err(error) => tracing::warn!(%error, "could not accept a new wayland client"),
     }
 }
 

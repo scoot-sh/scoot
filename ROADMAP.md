@@ -104,6 +104,35 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[wayland-backend's received-fd queue is bounded](docs/backlog/resolved/wayland-backend-fd-queue-done.md), [and scoot raises its fd limit](docs/backlog/resolved/raise-nofile-limit-done.md)**
+  (2026-09-25, PR #241) — wayland-backend 0.3.17 kept the fds a client
+  attaches to fd-less requests for the connection's life; one idle client
+  took scoot from 18 to 999 fds and shed every newcomer, `scootctl`
+  included. scoot now builds against the scoot-sh fork (`docs/forks.md`,
+  0.3.17 + `a39311b8` + `70f81e00`, pinned by the root `Cargo.toml`'s
+  `[patch.crates-io]`; `Cargo.lock` moves only `wayland-backend` and
+  `wayland-sys`), which disconnects a client leaving more than its cap
+  unclaimed: one eighth of the soft `RLIMIT_NOFILE`, clamped 128..=1024.
+  scoot sets that limit at startup to min(hard limit, 65536) (`nofile.rs`),
+  and every child `State::spawn` starts gets the original back; so the cap
+  is 1024, libwayland-server's default, and one connection at every bound
+  is 1674 fds against a 65408 line. The fd-table reading pressure checks
+  use is cached (reused for 20x its cost): re-review found the uncached
+  per-connection readdir let a 4000-connection storm against 58000 parked
+  fds freeze scoot for 35.6 s; now 101 ms (`main`: 361 ms), reproducible
+  with `scripts/fd-storm/run.sh`. The first round of the
+  PR pinned a fixed 128; review found stock libwayland clients reach it
+  under backpressure (disconnected at 140 fds, where `main` served 600), and
+  the coordinator folded the raise in. Dev VM: that libwayland client is
+  served at 160, 600 and 1000; the PR #236 probe is disconnected at 1036
+  with scoot back at 18 fds; `foot` runs at soft 1024 under a scoot at
+  65536; a container-like `prlimit --nofile=1024:1024` run keeps the 128
+  cap with a log line. `fd_pressure/tests/backend_queue*.rs` fail if the
+  patch is dropped. Left open, on
+  [pressure-many-light-connections](docs/backlog/core/pressure-many-light-connections.md):
+  64 idle connections parking 1024 each still fill the raised table (7 at
+  a 1024 hard limit).
+
 - **[Rounded corners and the focus ring match the window](docs/backlog/resolved/clip-to-committed-size-done.md)**
   (2026-09-24, gh #205 reopened) — default `foot` commits a buffer rounded
   down to whole character cells when it believes it floats, and scoot
@@ -219,9 +248,9 @@ each item's own file records why it landed when it did.
   40 ns per `add`. Not every fd path is counted yet; filed high:
   [buffer fds past their object](docs/backlog/resolved/buffer-fds-past-their-object-done.md)
   (found on the way; since resolved, above) and, found in review,
-  [wayland-backend's unbounded received-fd queue](docs/backlog/core/wayland-backend-fd-queue.md)
+  [wayland-backend's unbounded received-fd queue](docs/backlog/resolved/wayland-backend-fd-queue-done.md)
   (one client took scoot from 18 to 999 fds through it, on every tier,
-  unchanged by this PR).
+  unchanged by this PR; since resolved, above).
 
 - **[`--nested --renderer gles` hands frames to the host as dma-bufs](docs/backlog/resolved/nested-dmabuf-present-done.md)**
   (2026-09-24, PR #235) — in a `gpu-scanout` build, when the host's v4

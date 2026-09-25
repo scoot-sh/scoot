@@ -1304,9 +1304,10 @@ fn too_large(size: i32) -> String {
 ///
 /// The grace lookup short-circuits the table observation, so creations
 /// under grace cost no syscall -- which is every legitimate creation, since
-/// no legitimate client holds past grace. The guard below is load-bearing
-/// for that: `table()` observes the process fd table (getrlimit + readdir),
-/// so it must only run once a client is already past its grace. Checked
+/// no legitimate client holds past grace. The guard below keeps even the
+/// cached reading off that path: `table()` refreshes its observation
+/// (getrlimit + readdir) at most once per reading lifetime, however many
+/// creations a client past its grace makes. Checked
 /// before the per-client claim, so a pressure refusal never takes a count
 /// unit it would then have to give back.
 pub(super) fn pressure_refusal(live: u32, grace: u32) -> bool {

@@ -28,8 +28,9 @@
 //! nothing; the next one is measured. The
 //! difference, not the count: anything that already named the file -- the
 //! planes themselves, or fds a client parked in wayland-backend's received-fd
-//! queue on its own buffer (`docs/backlog/core/wayland-backend-fd-queue.md`)
-//! -- is in both counts and cancels, so no client can teach the session a
+//! queue on its own buffer (up to the fork's cap, 128..=1024,
+//! `docs/backlog/resolved/wayland-backend-fd-queue-done.md`) -- is in both
+//! counts and cancels, so no client can teach the session a
 //! bigger number. Nothing else opens an fd on a client's dma-buf in between;
 //! the only other thread touching fds (Smithay's shm drop thread) only closes
 //! pool fds. That ratio -- 1 on llvmpipe, 0 on a driver that keeps nothing --

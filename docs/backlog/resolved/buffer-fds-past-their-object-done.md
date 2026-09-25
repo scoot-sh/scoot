@@ -110,8 +110,8 @@ stay.
 ## What is still not counted
 
 - **wayland-backend's queues**, below scoot. Received fds parked with
-  fd-less requests ([its own ticket](../core/wayland-backend-fd-queue.md),
-  unbounded). And, reasoned from wayland-backend 0.3.17's source here and
+  fd-less requests ([its own ticket](./wayland-backend-fd-queue-done.md),
+  unbounded when this was written; bounded at 128 since). And, reasoned from wayland-backend 0.3.17's source here and
   not measured: an event carrying an fd (a keymap, a format table, a
   selection `send`) is queued for a client with a *duplicate* of the fd
   until flushed, and a client that stops reading keeps those until its
@@ -134,6 +134,12 @@ stay.
   charged one copy per backend and are never raised.
 
 ## The interface for the wayland-backend fix
+
+(Superseded 2026-09-24: the fix landed as the transport-level bound, 128
+at rest and 30 more inside one read, see
+[its ticket](./wayland-backend-fd-queue-done.md). The current arithmetic,
+including the drain-window figures, is in `fd_pressure.rs`'s module doc;
+the analysis below is kept as written.)
 
 A fix there can meet this in two ways. A transport-level bound (disconnect
 past N queued fds) needs nothing from the ledger: it is one more term in the

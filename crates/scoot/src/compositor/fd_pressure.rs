@@ -7,10 +7,16 @@
 //! planes added to params objects not yet created, 8 binds, 16 capture
 //! frames, 64 IPC slots, and where explicit sync is offered 128 retained
 //! syncobj timelines and 64 outstanding acquire waits -- see
-//! `dmabuf/pending_planes.rs` and `drm_syncobj.rs`), while the fd table they
-//! all draw from is process-global (`RLIMIT_NOFILE` 1024 on the dev VM). Two
-//! connections inside every per-connection bound can hold more than the
-//! table with nothing tripped -- the residual
+//! `dmabuf/pending_planes.rs` and `drm_syncobj.rs`; and below scoot, the
+//! received fds no request claimed, capped in the wayland-backend fork at
+//! [`backend_queued_fds`] of the table), while the fd table they all draw
+//! from is process-global: the soft `RLIMIT_NOFILE`, which scoot raises at
+//! startup to its hard limit capped at 65536 (`nofile.rs`; 65536 on the dev
+//! VM, whose hard limit is 524288), and which stays 1024 where the hard limit
+//! is 1024 (a container, say). Every line here is measured against the
+//! actual limit ([`table`] reads it); the figures below are given for both
+//! tables. On the 1024-fd table, two connections inside every per-connection
+//! bound can hold more than the table with nothing tripped -- the residual
 //! `docs/backlog/resolved/wayland-connection-cap-done.md` fixed the kill
 //! half of and left here. This module is the shared ceiling:
 //! one observation of the table ([`table`]) and one predicate
@@ -89,18 +95,73 @@
 //! - Two such connections do exceed the table, which is what the arrival
 //!   guards are for: the second is past its 128-fd grace long before the
 //!   line, and its next arrival there is refused.
+//! - Adding what wayland-backend holds for that connection below scoot (next
+//!   section): its received-fd queue at the cap, [`backend_queued_fds`] at
+//!   rest, and up to 30 more for a moment inside the read that takes it past
+//!   (the next check disconnects it).
+//!   - **Raised table (65536, line 65408)**: the cap is 1024. Steady state
+//!     577 + 1024 = 1601 at rest, 1631 inside that read, **1674** with the
+//!     GPU tier's baseline; the drain window adds 256 (1930). Nowhere near
+//!     the line, and 63 such connections would still fit under it.
+//!   - **1024-fd table (line 896)**: the cap is 128. Steady state 705 at rest
+//!     and 735 inside the read, **748** and **778** with the baseline, 148
+//!     and 118 below the line. The drain window is where it stops fitting:
+//!     876 + 128 = 1004 at rest, past the line (newcomers are shed for that
+//!     moment) but inside the table; and 1034 inside the read, past the
+//!     table. What that last instant would do is reasoned, not measured: the
+//!     kernel installs the read's fds only up to the table and closes the
+//!     rest, so the table is full for the remainder of that one read's
+//!     requests, all from the connection that is about to be disconnected
+//!     (it is past the queue cap, or its fd-carrying requests meet its full
+//!     512 and are refused). A request of its that makes scoot send an fd to
+//!     *another* client in that window (a selection `send`) fails to
+//!     duplicate the fd, and wayland-backend disconnects that other client
+//!     for it: the same harm any full table does, and one the
+//!     connection-count residual below already reaches with several
+//!     connections. Here it needs one connection at its 512 bound, in the
+//!     software-GLES drain window, with 128 parked, all in the same instant,
+//!     on a machine whose hard limit kept the table at 1024.
 //!
-//! ## What is not counted
+//!   `tests.rs` derives the steady-state figures on both tables from the
+//!   ledger's admission rule and the queue terms, which
+//!   `tests/backend_queue.rs` pins against the real backend.
 //!
-//! Below scoot, in wayland-backend, two per-connection queues hold fds that
-//! no scoot code sees:
+//! ## Below scoot, in wayland-backend
 //!
-//! - **Received fds** (`docs/backlog/core/wayland-backend-fd-queue.md`):
-//!   fds a client sends alongside a request whose signature has no fd
-//!   argument stay queued for the connection's life. Review of PR #236
-//!   measured one client taking scoot from 18 to 999 fds this way on the
-//!   default headless tier, newcomers shed, and the client never killed.
-//!   Unbounded; that ticket's.
+//! Two per-connection queues there hold fds that no scoot code sees, so no
+//! ledger counts them and the grace cannot attribute them:
+//!
+//! - **Received fds**: every fd arrives attached to a request's bytes and is
+//!   queued until a request with an fd argument takes it, so fds a client
+//!   attaches to fd-less requests are never taken. Released wayland-backend
+//!   0.3.17 kept them for the connection's life; review of PR #236 measured
+//!   one idle client taking scoot from 18 to 999 fds that way, newcomers and
+//!   `scootctl` shed, the client never killed. scoot now builds against a
+//!   scoot-sh fork (`docs/forks.md`) that disconnects a client leaving more
+//!   than its cap unclaimed at a point where every complete request has been
+//!   parsed, with `wl_display.error` `invalid_method` ("too many file
+//!   descriptors queued"), closing them. The cap is one eighth of the soft
+//!   limit read when the client connects, clamped to 128..=1024
+//!   ([`backend_queued_fds`] restates it): **1024** on the raised table,
+//!   which is libwayland-server's own bound (its `fds_in` ring holds 4096
+//!   bytes of fds by default), and **128** on a 1024-fd table. One read adds
+//!   at most 30 on top. So a connection holds at most the cap at rest and
+//!   the cap + 30 for a moment, the figures above
+//!   (`docs/backlog/resolved/wayland-backend-fd-queue-done.md`).
+//!
+//!   The check runs before each read, so fds whose requests are still in
+//!   flight count, and well-behaved clients do run ahead: a flush carrying
+//!   more than 28 fds sends them 28 per `sendmsg` with one byte each, ahead
+//!   of the bytes. A client on `wayland-client`'s pure-Rust backend does that
+//!   for every flush; a libwayland client does it once its socket has filled
+//!   and its unbounded buffers have grown (review of PR #241 measured a stock
+//!   libwayland 1.26 client stalled behind a stopped compositor disconnected
+//!   at 140 fds under the old fixed 128). At the 1024 cap every client a
+//!   libwayland compositor serves is served: `tests/backend_queue_client.rs`
+//!   pins the backpressure shape (the cap served, one more disconnected) and
+//!   the Rust client's largest one-flush batch (1036), and on the dev VM the
+//!   same libwayland client is served at 160, 600 and 1000. On a 1024-fd
+//!   table it is still disconnected past about 128.
 //! - **Outgoing fds**: an event carrying an fd (a keymap, a dma-buf format
 //!   table, a selection `send`) is written into the client's outgoing buffer
 //!   with a duplicate of the fd, which closes once the buffer is flushed to
@@ -109,14 +170,16 @@
 //!   caps the buffer at 4096 bytes and kills the client past it). The
 //!   smallest such event is 12-16 bytes, so that is at most a few hundred
 //!   fds, and only for a client that has first filled its socket's kernel
-//!   buffer. Reasoned from wayland-backend 0.3.17's source, not measured.
-//!   On top of the 620 above that could take one non-reading connection on
-//!   the dev VM's GPU tier to the line, but only transiently: it is
-//!   disconnected once its buffer fills.
+//!   buffer. Reasoned from wayland-backend 0.3.17's source (unchanged in the
+//!   fork), not measured. On top of the 620 above that could take one
+//!   non-reading connection on the dev VM's GPU tier to the line, but only
+//!   transiently: it is disconnected once its buffer fills.
 //!
 //! [`RESERVE_FDS`] is 128: shed/refuse once fewer than 128 fds stand free
-//! (used past 896 of 1024). That is ~6x above the reasoned login storm. What
-//! the 128 is *for* is headroom once the line is crossed: scoot's own
+//! (used past 65408 of the raised 65536, or past 896 of a 1024-fd table; on
+//! the small table that is ~6x above the reasoned login storm). A fixed
+//! reserve rather than a fraction of the table on purpose: what the 128 is
+//! *for* is headroom once the line is crossed, the same on any table: scoot's own
 //! transient fds (an accepted socket before it is shed, a selection pipe, an
 //! acquire wait, a screenshot) and the arrivals the graces still admit
 //! (below). It is not room for a greedy connection: one of those can hold
@@ -135,7 +198,7 @@
 //! The grace (128 fds, every kind together; see `client_fds.rs` for how it
 //! compares to the heaviest reasoned legitimate clients) bites only
 //! *during* genuine pressure, which a legitimate session never produces
-//! (see above): holding past-grace while the table is 7/8 full means
+//! (see above): holding past-grace while the table is nearly full means
 //! contributing to the pressure, which is what justifies the kill. A
 //! connection at the most the graces let through under pressure holds
 //! 128 + 16 + 17 + 1 = 162 fds on the GPU tier: 128 client fds plus the
@@ -157,15 +220,46 @@
 //! table, with nobody killed. The grace attributes pressure to *heavy*
 //! clients; many light ones are the connection-count problem.
 //!
+//! The wayland-backend queue cap reshapes that residual: fds parked there
+//! need no object at all, and the grace never sees them, so each idle
+//! connection can hold its cap plus its socket. Measured on the default tier
+//! (headless pixman, idle at 18; `~/evidence/fdq/runs/`):
+//!
+//! - **Raised table**: 1025 per connection. 8 such connections held 8218
+//!   fds and 63 held 64593, everyone served both times; 64 filled the 65536
+//!   table (newcomers dropped, `scootctl` reset). Nobody is disconnected.
+//! - **1024-fd table** (the fixed-128 build, which is what a 1024 hard limit
+//!   gives): 129 per connection. Six held 792 with everyone served, seven 921,
+//!   past the line (newcomers shed, `scootctl` refused), and eight filled the
+//!   table.
+//!
+//! Before the cap, one connection could do either. That residual, and what
+//! it costs `scootctl`, is
+//! `docs/backlog/core/pressure-many-light-connections.md`.
+//!
 //! ## Observation cost and disciplines
 //!
-//! [`table`] costs one `getrlimit` plus one `/proc/self/fd` readdir --
-//! ~8us per call on the dev VM (debug build, 2000-call sample; release is
-//! faster), no steady-state cost anywhere: the accept sites run it once per
-//! *connection* (not per frame or request), and the arrival sites only
-//! once a client is already past its grace, and then at most once per
-//! [`SWEEP_MARGIN`](crate::compositor::client_fds::SWEEP_MARGIN) arrivals
-//! (a map lookup short-circuits everything under it).
+//! An observation ([`observe`]) is one `getrlimit` plus one readdir of
+//! `/proc/self/fd`, linear in the open fds: measured for the readdir at
+//! 3.6us for 20 open fds, 72us for 1000, 634us for 8000 and ~8ms for 65000
+//! (`~/evidence/fdq/runs/readdir-cost.txt`). The enforcement sites never
+//! observe directly: they read [`table`], a per-thread cached reading reused
+//! for 20 times what it cost to take (1 ms to 250 ms; see
+//! [`reading_lifetime`]), with every fd a guarded path admits counted
+//! against it ([`note_opened`]: connections, ledger arrivals, acquire
+//! waits). So observing costs at most ~5% of loop time on any
+//! table: on a session's few hundred fds a reading is microseconds and at
+//! most 1 ms old, and on a full raised table one ~7 ms readdir serves the
+//! next ~140 ms. A burst of accepts (the Wayland accept callback drains up to
+//! 4096 in one call) costs one reading, not one per connection, and is still
+//! judged connection by connection, since each admit adds one to the count.
+//! Review of PR #241 measured the uncached version at a 35.6 s freeze (58
+//! connections parking 1008 fds each, then 4000 connections);
+//! `scripts/fd-storm/run.sh` reproduces it at 36.1 s uncached and 110 ms
+//! cached (`main`, on a 1024 table: 361 ms). The arrival sites read it only
+//! once a client is already past its grace, and the ledger's guard at most
+//! once per [`SWEEP_MARGIN`](crate::compositor::client_fds::SWEEP_MARGIN)
+//! arrivals (a map lookup short-circuits everything under it).
 //!
 //! `table()` allocates (`read_dir`), so the fork-child discipline from
 //! `ipc::accept` applies: never call it from `drain`, `shed_one`,
@@ -177,6 +271,18 @@
 //! infinite limit, an unreadable `/proc`) returns `None`, and every site
 //! admits on `None`. Shedding on unknown would deny innocents for a
 //! broken gauge; the `EMFILE` shed still catches real exhaustion underneath.
+
+use std::cell::Cell;
+use std::time::{Duration, Instant};
+
+/// How many received fds wayland-backend lets one client leave unclaimed on a
+/// table of `soft` fds: one eighth of it, clamped to 128..=1024. This mirrors
+/// the scoot-sh fork's `max_queued_fds` (crate-private there, read when each
+/// client is created) so the arithmetic below and the startup log can name
+/// it; `tests/backend_queue.rs` pins it against the real backend.
+pub(crate) fn backend_queued_fds(soft: u64) -> u64 {
+    (soft / 8).clamp(128, 1024)
+}
 
 /// How many free fds must remain before newcomers shed and past-grace
 /// creations refuse. See the module doc for the sizing.
@@ -215,10 +321,145 @@ impl Table {
     }
 }
 
-/// Observes the process fd table, or `None` when there is nothing to
+/// The process fd table as the enforcement sites see it: a cached
+/// [`observe`], refreshed at most once per [`reading_lifetime`], plus every
+/// fd [`note_opened`] has counted since. `None` when there is nothing to
 /// enforce (small or infinite table) or nothing observable (any failure).
 /// Fails open by construction: every enforcement site admits on `None`.
+///
+/// Why cached: an observation is a readdir of `/proc/self/fd`, linear in the
+/// open fds (~7 ms at 60000), and the sites are client-triggered: the
+/// Wayland accept callback drains its whole backlog (up to 4096
+/// connections) in one call, the IPC accept runs per connection, and a
+/// client past its grace reaches the creation guards on every request.
+/// Uncached, review of PR #241 measured a 4000-connection storm against
+/// 58000 parked fds freezing the compositor for 35.6 s. Cached, a burst
+/// costs one readdir, and readdirs cost at most ~1/20 of loop time however
+/// large the table (see [`reading_lifetime`]).
+///
+/// The cache is per thread: every site runs on the event-loop thread, and
+/// a test's `State` gets a reading of its own. Within a reading's lifetime
+/// [`note_opened`] counts every fd a guarded path admits: each accepted
+/// Wayland or IPC connection, each pool, plane and timeline fd the ledger
+/// records (`client_fds::record_arrival`, at its admitted weight, renderer
+/// copies included), and each acquire-wait eventfd. So the guards that
+/// refuse past-grace clients see those as they happen, however stale the
+/// readdir; review of PR #241 measured two clients each keeping 512 pools
+/// within one lifetime fill the table to 65535 before this was counted.
+///
+/// What stays uncounted within a lifetime, exactly as for the uncached
+/// observation between two events: scoot's own fds (a renderer copy beyond
+/// what the plane was charged, at most one round of a client's planes, 256;
+/// a capture; a spawn's pipe; a selection pipe), and received fds
+/// wayland-backend queues before any request claims them (bounded per
+/// connection by the fork's cap, and never seen by any scoot-side count).
+/// Those can make the reading low by that much until the next refresh, at
+/// most [`MAX_READING_LIFETIME`] later; the `EMFILE` shed still catches real
+/// exhaustion underneath. Fds closed within a lifetime make it read high
+/// until the next refresh: towards shedding, never away from it.
 pub(crate) fn table() -> Option<Table> {
+    let now = Instant::now();
+    GAUGE.with(|gauge| {
+        if let Some(cached) = gauge.get().filter(|cached| cached.fresh_at(now)) {
+            return cached.table;
+        }
+        let started = Instant::now();
+        let table = observe();
+        let cost = started.elapsed();
+        OBSERVATIONS.with(|count| count.set(count.get() + 1));
+        gauge.set(Some(Reading {
+            table,
+            taken: now,
+            lifetime: reading_lifetime(cost),
+        }));
+        table
+    })
+}
+
+/// Counts `count` fds just opened on the loop thread (an accepted
+/// connection) against the cached reading, so a burst of accepts inside one
+/// reading's lifetime still sees the table fill: the 4000th connection of a
+/// storm is judged against a count that includes the 3999 before it.
+pub(crate) fn note_opened(count: u64) {
+    GAUGE.with(|gauge| {
+        if let Some(mut cached) = gauge.get() {
+            if let Some(table) = cached.table.as_mut() {
+                table.used = table.used.saturating_add(count);
+            }
+            gauge.set(Some(cached));
+        }
+    });
+}
+
+/// How long a reading that took `cost` to observe is reused: 20 times its
+/// cost, so observing costs at most ~5% of loop time on any table (a 7 ms
+/// readdir at 60000 open fds is reused for 140 ms), clamped to
+/// [`MIN_READING_LIFETIME`]..=[`MAX_READING_LIFETIME`]. On an ordinary
+/// session's few hundred fds a readdir costs microseconds, and the reading
+/// is at most 1 ms old. The ceiling is for a readdir that was preempted or
+/// stalled (its wall time is not its cost): without it one slow observation
+/// could make the next seconds' checks read a stale figure.
+pub(crate) fn reading_lifetime(cost: Duration) -> Duration {
+    cost.saturating_mul(20)
+        .clamp(MIN_READING_LIFETIME, MAX_READING_LIFETIME)
+}
+
+/// The shortest a reading is reused for; see [`reading_lifetime`].
+pub(crate) const MIN_READING_LIFETIME: Duration = Duration::from_millis(1);
+
+/// The longest a reading is reused for; see [`reading_lifetime`].
+pub(crate) const MAX_READING_LIFETIME: Duration = Duration::from_millis(250);
+
+/// One cached observation.
+#[derive(Debug, Clone, Copy)]
+struct Reading {
+    table: Option<Table>,
+    taken: Instant,
+    lifetime: Duration,
+}
+
+impl Reading {
+    fn fresh_at(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.taken) < self.lifetime
+    }
+}
+
+thread_local! {
+    static GAUGE: Cell<Option<Reading>> = const { Cell::new(None) };
+    /// How many real observations (readdirs) [`table`] has made on this
+    /// thread; read by the tests that pin the per-burst bound.
+    static OBSERVATIONS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Real observations [`table`] has made on this thread so far.
+#[cfg(test)]
+pub(crate) fn observations() -> u64 {
+    OBSERVATIONS.with(Cell::get)
+}
+
+/// Replaces this thread's cached reading with `table`, reused for
+/// `lifetime`: lets a test put the gauge in a known state (calm, one fd from
+/// the line) without filling the process's real fd table.
+#[cfg(test)]
+pub(crate) fn pin_reading(table: Option<Table>, lifetime: Duration) {
+    GAUGE.with(|gauge| {
+        gauge.set(Some(Reading {
+            table,
+            taken: Instant::now(),
+            lifetime,
+        }));
+    });
+}
+
+/// Drops this thread's cached reading, so the next [`table`] observes.
+#[cfg(test)]
+pub(crate) fn forget_reading() {
+    GAUGE.with(|gauge| gauge.set(None));
+}
+
+/// Observes the process fd table now: one `getrlimit` and one readdir of
+/// `/proc/self/fd`. Only [`table`] calls this.
+fn observe() -> Option<Table> {
     let soft = soft_limit()?;
     if soft < MIN_TABLE_FDS {
         return None;

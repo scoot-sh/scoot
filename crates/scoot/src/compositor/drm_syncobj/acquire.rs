@@ -273,6 +273,9 @@ pub(crate) fn pre_commit(state: &mut State, dh: &DisplayHandle, surface: &WlSurf
         Ok(token) => {
             entry.pending.push((key, token));
             *waits.per_client.entry(client_id).or_insert(0) += 1;
+            // The wait's eventfd, counted against fd pressure's cached table
+            // reading (see `fd_pressure::table`).
+            crate::compositor::fd_pressure::note_opened(1);
             add_blocker(
                 surface,
                 AcquireBlocker {

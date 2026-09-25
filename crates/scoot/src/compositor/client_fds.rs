@@ -133,7 +133,15 @@
 //! most 256 copies at two fds a plane, 876 in all, still under the line --
 //! and in practice short: review of PR #239 saw all 240 copies of 80 released
 //! buffers close within 500 ms on both GLES tiers. What scoot does not count
-//! is in `fd_pressure.rs`.
+//! is in `fd_pressure.rs`: chiefly the received fds wayland-backend can
+//! hold for the connection below scoot, up to 1024 on the table scoot raises
+//! to (1674 with everything above, far under its 65408 line) or 128 where
+//! the hard limit keeps the table at 1024 (748, and 1004 in the drain
+//! window, past that table's line for that moment).
+//!
+//! These figures are for the 1024-fd table this ledger was sized against.
+//! On the raised table (`nofile.rs`) the same per-client bounds leave dozens
+//! of connections' worth of room; nothing here changes with the table.
 //!
 //! ## When the bounds are checked
 //!
@@ -161,16 +169,20 @@
 //! ## A known over-count
 //!
 //! wayland-backend keeps fds that a client sends alongside a request with no
-//! fd argument, for the connection's life
-//! (`docs/backlog/core/wayland-backend-fd-queue.md`). A syncobj fd parked
-//! there on a number some other client's dead timeline record names would
-//! make that record read live, and so inflate the *other* client's count.
-//! Pool and plane records are immune (their check is the file's identity,
-//! which a different file does not have); timeline records are not, since
-//! every syncobj shares one inode. Reasoned, not demonstrated. It can only
-//! over-count, never under-count, so it opens no hole in the bound; its harm
-//! is that it could push an innocent client toward a refusal, which is part
-//! of that ticket.
+//! fd argument, until the client leaves or parks more than its cap of them
+//! (the bound the scoot-sh wayland-backend fork adds, 1024 on scoot's raised
+//! table and 128 on a 1024-fd one, `docs/forks.md`; released 0.3.17 kept them
+//! for the connection's life). A syncobj fd parked there on
+//! a number some other client's dead timeline record names would make that
+//! record read live, and so inflate the *other* client's count. Pool and
+//! plane records are immune (their check is the file's identity, which a
+//! different file does not have); timeline records are not, since every
+//! syncobj shares one inode. Reasoned, not demonstrated. It can only
+//! over-count, never under-count, so it opens no hole in the bound. Its harm
+//! is that it could push an innocent client toward a refusal; the queue cap
+//! bounds it at the cap per connection (30 more for a moment inside a read)
+//! rather than removing it, and the parker must also hold those numbers
+//! until the victim's next sweep.
 
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
@@ -419,6 +431,12 @@ impl ClientFds {
     ) {
         let check = liveness::capture(fd, kind);
         self.record(client, fd.as_raw_fd(), kind, check, weight);
+        // Counted against fd pressure's cached table reading too, at the
+        // weight admitted (renderer copies included), so a client past its
+        // grace cannot open more than the reserve within one reading's
+        // lifetime on a reading that has gone stale-low (see
+        // `fd_pressure::table`).
+        super::fd_pressure::note_opened(u64::from(weight));
     }
 
     /// Decides whether `client` may have scoot keep one more fd of `kind`,

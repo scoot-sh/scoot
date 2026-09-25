@@ -26,3 +26,19 @@ codegen-units = 1
 panic = "abort"
 strip = true
 opt-level = 3
+
+# A scoot-sh fork of wayland-backend, not upstream: the 0.3.17 release
+# (`72f7fe0d`, branch `v0.31.x`) plus two commits (`a39311b8`, `70f81e00`,
+# branch `scoot/server-fd-queue-cap-adaptive`), server side only. They
+# disconnect a client that leaves more than a cap of received fds unclaimed
+# by any request: one eighth of the soft `RLIMIT_NOFILE` read when the client
+# connects, clamped to 128..=1024 (1024, libwayland-server's own bound, once
+# scoot has raised its limit at startup: `compositor/nofile.rs`). 0.3.17
+# queued them for the connection's life, so one idle client could fill this
+# process's fd table. A patch rather than a dependency line because Smithay,
+# wayland-server and wayland-client all reach wayland-backend from
+# crates.io; `wayland-sys` moves to the fork's source with it (a path
+# dependency inside that repository). Why, the evidence, and when to drop
+# it: `docs/forks.md`. Verify claims about wayland-backend against this rev.
+[patch.crates-io]
+wayland-backend = { git = "https://github.com/scoot-sh/wayland-rs", rev = "70f81e005179463fb4d46ac68045a7f21eb5aff2" }

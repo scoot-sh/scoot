@@ -9,6 +9,29 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-25 — scoot raises its file-descriptor limit, and an app can no longer make it hold hundreds of descriptors by attaching them to ordinary requests
+
+- **A misbehaving app can no longer make scoot hold hundreds of file
+  descriptors by attaching them to ordinary requests.** An app could send
+  file descriptors along with requests that never use one, and scoot kept
+  every one of them for as long as the app stayed connected. A single idle
+  app could take scoot from 18 to 999, and scoot then turned away every
+  new app and `scootctl`. scoot now disconnects an app that leaves more
+  than 1024 unused: the default limit of libwayland, the library GNOME,
+  KDE, sway and weston are built on, so apps those serve are served here,
+  including apps that queued many requests while scoot was busy.
+- **scoot raises its own file-descriptor limit at startup** (to the
+  system's hard limit, capped at 65536, which also lowers a larger one) and
+  logs it; **programs scoot starts
+  get the normal limit back**, so older programs that use `select()` keep
+  working. With the higher limit, one app can no longer come near the point
+  where scoot turns new apps and `scootctl` away. On a machine or container
+  whose hard limit is 1024, nothing is raised, the startup log says so, the
+  unused-descriptor limit is 128, and an app that queued more than about
+  128 requests carrying descriptors while scoot was busy can be
+  disconnected there; raise the hard limit to avoid that. Nothing to
+  configure. Details: [protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps).
+
 ### 2026-09-24 — rounded corners and the focus ring now match the window
 
 - **Rounded corners and the focus ring now match the window**, including
@@ -76,8 +99,8 @@ scoot has not cut a numbered release yet; entries are dated.
   Both are now counted per app: an app that goes past a generous limit on
   either is disconnected, and everything else keeps working. (Other ways of
   holding descriptors are not all counted yet; see
-  `docs/backlog/core/wayland-backend-fd-queue.md` and
-  `docs/backlog/resolved/buffer-fds-past-their-object-done.md`, since
+  `docs/backlog/resolved/wayland-backend-fd-queue-done.md` and
+  `docs/backlog/resolved/buffer-fds-past-their-object-done.md`, both since
   fixed.) No real app comes near
   the limits (a GPU app normally has one buffer's pieces in flight at a time; a
   Vulkan window uses 16 timelines, and the limit is 128). Nothing to
