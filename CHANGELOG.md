@@ -9,6 +9,22 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-24 — an app can no longer make scoot hold hundreds of file descriptors by attaching them to ordinary requests
+
+- **A misbehaving app can no longer make scoot hold hundreds of file
+  descriptors by attaching them to ordinary requests.** An app could send
+  file descriptors along with requests that never use one, and scoot kept
+  every one of them for as long as the app stayed connected. A single idle
+  app could take scoot from 18 to 999, and scoot then turned away every
+  new app and `scootctl`. scoot now disconnects an app that leaves more
+  than 128 unused, and everything else keeps working. Apps built on
+  libwayland (GTK, Qt, foot, Firefox, mpv and nearly everything else) never
+  come near it. **For developers of Rust Wayland clients:** an app on the
+  Rust `wayland-client` that queues more than 140 requests carrying file
+  descriptors (shm pools, dma-buf planes, timelines, gamma ramps) between
+  two flushes is now disconnected; flush at least every 140. Nothing to
+  configure. Details: [protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps).
+
 ### 2026-09-24 — rounded corners and the focus ring now match the window
 
 - **Rounded corners and the focus ring now match the window**, including
@@ -76,8 +92,8 @@ scoot has not cut a numbered release yet; entries are dated.
   Both are now counted per app: an app that goes past a generous limit on
   either is disconnected, and everything else keeps working. (Other ways of
   holding descriptors are not all counted yet; see
-  `docs/backlog/core/wayland-backend-fd-queue.md` and
-  `docs/backlog/resolved/buffer-fds-past-their-object-done.md`, since
+  `docs/backlog/resolved/wayland-backend-fd-queue-done.md` and
+  `docs/backlog/resolved/buffer-fds-past-their-object-done.md`, both since
   fixed.) No real app comes near
   the limits (a GPU app normally has one buffer's pieces in flight at a time; a
   Vulkan window uses 16 timelines, and the limit is 128). Nothing to

@@ -104,6 +104,28 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[wayland-backend's received-fd queue is bounded](docs/backlog/resolved/wayland-backend-fd-queue-done.md)**
+  (2026-09-24, PR #PRNUM) — wayland-backend 0.3.17 kept the fds a client
+  attaches to fd-less requests for the connection's life; one idle client
+  took scoot from 18 to 999 fds and shed every newcomer, `scootctl`
+  included. scoot now builds against the scoot-sh fork (`docs/forks.md`,
+  0.3.17 + `a39311b8`, pinned by the root `Cargo.toml`'s
+  `[patch.crates-io]`; `Cargo.lock` moves only `wayland-backend` and
+  `wayland-sys`), which disconnects a client leaving more than 128
+  unclaimed. `fd_pressure/tests/backend_queue.rs` fails if the patch is
+  ever dropped and pins the numbers the reserve arithmetic now adds (128 at
+  rest, 30 more inside one read): 748 steady against the 896 line on the
+  GPU tier. Dev VM: the PR #236 probe went from 999 fds and shed
+  newcomers to the attacker disconnected at 140 parked, 18 fds,
+  `wayland-info` and `scootctl` served; real clients unchanged. One cost to
+  legitimate clients, measured and documented: a Rust `wayland-client`
+  that queues more than 140 fd-carrying requests between flushes is now
+  disconnected (one scoot test did; it now flushes every 64). Left open:
+  the software-GLES drain window can put one connection past the line (and,
+  for one instant, the table), and seven idle connections parking 128 each
+  reach the line with nobody killed, recorded on
+  [pressure-many-light-connections](docs/backlog/core/pressure-many-light-connections.md).
+
 - **[Rounded corners and the focus ring match the window](docs/backlog/resolved/clip-to-committed-size-done.md)**
   (2026-09-24, gh #205 reopened) — default `foot` commits a buffer rounded
   down to whole character cells when it believes it floats, and scoot
@@ -219,9 +241,9 @@ each item's own file records why it landed when it did.
   40 ns per `add`. Not every fd path is counted yet; filed high:
   [buffer fds past their object](docs/backlog/resolved/buffer-fds-past-their-object-done.md)
   (found on the way; since resolved, above) and, found in review,
-  [wayland-backend's unbounded received-fd queue](docs/backlog/core/wayland-backend-fd-queue.md)
+  [wayland-backend's unbounded received-fd queue](docs/backlog/resolved/wayland-backend-fd-queue-done.md)
   (one client took scoot from 18 to 999 fds through it, on every tier,
-  unchanged by this PR).
+  unchanged by this PR; since resolved, above).
 
 - **[`--nested --renderer gles` hands frames to the host as dma-bufs](docs/backlog/resolved/nested-dmabuf-present-done.md)**
   (2026-09-24, PR #235) — in a `gpu-scanout` build, when the host's v4

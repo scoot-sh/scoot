@@ -107,6 +107,18 @@ buffer it is, from the moment the plane is added.
   refused for someone else's use. scoot looks at a client at most once per
   16 new fds, so one it last looked at while the table was calm can go up
   to 16 past where it was then before it is refused.
+- **128 fds a client sent but no request used.** Every fd travels attached
+  to a request, and one attached to a request that takes no fd is never
+  used. A client that leaves more than 128 of those is disconnected with
+  `wl_display.error` `invalid_method` ("too many file descriptors
+  queued"), and the fds are closed. The count includes fds sent ahead of
+  the requests that will use them. A libwayland client sends each fd with
+  its request and never comes near it. A client on the Rust
+  `wayland-client` sends a flush's fds ahead of its requests (all but the
+  last 28), so one that queues **more than 140** fd-carrying requests
+  (pools, planes, timelines, gamma ramps) between flushes is disconnected:
+  flush at least every 140. This limit lives in scoot's fork of
+  wayland-backend ([forks.md](forks.md)).
 - **Object limits on top**, unchanged: 512 live `wl_buffer`s, 128 live
   `wl_shm_pool`s, 32 planes added to params objects not yet made into a
   buffer (see [GPU-rendering clients](#gpu-rendering-clients-zwp_linux_dmabuf_v1)),
@@ -116,13 +128,14 @@ buffer it is, from the moment the plane is added.
 Real clients are far below all of these: a `foot` window keeps 2 fds, a
 GPU client one per buffer it has allocated (a few per window), a Vulkan
 window 16 timelines. At every limit at once, one client can make scoot
-hold about 580 fds, which stays below the point (896 of 1024) where scoot
-starts turning newcomers away, so one misbehaving client can no longer do
-that on its own. (With the software GLES renderer, copies of buffers a
-client has just released can linger for a moment until scoot next clears
-the renderer's cache. With one software-GLES output, one client stays
-under that point even counting those; with several outputs the lingering
-copies can take it past for that moment.)
+hold about 580 fds, about 710 with 128 unused ones, which stays below the
+point (896 of 1024) where scoot starts turning newcomers away, so one
+misbehaving client can no longer do that on its own. (With the software
+GLES renderer, copies of buffers a client has just released can linger for
+a moment until scoot next clears the renderer's cache. Counting those, one
+client at every limit, unused fds included, can take scoot past that point
+for that moment.) Many clients together still can: see
+[`pressure-many-light-connections`](backlog/core/pressure-many-light-connections.md).
 
 ## Tiled windows
 
