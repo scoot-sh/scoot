@@ -8,6 +8,24 @@
 
 use super::*;
 
+mod backend_queue;
+
+/// Received fds wayland-backend lets one connection leave unclaimed by any
+/// request: the scoot-sh fork's `MAX_QUEUED_FDS` (crate-private there, so
+/// restated here and pinned against the real behaviour by
+/// `backend_queue.rs`). A connection is disconnected once more than this
+/// many are queued at a point where every complete request has been parsed.
+const BACKEND_QUEUED_FDS: u64 = 128;
+
+/// The most fds one read from a client's socket can add to that queue: 30.
+/// wayland-backend sizes its receive buffer for 28 (its `MAX_FDS_OUT`) with
+/// rustix's `cmsg_space!`, which pads it by the 8 bytes of `cmsghdr`
+/// alignment, so depending on where the buffer lands the kernel has room
+/// for 28 to 30, and closes the rest of a larger message. So a connection
+/// can hold [`BACKEND_QUEUED_FDS`] + 30 unclaimed for a moment, inside the
+/// read that takes it past the bound. Pinned by `backend_queue.rs`.
+const BACKEND_READ_FDS: u64 = 30;
+
 /// A table at the dev-VM size, `free` fds standing free.
 fn table_with_free(free: u64) -> Table {
     Table {
@@ -117,7 +135,10 @@ fn the_live_observer_agrees_with_the_kernel() {
 /// The claim the module doc's numbers rest on: one connection at every
 /// per-client bound at once, on the tier with the most (the `--tty` GPU
 /// scanout tier, with explicit sync offered), plus that tier's measured idle
-/// baseline, stays below the reserve line of a 1024-fd table.
+/// baseline, stays below the reserve line of a 1024-fd table. That includes
+/// the fds wayland-backend holds for it below scoot: its received-fd queue
+/// at the most the fork allows, [`BACKEND_QUEUED_FDS`], plus the one read
+/// [`BACKEND_READ_FDS`] that can sit on top for a moment.
 ///
 /// The fd figure is not read off a constant: it is what the fd ledger's own
 /// admission rule lets one client reach, driven here with every kind and
@@ -177,5 +198,13 @@ fn one_connection_at_every_bound_stays_below_the_reserve() {
     assert!(
         one_connection + GPU_TIER_IDLE_BASELINE < line,
         "{one_connection} + {GPU_TIER_IDLE_BASELINE} is past the {line} line"
+    );
+    // The module doc's figures: 577 counted, 620 with the baseline, 748 with
+    // a full backend queue at rest and 778 inside the read past it.
+    let with_queue = one_connection + BACKEND_QUEUED_FDS + BACKEND_READ_FDS;
+    assert!(
+        with_queue + GPU_TIER_IDLE_BASELINE < line,
+        "{with_queue} + {GPU_TIER_IDLE_BASELINE} (the backend's queue included) \
+         is past the {line} line"
     );
 }

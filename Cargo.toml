@@ -26,3 +26,16 @@ codegen-units = 1
 panic = "abort"
 strip = true
 opt-level = 3
+
+# A scoot-sh fork of wayland-backend, not upstream: the 0.3.17 release
+# (`72f7fe0d`, branch `v0.31.x`) plus exactly one commit (`a39311b8`, branch
+# `scoot/server-fd-queue-cap`), server side only. It disconnects a client
+# that leaves more than 128 received fds unclaimed by any request; 0.3.17
+# queued them for the connection's life, so one idle client could fill this
+# process's fd table. A patch rather than a dependency line because Smithay,
+# wayland-server and wayland-client all reach wayland-backend from
+# crates.io; `wayland-sys` moves to the fork's source with it (a path
+# dependency inside that repository). Why, the evidence, and when to drop
+# it: `docs/forks.md`. Verify claims about wayland-backend against this rev.
+[patch.crates-io]
+wayland-backend = { git = "https://github.com/scoot-sh/wayland-rs", rev = "a39311b8956e2f01983d26a5a6e517d0b8de4170" }
