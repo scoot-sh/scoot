@@ -9,6 +9,26 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-25 — copy, paste and drag between X and Wayland apps
+
+- **Copy and paste crosses between X11 and Wayland apps**, both ways, for
+  the clipboard and the middle-click primary selection (`xclip`/`xsel` and
+  `wl-copy`/`wl-paste` see each other; large selections stream in chunks).
+  Clipboard managers see what X apps copy. An X app can read or set the
+  selection only while an X window has the keyboard, and never while the
+  screen is locked: while you work in a Wayland window, X apps cannot read
+  or replace your clipboard (`xclip -o` there fails with `target STRING not
+  available`). Something an X app copies while a Wayland window is focused
+  stays with the X apps.
+- **Drag from an X app into a Wayland app** (text, files). Only the X app
+  you pressed the button on can start that drag -- before this, any X app
+  could take over a drag you started anywhere, a Wayland window included.
+  Dropping *onto* an X window still does not work (from a Wayland app, from
+  another X app, or within the same X app): the drop does nothing, and
+  nothing is lost.
+- **X input methods (XIM) are not supported**; a Wayland input method's
+  keyboard grab still takes the keys from an X window, as from any window.
+
 ### 2026-09-25 — X11 applications (opt-in XWayland)
 
 - **X11 apps run** with `--xwayland` (or `[xwayland] enabled`) in a build
@@ -28,9 +48,9 @@ scoot has not cut a numbered release yet; entries are dated.
   answer.
 - **Trust:** running an X app extends full trust to it -- X11 apps can read
   each other's keystrokes and windows by design, and an X app's menus and
-  pop-ups can cover anything on screen, Wayland apps included. Not bridged
-  yet: copy and paste or drag-and-drop between X and Wayland apps, and X
-  input methods.
+  pop-ups can cover anything on screen, Wayland apps included. (Copy,
+  paste and drag between X and Wayland apps came later the same day --
+  see above.)
 
 ### 2026-09-25 — move and resize floating windows
 

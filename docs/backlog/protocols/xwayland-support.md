@@ -454,8 +454,87 @@ windowactivate` was refused, a click focused it, the dialog floated
 centred); default-build hot paths unchanged within noise (key 2.00 vs 2.00
 µs, pointer 4.12-4.18 vs 4.16-4.35 µs, frames identical).
 
-What stays open here: **Phase 4** (clipboard/DnD bridge through the
-selection focus gate, XIM), **Phases 5–7** (capture pins, `vm/compositor-deps.nix`
-+ session `PATH` packaging and a flake output for the feature). Smaller
+What stays open here: **Phases 5–7** (capture pins, `vm/compositor-deps.nix`
++ session `PATH` packaging and a flake output for the feature). Phase 4 is
+recorded below. Smaller
 follow-ups noted in the code: `_NET_WM_MOVERESIZE` (client titlebar drags)
 not honoured, `_NET_WM_ICON` not read, X windows not scale-aware.
+
+## PROGRESS — Phase 4 (clipboard, primary, drag-and-drop, input methods) landed; ticket stays OPEN for Phases 5–7
+
+**Clipboard and primary selection cross both ways** (`xwayland/selection.rs`)
+through Smithay's XWM bridge, hooked into the same selection state the
+Wayland devices use -- so a clipboard manager on either data-control
+protocol sees X selections and can set one X clients read. **The gate is
+Smithay's Wayland rule with XWayland as the client**: an X client sets or
+reads a selection only while an X window of the server holds the keyboard
+(`KeyboardFocus::X11`), never while locked. Per server, not per X client, on
+purpose: Smithay's read hook names no requester, `xclip` has no window
+(a per-client rule would refuse it from the terminal the user types in), and
+X11 isolates no X client from another anyway. An X selection set while a
+Wayland window is focused stays X-side. Loops cannot happen (Smithay's
+compositor-side setters never call back into `new_selection`; the XWM ignores
+its own ownership change).
+
+Found while building it, each measured first (fail-first records in
+`~/evidence/xw4/` on the dev VM):
+
+- **A paste was served by whoever owned the X selection at paste time.** A
+  background X client taking the clipboard after an approved copy -- and
+  never answering `TARGETS`, so nothing announces it -- served the next
+  Wayland paste (`failfirst-clipboard-fork-43f50eb.txt`: "a paste delivered
+  the bytes of an X owner the gate never let through"). scoot now records
+  the owner that crossed and serves a paste only while it still owns the
+  selection (`X11Wm::selection_owner`, a fork addition), else clears it.
+- **X drags bypassed every check** -- live on `main` since Phase 1: the
+  XWM turns any held left-button press into a drag for any X client taking
+  `XdndSelection`, so a background X client could hijack a press on a
+  Wayland window (`failfirst-dnd-main.txt`). Now `XwmHandler::allow_drag`
+  (fork addition) runs `xwayland/dnd.rs`: a recent button press delivered
+  to XWayland (`interaction_serials.contains`) on a window of the same X
+  client (window-id client bits), not locked, not touch.
+- **Large transfers were cut to 64 KiB both ways** (a 2 MiB payload arrived
+  as exactly 65536 bytes): the incoming INCR path deleted each chunk twice,
+  so a prompt owner's next chunk was deleted unread; the outgoing pipe was
+  created `O_NONBLOCK` on both ends, so the Wayland source's blocking
+  `write` hit `EAGAIN`. Both fixed in the fork.
+- **A stuck X reader made scoot buffer the whole Wayland selection**
+  (64 MiB drained for a reader that took nothing,
+  `failfirst-clipboard-fork-b5aa306f.txt`); the fork now pauses reading at
+  two chunks until the requestor's next delete.
+- **Pastes waiting on a silent X owner were unbounded** (12 of 12 still
+  waiting, each an fd and an X window; `failfirst-transfer-bound-853d305f.txt`);
+  the fork drops them when the selection changes hands and refuses more
+  than 8 in flight.
+- **A new Wayland selection sat unsent to the X server**, so `xclip -o` right
+  after `wl-copy` read the previous owner (live, then 5 of 6 harness runs,
+  `failfirst-new-selection-flush-4aca6ef5.txt`); the fork flushes.
+- **Hostile type names**: X selection types are filtered to mime types
+  (a `/`, at most 255 bytes, no NUL, at most 64) before reaching a Wayland
+  client; Wayland types sent to X are capped at 64. (The X server itself cuts
+  an atom name at a NUL, measured, so the NUL refusal is defence in depth.)
+
+All seven fork commits are on `scoot-sh/smithay` branch
+`scoot/xwayland-selection-dnd` (`0d281abf`), listed in `docs/forks.md`;
+upstream master `79bbed5e1` has none of them.
+
+**Drag-and-drop**: X → Wayland works, live (`mousepad` over X into a
+Wayland `mousepad`). Drops onto X windows -- Wayland → X, X → X, within one
+X app -- do not land: `DnDGrab` delivers to `SeatHandler::PointerFocus`,
+scoot's is a plain `WlSurface`, and XWayland binds no `wl_data_device`.
+Pre-existing (the gate only refuses), harmless (source intact after move
+drags, X input fine afterwards, measured), filed as
+[`xwayland-pointer-focus-x11.md`](./xwayland-pointer-focus-x11.md).
+
+**Input methods**: XIM is not provided (XWayland links no `text-input-v3`,
+checked with `strings`); an `input-method-v2` keyboard grab pre-empts an X
+window's keyboard like any other (`tests/ime.rs`).
+
+**Evidence**: `tests/clipboard.rs` (16), `tests/dnd.rs` (3),
+`tests/ime.rs` (1), the hermetic type filter; the gate's lock and focus
+branches mutation-checked (`mutation-gate-M*.txt`: the lock test is pinned
+by either branch, the background tests by the focus branch; the DnD gate's
+lock refusal is defence in depth -- under lock a press reaches only a lock
+surface, which the "Wayland surface" refusal already covers); live
+`xclip`/`xsel` ↔ `wl-copy`/`wl-paste` matrix (`live-clip-*.txt`) and the
+`mousepad` drag matrix (`live-dnd/`).

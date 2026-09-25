@@ -750,6 +750,11 @@ scale/mode) into one hardware session.
   E + scale/mode hardware-gated. Pairs with the existing
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
+- [XWayland: drops onto X windows do not land](./protocols/xwayland-pointer-focus-x11.md)
+  — OPEN, medium (filed by XWayland Phase 4): Wayland → X, X → X and
+  in-app X drops do nothing because `DnDGrab` targets scoot's `WlSurface`
+  pointer focus and XWayland binds no `wl_data_device`; needs an X arm on
+  the pointer focus (behaviour-neutral first, benchmarked -- hot path).
 - [XWayland support](./protocols/xwayland-support.md)
   — OPEN, low: spike (PR #220), skeleton (PR #221) and mapping + focus gate
   (Phases 2+3, PR #244) landed: X windows tile, dialogs float, rules
@@ -758,8 +763,14 @@ scale/mode) into one hardware session.
   focused window is the same X process, or it redeems its spawn's token
   (`_NET_STARTUP_ID` on the window or its client leader, or X-Resource pid;
   spent whichever rule grants focus), and
-  `_NET_ACTIVE_WINDOW` goes through the same gate. Remaining: clipboard/DnD/
-  XIM (Phase 4) → capture pins/packaging (5–7). The [WM-failure
+  `_NET_ACTIVE_WINDOW` goes through the same gate. Phase 4 landed: the
+  clipboard and primary selection cross both ways while an X window is
+  focused (never while locked), a paste is served only by the X owner the
+  gate let through, X drags need a press on the dragging client's own
+  window, and seven measured XWM fixes/hooks moved into the Smithay fork;
+  X → Wayland drags work, drops onto X windows do not ([pointer focus needs
+  an X arm](./protocols/xwayland-pointer-focus-x11.md), medium), no XIM.
+  Remaining: capture pins/packaging (5–7). The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its
   rival-claimant recipe cannot work: XWayland admits no X client before the
   WM attaches). Follow-up filed: [bind startup-id redemption to the spawned

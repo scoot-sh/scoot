@@ -144,17 +144,29 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus
-# exactly one commit (`43f50eb2`, branch `scoot/syncobj-timeline-drop`) that
-# adds a `Drop` for `DrmTimelineDeviceSpecific`. Without it every
-# `wp_linux_drm_syncobj_manager_v1.import_timeline` leaks a kernel syncobj
-# handle on the import device until scoot exits -- ~80 B of kernel slab per
-# import and ~200 B per abandoned acquire wait, which a client can drive at
-# wire speed (see `docs/backlog/resolved/syncobj-handle-leak-done.md`).
-# Upstream status (checked 2026-09-24): not fixed on Smithay `master`
-# (79bbed5e1 has no such `Drop`) and not in any release (v0.7.0 predates
-# `0ff00983`); an upstream PR is the user's to file. Repin to upstream --
-# and drop the fork -- as soon as a Smithay rev carrying the fix exists.
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus eight
+# commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
+# each one and why):
+#
+# - `43f50eb2` (also branch `scoot/syncobj-timeline-drop`) adds a `Drop` for
+#   `DrmTimelineDeviceSpecific`. Without it every
+#   `wp_linux_drm_syncobj_manager_v1.import_timeline` leaks a kernel syncobj
+#   handle on the import device until scoot exits -- ~80 B of kernel slab per
+#   import and ~200 B per abandoned acquire wait, which a client can drive at
+#   wire speed (see `docs/backlog/resolved/syncobj-handle-leak-done.md`).
+# - Seven XWayland selection and drag fixes (XWayland Phase 4, each measured
+#   first -- see `compositor/xwayland/selection.rs` and `dnd.rs`): large
+#   transfers were cut to 64 KiB both ways (incoming INCR double delete; a
+#   non-blocking pipe handed to the Wayland source); a stuck X reader made
+#   scoot buffer a whole Wayland selection; transfers waiting on a silent X
+#   owner were unbounded; a new Wayland selection sat unsent to the X server;
+#   and two hooks scoot's gates need, `X11Wm::selection_owner` and
+#   `XwmHandler::allow_drag`.
+#
+# Upstream status (checked 2026-09-25): none of these is on Smithay `master`
+# or in a release; an upstream PR is the user's to file. Repin to upstream --
+# and drop the fork -- once a Smithay rev carries equivalents
+# (`docs/backlog/core/smithay-fork-repin.md`).
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"

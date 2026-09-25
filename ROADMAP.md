@@ -108,6 +108,23 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[XWayland Phase 4: clipboard, primary selection, drags, input methods](docs/backlog/protocols/xwayland-support.md)**
+  (2026-09-25) — the clipboard and primary selection cross between X and
+  Wayland both ways (clipboard managers included), gated like Wayland's own
+  rule with XWayland as the client: only while an X window holds the
+  keyboard, never while locked. A Wayland paste is served only by the X
+  owner the gate let through (a hidden owner could otherwise serve it). X
+  drags now need a recent press on the dragging client's own window -- any
+  X client could hijack any held press, a Wayland one included, since
+  Phase 1 (fail-first). Seven measured XWM bugs and hooks went into the
+  scoot-sh Smithay fork (`0d281abf`, `docs/forks.md`): 64 KiB truncation
+  both ways, unbounded buffering behind a stuck X reader, unbounded pastes
+  behind a silent owner, an unsent ownership change, and the owner/drag
+  hooks. X → Wayland drags work live; drops onto X windows do not (filed,
+  [pointer focus X arm](docs/backlog/protocols/xwayland-pointer-focus-x11.md));
+  XIM not provided; an IM keyboard grab pre-empts X focus (tested).
+  Ticket stays OPEN for Phases 5–7.
+
 - **[XWayland Phases 2+3: X windows in the layout, behind a focus gate](docs/backlog/protocols/xwayland-support.md)**
   (2026-09-25, PR #244) — with `--xwayland` in an `xwayland` build, X11
   windows map as columns (`WM_CLASS` class as app id, `_NET_WM_NAME` title,
@@ -142,7 +159,7 @@ each item's own file records why it landed when it did.
   and the [smoke feature-gate](docs/backlog/resolved/smoke-xwayland-step-feature-gate-done.md)
   defects. Live on the dev VM under `--headless`, `--nested` and `--tty`
   with xterm/xeyes/xclock/GTK4 zenity; default-build hot paths unchanged.
-  Ticket stays OPEN for clipboard/DnD/XIM and packaging.
+  Ticket stayed OPEN for clipboard/DnD/XIM (Phase 4, above) and packaging.
 
 - **[Floating windows, PR 2 of 2: move and resize](docs/backlog/resolved/floating-windows-done.md)**
   (2026-09-25, PR #243) — `[floating] modifier` (Super) with the left button moves a

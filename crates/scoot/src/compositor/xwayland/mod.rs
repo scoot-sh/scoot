@@ -27,8 +27,13 @@
 //!   same gate. The keyboard reaches an X window through its `X11Surface`,
 //!   which moves the X server's own input focus (see `keyboard_focus.rs`
 //!   for why the `wl_surface` alone does not).
-//! - **Phase 4 onward** (clipboard, drag-and-drop, XIM, packaging) is
-//!   not here yet: see `docs/backlog/protocols/xwayland-support.md`.
+//! - **Phase 4, clipboard and drags** -- `selection.rs`: the clipboard and
+//!   primary selection cross both ways, but an X client sets or reads one
+//!   only while an X window holds the keyboard, and a Wayland paste is
+//!   served only by the X owner that crossed. `dnd.rs`: an X client starts
+//!   a drag only from a press on its own window. XIM is not provided.
+//! - **Phases 5–7** (capture pins, packaging) are not here yet: see
+//!   `docs/backlog/protocols/xwayland-support.md`.
 //!
 //! `wm.rs` holds the Smithay handler impls, each a dispatch into the
 //! module that owns its policy.
