@@ -204,6 +204,39 @@ fn square_shm_buffer(
     (buffer, file)
 }
 
+/// `count` 1x1 `Argb8888` buffers from one pool, and the pool's backing file
+/// (held for the same reason as [`square_shm_buffer`]'s). One pool, so one
+/// fd for the compositor to keep however many buffers there are: this is
+/// how a live-*buffer* flood stays clear of the per-client fd bound
+/// (`client_fds.rs`), which a pool per buffer would reach first.
+fn one_pixel_shm_buffers(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    count: u32,
+) -> (Vec<wl_buffer::WlBuffer>, std::fs::File) {
+    let len = count.max(1) as usize * 4;
+    let fd = rustix::fs::memfd_create("scoot-icon-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    file.write_all(&vec![0u8; len]).expect("a filled pool file");
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffers = (0..count)
+        .map(|index| {
+            pool.create_buffer(
+                (index * 4) as i32,
+                1,
+                1,
+                4,
+                wl_shm::Format::Argb8888,
+                qh,
+                (),
+            )
+        })
+        .collect();
+    pool.destroy();
+    (buffers, file)
+}
+
 /// Maps one toplevel, reports what the manager advertised, then runs whatever
 /// steps arrive, acknowledging each.
 fn run_client(
@@ -297,10 +330,10 @@ fn run_client(
                 buffer.destroy();
             }
             Step::AttachManyIconBuffers { count } => {
-                for _ in 0..count {
+                let (buffers, file) = one_pixel_shm_buffers(&shm, &qh, count);
+                held_files.push(file);
+                for buffer in buffers {
                     let icon = icons.create_icon(&qh, ());
-                    let (buffer, file) = square_shm_buffer(&shm, &qh, 1);
-                    held_files.push(file);
                     icon.add_buffer(&buffer, 1);
                     held_icons.push(icon);
                     held_buffers.push(buffer);
@@ -913,14 +946,13 @@ fn the_live_buffer_budget_counts_to_512_with_no_flood_at_all() {
 /// refused -- after which the kill drains the dead client's whole
 /// count, the way `dispatch/tests.rs` pins for the bypass loop.
 ///
-/// One shared pool is deliberately *not* used here: per-buffer pools
-/// are the retention shape the budget exists to catch (one fd per
-/// buffer past its pool's destroy), and `dispatch/tests.rs` already
-/// owns that shape at scale. Small pools in 64-step chunks keep this
-/// client's own fd peak at 64; the ~512 retained server fds are the
-/// reason this takes the shared fd-flood lock -- beside a dispatch
-/// flood on another thread the pair would exhaust the test process's
-/// table.
+/// One pool per 64-buffer step, not one per buffer: a pool per buffer
+/// is one fd per buffer for the compositor to keep, and the per-client
+/// fd bound (`client_fds.rs`, 512 fds) would refuse the 513th pool before
+/// the 513th buffer ever reached the budget under test. That per-pool
+/// retention shape is the fd ledger's, pinned in `client_fds/tests/shm.rs`.
+/// The lock and headroom below are kept from when this flood held ~512
+/// server fds; it now holds nine, so they are cheap insurance.
 ///
 /// The flood runs under [`ensure_flood_headroom`]: its ~512 retained
 /// server fds sit close to the fd-pressure boundary by design (see

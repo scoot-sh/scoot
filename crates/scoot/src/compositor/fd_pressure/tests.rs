@@ -113,3 +113,69 @@ fn the_live_observer_agrees_with_the_kernel() {
     let soft = soft_limit().expect("getrlimit works on this machine");
     assert_eq!(table.soft, soft);
 }
+
+/// The claim the module doc's numbers rest on: one connection at every
+/// per-client bound at once, on the tier with the most (the `--tty` GPU
+/// scanout tier, with explicit sync offered), plus that tier's measured idle
+/// baseline, stays below the reserve line of a 1024-fd table.
+///
+/// The fd figure is not read off a constant: it is what the fd ledger's own
+/// admission rule lets one client reach, driven here with every kind and
+/// weight a client can bring (pools, timelines, and planes weighing their
+/// renderer copies too, up to the probe's cap of four per backend) until it
+/// refuses. Review of PR #239 found the first version of this test only
+/// added constants, while the code let imports charge copies after the bound
+/// was checked and reach 540. On `main` before the ledger the same sum was
+/// 512 buffers + 128 pools + 32 pending planes + 128 timelines + 64 waits +
+/// 1 = 865, and 908 with the baseline: past the line.
+#[test]
+fn one_connection_at_every_bound_stays_below_the_reserve() {
+    use crate::compositor::client_fds::{Check, ClientFds, Kind, LIMITS, MAX_FDS_PER_CLIENT};
+    use crate::compositor::drm_syncobj::MAX_ACQUIRE_WAITS_PER_CLIENT;
+    use smithay::reexports::wayland_server::Display;
+    /// Idle `--tty --renderer gles` on the dev VM, 2026-09-24.
+    const GPU_TIER_IDLE_BASELINE: u64 = 43;
+    const SOCKET: u64 = 1;
+
+    struct Data;
+    impl smithay::reexports::wayland_server::backend::ClientData for Data {}
+    let display: Display<()> = Display::new().expect("a display");
+    let (server, _client) = std::os::unix::net::UnixStream::pair().expect("a socket pair");
+    let client = display
+        .handle()
+        .insert_client(server, std::sync::Arc::new(Data))
+        .expect("a client")
+        .id();
+
+    // Every arrival stays open (the worst case), with no pressure.
+    let arrivals = [
+        (Kind::Pool, 1u8),
+        (Kind::Plane, 2),
+        (Kind::Timeline, 1),
+        (Kind::Plane, 5),
+        (Kind::Plane, 3),
+    ];
+    let mut ledger = ClientFds::default();
+    let mut reached = 0;
+    for (n, fd) in (0..100_000).enumerate() {
+        let (kind, weight) = arrivals[n % arrivals.len()];
+        let admitted = ledger.admit(&client, kind, weight, LIMITS, |_, _| true, || false);
+        if admitted.is_ok() {
+            ledger.record(&client, fd, kind, Check::Open, weight);
+        } else if kind == Kind::Plane && weight == 2 {
+            // Refused at the smallest plane weight: nothing heavier fits.
+            break;
+        }
+        reached = reached.max(ledger.held_by(&client));
+    }
+    assert!(
+        reached <= MAX_FDS_PER_CLIENT,
+        "the ledger let one client reach {reached}"
+    );
+    let one_connection = u64::from(reached) + u64::from(MAX_ACQUIRE_WAITS_PER_CLIENT) + SOCKET;
+    let line = 1024 - RESERVE_FDS;
+    assert!(
+        one_connection + GPU_TIER_IDLE_BASELINE < line,
+        "{one_connection} + {GPU_TIER_IDLE_BASELINE} is past the {line} line"
+    );
+}

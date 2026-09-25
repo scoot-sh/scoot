@@ -22,7 +22,7 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1, zwp_linux_dmabuf_v1,
 };
 
-use super::{MAX_PENDING_PLANES_PER_CLIENT, PRESSURE_GRACE_PENDING_PLANES, Refusal, plane_refusal};
+use super::MAX_PENDING_PLANES_PER_CLIENT;
 use crate::cli::RendererKind;
 use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::Harness;
@@ -319,49 +319,6 @@ fn the_bound_is_per_client() {
         },
     );
     assert_eq!(fixture.planes(), 2 * MAX_PENDING_PLANES_PER_CLIENT);
-}
-
-// ---------------------------------------------------------------------------
-// The decision, both boundaries, without filling the fd table
-// ---------------------------------------------------------------------------
-
-#[test]
-fn the_cap_refuses_at_the_cap_whatever_the_table() {
-    assert_eq!(
-        plane_refusal(MAX_PENDING_PLANES_PER_CLIENT - 1, || false),
-        None
-    );
-    assert_eq!(
-        plane_refusal(MAX_PENDING_PLANES_PER_CLIENT, || false),
-        Some(Refusal::Cap)
-    );
-}
-
-#[test]
-fn at_the_grace_passes_even_under_pressure() {
-    assert_eq!(plane_refusal(PRESSURE_GRACE_PENDING_PLANES, || true), None);
-}
-
-#[test]
-fn past_the_grace_refuses_only_under_pressure() {
-    assert_eq!(
-        plane_refusal(PRESSURE_GRACE_PENDING_PLANES + 1, || true),
-        Some(Refusal::Pressure)
-    );
-    assert_eq!(
-        plane_refusal(PRESSURE_GRACE_PENDING_PLANES + 1, || false),
-        None
-    );
-}
-
-#[test]
-fn under_the_grace_the_table_is_never_observed() {
-    for live in 0..=PRESSURE_GRACE_PENDING_PLANES {
-        assert_eq!(
-            plane_refusal(live, || panic!("observed the table at {live}")),
-            None
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -682,9 +639,7 @@ fn pending_plane_bookkeeping_cost() {
     let started = std::time::Instant::now();
     for _ in 0..ROUNDS {
         for _ in 0..4 {
-            let claimed = planes.try_claim(&client, params.clone(), |live| {
-                super::plane_refusal(live, || false)
-            });
+            let claimed = planes.try_claim(&client, params.clone());
             std::hint::black_box(claimed).expect("under the bound");
         }
         planes.release(&client, &params);

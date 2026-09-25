@@ -75,6 +75,55 @@ The rest of this list *is* deliberate:
   here — so a version 5+ client may show those buttons; pressing them does
   nothing.
 
+## Per-client limits on what scoot keeps
+
+A client can make scoot keep file descriptors on its behalf: every
+`wl_shm.create_pool` hands over one, every `zwp_linux_buffer_params_v1.add`
+hands over one per dma-buf plane, and every
+`wp_linux_drm_syncobj_manager_v1.import_timeline` one more. scoot counts
+those **per client, for as long as each fd is really open** — not for as
+long as the object it arrived on exists. That difference matters: a
+buffer a surface still shows keeps its pool's (or its planes') fds after
+the client has destroyed both the `wl_buffer` and the pool, and a sync
+point keeps its timeline's fd after the timeline object is destroyed.
+Where the GLES renderer keeps a copy of each imported dma-buf plane's fd
+(Mesa's software renderer does; hardware drivers are expected not to, but
+that is not yet measured), the copy counts too, against the client whose
+buffer it is, from the moment the plane is added.
+
+- **512 fds per client**, every kind together. The request that would take
+  the client past 512 is refused; a plane's renderer copy is charged when
+  the plane is added, so importing it later can never take a client past
+  the limit. Before refusing, scoot checks which of the client's fds have
+  really closed, so a client that allocates and releases buffers does not
+  creep toward the limit. The refusal kills only that
+  client: `wl_shm.create_pool` gets `invalid_stride` on `wl_shm`, an `add`
+  gets `wl_display.error` `no_memory`, `import_timeline` gets
+  `invalid_timeline`. The message says which limit was hit and how many
+  fds scoot still held.
+- **128 fds per client while the compositor's fd table is nearly full**
+  (fewer than 128 of its fds free). Past that, the client's next pool,
+  plane or timeline is refused the same way. A client under 128 is never
+  refused for someone else's use. scoot looks at a client at most once per
+  16 new fds, so one it last looked at while the table was calm can go up
+  to 16 past where it was then before it is refused.
+- **Object limits on top**, unchanged: 512 live `wl_buffer`s, 128 live
+  `wl_shm_pool`s, 32 planes added to params objects not yet made into a
+  buffer (see [GPU-rendering clients](#gpu-rendering-clients-zwp_linux_dmabuf_v1)),
+  128 imported timelines and 64 commits waiting on acquire points (see
+  [Explicit sync](#explicit-sync-linux-drm-syncobj-v1)).
+
+Real clients are far below all of these: a `foot` window keeps 2 fds, a
+GPU client one per buffer it has allocated (a few per window), a Vulkan
+window 16 timelines. At every limit at once, one client can make scoot
+hold about 580 fds, which stays below the point (896 of 1024) where scoot
+starts turning newcomers away, so one misbehaving client can no longer do
+that on its own. (With the software GLES renderer, copies of buffers a
+client has just released can linger for a moment until scoot next clears
+the renderer's cache. With one software-GLES output, one client stays
+under that point even counting those; with several outputs the lingering
+copies can take it past for that moment.)
+
 ## Fullscreen
 
 A client's fullscreen button works: `xdg_toplevel.set_fullscreen` puts the
@@ -888,19 +937,29 @@ table is the active renderer's, so `gles` advertises what the GPU driver
 can import and pixman advertises what pixman can. See
 [tty.md](tty.md#which-renderer-draws-the-frames).
 
-**Limits.** A dma-buf `wl_buffer` counts against the same 512 live buffers
-per client as every other buffer, and both `create` and `create_immed`
-claim. Planes that have been `add`ed to a `zwp_linux_buffer_params_v1`
-object which has not yet been turned into a buffer are counted separately.
-Each one is an fd scoot holds for the client, and without a bound a
-client could add planes and never create anything; review measured 220
-params objects x 4 planes holding 927 fds. A client may have **32** such
-planes at once, across all its params objects. While the compositor's fd
-table is nearly full the grace is **8**, with the same exact boundary as
-the buffer and pool graces: an `add` is refused only once the client
-already holds more than 8, so it can reach 9. A plane stops counting when its params object is
-consumed by `create`/`create_immed` (whatever the import's outcome) or
-destroyed, and when the client disconnects. An `add` past the bound
+**Limits.** Every plane `add`ed is one fd, and counts against the client's
+[512 fds](#per-client-limits-on-what-scoot-keeps) until it really closes:
+while it sits in a params object, while it is part of a buffer, and after
+the client destroys that `wl_buffer` if a surface still shows it. A
+four-plane buffer is four. Under a GLES renderer that keeps its own copy
+of each imported plane (Mesa's software renderer, measured on the dev VM:
+a three-plane `YU12` buffer costs scoot six fds) the copies count too,
+from the `add`; scoot measures this once per session, on the first import
+it can measure cleanly, and logs it
+(`dmabuf: learned how many fds the renderer keeps of each imported
+plane`). A dma-buf `wl_buffer` also counts against the same 512 live
+buffers per client as every other buffer, and both `create` and
+`create_immed` claim. Planes that have been `add`ed to a
+`zwp_linux_buffer_params_v1` object which has not yet been turned into a
+buffer are also bounded on their own: without that, a client could add
+planes and never create anything; review measured 220 params objects x 4
+planes holding 927 fds. A client may have **32** such planes at once,
+across all its params objects. (Under fd pressure there is no separate
+grace for them any more; the client's whole fd count is what the
+[pressure limit](#per-client-limits-on-what-scoot-keeps) reads.) A plane
+stops counting as pending when its params object is consumed by
+`create`/`create_immed` (whatever the import's outcome) or destroyed, and
+when the client disconnects. An `add` past the bound
 disconnects the client with `wl_display.error` `no_memory`; the params
 interface has no error for "too many". A client that adds one buffer's
 planes (at most four) and creates it straight away, which is how the
@@ -1035,10 +1094,12 @@ What scoot does with the points:
   own errors, from Smithay.
 - **Bounds.** A client may have scoot hold **128** of its imported
   timelines and have **64** commits waiting on acquire points at once (each
-  is an eventfd). While the compositor's fd table is nearly full the graces
-  are **32** and **16**, with the buffer and pool graces' exact boundary:
-  refused only once the client already holds *more* than the grace, so it
-  can reach 33 timelines and 17 waits. A timeline
+  is an eventfd). Timelines also count toward the client's
+  [512 fds](#per-client-limits-on-what-scoot-keeps), with its pools and
+  planes. While the compositor's fd table is nearly full an import is
+  refused once the client's fds of every kind are past 128 (see the same
+  section), and a wait once it has more than **16** waiting, so it can
+  reach 17 waits. A timeline
   counts for as long as scoot holds its syncobj fd, which is not the same as
   for as long as the timeline object lives: a sync point set on a surface
   keeps its timeline's fd open after the object is destroyed (the protocol
@@ -1051,12 +1112,8 @@ What scoot does with the points:
   that nothing references cost it nothing however many it churns. The
   import is refused, with `invalid_timeline`, only if more than 112 are
   still open (fewer than 16 could be reclaimed); below that, the check buys
-  the next 16 imports without another one. Under fd pressure an import past
-  32 is refused if the same check finds more than 32 still open (so 33 is
-  reachable). Any check
-  that does not refuse (including one that finds the table calm) buys the
-  next 16 imports without another, so a client can go 16 past what it held
-  when last checked -- 48, for one that was at 32. Past the wait bound the client is disconnected
+  the next 16 imports without another one. Under fd pressure the same kind
+  of check decides, on the client's whole fd count. Past the wait bound the client is disconnected
   with `wl_display.error` `no_memory`. A real client stays far below both:
   Mesa's Vulkan WSI imports two timelines per swapchain image, and a
   swapchain cannot run more than its image count ahead.
@@ -1478,8 +1535,8 @@ renders as a solid fill; a client that wants it bigger scales it through
 `wp_viewporter` rather than by uploading a larger buffer.
 
 - **No shm, no pool budget — but inside the buffer bound.** These buffers
-  allocate nothing, so the per-client `wl_shm` pool count never moves for
-  them. They still count against the 512-live-`wl_buffer` bound (uniform
+  allocate nothing, so the per-client `wl_shm` pool count and fd count never
+  move for them. They still count against the 512-live-`wl_buffer` bound (uniform
   accounting — the hook can't observe buffer kind, and excluding them would
   let cheap destroys drain retaining units).
 - **Destroying the manager leaves its buffers working.** The spec says the

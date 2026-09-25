@@ -420,14 +420,14 @@ impl Backend {
 
     /// Which renderer is *actually* drawing this session's frames.
     ///
-    /// Test-only, and deliberately not the same question as
-    /// `State::renderer`: that field is what was asked for, this is what was
-    /// built. A test that runs the pixel suites under `--renderer gles` has
-    /// to be able to tell the difference, or a silent fallback to pixman
-    /// would make it pass while proving nothing (see `test_support`).
-    /// Nothing on the frame path branches on either -- that is
+    /// Deliberately not the same question as `State::renderer`: that field
+    /// is what was asked for, this is what was built. A test that runs the
+    /// pixel suites under `--renderer gles` has to be able to tell the
+    /// difference, or a silent fallback to pixman would make it pass while
+    /// proving nothing (see `test_support`); and `dmabuf/renderer_copies.rs`
+    /// counts the backends a dma-buf import really went into as GLES, once
+    /// per import. Nothing on the frame path branches on either -- that is
     /// [`draw_frame`]'s single match.
-    #[cfg(test)]
     pub(super) fn renderer(&self) -> RendererKind {
         match &self.pipeline {
             Pipeline::Pixman(_) => RendererKind::Pixman,

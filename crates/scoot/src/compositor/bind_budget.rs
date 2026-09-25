@@ -105,8 +105,8 @@
 //!   size accessor first (see `shm_pools.rs` for the wall, stated with
 //!   sources). The fds and mappings a destroyed pool's surviving buffers
 //!   retain -- which the pool count cannot bound -- are capped separately
-//!   by the per-client live-`wl_buffer` count (`wl_buffers.rs`), same key
-//!   and shape again, for the same refusal-form reason.
+//!   by the per-client fd ledger (`client_fds.rs`), keyed the same way,
+//!   which counts each pool's fd until it really closes.
 //! - **Screencopy sessions** (`docs/backlog/resolved/screencopy-session-cap-done.md`):
 //!   the frames half stays where it is (per-client, pre-delegation, in
 //!   `dispatch.rs`). Sessions join here the same way: claim on the manager

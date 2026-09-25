@@ -8,7 +8,8 @@
 //! of memory"): it is the code libwayland servers send when a client's
 //! demands cannot be met, and it names the reason. The callers are
 //! `drm_syncobj/acquire.rs` (outstanding acquire waits) and
-//! `dmabuf/pending_planes.rs` (plane fds held before `create`).
+//! `dmabuf/pending_planes.rs` (an `add` past the plane fds held before
+//! `create`, or past the client's fds in the fd ledger, `client_fds.rs`).
 
 use smithay::reexports::wayland_server::backend::protocol::{Interface, ProtocolError};
 use smithay::reexports::wayland_server::{Client, DisplayHandle};
