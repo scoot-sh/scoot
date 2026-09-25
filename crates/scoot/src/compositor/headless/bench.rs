@@ -421,6 +421,11 @@ fn run_rounded_client(
     let shm = client.shm.clone().ok_or("no wl_shm")?;
     let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
     let mut surfaces: Vec<wl_surface::WlSurface> = Vec::new();
+    // Per surface, the buffer it shows: destroyed once the next one is
+    // committed, as a real client does, so a scene that re-attaches every
+    // frame does not pile up buffers (and their fds) past the per-client
+    // bound.
+    let mut shown: Vec<Option<wl_buffer::WlBuffer>> = Vec::new();
 
     while let Ok(step) = steps.recv() {
         match step {
@@ -432,6 +437,7 @@ fn run_rounded_client(
                 surface.commit();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 surfaces.push(surface);
+                shown.push(None);
                 acks.send(RoundedAck::Done).map_err(|e| e.to_string())?;
             }
             RoundedStep::Attach { index, w, h, color } => {
@@ -452,6 +458,9 @@ fn run_rounded_client(
                 surface.attach(Some(&buffer), 0, 0);
                 surface.damage_buffer(0, 0, w, h);
                 surface.commit();
+                if let Some(previous) = shown[index].replace(buffer) {
+                    previous.destroy();
+                }
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 acks.send(RoundedAck::Done).map_err(|e| e.to_string())?;
             }
@@ -569,4 +578,74 @@ fn rounded_corners_cost() {
             paired_max * 100.0
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// A client that changes its committed size every frame
+// ---------------------------------------------------------------------------
+
+/// Frames per timed batch in [`rounded_resize_churn_cost`]. Each one is a
+/// client commit of a fresh full-window buffer plus a frame, so batches are
+/// small.
+const CHURN_FRAMES: u32 = 60;
+
+/// The painted ring's key includes the size the window *drew*
+/// (`drawn.rs`), so a client whose committed size changes on every commit
+/// -- a video changing resolution, a toolkit mid interactive resize, or a
+/// client doing it on purpose -- repaints and re-imports its two ring strips
+/// on every such commit, where on `main` only a layout change could. This
+/// prices that against the same client committing the same size each
+/// frame: both tiers pay for a fresh full-window client buffer per frame (the
+/// client's own cost, which it pays for every frame it changes anything),
+/// and differ only in whether the ring's key changes.
+#[test]
+#[ignore = "prints per-frame render timings for a human; asserts nothing"]
+fn rounded_resize_churn_cost() {
+    let renderer = test_renderer();
+    let mut fixture = rounded_scene(1, 1);
+    fixture.state.appearance.corner_radius = ROUNDED_RADIUS;
+    let slot = fixture.state.world.arrange().placements[0].rect;
+    let color = [0x00, 0x00, 0xFF, 0xFF];
+    let batch = |fixture: &mut RoundedFixture, alternate: bool| {
+        let start = Instant::now();
+        for frame in 0..CHURN_FRAMES {
+            let shrink = if alternate && frame % 2 == 1 { 7 } else { 0 };
+            fixture.run(RoundedStep::Attach {
+                index: 0,
+                w: slot.w - shrink,
+                h: slot.h - shrink,
+                color,
+            });
+            render_frames(fixture, 1);
+        }
+        start.elapsed() / CHURN_FRAMES
+    };
+    batch(&mut fixture, true);
+    let mut steady: Vec<Duration> = Vec::new();
+    let mut churn: Vec<Duration> = Vec::new();
+    let mut paired: Vec<f64> = Vec::new();
+    for _ in 0..ROUNDED_RUNS {
+        let same = batch(&mut fixture, false);
+        let alternating = batch(&mut fixture, true);
+        paired.push(alternating.as_nanos() as f64 / same.as_nanos() as f64 - 1.0);
+        steady.push(same);
+        churn.push(alternating);
+    }
+    steady.sort();
+    churn.sort();
+    paired.sort_by(|a, b| a.total_cmp(b));
+    let median = |v: &[Duration]| v[v.len() / 2];
+    println!(
+        "resize churn [{renderer}], one window radius {ROUNDED_RADIUS}: same size every commit \
+         min/median {:?}/{:?} vs a different size every commit {:?}/{:?} per commit+frame \
+         ({CHURN_FRAMES} x {ROUNDED_RUNS} alternating runs, {CANVAS}x{CANVAS}); paired \
+         min/median/max {:+.1}%/{:+.1}%/{:+.1}%",
+        steady[0],
+        median(&steady),
+        churn[0],
+        median(&churn),
+        paired[0] * 100.0,
+        paired[paired.len() / 2] * 100.0,
+        paired[paired.len() - 1] * 100.0,
+    );
 }

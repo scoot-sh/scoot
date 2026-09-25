@@ -60,7 +60,9 @@
 //! `corner_radius = 0` wraps nothing and paints nothing new: the gather path
 //! (`render/elements.rs`'s `window_elements`) pushes each window's own
 //! `AsRenderElements` output unwrapped, and the ring keeps its four solid
-//! rects, so the default session is byte-identical to before.
+//! rects. (Around the same rect as the rounded path: what the window drew,
+//! `drawn.rs` -- which for a window that fills its slot, the common case, is
+//! the slot.)
 
 use std::cell::RefCell;
 
@@ -129,8 +131,10 @@ pub fn row_cut(radius: i32, y: i32, h: i32) -> i32 {
     }
 }
 
-/// One window's outer rect in physical output pixels: the placement the
-/// layout produced, converted the way surface-element locations are
+/// One window's outer rect in physical output pixels: `rect`, the part of
+/// its slot the window drew (`drawn.rs` -- the layout placement clamped to
+/// the window's committed size), converted the way surface-element
+/// locations are
 /// (`to_physical_precise_round`, so the clip and the drawn content agree on
 /// where the window starts) with the size scaled and rounded (so they agree
 /// on where it ends).
@@ -138,11 +142,11 @@ pub fn row_cut(radius: i32, y: i32, h: i32) -> i32 {
 /// Shared by the window clip and the ring paint -- see the module doc -- so
 /// the two edges coincide by construction rather than by matching
 /// conversions written twice.
-pub fn clip_rect(placement: Rect, scale: f64) -> Rectangle<i32, Physical> {
-    let loc = Point::<i32, _>::from((placement.x, placement.y)).to_physical_precise_round(scale);
+pub fn clip_rect(rect: Rect, scale: f64) -> Rectangle<i32, Physical> {
+    let loc = Point::<i32, _>::from((rect.x, rect.y)).to_physical_precise_round(scale);
     let size = (
-        (f64::from(placement.w) * scale).round() as i32,
-        (f64::from(placement.h) * scale).round() as i32,
+        (f64::from(rect.w) * scale).round() as i32,
+        (f64::from(rect.h) * scale).round() as i32,
     );
     Rectangle::new(loc, size.into())
 }
@@ -179,6 +183,7 @@ fn corner_squares(clip: Rectangle<i32, Physical>, radius: i32) -> [Rectangle<i32
 
 /// A painted focus ring's geometry: where its image sits and how big it is.
 ///
+/// `rect` is the window's drawn rect in logical pixels (see [`clip_rect`]).
 /// `loc` is the ring image's origin in exact physical pixels (the window
 /// origin minus the ring thickness, unrounded -- the element rounds it the
 /// same way for every scale), `logical` the image's size in logical pixels
@@ -189,7 +194,7 @@ fn corner_squares(clip: Rectangle<i32, Physical>, radius: i32) -> [Rectangle<i32
 /// pixels and the drawn element agree on every scale -- at scale 1.0 both
 /// are exact integers.
 pub fn ring_layout(
-    placement: Rect,
+    rect: Rect,
     thickness: i32,
     scale: f64,
 ) -> (
@@ -197,14 +202,12 @@ pub fn ring_layout(
     Size<i32, Logical>,
     Size<i32, Physical>,
 ) {
-    let loc = Point::<f64, Logical>::from((
-        f64::from(placement.x - thickness),
-        f64::from(placement.y - thickness),
-    ))
-    .to_physical(scale);
+    let loc =
+        Point::<f64, Logical>::from((f64::from(rect.x - thickness), f64::from(rect.y - thickness)))
+            .to_physical(scale);
     let logical = Size::<i32, Logical>::from((
-        placement.w.saturating_add(thickness.saturating_mul(2)),
-        placement.h.saturating_add(thickness.saturating_mul(2)),
+        rect.w.saturating_add(thickness.saturating_mul(2)),
+        rect.h.saturating_add(thickness.saturating_mul(2)),
     ));
     (loc, logical, element_canvas(loc, logical, scale))
 }

@@ -249,8 +249,8 @@ impl Default for Appearance {
             focus_ring_inactive_color: Color::new(0.35, 0.35, 0.38, 1.0),
             background_color: Color::new(0.08, 0.08, 0.1, 1.0),
             // Square until configured: any non-zero radius opts the session
-            // into the rounded window + ring path (see `rounded.rs`), so the
-            // default session is byte-identical to before it existed.
+            // into the rounded window + ring path (see `rounded.rs`); the
+            // default session never takes it.
             corner_radius: 0,
             // The shape `cursor.rs` has drawn since it existed: a 16x16
             // triangle with a white fill. Unchanged defaults, so an existing
@@ -371,7 +371,8 @@ pub struct RingRects {
     pub right: Option<Rect>,
 }
 
-/// Computes the ring drawn *outside* `rect` (a window's placement), `width`
+/// Computes the ring drawn *outside* `rect` (the part of a window's slot it
+/// drew -- see `drawn.rs`), `width`
 /// pixels wide, clipped to `bounds` (normally the output's own rect).
 ///
 /// The frame is decomposed into 4 rectangles with the top and bottom strips
@@ -1789,6 +1790,50 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// What one ring repaint costs, for a human: [`build_strips`] (paint both
+    /// strips into the reused scratch, copy each into a fresh
+    /// `MemoryRenderBuffer`) against the cache-hit path
+    /// ([`refresh_strip_origins`]), at the gh #205 window sizes. The texture
+    /// import that follows a repaint is the renderer's and is priced by
+    /// `headless::bench::rounded_resize_churn_cost` instead.
+    #[test]
+    #[ignore = "prints repaint timings for a human; asserts nothing"]
+    fn ring_repaint_cost() {
+        const CALLS: u32 = 2000;
+        let appearance = Appearance {
+            focus_ring_width: 4,
+            corner_radius: 10,
+            ..Appearance::default()
+        };
+        for (scale, rect) in [
+            (1.5, Rect::new(12, 12, 966, 1083)),
+            (1.0, Rect::new(12, 12, 1458, 1636)),
+        ] {
+            let mut entry = painted_entry(rect, &appearance, scale);
+            let start = std::time::Instant::now();
+            for _ in 0..CALLS {
+                build_strips(
+                    rect,
+                    &appearance,
+                    appearance.focus_ring_active_color,
+                    scale,
+                    &mut entry,
+                );
+            }
+            let repaint = start.elapsed() / CALLS;
+            let start = std::time::Instant::now();
+            for _ in 0..CALLS {
+                assert!(refresh_strip_origins(rect, &appearance, scale, &mut entry));
+            }
+            let hit = start.elapsed() / CALLS;
+            println!(
+                "ring repaint at scale {scale}, {}x{} logical: {repaint:?} per repaint vs \
+                 {hit:?} per cache hit",
+                rect.w, rect.h
+            );
         }
     }
 

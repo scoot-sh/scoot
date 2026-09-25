@@ -40,6 +40,16 @@
 //! two, draws over the ring rather than under it -- see the gather order in
 //! `render/elements.rs`). Nothing is tracked per resize, so there is no
 //! state to go stale.
+//!
+//! The price of following the client: the painted ring's cache key is the
+//! drawn size, so a client whose committed size changes on every commit
+//! repaints its two ring strips on every such commit (two strip-sized
+//! `MemoryRenderBuffer` copies and imports; a layout change was the only
+//! trigger before). Bounded by the client's own commit rate, and small next
+//! to the full-window buffer the client uploads for the same commit:
+//! `headless::bench::rounded_resize_churn_cost` measures +0.5-0.7% per
+//! commit+frame against the same client committing a constant size, and
+//! `decorations`' `ring_repaint_cost` prices one repaint alone.
 
 use scoot_core::Rect;
 use smithay::desktop::Window;

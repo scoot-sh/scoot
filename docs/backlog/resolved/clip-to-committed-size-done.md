@@ -63,6 +63,14 @@ the ring at once, as before. Nothing is tracked per resize.
 on the ring path: two uncontended locks and no allocation. The clip path
 already read the geometry.
 
+There is one new trigger, and it is client-driven. The painted ring's key is
+the drawn size, so a client whose committed size changes on every commit
+repaints its two strips on every such commit. Each repaint is two
+strip-sized `MemoryRenderBuffer` copies plus imports, about 158 KB each for
+a 966-wide window at 1.5. On `main` only a layout change could trigger a
+repaint. The trigger is bounded by the client's commit rate, and each of
+those commits also uploads a full-window buffer. Measured below.
+
 ## Evidence
 
 Fail-first commit `b755f11` (main `1a8c5c1` plus tests only), fixed at
@@ -125,7 +133,64 @@ installed on the dev VM, so not measured):
   geometry, larger than its slot, so the rect is clamped to the 966x1083
   slot, the same as before.
 
-Screenshots are in the coordinator's scratchpad `r205-fixed/`.
+Everything above (binaries with `SHA256SUMS`, logs, PNGs, `windows`
+JSON, `WAYLAND_DEBUG` client logs, gate logs) is under `~/evidence/r205/`
+on the dev VM: `live/`, `clients/`, `bin/`, `gate-<sha>/`.
+
+**Cache key.** The live runs, the client measurements and the screenshots
+were all captured on `7164226`. Everything after it in `crates/` is:
+
+- doc comments;
+- a parameter rename (`placement` → `rect`) in `rounded::clip_rect` and
+  `ring_layout`;
+- `#[cfg(test)]` code only: the two benches below, plus the bench client
+  now destroying the buffer it replaces, as real clients do (the per-client
+  fd bound of PR #239 otherwise refuses a client that re-attaches every
+  frame).
+
+None of it changes behaviour.
+
+## Benchmarks
+
+Release *test* binaries OOM the 3.9 GB dev VM and are banned there, so
+these are dev-profile runs. They are good for before/after on the same
+machine, not for absolute numbers. Command:
+
+```
+cargo test -p scoot --bin scoot -- --ignored --nocapture --test-threads=1 --exact \
+  compositor::headless::bench::render_frame_cost compositor::headless::bench::rounded_corners_cost
+```
+
+Pixman ran three times per tree and GLES once (`SCOOT_TEST_RENDERER=gles`).
+Before is `1a8c5c1`, after is `7164226`. The files are
+`~/evidence/r205/bench-{before-1a8c5c1,after-7164226}-{pixman*,gles}.out`.
+The table gives square/radius-12 medians per frame, the paired median delta
+in brackets, and one cell per run:
+
+| scene | before | after |
+| --- | --- | --- |
+| render, empty (BEST) | 23.85 / 23.96 / 23.66 µs | 23.88 / 23.78 / 23.81 µs |
+| render, 8 windows (BEST) | 77.88 / 77.75 / 76.98 µs | 77.53 / 77.21 / 77.45 µs |
+| rounded single | 140.5/158.0 (+13.7%), 138.9/157.4 (+13.2%), 141.2/155.4 (+11.2%) | 140.6/157.1 (+11.6%), 138.0/154.2 (+12.0%), 138.7/157.8 (+13.9%) |
+| rounded tiled3 | 239.7/274.4 (+15.6%), 239.9/276.5 (+14.4%), 238.7/274.3 (+14.9%) | 238.7/271.8 (+14.6%), 237.3/271.3 (+14.4%), 237.0/272.2 (+14.2%) |
+| rounded overhang3 | 305.0/330.3 (+8.1%), 305.3/333.0 (+9.1%), 303.2/327.7 (+8.1%) | 301.9/327.3 (+7.8%), 302.6/328.6 (+8.4%), 302.2/328.1 (+8.6%) |
+| GLES rounded single / tiled3 / overhang3 | +34.9% / +40.6% / +18.6% | +30.0% / +40.0% / +16.1% |
+
+Every after number sits inside the before runs' spread, so there is no
+measurable change. `render_frame_cost`'s windows are core-only (no
+`Window`), so they cannot see the new lookup. `rounded_corners_cost` has
+real clients and does.
+
+The client-driven repaint, from the two new ignored benches:
+
+- `headless::bench::rounded_resize_churn_cost`: one real client at radius
+  12 commits a fresh full-window buffer every frame, either the same size
+  each time or alternating 7 px smaller. Pixman paired median was
+  +0.7% / +0.7% over two runs (about 30.8 → 31.0 ms per commit+frame in
+  the dev profile, mostly the client filling its buffer). GLES was +0.5%.
+- `decorations::tests::ring_repaint_cost`: one `build_strips` took
+  432–436 µs at 966x1083 @1.5 and 287–291 µs at 1458x1636 @1.0 in the dev
+  profile, against a 194–204 ns cache hit.
 
 Filed 2026-09-24 from a live re-verification of gh #205 on `main` `1f2fe5c`
 (scale 1.5, `corner_radius = 10`, `focus_ring_width = 4`). Serves
