@@ -128,7 +128,7 @@ PR 1's design record and the original entry follow.
 
 In the PR description: core property tests (`world/tests/floating_move.rs`,
 the randomized invariants extended with both actions, wild values,
-cross-output moves and a drawn-above-ancestors invariant), 24 harness
+cross-output moves and a drawn-above-ancestors invariant), 22 harness
 tests (`floating/tests/drag.rs`) plus a relative-pointer test, mutation
 checks for each guard, the headless and `--tty` live runs
 (`~/evidence/fpg/`), the pointer-motion bench before/after and the
