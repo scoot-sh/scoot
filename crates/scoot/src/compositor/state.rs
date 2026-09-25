@@ -453,6 +453,12 @@ pub struct State {
     /// application, and none in a session without X clients.
     #[cfg(feature = "xwayland")]
     pub x11_startup_carriers: HashMap<u32, smithay::xwayland::X11Surface>,
+    /// The X owner of each selection the gate let onto the Wayland side
+    /// (`xwayland/selection.rs`): a Wayland paste is served only while that
+    /// window still owns it. Written when an X selection crosses or stops
+    /// being the Wayland one; read per paste.
+    #[cfg(feature = "xwayland")]
+    pub x11_selection_owners: xwayland::selection::CrossedOwners,
     /// `zwlr_layer_shell_v1`: bars, docks, wallpapers and notification
     /// daemons. Unlike the two `#[allow(dead_code)]` states below this one is
     /// read again -- `WlrLayerShellHandler::shell_state` (see
@@ -1015,6 +1021,8 @@ impl State {
             x11_unmanaged: Vec::new(),
             #[cfg(feature = "xwayland")]
             x11_startup_carriers: HashMap::new(),
+            #[cfg(feature = "xwayland")]
+            x11_selection_owners: xwayland::selection::CrossedOwners::default(),
             layer_shell_state,
             ext_workspace,
             foreign_toplevels,

@@ -134,9 +134,13 @@ use smithay::xwayland::{XWayland, XWaylandEvent};
 use super::State;
 
 #[cfg(feature = "xwayland")]
+mod dnd;
+#[cfg(feature = "xwayland")]
 mod focus;
 #[cfg(feature = "xwayland")]
 pub(in crate::compositor) mod manage;
+#[cfg(feature = "xwayland")]
+pub(in crate::compositor) mod selection;
 #[cfg(test)]
 mod tests;
 #[cfg(feature = "xwayland")]

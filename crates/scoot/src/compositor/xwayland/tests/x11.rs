@@ -435,3 +435,54 @@ impl XClient {
         leader
     }
 }
+
+impl XClient {
+    /// Interns `name` on this connection.
+    pub(super) fn atom(&self, name: &str) -> Atom {
+        self.conn
+            .intern_atom(false, name.as_bytes())
+            .expect("an intern request")
+            .reply()
+            .expect("an atom")
+            .atom
+    }
+
+    /// Makes an unmapped window of this client the owner of selection
+    /// `name` -- all an X client has to do to start a drag (`XdndSelection`)
+    /// or claim a selection -- and returns it once the server agrees.
+    pub(super) fn take_selection(&self, name: &str) -> Window {
+        let selection = self.atom(name);
+        let owner = self.conn.generate_id().expect("an X window id");
+        self.conn
+            .create_window(
+                COPY_DEPTH_FROM_PARENT,
+                owner,
+                self.root,
+                -10,
+                -10,
+                1,
+                1,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                self.visual,
+                &CreateWindowAux::new(),
+            )
+            .expect("a create request")
+            .check()
+            .expect("the X server accepted the window");
+        self.conn
+            .set_selection_owner(owner, selection, x11rb::CURRENT_TIME)
+            .expect("a set-owner request")
+            .check()
+            .expect("the X server accepted the owner");
+        let now = self
+            .conn
+            .get_selection_owner(selection)
+            .expect("a get-owner request")
+            .reply()
+            .expect("the owner")
+            .owner;
+        assert_eq!(now, owner, "the X server did not make the window the owner");
+        owner
+    }
+}

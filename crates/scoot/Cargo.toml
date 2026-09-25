@@ -158,7 +158,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "43f50eb257a692a5e94a1a719641f121b3c849ab"
+rev = "0d281abf23fbfb80aae62381ac0cb7542530d203"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session

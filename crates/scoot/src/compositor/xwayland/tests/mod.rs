@@ -667,7 +667,13 @@ fn a_window_manager_that_cannot_attach_withdraws_the_display() {
 #[cfg(feature = "xwayland")]
 mod bench;
 #[cfg(feature = "xwayland")]
+mod clipboard;
+#[cfg(feature = "xwayland")]
+mod dnd;
+#[cfg(feature = "xwayland")]
 mod focus;
+#[cfg(feature = "xwayland")]
+mod ime;
 #[cfg(feature = "xwayland")]
 mod live;
 #[cfg(feature = "xwayland")]
@@ -680,3 +686,45 @@ mod peer;
 mod scanout;
 #[cfg(feature = "xwayland")]
 mod x11;
+#[cfg(feature = "xwayland")]
+mod xsel;
+
+/// Which X selection types cross to Wayland (see `selection.rs`): mime-like,
+/// short enough for the wire, no NUL, and a bounded count -- in the owner's
+/// order.
+#[cfg(feature = "xwayland")]
+#[test]
+fn hostile_types_are_filtered() {
+    use super::selection::{MAX_MIME_BYTES, MAX_MIME_TYPES, crossing_mime_types, mime_crosses};
+
+    assert!(mime_crosses("text/plain;charset=utf-8"));
+    assert!(mime_crosses("image/png"));
+    assert!(!mime_crosses(""));
+    assert!(!mime_crosses("STRING"), "an X-only target name");
+    assert!(!mime_crosses("SAVE_TARGETS"));
+    assert!(
+        !mime_crosses("text/evil\0type"),
+        "a NUL panics wayland-scanner"
+    );
+    let longest = format!("text/{}", "x".repeat(MAX_MIME_BYTES - 5));
+    assert!(mime_crosses(&longest));
+    assert!(
+        !mime_crosses(&format!("{longest}x")),
+        "past the length bound"
+    );
+
+    let many: Vec<String> = (0..MAX_MIME_TYPES + 10)
+        .map(|i| format!("application/x-{i}"))
+        .collect();
+    let crossing = crossing_mime_types(many.clone());
+    assert_eq!(crossing.len(), MAX_MIME_TYPES);
+    assert_eq!(
+        crossing[..],
+        many[..MAX_MIME_TYPES],
+        "the owner's order is kept"
+    );
+    assert_eq!(
+        crossing_mime_types(vec!["TARGETS".into(), "image/png".into(), "\0/".into()]),
+        vec!["image/png".to_owned()]
+    );
+}

@@ -930,7 +930,7 @@ checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/scoot-sh/smithay?rev=43f50eb257a692a5e94a1a719641f121b3c849ab#43f50eb257a692a5e94a1a719641f121b3c849ab"
+source = "git+https://github.com/scoot-sh/smithay?rev=0d281abf23fbfb80aae62381ac0cb7542530d203#0d281abf23fbfb80aae62381ac0cb7542530d203"
 dependencies = [
  "appendlist",
  "bitflags",
