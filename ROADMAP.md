@@ -104,7 +104,27 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
-- **[Floating windows, PR 1 of 2](docs/backlog/core/floating-windows.md)**
+- **[Floating windows, PR 2 of 2: move and resize](docs/backlog/resolved/floating-windows-done.md)**
+  (2026-09-25) — `[floating] modifier` (Super) with the left button moves a
+  floating window, with the right resizes it from the nearest edge or
+  corner; a client's own `xdg_toplevel.move`/`resize` (GTK headerbars, CSD
+  borders) is honoured on its still-held press (serial = the live implicit
+  grab's, press on its own surface), a tiled window's ignored. The core
+  keeps each floating window's anchor (a point and which point of the
+  window sits on it), so the edge a resize did not move holds whatever size
+  the client settles on; `MoveFloating`/`ResizeFloating` clamp to the usable
+  area, the window's min/max and the room from the fixed edge, and a move
+  whose middle lands on another output carries the window there. IPC
+  `move-floating ID X Y` / `resize-floating ID W H`. The drag allocates
+  nothing per motion (measured, `LD_PRELOAD` count: 0 on the no-drag, move
+  and resize paths; resize configures are paced to client acks); it ends on
+  release, a second press, close, un-float, workspace switch, lock, VT
+  pause or output resize. A window's own floating dialogs are always drawn
+  above it (the PR #242 re-review's fullscreen-game case, fixed in
+  general). Dev VM: IPC move/resize of a rule-floated foot and a zenity
+  dialog dragged by its own body on `--headless`; Super+left/right drags
+  with a uinput keyboard/mouse on `--tty`.
+- **[Floating windows, PR 1 of 2](docs/backlog/resolved/floating-windows-done.md)**
   (2026-09-25, PR #242) — a per-workspace floating layer above the strip in
   `scoot-core` (stacking with raise-on-focus, a focus flag per workspace,
   placement centred on the parent or output and clamped to the usable area,
@@ -119,8 +139,7 @@ each item's own file records why it landed when it did.
   and pointer focus follows a dialog appearing under a still pointer. Dev VM:
   `zenity --info/--question/--file-selection` float by dialog hint, the
   `gtk3-widget-factory` About dialog by parent (centred on it), `foot
-  --app-id` by rule. **PR 2 remains:** pointer move/resize (Super+drag, CSD
-  `xdg_toplevel.move`/`resize`).
+  --app-id` by rule.
 - **[wayland-backend's received-fd queue is bounded](docs/backlog/resolved/wayland-backend-fd-queue-done.md), [and scoot raises its fd limit](docs/backlog/resolved/raise-nofile-limit-done.md)**
   (2026-09-25, PR #241) — wayland-backend 0.3.17 kept the fds a client
   attaches to fd-less requests for the connection's life; one idle client

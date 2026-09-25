@@ -687,7 +687,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### Requested 2026-09-24
-- [Floating windows (dialogs auto-float, window rules, toggle)](./core/floating-windows.md) — high, user request. **PR 1 landed** (2026-09-25): the floating layer, auto-float by `xdg-dialog-v1`/parent/fixed size, `[[window_rule]]`, the toggle and focus switch, IPC. **PR 2 remains:** pointer move/resize.
+- [Floating windows (dialogs auto-float, window rules, toggle, move/resize)](./resolved/floating-windows-done.md) — RESOLVED 2026-09-25 in two PRs. PR 1 (#242): the floating layer, auto-float by `xdg-dialog-v1`/parent/fixed size, `[[window_rule]]`, the toggle and focus switch, IPC. PR 2: `[floating] modifier` (Super) + left/right drag moves/resizes, the client's own `xdg_toplevel.move`/`resize` honoured on its held press (tiled windows' ignored), IPC `move-floating`/`resize-floating`, cross-output moves, a window's dialogs always drawn above it (the re-review's fullscreen-game case), resize configures paced to client acks; 0 allocations per pointer motion.
 
 ### From the PR #239 review (2026-09-24)
 - [Many light connections can still pressure the table and shed scootctl](./core/pressure-many-light-connections.md) — medium; cheapest fix is a lower pressure line for IPC accepts. Since PR #241's raised table it takes 64 idle connections parking 1024 fds each (no objects) to fill it, measured; still 7 where the hard limit is 1024.
