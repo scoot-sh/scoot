@@ -520,8 +520,9 @@ Found while building it, each measured first (fail-first records in
   client; Wayland types sent to X are capped at 64. (The X server itself cuts
   an atom name at a NUL, measured, so the NUL refusal is defence in depth.)
 
-All the fork commits (seven, then four more from review) are on
-`scoot-sh/smithay` branch `scoot/xwayland-selection-dnd` (`53aafc36`),
+All the fork commits (seven, then four more from review round 1 and two
+more from review round 2 — thirteen XWayland commits, `35c335e0`..`5b575329`)
+are on `scoot-sh/smithay` branch `scoot/xwayland-selection-dnd` (`5b575329`),
 listed in `docs/forks.md`;
 upstream master `79bbed5e1` has none of them.
 

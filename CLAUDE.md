@@ -42,12 +42,14 @@ window layout OmniWM-style through the Accessibility API.
   verify claims about its behavior against the pinned source, not general
   Smithay knowledge; APIs and semantics shift across revs. **It is
   currently a scoot-sh fork** (`github.com/scoot-sh/smithay`, rev
-  `43f50eb2`): upstream's `0ff0098` plus exactly one commit, a `Drop` that
-  stops every syncobj timeline import leaking a kernel handle (see
-  `docs/backlog/resolved/syncobj-handle-leak-done.md`). Make
+  `5b575329`, branch `scoot/xwayland-selection-dnd`): upstream's `0ff0098`
+  plus fourteen commits — a `Drop` that stops every syncobj timeline import
+  leaking a kernel handle (see
+  `docs/backlog/resolved/syncobj-handle-leak-done.md`), then thirteen
+  XWayland selection/drag commits for Phase 4 (see `docs/forks.md`). Make
   verify-against-source claims against the fork rev (its checkout is
-  `~/.cargo/git/checkouts/smithay-*/43f50eb`), and repin to upstream once
-  a Smithay rev carries the fix (`docs/backlog/core/smithay-fork-repin.md`).
+  `~/.cargo/git/checkouts/smithay-*/5b57532`), and repin to upstream once
+  a Smithay rev carries the fixes (`docs/backlog/core/smithay-fork-repin.md`).
 - **Dependency fixes go in scoot-sh forks, never upstream from here.**
   (User, 2026-09-24: "Do not open upstream PR's. I would rather fork for now
   and maintain a list of forks … I as the human can later decide whether or

@@ -18,7 +18,9 @@
 //! window whose X client (the client bits of its id, which the X server
 //! allocates per connection -- `focus::same_x_client`) is that of the window
 //! now owning `XdndSelection`. Refused while the session is locked, and for
-//! touch -- `dnd_requested` refuses touch drags too. The hook it rides on,
+//! touch -- `dnd_requested` refuses touch drags too. Like a Wayland drag, the
+//! press must still be within `INTERACTION_WINDOW` (10 s): a press held past
+//! it cannot start a drag even while still held. The hook it rides on,
 //! `XwmHandler::allow_drag`, is a scoot-sh fork addition.
 //!
 //! **What this protects, and what it cannot.** A press on a *Wayland*
