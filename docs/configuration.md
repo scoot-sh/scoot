@@ -336,7 +336,8 @@ never acted on; a `spawn` whose program fails to start is refused by name
 instead of reported applied, and stays pending -- the next reload retries
 it. Seen is by value per occurrence: an edited entry counts as
 new, a removed-then-re-added entry runs again, and a second identical
-reload is silent), `[floating] modifier` (the next drag uses it), and
+reload is silent), `[floating] modifier` (the next drag uses it; a value
+that is not a modifier is refused by name), and
 `[floating] auto` and the `[[window_rule]]` list
 (swapped whole; they decide for windows that map after the reload, and
 windows already mapped keep their place -- a rule that cannot be used is
@@ -613,7 +614,7 @@ Three behaviors worth knowing, plus the reload rule:
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `auto` | bool | `true` | Float a window automatically when it first maps if it says it is a dialog (`xdg-dialog-v1`), names a parent (`xdg_toplevel.set_parent`, a transient window), or has a fixed size (equal non-zero minimum and maximum). `false` turns all three off; `[[window_rule]]`s still apply. Re-applied live by `scootctl reload`, for windows that map after it. |
-| `modifier` | string | `"super"` | The modifier held to drag floating windows: with the left button anywhere on one it moves it, with the right button it resizes it. `super`, `alt`, `ctrl` or `shift` (or an alias a `[binds]` combo accepts: `logo`, `meta`, `cmd`, `control`); anything else falls back to `super` with a warning. Worth changing under `--nested`, where the host compositor often keeps Super for itself. Re-applied live by `scootctl reload`. |
+| `modifier` | string | `"super"` | The modifier held to drag floating windows: with the left button anywhere on one it moves it, with the right button it resizes it. `super`, `alt`, `ctrl` or `shift` (or an alias a `[binds]` combo accepts: `logo`, `meta`, `cmd`, `control`); anything else falls back to `super` with a warning at startup, and is refused by name on a reload (the running modifier stays). Worth changing under `--nested`, where the host compositor often keeps Super for itself. Re-applied live by `scootctl reload`. |
 
 What floating is — a layer above each workspace's scrolling strip, for
 confirmation dialogs, file pickers, settings windows and anything you pick
@@ -633,7 +634,8 @@ with a rule:
   (`xdg_toplevel.move`/`resize`, what GTK's headerbar and client-side
   borders send). Either way the window stays where you leave it, inside the
   usable area; a resize stops at the usable area rather than pushing the
-  far edge, and respects the window's own minimum and maximum size. Drop a
+  far edge, and respects the window's own minimum and maximum size where
+  there is room for them (the usable area wins over a minimum). Drop a
   window with its middle over another output and it moves to that output's
   active workspace. A drag ends when the button is released, another button
   is pressed, the window closes or stops floating, its workspace is switched

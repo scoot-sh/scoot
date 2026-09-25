@@ -277,9 +277,12 @@ on a floating window; that press and its release are never delivered to the
 client. During a resize the window is sent configures carrying the
 `resizing` state and the size the drag asks for (clamped to its own
 `min_size`/`max_size`, re-read when the drag starts, and to the room to the
-usable area's edge), one at a time: a new size goes out once the client has
-acked the last, so a 1000Hz mouse does not queue sizes a 60Hz client has to
-skip. The edge not being dragged stays put whatever size the client settles
+usable area's edge, which wins over a minimum that does not fit), paced
+to the client: the drag sends a new size only once the client has acked the
+last, so a 1000Hz mouse does not queue sizes a 60Hz client has to skip.
+Best effort, not a guarantee of one outstanding configure: any other
+relayout meanwhile (the client's own resized frame, say) also sends the
+newest size. The edge not being dragged stays put whatever size the client settles
 on (a terminal rounding to whole cells, say). The drag's last configure
 drops `resizing` and keeps the size. X11 windows (the XWayland skeleton)
 stay refused: their `move_request`/`resize_request` start nothing.

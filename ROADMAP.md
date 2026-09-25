@@ -116,8 +116,10 @@ each item's own file records why it landed when it did.
   area, the window's min/max and the room from the fixed edge, and a move
   whose middle lands on another output carries the window there. IPC
   `move-floating ID X Y` / `resize-floating ID W H`. The drag allocates
-  nothing per motion (measured, `LD_PRELOAD` count: 0 on the no-drag, move
-  and resize paths; resize configures are paced to client acks); it ends on
+  nothing per motion (measured, `LD_PRELOAD` count: 0 on the no-drag and
+  move paths, and 0 per resize motion the client has not yet answered; a
+  resize allocates only for the configures it sends, ~11 each, at most
+  about one per client ack); it ends on
   release, a second press, close, un-float, workspace switch, lock, VT
   pause or output resize. A window's own floating dialogs are always drawn
   above it (the PR #242 re-review's fullscreen-game case, fixed in

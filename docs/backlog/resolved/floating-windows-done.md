@@ -132,7 +132,9 @@ cross-output moves and a drawn-above-ancestors invariant), 22 harness
 tests (`floating/tests/drag.rs`) plus a relative-pointer test, mutation
 checks for each guard, the headless and `--tty` live runs
 (`~/evidence/fpg/`), the pointer-motion bench before/after and the
-allocation probe (0 allocations per motion on every path).
+allocation probe (0 allocations per motion on the no-drag and move paths
+and per unanswered resize motion; a resize allocates only for the
+configures it sends, ~11 each, about one per client ack).
 
 ## PR 1 design record
 

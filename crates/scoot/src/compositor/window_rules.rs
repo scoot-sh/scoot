@@ -86,21 +86,15 @@ pub struct FloatingConfig {
 pub const DEFAULT_DRAG_MODIFIER: Modifier = Modifier::Super;
 
 /// `[floating] modifier`, resolved: the named modifier, or
-/// [`DEFAULT_DRAG_MODIFIER`] when the table or key is absent -- and, with a
-/// warning naming the value, when it names something that is not a single
-/// modifier (a combo like `super+shift` included: one modifier drags).
-pub fn drag_modifier(floating: Option<&FloatingConfig>) -> Modifier {
+/// [`DEFAULT_DRAG_MODIFIER`] when the table or key is absent. `Err` carries
+/// a value that is not a single modifier (a combo like `super+shift`
+/// included: one modifier drags) -- startup warns and uses the default, a
+/// reload refuses it by name and keeps what the session has.
+pub fn drag_modifier(floating: Option<&FloatingConfig>) -> Result<Modifier, String> {
     let Some(name) = floating.and_then(|floating| floating.modifier.as_deref()) else {
-        return DEFAULT_DRAG_MODIFIER;
+        return Ok(DEFAULT_DRAG_MODIFIER);
     };
-    Modifier::parse(name.trim()).unwrap_or_else(|| {
-        tracing::warn!(
-            modifier = name,
-            "[floating] modifier is not one of super, alt, ctrl or shift; dragging \
-             floating windows with super"
-        );
-        DEFAULT_DRAG_MODIFIER
-    })
+    Modifier::parse(name.trim()).ok_or_else(|| name.to_owned())
 }
 
 /// One `[[window_rule]]` as written.

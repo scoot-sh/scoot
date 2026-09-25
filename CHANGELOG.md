@@ -16,7 +16,8 @@ scoot has not cut a numbered release yet; entries are dated.
   nearest edge or corner. A dialog's own titlebar and borders work too
   (GTK headerbars, client-side decorations). Windows stay where you put
   them, inside the screen's usable area, and a resize respects the window's
-  own minimum and maximum size. Dropping one over another output moves it
+  own minimum and maximum size wherever the screen has room for them (it
+  never grows a window past the usable area, even to reach its minimum). Dropping one over another output moves it
   there. Under `--nested`, where the host often keeps Super, set
   `[floating] modifier = "alt"` (or `ctrl`, `shift`). Tiled windows are not
   dragged: a titlebar drag or Super+drag on one does nothing special.

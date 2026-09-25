@@ -158,7 +158,8 @@ pub enum Action {
     /// `scoot_core::Action::ResizeFloating` with the bottom-right edges
     /// moving. Clamped to the window's own minimum and maximum size and to
     /// the room between its top-left corner and the usable area's bottom
-    /// right, and to at least 1; the window draws the new size when it
+    /// right (the room wins over a minimum that does not fit), and to at
+    /// least 1; the window draws the new size when it
     /// answers the configure, so `windows` reports it a frame or so later.
     /// An unknown id, a tiled window and a fullscreen one do nothing.
     /// Additive like the move: no `PROTOCOL_VERSION` bump.

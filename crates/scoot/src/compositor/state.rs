@@ -148,13 +148,15 @@ pub struct State {
     /// window, with the right to resize it (see `floating/grab.rs`). Set
     /// from the config after `State::new` and by a reload.
     pub floating_modifier: scoot_ipc::Modifier,
-    /// Set by a floating window's pointer grab when the arrangement needs a
-    /// full `apply()` -- the grab ended, or carried its window to another
-    /// output -- which the grab cannot run itself: its callbacks run inside
-    /// Smithay's pointer lock, and `apply()` can reach the pointer. Drained
-    /// by `State::settle_floating_grab` once the pointer call that ran the
-    /// grab has returned, and cleared by any `apply()`, which is what it
-    /// asks for.
+    /// Whether a floating window's pointer grab left the arrangement
+    /// needing a full `apply()`: set from inside the grab's callbacks, which
+    /// run under Smithay's pointer lock where `apply()` must not run (it can
+    /// reach the pointer) -- by a motion that carried the window to another
+    /// output, and by the grab's `unset` however it ended (its own release,
+    /// a lock, a close, a VT pause, a replacing grab). Drained by
+    /// `State::settle_floating_grab` after the pointer call (the input
+    /// paths, the lock transition, the VT pause, the nested pointer leave),
+    /// and cleared by any `apply()`, which does what it asks for.
     pub(super) floating_grab_resync: bool,
     /// What `dmabuf::advertise` put on the `zwp_linux_dmabuf_v1` global --
     /// the default feedback, and the builder and table behind it -- or

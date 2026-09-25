@@ -419,6 +419,10 @@ pub struct LoadedConfig {
     /// window and with the right button to resize one (see
     /// `floating/grab.rs`). Super unless the file names another modifier.
     pub floating_modifier: scoot_ipc::Modifier,
+    /// The `[floating] modifier` value, when it named no modifier: startup
+    /// warned and uses the default; a reload refuses it by name and keeps
+    /// the session's (see `reload.rs`).
+    pub invalid_floating_modifier: Option<String>,
 }
 
 impl LoadedConfig {
@@ -435,6 +439,7 @@ impl LoadedConfig {
             floating: FloatingRules::default(),
             skipped_rules: Vec::new(),
             floating_modifier: DEFAULT_DRAG_MODIFIER,
+            invalid_floating_modifier: None,
         }
     }
 
@@ -461,7 +466,18 @@ impl LoadedConfig {
         let xwayland = file.xwayland.unwrap_or_default().enabled.unwrap_or(false);
         let autostart = file.autostart.unwrap_or_default().into_actions();
         let keybindings = keybindings_for(&file.binds, vt);
-        let floating_modifier = drag_modifier(file.floating.as_ref());
+        let (floating_modifier, invalid_floating_modifier) =
+            match drag_modifier(file.floating.as_ref()) {
+                Ok(modifier) => (modifier, None),
+                Err(name) => {
+                    tracing::warn!(
+                        modifier = %name,
+                        "[floating] modifier is not one of super, alt, ctrl or shift; dragging \
+                         floating windows with super"
+                    );
+                    (DEFAULT_DRAG_MODIFIER, Some(name))
+                }
+            };
         let (floating, skipped_rules) =
             FloatingRules::from_config(file.floating, &file.window_rule);
         for skipped in &skipped_rules {
@@ -479,6 +495,7 @@ impl LoadedConfig {
             floating,
             skipped_rules,
             floating_modifier,
+            invalid_floating_modifier,
         }
     }
 }

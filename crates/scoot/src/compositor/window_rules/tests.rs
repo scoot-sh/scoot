@@ -211,10 +211,10 @@ fn the_drag_modifier_defaults_to_super_and_takes_any_modifier_name() {
         auto: None,
         modifier: Some(name.to_owned()),
     };
-    assert_eq!(drag_modifier(None), Modifier::Super);
+    assert_eq!(drag_modifier(None), Ok(Modifier::Super));
     assert_eq!(
         drag_modifier(Some(&FloatingConfig::default())),
-        Modifier::Super
+        Ok(Modifier::Super)
     );
     for (name, expected) in [
         ("alt", Modifier::Alt),
@@ -225,11 +225,15 @@ fn the_drag_modifier_defaults_to_super_and_takes_any_modifier_name() {
         ("logo", Modifier::Super),
         ("super", Modifier::Super),
     ] {
-        assert_eq!(drag_modifier(Some(&named(name))), expected, "{name}");
+        assert_eq!(drag_modifier(Some(&named(name))), Ok(expected), "{name}");
     }
-    // Not a single modifier: the default, with a warning, never a refusal
-    // of the whole file.
+    // Not a single modifier: named back, for a warning at startup and a
+    // refusal on reload -- never a refusal of the whole file.
     for name in ["", "hyper", "super+shift", "a"] {
-        assert_eq!(drag_modifier(Some(&named(name))), Modifier::Super, "{name}");
+        assert_eq!(
+            drag_modifier(Some(&named(name))),
+            Err(name.to_owned()),
+            "{name}"
+        );
     }
 }

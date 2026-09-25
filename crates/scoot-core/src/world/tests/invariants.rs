@@ -795,7 +795,11 @@ fn a_deep_dialog_chain_draws_every_window_above_its_parent() {
     }
     let mut rng = Rng(7);
     for step in 0..200 {
-        let raise = WindowId(if step == 0 { 1 } else { 1 + rng.below(40) as u64 });
+        let raise = WindowId(if step == 0 {
+            1
+        } else {
+            1 + rng.below(40) as u64
+        });
         world.handle_event(Event::FocusObserved { id: raise });
         assert_invariants(&world);
         let order: Vec<u64> = world
@@ -805,6 +809,10 @@ fn a_deep_dialog_chain_draws_every_window_above_its_parent() {
             .filter(|p| p.floating)
             .map(|p| p.id.0)
             .collect();
-        assert_eq!(order, (1..=40).collect::<Vec<_>>(), "after raising {raise:?}");
+        assert_eq!(
+            order,
+            (1..=40).collect::<Vec<_>>(),
+            "after raising {raise:?}"
+        );
     }
 }

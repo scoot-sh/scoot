@@ -171,7 +171,12 @@ impl World {
     /// which of them descend from `covering`. Every index appears exactly
     /// once, whatever the parent links say: a link that closes a loop is
     /// dropped, so the links form a forest.
-    fn drawing_order(&self, ws: &Workspace, covering: Option<WindowId>, scratch: &mut OrderScratch) {
+    fn drawing_order(
+        &self,
+        ws: &Workspace,
+        covering: Option<WindowId>,
+        scratch: &mut OrderScratch,
+    ) {
         let stack = &ws.floating;
         let n = stack.len();
         scratch.by_id.clear();

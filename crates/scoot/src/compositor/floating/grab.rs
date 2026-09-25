@@ -33,7 +33,8 @@
 //! the space to match -- no `apply()`, which arranges everything and would
 //! allocate per motion. A resize also sends the client a configure with the
 //! `resizing` state -- only when the size asked for changed and the client
-//! has acked every configure before it, so configures go out at the rate
+//! has acked every configure before it (best effort: any other `apply()`
+//! meanwhile sends the newest size too), so configures go out at the rate
 //! the client answers them, not the mouse's (a configure is Smithay's
 //! allocation, about eleven of them, measured); the window's position
 //! follows when it draws that size (`observe_frame`), the edge the user is
