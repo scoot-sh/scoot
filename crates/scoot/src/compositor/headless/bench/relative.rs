@@ -43,7 +43,7 @@ fn time(outputs: i32) -> Vec<Duration> {
         .state
         .pointer_move(f64::from(CANVAS) / 2.0, f64::from(CANVAS) / 2.0);
     let step = |harness: &mut Harness<(), ()>, i: u32| {
-        let d = if i % 2 == 0 { 1.0 } else { -1.0 };
+        let d = if i.is_multiple_of(2) { 1.0 } else { -1.0 };
         harness.state.pointer_move_relative(d, 0.0, d, 0.0);
     };
     for i in 0..MOTIONS / 10 {
