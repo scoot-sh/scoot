@@ -118,6 +118,7 @@ pub(super) enum Change {
     Added {
         connector: connector::Handle,
         name: String,
+        identity: crate::compositor::output_identity::OutputIdentity,
         width: i32,
         height: i32,
         scanout: ScanoutHandoff,
@@ -140,10 +141,11 @@ pub(super) fn apply(state: &mut State, changes: Vec<Change>) {
             Change::Added {
                 connector,
                 name,
+                identity,
                 width,
                 height,
                 scanout,
-            } => added.push((connector, name, width, height, scanout)),
+            } => added.push((connector, name, identity, width, height, scanout)),
         }
     }
     for id in removed {
@@ -161,7 +163,7 @@ pub(super) fn apply(state: &mut State, changes: Vec<Change>) {
             );
         }
     }
-    for (connector, name, width, height, scanout) in added {
+    for (connector, name, identity, width, height, scanout) in added {
         match headless::add_output_with(state, &name, width, height, scanout) {
             Ok(id) => {
                 tracing::info!(
@@ -171,7 +173,18 @@ pub(super) fn apply(state: &mut State, changes: Vec<Change>) {
                     height,
                     "drm: a display was connected; added an output for it"
                 );
+                // The full connector identity (name plus EDID), replacing
+                // the name-only one `add_output_with` registered: a later
+                // unplug must record this, and the restore after it must
+                // match on it. Then the restore itself -- `add_output_with`
+                // already tried with the name-only identity and missed (a
+                // name-only lookup never hits an EDID-carrying record, and
+                // hits a name-only record correctly), so this second attempt
+                // is the one that can bring the monitor's workspaces back.
+                // Safe to run twice: a hit consumes the record.
+                state.note_output_identity(id, identity);
                 super::attach_where(state, |head| head.connector == connector, id);
+                state.restore_displaced(id);
             }
             Err(error) => {
                 tracing::warn!(
@@ -603,6 +616,7 @@ impl Tty {
                 let change = Change::Added {
                     connector: head.connector,
                     name: head.name.clone(),
+                    identity: head.identity.clone(),
                     width: head.width,
                     height: head.height,
                     scanout,

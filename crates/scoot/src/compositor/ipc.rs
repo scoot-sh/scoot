@@ -378,6 +378,7 @@ impl State {
                         | scoot_ipc::Action::FocusWorkspace { .. }
                         | scoot_ipc::Action::FocusWorkspaceIndex { .. }
                         | scoot_ipc::Action::FocusOutput { .. }
+                        | scoot_ipc::Action::FocusOutputIndex { .. }
                         | scoot_ipc::Action::ToggleFloatingFocus
                 ) {
                     self.clicked_layer = None;
@@ -651,6 +652,13 @@ impl State {
     ///   focus action by this function's cut (like every other `Move*` it
     ///   stays on the full path), even though the core follows the window:
     ///   the same line `MoveWindowToWorkspaceIndex` already holds.
+    ///   `MoveFocusedWindowToOutputIndex` stays out for the same reason.
+    /// - `FocusOutputIndex`: the focused output already is the output at
+    ///   that position -- one index plus one `Copy` compare, through the
+    ///   allocation-free `World::output_at`, no workspace lookup. This is
+    ///   what the default `Super+comma` / `Super+period` binds send, so a
+    ///   held key repeating on an already-focused screen must land here
+    ///   rather than paying a full `apply` per repeat.
     /// - `FocusColumn` / `FocusWindow`: relative steps whose no-op-ness
     ///   needs the focused column's position in its workspace (and the
     ///   stack position within it), which `World` does not expose.
@@ -685,6 +693,14 @@ impl State {
                 .world
                 .focused_output()
                 .is_some_and(|focused| focused.0 == *output),
+            // `FocusOutputIndex`: the focused output already is the output
+            // at that position. Out of range resolves to no output, which
+            // never equals the focused one, so it stays on the full path
+            // like the unknown id above.
+            scoot_ipc::Action::FocusOutputIndex { index } => self
+                .world
+                .output_at(*index)
+                .is_some_and(|at| Some(at) == self.world.focused_output()),
             _ => false,
         }
     }

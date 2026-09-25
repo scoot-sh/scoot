@@ -62,11 +62,13 @@ inspired this project.
     size. Screens sit side by side, left to right: in connector order at
     startup, and a monitor plugged in later goes on the right.
     `wlr-output-management` `apply`/`test` stay refused.
-  - **A replugged monitor comes back empty, under a new id.** Its windows
-    stay on the screen they were moved to when it went away, and the
-    default output-2 binds stop reaching it until scoot restarts
-    (`scootctl outputs` shows the current ids). Restoring both on
-    reconnect is planned.
+  - **A replugged monitor comes back with its windows.** Its workspaces move
+    back from the screen they were adopted by -- the windows that are still
+    open and that were not moved by hand in between, in the same order with
+    the same active workspace -- and the default `Super+period` binds follow
+    it (they name the second screen, not output id 2). A *different* monitor
+    on the same connector does not inherit them: identity is the connector
+    name plus the EDID make/model/serial where one can be read.
 - **XWayland is opt-in, and partial.** X11 applications run with
   `--xwayland` (or `[xwayland] enabled`) in an `xwayland` build (`cargo
   build --release --features xwayland`, with `Xwayland` on `PATH`; no flake
@@ -228,8 +230,8 @@ second output does and does not do yet.
 | `Super+Ctrl+Shift+j` / `Super+Ctrl+Shift+k` | Move window to workspace down / up |
 | `Super+1`..`Super+9` | Focus workspace 1–9 directly |
 | `Super+Shift+1`..`Super+Shift+9` | Move window to workspace 1–9 directly |
-| `Super+comma` / `Super+period` | Focus output 1 / 2 |
-| `Super+Shift+comma` / `Super+Shift+period` | Move window to output 1 / 2 directly |
+| `Super+comma` / `Super+period` | Focus first / second screen |
+| `Super+Shift+comma` / `Super+Shift+period` | Move window to first / second screen directly |
 | `Super+r` | Cycle column width |
 | `Super+f` | Toggle fullscreen |
 | `Super+Shift+Space` | Float the focused window, or put it back in the strip |

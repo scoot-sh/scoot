@@ -6,6 +6,7 @@ mod frames;
 mod fullscreen;
 mod invariants;
 mod outputs;
+mod reconnect;
 mod reload;
 mod workspaces;
 

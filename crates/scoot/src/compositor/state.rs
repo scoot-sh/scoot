@@ -62,9 +62,11 @@ use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::layer_shell;
 use super::nested::Host;
+use super::output_identity::OutputIdentity;
 use super::output_management::OutputManagement;
 use super::outputs::Outputs;
 use super::popup::ActivePopupGrab;
+use super::reconnect::DisplacedOutput;
 use super::render::Backend;
 use super::screencopy::Screencopy;
 use super::screenshot::{Encoder, PendingShot, ShotSink};
@@ -287,6 +289,16 @@ pub struct State {
     /// [`Outputs::primary`](super::outputs::Outputs::primary) is still
     /// assuming.
     pub outputs: Outputs,
+    /// Which monitor each live output is, by the core id it is known by --
+    /// see `reconnect.rs`. Registered when the output is created (name-only
+    /// on the connector-less backends, name plus EDID under `--tty` once
+    /// `note_output_identity` upgrades it) and forgotten when the output is
+    /// removed. Read only by `State::remove_output`.
+    pub(super) output_identities: HashMap<OutputId, OutputIdentity>,
+    /// Removed outputs awaiting their monitor's return, keyed by monitor
+    /// identity -- see `reconnect.rs`. Written only by
+    /// `State::remove_output`, consumed only by `State::restore_displaced`.
+    pub(super) displaced: HashMap<OutputIdentity, DisplacedOutput>,
     /// The output scale resolved from `[output] scale` (see
     /// `output_scale.rs`), set at startup and re-applied live by a config
     /// reload (see `reload.rs`) -- except under `--nested`, where it stays
@@ -1005,6 +1017,8 @@ impl State {
             popup_grab: None,
             last_popup_grab: None,
             outputs: Outputs::default(),
+            output_identities: HashMap::new(),
+            displaced: HashMap::new(),
             output_scale: scale,
             integer_scale: super::output_scale::integer_scale(scale),
             renderer,

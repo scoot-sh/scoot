@@ -38,6 +38,7 @@ mod nested_dispatch;
 mod no_memory;
 pub(crate) mod nofile;
 mod output_clip;
+mod output_identity;
 mod output_management;
 mod output_scale;
 mod outputs;
@@ -45,6 +46,7 @@ mod popup;
 mod popup_constraint;
 mod popup_parent;
 mod presentation_time;
+mod reconnect;
 mod relative_pointer;
 mod reload;
 pub(crate) mod render;
@@ -202,6 +204,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
             width: options.width,
             height: options.height,
             name: headless::OUTPUT_NAME.to_owned(),
+            identity: output_identity::OutputIdentity::named(headless::OUTPUT_NAME),
             scanout: render::ScanoutHandoff::default(),
         }]
     };
@@ -220,6 +223,10 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         first.height,
         first.scanout,
     )?;
+    // The full connector identity (name plus EDID under `--tty`, name-only
+    // elsewhere), replacing the name-only one `init_named` registered -- so
+    // a later unplug files the right record (see `reconnect.rs`).
+    state.note_output_identity(primary, first.identity);
     tty::attach(&mut state, 0, primary);
     // Every further `--tty` connector, side by side to the right of the one
     // before (`add_output_with` measures off the previous output's logical
@@ -234,7 +241,10 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
             head.height,
             head.scanout,
         ) {
-            Ok(id) => tty::attach(&mut state, index, id),
+            Ok(id) => {
+                state.note_output_identity(id, head.identity);
+                tty::attach(&mut state, index, id);
+            }
             Err(error) => tracing::warn!(
                 %error,
                 connector = %head.name,

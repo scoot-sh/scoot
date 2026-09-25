@@ -23,4 +23,7 @@ pub use config::Config;
 pub use geometry::{Point, Rect, Size};
 pub use messages::{Action, Edges, Effect, Event, Horizontal, Vertical};
 pub use types::{OutputId, SizeHints, WindowId, WindowInfo};
-pub use world::{Arrangement, FloatingGeometry, Placement, Workspaces, World};
+pub use world::{
+    Arrangement, ColumnSnapshot, EvictedOutput, FloatingGeometry, OutputSnapshot, Placement,
+    WorkspaceSnapshot, Workspaces, World,
+};

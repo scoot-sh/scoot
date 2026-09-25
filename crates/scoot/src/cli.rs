@@ -42,7 +42,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";

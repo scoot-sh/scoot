@@ -21,6 +21,7 @@ use scoot_core::OutputId;
 use smithay::reexports::drm::control::connector;
 
 use super::presenter::Presenter;
+use crate::compositor::output_identity::OutputIdentity;
 
 /// One connector this backend drives, and everything that drives it.
 pub(super) struct Head {
@@ -46,6 +47,15 @@ pub(super) struct Head {
     /// The connector's name (`eDP-1`, `DP-1`), for log lines. The
     /// `wl_output` carries its own copy, fixed at creation.
     pub(super) name: String,
+    /// Which monitor this head was built for: the connector name plus the
+    /// EDID summary where one could be read (see
+    /// [`OutputIdentity`](crate::compositor::output_identity::OutputIdentity)).
+    /// Fixed when the head is built, like the `wl_output` name above -- a
+    /// hotplug that moves this head onto another connector (the single-output
+    /// fallback) does not rewrite it, and neither does the output registered
+    /// from it. Written only in `build_head`, read when the output is
+    /// created (`StartupHead`, hotplug's `Change::Added`).
+    pub(super) identity: OutputIdentity,
     /// How this head gets a rendered frame onto its CRTC. See
     /// [`Presenter`] for the two tiers.
     pub(super) presenter: Presenter,

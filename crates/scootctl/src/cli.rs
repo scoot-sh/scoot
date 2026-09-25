@@ -45,7 +45,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
@@ -79,7 +79,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
@@ -297,6 +297,12 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
         },
         "move-window-to-output" => Action::MoveFocusedWindowToOutput {
             output: number("an output id", args.next())?,
+        },
+        "focus-output-index" => Action::FocusOutputIndex {
+            index: number("an output index", args.next())?,
+        },
+        "move-window-to-output-index" => Action::MoveFocusedWindowToOutputIndex {
+            index: number("an output index", args.next())?,
         },
         "cycle-column-width" => Action::CycleColumnWidth,
         "set-column-width" => Action::SetColumnWidth {
@@ -740,6 +746,28 @@ mod tests {
         );
         assert!(parse_msg_args(&["action", "focus-output", "down"]).is_err());
         assert!(parse_msg_args(&["action", "move-window-to-output"]).is_err());
+    }
+
+    #[test]
+    fn the_positional_output_actions_take_an_output_index() {
+        // Positions, not ids: 0-based into the output list in creation
+        // order, so the second screen is 1 whatever id it carries.
+        assert_eq!(
+            parse_msg_args(&["action", "focus-output-index", "1"]),
+            Ok(Msg {
+                request: Request::Action(Action::FocusOutputIndex { index: 1 }),
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["action", "move-window-to-output-index", "1"]),
+            Ok(Msg {
+                request: Request::Action(Action::MoveFocusedWindowToOutputIndex { index: 1 }),
+                out: None,
+            })
+        );
+        assert!(parse_msg_args(&["action", "focus-output-index", "down"]).is_err());
+        assert!(parse_msg_args(&["action", "move-window-to-output-index"]).is_err());
     }
 
     #[test]

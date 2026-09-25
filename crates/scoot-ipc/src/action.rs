@@ -93,6 +93,26 @@ pub enum Action {
     FocusOutput {
         output: u64,
     },
+    /// Move keyboard focus to another output by its position in the output
+    /// list (0-based, creation order: the first screen, the second screen)
+    /// -- the wire half of `scoot_core::Action::FocusOutputIndex`. What the
+    /// default `Super+comma` / `Super+period` binds send, so they keep
+    /// reaching a monitor that was unplugged and plugged back in (which
+    /// comes back under a fresh id). Out of range does nothing, like an
+    /// unknown id. Additive like the id form: no `PROTOCOL_VERSION` bump.
+    FocusOutputIndex {
+        index: usize,
+    },
+    /// Carry the focused window to the *active* workspace of the output at
+    /// position `index` in the output list (0-based, creation order), and
+    /// follow it there -- the wire half of
+    /// `scoot_core::Action::MoveFocusedWindowToOutputIndex`, and what the
+    /// default `Super+Shift+comma` / `Super+Shift+period` binds send. Out of
+    /// range leaves the window where it is. Additive: no `PROTOCOL_VERSION`
+    /// bump.
+    MoveFocusedWindowToOutputIndex {
+        index: usize,
+    },
     /// Put the focused window into fullscreen, or take it out -- the wire
     /// half of `scoot_core::Action::ToggleFullscreen`, whose doc has the
     /// rules (it covers its output edge to edge, bars included, while its
