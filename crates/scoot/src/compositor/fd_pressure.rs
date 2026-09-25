@@ -7,10 +7,11 @@
 //! planes added to params objects not yet created, 8 binds, 16 capture
 //! frames, 64 IPC slots, and where explicit sync is offered 128 retained
 //! syncobj timelines and 64 outstanding acquire waits -- see
-//! `dmabuf/pending_planes.rs` and `drm_syncobj.rs`), while the fd table they
-//! all draw from is process-global (`RLIMIT_NOFILE` 1024 on the dev VM). Two
-//! connections inside every per-connection bound can hold more than the
-//! table with nothing tripped -- the residual
+//! `dmabuf/pending_planes.rs` and `drm_syncobj.rs`; and below scoot, 128
+//! received fds no request claimed, in the wayland-backend fork), while the
+//! fd table they all draw from is process-global (`RLIMIT_NOFILE` 1024 on
+//! the dev VM). Two connections inside every per-connection bound can hold
+//! more than the table with nothing tripped -- the residual
 //! `docs/backlog/resolved/wayland-connection-cap-done.md` fixed the kill
 //! half of and left here. This module is the shared ceiling:
 //! one observation of the table ([`table`]) and one predicate
@@ -89,18 +90,52 @@
 //! - Two such connections do exceed the table, which is what the arrival
 //!   guards are for: the second is past its 128-fd grace long before the
 //!   line, and its next arrival there is refused.
+//! - Adding what wayland-backend holds for that connection below scoot (next
+//!   section): its received-fd queue at the bound, 128 at rest, and 30 more
+//!   for a moment inside the read that takes it past (the next check
+//!   disconnects it). Steady state: 577 + 128 = 705 at rest, 735 inside that
+//!   read; with the GPU tier's baseline **748** and **778**, 148 and 118
+//!   below the line. The drain window is where it stops fitting: 876 + 128 =
+//!   1004 at rest, past the line (newcomers are shed for that moment) but
+//!   inside the 1024 table; and 1034 inside the read, past the table. What
+//!   that last instant would do is reasoned, not measured: the kernel
+//!   installs the read's fds only up to the table and closes the rest, so the
+//!   table is full for the remainder of that one read's requests, all from the
+//!   connection that is about to be disconnected (it is past the queue bound,
+//!   or its fd-carrying requests meet its full 512 and are refused). A request
+//!   of its that makes scoot send an fd to *another* client in that window (a
+//!   selection `send`) fails to duplicate the fd, and wayland-backend
+//!   disconnects that other client for it: the same harm any full table does,
+//!   and one the connection-count residual below already reaches with several
+//!   connections. Here it needs one connection at its 512 bound, in the
+//!   software-GLES drain window, with 128 parked, all in the same instant.
+//!   `tests.rs` derives the steady-state figures from the ledger's admission
+//!   rule and the two queue constants, which `tests/backend_queue.rs` pins
+//!   against the real backend.
 //!
-//! ## What is not counted
+//! ## Below scoot, in wayland-backend
 //!
-//! Below scoot, in wayland-backend, two per-connection queues hold fds that
-//! no scoot code sees:
+//! Two per-connection queues there hold fds that no scoot code sees, so no
+//! ledger counts them and the grace cannot attribute them:
 //!
-//! - **Received fds** (`docs/backlog/core/wayland-backend-fd-queue.md`):
-//!   fds a client sends alongside a request whose signature has no fd
-//!   argument stay queued for the connection's life. Review of PR #236
-//!   measured one client taking scoot from 18 to 999 fds this way on the
-//!   default headless tier, newcomers shed, and the client never killed.
-//!   Unbounded; that ticket's.
+//! - **Received fds**: every fd arrives attached to a request's bytes and is
+//!   queued until a request with an fd argument takes it, so fds a client
+//!   attaches to fd-less requests are never taken. Released wayland-backend
+//!   0.3.17 kept them for the connection's life; review of PR #236 measured
+//!   one idle client taking scoot from 18 to 999 fds that way, newcomers and
+//!   `scootctl` shed, the client never killed. scoot now builds against a
+//!   scoot-sh fork (`docs/forks.md`) that disconnects a client leaving more
+//!   than **128** unclaimed at a point where every complete request has been
+//!   parsed, with `wl_display.error` `invalid_method` ("too many file
+//!   descriptors queued"), closing them. One read adds at most 30 on top.
+//!   So a connection holds at most 128 of these at rest and 158 for a
+//!   moment, the figures above (`docs/backlog/resolved/wayland-backend-fd-queue-done.md`).
+//!   The check runs before each read, so fds whose requests are still in
+//!   flight are counted: a libwayland client sends each fd with its request
+//!   and never comes near it, but a Rust `wayland-client` client sends every
+//!   fd past the last 28 of a flush ahead of the requests, and one flush of
+//!   more than 140 fd-carrying requests is disconnected (pinned both ways in
+//!   `tests/backend_queue.rs`).
 //! - **Outgoing fds**: an event carrying an fd (a keymap, a dma-buf format
 //!   table, a selection `send`) is written into the client's outgoing buffer
 //!   with a duplicate of the fd, which closes once the buffer is flushed to
@@ -109,10 +144,10 @@
 //!   caps the buffer at 4096 bytes and kills the client past it). The
 //!   smallest such event is 12-16 bytes, so that is at most a few hundred
 //!   fds, and only for a client that has first filled its socket's kernel
-//!   buffer. Reasoned from wayland-backend 0.3.17's source, not measured.
-//!   On top of the 620 above that could take one non-reading connection on
-//!   the dev VM's GPU tier to the line, but only transiently: it is
-//!   disconnected once its buffer fills.
+//!   buffer. Reasoned from wayland-backend 0.3.17's source (unchanged in the
+//!   fork), not measured. On top of the 620 above that could take one
+//!   non-reading connection on the dev VM's GPU tier to the line, but only
+//!   transiently: it is disconnected once its buffer fills.
 //!
 //! [`RESERVE_FDS`] is 128: shed/refuse once fewer than 128 fds stand free
 //! (used past 896 of 1024). That is ~6x above the reasoned login storm. What
@@ -156,6 +191,14 @@
 //! such connections all held and a newcomer shed at 584 fds under a 700-fd
 //! table, with nobody killed. The grace attributes pressure to *heavy*
 //! clients; many light ones are the connection-count problem.
+//!
+//! The wayland-backend queue bound makes that cheaper still, while making
+//! the single-connection case impossible: fds parked there need no object at
+//! all, and the grace never sees them, so each idle connection can hold 129
+//! (128 parked and its socket). Seven reach the line on the default tier
+//! (7 x 129 + 14 = 917) and eight pass the 1024 table (1046). Before the
+//! bound, one connection could do either. That residual, and what it costs
+//! `scootctl`, is `docs/backlog/core/pressure-many-light-connections.md`.
 //!
 //! ## Observation cost and disciplines
 //!

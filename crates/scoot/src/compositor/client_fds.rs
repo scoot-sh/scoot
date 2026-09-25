@@ -133,7 +133,9 @@
 //! most 256 copies at two fds a plane, 876 in all, still under the line --
 //! and in practice short: review of PR #239 saw all 240 copies of 80 released
 //! buffers close within 500 ms on both GLES tiers. What scoot does not count
-//! is in `fd_pressure.rs`.
+//! is in `fd_pressure.rs`: chiefly the up to 128 received fds wayland-backend
+//! can hold for the connection (748 with everything above, 1004 in the drain
+//! window, past the line for that moment).
 //!
 //! ## When the bounds are checked
 //!
@@ -161,16 +163,19 @@
 //! ## A known over-count
 //!
 //! wayland-backend keeps fds that a client sends alongside a request with no
-//! fd argument, for the connection's life
-//! (`docs/backlog/core/wayland-backend-fd-queue.md`). A syncobj fd parked
-//! there on a number some other client's dead timeline record names would
-//! make that record read live, and so inflate the *other* client's count.
-//! Pool and plane records are immune (their check is the file's identity,
-//! which a different file does not have); timeline records are not, since
-//! every syncobj shares one inode. Reasoned, not demonstrated. It can only
-//! over-count, never under-count, so it opens no hole in the bound; its harm
-//! is that it could push an innocent client toward a refusal, which is part
-//! of that ticket.
+//! fd argument, until the client leaves or parks more than 128 of them (the
+//! bound the scoot-sh wayland-backend fork adds, `docs/forks.md`; released
+//! 0.3.17 kept them for the connection's life). A syncobj fd parked there on
+//! a number some other client's dead timeline record names would make that
+//! record read live, and so inflate the *other* client's count. Pool and
+//! plane records are immune (their check is the file's identity, which a
+//! different file does not have); timeline records are not, since every
+//! syncobj shares one inode. Reasoned, not demonstrated. It can only
+//! over-count, never under-count, so it opens no hole in the bound. Its harm
+//! is that it could push an innocent client toward a refusal; the queue bound
+//! caps it at 128 parked fds per connection (158 for a moment inside a read)
+//! rather than removing it, and the parker must also hold those numbers
+//! until the victim's next sweep.
 
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
