@@ -523,6 +523,9 @@ impl Tty {
         // connector is gone, and the CRTC is free for a head built below.
         for index in remove.into_iter().rev() {
             let head = self.heads.remove(index);
+            if head.presenter.flip_in_flight() {
+                self.stale_vblanks.push(head.presenter.crtc());
+            }
             tracing::info!(connector = %head.name, "drm: this connector went away");
             if let Some(id) = head.output {
                 changes.push(Change::Removed(id));

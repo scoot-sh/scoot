@@ -11,7 +11,7 @@
 
 use scoot_core::OutputId;
 
-use super::per_output::{Ack, BAR_BGRA, CANVAS, Removals, Step, bar_on, draw, session};
+use super::per_output::{Ack, BAR_BGRA, CANVAS, Removals, Seen, Step, bar_on, draw, session};
 use crate::compositor::headless;
 use crate::compositor::test_support::contains;
 
@@ -199,4 +199,46 @@ fn an_output_removed_then_added_again_is_a_new_output() {
     let report = removals(&mut harness);
     assert_eq!(report.outputs_removed, vec![1]);
     assert_eq!(report.outputs_announced, 3, "a new global was announced");
+}
+
+/// A window on a removed output is told `wl_surface.leave` for it *before*
+/// the output's `wl_output` global is withdrawn: after the `global_remove` a
+/// client can no longer resolve the output a leave names (foot logged
+/// "unmapped from unknown output" on the Asahi replug before this).
+/// Fail-first: without the immediate `Space` refresh the leave arrives at the
+/// next frame, after the `global_remove`.
+#[test]
+fn a_windows_leave_precedes_the_outputs_global_remove() {
+    let mut harness = session(2);
+    harness.run(Step::Window);
+    harness
+        .state
+        .act(scoot_core::Action::MoveFocusedWindowToOutput(OutputId(2)));
+    harness.state.render();
+    harness.settle();
+    let Ack::Order(before) = harness.run(Step::Order) else {
+        panic!("expected the event log");
+    };
+    assert!(
+        before.contains(&Seen::Enter(1)),
+        "the setup put the window on the second output: {before:?}"
+    );
+
+    assert!(harness.state.remove_output(OutputId(2)));
+    harness.settle();
+    let Ack::Order(after) = harness.run(Step::Order) else {
+        panic!("expected the event log");
+    };
+    let leave = after
+        .iter()
+        .rposition(|seen| *seen == Seen::Leave(1))
+        .expect("the window is told it left the removed output");
+    let removed = after
+        .iter()
+        .position(|seen| *seen == Seen::GlobalRemove(1))
+        .expect("the removed output's global is withdrawn");
+    assert!(
+        leave < removed,
+        "leave must precede global_remove: {after:?}"
+    );
 }

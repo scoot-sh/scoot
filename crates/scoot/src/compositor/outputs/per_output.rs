@@ -30,6 +30,7 @@ use wayland_protocols::ext::image_copy_capture::v1::client::{
     ext_image_copy_capture_frame_v1, ext_image_copy_capture_manager_v1,
     ext_image_copy_capture_session_v1,
 };
+use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use wayland_protocols_wlr::gamma_control::v1::client::{
     zwlr_gamma_control_manager_v1, zwlr_gamma_control_v1,
 };
@@ -84,6 +85,19 @@ pub(super) enum Step {
     /// Bind the `wl_output` global at registry index `output` again -- the
     /// shape of a bind that was already in flight when the output went away.
     Rebind { output: usize },
+    /// Map an xdg toplevel (it opens on the output under the pointer).
+    Window,
+    /// Report the ordered log of `wl_surface.enter`/`leave` and `wl_output`
+    /// `global_remove` events this client has seen.
+    Order,
+}
+
+/// One entry of [`Step::Order`]'s log, naming outputs by registry index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Seen {
+    Enter(usize),
+    Leave(usize),
+    GlobalRemove(usize),
 }
 
 /// What the client answers a [`Step`] with.
@@ -96,6 +110,7 @@ pub(super) enum Ack {
     Held(usize),
     GammaState { size: Option<u32>, failed: bool },
     Removals(Removals),
+    Order(Vec<Seen>),
 }
 
 /// What [`Step::Removals`] reports.
@@ -145,6 +160,11 @@ struct TestClient {
     outputs_removed: Vec<usize>,
     /// `closed` per layer surface, in creation order.
     layer_closed: Vec<bool>,
+    /// Surface enter/leave and output global_remove, in arrival order.
+    order: Vec<Seen>,
+    wm_base: Option<xdg_wm_base::XdgWmBase>,
+    /// Whether the toplevel's first configure arrived.
+    window_configured: bool,
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     sources:
         Option<ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1>,
@@ -185,6 +205,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                     .position(|(known, _)| *known == name)
                 {
                     client.outputs_removed.push(index);
+                    client.order.push(Seen::GlobalRemove(index));
                 }
                 return;
             }
@@ -195,6 +216,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 client.compositor = Some(registry.bind(name, version.min(6), qh, ()));
             }
             "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
+            "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(1), qh, ())),
             "wl_output" => {
                 client.output_names.push((name, version.min(4)));
                 client
@@ -350,7 +372,65 @@ impl Dispatch<zwlr_gamma_control_v1::ZwlrGammaControlV1, ControlIndex> for TestC
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
-wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
+impl Dispatch<wl_surface::WlSurface, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_surface::WlSurface,
+        event: wl_surface::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let (output, entered) = match event {
+            wl_surface::Event::Enter { output } => (output, true),
+            wl_surface::Event::Leave { output } => (output, false),
+            _ => return,
+        };
+        let index = client
+            .outputs
+            .iter()
+            .position(|known| *known == output)
+            .unwrap_or(usize::MAX);
+        client.order.push(if entered {
+            Seen::Enter(index)
+        } else {
+            Seen::Leave(index)
+        });
+    }
+}
+
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for TestClient {
+    fn event(
+        _: &mut Self,
+        base: &xdg_wm_base::XdgWmBase,
+        event: xdg_wm_base::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            base.pong(serial);
+        }
+    }
+}
+
+impl Dispatch<xdg_surface::XdgSurface, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        surface: &xdg_surface::XdgSurface,
+        event: xdg_surface::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            surface.ack_configure(serial);
+            client.window_configured = true;
+        }
+    }
+}
+
+wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel::XdgToplevel);
 wayland_client::delegate_noop!(TestClient: ignore wl_output::WlOutput);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
@@ -414,6 +494,11 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let gamma_manager = client.gamma_manager.clone().ok_or("no gamma manager")?;
 
     let mut bars: Vec<KeptBar> = Vec::new();
+    let mut windows: Vec<(
+        wl_surface::WlSurface,
+        xdg_surface::XdgSurface,
+        xdg_toplevel::XdgToplevel,
+    )> = Vec::new();
     let mut frames: Vec<wl_callback::WlCallback> = Vec::new();
     let mut gammas: Vec<KeptGamma> = Vec::new();
     let mut session: Option<ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1> = None;
@@ -582,6 +667,31 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 rebound.release();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
+            }
+            Step::Window => {
+                let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+                let toplevel = xdg.get_toplevel(&qh, ());
+                surface.commit();
+                client.window_configured = false;
+                wait_for(&mut queue, &mut client, "a toplevel configure", |client| {
+                    client.window_configured.then_some(())
+                })?;
+                let (file, buffer, _) = solid_buffer(&shm, &qh, 64, 64, BAR_BGRA);
+                drop(file);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, 64, 64);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                windows.push((surface, xdg, toplevel));
+                Ack::Done
+            }
+            Step::Order => {
+                for _ in 0..3 {
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                }
+                Ack::Order(client.order.clone())
             }
             Step::GammaState { held } => {
                 for _ in 0..3 {

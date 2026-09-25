@@ -61,16 +61,24 @@ fn put_back(fixture: &mut Fixture, taken: Vec<(OutputId, Backend)>) {
 fn one_screens_vblank_does_not_confirm_a_two_screen_lock() {
     let (mut fixture, taken) = pending_two_output_lock();
     let now = Instant::now();
-    let _ = fixture.state.session_lock.await_vblank(FIRST, Some(0), now);
+    // Head 2 recorded first, so a completion matched by number alone (the
+    // review's mutation M2) spends head 2's entry for head 1's vblank --
+    // which the outstanding-flip check below catches.
     let _ = fixture
         .state
         .session_lock
         .await_vblank(SECOND, Some(0), now);
+    let _ = fixture.state.session_lock.await_vblank(FIRST, Some(0), now);
 
     fixture.state.note_flip_completed(FIRST, Some(0));
     assert!(
         fixture.state.session_lock.awaiting_blank(),
         "head 2's blanked frame is still in flight: no `locked` yet"
+    );
+    assert_eq!(
+        fixture.state.session_lock.blank_flips,
+        vec![(SECOND, 0)],
+        "the flip still owed is head 2's own"
     );
 
     fixture.state.note_flip_completed(SECOND, Some(0));
@@ -271,11 +279,109 @@ fn the_fallback_does_not_confirm_over_a_placeholder_screen() {
     });
     let t0 = Instant::now();
     let _ = fixture.state.session_lock.await_vblank(FIRST, Some(0), t0);
+    // Head 2 drew its backdrop blank before its lock surface was admitted
+    // (the setup above admits it, undrawn, afterwards in real time order):
+    // drawn, but its screen is now a placeholder for the locker's surface.
+    let _ = fixture.state.session_lock.await_vblank(SECOND, None, t0);
     fixture.state.note_blank_timeout(t0 + LOCK_VBLANK_TIMEOUT);
     assert!(
         fixture.state.session_lock.awaiting_blank(),
         "head 2's admitted surface has not drawn: no `locked` over its placeholder"
     );
     assert_eq!(fixture.state.session_lock.confirmed, vec![FIRST]);
+    put_back(&mut fixture, taken);
+}
+
+/// Review probe (i), kept as a pin: a screen already recorded blanked that
+/// keeps flipping (cursor motion, an animated locker) must not push the
+/// fallback out while a second screen's completion never arrives -- and its
+/// frames must not each ask for another timer. Fail-first: when every flip
+/// re-armed the shared deadline, `locked` was still unsent after 9.6 s.
+#[test]
+fn a_busy_blanked_screen_cannot_hold_the_fallback_back() {
+    let (mut fixture, taken) = pending_two_output_lock();
+    let t0 = Instant::now();
+    assert!(fixture.state.session_lock.await_vblank(FIRST, Some(0), t0));
+    let _ = fixture.state.session_lock.await_vblank(SECOND, Some(0), t0);
+    fixture.state.note_flip_completed(FIRST, Some(0));
+    let mut t = t0;
+    let mut timers = 0;
+    for n in 1..=600u64 {
+        t += Duration::from_millis(16);
+        if fixture.state.session_lock.await_vblank(FIRST, Some(n), t) {
+            timers += 1;
+        }
+        fixture.state.note_flip_completed(FIRST, Some(n));
+        fixture.state.note_blank_timeout(t);
+        if !fixture.state.session_lock.awaiting_blank() {
+            break;
+        }
+    }
+    assert!(
+        !fixture.state.session_lock.awaiting_blank(),
+        "the fallback confirms within its bound whatever head 1 does"
+    );
+    assert!(
+        t - t0 <= LOCK_VBLANK_TIMEOUT + Duration::from_millis(16),
+        "confirmed at {:?}, past the bound",
+        t - t0
+    );
+    assert_eq!(timers, 0, "a busy screen asks for no further timers");
+    put_back(&mut fixture, taken);
+}
+
+/// Review probe (ii), kept as a pin: the fallback records only screens that
+/// drew their blank. Head 2's render never happened (a failed bind or draw),
+/// so its screen still shows the pre-lock desktop; `locked` must not go out
+/// over it. Fail-first: the fallback used to record every output.
+#[test]
+fn the_fallback_never_records_a_screen_that_did_not_draw() {
+    let (mut fixture, taken) = pending_two_output_lock();
+    let t0 = Instant::now();
+    let _ = fixture.state.session_lock.await_vblank(FIRST, Some(0), t0);
+    fixture.state.note_flip_completed(FIRST, Some(0));
+    fixture.state.note_blank_timeout(t0 + LOCK_VBLANK_TIMEOUT);
+    assert!(
+        fixture.state.session_lock.awaiting_blank(),
+        "`locked` must not go out over head 2's undrawn screen"
+    );
+    assert_eq!(fixture.state.session_lock.confirmed, vec![FIRST]);
+
+    // Head 2 draws later: that frame arms a fresh bound of its own.
+    let t1 = t0 + Duration::from_secs(5);
+    assert!(
+        fixture.state.session_lock.await_vblank(SECOND, Some(0), t1),
+        "the late blank arms a fresh wait"
+    );
+    fixture.state.note_blank_timeout(t1 + LOCK_VBLANK_TIMEOUT);
+    assert!(!fixture.state.session_lock.awaiting_blank());
+    put_back(&mut fixture, taken);
+}
+
+/// The review's mutation M2 (match the number, ignore the output, still
+/// record per output) must turn this red: head 2's flip 0 is recorded
+/// *first*, so a completion from head 1 matched by number alone would spend
+/// head 2's entry. It has to spend only its own.
+#[test]
+fn a_completion_spends_only_its_own_screens_flip() {
+    let (mut fixture, taken) = pending_two_output_lock();
+    let now = Instant::now();
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(SECOND, Some(0), now);
+    let _ = fixture.state.session_lock.await_vblank(FIRST, Some(0), now);
+
+    fixture.state.note_flip_completed(FIRST, Some(0));
+    assert_eq!(
+        fixture.state.session_lock.blank_flips,
+        vec![(SECOND, 0)],
+        "head 2's outstanding flip is untouched by head 1's completion"
+    );
+    fixture.state.note_flip_completed(SECOND, Some(0));
+    assert!(
+        !fixture.state.session_lock.awaiting_blank(),
+        "head 2's own completion is what completes the set"
+    );
     put_back(&mut fixture, taken);
 }

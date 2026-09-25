@@ -1267,7 +1267,8 @@ impl State {
     /// In order, each step before the output leaves `State::outputs` so no
     /// frame, capture or event in between can resolve it:
     ///
-    /// - layer surfaces on it are unmapped and sent `closed` (the
+    /// - layer surfaces on it are unmapped (which sends their
+    ///   `wl_surface.leave`, popups included) and sent `closed` (the
     ///   protocol's answer for an output going away);
     /// - capture sessions on it are stopped, and a parked frame failed;
     /// - its gamma control is failed and its size forgotten;
@@ -1278,8 +1279,11 @@ impl State {
     /// - on the scanout tier, a surface its feedback was steering is
     ///   reverted to the default tranche;
     ///
-    /// then the output itself goes: out of the `Space` (clients get
-    /// `wl_surface.leave`), its render target dropped, its `wl_output` global
+    /// then the output itself goes: out of the `Space`, whose immediate
+    /// refresh sends each window's `wl_surface.leave` *before* the global
+    /// is withdrawn (a leave naming an output the client has already seen
+    /// removed is unresolvable to it), its render target dropped, its
+    /// `wl_output` global
     /// retired (withdrawn now, destroyed later -- see [`retire_global`]), and
     /// `OutputRemoved` filed with the core, which hands its workspaces and
     /// windows to the focused output. The remaining outputs are repacked side
@@ -1328,6 +1332,17 @@ impl State {
         self.end_floating_grab();
 
         self.space.unmap_output(&output);
+        // `unmap_output` sends nothing: the `wl_surface.leave` for every
+        // window (and its popups) on this output goes out at the `Space`'s
+        // next refresh, which would otherwise be the render tail -- *after*
+        // the `global_remove` below, so a client would be told its surface
+        // left an output it no longer knows (foot logs "unmapped from
+        // unknown output"). Refreshed here, so the leaves are queued before
+        // the global is withdrawn. Layer surfaces were already told, by
+        // `unmap_layer` above. Windows are not placed on the remaining
+        // outputs until the `apply()` at the end, so this sends leaves only;
+        // the matching enters come with that layout.
+        self.space.refresh();
         self.backends.remove(&id);
         self.outputs.remove(id);
         retire_global(self, &output);

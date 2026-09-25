@@ -229,6 +229,23 @@ impl Presenter {
         }
     }
 
+    /// Whether a completion event is certainly still owed for a flip this
+    /// presenter issued. Dumb tier: its single in-flight flip. Scanout tier:
+    /// `false` -- `DrmCompositor` tracks its queue privately, so this cannot
+    /// be answered with certainty there, and answering `true` when unsure
+    /// could let the guard eat a live head's real vblank and freeze it. What
+    /// that leaves on the scanout tier is the residual `scanout.rs`'s module
+    /// doc already accepts: a stale completion reaching a new compositor
+    /// with a frame pending settles that frame up to one vblank early (and
+    /// one with nothing pending answers `None`, harmlessly).
+    pub(super) fn flip_in_flight(&self) -> bool {
+        match self {
+            Self::Dumb(dumb) => dumb.flip_in_flight(),
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(_) => false,
+        }
+    }
+
     /// The renderer this tier composites with: GLES on the scanout tier,
     /// pixman on the dumb one.
     pub(super) fn renderer(&self) -> crate::cli::RendererKind {

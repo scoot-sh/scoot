@@ -127,6 +127,23 @@ pub struct Tty {
     /// device table by (it `stat`s every path `all_gpus` returns), so the
     /// two really are comparable and not merely both called "device id".
     device_id: libc::dev_t,
+    /// CRTCs whose previous head was dropped by a hotplug with a flip still
+    /// in flight, one entry per completion still owed to that dead head.
+    /// Written only in `hotplug.rs`'s head removal (and only when the
+    /// presenter is certain an event is owed -- see
+    /// `Presenter::flip_in_flight`); consumed by [`Tty::on_vblank`], which
+    /// drops the first `VBlank` on such a CRTC instead of settling whichever
+    /// head now drives it. Without this, one uevent that removes a head and
+    /// builds another on the same CRTC lets the old flip's late event settle
+    /// the new head's first commit early -- an `EBUSY`-refused flip at best,
+    /// and a session-lock wait confirmed by a flip that never carried the
+    /// blank at worst. Surface `Drop`'s blocking commit means the owed event
+    /// is already queued on the DRM fd by the time the new head exists, so
+    /// it is the next one read for that CRTC. Cleared on a device-wide
+    /// `DrmEvent::Error` and on reactivation, where no completion can be
+    /// relied on any more: leaving an entry to eat a real vblank would
+    /// freeze that screen, the worse of the two mistakes.
+    stale_vblanks: Vec<crtc::Handle>,
     /// `--mode WxH`, exactly as the user gave it, kept so a hotplug can
     /// re-run the same choice startup made rather than silently demoting
     /// the flag to a startup-only preference. `None` means each connector's
@@ -314,6 +331,7 @@ pub fn init(
         session,
         drm,
         heads,
+        stale_vblanks: Vec::new(),
         device_id,
         requested_mode: mode,
         nothing_connected: false,
@@ -1207,6 +1225,12 @@ impl Tty {
     /// the session-lock vblank wait matches on for *that* output (see
     /// `session_lock.rs`): numbers are per head, so only the pair confirms.
     fn on_vblank(&mut self, crtc: crtc::Handle) -> Option<(OutputId, bool, Option<u64>)> {
+        if let Some(stale) = self.stale_vblanks.iter().position(|&dead| dead == crtc) {
+            // The completion a hotplug-dropped head was still owed: not the
+            // current head's (see `stale_vblanks`).
+            self.stale_vblanks.swap_remove(stale);
+            return None;
+        }
         let head = self
             .heads
             .iter_mut()
@@ -1266,6 +1290,9 @@ impl Tty {
         for head in &mut self.heads {
             head.presenter.reactivate();
         }
+        // Every head's scanout state was just thrown away, and with it any
+        // certainty about which completions are still owed.
+        self.stale_vblanks.clear();
         self.active = drm_active;
         drm_active
     }
@@ -1470,6 +1497,10 @@ fn drm_event(event: DrmEvent, _: &mut Option<DrmEventMetadata>, state: &mut Stat
                 let (again, _) = head.presenter.settle_flip();
                 needs_render |= again;
             }
+            // An untrackable completion may have been one a dropped head was
+            // owed: stop waiting for those, rather than let an entry eat a
+            // live head's next real vblank.
+            tty.stale_vblanks.clear();
             if needs_render {
                 state.request_render();
             }
