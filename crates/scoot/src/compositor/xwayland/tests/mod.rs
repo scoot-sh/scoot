@@ -599,6 +599,8 @@ fn a_window_manager_that_cannot_attach_withdraws_the_display() {
 }
 
 #[cfg(feature = "xwayland")]
+mod bench;
+#[cfg(feature = "xwayland")]
 mod focus;
 #[cfg(feature = "xwayland")]
 mod live;
