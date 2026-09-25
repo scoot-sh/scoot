@@ -3,3 +3,6 @@ result
 result-*
 .direnv
 HANDOFF.md
+
+# Local-only machine access / scratch notes (e.g. ASAHI.local.md)
+*.local.md
