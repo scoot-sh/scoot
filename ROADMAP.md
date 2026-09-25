@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[Floating windows, PR 2 of 2: move and resize](docs/backlog/resolved/floating-windows-done.md)**
-  (2026-09-25) — `[floating] modifier` (Super) with the left button moves a
+  (2026-09-25, PR #243) — `[floating] modifier` (Super) with the left button moves a
   floating window, with the right resizes it from the nearest edge or
   corner; a client's own `xdg_toplevel.move`/`resize` (GTK headerbars, CSD
   borders) is honoured on its still-held press (serial = the live implicit
