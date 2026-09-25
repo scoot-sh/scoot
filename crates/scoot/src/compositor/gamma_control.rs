@@ -165,6 +165,16 @@ impl GammaControlState {
         }
     }
 
+    /// Forgets output `id` entirely: its size record, and its live control,
+    /// which is told it failed -- the protocol's answer for an output that
+    /// went away. Called when a `--tty` hotplug removes the output.
+    pub(super) fn forget_output(&mut self, id: OutputId) {
+        self.sizes.retain(|(known, _)| *known != id);
+        if let Some(current) = self.current.remove(&id) {
+            current.failed();
+        }
+    }
+
     /// Which output's live control `control` is, if any.
     ///
     /// Compared by object identity: a superseded (already `failed`) control

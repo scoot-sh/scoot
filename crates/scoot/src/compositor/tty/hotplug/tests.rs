@@ -1,7 +1,7 @@
 //! What a fresh probe of the DRM device *means*, decided without one.
 //!
 //! [`super::plan`] is the only part of the *decision* that can be exercised
-//! off real hardware: everything around it -- `gpu::reselect`,
+//! off real hardware: everything around it -- `gpu::connector_mode`,
 //! `DrmSurface::use_mode`/`set_connectors`, `BufferPool::new` -- needs a
 //! live DRM file descriptor, and `drm`'s two device traits are blanket
 //! implementations over `AsFd` with no seam to fake (the same reason

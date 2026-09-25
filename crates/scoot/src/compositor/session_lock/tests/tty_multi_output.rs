@@ -156,6 +156,64 @@ fn the_fallback_confirms_both_screens_when_no_vblank_arrives() {
     put_back(&mut fixture, taken);
 }
 
+/// An output that went away is forgotten from the wait, so it cannot
+/// complete the set for a screen that never blanked: head 1 blanked and was
+/// then unplugged, leaving one output -- head 2 -- still unconfirmed. With
+/// its stale record kept, `confirmed.len() >= 1` would have sent `locked`
+/// over head 2's live desktop.
+#[test]
+fn a_removed_confirmed_screen_does_not_confirm_the_remaining_one() {
+    let (mut fixture, taken) = pending_two_output_lock();
+    let now = Instant::now();
+    let _ = fixture.state.session_lock.await_vblank(FIRST, Some(0), now);
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(SECOND, Some(0), now);
+    fixture.state.note_flip_completed(FIRST, Some(0));
+    assert_eq!(fixture.state.session_lock.confirmed, vec![FIRST]);
+
+    assert!(
+        !fixture.state.session_lock.forget_output(FIRST, 1),
+        "head 2 has not blanked: forgetting head 1 must not complete the set"
+    );
+    assert!(fixture.state.session_lock.awaiting_blank());
+    // One output is left, so one record completes the set -- head 2's own.
+    // (Driven at the `SessionLock` level: this harness keeps both outputs,
+    // so `State::note_flip_completed` would still count two.)
+    assert!(
+        fixture
+            .state
+            .session_lock
+            .confirm_on_vblank(SECOND, Some(0), false, 1),
+        "head 2's own blank is what confirms the one-screen lock"
+    );
+    put_back(&mut fixture, taken);
+}
+
+/// The other half: the screen that went away was the only one still
+/// outstanding, so its removal completes the set and the caller may confirm.
+#[test]
+fn removing_the_only_unconfirmed_screen_completes_the_set() {
+    let (mut fixture, taken) = pending_two_output_lock();
+    let now = Instant::now();
+    let _ = fixture.state.session_lock.await_vblank(FIRST, Some(0), now);
+    let _ = fixture
+        .state
+        .session_lock
+        .await_vblank(SECOND, Some(0), now);
+    fixture.state.note_flip_completed(FIRST, Some(0));
+    assert!(
+        fixture.state.session_lock.forget_output(SECOND, 1),
+        "head 1 is blanked and is now the only screen"
+    );
+    assert!(
+        fixture.state.session_lock.blank_flips.is_empty(),
+        "the removed screen's outstanding flip is forgotten with it"
+    );
+    put_back(&mut fixture, taken);
+}
+
 /// Phase C's placeholder rule holds on the `--tty` path too: a screen whose
 /// admitted lock surface has not drawn yet is not recorded by its vblank --
 /// the flip carried the backdrop, not the locker's blank -- and the frame

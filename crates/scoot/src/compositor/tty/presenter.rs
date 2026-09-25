@@ -229,6 +229,16 @@ impl Presenter {
         }
     }
 
+    /// The renderer this tier composites with: GLES on the scanout tier,
+    /// pixman on the dumb one.
+    pub(super) fn renderer(&self) -> crate::cli::RendererKind {
+        match self {
+            Self::Dumb(_) => crate::cli::RendererKind::Pixman,
+            #[cfg(feature = "gpu-scanout")]
+            Self::Gpu(_) => crate::cli::RendererKind::Gles,
+        }
+    }
+
     /// Which tier this is, for the one startup log line that says so. A
     /// string rather than a bool because it is read by a person grepping a
     /// log, and "gpu"/"dumb" answers the question `scanout=false` only hints

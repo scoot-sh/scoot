@@ -483,6 +483,45 @@ impl State {
         ext.current = current;
     }
 
+    /// Takes output `id`'s group away from every manager, for an output that
+    /// is going away (a `--tty` connector unplugged).
+    ///
+    /// In the order `ext-workspace-v1` requires: each workspace leaves the
+    /// group and is removed ("the compositor must remove all workspaces
+    /// belonging to a workspace group via a workspace_leave event before
+    /// removing the workspace group"), then the group is removed, then one
+    /// `done` closes the batch per manager that heard anything. The
+    /// workspaces themselves are not lost -- the core hands them to the
+    /// output that adopts them, and the next [`State::refresh_workspaces`]
+    /// announces them there as new handles in that output's group, the only
+    /// way a workspace can change groups in this protocol. `published` drops
+    /// the output too, so that refresh diffs against what clients now hold.
+    pub(super) fn retire_workspace_group(&mut self, id: OutputId) {
+        let ext = &mut self.ext_workspace;
+        for manager in &mut ext.managers {
+            let Some(position) = manager.groups.iter().position(|group| group.output == id) else {
+                continue;
+            };
+            let group = manager.groups.remove(position);
+            let object = group.group.as_ref().and_then(|weak| weak.upgrade().ok());
+            for handle in group
+                .workspaces
+                .iter()
+                .filter_map(|weak| weak.upgrade().ok())
+            {
+                if let Some(object) = &object {
+                    object.workspace_leave(&handle);
+                }
+                handle.removed();
+            }
+            if let Some(object) = &object {
+                object.removed();
+            }
+            manager.manager.done();
+        }
+        ext.published.retain(|(output, _)| *output != id);
+    }
+
     /// Applies whatever clients staged before this `commit` -- every group
     /// with a pending `activate`, in creation order.
     ///
@@ -517,10 +556,11 @@ impl State {
     /// Applies one staged `activate` on one output's group.
     fn commit_one_workspace_request(&mut self, output: OutputId, index: usize) {
         let Some(current) = self.world.workspaces(output) else {
-            // The output is gone: nothing to switch to. Unreachable --
-            // outputs are never removed -- and ignoring is the safe answer
-            // either way: a refused request must not disturb anything, so
-            // the session comes back as the user left it.
+            // The output is gone (a `--tty` monitor unplugged between the
+            // client's `activate` and its `commit`): nothing to switch to,
+            // and ignoring is the safe answer -- a refused request must not
+            // disturb anything, so the session comes back as the user left
+            // it.
             return;
         };
         if index >= current.count {

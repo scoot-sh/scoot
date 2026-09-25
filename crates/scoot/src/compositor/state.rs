@@ -322,7 +322,7 @@ pub struct State {
     /// One render target per output, keyed by the id the core knows it by.
     ///
     /// A `HashMap` rather than a second `Vec` beside [`Outputs`](super::outputs::Outputs):
-    /// outputs are added once and never removed, looked up by id on every
+    /// outputs are added at startup or by a hotplug and rarely removed, looked up by id on every
     /// capture path, and number at most eight -- so the map stays tiny and
     /// the per-frame render loop walks [`Outputs`](super::outputs::Outputs)
     /// by index (creation order, which is what makes the primary first)

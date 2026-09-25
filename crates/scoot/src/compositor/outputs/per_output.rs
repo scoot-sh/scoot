@@ -41,14 +41,14 @@ use crate::compositor::test_support::{Harness, contains, pixel, wait_for};
 
 /// The framebuffer each output renders into. Square and small: every
 /// assertion below is a pixel coordinate.
-const CANVAS: i32 = 200;
+pub(super) const CANVAS: i32 = 200;
 /// A bar's height: full width, fixed rows at the top.
 const BAR_HEIGHT: i32 = 24;
 
 /// A bar's colour, as the BGRA bytes a pixman `Argb8888` buffer holds them
 /// in -- distinct in every channel from the default background, so no
 /// assertion can pass by accident against an undrawn screen.
-const BAR_BGRA: [u8; 4] = [0xE0, 0x20, 0x20, 0xFF];
+pub(super) const BAR_BGRA: [u8; 4] = [0xE0, 0x20, 0x20, 0xFF];
 
 /// What a capture buffer is pre-filled with: any pixel still holding this
 /// after a capture is one the compositor never wrote.
@@ -56,7 +56,7 @@ const SENTINEL: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
 
 /// One instruction for the client thread. `output` is an index into the
 /// `wl_output` globals in registry order -- 0 is the primary output.
-enum Step {
+pub(super) enum Step {
     /// Map a solid-colour bar on `outputs[output]`, returning its index.
     BarOn { output: usize, color: [u8; 4] },
     /// Request a frame callback on bar `bar`.
@@ -77,10 +77,17 @@ enum Step {
     GammaHold { output: usize },
     /// Report a held control's `(gamma_size, failed)` as last seen.
     GammaState { held: usize },
+    /// Report what the client has been told about outputs and the objects
+    /// on them: which layer surfaces were `closed`, whether the live capture
+    /// session was `stopped`, which `wl_output` globals were removed.
+    Removals,
+    /// Bind the `wl_output` global at registry index `output` again -- the
+    /// shape of a bind that was already in flight when the output went away.
+    Rebind { output: usize },
 }
 
 /// What the client answers a [`Step`] with.
-enum Ack {
+pub(super) enum Ack {
     Done,
     Bar(usize),
     Frames(Vec<u32>),
@@ -88,11 +95,26 @@ enum Ack {
     Gamma { size: Option<u32>, failed: bool },
     Held(usize),
     GammaState { size: Option<u32>, failed: bool },
+    Removals(Removals),
+}
+
+/// What [`Step::Removals`] reports.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct Removals {
+    /// `closed` per layer surface, in creation order.
+    pub(super) bars_closed: Vec<bool>,
+    /// Whether the live capture session saw `stopped`.
+    pub(super) capture_stopped: bool,
+    /// The registry indices (0 = the primary) of every `wl_output` global
+    /// whose `global_remove` arrived.
+    pub(super) outputs_removed: Vec<usize>,
+    /// How many `wl_output` globals the registry has announced in all.
+    pub(super) outputs_announced: usize,
 }
 
 /// Everything one [`Step::CaptureOn`] learned about its output.
 #[derive(Clone, Debug, Default)]
-struct Capture {
+pub(super) struct Capture {
     width: u32,
     height: u32,
     formats: Vec<u32>,
@@ -117,6 +139,12 @@ struct TestClient {
     compositor: Option<wl_compositor::WlCompositor>,
     shm: Option<wl_shm::WlShm>,
     outputs: Vec<wl_output::WlOutput>,
+    /// The registry name of each `wl_output` global, index-aligned with
+    /// `outputs`, and those whose `global_remove` arrived.
+    output_names: Vec<(u32, u32)>,
+    outputs_removed: Vec<usize>,
+    /// `closed` per layer surface, in creation order.
+    layer_closed: Vec<bool>,
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     sources:
         Option<ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1>,
@@ -144,13 +172,23 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        let wl_registry::Event::Global {
-            name,
-            interface,
-            version,
-        } = event
-        else {
-            return;
+        let (name, interface, version) = match event {
+            wl_registry::Event::Global {
+                name,
+                interface,
+                version,
+            } => (name, interface, version),
+            wl_registry::Event::GlobalRemove { name } => {
+                if let Some(index) = client
+                    .output_names
+                    .iter()
+                    .position(|(known, _)| *known == name)
+                {
+                    client.outputs_removed.push(index);
+                }
+                return;
+            }
+            _ => return,
         };
         match interface.as_str() {
             "wl_compositor" => {
@@ -158,6 +196,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             }
             "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
             "wl_output" => {
+                client.output_names.push((name, version.min(4)));
                 client
                     .outputs
                     .push(registry.bind(name, version.min(4), qh, ()));
@@ -191,16 +230,23 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, SurfaceIndex> for TestC
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let zwlr_layer_surface_v1::Event::Configure {
-            serial,
-            width,
-            height,
-        } = event
-        {
-            surface.ack_configure(serial);
-            if let Some(slot) = client.layer_sizes.get_mut(index.0) {
-                *slot = Some((width, height));
+        match event {
+            zwlr_layer_surface_v1::Event::Configure {
+                serial,
+                width,
+                height,
+            } => {
+                surface.ack_configure(serial);
+                if let Some(slot) = client.layer_sizes.get_mut(index.0) {
+                    *slot = Some((width, height));
+                }
             }
+            zwlr_layer_surface_v1::Event::Closed => {
+                if let Some(slot) = client.layer_closed.get_mut(index.0) {
+                    *slot = true;
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -354,7 +400,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
     let mut client = TestClient::default();
-    conn.display().get_registry(&qh, ());
+    let registry = conn.display().get_registry(&qh, ());
     // Twice: the first round trip binds whatever globals the registry
     // announced, the second collects the events those binds produced.
     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -386,6 +432,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let surface = compositor.create_surface(&qh, ());
                 let index = client.layer_sizes.len();
                 client.layer_sizes.push(None);
+                client.layer_closed.push(false);
                 let layer = layer_shell.get_layer_surface(
                     &surface,
                     Some(&wl_output),
@@ -512,6 +559,30 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 gammas.push(control);
                 Ack::Held(index)
             }
+            Step::Removals => {
+                for _ in 0..3 {
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                }
+                Ack::Removals(Removals {
+                    bars_closed: client.layer_closed.clone(),
+                    capture_stopped: client.constraints.stopped,
+                    outputs_removed: client.outputs_removed.clone(),
+                    outputs_announced: client.output_names.len(),
+                })
+            }
+            Step::Rebind { output } => {
+                let (name, version) = client
+                    .output_names
+                    .get(output)
+                    .copied()
+                    .ok_or_else(|| format!("no wl_output at index {output}"))?;
+                let registry = registry.clone();
+                let rebound: wl_output::WlOutput = registry.bind(name, version, &qh, ());
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                rebound.release();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
             Step::GammaState { held } => {
                 for _ in 0..3 {
                     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -608,7 +679,7 @@ fn capture_on(
 /// The extra outputs are added before the client connects, so the registry
 /// announces every one of them in the client's first round trip -- the same
 /// order `compositor::run` builds them in.
-fn session(count: i32) -> Harness<Step, Ack> {
+pub(super) fn session(count: i32) -> Harness<Step, Ack> {
     let mut harness = Harness::headless(Appearance::default(), CANVAS);
     for index in 2..=count {
         headless::add_output(
@@ -624,13 +695,13 @@ fn session(count: i32) -> Harness<Step, Ack> {
 }
 
 /// Draws every output and hands back output `id`'s raw BGRA pixels.
-fn draw(harness: &mut Harness<Step, Ack>, id: OutputId) -> Vec<u8> {
+pub(super) fn draw(harness: &mut Harness<Step, Ack>, id: OutputId) -> Vec<u8> {
     harness.state.request_render();
     harness.state.render();
     harness.pixels_of(id)
 }
 
-fn bar_on(harness: &mut Harness<Step, Ack>, output: usize) -> usize {
+pub(super) fn bar_on(harness: &mut Harness<Step, Ack>, output: usize) -> usize {
     match harness.run(Step::BarOn {
         output,
         color: BAR_BGRA,

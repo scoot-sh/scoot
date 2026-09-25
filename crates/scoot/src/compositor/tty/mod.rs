@@ -389,13 +389,32 @@ pub fn init(
 /// A no-op on every other backend (no `Tty`), and for an index `init` never
 /// returned.
 pub fn attach(state: &mut State, index: usize, id: OutputId) {
+    let mut position = 0;
+    attach_where(
+        state,
+        |_| {
+            let hit = position == index;
+            position += 1;
+            hit
+        },
+        id,
+    );
+}
+
+/// [`attach`]'s body, for the first unattached head `pick` accepts: startup
+/// picks by position, a hotplug by connector (`hotplug::apply`).
+fn attach_where(state: &mut State, mut pick: impl FnMut(&Head) -> bool, id: OutputId) {
     let Some(output) = state.outputs.get(id).cloned() else {
         return;
     };
     let Some(tty) = state.tty.as_mut() else {
         return;
     };
-    let Some(head) = tty.heads.get_mut(index) else {
+    let Some(head) = tty
+        .heads
+        .iter_mut()
+        .find(|head| pick(head) && head.output.is_none())
+    else {
         return;
     };
     head.output = Some(id);
@@ -1140,6 +1159,16 @@ impl Tty {
             .is_some_and(|head| head.presenter.take_retry_render())
     }
 
+    /// The renderer every head of this session composites with: GLES on the
+    /// GPU scanout tier, pixman on the dumb one -- the tier the first head
+    /// decided at startup (see `open_device`), which a head built for a
+    /// connector plugged in later must share.
+    fn renderer(&self) -> RendererKind {
+        self.heads
+            .first()
+            .map_or(RendererKind::Pixman, |head| head.presenter.renderer())
+    }
+
     /// Whether this session came up on the GPU scanout tier -- fixed for the
     /// session's life (the tier is chosen once, in `init`, and every head
     /// shares it; see `open_device`).
@@ -1380,9 +1409,7 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
         }
     };
     let activated = !paused;
-    for (id, outcome) in outcomes {
-        outcome.finish(state, id);
-    }
+    hotplug::apply(state, outcomes);
     if activated && state.tty.as_ref().is_some_and(Tty::is_active) {
         state.request_render();
     }

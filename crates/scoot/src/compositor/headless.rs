@@ -316,21 +316,54 @@ fn create_output(
 struct OutputGlobal(smithay::reexports::wayland_server::backend::GlobalId);
 
 /// Takes back what [`create_output`] did, for an output that was never
-/// registered: unmaps it from the `Space` and removes its `wl_output` global.
-///
-/// Only for [`add_output`]'s failure path, which today runs before any event
-/// loop dispatch in every caller (startup and tests): no client can have
-/// seen the global, so removing it at once is safe. **It would not be safe at
-/// runtime.** A client whose `wl_registry.bind` for this global is already in
-/// flight when it is removed gets a protocol error for binding a global that
-/// no longer exists; the safe pattern is `disable_global` (withdraw the
-/// announcement) now and `remove_global` some time later. If `add_output`
-/// ever runs on a live session -- output hotplug under `--headless` or
-/// `--nested` -- this is the function to change.
+/// registered: unmaps it from the `Space` and retires its `wl_output` global
+/// (see [`retire_global`]). [`add_output_with`]'s failure path -- at startup,
+/// and at runtime when a `--tty` connector is plugged in and its render
+/// target cannot be built.
 fn discard_output(state: &mut State, output: &Output) {
     state.space.unmap_output(output);
-    if let Some(OutputGlobal(global)) = output.user_data().get::<OutputGlobal>() {
+    retire_global(state, output);
+}
+
+/// How long a withdrawn `wl_output` global stays bindable before it is
+/// destroyed. A client whose `wl_registry.bind` for it was already in flight
+/// when the output went away must find the global still there (binding a
+/// destroyed global is a protocol error that kills the client); a few seconds
+/// covers any bind racing the `global_remove` the withdrawal sends. The same
+/// shape niri and wlroots use. Shorter under test, so a suite can watch the
+/// destruction happen without sleeping for five seconds -- but still far
+/// longer than any racing-bind test takes to land its bind (a few
+/// milliseconds of dispatch), so that test cannot turn flaky.
+#[cfg(not(test))]
+const RETIRED_GLOBAL_GRACE: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const RETIRED_GLOBAL_GRACE: Duration = Duration::from_millis(500);
+
+/// Withdraws `output`'s `wl_output` global now and destroys it after
+/// [`RETIRED_GLOBAL_GRACE`] -- the only removal that is safe while clients
+/// are connected (see the constant). Before the event loop runs (startup)
+/// the timer simply fires later, which is equally safe.
+///
+/// A timer that cannot be registered leaves the global withdrawn but alive
+/// for the session: no new client sees it, a bound one keeps a resource
+/// with nothing behind it, and nothing is killed -- the safe way to fail.
+fn retire_global(state: &mut State, output: &Output) {
+    let Some(OutputGlobal(global)) = output.user_data().get::<OutputGlobal>() else {
+        return;
+    };
+    let global = global.clone();
+    state.display_handle.disable_global::<State>(global.clone());
+    let timer = Timer::from_duration(RETIRED_GLOBAL_GRACE);
+    let registered = state.loop_handle.insert_source(timer, move |_, _, state| {
         state.display_handle.remove_global::<State>(global.clone());
+        TimeoutAction::Drop
+    });
+    if let Err(error) = registered {
+        tracing::warn!(
+            %error,
+            "could not schedule a removed output's wl_output global for destruction; \
+             it stays withdrawn but alive"
+        );
     }
 }
 
@@ -469,8 +502,9 @@ impl State {
         // (see `draw_frame`), which no borrow of `self.outputs` can outlive,
         // so each step clones its `(id, output)` -- an `Arc` bump, no
         // allocation -- and releases the borrow before drawing. The count is
-        // read once up front; outputs are only ever added at startup, never
-        // removed mid-frame, so it cannot go stale inside this loop.
+        // read once up front; outputs are added and removed only by startup
+        // and the `--tty` hotplug handler, never mid-frame, so it cannot go
+        // stale inside this loop.
         //
         // Order matters per step the same way it used to for the single
         // output: a missing backend skips its output without touching the
@@ -512,7 +546,8 @@ impl State {
                 // No render target for this output: skipped, leaving the
                 // others to draw. Unreachable past startup -- both makers
                 // (`init_named`, `add_output`) insert the target with the
-                // output, and nothing removes one -- except for the suites
+                // output, and `remove_output` drops it with the output --
+                // except for the suites
                 // that take the primary's out by hand to prove a frame with
                 // nothing to draw confirms no lock and stamps nothing (see
                 // `take_primary_backend`). Skipped rather than logged: this
@@ -1219,6 +1254,101 @@ impl State {
         self.settle_floating_grab();
     }
 
+    /// Takes output `id` away while the session runs -- a `--tty` connector
+    /// that was unplugged -- and everything that output was part of. Answers
+    /// whether it did.
+    ///
+    /// Refuses to remove the last output: with none left the core would park
+    /// every window as unplaced, and nothing could render, capture or take
+    /// the pointer. `--tty` never asks for that (it holds the last frame on
+    /// the last screen instead -- see `tty/hotplug.rs`), and the refusal
+    /// makes it impossible rather than merely avoided.
+    ///
+    /// In order, each step before the output leaves `State::outputs` so no
+    /// frame, capture or event in between can resolve it:
+    ///
+    /// - layer surfaces on it are unmapped and sent `closed` (the
+    ///   protocol's answer for an output going away);
+    /// - capture sessions on it are stopped, and a parked frame failed;
+    /// - its gamma control is failed and its size forgotten;
+    /// - its `ext-workspace-v1` group is removed from every manager;
+    /// - every foreign-toplevel handle announced on it is told
+    ///   `output_leave` (the matching `output_enter` for the adopting output
+    ///   comes from the final `apply()`);
+    /// - on the scanout tier, a surface its feedback was steering is
+    ///   reverted to the default tranche;
+    ///
+    /// then the output itself goes: out of the `Space` (clients get
+    /// `wl_surface.leave`), its render target dropped, its `wl_output` global
+    /// retired (withdrawn now, destroyed later -- see [`retire_global`]), and
+    /// `OutputRemoved` filed with the core, which hands its workspaces and
+    /// windows to the focused output. The remaining outputs are repacked side
+    /// by side, the session-lock wait forgets it (and confirms if it was the
+    /// only screen still owing a blank), the pointer is brought back inside
+    /// the desktop, and one refresh of heads, capture constraints, layer
+    /// zones and keyboard focus plus an `apply()` tells everyone the rest.
+    /// The `wlr-output-management` head is retired by that refresh.
+    ///
+    /// Cold: a hotplug path. A few small `Vec`s.
+    pub(super) fn remove_output(&mut self, id: OutputId) -> bool {
+        if self.outputs.len() <= 1 {
+            tracing::warn!(
+                output = id.0,
+                "refusing to remove the last output; a session always keeps one"
+            );
+            return false;
+        }
+        let Some(output) = self.outputs.get(id).cloned() else {
+            return false;
+        };
+        let layers: Vec<smithay::desktop::LayerSurface> =
+            layer_map_for_output(&output).layers().cloned().collect();
+        {
+            let mut map = layer_map_for_output(&output);
+            for layer in &layers {
+                map.unmap_layer(layer);
+            }
+        }
+        for layer in &layers {
+            if self.clicked_layer.as_ref() == Some(layer) {
+                self.clicked_layer = None;
+            }
+            self.mapped_layers.remove(layer.wl_surface());
+            layer.layer_surface().send_close();
+        }
+        self.stop_captures_on(id);
+        self.gamma_control.forget_output(id);
+        self.retire_workspace_group(id);
+        self.leave_removed_output(id);
+        #[cfg(feature = "gpu-scanout")]
+        {
+            self.steer_scanout_feedback(id, false, Instant::now);
+            self.scanout_feedback.forget(id);
+        }
+        self.end_floating_grab();
+
+        self.space.unmap_output(&output);
+        self.backends.remove(&id);
+        self.outputs.remove(id);
+        retire_global(self, &output);
+        self.world.handle_event(CoreEvent::OutputRemoved { id });
+        self.repack_outputs();
+        if self.session_lock.forget_output(id, self.outputs.len()) {
+            tracing::debug!(
+                "session lock confirmed: the only output still owing a blank went away"
+            );
+            self.confirm_lock();
+        }
+        self.rehome_pointer();
+        self.refresh_output_heads();
+        self.refresh_capture_constraints();
+        self.refresh_layer_zone();
+        self.refresh_keyboard_focus();
+        self.settle_floating_grab();
+        self.apply();
+        true
+    }
+
     /// Re-tiles the outputs side by side, left to right in creation order,
     /// at the current scale -- the layout startup builds (`add_output` places
     /// each one at the previous one's right edge) -- after something changed
@@ -1597,6 +1727,19 @@ mod tests {
         let backend = state.display_handle.backend_handle();
         assert!(backend.global_info(global.clone()).is_ok());
         discard_output(&mut state, &output);
+        // Withdrawn at once -- no client binding from now on sees it -- but
+        // still there for a bind already in flight (see `retire_global`)...
+        let info = backend
+            .global_info(global.clone())
+            .expect("the global survives its grace period");
+        assert!(info.disabled, "the global is withdrawn at once");
+        // ...and destroyed once the grace period has passed.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while backend.global_info(global.clone()).is_ok() && Instant::now() < deadline {
+            event_loop
+                .dispatch(Some(Duration::from_millis(10)), &mut state)
+                .expect("the event loop dispatches");
+        }
         assert!(
             backend.global_info(global).is_err(),
             "the wl_output global outlived its discarded output"

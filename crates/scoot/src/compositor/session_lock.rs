@@ -534,8 +534,8 @@ impl SessionLock {
     ///
     /// `id` is the output's core id, `expected` how many outputs must record
     /// before the lock confirms (the render loop's output count, read once up
-    /// front -- outputs are only ever added at startup, so it cannot go stale
-    /// mid-frame).
+    /// front -- outputs change only at startup and in the `--tty` hotplug
+    /// handler, never mid-frame, so it cannot go stale).
     ///
     /// An output records when it drew a locked frame, with two qualifications:
     ///
@@ -742,6 +742,20 @@ impl SessionLock {
         } else {
             false
         }
+    }
+
+    /// Forgets output `id` from the pending confirmation: its recorded blank
+    /// and its outstanding flip. Called when a `--tty` hotplug removes the
+    /// output. Without it, an output recorded blanked before it went away
+    /// would keep counting towards `expected` -- which has just shrunk by one
+    /// -- and could complete the set for a remaining output that never
+    /// blanked. Answers whether the set is now complete (`expected` being the
+    /// output count after the removal), so the caller can send `locked` for
+    /// a wait that only the removed output was holding up.
+    pub(super) fn forget_output(&mut self, id: OutputId, expected: usize) -> bool {
+        self.confirmed.retain(|&output| output != id);
+        self.blank_flips.retain(|&(output, _)| output != id);
+        self.pending.is_some() && expected > 0 && self.confirmed.len() >= expected
     }
 
     /// Forgets a wait that can no longer confirm anything: the lock it was
@@ -1291,11 +1305,12 @@ impl SessionLockHandler for State {
         // The output the client named. No fallback: with more than one
         // output a surface that names nothing resolvable has no size to be
         // configured to and no screen to be drawn on, so it is ignored rather
-        // than shown somewhere the locker did not ask for. Unreachable in
-        // practice -- outputs are only ever added at startup, never removed
-        // mid-session -- but written as a fallthrough rather than an
-        // `expect`, because a panic on the commit path would take every
-        // client's unsaved state with it.
+        // than shown somewhere the locker did not ask for. Reachable since
+        // `--tty` hotplug: a locker naming the `wl_output` of a monitor that
+        // was just unplugged (its resource outlives the output) -- and
+        // written as a fallthrough rather than an `expect` either way,
+        // because a panic on the commit path would take every client's
+        // unsaved state with it.
         let Some(output) = Output::from_resource(&output) else {
             tracing::warn!("no output for a lock surface");
             return;

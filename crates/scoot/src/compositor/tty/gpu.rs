@@ -22,8 +22,8 @@
 //! of the file descriptor, that KMS resources load and some connector is
 //! connected with a usable mode.
 //!
-//! Connector and mode choice ([`find_all`], and [`reselect`]/
-//! [`connector_mode`] for the hotplug path) lives here too, for the same reason:
+//! Connector and mode choice ([`find_all`], and [`connector_mode`] for the
+//! hotplug path) lives here too, for the same reason:
 //! it is the other half of "can this device drive a display", and it has to
 //! run twice -- once on a borrowed fd before the device is adopted, and
 //! again on the live `DrmDevice` every time the connectors change underneath
@@ -495,8 +495,10 @@ pub(super) enum Freshness {
     /// cable or an adapter that needs retries -- synchronously, on the
     /// calloop thread, once per connector examined. That happens on every
     /// `change` uevent for this device and on every VT-switch-back (see
-    /// `tty/hotplug.rs`'s `Tty::reconfigure` callers), which is why
-    /// [`reselect`] is careful to examine as few connectors as it can.
+    /// `tty/hotplug.rs`'s `Tty::reconfigure` callers). With more than one
+    /// output that is every connector, not only the driven ones: a monitor
+    /// plugged into an undriven connector is only visible to a probe of
+    /// that connector, and a disconnected one answers without an EDID read.
     /// wlroots pays exactly the same cost on the same path for the same
     /// reason; there is no cheaper way to learn what a connector is
     /// actually offering now.
@@ -531,42 +533,6 @@ pub(super) fn find_all(
     })
 }
 
-/// The same search, but biased towards `current` -- the connector this
-/// backend is already driving. Used by the hotplug path, never at startup
-/// (there is nothing current then), so it always re-probes; see
-/// [`Freshness`].
-///
-/// Staying on `current` while it is still `Connected` is what keeps
-/// plugging a *second* display into a laptop from moving the session off
-/// the panel the user is looking at: this backend drives one output, so one
-/// of the two connectors has to be dark, and the one already lit is the
-/// only defensible choice. Only when `current` is gone -- unplugged, or its
-/// mode list emptied -- does the search widen to the rest, which is exactly
-/// what issue #48 asks for ("if the connector is gone, pick another
-/// `Connected` one").
-///
-/// `current` is excluded from that widened search rather than left in it:
-/// it has just been re-probed and rejected a few lines up, and a second
-/// forced probe of the same connector would be a second EDID read for an
-/// answer already in hand. On a dock with several dead connectors that is
-/// the difference between one redundant read and one per fallback.
-pub(super) fn reselect(
-    device: &impl ControlDevice,
-    resources: &ResourceHandles,
-    current: connector::Handle,
-    requested: Option<(u16, u16)>,
-) -> Option<Connected> {
-    if let Some(found) = connector_mode(device, resources, current, requested, Freshness::Reprobe) {
-        return Some(found);
-    }
-    resources
-        .connectors()
-        .iter()
-        .copied()
-        .filter(|&conn| conn != current)
-        .find_map(|conn| connector_mode(device, resources, conn, requested, Freshness::Reprobe))
-}
-
 /// Every connector in `connectors` that `probe` says can drive a display,
 /// in the order given. The pure half of [`find_all`], split out so the
 /// ordering and filtering are pinnable without a DRM device (see this
@@ -580,7 +546,7 @@ fn search_all<T>(
 
 /// One connector's mode, name and reachable CRTCs, or `None` if it isn't
 /// `Connected` or lists no mode at all. The per-connector half of
-/// [`find_all`], split out so [`reselect`] and the hotplug path can ask about
+/// [`find_all`], split out so the hotplug path can ask about
 /// one specific connector without duplicating the choice of mode.
 ///
 /// A `requested` size the connector does not offer is a warning, not a

@@ -391,6 +391,20 @@ impl State {
         self.pointer_move_quietly(f64::from(width) / 2.0, f64::from(height) / 2.0);
     }
 
+    /// Puts the pointer back inside the desktop after the outputs changed
+    /// under it -- an output it sat on was removed, or the rest were
+    /// repacked -- clamped into the union exactly as relative motion is,
+    /// quietly (the compositor moving its own pointer is not user activity).
+    /// A pointer already inside stays where it is and is only re-hit-tested.
+    pub(super) fn rehome_pointer(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let location = pointer.current_location();
+        let (x, y) = self.clamp_to_output_union(location.x, location.y);
+        self.pointer_move_quietly(x, y);
+    }
+
     /// Re-runs the hit test where the pointer already is, so pointer focus
     /// follows a change in *what is on screen* rather than waiting for the
     /// user to move the mouse.
