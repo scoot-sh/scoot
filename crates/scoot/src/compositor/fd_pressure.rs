@@ -244,9 +244,10 @@
 //! 3.6us for 20 open fds, 72us for 1000, 634us for 8000 and ~8ms for 65000
 //! (`~/evidence/fdq/runs/readdir-cost.txt`). The enforcement sites never
 //! observe directly: they read [`table`], a per-thread cached reading reused
-//! for 20 times what it cost to take (at least 1 ms; see
-//! [`reading_lifetime`]), with every admitted connection counted against it
-//! ([`note_opened`]). So observing costs at most ~5% of loop time on any
+//! for 20 times what it cost to take (1 ms to 250 ms; see
+//! [`reading_lifetime`]), with every fd a guarded path admits counted
+//! against it ([`note_opened`]: connections, ledger arrivals, acquire
+//! waits). So observing costs at most ~5% of loop time on any
 //! table: on a session's few hundred fds a reading is microseconds and at
 //! most 1 ms old, and on a full raised table one ~7 ms readdir serves the
 //! next ~140 ms. A burst of accepts (the Wayland accept callback drains up to
@@ -337,11 +338,23 @@ impl Table {
 /// large the table (see [`reading_lifetime`]).
 ///
 /// The cache is per thread: every site runs on the event-loop thread, and
-/// a test's `State` gets a reading of its own. What it can miss is fds
-/// opened within a reading's lifetime by anything other than the accepts
-/// (which [`note_opened`] counts): client fds arriving on requests, and
-/// scoot's own. For at most one lifetime the reading is low by those; the
-/// reserve absorbs that, and the `EMFILE` shed still catches real
+/// a test's `State` gets a reading of its own. Within a reading's lifetime
+/// [`note_opened`] counts every fd a guarded path admits: each accepted
+/// Wayland or IPC connection, each pool, plane and timeline fd the ledger
+/// records (`client_fds::record_arrival`, at its admitted weight, renderer
+/// copies included), and each acquire-wait eventfd. So the guards that
+/// refuse past-grace clients see those as they happen, however stale the
+/// readdir; review of PR #241 measured two clients each keeping 512 pools
+/// within one lifetime fill the table to 65535 before this was counted.
+///
+/// What stays uncounted within a lifetime, exactly as for the uncached
+/// observation between two events: scoot's own fds (a renderer copy beyond
+/// what the plane was charged, at most one round of a client's planes, 256;
+/// a capture; a spawn's pipe; a selection pipe), and received fds
+/// wayland-backend queues before any request claims them (bounded per
+/// connection by the fork's cap, and never seen by any scoot-side count).
+/// Those can make the reading low by that much until the next refresh, at
+/// most [`MAX_READING_LIFETIME`] later; the `EMFILE` shed still catches real
 /// exhaustion underneath. Fds closed within a lifetime make it read high
 /// until the next refresh: towards shedding, never away from it.
 pub(crate) fn table() -> Option<Table> {
@@ -378,17 +391,24 @@ pub(crate) fn note_opened(count: u64) {
     });
 }
 
-/// How long a reading that took `cost` to observe is reused: at least
-/// [`MIN_READING_LIFETIME`], and at least 20 times its cost, so observing
-/// costs at most ~5% of loop time on any table (a 7 ms readdir at 60000 open
-/// fds is reused for 140 ms). On an ordinary session's few hundred fds a
-/// readdir costs microseconds, and the reading is at most 1 ms old.
+/// How long a reading that took `cost` to observe is reused: 20 times its
+/// cost, so observing costs at most ~5% of loop time on any table (a 7 ms
+/// readdir at 60000 open fds is reused for 140 ms), clamped to
+/// [`MIN_READING_LIFETIME`]..=[`MAX_READING_LIFETIME`]. On an ordinary
+/// session's few hundred fds a readdir costs microseconds, and the reading
+/// is at most 1 ms old. The ceiling is for a readdir that was preempted or
+/// stalled (its wall time is not its cost): without it one slow observation
+/// could make the next seconds' checks read a stale figure.
 pub(crate) fn reading_lifetime(cost: Duration) -> Duration {
-    cost.saturating_mul(20).max(MIN_READING_LIFETIME)
+    cost.saturating_mul(20)
+        .clamp(MIN_READING_LIFETIME, MAX_READING_LIFETIME)
 }
 
 /// The shortest a reading is reused for; see [`reading_lifetime`].
 pub(crate) const MIN_READING_LIFETIME: Duration = Duration::from_millis(1);
+
+/// The longest a reading is reused for; see [`reading_lifetime`].
+pub(crate) const MAX_READING_LIFETIME: Duration = Duration::from_millis(250);
 
 /// One cached observation.
 #[derive(Debug, Clone, Copy)]

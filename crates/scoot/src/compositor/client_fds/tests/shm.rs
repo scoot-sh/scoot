@@ -185,6 +185,59 @@ fn a_disconnect_closes_every_kept_fd() {
     assert_eq!(fixture.state.client_fds.in_flight(None), 0);
 }
 
+/// A client past its grace is refused at the pressure line even on a table
+/// reading that went stale-low: every fd the ledger admits counts against
+/// fd pressure's cached reading, so it cannot open more than the reserve
+/// between readdirs. Review of PR #241 measured two clients each keeping
+/// 512 pools within one reading's lifetime fill the table to 65535 before
+/// arrivals were counted. The reading is pinned ten fds short of the line
+/// and never refreshed, so only the counting can end this.
+#[test]
+fn a_past_grace_client_is_refused_at_the_line_on_a_stale_reading() {
+    use crate::compositor::client_fds::{PRESSURE_GRACE_FDS, SWEEP_MARGIN};
+    use crate::compositor::fd_pressure::{RESERVE_FDS, Table, forget_reading, pin_reading};
+
+    const TAG: &str = "scoot-cfd-stale";
+    const ROOM: u32 = 10;
+    let _flood = hold_flood_lock();
+    ensure_dispatch_flood_headroom(u64::from(MAX_FDS_PER_CLIENT));
+    let mut fixture = start(TAG);
+    // Past the grace on a calm table first.
+    let past_grace = PRESSURE_GRACE_FDS + 12;
+    fixture.run(Step::Hold {
+        surfaces: past_grace,
+    });
+    let soft = crate::compositor::nofile::raise()
+        .expect("RLIMIT_NOFILE is readable")
+        .soft;
+    pin_reading(
+        Some(Table {
+            used: soft - RESERVE_FDS - u64::from(ROOM),
+            soft,
+        }),
+        Duration::from_secs(600),
+    );
+    let error = fixture.run_expecting_disconnect(Step::Hold { surfaces: 200 });
+    forget_reading();
+    let admitted: u32 = error
+        .split("after ")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|held| held.parse().ok())
+        .unwrap_or_else(|| panic!("no surface count in: {error}"));
+    assert!(
+        error.contains("compositor-wide file-descriptor pressure"),
+        "refused, but not by fd pressure: {error}"
+    );
+    // The line is ROOM + 1 fds away; the guard checks at most every
+    // SWEEP_MARGIN arrivals, so it may admit that many past it.
+    let after_pin = admitted - past_grace;
+    assert!(
+        after_pin <= ROOM + 1 + SWEEP_MARGIN,
+        "{after_pin} fds admitted past a reading {ROOM} short of the line"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The client
 // ---------------------------------------------------------------------------

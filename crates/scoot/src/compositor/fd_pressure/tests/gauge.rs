@@ -16,8 +16,8 @@ use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 use super::super::{
-    MIN_READING_LIFETIME, RESERVE_FDS, Table, forget_reading, note_opened, observations,
-    pin_reading, reading_lifetime, table,
+    MAX_READING_LIFETIME, MIN_READING_LIFETIME, RESERVE_FDS, Table, forget_reading, note_opened,
+    observations, pin_reading, reading_lifetime, table,
 };
 use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::Harness;
@@ -36,7 +36,13 @@ fn a_reading_is_reused_for_twenty_times_its_cost() {
         reading_lifetime(Duration::from_millis(7)),
         Duration::from_millis(140)
     );
-    assert_eq!(reading_lifetime(Duration::MAX), Duration::MAX);
+    // A preempted or stalled readdir cannot stretch the reading past the
+    // ceiling, however long it took.
+    assert_eq!(
+        reading_lifetime(Duration::from_millis(100)),
+        MAX_READING_LIFETIME
+    );
+    assert_eq!(reading_lifetime(Duration::MAX), MAX_READING_LIFETIME);
 }
 
 #[test]
@@ -76,6 +82,30 @@ fn an_unknown_reading_stays_unknown() {
     pin_reading(None, PINNED);
     note_opened(1);
     assert_eq!(table(), None);
+    forget_reading();
+}
+
+/// A reading is reused only for its lifetime: once that has passed, the
+/// next read observes again, and the count it had accumulated is replaced by
+/// the real one.
+#[test]
+fn an_expired_reading_is_taken_again() {
+    pin_reading(
+        Some(Table {
+            used: 1_000_000,
+            soft: 65536,
+        }),
+        Duration::from_millis(5),
+    );
+    assert_eq!(table().map(|t| t.used), Some(1_000_000), "still fresh");
+    std::thread::sleep(Duration::from_millis(20));
+    let before = observations();
+    let fresh = table().expect("the observer works on this machine");
+    assert_eq!(observations(), before + 1, "the expired reading was reused");
+    assert!(
+        fresh.used < 1_000_000,
+        "the fresh reading is the real table: {fresh:?}"
+    );
     forget_reading();
 }
 

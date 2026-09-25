@@ -431,6 +431,12 @@ impl ClientFds {
     ) {
         let check = liveness::capture(fd, kind);
         self.record(client, fd.as_raw_fd(), kind, check, weight);
+        // Counted against fd pressure's cached table reading too, at the
+        // weight admitted (renderer copies included), so a client past its
+        // grace cannot open more than the reserve within one reading's
+        // lifetime on a reading that has gone stale-low (see
+        // `fd_pressure::table`).
+        super::fd_pressure::note_opened(u64::from(weight));
     }
 
     /// Decides whether `client` may have scoot keep one more fd of `kind`,
