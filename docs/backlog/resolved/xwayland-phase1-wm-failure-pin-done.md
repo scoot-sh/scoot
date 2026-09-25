@@ -8,7 +8,7 @@ blocked: null
 
 # XWayland Phase 1 follow-up: pin the WM-attach-failure clear
 
-**RESOLVED (2026-09-25) with XWayland Phases 2+3** -- pinned by
+**RESOLVED (2026-09-25, PR #244) with XWayland Phases 2+3** -- pinned by
 `a_window_manager_that_cannot_attach_withdraws_the_display`
 (`compositor/xwayland/tests/mod.rs`), but **not with this ticket's recipe,
 which does not hold**, and with one small production change the ticket said

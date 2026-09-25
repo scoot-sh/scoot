@@ -105,7 +105,7 @@ each item's own file records why it landed when it did.
 ## Recently shipped (since 2026-09-15)
 
 - **[XWayland Phases 2+3: X windows in the layout, behind a focus gate](docs/backlog/protocols/xwayland-support.md)**
-  (2026-09-25, PR #PRNUM) — with `--xwayland` in an `xwayland` build, X11
+  (2026-09-25, PR #244) — with `--xwayland` in an `xwayland` build, X11
   windows map as columns (`WM_CLASS` class as app id, `_NET_WM_NAME` title,
   hints through the xdg clamp), float by the xdg rules (transients centred
   on an X parent, non-normal types, modal, fixed size; `[[window_rule]]`

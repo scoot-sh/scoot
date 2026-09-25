@@ -8,7 +8,7 @@ blocked: null
 
 # Smoke xwayland step: gate on the build feature, not the binary
 
-**RESOLVED (2026-09-25) with XWayland Phases 2+3.** Both defects fixed in
+**RESOLVED (2026-09-25, PR #244) with XWayland Phases 2+3.** Both defects fixed in
 `scripts/smoke-test.sh`'s xwayland section:
 
 - **The feature gate.** The step no longer asks whether `Xwayland` is on

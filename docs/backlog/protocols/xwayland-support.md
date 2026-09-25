@@ -341,7 +341,7 @@ shared cache, every agent rebuilds only `scoot` itself afterwards).
 
 ## PROGRESS — Phases 2 + 3 (mapping + focus gate) landed together; ticket stays OPEN for Phase 4+
 
-Shipped as one PR (2026-09-25, `xwayland-phase2-3`) because either half
+Shipped as one PR (2026-09-25, PR #244) because either half
 alone is unsafe or useless: mapping without the gate hands X clients the
 focus-steal hole, the gate without mapping has nothing to gate.
 
