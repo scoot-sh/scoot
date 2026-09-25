@@ -120,8 +120,9 @@ hold about 580 fds, which stays below the point (896 of 1024) where scoot
 starts turning newcomers away, so one misbehaving client can no longer do
 that on its own. (With the software GLES renderer, copies of buffers a
 client has just released can linger for a moment until scoot next clears
-the renderer's cache; even counting those, one client stays under that
-point.)
+the renderer's cache. With one software-GLES output, one client stays
+under that point even counting those; with several outputs the lingering
+copies can take it past for that moment.)
 
 ## Fullscreen
 

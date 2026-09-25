@@ -144,7 +144,10 @@ line: 276 to spare. In the software-GLES drain window (copies of planes a
 client just released, until the next cache drain) up to 256 more can be
 held for a moment, 876 in all, leaving 20. Review measured that window
 closing within 500 ms, so a queue bound meant to hold even inside it has
-to be small; one sized against the steady state has 276. A per-client count scoot can read would become one more
+to be small; one sized against the steady state has 276. The carried
+wayland-rs fork's 128-fd queue cap (`docs/forks.md`) fits the steady state
+(748, 148 to spare) but not this drain-window worst case (1004 against 896,
+still under the 1024 table). A per-client count scoot can read would become one more
 term in the ledger's per-client total: `ClientFds::admit` reads
 `held_by(client)` for both the 512 bound and the pressure grace, and adding
 a queued-fd count there (or recording queued fds as another `Kind`) makes

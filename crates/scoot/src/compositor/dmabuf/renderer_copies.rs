@@ -47,8 +47,12 @@
 //! still fall short, and only on a driver that keeps more than one copy per
 //! plane, which none measured does: planes admitted before the session's
 //! first clean measurement were charged one copy per backend, and are not
-//! raised afterwards. At most the planes in flight until then, each short by
-//! the difference.
+//! raised afterwards. Usually that is the planes in flight until then, each
+//! short by the difference; but a client that is the session's only dma-buf
+//! importer and puts a `wl_shm` pool on the same file as every buffer keeps
+//! every import unclean, so the session never learns and every plane keeps its
+//! assumed weight. That only under-counts on a driver keeping two or more
+//! copies per plane, and none is known.
 //!
 //! The measurement costs two `/proc/self/fd` walks with an `fstat` per
 //! entry, once per session (again only after an import that could not be
