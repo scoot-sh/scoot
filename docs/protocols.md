@@ -1225,8 +1225,10 @@ then be shown straight from its own memory instead of being composited.
   `LINEAR`. On an Apple M2 it is 10 formats at `LINEAR` and names the
   display card, not the render node. Mesa's GL clients (es2gears, mpv) move
   from their compressed layout to `LINEAR` when it arrives and back when it
-  is withdrawn, and mpv then goes direct. Vulkan's `vkcube` does not
-  reallocate for it (`Asahi.md`, Tests 5 and 6).
+  is withdrawn, and mpv then goes direct. Vulkan's `vkcube` rebuilt its
+  swapchain for the fullscreen size about 7 ms before the tranche arrived,
+  and did not rebuild again, so whether it would act on the tranche is
+  open (`Asahi.md`, Tests 5 and 6).
 
 No other backend or tier sends per-surface feedback that differs from the
 default.

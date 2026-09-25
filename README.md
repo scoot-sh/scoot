@@ -64,11 +64,11 @@ inspired this project.
   (`nix build .#scoot-gpu`) and `scoot --tty --renderer gles`. There, a
   fullscreen window can be shown straight from the app's own buffer, with
   no compositing, when the display accepts that buffer. On an Apple M2 a
-  fullscreen mpv goes direct and scoot uses about 60% less CPU for it. A
-  drawn pointer on top forces compositing, and a display with no cursor
-  plane (Apple Silicon's has none) therefore goes direct only while the
-  app hides the pointer, as video players do ([Asahi.md](Asahi.md),
-  Test 5). scoot also tells a fullscreen app which buffer layouts the
+  fullscreen mpv goes direct and scoot uses about 60% less CPU for it.
+  On a display with no cursor plane (Apple Silicon's has none) the drawn
+  pointer forces compositing, so nothing goes direct while the pointer is
+  visible. Even with it hidden, the app's buffer must be one the display
+  takes, in layout and in size ([Asahi.md](Asahi.md), Test 5). scoot also tells a fullscreen app which buffer layouts the
   display can show that way, and Mesa's GL apps switch to one (Test 6).
   While something records or streams the screen, scoot
   composites as usual. Not there yet:

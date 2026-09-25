@@ -258,8 +258,14 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   expose anyway -- its inventory is one primary plus one cursor plane. On
   virtio the cursor then scans out live (pointer-tracked; captures draw it
   back in when they ask for it). No window surface is ever an overlay candidate (every one is
-  built `Kind::Unspecified`), so an overlay plane carries at most the
-  cursor -- never a window; candidate-marking is
+  built `Kind::Unspecified`), so an overlay plane carries at most a
+  cursor -- never a window. And at the pinned Smithay rev, scoot's own
+  drawn cursor cannot reach an overlay on any hardware either. It is a
+  memory buffer, and Smithay's exporter turns only Wayland buffers into
+  framebuffers (`UnderlyingStorage::Memory` maps to `None`). So the only
+  cursor an overlay can carry is a client's cursor surface backed by a
+  dma-buf. A cursor *plane* is different: Smithay copies the image into a
+  buffer of its own there, which is how virtio's works. Candidate-marking is
   [`backlog/core/gpu-overlay-window-candidates.md`](backlog/core/gpu-overlay-window-candidates.md).
   A capture (IPC screenshots, `ext-image-copy-capture-v1`) reads the
   primary plane's swapchain slot, which lacks a plane-assigned cursor --
@@ -336,8 +342,11 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   jiffies per 10 s against 27–28 compositing the same video. **On a CRTC
   with no cursor plane (Apple's `apple,dcp` has none), the drawn pointer is
   composited, and a composited element above the window rules out the
-  primary for that frame**. So there, a fullscreen window goes direct only
-  while its app hides the pointer, as mpv does
+  primary for that frame**. So there, a visible pointer denies every
+  fullscreen window a primary attempt. With the pointer hidden, whether it
+  goes direct still depends on its buffer: layout, format, and a size
+  matching the mode. mpv's buffer qualified. vkcube's (tiled-compressed)
+  and es2gears' (logical-size) did not
   ([ticket](backlog/core/gpu-direct-blocked-by-composited-cursor.md)). The log line
   `scanout: primary-direct eligibility changed` (at `debug`) says when a
   session starts or stops being allowed to go direct, and why. A frame
@@ -367,8 +376,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   Apple M2 the tranche is 10 formats at `LINEAR` naming `apple,dcp`'s card.
   Mesa's GL clients move from `APPLE_GPU_TILED_COMPRESSED` to `LINEAR` when
   it arrives and back when it is reverted, and mpv then goes direct.
-  Vulkan's `vkcube` does not reallocate for it
-  ([`../Asahi.md`](../Asahi.md)'s Test 6).
+  Vulkan's `vkcube` rebuilt its swapchain for fullscreen about 7 ms
+  before the tranche arrived and never rebuilt again, so whether it would
+  act on it is open ([`../Asahi.md`](../Asahi.md)'s Test 6).
 - **GPU clients get explicit sync here, and only here.** Where the DRM
   device -- or, failing that, a render node (`/dev/dri/renderD*`) --
   supports syncobj timelines with eventfd (the startup log says
@@ -489,8 +499,9 @@ watched working on the dev VM. Apple's `apple,dcp` (M2) exposes one
 primary, **one overlay and no cursor plane** (`cursor_planes=0
 overlay_planes=1`). The overlay has a fixed zpos above the primary, takes
 `LINEAR` only, and takes alpha RGB and YUV formats but no `XR24`. The
-cursor never lands on it, because Smithay cannot export a memory-buffer
-cursor as a framebuffer, so there the pointer is always composited
+cursor never lands on it: scoot's drawn cursor is a memory buffer, which
+no overlay can take at this Smithay rev on any hardware (above). With no
+cursor plane either, the pointer on this panel is always composited
 ([`../Asahi.md`](../Asahi.md)'s Test 5). Virtio's own footnote: its cursor plane needs the
 session's `CURSOR_PLANE_HOTSPOT` cap to be enumerated at all (set before
 `DrmDevice::new`, `ATOMIC` first, or commits fail unknown-plane), after

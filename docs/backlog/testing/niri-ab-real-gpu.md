@@ -44,7 +44,8 @@ section. Against the list above:
 - **Per-frame GLES cost: answered.** Nested, niri costs 0.94 ms per
   relayout frame and 2.35 ms per animated frame. scoot-gles on the
   read-back path costs 2.53 and 2.47 ms, and scoot-pixman 8.78 and 7.10 ms.
-  The gpu-scanout build presenting by dma-buf is the cheapest in total CPU
+  The gpu-scanout build presenting by dma-buf used the least total CPU for
+  relayout and animate (not for pointer or grim)
   (relayout 250 ms against niri's 580; animate 820 against 1290). That
   variant has no DIAG frame counts.
 - **The pointer on a real session: answered.** On `--tty`, where both

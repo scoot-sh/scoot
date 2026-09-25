@@ -52,6 +52,12 @@ shape the design:
   with any future cursor-on-overlay work (`Asahi.md`, Test 5: the
   composited cursor is what blocks primary-direct here). Decide the
   priority between the two before building either.
+- **No client observed on this machine could ride it.** Every client
+  seen used a fourcc the overlay rejects: `XR30` (es2gears, mpv's GL
+  output) and `XR24` (vkcube). Verifying this ticket therefore needs a
+  purpose-built client that renders `AR24` at `LINEAR`, for example a
+  small GBM or dumb-buffer test client like the dev VM's, run in a tiled
+  window.
 - The capture contract in the first paragraph still applies unchanged.
   Verify it on this machine: debugfs `dri/2/state` shows which fb plane 40
   holds, and a capture must still contain that window.

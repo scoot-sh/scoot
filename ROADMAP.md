@@ -272,8 +272,9 @@ each item's own file records why it landed when it did.
   [a nested frame-rate shortfall](docs/backlog/core/nested-frame-rate-vs-client.md)
   (low). The real-GPU and `--tty` half is `Asahi.md` Test 9, **run
   2026-09-25** on an Apple M2: there, scoot's GPU tier used the least total
-  CPU of the three in every busy row (on the panel, relayout at 2.7% of a core
-  against niri's 4.6–4.9%, pointer motion at 9.2–9.6% against 22–23.5%),
+  CPU of the three for relayout and pointer motion on the panel (relayout
+  at 2.7% of a core against niri's 4.6–4.9%, pointer motion at 9.2–9.6%
+  against 22–23.5%; totals, with no frame counts on `--tty`),
   and pixman is the most expensive. Only input latency remains
   ([its own item](docs/backlog/testing/niri-ab-real-gpu.md)).
 
@@ -485,9 +486,11 @@ each item's own file records why it landed when it did.
   jiffies/10 s against llvmpipe compositing. **Real GPU, 2026-09-25**
   (`Asahi.md` Test 5, Apple M2): a fullscreen mpv goes direct (its `LINEAR`
   `XR30` framebuffer on plane 35) at 10–11 jiffies/10 s against 27–28
-  composited. On `apple,dcp`, which has no cursor plane, it does so only
-  while the app hides the pointer: a composited cursor rules out the
-  primary ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)).
+  composited, once mpv hides its pointer. `apple,dcp` has no cursor plane,
+  so a visible, composited pointer denies every fullscreen client a primary
+  attempt. With it hidden, the buffer must still qualify (`LINEAR`, and a
+  size matching the mode)
+  ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)).
   Its [candidates](docs/backlog/resolved/gpu-scanout-candidates-done.md)
   remainder -- scanout-tranche feedback and `zero_copy` -- landed in PR #230;
   overlay-plane candidates are split out
@@ -629,7 +632,10 @@ each item's own file records why it landed when it did.
   (step 2)](docs/backlog/resolved/gpu-scanout-planes-done.md)** (2026-09-22,
   PR #217) — overlay list populated per CRTC (rides whole; no candidates
   exist yet so nothing can be claimed — verified no production surface is
-  `ScanoutCandidate`, hence "at most the cursor ever goes missing" holds).
+  `ScanoutCandidate`, hence "at most the cursor ever goes missing" holds;
+  2026-09-25 correction: scoot's own drawn cursor is a memory buffer, which
+  this Smithay rev cannot export to any overlay on any hardware, so only a
+  client's dma-buf cursor surface could ever ride one).
   Virtio has zero overlay planes (fallback proven live). Ticket stays OPEN
   for `ALLOW_SCANOUT` + capture fix.
 

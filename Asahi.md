@@ -24,12 +24,12 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
 | Issue #48's unconfirmed connector fallback | — | yes | still open — needs an external display |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
-| [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | **ANSWERED** (2026-09-25): mpv goes direct (~60% less compositor CPU), but only with the pointer hidden, because `apple,dcp` has no cursor plane ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)); planes: 1 primary, 1 overlay, 0 cursor |
+| [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | **ANSWERED** (2026-09-25): mpv goes direct (~60% less compositor CPU) once it hides its pointer; `apple,dcp` has no cursor plane, so a visible pointer rules out any primary attempt ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)); planes: 1 primary, 1 overlay, 0 cursor |
 | [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | **ANSWERED** (2026-09-25): 162 pairs (54 formats x tiled-compressed/tiled/`LINEAR`); clients pick compressed and Mesa follows the scanout tranche to `LINEAR`; mpv `dmabuf-wayland` cannot run (no hardware decoder: AVD firmware missing) |
 | [Test 7: explicit sync on a real GPU](docs/backlog/resolved/linux-drm-syncobj-done.md) | medium | yes | **ANSWERED** (2026-09-25): offered on the display device; `vkcube` uses it |
 | [Test 8: nested dma-buf presentation](docs/backlog/resolved/nested-dmabuf-present-done.md) | medium | Part B only | **ANSWERED** (2026-09-25): nested CPU 1.8–2x lower, host 2.2–3x lower, pixels identical, niri imports scoot's compressed buffers intact |
-| [Test 9: scoot vs niri on a real GPU](docs/benchmarks.md) | medium | Part B only | **ANSWERED** (2026-09-25) except input latency: on the real panel scoot-gpu used the least total CPU in every busy row (no frame counts there); pixman the most |
-| Test 10: does the GPU driver keep an fd per imported plane | — | yes | **ANSWERED** (2026-09-25): yes, one (`copies_per_plane_per_output=1`), and scoot counts it exactly |
+| [Test 9: scoot vs niri on a real GPU](docs/benchmarks.md) | medium | Part B only | **ANSWERED** (2026-09-25) except input latency: on the real panel scoot-gpu used the least total CPU for relayout and pointer motion (no frame counts there); pixman the most |
+| Test 10: does the GPU driver keep an fd per imported plane | — | yes | **ANSWERED** (2026-09-25): yes, one (`copies_per_plane_per_output=1`). While a client runs scoot counts it exactly; after a client quits, one fd can linger until the next redraw, and one extra fd in one session is unexplained |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -587,8 +587,9 @@ primary-plane only — cursor and overlay planes are phase 2 of
 `docs/backlog/resolved/gpu-scanout-planes-done.md`, which this unblocks.
 (That was the state at the time of this run; cursor and overlay steps have
 since landed — see the resolved record. On this machine the cursor step
-cannot engage: `apple,dcp` exposes no cursor plane, and its one overlay
-cannot take the cursor's memory buffer. See Test 5's results.)
+cannot engage: `apple,dcp` exposes no cursor plane. Its one overlay does
+not help, because at this Smithay rev no overlay on any hardware can take
+scoot's drawn cursor, which is a memory buffer. See Test 5's results.)
 
 **Corrections to earlier drafts of this section**, collected here rather than
 left inline, because a result is hard to read with its own revision history
@@ -704,7 +705,7 @@ p=$(pgrep -x scoot); a=$(awk '{print $14+$15}' /proc/$p/stat); sleep 10
 b=$(awk '{print $14+$15}' /proc/$p/stat); echo "jiffies/10s: $((b-a))"
 ```
 
-### Results, 2026-09-25 — direct scanout works, but only with the pointer hidden
+### Results, 2026-09-25 — mpv goes direct once its pointer is hidden; a visible pointer rules out every attempt
 
 Run on the same Apple M2 (j413), NixOS 26.11, kernel 7.1.5, Mesa 26.2.2.
 Built on the machine from `main` at `e1dce6f`
@@ -729,8 +730,11 @@ Linear]` (Smithay's plane set, filtered to its colour formats, is
 
 **The trap: the software cursor blocks direct scanout.** With no cursor
 plane, the pointer is a `Kind::Cursor` memory buffer. Smithay can put that
-kind on an overlay, but a memory buffer has no framebuffer to export, so
-the attempt fails silently and the cursor is composited. Smithay only
+kind on an overlay, but a memory buffer has no framebuffer to export
+(`ExportBuffer::from_underlying_storage` maps `UnderlyingStorage::Memory`
+to `None`, `drm/exporter/mod.rs` ~38), so the attempt fails silently and
+the cursor is composited. That holds on any hardware at this Smithay rev,
+not just here. Smithay only
 tries the primary plane for the last element when nothing above it went to
 the render list (`remaining_elements == 1 && primary_plane_elements.is_empty()`,
 `drm/compositor/mod.rs` ~1995 at the pinned fork `43f50eb`). So while the
@@ -810,14 +814,31 @@ the debugfs fb, whose format and modifier match what the client sent. The
 panel was not photographed.
 
 **Consequences.**
-- The pointer is the gate, not the format. Players that hide the pointer
-  (mpv, most video players and games) go direct. A fullscreen GL client
-  that never hides it (`es2gears_wayland`, `vkcube`) never does on this
-  machine.
-- Hiding scoot's own cursor after inactivity, or putting the cursor on the
-  overlay plane (which needs a GBM copy of the cursor image, which Smithay
-  does only for cursor-type planes), would make every fullscreen client
-  eligible here. Neither exists yet; worth a ticket.
+- **A visible pointer denies every fullscreen client a primary attempt on
+  this machine. Whether a client then goes direct still depends on its
+  buffer**: a format and modifier the primary takes (`LINEAR` only here),
+  and a size matching the mode. One client was seen to pass both: mpv,
+  whose fullscreen buffer was `LINEAR` at 2561x1601, once it hid its
+  pointer. The other two would not have gone direct even with the pointer
+  hidden:
+  - `vkcube` stayed `APPLE_GPU_TILED_COMPRESSED` throughout (all 20
+    `add(…, 201326592, 2)` in its trace), which the primary does not take.
+  - Both `vkcube` and `es2gears_wayland` submit 1707x1067 buffers at
+    `set_buffer_scale(1)` when fullscreen, the logical size. The primary
+    would have to upscale those 1.5x, which was not tested on DCP.
+    es2gears did switch to `LINEAR` after the steer, so size is its only
+    remaining obstacle.
+
+  That is one player, seen once. It does not show how other players or
+  games behave.
+- Hiding scoot's own cursor after inactivity would remove the pointer
+  obstacle for clients whose buffers qualify. Putting the cursor on the
+  overlay plane would too: the overlay takes `AR24`, so format is not the
+  problem. What blocks it is that Smithay at this rev cannot export a
+  memory buffer at all (above), and its GBM exporter also rejects `wl_shm`
+  buffers (`drm/exporter/gbm.rs` ~105–118). So a dma-buf-backed cursor
+  element needs a change in scoot's Smithay fork. Ticket:
+  [gpu-direct-blocked-by-composited-cursor](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md).
 
 ## Test 6 — the GLES tier's dma-buf formats, and what GPU clients do with them
 
@@ -998,8 +1019,9 @@ above it is its size and the device it names.) What each answer means:
 
 Same machine, build and config as Test 5's results.
 
-**Part A: the table.** Both GLES tiers advertise the same table, identical
-line for line (`diff` of the two `wayland-info` dumps is empty):
+**Part A: the table.** Both GLES tiers advertise the same table. The two
+`wayland-info` dumps are identical except for the global's name (39
+headless, 40 on `--tty`), and all 162 format lines match:
 `dmabuf feedback: advertising the renderer's importable formats pairs=162
 fourccs=54`, main device `renderD128` (0xe280). Every one of the 54 fourccs
 comes at exactly three modifiers: `APPLE_GPU_TILED_COMPRESSED`
@@ -1019,8 +1041,12 @@ disappeared, and no `import refused` or protocol error was logged.
 There is no hardware decoder that userspace can reach:
 - The AVD video decoder's driver fails to probe:
   `avd 269080000.avd: Direct firmware load for apple/avd-fw-v3-t1.bin
-  failed with error -2`, so there is no `/dev/videoN` for it. The only V4L2
-  device is `apple-isp`, the camera.
+  failed with error -2`, then `probe with driver avd failed with error
+  -2`. So there is no `/dev/videoN` for it. The only V4L2 device is
+  `apple-isp`, the camera (`v4l2-ctl --list-devices`). The system's
+  firmware search path holds no `*avd*` file. All of this was recorded in
+  `~/fx/t6-decoder-evidence.txt` on the machine, from `journalctl -k -b`,
+  since the kernel ring buffer had wrapped by then.
 - VA-API has no driver (`asahi_drv_video.so` not found).
 - mpv's Vulkan video hwdec found nothing usable.
 - With `--hwdec=no`, mpv 0.41's dmabuf VO cannot upload software frames
@@ -1029,7 +1055,7 @@ There is no hardware decoder that userspace can reach:
 
 This is a finding about the machine, not scoot. Separately, Mesa's Vulkan
 loader could not open `card1`/`card2` (`Permission denied`). That was the
-test setup: VT 2 was active with no logind session on it, so steve held no
+test setup: VT 2 was active with no logind session on it, so the user held no
 seat ACLs. It does not affect `renderD128`, which is mode 0666.
 
 **Part C: the scanout tranche, and Mesa follows it.** `scanout tranche for
@@ -1049,10 +1075,16 @@ primary plane's list minus `P210`, which the renderer does not import.
 - mpv then went direct once its pointer was hidden. Its `presented` flags
   were `9` (`vsync | zero_copy`) 743 times and `1` 451 times, which lines
   up frame for frame with Test 5's plane assignments.
-- `vkcube` did not reallocate after its `tranche_flags(1)`: it stayed
-  `APPLE_GPU_TILED_COMPRESSED` and composited (the pointer was visible
-  anyway). Whether that comes from Mesa's WSI or from vkcube itself was
-  not tested.
+- `vkcube` did not reallocate after its `tranche_flags(1)`, but the
+  ordering matters. On the toggle to fullscreen, vkcube rebuilt its
+  swapchain at 1707x1067 between 12:39:41.4404 and .4476 (four new
+  `APPLE_GPU_TILED_COMPRESSED` buffers, the old four destroyed). The
+  scanout tranche reached it about 7 ms later, at .4549, and it never
+  rebuilt again. It then composited (the pointer was visible anyway). So
+  this may be a timing artefact: scoot sends the tranche after the
+  fullscreen configure, and it is not known whether vkcube would have used
+  it had it arrived before the rebuild. It was not tested whether the
+  cause is Mesa's WSI, vkcube, or that ordering.
 - `get_surface_feedback` was requested once by each client.
 - Neither `the primary plane takes none of the advertised formats` nor
   `lost its tiled layout` appeared.
@@ -1481,8 +1513,10 @@ What changes on a real GPU, against the dev VM's llvmpipe table in
 - **scoot-gles on the read-back path now costs about the same per animated
   frame as niri** (2.47 against 2.35 ms), and about 2.7x more per relayout
   frame, where niri draws three frames for scoot's one.
-- The **gpu build (dma-buf to the host) used the least total CPU here**: relayout 250 ms against niri's 580, animate 820 against
-  1290. (The DIAG pass did not include the gpu build, so there is no frame
+- The **gpu build (dma-buf to the host) used the least total CPU for
+  relayout and animate**: relayout 250 ms against niri's 580, animate 820
+  against 1290. It was not the lowest everywhere: pointer 100 ms against
+  pixman's 90, and shot-grim 40 against the read-back tier's 30. (The DIAG pass did not include the gpu build, so there is no frame
   count for it.)
 - **scoot-pixman is now the expensive one.** At 1600x1000 it spends 2.3x
   the CPU of niri while animating, and it delivers fewer frames (41/s
@@ -1518,9 +1552,10 @@ cell is round 1, then round 2:
 | shot-grim, 10 captures | 150, 150 | 120, 120 | 140, 130 | 120, 130 |
 | RSS after 3 foots → after shots (MB) | 93.6 → 110.3 | 101.6 → 135.2 | 126.8 → 159.9 | 126.8 → 152.4 |
 
-- **On the real panel, scoot-gpu used the least total CPU in every busy
-  row.** These are totals: `--tty` has no frame counts, so this is not a
-  per-frame comparison.
+- **On the real panel, scoot-gpu used the least total CPU for relayout
+  and pointer motion.** These are totals: `--tty` has no frame counts, so
+  this is not a per-frame comparison. Through `grim` it tied niri
+  (anim on) in round 1 (120 = 120). `t9b.sh` ran its scenes back to back, with no idle wait between them.
   Relayout costs 2.7% of a core against niri's 4.6–4.9%. Pointer motion
   costs 9.2–9.6% against niri's 22–23.5%. Both compositors draw the
   pointer here, and neither can use a cursor plane, because `apple,dcp`
@@ -1616,31 +1651,60 @@ identity rather than by raw count. Each snapshot lists the `/dmabuf:` fds
 in `/proc/<scoot>/fd`, grouped by inode (the same inode means the same
 buffer):
 
+Four sessions were counted: the combined Test 6/7 session (`t67.sh`), two
+dedicated reruns without screenshots (`t10.sh` tiled, `t10b.sh` with a
+fullscreen phase), and a third rerun that also took an IPC screenshot
+while tiled and again while fullscreen (`t10c.sh`). The dedicated reruns:
+
 | moment | dma-buf fds | what they are |
 | --- | --- | --- |
 | before any client | 3 | 1 swapchain buffer (2560x1600x4 B) x 3 fds |
-| `vkcube` running, at 4 s, 8 s and 12 s | 17 | 3 swapchain buffers x 3 fds, plus **4 vkcube buffers x 2 fds** |
-| 1 s after vkcube quit (tiled, or fullscreen) | 9 | 3 swapchain buffers x 3 fds |
+| `vkcube` running, tiled, at 4 s, 8 s and 12 s | 17 | 3 swapchain buffers x 3 fds, plus **4 vkcube buffers x 2 fds** |
+| 1 s after vkcube quit (`t10.sh` tiled; `t10b.sh` fullscreen) | 9 | 3 swapchain buffers x 3 fds |
 | `es2gears_wayland` running | 13 | 9 own, plus 2 gears buffers x 2 fds |
 | after es2gears quit | 9 | 9 own |
 
-With `P = 4` live one-plane buffers (vkcube's swapchain; the trace shows
-four `add(` per rebuild and the old four destroyed each time) and `N = 1`,
-the client's share is exactly `P x (1 + N) = 8`. There are no copies that
-scoot did not see at import time. The copy is a second fd for the same
-dma-buf (same inode), so it costs an fd slot but no memory. Everything is
-released within 1 s of the client quitting, including from fullscreen. The
-rest is scoot's own swapchain, which grows from 1 to 3 buffers as it fills
-and holds 3 fds per buffer. That share is steady and is not charged to any
-client.
+**While a client runs, the accounting is exact.** With `P = 4` live
+one-plane buffers (vkcube's swapchain; the trace shows four `add(` per
+rebuild and the old four destroyed each time) and `N = 1`, the client's
+share is `P x (1 + N) = 8`, which is what was measured. Nothing is held
+that scoot did not see at import time. The copy is a second fd for the
+same dma-buf (same inode), so it costs an fd slot but no memory.
 
-The dma-buf fd copies are therefore charged correctly on this hardware,
-and the "hardware drivers are expected not to" line in
-`docs/protocols.md` was wrong for AGX. It is corrected in the same change as
-this section. (One earlier sample, taken in the combined Test 6/7 session,
-read 17 fds 2 s after a fullscreen vkcube quit. Two dedicated reruns, one
-of them fullscreen, both read 9 at 1 s and stayed at 9. The raw counts are
-kept with the run, in `t10-dmabuf-fds.txt`.)
+**After a client quits, the picture is less clean, and one extra fd is
+unexplained.**
+- In the combined session, `t10-dmabuf-fds.txt` reads `3 / 17 / 10`:
+  before the client, while vkcube was running tiled, and 2 s after it quit
+  from fullscreen. The 17 taken while it was fullscreen is a separate
+  file, `t10-dmabuf-fds-fs.txt`. So the after-quit count was **10**, one
+  above the steady 9. What held the tenth fd was not identified.
+- The two dedicated reruns read 9 at 1 s and stayed there, but they took no
+  screenshots, while the combined session did (one tiled, one fullscreen).
+  Those two runs therefore cannot rule out a capture holding the fd.
+- The rerun that did take screenshots (`t10c-counts.tsv`) does not
+  reproduce "a capture holds it": each screenshot left the count unchanged
+  (17 before and after the tiled one, 18 before and after the fullscreen
+  one). It shows two other things instead:
+  - After vkcube quit from fullscreen, **one fd of one vkcube buffer
+    stayed open** (11 fds at 1, 2 and 4 s). It closed only after two
+    pointer moves made scoot draw another frame, which brought the count
+    to 10. So the last frame's client buffer can outlive its client until
+    the next redraw: bounded to that frame, but not released "within 1 s".
+  - **scoot's own dma-buf fd set is not constant.** During the fullscreen
+    phase one swapchain buffer went from 3 fds to 1 and a new buffer
+    appeared with 3, so scoot's own share settled at 10, not 9.
+
+  Either effect could account for the combined session's 10. Which one it
+  was is not known.
+
+So: charging each client for its planes' copies is correct on this
+hardware, and the "hardware drivers are expected not to" line in
+`docs/protocols.md` was wrong for AGX; it is corrected in the same change
+as this section. Release after quit is prompt when scoot keeps drawing,
+but it is not guaranteed within any fixed time: one fd of the last frame's
+buffer can wait for the next frame. The raw counts are kept with the runs
+(`t10-dmabuf-fds.txt`, `t10-dmabuf-fds-fs.txt`, `t10-counts.tsv`,
+`t10b-counts.tsv`, `t10c-counts.tsv`).
 
 ## Keys for the 2026-09-25 runs
 

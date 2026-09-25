@@ -23,8 +23,8 @@ niri is nixpkgs' 26.04. CPU is the compositor's process total
 
 ### Summary
 
-- **With a real GPU, scoot's GPU tier used the least total CPU of the
-  three.** On the real 2560x1600 panel at scale 1.5, `--tty --renderer
+- **With a real GPU, scoot's GPU tier used the least total CPU for
+  relayout and pointer motion on the panel.** On the real 2560x1600 panel at scale 1.5, `--tty --renderer
   gles` spent 2.7% of a core on a relayout storm against niri's 4.6–4.9%.
   Under continuous pointer motion it spent 9.2–9.6% against niri's
   22–23.5%. Both compositors draw the pointer here, and neither has a
@@ -34,7 +34,10 @@ niri is nixpkgs' 26.04. CPU is the compositor's process total
   three frames per relayout action to scoot's one. Nested, the
   `gpu-scanout` build hands its frames to the host as dma-bufs. It spent
   250 ms on 200 relayout actions against niri's 580, and 820 ms animating
-  against niri's 1290 (no DIAG frame count for that build).
+  against niri's 1290 (no DIAG frame count for that build). It was not
+  lowest everywhere: nested pointer 100 ms against pixman's 90, and
+  nested shot-grim 40 against the read-back tier's 30. On the panel,
+  `grim` tied niri (anim on) in round 1.
 - **pixman stops being the cheap option.** Nested at 1600x1000 it costs
   7.1 ms per animated frame against niri's 2.4 and delivers 41 frames/s
   against 54. On the panel it takes 44% of a core for relayout and 32–35%
@@ -70,6 +73,8 @@ As on the VM, nested scoot presents no frames for pointer motion because
 the host draws the pointer, while niri redraws (628 frames, 1.2 ms each).
 
 ### `--tty` on the real panel (2560x1600, scale 1.5 on both, two rounds)
+
+Each cell is round 1, then round 2. `t9b.sh` ran its scenes back to back, with no idle wait between them.
 
 | scene | scoot-pixman | scoot-gpu | niri, anim off | niri, anim on |
 |---|---|---|---|---|
