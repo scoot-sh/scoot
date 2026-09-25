@@ -68,8 +68,11 @@ known for exactly these two actions), and differs on matching (globs, below).
   once they can be moved); `focus-window up|down` cycles the stack (down
   raises the bottom-most, up sends the top to the bottom); the strip-only
   actions do nothing. A focused floating window closing hands focus to its
-  parent on the same workspace, else the next floating window, else the
-  strip.
+  parent on the same workspace (decided before the removal, so a dialog
+  alone on an inactive workspace cannot refocus the workspace that slides
+  into its index; and not to a parent stacked behind a fullscreen sibling,
+  which would end that fullscreen -- both found in review, pinned by core
+  tests), else the next floating window, else the strip.
 - **Floating and un-floating**: floating takes the window out of its
   column; strip focus moves to the column on its left, and a window that
   floats before it ever drew (the map-time case) also puts the strip's

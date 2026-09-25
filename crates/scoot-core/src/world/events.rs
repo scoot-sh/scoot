@@ -1,7 +1,7 @@
 //! Applying what a platform shell observed.
 
 use super::World;
-use super::tree::{Output, Slot, WindowState};
+use super::tree::{Output, WindowState};
 use crate::geometry::{Rect, Size};
 use crate::messages::Event;
 use crate::types::{OutputId, WindowId, WindowInfo};
@@ -64,11 +64,12 @@ impl World {
         let Some(loc) = self.locate(id) else {
             return;
         };
-        let focused_floating = matches!(loc.slot, Slot::Floating { .. })
-            && self.outputs[loc.output].workspaces[loc.workspace].focused_window() == Some(id);
+        // Decided before the removal, which may normalize the workspace list
+        // (see `World::refocus_target`).
+        let refocus = self.refocus_target(loc, window.info.parent);
         self.remove_window(loc);
-        if focused_floating {
-            self.refocus_after_floating_close(loc.output, loc.workspace, window.info.parent);
+        if let Some(parent) = refocus {
+            self.refocus_after_floating_close(loc.output, loc.workspace, parent);
         }
     }
 

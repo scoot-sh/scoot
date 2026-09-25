@@ -294,8 +294,10 @@ pub enum Action {
     ///   focus returns to the strip. Floating or un-floating a fullscreen
     ///   window ends its fullscreen first.
     /// - A floating window that closes while focused hands focus to its
-    ///   parent when the parent is on the same workspace, otherwise to the
-    ///   next floating window, otherwise to the strip.
+    ///   parent when the parent is on the same workspace (unless the parent
+    ///   is stacked in a column behind a fullscreen sibling: focusing it
+    ///   would end that fullscreen), otherwise to the next floating window,
+    ///   otherwise to the strip.
     ToggleFloating,
     /// Float one specific window (`true`) or put it back in the strip
     /// (`false`), by id. The same rules as [`Action::ToggleFloating`]; it

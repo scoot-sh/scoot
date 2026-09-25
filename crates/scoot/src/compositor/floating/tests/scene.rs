@@ -11,12 +11,25 @@ use scoot_core::OutputId;
 use super::*;
 use crate::compositor::headless;
 
+/// Square, and rounded -- the painted-ring path, with the rounded clip on
+/// the floating window -- which is what a session with `corner_radius` set
+/// draws. The probes sit at a window's vertical centre, on the straight
+/// part of the ring either way.
+const RADII: [i32; 2] = [0, 10];
+
 /// The ring of a floating window is drawn over the tiled window beneath it,
 /// not under it: the pixel just outside the dialog, which lies inside its
 /// parent's column, is ring-coloured.
 #[test]
 fn a_floating_window_s_ring_is_drawn_over_the_window_beneath_it() {
+    for radius in RADII {
+        ring_over_the_window_beneath(radius);
+    }
+}
+
+fn ring_over_the_window_beneath(radius: i32) {
     let mut fixture = Fixture::new();
+    fixture.state.appearance.corner_radius = radius;
     fixture.map(Spec::tiled());
     let dialog = fixture.map(Spec::dialog_of(0));
     let column = fixture.placement(0).rect;
@@ -32,9 +45,14 @@ fn a_floating_window_s_ring_is_drawn_over_the_window_beneath_it() {
     assert_eq!(
         pixel(&pixels, outside, cy),
         RING_BGRA,
-        "ring under the column"
+        "ring under the column (radius {radius})"
     );
     assert_eq!(pixel(&pixels, placed.x - RING - 1, cy), TILED_BGRA);
+    if radius > 0 {
+        // The rounded clip cuts the dialog's own corner: its top-left pixel
+        // is not the dialog's colour.
+        assert_ne!(pixel(&pixels, placed.x, placed.y), DIALOG_BGRA);
+    }
 }
 
 /// Two overlapping floating windows: the upper one's ring is drawn over the
@@ -42,7 +60,14 @@ fn a_floating_window_s_ring_is_drawn_over_the_window_beneath_it() {
 /// gets right (all floating rings under all floating windows would bury it).
 #[test]
 fn stacked_floating_windows_each_draw_their_ring_over_what_is_below() {
+    for radius in RADII {
+        stacked_rings(radius);
+    }
+}
+
+fn stacked_rings(radius: i32) {
     let mut fixture = Fixture::new();
+    fixture.state.appearance.corner_radius = radius;
     fixture.map(Spec::tiled());
     let lower = fixture.map(Spec {
         color: OTHER_BGRA,
@@ -60,7 +85,11 @@ fn stacked_floating_windows_each_draw_their_ring_over_what_is_below() {
     let (_, cy) = centre(small);
     assert!(big.contains(scoot_core::Point::new(small.x - RING - 1, cy)));
     let pixels = fixture.render();
-    assert_eq!(pixel(&pixels, small.x - 1, cy), RING_BGRA);
+    assert_eq!(
+        pixel(&pixels, small.x - 1, cy),
+        RING_BGRA,
+        "radius {radius}"
+    );
     assert_eq!(pixel(&pixels, small.x - RING - 1, cy), OTHER_BGRA);
 }
 

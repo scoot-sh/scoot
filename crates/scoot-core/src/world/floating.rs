@@ -249,20 +249,54 @@ impl World {
         }
     }
 
-    /// After the focused floating window of a workspace closed: focus goes to
-    /// its parent when that is on the same workspace, and otherwise stays on
-    /// the floating layer (its new top) or, with the layer now empty, returns
-    /// to the strip -- which the workspace's own focus flag already does
-    /// (`Workspace::take_floating`).
+    /// Whether closing the window at `loc` should hand focus to `parent`,
+    /// read *before* the window leaves the tree: only for its workspace's
+    /// focused floating window, only for a parent on that same workspace --
+    /// which therefore keeps a window and survives the removal's
+    /// `normalize` at the same index (a dialog alone on an inactive
+    /// workspace drops it, and the next workspace would slide into the index
+    /// if this were decided afterwards) -- and not for a tiled parent
+    /// stacked behind a fullscreen sibling in its column: focusing it would
+    /// break the rule that a fullscreen window is its column's focused one,
+    /// and ending that fullscreen over a dialog closing would be a surprise.
+    /// Focus then stays where the workspace's own flag puts it
+    /// (`Workspace::take_floating`): the next floating window, or the strip.
+    pub(super) fn refocus_target(
+        &self,
+        loc: Location,
+        parent: Option<WindowId>,
+    ) -> Option<WindowId> {
+        let parent = parent?;
+        let ws = &self.outputs[loc.output].workspaces[loc.workspace];
+        let closing = match loc.slot {
+            Slot::Floating { index } => ws.floating.get(index).copied(),
+            Slot::Tiled { .. } => None,
+        }?;
+        if ws.focused_window() != Some(closing) || parent == closing {
+            return None;
+        }
+        match ws.slot_of(parent)? {
+            Slot::Floating { .. } => Some(parent),
+            Slot::Tiled { column, index } => {
+                let column = &ws.columns[column];
+                let behind_fullscreen = column.focused != index
+                    && column
+                        .windows
+                        .get(column.focused)
+                        .is_some_and(|&sibling| self.is_fullscreen(sibling));
+                (!behind_fullscreen).then_some(parent)
+            }
+        }
+    }
+
+    /// After the focused floating window of a workspace closed, focuses the
+    /// parent [`World::refocus_target`] chose on that workspace.
     pub(super) fn refocus_after_floating_close(
         &mut self,
         output: usize,
         workspace: usize,
-        parent: Option<WindowId>,
+        parent: WindowId,
     ) {
-        let Some(parent) = parent else {
-            return;
-        };
         let Some(ws) = self
             .outputs
             .get_mut(output)

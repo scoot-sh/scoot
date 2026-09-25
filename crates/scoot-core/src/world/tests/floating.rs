@@ -643,3 +643,48 @@ fn a_new_window_opening_takes_focus_to_the_strip() {
     assert_eq!(focused(&world), Some(2));
     assert!(placement(&world, 9).visible, "the floating window stays up");
 }
+
+/// A dialog whose parent is stacked under a fullscreen sibling in its
+/// column: closing it must not hand focus to the parent (which would leave
+/// the sibling fullscreen without being its column's focused window) --
+/// nor end a fullscreen the dialog had nothing to do with.
+#[test]
+fn closing_a_dialog_does_not_refocus_a_parent_behind_a_fullscreen_sibling() {
+    let mut world = strip_of(1, 1);
+    open(&mut world, 2);
+    world.handle_action(Action::ConsumeOrExpel(Horizontal::Left));
+    world.handle_action(Action::FocusWindow(Vertical::Up));
+    assert_eq!(focused(&world), Some(1));
+    world.handle_action(Action::ToggleFullscreen);
+    assert!(world.is_fullscreen(WindowId(1)));
+    open_with(&mut world, 9, with_parent(2));
+    float_on_map(&mut world, 9);
+    world.handle_event(Event::WindowClosed { id: WindowId(9) });
+    assert!(
+        world.is_fullscreen(WindowId(1)),
+        "an unrelated fullscreen ended"
+    );
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(1)));
+}
+
+/// A dialog alone on an inactive workspace, whose parent is on the next
+/// one: closing it drops its workspace, and nothing may refocus the
+/// neighbour that slid into its index.
+#[test]
+fn closing_a_lone_dialog_on_an_inactive_workspace_moves_no_other_focus() {
+    let mut world = world();
+    open(&mut world, 9);
+    float_on_map(&mut world, 9);
+    world.handle_action(Action::FocusWorkspace(Vertical::Down));
+    open(&mut world, 1);
+    open(&mut world, 2);
+    world.handle_action(Action::FocusWindowId(WindowId(2)));
+    // Give the dialog a parent on the second workspace after the fact.
+    world.handle_event(Event::WindowChanged {
+        id: WindowId(9),
+        info: with_parent(1),
+    });
+    world.handle_event(Event::WindowClosed { id: WindowId(9) });
+    assert_eq!(focused(&world), Some(2));
+}
