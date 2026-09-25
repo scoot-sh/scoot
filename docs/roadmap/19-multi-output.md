@@ -325,8 +325,11 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
     match its own output's flip, `locked` needs every output recorded,
     Phase C's placeholder rule (an admitted, undrawn surface blocks its
     output) applies on the tty path too, and the fallback timeout stands in
-    for missing vblanks, never for missing surfaces. Pinned fail-first
-    (`session_lock/tests/tty_multi_output.rs`, 9 tests). Live: both screens
+    for missing vblanks, never for missing surfaces. Pinned in
+    `session_lock/tests/tty_multi_output.rs` (8 tests): with the old
+    semantics restored by mutation (any output's matching seq confirms at
+    once), 7 of the 8 fail; the eighth, the timeout-over-placeholder pin,
+    exercises a path the mutation does not touch. Live: both screens
     blank (swaylock colour on both IPC screenshots) and the log's
     confirmation reads "every output's blanked frame reached scanout" ~60 ms
     after `locking the session`, on both tiers.
@@ -370,7 +373,14 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
     below 60/s each: flips never exceed one per CRTC vblank).
   - **What hardware could not show.** The unplug: with this kernel DP-1
     keeps reading `connected` after the cable is pulled (no HPD loss
-    reaches userspace), so removal is harness-verified only. The GPU tier
+    reaches userspace). So the *tty* half of E2 -- `Tty::reconfigure`'s
+    multi-head apply, `add_head` (CRTC pick, surface, presenter on a live
+    session, including a GPU-tier runtime add with its fresh EGL context),
+    dropping a head mid-session, and `hotplug::apply`'s attach-by-connector
+    -- has not executed anywhere yet; only the backend-independent
+    `State::remove_output`/runtime `add_output` half is exercised (harness).
+    The unit-pinned planner decides what that code does, but not whether it
+    does it on a real device. The GPU tier
     ran with Mesa's paths passed by environment (`GBM_BACKENDS_PATH`,
     `__EGL_VENDOR_LIBRARY_DIRS`) because the booted generation has no
     `/run/opengl-driver`; no system change was made. Gamma: both CRTCs

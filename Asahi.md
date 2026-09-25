@@ -449,8 +449,12 @@ final product code, via `nix build .#scoot-gpu`. It ran on VT 2 through
   about 35 per second each, never more than one per CRTC vblank.
 - **Not observable here.** Unplugging DP-1: no HPD loss reaches userspace
   on this kernel, so scoot keeps driving a screen that is gone. That
-  covers both the new remove-an-output path and the old fallback path;
-  both are harness-verified only.
+  leaves the whole `--tty` side of runtime add/remove unexecuted: removing
+  a head mid-session, building one for a newly plugged connector (on
+  either tier), and the old fallback. Only the backend-independent output
+  removal and addition are exercised, in harness tests. A way to force it
+  without the cable, pending approval, is writing `off` and then `detect`
+  to `/sys/class/drm/card2-DP-1/status` as root.
 
 ---
 
