@@ -685,6 +685,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [GLES captures keep a whole frame each while nothing redraws](./resolved/gles-capture-leaks-a-frame-per-shot-done.md) — RESOLVED 2026-09-24 (PR #238): Smithay queues a dropped read-back buffer (and the bind's framebuffer object) until the next frame's drain, and a capture of a static screen reached no drain. Both GLES arms of `Backend::capture` and the GLES capture-cursor region render now drain once the capture returns. Dev VM: 120 `scootctl screenshot --no-cursor` or `grim` captures went from +750–763 MB to flat after one frame, on `--nested`, `--headless`, the `--tty` GPU tier and the `--nested` dma-buf tier. p50 8.8 → 7.9 ms.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
+### From the PR #239 review (2026-09-24)
+- [Many light connections can still pressure the table and shed scootctl](./core/pressure-many-light-connections.md) — medium; cheapest fix is a lower pressure line for IPC accepts.
+
 ### From the gh #205 re-verification (2026-09-24)
 - [Clip and ring the committed size; send tiled states](./core/clip-to-committed-size.md) — high: foot defaults still show mismatched corners (gh #205 reopened).
 - [Ring outer corners have square shoulders](./core/ring-outer-corner-shoulders.md) — medium.
