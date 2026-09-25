@@ -66,9 +66,14 @@ PR 1's design record and the original entry follow.
   "looks like a hang" harm). The common case -- no floating window's
   parent floats, which includes every dialog of a tiled window -- is one
   map lookup per floating window; otherwise O(n log n) into reused buffers.
-  `descends_from` (the covering rule) is bounded by the window count, not
-  16. Mac release: a 64-deep chain arranges in ~5 µs (main 3.7), 1000-deep
-  in ~49 µs (main 16).
+  `descends_from` (the covering rule's walk, asked only for a window whose
+  parent is not floating on the workspace, i.e. through tiled windows)
+  stays bounded at 16: review round 1 had unbounded it, and the re-review
+  found that quadratic -- n dialogs on the tip of an n-long tiled chain
+  under an unrelated fullscreen window, 142 ms per `arrange` at n = 1000 in
+  debug. The bound is pinned by a test and the scene is in the arrange
+  bench. Mac release: a 64-deep floating chain arranges in ~5 µs (main
+  3.7), 1000-deep in ~49 µs (main 16).
 - **Tiled windows.** A modifier press on a tiled window is an ordinary
   click, and a tiled window's `xdg_toplevel.move`/`resize` is ignored
   (debug log): tiled windows are placed by the strip, and a toolkit whose
