@@ -134,9 +134,10 @@ hold about 1600 fds, unused ones included, against the point (65408 of
 still can reach it (see
 [`pressure-many-light-connections`](backlog/core/pressure-many-light-connections.md)).
 
-**scoot raises its own fd limit at startup** (the soft `RLIMIT_NOFILE`, to
-the hard limit capped at 65536, logged at startup), and **every program it
-starts gets the original limit back**: apps spawned by a keybinding, IPC
+**scoot raises its own fd limit at startup** (the soft `RLIMIT_NOFILE` is
+set to the hard limit capped at 65536, which also lowers a larger one;
+logged at startup), and **every program it starts gets the original limit
+back**: apps spawned by a keybinding, IPC
 `spawn`, `[autostart]` or the session command see the limit scoot was
 started with, so a program that uses `select()` is not handed fds it
 cannot watch. (The XWayland server raises its own limit to the hard limit

@@ -27,7 +27,8 @@ release `72f7fe0d` plus two server-side commits), and raises its own soft
   (`70f81e00`): 1024, libwayland-server's default bound, on the table scoot
   raises to; 128 where the hard limit is 1024.
 - **The raise** (`crates/scoot/src/compositor/nofile.rs`): the soft limit
-  goes to the hard limit capped at 65536 at startup; every child
+  is set to min(hard limit, 65536) at startup, lowering one that started
+  higher (Docker before 25 starts containers at 1048576:1048576); every child
   `State::spawn` starts gets the original back. See its own record.
 - **The pin.** `Cargo.lock` moves exactly two entries, `wayland-backend`
   and `wayland-sys`, to the fork's git source (`wayland-sys` byte-identical
@@ -64,6 +65,46 @@ connections still got past the fixed cap to fill the table. The
 coordinator's decision was the raise plus an adaptive cap, in this PR. The
 first round's own record is kept below, under "First round (superseded)".
 
+## The accept-storm freeze (round 3)
+
+Re-review of the raise found that on a 65536-entry table the pressure
+observation, a readdir of `/proc/self/fd` linear in open fds (~7 ms at
+60000), ran once per accepted connection, and the Wayland accept callback
+drains up to 4096 connections at once. The reviewer's `storm.sh` on the dev
+VM: 58 connections parking 1008 fds each (58540 open, all under the cap and
+connected), then 4000 connections in 13 ms, froze scoot for **35.6 s** for
+an ordinary round-trip client (6.9 s at ~12000 parked; 0.96 s with nothing
+parked; `main` on its 1024 table: 0.36 s).
+
+- **The fix** (`fd_pressure::table`): one per-thread cached reading, reused
+  for max(1 ms, 20 x what it cost), so observing costs at most ~5% of loop
+  time on any table; every admitted Wayland or IPC connection counts +1
+  against it (`note_opened`), so a burst is still judged connection by
+  connection. `pressure_refusal` and the ledger's arrival guard read the
+  same cache. A cheaper exhaustion signal was considered and rejected:
+  `fcntl(F_DUPFD_CLOEXEC, line)` only says whether some fd at or above the
+  line is free, which with lowest-first allocation and holes below the line
+  is not the count the reserve is defined on.
+- **Measured** (`runs/storm-b596906.txt`, `runs/fd-storm-script-*.txt`,
+  binary `bin/scoot-gauge-b596906-debug`): the same storm, 58 parkers and
+  4000 connections, now gives a worst round-trip wait of **101 ms** (110 ms
+  through the committed `scripts/fd-storm/run.sh`); the uncached `2c18a93`
+  through that script: **36.1 s**. With nothing parked: 109 ms; `main`:
+  361 ms. Crossing the line (63 parkers, 63585 open, then 4000): scoot
+  stopped at 65406, just under the 65408 line, shed 2179 connections, and
+  the worst wait was 72.5 ms.
+- **Tests** (`fd_pressure/tests/gauge.rs`): a 300-connection burst through
+  the real listening socket makes no observation and counts all 300; a
+  burst ten fds from the line admits exactly the eleven the reserve allows
+  and sheds the rest; 1001 back-to-back readings make one to three
+  observations. With caching off, five of the six fail
+  (`runs/failfirst-gauge-uncached.txt`).
+- **Also in round 3:** the soft limit is clamped down to 65536 as well as
+  up (checked live: started at 200000:524288, scoot ran at 65536 and its
+  children at 200000, `runs/limits-soft200k-gauge-b596906.out`); the
+  child's `setrlimit` can no longer fail a spawn. The cap stays 65536, now
+  justified by the storm figures above rather than by the uncached cost.
+
 ## What it costs a legitimate client now
 
 - **With the raise (hard limit 8192 or more): nothing libwayland-server
@@ -86,10 +127,9 @@ first round's own record is kept below, under "First round (superseded)".
   1024-fd table it is 7 and 8 connections, as before. Recorded on
   [`pressure-many-light-connections`](../core/pressure-many-light-connections.md),
   which stays open.
-- **The cost of observing a full table.** A pressure observation reads
-  `/proc/self/fd`, linear in open fds: ~8 ms at 65000
-  (`runs/readdir-cost.txt`) against 72 us at 1000. Only a table someone has
-  already filled makes each accepted connection cost that much.
+- **Observing a full table** costs one readdir of `/proc/self/fd`, ~7-8 ms
+  at 65000 open fds (`runs/readdir-cost.txt`), at most once per ~140 ms: the
+  reading is cached (see "The accept-storm freeze" below).
 - **The 1024-table drain-window transient** (1034, reasoned in
   `fd_pressure.rs`), only where the hard limit keeps the table at 1024.
 - **The parked-syncobj over-count** (`client_fds.rs`) is bounded by the cap,

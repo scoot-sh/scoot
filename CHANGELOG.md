@@ -21,7 +21,8 @@ scoot has not cut a numbered release yet; entries are dated.
   KDE, sway and weston are built on, so apps those serve are served here,
   including apps that queued many requests while scoot was busy.
 - **scoot raises its own file-descriptor limit at startup** (to the
-  system's hard limit, at most 65536) and logs it; **programs scoot starts
+  system's hard limit, capped at 65536, which also lowers a larger one) and
+  logs it; **programs scoot starts
   get the normal limit back**, so older programs that use `select()` keep
   working. With the higher limit, one app can no longer come near the point
   where scoot turns new apps and `scootctl` away. On a machine or container

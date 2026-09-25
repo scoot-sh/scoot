@@ -239,19 +239,26 @@
 //!
 //! ## Observation cost and disciplines
 //!
-//! [`table`] costs one `getrlimit` plus one `/proc/self/fd` readdir, which
-//! is linear in the open fds: ~8us per call on the dev VM at a session's few
-//! dozen (debug build, 2000-call sample; release is faster), and measured
-//! for the readdir alone at 3.6us for 20 open fds, 72us for 1000, 634us for
-//! 8000 and ~8ms for 65000 (`~/evidence/fdq/runs/readdir-cost.txt`). So on
-//! the raised table an observation stays cheap in any real session but costs
-//! ~8ms per accepted connection once someone has filled the table, which is
-//! the price of the raise's headroom. No steady-state cost anywhere: the
-//! accept sites run it once per
-//! *connection* (not per frame or request), and the arrival sites only
-//! once a client is already past its grace, and then at most once per
-//! [`SWEEP_MARGIN`](crate::compositor::client_fds::SWEEP_MARGIN) arrivals
-//! (a map lookup short-circuits everything under it).
+//! An observation ([`observe`]) is one `getrlimit` plus one readdir of
+//! `/proc/self/fd`, linear in the open fds: measured for the readdir at
+//! 3.6us for 20 open fds, 72us for 1000, 634us for 8000 and ~8ms for 65000
+//! (`~/evidence/fdq/runs/readdir-cost.txt`). The enforcement sites never
+//! observe directly: they read [`table`], a per-thread cached reading reused
+//! for 20 times what it cost to take (at least 1 ms; see
+//! [`reading_lifetime`]), with every admitted connection counted against it
+//! ([`note_opened`]). So observing costs at most ~5% of loop time on any
+//! table: on a session's few hundred fds a reading is microseconds and at
+//! most 1 ms old, and on a full raised table one ~7 ms readdir serves the
+//! next ~140 ms. A burst of accepts (the Wayland accept callback drains up to
+//! 4096 in one call) costs one reading, not one per connection, and is still
+//! judged connection by connection, since each admit adds one to the count.
+//! Review of PR #241 measured the uncached version at a 35.6 s freeze (58
+//! connections parking 1008 fds each, then 4000 connections);
+//! `scripts/fd-storm/run.sh` reproduces it at 36.1 s uncached and 110 ms
+//! cached (`main`, on a 1024 table: 361 ms). The arrival sites read it only
+//! once a client is already past its grace, and the ledger's guard at most
+//! once per [`SWEEP_MARGIN`](crate::compositor::client_fds::SWEEP_MARGIN)
+//! arrivals (a map lookup short-circuits everything under it).
 //!
 //! `table()` allocates (`read_dir`), so the fork-child discipline from
 //! `ipc::accept` applies: never call it from `drain`, `shed_one`,

@@ -15,18 +15,27 @@ after review of that PR found stock libwayland clients reach the fixed
 
 ## What changed
 
-- **`crates/scoot/src/compositor/nofile.rs`.** `raise()` lifts the soft
+- **`crates/scoot/src/compositor/nofile.rs`.** `raise()` sets the soft
   `RLIMIT_NOFILE` to the hard limit capped at **65536**, once, at the top of
   `compositor::run` (and, a no-op there, from `State::new`, so test
   harnesses run with a session's limit), and logs before and after with
-  the resulting unclaimed-fd cap. It never lowers a soft limit.
+  the resulting unclaimed-fd cap. A soft limit above the cap is lowered to
+  it too (Docker before 25 starts containers at 1048576:1048576; measured
+  with 200000:524288: scoot 65536, children 200000). The child's
+  `setrlimit` result is ignored, so it can never fail a spawn; if the hard
+  limit has dropped below the original soft limit, the child gets the hard
+  limit and scoot warns.
 - **Why 65536.** Raising costs nothing until fds are used (the kernel grows
-  the fd table on demand) and epoll costs per registered fd. The cap bounds
-  what local clients can make scoot hold before fd pressure sheds (the line
-  is the table minus 128), and the cost of observing the table: a readdir
-  of `/proc/self/fd` measured at 72 us for 1000 open fds, 634 us for 8000
-  and ~8 ms for 65000 (`~/evidence/fdq/runs/readdir-cost.txt`). 65536 is 64
-  connections at every per-client bound including the 1024 queue cap.
+  the fd table on demand) and epoll costs per registered fd. The size bounds
+  what local clients can make scoot hold before pressure sheds (the table
+  minus 128) and what observing the table costs: a readdir of
+  `/proc/self/fd`, 72 us at 1000 open fds, 634 us at 8000, ~8 ms at 65000
+  (`~/evidence/fdq/runs/readdir-cost.txt`). Round 3 of PR #241 caches that
+  reading (reused for 20x its cost, so at most ~5% of loop time); with it,
+  58 connections parking 1008 fds each plus a 4000-connection burst gave a
+  worst round-trip wait of 101-110 ms, the same as with nothing parked (109
+  ms) and under `main`'s 361 ms. Uncached, the same was 35.6-36.1 s. 65536
+  is 64 connections at every per-client bound including the 1024 queue cap.
 - **Children get the original soft limit** (hard limit unchanged):
   `restore_for_child` adds a `pre_exec` `setrlimit` to `State::spawn`'s
   `Command`, the one path keybindings, IPC `spawn`, `[autostart]` and the

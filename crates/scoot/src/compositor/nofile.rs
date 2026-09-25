@@ -8,9 +8,9 @@
 //! the process: every fd-exhaustion bound scoot carries was sized against
 //! it, and the wayland-backend fork's cap on unclaimed fds (one eighth of
 //! the soft limit, 128..=1024) can only reach libwayland-server's own 1024
-//! on a table of 8192 or more. So [`raise`] lifts the soft limit toward the
-//! hard limit once, at startup, the way other compositors (niri among them)
-//! do.
+//! on a table of 8192 or more. So [`raise`] sets the soft limit to the hard
+//! limit (capped, below) once, at startup, the way other compositors (niri
+//! among them) raise theirs.
 //!
 //! **Children get the original back.** A program that still uses `select()`
 //! cannot watch an fd numbered 1024 or above (`FD_SETSIZE`), and one that
@@ -32,18 +32,25 @@
 //! 1024 back first would have meant lowering this whole process's limit for
 //! the length of the spawn, for nothing.
 //!
-//! **The cap, [`RAISED_SOFT_CAP`] = 65536.** Raising costs nothing until
-//! fds are used (the kernel grows a process's fd table on demand), and
-//! epoll's cost is per registered fd, not per limit. What a raised limit
-//! does change is how much one local client can make this process hold
-//! before fd pressure (`fd_pressure.rs`) turns newcomers away: the pressure
-//! line is the table minus a 128-fd reserve, so on a 524288-fd hard limit
-//! (the dev VM's) an uncapped raise would let clients park half a million
-//! fds, each pinning a kernel `struct file`, and make every pressure
-//! observation (a readdir of `/proc/self/fd`, O(open fds)) that much
-//! slower. 65536 is 64 times the default: room for 64 connections each at
-//! every per-client bound at once, including the 1024-fd queue cap, while
-//! keeping an observation of a full table in the low milliseconds.
+//! **The cap, [`RAISED_SOFT_CAP`] = 65536**, applied in both directions:
+//! a soft limit above it is lowered to it too (Docker before 25 starts
+//! containers at 1048576:1048576), and children get their original back
+//! either way. Raising costs nothing until fds are used (the kernel grows a
+//! process's fd table on demand), and epoll's cost is per registered fd, not
+//! per limit. What the size does change is how much local clients can make
+//! this process hold before fd pressure (`fd_pressure.rs`) turns newcomers
+//! away (the table minus a 128-fd reserve), each fd pinning a kernel
+//! `struct file`, and what observing the table costs: a readdir of
+//! `/proc/self/fd`, linear in open fds, ~7 ms at 60000. That observation is
+//! cached (`fd_pressure::table`: reused for 20 times its cost, so at most
+//! ~5% of loop time), so a full 65536-entry table costs one ~7 ms readdir
+//! per ~140 ms, not one per event. Measured with that cache on the dev VM
+//! (`scripts/fd-storm/run.sh`): 58 connections parking 1008 fds each (58540
+//! open) plus a 4000-connection burst gave an ordinary client a worst
+//! round-trip wait of 101-110 ms, the same as the burst with nothing parked
+//! (109 ms) and below `main`'s 361 ms on a 1024 table; uncached it was
+//! 36 s. 65536 is 64 times the default: room for 64 connections each at
+//! every per-client bound at once, including the 1024-fd queue cap.
 //!
 //! **A hard limit too low to raise** (a container started with
 //! `--ulimit nofile=1024:1024`, say) leaves the soft limit where it is; the
@@ -54,8 +61,9 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::sync::OnceLock;
 
-/// The most [`raise`] lifts the soft limit to, whatever the hard limit. See
-/// the module doc for the number.
+/// The soft limit [`raise`] sets wherever the hard limit allows it, whether
+/// that raises or lowers the one scoot started with. See the module doc for
+/// the number.
 pub(crate) const RAISED_SOFT_CAP: u64 = 65536;
 
 /// What [`raise`] found and did.
@@ -79,7 +87,7 @@ impl Limits {
 
 static RAISED: OnceLock<Option<Limits>> = OnceLock::new();
 
-/// Raises the soft `RLIMIT_NOFILE` to [`target_soft`], once per process, and
+/// Sets the soft `RLIMIT_NOFILE` to [`target_soft`], once per process, and
 /// logs what it did; later calls return the first call's answer. `None`
 /// when the limit could not be read at all (nothing was changed, and
 /// children inherit whatever the process has).

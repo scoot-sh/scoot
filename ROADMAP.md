@@ -113,10 +113,14 @@ each item's own file records why it landed when it did.
   `[patch.crates-io]`; `Cargo.lock` moves only `wayland-backend` and
   `wayland-sys`), which disconnects a client leaving more than its cap
   unclaimed: one eighth of the soft `RLIMIT_NOFILE`, clamped 128..=1024.
-  scoot raises that limit at startup to the hard limit capped at 65536
-  (`nofile.rs`), and every child `State::spawn` starts gets the original
-  back; so the cap is 1024, libwayland-server's default, and one connection
-  at every bound is 1674 fds against a 65408 line. The first round of the
+  scoot sets that limit at startup to min(hard limit, 65536) (`nofile.rs`),
+  and every child `State::spawn` starts gets the original back; so the cap
+  is 1024, libwayland-server's default, and one connection at every bound
+  is 1674 fds against a 65408 line. The fd-table reading pressure checks
+  use is cached (reused for 20x its cost): re-review found the uncached
+  per-connection readdir let a 4000-connection storm against 58000 parked
+  fds freeze scoot for 35.6 s; now 101 ms (`main`: 361 ms), reproducible
+  with `scripts/fd-storm/run.sh`. The first round of the
   PR pinned a fixed 128; review found stock libwayland clients reach it
   under backpressure (disconnected at 140 fds, where `main` served 600), and
   the coordinator folded the raise in. Dev VM: that libwayland client is

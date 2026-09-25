@@ -55,7 +55,7 @@ top**, so it stays easy to review, rebase, and drop.
   1024 (its `fds_in` ring holds 4096 bytes of fds by default), wherever
   the table allows it: one eighth of the soft limit, read when each client
   is created, clamped to 128..=1024. scoot raises its soft limit at startup
-  to the hard limit capped at 65536 (`crates/scoot/src/compositor/nofile.rs`),
+  to min(hard limit, 65536) (`crates/scoot/src/compositor/nofile.rs`),
   so the cap is 1024 wherever the hard limit is 8192 or more. Where the hard
   limit is 1024 (a container) it stays 128, the startup log says so, and a
   stalled libwayland client there can still be disconnected past about 128.
