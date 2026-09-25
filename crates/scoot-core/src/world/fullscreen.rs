@@ -7,7 +7,9 @@
 //! - The state is a per-window [`Fullscreen`] in `WindowState`, so it travels
 //!   with nothing: a window that closes takes it along, and no column or
 //!   workspace has a second copy to keep in step.
-//! - **A fullscreen window is always its column's focused window.** That is
+//! - **A fullscreen window in the strip is always its column's focused
+//!   window.** (A floating one has no column; it covers while it is its
+//!   workspace's focused window, like any other -- see `World::fullscreen_on`.) That is
 //!   what makes "at most one per column" hold without a check of its own, and
 //!   what lets `arrange` find one on the window lookups it already makes per
 //!   column (`World::column_spans`). Entering refuses a window that is not its

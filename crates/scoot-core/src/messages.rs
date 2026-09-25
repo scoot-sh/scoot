@@ -274,9 +274,10 @@ pub enum Action {
     ///   [`Action::SetColumnWidth`]) do nothing. Moving the focused window to
     ///   another workspace or output keeps it floating there, on top and
     ///   focused.
-    /// - **Floating takes the window out of its column**, and strip focus
-    ///   lands on the column to its left (for a window that floats as it
-    ///   first maps, that is the column that was focused before it opened,
+    /// - **Floating takes the window out of its column**; when that empties
+    ///   the strip's focused column, strip focus lands on the column to its
+    ///   left (for a window that floats as it first maps, that is the column
+    ///   that was focused before it opened,
     ///   and the strip's scroll is put back too, so the dialog leaves the
     ///   strip exactly as it found it). **Un-floating inserts it as a new
     ///   column right of the strip's focused column**, at the width it had

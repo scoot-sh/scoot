@@ -528,6 +528,10 @@ fn time_rounded_tier(fixture: &mut RoundedFixture, radius: i32, rounds: u32) -> 
 ///   corners (a window's committed size is clamped to its slot before it
 ///   becomes the clip; see `drawn.rs`) -- so this scene prices the clip on
 ///   content that overlaps its neighbors.
+/// - **float1**: the three tiled windows with the last one floated
+///   (`toggle-floating`) at the size it drew: a painted ring drawn over the
+///   windows beneath it, the floating layer's interleaved ring path (see
+///   `render/elements.rs`). Not in trees before floating windows existed.
 ///
 /// Tiers alternate per run and the table reports min/median/max per tier:
 /// this is a VM sharing a host's cores (see `render_frame_cost`), so a
@@ -536,8 +540,27 @@ fn time_rounded_tier(fixture: &mut RoundedFixture, radius: i32, rounds: u32) -> 
 #[ignore = "prints per-frame render timings for a human; asserts nothing"]
 fn rounded_corners_cost() {
     let renderer = test_renderer();
-    for (label, windows, overhang) in [("single", 1, 1), ("tiled3", 3, 1), ("overhang3", 3, 2)] {
+    for (label, windows, overhang, float) in [
+        ("single", 1, 1, false),
+        ("tiled3", 3, 1, false),
+        ("overhang3", 3, 2, false),
+        ("float1", 3, 1, true),
+    ] {
         let mut fixture = rounded_scene(windows, overhang);
+        if float {
+            fixture.state.act(scoot_core::Action::ToggleFloating);
+            fixture.settle();
+            assert!(
+                fixture
+                    .state
+                    .world
+                    .arrange()
+                    .placements
+                    .iter()
+                    .any(|p| p.floating && p.visible),
+                "the float1 scene has no visible floating window"
+            );
+        }
         let mut square: Vec<Duration> = Vec::with_capacity(ROUNDED_RUNS as usize);
         let mut rounded: Vec<Duration> = Vec::with_capacity(ROUNDED_RUNS as usize);
         // Paired deltas: each run's rounded batch minus its own square

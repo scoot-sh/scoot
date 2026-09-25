@@ -245,7 +245,9 @@ impl World {
     /// the workspace-index move makes. The window keeps its column preset
     /// across (a width choice, not a per-output state), lands right of the
     /// target's focused column like a newly opened window, and the source
-    /// output keeps whatever neighbour focus `take` leaves behind.
+    /// output keeps whatever neighbour focus `take` leaves behind. A floating
+    /// window stays floating: on top of the target's floating layer, focused,
+    /// and re-centred there.
     ///
     /// A fullscreen window leaves fullscreen on the way (see
     /// [`Action::ToggleFullscreen`](crate::Action::ToggleFullscreen)); an

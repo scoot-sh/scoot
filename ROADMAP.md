@@ -104,6 +104,23 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Floating windows, PR 1 of 2](docs/backlog/core/floating-windows.md)**
+  (2026-09-25, PR #TBD) — a per-workspace floating layer above the strip in
+  `scoot-core` (stacking with raise-on-focus, a focus flag per workspace,
+  placement centred on the parent or output and clamped to the usable area,
+  sized by what the client drew). Windows float at their first commit when
+  they carry `xdg_dialog_v1` (now advertised; GTK 4 dialogs), name a parent
+  (GTK 3 dialogs) or have a fixed size, unless `[floating] auto = false`;
+  `[[window_rule]]` globs on app id/title float or keep tiled, with an
+  optional initial size; all reloadable. `Super+Shift+Space` /
+  `toggle-floating`, `set-floating ID on|off`, `Super+Space` /
+  `toggle-floating-focus`; IPC `windows` gains `floating`. Floating windows
+  get no tiled states, their rings are drawn over the windows beneath them,
+  and pointer focus follows a dialog appearing under a still pointer. Dev VM:
+  `zenity --info/--question/--file-selection` float by dialog hint, the
+  `gtk3-widget-factory` About dialog by parent (centred on it), `foot
+  --app-id` by rule. **PR 2 remains:** pointer move/resize (Super+drag, CSD
+  `xdg_toplevel.move`/`resize`).
 - **[wayland-backend's received-fd queue is bounded](docs/backlog/resolved/wayland-backend-fd-queue-done.md), [and scoot raises its fd limit](docs/backlog/resolved/raise-nofile-limit-done.md)**
   (2026-09-25, PR #241) — wayland-backend 0.3.17 kept the fds a client
   attaches to fd-less requests for the connection's life; one idle client

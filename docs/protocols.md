@@ -12,7 +12,8 @@ read your files anyway.
 
 | Protocol | Version | State |
 | --- | --- | --- |
-| `xdg-shell` | 7 | Windows and popups. Every `xdg_toplevel` is a column entry, told it is [tiled](#tiled-windows) on all four edges; [`set_fullscreen`](#fullscreen) is honoured. |
+| `xdg-shell` | 7 | Windows and popups. An `xdg_toplevel` is a column entry, told it is [tiled](#tiled-windows) on all four edges, or a [floating](#floating-windows) window, told neither; [`set_fullscreen`](#fullscreen) is honoured. |
+| `xdg-dialog-v1` | 1 | `xdg_wm_dialog_v1`: a toplevel marked as a dialog (modal or not) [floats](#floating-windows) when it maps. |
 | `xdg-decoration-v1` | 1 | `zxdg_decoration_manager_v1` — server-side decorations, so a client stops drawing its own titlebar; see [`prefer_no_csd`](configuration.md#appearance). scoot draws a focus ring, never a titlebar. |
 | `wlr-layer-shell-v1` | 5 | [Bars, docks, wallpapers, launchers](#layer-shell-bars-wallpapers-launchers). |
 | `ext-workspace-v1` | 1 | [Workspaces](#workspaces-ext-workspace-v1). |
@@ -160,8 +161,9 @@ answering its next map is rebuilt from the layout: its column's size (if
 it is visible; a hidden window is sized when it next shows), the tiled
 states, `activated` if it has focus, and `ServerSide` decorations
 under `prefer_no_csd`. A fullscreen window is sent `fullscreen` instead,
-never both, and gets the four back when it leaves. scoot has no floating
-windows yet, so every window is sent one or the other. A client bound
+never both, and gets the four back when it leaves. A [floating
+window](#floating-windows) is sent neither — it sizes itself, and is told
+so. A client bound
 to `xdg_wm_base` below version 2 is sent none of the tiled states (they do
 not exist at its version).
 
@@ -178,14 +180,69 @@ ring around what such a window actually draws, and reports that area as its
 `rect` over IPC ([ipc.md](ipc.md#what-the-replies-carry)). It does not use the whole slot.
 
 One case is not solved yet. libadwaita dialogs (`zenity --info` above)
-round their own corners, with a larger radius than scoot's, and they keep
-doing it when tiled. With `corner_radius` set, a crescent of background
-shows at each corner, between the dialog's own curve and scoot's tighter
-ring. That is far closer than before, when the ring circled the whole empty
-slot, but it is not a match. Tracked in
+round their own corners, with a larger radius than scoot's. With
+`corner_radius` set, a crescent of background can show at each corner,
+between the dialog's own curve and scoot's tighter ring. Such dialogs now
+[float](#floating-windows) (they carry `xdg_dialog_v1`), so the ring hugs a
+window drawn at its own size rather than a short client in a tall column,
+but the corner radius still does not match. Tracked in
 [`core/client-rounded-corners-vs-ring.md`](backlog/core/client-rounded-corners-vs-ring.md).
-Most such dialogs will float once
-[floating windows](backlog/core/floating-windows.md) land.
+
+## Floating windows
+
+Dialogs, file pickers, settings windows and anything a user picks with a
+rule float above the scrolling strip instead of taking a column. What
+floating means for the layout — placement, stacking, focus, what the toggle
+puts back — is in [configuration.md](configuration.md#floating); this is
+the protocol side.
+
+**What floats, decided once, at the window's first commit.** By then a
+client has sent its app id, title, parent and size limits. In order:
+
+1. an `xdg_dialog_v1` object (`xdg_wm_dialog_v1.get_xdg_dialog`, modal or
+   not) — GTK 4 attaches one to its dialogs: `zenity --info`, `--question`
+   and `--file-selection` (GTK 4.22) all float this way;
+2. a parent (`xdg_toplevel.set_parent`) — GTK 3's dialogs (the About dialog
+   of `gtk3-widget-factory` 3.24.52) float this way;
+3. a fixed size — equal, non-zero `set_min_size` and `set_max_size` on both
+   axes;
+
+each off together under `[floating] auto = false`; then the
+[`[[window_rule]]`s](configuration.md#window_rule), which have the last
+word (`float = false` keeps a dialog in the strip). A hint, parent or title
+that changes after the first commit re-decides nothing, and a window that
+unmaps and maps again keeps whatever it was.
+
+**What the window is told.** A toplevel is placed as a column the moment it
+is created (before its first commit), so its first configure is the tiled
+one. The first commit's answer adds a second configure: size `0x0` (the
+client chooses) — or a rule's `size` — and no `tiled_*` state. Both arrive
+in the same flush, and a client acks the newest before drawing, so its
+first frame is at the size it chose: on the dev VM `zenity --info` drew its
+300x223 dialog, and `foot --app-id` matched by a rule its 693x500 default,
+rounded to whole cells as a floating `foot` does. From then on it is sent no
+size unless it draws itself larger than the output's usable area, which asks
+it to fit. Floating a tiled window sends `0x0` with the tiled states
+cleared, and the client picks its floating size again (`foot` went back to
+its 693x500 default on the dev VM). Un-floating sends its column's size with the tiled states back.
+
+**Drawn above the strip, below the `top` layer.** A floating window is drawn
+over every tiled window on its output, with its focus ring drawn over them
+too (directly under the window itself, so of two overlapping floating
+windows the upper one's ring shows over the lower one), and below `top`
+and `overlay` layer surfaces. The pointer and clicks follow the same order.
+A lock screen covers it like everything else. It is drawn and clickable only
+on its own output. When a floating window appears, moves or is raised under
+a pointer that is not moving, the pointer is re-entered on whatever is now
+under it, so the next click goes to the dialog, not the window beneath.
+
+**Popups** of a floating window are fitted into its output's usable area
+like any window's (see [Popup menus](#popup-menus-xdg_popup)).
+
+**Not yet:** moving or resizing a floating window with the pointer — a
+client-side titlebar drag (`xdg_toplevel.move`) or resize edge
+(`xdg_toplevel.resize`) does nothing, and neither does a Super+drag. scoot
+centres it; the toggle is the only way to change what it is.
 
 ## Fullscreen
 
@@ -271,6 +328,15 @@ not looking at to another screen.
 **While locked.** A window's own request is honoured (it is not drawn, and
 the session is as the client left it at unlock); requests on the user's
 behalf — a taskbar, the bind, IPC — are refused like every other action.
+
+**Floating windows.** A floating window can go fullscreen. It covers its
+output while it has focus, is hidden while focus is elsewhere, and leaving
+puts it back where it floated, told `0x0` with no tiled state. While a
+fullscreen window in the strip covers the output, the floating windows on
+that workspace are hidden — until one of them takes focus (a dialog the
+fullscreen app opened does), which shows the floating layer above it; nothing
+counts as covering the output then (so the `top` layer is drawn again, and
+direct scanout pauses), until focus returns to the strip.
 
 ## XWayland (opt-in skeleton)
 

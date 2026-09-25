@@ -687,14 +687,14 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [VRR on the scanout tier](./core/gpu-vrr.md) — low, blocked on a VRR-capable display.
 
 ### Requested 2026-09-24
-- [Floating windows (dialogs auto-float, window rules, toggle)](./core/floating-windows.md) — high, user request; queued after PR #240 and the wayland-rs fork repin.
+- [Floating windows (dialogs auto-float, window rules, toggle)](./core/floating-windows.md) — high, user request. **PR 1 landed** (2026-09-25): the floating layer, auto-float by `xdg-dialog-v1`/parent/fixed size, `[[window_rule]]`, the toggle and focus switch, IPC. **PR 2 remains:** pointer move/resize.
 
 ### From the PR #239 review (2026-09-24)
 - [Many light connections can still pressure the table and shed scootctl](./core/pressure-many-light-connections.md) — medium; cheapest fix is a lower pressure line for IPC accepts. Since PR #241's raised table it takes 64 idle connections parking 1024 fds each (no objects) to fill it, measured; still 7 where the hard limit is 1024.
 
 ### From the gh #205 re-verification (2026-09-24)
 - [Clip and ring the committed size; send tiled states](./resolved/clip-to-committed-size-done.md) — RESOLVED 2026-09-24: layout windows are told they are tiled on all four edges (default foot now fills its slot: 958x1068 → 966x1083 at 1.5), and the rounded clip, both rings and IPC `rect` follow the committed size clamped to the slot (`drawn.rs`), so a client that still draws short (GTK 4 dialogs, mpv) is clipped and ringed where it drew. Default foot at 1.0/1.5, headless and `--tty`: all four corners pass (right and bottom failed on `main`). The review found that a re-map had lost size, tiled states and the decoration mode; they are now rebuilt from the layout. Residual filed below.
-- [A client that rounds its own corners leaves a sliver between its corner and the ring](./core/client-rounded-corners-vs-ring.md) — medium: libadwaita dialogs round wider than scoot (53–59 background px per corner at 1.5); most will float once floating windows land.
+- [A client that rounds its own corners leaves a sliver between its corner and the ring](./core/client-rounded-corners-vs-ring.md) — medium: libadwaita dialogs round wider than scoot (53–59 background px per corner at 1.5). They float now (floating windows PR 1), which does not change the radius mismatch.
 - [Ring outer corners have square shoulders](./resolved/ring-outer-corner-shoulders-done.md) — RESOLVED 2026-09-24: the painted ring's side bars span only the rows between its strips (from the strips' own physical geometry), so the outer edge is a concentric arc in every row. Pixman and GLES, 1.0–2.0.
 
 ### GPU tier, after primary-direct (2026-09-23)

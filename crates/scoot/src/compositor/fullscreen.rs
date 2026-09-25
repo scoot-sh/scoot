@@ -14,9 +14,10 @@
 //! - **State out.** `shell.rs`'s `apply()` sets the `fullscreen` state bit
 //!   and the output-sized frame on every visible window's configure, from
 //!   `Placement::fullscreen` -- or, for every other window, the four tiled
-//!   states, or none for a floating one (see [`set_layout_states`]); [`State::answer_fullscreen_request`] covers the
-//!   window the arrangement did not configure (an invisible one) and the
-//!   request that changed nothing.
+//!   states, or none for a floating one (see [`set_layout_states`]);
+//!   [`State::answer_fullscreen_request`] covers the window the arrangement
+//!   did not configure (an invisible one) and the request that changed
+//!   nothing.
 //! - **What stays above.** [`State::covered_by_fullscreen`] is the one
 //!   question the render stack, pointer hit-testing and keyboard focus ask
 //!   (through `layer_shell::above_windows`) to hide the top layer under a
