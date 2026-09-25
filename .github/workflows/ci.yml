@@ -61,7 +61,9 @@ jobs:
   linux:
     name: Linux (compositor)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 90, not 60, since the xwayland step (last) rebuilds Smithay a third
+    # time and runs the whole scoot suite again under that feature.
+    timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
 
@@ -318,6 +320,35 @@ jobs:
           echo "note: libEGL/libGLESv2 are dlopen'd by renderer_gl and never appear in ldd for either build, so"
           echo "      those clauses are belt-and-braces against a future static link, not live checks. What"
           echo "      actually guards the GPU-free path is the smoke test below, which runs with no loadable EGL."
+
+      # The opt-in XWayland tier (`--features xwayland`): nothing else here
+      # builds it, and its live suites -- window mapping, the focus gate
+      # (focus-steal refusals, token spending), the lock's blanking and input
+      # refusal -- are security regression tests that must run somewhere
+      # automated. They drive a real `Xwayland` server, so one is put on
+      # PATH (plus xclock/xeyes, which two suites use for a second X client
+      # process), pinned like the smoke tools through this repo's
+      # `flake.lock`. `SCOOT_REQUIRE_XWAYLAND` turns every live test's quiet
+      # "skipped -- no Xwayland binary on PATH" into a failure, so a PATH
+      # regression here cannot leave the security suites green by skipping
+      # (see `compositor/xwayland/tests/mod.rs`'s `xwayland_on_path`).
+      #
+      # Last among the builds, like gpu-scanout above and for the same
+      # reason: the feature changes Smithay's unification and rebuilds it.
+      # The GLES tests in the full suite need the same software EGL as the
+      # default test steps.
+      - name: --features xwayland -- clippy, nextest and cargo test, live suites required
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          x=$(nix build --inputs-from . nixpkgs#xwayland nixpkgs#xorg.xclock nixpkgs#xorg.xeyes --no-link --print-out-paths)
+          for path in $x; do export PATH="$path/bin:$PATH"; done
+          command -v Xwayland
+          export SCOOT_REQUIRE_XWAYLAND=1
+          export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
+          export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
+          cargo clippy -p scoot --all-targets --features xwayland -- -D warnings
+          cargo nextest run -p scoot --features xwayland --no-fail-fast
+          cargo test -p scoot --features xwayland
 
       - name: Save the cargo cache
         # Not `always()`, which also fires on cancellation -- and

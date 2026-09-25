@@ -437,6 +437,16 @@ pub struct State {
     /// session without an X client, so each reader costs an empty-`Vec` test.
     #[cfg(feature = "xwayland")]
     pub x11_unmanaged: Vec<smithay::xwayland::X11Surface>,
+    /// Every X window, mapped or not, that currently carries a
+    /// `_NET_STARTUP_ID`, by X window id -- so the focus gate can read a
+    /// toolkit's startup id off its *client leader* (GTK and Qt put it
+    /// there, on an unmapped window, not on the toplevel they map; see
+    /// `xwayland/focus.rs`). Written only from the XWM callbacks (a window
+    /// created, its startup id changing, its destruction, the server's
+    /// death); read once per redemption. Holds a handful of windows per X
+    /// application, and none in a session without X clients.
+    #[cfg(feature = "xwayland")]
+    pub x11_startup_carriers: HashMap<u32, smithay::xwayland::X11Surface>,
     /// `zwlr_layer_shell_v1`: bars, docks, wallpapers and notification
     /// daemons. Unlike the two `#[allow(dead_code)]` states below this one is
     /// read again -- `WlrLayerShellHandler::shell_state` (see
@@ -995,6 +1005,8 @@ impl State {
             xwayland_grab: None,
             #[cfg(feature = "xwayland")]
             x11_unmanaged: Vec::new(),
+            #[cfg(feature = "xwayland")]
+            x11_startup_carriers: HashMap::new(),
             layer_shell_state,
             ext_workspace,
             foreign_toplevels,

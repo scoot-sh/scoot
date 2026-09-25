@@ -755,7 +755,8 @@ scale/mode) into one hardware session.
   match `WM_CLASS`, fullscreen both ways, override-redirect menus drawn
   unmanaged; an X window takes focus only when nothing is focused, the
   focused window is the same X process, or it redeems its spawn's token
-  (`_NET_STARTUP_ID` or X-Resource pid), and
+  (`_NET_STARTUP_ID` on the window or its client leader, or X-Resource pid;
+  spent whichever rule grants focus), and
   `_NET_ACTIVE_WINDOW` goes through the same gate. Remaining: clipboard/DnD/
   XIM (Phase 4) → capture pins/packaging (5–7). The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its

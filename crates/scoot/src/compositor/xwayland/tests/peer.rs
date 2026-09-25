@@ -12,6 +12,12 @@ use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, event_created_child};
+use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_handle_v1::{
+    self as ext_handle, ExtForeignToplevelHandleV1,
+};
+use wayland_protocols::ext::foreign_toplevel_list::v1::client::ext_foreign_toplevel_list_v1::{
+    self as ext_list, ExtForeignToplevelListV1,
+};
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1, ext_session_lock_v1,
 };
@@ -33,6 +39,11 @@ pub(super) enum Step {
     Map { title: &'static str, color: [u8; 4] },
     /// Bind `zwlr_foreign_toplevel_manager_v1`.
     BindTaskbar,
+    /// Bind `ext_foreign_toplevel_list_v1`.
+    BindExtList,
+    /// Report every toplevel the `ext-` list has announced and not closed,
+    /// as `(title, app_id)`, in announcement order.
+    ExtToplevels,
     /// Report every toplevel the taskbar has been told about and not seen
     /// close, as `(title, app_id)`, in announcement order.
     Toplevels,
@@ -59,10 +70,20 @@ struct Peer {
     seat: Option<wl_seat::WlSeat>,
     locks: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
     manager_name: Option<(u32, u32)>,
+    list_name: Option<(u32, u32)>,
     /// The taskbar's handles, with what each was last told.
     handles: Vec<Known>,
+    /// The `ext-` list's handles, the same way.
+    ext_handles: Vec<ExtKnown>,
     /// Per window: the newest configure's serial and size, if unacked.
     configures: Vec<Option<(u32, i32, i32)>>,
+}
+
+struct ExtKnown {
+    handle: ExtForeignToplevelHandleV1,
+    title: String,
+    app_id: String,
+    closed: bool,
 }
 
 struct Known {
@@ -96,6 +117,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Peer {
             "wl_seat" => peer.seat = Some(registry.bind(name, version.min(5), qh, ())),
             "ext_session_lock_manager_v1" => peer.locks = Some(registry.bind(name, 1, qh, ())),
             "zwlr_foreign_toplevel_manager_v1" => peer.manager_name = Some((name, version)),
+            "ext_foreign_toplevel_list_v1" => peer.list_name = Some((name, version)),
             _ => {}
         }
     }
@@ -141,6 +163,55 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for Peer {
             handle::Event::Title { title } => known.title = title,
             handle::Event::AppId { app_id } => known.app_id = app_id,
             handle::Event::Closed => known.closed = true,
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ExtForeignToplevelListV1, ()> for Peer {
+    fn event(
+        peer: &mut Self,
+        _: &ExtForeignToplevelListV1,
+        event: ext_list::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let ext_list::Event::Toplevel { toplevel } = event {
+            peer.ext_handles.push(ExtKnown {
+                handle: toplevel,
+                title: String::new(),
+                app_id: String::new(),
+                closed: false,
+            });
+        }
+    }
+
+    event_created_child!(Peer, ExtForeignToplevelListV1, [
+        ext_list::EVT_TOPLEVEL_OPCODE => (ExtForeignToplevelHandleV1, ()),
+    ]);
+}
+
+impl Dispatch<ExtForeignToplevelHandleV1, ()> for Peer {
+    fn event(
+        peer: &mut Self,
+        proxy: &ExtForeignToplevelHandleV1,
+        event: ext_handle::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let Some(known) = peer
+            .ext_handles
+            .iter_mut()
+            .find(|known| &known.handle == proxy)
+        else {
+            return;
+        };
+        match event {
+            ext_handle::Event::Title { title } => known.title = title,
+            ext_handle::Event::AppId { app_id } => known.app_id = app_id,
+            ext_handle::Event::Closed => known.closed = true,
             _ => {}
         }
     }
@@ -245,6 +316,7 @@ pub(super) fn peer(
     // Held for the run: dropping a window or the lock would end it.
     let mut windows = Vec::new();
     let mut managers = Vec::new();
+    let mut managers_ext = Vec::new();
     let mut locks = Vec::new();
     while let Ok(step) = steps.recv() {
         let ack = match step {
@@ -282,6 +354,28 @@ pub(super) fn peer(
                 queue.roundtrip(&mut peer).map_err(|e| e.to_string())?;
                 queue.roundtrip(&mut peer).map_err(|e| e.to_string())?;
                 Ack::Done
+            }
+            Step::BindExtList => {
+                let (name, version) = peer.list_name.ok_or("no ext foreign-toplevel list")?;
+                managers_ext.push(registry.bind::<ExtForeignToplevelListV1, _, _>(
+                    name,
+                    version.min(1),
+                    &qh,
+                    (),
+                ));
+                queue.roundtrip(&mut peer).map_err(|e| e.to_string())?;
+                queue.roundtrip(&mut peer).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::ExtToplevels => {
+                queue.roundtrip(&mut peer).map_err(|e| e.to_string())?;
+                Ack::Toplevels(
+                    peer.ext_handles
+                        .iter()
+                        .filter(|known| !known.closed)
+                        .map(|known| (known.title.clone(), known.app_id.clone()))
+                        .collect(),
+                )
             }
             Step::Toplevels => {
                 queue.roundtrip(&mut peer).map_err(|e| e.to_string())?;

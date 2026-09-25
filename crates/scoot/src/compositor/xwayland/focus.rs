@@ -17,43 +17,53 @@
 //! An X window may take focus by itself when:
 //!
 //! 1. **nothing is focused** -- no window holds focus to steal; or
-//! 2. **scoot spawned it, and the spawn's token is still unspent** -- the
-//!    chain from a user's own keybinding (or an agent's IPC `spawn`) to this
-//!    window. Checked two ways, both against the activation token table, so
-//!    every token rule there still binds (the 30-second lifetime, the shared
-//!    cap, single use):
-//!    - the window's `_NET_STARTUP_ID` names a live token. `State::spawn`
-//!      hands a child its token as `DESKTOP_STARTUP_ID` too while XWayland
-//!      is live -- the variable X toolkits (GTK, Qt) read for exactly this
-//!      -- so a toolkit client redeems the same token a Wayland child would.
-//!      A token a Wayland launcher minted from a real click works the same
-//!      way: it passed `activation.rs`'s serial gate when it was created.
+//! 2. **it redeems its launch's activation token** -- the chain from a
+//!    user's own keybinding (or an agent's IPC `spawn`) to this window.
+//!    Checked two ways, both against the activation token table, so every
+//!    token rule there still binds (the 30-second lifetime, the shared cap,
+//!    single use):
+//!    - the window's `_NET_STARTUP_ID` -- or, when the window has none, its
+//!      client leader's (the `WM_HINTS` window group: GTK and Qt set the
+//!      startup id on that unmapped leader window, never on the toplevel
+//!      they map, so reading the toplevel alone redeemed nothing, measured
+//!      by review) -- names a live token. `State::spawn` hands a child its
+//!      token as `DESKTOP_STARTUP_ID` too while XWayland is live, the
+//!      variable X toolkits read for exactly this, so a toolkit launched
+//!      through a wrapper (`sh -c`, a launcher, `flatpak run`) still
+//!      redeems it. A token a Wayland launcher minted from a real click
+//!      works the same way: it passed `activation.rs`'s serial gate.
 //!    - the X client's process -- read through the X-Resource extension
 //!      (`XResQueryClientIds`), which the X server answers from the socket's
 //!      credentials, never from the forgeable `_NET_WM_PID` -- is a child
 //!      scoot spawned and has not reaped (so the pid cannot have been
-//!      reused), and a token minted for that spawn is live. This is what
-//!      covers the clients that do no startup notification at all (`xterm`).
-//!
+//!      reused), and a token minted for that spawn is live. This covers
+//!      clients that do no startup notification at all (`xterm`).
 //! 3. **the focused window is an X window of the same client process** --
 //!    again by X-Resource pid -- which is an application opening its own
-//!    dialog, or moving focus between its own windows. Not a steal: that
-//!    process already holds the keyboard, and inside the X server one X
-//!    client can move another's focus anyway. Without this an X app's file
-//!    chooser opened unfocused under its own window (measured: GTK 3's
-//!    `mousepad` Ctrl+O, token already spent -- GTK sends no
-//!    `_NET_ACTIVE_WINDOW` for a new dialog). Only the pid counts, never
-//!    `WM_TRANSIENT_FOR`: that is client-set, and any background X client
-//!    could name the focused window as its parent.
+//!    window or dialog, or moving focus between its own windows. Not a
+//!    steal: that process already holds the keyboard, and inside the X
+//!    server one X client can move another's focus anyway. Without this an
+//!    X app's file chooser opened unfocused under its own window (measured:
+//!    GTK 3's `mousepad` Ctrl+O -- GTK sends no `_NET_ACTIVE_WINDOW` for a
+//!    new dialog). Only the pid counts, never `WM_TRANSIENT_FOR`: that is
+//!    client-set, and any background X client could name the focused
+//!    window as its parent.
 //!
-//! A redeemed token is removed, so one spawn focuses one window: a second
-//! window the same process maps later takes focus only through rule 3 (its
-//! own window is focused) or rule 1.
+//! **A live token a mapping window carries is spent whichever rule grants
+//! it focus**, rule 1 or 3 included. Rule 1 used to short-circuit past it
+//! and leave the token live for 30 s -- and a startup id is a readable
+//! property, so any X client could copy it off the launched app's window
+//! and redeem it later with `_NET_ACTIVE_WINDOW` to take focus from a
+//! Wayland window (found live by review: zenity focused by rule 1, then
+//! `xeyes` copied the token and took focus from `foot`). One spawn focuses
+//! at most one window through its token; later windows of that process
+//! take focus through rule 3 while it is focused.
 //!
-//! `_NET_ACTIVE_WINDOW` passes the same gate. The message's own "currently
-//! active window" field is ignored: it is part of the request, so it proves
-//! nothing about who sent it. And while the session is locked the request is
-//! refused outright, like every activation.
+//! `_NET_ACTIVE_WINDOW` passes the same gate, and spends a token the same
+//! way. The message's own "currently active window" field is ignored: it
+//! is part of the request, so it proves nothing about who sent it. And
+//! while the session is locked the request is refused outright, like every
+//! activation.
 //!
 //! # What the gate cannot do
 //!
@@ -68,12 +78,13 @@
 //!
 //! # The startup-id race (known, filed)
 //!
-//! A startup id is a property on the launched app's window, so any X client
-//! can read it: one watching the root for new windows can copy a freshly
-//! launched app's `_NET_STARTUP_ID` onto a window of its own and map first,
-//! redeeming the token and taking focus once, for as long as that token is
-//! live (up to 30 seconds after the launch, until the app's own window
-//! spends it). The redemption does not check that the redeeming window's
+//! A startup id is readable by every X client from the moment the launched
+//! app sets it -- and a toolkit sets it on its client leader at startup,
+//! well before its first window maps. So an X client watching for new
+//! windows can copy it onto a window of its own (or name the app's leader
+//! as its own window group) and map *before* the app does, redeeming the
+//! token and taking focus once, while the token is live (up to 30 s after
+//! the launch). The redemption does not check that the redeeming window's
 //! process is the one the token was minted for. The tightening -- when the
 //! token carries a [`SpawnedPid`], accept a startup-id redemption only from
 //! that process or a descendant (a bounded parent walk, so wrapper scripts
@@ -82,12 +93,12 @@
 //! `/proc/<pid>/environ`; that is the project's same-uid trust boundary, and
 //! applies to every activation token, X or not.)
 
+use scoot_core::Action;
 use smithay::wayland::xdg_activation::XdgActivationToken;
 use smithay::xwayland::X11Surface;
 
 use super::super::State;
 use super::super::activation::TOKEN_LIFETIME;
-use scoot_core::Action;
 
 /// A token minted for a spawned child records the child's pid here (see
 /// `State::spawn`), so the X-Resource half of the gate can find the token a
@@ -103,11 +114,13 @@ struct ClientPid(Option<u32>);
 
 impl State {
     /// Whether a newly mapped X window takes focus (the module doc's gate).
-    /// Redeems the token that lets it, when one does.
+    ///
+    /// The token is redeemed first and unconditionally -- not after the
+    /// other two rules, which would short-circuit past it and leave a
+    /// copyable token live (see the module doc).
     pub(super) fn x11_focus_on_map(&mut self, window: &X11Surface) -> bool {
-        self.focus.is_none()
-            || self.same_client_as_focused(window)
-            || self.redeem_x11_spawn_token(window)
+        let redeemed = self.redeem_x11_spawn_token(window);
+        redeemed || self.focus.is_none() || self.same_client_as_focused(window)
     }
 
     /// `_NET_ACTIVE_WINDOW` for `window`: honoured only through the gate.
@@ -131,9 +144,9 @@ impl State {
         if self.focus == Some(id) {
             return;
         }
-        let allowed = self.focus.is_none()
-            || self.same_client_as_focused(window)
-            || self.redeem_x11_spawn_token(window);
+        // Redeemed first, whichever rule grants it, as on map.
+        let redeemed = self.redeem_x11_spawn_token(window);
+        let allowed = redeemed || self.focus.is_none() || self.same_client_as_focused(window);
         if !allowed {
             tracing::debug!(
                 ?id,
@@ -148,6 +161,29 @@ impl State {
         // on, or the refresh would hand the keyboard straight back to it.
         self.clicked_layer = None;
         self.act(Action::FocusWindowId(id));
+    }
+
+    /// The startup id on `window`'s client leader -- its `WM_HINTS` window
+    /// group, where GTK and Qt set it -- when that leader is a window the
+    /// XWM has seen carry one. One map lookup.
+    fn leader_startup_id(&self, window: &X11Surface) -> Option<String> {
+        let leader = window.hints()?.window_group?;
+        if leader == window.window_id() {
+            return None;
+        }
+        self.x11_startup_carriers.get(&leader)?.startup_id()
+    }
+
+    /// Files (or forgets) `window` as a carrier of a startup id, as the XWM
+    /// creates it or its `_NET_STARTUP_ID` changes; see
+    /// [`State::x11_startup_carriers`].
+    pub(super) fn note_x11_startup_id(&mut self, window: &X11Surface) {
+        if window.startup_id().is_some() {
+            self.x11_startup_carriers
+                .insert(window.window_id(), window.clone());
+        } else {
+            self.x11_startup_carriers.remove(&window.window_id());
+        }
     }
 
     /// Whether the focused window is an X window of the same client process
@@ -172,7 +208,10 @@ impl State {
         let fresh = |data: &smithay::wayland::xdg_activation::XdgActivationTokenData| {
             data.timestamp.elapsed() < TOKEN_LIFETIME
         };
-        if let Some(startup) = window.startup_id() {
+        if let Some(startup) = window
+            .startup_id()
+            .or_else(|| self.leader_startup_id(window))
+        {
             let token = XdgActivationToken::from(startup);
             if self
                 .xdg_activation
@@ -182,7 +221,7 @@ impl State {
                 self.xdg_activation.remove_token(&token);
                 tracing::debug!(
                     xid = window.window_id(),
-                    "X11 window redeemed its startup id"
+                    "X11 window redeemed its (or its client leader's) startup id"
                 );
                 return true;
             }

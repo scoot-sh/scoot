@@ -15,20 +15,24 @@ property, and this is its one known window.
 ## The gap
 
 The X focus gate (`compositor/xwayland/focus.rs`) lets a mapping X window
-take focus when its `_NET_STARTUP_ID` names a live activation token --
-`State::spawn` hands every child its token as `DESKTOP_STARTUP_ID` while
-XWayland is live. But a startup id is a *property on the launched app's
-window*, readable by every X client. A background X client that watches the
-root for `CreateNotify` can read a freshly launched app's `_NET_STARTUP_ID`,
-copy it onto a window of its own, and map first: it redeems the token and
-takes focus from a Wayland window once. The real app arrives second and is
-refused (the token is single-use). The window is as long as the token is
-live: up to 30 s after the launch (`TOKEN_LIFETIME`), until the app's own
-window spends it.
+take focus when its `_NET_STARTUP_ID` -- or its client leader's, the
+`WM_HINTS` window group where GTK and Qt set it -- names a live activation
+token; `State::spawn` hands every child its token as `DESKTOP_STARTUP_ID`
+while XWayland is live. But a startup id is a property readable by every X
+client, and a toolkit sets it on its leader at startup, before its first
+window maps. A background X client watching the root can read it, copy it
+onto a window of its own (or name the app's leader as its own window
+group), and map *before the app does*: it redeems the token and takes
+focus from a Wayland window once. The real app arrives second; the token
+is single-use. The window is from the moment the app sets its startup id
+until its own first window maps (which spends the token, whichever gate
+rule grants focus -- review round 1 closed the case where a rule-1 or
+rule-3 grant left it live for later), bounded by the token's 30 s.
 
 The redemption does not check the redeeming window's process. The existing
-test (`a_spawn_tokens_startup_id_lets_an_x_window_take_focus_once`) shows it:
-the redeeming X client is the test process, not a spawned child.
+tests (`a_spawn_tokens_startup_id_lets_an_x_window_take_focus_once`,
+`a_startup_id_on_the_client_leader_is_redeemed`) show it: the redeeming X
+client is the test process, not a spawned child.
 
 (A same-uid process can also read any child's token from
 `/proc/<pid>/environ`. That is the project's documented same-uid trust

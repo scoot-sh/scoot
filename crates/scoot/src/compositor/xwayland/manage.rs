@@ -102,19 +102,55 @@ fn x11_title(window: &X11Surface) -> String {
     x11_text(window.title())
 }
 
-/// A string an X client set, made safe to pass on: cut at its first NUL.
+/// The longest X string, in UTF-8 bytes, scoot passes on: see [`x11_text`].
 ///
-/// X properties are byte arrays, so `WM_NAME`, `_NET_WM_NAME` and `WM_CLASS`
-/// may carry a NUL -- and every Wayland string argument is a C string:
-/// wayland-scanner's generated senders build it with
-/// `CString::new(..).unwrap()`, so a title with a NUL in it, sent to a
-/// taskbar's foreign-toplevel handle, panics the compositor. (An xdg title
-/// cannot contain one: it arrived as a C string.) Cutting at the first NUL
-/// is what any C consumer of the property reads anyway. Allocation-free when
-/// there is no NUL, which is always, bar a hostile client.
+/// From the wire format, where a string is the one argument of the event
+/// carrying it (`title`/`app_id` on both foreign-toplevel handles): a
+/// message is an 8-byte header, then the string as a 4-byte length and its
+/// bytes plus a NUL, padded to a multiple of 4 -- and wayland-backend refuses
+/// (and disconnects the client over) any message past 4096 bytes
+/// (`MAX_BYTES_OUT`, `rs/socket.rs`). So `8 + 4 + round_up(n + 1, 4) <=
+/// 4096`, i.e. `n <= 4083`. 4000 leaves headroom under that hard bound (an
+/// event growing a second argument in a later protocol version) while being
+/// far past any title a person reads.
+pub(in crate::compositor) const MAX_X11_TEXT: usize = 4000;
+
+/// A string an X client set, made safe to pass on to a Wayland client: cut
+/// at its first NUL, then to at most [`MAX_X11_TEXT`] UTF-8 bytes.
+///
+/// Both bounds are about what a Wayland string can carry, which an X
+/// property does not share:
+///
+/// - **NUL.** X properties are byte arrays, so `WM_NAME`, `_NET_WM_NAME` and
+///   `WM_CLASS` may carry one -- and every Wayland string argument is a C
+///   string: wayland-scanner's generated senders build it with
+///   `CString::new(..).unwrap()`, so a title with a NUL in it, sent to a
+///   taskbar's foreign-toplevel handle, panics the compositor. Cutting at
+///   the first NUL is what any C consumer of the property reads anyway.
+/// - **Length.** Smithay reads these properties up to 8192 bytes, and a
+///   `STRING`-typed one decodes from Windows-1252, where each byte in
+///   0x80-0x9F becomes three UTF-8 bytes -- so a title or class can reach
+///   tens of kilobytes decoded, and one past the message limit disconnects
+///   every taskbar it is sent to, and every taskbar that binds while the
+///   window exists. Measured by review: a 4090-byte title, or a 1500-byte
+///   class of 0x80 bytes, dropped `lswt -w`. The cut is made *after*
+///   decoding, by UTF-8 bytes, and walked back to a character boundary:
+///   `String::truncate` panics mid-character, so a naive cap would turn the
+///   disconnect into a compositor panic.
+///
+/// (An xdg title needs neither: it arrived as a C string in a Wayland
+/// message of the same size limit.) Allocation-free: both cuts truncate in
+/// place, and the common string pays one scan for a NUL and a length check.
 pub(in crate::compositor) fn x11_text(mut text: String) -> String {
     if let Some(nul) = text.find('\0') {
         text.truncate(nul);
+    }
+    if text.len() > MAX_X11_TEXT {
+        let mut end = MAX_X11_TEXT;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
     }
     text
 }
@@ -501,6 +537,7 @@ impl State {
             self.remove_window(id);
         }
         self.clear_x11_unmanaged();
+        self.x11_startup_carriers.clear();
     }
 
     /// A frame an X window committed: reported only for a floating one (see

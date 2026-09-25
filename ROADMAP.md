@@ -127,6 +127,11 @@ each item's own file records why it landed when it did.
   class panicked the compositor in wayland-scanner's `CString::new().unwrap()`
   (now cut at the NUL), and `_GTK_FRAME_EXTENTS` near `i32::MAX` overflowed
   Smithay's geometry subtraction (such windows are refused or withdrawn).
+  Review round 1: an over-long X title/class disconnected every taskbar
+  (now capped at 4000 UTF-8 bytes after decoding, at a character boundary);
+  a token is spent whichever gate rule grants focus (a copied token used
+  to redeem later); the startup id is read from the client leader too (GTK
+  sets it there); CI runs the live suites with Xwayland installed.
   Also resolved
   the [WM-failure pin](docs/backlog/resolved/xwayland-phase1-wm-failure-pin-done.md)
   (the rival recipe cannot work: XWayland admits no client before the WM)

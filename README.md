@@ -61,10 +61,10 @@ inspired this project.
   build --release --features xwayland`, with `Xwayland` on `PATH`; no flake
   output ships it yet): their windows tile, dialogs float, fullscreen
   works, and they take focus by themselves only when nothing is focused,
-  when they are a dialog of the X app in use, or when scoot started them.
-  Running one extends full trust to it — X11 clients can read each other's
-  keystrokes and screens by design
-  ([protocols.md](docs/protocols.md#xwayland-opt-in)). Not there yet:
+  when they belong to the X app in use, or when scoot started them.
+  Running one extends full trust to it — an X11 client can read and cover
+  other windows by design ([protocols.md](docs/protocols.md#xwayland-opt-in)).
+  Not there yet:
   copy/paste and drag-and-drop between X and Wayland apps, and X input
   methods (XIM).
 - **GPU scanout is opt-in.** With a real GPU it is worth trying: on an

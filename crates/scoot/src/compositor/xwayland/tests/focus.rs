@@ -398,3 +398,95 @@ fn the_taskbar_activates_and_closes_x_windows() {
         "closing is a request, not a kill"
     );
 }
+
+/// A live token a mapping window carries is spent even when another rule
+/// (here rule 1: nothing focused) is what grants it focus -- otherwise any X
+/// client could copy the startup id off the launched app's window and
+/// redeem it later to take focus from a Wayland window (review, live: zenity
+/// focused by rule 1, then `xeyes` copied its token and took focus from
+/// `foot`). Here a second X connection copies the id, maps, and asks with
+/// `_NET_ACTIVE_WINDOW`; neither takes focus from the Wayland window.
+#[test]
+fn a_token_is_spent_whichever_rule_grants_focus() {
+    let Some(mut live) = live("a_token_is_spent_whichever_rule_grants_focus") else {
+        return;
+    };
+    let token = live
+        .fixture
+        .state
+        .mint_spawn_token("xprobe")
+        .expect("a spawn token");
+    let mut props = Props::new(RED);
+    props.startup_id = Some(token.as_str().to_owned());
+    let launched = live.x.map(&props);
+    let launched = live.managed(launched);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(launched),
+        "rule 1 focused it"
+    );
+    assert!(
+        live.fixture
+            .state
+            .xdg_activation
+            .data_for_token(&token)
+            .is_none(),
+        "rule 1 granted focus but left the token live"
+    );
+
+    let wayland = live.map_peer("wayland");
+    assert_eq!(live.fixture.state.focus, Some(wayland));
+    let copier = super::x11::XClient::connect(live.display);
+    let copied = copier.map(&props);
+    live.managed(copied);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(wayland),
+        "a copied startup id took focus on map"
+    );
+    copier.request_activation(copied);
+    live.drain();
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(wayland),
+        "a copied startup id took focus with _NET_ACTIVE_WINDOW"
+    );
+}
+
+/// GTK and Qt set `_NET_STARTUP_ID` on their unmapped client leader (the
+/// `WM_HINTS` window group), not on the toplevel they map -- so a launch
+/// through a wrapper (`sh -c`, a launcher), where the process path cannot
+/// match, redeems its token only if the gate reads the leader. This test's
+/// process is no spawned child, so the leader is the only path that can
+/// grant focus here.
+#[test]
+fn a_startup_id_on_the_client_leader_is_redeemed() {
+    let Some(mut live) = live("a_startup_id_on_the_client_leader_is_redeemed") else {
+        return;
+    };
+    let wayland = live.map_peer("wayland");
+    let token = live
+        .fixture
+        .state
+        .mint_spawn_token("xprobe")
+        .expect("a spawn token");
+    let leader = live.x.leader_with_startup_id(token.as_str());
+    live.drain();
+    let mut props = Props::new(RED);
+    props.group_leader = Some(leader);
+    let xid = live.x.map(&props);
+    let id = live.managed(xid);
+    assert_ne!(id, wayland);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(id),
+        "the leader's startup id was not redeemed"
+    );
+    assert!(
+        live.fixture
+            .state
+            .xdg_activation
+            .data_for_token(&token)
+            .is_none()
+    );
+}

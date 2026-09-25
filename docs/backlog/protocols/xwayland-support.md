@@ -385,21 +385,36 @@ the focused window is an X window of the same client process (X-Resource
 pid -- a deliberate addition to the brief: without it a GTK app's file
 chooser opened unfocused, measured with `mousepad`, because GTK sends no
 `_NET_ACTIVE_WINDOW` for a new dialog), or the window redeems its spawn's
-activation token -- by `_NET_STARTUP_ID`
+activation token -- by `_NET_STARTUP_ID` on the window or, failing that,
+on its client leader (`WM_HINTS` window group, where GTK and Qt put it)
 (`State::spawn` now exports the token as `DESKTOP_STARTUP_ID` too while
 XWayland is live; this reverses Phase 1's documented "must not mint", which
 predated any X redemption path) or by its X-Resource client pid being an
 unreaped spawned child with a live token (covers `xterm`, which sets no
-startup id; `_NET_WM_PID` is never read). `_NET_ACTIVE_WINDOW` passes the
+startup id; `_NET_WM_PID` is never read). A live token the window carries
+is spent whichever rule grants focus. `_NET_ACTIVE_WINDOW` passes the
 same gate, refused while locked, cheap checks before any round trip, pid cached per window. An
 input-model-`None` window gets no keyboard; the focused X window is raised in
 X stacking; the keyboard-grab protocol stays refused. X input feeds idle and
 `interaction_serials` through the same paths as Wayland input.
 
+**Review round 1 (same PR):** an over-long X title or class (Smithay reads
+8192 bytes; `STRING` values decode from Windows-1252, 0x80-0x9F to three
+UTF-8 bytes) disconnected every foreign-toplevel watcher, repeatedly -- X
+strings are now also capped at 4000 UTF-8 bytes after decoding, walked back
+to a character boundary (the hard wire bound is 4083); rule 1 and rule 3 no
+longer short-circuit past the token (a copied token redeemed later took
+focus from a Wayland window, live); the startup id is read from the client
+leader too (GTK's wrapped launches got focus by pid only, never by startup
+id); an override-redirect window mapped during the lock is pinned hidden and
+inert; CI builds, lints and runs the live suites with `Xwayland` installed
+and `SCOOT_REQUIRE_XWAYLAND=1`, so a skipped live test fails there.
+
 **Known limits, measured and stated rather than hidden:** (1) the startup-id
-chain is copyable -- `_NET_STARTUP_ID` is a readable property, so a watching
-X client can race a scoot-launched app to its token within its 30 s and take
-focus once; binding the redemption to the spawned process (ppid walk) is
+chain is copyable before the app maps -- `_NET_STARTUP_ID` is readable from
+the moment a toolkit sets it on its leader, so a watching X client can map
+a window with a copy (or naming the leader as its group) before the app's
+own window maps, within the token's 30 s, and take focus once; binding the redemption to the spawned process (ppid walk) is
 filed as [`xwayland-startup-id-race.md`](./xwayland-startup-id-race.md). (2)
 The brief asked the lock to *dismiss* X menus; it hides them and refuses
 them input, but cannot close them: the WM cannot unmap an override-redirect

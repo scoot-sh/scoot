@@ -44,6 +44,11 @@ pub(super) struct Props {
     pub(super) override_redirect: bool,
     /// `_GTK_FRAME_EXTENTS` (left, right, top, bottom), set before mapping.
     pub(super) frame_extents: Option<[u32; 4]>,
+    /// A raw `WM_CLASS` value (`STRING`, so Windows-1252), written as-is
+    /// instead of [`Props::class`].
+    pub(super) class_raw: Option<Vec<u8>>,
+    /// `WM_HINTS` window group: the client leader, as GTK and Qt set it.
+    pub(super) group_leader: Option<Window>,
 }
 
 impl Props {
@@ -61,6 +66,8 @@ impl Props {
             startup_id: None,
             override_redirect: false,
             frame_extents: None,
+            class_raw: None,
+            group_leader: None,
         }
     }
 }
@@ -216,6 +223,22 @@ impl XClient {
             hints
                 .set_normal_hints(&self.conn, window)
                 .expect("a hints request");
+        }
+        if let Some(raw) = &props.class_raw {
+            self.conn
+                .change_property8(
+                    PropMode::REPLACE,
+                    window,
+                    AtomEnum::WM_CLASS,
+                    AtomEnum::STRING,
+                    raw,
+                )
+                .expect("a property request");
+        }
+        if let Some(leader) = props.group_leader {
+            let mut hints = x11rb::properties::WmHints::new();
+            hints.window_group = Some(leader);
+            hints.set(&self.conn, window).expect("a hints request");
         }
         if let Some(extents) = props.frame_extents {
             self.set_frame_extents(window, extents);
@@ -382,5 +405,33 @@ impl XClient {
             )
             .expect("a property request");
         self.conn.flush().expect("the property hit the wire");
+    }
+}
+
+impl XClient {
+    /// An unmapped client-leader window carrying `startup_id` as its
+    /// `_NET_STARTUP_ID`, the way GTK and Qt set one up at startup.
+    pub(super) fn leader_with_startup_id(&self, startup_id: &str) -> Window {
+        let leader = self.conn.generate_id().expect("an X window id");
+        self.conn
+            .create_window(
+                COPY_DEPTH_FROM_PARENT,
+                leader,
+                self.root,
+                -100,
+                -100,
+                1,
+                1,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                self.visual,
+                &CreateWindowAux::new(),
+            )
+            .expect("a create request")
+            .check()
+            .expect("the X server accepted the leader");
+        self.string(leader, self.atoms.startup_id, self.atoms.utf8, startup_id);
+        self.conn.flush().expect("the leader hit the wire");
+        leader
     }
 }

@@ -45,6 +45,7 @@ impl XwmHandler for State {
 
     fn new_window(&mut self, _xwm: XwmId, window: X11Surface) {
         tracing::debug!(id = window.window_id(), "X11 window created");
+        self.note_x11_startup_id(&window);
     }
 
     fn new_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -72,6 +73,7 @@ impl XwmHandler for State {
         // mapped window outright), and matched by id, since Smithay marks
         // the surface dead before this runs (see `State::id_of_x11`).
         self.forget_x11_window(&window, "destroyed");
+        self.x11_startup_carriers.remove(&window.window_id());
     }
 
     fn configure_request(
@@ -118,6 +120,7 @@ impl XwmHandler for State {
             | WmWindowProperty::NormalHints
             | WmWindowProperty::TransientFor => self.x11_properties_changed(&window),
             WmWindowProperty::FrameExtents => self.x11_frame_extents_changed(&window),
+            WmWindowProperty::StartupId => self.note_x11_startup_id(&window),
             _ => {}
         }
     }

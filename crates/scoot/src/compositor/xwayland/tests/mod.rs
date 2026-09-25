@@ -57,6 +57,14 @@ fn x11_text_is_cut_at_the_first_nul() {
     assert_eq!(x11_text("evil\0title".to_owned()), "evil");
     assert_eq!(x11_text("\0".to_owned()), "");
     assert_eq!(x11_text(String::new()), "");
+    // Capped by UTF-8 bytes, walking back to a character boundary: a naive
+    // cut through a three-byte character would panic.
+    use super::manage::MAX_X11_TEXT;
+    assert_eq!(x11_text("x".repeat(MAX_X11_TEXT + 7)).len(), MAX_X11_TEXT);
+    let cut = x11_text(format!("AB{}", "\u{20ac}".repeat(MAX_X11_TEXT)));
+    assert!(cut.len() <= MAX_X11_TEXT && cut.len() > MAX_X11_TEXT - 3);
+    assert!(cut.ends_with('\u{20ac}'));
+    assert_eq!(x11_text("x".repeat(MAX_X11_TEXT)).len(), MAX_X11_TEXT);
 }
 
 #[test]
@@ -249,11 +257,24 @@ fn display_reaches_spawned_children_only_while_live() {
 /// walk, never an exec, so probing has no side effects.
 #[cfg(feature = "xwayland")]
 fn xwayland_on_path() -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| {
+    let found = std::env::var_os("PATH").is_some_and(|paths| {
         std::env::split_paths(&paths)
             .any(|dir| dir.join("Xwayland").is_file() || dir.join("Xwayland.exe").is_file())
-    })
+    });
+    // Where the live suites are expected to run (CI sets this), a missing
+    // binary is a failure, not a quiet skip: a green run whose security-gate
+    // tests all skipped would prove nothing.
+    assert!(
+        found || std::env::var_os(REQUIRE_XWAYLAND_ENV).is_none(),
+        "{REQUIRE_XWAYLAND_ENV} is set but no Xwayland binary is on PATH: the live XWayland suites would silently skip"
+    );
+    found
 }
+
+/// Set (to anything) where the live XWayland suites must run: every live
+/// test then fails instead of skipping when `Xwayland` is not on `PATH`.
+#[cfg(feature = "xwayland")]
+const REQUIRE_XWAYLAND_ENV: &str = "SCOOT_REQUIRE_XWAYLAND";
 
 /// How long to wait for the server to become ready, or for X events to
 /// arrive. Generous: a debug build exec'ing a real server on a VM.

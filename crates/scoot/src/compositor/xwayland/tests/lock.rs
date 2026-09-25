@@ -109,3 +109,52 @@ fn the_lock_blanks_x_windows_and_refuses_them_input() {
     // And the window keeps its place for the unlock.
     assert_eq!(super::live::id_of_xid(&live.fixture.state, xid), Some(id));
 }
+
+/// An override-redirect window mapped *during* the lock -- a tooltip or an
+/// X client's fake prompt -- is neither drawn nor pointed at.
+#[test]
+fn an_override_redirect_window_mapped_during_the_lock_is_neither_drawn_nor_hit() {
+    let Some(mut live) =
+        live("an_override_redirect_window_mapped_during_the_lock_is_neither_drawn_nor_hit")
+    else {
+        return;
+    };
+    assert!(matches!(live.fixture.run(Step::Lock), Ack::Done));
+    eventually(&mut live.fixture, "the session locking", |fixture| {
+        fixture.state.session_lock.is_locked()
+    });
+    let mut props = Props::new(BLUE);
+    props.rect = (20, 20, 50, 40);
+    props.override_redirect = true;
+    let overlay = live.x.map(&props);
+    eventually(&mut live.fixture, "the overlay mapped", |fixture| {
+        fixture
+            .state
+            .x11_unmanaged
+            .iter()
+            .any(|known| known.window_id() == overlay && known.wl_surface().is_some())
+    });
+    live.drain();
+    let pixels = live.fixture.render();
+    assert!(
+        !crate::compositor::test_support::contains(&pixels, BLUE_BGRA),
+        "an override-redirect window mapped under the lock is drawn"
+    );
+    assert!(
+        live.fixture
+            .state
+            .surface_under((45.0, 40.0).into())
+            .is_none(),
+        "the pointer finds an override-redirect window mapped under the lock"
+    );
+    live.fixture.state.pointer_move(45.0, 40.0);
+    assert!(
+        live.fixture
+            .state
+            .seat
+            .get_pointer()
+            .and_then(|pointer| pointer.current_focus())
+            .is_none(),
+        "the pointer entered an override-redirect window mapped under the lock"
+    );
+}

@@ -581,3 +581,69 @@ fn absurd_frame_extents_do_not_take_the_session_down() {
     );
     assert!(id_of_xid(&live.fixture.state, shadowed).is_some());
 }
+
+/// A title or class longer than a Wayland message can carry is capped --
+/// after Windows-1252 decoding, by UTF-8 bytes, at a character boundary --
+/// rather than disconnecting every taskbar it is sent to (and every one
+/// that binds while the window exists). The title is 4090 ASCII bytes; the
+/// class is `STRING`-typed `AB` plus 1500 bytes of 0x80, which decode to
+/// three UTF-8 bytes each (`€`), so the cap lands mid-character and has to
+/// walk back. Both watchers bind after the window exists -- the "freshly
+/// started taskbar" shape review measured being dropped again and again.
+#[test]
+fn an_overlong_x_title_or_class_is_capped_not_a_taskbar_disconnect() {
+    use crate::compositor::xwayland::manage::MAX_X11_TEXT;
+
+    let Some(mut live) = live("an_overlong_x_title_or_class_is_capped_not_a_taskbar_disconnect")
+    else {
+        return;
+    };
+    let title: &'static str = Box::leak("t".repeat(4090).into_boxed_str());
+    let mut class = b"latin\0AB".to_vec();
+    class.extend(std::iter::repeat_n(0x80u8, 1500));
+    class.push(0);
+    let mut props = Props::new(RED);
+    props.title = Some(title);
+    props.class_raw = Some(class);
+    let xid = live.x.map(&props);
+    let id = live.managed(xid);
+
+    let expected_title = "t".repeat(MAX_X11_TEXT);
+    // `AB` + as many whole `€` as fit: 2 + 3 * 1332 = 3998 bytes.
+    let expected_class = format!("AB{}", "\u{20ac}".repeat((MAX_X11_TEXT - 2) / 3));
+    assert!(expected_class.len() <= MAX_X11_TEXT);
+    // The watchers first: a disconnected peer fails its step, which is the
+    // harm this pins.
+    assert!(matches!(live.fixture.run(Step::BindTaskbar), Ack::Done));
+    assert!(matches!(live.fixture.run(Step::BindExtList), Ack::Done));
+    let wlr = live.taskbar();
+    let Ack::Toplevels(ext) = live.fixture.run(Step::ExtToplevels) else {
+        panic!("expected the ext list");
+    };
+    let info = live
+        .fixture
+        .state
+        .world
+        .window_info(id)
+        .cloned()
+        .expect("info");
+    assert_eq!(info.title, expected_title);
+    assert_eq!(info.app_id, expected_class);
+    assert!(
+        wlr.contains(&(expected_title.clone(), expected_class.clone())),
+        "the wlr taskbar was not told the capped title and class"
+    );
+    assert!(
+        ext.contains(&(expected_title.clone(), expected_class.clone())),
+        "the ext list was not told the capped title and class"
+    );
+    let snapshot = live
+        .fixture
+        .state
+        .window_snapshots()
+        .into_iter()
+        .find(|snapshot| snapshot.id == id.0)
+        .expect("the X window in `scoot msg windows`");
+    assert_eq!(snapshot.title, expected_title);
+    assert_eq!(snapshot.app_id, expected_class);
+}
