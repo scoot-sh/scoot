@@ -624,5 +624,7 @@ mod lock;
 mod mapping;
 #[cfg(feature = "xwayland")]
 mod peer;
+#[cfg(all(feature = "xwayland", feature = "gpu-scanout"))]
+mod scanout;
 #[cfg(feature = "xwayland")]
 mod x11;
