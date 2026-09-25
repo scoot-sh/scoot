@@ -118,6 +118,8 @@ struct Configured {
     width: i32,
     height: i32,
     fullscreen: bool,
+    /// Whether it carried all four `tiled_*` states (xdg_toplevel v2+).
+    tiled: bool,
 }
 
 enum Step {
@@ -384,15 +386,27 @@ impl Dispatch<xdg_toplevel::XdgToplevel, Index> for TestClient {
         } = event
             && let Some(pending) = client.pending.get_mut(index.0)
         {
-            let fullscreen = states
-                .chunks_exact(4)
-                .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
-                .any(|state| state == xdg_toplevel::State::Fullscreen as u32);
+            let has = |wanted: xdg_toplevel::State| {
+                states
+                    .chunks_exact(4)
+                    .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
+                    .any(|state| state == wanted as u32)
+            };
+            let fullscreen = has(xdg_toplevel::State::Fullscreen);
+            let tiled = [
+                xdg_toplevel::State::TiledLeft,
+                xdg_toplevel::State::TiledRight,
+                xdg_toplevel::State::TiledTop,
+                xdg_toplevel::State::TiledBottom,
+            ]
+            .into_iter()
+            .all(has);
             *pending = Configured {
                 serial: 0,
                 width,
                 height,
                 fullscreen,
+                tiled,
             };
         }
     }

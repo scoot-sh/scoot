@@ -36,6 +36,63 @@ fn set_fullscreen_configures_the_output_size_with_the_state_bit() {
     assert_eq!(fixture.rect_of(0), tiled);
 }
 
+/// Every window in the scrolling layout is tiled on all four edges, and is
+/// told so (`tiled_left/right/top/bottom`, xdg_toplevel v2+) from its first
+/// sized configure on: a client that believes it floats may size itself
+/// short of its slot (`foot` rounds down to whole character cells) or draw
+/// its own shadow and rounded corners around it (GTK).
+#[test]
+fn a_window_in_the_layout_is_told_it_is_tiled_on_every_edge() {
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    let configures = fixture.configures(0);
+    let first = configures
+        .iter()
+        .find(|c| c.width > 0)
+        .copied()
+        .expect("a sized configure");
+    assert!(
+        first.tiled && !first.fullscreen,
+        "the first sized configure: {configures:?}"
+    );
+    let last = *configures.last().expect("a configure");
+    assert!(last.tiled && !last.fullscreen, "{configures:?}");
+
+    // A second column: both windows stay tiled through the relayout.
+    fixture.map(OTHER_BGRA);
+    for window in 0..2 {
+        let last = *fixture.configures(window).last().expect("a configure");
+        assert!(last.tiled, "window {window} after a relayout: {last:?}");
+    }
+}
+
+/// Fullscreen and tiled are exclusive, and travel in the same configure as
+/// the size: entering sends `fullscreen` with no tiled state, leaving sends
+/// the four tiled states back with the column's size.
+#[test]
+fn fullscreen_replaces_the_tiled_states_and_leaving_restores_them() {
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    let entered = fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    assert!(entered.fullscreen && !entered.tiled, "{entered:?}");
+    assert_eq!((entered.width, entered.height), (CANVAS, CANVAS));
+
+    fixture.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    let left = fixture.configured(Step::UnsetFullscreen { window: 0 });
+    assert!(left.tiled && !left.fullscreen, "{left:?}");
+    assert_ne!(
+        (left.width, left.height),
+        (CANVAS, CANVAS),
+        "leaving hands back the column's size with the tiled states"
+    );
+}
+
 #[test]
 fn every_request_is_answered_with_a_configure_even_when_nothing_changes() {
     // xdg-shell: "the compositor will respond by emitting a configure event"
@@ -81,6 +138,10 @@ fn a_request_before_the_first_commit_is_what_the_first_configure_carries() {
         .copied()
         .expect("a sized configure");
     assert!(drawn_for.fullscreen, "{configures:?}");
+    assert!(
+        !drawn_for.tiled,
+        "a fullscreen first frame was also told it is tiled: {configures:?}"
+    );
     assert_eq!((drawn_for.width, drawn_for.height), (CANVAS, CANVAS));
     assert_eq!(
         fixture
@@ -223,6 +284,10 @@ fn ipc_set_fullscreen_targets_a_window_and_tells_it_even_while_invisible() {
     assert!(
         last.fullscreen,
         "an invisible window was not told: {last:?}"
+    );
+    assert!(
+        !last.tiled,
+        "an invisible window told it is fullscreen kept its tiled states: {last:?}"
     );
     assert_eq!(
         (last.width, last.height),
