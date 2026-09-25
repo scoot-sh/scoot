@@ -461,7 +461,8 @@ where
 /// corners rounded rather than a corner of empty slot. Only the corner
 /// staircases are cut, so a surface temporarily larger than its placement (a
 /// shrink still in flight) still draws past it -- over the ring, never under
-/// it -- until its smaller frame lands. A fullscreen window is pushed plain,
+/// it -- until its smaller frame lands, or for as long as it keeps drawing
+/// past its slot (some clients do for good). A fullscreen window is pushed plain,
 /// never wrapped: its corners are the output's corners.
 ///
 /// Both clip and location are in *this output's* coordinates (the placement

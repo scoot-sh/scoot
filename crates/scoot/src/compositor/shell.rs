@@ -2,6 +2,7 @@
 
 use scoot_core::{Action, Effect, Event, Rect, Size, SizeHints, WindowId, WindowInfo};
 use smithay::desktop::Window;
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::compositor::with_states;
@@ -126,6 +127,56 @@ impl State {
             id,
             requested: Size::new(requested.w, requested.h),
             actual: Size::new(size.w, size.h),
+        });
+    }
+
+    /// Rebuilds a toplevel's pending configure state from where the layout
+    /// has it, for the initial configure that answers a (re-)map.
+    ///
+    /// Smithay throws away everything pending when a toplevel unmaps (a null
+    /// buffer): size, states, decoration mode -- xdg-shell says the surface
+    /// returns to its state right after `get_toplevel`. The window keeps its
+    /// slot, its focus and its column in the layout, but nothing re-arranges
+    /// on a re-map, so without this the configure answering it would carry
+    /// no size (the client picks its own), no tiled states (so `foot`
+    /// rounds that size to whole cells), no `activated`, and -- because the
+    /// decoration mode is re-sent with every initial configure -- `ClientSide`
+    /// in place of the `ServerSide` scoot chose, telling the client to draw
+    /// its own titlebar.
+    ///
+    /// On a first map every value here is already pending (`add_window`'s
+    /// `apply()`, and the decoration handlers), so this changes nothing
+    /// there. The size is only set for a visible placement: a hidden one may
+    /// be a window stacked behind a fullscreen sibling, whose placement is
+    /// the sibling's frame -- not a size to configure it to (see
+    /// `answer_fullscreen_request`) -- and the next `apply()` that shows it
+    /// sizes it anyway. The decoration mode is restored only under
+    /// `prefer_no_csd`: without it scoot does what the client asked, and an
+    /// unmapped client's earlier request is gone with the rest of its state.
+    ///
+    /// Runs once per (re-)map, so the full arrangement it reads is no
+    /// per-frame cost.
+    pub(super) fn restore_layout_state(&self, id: WindowId) {
+        let Some(toplevel) = self.window(id).and_then(Window::toplevel) else {
+            return;
+        };
+        let arrangement = self.world.arrange();
+        let placement = arrangement.get(id);
+        let focused = self.focus == Some(id);
+        let server_side = self.appearance.prefer_no_csd;
+        toplevel.with_pending_state(|state| {
+            if let Some(placement) = placement {
+                if placement.visible {
+                    state.size = Some((placement.rect.w, placement.rect.h).into());
+                }
+                set_layout_states(state, placement.fullscreen);
+            }
+            if focused {
+                state.states.set(xdg_toplevel::State::Activated);
+            }
+            if server_side {
+                state.decoration_mode = Some(Mode::ServerSide);
+            }
         });
     }
 

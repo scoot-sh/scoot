@@ -590,9 +590,16 @@ impl State {
                     // origin and the part of it the client committed (see
                     // `drawn.rs`) -- the same rect the ring surrounds and
                     // the rounded clip cuts, so an agent aiming inside it
-                    // lands on the window. One geometry read per window per
-                    // `windows` request, not a per-frame path.
-                    rect: wire(drawn_rect(placement.rect, self.windows.get(&placement.id))),
+                    // lands on the window. A hidden window draws nothing at
+                    // its placement (which, stacked behind a fullscreen
+                    // sibling, is the sibling's frame), so it reports the
+                    // layout's rect unchanged. One geometry read per window
+                    // per `windows` request, not a per-frame path.
+                    rect: wire(if placement.visible {
+                        drawn_rect(placement.rect, self.windows.get(&placement.id))
+                    } else {
+                        placement.rect
+                    }),
                     visible: placement.visible,
                     focused: arrangement.focused == Some(placement.id),
                     popup_grab: grab_holder == Some(placement.id),

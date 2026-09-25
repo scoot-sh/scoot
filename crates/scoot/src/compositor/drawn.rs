@@ -7,8 +7,11 @@
 //! and GTK stop sizing themselves as floating windows. Some still draw
 //! short: a fixed-size dialog, an older client, a terminal told nothing, or
 //! any client for the frame or two between a larger configure and the frame
-//! that answers it. A few draw past the slot for the same frame or two while
-//! a shrink is in flight.
+//! that answers it. Some draw past the slot: any client for the frame or two
+//! a shrink is in flight, and a few for good (`weston-terminal` commits a
+//! 967x1087 window geometry in a 966x1083 slot and keeps it). Past the slot
+//! is clamped to the slot here, so the ring and the report stay on the
+//! layout's rect and the content draws over the ring where it spills.
 //!
 //! [`drawn_rect`] is that answer as a rect: the slot's origin (where the
 //! window is mapped -- its geometry's origin lands on the slot's top-left
@@ -36,8 +39,9 @@
 //! that grows keeps the ring hugging the old content until the client's
 //! larger frame arrives (no ring around empty slot in between), and one
 //! that shrinks clamps the ring to the new slot at once, exactly as before
-//! this existed (the client's larger frame, still on screen for a frame or
-//! two, draws over the ring rather than under it -- see the gather order in
+//! this existed (the client's larger frame, still on screen until its
+//! smaller one lands -- or for good, for a client that never shrinks to its
+//! slot -- draws over the ring rather than under it; see the gather order in
 //! `render/elements.rs`). Nothing is tracked per resize, so there is no
 //! state to go stale.
 //!
