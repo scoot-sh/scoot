@@ -238,8 +238,12 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   nested one); there the GPU is software, and per frame it measured the
   same CPU as read-back (7.67-7.73 against 7.70-7.77 ms per frame,
   1024x768) with a resize a little dearer (15.1 against 14.1-14.3 ms),
-  because drawing in software is nearly all the cost. What it saves on a real GPU
-  is [`../Asahi.md`](../Asahi.md)'s Test 8, not a claim made here.
+  because drawing in software is nearly all the cost. On a real GPU (Apple
+  M2, [`../Asahi.md`](../Asahi.md)'s Test 8) it does pay. Nested CPU per
+  frame falls 1.8–1.9x and the host's 3x, with an outer scoot as host.
+  Nested in niri on the VT, scoot takes 38–42 jiffies over 20 s against
+  76–77, and niri takes 34–37 against 82–83. niri imports scoot's
+  tiled-compressed buffers, and its own screenshot shows them intact.
 - **Scanout drives every plane it can claim, with captures kept correct.**
   The cursor plane is attempted on CRTCs that expose one, with per-frame
   fallback to compositing where the plane cannot be claimed; overlay planes
@@ -325,9 +329,16 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   import at all; a GL client's buffers there cannot): the primary on the
   client's framebuffer, captures byte-correct, the VT-away refusal and
   recovery, a lock over it composited; compositor CPU for that fullscreen client
-  dropped from ~76% of a core (llvmpipe compositing) to ~1.5%. Not yet
-  seen on real GPU hardware or with a real video player --
-  [`../Asahi.md`](../Asahi.md)'s Test 5 asks for that. The log line
+  dropped from ~76% of a core (llvmpipe compositing) to ~1.5%. On real
+  hardware (Apple M2, [`../Asahi.md`](../Asahi.md)'s Test 5) a fullscreen
+  mpv goes direct: plane 35 holds mpv's own `LINEAR` `XR30` framebuffer,
+  its `presented` feedback says `zero_copy`, and the compositor uses 10–11
+  jiffies per 10 s against 27–28 compositing the same video. **On a CRTC
+  with no cursor plane (Apple's `apple,dcp` has none), the drawn pointer is
+  composited, and a composited element above the window rules out the
+  primary for that frame**. So there, a fullscreen window goes direct only
+  while its app hides the pointer, as mpv does
+  ([ticket](backlog/core/gpu-direct-blocked-by-composited-cursor.md)). The log line
   `scanout: primary-direct eligibility changed` (at `debug`) says when a
   session starts or stops being allowed to go direct, and why. A frame
   that did go direct tells that window's `wp_presentation` feedback
@@ -352,9 +363,12 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   `LINEAR`, logged once as `dmabuf feedback: scanout tranche for
   fullscreen windows`; a tiled modifier the display's GBM is seen to lose on
   import -- the scanout exporter refuses such a framebuffer, since KMS would
-  show scrambled tiles -- is dropped from it and the window re-sent. Whether a real GL client reallocates into the tranche on
-  real hardware and goes direct is [`../Asahi.md`](../Asahi.md)'s Test 6 --
-  not yet seen; no GL client on the dev VM can allocate a dma-buf at all.
+  show scrambled tiles -- is dropped from it and the window re-sent. On an
+  Apple M2 the tranche is 10 formats at `LINEAR` naming `apple,dcp`'s card.
+  Mesa's GL clients move from `APPLE_GPU_TILED_COMPRESSED` to `LINEAR` when
+  it arrives and back when it is reverted, and mpv then goes direct.
+  Vulkan's `vkcube` does not reallocate for it
+  ([`../Asahi.md`](../Asahi.md)'s Test 6).
 - **GPU clients get explicit sync here, and only here.** Where the DRM
   device -- or, failing that, a render node (`/dev/dri/renderD*`) --
   supports syncobj timelines with eventfd (the startup log says
@@ -367,8 +381,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   buffer shown directly. Waits keep running across a VT switch. No other tier or backend
   offers the global, because none can honour it without blocking. Bounds,
   the Smithay leak scoot forked Smithay to fix, and what has been verified are in
-  [protocols.md](protocols.md#explicit-sync-linux-drm-syncobj-v1); the
-  real-GPU check is [`../Asahi.md`](../Asahi.md)'s Test 7.
+  [protocols.md](protocols.md#explicit-sync-linux-drm-syncobj-v1). On an
+  Apple M2 it is offered on the display device itself, and Mesa's Vulkan
+  `vkcube` uses it ([`../Asahi.md`](../Asahi.md)'s Test 7).
 - **A resize under `gles` keeps the renderer.** `--nested` follows its host
   window's size, and under `--renderer gles` each new size reallocates only
   the offscreen target: the EGL context, its shaders and every client
@@ -424,7 +439,8 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   conversion. Implicit-modifier entries are never offered next to explicit
   ones (a YUV buffer imported that way draws the wrong colours). On the dev
   VM's llvmpipe that is 57 formats, all `LINEAR`, identical on both GLES
-  tiers; on real hardware it is recorded, not promised
+  tiers. On an Apple M2 it is 54 formats at three modifiers each (Apple's
+  tiled-compressed, tiled, and `LINEAR`), also identical on both tiers
   ([`../Asahi.md`](../Asahi.md)'s Test 6). A multi-plane YUV buffer can go
   direct on the primary plane only where that plane lists the format;
   otherwise it composites. The same goes for a tiled layout: with those on
@@ -469,9 +485,13 @@ and no window can ride an overlay yet (nothing is marked a scanout
 candidate). A capture of a frame
 that went direct forces one composite frame first, and a capture stream
 keeps the output composited, so captures stay correct throughout --
-watched working on the dev VM. Whether `apple,dcp`
-exposes usable cursor or overlay planes is still unknown (no plane inventory exists
-from the Asahi runs). Virtio's own footnote: its cursor plane needs the
+watched working on the dev VM. Apple's `apple,dcp` (M2) exposes one
+primary, **one overlay and no cursor plane** (`cursor_planes=0
+overlay_planes=1`). The overlay has a fixed zpos above the primary, takes
+`LINEAR` only, and takes alpha RGB and YUV formats but no `XR24`. The
+cursor never lands on it, because Smithay cannot export a memory-buffer
+cursor as a framebuffer, so there the pointer is always composited
+([`../Asahi.md`](../Asahi.md)'s Test 5). Virtio's own footnote: its cursor plane needs the
 session's `CURSOR_PLANE_HOTSPOT` cap to be enumerated at all (set before
 `DrmDevice::new`, `ATOMIC` first, or commits fail unknown-plane), after
 which it scans out live on virtio. The case for scanout is no longer

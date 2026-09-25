@@ -63,12 +63,14 @@ inspired this project.
   ([Asahi.md](Asahi.md), Test 4). Turn it on with a `gpu-scanout` build
   (`nix build .#scoot-gpu`) and `scoot --tty --renderer gles`. There, a
   fullscreen window can be shown straight from the app's own buffer, with
-  no compositing, when the display accepts that buffer (seen on the dev VM
-  with a test client's dumb buffers; not yet with a GPU-rendered app, a
-  real video player, or real GPU hardware — [Asahi.md](Asahi.md), Test 5).
-  scoot also tells a fullscreen app which buffer layouts the display can
-  show that way, so an app that listens can pick one (not yet seen with a
-  real app — Test 6). While something records or streams the screen, scoot
+  no compositing, when the display accepts that buffer. On an Apple M2 a
+  fullscreen mpv goes direct and scoot uses about 60% less CPU for it. A
+  drawn pointer on top forces compositing, and a display with no cursor
+  plane (Apple Silicon's has none) therefore goes direct only while the
+  app hides the pointer, as video players do ([Asahi.md](Asahi.md),
+  Test 5). scoot also tells a fullscreen app which buffer layouts the
+  display can show that way, and Mesa's GL apps switch to one (Test 6).
+  While something records or streams the screen, scoot
   composites as usual. Not there yet:
   every other window is still composited. Under
   `--headless` the GPU speedup does not apply: `gles` there still copies
@@ -76,21 +78,23 @@ inspired this project.
   measured 18–31x *slower* than pixman. Under `--nested`, a `gpu-scanout`
   build hands each frame to the host compositor as a GPU buffer, with no
   copy back to the CPU, when the host composites on the same GPU (the
-  startup log says whether it does, and why not); seen working on the dev
-  VM, not yet measured on real GPU hardware ([Asahi.md](Asahi.md), Test 8).
+  startup log says whether it does, and why not). On an Apple M2 that
+  halves the nested scoot's CPU, nested in niri as well as in scoot
+  ([Asahi.md](Asahi.md), Test 8).
   pixman stays the default and the right choice without a GPU; details in
   [docs/tty.md](docs/tty.md).
 - **GPU apps get their GPU's own buffer formats under `--renderer gles`** —
   the layouts the GPU prefers and the YUV formats video decoders produce,
-  not only plain linear RGB. Checked on the dev VM's software GPU (linear
-  formats only there); real hardware is [Asahi.md](Asahi.md)'s Test 6.
+  not only plain linear RGB. On an Apple M2 that is 54 formats, each
+  offered tiled, compressed and linear, and GL and Vulkan apps pick the
+  compressed layout ([Asahi.md](Asahi.md)'s Test 6).
 - **GPU apps that use explicit sync (NVIDIA's driver relies on it, Mesa's
   Vulkan drivers use it where offered) are supported on the GPU tier**,
   where the GPU device supports it: scoot waits for an app's GPU to finish
   a frame before showing it, and tells the app when it may reuse a buffer.
   It is offered only there, never under pixman or `--headless`/`--nested`.
-  Checked on the dev VM with a test client; not yet with an NVIDIA or
-  Vulkan app, or on real GPU hardware ([Asahi.md](Asahi.md), Test 7).
+  Seen working with Mesa's Vulkan driver (`vkcube`) on an Apple M2; not
+  yet with NVIDIA ([Asahi.md](Asahi.md), Test 7).
 - **Config reload is live, except three restart fields.** `scootctl reload` (or `kill -HUP` on the
   compositor) re-applies the layout (gap, column widths, default column
   width), the output scale (except under `--nested`, where the host owns

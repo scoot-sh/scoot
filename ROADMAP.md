@@ -60,7 +60,11 @@ claimed rather than shown. Where they stand now:
   the connectors; the separable construction reserved for that case is not
   needed.
 - **The `Modifier::Invalid` widening on a driver that reports
-  `Invalid`-only — still unshown.** No such driver has been met.
+  `Invalid`-only — still unshown.** No such driver has been met, and Apple
+  Silicon is not one (2026-09-25, `Asahi.md` Test 6). AGX names explicit
+  modifiers for all 54 of its formats (tiled-compressed, tiled, `LINEAR`),
+  and `apple,dcp`'s `IN_FORMATS` names `LINEAR` explicitly on both planes.
+  So this claim needs different hardware.
 
 Scanout drives every plane it can claim — cursor plane active where exposed,
 overlay planes enumerated per CRTC, `ALLOW_SCANOUT` passed with its capture
@@ -266,8 +270,12 @@ each item's own file records why it landed when it did.
   [GLES captures keep a frame each while nothing redraws](docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)
   (high: 885 MB after 120 static-screen captures; fixed by PR #238, above) and
   [a nested frame-rate shortfall](docs/backlog/core/nested-frame-rate-vs-client.md)
-  (low). The real-GPU and `--tty` half is `Asahi.md` Test 9, tracked as
-  [its own item](docs/backlog/testing/niri-ab-real-gpu.md).
+  (low). The real-GPU and `--tty` half is `Asahi.md` Test 9, **run
+  2026-09-25** on an Apple M2: there, scoot's GPU tier used the least total
+  CPU of the three in every busy row (on the panel, relayout at 2.7% of a core
+  against niri's 4.6–4.9%, pointer motion at 9.2–9.6% against 22–23.5%),
+  and pixman is the most expensive. Only input latency remains
+  ([its own item](docs/backlog/testing/niri-ab-real-gpu.md)).
 
 - **[Params planes and retained syncobj timelines are counted, so fd pressure can find those holders](docs/backlog/resolved/client-held-fd-bound-done.md)**
   (2026-09-24, PR #236) — two paths let one client make scoot hold ~927
@@ -313,7 +321,10 @@ each item's own file records why it landed when it did.
   (7.67-7.73 vs 7.70-7.77 ms), ~6-8% dearer per resize (software drawing
   dominates on llvmpipe); fds flat over 1001 resizes. In-process tests run
   a nested scoot against a second scoot as host, including one that
-  refuses every buffer. Real GPU: `Asahi.md` Test 8.
+  refuses every buffer. **Real GPU, 2026-09-25** (`Asahi.md` Test 8,
+  Apple M2): nested CPU per frame 1.8–1.9x lower and the host's 3x lower,
+  pixels identical. Nested in niri on the VT: 38–42 against 76–77 jiffies
+  over 20 s, and niri imports scoot's tiled-compressed buffers intact.
 
 - **[Explicit sync on the GPU scanout tier](docs/backlog/resolved/linux-drm-syncobj-done.md)**
   (2026-09-23, PR #233) — `wp_linux_drm_syncobj_manager_v1` v1, offered
@@ -340,8 +351,10 @@ each item's own file records why it landed when it did.
   across a VT switch; a stalled client isolated; both bounds;
   fds back to baseline after a SIGKILL mid-wait; every fullscreen frame
   direct with releases following the flip; CPU unchanged against
-  `a30cd58`. Real Vulkan/NVIDIA clients and real GPU hardware are
-  `Asahi.md` Test 7.
+  `a30cd58`. **Real GPU, 2026-09-25** (`Asahi.md` Test 7, Apple M2):
+  offered on the display device itself (`apple,dcp` supports timelines),
+  and Mesa's Vulkan `vkcube` uses it (40 timelines, 827 acquire and 827
+  release points, no stall). NVIDIA remains unrun.
 
 - **[A GLES resize keeps its renderer](docs/backlog/resolved/gles-resize-in-place-done.md)**
   (2026-09-23, PR #232) — under `--renderer gles` (`--headless`/`--nested`)
@@ -417,9 +430,13 @@ each item's own file records why it landed when it did.
   directly (the `DrmCompositor`'s answer, not the cursor plane). Dev VM:
   tranche `XR24`/`AR24` `LINEAR`, sent/reverted live, `zero_copy` on
   exactly Smithay's direct frames (260/260, 384/384), CPU unchanged vs
-  `main`. Real GL client reallocating into it: `Asahi.md` Test 6 Part C.
+  `main`. **Verified on a real GPU 2026-09-25** (`Asahi.md` Test 6 Part
+  C, Apple M2): the tranche is 10 formats at `LINEAR` naming `apple,dcp`'s
+  card, Mesa's GL clients reallocate from `APPLE_GPU_TILED_COMPRESSED` to
+  `LINEAR` on the steer and back on the revert, and mpv reports `zero_copy`
+  on exactly the direct frames (743/743).
   Overlay-plane candidates stay split out
-  ([blocked](docs/backlog/core/gpu-overlay-window-candidates.md)).
+  ([now unblocked](docs/backlog/core/gpu-overlay-window-candidates.md)).
 
 - **[GLES tier advertises the driver's real dma-buf formats](docs/backlog/resolved/gles-dmabuf-full-formats-done.md)**
   (2026-09-23, PR #229) — under `--renderer gles` (offscreen and the
@@ -434,7 +451,11 @@ each item's own file records why it landed when it did.
   present, so the old rule could offer `LINEAR` against a driver's own
   list). New dumb-buffer suite imports and draws one buffer per advertised
   layout class through `create_immed` under either renderer. Dev VM:
-  57 formats at `LINEAR` on both GLES tiers. Real GPU: `Asahi.md` Test 6.
+  57 formats at `LINEAR` on both GLES tiers. **Real GPU, 2026-09-25**
+  (`Asahi.md` Test 6, Apple M2): 162 pairs, with 54 formats each at Apple
+  tiled-compressed, tiled and `LINEAR`, identical on both tiers. GL and
+  Vulkan clients allocate the compressed layout, and every import
+  succeeded.
   Trade-off recorded: a fullscreen client may now pick a layout the display
   cannot scan out — [scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md). Review found two harms the wider table made
   reachable, both fixed in the PR: GLES rebuilds (resize, added output)
@@ -461,7 +482,12 @@ each item's own file records why it landed when it did.
   captures). Live on the dev VM at default config (direct, tiled-over-black
   never direct, captures byte-correct, VT refusal and recovery, lock
   composited, overlay/shm/SIGKILL/scale fallbacks); 14-17 vs 754-763
-  jiffies/10 s against llvmpipe compositing. Real GPU: `Asahi.md` Test 5.
+  jiffies/10 s against llvmpipe compositing. **Real GPU, 2026-09-25**
+  (`Asahi.md` Test 5, Apple M2): a fullscreen mpv goes direct (its `LINEAR`
+  `XR30` framebuffer on plane 35) at 10–11 jiffies/10 s against 27–28
+  composited. On `apple,dcp`, which has no cursor plane, it does so only
+  while the app hides the pointer: a composited cursor rules out the
+  primary ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)).
   Its [candidates](docs/backlog/resolved/gpu-scanout-candidates-done.md)
   remainder -- scanout-tranche feedback and `zero_copy` -- landed in PR #230;
   overlay-plane candidates are split out

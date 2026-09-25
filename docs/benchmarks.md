@@ -6,9 +6,83 @@ to the results because some rows are not like-for-like, and each place where
 they aren't is marked.
 
 - [scoot vs niri, nested on the dev VM (2026-09-24)](#scoot-vs-niri-nested-on-the-dev-vm-2026-09-24)
+- [scoot vs niri on a real GPU, nested and `--tty` (2026-09-25)](#scoot-vs-niri-on-a-real-gpu-nested-and---tty-2026-09-25)
 - scoot's own tiers on real hardware (dumb buffers + pixman vs GPU scanout
   on an Apple M2) are in [`Asahi.md`](../Asahi.md) Test 4, summarised in
   [tty.md](tty.md#which-renderer-draws-the-frames).
+
+## scoot vs niri on a real GPU, nested and `--tty` (2026-09-25)
+
+The same comparison on an Apple M2 under Asahi Linux (Mesa 26.2.2's
+`asahi` driver). Here both compositors' GLES paths render on a real GPU,
+and both can own the real panel over `--tty`. The full method, every
+check and each raw cell are in [`Asahi.md`](../Asahi.md) Test 9. This is
+the summary. The build is `main` at `e1dce6f`, built on the machine; the
+niri is nixpkgs' 26.04. CPU is the compositor's process total
+(`/proc/PID/stat`), in ms.
+
+### Summary
+
+- **With a real GPU, scoot's GPU tier used the least total CPU of the
+  three.** On the real 2560x1600 panel at scale 1.5, `--tty --renderer
+  gles` spent 2.7% of a core on a relayout storm against niri's 4.6–4.9%.
+  Under continuous pointer motion it spent 9.2–9.6% against niri's
+  22–23.5%. Both compositors draw the pointer here, and neither has a
+  cursor plane to use. **These are totals, not like-for-like work.** No
+  frame counts exist on `--tty`, so per-frame cost there is unknown. The
+  pointer rows ran at an uncounted event rate. Nested, niri draws about
+  three frames per relayout action to scoot's one. Nested, the
+  `gpu-scanout` build hands its frames to the host as dma-bufs. It spent
+  250 ms on 200 relayout actions against niri's 580, and 820 ms animating
+  against niri's 1290 (no DIAG frame count for that build).
+- **pixman stops being the cheap option.** Nested at 1600x1000 it costs
+  7.1 ms per animated frame against niri's 2.4 and delivers 41 frames/s
+  against 54. On the panel it takes 44% of a core for relayout and 32–35%
+  for pointer motion. It stays the right default without a GPU (see the
+  dev VM section below), and it is the wrong choice with one.
+- **niri's renderer is about 6–15x cheaper per frame than on llvmpipe**
+  (0.94 ms per relayout frame, 2.35 ms per animated frame). scoot-gles on
+  the read-back path now matches it per animated frame (2.47 ms), while
+  niri still draws about three frames per relayout action to scoot's one.
+- **Idle:** neither scoot tier woke even once in 20 s, nested or on the
+  panel. niri woke 65–74 times on the panel. **Memory with three
+  terminals:** nested, 44 MB (pixman), 81–87 MB (GLES) and 110 MB (niri).
+  On the panel, 94 MB, 102 MB and 127 MB.
+- **Screenshots** through each compositor's own IPC cost 20–25 ms of CPU
+  per 2560x1600 capture on scoot-gpu, 27–32 ms on pixman and 41–44 ms on
+  niri. Through `grim`, all are within 12–15 ms. Neither GLES scoot nor
+  niri grew by a frame per capture.
+
+### Nested (cage with GLES as the host, 1600x1000, three rounds, medians)
+
+| scene | scoot-pixman | scoot-gles (read-back) | scoot-gles (dma-buf, `gpu-scanout`) | niri, anim off | niri, anim on |
+|---|---|---|---|---|---|
+| idle 20 s | 0 | 0 | 0 | 10 | 0 |
+| pointer, 1200 events | 90 | 100 | 100 | 750 | 760 |
+| relayout, 200 actions | 1760 | 510 | 250 | 580 | 630 |
+| shot-ipc, 10 | 100 | 80 | 80 | 160 | 160 |
+| shot-grim, 10 | 50 | 30 | 40 | 40 | 40 |
+| animate 10 s | 2940 | 1270 | 820 | 1290 | 1270 |
+| ms per relayout frame (DIAG) | 8.78 | 2.53 | not run | 0.94 | 1.01 |
+| ms per animated frame (DIAG) | 7.10 (41/s) | 2.47 (51/s) | not run | 2.38 (54/s) | 2.35 (54/s) |
+
+As on the VM, nested scoot presents no frames for pointer motion because
+the host draws the pointer, while niri redraws (628 frames, 1.2 ms each).
+
+### `--tty` on the real panel (2560x1600, scale 1.5 on both, two rounds)
+
+| scene | scoot-pixman | scoot-gpu | niri, anim off | niri, anim on |
+|---|---|---|---|---|
+| idle 20 s | 0, 0 | 0, 0 | 0, 10 | 0, 0 |
+| relayout 10 s | 4390, 4350 | 270, 270 | 470, 460 | 490, 470 |
+| pointer 10 s (ydotool) | 3470, 3160 | 960, 920 | 2210, 2220 | 2210, 2350 |
+| shot-ipc, 10 | 270, 320 | 200, 250 | 420, 440 | 410, 430 |
+| shot-grim, 10 | 150, 150 | 120, 120 | 140, 130 | 120, 130 |
+
+The pointer row is CPU per second at whatever rate ydotool's
+one-fork-per-event loop reached. scoot-pixman took about a third fewer
+wakeups there, which suggests it served fewer events. **Not measured:**
+input-to-present latency, and frame counts on `--tty`.
 
 ## scoot vs niri, nested on the dev VM (2026-09-24)
 
@@ -20,8 +94,9 @@ answer. niri renders only through GLES, and it refuses a software renderer
 on a real `--tty` session. The VM's GPU has no 3D, so niri could run there
 only nested, and every GLES row (niri's and scoot's `--renderer gles`)
 rasterises on llvmpipe, a software renderer. The real-GPU half, `--tty`
-included, is a runbook step for real hardware ([`Asahi.md`](../Asahi.md)
-Test 9). Nothing on this page is a claim about it.
+included, was run on an Apple M2 on 2026-09-25: see
+[the next section](#scoot-vs-niri-on-a-real-gpu-nested-and---tty-2026-09-25).
+Nothing in this section is a claim about real hardware.
 
 niri is a mature, much fuller compositor: animations, an overview,
 screencasting through PipeWire, a hotkey overlay, rich per-window rules and a
