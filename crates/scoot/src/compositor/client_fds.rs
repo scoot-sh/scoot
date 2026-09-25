@@ -88,13 +88,19 @@
 //! Mesa's software rasterizer keeps its own duplicate of every plane it
 //! imports, for as long as its texture cache holds the import (a hardware
 //! driver is expected to keep none; that module says how far that is
-//! checked). That duplicate is not the client's fd, so no arrival
-//! records it; `dmabuf/renderer_copies.rs` learns once per session how many
-//! the renderer keeps and adds them to the plane's record as it is imported
-//! ([`ClientFds::add_copies`]). So a record has a *weight* -- 1, plus its
-//! copies -- and every bound here reads the weighted sum: the fds a client
-//! really makes this process hold. A copy can outlive its plane until the
-//! renderer's cache is next drained; that module states the window.
+//! checked). That duplicate is not the client's fd, so no arrival brings
+//! it. Instead a plane is *admitted at the weight it will cost*: 1, plus the
+//! copies each GLES backend will make when it is imported, which
+//! `dmabuf/renderer_copies.rs` learns once per session and assumes is 1 until
+//! it has. Every bound here reads the weighted sum, and since the copies are
+//! inside the weight the arrival was admitted at, an import can never take a
+//! client past a bound after the fact. (It used to: the copies were added at
+//! import, and review of PR #239 took a client to 540 against 512 by adding
+//! planes near the bound and importing them.) Once the session knows the
+//! real number, an import lowers its planes to it
+//! ([`ClientFds::settle_copies`]); a weight is never raised after admission.
+//! A copy can outlive its plane until the renderer's cache is next drained;
+//! that module states the window.
 //!
 //! ## The numbers
 //!
@@ -114,16 +120,20 @@
 //!
 //! What one connection can make this process hold, at every bound at once,
 //! on the tier with the most (`--tty` GPU scanout, explicit sync offered):
-//! 512 here (renderer copies included), plus 64 acquire-wait eventfds
+//! 512 here (renderer copies included, and never exceeded: see
+//! [`ClientFds::admit`]), plus 64 acquire-wait eventfds
 //! (`drm_syncobj/acquire.rs`, scoot's own fds, bounded there), plus its
 //! socket: **577**. Against the idle baseline measured there (43) that is
 //! 620, 276 below the pressure line of a 1024-fd table (896); measured live
-//! at the bound, 557. So one connection cannot trip the reserve on its own
-//! through anything scoot counts, on any tier. On a software GLES renderer
-//! add the copies of planes that closed since the renderer's cache was last
-//! drained (`dmabuf/renderer_copies.rs`): at most the one round of the
-//! client's buffers, which at two fds a plane is 256 more, 876 in all --
-//! still under. What scoot does not count is in `fd_pressure.rs`.
+//! at the bound, 557. `fd_pressure/tests.rs` derives that figure by driving
+//! this ledger's admission rule, not from the constants alone. That is the
+//! steady state. The one transient on top is the renderer-copy drain window
+//! (`dmabuf/renderer_copies.rs`): copies of planes that already closed, until
+//! the next cache drain. Bounded by one round of the client's planes -- at
+//! most 256 copies at two fds a plane, 876 in all, still under the line --
+//! and in practice short: review of PR #239 saw all 240 copies of 80 released
+//! buffers close within 500 ms on both GLES tiers. What scoot does not count
+//! is in `fd_pressure.rs`.
 //!
 //! ## When the bounds are checked
 //!
@@ -178,11 +188,14 @@ mod tests;
 /// dma-buf planes and syncobj timelines together, each counted until it
 /// really closes. See the module doc for the number.
 ///
-/// An arrival that finds the client at this bound sweeps its records first,
-/// and is refused only if more than `512 - SWEEP_MARGIN` = 496 of them are
-/// still open. So a client never has more than 512 fds kept here. The refusal
-/// is the arriving request's own (see [`Refusal`]), and kills only that
-/// client.
+/// An arrival that would take the client's weight past this bound sweeps
+/// its records first, and is refused unless the sweep leaves room for it
+/// with [`SWEEP_MARGIN`] to spare (for a one-fd arrival: refused if more than
+/// `512 - SWEEP_MARGIN` = 496 are still open). A plane is admitted at its
+/// full weight, renderer copies included, and no weight is raised after
+/// admission, so the fds a client has scoot keep never pass 512 (apart from
+/// the drain window the module doc names). The refusal is the arriving
+/// request's own (see [`Refusal`]), and kills only that client.
 pub(crate) const MAX_FDS_PER_CLIENT: u32 = 512;
 
 /// How many fds a client may have this process keep before fd pressure
@@ -292,7 +305,16 @@ pub struct ClientFds {
     owner: HashMap<RawFd, ClientId>,
     /// Each client's records, as a list for its own sweep.
     per_client: HashMap<ClientId, Held>,
+    /// Record lists of entries that emptied, reused by the next entry made
+    /// (see [`ClientFds::release_entry`]).
+    spare: Vec<Vec<Record>>,
 }
+
+/// How many emptied record lists [`ClientFds`] keeps for reuse.
+const SPARE_LISTS: usize = 8;
+
+/// The capacity an emptied record list is shrunk to before it is kept.
+const SPARE_LIST_CAPACITY: usize = 64;
 
 /// One recorded fd.
 #[derive(Debug, Clone, Copy)]
@@ -302,8 +324,9 @@ struct Record {
     /// How a sweep tells whether the fd on this number is still this one.
     check: Check,
     /// How many fds this record stands for: 1, plus the copies a renderer
-    /// keeps of an imported plane's fd ([`ClientFds::add_copies`]). Always at
-    /// least 1.
+    /// is expected to keep of a plane's fd once it is imported, charged when
+    /// the plane is admitted and only ever lowered after
+    /// ([`ClientFds::settle_copies`]). Always at least 1.
     weight: u8,
 }
 
@@ -311,10 +334,9 @@ struct Record {
 #[derive(Debug, Default)]
 struct Held {
     /// Unordered, and never longer than [`Limits::total`]: every record
-    /// weighs at least 1, and an arrival that finds the weight at that bound
-    /// either sweeps it back down first or is refused. (The weight itself can
-    /// pass the bound by the copies of the one import after the last
-    /// admitted `add`; the next arrival then finds it there.)
+    /// weighs at least 1, and the weight never passes that bound (an arrival
+    /// that would take it past sweeps first or is refused, and a weight is
+    /// never raised after admission).
     records: Vec<Record>,
     /// How many of `records` are [`Kind::Timeline`].
     timelines: u32,
@@ -377,80 +399,97 @@ impl ClientFds {
         client: &ClientId,
         fd: RawFd,
         kind: Kind,
+        weight: u8,
     ) -> Result<(), Refusal> {
         self.fd_arrived(fd);
-        self.admit(client, kind, LIMITS, liveness::still_held, || {
+        self.admit(client, kind, weight, LIMITS, liveness::still_held, || {
             super::fd_pressure::table().is_some_and(|table| table.pressured())
         })
     }
 
-    /// Records `fd`, just admitted from `client` as `kind`, with the identity
-    /// check a later sweep will use. One `fstat` for a pool or a plane, none
-    /// for a timeline, plus one insert in each of two maps.
-    pub(crate) fn record_arrival(&mut self, client: &ClientId, fd: BorrowedFd<'_>, kind: Kind) {
+    /// Records `fd`, just admitted from `client` as `kind` at `weight`, with
+    /// the identity check a later sweep will use. One `fstat` for a pool or a
+    /// plane, none for a timeline, plus one insert in each of two maps.
+    pub(crate) fn record_arrival(
+        &mut self,
+        client: &ClientId,
+        fd: BorrowedFd<'_>,
+        kind: Kind,
+        weight: u8,
+    ) {
         let check = liveness::capture(fd, kind);
-        self.record(client, fd.as_raw_fd(), kind, check);
+        self.record(client, fd.as_raw_fd(), kind, check, weight);
     }
 
     /// Decides whether `client` may have scoot keep one more fd of `kind`,
-    /// against `limits`, with the grace applying only while `pressured()`
-    /// says the fd table is. Records nothing.
+    /// weighing `weight` (1, plus the renderer copies a plane will cost; see
+    /// the module doc), against `limits`, with the grace applying only while
+    /// `pressured()` says the fd table is. Records nothing.
     ///
     /// Every refusal is decided on a fresh sweep, never on the raw record
     /// count, which may include dead records:
     ///
-    /// - **Caps.** The records never exceed `limits.total`, because an
-    ///   arrival that finds them there sweeps first. It is refused if the
-    ///   sweep leaves more than `limits.total - SWEEP_MARGIN` live. The same
-    ///   for a timeline import against `limits.timelines`, counting timelines
-    ///   only. Otherwise the client has at least [`SWEEP_MARGIN`] arrivals
-    ///   before it can reach the bound again, which is what amortizes the
-    ///   sweeps.
-    /// - **Pressure grace.** Past `limits.grace` records, and only if a check
-    ///   is due ([`Self::sweep_due`]) or a sweep has just run for a cap, the
-    ///   table is observed (`pressured`, a `/proc/self/fd` readdir in
-    ///   production). If it is pressured, the client is refused if a sweep
-    ///   leaves it past the grace. Either way the next check is
-    ///   [`SWEEP_MARGIN`] records later: a sweep that does not refuse sets it
-    ///   from what the sweep left, and a calm observation from the records as
-    ///   they stand. So at most `SWEEP_MARGIN` arrivals pass between checks.
+    /// - **Caps.** An arrival that would take the weight past `limits.total`
+    ///   sweeps first, and is refused if what the sweep leaves, plus its own
+    ///   weight, is past `limits.total - SWEEP_MARGIN + 1`. So an admitted
+    ///   arrival never takes the weight past `limits.total`, whatever it
+    ///   weighs. The same for a timeline import against `limits.timelines`,
+    ///   counting timelines only. Otherwise the client has at least
+    ///   [`SWEEP_MARGIN`] weight to go before it can reach the bound again,
+    ///   which is what amortizes the sweeps.
+    /// - **Pressure grace.** If the arrival would take the weight past
+    ///   `limits.grace + 1`, and only if a check is due ([`Self::sweep_due`])
+    ///   or a sweep has just run for a cap, the table is observed
+    ///   (`pressured`, a `/proc/self/fd` readdir in production). If it is
+    ///   pressured, the client is refused if a sweep leaves it where the
+    ///   arrival would still take it past `limits.grace + 1`. Either way the
+    ///   next check is [`SWEEP_MARGIN`] later: a sweep that does not refuse
+    ///   sets it from what the sweep left, and a calm observation from the
+    ///   weight as it stands. So at most `SWEEP_MARGIN` weight passes between
+    ///   checks. (With `weight` 1 both rules are exactly the ones PR #236's
+    ///   timeline ledger had: refused past `cap - 16` live, and past the
+    ///   grace.)
     ///
     /// `pressured` is evaluated at most once per call, and at most once per
-    /// [`SWEEP_MARGIN`] arrivals per client. Under the grace, which is where
+    /// [`SWEEP_MARGIN`] weight per client. Under the grace, which is where
     /// every well-behaved client is, this is two map lookups and no syscall.
     pub(crate) fn admit(
         &mut self,
         client: &ClientId,
         kind: Kind,
+        weight: u8,
         limits: Limits,
         mut still_held: impl FnMut(RawFd, Check) -> bool,
         pressured: impl FnOnce() -> bool,
     ) -> Result<(), Refusal> {
+        // What the arrival adds beyond one fd: 0 for anything but a plane a
+        // renderer will copy.
+        let extra = u32::from(weight.max(1)) - 1;
         let mut total = self.held_by(client);
         let at_timeline_cap =
             kind == Kind::Timeline && self.timelines_held_by(client) >= limits.timelines;
         let mut fresh = false;
-        if total >= limits.total || at_timeline_cap {
+        if total.saturating_add(extra) >= limits.total || at_timeline_cap {
             let (live, timelines) = self.sweep(client, &mut still_held);
             total = live;
             fresh = true;
-            if total > limits.total.saturating_sub(SWEEP_MARGIN) {
+            if total.saturating_add(extra) > limits.total.saturating_sub(SWEEP_MARGIN) {
                 return Err(Refusal::Total { held: total });
             }
             if kind == Kind::Timeline && timelines > limits.timelines.saturating_sub(SWEEP_MARGIN) {
                 return Err(Refusal::Timelines { held: timelines });
             }
         }
-        if total > limits.grace && (fresh || self.sweep_due(client)) {
+        if total.saturating_add(extra) > limits.grace && (fresh || self.sweep_due(client)) {
             if !pressured() {
-                // Calm: not again until another margin's worth of arrivals.
+                // Calm: not again until another margin's worth of weight.
                 self.check_again_after(client, total);
                 return Ok(());
             }
             if !fresh {
                 total = self.sweep(client, &mut still_held).0;
             }
-            if total > limits.grace {
+            if total.saturating_add(extra) > limits.grace {
                 return Err(Refusal::Pressure { held: total });
             }
         }
@@ -465,32 +504,52 @@ impl ClientFds {
         }
     }
 
-    /// Records `fd`, just received from `client` as `kind`. Any older record
-    /// on the same number is dead (the number could not have been reused
-    /// otherwise), and is dropped first.
-    pub(crate) fn record(&mut self, client: &ClientId, fd: RawFd, kind: Kind, check: Check) {
-        self.fd_arrived(fd);
-        self.owner.insert(fd, client.clone());
-        let held = self.per_client.entry(client.clone()).or_default();
+    /// Records `fd`, just received from `client` as `kind`, standing for
+    /// `weight` fds (at least 1). Any older record on the same number is dead
+    /// (the number could not have been reused otherwise) and is dropped: the
+    /// insert that records this one hands back the old owner, so this costs
+    /// no lookup of its own.
+    pub(crate) fn record(
+        &mut self,
+        client: &ClientId,
+        fd: RawFd,
+        kind: Kind,
+        check: Check,
+        weight: u8,
+    ) {
+        if let Some(previous) = self.owner.insert(fd, client.clone()) {
+            self.drop_record(&previous, fd);
+        }
+        let weight = weight.max(1);
+        let spare = &mut self.spare;
+        let held = self
+            .per_client
+            .entry(client.clone())
+            .or_insert_with(|| Held {
+                records: spare.pop().unwrap_or_default(),
+                ..Held::default()
+            });
         held.records.push(Record {
             fd,
             kind,
             check,
-            weight: 1,
+            weight,
         });
-        held.weight = held.weight.saturating_add(1);
+        held.weight = held.weight.saturating_add(u32::from(weight));
         if kind == Kind::Timeline {
             held.timelines += 1;
         }
     }
 
-    /// Adds `copies` to the weight of the record on `fd`: a renderer has just
-    /// imported the plane on that number and keeps that many fds of its own
-    /// for it (see `dmabuf.rs`'s `renderer_plane_copies`). A number with no
-    /// record, which only a plane recorded before a disconnect could be, is
-    /// one failed lookup. Saturating: a record never weighs more than
-    /// `u8::MAX`, far past any renderer count.
-    pub(crate) fn add_copies(&mut self, fd: RawFd, copies: u8) {
+    /// Lowers the record on `fd` to 1 plus `copies`, if it weighs more: the
+    /// plane on that number has just been imported, and the session now knows
+    /// the renderer keeps `copies` fds for it (see `dmabuf/renderer_copies.rs`).
+    /// Only ever lowers. A plane is admitted at the weight the session
+    /// expects its copies to cost, so raising it here would take the client
+    /// past a bound it was admitted under; see that module for when the
+    /// expectation can fall short. A number with no record is one failed
+    /// lookup.
+    pub(crate) fn settle_copies(&mut self, fd: RawFd, copies: u8) {
         let Some(client) = self.owner.get(&fd) else {
             return;
         };
@@ -498,11 +557,13 @@ impl ClientFds {
             return;
         };
         if let Some(record) = held.records.iter_mut().find(|record| record.fd == fd) {
-            let before = record.weight;
-            record.weight = record.weight.saturating_add(copies);
-            held.weight = held
-                .weight
-                .saturating_add(u32::from(record.weight - before));
+            let settled = copies.saturating_add(1);
+            if settled < record.weight {
+                held.weight = held
+                    .weight
+                    .saturating_sub(u32::from(record.weight - settled));
+                record.weight = settled;
+            }
         }
     }
 
@@ -526,10 +587,15 @@ impl ClientFds {
         if self.owner.is_empty() {
             return;
         }
-        let Some(client) = self.owner.remove(&fd) else {
-            return;
-        };
-        let Some(held) = self.per_client.get_mut(&client) else {
+        if let Some(client) = self.owner.remove(&fd) {
+            self.drop_record(&client, fd);
+        }
+    }
+
+    /// Drops `client`'s record on `fd`, whose owner entry is already gone,
+    /// and releases the client's entry if that was its last record.
+    fn drop_record(&mut self, client: &ClientId, fd: RawFd) {
+        let Some(held) = self.per_client.get_mut(client) else {
             return;
         };
         if let Some(at) = held.records.iter().position(|record| record.fd == fd) {
@@ -537,7 +603,24 @@ impl ClientFds {
             held.forget(&record);
         }
         if held.records.is_empty() {
-            self.per_client.remove(&client);
+            self.release_entry(client);
+        }
+    }
+
+    /// Removes `client`'s (empty) entry, keeping its record list for the
+    /// next entry that needs one, so a client whose records keep emptying --
+    /// one that allocates and frees a pool at a time -- does not allocate a
+    /// list per arrival. At most [`SPARE_LISTS`] are kept, each shrunk to
+    /// [`SPARE_LIST_CAPACITY`], so the spares cost a few KiB at most.
+    fn release_entry(&mut self, client: &ClientId) {
+        let Some(held) = self.per_client.remove(client) else {
+            return;
+        };
+        if self.spare.len() < SPARE_LISTS {
+            let mut records = held.records;
+            records.clear();
+            records.shrink_to(SPARE_LIST_CAPACITY);
+            self.spare.push(records);
         }
     }
 
@@ -572,7 +655,7 @@ impl ClientFds {
         held.weight = weight;
         held.sweep_at = weight.saturating_add(SWEEP_MARGIN);
         if held.records.is_empty() {
-            self.per_client.remove(client);
+            self.release_entry(client);
         }
         (weight, timelines)
     }

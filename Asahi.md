@@ -1169,34 +1169,50 @@ Quit with `Super+Shift+e` (scoot) or, from a `foot` in niri,
 Why: scoot counts the file descriptors each client makes it hold, and a
 GLES renderer can hold one more per dma-buf plane it imports. On the dev
 VM's software renderer (llvmpipe) it does: a three-plane `YU12` buffer costs
-scoot six fds, not three. scoot measures this once per session, on the
+scoot six fds, not three. scoot measures this once per session, around the
 first import, logs the answer, and counts the copies against the client
 (`docs/protocols.md`, "Per-client limits on what scoot keeps"). A hardware
 driver is expected to import into a GEM handle and keep no fd, which would
 log `copies_per_plane_per_output=0`. That expectation is reasoned from
 Mesa's source, not measured; this machine is the check.
 
+The log line alone is not enough. scoot measures right around the import,
+so a driver that makes its copy later, on the first frame that draws the
+buffer, would log 0 and still hold the copies uncounted. So this compares
+scoot's real dma-buf fds with a client running against what the logged
+number predicts.
+
 ```sh
 mkdir -p /tmp/fx
 # on a free VT, as in Test 4
 RUST_LOG=scoot=info scoot --tty --renderer gles > /tmp/fx/t10.log 2>&1 &
 sleep 3
-# any GPU client that renders through dma-bufs: vkcube, glmark2-wayland,
-# es2gears_wayland; mpv with hardware decoding if you have a video
-WAYLAND_DISPLAY=$(grep -o 'wayland-[0-9]*' /tmp/fx/t10.log | head -1) vkcube --wsi wayland &
-sleep 5
+export WAYLAND_DISPLAY=$(grep -o 'wayland-[0-9]*' /tmp/fx/t10.log | head -1)
+ls -l /proc/$(pidof scoot)/fd | grep -c /dmabuf: > /tmp/fx/t10-dmabuf-fds.txt   # before
+# a GPU client that renders through dma-bufs, with its wire traffic logged
+WAYLAND_DEBUG=1 vkcube --wsi wayland 2> /tmp/fx/t10-vkcube.trace &
+sleep 8   # let it draw a few hundred frames
+ls -l /proc/$(pidof scoot)/fd | grep -c /dmabuf: >> /tmp/fx/t10-dmabuf-fds.txt  # running
+grep -c 'zwp_linux_buffer_params_v1#[0-9]*.add(' /tmp/fx/t10-vkcube.trace > /tmp/fx/t10-planes.txt
+grep -c 'wl_buffer#[0-9]*.destroy()' /tmp/fx/t10-vkcube.trace >> /tmp/fx/t10-planes.txt
 grep 'learned how many fds the renderer keeps' /tmp/fx/t10.log
-ls -l /proc/$(pidof scoot)/fd | grep -c /dmabuf: > /tmp/fx/t10-dmabuf-fds.txt
 kill %2; sleep 1
-ls -l /proc/$(pidof scoot)/fd | grep -c /dmabuf: >> /tmp/fx/t10-dmabuf-fds.txt
+ls -l /proc/$(pidof scoot)/fd | grep -c /dmabuf: >> /tmp/fx/t10-dmabuf-fds.txt  # after
 ```
 
-Expected: one `learned ... copies_per_plane_per_output=N` line. If `N` is
-0, scoot is charging GPU clients nothing extra, which is the point of
-measuring it. If it is 1, this driver behaves like llvmpipe and that is
-fine too, just worth knowing. The two counts are scoot's dma-buf fds with
-the client running and after it quit; the second should be back to the
-handful scoot holds for itself.
+What to compare: let `N` be the logged `copies_per_plane_per_output`, `P`
+the first line of `t10-planes.txt` (planes the client added), and `B`,
+`R` the first two lines of `t10-dmabuf-fds.txt` (before, running). With
+the client still holding every buffer it made (vkcube keeps its swapchain;
+the second line of `t10-planes.txt` should be 0 or small),
+`R - B` should be about `P x (1 + N)`, give or take the few dma-bufs scoot
+allocates for itself once it starts drawing (on the dev VM, 3). If it is
+clearly more -- roughly `P x (1 + N + 1)` -- the driver keeps copies scoot
+did not see at import, and scoot is under-counting on this hardware: send
+all four files. If `N` is 0 and `R - B` is about `P`, the driver keeps
+nothing and scoot charges nothing extra, which is the expected result. The
+third line of `t10-dmabuf-fds.txt` should be back near `B` once the client
+has quit.
 
 ## What to send back
 
@@ -1224,7 +1240,7 @@ handful scoot holds for itself.
   `t6-mpv.log`, `t6-mpv.png`, `t6-kms-mpv.txt`; for Part C `t6c.log`,
   both `t6c-*.trace` (or their `tranche_*`, `add(` and `presented(` lines),
   `t6c-kms-*.txt`, `t6c-fs.png`, and the grep output
-- for Test 10: `/tmp/fx/t10.log` and `/tmp/fx/t10-dmabuf-fds.txt`
+- for Test 10: `/tmp/fx/t10.log`, `/tmp/fx/t10-dmabuf-fds.txt`, `/tmp/fx/t10-planes.txt` and `/tmp/fx/t10-vkcube.trace`
 
 Raw logs beat a summary here. Both open entries were written after earlier
 investigations went wrong in ways only the raw output showed — a harness

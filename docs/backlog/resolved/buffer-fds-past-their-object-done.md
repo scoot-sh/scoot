@@ -47,8 +47,19 @@ stay.
   buffers: 600 planes and 600 copies. scoot now measures the copies once
   per session, on the first cleanly measurable GLES import: the fds in the process
   naming the imported file just after the import, less those just before.
-  It adds them to each imported plane's record as a *weight*, and every
-  bound reads the weighted sum. Two ways the measurement could be steered
+  Every bound reads the weighted sum, and a plane is *admitted* at its full
+  weight: 1, plus the learned copies per GLES backend (plus 1 per backend
+  until the session has learned the number). An import only ever lowers a
+  plane's weight to what was learned. The first version of this PR added
+  the copies at import instead, after the bound had been checked, and
+  review took a client to **540** fds against 512 that way: 80 committed
+  `YU12` buffers, 30 planes added (each fitting at weight 1), then all
+  imported. `renderer_copies_are_inside_the_bound_when_a_plane_is_admitted`
+  pins that shape. It failed on the import-time version ("all 30 adds were
+  admitted, and after the imports the client holds 540",
+  `~/evidence/bfl/overshoot-failfirst-0111f57-plus-test.txt`) and passes now.
+  The reserve test (`fd_pressure/tests.rs`) now drives the ledger's own
+  admission rule with every kind and weight rather than adding constants. Two ways the measurement could be steered
   were caught before the PR opened (advisor passes on the branch, not
   `scoot-reviewer`):
   - **Upward.** The first version compared a count against the ledger. A
@@ -107,20 +118,33 @@ stay.
   4096-byte outgoing buffer is full, when it is disconnected. The smallest
   such events are 12-16 bytes, so a few hundred fds at most, and only after
   the client has filled its socket's kernel buffer.
-- **A renderer copy between its plane closing and the next drain**: a
-  commit that replaces a buffer whose `wl_buffer` was already destroyed, on
-  a surface nothing redraws, leaves its copies until the next drain or
-  frame. Bounded by one round of the client's buffers (see above).
-- **An output added after an import** makes its own copy on its first frame
-  of that buffer, uncounted until the buffer is imported again.
+- **A renderer copy between its plane closing and the next drain.** The
+  record goes when the plane closes, and the copy goes at the next drain.
+  The drain runs at the loop's next idle after any `wl_buffer` or
+  `wl_surface` destruction. The one case with no drain scheduled is a
+  commit that replaces a buffer whose `wl_buffer` was already destroyed,
+  on a surface nothing redraws; its copies wait for the next drain or
+  frame. Bounded by one round of the client's planes (at most 256 copies).
+  Review saw all 240 copies of 80 released buffers close within 500 ms on
+  both GLES tiers.
+- **An output added after a plane was admitted** (before or after its
+  import) costs a copy that plane was not charged for.
+- **A driver keeping more than one copy per plane**, which none measured
+  does: planes admitted before the session's first clean measurement were
+  charged one copy per backend and are never raised.
 
 ## The interface for the wayland-backend fix
 
 A fix there can meet this in two ways. A transport-level bound (disconnect
 past N queued fds) needs nothing from the ledger: it is one more term in the
-reserve arithmetic in `fd_pressure.rs`, which has room (one connection at
-every scoot bound is 577 fds against a 896 line, 620 with the GPU tier's
-idle baseline). A per-client count scoot can read would become one more
+reserve arithmetic in `fd_pressure.rs`. The room it has depends on which
+figure it is added to. In the steady state, one connection at every scoot
+bound is 577 fds, 620 with the GPU tier's idle baseline, against the 896
+line: 276 to spare. In the software-GLES drain window (copies of planes a
+client just released, until the next cache drain) up to 256 more can be
+held for a moment, 876 in all, leaving 20. Review measured that window
+closing within 500 ms, so a queue bound meant to hold even inside it has
+to be small; one sized against the steady state has 276. A per-client count scoot can read would become one more
 term in the ledger's per-client total: `ClientFds::admit` reads
 `held_by(client)` for both the 512 bound and the pressure grace, and adding
 a queued-fd count there (or recording queued fds as another `Kind`) makes

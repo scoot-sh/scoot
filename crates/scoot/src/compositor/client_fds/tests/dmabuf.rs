@@ -67,6 +67,13 @@ enum Step {
     /// `pool`, it first opens a `wl_shm` pool on each buffer's fd and keeps
     /// it: a pool whose fd can close on Smithay's drop thread mid-import.
     CommitYuv { count: u32, dups: u32, pool: bool },
+    /// `params` params objects, each with the three `YU12` planes of a fresh
+    /// dumb buffer added and kept, not yet created. A round trip after each,
+    /// so a kill says how many were complete.
+    HoldYuvParams { params: u32 },
+    /// `create_immed` every params object [`Step::HoldYuvParams`] kept, each
+    /// attached and committed on a fresh surface, the buffer then destroyed.
+    ImmedHeldParams,
     /// Destroy every surface the steps above kept.
     DestroySurfaces,
 }
@@ -259,9 +266,10 @@ fn multi_plane_dmabufs_count_every_plane_up_to_the_bound() {
         "the ledger counts every fd the buffer made this process hold"
     );
 
-    // Every buffer whose three adds all fit: the third add of one sees the
-    // weight of the ones before it plus its own first two.
-    let fit = (MAX_FDS_PER_CLIENT - 3) / per_buffer + 1;
+    // Every buffer whose three adds all fit: each add is admitted at its
+    // full weight, so a buffer fits while the buffers before it plus its own
+    // whole weight stay within the bound.
+    let fit = MAX_FDS_PER_CLIENT / per_buffer;
     assert!(fixture.done(Step::CommitYuv {
         count: fit - 1,
         dups: 0,
@@ -414,6 +422,79 @@ fn an_import_a_pool_could_disturb_is_not_learned_from() {
     assert_eq!(
         fixture.state.renderer_plane_copies, learned,
         "the next clean import taught what a clean session learns"
+    );
+}
+
+/// The review of PR #239's shape: a renderer copy is part of what a plane
+/// costs, so it has to be inside the bound when the plane is admitted, not
+/// added at import after the bound was checked. Fill with committed `YU12`
+/// buffers to near the bound, then add planes to params objects (each fits
+/// on its own weight of one), then import them all: before the fix all 30
+/// adds were admitted and the imports took the client to 540 with nothing
+/// refused. Now each `add` weighs its copies too, so the add that would pass
+/// 512 is refused, and the weight never passes it.
+#[test]
+fn renderer_copies_are_inside_the_bound_when_a_plane_is_admitted() {
+    let _flood = hold_flood_lock();
+    let _mappings = crate::compositor::dmabuf::tests::exclusive_mappings();
+    ensure_dispatch_flood_headroom(u64::from(MAX_FDS_PER_CLIENT));
+    let mut fixture = start(RendererKind::Gles, "scoot-cfd-overshoot");
+    let output = fixture.state.outputs.primary_id().expect("an output");
+    let imports = fixture.state.backends[&output].imports_dmabuf_format(Format {
+        code: Fourcc::Yuv420,
+        modifier: Modifier::Linear,
+    });
+    if !imports
+        || !fixture.done(Step::CommitYuv {
+            count: 1,
+            dups: 0,
+            pool: false,
+        })
+    {
+        eprintln!("renderer_copies_are_inside_the_bound_when_a_plane_is_admitted: skipped");
+        return;
+    }
+    let copies = u32::from(fixture.state.renderer_plane_copies.expect("learned"));
+    if copies == 0 {
+        eprintln!(
+            "renderer_copies_are_inside_the_bound_when_a_plane_is_admitted: skipped -- this \
+             renderer keeps no copies, so there is nothing to overshoot with"
+        );
+        return;
+    }
+    let per_buffer = 3 * (1 + copies);
+    let committed = (MAX_FDS_PER_CLIENT - 3 * 10) / per_buffer;
+    assert!(fixture.done(Step::CommitYuv {
+        count: committed - 1,
+        dups: 0,
+        pool: false,
+    }));
+    let client = fixture.client(0).id();
+    let held = committed * per_buffer;
+    assert_eq!(fixture.state.client_fds.held_by(&client), held);
+    // Each add now weighs 1 + copies. Complete params objects fit while
+    // `held + 3n * (1 + copies) <= 512`; the add that would pass it is
+    // refused.
+    let fit_params = (MAX_FDS_PER_CLIENT - held) / per_buffer;
+    let outcome = fixture.run_or_disconnect(Step::HoldYuvParams { params: 10 });
+    let error = match outcome {
+        Ok(_) => {
+            // The old behaviour: every add admitted. Import them and show
+            // where that leaves the client.
+            let _ = fixture.run_or_disconnect(Step::ImmedHeldParams);
+            panic!(
+                "all 30 adds were admitted, and after the imports the client holds {} \
+                 against a bound of {MAX_FDS_PER_CLIENT}",
+                fixture.state.client_fds.held_by(&client)
+            );
+        }
+        Err(error) => error,
+    };
+    assert!(
+        error.contains(&format!("after {fit_params} params complete"))
+            && error.contains("zwp_linux_buffer_params_v1.add refused")
+            && error.contains(&format!("the maximum is {MAX_FDS_PER_CLIENT}")),
+        "{error}"
     );
 }
 
@@ -637,6 +718,48 @@ fn run_client(
                         ack
                     }
                 }
+            }
+            Step::HoldYuvParams { params } => {
+                if card.is_none() {
+                    card = std::fs::OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open("/dev/dri/card0")
+                        .ok()
+                        .map(Card);
+                }
+                let card = card.as_ref().ok_or("no usable /dev/dri/card0")?;
+                for n in 0..params {
+                    let (fd, planes) = yuv_dumb_buffer(card)?;
+                    let object = dmabuf.create_params(&qh, ());
+                    for (index, (offset, stride)) in planes.into_iter().enumerate() {
+                        object.add(
+                            fd.as_fd(),
+                            index as u32,
+                            offset,
+                            stride,
+                            (linear >> 32) as u32,
+                            linear as u32,
+                        );
+                    }
+                    pending.push(object);
+                    sync(&conn, &mut queue, &mut client)
+                        .map_err(|error| format!("after {n} params complete: {error}"))?;
+                }
+                Ack::Done
+            }
+            Step::ImmedHeldParams => {
+                for object in pending.drain(..) {
+                    commit_immed(
+                        &compositor,
+                        &qh,
+                        &mut surfaces,
+                        object,
+                        (SIDE as i32, SIDE as i32),
+                        Fourcc::Yuv420 as u32,
+                    );
+                }
+                Ack::Done
             }
             Step::DestroySurfaces => {
                 for surface in surfaces.drain(..) {

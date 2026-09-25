@@ -226,18 +226,22 @@ where
     };
     const REFUSED: &str = "zwp_linux_buffer_params_v1.add refused";
     let id = client.id();
+    // The plane is admitted at the weight it will cost once imported, the
+    // renderer's copies included (see `dmabuf/renderer_copies.rs`), so an
+    // import can never take the client past a bound after the fact.
+    let weight = super::renderer_copies::plane_weight(state);
     // Forgets whatever the ledger recorded on this number first: it arrived
     // again, so that fd was closed.
     let message = match state
         .client_fds
-        .admit_arrival(&id, fd.as_raw_fd(), Kind::Plane)
+        .admit_arrival(&id, fd.as_raw_fd(), Kind::Plane, weight)
     {
         Err(refusal) => refusal.message(REFUSED),
         Ok(()) => match state.pending_planes.try_claim(&id, resource.id()) {
             Ok(()) => {
                 state
                     .client_fds
-                    .record_arrival(&id, fd.as_fd(), Kind::Plane);
+                    .record_arrival(&id, fd.as_fd(), Kind::Plane, weight);
                 return false;
             }
             Err(live) => format!(

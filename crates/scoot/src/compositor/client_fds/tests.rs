@@ -64,8 +64,15 @@ fn arrive_all(
 ) -> Result<(), Refusal> {
     for fd in first..first + count as RawFd {
         ledger.fd_arrived(fd);
-        ledger.admit(client, kind, limits, |fd, _| live.contains(&fd), || false)?;
-        ledger.record(client, fd, kind, Check::Open);
+        ledger.admit(
+            client,
+            kind,
+            1,
+            limits,
+            |fd, _| live.contains(&fd),
+            || false,
+        )?;
+        ledger.record(client, fd, kind, Check::Open, 1);
     }
     Ok(())
 }
@@ -100,6 +107,7 @@ fn admit_timeline(
     ledger.admit(
         client,
         Kind::Timeline,
+        1,
         TIMELINES,
         |fd, _| still_held(fd),
         pressured,
@@ -137,8 +145,8 @@ fn records_count_per_client_and_drain_by_sweep() {
 fn a_reused_number_forgets_the_old_record_whoever_owned_it() {
     let (_display, a, b) = two_clients();
     let mut ledger = ClientFds::default();
-    ledger.record(&a, 7, Kind::Timeline, Check::Syncobj);
-    ledger.record(&a, 8, Kind::Pool, Check::Open);
+    ledger.record(&a, 7, Kind::Timeline, Check::Syncobj, 1);
+    ledger.record(&a, 8, Kind::Pool, Check::Open, 1);
     // Number 7 reaches the compositor again, from anyone, through anything:
     // the fd that held it is gone.
     ledger.fd_arrived(7);
@@ -146,7 +154,7 @@ fn a_reused_number_forgets_the_old_record_whoever_owned_it() {
     assert_eq!(ledger.timelines_held_by(&a), 0, "the timeline went with it");
     // A new arrival on 8 by another client replaces a's record rather than
     // counting 8 twice.
-    ledger.record(&b, 8, Kind::Plane, Check::Open);
+    ledger.record(&b, 8, Kind::Plane, Check::Open, 1);
     assert_eq!(ledger.held_by(&a), 0);
     assert_eq!(ledger.held_by(&b), 1);
     assert_eq!(ledger.records(), 1);
@@ -184,7 +192,7 @@ fn the_ledger_is_bounded_by_fd_numbers_not_by_clients() {
             (23, Kind::Timeline),
         ] {
             ledger.fd_arrived(fd);
-            ledger.record(&id, fd, kind, Check::Open);
+            ledger.record(&id, fd, kind, Check::Open, 1);
         }
     }
     drop(display);
@@ -237,7 +245,7 @@ fn every_kind_counts_toward_one_total() {
     assert_eq!(ledger.held_by(&a), MAX_FDS_PER_CLIENT);
     for kind in [Kind::Pool, Kind::Plane, Kind::Timeline] {
         assert_eq!(
-            ledger.admit(&a, kind, LIMITS, |fd, _| live.contains(&fd), || false),
+            ledger.admit(&a, kind, 1, LIMITS, |fd, _| live.contains(&fd), || false),
             Err(Refusal::Total {
                 held: MAX_FDS_PER_CLIENT
             }),
@@ -291,6 +299,7 @@ fn the_timeline_cap_does_not_bind_other_kinds() {
         ledger.admit(
             &a,
             Kind::Timeline,
+            1,
             LIMITS,
             |fd, _| live.contains(&fd),
             || false
@@ -300,6 +309,143 @@ fn the_timeline_cap_does_not_bind_other_kinds() {
         })
     );
     assert_eq!(ledger.held_by(&a), LIMITS.timelines + 64);
+}
+
+/// A plane is admitted at its full weight, renderer copies included, and an
+/// admitted arrival never takes the weight past the bound, whatever it
+/// weighs: the rule the review of PR #239 found import-time charging broke.
+#[test]
+fn a_weighted_arrival_never_takes_the_weight_past_the_bound() {
+    let (_display, a, _) = two_clients();
+    let mut ledger = ClientFds::default();
+    let weights = [1u8, 2, 3, 5, 2, 9];
+    let mut refused = None;
+    for (n, fd) in (0..10_000).enumerate() {
+        let weight = weights[n % weights.len()];
+        let kind = if weight == 1 { Kind::Pool } else { Kind::Plane };
+        match ledger.admit(&a, kind, weight, LIMITS, |_, _| true, || false) {
+            Ok(()) => ledger.record(&a, fd, kind, Check::Open, weight),
+            Err(refusal) => {
+                refused = Some(refusal);
+                break;
+            }
+        }
+        assert!(
+            ledger.held_by(&a) <= MAX_FDS_PER_CLIENT,
+            "weight {} after admitting {weight}",
+            ledger.held_by(&a)
+        );
+    }
+    assert!(
+        matches!(refused, Some(Refusal::Total { .. })),
+        "{refused:?}"
+    );
+
+    // The boundary exactly: 510 held, a two-fd plane fits, the next does not.
+    let mut ledger = ClientFds::default();
+    arrive_all(
+        &mut ledger,
+        &a,
+        Kind::Pool,
+        LIMITS,
+        0,
+        510,
+        &(0..600).collect(),
+    )
+    .expect("510");
+    assert_eq!(
+        ledger.admit(&a, Kind::Plane, 2, LIMITS, |_, _| true, || false),
+        Ok(())
+    );
+    ledger.record(&a, 1000, Kind::Plane, Check::Open, 2);
+    assert_eq!(ledger.held_by(&a), MAX_FDS_PER_CLIENT);
+    assert_eq!(
+        ledger.admit(&a, Kind::Plane, 2, LIMITS, |_, _| true, || false),
+        Err(Refusal::Total {
+            held: MAX_FDS_PER_CLIENT
+        })
+    );
+}
+
+/// The pressure grace weighs an arrival the same way: a client at the grace
+/// may add one more fd's worth, and a heavier arrival from there is checked.
+#[test]
+fn the_pressure_grace_weighs_the_arrival() {
+    let (_display, a, _) = two_clients();
+    let mut ledger = ClientFds::default();
+    let live: HashSet<RawFd> = (0..1000).collect();
+    arrive_all(
+        &mut ledger,
+        &a,
+        Kind::Pool,
+        LIMITS,
+        0,
+        PRESSURE_GRACE_FDS - 1,
+        &live,
+    )
+    .expect("under");
+    // 127 held: a two-fd plane takes it to 129, one past the grace, like a
+    // one-fd arrival at 128 would: admitted.
+    assert_eq!(
+        ledger.admit(
+            &a,
+            Kind::Plane,
+            2,
+            LIMITS,
+            |fd, _| live.contains(&fd),
+            || true
+        ),
+        Ok(())
+    );
+    // (Recorded at weight 1, to stand exactly at the grace for the next.)
+    ledger.record(&a, 500, Kind::Plane, Check::Open, 1);
+    // 128 held: the same plane would take it to 130, and is refused.
+    assert_eq!(
+        ledger.admit(
+            &a,
+            Kind::Plane,
+            2,
+            LIMITS,
+            |fd, _| live.contains(&fd),
+            || true
+        ),
+        Err(Refusal::Pressure {
+            held: PRESSURE_GRACE_FDS
+        })
+    );
+}
+
+/// Settling a plane's copies after import only ever lowers its weight.
+#[test]
+fn settling_copies_only_lowers_a_weight() {
+    let (_display, a, _) = two_clients();
+    let mut ledger = ClientFds::default();
+    ledger.record(&a, 7, Kind::Plane, Check::Open, 3);
+    ledger.settle_copies(7, 4);
+    assert_eq!(ledger.held_by(&a), 3, "never raised");
+    ledger.settle_copies(7, 1);
+    assert_eq!(ledger.held_by(&a), 2);
+    ledger.settle_copies(7, 0);
+    assert_eq!(ledger.held_by(&a), 1);
+    ledger.settle_copies(99, 0);
+    assert_eq!(ledger.records(), 1);
+}
+
+/// A client whose records keep emptying and refilling -- one pool at a
+/// time, its number coming back each time -- reuses its record list rather
+/// than allocating one per arrival.
+#[test]
+fn an_emptied_entry_leaves_its_list_for_reuse() {
+    let (_display, a, _) = two_clients();
+    let mut ledger = ClientFds::default();
+    ledger.record(&a, 30, Kind::Pool, Check::Open, 1);
+    ledger.fd_arrived(30);
+    assert_eq!(ledger.records(), 0);
+    assert_eq!(ledger.spare.len(), 1, "the emptied list was kept");
+    let capacity = ledger.spare[0].capacity();
+    ledger.record(&a, 30, Kind::Pool, Check::Open, 1);
+    assert!(ledger.spare.is_empty(), "and taken back");
+    assert_eq!(ledger.per_client[&a].records.capacity(), capacity);
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +491,7 @@ fn a_client_within_the_margin_of_the_cap_is_refused_not_swept_per_import() {
     let mut ledger = ClientFds::default();
     let live: HashSet<RawFd> = (0..CAP as RawFd - 1).collect();
     import_all(&mut ledger, &a, 0, CAP - 1, &live).expect("under the cap");
-    ledger.record(&a, 5000, Kind::Timeline, Check::Syncobj); // one churned import, dead
+    ledger.record(&a, 5000, Kind::Timeline, Check::Syncobj, 1); // one churned import, dead
     let mut checks = 0;
     let refusal = admit_timeline(
         &mut ledger,
@@ -382,7 +528,7 @@ fn a_sweep_that_frees_the_margin_admits_and_buys_that_many_imports() {
         )
         .expect("the dead margin is reclaimed");
         sweeps += u32::from(swept);
-        ledger.record(&a, fd, Kind::Timeline, Check::Syncobj);
+        ledger.record(&a, fd, Kind::Timeline, Check::Syncobj, 1);
     }
     assert_eq!(
         sweeps, 1,
@@ -404,12 +550,13 @@ fn nothing_is_observed_under_the_grace() {
             .admit(
                 &a,
                 kind,
+                1,
                 TIMELINES,
                 |_, _| panic!("no sweep under the grace"),
                 || panic!("no table observation under the grace"),
             )
             .expect("under the grace");
-        ledger.record(&a, fd, kind, Check::Open);
+        ledger.record(&a, fd, kind, Check::Open, 1);
     }
 }
 
@@ -433,11 +580,18 @@ fn the_production_grace_refuses_one_past_it_only_under_pressure() {
     )
     .expect("calm");
     assert_eq!(
-        ledger.admit(&a, Kind::Plane, LIMITS, |fd, _| live.contains(&fd), || true),
+        ledger.admit(
+            &a,
+            Kind::Plane,
+            1,
+            LIMITS,
+            |fd, _| live.contains(&fd),
+            || true
+        ),
         Ok(()),
         "at the grace passes under pressure"
     );
-    ledger.record(&a, 9000, Kind::Plane, Check::Open);
+    ledger.record(&a, 9000, Kind::Plane, Check::Open, 1);
     let mut calm = ClientFds::default();
     arrive_all(
         &mut calm,
@@ -453,6 +607,7 @@ fn the_production_grace_refuses_one_past_it_only_under_pressure() {
         ledger.admit(
             &a,
             Kind::Pool,
+            1,
             LIMITS,
             |fd, _| live.contains(&fd) || fd == 9000,
             || true
@@ -482,7 +637,7 @@ fn under_pressure_dead_records_do_not_count_against_the_grace() {
     let live: HashSet<RawFd> = (0..10).collect();
     import_all(&mut ledger, &a, 0, 10, &live).expect("under the grace");
     for fd in 100..100 + 3 * GRACE as RawFd {
-        ledger.record(&a, fd, Kind::Pool, Check::Open);
+        ledger.record(&a, fd, Kind::Pool, Check::Open, 1);
     }
     assert!(ledger.held_by(&a) > GRACE);
     admit_timeline(&mut ledger, &a, |fd| live.contains(&fd), || true)
@@ -498,7 +653,7 @@ fn under_pressure_sweeps_are_amortized_by_the_margin() {
     // pressure admits, and buys the margin's worth of unswept arrivals.
     let live: HashSet<RawFd> = (0..10_000).collect();
     import_all(&mut ledger, &a, 0, GRACE, &live).expect("no pressure yet");
-    ledger.record(&a, 20_000, Kind::Plane, Check::Open);
+    ledger.record(&a, 20_000, Kind::Plane, Check::Open, 1);
     let (mut sweeps, mut observations) = (0, 0);
     let mut outcome = Ok(());
     for fd in GRACE as RawFd..GRACE as RawFd + 2 * SWEEP_MARGIN as RawFd {
@@ -519,7 +674,7 @@ fn under_pressure_sweeps_are_amortized_by_the_margin() {
         if outcome.is_err() {
             break;
         }
-        ledger.record(&a, fd, Kind::Timeline, Check::Syncobj);
+        ledger.record(&a, fd, Kind::Timeline, Check::Syncobj, 1);
     }
     assert_eq!(
         outcome,
@@ -560,7 +715,7 @@ fn a_calm_table_is_observed_once_per_margin_not_per_arrival() {
             },
         )
         .expect("calm, and under the cap once swept");
-        ledger.record(&a, fd, Kind::Timeline, Check::Syncobj);
+        ledger.record(&a, fd, Kind::Timeline, Check::Syncobj, 1);
     }
     assert!(
         observations <= ARRIVALS / SWEEP_MARGIN + 1,
@@ -631,7 +786,7 @@ fn two_numbers_on_one_file_are_two_records() {
     let dup = file.try_clone().expect("a second fd on the same file");
     for fd in [&file, &dup] {
         ledger.fd_arrived(fd.as_raw_fd());
-        ledger.record_arrival(&a, fd.as_fd(), Kind::Plane);
+        ledger.record_arrival(&a, fd.as_fd(), Kind::Plane, 1);
     }
     assert_eq!(ledger.sweep(&a, still_held).0, 2);
     drop(dup);
@@ -763,7 +918,7 @@ fn sweep_cost() {
         for _ in 0..ROUNDS {
             let mut ledger = ClientFds::default();
             for fd in fds {
-                ledger.record_arrival(&a, fd.as_fd(), kind);
+                ledger.record_arrival(&a, fd.as_fd(), kind, 1);
             }
             let started = std::time::Instant::now();
             std::hint::black_box(ledger.sweep(&a, still_held));
@@ -796,14 +951,14 @@ fn arrival_cost() {
     ] {
         let mut ledger = ClientFds::default();
         for fd in &held {
-            ledger.record_arrival(&a, fd.as_fd(), Kind::Pool);
+            ledger.record_arrival(&a, fd.as_fd(), Kind::Pool, 1);
         }
         let started = std::time::Instant::now();
         for _ in 0..ROUNDS {
             ledger
-                .admit_arrival(&a, churned.as_raw_fd(), kind)
+                .admit_arrival(&a, churned.as_raw_fd(), kind, 1)
                 .expect("under every bound");
-            ledger.record_arrival(&a, churned.as_fd(), kind);
+            ledger.record_arrival(&a, churned.as_fd(), kind, 1);
         }
         let per = started.elapsed() / ROUNDS;
         println!("arrival cost, {label}: {per:?} per arrival (admit and record)");

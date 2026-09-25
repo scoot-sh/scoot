@@ -1071,9 +1071,10 @@ impl DmabufHandler for State {
                     );
                     self.imports_dmabufs = true;
                 }
-                // The planes' fds are the client's in the fd ledger since
-                // their `add`s; a renderer that keeps copies of its own has
-                // just made them, and they are charged to the same client.
+                // The planes' fds, and the renderer copies this import has
+                // just made, were charged to the client at their `add`s.
+                // This learns the real number of copies once per session and
+                // lowers the planes' weights to it; it never raises one.
                 renderer_copies::charge(self, &dmabuf, probe);
                 if let Err(error) = notifier.successful::<State>() {
                     // The client died between allocating and being told --

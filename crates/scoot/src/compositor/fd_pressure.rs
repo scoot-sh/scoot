@@ -115,8 +115,15 @@
 //!   disconnected once its buffer fills.
 //!
 //! [`RESERVE_FDS`] is 128: shed/refuse once fewer than 128 fds stand free
-//! (used past 896 of 1024). That is ~6x above the reasoned login storm and
-//! still leaves room for a whole greedy connection's transient burst.
+//! (used past 896 of 1024). That is ~6x above the reasoned login storm. What
+//! the 128 is *for* is headroom once the line is crossed: scoot's own
+//! transient fds (an accepted socket before it is shed, a selection pipe, an
+//! acquire wait, a screenshot) and the arrivals the graces still admit
+//! (below). It is not room for a greedy connection: one of those can hold
+//! 512 client fds and more, and what stops it is the per-client bound and
+//! the grace, not the reserve. (An earlier version of this paragraph said
+//! the reserve left room for a whole greedy connection's burst; it never
+//! did.)
 //!
 //! [`MIN_TABLE_FDS`] is 512: below it the guard stays off entirely
 //! ([`table`] returns `None`, every site fails open) and the `EMFILE` shed
@@ -129,14 +136,26 @@
 //! compares to the heaviest reasoned legitimate clients) bites only
 //! *during* genuine pressure, which a legitimate session never produces
 //! (see above): holding past-grace while the table is 7/8 full means
-//! contributing to the pressure, which is what justifies the kill. Two
-//! connections at the most the graces let through under pressure hold
-//! 2 x (128 + 16 + 17 + 1) + 43 = 367 fds on the GPU tier: 128 client fds
-//! plus the [`SWEEP_MARGIN`](crate::compositor::client_fds::SWEEP_MARGIN) of
-//! arrivals the ledger admits between pressure checks, 17 acquire-wait
-//! eventfds (`live > 16` is the refusal), a socket, and the idle baseline.
-//! That is far below the 896 line, so pressure still requires someone past
-//! grace, and the refusal lands on a contributor.
+//! contributing to the pressure, which is what justifies the kill. A
+//! connection at the most the graces let through under pressure holds
+//! 128 + 16 + 17 + 1 = 162 fds on the GPU tier: 128 client fds plus the
+//! [`SWEEP_MARGIN`](crate::compositor::client_fds::SWEEP_MARGIN) the ledger
+//! admits between pressure checks, 17 acquire-wait eventfds (`live > 16` is
+//! the refusal), and a socket. Two such connections are 367 with the idle
+//! baseline, far below the line. But that does not generalise to "pressure
+//! always needs someone past grace": six connections at the grace reach
+//! 6 x 162 + 43 = 1015, past 896 with nobody past any grace, and then
+//! newcomers are shed and no one is refused. That is connection
+//! multiplication, the residual
+//! `docs/backlog/resolved/wayland-connection-cap-done.md` already accepted
+//! (any usable per-connection budget times enough connections fills the
+//! table), not a hole this ceiling can close. It is a little easier to reach
+//! than before the fd ledger: the pending-plane grace of 8 is gone, so a
+//! client holding 32 pending planes and nothing else is under the 128-fd
+//! grace and is not refused under pressure. Review of PR #239 measured 17
+//! such connections all held and a newcomer shed at 584 fds under a 700-fd
+//! table, with nobody killed. The grace attributes pressure to *heavy*
+//! clients; many light ones are the connection-count problem.
 //!
 //! ## Observation cost and disciplines
 //!

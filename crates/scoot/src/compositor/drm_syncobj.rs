@@ -345,12 +345,12 @@ where
     let id = client.id();
     let refusal = match state
         .client_fds
-        .admit_arrival(&id, fd.as_raw_fd(), Kind::Timeline)
+        .admit_arrival(&id, fd.as_raw_fd(), Kind::Timeline, 1)
     {
         Ok(()) => {
             state
                 .client_fds
-                .record_arrival(&id, fd.as_fd(), Kind::Timeline);
+                .record_arrival(&id, fd.as_fd(), Kind::Timeline, 1);
             return false;
         }
         Err(refusal) => refusal,

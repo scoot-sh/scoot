@@ -701,10 +701,6 @@ where
     else {
         return false;
     };
-    // Whatever becomes of this pool, its fd number is this process's again,
-    // which proves whatever the fd ledger recorded on it was closed (see
-    // `client_fds.rs`). One map lookup.
-    state.client_fds.fd_arrived(fd.as_raw_fd());
     if *size <= 0 || *size > MAX_SHM_POOL_BYTES {
         return false;
     }
@@ -721,7 +717,7 @@ where
     let id = client.id();
     if let Err(refusal) = state
         .client_fds
-        .admit_arrival(&id, fd.as_raw_fd(), Kind::Pool)
+        .admit_arrival(&id, fd.as_raw_fd(), Kind::Pool, 1)
     {
         resource.post_error(
             wl_shm::Error::InvalidStride,
@@ -733,7 +729,9 @@ where
         resource.post_error(wl_shm::Error::InvalidStride, too_many_pools());
         return true;
     }
-    state.client_fds.record_arrival(&id, fd.as_fd(), Kind::Pool);
+    state
+        .client_fds
+        .record_arrival(&id, fd.as_fd(), Kind::Pool, 1);
     false
 }
 

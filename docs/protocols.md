@@ -87,13 +87,16 @@ buffer a surface still shows keeps its pool's (or its planes') fds after
 the client has destroyed both the `wl_buffer` and the pool, and a sync
 point keeps its timeline's fd after the timeline object is destroyed.
 Where the GLES renderer keeps a copy of each imported dma-buf plane's fd
-(Mesa's software renderer does; hardware drivers do not), the copy counts
-too, against the client whose buffer it is.
+(Mesa's software renderer does; hardware drivers are expected not to, but
+that is not yet measured), the copy counts too, against the client whose
+buffer it is, from the moment the plane is added.
 
-- **512 fds per client**, every kind together. The request that would make
-  the 513th is refused; before refusing, scoot checks which of the
-  client's fds have really closed, so a client that allocates and releases
-  buffers does not creep toward the limit. The refusal kills only that
+- **512 fds per client**, every kind together. The request that would take
+  the client past 512 is refused; a plane's renderer copy is charged when
+  the plane is added, so importing it later can never take a client past
+  the limit. Before refusing, scoot checks which of the client's fds have
+  really closed, so a client that allocates and releases buffers does not
+  creep toward the limit. The refusal kills only that
   client: `wl_shm.create_pool` gets `invalid_stride` on `wl_shm`, an `add`
   gets `wl_display.error` `no_memory`, `import_timeline` gets
   `invalid_timeline`. The message says which limit was hit and how many
@@ -115,7 +118,10 @@ GPU client one per buffer it has allocated (a few per window), a Vulkan
 window 16 timelines. At every limit at once, one client can make scoot
 hold about 580 fds, which stays below the point (896 of 1024) where scoot
 starts turning newcomers away, so one misbehaving client can no longer do
-that on its own.
+that on its own. (With the software GLES renderer, copies of buffers a
+client has just released can linger for a moment until scoot next clears
+the renderer's cache; even counting those, one client stays under that
+point.)
 
 ## Fullscreen
 
@@ -936,8 +942,9 @@ while it sits in a params object, while it is part of a buffer, and after
 the client destroys that `wl_buffer` if a surface still shows it. A
 four-plane buffer is four. Under a GLES renderer that keeps its own copy
 of each imported plane (Mesa's software renderer, measured on the dev VM:
-a three-plane `YU12` buffer costs scoot six fds) the copies count too;
-scoot measures this once per session, on the first import, and logs it
+a three-plane `YU12` buffer costs scoot six fds) the copies count too,
+from the `add`; scoot measures this once per session, on the first import
+it can measure cleanly, and logs it
 (`dmabuf: learned how many fds the renderer keeps of each imported
 plane`). A dma-buf `wl_buffer` also counts against the same 512 live
 buffers per client as every other buffer, and both `create` and

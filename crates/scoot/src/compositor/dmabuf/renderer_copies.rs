@@ -34,12 +34,26 @@
 //! the only other thread touching fds (Smithay's shm drop thread) only closes
 //! pool fds. That ratio -- 1 on llvmpipe, 0 on a driver that keeps nothing --
 //! is kept for the session (its GLES device is pinned; see
-//! `render/gles.rs`), and every import from then on adds that many copies per
-//! GLES backend to each plane's record, so a client's bound counts them. It
-//! costs two `/proc/self/fd` walks with an `fstat` per entry, once per
-//! session (again only after an import that could not be measured); after
-//! that, a map lookup per plane per import (imports happen when a client
-//! allocates a buffer, not per frame).
+//! `render/gles.rs`).
+//!
+//! **Charged at admission, not at import.** A plane is admitted into the fd
+//! ledger at its full weight, [`plane_weight`]: 1, plus that ratio for each
+//! GLES backend, or plus 1 per backend while the session has not learned
+//! the ratio yet. An import then only lowers a plane's weight to what the
+//! session has learned ([`charge`]). The copies used to be added at import,
+//! after the bound had been checked, and review of PR #239 took a client to
+//! 540 fds against its 512 that way (planes added near the bound, then
+//! imported); `client_fds/tests/dmabuf.rs` pins the shape. One case can
+//! still fall short, and only on a driver that keeps more than one copy per
+//! plane, which none measured does: planes admitted before the session's
+//! first clean measurement were charged one copy per backend, and are not
+//! raised afterwards. At most the planes in flight until then, each short by
+//! the difference.
+//!
+//! The measurement costs two `/proc/self/fd` walks with an `fstat` per
+//! entry, once per session (again only after an import that could not be
+//! measured); after that, a map lookup per plane per import (imports happen
+//! when a client allocates a buffer, not per frame).
 //!
 //! **What this does not count.** A copy lives until the renderer's cache
 //! drops the import, which is after the plane's `Dmabuf` is gone *and* a
@@ -50,9 +64,13 @@
 //! but one: a commit that replaces a buffer whose `wl_buffer` was already
 //! destroyed, on a surface nothing redraws, leaves its copies until the next
 //! drain. Any later `wl_buffer` destruction by any client drains them, so
-//! they do not pile up past one round of a client's buffers. An output
-//! added after an import makes its own copy on its first frame of that
-//! buffer, uncounted until the buffer is imported again.
+//! they do not pile up past one round of a client's buffers: at most 256
+//! copies at two fds a plane, on top of the 512. In practice the window is
+//! short: the drain runs at the loop's next idle, and review of PR #239 saw
+//! all 240 copies of 80 released three-plane buffers close within 500 ms
+//! on both GLES tiers. An output added after a plane was admitted -- before
+//! its import, or after it, when the new output makes its own copy on its
+//! first frame of that buffer -- is uncounted for that plane.
 
 use std::os::fd::{AsRawFd, BorrowedFd};
 
@@ -142,14 +160,30 @@ fn gles_backends(state: &State) -> usize {
         .count()
 }
 
-/// Charges `dmabuf`'s planes, just imported into every backend, with the
-/// copies this session's GLES renderer keeps of them. Until the session has
-/// learned that number from a clean measurement (`probe`, see the module
-/// doc), an import is charged one copy per plane per backend -- the
-/// conservative direction: an over-count costs a client some headroom for
-/// that buffer, an under-count lets it hold fds nothing sees -- and the next
-/// import is measured again. Nothing at all on a session with no GLES
-/// backend.
+/// The weight a plane arriving now is admitted at in the fd ledger: 1, plus
+/// the copies each GLES backend will make of it when it is imported -- the
+/// session's learned number, or 1 until it has learned one (the
+/// conservative direction; see the module doc). 1 on a session with no
+/// GLES backend. Charging the copies here, at admission, is what keeps an
+/// import from taking a client past a bound it was already admitted under.
+pub(in crate::compositor) fn plane_weight(state: &State) -> u8 {
+    let backends = gles_backends(state);
+    if backends == 0 {
+        return 1;
+    }
+    let per_backend = state.renderer_plane_copies.unwrap_or(1);
+    per_backend
+        .saturating_mul(u8::try_from(backends).unwrap_or(u8::MAX))
+        .saturating_add(1)
+}
+
+/// Settles `dmabuf`'s planes, just imported into every backend: learns the
+/// renderer's copies from `probe` if the session has not yet (see the module
+/// doc), and lowers the planes' ledger weights to what they really cost
+/// once it knows. The weights were charged at admission
+/// ([`plane_weight`]), so this never raises one. Until a clean measurement
+/// the planes keep the one copy per backend they were admitted at. Nothing
+/// at all on a session with no GLES backend.
 pub(in crate::compositor) fn charge(state: &mut State, dmabuf: &Dmabuf, probe: Option<Probe>) {
     let backends = gles_backends(state);
     if backends == 0 {
@@ -171,19 +205,16 @@ pub(in crate::compositor) fn charge(state: &mut State, dmabuf: &Dmabuf, probe: O
             }
             None => {
                 tracing::debug!(
-                    "dmabuf: this import could not be measured cleanly; charging one renderer \
-                     copy per plane and measuring the next"
+                    "dmabuf: this import could not be measured cleanly; its planes keep the one \
+                     renderer copy per plane they were admitted at, and the next is measured"
                 );
-                1
+                return;
             }
         },
     };
-    if per_backend == 0 {
-        return;
-    }
     let copies = per_backend.saturating_mul(u8::try_from(backends).unwrap_or(u8::MAX));
     for plane in dmabuf.handles() {
-        state.client_fds.add_copies(plane.as_raw_fd(), copies);
+        state.client_fds.settle_copies(plane.as_raw_fd(), copies);
     }
 }
 
