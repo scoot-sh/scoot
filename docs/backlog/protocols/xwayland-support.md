@@ -393,7 +393,7 @@ input-model-`None` window gets no keyboard; the focused X window is raised in
 X stacking; the keyboard-grab protocol stays refused. X input feeds idle and
 `interaction_serials` through the same paths as Wayland input.
 
-**Evidence** (details and raw logs in the PR): 29 live tests on `Harness`
+**Evidence** (details and raw logs in the PR): 30 `xwayland::tests` on `Harness` (25 live against a real XWayland, 5 hermetic)
 (mapping, lists, floating/centring, rules, position policy, override-
 redirect, fullscreen, close, ring/rounded clip, focus gate, typing, click,
 taskbar activate/close, lock blanking and input refusal, server death
