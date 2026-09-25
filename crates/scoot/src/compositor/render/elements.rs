@@ -441,6 +441,9 @@ where
 {
     let drawn = |placement: &Placement| drawn_rect(placement.rect, windows.get(&placement.id));
     let mut rings = Rings::none();
+    // The floating pass only when something floats: the common frame pays
+    // one flag read per placement for it, not a second ring walk.
+    let floats = arrangement.is_some_and(|arranged| arranged.placements.iter().any(|p| p.floating));
     match (arrangement, frame.output) {
         (Some(arranged), Some(output)) if appearance.corner_radius > 0 => {
             rings.tiled = decorations
@@ -456,6 +459,9 @@ where
                 .into_iter()
                 .map(map_ring)
                 .collect();
+            if !floats {
+                return rings;
+            }
             rings.floating = decorations
                 .floating_elements_rounded(
                     arranged,
@@ -484,6 +490,9 @@ where
                 .into_iter()
                 .map(Elements::Decoration)
                 .collect();
+            if !floats {
+                return rings;
+            }
             rings.floating = decorations
                 .floating_elements(
                     arranged,
@@ -578,17 +587,108 @@ where
         if placement.output != output {
             continue;
         }
-        push_window_elements(
-            space,
-            windows,
-            placement,
-            renderer,
-            region,
-            origin,
-            scale,
-            configured_radius,
-            &mut out,
-        );
+        // One window's elements, popups first. A labelled block rather than
+        // a helper so this per-placement, per-frame body stays inline; each
+        // `break` skips drawing the window but never its ring below.
+        'draw: {
+            let Some(window) = windows.get(&placement.id) else {
+                break 'draw;
+            };
+            // The mapped location, and from it the render location and the bbox
+            // (popups included) exactly as `InnerElement::render_location` and
+            // `InnerElement::bbox` compute them -- one space lookup rather than
+            // the two `element_location` + `element_bbox` would cost.
+            let Some(mapped) = space.element_location(window) else {
+                break 'draw;
+            };
+            let geometry = window.geometry();
+            let render_location = mapped - geometry.loc;
+            // `SpaceElement::bbox` (popups included), not the inherent
+            // `Window::bbox` (the toplevel tree only), which is the one
+            // `InnerElement::bbox` reads.
+            let mut bbox = SpaceElement::bbox(window);
+            bbox.loc += render_location;
+            if !region.overlaps(bbox) {
+                break 'draw;
+            }
+            let location = (render_location - region.loc).to_physical_precise_round(scale);
+            if configured_radius <= 0 {
+                out.extend(
+                    AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
+                        window,
+                        renderer,
+                        location,
+                        Scale::from(scale),
+                        1.0,
+                    )
+                    .into_iter()
+                    .map(Elements::Surface),
+                );
+                break 'draw;
+            }
+            // No X11 arm: without the `xwayland` feature `Wayland` is the only
+            // variant -- and if that ever changes this match fails to compile
+            // rather than silently dropping windows. With the feature the `X11`
+            // variant exists, and the Phase-1 skeleton answers it loudly: no
+            // X11 window can exist yet (nothing constructs
+            // `Window::new_x11_window` until Phase 2 maps one), so reaching
+            // here is a bug, and a bug that logs per frame beats one that
+            // silently drops the window -- or one that panics the session.
+            #[cfg(not(feature = "xwayland"))]
+            let WindowSurface::Wayland(toplevel) = window.underlying_surface();
+            #[cfg(feature = "xwayland")]
+            let WindowSurface::Wayland(toplevel) = window.underlying_surface() else {
+                tracing::error!(
+                    "an X11 window reached the render path before Phase 2 maps one; skipping it"
+                );
+                break 'draw;
+            };
+            let surface = toplevel.wl_surface();
+            for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
+                let offset = (geometry.loc + popup_offset - popup.geometry().loc)
+                    .to_physical_precise_round(scale);
+                out.extend(
+                    render_elements_from_surface_tree(
+                        renderer,
+                        popup.wl_surface(),
+                        location + offset,
+                        scale,
+                        1.0,
+                        Kind::Unspecified,
+                    )
+                    .into_iter()
+                    .map(Elements::Surface),
+                );
+            }
+            let main: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
+                renderer,
+                surface,
+                location,
+                scale,
+                1.0,
+                Kind::Unspecified,
+            );
+            // What the client drew, not the slot: a short client's corners are
+            // its own, and they are where the ring rounds too (`drawn.rs`).
+            let drawn = clamp_to_slot(placement.rect, geometry.size.w, geometry.size.h);
+            let clip = clip_rect(to_output_local(drawn, origin), scale);
+            // Never rounded while fullscreen: it covers the output edge to edge,
+            // and a rounded clip would cut its corners back to the background.
+            let radius = if placement.fullscreen {
+                0
+            } else {
+                physical_radius(configured_radius, clip, scale)
+            };
+            if radius > 0 {
+                out.extend(
+                    main.into_iter().map(|element| {
+                        Elements::RoundedSurface(Rounded::new(element, clip, radius))
+                    }),
+                );
+            } else {
+                out.extend(main.into_iter().map(Elements::Surface));
+            }
+        }
         if placement.floating
             && let Some(&(id, count)) = spans.peek()
             && id == placement.id
@@ -598,122 +698,6 @@ where
         }
     }
     out
-}
-
-/// One window's elements, popups first, appended to `out` -- the body of
-/// [`window_elements`]'s walk. Pushes nothing for a window the space has not
-/// mapped (an invisible placement) or whose bounding box misses `region`.
-#[allow(clippy::too_many_arguments)]
-fn push_window_elements<R>(
-    space: &Space<Window>,
-    windows: &HashMap<WindowId, Window>,
-    placement: &Placement,
-    renderer: &mut R,
-    region: Rectangle<i32, Logical>,
-    origin: Rect,
-    scale: f64,
-    configured_radius: i32,
-    out: &mut Vec<Elements<R>>,
-) where
-    R: Renderer + ImportAll + ImportMem,
-    R::TextureId: Texture + Send + Clone + 'static,
-{
-    let Some(window) = windows.get(&placement.id) else {
-        return;
-    };
-    // The mapped location, and from it the render location and the bbox
-    // (popups included) exactly as `InnerElement::render_location` and
-    // `InnerElement::bbox` compute them -- one space lookup rather than
-    // the two `element_location` + `element_bbox` would cost.
-    let Some(mapped) = space.element_location(window) else {
-        return;
-    };
-    let geometry = window.geometry();
-    let render_location = mapped - geometry.loc;
-    // `SpaceElement::bbox` (popups included), not the inherent
-    // `Window::bbox` (the toplevel tree only), which is the one
-    // `InnerElement::bbox` reads.
-    let mut bbox = SpaceElement::bbox(window);
-    bbox.loc += render_location;
-    if !region.overlaps(bbox) {
-        return;
-    }
-    let location = (render_location - region.loc).to_physical_precise_round(scale);
-    if configured_radius <= 0 {
-        out.extend(
-            AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
-                window,
-                renderer,
-                location,
-                Scale::from(scale),
-                1.0,
-            )
-            .into_iter()
-            .map(Elements::Surface),
-        );
-        return;
-    }
-    // No X11 arm: without the `xwayland` feature `Wayland` is the only
-    // variant -- and if that ever changes this match fails to compile
-    // rather than silently dropping windows. With the feature the `X11`
-    // variant exists, and the Phase-1 skeleton answers it loudly: no
-    // X11 window can exist yet (nothing constructs
-    // `Window::new_x11_window` until Phase 2 maps one), so reaching
-    // here is a bug, and a bug that logs per frame beats one that
-    // silently drops the window -- or one that panics the session.
-    #[cfg(not(feature = "xwayland"))]
-    let WindowSurface::Wayland(toplevel) = window.underlying_surface();
-    #[cfg(feature = "xwayland")]
-    let WindowSurface::Wayland(toplevel) = window.underlying_surface() else {
-        tracing::error!(
-            "an X11 window reached the render path before Phase 2 maps one; skipping it"
-        );
-        return;
-    };
-    let surface = toplevel.wl_surface();
-    for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
-        let offset =
-            (geometry.loc + popup_offset - popup.geometry().loc).to_physical_precise_round(scale);
-        out.extend(
-            render_elements_from_surface_tree(
-                renderer,
-                popup.wl_surface(),
-                location + offset,
-                scale,
-                1.0,
-                Kind::Unspecified,
-            )
-            .into_iter()
-            .map(Elements::Surface),
-        );
-    }
-    let main: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
-        renderer,
-        surface,
-        location,
-        scale,
-        1.0,
-        Kind::Unspecified,
-    );
-    // What the client drew, not the slot: a short client's corners are
-    // its own, and they are where the ring rounds too (`drawn.rs`).
-    let drawn = clamp_to_slot(placement.rect, geometry.size.w, geometry.size.h);
-    let clip = clip_rect(to_output_local(drawn, origin), scale);
-    // Never rounded while fullscreen: it covers the output edge to edge,
-    // and a rounded clip would cut its corners back to the background.
-    let radius = if placement.fullscreen {
-        0
-    } else {
-        physical_radius(configured_radius, clip, scale)
-    };
-    if radius > 0 {
-        out.extend(
-            main.into_iter()
-                .map(|element| Elements::RoundedSurface(Rounded::new(element, clip, radius))),
-        );
-    } else {
-        out.extend(main.into_iter().map(Elements::Surface));
-    }
 }
 
 /// Appends the render elements of every mapped layer surface on `layers`,

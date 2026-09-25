@@ -93,8 +93,12 @@ impl World {
         // an active workspace. It hides everything else on the workspace:
         // the floating layer under a covering column, and the strip and the
         // rest of the floating layer under a covering floating window.
-        let covering = ws
-            .focused_window()
+        // Only an active workspace shows anything, so only its answer is
+        // read: an inactive one is placed invisible whatever covers it, and
+        // skipping it saves a map lookup per workspace per arrangement.
+        let covering = active
+            .then(|| ws.focused_window())
+            .flatten()
             .filter(|id| self.windows.get(id).is_some_and(|w| w.fullscreen.is_some()));
         let floating_covers = covering.is_some() && ws.floating_has_focus();
         self.place_strip(output, ws, active && !floating_covers, placements);
