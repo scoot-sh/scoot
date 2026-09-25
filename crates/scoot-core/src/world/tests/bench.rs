@@ -128,6 +128,11 @@ fn arrange_cost() {
     add_floating_chain(&mut dialogs, &[None, Some(0), Some(0)]);
     dialogs.handle_action(Action::FocusWindowId(WindowId(WINDOWS + 1)));
     dialogs.handle_action(Action::ToggleFloatingFocus);
+    assert_ne!(
+        floating_ids(&dialogs, false),
+        floating_ids(&dialogs, true),
+        "the dialogs scene must draw in another order than it stacks"
+    );
     measure("floating dialogs", dialogs);
     // The worst case a client can build for that path: 64 floating windows,
     // each the dialog of the one before, the bottom one focused (raised
@@ -144,6 +149,30 @@ fn arrange_cost() {
     long.handle_action(Action::FocusWindowId(WindowId(WINDOWS + 1)));
     long.handle_action(Action::ToggleFloatingFocus);
     measure("floating chain of 1000", long);
+}
+
+/// The focused workspace's floating windows: in stacking order, or in the
+/// order the arrangement draws them.
+fn floating_ids(world: &World, drawn: bool) -> Vec<WindowId> {
+    if drawn {
+        world
+            .arrange()
+            .placements
+            .iter()
+            .filter(|p| {
+                p.floating
+                    && world
+                        .locate(p.id)
+                        .is_some_and(|l| l.output == world.focused_output)
+            })
+            .map(|p| p.id)
+            .collect()
+    } else {
+        world.outputs[world.focused_output]
+            .active_workspace()
+            .floating
+            .clone()
+    }
 }
 
 /// Opens one floating window per entry after the scene's windows, drawn

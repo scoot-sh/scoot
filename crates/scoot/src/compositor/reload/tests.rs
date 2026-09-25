@@ -1878,3 +1878,26 @@ fn a_removed_then_readded_entry_runs_again() {
     );
     wait_for_marker(&marker);
 }
+
+#[test]
+fn a_floating_modifier_reload_applies_and_a_bad_one_falls_back() {
+    let mut fixture = Fixture::with_config("");
+    assert_eq!(fixture.state.floating_modifier, scoot_ipc::Modifier::Super);
+    fixture.rewrite("[floating]\nmodifier = \"alt\"\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &[field::FLOATING_MODIFIER.to_owned()],
+        "{response:?}"
+    );
+    assert_eq!(fixture.state.floating_modifier, scoot_ipc::Modifier::Alt);
+    // Not a modifier: back to the default, applied, nothing refused.
+    fixture.rewrite("[floating]\nmodifier = \"hyper\"\n");
+    let response = fixture.reload();
+    assert_eq!(applied(&response), &[field::FLOATING_MODIFIER.to_owned()]);
+    assert!(refused(&response).is_empty(), "{response:?}");
+    assert_eq!(fixture.state.floating_modifier, scoot_ipc::Modifier::Super);
+    // Unchanged: silent.
+    let response = fixture.reload();
+    assert!(applied(&response).is_empty() && refused(&response).is_empty());
+}

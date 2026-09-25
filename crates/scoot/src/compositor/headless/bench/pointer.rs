@@ -101,8 +101,11 @@ fn pointer_motion_cost() {
 }
 
 /// Motion while the floating window is dragged: every motion moves it (a
-/// move drag), or asks it for a new size (a resize drag, whose configure is
-/// the one allocation, Smithay's, per new size).
+/// move drag), or asks the core for a new size (a resize drag). A resize
+/// configure goes out only once the client has acked the last, so with the
+/// client acking once per batch this is the paced steady state -- mostly
+/// motions that update the size without a configure, which is what a
+/// client answering at its frame rate sees from a 1000Hz mouse.
 #[test]
 #[ignore = "prints per-motion timings for a human; asserts nothing"]
 fn pointer_motion_drag_cost() {
