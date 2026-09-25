@@ -46,6 +46,12 @@ impl From<Action> for scoot_core::Action {
                 id: scoot_core::WindowId(id),
                 fullscreen,
             },
+            Action::ToggleFloating => Self::ToggleFloating,
+            Action::SetFloating { id, floating } => Self::SetFloating {
+                id: scoot_core::WindowId(id),
+                floating,
+            },
+            Action::ToggleFloatingFocus => Self::ToggleFloatingFocus,
             Action::CloseFocused => Self::CloseFocused,
             Action::Spawn { command } => Self::Spawn(command),
             Action::Quit => Self::Quit,
@@ -102,6 +108,24 @@ mod tests {
                 id: scoot_core::WindowId(7),
                 fullscreen: true
             }
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::ToggleFloating),
+            scoot_core::Action::ToggleFloating
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::SetFloating {
+                id: 7,
+                floating: false
+            }),
+            scoot_core::Action::SetFloating {
+                id: scoot_core::WindowId(7),
+                floating: false
+            }
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::ToggleFloatingFocus),
+            scoot_core::Action::ToggleFloatingFocus
         );
     }
 }

@@ -1,5 +1,6 @@
 mod bench;
 mod columns;
+mod floating;
 mod frames;
 mod fullscreen;
 mod invariants;

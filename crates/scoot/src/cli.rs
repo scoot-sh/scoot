@@ -43,6 +43,7 @@ ACTIONS:
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
     focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+    toggle-floating | set-floating ID on|off | toggle-floating-focus
 ";
 
 /// The largest `--width`/`--height` a `--headless`/`--nested` output may ask

@@ -3,7 +3,7 @@
 - [Command-line flags](#command-line-flags)
 - [The config file](#the-config-file)
 - [Reloading the config](#reloading-the-config)
-- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[xwayland]`](#xwayland) · [`[autostart]`](#autostart) · [`[binds]`](#binds)
+- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[xwayland]`](#xwayland) · [`[autostart]`](#autostart) · [`[floating]`](#floating) · [`[[window_rule]]`](#window_rule) · [`[binds]`](#binds)
 - [Default keybindings](#default-keybindings)
 - [Example `config.toml`](#example-configtoml)
 
@@ -227,9 +227,10 @@ session script carries the behavior half — see
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks for
 `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml` if `$XDG_CONFIG_HOME` is unset or empty, and
-runs on built-in defaults if neither exists. Eight optional tables:
+runs on built-in defaults if neither exists. Nine optional tables:
 `[layout]`, `[appearance]`, `[output]`, `[renderer]`, `[tty]`,
-`[xwayland]`, `[autostart]`, `[binds]`.
+`[xwayland]`, `[autostart]`, `[floating]`, `[binds]` — plus any number of
+`[[window_rule]]` entries (an array of tables).
 Every field in every table is itself optional and defaults independently, so
 a config that only sets `gap` leaves everything else — including the rest of
 `[layout]` — at its built-in default.
@@ -255,7 +256,8 @@ other path (`> wherever`). (On a machine with no
 re-reads this same file and re-applies the layout (gap, column widths and
 the default column width), the output scale, the appearance (including
 the cursor size, color and theme), the
-keybindings, and new `[autostart]` spawn entries. Only `[tty] gpu`,
+keybindings, `[floating]` and the `[[window_rule]]`s (for windows that map
+after the reload), and new `[autostart]` spawn entries. Only `[tty] gpu`,
 `[renderer] backend` and `[xwayland] enabled` need a restart, and a reload
 refuses them with a message naming that rather than silently ignoring them.
 
@@ -278,9 +280,11 @@ cases where guessing would be worse than refusing — see below and
   the *entire* file is discarded for full built-in defaults — a single bad
   field in `[layout]` also throws away an otherwise-valid `[binds]` table
   elsewhere in the same file.
-- One bad `[appearance]` color string, one bad `[binds]` entry, or one bad
-  `[autostart]` entry: logged as a warning, and only that field/bind/entry
-  falls back — every other field and bind in the file still applies.
+- One bad `[appearance]` color string, one bad `[binds]` entry, one bad
+  `[autostart]` entry, or one unusable `[[window_rule]]` (no matcher, a
+  size that is not positive, ...): logged as a warning, and only that
+  field/bind/entry/rule falls back — every other field, bind and rule in the
+  file still applies.
 - A set-but-unusable `[tty] gpu` (a wrong path, or an empty one): a hard
   startup error naming the key, not a silent fallback to the automatic pick.
   This is one of the two deliberate startup exceptions; the other is
@@ -332,7 +336,11 @@ never acted on; a `spawn` whose program fails to start is refused by name
 instead of reported applied, and stays pending -- the next reload retries
 it. Seen is by value per occurrence: an edited entry counts as
 new, a removed-then-re-added entry runs again, and a second identical
-reload is silent).
+reload is silent), and `[floating] auto` and the `[[window_rule]]` list
+(swapped whole; they decide for windows that map after the reload, and
+windows already mapped keep their place -- a rule that cannot be used is
+refused by name, e.g. `window_rule #3 (sets neither float nor size): skipped
+as unusable`, on every reload that finds it).
 
 **Refused, explicitly, pending a restart:**
 `[tty] gpu` (the session already
@@ -349,7 +357,9 @@ The reply says which was which:
 
 Both lists name only fields that *differed* — a field the file and the
 session agree on appears in neither, so two empty lists together mean "the
-reload changed nothing it was asked to". A reload that cannot load or
+reload changed nothing it was asked to". The one exception is an unusable
+`[[window_rule]]`, refused on every reload that finds it: it is never in
+effect, so it always differs from what the file asks for. A reload that cannot load or
 validate the file at all (unreadable, malformed TOML, an unknown field)
 answers an `error` instead, keeps the running config untouched, and logs —
 never defaults, never a half-applied session, never an exit. `scootctl`
@@ -485,6 +495,7 @@ focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
 focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+toggle-floating | set-floating ID on|off | toggle-floating-focus
 ```
 
 e.g. `"focus-column left"`, `"close"`, or `"spawn foot -e htop"` (split on
@@ -595,6 +606,90 @@ Three behaviors worth knowing, plus the reload rule:
   skipped-while-locked) and decides the still-pending ones on the first
   unlocked reload instead (see [Reloading the config](#reloading-the-config)).
 
+## `[floating]`
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `auto` | bool | `true` | Float a window automatically when it first maps if it says it is a dialog (`xdg-dialog-v1`), names a parent (`xdg_toplevel.set_parent`, a transient window), or has a fixed size (equal non-zero minimum and maximum). `false` turns all three off; `[[window_rule]]`s still apply. Re-applied live by `scootctl reload`, for windows that map after it. |
+
+What floating is — a layer above each workspace's scrolling strip, for
+confirmation dialogs, file pickers, settings windows and anything you pick
+with a rule:
+
+- **Where it goes.** Centred on its parent when the parent is visible on
+  the same workspace, otherwise on the output — always inside the output's
+  usable area (a bar's reserved strip excluded). The window picks its own
+  size (a rule's `size` asks for one); one larger than the usable area is
+  asked to fit it. It keeps its centre as it resizes itself, and is re-centred
+  when carried to another output. It cannot be dragged or resized with the
+  pointer yet (a client-side titlebar drag does nothing); that is planned.
+- **Stacking.** The most recently focused floating window is on top; a click,
+  `focus-window-id`, or a taskbar activating it raises it.
+- **Focus.** `Super+Space` (`toggle-floating-focus`) moves focus between
+  the floating windows and the strip. With a floating window focused,
+  `focus-column left|right` goes back to the strip's focused column,
+  `focus-window up|down` cycles the floating windows, and the strip's own
+  actions (`move-column`, `move-window`, `consume-or-expel`,
+  `cycle-column-width`, `set-column-width`) do nothing. Moving the window to
+  another workspace or output keeps it floating there.
+- **The strip underneath is untouched.** A dialog that floats as it opens
+  leaves every column, width and scroll position exactly as it found them.
+  Floating a column takes it out (focus in the strip goes to the column on
+  its left); un-floating (`Super+Shift+Space`) puts it back as a column right
+  of the strip's focused column, at the width it had -- back where it was,
+  except the leftmost column (it comes back second) and a window floated out
+  of a stacked column (it comes back as a column of its own).
+- **Fullscreen.** A floating window can go fullscreen and comes back floating.
+  A dialog opened by a fullscreen app shows above it, and stays up when you
+  click the app (a modal dialog hidden under its app would look like a hung
+  app); other floating windows hide while a fullscreen window has focus.
+  A fullscreen window, tiled or floating, stays in place under a floating
+  window that has focus.
+- **Decided once.** Whether a window floats is decided when it first maps; a
+  title change later does not re-decide it. The toggle changes it any time.
+
+## `[[window_rule]]`
+
+Each rule is its own `[[window_rule]]` table; repeat the header for more.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `match_app_id` | string (glob) | Matches the window's app id. |
+| `match_title` | string (glob) | Matches the window's title. |
+| `float` | bool | `true` floats a matching window when it maps; `false` keeps it in the strip even if `[floating] auto` would float it. |
+| `size` | `[width, height]`, logical px | The size to ask a floating window for when it maps (each axis `1..=65535`, clamped to the output's usable area). No effect on a window that tiles. |
+
+A rule needs at least one matcher, and must set `float`, `size` or both;
+when it names both matchers, both must match. Matchers are **globs over the
+whole string**, case-sensitive: `*` matches any run of characters, `?`
+exactly one, everything else itself — so `"foot"` matches only `foot`, not
+`footclient`, and `"*Preferences*"` matches any title containing
+`Preferences`. `match_app_id = "*"` matches every window. There is no
+escape: a literal `*` or `?` in an app id or title cannot be matched as
+itself -- use `?` in its place (it matches any one character, the `*`
+included). Rules apply in
+file order; a later matching rule overrides an earlier one for each field it
+sets. Rules are checked when a window first maps, after `[floating] auto`'s
+heuristics, so a rule always has the last word. `scootctl windows` shows the
+app id and title to match against.
+
+```toml
+[[window_rule]]
+match_app_id = "org.gnome.Calculator"
+float = true
+
+[[window_rule]]
+match_title = "*Picture-in-Picture*"
+float = true
+size = [640, 360]
+
+# A dialog you would rather have as a column:
+[[window_rule]]
+match_app_id = "org.gnome.Nautilus"
+match_title = "*Properties*"
+float = false
+```
+
 ## Default keybindings
 
 | Combo | Action |
@@ -619,11 +714,13 @@ Three behaviors worth knowing, plus the reload rule:
 | `Super+Shift+comma` / `Super+Shift+period` | Move window to output 1 / 2 directly |
 | `Super+r` | Cycle column width |
 | `Super+f` | Toggle fullscreen |
+| `Super+Shift+Space` | Float the focused window, or put it back in the strip |
+| `Super+Space` | Move focus between the floating windows and the strip |
 | `Super+q` | Close focused window |
 | `Super+Return` | Spawn `foot` |
 | `Super+Shift+e` | Quit |
 
-All 41 of them — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
+All 43 of them — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
 scoot's own modifier throughout. Quit is deliberately `Super+Shift+e`, not
 `Super+Shift+q`: that combo is one slipped Shift away from `Super+q` (close
 focused window), and a slip of the finger shouldn't be able to end the whole
@@ -735,4 +832,16 @@ commands = [
     "spawn waybar",
     "spawn mako",
 ]
+
+[floating]
+# Dialogs, transient and fixed-size windows float when they map; false
+# tiles everything except what a rule floats.
+auto = true
+
+# pavucontrol's app id is org.pulseaudio.pavucontrol (`scootctl windows`
+# shows any window's).
+[[window_rule]]
+match_app_id = "*pavucontrol"
+float = true
+size = [700, 500]
 ```

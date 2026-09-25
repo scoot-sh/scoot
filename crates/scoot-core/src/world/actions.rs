@@ -11,6 +11,32 @@ impl World {
     /// [`World::arrange`].
     pub fn handle_action(&mut self, action: Action) -> Vec<Effect> {
         let presets = self.config.column_widths.len();
+        // With a floating window focused, the strip's own actions have no
+        // column to act on (see `Action::ToggleFloating`): the two focus
+        // steps act on the floating layer instead, and the rest do nothing.
+        if self.floating_has_focus() {
+            match action {
+                // Leave the floating layer for the strip, without stepping.
+                Action::FocusColumn(_) => self.toggle_floating_focus(),
+                Action::FocusWindow(dir) => {
+                    self.reshape(|o| o.active_workspace_mut().cycle_floating(dir));
+                }
+                Action::MoveColumn(_)
+                | Action::MoveWindow(_)
+                | Action::ConsumeOrExpel(_)
+                | Action::CycleColumnWidth
+                | Action::SetColumnWidth(_) => {}
+                other => return self.handle_any_focus(other, presets),
+            }
+            self.settle_fullscreen();
+            return Vec::new();
+        }
+        self.handle_any_focus(action, presets)
+    }
+
+    /// Every action, applied with the strip's focus -- and the ones that do
+    /// not care where focus is, applied either way.
+    fn handle_any_focus(&mut self, action: Action, presets: usize) -> Vec<Effect> {
         match action {
             Action::FocusColumn(dir) => {
                 self.reshape(|o| o.active_workspace_mut().focus_column(dir))
@@ -77,6 +103,9 @@ impl World {
             }
             Action::ToggleFullscreen => self.toggle_fullscreen(),
             Action::SetFullscreen { id, fullscreen } => self.set_fullscreen(id, fullscreen),
+            Action::ToggleFloating => self.toggle_floating(),
+            Action::SetFloating { id, floating } => self.set_floating(id, floating, None),
+            Action::ToggleFloatingFocus => self.toggle_floating_focus(),
             Action::CloseFocused => {
                 return self
                     .focused_window()

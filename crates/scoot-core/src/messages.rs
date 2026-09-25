@@ -84,6 +84,28 @@ pub enum Event {
         id: WindowId,
         fullscreen: bool,
     },
+    /// The platform decided, when the window first mapped, that it floats
+    /// (`true`) or tiles (`false`): from the window's own properties (a
+    /// dialog hint, a parent, a fixed size) or a user's window rule.
+    ///
+    /// An event rather than an action for the same reason as
+    /// [`Event::FullscreenRequested`]: it is about the window, not an intent
+    /// from a user or an agent at the keyboard, so a shell applies it even
+    /// while it refuses actions (a dialog mapping behind the lock screen is
+    /// floating when the session unlocks). The same intent from a user or an
+    /// agent is [`Action::SetFloating`]; both land on the rules spelled out
+    /// on [`Action::ToggleFloating`].
+    ///
+    /// `size` is an initial size to ask the window for, in logical pixels
+    /// (a window rule's `size`); `None` lets the window choose its own.
+    /// Either way it is clamped to the output's usable area, and ignored
+    /// when `floating` is `false`. Unknown windows, and a window already in
+    /// the asked-for state, are ignored.
+    FloatingRequested {
+        id: WindowId,
+        floating: bool,
+        size: Option<Size>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,6 +235,96 @@ pub enum Action {
         id: WindowId,
         fullscreen: bool,
     },
+    /// Float the focused window, or put it back in the scrolling strip. With
+    /// no window focused, does nothing.
+    ///
+    /// What floating means here:
+    ///
+    /// - **Each workspace has a floating layer above its strip**, holding
+    ///   windows in stacking order. The most recently focused floating window
+    ///   is on top: focusing one (by id, a click reported as
+    ///   [`Event::FocusObserved`], or stepping) raises it. A floating window
+    ///   belongs to its workspace like a column does, and travels with it.
+    /// - **Placement.** A window starts floating centred on its parent (see
+    ///   [`WindowInfo::parent`](crate::WindowInfo::parent)) when the parent is
+    ///   on the same output's same workspace and visible, otherwise on its
+    ///   output's usable area -- decided once, when it starts floating, and
+    ///   kept as a centre point: a window that resizes itself grows and
+    ///   shrinks around that point rather than jumping. It is always clamped
+    ///   inside the usable area (a bar's exclusive zone excluded), shrunk to
+    ///   fit it when larger. Carried to another output, it is re-centred
+    ///   there.
+    /// - **Size.** The window chooses its own (the core asks for nothing --
+    ///   [`Placement::requested`](crate::Placement::requested) is `None`),
+    ///   unless the platform asked for an initial size
+    ///   ([`Event::FloatingRequested`]) or the window drew itself larger than
+    ///   the usable area, in which case the core asks for that size, clamped,
+    ///   from then on. The rect is the size it last drew
+    ///   ([`Event::FrameObserved`]'s `actual`); a window that has not drawn
+    ///   yet (and was asked for no size) is placed invisible until it does.
+    ///   Frames a floating window draws never teach the strip a minimum.
+    /// - **Focus.** A workspace's focus is either in its strip or on its top
+    ///   floating window. [`Action::ToggleFloatingFocus`] switches between
+    ///   them. With a floating window focused, [`Action::FocusColumn`] leaves
+    ///   the floating layer for the strip's focused column (without stepping),
+    ///   and [`Action::FocusWindow`] cycles the floating stack -- down raises
+    ///   the bottom-most window, up sends the top one to the bottom. The
+    ///   strip-only actions ([`Action::MoveColumn`], [`Action::MoveWindow`],
+    ///   [`Action::ConsumeOrExpel`], [`Action::CycleColumnWidth`],
+    ///   [`Action::SetColumnWidth`]) do nothing. Moving the focused window to
+    ///   another workspace or output keeps it floating there, on top and
+    ///   focused.
+    /// - **Floating takes the window out of its column**; when that empties
+    ///   the strip's focused column, strip focus lands on the column to its
+    ///   left (for a window that floats as it first maps, that is the column
+    ///   that was focused before it opened, and the strip's scroll is put
+    ///   back too, so the dialog leaves the strip exactly as it found it).
+    ///   **Un-floating inserts it as a new column right of the strip's
+    ///   focused column**, at the width it had when it was floated (the
+    ///   default width if it was never a column), focused if it was the
+    ///   focused window. So floating a focused column and un-floating it
+    ///   again puts it back right of its left neighbour: where it was,
+    ///   except the leftmost column (it comes back second) and a window
+    ///   floated out of a stacked column (it comes back as its own column).
+    /// - **Fullscreen.** A floating window can go fullscreen; leaving
+    ///   fullscreen puts it back where it floated. Whichever layer a
+    ///   fullscreen window is in, the same three rules hold:
+    ///   - While it is the focused window it covers its output
+    ///     ([`World::fullscreen_on`](crate::World::fullscreen_on)): the rest
+    ///     of the workspace is hidden **except its own floating dialogs**
+    ///     (windows whose [`parent`](crate::WindowInfo::parent) chain
+    ///     reaches it), which stay up, placed above it. Clicking a
+    ///     fullscreen app must not hide the dialog it opened: a modal dialog
+    ///     blocks its app, and one hidden under it looks like a hang.
+    ///   - While a floating window above it has focus (typically that
+    ///     dialog), it stays in place, full size, under the floating layer,
+    ///     and nothing counts as covering the output. A floating fullscreen
+    ///     window then hides the strip and the floating windows below it.
+    ///   - While focus is anywhere else it is not shown in front: a column
+    ///     stays in its strip slot as usual, a floating one is placed
+    ///     invisible.
+    ///
+    ///   Floating or un-floating a fullscreen window ends its fullscreen
+    ///   first.
+    /// - A floating window that closes while focused hands focus to its
+    ///   parent when the parent is on the same workspace (unless the parent
+    ///   is stacked in a column behind a fullscreen sibling: focusing it
+    ///   would end that fullscreen), otherwise to the next floating window,
+    ///   otherwise to the strip.
+    ToggleFloating,
+    /// Float one specific window (`true`) or put it back in the strip
+    /// (`false`), by id. The same rules as [`Action::ToggleFloating`]; it
+    /// does not move focus away from where it is (a window floated while
+    /// another floating window has focus goes directly below that one). An
+    /// unknown id, or a window already in the asked-for state, does nothing.
+    SetFloating {
+        id: WindowId,
+        floating: bool,
+    },
+    /// Move focus between the focused workspace's floating layer (its top
+    /// window) and its strip (the strip's focused window). Does nothing
+    /// when the side focus would move to is empty.
+    ToggleFloatingFocus,
     CloseFocused,
     Spawn(Vec<String>),
     Quit,

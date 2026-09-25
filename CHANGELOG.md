@@ -9,6 +9,30 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-25 — dialogs and chosen apps float above the scrolling strip
+
+- **Dialogs float.** A confirmation dialog, file picker, About box or
+  settings window now opens centred above the strip (on the window it
+  belongs to, when that is on screen) instead of taking a column and
+  scrolling everything sideways. scoot floats a window automatically when
+  its toolkit marks it a dialog (`xdg-dialog-v1`, which GTK 4 uses), when it
+  names a parent window (GTK 3 dialogs), or when it cannot be resized. The
+  strip underneath is left exactly as it was. Turn the automatic part off
+  with `[floating] auto = false`.
+- **Window rules.** `[[window_rule]]` tables float (`float = true`) or keep
+  tiled (`float = false`) windows by app id or title, with glob matching and
+  an optional starting `size`; `scootctl reload` applies them to windows
+  opened after it. See [configuration.md](docs/configuration.md#window_rule).
+- **New keys and actions.** `Super+Shift+Space` (`toggle-floating`) floats
+  the focused window or puts it back as a column; `Super+Space`
+  (`toggle-floating-focus`) moves focus between floating windows and the
+  strip; `scootctl action set-floating ID on|off` sets one window by id.
+  `scootctl windows` reports `floating` for each window. If you had bound
+  either key yourself, your binding still wins.
+- Floating windows are placed by scoot (centred, kept on screen); moving and
+  resizing them with the pointer, including a dialog's own titlebar drag, is
+  not there yet.
+
 ### 2026-09-25 — scoot raises its file-descriptor limit, and an app can no longer make it hold hundreds of descriptors by attaching them to ordinary requests
 
 - **A misbehaving app can no longer make scoot hold hundreds of file

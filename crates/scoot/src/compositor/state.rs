@@ -38,6 +38,7 @@ use smithay::wayland::selection::wlr_data_control::DataControlState as WlrDataCo
 use smithay::wayland::shell::wlr_layer::WlrLayerShellState;
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
+use smithay::wayland::shell::xdg::dialog::XdgDialogState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::tablet_manager::TabletManagerState;
@@ -129,6 +130,20 @@ pub struct State {
     /// `State::refresh_fullscreen_cover`). Updated in place, so it allocates
     /// only when an output is added.
     pub(super) fullscreen_covers: Vec<Option<WindowId>>,
+    /// A fingerprint of every visible floating window's id, stacking order
+    /// and rect as of the last `apply()`, so `apply()` can tell when what
+    /// floats under the pointer may have changed (see
+    /// `State::refresh_floating_cover`). A number, not a list: allocation-free.
+    pub(super) floating_cover: u64,
+    /// Toplevels created but not yet committed: the ones whose first commit
+    /// is still to decide whether they float (see `floating.rs`). Almost
+    /// always empty -- a client creates a toplevel and commits it in the same
+    /// flush -- so the commit path's check is an empty-`Vec` test.
+    pub(super) awaiting_map: Vec<WindowId>,
+    /// `[floating] auto` and the `[[window_rule]]`s the session runs with:
+    /// what decides at a window's first commit whether it floats. Set from
+    /// the config after `State::new` and swapped whole by a reload.
+    pub floating_rules: super::window_rules::FloatingRules,
     /// What `dmabuf::advertise` put on the `zwp_linux_dmabuf_v1` global --
     /// the default feedback, and the builder and table behind it -- or
     /// `None` when nothing was advertised (a renderer-less harness, a
@@ -834,6 +849,12 @@ impl State {
         #[cfg(feature = "xwayland")]
         let xwayland_shell_state = xwayland::XWaylandShellState::new::<Self>(&dh);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        // `xdg_wm_dialog_v1` (`xdg-dialog-v1`): how a toolkit marks a
+        // toplevel as a dialog, which floats it when it maps (see
+        // `floating.rs`). Nothing reads the returned state -- it holds only
+        // the global's id, for a caller that would remove the global, and the
+        // global lives in the display either way -- so it is not kept.
+        XdgDialogState::new::<Self>(&dh);
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let ext_workspace = ExtWorkspaceState::new(&dh);
         let foreign_toplevels = ForeignToplevels::new(&dh);
@@ -910,6 +931,9 @@ impl State {
             next_id: 0,
             focus: None,
             fullscreen_covers: Vec::new(),
+            floating_cover: 0,
+            awaiting_map: Vec::new(),
+            floating_rules: super::window_rules::FloatingRules::default(),
             #[cfg(feature = "gpu-scanout")]
             dmabuf_default: None,
             #[cfg(feature = "gpu-scanout")]

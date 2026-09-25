@@ -76,9 +76,10 @@ focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
 focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+toggle-floating | set-floating ID on|off | toggle-floating-focus
 ```
 
-`focus-workspace-index N` and `move-window-to-workspace-index N` are 0-based; out of range does nothing (a move leaves the window where it is). `set-column-width N` is 0-based into the session's `[layout] column_widths`; out of range does nothing, like a stale workspace index. `focus-output ID` and `move-window-to-output ID` take an output id as `scootctl outputs` reports it (output ids are stable for the session, unlike workspace positions); an unknown id does nothing. A move carries the focused window to the target output's active workspace and follows it there; focusing an output with no windows focuses nothing. `toggle-fullscreen` flips the focused window in and out of fullscreen (the `Super+f` bind); `set-fullscreen ID on|off` sets one window's state by id, idempotently, without moving focus — so a window whose column is not focused becomes fullscreen but does not cover the screen until its column is focused, and an unknown id, or a window stacked under another in its column, does nothing (see [configuration.md](configuration.md#default-keybindings) for what fullscreen does to the layout). `spawn` is
+`focus-workspace-index N` and `move-window-to-workspace-index N` are 0-based; out of range does nothing (a move leaves the window where it is). `set-column-width N` is 0-based into the session's `[layout] column_widths`; out of range does nothing, like a stale workspace index. `focus-output ID` and `move-window-to-output ID` take an output id as `scootctl outputs` reports it (output ids are stable for the session, unlike workspace positions); an unknown id does nothing. A move carries the focused window to the target output's active workspace and follows it there; focusing an output with no windows focuses nothing. `toggle-fullscreen` flips the focused window in and out of fullscreen (the `Super+f` bind); `set-fullscreen ID on|off` sets one window's state by id, idempotently, without moving focus — so a window whose column is not focused becomes fullscreen but does not cover the screen until its column is focused, and an unknown id, or a window stacked under another in its column, does nothing (see [configuration.md](configuration.md#default-keybindings) for what fullscreen does to the layout). `toggle-floating` floats the focused window above its workspace's strip or puts it back as a column right of the strip's focused one (the `Super+Shift+Space` bind); `set-floating ID on|off` does the same to one window by id, idempotently, without moving focus; `toggle-floating-focus` moves focus between the focused workspace's floating windows and its strip (`Super+Space`), and does nothing when the other side is empty. With a floating window focused, `focus-column` returns to the strip, `focus-window` cycles the floating windows, and `move-column`, `move-window`, `consume-or-expel`, `cycle-column-width` and `set-column-width` do nothing (see [configuration.md](configuration.md#floating)). There is no action to move or resize a floating window yet: scoot centres it. `spawn` is
 split on whitespace and not run through a shell, so an argument containing a
 space can't be expressed this way. Every action is refused while the session
 is locked.
@@ -158,19 +159,20 @@ for its modifier only when no key on the layout can hold it.
 | `icon` | The freedesktop icon name the client committed through `xdg-toplevel-icon-v1`, or `null`. Read off the surface's current state when asked, so it is never stale. A client that supplied raw pixel buffers instead of a name reads as `null`. |
 | `output` | The id of the output the window is on. |
 | `rect` | Where the window is, in logical pixels — what you click. That is the part of its layout slot the window has actually drawn: the slot's top-left corner, and the smaller of the slot and what the window last committed on each axis. Normally that is the whole slot. It is smaller for a window that draws less than it was given (a fixed-size dialog, a video player keeping its own size), and for the frame or two after its slot grows until the window's larger frame arrives. It is the same area the focus ring surrounds and rounded corners cut, and it never reaches past the slot. A window that has drawn nothing yet reports its whole slot. Its toplevel surface only: its open menus and other popups can draw outside `rect`. Whatever the window draws, only the part inside its own output's `rect` (`scootctl outputs`) is shown and clickable: a column scrolled part-way past its output's edge is cut there (so is a menu crossing it, unless it lets the compositor adjust it — toolkit menus do — in which case it is flipped or slid back onto the window's output when it opens; see [protocols.md](protocols.md#popup-menus-xdg_popup)), and a click past that edge lands on whatever the neighbouring output shows there — or on nothing, past the last output. A window that is not visible still reports the frame it *would* have — except a window stacked in the same column as a fullscreen one, which reports that fullscreen window's frame (it is behind it) until the fullscreen ends. The drawn-area rule applies only to visible windows. A window that is not visible reports its layout frame unchanged, because it draws nothing there. |
-| `visible` | `false` when the window is scrolled out of view, on an inactive workspace, or hidden behind a fullscreen window (every other window on an output a fullscreen window covers, including windows stacked in its own column). |
+| `visible` | `false` when the window is scrolled out of view, on an inactive workspace, or hidden behind a fullscreen window (every other window on an output a fullscreen window covers, including windows stacked in its own column, and every floating window on it). A floating window is also `false` before its first frame, and while it is fullscreen without focus. |
 | `focused` | Compositor *window* focus — not necessarily where keystrokes go; see below. |
 | `popup_grab` | Whether this window's own popup tree holds the keyboard — see below. |
 | `fullscreen` | Whether the window is fullscreen. While its column is focused it covers its output: `rect` equals that output's `rect` (for a window that draws its whole frame, as fullscreen windows do; see `rect`), and every other window on the output reports `visible: false`. Focused away, it keeps that size and sits in the strip where a column that wide would, one ordinary gap from its neighbours — it may still be partly `visible` beside the focused window, never overlapping it, and like any window is drawn and clickable only within its own output, however far its `rect` reaches past that output's edge. |
+| `floating` | Whether the window floats above its workspace's strip: a dialog, transient or fixed-size window floated as it mapped, a `[[window_rule]]` match, or `toggle-floating`/`set-floating`. Its `rect` is where it really is: centred on its parent (when that is visible on the same workspace) or its output, inside the output's `usable` area, at the size it drew. It is drawn above, and takes clicks before, every tiled window on its output. A floating window that has not drawn its first frame yet is `visible: false`, as is one on an inactive workspace or under a fullscreen window that covers the output. |
 
 Every success reply also carries **`locked`**: the session-lock state it was
 built under. An agent typing a password over IPC learns the unlock landed
 from the very next reply.
 
-`locked`, `usable`, `scale`, `icon`, `popup_grab` and `fullscreen` are
-additive and defaulted — an older server omits them rather than bumping
+`locked`, `usable`, `scale`, `icon`, `popup_grab`, `fullscreen` and
+`floating` are additive and defaulted — an older server omits them rather than bumping
 `PROTOCOL_VERSION`, so read each asymmetrically. `locked: true`,
-`popup_grab: true` and `fullscreen: true` are always truthful, while `false` means "no, *or* a
+`popup_grab: true`, `fullscreen: true` and `floating: true` are always truthful, while `false` means "no, *or* a
 server predating the field"; an all-zero `usable` means the same (fall back
 to `rect`), and an omitted `scale` decodes as `1.0`.
 
@@ -191,10 +193,11 @@ unknown request tag is a decode error the server answers and keeps serving.
 when new spawn entries started -- a spawn entry that fails to start is
 refused by name instead, and stays pending for the next reload), `refused` the ones that
 differed but cannot be (each with its reason: the two restart fields, a
-non-`spawn` autostart entry by name, or a locked-skipped autostart delta).
-Both name only fields that
-*differed*: two empty lists together mean the reload changed nothing it was
-asked to. A reload that could not load or validate the file answers
+non-`spawn` autostart entry by name, a locked-skipped autostart delta, or
+an unusable `[[window_rule]]` by its position in the file). Both name only
+fields that *differed*: two empty lists together mean the reload changed
+nothing it was asked to -- except an unusable window rule, which is refused
+on every reload that finds it, since it is never in effect. A reload that could not load or validate the file answers
 `error` with the running config untouched (`scootctl` exits non-zero).
 
 ## Rules an agent needs

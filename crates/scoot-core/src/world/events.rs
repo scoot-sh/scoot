@@ -31,15 +31,7 @@ impl World {
                     self.fix_all_views();
                 }
             }
-            Event::WindowClosed { id } => {
-                if self.windows.remove(&id).is_none() {
-                    return;
-                }
-                self.unplaced.retain(|&w| w != id);
-                if let Some(loc) = self.locate(id) {
-                    self.remove_window(loc);
-                }
-            }
+            Event::WindowClosed { id } => self.close_window(id),
             Event::FrameObserved {
                 id,
                 requested,
@@ -52,14 +44,45 @@ impl World {
                 }
             }
             Event::FullscreenRequested { id, fullscreen } => self.set_fullscreen(id, fullscreen),
+            Event::FloatingRequested { id, floating, size } => {
+                self.set_floating(id, floating, size);
+            }
+        }
+    }
+
+    /// Forgets a window and takes it out of the tree. A focused floating
+    /// window hands focus back to its parent when it can (see
+    /// `World::refocus_after_floating_close`).
+    fn close_window(&mut self, id: WindowId) {
+        let Some(window) = self.windows.remove(&id) else {
+            return;
+        };
+        self.unplaced.retain(|&w| w != id);
+        if self.last_open.is_some_and(|(opened, _)| opened == id) {
+            self.last_open = None;
+        }
+        let Some(loc) = self.locate(id) else {
+            return;
+        };
+        // Decided before the removal, which may normalize the workspace list
+        // (see `World::refocus_target`).
+        let refocus = self.refocus_target(loc, window.info.parent);
+        self.remove_window(loc);
+        if let Some(parent) = refocus {
+            self.refocus_after_floating_close(loc.output, loc.workspace, parent);
         }
     }
 
     /// Adds an output, or updates its area if it is already known.
     fn upsert_output(&mut self, id: OutputId, area: Rect) {
         if let Some(o) = self.output_index(id) {
+            let changed = self.outputs[o].area != area;
             self.outputs[o].set_area(area);
             self.fix_view(o);
+            if changed {
+                let floating = self.floating_on_output(o);
+                self.recentre_floating_on_output(o, &floating);
+            }
             return;
         }
         self.outputs.push(Output::new(id, area));
@@ -98,10 +121,19 @@ impl World {
             .focused_output
             .min(self.outputs.len().saturating_sub(1));
         let target = self.focused_output;
+        // Its floating windows, re-centred once they are on the output that
+        // takes them (see `World::recentre_floating`); the unplaced ones are
+        // when an output appears for them (`World::place_window`).
+        let floating: Vec<WindowId> = removed
+            .workspaces
+            .iter()
+            .flat_map(|ws| ws.floating.iter().copied())
+            .collect();
         match self.outputs.get_mut(target) {
             Some(output) => {
                 output.adopt(removed.workspaces);
                 self.fix_view(target);
+                self.recentre_floating_on_output(target, &floating);
             }
             None => self.unplaced.extend(removed.into_windows()),
         }
@@ -133,7 +165,24 @@ impl World {
     /// Not while the window is fullscreen: a frame sized for the whole output
     /// says nothing about how narrow the window can be in its column, and
     /// learning from one would widen that column for good once it leaves.
+    ///
+    /// Nor while it floats: a floating window's frame is the size it chose,
+    /// not a refusal to take one the strip asked for. What it drew is kept
+    /// for every window (`WindowState::drawn`), which is what a floating
+    /// window is placed at.
     fn learn_from_frame(&mut self, id: WindowId, requested: Size, actual: Size) {
+        let Some(window) = self.windows.get_mut(&id) else {
+            return;
+        };
+        window.drawn = Size::new(actual.w.max(0), actual.h.max(0));
+        if window.floating.is_some() {
+            // A fullscreen frame is the output's size by design, not a
+            // window too large for its usable area.
+            if window.fullscreen.is_none() {
+                self.floating_frame(id, actual);
+            }
+            return;
+        }
         if self.is_fullscreen(id) {
             return;
         }

@@ -177,6 +177,19 @@ impl Default for Keybindings {
             // The chord most tiling compositors (i3, sway, Hyprland) put
             // fullscreen on.
             (SUPER, Keysym::f, Bound::Action(Action::ToggleFullscreen)),
+            // The chords i3 and sway give floating: Shift+Space floats or
+            // tiles the focused window, bare Space moves focus between the
+            // floating windows and the tiled ones.
+            (
+                SUPER_SHIFT,
+                Keysym::space,
+                Bound::Action(Action::ToggleFloating),
+            ),
+            (
+                SUPER,
+                Keysym::space,
+                Bound::Action(Action::ToggleFloatingFocus),
+            ),
             (SUPER, Keysym::q, Bound::Action(Action::CloseFocused)),
             // The default terminal; rebind this combo in `[binds]` (see
             // config.rs) to launch something else instead.

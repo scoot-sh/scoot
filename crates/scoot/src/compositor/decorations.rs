@@ -611,22 +611,80 @@ impl Decorations {
     ) -> Vec<SolidColorRenderElement> {
         self.retain(arrangement);
         self.painted.clear();
-        let local_bounds = Rect::new(0, 0, bounds.w, bounds.h);
         let mut elements = Vec::new();
         for placement in &arrangement.placements {
-            if !placement.visible || placement.fullscreen || placement.output != output {
-                continue;
+            if !placement.floating && ringed(placement, output) {
+                self.push_square(
+                    &mut elements,
+                    arrangement,
+                    placement,
+                    appearance,
+                    bounds,
+                    scale,
+                    &drawn,
+                );
             }
-            let color = ring_color(arrangement, placement.id, appearance);
-            let rect = to_output_local(drawn(placement), bounds);
-            let rects = ring_rects(rect, appearance.focus_ring_width, local_bounds);
-            let ring = self.rings.entry(placement.id).or_default();
-            push(&mut elements, &mut ring.top, rects.top, color, scale);
-            push(&mut elements, &mut ring.bottom, rects.bottom, color, scale);
-            push(&mut elements, &mut ring.left, rects.left, color, scale);
-            push(&mut elements, &mut ring.right, rects.right, color, scale);
         }
         elements
+    }
+
+    /// The floating windows' square rings, for the frame to draw each one
+    /// directly under its own window rather than under every window (see
+    /// `render/elements.rs`): top of the floating stack first, with how many
+    /// elements each window's ring is appended to `spans`. Called after
+    /// [`Decorations::elements`] for the same arrangement, whose `retain`
+    /// already dropped closed windows' buffers.
+    #[allow(clippy::too_many_arguments)]
+    pub fn floating_elements(
+        &mut self,
+        arrangement: &Arrangement,
+        appearance: &Appearance,
+        output: OutputId,
+        bounds: Rect,
+        scale: f64,
+        drawn: impl Fn(&Placement) -> Rect,
+        spans: &mut Vec<(WindowId, usize)>,
+    ) -> Vec<SolidColorRenderElement> {
+        let mut elements = Vec::new();
+        for placement in arrangement.placements.iter().rev() {
+            if placement.floating && ringed(placement, output) {
+                let before = elements.len();
+                self.push_square(
+                    &mut elements,
+                    arrangement,
+                    placement,
+                    appearance,
+                    bounds,
+                    scale,
+                    &drawn,
+                );
+                spans.push((placement.id, elements.len() - before));
+            }
+        }
+        elements
+    }
+
+    /// One window's four square bars, through its persistent buffers.
+    #[allow(clippy::too_many_arguments)]
+    fn push_square(
+        &mut self,
+        elements: &mut Vec<SolidColorRenderElement>,
+        arrangement: &Arrangement,
+        placement: &Placement,
+        appearance: &Appearance,
+        bounds: Rect,
+        scale: f64,
+        drawn: &impl Fn(&Placement) -> Rect,
+    ) {
+        let local_bounds = Rect::new(0, 0, bounds.w, bounds.h);
+        let color = ring_color(arrangement, placement.id, appearance);
+        let rect = to_output_local(drawn(placement), bounds);
+        let rects = ring_rects(rect, appearance.focus_ring_width, local_bounds);
+        let ring = self.rings.entry(placement.id).or_default();
+        push(elements, &mut ring.top, rects.top, color, scale);
+        push(elements, &mut ring.bottom, rects.bottom, color, scale);
+        push(elements, &mut ring.left, rects.left, color, scale);
+        push(elements, &mut ring.right, rects.right, color, scale);
     }
 
     /// The rounded session's ring: one painted rounded ring per window (see
@@ -660,7 +718,7 @@ impl Decorations {
         let local_bounds = Rect::new(0, 0, bounds.w, bounds.h);
         let mut elements = Vec::new();
         for placement in &arrangement.placements {
-            if !placement.visible || placement.fullscreen || placement.output != output {
+            if placement.floating || !ringed(placement, output) {
                 continue;
             }
             let color = ring_color(arrangement, placement.id, appearance);
@@ -674,6 +732,48 @@ impl Decorations {
                 scale,
                 renderer,
             );
+        }
+        elements
+    }
+
+    /// [`Decorations::floating_elements`] for the rounded session: the
+    /// floating windows' painted rings, top of the stack first, each
+    /// window's element count appended to `spans`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn floating_elements_rounded<R>(
+        &mut self,
+        arrangement: &Arrangement,
+        appearance: &Appearance,
+        output: OutputId,
+        bounds: Rect,
+        scale: f64,
+        drawn: impl Fn(&Placement) -> Rect,
+        renderer: &mut R,
+        spans: &mut Vec<(WindowId, usize)>,
+    ) -> Vec<RingElement<R>>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Texture + Send + Clone + 'static,
+    {
+        let local_bounds = Rect::new(0, 0, bounds.w, bounds.h);
+        let mut elements = Vec::new();
+        for placement in arrangement.placements.iter().rev() {
+            if !placement.floating || !ringed(placement, output) {
+                continue;
+            }
+            let color = ring_color(arrangement, placement.id, appearance);
+            let before = elements.len();
+            self.push_painted(
+                &mut elements,
+                placement.id,
+                to_output_local(drawn(placement), bounds),
+                appearance,
+                color,
+                local_bounds,
+                scale,
+                renderer,
+            );
+            spans.push((placement.id, elements.len() - before));
         }
         elements
     }
@@ -838,6 +938,13 @@ impl Decorations {
         push_painted_rect(elements, &mut ring.left, rects.left, color, scale);
         push_painted_rect(elements, &mut ring.right, rects.right, color, scale);
     }
+}
+
+/// Whether `placement` gets a ring on `output`'s frame: visible, not
+/// fullscreen (it covers the output edge to edge -- there is no gap to draw
+/// in), and placed on that output. The one filter every ring path shares.
+fn ringed(placement: &Placement, output: OutputId) -> bool {
+    placement.visible && !placement.fullscreen && placement.output == output
 }
 
 /// Active color for the focused window, inactive for the rest: the one rule
@@ -1542,6 +1649,8 @@ mod tests {
             rect,
             visible: true,
             fullscreen: false,
+            floating: false,
+            requested: Some(rect.size()),
         }
     }
 

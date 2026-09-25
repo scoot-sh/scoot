@@ -30,15 +30,31 @@ impl Rng {
     }
 }
 
-fn random_info(rng: &mut Rng) -> WindowInfo {
+fn random_info(rng: &mut Rng, windows: &[WindowId]) -> WindowInfo {
     let min = if rng.chance(30) {
         Size::new(rng.size(1200), rng.size(900))
     } else {
         Size::default()
     };
+    // Sometimes transient for another window -- usually a live one,
+    // sometimes a stale or wild id, and now and then itself.
+    let parent = rng.chance(30).then(|| random_window(rng, windows));
     WindowInfo {
         hints: SizeHints { min },
+        parent,
         ..WindowInfo::default()
+    }
+}
+
+/// A size a platform might ask a floating window for: usually plausible,
+/// sometimes zero, negative or i32-extreme (a window rule's numbers are the
+/// user's, and a future platform's may be anyone's).
+fn random_float_size(rng: &mut Rng) -> Option<Size> {
+    match rng.below(6) {
+        0 => None,
+        1 => Some(Size::new(i32::MAX, i32::MAX)),
+        2 => Some(Size::new(0, -5)),
+        _ => Some(Size::new(rng.size(3000), rng.size(2000))),
     }
 }
 
@@ -81,7 +97,7 @@ fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> A
     } else {
         Vertical::Down
     };
-    match rng.below(17) {
+    match rng.below(20) {
         0 => Action::FocusColumn(horizontal),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
@@ -128,6 +144,12 @@ fn random_action(rng: &mut Rng, windows: &[WindowId], outputs: &[OutputId]) -> A
             id: random_window(rng, windows),
             fullscreen: rng.chance(60),
         },
+        16 => Action::ToggleFloating,
+        17 => Action::SetFloating {
+            id: random_window(rng, windows),
+            floating: rng.chance(60),
+        },
+        18 => Action::ToggleFloatingFocus,
         _ => Action::CloseFocused,
     }
 }
@@ -156,14 +178,65 @@ fn random_output(rng: &mut Rng, outputs: &[OutputId]) -> OutputId {
     }
 }
 
-fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) {
+/// One step of the randomized sequence: an event a platform might report or
+/// an action a user or agent might ask for.
+#[derive(Debug)]
+enum Step {
+    Event(Event),
+    Action(Action),
+}
+
+impl Step {
+    /// Whether this step, applied to `world`, can only touch floating
+    /// windows -- so every tiled window's rect must come out of it exactly
+    /// as it went in ("floating windows never change the strip").
+    fn floating_only(&self, world: &World) -> bool {
+        let floating = |id: &WindowId| world.is_floating(*id) && !world.is_fullscreen(*id);
+        // Focusing a floating window elsewhere switches workspace or output,
+        // which re-scrolls that strip: not floating-only.
+        let here = |id: &WindowId| {
+            floating(id)
+                && world.locate(*id).is_some_and(|loc| {
+                    loc.output == world.focused_output
+                        && loc.workspace == world.outputs[loc.output].active
+                })
+        };
+        match self {
+            Step::Event(Event::FrameObserved { id, .. }) => floating(id),
+            Step::Event(Event::FocusObserved { id }) => here(id),
+            Step::Action(Action::FocusWindowId(id)) => here(id),
+            Step::Action(Action::ToggleFloatingFocus) => true,
+            Step::Action(Action::FocusWindow(_)) => world.floating_has_focus(),
+            _ => false,
+        }
+    }
+
+    /// Whether this step, applied to `world`, must leave
+    /// `World::focused_window` alone: `set-floating` on a window that is not
+    /// the focused one (it never moves focus), and a window opening without
+    /// focus -- while some window has focus to keep (a window opening into
+    /// a workspace with nothing on it is that workspace's focus, there being
+    /// nothing else).
+    fn keeps_focus(&self, world: &World) -> bool {
+        if world.focused_window().is_none() {
+            return false;
+        }
+        match self {
+            Step::Action(Action::SetFloating { id, .. }) => world.focused_window() != Some(*id),
+            Step::Event(Event::WindowOpened { focus, .. }) => !focus,
+            _ => false,
+        }
+    }
+}
+
+fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) -> Step {
     let windows: Vec<WindowId> = world.windows().into_iter().map(|(id, _)| id).collect();
     let outputs: Vec<OutputId> = world.outputs().into_iter().map(|(id, _)| id).collect();
     *next_id += 1;
-    let event = match rng.below(14) {
+    let event = match rng.below(16) {
         0 | 1 => Event::WindowOpened {
             id: WindowId(*next_id),
-            info: random_info(rng),
+            info: random_info(rng, &windows),
             output: None,
             focus: rng.chance(80),
         },
@@ -191,7 +264,7 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) {
         },
         8 if !windows.is_empty() => Event::WindowChanged {
             id: windows[rng.below(windows.len())],
-            info: random_info(rng),
+            info: random_info(rng, &windows),
         },
         9 if !outputs.is_empty() => Event::OutputUsableAreaChanged {
             id: outputs[rng.below(outputs.len())],
@@ -201,12 +274,40 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) {
             id: random_window(rng, &windows),
             fullscreen: rng.chance(60),
         },
-        _ => {
-            world.handle_action(random_action(rng, &windows, &outputs));
-            return;
-        }
+        // Floating as a window maps: most often the one that just opened,
+        // which is the shape a platform produces.
+        11 | 12 => Event::FloatingRequested {
+            id: if rng.chance(50) {
+                WindowId(*next_id - 1)
+            } else {
+                random_window(rng, &windows)
+            },
+            floating: rng.chance(80),
+            size: random_float_size(rng),
+        },
+        _ => return Step::Action(random_action(rng, &windows, &outputs)),
     };
-    world.handle_event(event);
+    Step::Event(event)
+}
+
+fn apply_step(world: &mut World, step: Step) {
+    match step {
+        Step::Event(event) => world.handle_event(event),
+        Step::Action(action) => {
+            world.handle_action(action);
+        }
+    }
+}
+
+/// Every tiled window's rect, in arrangement order.
+fn tiled_rects(world: &World) -> Vec<(WindowId, Rect)> {
+    world
+        .arrange()
+        .placements
+        .iter()
+        .filter(|p| !p.floating)
+        .map(|p| (p.id, p.rect))
+        .collect()
 }
 
 fn assert_invariants(world: &World) {
@@ -232,9 +333,21 @@ fn assert_invariants(world: &World) {
                 "stray empty workspace at {index}"
             );
             assert!(
-                ws.is_empty() || ws.focused < ws.columns.len(),
+                ws.columns.is_empty() || ws.focused < ws.columns.len(),
                 "focused column out of range"
             );
+            // The floating layer's focus flag never outlives the layer.
+            assert!(
+                !ws.floating_focused || !ws.floating.is_empty(),
+                "floating focus on an empty floating layer"
+            );
+            for id in &ws.floating {
+                assert!(
+                    world.is_floating(*id),
+                    "{id:?} in a floating layer, not floating"
+                );
+                placed.push(*id);
+            }
             for column in &ws.columns {
                 assert!(!column.windows.is_empty(), "empty column");
                 // A fullscreen window is always its column's focused window
@@ -253,6 +366,12 @@ fn assert_invariants(world: &World) {
                     column.preset < world.config.column_widths.len(),
                     "preset out of range"
                 );
+                for id in &column.windows {
+                    assert!(
+                        !world.is_floating(*id),
+                        "floating window {id:?} in a column"
+                    );
+                }
                 placed.extend(column.windows.iter().copied());
             }
         }
@@ -276,6 +395,37 @@ fn assert_invariants(world: &World) {
             world.is_fullscreen(placement.id),
             "{placement:?}"
         );
+        assert_eq!(
+            placement.floating,
+            world.is_floating(placement.id),
+            "{placement:?}"
+        );
+        // What the core asks a window for is its rect for everything the
+        // layout sizes, and never bigger than the output for a floating one.
+        if !placement.floating || placement.fullscreen {
+            assert_eq!(
+                placement.requested,
+                Some(placement.rect.size()),
+                "{placement:?}"
+            );
+        }
+        if let Some(requested) = placement.requested {
+            assert!(requested.w >= 1 && requested.h >= 1, "{placement:?}");
+        }
+        // A visible floating window lies inside its output's usable area.
+        if placement.floating && placement.visible && !placement.fullscreen {
+            let usable = world
+                .outputs
+                .iter()
+                .find(|o| o.id == placement.output)
+                .map(|o| o.usable)
+                .expect("placed on a known output");
+            assert_eq!(
+                placement.rect.intersection(usable),
+                placement.rect,
+                "{placement:?} escapes {usable:?}"
+            );
+        }
     }
     // A covering window covers its output exactly, and nothing else on that
     // output shows. (`Rect::new` sizes are floored at 1 in the placement, so
@@ -292,6 +442,18 @@ fn assert_invariants(world: &World) {
             if placement.id == covering {
                 assert!(placement.visible, "covering {placement:?} is not visible");
                 assert_eq!(placement.rect, output.area, "covering {placement:?}");
+            } else if placement.floating
+                && !placement.fullscreen
+                && world.descends_from(placement.id, covering)
+            {
+                // Its own dialogs stay up, above it.
+                if placement.visible {
+                    let at = |id| arrangement.placements.iter().position(|p| p.id == id);
+                    assert!(
+                        at(placement.id) > at(covering),
+                        "{placement:?} under its parent"
+                    );
+                }
             } else {
                 assert!(
                     !placement.visible,
@@ -300,13 +462,14 @@ fn assert_invariants(world: &World) {
             }
         }
     }
-    // Nothing visible overlaps anything else visible on the same output --
-    // in particular a fullscreen window scrolled beside the focused column
-    // must keep to its own slot.
+    // Nothing visible in the strip overlaps anything else visible in it on
+    // the same output -- in particular a fullscreen window scrolled beside
+    // the focused column must keep to its own slot. (Floating windows are
+    // above the strip by design.)
     let visible: Vec<_> = arrangement
         .placements
         .iter()
-        .filter(|p| p.visible)
+        .filter(|p| p.visible && !p.floating)
         .collect();
     for (i, a) in visible.iter().enumerate() {
         for b in &visible[i + 1..] {
@@ -331,16 +494,44 @@ fn random_sequences_keep_the_tree_consistent() {
     // so the fullscreen invariants above are known to have been exercised
     // rather than passing vacuously.
     let mut covered_steps = 0;
+    // Likewise for floating: steps ending with a floating window on screen,
+    // steps that ended with the floating layer focused, and floating-only
+    // steps whose strip was compared before and after.
+    let (mut floating_steps, mut floating_focus_steps, mut strip_checks) = (0, 0, 0);
+    let mut focus_checks = 0;
     for seed in 1..=24 {
         let mut rng = Rng(seed);
         let mut world = World::new(config());
         let mut next_id = 0;
         for step in 0..1500 {
-            random_step(&mut world, &mut rng, &mut next_id);
+            let random = random_step(&mut world, &mut rng, &mut next_id);
+            let strip_before = random
+                .floating_only(&world)
+                .then(|| (tiled_rects(&world), format!("{random:?}")));
+            let focus_before = random
+                .keeps_focus(&world)
+                .then(|| (world.focused_window(), format!("{random:?}")));
+            apply_step(&mut world, random);
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| assert_invariants(&world)))
                 .is_err()
             {
                 panic!("invariant broken with seed {seed} at step {step}");
+            }
+            if let Some((before, what)) = focus_before {
+                assert_eq!(
+                    world.focused_window(),
+                    before,
+                    "{what} moved focus (seed {seed}, step {step})"
+                );
+                focus_checks += 1;
+            }
+            if let Some((before, what)) = strip_before {
+                assert_eq!(
+                    tiled_rects(&world),
+                    before,
+                    "{what} moved the strip (seed {seed}, step {step})"
+                );
+                strip_checks += 1;
             }
             if world
                 .outputs
@@ -349,10 +540,37 @@ fn random_sequences_keep_the_tree_consistent() {
             {
                 covered_steps += 1;
             }
+            if world
+                .arrange()
+                .placements
+                .iter()
+                .any(|p| p.floating && p.visible)
+            {
+                floating_steps += 1;
+            }
+            if world.floating_has_focus() {
+                floating_focus_steps += 1;
+            }
         }
     }
     assert!(
         covered_steps > 1000,
         "only {covered_steps} steps had a covering fullscreen window"
+    );
+    assert!(
+        floating_steps > 1000,
+        "only {floating_steps} steps had a visible floating window"
+    );
+    assert!(
+        floating_focus_steps > 1000,
+        "only {floating_focus_steps} steps had the floating layer focused"
+    );
+    assert!(
+        strip_checks > 500,
+        "only {strip_checks} floating-only steps were checked"
+    );
+    assert!(
+        focus_checks > 500,
+        "only {focus_checks} focus-keeping steps were checked"
     );
 }

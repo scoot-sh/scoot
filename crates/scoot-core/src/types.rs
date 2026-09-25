@@ -21,4 +21,12 @@ pub struct WindowInfo {
     pub app_id: String,
     pub title: String,
     pub hints: SizeHints,
+    /// The window this one is transient for, if the platform says so: on
+    /// Wayland the `xdg_toplevel.set_parent` target, on X11 (later)
+    /// `WM_TRANSIENT_FOR`. Read when the window starts floating -- a
+    /// floating window is centred on its parent when the parent is on the
+    /// same output ([`Action::ToggleFloating`](crate::Action::ToggleFloating)
+    /// has the rules) -- and when a focused floating window closes, to hand
+    /// focus back to it. An id the core does not know is ignored.
+    pub parent: Option<WindowId>,
 }

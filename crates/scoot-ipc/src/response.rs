@@ -125,6 +125,19 @@ pub struct WindowSnapshot {
     /// had no fullscreen state to report.
     #[serde(default)]
     pub fullscreen: bool,
+    /// Whether the window floats above its workspace's scrolling strip
+    /// (floated as it mapped -- a dialog, a transient, a fixed-size window,
+    /// or a `[[window_rule]]` -- or by `toggle-floating` / `set-floating`).
+    /// `rect` is then where it really is on screen, centred on its parent or
+    /// its output and inside the output's usable area, and it is drawn and
+    /// clicked above every tiled window of its output. A floating window
+    /// that has not drawn its first frame yet is `visible: false`.
+    ///
+    /// Defaulted like `fullscreen` above, for the same wire reason, so no
+    /// `PROTOCOL_VERSION` bump. `false` from an older server is truthful: it
+    /// had no floating windows.
+    #[serde(default)]
+    pub floating: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

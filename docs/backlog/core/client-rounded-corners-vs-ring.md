@@ -36,15 +36,31 @@ clip" 12–16 at 1.5). The montage is in the dev VM's
 `~/evidence/r205/review1/zenity-corners-s1.5.png`, and the raw frames are
 alongside it.
 
+## What floating windows changed (2026-09-25, floating windows PR 1)
+
+libadwaita dialogs now float: GTK 4 attaches `xdg_dialog_v1` to them, and
+scoot floats any window that does (`zenity --info`, `--question` and
+`--file-selection`, GTK 4.22, all float on the dev VM). A floating window is
+sent no `tiled_*` state and chooses its own size, so the ring now surrounds
+a dialog drawn at its natural size (300x223 for `zenity --info`) rather than
+a short client parked in a full-height column.
+
+It does **not** fix the corners. The crescent is still there: a crop of the
+top-left corner of `zenity --question` floating over `foot` at scale 1.5
+(scoot `b54cef7`, `corner_radius = 10`, `focus_ring_width = 4`) shows the
+terminal's dark background between the dialog's own anti-aliased curve and
+scoot's tighter ring (dev VM
+`~/evidence/float/live/s15/corner-tl.png`, 8x zoom of the 60x60 crop at
+(955, 577) of `user-dialog-centred-over-terminal.png`). No shadow was seen
+outside the ring in that crop. The options below stand; floating removed
+the "settle it inside floating windows" option, which turned out not to
+decide the radius.
+
 ## Options
 
-- **Floating windows will cover most of it.** Queued as
-  [`floating-windows.md`](./floating-windows.md): most such dialogs are
-  transient (`set_parent`), fixed-size, or `xdg-dialog-v1`, and will float.
-  Floating windows are not sent tiled states, so libadwaita keeps its own
-  rounded corners and shadow either way. Whether a floating window gets a
-  scoot ring at all, and what shape, is part of that design. Settle this
-  ticket inside it rather than twice.
+- ~~**Floating windows will cover most of it.**~~ They landed (see above):
+  the dialogs float and keep their own corners, and a floating window gets
+  the same ring as any other, so the mismatch is unchanged.
 - **Match the ring to the client.** Take the client's radius as the ring's
   inner radius. Nothing on the wire says what that radius is, so it would
   have to be measured from the buffer's alpha (per commit, which is costly

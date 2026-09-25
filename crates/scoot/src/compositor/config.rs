@@ -62,6 +62,7 @@ use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
 use super::keybindings::{Bound, Keybindings, Modifiers};
 use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale};
+use super::window_rules::{FloatingConfig, FloatingRules, WindowRuleConfig};
 
 /// `[layout]`. Mirrors `scoot_core::Config` field-for-field, each optional
 /// so a partial table (e.g. just `gap`) leaves the rest at their defaults
@@ -351,6 +352,11 @@ struct FileConfig {
     #[serde(default)]
     autostart: Option<AutostartConfig>,
     #[serde(default)]
+    floating: Option<FloatingConfig>,
+    /// `[[window_rule]]`, an array of tables: see `window_rules.rs`.
+    #[serde(default)]
+    window_rule: Vec<WindowRuleConfig>,
+    #[serde(default)]
     binds: HashMap<String, String>,
 }
 
@@ -398,6 +404,15 @@ pub struct LoadedConfig {
     /// (new spawns; anything else refuses by name), or skips while locked
     /// (see `reload.rs`).
     pub autostart: Vec<Action>,
+    /// `[floating] auto` and the usable `[[window_rule]]`s: which windows
+    /// float when they map (see `window_rules.rs`). Rules that parsed but
+    /// could not be used are warned about at load and listed in
+    /// [`LoadedConfig::skipped_rules`].
+    pub floating: FloatingRules,
+    /// One line per `[[window_rule]]` that was skipped as unusable, naming
+    /// it by its position in the file and why -- what a reload lists in its
+    /// `refused` reply. Empty when every rule was usable.
+    pub skipped_rules: Vec<String>,
 }
 
 impl LoadedConfig {
@@ -411,6 +426,8 @@ impl LoadedConfig {
             renderer: None,
             xwayland: false,
             autostart: Vec::new(),
+            floating: FloatingRules::default(),
+            skipped_rules: Vec::new(),
         }
     }
 
@@ -437,6 +454,11 @@ impl LoadedConfig {
         let xwayland = file.xwayland.unwrap_or_default().enabled.unwrap_or(false);
         let autostart = file.autostart.unwrap_or_default().into_actions();
         let keybindings = keybindings_for(&file.binds, vt);
+        let (floating, skipped_rules) =
+            FloatingRules::from_config(file.floating, &file.window_rule);
+        for skipped in &skipped_rules {
+            tracing::warn!(rule = %skipped, "skipping an unusable [[window_rule]]");
+        }
         Self {
             config,
             keybindings,
@@ -446,6 +468,8 @@ impl LoadedConfig {
             renderer,
             xwayland,
             autostart,
+            floating,
+            skipped_rules,
         }
     }
 }
@@ -601,8 +625,8 @@ pub fn default_config_toml() -> String {
          # comments summarize, not replace).\n\
          #\n\
           # Gap, column widths, the output scale, the ring/background/cursor
-          # appearance fields, binds, and new [autostart] spawn entries
-          # re-apply live with `scootctl reload`; [tty] gpu, [renderer]
+          # appearance fields, binds, [floating] and [[window_rule]], and new
+          # [autostart] spawn entries re-apply live with `scootctl reload`; [tty] gpu, [renderer]
           # backend and [xwayland] enabled take effect on restart and a reload
           # refuses them with a message.\n",
     );
@@ -690,6 +714,27 @@ pub fn default_config_toml() -> String {
     out.push_str("# Action strings to run once each, in file order, at session startup.\n");
     out.push_str("# A reload runs entries the session has not seen yet (new spawns only).\n");
     out.push_str("# commands = []\n");
+
+    out.push_str("\n[floating]\n");
+    out.push_str(
+        "# Float windows that say they are dialogs (xdg-dialog-v1), name a parent,\n\
+         # or have a fixed size, when they first map. [[window_rule]]s still apply\n\
+         # when this is off.\n",
+    );
+    out.push_str(&format!("# auto = {}\n", FloatingRules::default().auto));
+
+    out.push_str("\n# [[window_rule]] -- repeat the table for more rules. Each rule names at\n");
+    out.push_str("# least one whole-string glob (* any run, ? one character, case-sensitive)\n");
+    out.push_str("# and sets float and/or size (an initial [width, height] in logical px for\n");
+    out.push_str("# a floating window). Later matching rules override earlier ones. Rules\n");
+    out.push_str("# apply when a window first maps; a reload affects windows mapped after it.\n");
+    out.push_str("# [[window_rule]]\n");
+    out.push_str("# match_app_id = \"org.gnome.Calculator\"\n");
+    out.push_str("# float = true\n");
+    out.push_str("# [[window_rule]]\n");
+    out.push_str("# match_title = \"*Picture-in-Picture*\"\n");
+    out.push_str("# float = true\n");
+    out.push_str("# size = [640, 360]\n");
 
     out.push_str("\n[binds]\n");
     for (mods, keysym, bound) in keybindings.iter() {
@@ -813,6 +858,13 @@ fn action_string(action: &Action) -> String {
             id.0,
             if *fullscreen { "on" } else { "off" }
         ),
+        Action::ToggleFloating => "toggle-floating".to_owned(),
+        Action::SetFloating { id, floating } => format!(
+            "set-floating {} {}",
+            id.0,
+            if *floating { "on" } else { "off" }
+        ),
+        Action::ToggleFloatingFocus => "toggle-floating-focus".to_owned(),
         Action::CloseFocused => "close".to_owned(),
         Action::Spawn(command) => format!("spawn {}", command.join(" ")),
         Action::Quit => "quit".to_owned(),
@@ -2748,6 +2800,12 @@ mod tests {
             loaded.autostart.is_empty(),
             "the [autostart] emission drifted"
         );
+        assert_eq!(
+            loaded.floating,
+            FloatingRules::default(),
+            "the [floating] emission drifted"
+        );
+        assert!(loaded.skipped_rules.is_empty());
         let defaults = Appearance::default();
         // Exact, not approximate: every appearance key is commented out, so
         // the file carries no color value at all and each field falls back
@@ -2795,6 +2853,7 @@ mod tests {
             "[tty]",
             "[xwayland]",
             "[autostart]",
+            "[floating]",
             "[binds]",
         ] {
             assert!(
@@ -2802,6 +2861,73 @@ mod tests {
                 "the emission never names {section}"
             );
         }
+    }
+
+    /// The emitted `[[window_rule]]` example is commented out (an array of
+    /// tables cannot be "present with its default" -- the default is none),
+    /// so nothing else parses it. Uncommented, it must be two usable rules,
+    /// or the file teaches a syntax the loader refuses.
+    #[test]
+    fn the_emitted_window_rule_example_is_two_usable_rules_uncommented() {
+        let emitted = default_config_toml();
+        let example: String = emitted
+            .lines()
+            .skip_while(|line| line.trim() != "# [[window_rule]]")
+            .take_while(|line| line.trim() != "[binds]")
+            .filter_map(|line| line.trim().strip_prefix("# "))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let file: FileConfig = toml::from_str(&example)
+            .unwrap_or_else(|error| panic!("the example does not parse ({error}):\n{example}"));
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.floating.rules.len(), 2, "{example}");
+        assert!(
+            loaded.skipped_rules.is_empty(),
+            "{:?}",
+            loaded.skipped_rules
+        );
+    }
+
+    #[test]
+    fn floating_and_window_rules_load_in_file_order() {
+        let (_dir, path) = write_temp(
+            "[floating]\nauto = false\n\n\
+             [[window_rule]]\nmatch_app_id = \"foot\"\nfloat = true\nsize = [800, 600]\n\n\
+             [[window_rule]]\nmatch_title = \"*Save*\"\nfloat = false\n",
+        );
+        let loaded = load(Some(&path)).expect("a loadable file");
+        assert!(!loaded.floating.auto);
+        assert_eq!(loaded.floating.rules.len(), 2);
+        assert!(loaded.skipped_rules.is_empty());
+    }
+
+    #[test]
+    fn a_bad_window_rule_is_skipped_and_the_rest_still_load() {
+        let (_dir, path) = write_temp(
+            "[[window_rule]]\nfloat = true\n\n\
+             [[window_rule]]\nmatch_app_id = \"foot\"\nsize = [0, 10]\nfloat = true\n\n\
+             [[window_rule]]\nmatch_app_id = \"mpv\"\nfloat = true\n\n\
+             [layout]\ngap = 4\n",
+        );
+        let loaded = load(Some(&path)).expect("a loadable file");
+        assert_eq!(loaded.floating.rules.len(), 1);
+        assert_eq!(loaded.skipped_rules.len(), 2, "{:?}", loaded.skipped_rules);
+        assert!(loaded.skipped_rules[0].starts_with("window_rule #1 ("));
+        assert!(loaded.skipped_rules[1].starts_with("window_rule #2 ("));
+        assert_eq!(loaded.config.gap, 4, "the rest of the file still loads");
+    }
+
+    #[test]
+    fn an_unknown_window_rule_key_falls_back_to_full_defaults() {
+        // `deny_unknown_fields` like every other table: a typo is a
+        // whole-file fallback at startup (and a refused reload), never a rule
+        // that silently matches everything.
+        let (_dir, path) = write_temp(
+            "[[window_rule]]\nmatch_appid = \"foot\"\nfloat = true\n\n[layout]\ngap = 4\n",
+        );
+        let loaded = load(Some(&path)).expect("startup never fails over a parse error");
+        assert_eq!(loaded.config, Config::default());
+        assert!(loaded.floating.rules.is_empty());
     }
 
     /// The third pin, at key granularity for `[appearance]`: the round-trip
@@ -2894,9 +3020,9 @@ mod tests {
             );
             binds += 1;
         }
-        // "All 41 of them" (see docs/configuration.md): a dropped default
+        // "All 43 of them" (see docs/configuration.md): a dropped default
         // bind must fail loudly here, not just shrink the file.
-        assert_eq!(binds, 41, "a default bind was added or lost");
+        assert_eq!(binds, 43, "a default bind was added or lost");
     }
 
     /// Commented scalar values are pinned to their live defaults, not just
@@ -2936,6 +3062,7 @@ mod tests {
             format!("# cursor_size = {}", appearance.cursor_size),
             format!("# cursor_color = \"{}\"", hex(appearance.cursor_color)),
             format!("# prefer_no_csd = {}", appearance.prefer_no_csd),
+            format!("# auto = {}", FloatingRules::default().auto),
             format!(
                 "# backend = \"{}\"",
                 crate::cli::RendererKind::default().as_str()

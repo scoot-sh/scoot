@@ -96,6 +96,7 @@ inspired this project.
   width), the output scale (except under `--nested`, where the host owns
   it), the
   appearance (including the cursor size, color and theme), the keybindings,
+  `[floating]` and the window rules (for windows that open afterwards),
   and new `[autostart]` spawn entries (only entries the session has not seen
   run; a reloaded non-`spawn` entry is refused by name, a spawn whose program
   fails to start is refused by name and retried on the next reload, and a locked reload
@@ -199,6 +200,8 @@ second output does and does not do yet.
 | `Super+Shift+comma` / `Super+Shift+period` | Move window to output 1 / 2 directly |
 | `Super+r` | Cycle column width |
 | `Super+f` | Toggle fullscreen |
+| `Super+Shift+Space` | Float the focused window, or put it back in the strip |
+| `Super+Space` | Move focus between floating windows and the strip |
 | `Super+q` | Close focused window |
 | `Super+Return` | Spawn `foot` |
 | `Super+Shift+e` | Quit |
@@ -227,6 +230,13 @@ background_color = "#101014"
 
 [autostart]
 commands = ["spawn waybar"]
+
+# Float this app's windows above the strip instead of giving them a column
+# (pavucontrol's app id is org.pulseaudio.pavucontrol; `scootctl windows`
+# shows any window's).
+[[window_rule]]
+match_app_id = "*pavucontrol"
+float = true
 ```
 
 How a session starts its programs — a session script (`scoot -- ...`) vs
@@ -245,6 +255,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | If you want to… | scoot has | Detail |
 | --- | --- | --- |
 | Run a bar, dock, wallpaper, launcher or notification daemon | `wlr-layer-shell-v1`, with keyboard focus | [protocols.md](docs/protocols.md#layer-shell-bars-wallpapers-launchers) |
+| Have dialogs and pop-ups float instead of taking a column | confirmation dialogs, file pickers and other transient or fixed-size windows float centred above the strip automatically; `[[window_rule]]` floats (or keeps tiled) any app by app id or title; `Super+Shift+Space` or `scootctl action toggle-floating` toggles one. Moving and resizing them with the pointer is not there yet | [configuration.md](docs/configuration.md#floating) |
 | Watch a video or play a game fullscreen | the app's own fullscreen button, `Super+f`, a taskbar, or `scootctl action toggle-fullscreen` — edge to edge, bar hidden; notifications on the `overlay` layer stay on top (mako defaults to `top`: set `layer=overlay`) | [protocols.md](docs/protocols.md#fullscreen) |
 | List and switch workspaces from a bar | `ext-workspace-v1` | [protocols.md](docs/protocols.md#workspaces-ext-workspace-v1) |
 | List, focus and close windows from a taskbar | `ext-foreign-toplevel-list-v1` **and** the wlr one | [protocols.md](docs/protocols.md#window-lists-two-protocols) |
