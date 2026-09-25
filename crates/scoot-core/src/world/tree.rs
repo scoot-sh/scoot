@@ -2,7 +2,7 @@
 //! of columns, and columns hold a stack of windows. Each operation here changes
 //! one node and its children; [`World`](super::World) coordinates across nodes.
 
-use crate::geometry::{Rect, Size};
+use crate::geometry::{Point, Rect, Size};
 use crate::messages::{Horizontal, Vertical};
 use crate::types::{OutputId, WindowId, WindowInfo};
 
@@ -13,6 +13,38 @@ pub(super) struct WindowState {
     pub(super) learned_min: Size,
     /// `Some` while the window is fullscreen; see [`Fullscreen`].
     pub(super) fullscreen: Option<Fullscreen>,
+    /// `Some` while the window floats; see [`Floating`]. Exactly the windows
+    /// in some workspace's floating layer have it (or, with no output yet,
+    /// windows waiting in `World::unplaced` that will join one).
+    pub(super) floating: Option<Floating>,
+    /// The size the window last drew at, from [`Event::FrameObserved`](crate::Event::FrameObserved)'s
+    /// `actual`; zero until it has drawn. What a floating window is placed
+    /// at -- and, for a tiled window being floated, the size it keeps until
+    /// it draws at the one it chooses.
+    pub(super) drawn: Size,
+}
+
+/// What a floating window carries. Its place in the stacking order is its
+/// index in its workspace's `Workspace::floating`; this is the rest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Floating {
+    /// Where the window is centred, relative to its output's `area` origin
+    /// (not the usable area's, so a bar appearing or going does not move
+    /// it). `None` centres it on the output's usable area, recomputed on
+    /// every arrangement -- a window that floated with no parent to centre
+    /// on, or one carried to another output.
+    pub(super) centre: Option<Point>,
+    /// The size the core asks the window for, before clamping to the usable
+    /// area: `None` lets the window choose (the protocol's 0x0). Set by an
+    /// initial size a platform asked for, and by a window drawing itself
+    /// larger than the usable area (so asking it to fit sticks, rather than
+    /// being dropped and re-asked on every frame).
+    pub(super) request: Option<Size>,
+    /// The column width preset the window had when it was floated out of
+    /// the strip, so un-floating it restores its width; `None` for a window
+    /// that floated as it opened. Clamped into the width list when used,
+    /// since a reload may have shortened it.
+    pub(super) preset: Option<usize>,
 }
 
 /// What a fullscreen window remembers so leaving fullscreen can put the
@@ -40,6 +72,8 @@ impl WindowState {
             info,
             learned_min: Size::default(),
             fullscreen: None,
+            floating: None,
+            drawn: Size::default(),
         }
     }
 
@@ -81,6 +115,15 @@ impl Column {
     }
 }
 
+/// Where a window sits inside one workspace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Slot {
+    /// In the strip: column `column`, `index` down its stack.
+    Tiled { column: usize, index: usize },
+    /// In the floating layer, `index` up from the bottom of the stack.
+    Floating { index: usize },
+}
+
 #[derive(Debug, Default)]
 pub(super) struct Workspace {
     pub(super) columns: Vec<Column>,
@@ -88,41 +131,88 @@ pub(super) struct Workspace {
     /// Scroll offset into the strip of columns. It lives beside the columns
     /// rather than inside them because layout takes it as an input.
     pub(super) view_x: i32,
+    /// The floating layer, bottom of the stack first: the last entry is on
+    /// top, and is the most recently focused floating window.
+    pub(super) floating: Vec<WindowId>,
+    /// Whether the workspace's focus is on its floating layer (its top
+    /// window) rather than its strip. Never `true` with the layer empty --
+    /// every removal from it resets this -- and read through
+    /// [`Workspace::floating_has_focus`], which also hands focus to the
+    /// floating layer of a workspace with no columns.
+    pub(super) floating_focused: bool,
 }
 
 impl Workspace {
+    /// No windows at all, tiled or floating: what decides whether the
+    /// workspace survives `Output::normalize`.
     pub(super) fn is_empty(&self) -> bool {
-        self.columns.is_empty()
+        self.columns.is_empty() && self.floating.is_empty()
     }
 
     pub(super) fn focused_column(&self) -> Option<&Column> {
         self.columns.get(self.focused)
     }
 
+    /// Whether the workspace's focus is on its floating layer: asked for,
+    /// or the only place a window is.
+    pub(super) fn floating_has_focus(&self) -> bool {
+        !self.floating.is_empty() && (self.floating_focused || self.columns.is_empty())
+    }
+
+    /// The window the workspace would focus: its top floating window while
+    /// the floating layer has focus, otherwise its strip's focused window.
     pub(super) fn focused_window(&self) -> Option<WindowId> {
+        if self.floating_has_focus() {
+            return self.floating.last().copied();
+        }
+        self.strip_focused_window()
+    }
+
+    /// The strip's focused window, whatever the floating layer is doing.
+    pub(super) fn strip_focused_window(&self) -> Option<WindowId> {
         let column = self.focused_column()?;
         column.windows.get(column.focused).copied()
     }
 
-    /// The column and stack index holding `id`.
-    pub(super) fn position_of(&self, id: WindowId) -> Option<(usize, usize)> {
-        self.columns
-            .iter()
-            .enumerate()
-            .find_map(|(c, column)| column.windows.iter().position(|&w| w == id).map(|i| (c, i)))
+    /// Where `id` is on this workspace.
+    pub(super) fn slot_of(&self, id: WindowId) -> Option<Slot> {
+        if let Some(index) = self.floating.iter().position(|&w| w == id) {
+            return Some(Slot::Floating { index });
+        }
+        self.columns.iter().enumerate().find_map(|(c, column)| {
+            column
+                .windows
+                .iter()
+                .position(|&w| w == id)
+                .map(|i| Slot::Tiled {
+                    column: c,
+                    index: i,
+                })
+        })
     }
 
     fn into_windows(self) -> impl Iterator<Item = WindowId> {
-        self.columns.into_iter().flat_map(|c| c.windows)
+        self.columns
+            .into_iter()
+            .flat_map(|c| c.windows)
+            .chain(self.floating)
     }
 
     /// Opens `id` as a new column right of focus. It takes focus when asked, or
-    /// when it is the only column.
+    /// when it is the only column. Taking focus takes it off the floating
+    /// layer too.
     pub(super) fn insert_column(&mut self, id: WindowId, preset: usize, focus: bool) {
-        let at = if self.is_empty() { 0 } else { self.focused + 1 };
+        let at = if self.columns.is_empty() {
+            0
+        } else {
+            self.focused + 1
+        };
         self.columns.insert(at, Column::new(id, preset));
         if focus || self.columns.len() == 1 {
             self.focused = at;
+        }
+        if focus {
+            self.floating_focused = false;
         }
     }
 
@@ -139,9 +229,75 @@ impl Workspace {
         id
     }
 
+    /// [`Workspace::take`] for a window leaving the strip for the floating
+    /// layer: when that empties the focused column, strip focus lands on the
+    /// column to its *left* rather than the right. A window that floats as it
+    /// first maps was inserted right of the focused column
+    /// ([`Workspace::insert_column`]), so this is the column that had focus
+    /// before it opened; and un-floating inserts right of the focused
+    /// column, so floating a column and un-floating it again puts it back
+    /// where it was.
+    pub(super) fn take_for_float(&mut self, column: usize, index: usize) -> WindowId {
+        let emptied_focused = column == self.focused && self.columns[column].windows.len() == 1;
+        let id = self.take(column, index);
+        if emptied_focused && column > 0 {
+            self.focused = column - 1;
+        }
+        id
+    }
+
+    /// Puts `id` in the floating layer. On top and focused when `focus`;
+    /// otherwise on top only while the strip has focus -- with a floating
+    /// window focused it goes directly below it, so the focused window stays
+    /// on top and keeps focus.
+    pub(super) fn push_floating(&mut self, id: WindowId, focus: bool) {
+        if focus || !self.floating_has_focus() {
+            self.floating.push(id);
+        } else {
+            let below_top = self.floating.len() - 1;
+            self.floating.insert(below_top, id);
+        }
+        if focus {
+            self.floating_focused = true;
+        }
+    }
+
+    /// Takes the floating window at `index` out of the floating layer. The
+    /// layer's focus flag goes with the last window; otherwise focus stays
+    /// on whichever window is now on top.
+    pub(super) fn take_floating(&mut self, index: usize) -> WindowId {
+        let id = self.floating.remove(index);
+        if self.floating.is_empty() {
+            self.floating_focused = false;
+        }
+        id
+    }
+
+    /// Raises the floating window at `index` to the top and gives the
+    /// floating layer focus.
+    pub(super) fn focus_floating(&mut self, index: usize) {
+        let id = self.floating.remove(index);
+        self.floating.push(id);
+        self.floating_focused = true;
+    }
+
+    /// Steps the floating stack: `Down` raises the bottom-most window,
+    /// `Up` sends the top one to the bottom -- so repeating either visits
+    /// every floating window, in opposite orders. A no-op with fewer than two.
+    pub(super) fn cycle_floating(&mut self, dir: Vertical) {
+        if self.floating.len() < 2 {
+            return;
+        }
+        match dir {
+            Vertical::Down => self.floating.rotate_left(1),
+            Vertical::Up => self.floating.rotate_right(1),
+        }
+    }
+
     pub(super) fn focus(&mut self, column: usize, index: usize) {
         self.focused = column;
         self.columns[column].focused = index;
+        self.floating_focused = false;
     }
 
     pub(super) fn focus_column(&mut self, dir: Horizontal) {
@@ -149,7 +305,7 @@ impl Workspace {
     }
 
     pub(super) fn move_column(&mut self, dir: Horizontal) {
-        if self.is_empty() {
+        if self.columns.is_empty() {
             return;
         }
         let to = step(self.focused, self.columns.len(), dir == Horizontal::Right);
@@ -362,14 +518,7 @@ impl Output {
         if index >= self.workspaces.len() || index == self.active {
             return None;
         }
-        let source = &mut self.workspaces[self.active];
-        let column = source.focused_column()?;
-        let (column_index, window_index, preset) = (source.focused, column.focused, column.preset);
-        let id = source.take(column_index, window_index);
-        self.workspaces[index].insert_column(id, preset, true);
-        self.active = index;
-        self.normalize();
-        Some(id)
+        self.carry_focused_window_to(index)
     }
 
     /// Carries the focused window to the neighbouring workspace, and follows
@@ -379,11 +528,30 @@ impl Output {
         if target == self.active {
             return None;
         }
+        self.carry_focused_window_to(target)
+    }
+
+    /// The shared half of both workspace moves: takes the active
+    /// workspace's focused window to workspace `target` (a valid index other
+    /// than the active one), focused there, and follows it. A floating
+    /// window lands on top of the target's floating layer, keeping its
+    /// centre (the output is the same); a tiled one as a new column right of
+    /// the target's focused column, keeping its width preset.
+    fn carry_focused_window_to(&mut self, target: usize) -> Option<WindowId> {
         let source = &mut self.workspaces[self.active];
-        let column = source.focused_column()?;
-        let (column_index, window_index, preset) = (source.focused, column.focused, column.preset);
-        let id = source.take(column_index, window_index);
-        self.workspaces[target].insert_column(id, preset, true);
+        let id = if source.floating_has_focus() {
+            let top = source.floating.len() - 1;
+            let id = source.take_floating(top);
+            self.workspaces[target].push_floating(id, true);
+            id
+        } else {
+            let column = source.focused_column()?;
+            let (column_index, window_index, preset) =
+                (source.focused, column.focused, column.preset);
+            let id = source.take(column_index, window_index);
+            self.workspaces[target].insert_column(id, preset, true);
+            id
+        };
         self.active = target;
         self.normalize();
         Some(id)

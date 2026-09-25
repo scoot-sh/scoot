@@ -12,7 +12,8 @@
 //!
 //! Scenes: [`WINDOWS`] windows over two outputs and three workspaces, with
 //! some columns stacked, so every branch of `place_workspace` (on/off screen,
-//! active/inactive workspace, stacked heights) is exercised. Each scene is
+//! active/inactive workspace, stacked heights) is exercised -- tiled, with the
+//! focused window fullscreen, and with three floating windows added. Each scene is
 //! timed as `arrange()` alone, and as one focus step plus the `arrange()`
 //! that follows it -- the shape `State::act` has.
 
@@ -100,4 +101,23 @@ fn arrange_cost() {
     let mut fullscreen = scene();
     fullscreen.handle_action(Action::ToggleFullscreen);
     measure("fullscreen", fullscreen);
+    // The same scene with three floating windows on the focused workspace
+    // (drawn, so placed visible), focus back on the strip: the focus step
+    // then pays for placing the floating layer on every arrangement.
+    let mut floating = scene();
+    for id in WINDOWS + 1..=WINDOWS + 3 {
+        open(&mut floating, id);
+        floating.handle_event(Event::FloatingRequested {
+            id: WindowId(id),
+            floating: true,
+            size: None,
+        });
+        floating.handle_event(Event::FrameObserved {
+            id: WindowId(id),
+            requested: crate::Size::default(),
+            actual: crate::Size::new(300, 200),
+        });
+    }
+    floating.handle_action(Action::ToggleFloatingFocus);
+    measure("floating", floating);
 }

@@ -3,11 +3,13 @@
 //! The public surface is spread over a few files by concern:
 //! [`World::handle_event`] lives in `events.rs`, [`World::handle_action`] in
 //! `actions.rs`, and [`World::arrange`] in `arrange.rs`. The tree they all
-//! operate on is in `tree.rs`, and fullscreen's rules in `fullscreen.rs`.
+//! operate on is in `tree.rs`, fullscreen's rules in `fullscreen.rs` and
+//! floating's in `floating.rs`.
 
 mod actions;
 mod arrange;
 mod events;
+mod floating;
 mod fullscreen;
 mod tree;
 
@@ -21,7 +23,7 @@ pub use arrange::{Arrangement, Placement};
 use crate::config::Config;
 use crate::geometry::Rect;
 use crate::types::{OutputId, WindowId, WindowInfo};
-use tree::{Output, WindowState};
+use tree::{Output, Slot, WindowState};
 
 /// What one output's workspace list looks like right now, as
 /// [`World::workspaces`] reports it.
@@ -47,8 +49,7 @@ pub struct Workspaces {
 struct Location {
     output: usize,
     workspace: usize,
-    column: usize,
-    index: usize,
+    slot: Slot,
 }
 
 /// All window-management state, for every output.
@@ -60,6 +61,12 @@ pub struct World {
     focused_output: usize,
     /// Windows that opened, or were orphaned, while there was no output.
     unplaced: Vec<WindowId>,
+    /// The most recently opened window's workspace scroll from just before
+    /// its column went in: what floating it before it has drawn anything
+    /// puts back (see `World::float_window`), so a dialog that floats as it
+    /// maps leaves the strip exactly as it found it. Overwritten by every
+    /// open; read only for the window it names.
+    last_open: Option<(WindowId, i32)>,
 }
 
 impl World {
@@ -184,23 +191,29 @@ impl World {
     fn locate(&self, id: WindowId) -> Option<Location> {
         self.outputs.iter().enumerate().find_map(|(output, o)| {
             o.workspaces.iter().enumerate().find_map(|(workspace, ws)| {
-                ws.position_of(id).map(|(column, index)| Location {
+                ws.slot_of(id).map(|slot| Location {
                     output,
                     workspace,
-                    column,
-                    index,
+                    slot,
                 })
             })
         })
     }
 
-    /// Opens a window as a new column right of focus on output `o`.
+    /// Opens a window as a new column right of focus on output `o` -- or,
+    /// for a window that was already floating while it waited for an output
+    /// (see `World::unplaced`), on top of that output's floating layer.
     fn place_window(&mut self, id: WindowId, o: usize, focus: bool) {
         let preset = self.config.default_column_width;
+        let floating = self.windows.get(&id).is_some_and(|w| w.floating.is_some());
         let output = &mut self.outputs[o];
-        output
-            .active_workspace_mut()
-            .insert_column(id, preset, focus);
+        let ws = output.active_workspace_mut();
+        if floating {
+            ws.push_floating(id, focus);
+        } else {
+            self.last_open = Some((id, ws.view_x));
+            ws.insert_column(id, preset, focus);
+        }
         output.normalize();
         if focus {
             self.focused_output = o;
@@ -211,7 +224,11 @@ impl World {
     fn focus_location(&mut self, loc: Location) {
         let output = &mut self.outputs[loc.output];
         output.active = loc.workspace;
-        output.active_workspace_mut().focus(loc.column, loc.index);
+        let ws = output.active_workspace_mut();
+        match loc.slot {
+            Slot::Tiled { column, index } => ws.focus(column, index),
+            Slot::Floating { index } => ws.focus_floating(index),
+        }
         output.normalize();
         self.focused_output = loc.output;
         self.fix_view(loc.output);
@@ -247,11 +264,25 @@ impl World {
             return;
         }
         self.drop_fullscreen(id);
-        let preset = self.outputs[loc.output].workspaces[loc.workspace].columns[loc.column].preset;
+        let ws = &self.outputs[loc.output].workspaces[loc.workspace];
+        let preset = match loc.slot {
+            Slot::Tiled { column, .. } => Some(ws.columns[column].preset),
+            Slot::Floating { .. } => None,
+        };
         self.remove_window(loc);
-        self.outputs[t]
-            .active_workspace_mut()
-            .insert_column(id, preset, true);
+        let target = self.outputs[t].active_workspace_mut();
+        match preset {
+            Some(preset) => target.insert_column(id, preset, true),
+            None => {
+                // Re-centred on the new output: a centre measured against the
+                // old one's area means nothing on a screen of another size.
+                if let Some(floating) = self.windows.get_mut(&id).and_then(|w| w.floating.as_mut())
+                {
+                    floating.centre = None;
+                }
+                target.push_floating(id, true);
+            }
+        }
         self.outputs[t].normalize();
         self.focused_output = t;
         self.fix_view(t);
@@ -276,7 +307,15 @@ impl World {
     /// Takes a window out of the tree, tidying the workspaces behind it.
     fn remove_window(&mut self, loc: Location) {
         let output = &mut self.outputs[loc.output];
-        output.workspaces[loc.workspace].take(loc.column, loc.index);
+        let ws = &mut output.workspaces[loc.workspace];
+        match loc.slot {
+            Slot::Tiled { column, index } => {
+                ws.take(column, index);
+            }
+            Slot::Floating { index } => {
+                ws.take_floating(index);
+            }
+        }
         output.normalize();
         self.fix_view(loc.output);
     }

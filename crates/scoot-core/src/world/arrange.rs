@@ -1,8 +1,9 @@
 //! Projecting the tree into frames.
 
 use super::World;
+use super::floating::centred_within;
 use super::tree::{Column, Output, Workspace};
-use crate::geometry::Rect;
+use crate::geometry::{Point, Rect, Size};
 use crate::layout;
 use crate::types::{OutputId, WindowId};
 
@@ -15,13 +16,29 @@ pub struct Placement {
     /// still get the frame they *would* have, so a shell can animate from it.
     pub rect: Rect,
     /// False when scrolled out of view or on an inactive workspace -- or
-    /// covered: stacked in the same column as a fullscreen window.
+    /// covered: stacked in the same column as a fullscreen window, or behind
+    /// a fullscreen window covering the output (see
+    /// [`World::fullscreen_on`]). A floating window is also invisible before
+    /// it has drawn (there is no size to place it at yet), and while it is
+    /// fullscreen without focus.
     pub visible: bool,
     /// The window is fullscreen: `rect` is its output's whole area in size,
     /// and exactly that area while its column is in focus (see
     /// [`World::fullscreen_on`] for when that is). A shell tells the window
     /// it is fullscreen from this, and draws no decoration around it.
     pub fullscreen: bool,
+    /// The window floats above its workspace's strip (see
+    /// [`Action::ToggleFloating`](crate::Action::ToggleFloating)). Floating
+    /// placements come after their workspace's tiled ones, bottom of the
+    /// stack first, so a shell drawing and stacking windows in arrangement
+    /// order puts them above the strip in the right order. A shell tells a
+    /// floating window it is *not* tiled.
+    pub floating: bool,
+    /// The size to ask the window to take. `rect`'s size for every window
+    /// the layout sizes -- tiled, fullscreen -- and `None` for a floating
+    /// window the core lets choose its own size (the protocol's 0x0), whose
+    /// `rect` is then the size it last drew.
+    pub requested: Option<Size>,
 }
 
 /// A complete, declarative picture of where everything should be. Shells diff
@@ -71,6 +88,26 @@ impl World {
         active: bool,
         placements: &mut Vec<Placement>,
     ) {
+        // The fullscreen window covering the output, if the workspace's
+        // focused window is one -- the same answer `fullscreen_on` gives for
+        // an active workspace. It hides everything else on the workspace:
+        // the floating layer under a covering column, and the strip and the
+        // rest of the floating layer under a covering floating window.
+        let covering = ws
+            .focused_window()
+            .filter(|id| self.windows.get(id).is_some_and(|w| w.fullscreen.is_some()));
+        let floating_covers = covering.is_some() && ws.floating_has_focus();
+        self.place_strip(output, ws, active && !floating_covers, placements);
+        self.place_floating(output, ws, active, covering, placements);
+    }
+
+    fn place_strip(
+        &self,
+        output: &Output,
+        ws: &Workspace,
+        active: bool,
+        placements: &mut Vec<Placement>,
+    ) {
         let gap = self.config.gap;
         // The output minus whatever the platform reserved (a bar's exclusive
         // zone), then minus the layout gap -- never `output.area`, which is
@@ -114,6 +151,8 @@ impl World {
                     rect: Rect::new(x, y, width, height),
                     visible: active && on_screen,
                     fullscreen: false,
+                    floating: false,
+                    requested: Some(Size::new(width, height)),
                 });
                 y += height + gap;
             }
@@ -156,6 +195,82 @@ impl World {
             .collect()
     }
 
+    /// Places a workspace's floating layer, bottom of the stack first (see
+    /// [`Action::ToggleFloating`](crate::Action::ToggleFloating) for the
+    /// rules). Reads only the window map and the output: no parent lookup
+    /// and no allocation beyond the placements themselves -- this runs on
+    /// every frame.
+    ///
+    /// `covering` is the fullscreen window covering the output, when the
+    /// workspace's focused window is one: a floating fullscreen window shows
+    /// only while it is that window, and every other floating window hides
+    /// while anything covers.
+    fn place_floating(
+        &self,
+        output: &Output,
+        ws: &Workspace,
+        active: bool,
+        covering: Option<WindowId>,
+        placements: &mut Vec<Placement>,
+    ) {
+        let usable = output.usable;
+        let area = output.area;
+        let fits = usable.w > 0 && usable.h > 0;
+        // A size squeezed into the usable area, never below 1: the floor is
+        // what keeps an empty usable area (everything reserved) from
+        // producing a zero-sized rect, and such a window is placed invisible.
+        let clamp =
+            |size: Size| Size::new(size.w.min(usable.w).max(1), size.h.min(usable.h).max(1));
+        for &id in &ws.floating {
+            let Some(window) = self.windows.get(&id) else {
+                continue;
+            };
+            if window.fullscreen.is_some() {
+                let (w, h) = (area.w.max(1), area.h.max(1));
+                placements.push(Placement {
+                    id,
+                    output: output.id,
+                    rect: Rect::new(area.x, area.y, w, h),
+                    visible: active && covering == Some(id),
+                    fullscreen: true,
+                    floating: true,
+                    requested: Some(Size::new(w, h)),
+                });
+                continue;
+            }
+            let (centre, request) = window
+                .floating
+                .map_or((None, None), |floating| (floating.centre, floating.request));
+            let requested = request.filter(|_| fits).map(clamp);
+            let drawn = window.drawn;
+            let natural = if drawn.w > 0 && drawn.h > 0 {
+                Some(drawn)
+            } else {
+                requested
+            };
+            let size = natural.map_or(Size::new(1, 1), clamp);
+            let centre = match centre {
+                Some(offset) => Point::new(
+                    area.x.saturating_add(offset.x),
+                    area.y.saturating_add(offset.y),
+                ),
+                None => Point::new(
+                    usable.x.saturating_add(usable.w / 2),
+                    usable.y.saturating_add(usable.h / 2),
+                ),
+            };
+            placements.push(Placement {
+                id,
+                output: output.id,
+                rect: centred_within(centre, size, usable),
+                visible: active && covering.is_none() && natural.is_some() && fits,
+                fullscreen: false,
+                floating: true,
+                requested,
+            });
+        }
+    }
+
     fn column_heights(&self, column: &Column, available: i32) -> Vec<i32> {
         let mins: Vec<i32> = column
             .windows
@@ -174,7 +289,7 @@ impl World {
         };
         let available = output.usable.inset(self.config.gap).w;
         let ws = output.active_workspace();
-        let view = if ws.is_empty() {
+        let view = if ws.columns.is_empty() {
             0
         } else {
             // A focused fullscreen column is `area.w` wide, never narrower
@@ -263,6 +378,8 @@ fn place_fullscreen_column(
             rect,
             visible: is_fullscreen && active && on_screen,
             fullscreen: is_fullscreen,
+            floating: false,
+            requested: Some(rect.size()),
         });
     }
 }

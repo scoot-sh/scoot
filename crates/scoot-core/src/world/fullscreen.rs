@@ -15,7 +15,7 @@
 //!   any window that stops being it.
 
 use super::World;
-use super::tree::Fullscreen;
+use super::tree::{Fullscreen, Slot};
 use crate::types::{OutputId, WindowId};
 
 impl World {
@@ -69,10 +69,17 @@ impl World {
             let view_x = match loc {
                 Some(loc) => {
                     let ws = &self.outputs[loc.output].workspaces[loc.workspace];
-                    if ws.columns[loc.column].focused != loc.index {
-                        return;
+                    match loc.slot {
+                        Slot::Tiled { column, index } => {
+                            if ws.columns[column].focused != index {
+                                return;
+                            }
+                            ws.view_x
+                        }
+                        // A floating window has no column to be the focused
+                        // one of, and entering changes no scroll.
+                        Slot::Floating { .. } => ws.view_x,
                     }
-                    ws.view_x
                 }
                 None => 0,
             };
@@ -84,7 +91,12 @@ impl World {
                 .windows
                 .get_mut(&id)
                 .and_then(|window| window.fullscreen.take());
-            if let (Some(loc), Some(entered)) = (loc, entered) {
+            // Only a column's entering scrolled the strip; a floating
+            // window's leaving must not move a strip that has scrolled on
+            // its own since.
+            if let (Some(loc), Some(entered)) = (loc, entered)
+                && matches!(loc.slot, Slot::Tiled { .. })
+            {
                 self.outputs[loc.output].workspaces[loc.workspace].view_x = entered.view_x;
             }
         }
