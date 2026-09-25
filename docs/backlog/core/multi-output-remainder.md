@@ -3,7 +3,7 @@ title: "Multi-output remainder: --tty multi-CRTC, placement policy, default bind
 status: "open"
 area: "core"
 priority: "high"
-blocked: "phase E and the scale/mode surface need real two-connector hardware — do not build blind"
+blocked: "only a real-hardware unplug confirmation and the replug-id follow-up remain (the Asahi kernel never reports DP-1 going away); the scale/mode surface is its own entry"
 ---
 
 # Multi-output remainder: --tty multi-CRTC, placement policy, default binds
@@ -15,7 +15,17 @@ cross-output moves). This entry tracks everything left before the README
 scale/mode surface is its own entry
 ([per-output-scale-mode](./per-output-scale-mode.md)) and stays last.
 
-## E1 — TTY multi-CRTC enumeration + output registration
+## E1 — TTY multi-CRTC enumeration + output registration — DONE 2026-09-25 (`b782b06`)
+
+Landed as specified, with two corrections found in the code. First,
+CRTCs are matched from `possible_crtcs` (`tty/crtcs.rs`), not probed with
+`create_surface`, which refuses only a claimed primary plane. Second, the
+"two-connector fake `ControlDevice`" pin is impossible as written: `drm`
+0.14.1's `connector::Info` has only `pub(crate)` fields and no constructor
+(`drm-0.14.1/src/control/connector.rs:51-61`). The seam is pure functions
+over handles and sizes instead: `gpu::search_all`, `crtcs::assign` and
+`hotplug::heads::replan`. See `docs/roadmap/19-multi-output.md` phase E for
+the record.
 
 `tty/gpu.rs` picks the first `Connected` connector
 (`find_connector_and_mode`, `:491-516`) into a singular `OpenGpu`
@@ -32,7 +42,27 @@ scale/mode surface is its own entry
 - Pins: two-connector fake `ControlDevice` unit tests (`tty/gpu.rs`
   tests, `:707+` pattern); harness multi-CRTC bind test.
 
-## E2 — TTY per-connector rendering + hotplug add/remove
+## E2 — TTY per-connector rendering + hotplug add/remove — DONE 2026-09-25 (`2bd7d47`)
+
+Landed: per-head presenters, a render loop keyed by `OutputId`, per-output
+session-lock vblank waits (a security fix; see the milestone record), gamma
+per CRTC, and absolute pointer/tablet mapping over the union. Hotplug adds
+and removes outputs (`hotplug::heads::replan`, `State::remove_output`),
+with the last output never removed. Live on the Asahi M2 Air for everything
+except the unplug itself, which that kernel never reports.
+
+**Follow-ups left here (why this file stays open):**
+
+1. **Unplug confirmed on real hardware.** Harness-verified only. This needs
+   a machine whose kernel reports DP/HDMI HPD loss.
+2. **Output ids on replug.** Ids are never reused, so a monitor unplugged
+   and plugged back in returns under a new id, and the default output-2
+   binds (`Super+period`, `Super+Shift+period`) stop reaching it.
+   Candidates: reuse a connector's previous id, or bind by position rather
+   than id. Documented in `docs/configuration.md` meanwhile.
+3. **Per-output render scheduling.** A render walks every output. With
+   damage on one screen the other costs a no-damage pass, about 1 pp of CPU
+   measured. This is an optimisation, not a correctness gap.
 
 - One `DrmSurface`/CRTC per driven connector; render loop walks all TTY
   outputs like headless Phase A.

@@ -326,7 +326,7 @@ falsify. Read `flexwm` there as `scoot`.
   Gamma LUT length re-read per CRTC, live control failed only on change.
   Four fail-first harness tests; the switch itself unverified live
   (single-CRTC dev VM), legacy blind-probe limit stated in the record.
-- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — gh #48 stays open: new-mode-list on the same connector, and fallback to a *different* connector, both need vfkit/laptop hardware with before/after proof.
+- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — gh #48 stays open: new-mode-list on the same connector, and fallback to a *different* connector, both need vfkit/laptop hardware with before/after proof. Since multi-output phase E the fallback applies only when no driven connector is left; with another screen lit an unplug removes an output instead (harness-verified; the Asahi kernel never reports the unplug).
 
 ### Core / config / rendering
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.
@@ -528,8 +528,8 @@ be revisited.
   is the security-relevant one. Promoted 2026-09-20 to **Milestone 19**
   ([plan](../roadmap/19-multi-output.md), in progress, phases A–D
   VM-testable, E hardware-gated) — this entry stays the detailed spec.
-  Phases A–F have landed (render, layer shell, lock, workspaces, moves);
-  only phase E (`--tty` multi-CRTC) waits on hardware.
+  Phases A–F have landed (render, layer shell, lock, workspaces, moves),
+  E included (2026-09-25, `--tty` drives every connected monitor).
 - [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
   — deliberately left out of milestone 19: design answered 2026-09-22
   (`[[outputs]]` config shape, per-output scale enumeration, apply/test
@@ -746,8 +746,10 @@ scale/mode) into one hardware session.
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
   — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
   + H (default `Super+comma/period` output binds) LANDED 2026-09-21
-  (PR #208). Remaining: E1 enumerate, E2 render + hotplug add/remove.
-  E + scale/mode hardware-gated. Pairs with the existing
+  (PR #208). E1 (every connector driven at startup) + E2 (per-head
+  rendering, per-output lock waits, hotplug add/remove) LANDED 2026-09-25,
+  live on the Asahi M2 Air bar the unplug itself. Left: a real-hardware
+  unplug confirmation, the replug-changes-output-id follow-up, and the
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland support](./protocols/xwayland-support.md)

@@ -68,6 +68,7 @@ use crate::compositor::test_support::{Harness, test_renderer};
 mod keys;
 mod outputs;
 mod pointer;
+mod relative;
 
 /// The framebuffer each scene renders into. 800 square, matching the
 /// headless-render benchmark recorded in

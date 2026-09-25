@@ -27,7 +27,7 @@ docs/backlog`, `rg -l 'area: "protocols"' docs/roadmap`.
 | 5b | [VT-switch-back `EPERM`](docs/roadmap/05b-vt-switch-eperm.md) | done |
 | 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | done — **verified on a real GPU 2026-09-21** (one claim left: `Modifier::Invalid` on an `Invalid`-only driver) |
 | 7–18 | [Backlog-driven hardening and protocol work](docs/roadmap/) | done |
-| 19 | [Multi-output](docs/roadmap/19-multi-output.md) | **in progress (phases A–D + F done, E hardware-gated)** |
+| 19 | [Multi-output](docs/roadmap/19-multi-output.md) | **phases A–F done** (E: `--tty` drives every connector, 2026-09-25; unplug removal harness-verified, not yet seen on hardware) |
 
 Item 6 (a **GLES** renderer as an optional alternative to pixman, selected
 per-backend, with GPU-free operation kept as a hard requirement) was the last
@@ -107,6 +107,25 @@ direction or because a live crash-DoS or daily-driver gap jumped the queue —
 each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
+
+- **[Multi-output phase E: `--tty` drives every connected monitor](docs/roadmap/19-multi-output.md)**
+  (2026-09-25) — E1: every connected connector with a mode gets a head
+  (its own surface, presenter, `wl_output`, render target and gamma size),
+  matched to a CRTC through `possible_crtcs` (maximum matching, free-first,
+  kernel order wins); startup degrades rather than refuses; one tier per
+  session. Every per-output tty path is keyed by `OutputId`, and the
+  session lock's vblank wait is per output (each head numbers flips from
+  zero, so one screen's vblank used to be able to confirm a lock while the
+  other still showed the desktop -- pinned fail-first). E2: hotplug adds an
+  output for a plugged-in monitor and removes a pulled one
+  (`State::remove_output`: layer closed, captures stopped, gamma failed,
+  workspace group removed in protocol order, toplevel leave/enter, global
+  withdrawn then destroyed, outputs repacked); the #48 single-output rules
+  still apply when nothing driven is left; the last output is never
+  removed. Live on the Asahi M2 Air with its external monitor: both
+  screens, windows on each, `Super+Shift+period`, pointer across, lock
+  on both, VT switch, both tiers. The monitor unplug itself is harness-only
+  (the experimental kernel never reports it).
 
 - **[XWayland Phases 2+3: X windows in the layout, behind a focus gate](docs/backlog/protocols/xwayland-support.md)**
   (2026-09-25, PR #244) — with `--xwayland` in an `xwayland` build, X11

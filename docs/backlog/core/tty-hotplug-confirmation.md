@@ -43,3 +43,19 @@ unconfirmed on this machine: the panel can't be unplugged, and the
 experimental kernel kept `DP-1` reading `connected` across the unplug. A
 machine with two unpluggable outputs (or a kernel that reports DP HPD loss)
 is still needed.
+
+
+## Update 2026-09-25, later: multi-output phase E changes what path 2 means
+
+`--tty` now drives every connected connector (milestone 19 phase E). Path 2
+(falling back to a *different* connector) now applies only when **no**
+driven connector is still connected. That is `hotplug::heads::replan`'s
+`MoveTo`, pinned in its unit tests. With another screen still lit, an unplug
+*removes* that screen's output instead (`State::remove_output`, harness
+suites `outputs/removal.rs` and friends), and a plug *adds* one. The old
+"second display stays dark" behaviour is gone.
+
+On the Asahi M2 Air both new paths are still unobservable for the same
+reason as before: `DP-1` never reads disconnected on this kernel. A
+two-connector machine with a kernel that reports HPD loss would confirm
+removal, the fallback and path 1 in one session.

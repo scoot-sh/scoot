@@ -22,7 +22,7 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | --- | --- | --- | --- |
 | [Ghostty fails at `scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md) | high → none | no | **RESOLVED, not reproducible** (2026-09-18) |
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
-| Issue #48's unconfirmed connector fallback | — | yes | still open — needs an external display |
+| Issue #48's unconfirmed connector fallback, and multi-output phase E | — | yes | **partial** (2026-09-25): both monitors driven at once on both tiers, lock and VT verified live; unplug still unobservable (the `fairydust` kernel keeps DP-1 `connected`) |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
 | [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | **ANSWERED** (2026-09-25): mpv goes direct (~60% less compositor CPU) once it hides its pointer; `apple,dcp` has no cursor plane, so a visible pointer rules out any primary attempt ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)); planes: 1 primary, 1 overlay, 0 cursor |
 | [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | **ANSWERED** (2026-09-25): 162 pairs (54 formats x tiled-compressed/tiled/`LINEAR`); clients pick compressed and Mesa follows the scanout tranche to `LINEAR`; mpv `dmabuf-wayland` cannot run (no hardware decoder: AVD firmware missing) |
@@ -67,9 +67,12 @@ node.
   interactively at logical 1707×1067. That was the original reported
   configuration and the last one capable of testing this, so the entry is
   archived as not reproducible with the cause never captured.
-- **Test 3 — cannot run.** Only one connector exists (`card2-eDP-1`,
-  connected). Nothing to fall back to until an external display is attached,
-  and it also needs the `--tty` seat the live session holds.
+- **Test 3 — partial (2026-09-25).** An external monitor now works (DP-1
+  over the `fairydust` kernel). Since multi-output phase E, `--tty` drives
+  it *and* the panel at once; both tiers, the lock and VT switching all
+  verified live (results below). The unplug paths are still unobservable
+  because this kernel keeps `DP-1` reading `connected` after the cable is
+  pulled.
 
 Everything below is the runbook as written, plus traps found while running
 it. Re-running any of it is still worthwhile on a different Asahi model or
@@ -402,6 +405,52 @@ replugged); the DCP then set `1920x1080@60`.
   the experimental kernel), so no connector ever went away from scoot's
   point of view. The new-mode-list-on-the-same-connector path is likewise
   not exercised. Both stay open on #48.
+
+### Results, 2026-09-25 (later): both monitors at once, multi-output phase E
+
+scoot built from the phase E branch: E1 `b782b06`, and E2 `2bd7d47` for the
+final product code, via `nix build .#scoot-gpu`. It ran on VT 2 through
+`~/fx/e-live.sh` (seatd plus openvt as in the local recipe), with
+`[output] scale = 1.5`. The DP-1 monitor had been plugged in after boot.
+
+- **Both connectors driven.** One `drm: driving this device` line each:
+  `eDP-1` on CRTC 50 at 2560x1600 and `DP-1` on CRTC 68 at 1920x1080. That
+  matches `drm_info`, where each encoder reaches exactly one CRTC.
+  `scoot msg outputs` names `eDP-1` (logical 1707x1067 at 0,0) and `DP-1`
+  (1280x720 at 1707,0).
+- **Windows and pointer.** Two `foot` windows, the second carried to DP-1
+  with `Super+Shift+period`. The IPC screenshots (`screenshot --output 1`,
+  `--output 2`) each show their own window only, and the pointer moved onto
+  DP-1 is drawn there.
+- **VT switch.** `chvt 1` then `chvt 2`: `session paused`, `session
+  activated`, then a full modeset on each CRTC, and both screens come back.
+  The re-probe of both connectors on activation took about 240 ms.
+- **Lock.** swaylock (`-c 7a1fa0`) covers both screens (both screenshots
+  are that colour). `session lock confirmed: every output's blanked frame
+  reached scanout` came about 60 ms after `locking the session`.
+- **Both tiers.** Pixman/dumb buffers by default. The GPU scanout tier with
+  `--renderer gles` shows `scanout="gpu"` on both heads. For the GPU tier:
+  the booted generation has no `/run/opengl-driver`, so Mesa 26.2.2's paths
+  were passed by environment (`GBM_BACKENDS_PATH`,
+  `__EGL_VENDOR_LIBRARY_DIRS`, `LIBGL_DRIVERS_PATH`). No system change was
+  made.
+- **CPU** (utime+stime jiffies, 30 s windows, a `foot` printing every
+  20 ms):
+
+  | Tier | Idle | Both screens damaged | eDP-1 only |
+  |---|---|---|---|
+  | pixman | 0.00% | 37.27% | 36.20% |
+  | GPU | 0.00% | 13.73% | 9.27% |
+
+  Single-output `main` (`0785420`, eDP-1 only) with the same workload
+  measured 35.20% and 35.67% on pixman (one full-width window), and 9.43%
+  and 8.63% on the GPU tier (the same two-column layout).
+- **Pacing.** 705 page flips in 10 s across the two heads with both damaged,
+  about 35 per second each, never more than one per CRTC vblank.
+- **Not observable here.** Unplugging DP-1: no HPD loss reaches userspace
+  on this kernel, so scoot keeps driving a screen that is gone. That
+  covers both the new remove-an-output path and the old fallback path;
+  both are harness-verified only.
 
 ---
 
