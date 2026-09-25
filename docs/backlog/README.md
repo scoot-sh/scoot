@@ -326,7 +326,7 @@ falsify. Read `flexwm` there as `scoot`.
   Gamma LUT length re-read per CRTC, live control failed only on change.
   Four fail-first harness tests; the switch itself unverified live
   (single-CRTC dev VM), legacy blind-probe limit stated in the record.
-- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — gh #48 stays open: new-mode-list on the same connector, and fallback to a *different* connector, both need vfkit/laptop hardware with before/after proof. Since multi-output phase E the fallback applies only when no driven connector is left; with another screen lit an unplug removes an output instead (harness-verified; the Asahi kernel never reports the unplug).
+- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — gh #48 stays open: new-mode-list on the same connector, and fallback to a *different* connector, both need vfkit/laptop hardware with before/after proof. Since multi-output phase E the fallback applies only when no driven connector is left; with another screen lit an unplug removes an output instead (confirmed by a physical DP-1 replug on the Asahi M2 Air, 2026-09-25).
 
 ### Core / config / rendering
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.
@@ -743,13 +743,21 @@ binds → scale/mode surface; Asahi proof gates scanout planes; autostart
 policy → renderer/GPU reword. Batch Asahi trips (multi-CRTC + scanout +
 scale/mode) into one hardware session.
 
+- [Restore windows, workspaces and binds when a monitor reconnects](./core/output-reconnect-restore.md)
+  — OPEN, **HIGH** (daily-drive): a replugged monitor (DP monitors drop
+  hot-plug detect in standby) returns as a new output id with an empty
+  workspace while its windows stay piled on the panel, and the default
+  output-2 binds stop reaching it. niri-style restore by connector identity
+  (name + EDID make/model/serial); subsumes the remainder ticket's
+  replug-id follow-up. Filed from PR #247's review.
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
   — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
   + H (default `Super+comma/period` output binds) LANDED 2026-09-21
   (PR #208). E1 (every connector driven at startup) + E2 (per-head
   rendering, per-output lock waits, hotplug add/remove) LANDED 2026-09-25,
-  live on the Asahi M2 Air bar the unplug itself. Left: a real-hardware
-  unplug confirmation, the replug-changes-output-id follow-up, and the
+  live on the Asahi M2 Air including a physical unplug and replug. Left:
+  GPU-tier runtime add and #48 `MoveTo` on hardware,
+  [reconnect restore](./core/output-reconnect-restore.md), and the
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland support](./protocols/xwayland-support.md)

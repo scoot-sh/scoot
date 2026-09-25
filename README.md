@@ -58,15 +58,15 @@ inspired this project.
   windows to a remaining one; the last screen is never taken away. What is
   not there yet:
   - **Per-output scale, mode and position.** One `[output] scale` applies
-    to every screen, `--mode WxH` applies to every connector that offers
-    that size, and screens sit side by side, left to right, in connector
-    order. `wlr-output-management` `apply`/`test` stay refused.
-  - **Output ids are never reused.** A monitor unplugged and plugged back
-    in returns under a new id, so the default output-2 binds stop reaching
-    it until scoot restarts. `scootctl outputs` shows the current ids.
-  - **Unplug not yet seen on real hardware.** Unplugging is covered by
-    harness tests, but the one two-monitor machine tested so far (an M2 Air
-    on an experimental kernel) never reports the monitor going away.
+    to every screen and `--mode WxH` to every connector that offers that
+    size. Screens sit side by side, left to right: in connector order at
+    startup, and a monitor plugged in later goes on the right.
+    `wlr-output-management` `apply`/`test` stay refused.
+  - **A replugged monitor comes back empty, under a new id.** Its windows
+    stay on the screen they were moved to when it went away, and the
+    default output-2 binds stop reaching it until scoot restarts
+    (`scootctl outputs` shows the current ids). Restoring both on
+    reconnect is planned.
 - **XWayland is opt-in, and partial.** X11 applications run with
   `--xwayland` (or `[xwayland] enabled`) in an `xwayland` build (`cargo
   build --release --features xwayland`, with `Xwayland` on `PATH`; no flake

@@ -158,8 +158,9 @@ What a second output **is**, today:
   and absolute motion is never clamped.
 
 Under `--tty` every connected monitor is an output like these. It is named
-after its connector and placed left to right in connector order at its own
-mode, and it is added or removed when a monitor is plugged in or pulled out
+after its connector and placed left to right at its own mode (in connector
+order at startup, a later one on the right), and it is added or removed
+when a monitor is plugged in or pulled out
 (see [tty.md](tty.md#more-than-one-monitor)).
 
 What it is **not**, yet, is tracked in

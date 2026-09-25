@@ -123,8 +123,11 @@ drm: driving this device path=/dev/dri/card2 connector=eDP-1 crtc=crtc::Handle(5
 drm: driving this device path=/dev/dri/card2 connector=DP-1 crtc=crtc::Handle(68) width=1920 height=1080 scanout="dumb"
 ```
 
-- **Layout.** Outputs sit side by side, left to right, in the kernel's
-  connector order, each as wide as its mode at the shared `[output] scale`.
+- **Layout.** Outputs sit side by side, left to right, each as wide as its
+  mode at the shared `[output] scale`: in the kernel's connector order at
+  startup, and in the order they were added after that (a monitor plugged
+  in later goes on the right; the others close the gap when one is
+  removed).
   The first is the primary: the pointer starts there, and windows open on
   whichever output the pointer is over. There is no per-output scale, mode or
   position setting yet.
@@ -229,11 +232,17 @@ Two limits:
   and re-map its surfaces. That is a bigger lie about what happened than a
   stale name. An output added for a newly plugged monitor always gets its
   own connector's name.
-- **An unplug the kernel never reports is invisible.** On the M2 Air with
-  the experimental `fairydust` kernel, `DP-1` keeps reading `connected`
-  after its cable is pulled, so scoot keeps driving (and showing windows on)
-  a screen that is no longer there until the kernel says otherwise
-  ([`../Asahi.md`](../Asahi.md) Test 3).
+- **A replugged monitor comes back empty.** Windows moved off a screen
+  that went away stay where they were moved, and the screen returns under
+  a new output id. Monitors that drop hot-plug detect in standby make this
+  visible: every window piles onto the remaining screen. Restoring windows
+  and workspaces on reconnect is tracked in
+  `docs/backlog/core/output-reconnect-restore.md`.
+- **Only what the kernel reports is followed.** On the M2 Air with the
+  experimental `fairydust` kernel, one quick unplug earlier on 2026-09-25
+  never read `disconnected`, while a later ~16 s one did and was followed
+  ([`../Asahi.md`](../Asahi.md) Test 3). A disconnect the kernel does not
+  report leaves scoot driving a screen that is no longer there.
 
 Under `--tty` the output is named after its connector — `HDMI-A-1`, `eDP-1`,
 `Virtual-1`, the same spelling as `/sys/class/drm/card*-*` — so bars and

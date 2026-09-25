@@ -55,7 +55,14 @@ driven connector is still connected. That is `hotplug::heads::replan`'s
 suites `outputs/removal.rs` and friends), and a plug *adds* one. The old
 "second display stays dark" behaviour is gone.
 
-On the Asahi M2 Air both new paths are still unobservable for the same
-reason as before: `DP-1` never reads disconnected on this kernel. A
-two-connector machine with a kernel that reports HPD loss would confirm
-removal, the fallback and path 1 in one session.
+**Corrected the same day.** A physical replug at 17:59Z *did* read
+`disconnected` (33 samples at 0.5 s in `~/fx/replug/dp-status.log`), and
+scoot removed output 2 and then added output 3 on CRTC 68. The morning's
+"DP-1 kept reading connected" came from a quicker unplug and is not a
+property of the kernel. The multi-output remove/add paths are therefore
+confirmed on hardware (see `Asahi.md` Test 3). What this ticket tracks is
+still open:
+- **path 2 (fallback to a different connector):** it needs the *only* lit
+  screen to be unpluggable, and this machine's panel is not;
+- **path 1 (a new mode list on the same connector):** it needs vfkit-style
+  host rescaling.

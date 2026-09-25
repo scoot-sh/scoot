@@ -27,7 +27,7 @@ docs/backlog`, `rg -l 'area: "protocols"' docs/roadmap`.
 | 5b | [VT-switch-back `EPERM`](docs/roadmap/05b-vt-switch-eperm.md) | done |
 | 6 | [Real GPU rendering pipeline](docs/roadmap/06-gpu-pipeline.md) | done — **verified on a real GPU 2026-09-21** (one claim left: `Modifier::Invalid` on an `Invalid`-only driver) |
 | 7–18 | [Backlog-driven hardening and protocol work](docs/roadmap/) | done |
-| 19 | [Multi-output](docs/roadmap/19-multi-output.md) | **phases A–F done** (E: `--tty` drives every connector, 2026-09-25; unplug removal harness-verified, not yet seen on hardware) |
+| 19 | [Multi-output](docs/roadmap/19-multi-output.md) | **phases A–F done** (E: `--tty` drives every connector and follows plug/unplug, 2026-09-25, physical replug confirmed on the Asahi M2 Air) |
 
 Item 6 (a **GLES** renderer as an optional alternative to pixman, selected
 per-backend, with GPU-free operation kept as a hard requirement) was the last
@@ -124,8 +124,10 @@ each item's own file records why it landed when it did.
   still apply when nothing driven is left; the last output is never
   removed. Live on the Asahi M2 Air with its external monitor: both
   screens, windows on each, `Super+Shift+period`, pointer across, lock
-  on both, VT switch, both tiers. The monitor unplug itself is harness-only
-  (the experimental kernel never reports it).
+  on both, VT switch, both tiers, and a physical DP-1 unplug and replug
+  (output 2 removed, output 3 added on the same CRTC). Review round: the
+  lock fallback is armed once and records only screens that drew their
+  blank, and window leaves now precede the output's `global_remove`.
 
 - **[XWayland Phases 2+3: X windows in the layout, behind a focus gate](docs/backlog/protocols/xwayland-support.md)**
   (2026-09-25, PR #244) — with `--xwayland` in an `xwayland` build, X11

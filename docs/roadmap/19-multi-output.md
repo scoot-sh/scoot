@@ -371,16 +371,24 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
     overlapping likewise -- no measurable change. Page flips with both
     screens damaged: 705 in 10 s across the two heads (about 35/s each,
     below 60/s each: flips never exceed one per CRTC vblank).
-  - **What hardware could not show.** The unplug: with this kernel DP-1
-    keeps reading `connected` after the cable is pulled (no HPD loss
-    reaches userspace). So the *tty* half of E2 -- `Tty::reconfigure`'s
-    multi-head apply, `add_head` (CRTC pick, surface, presenter on a live
-    session, including a GPU-tier runtime add with its fresh EGL context),
-    dropping a head mid-session, and `hotplug::apply`'s attach-by-connector
-    -- has not executed anywhere yet; only the backend-independent
-    `State::remove_output`/runtime `add_output` half is exercised (harness).
-    The unit-pinned planner decides what that code does, but not whether it
-    does it on a real device. The GPU tier
+  - **The physical replug (2026-09-25, 17:59Z, `2bd7d47`, pixman).** The
+    user pulled DP-1 and plugged it back in. This time the kernel did
+    report it: `card2-DP-1/status` read `disconnected` for 33 samples at
+    0.5 s. (An earlier, quicker unplug that morning never did.) So the tty
+    half of E2 ran on hardware:
+    - `drm: this connector went away connector=DP-1`, then `removing its
+      output output=2`;
+    - on replug, `driving a newly connected display connector=DP-1
+      crtc=crtc::Handle(68)`, `added an output for it ... output=3`, and a
+      full modeset;
+    - both windows ended on output 1, and the returned monitor showed an
+      empty workspace.
+
+    Review of that run found foot logging `unmapped from unknown output`:
+    the window's `wl_surface.leave` went out after the `global_remove`.
+    Fixed in the review round (below). Still unexecuted on hardware: a
+    GPU-tier runtime add (the replug ran dumb), the #48 `MoveTo` fallback,
+    and a mode change with several heads. The GPU tier
     ran with Mesa's paths passed by environment (`GBM_BACKENDS_PATH`,
     `__EGL_VENDOR_LIBRARY_DIRS`) because the booted generation has no
     `/run/opengl-driver`; no system change was made. Gamma: both CRTCs
@@ -391,8 +399,27 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
     walks every output, so damage on one screen costs the other a no-damage
     pass and a frame callback round; measured at ~1 pp of CPU with the
     second screen idle (above), so per-output render scheduling is left as
-    an optimisation, not a correctness gap. Output ids are never reused, so
-    a monitor unplugged and replugged returns under a new id and the
+    an optimisation, not a correctness gap.
+  - **Review round (PR #247), each fix shown red under its mutation first.**
+    - **Lock fallback, deadline.** The deadline is armed once per wait and
+      never extended. Every issued flip used to re-arm it, so an
+      already-blanked screen that kept flipping held `locked` back
+      indefinitely while another screen's completion was lost (the probe
+      ran to 9.6 s), and each of those frames inserted another timer.
+    - **Lock fallback, what it records.** It records only outputs that
+      *drew* a blank for this lock (`SessionLock::drawn`), so a failed
+      render on one screen no longer sends `locked` over its pre-lock
+      desktop.
+    - **Leave before `global_remove`.** `remove_output` refreshes the
+      `Space` before withdrawing the global, so the leave arrives first.
+    - **Stale vblank after a same-CRTC swap.** A dumb-tier head dropped
+      with a flip in flight records its CRTC, so the late vblank does not
+      settle a head built on the same CRTC in the same uevent
+      (`Tty::stale_vblanks`).
+    - **Pins.** The single-output "re-present restarts the bound" test
+      became "re-present keeps the first bound".
+  - **Output identity on replug.** Output ids are never reused, so a
+    monitor unplugged and replugged returns under a new id and the
     default output-2 binds stop reaching it (documented; follow-up in the
     remainder ticket).
 - **F. Cross-output window moves + focus (staged 2026-09-21, the last

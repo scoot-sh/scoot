@@ -22,7 +22,7 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | --- | --- | --- | --- |
 | [Ghostty fails at `scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md) | high → none | no | **RESOLVED, not reproducible** (2026-09-18) |
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
-| Issue #48's unconfirmed connector fallback, and multi-output phase E | — | yes | **partial** (2026-09-25): both monitors driven at once on both tiers, lock and VT verified live; unplug still unobservable (the `fairydust` kernel keeps DP-1 `connected`) |
+| Issue #48's unconfirmed connector fallback, and multi-output phase E | — | yes | **mostly answered** (2026-09-25): both monitors driven at once on both tiers, lock and VT verified live, and a physical DP-1 unplug/replug removed and re-added its output; still open: #48's fallback onto a *different* connector (the panel can't be unplugged) and a GPU-tier runtime add |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
 | [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | **ANSWERED** (2026-09-25): mpv goes direct (~60% less compositor CPU) once it hides its pointer; `apple,dcp` has no cursor plane, so a visible pointer rules out any primary attempt ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)); planes: 1 primary, 1 overlay, 0 cursor |
 | [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | **ANSWERED** (2026-09-25): 162 pairs (54 formats x tiled-compressed/tiled/`LINEAR`); clients pick compressed and Mesa follows the scanout tranche to `LINEAR`; mpv `dmabuf-wayland` cannot run (no hardware decoder: AVD firmware missing) |
@@ -70,9 +70,10 @@ node.
 - **Test 3 — partial (2026-09-25).** An external monitor now works (DP-1
   over the `fairydust` kernel). Since multi-output phase E, `--tty` drives
   it *and* the panel at once; both tiers, the lock and VT switching all
-  verified live (results below). The unplug paths are still unobservable
-  because this kernel keeps `DP-1` reading `connected` after the cable is
-  pulled.
+  verified live, and a physical unplug and replug of DP-1 removed and then
+  re-added its output (results below). #48's fallback onto a *different*
+  connector is still unreachable here, because the panel cannot be
+  unplugged.
 
 Everything below is the runbook as written, plus traps found while running
 it. Re-running any of it is still worthwhile on a different Asahi model or
@@ -447,14 +448,46 @@ final product code, via `nix build .#scoot-gpu`. It ran on VT 2 through
   and 8.63% on the GPU tier (the same two-column layout).
 - **Pacing.** 705 page flips in 10 s across the two heads with both damaged,
   about 35 per second each, never more than one per CRTC vblank.
-- **Not observable here.** Unplugging DP-1: no HPD loss reaches userspace
-  on this kernel, so scoot keeps driving a screen that is gone. That
-  leaves the whole `--tty` side of runtime add/remove unexecuted: removing
-  a head mid-session, building one for a newly plugged connector (on
-  either tier), and the old fallback. Only the backend-independent output
-  removal and addition are exercised, in harness tests. A way to force it
-  without the cable, pending approval, is writing `off` and then `detect`
-  to `/sys/class/drm/card2-DP-1/status` as root.
+- **Correction.** An earlier version of this section said the unplug was
+  not observable here. It was wrong for this run, as the next section
+  shows: the morning's quicker unplug never read `disconnected`, but this
+  one did.
+
+### Results, 2026-09-25 17:59Z: a physical DP-1 unplug and replug
+
+- **Setup.** scoot `2bd7d47` (`nix build .#scoot-gpu`, pixman tier),
+  `~/fx/replug-start.sh`: a foot window on each monitor, a udev monitor, and
+  a 0.5 s poll of `card2-DP-1/status`. The user pulled DP-1 and plugged it
+  back into the front-left port. Collected with `~/fx/replug-collect.sh`.
+  Raw files are in `~/fx/replug/`: `scoot.log`, `udev.log` (6 events),
+  `dp-status.log`, `outputs-{before,after}.json`,
+  `windows-{before,after}.txt` and `after-out{1,3}.png`.
+- **Kernel.** `dp-status.log` reads 22 × `connected`, then 33 ×
+  `disconnected` (about 16 s), then 35 × `connected`. HPD loss *did* reach
+  userspace this time.
+- **scoot** (`scoot.log`):
+  - 17:59:17.39 `drm: this connector went away connector=DP-1`, then
+    `a display went away; removing its output output=2`.
+  - 17:59:34.08 `drm: driving a newly connected display connector=DP-1
+    crtc=crtc::Handle(68) width=1920 height=1080 scanout="dumb"`, then
+    `added an output for it ... output=3`, then `drm: modeset (full
+    commit)`.
+  - eDP-1's head was left alone throughout (`hotplug changed nothing this
+    head is driving connector=eDP-1`).
+- **After.**
+  - `outputs` lists `eDP-1` (id 1) and `DP-1` (id **3**, at x=1707).
+  - `windows` puts both on output 1, and the returned monitor shows an
+    empty workspace. This is the reconnect gap
+    `docs/backlog/core/output-reconnect-restore.md` tracks.
+- **Found by review of this run.**
+  - foot logged `unmapped from unknown output`: the window's
+    `wl_surface.leave` went out after the output's `global_remove`. Fixed
+    in PR #247's review round (`remove_output` refreshes the `Space` before
+    withdrawing the global).
+- **Still unexecuted on hardware.**
+  - A GPU-tier runtime add (this run was dumb buffers).
+  - #48's `MoveTo` fallback.
+  - A mode change with several heads.
 
 ---
 

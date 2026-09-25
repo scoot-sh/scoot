@@ -3,9 +3,9 @@
 //!
 //! `State::remove_output` and a runtime `headless::add_output` are
 //! backend-independent, so the whole lifecycle is pinned here on headless
-//! outputs with a real client holding objects on them -- the part real
-//! hardware here cannot exercise (the Asahi machine's experimental kernel
-//! never reports its DisplayPort monitor going away). Each test asserts what
+//! outputs with a real client holding objects on them -- far more of the
+//! protocol surface than one physical replug on the Asahi machine can
+//! check (that run is recorded in `Asahi.md` Test 3). Each test asserts what
 //! the *client* was told, since a protocol error or a missing event is where
 //! an output going away hurts.
 

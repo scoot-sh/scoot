@@ -3,7 +3,7 @@ title: "Multi-output remainder: --tty multi-CRTC, placement policy, default bind
 status: "open"
 area: "core"
 priority: "high"
-blocked: "only a real-hardware unplug confirmation and the replug-id follow-up remain (the Asahi kernel never reports DP-1 going away); the scale/mode surface is its own entry"
+blocked: "E1/E2 landed and ran on hardware (a physical DP-1 replug on the Asahi M2 Air, 2026-09-25); left: GPU-tier runtime add and #48 MoveTo on hardware, reconnect restore (its own ticket), the scale/mode surface (its own entry)"
 ---
 
 # Multi-output remainder: --tty multi-CRTC, placement policy, default binds
@@ -48,18 +48,23 @@ Landed: per-head presenters, a render loop keyed by `OutputId`, per-output
 session-lock vblank waits (a security fix; see the milestone record), gamma
 per CRTC, and absolute pointer/tablet mapping over the union. Hotplug adds
 and removes outputs (`hotplug::heads::replan`, `State::remove_output`),
-with the last output never removed. Live on the Asahi M2 Air for everything
-except the unplug itself, which that kernel never reports.
+with the last output never removed. Live on the Asahi M2 Air, including a
+physical DP-1 unplug and replug (17:59Z): output 2 removed, output 3 added
+on CRTC 68 with a modeset. The kernel reported the disconnect that time,
+unlike a quicker unplug that morning.
 
 **Follow-ups left here (why this file stays open):**
 
-1. **Unplug confirmed on real hardware.** Harness-verified only. This needs
-   a machine whose kernel reports DP/HDMI HPD loss.
-2. **Output ids on replug.** Ids are never reused, so a monitor unplugged
-   and plugged back in returns under a new id, and the default output-2
-   binds (`Super+period`, `Super+Shift+period`) stop reaching it.
-   Candidates: reuse a connector's previous id, or bind by position rather
-   than id. Documented in `docs/configuration.md` meanwhile.
+1. **The rest of the hotplug paths on hardware.** Unplug and replug are
+   confirmed on the dumb tier. Still unexecuted: a GPU-tier runtime add
+   (fresh `DrmCompositor` and EGL context beside a live one), the #48
+   `MoveTo` fallback (needs the only lit screen to be pullable), and a mode
+   change with several heads.
+2. **Reconnect restore and output ids on replug.** Now its own ticket,
+   [output-reconnect-restore](./output-reconnect-restore.md): match a
+   returning monitor by connector identity, give its windows and workspaces
+   back, and have the default output-2 binds follow the connector, not the
+   id.
 3. **Per-output render scheduling.** A render walks every output. With
    damage on one screen the other costs a no-damage pass, about 1 pp of CPU
    measured. This is an optimisation, not a correctness gap.
