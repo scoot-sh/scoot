@@ -158,17 +158,20 @@ Dev VM (kernel 6.18, virtio-gpu, `RLIMIT_NOFILE` 1024/524288). Before is
 `1f2fe5c` (`main`), built from a `git archive` into its own target dir
 (`CARGO_BUILD_JOBS=1 cargo build --release -p scoot -p scootctl --features
 scoot/gpu-scanout`; binary sha256 `e82acc7f…`). After is the PR's code at
-`0111f57`, built by the same command in the shared target (sha256
-`911bf342…`), for every `--tty --renderer gles` row and the GPU-tier legit
-run (`runs/*-after-0111f57.txt`). The headless rows and the `--tty` shm row
-are from `82b6590` (sha256 `0b180fbb…`, `runs/*-after-82b6590.txt`). The only
-change between the two is the renderer probe's guard, which runs only on a
-GLES dma-buf import, so those rows never reach it. Earlier runs at
-`42914bb` and `dbec752` (`runs/*-after.txt`, `runs/*-dbec752.txt`) gave the
-same numbers. Raw output: `~/evidence/bfl/runs/*.txt`; probe source
-`~/evidence/bfl/probe/src/main.rs`; runners
-`~/evidence/bfl/{run,legit,bench,scanout}.sh`. Gates:
-`~/evidence/bfl/gate-0111f57.out` (and `gate-82b6590.out`).
+`d6d3fe4`, which charges renderer copies at admission (the review fix),
+built by the same command in the shared target (sha256 `6f2eac38…`). Every
+`--tty --renderer gles` row, the review's overshoot shape on both GLES tiers,
+the GPU-tier legit run and the headless 900-surface row were re-run on it
+(`runs/*-after-d6d3fe4.txt`). The 500-surface headless row and the `--tty`
+shm row are from `82b6590` (`0b180fbb…`); neither imports a dma-buf, the
+only path changed since. Earlier runs at `42914bb`, `dbec752` and `0111f57`
+gave the same numbers for every row they share. Raw output:
+`~/evidence/bfl/runs/*.txt`; probe source `~/evidence/bfl/probe/src/main.rs`
+(and the reviewer's `overshoot` mode, `~/review239/probe`, run read-only
+through `~/evidence/bfl/over.sh`); runners
+`~/evidence/bfl/{run,legit,bench,scanout,over}.sh`. Gates:
+`~/evidence/bfl/gate-d6d3fe4.out` (earlier: `gate-0111f57.out`,
+`gate-82b6590.out`).
 
 **Fail-first** against `1f2fe5c` (`~/evidence/bfl/failfirst-main-1f2fe5c.out`,
 scratch source `~/evidence/bfl/scratch/failfirst_bfl.rs`), 3 of 3 failed:
@@ -179,13 +182,15 @@ scratch source `~/evidence/bfl/scratch/failfirst_bfl.rs`), 3 of 3 failed:
 
 **Live** (release binaries, `~/evidence/bfl/runs/`):
 
-| Shape | Tier | Before (`1f2fe5c`) | After (`82b6590` / `0111f57`, see above) |
+| Shape | Tier | Before (`1f2fe5c`) | After (`d6d3fe4` unless noted above) |
 |---|---|---|---|
 | 900 surfaces, each keeping a destroyed buffer and pool | `--headless` | 919 fds; `wayland-info` 0 globals; `scootctl` refused (pressure); honest client reset; attacker connected after 12 s | refused at 512 surfaces (`invalid_stride` on `wl_shm`, "512 file descriptors ... the maximum is 512"); 18 fds after; `wayland-info` 38 globals; `scootctl` served; honest client 147 commits, frame callbacks p95 21.5 ms |
 | 500 surfaces (under the bound) | `--headless` | 519 fds, all served | 519 fds, all served (same) |
 | 200 `YU12` surfaces, `wl_buffer`s destroyed | `--tty --renderer gles` | table full: 1024 fds (984 `/dmabuf:`); `wayland-info` 0 globals; `scootctl` and the honest client reset; attacker stuck | refused at 85 buffers (the 3rd `add` of the 86th; 6 fds each with llvmpipe's copies); 46 fds after; newcomer 39 globals; `scootctl` served; honest client 134 commits |
 | 85 `YU12` surfaces (at the bound) | `--tty --renderer gles` | — | 557 fds total (517 `/dmabuf:`), newcomers, `scootctl` and the honest client served: one client at the bound stays 339 under the 896 line |
 | 900 shm surfaces | `--tty --renderer gles` | — | refused at 512, newcomers and `scootctl` served |
+| Review's overshoot: 80 committed `YU12`, 30 planes pending, all imported | `--tty --renderer gles` | at `0111f57` (import-time charging): 587 fds (547 `/dmabuf:`), client connected, and again after a refill | refused during the pending adds (`no_memory`, "512 file descriptors"); 527 fds at the refusal |
+| the same | `--headless --renderer gles` | — | refused during the pending adds; 506 fds at the refusal |
 
 The session log records `dmabuf: learned how many fds the renderer keeps of
 each imported plane copies_per_plane_per_output=1` on the `--tty` GLES tier.
@@ -200,7 +205,7 @@ the same 23 before and after, so the bound's arithmetic holds on the
 direct-scanout path too.
 
 **Legitimate clients**, 5 s each, before and after, both tiers
-(`runs/legit-{headless,tty}-{before,after}.txt`, `runs/legit-headless-after-82b6590.txt`, `runs/legit-tty-after-0111f57.txt`): `foot`, `zenity` (GTK 4),
+(`runs/legit-{headless,tty}-{before,after}.txt`, `runs/legit-headless-after-82b6590.txt`, `runs/legit-tty-after-d6d3fe4.txt`): `foot`, `zenity` (GTK 4),
 `es2gears_wayland`, `eglgears_wayland`, `vkcube`, `mpv --vo=gpu` all alive
 with one window and identical scoot fd counts before and after; an
 explicit-sync client (card0 dumb buffers) 177-179 commits, 0 reuse timeouts on
