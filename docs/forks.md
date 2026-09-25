@@ -12,7 +12,7 @@ top**, so it stays easy to review, rebase, and drop.
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
 | [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/syncobj-timeline-drop) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline | **yes**, `crates/scoot/Cargo.toml` rev `43f50eb2` (PR #233) | Without it, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). |
-| [`scoot-sh/wayland-rs`](https://github.com/scoot-sh/wayland-rs/tree/scoot/server-fd-queue-cap) | [Smithay/wayland-rs](https://github.com/Smithay/wayland-rs) | `72f7fe0d` (the wayland-backend 0.3.17 release, `v0.31.x` branch) | `a39311b8`: server side, disconnects a client leaving more than 128 received fds unclaimed | **yes**, root `Cargo.toml` `[patch.crates-io]` rev `a39311b8` (PR #241) | wayland-backend queues fds a client sends with fd-less requests for the connection's life, so one idle client could fill scoot's fd table and shed every newcomer, `scootctl` included. |
+| [`scoot-sh/wayland-rs`](https://github.com/scoot-sh/wayland-rs/tree/scoot/server-fd-queue-cap-adaptive) | [Smithay/wayland-rs](https://github.com/Smithay/wayland-rs) | `72f7fe0d` (the wayland-backend 0.3.17 release, `v0.31.x` branch) | `a39311b8`: server side, disconnects a client leaving too many received fds unclaimed; `70f81e00`: sizes that cap at one eighth of the soft `RLIMIT_NOFILE`, 128..=1024 | **yes**, root `Cargo.toml` `[patch.crates-io]` rev `70f81e00` (PR #241) | wayland-backend queues fds a client sends with fd-less requests for the connection's life, so one idle client could fill scoot's fd table and shed every newcomer, `scootctl` included. |
 
 ## Per fork
 
@@ -33,31 +33,46 @@ top**, so it stays easy to review, rebase, and drop.
 
 ### `scoot-sh/wayland-rs`
 
+- **Branch:** `scoot/server-fd-queue-cap-adaptive`. Its first commit,
+  `a39311b8`, is also the tip of `scoot/server-fd-queue-cap`, which PR
+  #241 first pinned with a fixed cap of 128; that branch is kept as it was
+  (its history is not rewritten), and nothing pins it now.
 - **Evidence:** `docs/backlog/resolved/wayland-backend-fd-queue-done.md`,
   and on the dev VM `~/evidence/fdq/`. The route was chosen after
   scoot-side alternatives (per-client attribution, a kill heuristic, a
-  socket proxy) were ruled out. libwayland bounds the same queue, but its
-  bound is 1024, which scoot's 1024-fd table reaches first.
+  socket proxy) were ruled out.
+- **Why the cap is adaptive (`70f81e00`):** the check runs before each
+  read, so it counts fds a client has sent ahead of the requests that
+  claim them, and well-behaved clients get that far ahead: any flush
+  carrying more than 28 fds sends them 28 per `sendmsg` with one byte each,
+  ahead of the bytes. A client on `wayland-client`'s pure-Rust backend does
+  it for every flush, and a stock libwayland client (1.26) does it once its
+  socket has filled and its unbounded buffers have grown: review of PR #241
+  measured one stalled behind a stopped compositor disconnected at 140 fds
+  under the fixed 128, while 0.3.17 served 600. (`a39311b8`'s doc comment
+  claimed libwayland clients never come near the cap; that was wrong, and
+  `70f81e00` replaces it.) The cap is now libwayland-server's own bound,
+  1024 (its `fds_in` ring holds 4096 bytes of fds by default), wherever
+  the table allows it: one eighth of the soft limit, read when each client
+  is created, clamped to 128..=1024. scoot raises its soft limit at startup
+  to the hard limit capped at 65536 (`crates/scoot/src/compositor/nofile.rs`),
+  so the cap is 1024 wherever the hard limit is 8192 or more. Where the hard
+  limit is 1024 (a container) it stays 128, the startup log says so, and a
+  stalled libwayland client there can still be disconnected past about 128.
 - **How it is pinned:** a `[patch.crates-io]` entry in the root
   `Cargo.toml`, because Smithay, `wayland-server` and `wayland-client` all
   depend on `wayland-backend` from crates.io. `wayland-sys` moves to the
   fork's source with it (a path dependency inside that repository); the
   fork leaves it byte-identical to the 0.3.17 release. Both are covered
   by one `flake.nix` `outputHashes` entry, `wayland-backend-0.3.17`.
-- **What scoot relies on:** 128 unclaimed received fds per connection at
-  most (30 more for a moment inside one read), pinned against the real
-  backend by `crates/scoot/src/compositor/fd_pressure/tests/backend_queue.rs`,
-  which fails if the patch is lost to a repin, `cargo update` or rebase.
-  `fd_pressure.rs` adds both figures to its reserve arithmetic.
-- **Its one cost to legitimate clients:** the check runs before each read,
-  so fds a client has sent ahead of their requests count. A client using
-  `wayland-client`'s pure-Rust backend sends every fd past the last 28 of a
-  flush ahead, so one that queues more than 140 fd-carrying requests
-  between flushes is disconnected (served on 0.3.17). libwayland clients,
-  and Rust clients on its `client_system` backend (everything built on
-  winit, which forces it, and every GL/Vulkan-rendering one, which needs a
-  libwayland display), cannot hit it. The same tests pin 140 served and 141
-  refused.
+- **What scoot relies on:** at most the cap in unclaimed received fds per
+  connection (up to 30 more for a moment inside one read), pinned against
+  the real backend at whatever limit the test process runs with by
+  `crates/scoot/src/compositor/fd_pressure/tests/backend_queue.rs`, which
+  fails if the patch is lost to a repin, `cargo update` or rebase;
+  `backend_queue_client.rs` pins the legitimate shapes (the backpressure
+  case served at the cap, a Rust client's one-flush batch of 1036 served).
+  `fd_pressure.rs` adds both figures to its arithmetic, on both tables.
 - **Upstream status (last checked 2026-09-24):** unbounded in 0.3.17 and
   on master (the 0.4 rewrite). No issue or PR exists. Nothing has been
   filed from here. There is no AI-contribution policy file.

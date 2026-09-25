@@ -104,27 +104,30 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
-- **[wayland-backend's received-fd queue is bounded](docs/backlog/resolved/wayland-backend-fd-queue-done.md)**
-  (2026-09-24, PR #241) — wayland-backend 0.3.17 kept the fds a client
+- **[wayland-backend's received-fd queue is bounded](docs/backlog/resolved/wayland-backend-fd-queue-done.md), [and scoot raises its fd limit](docs/backlog/resolved/raise-nofile-limit-done.md)**
+  (2026-09-25, PR #241) — wayland-backend 0.3.17 kept the fds a client
   attaches to fd-less requests for the connection's life; one idle client
   took scoot from 18 to 999 fds and shed every newcomer, `scootctl`
   included. scoot now builds against the scoot-sh fork (`docs/forks.md`,
-  0.3.17 + `a39311b8`, pinned by the root `Cargo.toml`'s
+  0.3.17 + `a39311b8` + `70f81e00`, pinned by the root `Cargo.toml`'s
   `[patch.crates-io]`; `Cargo.lock` moves only `wayland-backend` and
-  `wayland-sys`), which disconnects a client leaving more than 128
-  unclaimed. `fd_pressure/tests/backend_queue.rs` fails if the patch is
-  ever dropped and pins the numbers the reserve arithmetic now adds (128 at
-  rest, 30 more inside one read): 748 steady against the 896 line on the
-  GPU tier. Dev VM: the PR #236 probe went from 999 fds and shed
-  newcomers to the attacker disconnected at 140 parked, 18 fds,
-  `wayland-info` and `scootctl` served; real clients unchanged. One cost to
-  legitimate clients, measured and documented: a client on
-  `wayland-client`'s pure-Rust backend that queues more than 140
-  fd-carrying requests between flushes is now disconnected (one scoot test did; it now flushes every 64). Left open:
-  the software-GLES drain window can put one connection past the line (and,
-  for one instant, the table), and seven idle connections parking 128 each
-  reach the line with nobody killed, recorded on
-  [pressure-many-light-connections](docs/backlog/core/pressure-many-light-connections.md).
+  `wayland-sys`), which disconnects a client leaving more than its cap
+  unclaimed: one eighth of the soft `RLIMIT_NOFILE`, clamped 128..=1024.
+  scoot raises that limit at startup to the hard limit capped at 65536
+  (`nofile.rs`), and every child `State::spawn` starts gets the original
+  back; so the cap is 1024, libwayland-server's default, and one connection
+  at every bound is 1674 fds against a 65408 line. The first round of the
+  PR pinned a fixed 128; review found stock libwayland clients reach it
+  under backpressure (disconnected at 140 fds, where `main` served 600), and
+  the coordinator folded the raise in. Dev VM: that libwayland client is
+  served at 160, 600 and 1000; the PR #236 probe is disconnected at 1036
+  with scoot back at 18 fds; `foot` runs at soft 1024 under a scoot at
+  65536; a container-like `prlimit --nofile=1024:1024` run keeps the 128
+  cap with a log line. `fd_pressure/tests/backend_queue*.rs` fail if the
+  patch is dropped. Left open, on
+  [pressure-many-light-connections](docs/backlog/core/pressure-many-light-connections.md):
+  64 idle connections parking 1024 each still fill the raised table (7 at
+  a 1024 hard limit).
 
 - **[Rounded corners and the focus ring match the window](docs/backlog/resolved/clip-to-committed-size-done.md)**
   (2026-09-24, gh #205 reopened) — default `foot` commits a buffer rounded

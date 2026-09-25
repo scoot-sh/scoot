@@ -28,7 +28,7 @@
 //! nothing; the next one is measured. The
 //! difference, not the count: anything that already named the file -- the
 //! planes themselves, or fds a client parked in wayland-backend's received-fd
-//! queue on its own buffer (up to 128,
+//! queue on its own buffer (up to the fork's cap, 128..=1024,
 //! `docs/backlog/resolved/wayland-backend-fd-queue-done.md`) -- is in both
 //! counts and cancels, so no client can teach the session a
 //! bigger number. Nothing else opens an fd on a client's dma-buf in between;

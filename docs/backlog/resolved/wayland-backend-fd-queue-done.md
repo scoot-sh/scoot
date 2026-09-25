@@ -8,12 +8,144 @@ blocked: null
 
 # Unbounded per-connection received-fd queue (wayland-backend) — RESOLVED
 
-RESOLVED 2026-09-24 (PR #241) by route 2 below: scoot now builds against
-a scoot-sh fork of wayland-backend (`docs/forks.md`), pinned through the
-root `Cargo.toml`'s `[patch.crates-io]` at `a39311b8` (the 0.3.17 release
-`72f7fe0d` plus one server-side commit). Nothing was filed upstream.
+RESOLVED 2026-09-25 (PR #241) by route 2 below, together with
+[raising scoot's fd limit](./raise-nofile-limit-done.md): scoot builds
+against a scoot-sh fork of wayland-backend (`docs/forks.md`), pinned through
+the root `Cargo.toml`'s `[patch.crates-io]` at `70f81e00` (the 0.3.17
+release `72f7fe0d` plus two server-side commits), and raises its own soft
+`RLIMIT_NOFILE` at startup. Nothing was filed upstream.
 
 ## What changed
+
+- **The fork.** In the server's `Client::next_request`, when every complete
+  request in the buffer has been parsed and before the next read: a client
+  with more than its cap of received fds still queued is sent
+  `wl_display.error` `invalid_method` ("too many file descriptors queued
+  (more than N)"), the queued fds are closed and the client is
+  disconnected (`a39311b8`). The cap is one eighth of the soft
+  `RLIMIT_NOFILE` read when the client is created, clamped to 128..=1024
+  (`70f81e00`): 1024, libwayland-server's default bound, on the table scoot
+  raises to; 128 where the hard limit is 1024.
+- **The raise** (`crates/scoot/src/compositor/nofile.rs`): the soft limit
+  goes to the hard limit capped at 65536 at startup; every child
+  `State::spawn` starts gets the original back. See its own record.
+- **The pin.** `Cargo.lock` moves exactly two entries, `wayland-backend`
+  and `wayland-sys`, to the fork's git source (`wayland-sys` byte-identical
+  to crates.io 0.31.11); `flake.nix` has one `outputHashes` entry.
+- **Tests in scoot** that fail if the patch is dropped and pin the numbers
+  the arithmetic uses, at whatever limit the test process runs with
+  (`fd_pressure/tests/backend_queue.rs`: exactly the cap kept, one more
+  disconnected with the fork's error, the parked fds closed, one read adds
+  at most 30), and the legitimate shapes
+  (`fd_pressure/tests/backend_queue_client.rs`: under backpressure the cap
+  is served and one more disconnected; a pure-Rust client's largest
+  one-flush batch, 1036, served and 1037 disconnected).
+  `gamma_rapid_sets_stay_alive` is back to its original 200-unflushed shape.
+- **fd pressure's arithmetic** (`fd_pressure.rs`) adds the queue on both
+  tables: 1674 per connection at every bound against 65408 on the raised
+  table; 748 (778 inside a read) against 896 on a 1024 one.
+
+## How it got here: PR #241's first round, and why it changed
+
+The first version of this PR pinned `a39311b8` alone, a fixed cap of 128,
+sized against the default 1024-fd table. Its record said the only
+legitimate clients it could disconnect were pure-Rust ones batching more
+than 140 fd-carrying requests per flush, and that libwayland clients could
+not reach it. **Review of PR #241 showed that was false:** libwayland 1.26
+keeps queueing after its flush hits `EAGAIN` (buffers from
+`wl_display_connect` are unbounded), then sends its fds 28 per `sendmsg`
+ahead of the requests, so a stock libwayland client stalled behind a busy
+compositor reached the cap. Measured by the reviewer on the dev VM
+(`~/review241/bp/`): the compositor stopped, the socket filled, N
+`create_pool`+destroy pairs queued, the compositor resumed; the fixed-128
+fork killed the client at N of 140 and above, `main` served 160 and 600.
+"Flush every 140" could not help under backpressure, and eight idle
+connections still got past the fixed cap to fill the table. The
+coordinator's decision was the raise plus an adaptive cap, in this PR. The
+first round's own record is kept below, under "First round (superseded)".
+
+## What it costs a legitimate client now
+
+- **With the raise (hard limit 8192 or more): nothing libwayland-server
+  would refuse.** The cap is libwayland-server's default 1024. A
+  libwayland client stalled behind a stopped scoot is served at 160, 600
+  and 1000 queued fd-carrying requests (`runs/bprun-160-600.txt`); a
+  pure-Rust client's one flush is served up to 1036.
+- **Hard limit 1024 (a container): the first round's cost remains.** The
+  cap stays 128, logged at startup; the same libwayland probe is served at
+  120 and disconnected at 160 (`runs/container-bprun-raise-2c18a93.out`).
+  Documented in `protocols.md` and the CHANGELOG with the fix (raise the
+  hard limit).
+
+## What is left
+
+- **Connection multiplication**, now at the raised table: each idle
+  connection can park 1024 with no objects, which neither the ledger nor
+  the grace sees. 63 such connections held 64593 fds with everyone served;
+  64 filled the 65536 table (newcomers dropped, `scootctl` reset). On a
+  1024-fd table it is 7 and 8 connections, as before. Recorded on
+  [`pressure-many-light-connections`](../core/pressure-many-light-connections.md),
+  which stays open.
+- **The cost of observing a full table.** A pressure observation reads
+  `/proc/self/fd`, linear in open fds: ~8 ms at 65000
+  (`runs/readdir-cost.txt`) against 72 us at 1000. Only a table someone has
+  already filled makes each accepted connection cost that much.
+- **The 1024-table drain-window transient** (1034, reasoned in
+  `fd_pressure.rs`), only where the hard limit keeps the table at 1024.
+- **The parked-syncobj over-count** (`client_fds.rs`) is bounded by the cap,
+  not removed. **Outgoing fds** are unchanged in the fork, reasoned only.
+
+## Evidence (final)
+
+Dev VM (kernel 6.18.50, hard `RLIMIT_NOFILE` 524288, soft 1024 in the ssh
+shell), debug builds, all under `~/evidence/fdq/`. Final binary: commit
+`2c18a93` (`bin/scoot-raise-2c18a93-debug`, sha256 `3075f728…`); later
+commits change docs, and one removes the XWayland limit toggle, which the
+default build does not compile. For comparison, the first round's
+fixed-128 build `8b01249` and `main` `173029d`.
+
+- **The reviewer's libwayland backpressure probe** (`bprun.sh`,
+  `runs/bprun-160-600.txt`): new build served at N=160 (`roundtrip=162`),
+  600 and 1000, scoot back to 18 fds; the fixed-128 build disconnected both
+  160 and 600 with "more than 128".
+- **The PR #236 attack probes**: 40 messages of 28 fds is disconnected at
+  1036 with "more than 1024", scoot back to 18, `wayland-info` and
+  `scootctl` served (`runs/attack-raise-2c18a93-N40.out`); the reviewer's
+  original 35 x 28 (980, under the cap) stays parked at 999 fds with
+  `wayland-info` (38 globals) and `scootctl` served on the raised table
+  (`runs/orig-probe-raise-2c18a93.out`), where `main` shed both.
+- **Many idle connections** parking 1024 each
+  (`runs/many-connections-raise-2c18a93.out`): 8 connections 8218 fds, 62
+  63568, 63 64593, all served; 64 filled the table (65536).
+- **Limits** (`runs/limits-raise-2c18a93.out`): scoot soft 65536 / hard
+  524288; `foot` started as the session command and by IPC `spawn`, and
+  their shells, soft 1024 / hard 524288. Startup log: `raised the fd limit
+  ... from=1024 to=65536 hard=524288 unclaimed_fd_cap=1024`.
+- **Container** (`prlimit --nofile=1024:1024`,
+  `runs/limits-container-raise-2c18a93.out`,
+  `runs/container-attack-raise-2c18a93.out`): log line `fd limit not
+  raised ... unclaimed_fd_cap=128`; 140 parked disconnected, 112 held;
+  children 1024/1024.
+- **XWayland** (`xwayland` build at `2c18a93`, `runs/xwayland-limits.out`):
+  scoot 65536, the Xwayland server it started 524288. That build still put
+  1024 back around the spawn, so the server started at 1024 and raised
+  itself to its hard limit; `7ce06df` dropped the toggle for that reason
+  (see the raise record).
+- **scoot's tests, fail-first** at the new tests:
+  `runs/failfirst-tests-no-patch-0.3.17.txt` (no patch: the four
+  disconnect tests fail), `runs/failfirst-tests-old-fork-a39311b.txt`
+  (fixed 128: the serve tests and `gamma_rapid_sets_stay_alive` fail),
+  `runs/failfirst-child-limit-restore-removed.txt` (the child reads 65536
+  without the restore).
+- **The fork's own tests** on Linux at `70f81e00`
+  (`runs/fork-adaptive-cargo-test.txt`): 98 + 1 + 2 passed, including the
+  new cap-formula test.
+
+## First round (superseded)
+
+Kept as written at `eba798b`; its libwayland claims are wrong (above).
+
+### What changed (first round)
 
 - **The fork's one commit.** In the server's `Client::next_request`, when
   every complete request in the buffer has been parsed and more bytes are
@@ -39,7 +171,7 @@ root `Cargo.toml`'s `[patch.crates-io]` at `a39311b8` (the 0.3.17 release
 - **fd pressure's arithmetic** (`fd_pressure.rs`) adds the queue: 128 at
   rest, 158 for a moment inside the read past the bound.
 
-## What it costs a legitimate client (a finding, not hidden)
+### What it costs a legitimate client (a finding, not hidden)
 
 The check counts fds a client has sent ahead of their requests. A client
 on `wayland-client`'s pure-Rust backend (the rs backend, its default)
@@ -83,7 +215,7 @@ flush of up to **252** fd-carrying requests (28 x floor(bound / 28) + 28)
 and put the drain-window figure at 1151. The bound is the fork's
 `MAX_QUEUED_FDS`; changing it means a new fork commit and repin.
 
-## What is left
+### What is left
 
 - **The software-GLES drain window.** One connection at its 512 bound, with
   renderer copies of released planes awaiting a drain (up to 256 more) and
@@ -105,7 +237,7 @@ and put the drain-window figure at 1151. The bound is the fork's
   reading) are unchanged in the fork and still reasoned, not measured
   (`fd_pressure.rs`).
 
-## Evidence
+### Evidence
 
 Dev VM (kernel 6.18.50, `RLIMIT_NOFILE` 1024), debug builds, all under
 `~/evidence/fdq/`. Before: `main` `173029d` (`bin/scoot-main-173029d-debug`,

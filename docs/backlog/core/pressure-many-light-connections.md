@@ -19,24 +19,35 @@ or killed, and newcomers (including `scootctl`) are shed for as long as they
 stay. Measured with `~/evidence/cfb/pressure.sh` on a 700-fd table: 17
 fillers held, a newcomer shed at 584.
 
-**Cheaper since the wayland-backend queue bound** (2026-09-24,
-[its ticket](../resolved/wayland-backend-fd-queue-done.md)). That fix made
-one connection unable to fill the table through the received-fd queue, but
-each connection may now park up to 128 fds there with no object at all,
-which neither the fd ledger nor the grace sees. Measured on the dev VM
-(headless pixman, 1024-fd table, the fork build `8b01249`,
-`~/evidence/fdq/runs/many-connections-fork-8b01249.out`, each connection
-`fdstuff2 8 12 16`: eight `wl_display.sync` requests carrying 16 fds
-each):
+**Updated 2026-09-25 (PR #241): the raised fd limit moved the numbers a
+long way, but did not make this moot.** scoot now raises its soft
+`RLIMIT_NOFILE` to the hard limit capped at 65536 (`nofile.rs`), and the
+wayland-backend fork lets each connection park up to 1024 received fds that
+no request claims (128 on a 1024-fd table). Parked fds need no object at
+all, so neither the fd ledger nor the grace sees them. Measured on the dev
+VM (headless pixman, idle at 18), each connection `fdstuff2 64 20 16`
+(sixty-four `wl_display.sync` requests carrying 16 fds each, 1024 parked):
 
-- 6 connections: 792 fds, newcomers and `scootctl` served.
-- 7 connections: 921 fds, a newcomer `wayland-info` got 0 globals,
-  `scootctl` was refused under fd pressure.
-- 8 connections: 1024 (the table full), `scootctl` got a connection reset.
-- None of them was disconnected at any count.
+| Table | Connections | scoot fds | Newcomers and `scootctl` |
+| --- | --- | --- | --- |
+| raised (65536) | 8 | 8218 | served |
+| raised (65536) | 63 | 64593 | served |
+| raised (65536) | 64 | 65536 (full) | newcomers dropped, `scootctl` reset |
+| 1024 (fixed-128 build) | 7 | 921 | newcomer 0 globals, `scootctl` refused |
+| 1024 (fixed-128 build) | 8 | 1024 (full) | `scootctl` reset |
 
-Candidate 2 below cannot see these fds (scoot has no count of them);
-candidate 1 still helps `scootctl` up to the point the table is full.
+Nobody was disconnected at any count
+(`~/evidence/fdq/runs/many-connections-raise-2c18a93.out`,
+`many-connections-fork-8b01249.out`). So it now takes 64 idle connections
+instead of 7 wherever the hard limit allows the raise, and the old 7 where
+it does not (containers at 1024). **Why this stays open:** 64 local
+connections is still cheap for a hostile client (no objects, a few ms of
+sends each), and at 64 the table fills outright, so the IPC-lower-line
+candidate below still matters for keeping `scootctl` reachable. Candidate 2
+cannot see parked fds (scoot has no count of them). At the raised table a
+full-table observation also costs ~8 ms per accepted connection
+(`runs/readdir-cost.txt`), which a cheaper pressure signal would help
+with too. Priority unchanged (medium).
 
 Ruled out: a per-uid budget (every client is the same user), a per-pid one
 (`SO_PEERCRED` is defeated by fork).

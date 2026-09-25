@@ -9,7 +9,7 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
-### 2026-09-24 — an app can no longer make scoot hold hundreds of file descriptors by attaching them to ordinary requests
+### 2026-09-25 — scoot raises its file-descriptor limit, and an app can no longer make it hold hundreds of descriptors by attaching them to ordinary requests
 
 - **A misbehaving app can no longer make scoot hold hundreds of file
   descriptors by attaching them to ordinary requests.** An app could send
@@ -17,15 +17,19 @@ scoot has not cut a numbered release yet; entries are dated.
   every one of them for as long as the app stayed connected. A single idle
   app could take scoot from 18 to 999, and scoot then turned away every
   new app and `scootctl`. scoot now disconnects an app that leaves more
-  than 128 unused, and everything else keeps working. Apps built on
-  libwayland (GTK, Qt, foot, Firefox, mpv and nearly everything else) never
-  come near it, and neither do Rust apps built on winit (it uses
-  libwayland underneath). **For developers of Rust Wayland clients using
-  `wayland-client`'s pure-Rust backend** (the default without its `system`
-  feature, as in Smithay's client toolkit): an app that queues more than
-  140 requests carrying file descriptors (shm pools, dma-buf planes,
-  timelines, gamma ramps) between two flushes is now disconnected; flush at
-  least every 140. Nothing to configure. Details: [protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps).
+  than 1024 unused: the default limit of libwayland, the library GNOME,
+  KDE, sway and weston are built on, so apps those serve are served here,
+  including apps that queued many requests while scoot was busy.
+- **scoot raises its own file-descriptor limit at startup** (to the
+  system's hard limit, at most 65536) and logs it; **programs scoot starts
+  get the normal limit back**, so older programs that use `select()` keep
+  working. With the higher limit, one app can no longer come near the point
+  where scoot turns new apps and `scootctl` away. On a machine or container
+  whose hard limit is 1024, nothing is raised, the startup log says so, the
+  unused-descriptor limit is 128, and an app that queued more than about
+  128 requests carrying descriptors while scoot was busy can be
+  disconnected there; raise the hard limit to avoid that. Nothing to
+  configure. Details: [protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps).
 
 ### 2026-09-24 — rounded corners and the focus ring now match the window
 
