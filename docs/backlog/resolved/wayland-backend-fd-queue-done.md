@@ -105,6 +105,36 @@ parked; `main` on its 1024 table: 0.36 s).
   child's `setrlimit` can no longer fail a spawn. The cap stays 65536, now
   justified by the storm figures above rather than by the uncached cost.
 
+## The stale-reading fill (round 4)
+
+Final re-review found the cached reading could go stale-low: within its
+~140 ms lifetime a client past its grace opened far more than the 128-fd
+reserve through guarded paths, and the reading waved them through. The
+reviewer's `stale.sh` (63 connections parking 1024 each, 64593 open, one
+accept to force a fresh reading, then two clients each keeping 512 shm pool
+fds): on `383c6b9` a holder was disconnected by `ECONNRESET` and scoot
+installed fds up to 65535 before `recvmsg` truncated; the uncached `40fd41d`
+refused one holder with a protocol error.
+
+- **Fix** (`46ccbb8`): `client_fds::record_arrival` counts every admitted
+  pool, plane (at its admitted weight, renderer copies included) and
+  timeline fd against the reading, and each admitted acquire wait counts
+  its eventfd; the reading's lifetime is capped at 250 ms, so a preempted
+  readdir cannot stretch it. What stays uncounted within a lifetime is
+  listed in `fd_pressure::table`'s doc (scoot's own fds beyond admission
+  weights, and wayland-backend's queue, as for the uncached observation).
+- **Measured** (`runs/stale-46ccbb8.txt`): the same run on `46ccbb8` refuses
+  the second holder with a protocol error on `wl_shm` (the client sees
+  `EPROTO`) at a peak of 65106 open, under the 65408 line; `383c6b9` in the
+  same run: `ECONNRESET`. The storm stays fixed: worst wait 122.8 ms
+  (`runs/fd-storm-script-46ccbb8.txt`).
+- **Tests:** `client_fds/tests/shm.rs`
+  `a_past_grace_client_is_refused_at_the_line_on_a_stale_reading` (a reading
+  pinned ten fds short of the line and never refreshed; the past-grace
+  client is refused within the line plus `SWEEP_MARGIN`; without the
+  counting it survives, `runs/failfirst-stale-reading-uncounted.txt`), and
+  `gauge.rs` `an_expired_reading_is_taken_again`.
+
 ## What it costs a legitimate client now
 
 - **With the raise (hard limit 8192 or more): nothing libwayland-server
