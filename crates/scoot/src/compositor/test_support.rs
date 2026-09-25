@@ -603,13 +603,82 @@ impl<S, A> Harness<S, A> {
     /// (nextest) never noticed; `cargo test` runs every test in one process,
     /// and on CI the leaked sockets plus the tests still running took all of
     /// `wayland-1`..`wayland-32` (run 36146821701: "wayland-1 through
-    /// wayland-32 are all in use"). Dropping the display also closes
-    /// XWayland's Wayland connection, which is what ends that server. What
-    /// still leaks is memory only (the loop and the XWM's dead source).
+    /// wayland-32 are all in use").
+    ///
+    /// Any XWayland server goes too, and first: the server process is sent
+    /// `SIGTERM` (see [`terminate_child_xwayland`]) while its source still
+    /// holds the display's `/tmp/.X<N>-lock` -- so no other test can be on
+    /// that number yet -- and then the source is removed, releasing the lock.
+    /// Dropping the
+    /// source does ask the backend to disconnect the server, but a kill only
+    /// takes effect when the backend next cleans up, which needs an event on
+    /// some client socket -- after teardown there may never be one, and the
+    /// server outlives the test holding its abstract X socket. Smithay looks
+    /// for a free display only in `:0`..`:32`, so under `cargo test` 33
+    /// lingering servers failed every later live test with "Could not find a
+    /// free socket for the XServer" (measured by XWayland Phase 4's gate,
+    /// once its suites took the live test count past 33). What still leaks
+    /// is memory only (the loop and the XWM's dead source).
     fn release_listener_sources(&mut self) {
         let handle = self.event_loop.handle();
+        for (token, display) in self.state.xwayland_tokens_for_test.drain(..) {
+            // Signal first, while the source still holds `:display`'s lock:
+            // released first, another test could take the number and exec
+            // its own `Xwayland :display` before the scan below, which would
+            // then match -- and end -- that test's server.
+            terminate_child_xwayland(display);
+            handle.remove(token);
+        }
         for token in self.state.listener_tokens.drain(..) {
             handle.remove(token);
+        }
+    }
+}
+
+/// Sends `SIGTERM` to this process's own `Xwayland` child serving display
+/// `:display`, found through `/proc`: its parent is this process and its
+/// command line names the display. Not through the server's Wayland
+/// connection -- Smithay creates that socket pair in this process, so its
+/// peer credentials name this process, not the server (measured: every
+/// server's "pid" was the test binary's). Matching on parent, name and
+/// display means nothing else can be signalled.
+fn terminate_child_xwayland(display: u32) {
+    let me = std::process::id();
+    let wanted = format!(":{display}");
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        // `/proc/<pid>/stat` is `pid (comm) state ppid ...`; the name can hold
+        // spaces or parentheses, so split after the last `)`.
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            continue;
+        };
+        let (Some(open), Some(close)) = (stat.find('('), stat.rfind(')')) else {
+            continue;
+        };
+        let comm = &stat[open + 1..close];
+        let ppid = stat[close + 1..]
+            .split_whitespace()
+            .nth(1)
+            .and_then(|field| field.parse::<u32>().ok());
+        if comm != "Xwayland" || ppid != Some(me) {
+            continue;
+        }
+        let names_display = std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|cmdline| {
+            cmdline
+                .split(|&b| b == 0)
+                .any(|arg| arg == wanted.as_bytes())
+        });
+        if names_display && let Some(pid) = rustix::process::Pid::from_raw(pid) {
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
         }
     }
 }

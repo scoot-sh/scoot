@@ -618,8 +618,39 @@ impl TabletSeatHandler for State {
     }
 }
 
+/// A compositor-provided selection is only ever an X one (see
+/// `xwayland/selection.rs`), tagged with the server that provided it, so a
+/// paste after a server restart is refused rather than converted from the
+/// wrong server. Without the feature nothing provides one.
 impl SelectionHandler for State {
+    #[cfg(feature = "xwayland")]
+    type SelectionUserData = smithay::xwayland::xwm::XwmId;
+    #[cfg(not(feature = "xwayland"))]
     type SelectionUserData = ();
+
+    /// A Wayland selection changed: announced to the X server.
+    #[cfg(feature = "xwayland")]
+    fn new_selection(
+        &mut self,
+        ty: smithay::wayland::selection::SelectionTarget,
+        source: Option<smithay::wayland::selection::SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
+        self.wayland_selection_to_x11(ty, source);
+    }
+
+    /// A Wayland client pastes an X selection: converted from its X owner.
+    #[cfg(feature = "xwayland")]
+    fn send_selection(
+        &mut self,
+        ty: smithay::wayland::selection::SelectionTarget,
+        mime_type: String,
+        fd: std::os::fd::OwnedFd,
+        _seat: Seat<Self>,
+        provider: &Self::SelectionUserData,
+    ) {
+        self.wayland_reads_x11_selection(ty, mime_type, fd, *provider);
+    }
 }
 
 impl DataDeviceHandler for State {

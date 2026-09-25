@@ -50,10 +50,13 @@ read your files anyway.
 
 **Not implemented:**
 
-- **XWayland clipboard, drag-and-drop and XIM.** X11 windows map, float,
-  go fullscreen and take the keyboard (see [XWayland](#xwayland-opt-in)),
-  but copying between an X app and a Wayland app, dragging between them,
-  and X input methods (XIM) are not bridged yet.
+- **Dropping into X windows, and XIM.** The clipboard and primary
+  selection cross between X and Wayland both ways, and a drag that starts
+  in an X app drops into Wayland apps (see
+  [Clipboard, drag-and-drop and input methods](#clipboard-drag-and-drop-and-input-methods));
+  but a drop *onto* an X window -- from a Wayland app, from another X app,
+  or within one X app -- does not land, and X input methods (XIM) are not
+  provided.
 
 The rest of this list *is* deliberate:
 
@@ -420,6 +423,14 @@ into another X client while one of them has the keyboard, capture any X
 window's contents, and synthesize input into them. Starting the server is
 harmless on its own; connecting your first X client is the trust decision.
 
+"X client" is anything that connects to `DISPLAY`, and every program the
+session spawns is told it -- a background *Wayland* app included. Any such
+process can connect and read the clipboard (below) whenever an X window
+has the keyboard, which a Wayland client could never do in the background.
+That is the same line wlroots -- and so sway -- draws for XWayland's
+clipboard (reads and new selections refused unless an X surface is focused,
+checked against its `xwayland/selection/` source), not a stricter one.
+
 It reaches past X windows, too. An X menu or tooltip (an override-redirect
 window) is drawn where its client puts it, above **every** window --
 fullscreen Wayland ones included -- and takes the pointer there, because
@@ -432,7 +443,8 @@ an X client like a program with your whole desktop in reach.
 What X clients do not get: keystrokes aimed at Wayland windows (keys go to
 an X window only while scoot has focused one, and the X server's own input
 focus is set by scoot, never left to "whatever is under the pointer"),
-anything drawn under the session lock, and -- through the focus gate below
+anything drawn under the session lock, the Wayland clipboard or primary
+selection while no X window is focused (below), and -- through the focus gate below
 -- the keyboard focus of a Wayland window by asking, with one known window:
 while a scoot-launched X app's token is live, another X client can race it
 to its startup id (below).
@@ -485,8 +497,9 @@ to its startup id (below).
   unlock.
 - **Not yet:** X clients draw at scale 1 (upscaled at a fractional
   `[output] scale`), `_NET_WM_MOVERESIZE` (an X app's own titlebar drag) is
-  ignored, `_NET_WM_ICON` is not read, and clipboard, drag-and-drop and XIM
-  between X and Wayland are not bridged.
+  ignored, `_NET_WM_ICON` is not read, drops onto X windows do not land and
+  XIM is not provided (see
+  [Clipboard, drag-and-drop and input methods](#clipboard-drag-and-drop-and-input-methods)).
 
 ### Focus: X windows ask, scoot decides
 
@@ -538,6 +551,112 @@ while the token is live (up to 30 seconds after the launch). Once the app's
 own window maps it spends the token, whichever rule focuses it, and the copy
 is worthless. Binding the redemption to the spawned process (the token
 already records it) is filed as a follow-up.
+
+### Clipboard, drag-and-drop and input methods
+
+**The clipboard and the primary selection cross both ways.** Copy in an X
+app and paste in a Wayland app, or the reverse; `xclip`/`xsel` and
+`wl-copy`/`wl-paste` see each other's selections (measured live, both
+selections, both directions, including a 2.9 MB payload). A clipboard
+manager on `zwlr_data_control` or `ext_data_control` is told about an X
+selection like any other, and one setting the clipboard reaches X clients
+too.
+
+**What a transfer can cost, bounded.** Every transfer is streamed: the
+compositor reads an X selection property 64 KiB at a time -- the next slice
+only once the last is in the Wayland reader's pipe -- and reads a Wayland
+source only while the X reader keeps up (X's `INCR` chunks, each waiting for
+the reader's delete). So a transfer holds at most one 64 KiB slice (two
+chunks for a Wayland source feeding an X reader) however large the
+selection, and a slow or stuck reader on either side stops the transfer, not
+the compositor. The property itself lives in XWayland's memory, not the
+compositor's. How many can be in flight is bounded too: per selection, 8
+pastes waiting on their X owner and 8 under way -- no more than 4 of those
+from one X app, so an app trickling its data a byte at a time cannot keep a
+different app's paste out -- and 4 transfers out to any one X client with
+16 in all. (The per-app counts go by X window ids, and an app can name
+another app's window; that moves whose share it uses, and the totals still
+hold.) **A paste past a bound is refused -- it reads nothing, at once --
+not queued.** Transfers that will not finish are ended, checked every
+second while any are in flight: one whose reader has gone, one that has not
+moved for 30 seconds, and, once the selection has changed hands or its X
+app has quit, a paste still waiting on the old owner's answer or stalled
+for over a second waiting on its next chunk -- so closing an X app
+mid-paste ends the paste within a couple of seconds. A paste that is moving
+is left to finish across a change of owner, since ending it would hand its
+reader part of the selection as if it were all of it. One app can still
+trickle its own share indefinitely; that costs it, not the compositor.
+
+**Only while an X window has the keyboard.** A Wayland client may set a
+selection only while it holds the keyboard, and only the focused client is
+offered one. XWayland is one Wayland client standing for every X client, so
+the X rule is: an X client may set or read a selection only while an X
+window holds the keyboard -- and never while the session is locked. So
+while you are typing in a Wayland window (or at the lock screen), no X
+client can read the Wayland clipboard or put a new selection on it;
+`xclip -o` fails with `target STRING not available`. The rule cannot tell X
+clients apart, and does not try to: a read names no requester, a clipboard
+tool like `xclip` has no window of its own, and inside the X server any X
+client can read or replace another's selection by design (the trust model
+above). An X client's selection set while a Wayland window is focused stays
+X-side -- other X apps paste it, Wayland apps keep theirs -- until the next
+copy on either side.
+
+**A paste of something copied in X is harder to tamper with, not
+impossible.** A Wayland paste is converted from whoever owns the X
+selection at that moment, so a background X client could take the
+selection after your copy -- announcing nothing -- and answer your next
+paste; it can even do so under the original owner's own window id, since X
+accepts any window as an owner. scoot therefore serves a paste only if the
+selection has not changed hands at all since the copy crossed, and otherwise
+takes it off the Wayland clipboard. That raises the bar; it is not a
+guarantee: the compositor reads an owner's answer from a property on a
+window of its own, which any X client may write, after an event any X
+client may send (a real owner's is a sent event too), so a client racing
+the owner can still substitute its bytes. X11 offers no way to close that.
+Selection types from X are filtered to mime types (no X-only target names,
+at most 255 bytes, at most 64 of them), so a hostile atom name cannot reach
+a Wayland client.
+
+**Drag-and-drop: out of X works, into X does not.** A drag that starts in
+an X app drops into Wayland apps (text from `mousepad` over X into a
+Wayland `mousepad`, measured). It starts only where a Wayland drag would:
+from a real, recent button press delivered to an X window whose X client is
+that of the window taking the drag's selection -- never while locked, and
+**never from touch** (X touch drags are refused, as Wayland ones are).
+Without that check (upstream's behaviour, and scoot's before this), any X
+client could turn a press you were holding on a Wayland window into a drag
+of its own data and drop it wherever you released; **presses on Wayland
+windows are now protected. Presses on X windows are not:** X accepts any
+window as the owner of the drag's selection, so a stranger naming the X
+window you pressed on still takes the press over, and the window manager
+cannot tell who asked. A drop onto an X window -- from a Wayland app, from
+another X app, or inside one X app, like moving selected text within an X
+editor -- does not land: the drag ends and nothing is inserted or lost, and
+the X apps stay usable. The cause is on scoot's side: Smithay's drag grab
+delivers to the pointer's focus type, which in scoot is a plain
+`wl_surface`, and XWayland takes drops only through its window manager,
+never through `wl_data_device`; giving scoot's pointer focus an X arm is
+filed as
+[`backlog/protocols/xwayland-pointer-focus-x11.md`](backlog/protocols/xwayland-pointer-focus-x11.md).
+
+**Input methods: XIM is not provided.** X clients compose text through XIM
+(an X-side protocol an input-method daemon speaks as an X client); XWayland
+does not bind `text-input-v3` (its binary links no such interface), so a
+Wayland input method (`input-method-v2`, fcitx5, an on-screen keyboard)
+cannot compose into an X window. An input-method daemon running its own
+XIM server under XWayland (fcitx5's X frontend, for instance) is untested.
+An input method's keyboard grab does pre-empt an X window's keyboard like
+any other: while it holds the grab, keys go to it, not to the X window.
+
+**Most of the bounds above, and the hooks the rules need, live in scoot's
+Smithay fork**, each measured first and listed in [forks.md](forks.md):
+upstream, large transfers were cut to 64 KiB both ways, a stuck reader made
+the compositor buffer a whole selection, an owner appending without waiting
+was re-read on every append, transfers of either direction piled up without
+bound or stalled for good, and a new Wayland selection could sit unsent to
+the X server; `X11Wm::selection_owner`, `X11Wm::selection_generation` and
+`XwmHandler::allow_drag` are fork additions.
 
 ## Layer shell (bars, wallpapers, launchers)
 

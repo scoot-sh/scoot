@@ -108,6 +108,28 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[XWayland Phase 4: clipboard, primary selection, drags, input methods](docs/backlog/protocols/xwayland-support.md)**
+  (2026-09-25, PR #246) — the clipboard and primary selection cross between X and
+  Wayland both ways (clipboard managers included), gated like Wayland's own
+  rule with XWayland as the client: only while an X window holds the
+  keyboard, never while locked. A Wayland paste is refused once the X
+  selection has changed hands since it crossed (a hidden owner could
+  otherwise serve it; a forged owner answer remains possible, documented).
+  X drags now need a recent press on a window of the dragging client --
+  any X client could hijack any held press, a Wayland one included, since
+  Phase 1 (fail-first); presses on X windows stay open to a stranger naming
+  the pressed window (X11 limit, pinned). Thirteen measured XWM bugs and hooks went into the
+  scoot-sh Smithay fork (`5b575329`, `docs/forks.md`; six from two review rounds:
+  a forgeable owner check, unbounded memory and fds, a bound exhausted for
+  good by stalled or trickling pastes, orphaned transfers waiting on an
+  unrelated event): 64 KiB truncation
+  both ways, unbounded buffering behind a stuck X reader, unbounded pastes
+  behind a silent owner, an unsent ownership change, and the owner/drag
+  hooks. X → Wayland drags work live; drops onto X windows do not (filed,
+  [pointer focus X arm](docs/backlog/protocols/xwayland-pointer-focus-x11.md));
+  XIM not provided; an IM keyboard grab pre-empts X focus (tested).
+  Ticket stays OPEN for Phases 5–7.
+
 - **[Multi-output phase E: `--tty` drives every connected monitor](docs/roadmap/19-multi-output.md)**
   (2026-09-25) — E1: every connected connector with a mode gets a head
   (its own surface, presenter, `wl_output`, render target and gamma size),
@@ -163,7 +185,7 @@ each item's own file records why it landed when it did.
   and the [smoke feature-gate](docs/backlog/resolved/smoke-xwayland-step-feature-gate-done.md)
   defects. Live on the dev VM under `--headless`, `--nested` and `--tty`
   with xterm/xeyes/xclock/GTK4 zenity; default-build hot paths unchanged.
-  Ticket stays OPEN for clipboard/DnD/XIM and packaging.
+  Ticket stayed OPEN for clipboard/DnD/XIM (Phase 4, above) and packaging.
 
 - **[Floating windows, PR 2 of 2: move and resize](docs/backlog/resolved/floating-windows-done.md)**
   (2026-09-25, PR #243) — `[floating] modifier` (Super) with the left button moves a

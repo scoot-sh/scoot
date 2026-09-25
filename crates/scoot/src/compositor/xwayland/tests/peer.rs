@@ -31,6 +31,12 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_m
 
 use crate::compositor::test_support::wait_for;
 
+mod clip;
+mod ime;
+
+pub(super) use clip::{ClipStep, Which};
+pub(super) use ime::ImeStep;
+
 /// What a test tells the peer to do.
 #[derive(Debug)]
 pub(super) enum Step {
@@ -53,6 +59,10 @@ pub(super) enum Step {
     Close(String),
     /// `ext_session_lock_manager_v1.lock`, and hold it.
     Lock,
+    /// A clipboard step (see `peer/clip.rs`).
+    Clip(ClipStep),
+    /// An input-method step (see `peer/ime.rs`).
+    Ime(ImeStep),
 }
 
 /// What the peer answers.
@@ -60,6 +70,16 @@ pub(super) enum Step {
 pub(super) enum Ack {
     Done,
     Toplevels(Vec<(String, String)>),
+    /// A selection's offered mime types, `None` when there is no selection.
+    Mimes(Option<Vec<String>>),
+    /// What a receive read, or why it could not.
+    Bytes(Result<Vec<u8>, String>),
+    /// A count.
+    Count(usize),
+    /// Per read, whether it has ended and how many bytes it received.
+    Ends(Vec<(bool, usize)>),
+    /// Key codes an input method received.
+    Keys(Vec<u32>),
 }
 
 #[derive(Default)]
@@ -77,6 +97,10 @@ struct Peer {
     ext_handles: Vec<ExtKnown>,
     /// Per window: the newest configure's serial and size, if unacked.
     configures: Vec<Option<(u32, i32, i32)>>,
+    /// The clipboard half (see `peer/clip.rs`).
+    clip: clip::Clip,
+    /// The input-method half (see `peer/ime.rs`).
+    ime: ime::Ime,
 }
 
 struct ExtKnown {
@@ -118,6 +142,18 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Peer {
             "ext_session_lock_manager_v1" => peer.locks = Some(registry.bind(name, 1, qh, ())),
             "zwlr_foreign_toplevel_manager_v1" => peer.manager_name = Some((name, version)),
             "ext_foreign_toplevel_list_v1" => peer.list_name = Some((name, version)),
+            "wl_data_device_manager" => {
+                peer.clip.data_manager = Some(registry.bind(name, version.min(3), qh, ()));
+            }
+            "zwp_primary_selection_device_manager_v1" => {
+                peer.clip.primary_manager = Some(registry.bind(name, 1, qh, ()));
+            }
+            "zwp_input_method_manager_v2" => {
+                peer.ime.manager = Some(registry.bind(name, 1, qh, ()));
+            }
+            "zwlr_data_control_manager_v1" => {
+                peer.clip.control_manager = Some(registry.bind(name, version.min(2), qh, ()));
+            }
             _ => {}
         }
     }
@@ -318,7 +354,26 @@ pub(super) fn peer(
     let mut managers = Vec::new();
     let mut managers_ext = Vec::new();
     let mut locks = Vec::new();
-    while let Ok(step) = steps.recv() {
+    loop {
+        // A peer with its selection devices bound keeps dispatching between
+        // steps, as a real client's loop does: its sources have to answer
+        // `send` while the test is busy pumping the compositor for an X
+        // read. Every other test's peer only dispatches inside a step.
+        let step = if peer.clip.bound() {
+            match steps.recv_timeout(std::time::Duration::from_millis(2)) {
+                Ok(step) => step,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    clip::pump(&conn, &mut queue, &mut peer)?;
+                    continue;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        } else {
+            match steps.recv() {
+                Ok(step) => step,
+                Err(_) => break,
+            }
+        };
         let ack = match step {
             Step::Map { title, color } => {
                 let index = peer.configures.len();
@@ -419,6 +474,8 @@ pub(super) fn peer(
                 queue.roundtrip(&mut peer).map_err(|e| e.to_string())?;
                 Ack::Done
             }
+            Step::Clip(step) => clip::step(&mut peer, &mut queue, &conn, step)?,
+            Step::Ime(step) => ime::step(&mut peer, &mut queue, step)?,
         };
         acks.send(ack).map_err(|e| e.to_string())?;
     }

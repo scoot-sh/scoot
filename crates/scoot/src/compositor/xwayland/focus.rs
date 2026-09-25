@@ -273,7 +273,7 @@ pub(in crate::compositor) const X_CLIENT_RESOURCE_MASK: u32 = 0x001f_ffff;
 
 /// Whether two X window ids were allocated to the same X client (the same
 /// connection); see [`X_CLIENT_RESOURCE_MASK`].
-fn same_x_client(a: u32, b: u32) -> bool {
+pub(super) fn same_x_client(a: u32, b: u32) -> bool {
     a & !X_CLIENT_RESOURCE_MASK == b & !X_CLIENT_RESOURCE_MASK
 }
 

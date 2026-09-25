@@ -395,6 +395,11 @@ pub struct State {
     /// `release_listener_sources`).
     #[cfg(test)]
     pub(crate) listener_tokens: Vec<smithay::reexports::calloop::RegistrationToken>,
+    /// Test-only: every XWayland server source `xwayland::start` inserted,
+    /// with its display number, for the same teardown (see
+    /// `release_listener_sources`).
+    #[cfg(test)]
+    pub(crate) xwayland_tokens_for_test: Vec<(smithay::reexports::calloop::RegistrationToken, u32)>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -453,6 +458,13 @@ pub struct State {
     /// application, and none in a session without X clients.
     #[cfg(feature = "xwayland")]
     pub x11_startup_carriers: HashMap<u32, smithay::xwayland::X11Surface>,
+    /// The window manager's ownership count for each selection at the
+    /// moment the gate let it onto the Wayland side (`xwayland/selection.rs`):
+    /// a Wayland paste is served only while it has not changed hands since.
+    /// Written when an X selection crosses or stops being the Wayland one;
+    /// read per paste.
+    #[cfg(feature = "xwayland")]
+    pub x11_selection_owners: xwayland::selection::CrossedOwners,
     /// `zwlr_layer_shell_v1`: bars, docks, wallpapers and notification
     /// daemons. Unlike the two `#[allow(dead_code)]` states below this one is
     /// read again -- `WlrLayerShellHandler::shell_state` (see
@@ -1015,6 +1027,8 @@ impl State {
             x11_unmanaged: Vec::new(),
             #[cfg(feature = "xwayland")]
             x11_startup_carriers: HashMap::new(),
+            #[cfg(feature = "xwayland")]
+            x11_selection_owners: xwayland::selection::CrossedOwners::default(),
             layer_shell_state,
             ext_workspace,
             foreign_toplevels,
@@ -1081,6 +1095,8 @@ impl State {
             fail_next_draw_for_test: false,
             #[cfg(test)]
             listener_tokens: listener_tokens.to_vec(),
+            #[cfg(test)]
+            xwayland_tokens_for_test: Vec::new(),
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),

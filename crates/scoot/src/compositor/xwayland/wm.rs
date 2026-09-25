@@ -7,8 +7,13 @@
 //! laid out) and `focus.rs` (the focus gate, and the one place an X client
 //! can ask for focus).
 
+use std::os::fd::OwnedFd;
+
+use smithay::input::Seat;
+use smithay::input::dnd::GrabType;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Logical, Rectangle, Serial};
+use smithay::wayland::selection::SelectionTarget;
 use smithay::wayland::xwayland_keyboard_grab::XWaylandKeyboardGrabHandler;
 use smithay::wayland::xwayland_shell::{XWaylandShellHandler, XWaylandShellState};
 use smithay::xwayland::xwm::{Reorder, ResizeEdge, WmWindowProperty, X11Window, XwmId};
@@ -173,7 +178,48 @@ impl XwmHandler for State {
         self.x11_activation_request(&window);
     }
 
-    fn disconnected(&mut self, _xwm: XwmId) {
+    /// An X client asks to read a Wayland selection: only through the gate
+    /// (see `selection.rs`).
+    fn allow_selection_access(&mut self, xwm: XwmId, _selection: SelectionTarget) -> bool {
+        self.x11_selection_allowed(xwm)
+    }
+
+    /// The read `allow_selection_access` allowed: the Wayland source writes
+    /// into `fd`.
+    fn send_selection(
+        &mut self,
+        _xwm: XwmId,
+        selection: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+    ) {
+        self.x11_reads_wayland_selection(selection, mime_type, fd);
+    }
+
+    /// An X client took a selection: it crosses to Wayland only through the
+    /// gate (see `selection.rs`).
+    fn new_selection(&mut self, xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
+        self.x11_new_selection(xwm, selection, mime_types);
+    }
+
+    fn cleared_selection(&mut self, xwm: XwmId, selection: SelectionTarget) {
+        self.x11_cleared_selection(xwm, selection);
+    }
+
+    /// An X client starting a drag from a held press: only from its own
+    /// window's press (see `dnd.rs`).
+    fn allow_drag(
+        &mut self,
+        _xwm: XwmId,
+        owner: X11Window,
+        seat: &Seat<Self>,
+        serial: Serial,
+        grab: GrabType,
+    ) -> bool {
+        self.x11_drag_allowed(owner, seat, serial, grab)
+    }
+
+    fn disconnected(&mut self, xwm: XwmId) {
         // The post-`READY` death signal (the pre-`READY` one is
         // `XWaylandEvent::Error` -- see `xwayland/mod.rs`): the server is
         // gone, the session is not. `warn!`, not `debug!`: an operator whose
@@ -189,6 +235,9 @@ impl XwmHandler for State {
         // columns and stale taskbar entries. `self.xwm` itself is left in
         // place: this runs inside its own event callback.
         self.sweep_x11_windows();
+        // Nor would anything the server put on the Wayland clipboard have
+        // anything left to convert from.
+        self.forget_x11_selections(xwm);
     }
 }
 

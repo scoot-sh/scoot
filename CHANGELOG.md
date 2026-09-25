@@ -9,6 +9,32 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-25 — copy, paste and drag between X and Wayland apps (PR #246)
+
+- **Copy and paste crosses between X11 and Wayland apps**, both ways, for
+  the clipboard and the middle-click primary selection (`xclip`/`xsel` and
+  `wl-copy`/`wl-paste` see each other; large selections stream in chunks).
+  Clipboard managers see what X apps copy. An X app can read or set the
+  selection only while an X window has the keyboard, and never while the
+  screen is locked: while you work in a Wayland window, X apps cannot read
+  your clipboard or put a new selection on it (`xclip -o` there fails with
+  `target STRING not available`). Something an X app copies while a Wayland
+  window is focused stays with the X apps. A paste of something you copied
+  *in an X app* is harder for another X app to tamper with than before, but
+  X11 cannot rule it out -- see
+  [protocols.md](docs/protocols.md#clipboard-drag-and-drop-and-input-methods).
+  Very many pastes at once are refused (read as empty), not queued.
+- **Drag from an X app into a Wayland app** (text measured; files
+  untested). A button press you make on a *Wayland* window can no longer
+  be turned into a drag by an X app -- before this, any X app could take it
+  over. A press on an X window is still open to that (X11 cannot tell who
+  started a drag). **Drags that start from touch in an X app are now
+  refused**, as touch drags from Wayland apps already were. Dropping *onto*
+  an X window still does not work (from a Wayland app, from another X app,
+  or within the same X app): the drop does nothing, and nothing is lost.
+- **X input methods (XIM) are not supported**; a Wayland input method's
+  keyboard grab still takes the keys from an X window, as from any window.
+
 ### 2026-09-25 — X11 applications (opt-in XWayland)
 
 - **X11 apps run** with `--xwayland` (or `[xwayland] enabled`) in a build
@@ -28,9 +54,9 @@ scoot has not cut a numbered release yet; entries are dated.
   answer.
 - **Trust:** running an X app extends full trust to it -- X11 apps can read
   each other's keystrokes and windows by design, and an X app's menus and
-  pop-ups can cover anything on screen, Wayland apps included. Not bridged
-  yet: copy and paste or drag-and-drop between X and Wayland apps, and X
-  input methods.
+  pop-ups can cover anything on screen, Wayland apps included. (Copy,
+  paste and drag between X and Wayland apps came later the same day --
+  see above.)
 
 ### 2026-09-25 — move and resize floating windows
 
