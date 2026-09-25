@@ -88,7 +88,7 @@ pub(super) const FALLBACK_GAMMA_SIZE: u32 = 256;
 /// one live control per output" is a map from the id the core knows each one
 /// by: a second `get_gamma_control` on the same output fails the old control
 /// and takes its place, while a control on another output is untouched.
-pub(crate) struct GammaControlState {
+pub struct GammaControlState {
     /// Held only to keep the manager global alive -- like
     /// `output_manager_state`, nothing reads this field again after `new`.
     #[allow(dead_code)]

@@ -10,6 +10,7 @@ use smithay::input::pointer::{
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER, Serial};
 use smithay::wayland::pointer_constraints::with_pointer_constraint;
+use smithay::wayland::seat::WaylandFocus;
 
 use super::State;
 use super::keybindings::Bound;
@@ -838,9 +839,11 @@ impl State {
         // serial must not follow it onto whatever gained it. What the filter
         // decides then says whether it went there at all -- see the recording
         // after the call.
-        let recipient = keyboard
-            .current_focus()
-            .and_then(|surface| self.client_of(&surface));
+        let recipient = keyboard.current_focus().and_then(|focus| {
+            focus
+                .wl_surface()
+                .and_then(|surface| self.client_of(&surface))
+        });
         let transition = self.note_held(keycode, state);
         let time = InputTime::from_millis(self.millis());
         let outcome = keyboard
@@ -1028,6 +1031,13 @@ impl State {
         let location = pointer.current_location();
         if let Some(layer) = self.layer_under(&layer_shell::ABOVE_WINDOWS, location) {
             self.click_layer(&layer);
+            return;
+        }
+        // A click in an override-redirect X window -- a menu item, a
+        // drop-down entry -- focuses nothing: the window is not a window
+        // scoot manages, and the click must not reach the one beneath it.
+        #[cfg(feature = "xwayland")]
+        if self.x11_unmanaged_under(location).is_some() {
             return;
         }
         // The same output-confined search the pointer focus uses (see

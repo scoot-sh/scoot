@@ -118,6 +118,7 @@ fn the_focus_toggle_hands_the_keyboard_between_the_layers() {
             .seat
             .get_keyboard()
             .and_then(|keyboard| keyboard.current_focus())
+            .map(smithay::reexports::wayland_server::protocol::wl_surface::WlSurface::from)
     };
     assert_eq!(keyboard(&fixture), surface(&fixture, dialog));
     fixture.act(Action::ToggleFloatingFocus);

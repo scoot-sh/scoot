@@ -70,7 +70,7 @@ struct Entry {
 /// linear scan beats hashing on every measure that matters here, and the
 /// creation order is itself meaningful ([`Outputs::primary`] is the first).
 /// Every accessor allocates nothing.
-pub(crate) struct Outputs {
+pub struct Outputs {
     entries: Vec<Entry>,
     /// The id the next [`Outputs::add`] hands out. Monotonic and never
     /// reused, so an id stays stable for the life of the process even if this

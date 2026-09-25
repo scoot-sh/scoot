@@ -1062,7 +1062,11 @@ impl Fixture {
     fn keyboard_focus(
         &self,
     ) -> Option<smithay::reexports::wayland_server::protocol::wl_surface::WlSurface> {
-        self.state.seat.get_keyboard()?.current_focus()
+        self.state
+            .seat
+            .get_keyboard()?
+            .current_focus()
+            .map(smithay::reexports::wayland_server::protocol::wl_surface::WlSurface::from)
     }
 
     /// The `index`-th window's `wl_surface`, compositor-side.

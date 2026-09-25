@@ -389,11 +389,17 @@ pub struct State {
     /// real renderer fail on demand.
     #[cfg(test)]
     pub(crate) fail_next_draw_for_test: bool,
+    /// Test-only: the listening socket's and the display's loop
+    /// registrations, so a test harness can remove both on teardown even
+    /// when its event loop outlives it (see `test_support`'s
+    /// `release_listener_sources`).
+    #[cfg(test)]
+    pub(crate) listener_tokens: Vec<smithay::reexports::calloop::RegistrationToken>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
-    /// `xwayland_shell_v1`: the association half of the opt-in XWayland
-    /// skeleton (see `xwayland.rs`). Always constructed, like
+    /// `xwayland_shell_v1`: the association half of opt-in XWayland (see
+    /// `xwayland/mod.rs`). Always constructed, like
     /// `xdg_shell_state` above -- and harmless when the session never asked:
     /// Smithay's `can_view` gate admits only XWayland's own client, which
     /// exists solely between a successful `XWayland::spawn` and session end,
@@ -407,12 +413,12 @@ pub struct State {
     /// and its server reached `READY` (see `xwayland::start`). `None`
     /// otherwise -- never asked, binary absent, server died pre-`READY`, or
     /// the WM attach failed. Read by `XwmHandler::xwm_state` (see
-    /// `handlers.rs`); Phase 1 never maps through it.
+    /// `xwayland/wm.rs`), which is how every X window reaches the layout.
     #[cfg(feature = "xwayland")]
     pub xwm: Option<xwayland::X11Wm>,
     /// The X display number while our server is believed live: set from the
     /// synchronous lock at spawn, cleared on a pre-`READY` death or a failed
-    /// window-manager attach (see `xwayland.rs` -- a WM-less server is not
+    /// window-manager attach (see `xwayland/mod.rs` -- a WM-less server is not
     /// live for our purposes). `State::spawn` and `run`'s process export read
     /// exactly this -- `Some` sets `DISPLAY`, `None` leaves it untouched
     /// (no clobber of a host `DISPLAY` under `--nested`). Unconditional
@@ -422,10 +428,31 @@ pub struct State {
     /// `zwp_xwayland_keyboard_grab_manager_v1`: created alongside a
     /// successful spawn, never in `new` (see `xwayland::start` for why the
     /// timing matters and why a never-asked session stays
-    /// byte-identical). Phase 1 answers no grab for any surface (see
-    /// `handlers.rs`); the focus half is Phase 3.
+    /// byte-identical). Answers no grab for any surface (see
+    /// `xwayland/wm.rs`): an X client's keyboard grab stays inside the X
+    /// server.
     #[cfg(feature = "xwayland")]
     pub xwayland_grab: Option<xwayland::XWaylandKeyboardGrabState>,
+    /// The override-redirect X windows currently mapped -- menus, tooltips,
+    /// drop-downs -- in mapping order, newest last (on top). Never in the
+    /// core or the `Space`: they place themselves, and are drawn and
+    /// hit-tested from here (see `xwayland/unmanaged.rs`). Written only by
+    /// that module (on map, unmap/destroy, and the server's death); read by
+    /// the hit test, the frame gathering, and the frame-callback and
+    /// presentation passes -- each behind its lock branch. Empty in every
+    /// session without an X client, so each reader costs an empty-`Vec` test.
+    #[cfg(feature = "xwayland")]
+    pub x11_unmanaged: Vec<smithay::xwayland::X11Surface>,
+    /// Every X window, mapped or not, that currently carries a
+    /// `_NET_STARTUP_ID`, by X window id -- so the focus gate can read a
+    /// toolkit's startup id off its *client leader* (GTK puts it
+    /// there, on an unmapped window, not on the toplevel they map; see
+    /// `xwayland/focus.rs`). Written only from the XWM callbacks (a window
+    /// created, its startup id changing, its destruction, the server's
+    /// death); read once per redemption. Holds a handful of windows per X
+    /// application, and none in a session without X clients.
+    #[cfg(feature = "xwayland")]
+    pub x11_startup_carriers: HashMap<u32, smithay::xwayland::X11Surface>,
     /// `zwlr_layer_shell_v1`: bars, docks, wallpapers and notification
     /// daemons. Unlike the two `#[allow(dead_code)]` states below this one is
     /// read again -- `WlrLayerShellHandler::shell_state` (see
@@ -917,7 +944,9 @@ impl State {
             .expect("a keymap for the default layout");
         seat.add_pointer();
 
-        let socket_name = Self::listen(display, event_loop)?;
+        let (socket_name, listener_tokens) = Self::listen(display, event_loop)?;
+        #[cfg(not(test))]
+        let _ = listener_tokens;
 
         // Built here rather than in the struct literal below, which moves
         // `appearance` before `cursor`'s own field initializer could read it.
@@ -982,6 +1011,10 @@ impl State {
             xdisplay: None,
             #[cfg(feature = "xwayland")]
             xwayland_grab: None,
+            #[cfg(feature = "xwayland")]
+            x11_unmanaged: Vec::new(),
+            #[cfg(feature = "xwayland")]
+            x11_startup_carriers: HashMap::new(),
             layer_shell_state,
             ext_workspace,
             foreign_toplevels,
@@ -1046,6 +1079,8 @@ impl State {
             frame_cursor_for_test: None,
             #[cfg(test)]
             fail_next_draw_for_test: false,
+            #[cfg(test)]
+            listener_tokens: listener_tokens.to_vec(),
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
@@ -1064,17 +1099,26 @@ impl State {
     /// [`BindError::RuntimeDirNotSet`] -- into a panic and, under this
     /// workspace's `panic = "abort"` release profile, a core dump, with
     /// nothing in it to tell an operator what to fix.
+    ///
+    /// Also hands back the two loop registrations (the socket's and the
+    /// display's); only a test harness keeps them.
     fn listen(
         display: Display<State>,
         event_loop: &mut EventLoop<'static, State>,
-    ) -> Result<OsString, Box<dyn std::error::Error>> {
+    ) -> Result<
+        (
+            OsString,
+            [smithay::reexports::calloop::RegistrationToken; 2],
+        ),
+        Box<dyn std::error::Error>,
+    > {
         // First, before `display` moves into the `Generic` below: this is the
         // failure that actually happens, and nothing else should have been
         // set up by the time it is reported.
         let socket = WaylandListener::bind_auto().map_err(socket_error)?;
         let name = socket.socket_name();
         let handle = event_loop.handle();
-        handle
+        let listener = handle
             .insert_source(socket, |stream, _, state: &mut State| {
                 super::wayland_accept::admit(state, stream, super::fd_pressure::table());
             })
@@ -1083,7 +1127,7 @@ impl State {
             // this function's error type to carry a `WaylandListener`;
             // only the reason is kept.
             .map_err(|error| error.error)?;
-        handle
+        let dispatcher = handle
             .insert_source(
                 Generic::new(display, Interest::READ, Mode::Level),
                 |_, display, state: &mut State| {
@@ -1130,7 +1174,7 @@ impl State {
                 },
             )
             .map_err(|error| error.error)?;
-        Ok(name)
+        Ok((name, [listener, dispatcher]))
     }
 
     /// Milliseconds since start, which is what Wayland input events carry.
@@ -1142,10 +1186,24 @@ impl State {
         self.windows.get(&id)
     }
 
+    /// The window whose root surface `surface` is: an xdg toplevel's, or --
+    /// in an `xwayland` build -- the surface XWayland associated with a
+    /// managed X window. On the commit path, so allocation-free: the X arm
+    /// takes that window's state lock and a reference-count bump to compare,
+    /// and only X windows pay it.
     pub fn id_of(&self, surface: &WlSurface) -> Option<WindowId> {
         self.windows
             .iter()
-            .find(|(_, window)| window.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .find(|(_, window)| {
+                if let Some(toplevel) = window.toplevel() {
+                    return toplevel.wl_surface() == surface;
+                }
+                #[cfg(feature = "xwayland")]
+                if let Some(x11) = window.x11_surface() {
+                    return x11.wl_surface().as_ref() == Some(surface);
+                }
+                false
+            })
             .map(|(&id, _)| id)
     }
 
@@ -1197,7 +1255,13 @@ impl State {
         if self.session_lock.is_locked() {
             return self.lock_surface_under(pos);
         }
-        self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos)
+        let above = self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos);
+        // Override-redirect X windows (menus, tooltips) sit between the top
+        // layers and the windows, as they are drawn (see
+        // `xwayland/unmanaged.rs`).
+        #[cfg(feature = "xwayland")]
+        let above = above.or_else(|| self.x11_unmanaged_under(pos));
+        above
             .or_else(|| self.window_under(pos))
             .or_else(|| self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos))
     }
@@ -1226,7 +1290,7 @@ impl State {
     /// theme (`XCURSOR_THEME`/`XCURSOR_SIZE`, read off the rebuilt `Cursor`
     /// so a reloaded theme reaches future children), and -- while the
     /// session's XWayland server is believed live -- `DISPLAY` for X11
-    /// clients (see `xwayland.rs`; unset there means inherit, so a
+    /// clients (see `xwayland/mod.rs`; unset there means inherit, so a
     /// host-provided `DISPLAY` under `--nested` survives when XWayland is
     /// off), and -- unless the
     /// token table is full -- a fresh activation token in
@@ -1306,8 +1370,34 @@ impl State {
         if let Some(token) = &token {
             child.env(State::ACTIVATION_TOKEN_ENV, token.as_str());
         }
+        // While XWayland is live, the same token again as the X toolkits'
+        // startup id -- the chain the X focus gate redeems (see
+        // `xwayland/focus.rs`). Removed first for the same reason as above:
+        // an inherited one is a receipt for someone else's action. Only
+        // while live, so a session without XWayland spawns exactly as it
+        // always has.
+        if self.xdisplay.is_some() {
+            child.env_remove(State::STARTUP_ID_ENV);
+            if let Some(token) = &token {
+                child.env(State::STARTUP_ID_ENV, token.as_str());
+            }
+        }
         match child.spawn() {
             Ok(child) => {
+                // The other half of that chain, for X clients that set no
+                // startup id at all: which process this token was minted
+                // for, so an X window whose client is this process (as the
+                // X server reports it) can be matched to it.
+                #[cfg(feature = "xwayland")]
+                if self.xdisplay.is_some()
+                    && let Some(data) = token
+                        .as_ref()
+                        .and_then(|token| self.xdg_activation.data_for_token(token))
+                {
+                    let pid = child.id();
+                    data.user_data
+                        .insert_if_missing_threadsafe(|| super::xwayland::SpawnedPid(pid));
+                }
                 // Tracked for the SIGCHLD drain, which reaps exactly these
                 // pids and nothing else (see `child_reaper.rs`). Inserted
                 // synchronously here, before the child can possibly exit and

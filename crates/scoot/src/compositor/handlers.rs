@@ -16,14 +16,13 @@ use smithay::reexports::wayland_server::protocol::wl_seat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Resource, protocol::wl_buffer};
 use smithay::utils::{IsAlive, Serial};
-#[cfg(feature = "xwayland")]
-use smithay::utils::{Logical, Rectangle};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     CompositorClientState, CompositorHandler, CompositorState, add_pre_commit_hook, get_parent,
     get_role, is_sync_subsurface, with_states,
 };
 use smithay::wayland::output::OutputHandler;
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
@@ -46,13 +45,7 @@ use smithay::wayland::shell::xdg::{
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
 #[cfg(feature = "xwayland")]
-use smithay::wayland::xwayland_keyboard_grab::XWaylandKeyboardGrabHandler;
-#[cfg(feature = "xwayland")]
-use smithay::wayland::xwayland_shell::{XWaylandShellHandler, XWaylandShellState};
-#[cfg(feature = "xwayland")]
-use smithay::xwayland::{X11Surface, X11Wm, XWaylandClientData, XwmHandler};
-#[cfg(feature = "xwayland")]
-use smithay::xwayland::xwm::{Reorder, ResizeEdge, X11Window, XwmId};
+use smithay::xwayland::XWaylandClientData;
 
 use super::State;
 use super::output_scale::send_preferred_buffer_scale;
@@ -499,182 +492,9 @@ impl XdgShellHandler for State {
     }
 }
 
-/// The opt-in XWayland skeleton's protocol halves (see `xwayland.rs`).
-///
-/// `XWaylandShellHandler` is the association protocol (`xwayland_shell_v1`,
-/// which pairs each X window with a `wl_surface`); the default
-/// `surface_associated` no-op stands, because Phase 1 files nothing about
-/// the pair anywhere -- mapping is Phase 2.
-///
-/// `XwmHandler` is the window-manager side. Every required method lands
-/// here, and every one refuses-by-default in the Phase-1 sense: `new_*`
-/// log, `map_window_request` deliberately never calls
-/// `X11Surface::set_mapped` (no X window enters the core -- the boundary
-/// `xwayland.rs` states), `configure_request` never calls `configure`, and
-/// `resize_request`/`move_request` start no grab. `active_window_request`
-/// is *not* implemented on purpose: the trait's default is a no-op (refuse),
-/// and that is the spike-verified answer -- X11 has no activation serials,
-/// so honouring `NET_ACTIVE_WINDOW` unconditionally would be the exact
-/// focus-stealing hole `activation-serial-validation` closed for xdg, now
-/// in X form. Phase 3 owns the gate (focus-on-map only if
-/// spawned-here-with-chain or nothing focused; `active_window_request`
-/// through the same gate, never a command).
-#[cfg(feature = "xwayland")]
-impl XWaylandShellHandler for State {
-    fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
-        &mut self.xwayland_shell_state
-    }
-}
-
-#[cfg(feature = "xwayland")]
-impl XwmHandler for State {
-    fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
-        // Callbacks originate from the stored manager's own event handling,
-        // so it is always there when one fires -- the way anvil reads its
-        // `Option` too. An `expect`, not an `Option` return, because the
-        // trait gives no other shape and inventing a dummy would be worse.
-        self.xwm
-            .as_mut()
-            .expect("an XWM callback fired without a running X server")
-    }
-
-    fn new_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        tracing::debug!(
-            id = window.window_id(),
-            "X11 window created (Phase-1 skeleton: not mapped)"
-        );
-    }
-
-    fn new_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        tracing::debug!(
-            id = window.window_id(),
-            "X11 override-redirect window created (Phase-1 skeleton: unmanaged, as ever)"
-        );
-    }
-
-    fn map_window_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        // Refuse-by-default: `set_mapped(true)` is never called, so the
-        // window never becomes visible and never enters the core. `debug!`,
-        // not `warn!`: a 30-window storm is 30 lines, and refusal is the
-        // designed Phase-1 answer, not an anomaly.
-        tracing::debug!(
-            id = window.window_id(),
-            "X11 map request refused (Phase-1 skeleton: X windows do not enter the layout)"
-        );
-    }
-
-    fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        // A notification, not a request: override-redirect windows map
-        // themselves and the XWM cannot prohibit it. Nothing to manage in
-        // this phase (and nothing managed in any phase -- they stay
-        // unmanaged by policy), so this only logs.
-        tracing::debug!(
-            id = window.window_id(),
-            "X11 override-redirect window mapped itself (unmanaged)"
-        );
-    }
-
-    fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        tracing::debug!(id = window.window_id(), "X11 window unmapped");
-    }
-
-    fn destroyed_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        tracing::debug!(id = window.window_id(), "X11 window destroyed");
-    }
-
-    fn configure_request(
-        &mut self,
-        _xwm: XwmId,
-        window: X11Surface,
-        x: Option<i32>,
-        y: Option<i32>,
-        w: Option<u32>,
-        h: Option<u32>,
-        reorder: Option<Reorder>,
-    ) {
-        // Refuse-by-default, like the map request above: `configure` is
-        // never called, so the window keeps whatever geometry it has (and,
-        // unmapped, is invisible anyway). The ask is logged whole -- Phase
-        // 2's mapping will need to expect this chatter per window, not one
-        // shot each (measured: ~2 configures plus ~13 property notifies per
-        // xterm).
-        tracing::debug!(
-            id = window.window_id(),
-            ?x,
-            ?y,
-            ?w,
-            ?h,
-            ?reorder,
-            "X11 configure request refused (Phase-1 skeleton)"
-        );
-    }
-
-    fn configure_notify(
-        &mut self,
-        _xwm: XwmId,
-        window: X11Surface,
-        geometry: Rectangle<i32, Logical>,
-        above: Option<X11Window>,
-    ) {
-        tracing::debug!(
-            id = window.window_id(),
-            ?geometry,
-            ?above,
-            "X11 window reconfigured"
-        );
-    }
-
-    fn resize_request(
-        &mut self,
-        _xwm: XwmId,
-        window: X11Surface,
-        button: u32,
-        resize_edge: ResizeEdge,
-    ) {
-        // No pointer grabs in this phase: refuse by doing nothing.
-        tracing::debug!(
-            id = window.window_id(),
-            button,
-            ?resize_edge,
-            "X11 resize request refused (Phase-1 skeleton)"
-        );
-    }
-
-    fn move_request(&mut self, _xwm: XwmId, window: X11Surface, button: u32) {
-        // Same as above: no grabs, no moves.
-        tracing::debug!(
-            id = window.window_id(),
-            button,
-            "X11 move request refused (Phase-1 skeleton)"
-        );
-    }
-
-    fn disconnected(&mut self, _xwm: XwmId) {
-        // The post-`READY` death signal (the pre-`READY` one is
-        // `XWaylandEvent::Error` -- see `xwayland.rs`): the server is gone,
-        // the session is not. `warn!`, not `debug!`: an operator whose X
-        // apps just died needs this line, and it fires once per session
-        // death, not per event. `xdisplay` is deliberately *not* cleared
-        // (see `xwayland.rs`'s staleness note).
-        tracing::warn!(
-            display = ?self.xdisplay,
-            "XWayland connection lost; the session continues Wayland-only (restart for X11)"
-        );
-    }
-}
-
-/// `zwp_xwayland_keyboard_grab_manager_v1`: present once the server started
-/// (see `xwayland::start`), but Phase 1 answers no grab for any surface --
-/// `None` means Smithay creates nothing, so a grab request is a silent
-/// no-op rather than a keyboard handoff. The focus half (`keyboard_focus`
-/// for a real X surface, the serial-less trust question) is Phase 3's gate
-/// to design, not a default to fall into here.
-#[cfg(feature = "xwayland")]
-impl XWaylandKeyboardGrabHandler for State {
-    fn keyboard_focus_for_xsurface(&self, _surface: &WlSurface) -> Option<WlSurface> {
-        None
-    }
-}
+// The XWayland protocol halves (`XWaylandShellHandler`, `XwmHandler`,
+// `XWaylandKeyboardGrabHandler`) live in `xwayland/wm.rs`, beside the
+// window management they drive.
 
 /// `zxdg_decoration_manager_v1`: lets a client ask the compositor whether it
 /// or the client itself should draw window decorations. This project draws
@@ -731,7 +551,9 @@ impl XdgDecorationHandler for State {
 }
 
 impl SeatHandler for State {
-    type KeyboardFocus = WlSurface;
+    /// A Wayland surface or an X11 window -- see `keyboard_focus.rs` for why
+    /// the X half cannot be its `wl_surface`.
+    type KeyboardFocus = super::keyboard_focus::KeyboardFocus;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -754,9 +576,18 @@ impl SeatHandler for State {
         self.cursor_changed();
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+    fn focus_changed(
+        &mut self,
+        seat: &Seat<Self>,
+        focused: Option<&super::keyboard_focus::KeyboardFocus>,
+    ) {
         let handle = &self.display_handle;
-        let client = focused.and_then(|surface| handle.get_client(surface.id()).ok());
+        // The surface keys go to, whichever kind of window owns it: an X
+        // window's is XWayland's own client, which is who the selection is
+        // offered to on its behalf.
+        let client = focused
+            .and_then(WaylandFocus::wl_surface)
+            .and_then(|surface| handle.get_client(surface.id()).ok());
         set_data_device_focus(handle, seat, client.clone());
         // Without this, no regular primary-selection device is ever offered
         // anything: Smithay only sends the primary selection to a device

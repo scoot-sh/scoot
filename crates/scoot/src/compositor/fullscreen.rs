@@ -140,12 +140,13 @@ pub(super) fn fullscreen_surface_in<'a>(
     world: &scoot_core::World,
     windows: &'a std::collections::HashMap<WindowId, Window>,
     output: scoot_core::OutputId,
-) -> Option<&'a smithay::reexports::wayland_server::protocol::wl_surface::WlSurface> {
+) -> Option<std::borrow::Cow<'a, smithay::reexports::wayland_server::protocol::wl_surface::WlSurface>>
+{
+    use smithay::wayland::seat::WaylandFocus;
     world
         .fullscreen_on(output)
         .and_then(|id| windows.get(&id))
-        .and_then(Window::toplevel)
-        .map(ToplevelSurface::wl_surface)
+        .and_then(WaylandFocus::wl_surface)
 }
 
 impl State {
@@ -163,18 +164,23 @@ impl State {
             .is_some()
     }
 
-    /// The root `wl_surface` of the fullscreen window covering `output`, if a
-    /// Wayland toplevel covers it: what the GPU scanout tier's
-    /// `render::primary_direct` checks Smithay's candidate element against,
-    /// and what its per-surface scanout feedback steers
-    /// (`dmabuf/scanout.rs`) -- one lookup, so the two cannot disagree about
-    /// which window that is. Allocation-free: `fullscreen_on` plus one map
-    /// lookup. An X11 window has no `ToplevelSurface` and answers `None`.
+    /// The root `wl_surface` of the fullscreen window covering `output`, if
+    /// one covers it: what the GPU scanout tier's `render::primary_direct`
+    /// checks Smithay's candidate element against, and what its per-surface
+    /// scanout feedback steers (`dmabuf/scanout.rs`) -- one lookup, so the
+    /// two cannot disagree about which window that is. An xdg toplevel's own
+    /// surface, or the one XWayland associated with a fullscreen X window
+    /// (whose buffer is XWayland's, and just as eligible to scan out); `None`
+    /// for an X window XWayland has not paired yet, which draws nothing.
+    /// Allocation-free: `fullscreen_on`, one map lookup, and for an X window
+    /// a reference-count bump.
     #[cfg(feature = "gpu-scanout")]
     pub(super) fn fullscreen_surface(
         &self,
         output: scoot_core::OutputId,
-    ) -> Option<&smithay::reexports::wayland_server::protocol::wl_surface::WlSurface> {
+    ) -> Option<
+        std::borrow::Cow<'_, smithay::reexports::wayland_server::protocol::wl_surface::WlSurface>,
+    > {
         fullscreen_surface_in(&self.world, &self.windows, output)
     }
 

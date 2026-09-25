@@ -65,6 +65,7 @@ use crate::compositor::decorations::Appearance;
 use crate::compositor::headless;
 use crate::compositor::test_support::{Harness, test_renderer};
 
+mod keys;
 mod outputs;
 mod pointer;
 

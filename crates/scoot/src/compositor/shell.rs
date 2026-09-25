@@ -1,16 +1,18 @@
 //! Keeping Wayland and the core in step: events in, arrangement out.
 
 use scoot_core::{Action, Effect, Event, Rect, Size, SizeHints, WindowId, WindowInfo};
-use smithay::desktop::Window;
+use smithay::desktop::{Window, WindowSurface};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::compositor::with_states;
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::xdg::SurfaceCachedState;
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 
 use super::State;
 use super::fullscreen::{LayoutState, set_layout_states};
+use super::keyboard_focus::KeyboardFocus;
 use super::output_clip;
 
 #[cfg(test)]
@@ -23,7 +25,22 @@ impl State {
         let id = WindowId(self.next_id);
         self.windows.insert(id, Window::new_wayland_window(surface));
         // Its first commit decides whether it floats (see `floating.rs`).
+        // Only an xdg window's: an X window decides at its map request (see
+        // `xwayland/manage.rs`) and never waits here.
         self.awaiting_map.push(id);
+        // An xdg window always takes focus when it opens -- the rule
+        // `activation.rs` documents; the X focus gate is the one place that
+        // passes `false`.
+        self.open_window(id, true);
+        self.apply();
+    }
+
+    /// Tells the core -- and both foreign-toplevel lists -- about a window
+    /// already in `self.windows`: the half of opening a window shared by an
+    /// xdg toplevel (`add_window`) and a managed X window
+    /// (`xwayland/manage.rs`). Leaves the `apply()` to the caller, which may
+    /// have more to tell the core first.
+    pub(super) fn open_window(&mut self, id: WindowId, focus: bool) {
         let info = self.info_of(id);
         // Before the core hears about it, though nothing depends on the order:
         // these are the other two lists of windows scoot publishes (see
@@ -49,9 +66,8 @@ impl State {
             id,
             info,
             output,
-            focus: true,
+            focus,
         });
-        self.apply();
     }
 
     pub fn remove_window(&mut self, id: WindowId) {
@@ -127,6 +143,11 @@ impl State {
         let Some(window) = self.window(id) else {
             return;
         };
+        #[cfg(feature = "xwayland")]
+        if window.x11_surface().is_some() {
+            self.observe_x11_frame(id);
+            return;
+        }
         let Some(toplevel) = window.toplevel() else {
             return;
         };
@@ -245,11 +266,7 @@ impl State {
         let mut accepted = true;
         for effect in self.world.handle_action(action) {
             match effect {
-                Effect::Close(id) => {
-                    if let Some(toplevel) = self.window(id).and_then(Window::toplevel) {
-                        toplevel.send_close();
-                    }
-                }
+                Effect::Close(id) => self.close_window(id),
                 // `&=`, not `&&=`: every entry must be attempted even after
                 // an earlier one failed, so a bad program mid-list cannot
                 // stop the entries after it.
@@ -265,11 +282,22 @@ impl State {
     pub fn apply(&mut self) {
         // What a floating grab's resync asks for is exactly this.
         self.floating_grab_resync = false;
+        // Before the arrangement is read: an X window floated by the toggle
+        // needs a size the core would otherwise wait for a frame to learn.
+        #[cfg(feature = "xwayland")]
+        self.size_undrawn_x11_floats();
         let arrangement = self.world.arrange();
         for placement in &arrangement.placements {
             let Some(window) = self.windows.get(&placement.id).cloned() else {
                 continue;
             };
+            // An X window's whole configure, visible or not: its fullscreen
+            // property follows the core either way, and it is configured
+            // only where it is shown (see `xwayland/manage.rs`).
+            #[cfg(feature = "xwayland")]
+            if let Some(x11) = window.x11_surface() {
+                super::xwayland::manage::configure_x11(x11, placement);
+            }
             if placement.visible {
                 self.space
                     .map_element(window.clone(), (placement.rect.x, placement.rect.y), false);
@@ -349,6 +377,12 @@ impl State {
                     toplevel.send_pending_configure();
                 }
             }
+            // The X stacking order follows focus too, so what the X server
+            // believes is on top -- which its own pointer and grab logic,
+            // and `_NET_CLIENT_LIST_STACKING`, go by -- is the window the
+            // user is using.
+            #[cfg(feature = "xwayland")]
+            self.raise_focused_x11();
             // The third reader of the same `focus`, alongside `set_activated`
             // above and the focus ring the render path draws from
             // `State::focus`: `wlr-foreign-toplevel-management-v1`'s
@@ -403,7 +437,7 @@ impl State {
             // committing while locked would re-derive focus for nothing.
             self.keyboard_on_layer = false;
             self.dismiss_popup_grab();
-            self.lock_keyboard_focus()
+            self.lock_keyboard_focus().map(KeyboardFocus::Surface)
         } else {
             // Owned, so the layer-map guard is already gone by the time
             // `dismiss_popup_grab` re-enters Smithay -- see this module's
@@ -422,12 +456,9 @@ impl State {
             if pre_empted {
                 self.dismiss_popup_grab();
             }
-            layer.map(|found| found.surface).or_else(|| {
-                self.focus
-                    .and_then(|id| self.windows.get(&id))
-                    .and_then(Window::toplevel)
-                    .map(|toplevel| toplevel.wl_surface().clone())
-            })
+            layer
+                .map(|found| KeyboardFocus::Surface(found.surface))
+                .or_else(|| self.window_keyboard_focus())
         };
         let serial = SERIAL_COUNTER.next_serial();
         // The keyboard half of the popup-grab history (`popup.rs`): when
@@ -456,15 +487,88 @@ impl State {
         // derivation -- not per event or per frame, so no hot-path concern.
         if self.popup_grab.as_ref().is_none_or(|grab| grab.has_ended())
             && keyboard.current_focus().as_ref() != surface.as_ref()
-            && let Some(ref entered) = surface
-            && let Some(client) = self.client_of(entered)
+            && let Some(entered) = surface.as_ref().and_then(WaylandFocus::wl_surface)
+            && let Some(client) = self.client_of(&entered)
         {
             self.interaction_serials.record_focus(serial, client);
         }
         keyboard.set_focus(self, surface, serial);
     }
 
+    /// The keyboard focus the focused *window* takes, if any: its toplevel's
+    /// surface. Only `refresh_keyboard_focus` asks, once per derivation.
+    ///
+    /// An X window's focus is its `X11Surface` with the surface XWayland
+    /// associated -- see `keyboard_focus.rs` -- and so exists only once it
+    /// *has* one: a window focused before XWayland paired it gets the
+    /// keyboard when the pairing lands (`xwayland/manage.rs`). One that says
+    /// it takes no keyboard input at all (ICCCM's `None` input model: no
+    /// `WM_HINTS` input flag and no `WM_TAKE_FOCUS`) gets none: Smithay's
+    /// target would set no X focus for it and still forward keys to its
+    /// surface, i.e. to whatever X window holds the X focus instead.
+    fn window_keyboard_focus(&self) -> Option<KeyboardFocus> {
+        let window = self.focus.and_then(|id| self.windows.get(&id))?;
+        if let Some(toplevel) = window.toplevel() {
+            return Some(KeyboardFocus::Surface(toplevel.wl_surface().clone()));
+        }
+        #[cfg(feature = "xwayland")]
+        if let Some(x11) = window.x11_surface() {
+            use smithay::xwayland::xwm::WmInputModel;
+            if x11.input_model() == WmInputModel::None {
+                return None;
+            }
+            return x11.wl_surface().map(|surface| KeyboardFocus::X11 {
+                window: x11.clone(),
+                surface,
+            });
+        }
+        None
+    }
+
+    /// Asks a window to close: `xdg_toplevel.close`, or for an X window
+    /// `WM_DELETE_WINDOW` (Smithay destroys the window outright when the
+    /// client does not speak that protocol). Unknown ids are ignored. The
+    /// one close path, so `Effect::Close` and a taskbar's close cannot
+    /// disagree about what closing an X window means.
+    pub(super) fn close_window(&self, id: WindowId) {
+        let Some(window) = self.window(id) else {
+            return;
+        };
+        match window.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => toplevel.send_close(),
+            #[cfg(feature = "xwayland")]
+            WindowSurface::X11(x11) => {
+                if let Err(error) = x11.close() {
+                    tracing::debug!(?id, %error, "could not ask an X11 window to close");
+                }
+            }
+        }
+    }
+
+    /// Raises the focused window in the X server's stacking order, when it
+    /// is an X window. Once per focus change.
+    #[cfg(feature = "xwayland")]
+    fn raise_focused_x11(&mut self) {
+        let Some(x11) = self
+            .focus
+            .and_then(|id| self.windows.get(&id))
+            .and_then(Window::x11_surface)
+            .cloned()
+        else {
+            return;
+        };
+        if let Some(wm) = self.xwm.as_mut()
+            && let Err(error) = wm.raise_window(&x11)
+        {
+            tracing::debug!(xid = x11.window_id(), %error, "could not raise an X11 window");
+        }
+    }
+
     pub(super) fn info_of(&self, id: WindowId) -> WindowInfo {
+        #[cfg(feature = "xwayland")]
+        if let Some(x11) = self.window(id).and_then(Window::x11_surface) {
+            return self.x11_info(x11);
+        }
         let Some(toplevel) = self.window(id).and_then(Window::toplevel) else {
             return WindowInfo::default();
         };
@@ -556,7 +660,7 @@ impl State {
 /// lands the consequence is a hint lost until the client's next
 /// `app_id`/`title` change re-reads it -- not a bad size: a window the core
 /// has no output for is `unplaced`, so it is neither arranged nor rendered.
-fn hint_limit(areas: impl Iterator<Item = Rect>, gap: i32) -> Size {
+pub(super) fn hint_limit(areas: impl Iterator<Item = Rect>, gap: i32) -> Size {
     areas.fold(Size::new(0, 0), |limit, area| {
         let usable = area.inset(gap);
         Size::new(limit.w.max(usable.w), limit.h.max(usable.h))
@@ -566,7 +670,7 @@ fn hint_limit(areas: impl Iterator<Item = Rect>, gap: i32) -> Size {
 /// Caps a client-declared minimum size to `limit`, and to zero from below
 /// (`set_min_size` accepts negatives too, and a negative minimum is not a
 /// minimum).
-fn clamp_hint(min: Size, limit: Size) -> Size {
+pub(super) fn clamp_hint(min: Size, limit: Size) -> Size {
     // Deliberately not `i32::clamp`, which panics when its own `min > max`:
     // `hint_limit` cannot return a negative limit today, but a clamp with a
     // panic in it is not worth the symmetry inside a compositor.

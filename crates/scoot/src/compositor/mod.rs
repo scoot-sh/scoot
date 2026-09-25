@@ -31,6 +31,7 @@ mod input;
 mod input_method;
 mod ipc;
 mod keybindings;
+mod keyboard_focus;
 mod layer_shell;
 mod nested;
 mod nested_dispatch;
@@ -231,14 +232,14 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // Opt-in XWayland (Phase-1 skeleton): after the outputs exist (an X
-    // client maps nowhere yet, but the server is session-scoped, so it
+    // Opt-in XWayland: after the outputs exist (X windows map into the
+    // layout like any other, and the server is session-scoped, so it
     // starts once the session does) and before the `WAYLAND_DISPLAY` export
     // below, so the `DISPLAY` export joins it and both reach every spawned
     // child. `resolve` ORs the flag with the config key -- a flag can only
     // say yes -- and records the answer in `startup_xwayland` for reload to
     // diff against. A spawn failure is a loud log plus a Wayland-only
-    // session, never a crash (see `xwayland.rs`); without the Cargo feature
+    // session, never a crash (see `xwayland/mod.rs`); without the Cargo feature
     // the knob warns once and does the same.
     let xwayland = xwayland::resolve(options.xwayland, loaded.xwayland);
     state.startup_xwayland = xwayland;
@@ -298,7 +299,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     unsafe {
         std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
         // The X display, iff our server is believed live (see
-        // `xwayland.rs`): `None` leaves `DISPLAY` untouched, so a
+        // `xwayland/mod.rs`): `None` leaves `DISPLAY` untouched, so a
         // host-provided value under `--nested` survives an XWayland-off
         // session -- no clobber.
         if let Some(display) = state.xdisplay {

@@ -9,6 +9,29 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-25 — X11 applications (opt-in XWayland)
+
+- **X11 apps run** with `--xwayland` (or `[xwayland] enabled`) in a build
+  with the `xwayland` feature and `Xwayland` on `PATH`. Their windows tile
+  like any other, dialogs and transients float centred on their parent,
+  fullscreen works (the app's own button, `Super+f`, a taskbar), menus and
+  tooltips appear where the app puts them, and every window gets the focus
+  ring and rounded corners. They show up in `scootctl windows` and in
+  taskbars under their `WM_CLASS` class (`XTerm`, `Gimp`), which is also
+  what a `[[window_rule]]` `match_app_id` matches.
+- **X apps do not steal focus.** A new X window takes focus only when no
+  window has it, when it belongs to the X app you are using (any window of
+  the same process), or when scoot itself started the app (a keybinding, `scootctl
+  action spawn`, autostart) moments ago; otherwise it opens without focus
+  and a click, a keybinding or a taskbar focuses it. An X app asking to be
+  activated (`_NET_ACTIVE_WINDOW`, `xdotool windowactivate`) gets the same
+  answer.
+- **Trust:** running an X app extends full trust to it -- X11 apps can read
+  each other's keystrokes and windows by design, and an X app's menus and
+  pop-ups can cover anything on screen, Wayland apps included. Not bridged
+  yet: copy and paste or drag-and-drop between X and Wayland apps, and X
+  input methods.
+
 ### 2026-09-25 — move and resize floating windows
 
 - **Drag floating windows.** Hold Super and drag with the left button to

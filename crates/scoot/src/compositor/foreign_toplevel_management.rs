@@ -128,7 +128,6 @@
 use std::collections::BTreeMap;
 
 use scoot_core::{Action, Arrangement, OutputId, WindowId, WindowInfo};
-use smithay::desktop::Window;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::zwlr_foreign_toplevel_handle_v1::{
     self, State as ToplevelState, ZwlrForeignToplevelHandleV1,
@@ -903,9 +902,7 @@ impl State {
             );
             return;
         }
-        if let Some(toplevel) = self.window(id).and_then(Window::toplevel) {
-            toplevel.send_close();
-        }
+        self.close_window(id);
     }
 }
 

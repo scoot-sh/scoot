@@ -346,6 +346,7 @@ impl Fixture {
             .get_keyboard()
             .expect("a keyboard")
             .current_focus()
+            .map(WlSurface::from)
     }
 
     /// The `wl_surface` of the clicked layer surface itself, so the test can

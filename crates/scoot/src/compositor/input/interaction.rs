@@ -220,7 +220,7 @@ enum Kind {
 
 /// The most recent qualifying input events, newest overwriting oldest.
 #[derive(Debug, Default)]
-pub(crate) struct Recent {
+pub struct Recent {
     /// `None` only before the ring has been filled once -- a fresh session
     /// that has seen no input at all matches nothing, which is the case the
     /// activation gate exists for.

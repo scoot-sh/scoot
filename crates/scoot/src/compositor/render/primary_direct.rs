@@ -212,9 +212,9 @@ where
         return PrimaryDirect::NotCovered;
     };
     // The covering window's root surface: `covered_by_fullscreen`'s question
-    // plus the surface rule 6 needs. A covering window with no Wayland
-    // toplevel (an X11 one; none can map yet) has no surface tree to find
-    // Smithay's element in, and counts as not covering.
+    // plus the surface rule 6 needs -- an xdg toplevel's, or an X window's
+    // associated one. A covering X window XWayland has not paired yet has no
+    // surface tree to find Smithay's element in, and counts as not covering.
     let Some(covering) = state.fullscreen_surface(id) else {
         return PrimaryDirect::NotCovered;
     };
@@ -247,7 +247,7 @@ where
     rule6(walked.end, walked.clear_color, |index| {
         elements
             .get(index)
-            .is_some_and(|element| in_tree(covering, element.id()))
+            .is_some_and(|element| in_tree(&covering, element.id()))
     })
 }
 

@@ -1,0 +1,550 @@
+//! Phase 3: the focus gate and the keyboard. Each refusal here was first
+//! run against a build whose gate said yes (see the PR's fail-first record):
+//! a test that cannot fail says nothing about a security gate.
+
+use smithay::backend::input::KeyState;
+use smithay::input::keyboard::Keycode;
+use x11rb::protocol::Event as XEvent;
+
+use super::live::{RED, id_of_xid, live};
+use super::peer::{Ack, Step};
+use super::x11::{Props, eventually};
+use crate::compositor::keyboard_focus::KeyboardFocus;
+
+/// evdev `KEY_A` (30) as the XKB keycode Smithay's seat takes.
+const KEY_A: u32 = 30 + 8;
+
+/// With nothing focused, a mapping X window takes focus -- and the
+/// keyboard actually reaches it: the X server's input focus names it, and a
+/// key injected into the seat arrives as an X `KeyPress` on that window.
+#[test]
+fn an_x_window_mapping_with_nothing_focused_takes_focus_and_keys_reach_it() {
+    let Some(mut live) =
+        live("an_x_window_mapping_with_nothing_focused_takes_focus_and_keys_reach_it")
+    else {
+        return;
+    };
+    let xid = live.x.map(&Props::new(RED));
+    let id = live.managed(xid);
+    live.drain();
+    assert_eq!(live.fixture.state.focus, Some(id));
+    assert!(
+        matches!(live.keyboard(), Some(KeyboardFocus::X11 { window, .. }) if window.window_id() == xid),
+        "the keyboard is not on the X window: {:?}",
+        live.keyboard()
+    );
+    assert_eq!(
+        live.x.input_focus(),
+        xid,
+        "the X server's input focus does not name the focused X window"
+    );
+    live.x.drain();
+    live.fixture
+        .state
+        .key(Keycode::new(KEY_A), KeyState::Pressed);
+    live.fixture
+        .state
+        .key(Keycode::new(KEY_A), KeyState::Released);
+    live.drain();
+    let pressed = live.x.drain().into_iter().any(|event| {
+        matches!(event, XEvent::KeyPress(press) if press.event == xid && u32::from(press.detail) == KEY_A)
+    });
+    assert!(
+        pressed,
+        "a key typed into the session never reached the X window"
+    );
+}
+
+/// The gate's first refusal: an X window mapping while a Wayland window has
+/// focus is announced (in the layout, on the taskbar) but takes neither
+/// focus nor the keyboard.
+#[test]
+fn an_x_window_mapping_does_not_steal_focus_from_a_wayland_window() {
+    let Some(mut live) = live("an_x_window_mapping_does_not_steal_focus_from_a_wayland_window")
+    else {
+        return;
+    };
+    let wayland = live.map_peer("wayland");
+    assert_eq!(live.fixture.state.focus, Some(wayland));
+    assert!(matches!(live.fixture.run(Step::BindTaskbar), Ack::Done));
+    let mut props = Props::new(RED);
+    props.title = Some("thief");
+    let xid = live.x.map(&props);
+    live.managed(xid);
+    live.drain();
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(wayland),
+        "a mapping X window stole focus"
+    );
+    assert!(
+        matches!(live.keyboard(), Some(KeyboardFocus::Surface(_))),
+        "the keyboard left the Wayland window"
+    );
+    assert!(
+        live.taskbar().iter().any(|(title, _)| title == "thief"),
+        "a refused window must still be announced"
+    );
+}
+
+/// The gate's second refusal: `_NET_ACTIVE_WINDOW` for an unfocused X
+/// window -- what `xdotool windowactivate` sends from any background client
+/// -- does nothing while a Wayland window has focus.
+#[test]
+fn net_active_window_from_a_background_client_is_refused() {
+    let Some(mut live) = live("net_active_window_from_a_background_client_is_refused") else {
+        return;
+    };
+    let wayland = live.map_peer("wayland");
+    let xid = live.x.map(&Props::new(RED));
+    live.managed(xid);
+    live.x.request_activation(xid);
+    live.drain();
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(wayland),
+        "_NET_ACTIVE_WINDOW took focus from a Wayland window"
+    );
+    assert!(matches!(live.keyboard(), Some(KeyboardFocus::Surface(_))));
+}
+
+/// `_NET_ACTIVE_WINDOW` between two windows of the focused X client is an
+/// application moving focus between its own windows: honoured. The same
+/// request for a window of a *different* X client process -- `xeyes`,
+/// started outside the session so it carries no spawn token -- is refused.
+/// "Client" is the process the X server names through X-Resource, so the
+/// stranger has to be another process: a second connection from this one
+/// is, correctly, the same application. The stranger half is skipped where
+/// `xeyes` is not on `PATH`; the own-window half always runs.
+#[test]
+fn net_active_window_is_honoured_only_within_the_focused_client() {
+    let Some(mut live) = live("net_active_window_is_honoured_only_within_the_focused_client")
+    else {
+        return;
+    };
+    let first = live.x.map(&Props::new(RED));
+    let first = live.managed(first);
+    assert_eq!(live.fixture.state.focus, Some(first));
+
+    if super::tool_on_path(
+        "net_active_window_is_honoured_only_within_the_focused_client (stranger half)",
+        "xeyes",
+    ) {
+        let mut stranger = std::process::Command::new("xeyes")
+            .env("DISPLAY", super::display_value(live.display))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("xeyes starts");
+        eventually(&mut live.fixture, "xeyes mapping", |fixture| {
+            fixture.state.windows.len() == 2
+        });
+        let (&strangers, window) = live
+            .fixture
+            .state
+            .windows
+            .iter()
+            .find(|(id, _)| **id != first)
+            .expect("xeyes' window");
+        let xid = window.x11_surface().expect("an X window").window_id();
+        assert_eq!(
+            live.fixture.state.focus,
+            Some(first),
+            "xeyes took focus on map"
+        );
+        live.x.request_activation(xid);
+        live.drain();
+        assert_eq!(
+            live.fixture.state.focus,
+            Some(first),
+            "another X client took focus with _NET_ACTIVE_WINDOW"
+        );
+        assert_ne!(live.fixture.state.focus, Some(strangers));
+        let _ = stranger.kill();
+        let _ = stranger.wait();
+    }
+
+    // The application's own second window takes focus as it maps (see
+    // the dialog test below); focus the first again, then ask for the
+    // second with `_NET_ACTIVE_WINDOW`: honoured, same process.
+    let own = live.x.map(&Props::new(RED));
+    let own_id = live.managed(own);
+    assert_eq!(live.fixture.state.focus, Some(own_id));
+    live.fixture
+        .state
+        .act(scoot_core::Action::FocusWindowId(first));
+    assert_eq!(live.fixture.state.focus, Some(first));
+    live.x.request_activation(own);
+    eventually(
+        &mut live.fixture,
+        "the client's own window taking focus",
+        |fixture| fixture.state.focus == Some(own_id),
+    );
+}
+
+/// An X application's own dialog takes focus when it maps over the
+/// application's focused window -- even with the launch token spent, and
+/// with a Wayland window having held focus before -- because the same
+/// process already holds the keyboard. GTK sends no `_NET_ACTIVE_WINDOW`
+/// for a new dialog (measured with `mousepad`'s Ctrl+O), so without this
+/// rule its file chooser opened unfocused.
+#[test]
+fn an_x_apps_own_dialog_takes_focus_from_its_focused_window() {
+    let Some(mut live) = live("an_x_apps_own_dialog_takes_focus_from_its_focused_window") else {
+        return;
+    };
+    live.map_peer("wayland");
+    let token = live
+        .fixture
+        .state
+        .mint_spawn_token("xprobe")
+        .expect("a spawn token");
+    let mut main = Props::new(RED);
+    main.startup_id = Some(token.as_str().to_owned());
+    let main = live.x.map(&main);
+    let main_id = live.managed(main);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(main_id),
+        "the launch took focus"
+    );
+    let mut dialog = Props::new(RED);
+    dialog.transient_for = Some(main);
+    dialog.dialog = true;
+    let dialog = live.x.map(&dialog);
+    let dialog_id = live.managed(dialog);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(dialog_id),
+        "the application's own dialog opened unfocused"
+    );
+}
+
+/// The spawn chain by startup id: a window whose `_NET_STARTUP_ID` names a
+/// live spawn token takes focus from a Wayland window -- once. The token is
+/// spent, so a second window naming it does not.
+#[test]
+fn a_spawn_tokens_startup_id_lets_an_x_window_take_focus_once() {
+    let Some(mut live) = live("a_spawn_tokens_startup_id_lets_an_x_window_take_focus_once") else {
+        return;
+    };
+    let wayland = live.map_peer("wayland");
+    let token = live
+        .fixture
+        .state
+        .mint_spawn_token("xprobe")
+        .expect("a spawn token");
+    let mut props = Props::new(RED);
+    props.startup_id = Some(token.as_str().to_owned());
+    let xid = live.x.map(&props);
+    let id = live.managed(xid);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(id),
+        "the spawned window did not take focus"
+    );
+    assert!(
+        live.fixture
+            .state
+            .xdg_activation
+            .data_for_token(&token)
+            .is_none(),
+        "the token was not spent"
+    );
+
+    live.fixture
+        .state
+        .act(scoot_core::Action::FocusWindowId(wayland));
+    let again = live.x.map(&props);
+    live.managed(again);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(wayland),
+        "a spent token focused a second window"
+    );
+}
+
+/// The spawn chain by process, for an X client that sets no startup id:
+/// `xclock` spawned through `State::spawn` takes focus from a Wayland
+/// window, matched by its X-Resource pid. Skipped where `xclock` is not on
+/// `PATH`.
+#[test]
+fn a_spawned_x_client_takes_focus_by_its_process() {
+    if !super::tool_on_path("a_spawned_x_client_takes_focus_by_its_process", "xclock") {
+        return;
+    }
+    // The whole session inside the capture, not just the spawn: spans the
+    // XWM creates at start are entered on every X event, and a span made
+    // outside a capture panics the registry when entered inside one under
+    // `cargo test` (see `capture_logs`).
+    let (outcome, logs) = crate::compositor::test_support::capture_logs(|| {
+        let mut live = live("a_spawned_x_client_takes_focus_by_its_process")?;
+        let wayland = live.map_peer("wayland");
+        assert!(live.fixture.state.spawn(&["xclock".to_owned()]));
+        eventually(&mut live.fixture, "xclock mapping", |fixture| {
+            fixture
+                .state
+                .windows
+                .values()
+                .any(|window| window.x11_surface().is_some())
+        });
+        let id = live
+            .fixture
+            .state
+            .windows
+            .iter()
+            .find(|(_, window)| window.x11_surface().is_some())
+            .map(|(&id, _)| id)
+            .expect("xclock's window");
+        let outcome = (wayland, id, live.fixture.state.focus);
+        // Don't leave the clock running past the test.
+        for pid in live.fixture.state.spawned_children.clone() {
+            let _ = std::process::Command::new("kill")
+                .arg(pid.to_string())
+                .status();
+        }
+        Some(outcome)
+    });
+    let Some((wayland, id, focus)) = outcome else {
+        return;
+    };
+    assert_ne!(wayland, id);
+    assert_eq!(
+        focus,
+        Some(id),
+        "a window spawned from the session did not take focus"
+    );
+    // By process, not by a startup id: Xt sets none, and this is the path
+    // the test is about.
+    assert!(
+        logs.contains("redeemed its spawn's token by process"),
+        "xclock was not matched to its spawn by process: {logs}"
+    );
+}
+
+/// A click focuses an unfocused X window -- the path a refused window is
+/// reached by -- and the keyboard follows, X-side too.
+#[test]
+fn a_click_focuses_an_x_window() {
+    let Some(mut live) = live("a_click_focuses_an_x_window") else {
+        return;
+    };
+    live.map_peer("wayland");
+    let xid = live.x.map(&Props::new(RED));
+    let id = live.managed(xid);
+    assert_ne!(live.fixture.state.focus, Some(id));
+    let rect = live.placement(id).rect;
+    let (x, y) = (
+        f64::from(rect.x + rect.w / 2),
+        f64::from(rect.y + rect.h / 2),
+    );
+    live.fixture.state.pointer_move(x, y);
+    live.fixture
+        .state
+        .pointer_button(scoot_ipc::PointerButton::Left, true);
+    live.fixture
+        .state
+        .pointer_button(scoot_ipc::PointerButton::Left, false);
+    live.drain();
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(id),
+        "the click did not focus the X window"
+    );
+    assert_eq!(live.x.input_focus(), xid);
+}
+
+/// A taskbar can activate and close an X window through the wlr
+/// foreign-toplevel protocol, the same as any window.
+#[test]
+fn the_taskbar_activates_and_closes_x_windows() {
+    let Some(mut live) = live("the_taskbar_activates_and_closes_x_windows") else {
+        return;
+    };
+    live.map_peer("wayland");
+    assert!(matches!(live.fixture.run(Step::BindTaskbar), Ack::Done));
+    let mut props = Props::new(RED);
+    props.title = Some("xwin");
+    let xid = live.x.map(&props);
+    let id = live.managed(xid);
+    assert_ne!(live.fixture.state.focus, Some(id));
+    assert!(matches!(
+        live.fixture.run(Step::Activate("xwin".to_owned())),
+        Ack::Done
+    ));
+    eventually(&mut live.fixture, "the taskbar's activate", |fixture| {
+        fixture.state.focus == Some(id)
+    });
+    live.x.drain();
+    assert!(matches!(
+        live.fixture.run(Step::Close("xwin".to_owned())),
+        Ack::Done
+    ));
+    live.drain();
+    let asked = live
+        .x
+        .drain()
+        .into_iter()
+        .any(|event| matches!(event, XEvent::ClientMessage(message) if message.window == xid));
+    assert!(asked, "the taskbar's close never reached the X window");
+    assert!(
+        id_of_xid(&live.fixture.state, xid).is_some(),
+        "closing is a request, not a kill"
+    );
+}
+
+/// A live token a mapping window carries is spent even when another rule
+/// (here rule 1: nothing focused) is what grants it focus -- otherwise any X
+/// client could copy the startup id off the launched app's window and
+/// redeem it later to take focus from a Wayland window (review, live: zenity
+/// focused by rule 1, then `xeyes` copied its token and took focus from
+/// `foot`). Here a second X connection copies the id, maps, and asks with
+/// `_NET_ACTIVE_WINDOW`; neither takes focus from the Wayland window.
+#[test]
+fn a_token_is_spent_whichever_rule_grants_focus() {
+    let Some(mut live) = live("a_token_is_spent_whichever_rule_grants_focus") else {
+        return;
+    };
+    let token = live
+        .fixture
+        .state
+        .mint_spawn_token("xprobe")
+        .expect("a spawn token");
+    let mut props = Props::new(RED);
+    props.startup_id = Some(token.as_str().to_owned());
+    let launched = live.x.map(&props);
+    let launched = live.managed(launched);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(launched),
+        "rule 1 focused it"
+    );
+    assert!(
+        live.fixture
+            .state
+            .xdg_activation
+            .data_for_token(&token)
+            .is_none(),
+        "rule 1 granted focus but left the token live"
+    );
+
+    let wayland = live.map_peer("wayland");
+    assert_eq!(live.fixture.state.focus, Some(wayland));
+    let copier = super::x11::XClient::connect(live.display);
+    let copied = copier.map(&props);
+    live.managed(copied);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(wayland),
+        "a copied startup id took focus on map"
+    );
+    copier.request_activation(copied);
+    live.drain();
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(wayland),
+        "a copied startup id took focus with _NET_ACTIVE_WINDOW"
+    );
+}
+
+/// GTK sets `_NET_STARTUP_ID` on its unmapped client leader (the
+/// `WM_HINTS` window group), not on the toplevel it maps -- so a launch
+/// through a wrapper (`sh -c`, a launcher), where the process path cannot
+/// match, redeems its token only if the gate reads the leader. This test's
+/// process is no spawned child, so the leader is the only path that can
+/// grant focus here.
+#[test]
+fn a_startup_id_on_the_client_leader_is_redeemed() {
+    let Some(mut live) = live("a_startup_id_on_the_client_leader_is_redeemed") else {
+        return;
+    };
+    let wayland = live.map_peer("wayland");
+    let token = live
+        .fixture
+        .state
+        .mint_spawn_token("xprobe")
+        .expect("a spawn token");
+    let leader = live.x.leader_with_startup_id(token.as_str());
+    live.drain();
+    let mut props = Props::new(RED);
+    props.group_leader = Some(leader);
+    let xid = live.x.map(&props);
+    let id = live.managed(xid);
+    assert_ne!(id, wayland);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(id),
+        "the leader's startup id was not redeemed"
+    );
+    assert!(
+        live.fixture
+            .state
+            .xdg_activation
+            .data_for_token(&token)
+            .is_none()
+    );
+}
+
+/// A window's `WM_HINTS` is client-set, so a stranger X client can name
+/// *another* application's client leader as its own window group. Its
+/// window must not borrow that leader's startup id: here the stranger maps
+/// first, naming the leader, and is refused -- and the token it tried to
+/// borrow is still there for the application that owns the leader, whose
+/// own window then redeems it.
+#[test]
+fn a_stranger_naming_another_clients_leader_is_refused() {
+    let Some(mut live) = live("a_stranger_naming_another_clients_leader_is_refused") else {
+        return;
+    };
+    let wayland = live.map_peer("wayland");
+    let token = live
+        .fixture
+        .state
+        .mint_spawn_token("xprobe")
+        .expect("a spawn token");
+    let leader = live.x.leader_with_startup_id(token.as_str());
+    live.drain();
+    // A second connection is a second X client, with its own id range.
+    let stranger = super::x11::XClient::connect(live.display);
+    let mut props = Props::new(RED);
+    props.group_leader = Some(leader);
+    let borrowed = stranger.map(&props);
+    live.managed(borrowed);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(wayland),
+        "a stranger borrowed another client's leader's startup id"
+    );
+    assert!(
+        live.fixture
+            .state
+            .xdg_activation
+            .data_for_token(&token)
+            .is_some(),
+        "the stranger's refused map spent the owner's token"
+    );
+    let owner = live.x.map(&props);
+    let owner = live.managed(owner);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(owner),
+        "the leader's own client could not redeem its startup id"
+    );
+}
+
+/// The client bits `same_x_client` compares are the server's: the
+/// resource-id mask the X server actually hands out matches the constant
+/// the gate uses (see `X_CLIENT_RESOURCE_MASK`).
+#[test]
+fn the_resource_id_mask_is_the_servers() {
+    use x11rb::connection::Connection as _;
+
+    let Some(live) = live("the_resource_id_mask_is_the_servers") else {
+        return;
+    };
+    assert_eq!(
+        live.x.conn.setup().resource_id_mask,
+        crate::compositor::xwayland::focus::X_CLIENT_RESOURCE_MASK,
+        "XWayland hands out a different resource-id mask than the focus gate assumes"
+    );
+}

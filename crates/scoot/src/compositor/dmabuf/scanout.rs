@@ -545,8 +545,8 @@ impl State {
     /// that frame's judgement. Allocation-free: two map lookups and the
     /// tracker's comparisons.
     ///
-    /// Only the root surface of a Wayland toplevel is ever steered; an X11
-    /// window (none can map yet) has no `ToplevelSurface` and is left alone.
+    /// The root surface of the covering window is what is steered: an xdg
+    /// toplevel's, or the one XWayland associated with an X window.
     pub(crate) fn steer_scanout_feedback(
         &mut self,
         output: OutputId,
@@ -559,10 +559,12 @@ impl State {
             &self.windows,
             output,
         );
-        let steer = self
-            .scanout_feedback
-            .get_mut(output)
-            .steer(covering, eligible, default, now);
+        let steer = self.scanout_feedback.get_mut(output).steer(
+            covering.as_deref(),
+            eligible,
+            default,
+            now,
+        );
         if matches!(steer, Steer::Sent | Steer::Reverted) {
             // A transition, never a frame: `Kept`, `Holding` and `Idle`
             // stay silent.

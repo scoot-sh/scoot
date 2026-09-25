@@ -839,6 +839,7 @@ impl Fixture {
             .get_keyboard()
             .expect("a keyboard")
             .current_focus()
+            .map(WlSurface::from)
     }
 
     /// The `wl_surface` of the `id`-th window's toplevel.
@@ -846,7 +847,7 @@ impl Fixture {
         self.state
             .windows
             .get(&WindowId(id))
-            .and_then(Window::toplevel)
+            .and_then(smithay::desktop::Window::toplevel)
             .expect("a live window")
             .wl_surface()
             .clone()
@@ -1006,11 +1007,14 @@ fn setting_the_same_title_again_tells_the_list_nothing() {
 
 #[test]
 fn a_title_as_long_as_the_wire_allows_survives_the_round_trip() {
-    // A client's title is its own to choose, and it reaches every watching
-    // client verbatim. Nothing here truncates or validates it -- the wayland
-    // message size is the only bound -- so this pins that a large-but-legal
-    // one is forwarded whole rather than truncated, dropped, or turned into a
-    // protocol error for the innocent taskbar watching.
+    // An xdg client's title is its own to choose, and it reaches every
+    // watching client verbatim: it arrived in a Wayland message, so it
+    // already fits in one (the same 4096-byte limit bounds both directions),
+    // and nothing here truncates it. This pins that a large-but-legal one is
+    // forwarded whole rather than truncated, dropped, or turned into a
+    // protocol error for the innocent taskbar watching. An X11 title has no
+    // such bound on the way in and is capped before it gets here -- see
+    // `xwayland/manage.rs`'s `x11_text`.
     let title = "t".repeat(3000);
     let mut fixture = Fixture::bound();
     fixture.run(Step::MapWindow);

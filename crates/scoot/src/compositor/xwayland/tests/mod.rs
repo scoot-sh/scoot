@@ -1,5 +1,6 @@
-//! Tests for the opt-in XWayland skeleton (see `super`, and
-//! `docs/backlog/protocols/xwayland-support.md` Phase 1).
+//! Tests for opt-in XWayland: the server (Phase 1), window mapping (Phase 2)
+//! and the focus gate (Phase 3) -- see `super`, and
+//! `docs/backlog/protocols/xwayland-support.md`.
 //!
 //! Two halves, split by what the machine provides:
 //!
@@ -9,8 +10,9 @@
 //!   listing proving neither XWayland global leaks to ordinary clients.
 //! - **Live** (only where the `Xwayland` binary is on `PATH`, and only in
 //!   `xwayland`-feature builds): server start, `READY`, `DISPLAY` in the
-//!   state, the Phase-1 mapping boundary against a real X client, and a
-//!   mid-session server kill the session survives. Where the binary is
+//!   state, a mid-session server kill the session survives, and -- in
+//!   [`mapping`], [`focus`] and [`lock`] -- real X clients mapping windows
+//!   into the layout, asking for focus, and meeting the lock. Where the binary is
 //!   absent these take the fallback branch instead -- asserting the loud
 //!   Wayland-only outcome, the way `dmabuf`'s tests assert their own
 //!   absence branch -- and print the same `skipped --` line, never a
@@ -43,6 +45,28 @@ fn resolve_is_an_or_with_off_as_the_agreement() {
     assert!(resolve(true, true));
 }
 
+/// X strings are cut at their first NUL before they go anywhere a Wayland
+/// C string could carry them (see `manage::x11_text`); one without a NUL is
+/// untouched.
+#[cfg(feature = "xwayland")]
+#[test]
+fn x11_text_is_cut_at_the_first_nul() {
+    use super::manage::x11_text;
+
+    assert_eq!(x11_text("plain".to_owned()), "plain");
+    assert_eq!(x11_text("evil\0title".to_owned()), "evil");
+    assert_eq!(x11_text("\0".to_owned()), "");
+    assert_eq!(x11_text(String::new()), "");
+    // Capped by UTF-8 bytes, walking back to a character boundary: a naive
+    // cut through a three-byte character would panic.
+    use super::manage::MAX_X11_TEXT;
+    assert_eq!(x11_text("x".repeat(MAX_X11_TEXT + 7)).len(), MAX_X11_TEXT);
+    let cut = x11_text(format!("AB{}", "\u{20ac}".repeat(MAX_X11_TEXT)));
+    assert!(cut.len() <= MAX_X11_TEXT && cut.len() > MAX_X11_TEXT - 3);
+    assert!(cut.ends_with('\u{20ac}'));
+    assert_eq!(x11_text("x".repeat(MAX_X11_TEXT)).len(), MAX_X11_TEXT);
+}
+
 #[test]
 fn display_value_is_the_local_colon_form() {
     // What X clients expect for a local server (the spike measured
@@ -68,7 +92,7 @@ fn read_marker(marker: &std::path::Path) -> String {
     }
 }
 
-/// A live compositor with no backend: the skeleton needs no framebuffer,
+/// A live compositor with no backend: the server-only tests need no framebuffer,
 /// and [`Harness::bare`] is what the wire-only suites use.
 type Fixture = Harness<Step, Ack>;
 
@@ -233,37 +257,43 @@ fn display_reaches_spawned_children_only_while_live() {
 /// walk, never an exec, so probing has no side effects.
 #[cfg(feature = "xwayland")]
 fn xwayland_on_path() -> bool {
-    std::env::var_os("PATH").is_some_and(|paths| {
+    let found = std::env::var_os("PATH").is_some_and(|paths| {
         std::env::split_paths(&paths)
             .any(|dir| dir.join("Xwayland").is_file() || dir.join("Xwayland.exe").is_file())
-    })
+    });
+    // Where the live suites are expected to run (CI sets this), a missing
+    // binary is a failure, not a quiet skip: a green run whose security-gate
+    // tests all skipped would prove nothing.
+    assert!(
+        found || std::env::var_os(REQUIRE_XWAYLAND_ENV).is_none(),
+        "{REQUIRE_XWAYLAND_ENV} is set but no Xwayland binary is on PATH: the live XWayland suites would silently skip"
+    );
+    found
 }
 
-/// Whether `window` is anywhere under `root` within `depth` levels: the
-/// reparenting XWM moves managed windows into frames, so the root's direct
-/// children never name them.
+/// Whether `tool` resolves on `PATH` for `test`'s optional half -- a walk,
+/// never an exec. Where it is missing the test says so on stderr and skips
+/// that half, unless [`REQUIRE_XWAYLAND_ENV`] is set: then every tool a live
+/// suite uses is required too, and a missing one fails the test rather than
+/// letting it pass without the check it exists for.
 #[cfg(feature = "xwayland")]
-fn tree_contains(
-    conn: &impl x11rb::connection::Connection,
-    root: x11rb::protocol::xproto::Window,
-    window: x11rb::protocol::xproto::Window,
-    depth: u8,
-) -> bool {
-    use x11rb::protocol::xproto::ConnectionExt as _;
-
-    let Ok(tree) = conn.query_tree(root).map(|cookie| cookie.reply()) else {
-        return false;
-    };
-    let Ok(tree) = tree else {
-        return false;
-    };
-    tree.children.contains(&window)
-        || (depth > 0
-            && tree
-                .children
-                .iter()
-                .any(|child| tree_contains(conn, *child, window, depth - 1)))
+pub(super) fn tool_on_path(test: &str, tool: &str) -> bool {
+    let found = std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(tool).is_file()));
+    if !found {
+        assert!(
+            std::env::var_os(REQUIRE_XWAYLAND_ENV).is_none(),
+            "{test}: {REQUIRE_XWAYLAND_ENV} is set but `{tool}` is not on PATH: this check would silently skip"
+        );
+        eprintln!("{test}: skipped -- no {tool} on PATH");
+    }
+    found
 }
+
+/// Set (to anything) where the live XWayland suites must run: every live
+/// test then fails instead of skipping when `Xwayland` is not on `PATH`.
+#[cfg(feature = "xwayland")]
+const REQUIRE_XWAYLAND_ENV: &str = "SCOOT_REQUIRE_XWAYLAND";
 
 /// How long to wait for the server to become ready, or for X events to
 /// arrive. Generous: a debug build exec'ing a real server on a VM.
@@ -345,147 +375,32 @@ fn server_starts_or_falls_back_loudly() {
     assert!(fixture.state.spawn(&["true".to_owned()]));
 }
 
-/// No X window enters the core: a real X client creates and maps windows
-/// against the live server while the layout stays empty.
-///
-/// Non-vacuous by construction: the client proves X-side (its windows
-/// exist in the server's tree, the override-redirect one viewable -- the
-/// self-mapped path the XWM cannot prohibit) and the captured log proves
-/// the requests reached this compositor's handlers (the map refusal, the
-/// override-redirect notification). Both halves have to hold for the
-/// assertions below to mean anything.
+/// Neither XWayland global becomes visible to an ordinary client once a
+/// live server has started, either: the shell global's `can_view` admits
+/// only XWayland's own client, and the grab manager the same (both verified
+/// against the pinned Smithay source). The listing client predates the
+/// start, so this also proves new globals are (not) announced to existing
+/// registries correctly. (Phase 1's `no_x_window_enters_the_core` asserted
+/// this beside the mapping boundary; the boundary itself is gone -- X
+/// windows map now, see [`mapping`] -- and this half stays.)
 #[cfg(feature = "xwayland")]
 #[test]
-fn no_x_window_enters_the_core() {
-    use x11rb::COPY_DEPTH_FROM_PARENT;
-    use x11rb::connection::Connection as _;
-    use x11rb::protocol::xproto::*;
-
+fn the_globals_stay_invisible_on_a_live_server() {
     if !xwayland_on_path() {
-        eprintln!("no_x_window_enters_the_core: skipped -- no Xwayland binary on PATH");
+        eprintln!(
+            "the_globals_stay_invisible_on_a_live_server: skipped -- no Xwayland binary on PATH"
+        );
         return;
     }
     let mut fixture = Fixture::unstarted();
-    // A registry-listing client from before the start, for the
-    // still-invisible assertion at the end.
     let (initial_tx, initial_rx) = channel();
     fixture.spawn(|stream, steps, acks| lister(stream, steps, acks, initial_tx));
     let _: Vec<String> = fixture.wait_for(0, &initial_rx, "the initial registry listing");
     let handle = fixture.state.loop_handle.clone();
-    let display = super::start(handle, &mut fixture.state).expect("XWayland should start");
+    super::start(handle, &mut fixture.state).expect("XWayland should start");
     wait_until(&mut fixture, "XWayland READY", |fixture| {
         fixture.state.xwm.is_some()
     });
-
-    let name = display_value(display);
-    let (conn, screen_num) = x11rb::connect(Some(name.as_str())).expect("an X connection");
-    let screen = &conn.setup().roots[screen_num];
-    let window: Window = conn.generate_id().expect("an X window id");
-    conn.create_window(
-        COPY_DEPTH_FROM_PARENT,
-        window,
-        screen.root,
-        0,
-        0,
-        200,
-        200,
-        0,
-        WindowClass::INPUT_OUTPUT,
-        screen.root_visual,
-        &CreateWindowAux::new(),
-    )
-    .expect("an X window")
-    .check()
-    .expect("the X server accepted the window");
-    conn.map_window(window)
-        .expect("a map request")
-        .check()
-        .expect("the X server accepted the map");
-    // Override-redirect: maps itself, which exercises the notification
-    // half (the XWM cannot prohibit it) rather than the request half.
-    let overlay: Window = conn.generate_id().expect("an override-redirect id");
-    conn.create_window(
-        COPY_DEPTH_FROM_PARENT,
-        overlay,
-        screen.root,
-        0,
-        0,
-        100,
-        100,
-        0,
-        WindowClass::INPUT_OUTPUT,
-        screen.root_visual,
-        &CreateWindowAux::new().override_redirect(1),
-    )
-    .expect("an override-redirect window")
-    .check()
-    .expect("the X server accepted the overlay");
-    conn.map_window(overlay)
-        .expect("an overlay map request")
-        .check()
-        .expect("the X server accepted the overlay map");
-    conn.flush().expect("the requests hit the wire");
-
-    // Drive until both windows exist X-side (proving the client dialogue
-    // really happened against this server), capturing the log throughout
-    // so the handler half is pinned too. The walk goes two levels: the XWM
-    // is a reparenting manager, so a managed window moves out of the
-    // root's children into a frame -- presence anywhere in the tree is the
-    // proof, and the reparenting itself proves the manager processed it.
-    let ((), logs) = capture_logs(|| {
-        let deadline = Instant::now() + XWAYLAND_PATIENCE;
-        loop {
-            fixture.settle();
-            if tree_contains(&conn, screen.root, window, 2)
-                && tree_contains(&conn, screen.root, overlay, 2)
-            {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "the X server never showed the test windows"
-            );
-        }
-        // The dialogue needs a few more dispatches to reach the handlers
-        // (X11 events arrive over the WM's own source, behind the tree
-        // reply the client just read).
-        for _ in 0..20 {
-            fixture.settle();
-        }
-    });
-    let overlay_attrs = conn
-        .get_window_attributes(overlay)
-        .expect("an attributes query")
-        .reply()
-        .expect("the attributes reply");
-    assert_eq!(
-        overlay_attrs.map_state,
-        MapState::VIEWABLE,
-        "the override-redirect window should have mapped itself X-side"
-    );
-    assert!(
-        logs.contains("map request refused"),
-        "the normal window's map request never reached the handler: {logs}"
-    );
-    assert!(
-        logs.contains("mapped itself"),
-        "the override-redirect notification never reached the handler: {logs}"
-    );
-    assert!(
-        fixture.state.windows.is_empty(),
-        "an X window entered the core: {:?}",
-        fixture.state.windows.keys()
-    );
-    assert!(
-        fixture.state.space.elements().next().is_none(),
-        "an X window entered the space"
-    );
-
-    // The globals stay invisible after the server started, too: the shell
-    // global's `can_view` admits only XWayland's own client, and the grab
-    // manager the same (both verified against the pinned Smithay source).
-    // The listing client predates the start, so this also proves new
-    // globals are (not) announced to existing registries correctly.
     let Ack::Globals(post) = fixture.run_on(0, Step::Relist);
     for global in ["xwayland_shell_v1", "zwp_xwayland_keyboard_grab_manager_v1"] {
         assert!(
@@ -496,10 +411,10 @@ fn no_x_window_enters_the_core() {
 }
 
 /// The X server keeps running under session lock: locking changes
-/// nothing about it (it must -- lock is not logout), and in this phase
-/// there is nothing to blank and no input to refuse, so the lock and the
-/// server simply coexist. Uses the shared [`Locker`] client: the lock is
-/// real, not a flag.
+/// nothing about the server itself (it must -- lock is not logout). What
+/// the lock does to X *windows* -- blanking them, refusing them input -- is
+/// [`lock`]'s. Uses the shared [`Locker`] client: the lock is real, not a
+/// flag.
 #[cfg(feature = "xwayland")]
 #[test]
 fn the_server_survives_session_lock() {
@@ -545,23 +460,54 @@ fn a_dead_server_is_loud_and_the_session_survives() {
         );
         return;
     }
-    let status = std::process::Command::new("pkill")
-        .arg("--version")
-        .output();
-    if status.is_err() {
-        eprintln!(
-            "a_dead_server_is_loud_and_the_session_survives: skipped -- no pkill on PATH to drive the kill half"
-        );
+    if !tool_on_path("a_dead_server_is_loud_and_the_session_survives", "pkill") {
         return;
     }
-    let mut fixture = Fixture::unstarted();
-    let handle = fixture.state.loop_handle.clone();
-    let display = super::start(handle, &mut fixture.state).expect("XWayland should start");
-    wait_until(&mut fixture, "XWayland READY", |fixture| {
-        fixture.state.xwm.is_some()
-    });
-
+    // Present is not enough: a pkill that cannot run (CI once handed the
+    // host's pkill a Nix `libsystemd` through `LD_LIBRARY_PATH`, and it died
+    // on `GLIBC_ABI_GNU2_TLS not found`) must fail here, loudly, not as a
+    // mystifying "pkill should find the test's server" later.
+    let probe = std::process::Command::new("pkill")
+        .arg("--version")
+        .output()
+        .expect("pkill on PATH should at least start");
+    assert!(
+        probe.status.success(),
+        "pkill is on PATH but does not run ({}): {}",
+        probe.status,
+        String::from_utf8_lossy(&probe.stderr)
+    );
+    // The whole session inside one capture, not just the kill: the XWM's
+    // span is made at `start` and entered on every X event, and a span made
+    // outside a capture panics the registry when entered inside one under
+    // `cargo test`'s shared process (see `capture_logs`).
     let ((), logs) = capture_logs(|| {
+        let mut fixture = Fixture::unstarted();
+        let handle = fixture.state.loop_handle.clone();
+        let display = super::start(handle, &mut fixture.state).expect("XWayland should start");
+        wait_until(&mut fixture, "XWayland READY", |fixture| {
+            fixture.state.xwm.is_some()
+        });
+        // A managed window and an override-redirect one, so the death has
+        // something to sweep: a dead server sends no unmap for either.
+        let x = x11::XClient::connect(display);
+        let managed = x.map(&x11::Props::new(0x00ff_0000));
+        let mut overlay = x11::Props::new(0x0000_00ff);
+        overlay.override_redirect = true;
+        let overlay = x.map(&overlay);
+        x11::eventually(
+            &mut fixture,
+            "both windows reaching the compositor",
+            |fixture| {
+                live::id_of_xid(&fixture.state, managed).is_some()
+                    && fixture
+                        .state
+                        .x11_unmanaged
+                        .iter()
+                        .any(|known| known.window_id() == overlay)
+            },
+        );
+
         // The bracket keeps `pkill -f` from matching this very command:
         // the pattern text contains `[X]wayland`, which the regex does
         // not match, while the server's `Xwayland :N` does. (Learned the
@@ -576,7 +522,7 @@ fn a_dead_server_is_loud_and_the_session_survives() {
         // Error or the XWM's `disconnected`. Both fire within a few
         // dispatches of the kill -- the drain below is bounded (not a
         // probe: the death paths deliberately change no state the loop
-        // could watch, see `xwayland.rs`'s staleness note), and the
+        // could watch, see `xwayland/mod.rs`'s staleness note), and the
         // assertion after reads the captured logs.
         for _ in 0..200 {
             fixture.settle();
@@ -585,18 +531,152 @@ fn a_dead_server_is_loud_and_the_session_survives() {
         // fine around the corpse.
         assert!(fixture.state.spawn(&["true".to_owned()]));
         fixture.settle();
+        // Swept: no empty column, no stale taskbar entry, nothing drawn or
+        // hit-tested from the dead server.
+        assert!(
+            fixture.state.windows.is_empty(),
+            "a dead server's window stayed in the layout: {:?}",
+            fixture.state.windows.keys()
+        );
+        assert!(
+            fixture.state.x11_unmanaged.is_empty(),
+            "a dead server's override-redirect window stayed on the draw list"
+        );
+        drop(x);
+
+        // And a restart comes back: a fresh server, a fresh READY, no wedge
+        // from the killed one's sockets (the lock scan moves on where the
+        // dead one's locks linger).
+        let handle = fixture.state.loop_handle.clone();
+        let display = super::start(handle, &mut fixture.state).expect("a restart should start");
+        wait_until(&mut fixture, "XWayland READY again", |fixture| {
+            fixture.state.xwm.is_some() && fixture.state.xdisplay == Some(display)
+        });
     });
     assert!(
         logs.contains("continuing Wayland-only") || logs.contains("connection lost"),
         "the server died but the session never logged it loudly: {logs}"
     );
-
-    // And a restart comes back: a fresh server, a fresh READY, no wedge
-    // from the killed one's sockets (the lock scan moves on where the
-    // dead one's locks linger).
-    let handle = fixture.state.loop_handle.clone();
-    let display = super::start(handle, &mut fixture.state).expect("a restart should start");
-    wait_until(&mut fixture, "XWayland READY again", |fixture| {
-        fixture.state.xwm.is_some() && fixture.state.xdisplay == Some(display)
-    });
 }
+
+/// A window manager that cannot attach to a server that just became ready
+/// -- the server's end gone between `READY` and `start_wm` -- leaves the
+/// session Wayland-only with `DISPLAY` withdrawn: the WM-attach-failure arm
+/// (`docs/backlog/resolved/xwayland-phase1-wm-failure-pin-done.md`).
+///
+/// Not the ticket's recipe, which does not hold: it had a rival X client
+/// claim `SubstructureRedirect` on the root before the first dispatch, but
+/// XWayland accepts *no* X client until the window manager owns `WM_S0`
+/// (Smithay's `start_wm`, "No X11 clients are accepted before this"), so
+/// the rival's connect blocks until the very attach it was meant to break
+/// -- measured: the rival's `x11rb::connect` never returned, and nextest
+/// killed the test at its 120s timeout. (And `start_wm` does not check its
+/// own `ChangeWindowAttributes`, so a rival that somehow got in first would
+/// not fail it either.) The failure `start_wm` does report is its
+/// connection failing, which is what a server dying right after `READY`
+/// looks like -- so that is what this drives, deterministically: the
+/// server is spawned the way `start` spawns it, `READY` is recorded instead
+/// of acted on, the recorded socket is shut down, and it is handed to
+/// [`super::attach_window_manager`] -- the function `start`'s own callback
+/// calls.
+#[cfg(feature = "xwayland")]
+#[test]
+fn a_window_manager_that_cannot_attach_withdraws_the_display() {
+    use std::cell::RefCell;
+    use std::net::Shutdown;
+    use std::process::Stdio;
+    use std::rc::Rc;
+
+    use smithay::xwayland::{XWayland, XWaylandEvent};
+
+    if !xwayland_on_path() {
+        eprintln!(
+            "a_window_manager_that_cannot_attach_withdraws_the_display: skipped -- no Xwayland binary on PATH"
+        );
+        return;
+    }
+    let mut fixture = Fixture::unstarted();
+    let display_handle = fixture.state.display_handle.clone();
+    let (xwayland, client) = XWayland::spawn(
+        &display_handle,
+        None::<u32>,
+        std::iter::empty::<(String, String)>(),
+        std::iter::empty::<String>(),
+        true,
+        Stdio::null(),
+        Stdio::null(),
+        |_| (),
+    )
+    .expect("XWayland should spawn");
+    let display = xwayland.display_number();
+    // What `start` stores synchronously, so the arm has something to
+    // withdraw.
+    fixture.state.xdisplay = Some(display);
+    let ready: Rc<RefCell<Option<std::os::unix::net::UnixStream>>> = Rc::default();
+    let seen = ready.clone();
+    fixture
+        .state
+        .loop_handle
+        .insert_source(xwayland, move |event, _, _| {
+            if let XWaylandEvent::Ready { x11_socket, .. } = event {
+                *seen.borrow_mut() = Some(x11_socket);
+            }
+        })
+        .expect("a readiness source");
+    wait_until(
+        &mut fixture,
+        "XWayland READY (recorded, not attached)",
+        |_| ready.borrow().is_some(),
+    );
+
+    let x11_socket = ready
+        .borrow_mut()
+        .take()
+        .expect("the recorded READY socket");
+    x11_socket
+        .shutdown(Shutdown::Both)
+        .expect("the window manager's socket shuts down");
+    let loop_handle = fixture.state.loop_handle.clone();
+    let ((), logs) = capture_logs(|| {
+        super::attach_window_manager(
+            &mut fixture.state,
+            loop_handle,
+            &display_handle,
+            x11_socket,
+            client,
+            display,
+        );
+    });
+    assert!(
+        fixture.state.xwm.is_none(),
+        "a window manager attached over a dead connection"
+    );
+    assert_eq!(
+        fixture.state.xdisplay, None,
+        "DISPLAY was not withdrawn after the window manager failed to attach"
+    );
+    assert!(
+        logs.contains("withdrawing DISPLAY"),
+        "the failed attach was not logged loudly: {logs}"
+    );
+    // Wayland-only, and still serving.
+    assert!(fixture.state.spawn(&["true".to_owned()]));
+    fixture.settle();
+}
+
+#[cfg(feature = "xwayland")]
+mod bench;
+#[cfg(feature = "xwayland")]
+mod focus;
+#[cfg(feature = "xwayland")]
+mod live;
+#[cfg(feature = "xwayland")]
+mod lock;
+#[cfg(feature = "xwayland")]
+mod mapping;
+#[cfg(feature = "xwayland")]
+mod peer;
+#[cfg(all(feature = "xwayland", feature = "gpu-scanout"))]
+mod scanout;
+#[cfg(feature = "xwayland")]
+mod x11;

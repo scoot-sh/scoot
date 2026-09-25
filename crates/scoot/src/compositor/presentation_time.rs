@@ -207,6 +207,8 @@ impl State {
                     surface_flags,
                 );
             }
+            #[cfg(feature = "xwayland")]
+            self.x11_unmanaged_feedback(output, &mut feedback, surface_flags);
         }
         if let Some(cursor) = cursor {
             take_presentation_feedback_surface_tree(

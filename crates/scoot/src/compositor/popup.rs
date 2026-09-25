@@ -249,7 +249,7 @@ impl State {
         // `root` is exactly what `grab_popup` recomputes for its own
         // debug assertion, from the same parent chain and in the same
         // synchronous call, so that assertion cannot fire from here.
-        let mut grab = match self.popups.grab_popup(root, popup, &seat, serial) {
+        let mut grab = match self.popups.grab_popup(root.into(), popup, &seat, serial) {
             Ok(grab) => grab,
             Err(error) => {
                 // Every variant is the client's own doing and Smithay has
@@ -370,7 +370,7 @@ impl State {
         self.popup_grab
             .as_ref()
             .and_then(|grab| grab.keyboard_grab_start_data().focus.as_ref())
-            == Some(surface)
+            .is_some_and(|root| root.surface() == surface)
     }
 
     /// Which window's popup tree currently holds the keyboard through an
@@ -408,7 +408,7 @@ impl State {
         // the root once the grab has ended, which the check above already
         // excluded). Only the root maps onto a window.
         let root = grab.keyboard_grab_start_data().focus.as_ref()?;
-        self.id_of(root)
+        self.id_of(root.surface())
     }
 
     /// Whether `client`'s grab request continues its own menu session rather
@@ -456,7 +456,7 @@ impl State {
         grab.keyboard_grab_start_data()
             .focus
             .as_ref()
-            .and_then(|surface| self.client_of(surface))
+            .and_then(|root| self.client_of(root.surface()))
     }
     /// Ends the active popup grab, if any, dismissing its popups.
     ///
