@@ -389,6 +389,12 @@ pub struct State {
     /// real renderer fail on demand.
     #[cfg(test)]
     pub(crate) fail_next_draw_for_test: bool,
+    /// Test-only: the listening socket's and the display's loop
+    /// registrations, so a test harness can remove both on teardown even
+    /// when its event loop outlives it (see `test_support`'s
+    /// `release_listener_sources`).
+    #[cfg(test)]
+    pub(crate) listener_tokens: Vec<smithay::reexports::calloop::RegistrationToken>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -938,7 +944,9 @@ impl State {
             .expect("a keymap for the default layout");
         seat.add_pointer();
 
-        let socket_name = Self::listen(display, event_loop)?;
+        let (socket_name, listener_tokens) = Self::listen(display, event_loop)?;
+        #[cfg(not(test))]
+        let _ = listener_tokens;
 
         // Built here rather than in the struct literal below, which moves
         // `appearance` before `cursor`'s own field initializer could read it.
@@ -1071,6 +1079,8 @@ impl State {
             frame_cursor_for_test: None,
             #[cfg(test)]
             fail_next_draw_for_test: false,
+            #[cfg(test)]
+            listener_tokens: listener_tokens.to_vec(),
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
@@ -1089,17 +1099,26 @@ impl State {
     /// [`BindError::RuntimeDirNotSet`] -- into a panic and, under this
     /// workspace's `panic = "abort"` release profile, a core dump, with
     /// nothing in it to tell an operator what to fix.
+    ///
+    /// Also hands back the two loop registrations (the socket's and the
+    /// display's); only a test harness keeps them.
     fn listen(
         display: Display<State>,
         event_loop: &mut EventLoop<'static, State>,
-    ) -> Result<OsString, Box<dyn std::error::Error>> {
+    ) -> Result<
+        (
+            OsString,
+            [smithay::reexports::calloop::RegistrationToken; 2],
+        ),
+        Box<dyn std::error::Error>,
+    > {
         // First, before `display` moves into the `Generic` below: this is the
         // failure that actually happens, and nothing else should have been
         // set up by the time it is reported.
         let socket = WaylandListener::bind_auto().map_err(socket_error)?;
         let name = socket.socket_name();
         let handle = event_loop.handle();
-        handle
+        let listener = handle
             .insert_source(socket, |stream, _, state: &mut State| {
                 super::wayland_accept::admit(state, stream, super::fd_pressure::table());
             })
@@ -1108,7 +1127,7 @@ impl State {
             // this function's error type to carry a `WaylandListener`;
             // only the reason is kept.
             .map_err(|error| error.error)?;
-        handle
+        let dispatcher = handle
             .insert_source(
                 Generic::new(display, Interest::READ, Mode::Level),
                 |_, display, state: &mut State| {
@@ -1155,7 +1174,7 @@ impl State {
                 },
             )
             .map_err(|error| error.error)?;
-        Ok(name)
+        Ok((name, [listener, dispatcher]))
     }
 
     /// Milliseconds since start, which is what Wayland input events carry.

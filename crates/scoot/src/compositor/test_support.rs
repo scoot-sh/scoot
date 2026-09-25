@@ -569,6 +569,7 @@ impl<S, A> Drop for Harness<S, A> {
             drop(client.steps.take());
         }
         if thread::panicking() {
+            self.release_listener_sources();
             return;
         }
         for index in 0..self.clients.len() {
@@ -585,6 +586,30 @@ impl<S, A> Drop for Harness<S, A> {
                 // the real failure.
                 eprintln!("the test client {index} failed: {error}");
             }
+        }
+        self.release_listener_sources();
+    }
+}
+
+impl<S, A> Harness<S, A> {
+    /// Removes the Wayland listening socket and the display from the event
+    /// loop, so both are closed now even if the loop itself is never freed.
+    ///
+    /// It can be kept alive past this harness: calloop's `EventLoop` has no
+    /// `Drop` that clears its sources, so a source whose callback holds a
+    /// `LoopHandle` -- Smithay's XWM inserts one for its X connection at
+    /// `start_wm` -- is an `Rc` cycle, and every live XWayland test used to
+    /// leak its whole loop, listening socket included. One process per test
+    /// (nextest) never noticed; `cargo test` runs every test in one process,
+    /// and on CI the leaked sockets plus the tests still running took all of
+    /// `wayland-1`..`wayland-32` (run 36146821701: "wayland-1 through
+    /// wayland-32 are all in use"). Dropping the display also closes
+    /// XWayland's Wayland connection, which is what ends that server. What
+    /// still leaks is memory only (the loop and the XWM's dead source).
+    fn release_listener_sources(&mut self) {
+        let handle = self.event_loop.handle();
+        for token in self.state.listener_tokens.drain(..) {
+            handle.remove(token);
         }
     }
 }
