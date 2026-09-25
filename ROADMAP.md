@@ -108,8 +108,10 @@ each item's own file records why it landed when it did.
   (2026-09-25, PR #243) — `[floating] modifier` (Super) with the left button moves a
   floating window, with the right resizes it from the nearest edge or
   corner; a client's own `xdg_toplevel.move`/`resize` (GTK headerbars, CSD
-  borders) is honoured on its still-held press (serial = the live implicit
-  grab's, press on its own surface), a tiled window's ignored. The core
+  borders) is honoured on its still-held press (the pointer's grab must be
+  that press's implicit `ClickGrab` under the request's serial -- a popup
+  grab's serial is not enough, review round 1 -- and the press on its own
+  surface), a tiled window's ignored. The core
   keeps each floating window's anchor (a point and which point of the
   window sits on it), so the edge a resize did not move holds whatever size
   the client settles on; `MoveFloating`/`ResizeFloating` clamp to the usable
@@ -122,8 +124,9 @@ each item's own file records why it landed when it did.
   about one per client ack); it ends on
   release, a second press, close, un-float, workspace switch, lock, VT
   pause or output resize. A window's own floating dialogs are always drawn
-  above it (the PR #242 re-review's fullscreen-game case, fixed in
-  general). Dev VM: IPC move/resize of a rule-floated foot and a zenity
+  above it at any depth (the PR #242 re-review's fullscreen-game case,
+  fixed in general). Under `--nested` a host focus change no longer leaves
+  a modifier stuck, and a host pointer leave ends a drag. Dev VM: IPC move/resize of a rule-floated foot and a zenity
   dialog dragged by its own body on `--headless`; Super+left/right drags
   with a uinput keyboard/mouse on `--tty`.
 - **[Floating windows, PR 1 of 2](docs/backlog/resolved/floating-windows-done.md)**

@@ -261,9 +261,11 @@ dialog stays visible over it rather than going under it.
 **Moving and resizing: `xdg_toplevel.move` and `.resize`.** A client-side
 titlebar drag (GTK's headerbar) or border drag works on a floating window.
 The request is honoured only while the button press it rides on is still
-held: its serial must be the press serial of the pointer's live implicit
-grab, and that press must have gone to the requesting client's own surface
--- so a stale serial, a guessed one, or another client's press is refused
+held: the pointer's grab must be the implicit grab that press installed,
+under the request's serial, and that press must have gone to the requesting
+client's own surface -- so a stale serial, a guessed one, another client's
+press, or the serial of a grab that holds no button (a popup's, which is
+installed under whatever key or enter serial the client offered) is refused
 (logged at debug), and nothing happens. A request from a tiled window is
 ignored: tiled windows are placed by the strip, and the client's own drag
 simply carries on with nothing moving. So is one from a fullscreen window,
