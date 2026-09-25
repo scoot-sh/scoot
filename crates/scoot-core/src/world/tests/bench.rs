@@ -158,10 +158,15 @@ fn arrange_cost() {
     // floating dialogs on the chain's tip, and an unrelated window
     // fullscreen over them -- the covering rule asks each dialog whether it
     // descends from the fullscreen window.
+    // Fewer rounds: a quadratic tree takes tens of milliseconds a call.
     for n in [250, 1000] {
-        measure(
-            &format!("covered tiled chain + {n} dialogs"),
-            covered_chain(n),
+        let world = covered_chain(n);
+        time_rounds(
+            &format!("covered tiled chain + {n} dialogs arrange"),
+            200,
+            || {
+                black_box(world.arrange());
+            },
         );
     }
 }
