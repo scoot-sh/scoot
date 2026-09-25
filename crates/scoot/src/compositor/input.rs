@@ -776,6 +776,39 @@ impl State {
         })
     }
 
+    /// Releases every key this seat believes held: what a keyboard that
+    /// lost focus without delivering its releases needs (`--nested`'s host
+    /// keyboard `leave` -- an Alt+Tab in the host keeps Alt's release on the
+    /// host side). Without it the seat's modifier state stays held, which
+    /// with `[floating] modifier` set to that key turns every click on a
+    /// floating window into a drag. Each goes through [`State::key`], so a
+    /// release a binding intercepted is still intercepted and the focused
+    /// client sees the rest. Rare (a focus change), so the snapshot's
+    /// allocation is fine.
+    pub(super) fn release_held_keys(&mut self) {
+        let held: Vec<Keycode> = self.held_keys.iter().copied().collect();
+        for keycode in held {
+            self.key(keycode, KeyState::Released);
+        }
+    }
+
+    /// Presses the modifiers among `evdev` (a `wl_keyboard.enter`'s key
+    /// array) that this seat does not believe held, so a modifier held as
+    /// focus arrives counts. Modifiers only: pressing an ordinary held key
+    /// would deliver a keystroke nobody typed, and could fire a binding.
+    /// Matched by evdev code against the default layout the seat uses (see
+    /// `nested_dispatch.rs`).
+    pub(super) fn press_held_modifiers(&mut self, evdev: &[u32]) {
+        // Ctrl, Shift, Alt and Meta, left and right.
+        const MODIFIERS: [u32; 8] = [29, 97, 42, 54, 56, 100, 125, 126];
+        for &code in evdev.iter().filter(|code| MODIFIERS.contains(code)) {
+            let keycode = Keycode::new(code + 8);
+            if !self.held_keys.contains(&keycode) {
+                self.key(keycode, KeyState::Pressed);
+            }
+        }
+    }
+
     /// `pub(super)` rather than private: `nested_dispatch.rs` forwards real
     /// host keyboard events through this exact same path IPC-injected key
     /// presses already use, rather than duplicating the `keyboard.input`

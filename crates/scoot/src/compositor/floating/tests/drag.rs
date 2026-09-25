@@ -287,6 +287,39 @@ fn the_configured_modifier_is_the_one_that_drags() {
     hold(&mut fixture, ALT, false);
 }
 
+/// `--nested`'s host keyboard `leave` releases what scoot believes held (an
+/// Alt+Tab in the host never delivers Alt's release), and its `enter`
+/// presses the modifiers the host reports down. Without the first, a stuck
+/// Alt would turn every click on a floating window into a drag.
+#[test]
+fn a_host_focus_change_leaves_no_modifier_stuck() {
+    let (mut fixture, dialog) = dialog_scene();
+    fixture.state.floating_modifier = scoot_ipc::Modifier::Alt;
+    let (cx, cy) = centre(fixture.placement(dialog).rect);
+    move_pointer(&mut fixture, cx, cy);
+    hold(&mut fixture, ALT, true);
+    // The host takes focus away with Alt down; its release goes elsewhere.
+    fixture.state.release_held_keys();
+    fixture.settle();
+    assert!(fixture.state.held_keys.is_empty());
+    press(&mut fixture, PointerButton::Left);
+    assert_eq!(fixture.state.floating_grab_window(), None, "Alt stuck");
+    release(&mut fixture, PointerButton::Left);
+    // Focus comes back with Alt (evdev 56) held on the host: it counts;
+    // an ordinary held key (evdev 30, `a`) is not typed.
+    fixture.state.press_held_modifiers(&[56, 30]);
+    fixture.settle();
+    assert!(fixture.state.held_keys.contains(&Keycode::new(ALT)));
+    assert!(!fixture.state.held_keys.contains(&Keycode::new(30 + 8)));
+    press(&mut fixture, PointerButton::Left);
+    assert_eq!(
+        fixture.state.floating_grab_window(),
+        Some(fixture.id(dialog))
+    );
+    release(&mut fixture, PointerButton::Left);
+    hold(&mut fixture, ALT, false);
+}
+
 /// The swallowed press must not become an activation serial the client
 /// could mint a token from: it never received it.
 #[test]

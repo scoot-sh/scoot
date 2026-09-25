@@ -271,6 +271,27 @@ impl Dispatch<HostKeyboard, ()> for State {
         // real physical keyboard never uploads a keymap, so this doesn't
         // affect it; it only affects synthetic input tools until host
         // keymap adoption is implemented (still out of scope).
+        // Focus, though, is tracked: the host delivers no release for a key
+        // let go while its window is unfocused (an Alt+Tab keeps Alt's
+        // release), so leaving releases everything scoot believes held and
+        // entering presses the modifiers the host says are down. A stuck
+        // modifier would otherwise stay held -- with `[floating] modifier =
+        // "alt"`, every click on a floating window a drag.
+        let event = match event {
+            wl_keyboard::Event::Leave { .. } => {
+                state.release_held_keys();
+                return;
+            }
+            wl_keyboard::Event::Enter { keys, .. } => {
+                let evdev: Vec<u32> = keys
+                    .chunks_exact(4)
+                    .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
+                    .collect();
+                state.press_held_modifiers(&evdev);
+                return;
+            }
+            other => other,
+        };
         if let wl_keyboard::Event::Key {
             key,
             state: key_state,
@@ -347,6 +368,14 @@ impl Dispatch<HostPointer, ()> for State {
             // event is matched explicitly, not folded into a catch-all, so
             // it's clear this was considered rather than missed.
             wl_pointer::Event::Frame => {}
+            // The pointer left scoot's window: whatever it does next the
+            // host delivers elsewhere, including the release that would end
+            // a floating window's drag -- so the drag ends here, as on a VT
+            // switch.
+            wl_pointer::Event::Leave { .. } => {
+                state.end_floating_grab();
+                state.settle_floating_grab();
+            }
             _ => {}
         }
     }
