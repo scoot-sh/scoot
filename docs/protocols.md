@@ -128,9 +128,14 @@ copies can take it past for that moment.)
 
 Every window in the scrolling layout is sent all four `xdg_toplevel` tiled
 states (`tiled_left`, `tiled_right`, `tiled_top`, `tiled_bottom`) in the same
-configure as its size, from its first configure on. A fullscreen window is
-sent `fullscreen` instead, never both, and gets the four back when it leaves.
-scoot has no floating windows, so no window is sent neither. A client bound
+configure as its size, from its first configure on. That includes the
+configure that answers a re-map: a window that unmaps (a null buffer)
+loses all its toplevel state, as xdg-shell says it must. The configure
+answering its next map is rebuilt from the layout: its column's size, the
+tiled states, `activated` if it has focus, and `ServerSide` decorations
+under `prefer_no_csd`. A fullscreen window is sent `fullscreen` instead,
+never both, and gets the four back when it leaves. scoot has no floating
+windows yet, so every window is sent one or the other. A client bound
 to `xdg_wm_base` below version 2 is sent none of the tiled states (they do
 not exist at its version).
 
@@ -145,6 +150,16 @@ GTK 4 dialog (`zenity --info`) kept its own 300x223 size in a 966x1083 slot,
 and `mpv` kept its video's size. scoot rounds the corners and draws the focus
 ring around what such a window actually draws, and reports that area as its
 `rect` over IPC ([ipc.md](ipc.md#what-the-replies-carry)). It does not use the whole slot.
+
+One case is not solved yet. libadwaita dialogs (`zenity --info` above)
+round their own corners, with a larger radius than scoot's, and they keep
+doing it when tiled. With `corner_radius` set, a crescent of background
+shows at each corner, between the dialog's own curve and scoot's tighter
+ring. That is far closer than before, when the ring circled the whole empty
+slot, but it is not a match. Tracked in
+[`core/client-rounded-corners-vs-ring.md`](backlog/core/client-rounded-corners-vs-ring.md).
+Most such dialogs will float once
+[floating windows](backlog/core/floating-windows.md) land.
 
 ## Fullscreen
 

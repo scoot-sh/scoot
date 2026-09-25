@@ -119,7 +119,13 @@ each item's own file records why it landed when it did.
   fix: the painted ring's side bars stop where its strips begin, so the
   outer edge is a concentric arc in every row. Default foot at 1.0 and 1.5,
   headless and `--tty`: all four corners pass the per-pixel check, inner
-  and outer (on `main`, three failed inner and every outer failed). No
+  and outer (on `main`, the right and bottom corners failed inner in every
+  run, the top-right as well in three of the four, and every outer edge
+  failed). A re-mapped window is rebuilt from the layout (size, tiled
+  states, activation, `ServerSide`), where it used to come back unsized,
+  untiled and told `ClientSide`. Residual: libadwaita dialogs round their
+  own corners wider than the ring
+  ([`client-rounded-corners-vs-ring`](docs/backlog/core/client-rounded-corners-vs-ring.md)). No
   measurable frame cost (debug-profile `rounded_corners_cost` and
   `render_frame_cost` within run-to-run noise, pixman and GLES).
 

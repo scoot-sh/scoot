@@ -8,10 +8,26 @@ blocked: null
 
 # Clip and ring the committed size; tell clients they're tiled — DONE
 
-RESOLVED 2026-09-24, together with
+RESOLVED 2026-09-24 (PR #240), together with
 [`ring-outer-corner-shoulders-done.md`](./ring-outer-corner-shoulders-done.md)
 in one PR (the user asked for both in one). The ticket as filed is kept
 verbatim below the resolution.
+
+**Scope of "done".** Default foot, mpv, and any client that fills its slot
+or draws a plain rectangle now match at every corner. One residual is
+filed rather than fixed: libadwaita dialogs round their own corners wider
+than scoot's radius, so a crescent of background still shows between their
+curve and the ring (all four corners fail the pixel check, 53–59
+background px each at 1.5). That is much closer than `main`, where the ring
+circled the empty slot, but it is not a match. See
+[`core/client-rounded-corners-vs-ring.md`](../core/client-rounded-corners-vs-ring.md).
+
+**SHA mapping.** The branch was rebased onto `85c662a` (a backlog-only
+commit) during review, so the evidence SHAs below are pre-rebase:
+`b755f11` → `e1bab6d`, `7164226` → `c71a2fb`, `557fa8e` → `cec98d5`. Each
+pair has an identical `crates/` tree (`git diff <old> <new> -- crates` is
+empty); the rebase added only `docs/backlog/core/floating-windows.md` and
+its index line.
 
 ## Resolution
 
@@ -47,10 +63,46 @@ and no writers. None of them configures a client or teaches the core:
 **Rect semantics (decided).** `rect` is what is drawn and clickable, and
 it never reaches past the slot. Hit-testing was always by surface, so a
 click in the undrawn part of a slot never reached the window. The old
-`rect` promised an area that was not clickable. A window stacked behind a
-fullscreen sibling reports the sibling's origin with its own size. A
+`rect` promised an area that was not clickable. The clamp applies only to
+visible windows: a hidden one reports its layout frame unchanged. (Before
+the review this also applied to a window stacked behind a fullscreen
+sibling, which then reported the sibling's origin with its own size.) A
 fullscreen window reports the output's rect as long as it draws the whole
 output. `docs/ipc.md` says both.
+
+**Re-map (review round 1).** Smithay discards everything pending when a
+toplevel unmaps (`xdg/mod.rs`, the `got_unmapped` reset). Nothing
+re-arranged on a re-map, so the configure answering it carried no size,
+no tiled states, no `activated`, and, because the decoration mode is
+re-sent with every initial configure, `ClientSide`. That told a re-mapped
+foot to size itself, round to cells, and draw its own titlebar. The review
+found the size and states; the decoration mode came to light while tracing
+the same reset. `State::restore_layout_state` now rebuilds all four from
+the layout before `send_initial_configure`:
+
+- the size, only for a visible placement (a hidden one may be stacked
+  behind a fullscreen sibling, whose frame is not its size);
+- the layout states;
+- `activated` if the window is focused;
+- `ServerSide` under `prefer_no_csd`.
+
+On a first map every value is already pending, so nothing changes there.
+
+Pinned in `fullscreen/tests/transitions.rs`:
+`a_re_mapped_window_is_told_its_size_and_that_it_is_tiled` (on `fbb1551`
+the re-map configure was `0x0`, `tiled: false`) and
+`a_re_mapped_window_keeps_server_side_decorations` (on `fbb1551` the modes
+were `[ServerSide, ClientSide]`). The same file pins
+`a_window_hidden_behind_a_fullscreen_sibling_reports_its_layout_rect`, and
+`rounded/tests/committed.rs` has `a_version_one_client_is_never_sent_tiled_states`
+as a guard; that one passes on both sides.
+
+Live on `340f3c7` (release `9d03ae27…`, headless 2952x1660, default foot).
+Open foot, `action close`, open it again: both rounds report the full
+slot, 966x1083 at 1.5 and 1458x1636 at 1.0, and all four corners pass in
+both rounds. A newly spawned foot is a fresh toplevel, not a re-map (foot
+never unmaps a live window), so the re-map path itself is covered by the
+harness tests above. Evidence is in `~/evidence/r205/review1/`.
 
 **Resize behaviour (decided).** The drawn rect is read fresh each frame
 from committed state, so the ring and clip move on the frame the client's
@@ -130,8 +182,12 @@ installed on the dev VM, so not measured):
 - `mpv` testsrc (`--vo=wlshm`): keeps its own 644x722 size tiled or not.
   After, the ring and rounded corners follow the video.
 - `weston-terminal`: ignores the tiled states. It commits a 967x1087
-  geometry, larger than its slot, so the rect is clamped to the 966x1083
-  slot, the same as before.
+  geometry, larger than its slot, and keeps it for good (not only mid-resize).
+  So the rect is clamped to the 966x1083 slot, the same as before.
+- Residual: re-measured on `340f3c7`, `check_corners.py` fails all four of
+  zenity's corners (the libadwaita crescent described at the top): 53–59
+  background px inside the clip per corner at 1.5, 19 at 1.0. The outer arc
+  passes.
 
 Everything above (binaries with `SHA256SUMS`, logs, PNGs, `windows`
 JSON, `WAYLAND_DEBUG` client logs, gate logs) is under `~/evidence/r205/`

@@ -32,9 +32,22 @@ fallback, so no buffer holds a size in two units. The strips are at least
 on both edges. A sweep over six scales, four thicknesses and 16 sub-pixel
 positions pins this, and a too-short window gets no bars.
 
-One side effect: a translucent ring colour used to blend twice where the
-strips overlapped the bars. It no longer overlaps. Opaque colours, all the
-defaults, are unchanged. The ring still draws four elements per window.
+Two side effects on the rounded path, both corrections:
+
+- **Fractional scales.** At 1.25, 1.5 and 1.75 the old logical-sized side
+  bars could sit 1px off the band the strips paint. The right bar started
+  at `round((x + w) * s)`, while the window's clip ends at
+  `round(x * s) + round(w * s)`, and those differ by one for some
+  positions (odd `x` and `w` at 1.5). The new physical bars land on the
+  band exactly, so a few edge pixels change there.
+- **Translucent ring colours.** They used to blend twice where the strips
+  overlapped the bars. They no longer overlap.
+
+The shoulder fix does not touch the square ring (`corner_radius = 0`):
+`ring_rects` is unchanged. The square ring's only change in PR #240 is that
+it follows the drawn rect. On the rounded path, opaque colours at integer scales change
+only in the shoulder pixels this ticket is about. The ring still draws four
+elements per window.
 
 ## Evidence
 
