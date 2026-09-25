@@ -403,6 +403,14 @@ impl State {
                     scoot_ipc::Action::SetFullscreen { id, .. } => Some(WindowId(*id)),
                     _ => None,
                 };
+                // A resize is clamped to the window's own limits, which the
+                // core only has as fresh as the last title change; read them
+                // now (see `floating/grab.rs`).
+                if let scoot_ipc::Action::ResizeFloating { id, .. } = &action
+                    && self.windows.contains_key(&WindowId(*id))
+                {
+                    self.sync_size_hints(WindowId(*id));
+                }
                 self.act(Action::from(action));
                 if let Some(id) = told {
                     self.tell_fullscreen(id);

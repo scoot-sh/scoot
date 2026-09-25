@@ -703,8 +703,10 @@ impl State {
     /// Re-reads a window's size limits into the core when they changed: the
     /// core's copy is taken when the window is created and on a title, app
     /// id or parent change, and `set_min_size`/`set_max_size` land at a
-    /// commit, usually after the first of those.
-    fn sync_size_hints(&mut self, id: WindowId) {
+    /// commit, usually after the first of those. Run before every resize
+    /// the core clamps to them: a resize drag's start, and IPC
+    /// `resize-floating` (`ipc.rs`).
+    pub(in crate::compositor) fn sync_size_hints(&mut self, id: WindowId) {
         let info = self.info_of(id);
         if self
             .world

@@ -648,6 +648,34 @@ fn ipc_moves_and_resizes_a_floating_window() {
     assert_eq!(fixture.placement(0).rect, column);
 }
 
+/// IPC `resize-floating` clamps to the limits the window has *now*: they
+/// arrive at its first commit, after the core took its copy.
+#[test]
+fn ipc_resize_respects_the_window_s_own_limits() {
+    let mut fixture = Fixture::new();
+    fixture.map(Spec::tiled());
+    let dialog = fixture.map(Spec {
+        min: Some((50, 30)),
+        max: Some((100, 60)),
+        ..Spec::dialog_of(0)
+    });
+    let id = fixture.id(dialog).0;
+    for ((width, height), expected) in [((500, 500), (100, 60)), ((5, 5), (50, 30))] {
+        let response =
+            fixture
+                .state
+                .handle_request(Request::Action(scoot_ipc::Action::ResizeFloating {
+                    id,
+                    width,
+                    height,
+                }));
+        assert!(matches!(response, Response::Ok { .. }), "{response:?}");
+        fixture.settle();
+        let asked = fixture.last_configure(dialog);
+        assert_eq!((asked.width, asked.height), expected);
+    }
+}
+
 /// PR #242's carried note, on screen: a floating parent clicked above its
 /// dialog keeps the dialog drawn over it.
 #[test]
