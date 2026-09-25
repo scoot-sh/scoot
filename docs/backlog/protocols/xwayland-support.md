@@ -386,7 +386,7 @@ pid -- a deliberate addition to the brief: without it a GTK app's file
 chooser opened unfocused, measured with `mousepad`, because GTK sends no
 `_NET_ACTIVE_WINDOW` for a new dialog), or the window redeems its spawn's
 activation token -- by `_NET_STARTUP_ID` on the window or, failing that,
-on its client leader (`WM_HINTS` window group, where GTK and Qt put it)
+on its client leader (`WM_HINTS` window group, same X client only, where GTK puts it; Qt unverified)
 (`State::spawn` now exports the token as `DESKTOP_STARTUP_ID` too while
 XWayland is live; this reverses Phase 1's documented "must not mint", which
 predated any X redemption path) or by its X-Resource client pid being an
@@ -410,10 +410,19 @@ id); an override-redirect window mapped during the lock is pinned hidden and
 inert; CI builds, lints and runs the live suites with `Xwayland` installed
 and `SCOOT_REQUIRE_XWAYLAND=1`, so a skipped live test fails there.
 
+**Review round 2 (same PR):** a client-leader startup id is honoured only
+when the leader belongs to the same X client (the X id's client bits, which
+the server allocates; the resource-id mask is pinned against the server's
+by a live test), so a stranger cannot name another app's leader; the tools
+the live suites use (xclock, xeyes, pkill) obey `SCOOT_REQUIRE_XWAYLAND`
+too; CI puts a Nix `pkill` on PATH (the host's broke under the EGL
+`LD_LIBRARY_PATH`); the Qt and `flatpak run` leader claims are marked
+unverified.
+
 **Known limits, measured and stated rather than hidden:** (1) the startup-id
 chain is copyable before the app maps -- `_NET_STARTUP_ID` is readable from
 the moment a toolkit sets it on its leader, so a watching X client can map
-a window with a copy (or naming the leader as its group) before the app's
+a window with a copy before the app's
 own window maps, within the token's 30 s, and take focus once; binding the redemption to the spawned process (ppid walk) is
 filed as [`xwayland-startup-id-race.md`](./xwayland-startup-id-race.md). (2)
 The brief asked the lock to *dismiss* X menus; it hides them and refuses

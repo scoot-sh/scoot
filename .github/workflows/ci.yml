@@ -327,9 +327,9 @@ jobs:
       # refusal -- are security regression tests that must run somewhere
       # automated. They drive a real `Xwayland` server, so one is put on
       # PATH (plus xclock/xeyes, which two suites use for a second X client
-      # process), pinned like the smoke tools through this repo's
+      # process, and procps for `pkill`), pinned like the smoke tools through this repo's
       # `flake.lock`. `SCOOT_REQUIRE_XWAYLAND` turns every live test's quiet
-      # "skipped -- no Xwayland binary on PATH" into a failure, so a PATH
+      # "skipped -- no Xwayland (or xclock/xeyes/pkill) on PATH" into a failure, so a PATH
       # regression here cannot leave the security suites green by skipping
       # (see `compositor/xwayland/tests/mod.rs`'s `xwayland_on_path`).
       #
@@ -340,9 +340,14 @@ jobs:
       - name: --features xwayland -- clippy, nextest and cargo test, live suites required
         shell: nix develop --command bash -euo pipefail {0}
         run: |
-          x=$(nix build --inputs-from . nixpkgs#xwayland nixpkgs#xorg.xclock nixpkgs#xorg.xeyes --no-link --print-out-paths)
+          # procps too: the dead-server test kills the server with `pkill`,
+          # and the host's pkill loads the host glibc against the Nix
+          # libraries `LD_LIBRARY_PATH` names below (run 36144028882 died on
+          # `GLIBC_ABI_GNU2_TLS not found`). A Nix pkill agrees with them.
+          x=$(nix build --inputs-from . nixpkgs#xwayland nixpkgs#xorg.xclock nixpkgs#xorg.xeyes nixpkgs#procps --no-link --print-out-paths)
           for path in $x; do export PATH="$path/bin:$PATH"; done
-          command -v Xwayland
+          command -v Xwayland pkill
+          pkill --version
           export SCOOT_REQUIRE_XWAYLAND=1
           export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
           export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"

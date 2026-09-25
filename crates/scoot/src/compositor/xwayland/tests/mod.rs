@@ -271,6 +271,25 @@ fn xwayland_on_path() -> bool {
     found
 }
 
+/// Whether `tool` resolves on `PATH` for `test`'s optional half -- a walk,
+/// never an exec. Where it is missing the test says so on stderr and skips
+/// that half, unless [`REQUIRE_XWAYLAND_ENV`] is set: then every tool a live
+/// suite uses is required too, and a missing one fails the test rather than
+/// letting it pass without the check it exists for.
+#[cfg(feature = "xwayland")]
+pub(super) fn tool_on_path(test: &str, tool: &str) -> bool {
+    let found = std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(tool).is_file()));
+    if !found {
+        assert!(
+            std::env::var_os(REQUIRE_XWAYLAND_ENV).is_none(),
+            "{test}: {REQUIRE_XWAYLAND_ENV} is set but `{tool}` is not on PATH: this check would silently skip"
+        );
+        eprintln!("{test}: skipped -- no {tool} on PATH");
+    }
+    found
+}
+
 /// Set (to anything) where the live XWayland suites must run: every live
 /// test then fails instead of skipping when `Xwayland` is not on `PATH`.
 #[cfg(feature = "xwayland")]
@@ -441,15 +460,23 @@ fn a_dead_server_is_loud_and_the_session_survives() {
         );
         return;
     }
-    let status = std::process::Command::new("pkill")
-        .arg("--version")
-        .output();
-    if status.is_err() {
-        eprintln!(
-            "a_dead_server_is_loud_and_the_session_survives: skipped -- no pkill on PATH to drive the kill half"
-        );
+    if !tool_on_path("a_dead_server_is_loud_and_the_session_survives", "pkill") {
         return;
     }
+    // Present is not enough: a pkill that cannot run (CI once handed the
+    // host's pkill a Nix `libsystemd` through `LD_LIBRARY_PATH`, and it died
+    // on `GLIBC_ABI_GNU2_TLS not found`) must fail here, loudly, not as a
+    // mystifying "pkill should find the test's server" later.
+    let probe = std::process::Command::new("pkill")
+        .arg("--version")
+        .output()
+        .expect("pkill on PATH should at least start");
+    assert!(
+        probe.status.success(),
+        "pkill is on PATH but does not run ({}): {}",
+        probe.status,
+        String::from_utf8_lossy(&probe.stderr)
+    );
     // The whole session inside one capture, not just the kill: the XWM's
     // span is made at `start` and entered on every X event, and a span made
     // outside a capture panics the registry when entered inside one under

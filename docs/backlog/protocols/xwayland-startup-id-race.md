@@ -16,13 +16,12 @@ property, and this is its one known window.
 
 The X focus gate (`compositor/xwayland/focus.rs`) lets a mapping X window
 take focus when its `_NET_STARTUP_ID` -- or its client leader's, the
-`WM_HINTS` window group where GTK and Qt set it -- names a live activation
+`WM_HINTS` window group, same X client only, where GTK sets it -- names a live activation
 token; `State::spawn` hands every child its token as `DESKTOP_STARTUP_ID`
 while XWayland is live. But a startup id is a property readable by every X
 client, and a toolkit sets it on its leader at startup, before its first
 window maps. A background X client watching the root can read it, copy it
-onto a window of its own (or name the app's leader as its own window
-group), and map *before the app does*: it redeems the token and takes
+onto a window of its own, and map *before the app does*: it redeems the token and takes
 focus from a Wayland window once. The real app arrives second; the token
 is single-use. The window is from the moment the app sets its startup id
 until its own first window maps (which spends the token, whichever gate
@@ -45,7 +44,7 @@ When the token carries `SpawnedPid(p)` (every token scoot mints for a spawn
 while XWayland is live), accept a startup-id redemption only if the window's
 X-Resource client pid is `p` or a descendant of it -- a bounded walk up
 `/proc/<pid>/stat` ppids (a few levels), so wrapper scripts (`sh -c`,
-launcher shims, `flatpak run`) keep working. A token without `SpawnedPid` (a
+launcher shims, and -- unverified -- `flatpak run`) keep working. A token without `SpawnedPid` (a
 Wayland launcher's, minted from a real click) keeps today's rule, or is
 bound to nothing and refused for X -- decide and document.
 

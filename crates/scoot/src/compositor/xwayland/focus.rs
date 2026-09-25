@@ -23,14 +23,16 @@
 //!    token rule there still binds (the 30-second lifetime, the shared cap,
 //!    single use):
 //!    - the window's `_NET_STARTUP_ID` -- or, when the window has none, its
-//!      client leader's (the `WM_HINTS` window group: GTK and Qt set the
-//!      startup id on that unmapped leader window, never on the toplevel
-//!      they map, so reading the toplevel alone redeemed nothing, measured
-//!      by review) -- names a live token. `State::spawn` hands a child its
+//!      client leader's (the `WM_HINTS` window group, when that leader
+//!      belongs to the same X client: GTK sets the startup id on that
+//!      unmapped leader window, never on the toplevel it maps, so reading
+//!      the toplevel alone redeemed nothing, measured by review; Qt is
+//!      believed to do the same, unverified) -- names a live token. `State::spawn` hands a child its
 //!      token as `DESKTOP_STARTUP_ID` too while XWayland is live, the
-//!      variable X toolkits read for exactly this, so a toolkit launched
-//!      through a wrapper (`sh -c`, a launcher, `flatpak run`) still
-//!      redeems it. A token a Wayland launcher minted from a real click
+//!      variable X toolkits read for exactly this, so a GTK app launched
+//!      through a wrapper (`sh -c`, measured) still redeems it; a launcher
+//!      shim or `flatpak run` should too, as long as the variable reaches
+//!      the app (unverified). A token a Wayland launcher minted from a real click
 //!      works the same way: it passed `activation.rs`'s serial gate.
 //!    - the X client's process -- read through the X-Resource extension
 //!      (`XResQueryClientIds`), which the X server answers from the socket's
@@ -81,8 +83,7 @@
 //! A startup id is readable by every X client from the moment the launched
 //! app sets it -- and a toolkit sets it on its client leader at startup,
 //! well before its first window maps. So an X client watching for new
-//! windows can copy it onto a window of its own (or name the app's leader
-//! as its own window group) and map *before* the app does, redeeming the
+//! windows can copy it onto a window of its own and map *before* the app does, redeeming the
 //! token and taking focus once, while the token is live (up to 30 s after
 //! the launch). The redemption does not check that the redeeming window's
 //! process is the one the token was minted for. The tightening -- when the
@@ -164,11 +165,16 @@ impl State {
     }
 
     /// The startup id on `window`'s client leader -- its `WM_HINTS` window
-    /// group, where GTK and Qt set it -- when that leader is a window the
+    /// group, where GTK sets it -- when that leader is a window the
     /// XWM has seen carry one. One map lookup.
+    ///
+    /// The leader must belong to the same X client as `window`: a window's
+    /// `WM_HINTS` is client-set, so without this any X client could name
+    /// another application's leader as its own group and borrow its startup
+    /// id. Compared by [`same_x_client`], on ids the server allocated.
     fn leader_startup_id(&self, window: &X11Surface) -> Option<String> {
         let leader = window.hints()?.window_group?;
-        if leader == window.window_id() {
+        if leader == window.window_id() || !same_x_client(leader, window.window_id()) {
             return None;
         }
         self.x11_startup_carriers.get(&leader)?.startup_id()
@@ -250,6 +256,25 @@ impl State {
         );
         true
     }
+}
+
+/// The resource-id mask XWayland hands every client: the low bits of an X
+/// id are the client's own, the bits above them name the client. An X
+/// server gives each connection its own `resource-id-base` and refuses a
+/// window id outside it (`BadIDChoice`), so the client bits of a window's id
+/// are the server's word on which connection created it -- nothing a client
+/// can forge. The value follows from the X server's default client limit
+/// (256 clients, so 8 client bits over a 29-bit id space, leaving 21): Smithay
+/// starts XWayland with no `-maxclients`, and the live test
+/// `the_resource_id_mask_is_the_servers` checks it against what the server
+/// reports, so a change surfaces as a failing test rather than a gate that
+/// quietly compares the wrong bits.
+pub(in crate::compositor) const X_CLIENT_RESOURCE_MASK: u32 = 0x001f_ffff;
+
+/// Whether two X window ids were allocated to the same X client (the same
+/// connection); see [`X_CLIENT_RESOURCE_MASK`].
+fn same_x_client(a: u32, b: u32) -> bool {
+    a & !X_CLIENT_RESOURCE_MASK == b & !X_CLIENT_RESOURCE_MASK
 }
 
 /// `window`'s X client pid through X-Resource, cached on the surface.

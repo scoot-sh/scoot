@@ -47,7 +47,7 @@ pub(super) struct Props {
     /// A raw `WM_CLASS` value (`STRING`, so Windows-1252), written as-is
     /// instead of [`Props::class`].
     pub(super) class_raw: Option<Vec<u8>>,
-    /// `WM_HINTS` window group: the client leader, as GTK and Qt set it.
+    /// `WM_HINTS` window group: the client leader, as GTK sets it.
     pub(super) group_leader: Option<Window>,
 }
 
@@ -410,7 +410,7 @@ impl XClient {
 
 impl XClient {
     /// An unmapped client-leader window carrying `startup_id` as its
-    /// `_NET_STARTUP_ID`, the way GTK and Qt set one up at startup.
+    /// `_NET_STARTUP_ID`, the way GTK sets one up at startup.
     pub(super) fn leader_with_startup_id(&self, startup_id: &str) -> Window {
         let leader = self.conn.generate_id().expect("an X window id");
         self.conn

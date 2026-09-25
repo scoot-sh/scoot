@@ -439,7 +439,7 @@ pub struct State {
     pub x11_unmanaged: Vec<smithay::xwayland::X11Surface>,
     /// Every X window, mapped or not, that currently carries a
     /// `_NET_STARTUP_ID`, by X window id -- so the focus gate can read a
-    /// toolkit's startup id off its *client leader* (GTK and Qt put it
+    /// toolkit's startup id off its *client leader* (GTK puts it
     /// there, on an unmapped window, not on the toplevel they map; see
     /// `xwayland/focus.rs`). Written only from the XWM callbacks (a window
     /// created, its startup id changing, its destruction, the server's

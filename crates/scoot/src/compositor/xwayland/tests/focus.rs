@@ -126,9 +126,10 @@ fn net_active_window_is_honoured_only_within_the_focused_client() {
     let first = live.managed(first);
     assert_eq!(live.fixture.state.focus, Some(first));
 
-    let xeyes = std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join("xeyes").is_file()));
-    if xeyes {
+    if super::tool_on_path(
+        "net_active_window_is_honoured_only_within_the_focused_client (stranger half)",
+        "xeyes",
+    ) {
         let mut stranger = std::process::Command::new("xeyes")
             .env("DISPLAY", super::display_value(live.display))
             .stdout(std::process::Stdio::null())
@@ -161,10 +162,6 @@ fn net_active_window_is_honoured_only_within_the_focused_client() {
         assert_ne!(live.fixture.state.focus, Some(strangers));
         let _ = stranger.kill();
         let _ = stranger.wait();
-    } else {
-        eprintln!(
-            "net_active_window_is_honoured_only_within_the_focused_client: stranger half skipped -- no xeyes on PATH"
-        );
     }
 
     // The application's own second window takes focus as it maps (see
@@ -273,10 +270,7 @@ fn a_spawn_tokens_startup_id_lets_an_x_window_take_focus_once() {
 /// `PATH`.
 #[test]
 fn a_spawned_x_client_takes_focus_by_its_process() {
-    let on_path = std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join("xclock").is_file()));
-    if !on_path {
-        eprintln!("a_spawned_x_client_takes_focus_by_its_process: skipped -- no xclock on PATH");
+    if !super::tool_on_path("a_spawned_x_client_takes_focus_by_its_process", "xclock") {
         return;
     }
     // The whole session inside the capture, not just the spawn: spans the
@@ -453,8 +447,8 @@ fn a_token_is_spent_whichever_rule_grants_focus() {
     );
 }
 
-/// GTK and Qt set `_NET_STARTUP_ID` on their unmapped client leader (the
-/// `WM_HINTS` window group), not on the toplevel they map -- so a launch
+/// GTK sets `_NET_STARTUP_ID` on its unmapped client leader (the
+/// `WM_HINTS` window group), not on the toplevel it maps -- so a launch
 /// through a wrapper (`sh -c`, a launcher), where the process path cannot
 /// match, redeems its token only if the gate reads the leader. This test's
 /// process is no spawned child, so the leader is the only path that can
@@ -488,5 +482,69 @@ fn a_startup_id_on_the_client_leader_is_redeemed() {
             .xdg_activation
             .data_for_token(&token)
             .is_none()
+    );
+}
+
+/// A window's `WM_HINTS` is client-set, so a stranger X client can name
+/// *another* application's client leader as its own window group. Its
+/// window must not borrow that leader's startup id: here the stranger maps
+/// first, naming the leader, and is refused -- and the token it tried to
+/// borrow is still there for the application that owns the leader, whose
+/// own window then redeems it.
+#[test]
+fn a_stranger_naming_another_clients_leader_is_refused() {
+    let Some(mut live) = live("a_stranger_naming_another_clients_leader_is_refused") else {
+        return;
+    };
+    let wayland = live.map_peer("wayland");
+    let token = live
+        .fixture
+        .state
+        .mint_spawn_token("xprobe")
+        .expect("a spawn token");
+    let leader = live.x.leader_with_startup_id(token.as_str());
+    live.drain();
+    // A second connection is a second X client, with its own id range.
+    let stranger = super::x11::XClient::connect(live.display);
+    let mut props = Props::new(RED);
+    props.group_leader = Some(leader);
+    let borrowed = stranger.map(&props);
+    live.managed(borrowed);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(wayland),
+        "a stranger borrowed another client's leader's startup id"
+    );
+    assert!(
+        live.fixture
+            .state
+            .xdg_activation
+            .data_for_token(&token)
+            .is_some(),
+        "the stranger's refused map spent the owner's token"
+    );
+    let owner = live.x.map(&props);
+    let owner = live.managed(owner);
+    assert_eq!(
+        live.fixture.state.focus,
+        Some(owner),
+        "the leader's own client could not redeem its startup id"
+    );
+}
+
+/// The client bits `same_x_client` compares are the server's: the
+/// resource-id mask the X server actually hands out matches the constant
+/// the gate uses (see `X_CLIENT_RESOURCE_MASK`).
+#[test]
+fn the_resource_id_mask_is_the_servers() {
+    use x11rb::connection::Connection as _;
+
+    let Some(live) = live("the_resource_id_mask_is_the_servers") else {
+        return;
+    };
+    assert_eq!(
+        live.x.conn.setup().resource_id_mask,
+        crate::compositor::xwayland::focus::X_CLIENT_RESOURCE_MASK,
+        "XWayland hands out a different resource-id mask than the focus gate assumes"
     );
 }

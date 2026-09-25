@@ -503,11 +503,13 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
 3. **scoot started it, and the start's activation token is still unspent.**
    `State::spawn` hands every child a token (see
    [focus handoff](#focus-handoff-xdg-activation-v1)); while XWayland is
-   live the child also gets it as `DESKTOP_STARTUP_ID`, which X toolkits
-   (GTK, Qt) turn into `_NET_STARTUP_ID` on their *client leader* window --
-   scoot reads it from the mapping window, or else from its leader (its
-   `WM_HINTS` window group), so an app launched through a wrapper (`sh -c`,
-   a launcher, `flatpak run`) still redeems it. A client that sets no
+   live the child also gets it as `DESKTOP_STARTUP_ID`, which GTK turns
+   into `_NET_STARTUP_ID` on its *client leader* window (Qt is believed to
+   do the same; unverified) -- scoot reads it from the mapping window, or
+   else from its leader (its `WM_HINTS` window group, and only a leader the
+   same X client created), so a GTK app launched through a wrapper
+   (`sh -c`, measured) still redeems it. A launcher shim or `flatpak run`
+   should too, as long as the variable reaches the app; unverified. A client that sets no
    startup id (`xterm`) is matched by process instead: the X server reports
    each client's process id (the X-Resource extension, from the socket's
    credentials — never the forgeable `_NET_WM_PID`), and a process scoot
@@ -529,8 +531,7 @@ is about the Wayland keyboard — which window scoot gives the keys to — and
 that is the one no X client can take by asking, with one known window: a
 startup id is readable by every X client from the moment a toolkit sets it
 on its leader -- before its first window maps -- so an X client watching
-for new windows can copy it onto a window of its own (or name the app's
-leader as its own group), map *before* the app does, and take focus once,
+for new windows can copy it onto a window of its own, map *before* the app does, and take focus once,
 while the token is live (up to 30 seconds after the launch). Once the app's
 own window maps it spends the token, whichever rule focuses it, and the copy
 is worthless. Binding the redemption to the spawned process (the token
