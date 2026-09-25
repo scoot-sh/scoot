@@ -67,6 +67,27 @@ fn a_transient_window_floats_centred_on_its_parent_at_its_own_size() {
     assert!(!fixture.snapshot(0).floating);
 }
 
+/// The strip, three columns wide with the parent focused in the middle of
+/// it: the dialog's column went in right of the parent (and scrolled the
+/// strip to show it) before the dialog floated, and floating it puts the
+/// scroll *and* the strip's focus back -- the parent, not the column to its
+/// right.
+#[test]
+fn a_dialog_leaves_a_wider_strip_exactly_as_it_was() {
+    let mut fixture = Fixture::new();
+    for _ in 0..3 {
+        fixture.map(Spec::tiled());
+    }
+    fixture.act(scoot_core::Action::FocusWindowId(fixture.id(1)));
+    let strip = fixture.strip();
+    let dialog = fixture.map(Spec::dialog_of(1));
+    assert!(fixture.floating(dialog));
+    assert_eq!(fixture.strip(), strip);
+    fixture.act(scoot_core::Action::ToggleFloatingFocus);
+    assert_eq!(fixture.state.focus, Some(fixture.id(1)));
+    assert_eq!(fixture.strip(), strip);
+}
+
 #[test]
 fn a_fixed_size_window_floats_centred_on_its_output() {
     let mut fixture = Fixture::new();
