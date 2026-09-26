@@ -74,19 +74,21 @@
 //!
 //! One map lookup and one insert per popup created, one lookup and one
 //! remove per popup destroyed -- on popup-open paths, never per frame or
-//! per commit. In particular the fix adds no allocation to any per-commit
-//! path: `find_popup`'s per-commit tree walk and its `Vec` stay exactly as
-//! they were, only bounded -- at most 128 popups deep, where before they
-//! were unbounded.
+//! per commit. The per-commit tree walk and its `Vec`
+//! (`PopupManager::find_popup`) are not on the commit path anymore either:
+//! the initial configure reads scoot's own surface-to-popup index instead
+//! (`popup_index.rs`), which the per-client bound keeps small -- at most
+//! 128 popups deep per tree, where before it was unbounded.
 //!
-//! The scans themselves -- `PopupTree::insert` / `PopupNode::try_insert` and
-//! `PopupManager::find_popup` live in Smithay at the pinned rev
-//!     (`src/desktop/wayland/popup/manager.rs`); the `xdg_popup` destructor's
-//!     linear search in `known_popups` too
-//!     (`src/wayland/shell/xdg/handlers/surface/popup.rs`). All three stay
-//!     as they are: with the count bounded, every one of them is bounded
-//!     with it, and reworking Smithay's tree into an indexed lookup would be
-//!     a fork change for a path that now costs milliseconds at worst.
+//! The scans themselves -- `PopupTree::insert` / `PopupNode::try_insert`
+//! and the `xdg_popup` destructor's linear search in `known_popups` --
+//! live in Smithay at the pinned rev
+//!     (`src/desktop/wayland/popup/manager.rs`;
+//!     `src/wayland/shell/xdg/handlers/surface/popup.rs`). Both stay as
+//!     they are: with the count bounded, every one of them is bounded
+//!     with it, and reworking Smithay's tree into an indexed lookup would
+//!     be a fork change for a path that now costs milliseconds at worst
+//!     (see `popup_index.rs` for the measured residual).
 
 use std::collections::HashMap;
 

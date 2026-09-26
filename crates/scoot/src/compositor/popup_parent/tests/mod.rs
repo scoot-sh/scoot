@@ -54,6 +54,7 @@ mod bypass;
 mod count;
 mod depth;
 mod ime;
+mod index;
 pub(in crate::compositor) mod subsurfaces;
 
 pub(in crate::compositor) use subsurfaces::{Node, SUB_SIZE, SubOp};

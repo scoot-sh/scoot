@@ -4,6 +4,7 @@ use std::any::Any;
 
 use smithay::backend::input::TabletToolDescriptor;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
+use smithay::desktop::{PopupManager, find_popup_root_surface};
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
 use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::input::tablet::TabletSeatHandler;
@@ -309,25 +310,60 @@ impl CompositorHandler for State {
 /// client is told, not where it was at creation.
 ///
 /// Guarded twice: the role check keeps ordinary commits from paying for
-/// the popup-tree lookup, and `is_initial_configure_sent` keeps later
+/// the popup lookup, and `is_initial_configure_sent` keeps later
 /// commits quiet -- a second configure would be a protocol error for a
 /// non-reactive positioner (`AlreadyConfigured`/`NotReactive`), not a
 /// harmless repeat. An initial configure cannot fail either way (both
 /// errors require a first configure already sent), so an `Err` here is
 /// logged, not retried specially: the flag stays unset and the next
 /// commit tries again.
+///
+/// The lookup reads scoot's own index of live popups (`popup_index.rs`),
+/// not `PopupManager::find_popup`'s global walk of every tree into a
+/// fresh `Vec` -- that walk is O(every live popup) per first commit, which
+/// stalled the compositor for seconds once connections multiplied under
+/// their per-client caps. The `alive` check keeps the one filter the walk
+/// had that the index does not apply itself, and the membership check
+/// below keeps its other semantic: a popup that was dismissed out of its
+/// tree (a refused grab tears the node down while the object lives on,
+/// Smithay-side as well as scoot-side) is not configured, exactly as the
+/// walk missing it did not configure it. The walk is only ever over the
+/// popup's own tree -- same-client parenting is all the protocol allows,
+/// so that tree holds at most its owner's capped popups -- never global,
+/// and it runs only for a first configure: later commits return on
+/// `is_initial_configure_sent` first, as before.
 fn send_popup_initial_configure(state: &State, surface: &WlSurface) {
     if get_role(surface) != Some(XDG_POPUP_ROLE) {
         return;
     }
-    let Some(smithay::desktop::PopupKind::Xdg(popup)) = state.popups.find_popup(surface) else {
+    let Some(smithay::desktop::PopupKind::Xdg(popup)) = state.popup_index.get(surface) else {
         // Not tracked: gone between the role check and the lookup. The role
         // check above is also what keeps input-method popups out of here --
-        // they are tracked (see `input_method.rs`) but carry
-        // `zwp_input_popup_surface_v2`, not `xdg_popup`, and have no
-        // configure to send at all.
+        // they are tracked (see `input_method.rs`) but never filed (see
+        // `popup_index.rs`), carry `zwp_input_popup_surface_v2`, not
+        // `xdg_popup`, and have no configure to send at all.
         return;
     };
+    if !popup.alive() {
+        return;
+    }
+    if popup.is_initial_configure_sent() {
+        return;
+    }
+    // A popup with no parent waits in the unmapped list, which the walk
+    // used to search first: still pending, still configured. Anything with
+    // a parent must still sit in its own tree; a dismissal removed it, and
+    // a broken chain means its root (and so its node) is gone.
+    let member = popup.get_parent_surface().is_none()
+        || find_popup_root_surface(&smithay::desktop::PopupKind::Xdg(popup.clone()))
+            .map(|root| {
+                PopupManager::popups_for_surface(&root)
+                    .any(|(kind, _)| kind.wl_surface() == surface)
+            })
+            .unwrap_or(false);
+    if !member {
+        return;
+    }
     if popup.is_initial_configure_sent() {
         return;
     }
@@ -469,15 +505,23 @@ impl XdgShellHandler for State {
             Admission::Reused => self.popups.cleanup(),
             Admission::Fresh => {}
         }
-        let _ = self
-            .popups
-            .track_popup(smithay::desktop::PopupKind::Xdg(surface));
+        let kind = smithay::desktop::PopupKind::Xdg(surface);
+        // Filed only once tracking takes it: a popup Smithay refuses is
+        // never looked up, so it must never be filed either -- see
+        // `popup_index.rs`.
+        if self.popups.track_popup(kind.clone()).is_ok() {
+            self.popup_index.insert(&kind);
+        }
     }
 
     /// Closes the popup's record and refuses a destroy that leaves child
     /// popups behind -- see `popup_parent.rs`.
     fn popup_destroyed(&mut self, surface: PopupSurface) {
-        super::popup_parent::popup_destroyed(&surface, &mut self.popup_count);
+        super::popup_parent::popup_destroyed(
+            &surface,
+            &mut self.popup_count,
+            &mut self.popup_index,
+        );
     }
 
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {

@@ -737,6 +737,12 @@ pub struct State {
     /// `popup_parent::popup_destroyed` -- see `popup_count.rs`, which owns
     /// the policy and the number.
     pub(super) popup_count: super::popup_count::PopupCount,
+    /// Every live tracked `xdg_popup` by its surface, so its first commit
+    /// earns its initial configure without `PopupManager::find_popup`'s
+    /// global walk. Filed in `XdgShellHandler::new_popup` once tracking
+    /// takes the popup, forgotten in `popup_parent::popup_destroyed` --
+    /// see `popup_index.rs`, which owns the exactness argument.
+    pub(super) popup_index: super::popup_index::PopupIndex,
     /// Every fd each Wayland client has handed this compositor that it
     /// keeps (shm pools, dma-buf planes, syncobj timelines), recorded by
     /// number on arrival and forgotten once it really closes -- which is
@@ -1125,6 +1131,7 @@ impl State {
             #[cfg(feature = "xwayland")]
             x11_unmanaged_cap: Default::default(),
             popup_count: Default::default(),
+            popup_index: Default::default(),
             client_fds: Default::default(),
             drm_syncobj: Default::default(),
             imports_dmabufs: false,

@@ -45,6 +45,7 @@ mod outputs;
 mod popup;
 mod popup_constraint;
 mod popup_count;
+mod popup_index;
 mod popup_parent;
 mod presentation_time;
 mod reconnect;
