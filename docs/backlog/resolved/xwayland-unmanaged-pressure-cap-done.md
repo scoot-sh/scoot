@@ -1,12 +1,23 @@
 ---
-title: "No per-client XWayland unmanaged-window cap: override-redirect windows draw and hit-test without bound"
-status: "open"
-area: "core"
-priority: "low"
+title: "No per-client XWayland unmanaged-window cap — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# No per-client XWayland unmanaged-window cap
+# No per-client XWayland unmanaged-window cap — RESOLVED
+
+RESOLVED 2026-09-26 (PR #258). `X11UnmanagedCap` in `toplevel_cap.rs`:
+same 128, same window-id client-bits identity, refuse-the-map (a refused
+menu is never pushed, drawn, hit-tested, or callback'd), own counting.
+Claim in `map_x11_unmanaged` only; release in `unmap_x11_unmanaged`
+(unmap + destroy funnel via `forget_x11_window`) plus whole-count drain
+in `clear_x11_unmanaged` on server death. 3 live + 5 hermetic tests;
+review re-derived lifecycle exhaustively (every writer/remover read).
+`protocols.md` bullet added. Residual split out, not closed:
+`core/xwayland-unmanaged-aggregate-cap.md` (N×128 global-list residual,
+low).
 
 Filed 2026-09-26 from the per-X-client managed-window cap
 (`docs/backlog/core/xwayland-toplevel-cap.md`). That cap counts only managed
