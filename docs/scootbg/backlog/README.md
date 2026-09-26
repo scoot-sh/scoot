@@ -32,7 +32,8 @@ full per-feature cycle.
 9. [Restoring the last wallpaper at startup](restore-state.md)
 10. [Seamless in scoot: a `[wallpaper]` config section](scoot-integration.md)
 11. [Lowest resource use of any wallpaper daemon](lightest.md) — the
-    release gate: v1 ships only when scootbg is lowest on every row
+    release gate: v1 ships only when no competitor beats scootbg beyond the
+    noise margin on any row both can do
 12. [Tests: unit, and end to end on headless scoot](testing.md) — grows with
     every item above, not batched at the end
 

@@ -15,10 +15,11 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 ## What it is for
 
 - **The lowest resource use of any wallpaper daemon.** Not a goal but a
-  release gate: v1 does not ship until scootbg measures lowest on every
-  axis (CPU, idle wakeups, memory, peak memory while decoding, binary
-  size, startup) against `swaybg`, `awww`, `hyprpaper`, `wpaperd` and
-  `wbg`, on the same machine, with the table published here. Every
+  release gate: v1 does not ship while any competitor beats scootbg,
+  beyond a noise margin, on any measure both can do (CPU, idle wakeups,
+  memory, peak memory while decoding, binary size, startup). The
+  competitors are `swaybg`, `awww`, `hyprpaper`, `wpaperd` and `wbg`, on
+  the same machine, with the table published here. Every
   dependency has to justify its bytes. See
   [`backlog/lightest.md`](backlog/lightest.md).
 - **Colours and images.** A solid colour or a PNG, JPEG or WebP image per
@@ -97,10 +98,11 @@ to it over its socket.
 
 ## Relation to scoot
 
-- **scoot drives scootbg, never the reverse.** With a `[wallpaper]`
-  section, scoot spawns `scootbg daemon` at startup (passing the section's
-  values) and, on reload, spawns `scootbg set` with the new ones, never
-  waiting on either from its event loop. scoot depends only on scootbg's CLI,
+- **scoot drives scootbg, never the reverse.** At startup, and on a
+  reload that changed `[wallpaper]`, scoot spawns one command,
+  `scootbg apply-config`, with the section's values. It starts the daemon
+  if none is running and otherwise hands the values over. scoot never
+  waits on it from its event loop. scoot depends only on scootbg's CLI,
   not its crate, and scootbg knows nothing about scoot's config, so each
   stays usable without the other. See
   [`backlog/scoot-integration.md`](backlog/scoot-integration.md).

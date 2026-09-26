@@ -34,25 +34,59 @@ Stated once here, and the same way in the README and in
   across restarts and unrelated reloads, until you next change
   `[wallpaper]` itself.
 
-Mechanism: scoot starts `scootbg daemon --initial <values from the
-section>`. The daemon keeps, in its state file, a fingerprint of the last
-`--initial` it applied. At startup, if the fingerprint matches, the section
-has not changed since, so it restores its own state (which includes any
-later `scootbg set`); if it differs, it applies the section and records the
-new fingerprint. Passing the values as daemon arguments also removes any
-race between spawning the daemon and its socket being ready.
+### Mechanism: one command for everything from the config
+
+Everything scoot does with scootbg goes through one command,
+`scootbg apply-config '<json>'`, where the JSON is the whole `[wallpaper]`
+section (`{}` when the section is absent). scoot never uses `set`,
+`clear` or `daemon` itself. `apply-config`:
+
+1. Computes a fingerprint of the section.
+2. If a daemon answers on the socket, hands it the section. If none does,
+   becomes the daemon itself with the section as its starting point. Two
+   racing starts (scoot's and an `[autostart]` entry's, say) are settled
+   by the socket bind: the loser forwards to the winner, so the config's
+   values are never dropped.
+3. The daemon compares the fingerprint with the one in its state file,
+   which records the last section applied *from the config*:
+   - **Different:** the section changed since it was last applied (or
+     was never applied). Apply it (an empty section means clear) and
+     record the new fingerprint.
+   - **Same:** the section has not changed. Keep what is showing, or at
+     startup restore the saved state, which includes any later
+     `scootbg set`.
+
+That delivers the rule in every order, because every config-origin
+change records its fingerprint and nothing else does:
+
+| Sequence | Result |
+|---|---|
+| section A, `set X`, restart | A unchanged, so X is restored |
+| section A, reload with B, `set X`, restart | B unchanged since its reload, so X |
+| section A, reload with B, restart | B shows |
+| section removed by reload, later re-added as A | `{}` was recorded at removal, so A differs and shows |
+| no daemon yet, section added by reload | `apply-config` starts the daemon |
+| an `[autostart]` entry also starts `scootbg daemon` | whichever binds second forwards; the config still applies |
+
+One order it cannot see: the section removed *while scoot is not
+running* and re-added unchanged before the next start. No `{}` was ever
+applied, so the old fingerprint matches and the last saved state (which
+may be a `scootbg set` pick) restores. The config did not change between
+the two runs that scoot saw, so this is still "unchanged", and it is
+documented rather than worked around.
 
 ## How scoot drives it
 
-- **Startup.** With a `[wallpaper]` section, scoot spawns `scootbg daemon
-  --initial ...` itself, alongside `[autostart]`. No autostart entry is
-  needed, and one there as well does not start a second daemon (the
-  daemon's own "already running" refusal). Spawn order does not decide
-  which client commits first, so nothing here promises the wallpaper
-  appears before a bar.
-- **Reload.** `scootctl reload` re-applies `[wallpaper]` only if the
-  section changed since the last apply, by spawning `scootbg set ...`.
-  Removing the section spawns `scootbg clear`; it does not kill the daemon.
+- **Startup, and reload when `[wallpaper]` changed:** spawn
+  `scootbg apply-config '<json>'`, alongside `[autostart]`. No autostart
+  entry is needed. Spawn order does not decide which client commits first,
+  so nothing here promises the wallpaper appears before a bar.
+- **Removing the section** is a reload with `{}`: the wallpaper clears,
+  and the daemon keeps running (so a later `scootbg set` still works).
+- **Paths are resolved by scoot**, which owns its config's meaning: `~/`
+  expanded and a relative path taken against the config file's directory,
+  before encoding. scoot spawns without a shell, so nothing else expands
+  them.
 - **Never wait on scootbg from the event loop.** `scootbg set` only
   finishes once scoot has processed its Wayland commit, so scoot waiting
   for it on its own loop thread would deadlock. Every scootbg invocation is

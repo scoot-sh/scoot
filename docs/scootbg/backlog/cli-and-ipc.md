@@ -8,7 +8,11 @@ blocked: "needs the socket from crate-and-daemon.md"
 
 # The CLI and control protocol
 
-Requests for v1: `set`, `clear`, `query`, `kill`, `version`.
+Requests for v1: `set`, `clear`, `query`, `kill`, `version`, and
+`apply-config`, the one command a compositor's config drives scootbg
+through (see [scoot-integration.md](scoot-integration.md)): it takes the
+whole section as JSON, starts the daemon when none answers, and only
+changes the wallpaper when the section itself changed.
 
 - `set <path|#colour>` is the one command for changing the wallpaper. An
   argument starting with `#` is a colour (`#rrggbb`), anything else a path.
