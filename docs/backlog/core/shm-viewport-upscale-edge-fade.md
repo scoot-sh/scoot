@@ -1,31 +1,66 @@
 ---
-title: "A tiny wl_shm buffer upscaled by wp_viewporter fades at its edges under pixman"
+title: "Upscaled surfaces get a semi-transparent 1-px edge under pixman (Smithay samples past the texture edge)"
 status: "open"
 area: "core"
-priority: "low"
+priority: "medium"
 blocked: null
 ---
 
-# A tiny wl_shm buffer upscaled by wp_viewporter fades at its edges under pixman
+# Upscaled surfaces get a semi-transparent 1-px edge under pixman (Smithay samples past the texture edge)
 
 Found while measuring scootbg's dependencies (2026-09-26, see
 [`docs/scootbg/backlog/resolved/dependencies-done.md`](../../scootbg/backlog/resolved/dependencies-done.md)),
-not yet reproduced independently of that prototype.
+then reproduced independently and widened in the review of PR #266.
 
-On `scoot --headless` (pixman), a client that commits a 1×1 `XRGB8888`
-`wl_shm` buffer and sets a `wp_viewporter` destination of the whole output
-gets a gradient instead of a flat colour: for `#c03020` the centre sampled
-`srgba(187,46,31,0.976)` and a corner `srgba(48,12,8,0.251)`. That reads as
-bilinear sampling reaching past the edge of a one-pixel texture (sampling
-transparent outside it) rather than clamping or repeating the edge. An
-`XRGB` buffer should also never come out with alpha below 1.
+## What happens
 
-The same colour through `wp_single_pixel_buffer_v1` renders exactly, and
-scootbg uses that path on scoot, so scootbg is not affected. Any other
-client that upscales a small shm buffer is (a 1×1 solid-colour fallback is
-common in wallpaper tools that support compositors without single-pixel
-buffers).
+Under the pixman renderer (the default), any surface whose buffer is
+scaled *up* to its on-screen size fades toward transparent black at its
+edges instead of keeping its edge pixels:
 
-To do: reproduce with a minimal client, check the GLES renderer too, and
-fix the sampling (edge clamp / pad the source, or treat an opaque format's
-alpha as 1) with a pixel test at the output corners.
+- **A 1×1 `XRGB8888` `wl_shm` buffer viewported to the whole output**
+  (`#c03020`, `scoot --headless`): centre `srgba(187,46,31,0.976)`, corner
+  `srgba(48,12,8,0.251)`, left-middle `srgba(95,23,15,0.494)`. The whole
+  surface is a gradient.
+- **Every buffer-scale-1 surface on an output with scale > 1**, fractional
+  scales included: a full logical-size buffer with no viewport, on
+  `[output] scale = 2.0`, has a 1-px edge at `srgba(108,27,18,0.561)`
+  around an interior of `srgba(192,48,32,1)`. That is every client that
+  does not do HiDPI itself, and likely XWayland windows, on any scaled
+  output. On XRGB scanout the edge shows as a dark line.
+
+Both the colour channels and alpha fade (premultiplied toward black), so an
+`XRGB` surface comes out partly transparent too.
+
+`wp_single_pixel_buffer_v1` renders exactly, which is why scootbg (it uses
+that path on scoot) is unaffected. The GLES renderer sets `CLAMP_TO_EDGE`
+(`gles/mod.rs:947` in the pinned Smithay), so this is almost certainly
+pixman-only.
+
+## Cause
+
+In the pinned Smithay fork (`~/.cargo/git/checkouts/smithay-*/5b57532`),
+`src/backend/renderer/pixman/mod.rs:591-597` pairs `Filter::Bilinear` with
+`src_image.set_repeat(Repeat::None)`. Bilinear taps at the edge then read
+outside the image, where pixman returns `(0,0,0,0)`, and an opaque source
+is composited with `Operation::Src`, which writes the faded result straight
+into the framebuffer. scoot's own code sets no filter or repeat on this
+path.
+
+## Fix
+
+`Repeat::Pad` on the source image, pixman's equivalent of GL's
+clamp-to-edge. (Forcing alpha to 1 for opaque formats would *not* fix it:
+the colour channels still fade, giving an opaque dark vignette instead.)
+
+The code is Smithay's, so the fix is a commit on the scoot-sh/smithay fork,
+listed in [`docs/forks.md`](../../forks.md) in the same PR, per `CLAUDE.md`'s
+fork policy. Test with pixel samples at the corners and edge midpoints for
+both cases above (1×1 viewported, and scale-1 on a scale-2 output), plus a
+check that downscaled surfaces are unchanged.
+
+## Priority
+
+Medium: a visual defect only (no crash, disconnect or lost work, so not a
+harm under `CLAUDE.md`'s rules), but it touches most windows on any HiDPI
+output under the default renderer, which is a daily-use problem.
