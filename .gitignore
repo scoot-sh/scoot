@@ -6,3 +6,8 @@ HANDOFF.md
 
 # Local-only machine access / scratch notes (e.g. ASAHI.local.md)
 *.local.md
+
+# devenv state (devenv.lock is tracked)
+.devenv*
+devenv.local.nix
+devenv.local.yaml

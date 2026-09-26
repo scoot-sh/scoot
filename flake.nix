@@ -328,80 +328,83 @@
         };
       });
 
-      devShells = forEach (pkgs: {
-        default = pkgs.mkShell {
-          nativeBuildInputs = [
-            pkgs.rustc
-            pkgs.cargo
-            pkgs.clippy
-            pkgs.rustfmt
-            # Part of the documented verification set (see `CLAUDE.md`), so
-            # the dev shell has to provide it. Already in the VM's own system
-            # closure, which keeps the Linux shell a subset of it as below.
-            pkgs.cargo-nextest
-            pkgs.pkg-config
-          ]
-          # Not on Linux: the VM's system closure deliberately drops
-          # rust-analyzer to keep erofs packing fast, and `nix develop` there
-          # should stay a subset of that closure -- nothing new to fetch.
-          ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.rust-analyzer;
-          # The compositor's C dependencies exist only on Linux; the core, the
-          # IPC crate and the `scootctl` client build anywhere.
-          buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
-            import ./vm/compositor-deps.nix pkgs
-          );
+      # The contents live in nix/dev-shell.nix, shared with devenv.nix, so
+      # `nix develop` and `devenv shell` cannot drift apart. Beyond the
+      # toolchain and the compositor's libraries they carry the smoke test's
+      # tools, the `soft-egl` wrapper for the GLES tests, and an
+      # `$XDG_RUNTIME_DIR` and a UTF-8 `LANG` for boxes that set neither --
+      # all in the VM's system closure too, so entering it there fetches
+      # nothing new (the `soft-egl` script is a trivial local build).
+      devShells = forEach (
+        pkgs:
+        let
+          dev = import ./nix/dev-shell.nix pkgs;
+        in
+        {
+          default = pkgs.mkShell {
+            nativeBuildInputs =
+              dev.toolchain
+              ++ dev.extras
+              # Not on Linux: the VM's system closure deliberately drops
+              # rust-analyzer to keep erofs packing fast, and `nix develop` there
+              # should stay a subset of that closure -- nothing new to fetch.
+              ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.rust-analyzer;
+            # The compositor's C dependencies exist only on Linux; the core, the
+            # IPC crate and the `scootctl` client build anywhere.
+            buildInputs = dev.compositorDeps;
 
-          # `nix develop`'s setup hooks already add -L for every buildInput, so
-          # this shellHook only matters inside the dev shell itself: a couple
-          # of the compositor's -sys crates (xkbcommon-sys, pixman-sys) probe
-          # via pkg-config for cflags but link with a bare -lfoo, which has
-          # nothing to find on NixOS without an explicit LIBRARY_PATH. (The
-          # VM's system profile hits the same gap outside any dev shell --
-          # that's fixed separately, in configuration.nix.)
-          #
-          # `LD_LIBRARY_PATH` is a separate problem from `LIBRARY_PATH` above,
-          # and only libglvnd goes on it. `LIBRARY_PATH` is link time; Smithay
-          # **dlopens** `libEGL.so.1` at *run* time, and a plain `cargo build`
-          # deliberately links no libEGL at all (CI's `ldd` gate asserts that,
-          # and the package instead link-injects `-lEGL` by derivation-only
-          # RUSTFLAGS -- see `packages.scoot` above). NixOS has no global
-          # `libEGL.so.1`: `/run/opengl-driver/lib` carries the vendor ICD
-          # (`libEGL_mesa.so`), not the dispatch library. So without this, two
-          # tests that reach EGL (`render::gles::tests::
-          # libegl_loads_where_the_suite_runs` and `render::tests::
-          # a_capture_covers_the_whole_target_at_the_backends_own_size`) fail
-          # in `nix develop` on any NixOS host -- found on the Asahi M2,
-          # 2026-09-21, where `cargo nextest run --workspace` was 2-red for
-          # this reason alone while the dev VM stayed green (its *system*
-          # profile supplies the path, per configuration.nix) and CI stayed
-          # green (it resolves a software EGL).
-          #
-          # Only libglvnd, never the whole `compositor-deps` list: that list
-          # includes `libgbm`/`mesa`, and putting nixpkgs' Mesa ahead of the
-          # host's on `LD_LIBRARY_PATH` is the same driver-shadowing hazard
-          # `packages.scoot` refuses to risk by bundling ICDs. libglvnd is the
-          # vendor-neutral dispatch; it finds the host's real driver through
-          # `/run/opengl-driver`, so it shadows no *driver* -- verified live on
-          # Asahi, where a `gles` run through this path reaches
-          # `GL Renderer: "Apple M2 (G14G B0)"`.
-          #
-          # It is not, however, true that it shadows *nothing*: glibc resolves
-          # `LD_LIBRARY_PATH` ahead of `DT_RUNPATH`, and the export is
-          # inherited by every child of the shell, so a GL app launched from
-          # `nix develop` (a client the compositor spawns included) gets this
-          # libglvnd rather than its own pinned one. That is the same
-          # "`LD_LIBRARY_PATH` leaking into every spawned client" the package
-          # itself avoids. Accepted here and only here: glvnd's ABI is stable,
-          # this is a dev shell rather than anything shipped, and the
-          # alternative is a test suite that cannot run on a NixOS host.
-          shellHook = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-            export LIBRARY_PATH="''${LIBRARY_PATH:+$LIBRARY_PATH:}${pkgs.lib.makeLibraryPath (import ./vm/compositor-deps.nix pkgs)}"
-            export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${
-              pkgs.lib.makeLibraryPath [ pkgs.libglvnd ]
-            }"
-          '';
-        };
-      });
+            # `nix develop`'s setup hooks already add -L for every buildInput, so
+            # this shellHook only matters inside the dev shell itself: a couple
+            # of the compositor's -sys crates (xkbcommon-sys, pixman-sys) probe
+            # via pkg-config for cflags but link with a bare -lfoo, which has
+            # nothing to find on NixOS without an explicit LIBRARY_PATH. (The
+            # VM's system profile hits the same gap outside any dev shell --
+            # that's fixed separately, in configuration.nix.)
+            #
+            # `LD_LIBRARY_PATH` is a separate problem from `LIBRARY_PATH` above,
+            # and only libglvnd goes on it. `LIBRARY_PATH` is link time; Smithay
+            # **dlopens** `libEGL.so.1` at *run* time, and a plain `cargo build`
+            # deliberately links no libEGL at all (CI's `ldd` gate asserts that,
+            # and the package instead link-injects `-lEGL` by derivation-only
+            # RUSTFLAGS -- see `packages.scoot` above). NixOS has no global
+            # `libEGL.so.1`: `/run/opengl-driver/lib` carries the vendor ICD
+            # (`libEGL_mesa.so`), not the dispatch library. So without this, two
+            # tests that reach EGL (`render::gles::tests::
+            # libegl_loads_where_the_suite_runs` and `render::tests::
+            # a_capture_covers_the_whole_target_at_the_backends_own_size`) fail
+            # in `nix develop` on any NixOS host -- found on the Asahi M2,
+            # 2026-09-21, where `cargo nextest run --workspace` was 2-red for
+            # this reason alone while the dev VM stayed green (its *system*
+            # profile supplies the path, per configuration.nix) and CI stayed
+            # green (it resolves a software EGL).
+            #
+            # Only libglvnd, never the whole `compositor-deps` list: that list
+            # includes `libgbm`/`mesa`, and putting nixpkgs' Mesa ahead of the
+            # host's on `LD_LIBRARY_PATH` is the same driver-shadowing hazard
+            # `packages.scoot` refuses to risk by bundling ICDs. libglvnd is the
+            # vendor-neutral dispatch; it finds the host's real driver through
+            # `/run/opengl-driver`, so it shadows no *driver* -- verified live on
+            # Asahi, where a `gles` run through this path reaches
+            # `GL Renderer: "Apple M2 (G14G B0)"`.
+            #
+            # It is not, however, true that it shadows *nothing*: glibc resolves
+            # `LD_LIBRARY_PATH` ahead of `DT_RUNPATH`, and the export is
+            # inherited by every child of the shell, so a GL app launched from
+            # `nix develop` (a client the compositor spawns included) gets this
+            # libglvnd rather than its own pinned one. That is the same
+            # "`LD_LIBRARY_PATH` leaking into every spawned client" the package
+            # itself avoids. Accepted here and only here: glvnd's ABI is stable,
+            # this is a dev shell rather than anything shipped, and the
+            # alternative is a test suite that cannot run on a NixOS host.
+            shellHook = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              export LIBRARY_PATH="''${LIBRARY_PATH:+$LIBRARY_PATH:}${dev.libraryPath}"
+              export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${dev.ldLibraryPath}"
+              ${dev.xdgRuntimeDirHook}
+              ${dev.localeHook}
+            '';
+          };
+        }
+      );
 
       # `programs.scoot`: a home-manager module (per-user config file,
       # session script hook, portals.conf install) and a NixOS module

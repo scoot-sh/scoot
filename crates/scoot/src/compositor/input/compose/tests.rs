@@ -269,3 +269,68 @@ fn sequences_come_only_from_the_active_group() {
         "`ü` should have no sequence while group 0 is `us`"
     );
 }
+
+/// Looks names up in a fixed list, the way [`session_locale`] reads the
+/// environment -- without touching the real one.
+fn env<'a>(vars: &'a [(&str, &str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
+    move |name| {
+        vars.iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| OsString::from(value))
+    }
+}
+
+#[test]
+fn no_locale_variable_resolves_to_c() {
+    assert_eq!(session_locale(env(&[])), "C");
+}
+
+#[test]
+fn lang_alone_is_the_locale() {
+    assert_eq!(
+        session_locale(env(&[("LANG", "de_DE.UTF-8")])),
+        "de_DE.UTF-8"
+    );
+}
+
+#[test]
+fn lc_ctype_beats_lang() {
+    let vars = [("LANG", "de_DE.UTF-8"), ("LC_CTYPE", "sv_SE.UTF-8")];
+    assert_eq!(session_locale(env(&vars)), "sv_SE.UTF-8");
+}
+
+#[test]
+fn lc_all_beats_lc_ctype_and_lang() {
+    let vars = [
+        ("LANG", "de_DE.UTF-8"),
+        ("LC_CTYPE", "sv_SE.UTF-8"),
+        ("LC_ALL", "fr_FR.UTF-8"),
+    ];
+    assert_eq!(session_locale(env(&vars)), "fr_FR.UTF-8");
+}
+
+#[test]
+fn an_empty_lc_all_falls_through() {
+    // The reported case: `LC_ALL= LANG=C.UTF-8` runs clients in C.UTF-8,
+    // so compose must resolve there too, not against "".
+    let vars = [("LC_ALL", ""), ("LANG", "C.UTF-8")];
+    assert_eq!(session_locale(env(&vars)), "C.UTF-8");
+    let vars = [
+        ("LC_ALL", ""),
+        ("LC_CTYPE", "sv_SE.UTF-8"),
+        ("LANG", "C.UTF-8"),
+    ];
+    assert_eq!(session_locale(env(&vars)), "sv_SE.UTF-8");
+}
+
+#[test]
+fn an_empty_lc_ctype_falls_through_to_lang() {
+    let vars = [("LC_CTYPE", ""), ("LANG", "de_DE.UTF-8")];
+    assert_eq!(session_locale(env(&vars)), "de_DE.UTF-8");
+}
+
+#[test]
+fn every_variable_empty_resolves_to_c() {
+    let vars = [("LC_ALL", ""), ("LC_CTYPE", ""), ("LANG", "")];
+    assert_eq!(session_locale(env(&vars)), "C");
+}

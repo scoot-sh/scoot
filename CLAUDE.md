@@ -258,6 +258,68 @@ unmodified.
   soundness (did they wait for idle before sampling? is the screenshot's
   content consistent with the claim?) rather than repeating every scenario.
 
+## Dev environment (devenv)
+
+`devenv shell` is the quickest way to a working tree on any Linux box, the
+dev VM included. Its contents match `nix develop`'s: both read
+`nix/dev-shell.nix`, so change the shell's contents there, never in only one
+of them. That shell has the pinned toolchain, the compositor's libraries,
+the smoke test's tools, `soft-egl`, an `$XDG_RUNTIME_DIR` when the box has
+none, and `LANG=C.UTF-8` when it sets no locale at all. devenv caches its
+evaluation, so a warm entry takes ~0.2s against ~1.5s for `nix develop`,
+which adds up for an agent that wraps every command in it.
+
+**Setup:**
+- **A box with no Nix** (a container, a Claude Code on the web session, a
+  throwaway VM): run `scripts/devenv-bootstrap.sh`. It installs single-user
+  Nix (safe as root, where the stock installer fails on the missing
+  `nixbld` group) and devenv, links both into `/usr/local/bin`, and is
+  idempotent.
+- **A box that already has Nix:** `nix profile add nixpkgs#devenv`
+  (`nix profile install` on older Nix).
+- **Claude Code on the web:** set the environment's setup script to
+  `cd /home/user/scoot && bash scripts/devenv-bootstrap.sh`, so every session
+  starts with devenv installed; the first `devenv shell` then takes ~40s.
+
+**Use:**
+
+```sh
+devenv shell -- cargo build --workspace
+devenv shell -- soft-egl cargo nextest run --workspace
+devenv shell -- cargo clippy -p scoot --all-targets -- -D warnings
+devenv shell -- cargo fmt --check -p scoot
+devenv shell -- scripts/smoke-test.sh
+devenv test                  # quick check that the shell itself is sound
+```
+
+- **`soft-egl`** runs one command against Mesa's software EGL, the way CI
+  runs the tests. Without it, the GLES tests fail on a box with no GPU.
+  Never export it shell-wide, and run the smoke test without it. Even so, a
+  local smoke run is not proof of the GPU-free path: both shells put
+  libglvnd on `LD_LIBRARY_PATH`, and a NixOS host has a real EGL. CI's
+  smoke step (`nix shell`, asserted with `ldconfig`) is the one that
+  proves it.
+- **A running session to poke at:**
+  `target/debug/scoot --headless --outputs 2 -- foot` gives two virtual
+  monitors (up to 8), driven with `scoot msg` and inspected with
+  `scoot msg screenshot --output N`.
+- **Running as root** (the web container), permission bits don't bind, so
+  `config::tests::an_unwritable_parent_is_a_loud_refusal` detects that and
+  skips with a message (`--no-capture` shows it);
+  `a_parent_that_is_a_file_is_a_loud_refusal` covers the same refusal for
+  root. A permission-based test added later needs the same premise probe.
+
+**Gotchas:**
+- **`devenv.yaml` uses shallow `git+https` inputs, not `github:`.** The web
+  sessions' proxy allows git fetches from GitHub but refuses the tarball
+  downloads `github:` uses. For the same reason, `nix develop` there needs
+  `--override-input nixpkgs 'git+https://github.com/NixOS/nixpkgs?rev=<rev
+  from flake.lock>&shallow=1'`. Keep the nixpkgs rev in `devenv.yaml`,
+  `flake.nix` and `vm/` identical.
+- **Leave `claude.code.enable` off in `devenv.nix`.** devenv would generate
+  `.claude/settings.json` and overwrite the hand-maintained one, including
+  its `gh pr merge` permission.
+
 ## Local scratch/handoff state
 
 `HANDOFF.md` at the repo root is gitignored — the convention for transient,

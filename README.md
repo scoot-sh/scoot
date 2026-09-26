@@ -329,6 +329,8 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 - [docs/benchmarks.md](docs/benchmarks.md) — measured resource usage (CPU,
   wakeups, memory, startup, screenshots), including an A/B with niri on the
   dev VM, with how it was measured and what it cannot show.
+- [docs/scootbg/README.md](docs/scootbg/README.md) — scootbg, the
+  planned wallpaper daemon (not built yet), with its own backlog.
 - [CHANGELOG.md](CHANGELOG.md) · [ROADMAP.md](ROADMAP.md)
 
 ## Developing
@@ -338,6 +340,25 @@ nix develop                     # every dependency, on Linux or macOS
 cargo test --workspace          # the compositor only compiles on Linux
 cargo nextest run --workspace   # one process per test -- the required runner
 ```
+
+On Linux the shell also carries what `scripts/smoke-test.sh` drives (`foot`,
+`jq`, ImageMagick, `wayland-info`), sets `$XDG_RUNTIME_DIR` when the box has
+none (a container, a CI runner), sets `LANG=C.UTF-8` when no locale is set at
+all (`LC_ALL`, `LC_CTYPE` and `LANG` all empty; an explicit one, `C`
+included, is kept), and provides `soft-egl`, which runs one command against
+Mesa's software EGL the way CI runs the GLES tests:
+
+```sh
+soft-egl cargo nextest run --workspace   # without it the GLES tests fail on a GPU-less box
+scripts/smoke-test.sh                    # without soft-egl: don't hand it Mesa
+```
+
+`devenv shell` gives a shell with the same contents (both read
+`nix/dev-shell.nix`), and
+enters faster once warm because devenv caches its evaluation.
+`scripts/devenv-bootstrap.sh` installs single-user Nix and devenv on a
+disposable Linux box that has neither (a container, a Claude Code on the web
+session); on a machine that already has Nix, install devenv the usual way.
 
 `crates/scoot-core` is the platform-independent layout engine (no Wayland, no
 I/O), `crates/scoot-ipc` the wire protocol and a client over it,
