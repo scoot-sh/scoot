@@ -3,7 +3,7 @@ title: "The CLI and control protocol"
 status: "open"
 area: "scootbg"
 priority: "high"
-blocked: "needs the socket from crate-and-daemon.md"
+blocked: null
 ---
 
 # The CLI and control protocol

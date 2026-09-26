@@ -55,7 +55,7 @@ concurrency:
 
 jobs:
   build:
-    name: nix build .#scoot .#scootctl
+    name: nix build .#scoot .#scootctl .#scootbg
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -65,9 +65,11 @@ jobs:
 
       # No Nix store cache -- the same deliberate call as ci.yml; see the
       # header there for why magic-nix-cache is not used.
-      - name: nix build .#scoot .#scootctl, and run the packaged binaries
+      - name: nix build .#scoot .#scootctl .#scootbg, and run the packaged binaries
         run: |
           nix build .#scoot --out-link result-scoot --print-out-paths
           nix build .#scootctl --out-link result-scootctl --print-out-paths
+          nix build .#scootbg --out-link result-scootbg --print-out-paths
           ./result-scoot/bin/scoot --version
           ./result-scootctl/bin/scootctl --version
+          ./result-scootbg/bin/scootbg --version

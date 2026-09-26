@@ -58,24 +58,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Which kinds of file a pull request changes, so a docs-only PR (every
-  # changed path a `*.md` file or under `docs/`) does not spend ~10 minutes
-  # rebuilding Smithay to test Markdown: nothing in the build or the tests
-  # reads those files (if a crate ever does, say an `include_str!` of a
-  # README, narrow the pattern below). `--no-renames` so a code file moved
-  # into docs/ or renamed to .md still counts as a code change: rename
-  # detection would list only its new path. A job-level `if` rather than a
-  # workflow-level `paths:` filter, because a skipped job reports success
-  # to a required status check, while a workflow that never starts leaves
-  # the check waiting forever. Pushes to main always run everything. When
-  # scootbg gets code, this is where its own path set goes (see
-  # docs/scootbg/backlog/crate-and-daemon.md).
+  # Which parts of the repository a pull request changes, so a PR that
+  # touches only one side does not rebuild and test the other: a docs-only
+  # PR (every changed path a `*.md` file or under `docs/`) runs nothing,
+  # since nothing in the build or the tests reads those files (if a crate
+  # ever does, say an `include_str!` of a README, narrow the pattern
+  # below). The split, from docs/scootbg/backlog/resolved/crate-and-daemon-done.md:
+  #
+  #   crates/scoot/, crates/scoot-core/, crates/scoot-ipc/,
+  #   crates/scootctl/, scripts/smoke-test.sh, vm/compositor-deps.nix
+  #                                        -> scoot=true  (Linux, macOS)
+  #   crates/scootbg/, crates/scootbg-mem/ -> scootbg=true (scootbg job)
+  #   anything else that is not docs (Cargo.toml, Cargo.lock, flake.*,
+  #   nix/, .github/, .config/, resources/, devenv.*, other scripts/ and
+  #   vm/ files, LICENSE)                  -> both
+  #   either side                          -> the scootbg-on-scoot
+  #                                           integration job
+  #
+  # Directory prefixes carry their trailing slash: `crates/scoot*` would
+  # also match `crates/scootbg`, and `crates/scootbg/` does not match
+  # `crates/scootbg-mem/`, which is why both are listed.
+  #
+  # `--no-renames` so a code file moved into docs/ or renamed to .md still
+  # counts as a code change: rename detection would list only its new path.
+  # Job-level `if`s rather than a workflow-level `paths:` filter, because a
+  # skipped job reports success to a required status check, while a
+  # workflow that never starts leaves the check waiting forever. Every
+  # output starts `true` and is only lowered by a successful diff, and the
+  # jobs skip only on an explicit `false`, so a failed classification runs
+  # everything. Pushes to main always run everything.
   changes:
     name: Changed paths
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      code: ${{ steps.classify.outputs.code }}
+      scoot: ${{ steps.classify.outputs.scoot }}
+      scootbg: ${{ steps.classify.outputs.scootbg }}
     steps:
       # Depth 2: a pull_request run checks out the merge commit, whose first
       # parent is the base branch tip, so `HEAD^1..HEAD` is exactly the PR.
@@ -87,22 +105,37 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
         run: |
-          code=true
+          scoot=true
+          scootbg=true
           if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$changed" ]; then
             printf 'Changed:\n%s\n' "$changed"
-            if ! printf '%s\n' "$changed" | grep -vE '(\.md$|^docs/)' >/dev/null; then
-              code=false
-            fi
+            scoot=false
+            scootbg=false
+            while IFS= read -r path; do
+              case "$path" in
+                *.md | docs/*) ;;
+                crates/scoot/* | crates/scoot-core/* | crates/scoot-ipc/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
+                  scoot=true ;;
+                crates/scootbg/* | crates/scootbg-mem/*)
+                  scootbg=true ;;
+                *)
+                  scoot=true
+                  scootbg=true ;;
+              esac
+            done <<<"$changed"
           fi
-          echo "code=$code"
-          echo "code=$code" >>"$GITHUB_OUTPUT"
+          echo "scoot=$scoot scootbg=$scootbg"
+          {
+            echo "scoot=$scoot"
+            echo "scootbg=$scootbg"
+          } >>"$GITHUB_OUTPUT"
 
   linux:
     name: Linux (compositor)
     needs: changes
     # Fail open: only an explicit `false` skips, so a failed `changes` job
     # (empty output) still runs this one instead of skipping it green.
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.scoot != 'false' }}
     runs-on: ubuntu-latest
     # 90, not 60, since the xwayland step (last) rebuilds Smithay a third
     # time and runs the whole scoot suite again under that feature.
@@ -431,7 +464,7 @@ jobs:
     needs: changes
     # Fail open: only an explicit `false` skips, so a failed `changes` job
     # (empty output) still runs this one instead of skipping it green.
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.scoot != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 30
     env:
@@ -485,3 +518,149 @@ jobs:
             target
           # The restore step's own key -- see the Linux job's note.
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  # scootbg, the wallpaper daemon (crates/scootbg, crates/scootbg-mem): its
+  # own checks, without building the compositor. Its compositor-backed
+  # integration tests skip here (no `scoot` binary is built in this job);
+  # they run for real in the next job.
+  scootbg:
+    name: scootbg (wallpaper daemon)
+    needs: changes
+    # Fail open, as above.
+    if: ${{ !cancelled() && needs.changes.outputs.scootbg != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # Its own cache: this job never builds Smithay, so sharing the Linux
+      # job's (gigabytes of it) would cost more to restore than it saves.
+      - name: Restore the cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: scootbg-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            scootbg-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            scootbg-cargo-
+
+      - name: cargo fmt
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo fmt --check -p scootbg -p scootbg-mem
+
+      # `-D warnings` also enforces scootbg-mem's own `[lints]`: every
+      # `unsafe` block carries a `// SAFETY:` comment and holds one
+      # operation (`undocumented_unsafe_blocks`, `multiple_unsafe_ops_per_block`).
+      # scootbg itself is `#![forbid(unsafe_code)]`, which rustc enforces.
+      - name: cargo clippy
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo clippy -p scootbg -p scootbg-mem --all-targets -- -D warnings
+
+      # Both runners, for the reason the Linux job gives: nextest isolates
+      # each test in its own process, `cargo test` shares one.
+      - name: cargo nextest and cargo test
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          cargo nextest run -p scootbg -p scootbg-mem --no-fail-fast
+          cargo test -p scootbg -p scootbg-mem
+
+      # scootbg's rule is no C beyond what std links: no `libc` crate in its
+      # normal dependency tree (rustix on its `linux_raw` backend), and no
+      # shared library beyond glibc and libgcc_s. `cargo tree` resolves the
+      # host target, the one this binary ships for.
+      - name: No libc crate, and what the release binary links
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          if cargo tree -p scootbg -e normal --prefix none | grep -q '^libc '; then
+            echo "::error title=scootbg depends on the libc crate::scootbg calls no C (docs/scootbg/README.md, Standards); find the path with: cargo tree -p scootbg -e normal -i libc"
+            cargo tree -p scootbg -e normal -i libc
+            exit 1
+          fi
+          echo "ok: no libc crate in scootbg's normal dependency tree"
+          # Weighed alone, never in a --workspace build (feature unification).
+          cargo build --release -p scootbg
+          echo "release binary: $(stat -c %s target/release/scootbg) bytes (stripped)"
+          ldd target/release/scootbg
+          extra=$(ldd target/release/scootbg | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
+          if [ -n "$extra" ]; then
+            echo "::error title=scootbg links a library beyond std's::$(echo "$extra" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "ok: links only what std links"
+
+      - name: Save the cargo cache
+        # Same condition as the Linux job's save; see the comment there.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  # scootbg against a live `scoot --headless`: the daemon's socket
+  # lifecycle end to end (crates/scootbg/tests/daemon.rs). Runs when either
+  # side changes, since each can break the other's end-to-end run.
+  # `SCOOTBG_REQUIRE_SCOOT` turns the tests' "skipped -- no scoot binary"
+  # into a failure, so this job cannot go green by skipping.
+  scootbg-integration:
+    name: scootbg on headless scoot
+    needs: changes
+    # Fail open: skipped only when both sides are explicitly unchanged.
+    if: ${{ !cancelled() && (needs.changes.outputs.scoot != 'false' || needs.changes.outputs.scootbg != 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - name: Create XDG_RUNTIME_DIR
+        run: |
+          mkdir -p "$RUNNER_TEMP/xdg"
+          chmod 700 "$RUNNER_TEMP/xdg"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
+
+      # Restore-only, from the Linux job's entries: they hold the Smithay
+      # build this job needs, and this job adds nothing worth saving twice.
+      - name: Restore the cargo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            linux-cargo-
+
+      - name: Build scoot and scootbg
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo build -p scoot -p scootbg
+
+      # The tests find `scoot` beside `scootbg` in target/debug, built by the
+      # step above from this same tree.
+      - name: Integration tests, compositor required
+        shell: nix develop --command bash -euo pipefail {0}
+        env:
+          SCOOTBG_REQUIRE_SCOOT: "1"
+        run: |
+          cargo nextest run -p scootbg --test daemon --no-fail-fast
+          cargo test -p scootbg --test daemon

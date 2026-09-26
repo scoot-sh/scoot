@@ -150,6 +150,7 @@ Clone, then, from the flake at the repo root:
 nix build                            # ./result/bin/scoot
 nix build .#scoot-gpu                    # ...with the --tty GPU scanout tier
 nix build .#scootctl                 # ./result/bin/scootctl, the client alone
+nix build .#scootbg                  # ./result/bin/scootbg, the wallpaper daemon (early; Linux)
 nix run . -- --headless -- foot      # build and run it in one step
 nix run .#scootctl -- windows        # the client, from anywhere
 ```
@@ -313,6 +314,29 @@ refusing: `[tty] gpu` naming a device that will not open, and
 The full protocol/version table, and the ones that are deliberately absent,
 are at the top of [docs/protocols.md](docs/protocols.md).
 
+## scootbg (early)
+
+`scootbg` is scoot's wallpaper daemon, a separate binary and package that
+works on any compositor with `wlr-layer-shell`. **It is early: the daemon
+runs, but it draws no wallpaper yet.** What works today:
+
+```sh
+scootbg daemon      # connect to $WAYLAND_DISPLAY and serve the control socket
+scootbg query       # {"type":"outputs","outputs":[]} -- one JSON line
+scootbg version     # the running daemon's version and protocol
+scootbg kill        # stop it; returns once a new daemon can start
+scootbg --help      # and `scootbg COMMAND --help`
+```
+
+One daemon per display: its socket is
+`$XDG_RUNTIME_DIR/scootbg-NAME.sock`, `NAME` being the last component of
+`$WAYLAND_DISPLAY`. A second `scootbg daemon` refuses while one runs, and
+a socket left by a crashed one is replaced. It exits 0 on `kill`, SIGTERM,
+SIGINT or SIGHUP, and 1 when the compositor goes away, removing its socket
+either way. Colours, images and `scootbg set` are the next items in
+[its backlog](docs/scootbg/backlog/README.md); scoot's `[wallpaper]` config
+section does not exist yet, so do not add one.
+
 ## Documentation
 
 - [docs/ipc.md](docs/ipc.md) — driving scoot from a script or an agent:
@@ -330,7 +354,8 @@ are at the top of [docs/protocols.md](docs/protocols.md).
   wakeups, memory, startup, screenshots), including an A/B with niri on the
   dev VM, with how it was measured and what it cannot show.
 - [docs/scootbg/README.md](docs/scootbg/README.md) — scootbg, the
-  planned wallpaper daemon (not built yet), with its own backlog.
+  wallpaper daemon (early: the daemon and its socket, no wallpapers yet),
+  with its design and its own backlog.
 - [CHANGELOG.md](CHANGELOG.md) · [ROADMAP.md](ROADMAP.md)
 
 ## Developing
@@ -363,7 +388,8 @@ session); on a machine that already has Nix, install devenv the usual way.
 `crates/scoot-core` is the platform-independent layout engine (no Wayland, no
 I/O), `crates/scoot-ipc` the wire protocol and a client over it,
 `crates/scootctl` the `scootctl` remote-control client, `crates/scoot`
-the CLI and the Smithay-based compositor. `vm/README.md` sets up a Mac-native
+the CLI and the Smithay-based compositor, `crates/scootbg` the wallpaper
+daemon and `crates/scootbg-mem` the only `unsafe` code it has. `vm/README.md` sets up a Mac-native
 NixOS VM to run the Linux-only half in; `CLAUDE.md` has the engineering
 standards.
 
@@ -375,8 +401,14 @@ since both are `dlopen`ed and never appear in `ldd` either way), a `nix fmt`
 check over all tracked `.nix` files, `nix flake check -L` (Linux and macOS
 jobs each cover their own systems' outputs, modules and checks), and a macOS
 `cargo check --workspace --all-targets` (on a Mac that is the `scootctl`
-client plus the compositor crate with its Linux halves cfg'd out). The
-packaged artifacts themselves (`nix build .#scoot .#scootctl`) build on every
+client plus the compositor crate with its Linux halves cfg'd out). Jobs are
+split by path: a change under `crates/scootbg/` or `crates/scootbg-mem/`
+alone runs only scootbg's own job (fmt, clippy, tests, a no-`libc`-crate
+check, the release size) plus the scootbg-on-headless-scoot integration
+tests, and a compositor-only change skips scootbg's job; shared files
+(`Cargo.*`, `flake.*`, `nix/`, `.github/`, and anything unlisted) run
+everything. The
+packaged artifacts themselves (`nix build .#scoot .#scootctl .#scootbg`) build on every
 merge to main via `.github/workflows/nix-build.yml` instead of on every PR --
 a full release Smithay build the cargo cache cannot reuse, so it would tax
 every push; the every-PR `flake check` already evals every output and runs

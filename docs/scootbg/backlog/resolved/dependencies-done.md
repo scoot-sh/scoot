@@ -29,7 +29,7 @@ one, the round-one text stays as evidence and is marked **superseded**.
 
 The original ticket asked for the choice to be recorded in the crate's
 `Cargo.toml` comments as well. That happens in the
-[crate PR](../crate-and-daemon.md), which links here.
+[crate PR](crate-and-daemon-done.md), which links here.
 
 ## Decisions
 
@@ -93,7 +93,7 @@ but that is an estimate, not a measurement.
     first) measured +60 MB peak and +200 ms on 6000×4000. The
     packing-loop version is designed, not measured.
   - Validate dimensions before allocating or scaling.
-- **[crate-and-daemon.md](../crate-and-daemon.md):**
+- **[crate-and-daemon.md](crate-and-daemon-done.md):**
   - Two crates: `scootbg` (`#![forbid(unsafe_code)]`) and `scootbg-mem`
     (the only `unsafe`).
   - No `scoot-ipc` reuse. It pulls no compositor types, but it would
@@ -772,6 +772,10 @@ The weakest spot left is wayland-rs: no fuzzing, though only ~10
 `unsafe` sites are compiled. There is no maintained safe alternative.
 
 ## 11. scootbg's own `unsafe`: two modules in one small crate
+
+(The crate PR added a third, `signal.rs`, because rustix has no safe way
+to wait for SIGTERM; see
+[crate-and-daemon-done.md](crate-and-daemon-done.md#departures-from-the-plan-and-why).)
 
 `scootbg` itself is `#![forbid(unsafe_code)]`. All of its `unsafe` lives
 in **`crates/scootbg-mem`**: pure Rust, `publish = false`, with

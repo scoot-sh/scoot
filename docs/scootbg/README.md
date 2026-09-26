@@ -8,9 +8,12 @@ It is built for scoot and set up by scoot's own config, but it is not tied
 to it: scootbg speaks only standard protocols, so it also runs on any
 compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 
-> **Status: planning.** There is no code yet. This file is the design; the
-> work is in [`backlog/`](backlog/README.md). The code will live in
-> `crates/scootbg/` once its first feature lands; these docs stay here.
+> **Status: early.** The daemon exists (`crates/scootbg/`, with its
+> `unsafe` in `crates/scootbg-mem/`): `scootbg daemon` connects, binds the
+> globals it will need, and serves its control socket; `scootbg query`, `version`
+> and `kill` work. **It draws no wallpaper yet**: output tracking, colours
+> and images are the next items in [`backlog/`](backlog/README.md). These
+> docs stay here.
 
 ## What it is for
 
@@ -75,7 +78,9 @@ scootbg clear --output DP-1                    # back to the compositor's own ba
 scootbg daemon                                 # outside scoot: start it yourself
 ```
 
-The commands above are the planned interface, not a working one yet.
+The commands above are the planned interface; of them, only `query` and
+`daemon` work so far (with `version` and `kill`), and `query`'s output list
+is empty until outputs are tracked.
 One binary: `daemon` runs the Wayland client, every other subcommand talks
 to it over its socket.
 
@@ -158,7 +163,12 @@ safety are not traded against each other:
 - **`#![forbid(unsafe_code)]` in `scootbg`.** The only `unsafe` is
   isolated in one small crate, `scootbg-mem`:
   - the global allocator that returns large blocks to the kernel;
-  - the `wl_shm` buffer mapping.
+  - the `wl_shm` buffer mapping;
+  - blocking SIGTERM, SIGINT and SIGHUP and waiting for them on a thread,
+    so the daemon removes its socket on the way out. rustix has no
+    `signalfd` and no safe `sigaction`, so this is two `rustix::runtime`
+    calls (`sigprocmask`, `sigwait`); added with the daemon, see
+    [its record](backlog/resolved/crate-and-daemon-done.md).
 
   It is named for what it owns rather than `-sys`, which by Cargo
   convention means bindings to a native library, the one thing it

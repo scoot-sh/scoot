@@ -9,6 +9,15 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-26 — scootbg, the wallpaper daemon, exists (early)
+
+- **A new binary and package, `scootbg`** (`nix build .#scootbg`, Linux).
+  `scootbg daemon` connects to any compositor with `wlr-layer-shell` and
+  serves a control socket; `scootbg query`, `version` and `kill` talk to
+  it. **It draws no wallpaper yet.** Do not add a `[wallpaper]` section to
+  scoot's config: scoot does not accept one yet. See the README's scootbg
+  section.
+
 ### 2026-09-26 — one app can no longer freeze the desktop with menus (PR #253)
 
 - **An app that opens popups without bound is disconnected at 128 live

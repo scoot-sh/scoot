@@ -188,6 +188,11 @@ fmt --check -p scoot`, and `scripts/smoke-test.sh` (backend-agnostic
 IPC-driven end-to-end test; set `MODE=--nested` to run under a host
 compositor, and real `--tty` hardware needs the binary launched there — see
 the script's header).
+For a scootbg change (`crates/scootbg*`): `cargo nextest run -p scootbg
+-p scootbg-mem` with `scoot` built beside it (its integration tests skip
+without one; `SCOOTBG_REQUIRE_SCOOT=1` makes that a failure), `cargo clippy
+-p scootbg -p scootbg-mem --all-targets -- -D warnings`, and `cargo fmt
+--check -p scootbg -p scootbg-mem`.
 
 **nextest is the runner to lean on** (user, 2026-09-19). It is the stricter
 of the two and it guards the more important property — see below. `cargo
