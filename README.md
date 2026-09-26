@@ -339,6 +339,23 @@ cargo test --workspace          # the compositor only compiles on Linux
 cargo nextest run --workspace   # one process per test -- the required runner
 ```
 
+On Linux the shell also carries what `scripts/smoke-test.sh` drives (`foot`,
+`jq`, ImageMagick, `wayland-info`), sets `$XDG_RUNTIME_DIR` when the box has
+none (a container, a CI runner), and provides `soft-egl`, which runs one
+command against Mesa's software EGL the way CI runs the GLES tests:
+
+```sh
+soft-egl cargo nextest run --workspace   # without it the GLES tests fail on a GPU-less box
+scripts/smoke-test.sh                    # without soft-egl: don't hand it Mesa
+```
+
+`devenv shell` gives a shell with the same contents (both read
+`nix/dev-shell.nix`), and
+enters faster once warm because devenv caches its evaluation.
+`scripts/devenv-bootstrap.sh` installs single-user Nix and devenv on a
+disposable Linux box that has neither (a container, a Claude Code on the web
+session); on a machine that already has Nix, install devenv the usual way.
+
 `crates/scoot-core` is the platform-independent layout engine (no Wayland, no
 I/O), `crates/scoot-ipc` the wire protocol and a client over it,
 `crates/scootctl` the `scootctl` remote-control client, `crates/scoot`

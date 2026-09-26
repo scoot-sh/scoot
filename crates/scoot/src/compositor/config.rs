@@ -3302,6 +3302,14 @@ mod tests {
 
     /// An unwritable parent is a loud refusal naming the path, not a panic
     /// and not a file elsewhere.
+    ///
+    /// Permission bits do not bind a process with `CAP_DAC_OVERRIDE` (root,
+    /// as in a dev container), so there the premise cannot be built at all:
+    /// the test probes for that and says so instead of failing on a
+    /// directory that is not actually unwritable. The refusal path itself
+    /// stays covered for root by
+    /// [`a_parent_that_is_a_file_is_a_loud_refusal`], which no privilege
+    /// gets past.
     #[test]
     fn an_unwritable_parent_is_a_loud_refusal() {
         use std::os::unix::fs::PermissionsExt as _;
@@ -3309,6 +3317,17 @@ mod tests {
         let locked = dir.path().join("locked");
         fs::create_dir(&locked).expect("locked dir");
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).expect("lock");
+        let probe = locked.join("probe");
+        if fs::create_dir(&probe).is_ok() {
+            eprintln!(
+                "skipped: a 0555 directory is writable here (running with \
+                 CAP_DAC_OVERRIDE, e.g. as root), so it cannot stand for an \
+                 unwritable parent; a_parent_that_is_a_file_is_a_loud_refusal \
+                 covers the refusal instead"
+            );
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("unlock");
+            return;
+        }
         let path = locked.join("scoot/config.toml");
         let error = write_default_config_to(&path).expect_err("an unwritable dir must be refused");
         assert!(
@@ -3317,6 +3336,33 @@ mod tests {
         );
         assert!(!path.exists(), "a refused write left a file behind");
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("unlock");
+    }
+
+    /// A parent that cannot be created is refused the same way whatever the
+    /// cause: here a regular file stands where a directory is needed
+    /// (`ENOTDIR`), which fails for every user, root included -- so this is
+    /// the refusal's coverage on a box where permission bits do not bind.
+    #[test]
+    fn a_parent_that_is_a_file_is_a_loud_refusal() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let blocker = dir.path().join("blocker");
+        fs::write(&blocker, b"not a directory").expect("blocker file");
+        let path = blocker.join("scoot/config.toml");
+        let error = write_default_config_to(&path).expect_err("a file as a parent must be refused");
+        assert!(
+            matches!(error, WriteDefaultConfigError::Mkdir { .. }),
+            "wrong error for an uncreatable parent: {error:?}"
+        );
+        assert!(
+            error.to_string().contains(blocker.to_str().expect("utf-8")),
+            "the refusal must name the path: {error}"
+        );
+        assert!(!path.exists(), "a refused write left a file behind");
+        assert_eq!(
+            fs::read(&blocker).expect("blocker still readable"),
+            b"not a directory",
+            "the refusal must not touch what was in the way"
+        );
     }
 
     /// A mid-write I/O failure (disk full, quota, ...) removes the partial
