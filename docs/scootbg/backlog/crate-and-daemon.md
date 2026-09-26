@@ -31,8 +31,22 @@ The first real PR, and the one that creates the crate.
 - A Wayland disconnect (compositor exit) ends the daemon cleanly with a
   non-zero status, never a panic.
 - Nix: a `scootbg` package output of its own (the `scoot` package stays
-  `scoot` only, as with `scootctl`) and a place in the dev shell; CI builds
-  and tests it with the rest of the workspace.
+  `scoot` only, as with `scootctl`) and a place in the dev shell.
+- CI, split by path, extending the `changes` job in
+  `.github/workflows/ci.yml` (which today only skips docs-only PRs):
+
+  | Changed | Runs |
+  |---|---|
+  | `crates/scoot*`, `crates/scootctl`, `scripts/smoke-test.sh`, `vm/compositor-deps.nix` | the scoot jobs |
+  | `crates/scootbg` | a scootbg job (fmt, clippy, tests) |
+  | `Cargo.toml`, `Cargo.lock`, `flake.*`, `nix/`, `.github/` | everything |
+  | either side | the scootbg-on-headless-scoot integration test |
+
+  The integration test runs for both because the `apply-config` contract
+  couples them: a scoot change can break scootbg's end-to-end run and the
+  reverse. Gate jobs with `if:` on the `changes` outputs, never a
+  workflow-level `paths:` filter (a required check would wait forever),
+  and keep pushes to `main` running everything.
 
 Done when `scootbg daemon` connects, binds its globals, answers `query`
 with an empty output list shape, and exits cleanly on `kill` and on
