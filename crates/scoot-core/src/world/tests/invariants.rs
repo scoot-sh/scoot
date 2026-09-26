@@ -121,7 +121,7 @@ fn random_action(
             random_window(rng, windows)
         }
     };
-    match rng.below(24) {
+    match rng.below(26) {
         0 => Action::FocusColumn(horizontal),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
@@ -191,6 +191,20 @@ fn random_action(
                 bottom: rng.chance(40),
             },
         },
+        // The positional cross-output halves (see
+        // `Action::FocusOutputIndex`): usually a live position, sometimes a
+        // wild one off the same wire -- and the window must survive all of
+        // them (an out-of-range index does nothing).
+        24 => Action::FocusOutputIndex(match rng.below(8) {
+            0 => usize::MAX,
+            1 => usize::MAX / 2,
+            other => other,
+        }),
+        25 => Action::MoveFocusedWindowToOutputIndex(match rng.below(8) {
+            0 => usize::MAX,
+            1 => usize::MAX / 2,
+            other => other,
+        }),
         _ => Action::CloseFocused,
     }
 }

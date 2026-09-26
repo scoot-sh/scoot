@@ -605,6 +605,43 @@ fn a_dialog_over_a_covering_fullscreen_window_shows_while_it_has_focus() {
     assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(1)));
 }
 
+/// A dialog that descends from a covering floating window through a tiled
+/// one is drawn above it (fuzz seed 17: it showed but stacked below -- a
+/// modal hidden under the fullscreen parent it blocks looks like a hang).
+#[test]
+fn a_dialog_through_a_tiled_window_draws_above_its_covering_parent() {
+    let mut world = world();
+    // The app, floating.
+    open(&mut world, 1);
+    float_on_map(&mut world, 1);
+    draw(&mut world, 1, 200, 200);
+    // A second window kept tiled, transient for the app (auto-float off, or
+    // unfloated: the parent link stays).
+    open_with(&mut world, 2, with_parent(1));
+    draw(&mut world, 2, 200, 200);
+    // Its dialog: floating, transient for the tiled window.
+    open_with(&mut world, 3, with_parent(2));
+    float_on_map(&mut world, 3);
+    draw(&mut world, 3, 200, 200);
+    // Click the app and take it fullscreen: it covers the output, raised
+    // above its grand-dialog.
+    world.handle_event(Event::FocusObserved { id: WindowId(1) });
+    world.handle_event(Event::FullscreenRequested {
+        id: WindowId(1),
+        fullscreen: true,
+    });
+    assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(1)));
+    assert!(placement(&world, 3).visible, "the dialog stays up");
+    let order: Vec<u64> = world
+        .arrange()
+        .placements
+        .iter()
+        .filter(|p| p.visible)
+        .map(|p| p.id.0)
+        .collect();
+    assert_eq!(order, vec![1, 3], "the dialog is above its parent");
+}
+
 #[test]
 fn floating_or_un_floating_a_fullscreen_window_ends_its_fullscreen() {
     let mut world = strip_of(2, 1);
