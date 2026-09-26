@@ -1058,7 +1058,9 @@ impl Tty {
     /// always the same value, and `BufferPool::next_age`'s doc for what it
     /// means. A pure peek: pair every call with
     /// [`advance_generation`](Self::advance_generation) once the render it
-    /// was used for has actually happened. `0` (always redraw in full) for an
+    /// was used for has actually happened *and reported damage* (an
+    /// empty-damage render freezes Smithay's history -- see
+    /// `BufferPool::advance_generation`'s doc). `0` (always redraw in full) for an
     /// output this backend does not drive.
     pub fn next_buffer_age(&self, id: OutputId) -> usize {
         match self.head(id).map(|head| &head.presenter) {
@@ -1075,11 +1077,11 @@ impl Tty {
     }
 
     /// Must be called exactly once per `render_output` call this backend's
-    /// [`next_buffer_age`](Self::next_buffer_age) was used for, for the same
-    /// output -- see `BufferPool::advance_generation`'s doc for why this
-    /// can't be folded into `present` itself (it must run even when
-    /// `present` isn't called at all, i.e. when nothing was damaged this
-    /// frame).
+    /// [`next_buffer_age`](Self::next_buffer_age) was used for that reported
+    /// damage, for the same output -- see `BufferPool::advance_generation`'s
+    /// doc for why a damage-free render must not advance, and why this
+    /// can't be folded into `present` itself (a damaging render whose
+    /// damage ends up written nowhere still consumed history).
     pub fn advance_generation(&mut self, id: OutputId) {
         match self.head_mut(id).map(|head| &mut head.presenter) {
             Some(Presenter::Dumb(dumb)) => dumb.advance_generation(),

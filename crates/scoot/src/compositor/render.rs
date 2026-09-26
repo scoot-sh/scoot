@@ -1613,11 +1613,15 @@ where
                     // nothing and leaves the previous frame on screen. See
                     // `FrameOutcome::damaged`.
                     outcome.damaged = render_result.damage.is_some();
-                    // Must run unconditionally, even when there turns out to
-                    // be nothing to present below -- see
-                    // `BufferPool::advance_generation`'s doc for why this
-                    // can't be skipped just because this frame is.
-                    if let (Some(tty), Some(id)) = (&mut state.tty, frame.output) {
+                    // Advance the dumb tier's generation if and only if this
+                    // render consumed Smithay damage history -- see
+                    // `history_advanced` and
+                    // `BufferPool::advance_generation`'s doc. An empty-damage
+                    // frame (`damage: None`) froze the history, so advancing
+                    // past it desyncs the next frame into a full repaint.
+                    if history_advanced(render_result.damage)
+                        && let (Some(tty), Some(id)) = (&mut state.tty, frame.output)
+                    {
                         tty.advance_generation(id);
                     }
                     // Both presenters read back the same frame the same way;
@@ -1702,6 +1706,28 @@ where
         Err(error) => tracing::warn!(%error, "could not bind the framebuffer"),
     }
     (outcome, owed)
+}
+
+/// Whether a finished `render_output` call consumed Smithay damage history
+/// -- and so whether the dumb tier's own generation must advance with it.
+///
+/// Exact correspondence, verified against the pinned Smithay source
+/// (`damage/mod.rs`): `render_output` reports `damage: None` if and only if
+/// it took the early return *before* `old_damage.push_front` (zero history
+/// mutation -- no push, no element-state refresh), and `Some` only on the
+/// path that pushed. Advancing `BufferPool`'s generation past a
+/// history-freezing frame is the desync
+/// `dumb-tier-damage-history-desync.md` records: the next frame reads
+/// `age > old_damage.len()` and repaints everything.
+///
+/// A free function so the regression test below drives the same decision
+/// the frame path does, rather than a copy of its expression.
+///
+/// The scanout tier never reaches this: `draw_frame_scanout` owns no
+/// `OutputDamageTracker` history (`DrmCompositor` tracks its own swapchain
+/// ages), so there is no generation here to keep in step.
+fn history_advanced(damage: Option<&Vec<Rectangle<i32, Physical>>>) -> bool {
+    damage.is_some()
 }
 
 /// The smallest rectangle containing every rect in `rects`. A free function

@@ -157,23 +157,34 @@ impl BufferPool {
     /// A pure peek: this alone doesn't advance `generation`, so it's safe to
     /// call before deciding whether a render is even worth doing. The
     /// caller must still call [`advance_generation`](Self::advance_generation)
-    /// exactly once for every `render_output` call this age was used for --
-    /// see that method's doc for why.
+    /// exactly once for every `render_output` call this age was used for
+    /// that reported damage -- see that method's doc for why the
+    /// damage-free ones must not advance.
     pub fn next_age(&self) -> usize {
         let index = first_free(self.slots.iter().map(|slot| slot.free));
         index.map_or(0, |index| self.ages.age_for(index))
     }
 
     /// Must be called exactly once after every `render_output` call this
-    /// pool's [`next_age`](Self::next_age) was used for, whether or not that
-    /// render's damage ends up written anywhere by
-    /// [`write_region`](Self::write_region). `OutputDamageTracker`'s own
-    /// damage history advances unconditionally on every `render_output`
-    /// call (confirmed against the pinned Smithay source: the history push
-    /// happens before the "anything actually damaged?" check that might
-    /// skip drawing) -- so this generation counter must track it 1:1, or a
-    /// later `next_age` computes an age against the wrong baseline and the
-    /// tracker hands back damage for the wrong span of history.
+    /// pool's [`next_age`](Self::next_age) was used for that reported
+    /// damage (`Some`), whether or not that damage ends up written anywhere
+    /// by [`write_region`](Self::write_region) -- and never after one that
+    /// reported none. `OutputDamageTracker` freezes its damage history on an
+    /// empty-damage pass (confirmed against the pinned Smithay source: the
+    /// `if self.damage.is_empty() { "nothing damaged, exiting early";
+    /// return … }` in `damage_output_internal` runs BEFORE
+    /// `old_damage.push_front`, so neither the history nor the element
+    /// states move), while a damaging pass pushes exactly one entry. This
+    /// generation counter must therefore track damaging renders 1:1: advance
+    /// past a frozen history and a later `next_age` computes an age against
+    /// the wrong baseline (`age > old_damage.len()`), and the tracker
+    /// answers a full repaint for a frame nothing changed in.
+    ///
+    /// (An earlier revision of this doc claimed the history "advances
+    /// unconditionally on every `render_output` call … the history push
+    /// happens before the check that might skip drawing". That is false for
+    /// the empty-damage case -- the check runs first -- and the gate in
+    /// `render::draw_frame_with` (`history_advanced`) exists because of it.)
     pub fn advance_generation(&mut self) {
         self.ages.advance();
     }
