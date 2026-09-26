@@ -264,10 +264,10 @@ unmodified.
 dev VM included. Its contents match `nix develop`'s: both read
 `nix/dev-shell.nix`, so change the shell's contents there, never in only one
 of them. That shell has the pinned toolchain, the compositor's libraries,
-the smoke test's tools, `soft-egl`, and an `$XDG_RUNTIME_DIR` and a UTF-8
-`LANG` when the box has none. devenv caches its evaluation, so a warm entry
-takes ~0.2s against ~1.5s for `nix develop`, which adds up for an agent
-that wraps every command in it.
+the smoke test's tools, `soft-egl`, an `$XDG_RUNTIME_DIR` when the box has
+none, and `LANG=C.UTF-8` when it sets no locale at all. devenv caches its
+evaluation, so a warm entry takes ~0.2s against ~1.5s for `nix develop`,
+which adds up for an agent that wraps every command in it.
 
 **Setup:**
 - **A box with no Nix** (a container, a Claude Code on the web session, a
