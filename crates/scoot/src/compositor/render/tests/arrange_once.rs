@@ -22,25 +22,41 @@
 //! like `headless::bench`'s scenes): no client surface means the window
 //! gather finds nothing mapped, but the focus ring is still drawn for every
 //! placed window -- which is exactly the arrangement-dependent pixel this
-//! suite watches. A mutation that re-lays-out moves or recolours a ring, so
-//! the framebuffer changes; a mutation the frame missed leaves stale ring
-//! pixels behind.
+//! suite watches. A mutation that re-lays-out recolours a ring (focus) or
+//! moves one (geometry), so the framebuffer changes; a mutation the frame
+//! missed leaves stale ring pixels behind.
+//!
+//! One property of the ring renderer shapes these tests: a ring is drawn
+//! from a window's geometry and focused state, not its identity, so two
+//! frames whose visible columns sit in the same places with the same focus
+//! pattern are byte-identical even when different windows sit in them (a
+//! scrolled strip, or a focus move between equally-placed columns). The
+//! invalidation tests below are built to move visible geometry or the focus
+//! pattern, never just window identity -- and each one asserts its scene
+//! actually watches something before asserting the sharing.
 
+use std::os::unix::net::UnixStream;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use scoot_core::{
     Action, Event as CoreEvent, Horizontal, OutputId, Vertical, WindowId, WindowInfo,
 };
+use wayland_client::protocol::wl_registry::WlRegistry;
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1::{self, ExtSessionLockManagerV1},
+    ext_session_lock_v1::{self, ExtSessionLockV1},
+};
 
 use crate::compositor::decorations::Appearance;
 use crate::compositor::headless;
-use crate::compositor::test_support::{self, Harness};
+use crate::compositor::test_support::Harness;
 
 /// Small square canvas: every assertion here compares whole framebuffers
 /// byte for byte, and ring pixels read the same at any size.
 const CANVAS: i32 = 200;
 
-/// No client ever connects here (except the parked locker in
+/// No client ever connects here (except the lock-then-unlock client in
 /// [`relock_refreshes_and_restores`]), so the step/ack vocabulary is empty.
 type Fixture = Harness<(), ()>;
 
@@ -137,32 +153,23 @@ fn identical_consecutive_frames_share_and_repeat() {
     assert_eq!(again_second, second, "output 2 must repeat its pixels");
 }
 
-/// An animated scene repeats exactly: cycling focus across the strip
-/// recolours the rings each frame, and running the same cycle again draws
-/// the same byte sequence -- sharing never drifts, and every animated tick
-/// still costs exactly one arrangement.
-///
-/// The cycle walks left twice then right twice (`step` clamps rather than
-/// wraps, so a march in one direction would stall at the edge watching
-/// nothing): from the rightmost column, [L, L, R, R] focuses columns
-/// [1, 0, 1, 2], and the second round repeats it from the same start.
+/// An animated scene repeats exactly: consuming the focused window into its
+/// neighbour and expelling it back changes the visible column geometry each
+/// frame, and running the same cycle again draws the same byte sequence --
+/// sharing never drifts, and every animated tick still costs exactly one
+/// arrangement.
 #[test]
 fn a_repeated_animation_draws_the_same_bytes() {
     let mut fixture = two_output_fixture(3);
     let cycle = |fixture: &mut Fixture| {
         let mut frames = Vec::new();
-        for dir in [
-            Horizontal::Left,
-            Horizontal::Left,
-            Horizontal::Right,
-            Horizontal::Right,
-        ] {
+        for dir in [Horizontal::Left, Horizontal::Right] {
             let before = fixture.state.world.arrange();
-            fixture.state.act(Action::FocusColumn(dir));
+            fixture.state.act(Action::ConsumeOrExpel(dir));
             assert_ne!(
                 fixture.state.world.arrange(),
                 before,
-                "focus must move {dir:?}: otherwise this frame watches nothing"
+                "consume/expel {dir:?} must re-lay-out: otherwise this frame watches nothing"
             );
             reset_arrange_calls(fixture);
             let (first, second) = render_all(fixture);
@@ -179,7 +186,7 @@ fn a_repeated_animation_draws_the_same_bytes() {
     let twice = cycle(&mut fixture);
     assert_ne!(
         once[0].0, once[1].0,
-        "cycling focus must move the ring: otherwise this test watches nothing"
+        "consume then expel must move the columns: otherwise this test watches nothing"
     );
     assert_eq!(once, twice, "the same animation must draw the same bytes");
 }
@@ -187,9 +194,13 @@ fn a_repeated_animation_draws_the_same_bytes() {
 /// Opening a window refreshes the next frame; closing it restores the exact
 /// pre-open pixels on the populated output while the empty output never
 /// moves -- freshness plus a byte-exact round trip.
+///
+/// From a single window: a second column changes the visible geometry, which
+/// is what this watches (a scrolled strip can land different windows in the
+/// same places, pixel-identical -- see the module doc).
 #[test]
 fn open_and_close_refresh() {
-    let mut fixture = two_output_fixture(3);
+    let mut fixture = two_output_fixture(1);
     let (before_first, before_second) = render_all(&mut fixture);
     open_windows(&mut fixture, 100, 1);
     let (opened_first, opened_second) = render_all(&mut fixture);
@@ -399,6 +410,85 @@ fn output_remove_and_readd_leave_the_survivor_alone() {
     );
 }
 
+/// A session-lock client that locks, then waits for one step and unlocks --
+/// [`Harness::spawn`] shaped (`Harness<(), ()>`). Disconnecting a locker
+/// abandons the lock by design (the session *stays* locked), so a test that
+/// wants the unlock half of the invalidation story needs a client that
+/// really sends `unlock_and_destroy`.
+struct UnlockingLocker {
+    manager: Option<ExtSessionLockManagerV1>,
+}
+
+impl wayland_client::Dispatch<WlRegistry, ()> for UnlockingLocker {
+    fn event(
+        client: &mut Self,
+        registry: &WlRegistry,
+        event: wayland_client::protocol::wl_registry::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        qh: &wayland_client::QueueHandle<Self>,
+    ) {
+        if let wayland_client::protocol::wl_registry::Event::Global {
+            name,
+            interface,
+            version,
+        } = event
+            && interface.as_str() == "ext_session_lock_manager_v1"
+        {
+            client.manager = Some(registry.bind(name, version.min(1), qh, ()));
+        }
+    }
+}
+
+impl wayland_client::Dispatch<ExtSessionLockManagerV1, ()> for UnlockingLocker {
+    fn event(
+        _: &mut Self,
+        _: &ExtSessionLockManagerV1,
+        _: ext_session_lock_manager_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl wayland_client::Dispatch<ExtSessionLockV1, ()> for UnlockingLocker {
+    fn event(
+        _: &mut Self,
+        _: &ExtSessionLockV1,
+        _: ext_session_lock_v1::Event,
+        _: &(),
+        _: &wayland_client::Connection,
+        _: &wayland_client::QueueHandle<Self>,
+    ) {
+    }
+}
+
+fn locking_client(stream: UnixStream, steps: Receiver<()>, acks: Sender<()>) -> Result<(), String> {
+    use wayland_client::Connection;
+    let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
+    let mut queue = conn.new_event_queue();
+    let qh = queue.handle();
+    let _registry = conn.display().get_registry(&qh, ());
+    let mut client = UnlockingLocker { manager: None };
+    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+    let manager = client
+        .manager
+        .take()
+        .ok_or("no ext_session_lock_manager_v1")?;
+    let lock = manager.lock(&qh, ());
+    queue.flush().map_err(|e| e.to_string())?;
+    acks.send(()).map_err(|e| e.to_string())?;
+    // Parked holding the lock until the test's unlock step.
+    steps
+        .recv()
+        .map_err(|_| "the harness went away before unlocking")?;
+    lock.unlock_and_destroy();
+    queue.flush().map_err(|e| e.to_string())?;
+    acks.send(()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Locking blanks both outputs without arranging (locked frames gather no
 /// arrangement at all); unlocking restores the exact pre-lock pixels --
 /// the lock-state half of the invalidation story.
@@ -406,7 +496,7 @@ fn output_remove_and_readd_leave_the_survivor_alone() {
 fn relock_refreshes_and_restores() {
     let mut fixture = two_output_fixture(3);
     let (before_first, before_second) = render_all(&mut fixture);
-    let locker = fixture.spawn(test_support::locker);
+    let locker = fixture.spawn(locking_client);
     fixture.wait_for_ack(locker);
     let deadline = Instant::now() + Duration::from_secs(10);
     while !fixture.state.session_lock.is_locked() {
@@ -431,7 +521,8 @@ fn relock_refreshes_and_restores() {
         locked_first, locked_second,
         "with no lock surfaces both outputs must show the same blank"
     );
-    fixture.disconnect(locker);
+    fixture.send_step(locker, ());
+    fixture.wait_for_ack(locker);
     let deadline = Instant::now() + Duration::from_secs(10);
     while fixture.state.session_lock.is_locked() {
         assert!(
@@ -443,6 +534,7 @@ fn relock_refreshes_and_restores() {
             .dispatch(Some(Duration::from_millis(5)), &mut fixture.state)
             .expect("a compositor dispatch");
     }
+    fixture.disconnect(locker);
     let (back_first, back_second) = render_all(&mut fixture);
     assert_eq!(
         back_first, before_first,

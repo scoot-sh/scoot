@@ -1,6 +1,7 @@
 //! What the compositor owns: Smithay's protocol state, the Wayland windows, and
 //! the [`World`] that decides where they go.
 
+#[cfg(test)]
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
