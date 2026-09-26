@@ -50,6 +50,8 @@
 //! loud refusal, never a wrong key -- and each cap carries a `debug_assert`
 //! so a layout that outgrows one fails loudly in development.
 
+use std::ffi::OsString;
+
 use smithay::input::keyboard::{Keycode, Keysym, xkb};
 
 use super::modifiers::{self, KeyPlan, ModifierKeys};
@@ -71,19 +73,31 @@ const MAX_SEQUENCES: usize = 512;
 /// typing on this machine would get, which is what the toolkit on the other
 /// end of the socket decodes with.
 ///
-/// The locale is `LC_ALL`, then `LC_CTYPE`, then `LANG` -- the order
-/// `setlocale` consults -- defaulting to `C` when the session sets none.
-/// `None` when no table compiles for it: compose is unavailable, and
-/// `type_text` keeps the refusals it always gave. A fresh context per call,
-/// like the test helpers build their keymaps with: this runs at most once
-/// per request, and only on one that already needs it.
+/// The locale is [`session_locale`] of the process environment. `None` when
+/// no table compiles for it: compose is unavailable, and `type_text` keeps
+/// the refusals it always gave. A fresh context per call, like the test
+/// helpers build their keymaps with: this runs at most once per request, and
+/// only on one that already needs it.
 pub(super) fn table_from_session_locale() -> Option<xkb::compose::Table> {
     let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-    let locale = std::env::var_os("LC_ALL")
-        .or_else(|| std::env::var_os("LC_CTYPE"))
-        .or_else(|| std::env::var_os("LANG"))
-        .unwrap_or_else(|| std::ffi::OsString::from("C"));
+    let locale = session_locale(|name| std::env::var_os(name));
     xkb::compose::Table::new_from_locale(&context, &locale, xkb::compose::COMPILE_NO_FLAGS).ok()
+}
+
+/// The locale compose resolves against: the first of `LC_ALL`, `LC_CTYPE`,
+/// `LANG` that is set *and non-empty* -- the order `setlocale(LC_CTYPE, "")`
+/// consults, and like it, treating an empty variable as unset (so
+/// `LC_ALL= LANG=C.UTF-8` resolves to `C.UTF-8`, the locale clients run in)
+/// -- defaulting to `C` when none is.
+///
+/// `var` looks a variable up by name; taking it as a parameter keeps the
+/// choice testable without mutating the process environment.
+fn session_locale(var: impl Fn(&str) -> Option<OsString>) -> OsString {
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .filter_map(var)
+        .find(|value| !value.is_empty())
+        .unwrap_or_else(|| OsString::from("C"))
 }
 
 /// Every two-key dead-led sequence the active layout can produce, as the
@@ -128,9 +142,8 @@ pub(super) fn build_map(
                     continue;
                 }
                 // One of two bounded heap allocations in this module (the
-                // other is the locale `OsString` in
-                // `table_from_session_locale`, once per fallback
-                // request): naming
+                // other is the at most three locale `OsString`s read by
+                // `session_locale`, once per fallback request): naming
                 // a keysym to test the `dead_` prefix, once per distinct
                 // keysym per request that needs the fallback. Matching the
                 // raw keysym range instead would avoid it but freeze
