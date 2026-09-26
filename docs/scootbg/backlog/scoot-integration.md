@@ -55,15 +55,19 @@ absent). scoot never uses `set`, `clear` or `daemon` itself.
    becomes the daemon itself with the section as its starting point. Two
    racing starts (scoot's and an `[autostart]` entry's, say) are settled
    by the socket bind: the loser forwards to the winner, so the config's
-   values are never dropped.
-3. The daemon compares the fingerprint with the one in its state file,
-   which records the last section applied *from the config*:
+   values are never dropped. A forwarded `apply-config` carries its
+   profile, and **the daemon adopts it**: from then on it compares,
+   restores and records (later `scootbg set`s included) in that profile's
+   state, whatever profile it started with. The config owns the profile,
+   so which process won the bind never changes where state lives.
+3. The daemon compares the fingerprint with the one in that profile's
+   state, which records the last section applied *from the config*:
    - **Different:** the section changed since it was last applied (or
      was never applied). Apply it (an empty section means clear) and
      record the new fingerprint.
-   - **Same:** the section has not changed. Keep what is showing, or at
-     startup restore the saved state, which includes any later
-     `scootbg set`.
+   - **Same:** the section has not changed. Keep what is showing, or
+     (at startup, or on adopting a profile) restore that profile's saved
+     state, which includes any later `scootbg set`.
 
 That delivers the rule in every order, because every config-origin
 change records its fingerprint and nothing else does:
@@ -75,7 +79,7 @@ change records its fingerprint and nothing else does:
 | section A, reload with B, restart | B shows |
 | section removed by reload, later re-added as A | `{}` was recorded at removal, so A differs and shows |
 | no daemon yet, section added by reload | `apply-config` starts the daemon |
-| an `[autostart]` entry also starts `scootbg daemon` | whichever binds second forwards; the config still applies |
+| an `[autostart]` entry also starts `scootbg daemon` | whichever binds first, the daemon ends up on scoot's profile, so a `set X` from a previous boot is restored either way |
 
 One order it cannot see: the section removed *while scoot is not
 running* and re-added unchanged before the next start. No `{}` was ever
@@ -101,8 +105,10 @@ documented rather than worked around.
   applied" and clear it).
 - **Removing the section** is a reload with `{}`: the wallpaper clears,
   and the daemon keeps running (so a later `scootbg set` still works).
-  `apply-config '{}'` with no daemon running records the fingerprint and
-  exits, rather than starting a daemon only to clear.
+  `apply-config '{}'` with no daemon running records both the fingerprint
+  and the clear in that profile's state, then exits, rather than starting
+  a daemon only to clear; a later `scootbg daemon --profile scoot` shows
+  nothing, as the config asked.
 - **The profile** names the state `apply-config` restores and records
   (see [restore-state.md](restore-state.md)): scoot passes `scoot`, or
   `scoot-nested` under `--nested`, so a nested session and its host keep
