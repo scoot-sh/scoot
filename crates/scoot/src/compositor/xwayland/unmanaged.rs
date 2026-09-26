@@ -31,6 +31,8 @@ use smithay::wayland::compositor::SurfaceData;
 use smithay::xwayland::X11Surface;
 
 use super::super::State;
+use super::super::toplevel_cap::MAX_X11_UNMANAGED_PER_CLIENT;
+use super::focus::x_client_key;
 
 /// Where an override-redirect window is on the screen: the position it
 /// last configured itself to (Smithay records every `ConfigureNotify`),
@@ -41,15 +43,44 @@ pub(in crate::compositor) fn rect_of(window: &X11Surface) -> Rectangle<i32, Logi
 
 impl State {
     /// An override-redirect window mapped itself: draw it from now on.
+    ///
+    /// Refused, past its client's live-window cap (see `toplevel_cap.rs`):
+    /// never drawn, never hit-tested, never sent frame callbacks -- the
+    /// refuse-the-map form, the way `map_x11_window` refuses a managed
+    /// window past its own cap. X has no client object to post an error
+    /// to, so there is no kill to send; the window simply stays invisible,
+    /// and its client keeps everything it had. Other X clients (other
+    /// client bits) are unaffected: the count is per X client.
     pub(super) fn map_x11_unmanaged(&mut self, window: X11Surface) {
         let (xwm, xid) = (window.xwm_id(), window.window_id());
-        if !self
+        if self
             .x11_unmanaged
             .iter()
             .any(|known| known.window_id() == xid && known.xwm_id() == xwm)
         {
-            self.x11_unmanaged.push(window);
+            // A repeated report for a window already drawn: leave its place
+            // alone, and claim nothing twice.
+            return;
         }
+        // The per-X-client cap, read before anything is granted: past it
+        // the map is refused outright.
+        let x_client = x_client_key(xid);
+        if !self.x11_unmanaged_cap.admits(&x_client) {
+            tracing::warn!(
+                xid,
+                live = self.x11_unmanaged_cap.live_for(&x_client),
+                cap = MAX_X11_UNMANAGED_PER_CLIENT,
+                "refusing to map an X11 override-redirect window: its client is past the per-client cap"
+            );
+            return;
+        }
+        self.x11_unmanaged.push(window);
+        // Claimed now that the window is in: `admits` said yes above, on
+        // this same dispatch, so this cannot overflow the bound (see
+        // `X11UnmanagedCap::admits` for why the split is sound). Released
+        // in `unmap_x11_unmanaged` on every path the window can leave by
+        // short of the server's death, which drains the whole count.
+        self.x11_unmanaged_cap.claim(x_client, xid);
         self.request_render();
     }
 
@@ -63,6 +94,12 @@ impl State {
         self.x11_unmanaged
             .retain(|known| !(known.window_id() == xid && known.xwm_id() == xwm));
         if self.x11_unmanaged.len() != before {
+            // Both removal paths reach here: an unmap, and the destroy that
+            // follows it (`forget_x11_window` funnels destroy here too, and
+            // a client that destroys a mapped window outright lands here
+            // directly). The release is idempotent by the owner map, so the
+            // destroy after an unmap frees nothing twice.
+            self.x11_unmanaged_cap.release(&xid);
             self.refresh_pointer_focus();
             self.request_render();
         }
@@ -74,9 +111,13 @@ impl State {
     }
 
     /// Every override-redirect window gone at once: the server died.
+    /// A dead server sends no unmap or destroy for the windows it had, so
+    /// without the drain their units would stay claimed against window ids
+    /// a restarted server reuses.
     pub(super) fn clear_x11_unmanaged(&mut self) {
         if !self.x11_unmanaged.is_empty() {
             self.x11_unmanaged.clear();
+            self.x11_unmanaged_cap.clear();
             self.refresh_pointer_focus();
             self.request_render();
         }
