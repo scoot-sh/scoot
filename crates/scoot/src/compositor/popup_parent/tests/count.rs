@@ -9,9 +9,10 @@
 //! cap is disconnected with `wl_display.no_memory`, everything it held is
 //! released, and other clients are still served.
 //!
-//! Nothing here names `popup_count::MAX_POPUPS_PER_CLIENT` (the cap is
-//! spelled out as [`COUNT_BOUND`]), so this file compiles against the code
-//! before it, which is how its tests were watched failing first.
+//! The tests drive the spelled-out [`COUNT_BOUND`] rather than the code's
+//! cap, which is how they were watched failing first; the only import of
+//! `popup_count::MAX_POPUPS_PER_CLIENT` is the drift assert, added after
+//! the watch, checking the two still match.
 
 use super::*;
 use crate::compositor::popup_count::MAX_POPUPS_PER_CLIENT;
