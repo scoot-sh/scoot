@@ -1847,12 +1847,13 @@ window snapshots, `wlr-randr` outputs and screenshots stay on the machine
 under `~/fx/vpull-dumb/` and `~/fx/vpull-mode/`; build log at
 `~/fx/build-326edd0.log`.
 
-Rig correction worth recording: the live debugfs node is
-`/sys/kernel/debug/dri/2/DP-1/force`, not the `soc:display-subsystem`
-alias path the earlier note names. A write to the alias path echoed
-through `tee` but read back `unspecified`; the same write to the `2/`
-path latched, and both paths then read the new value. Every force value
-below was verified by reading the file back.
+Rig correction worth recording: `/sys/kernel/debug/dri/2` is a symlink
+to `soc:display-subsystem` — both force paths are the same file, so no
+kernel mechanism distinguishes writes by path. One write to the alias
+path appeared to echo through `tee` but read back `unspecified` (cause
+unknown); the retry latched. Every force value below was verified by
+reading the file back — that read-back discipline, not the path, is
+what makes the rig trustworthy.
 
 ### Leg 1 — remove: force DP-1 `off`, windows adopted to the panel
 
@@ -1991,9 +1992,10 @@ order and the active workspace back, positional binds reaching the
 returned monitor, reconnected full-commit modeset with fresh pixels, and
 the per-connector `--mode` modeset — all on the dumb tier at `326edd0`.
 Nothing failed, so there is no fix ticket and no product diff; this
-section is the proof ticket. The only surprise was the rig's (the
-`soc:display-subsystem` force alias does not latch; `dri/2/DP-1/force`
-does), recorded above so the next run does not rediscover it.
+section is the proof ticket. The only surprise was the rig's (one
+aliased-path write echoed without latching — same file via symlink,
+cause unknown), recorded above so the next run verifies every write by
+read-back.
 
 ## Keys for the 2026-09-25 runs
 
