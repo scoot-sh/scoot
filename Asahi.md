@@ -30,6 +30,7 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | [Test 8: nested dma-buf presentation](docs/backlog/resolved/nested-dmabuf-present-done.md) | medium | Part B only | **ANSWERED** (2026-09-25): nested CPU 1.8–2x lower, host 2.2–3x lower, pixels identical, niri imports scoot's compressed buffers intact |
 | [Test 9: scoot vs niri on a real GPU](docs/benchmarks.md) | medium | Part B only | **ANSWERED** (2026-09-25) except input latency: on the real panel scoot-gpu used the least total CPU for relayout and pointer motion (no frame counts there); pixman the most |
 | Test 10: does the GPU driver keep an fd per imported plane | — | yes | **ANSWERED** (2026-09-25): yes, one (`copies_per_plane_per_output=1`). While a client runs scoot counts it exactly; after a client quits, one fd can linger until the next redraw, and one extra fd in one session is unexplained |
+| Test 11: output remove/restore, reconnected modeset and multi-head mode change on the dumb tier (the #249 runbook, for real) | — | yes | **ANSWERED** (2026-09-26): virtual-pull force-off/on of DP-1 removed and re-added its output; both windows adopted then restored in order under a fresh id, positional binds reach the returned monitor; `--mode 1280x720` drives DP-1 at that mode with eDP-1 warned onto preferred; runtime mode switch stays refused by design (read-only `wlr-output-management`) |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -1815,6 +1816,184 @@ but it is not guaranteed within any fixed time: one fd of the last frame's
 buffer can wait for the next frame. The raw counts are kept with the runs
 (`t10-dmabuf-fds.txt`, `t10-dmabuf-fds-fs.txt`, `t10-counts.tsv`,
 `t10b-counts.tsv`, `t10c-counts.tsv`).
+
+## Test 11 — output remove/restore, reconnected modeset, multi-head mode change (dumb tier)
+
+Why: PR #249 (restore windows, workspaces and binds when a monitor
+reconnects) merged with its live leg unverified — "needs physical hands".
+The virtual-pull rig (proven 2026-09-26, see `ASAHI.local.md`) removes the
+hands: forcing DP-1 `off` plus a synthetic udev change event is an unplug,
+forcing it `on` plus the same event is a replug, and the kernel state is
+readable throughout (`status`, `modes`, the `force` file itself). This runs
+the #249 runbook for real — remove with windows on DP-1, return, positional
+binds — plus the reconnected-modeset check and a multi-head mode change,
+all on the dumb tier (`--renderer gles` untouched; that runtime add is a
+separate ticket).
+
+Built on the machine itself (native aarch64) from `main` at `326edd0`,
+with `nix build .#scoot .#scootctl`:
+
+| binary | store path | sha256 |
+| --- | --- | --- |
+| `scoot` | `/nix/store/flpc4ym2bkdr5jpw05i1z3hpjw0hx8bp-scoot-0.1.0` | `99fdb826f37dabe9bc260aa30cfd4f60417d079a8a469389f01726b06f93f7bb` |
+| `scootctl` | `/nix/store/1nr7xs7zmy8a9lbadljb1kn9gvzf95bh-scootctl-0.1.0` | `681386457ee620d8fc4cce013b89f1e927e332a1eade1eea476e36925efc9377` |
+
+Machine: Apple M2 (Mac14,2 / j413), NixOS 26.11, kernel 7.1.13
+(fairydust), eDP-1 (2560x1600, its only mode) + DP-1 (21 modes, monitor
+awake throughout the run). Sessions on VT 2 against a private `seatd`
+(`~/fx/vt-run.sh` / `~/fx/vt-stop.sh`), config `[output] scale = 1.5` only
+(`~/fx/test.toml`), socket `/run/user/1000/scoot-vp.sock`. Raw logs,
+window snapshots, `wlr-randr` outputs and screenshots stay on the machine
+under `~/fx/vpull-dumb/` and `~/fx/vpull-mode/`; build log at
+`~/fx/build-326edd0.log`.
+
+Rig correction worth recording: the live debugfs node is
+`/sys/kernel/debug/dri/2/DP-1/force`, not the `soc:display-subsystem`
+alias path the earlier note names. A write to the alias path echoed
+through `tee` but read back `unspecified`; the same write to the `2/`
+path latched, and both paths then read the new value. Every force value
+below was verified by reading the file back.
+
+### Leg 1 — remove: force DP-1 `off`, windows adopted to the panel
+
+Baseline: `--tty` session up (`wayland-1`, zero `ERROR` lines), both heads
+lit — eDP-1 id 1 (2560x1600@60), DP-1 id 2 (1920x1080@60, at logical
+x=1707). Two `foot` windows spawned and carried to the second screen with
+`move-window-to-output-index 1`: id 1 at x=1719, id 2 at x=2353, both
+`output: 2`, `visible: true`, id 2 focused. Screenshots of both heads
+(`before-out1.png`, `before-out2.png`).
+
+```sh
+echo off | sudo tee /sys/kernel/debug/dri/2/DP-1/force   # reads back: off
+# status still connected/21 modes here -- the force needs a redetection
+sudo udevadm trigger --subsystem-match=drm --action=change
+# 5 s later: status=disconnected, 0 modes
+scoot msg outputs   # [{"id":1,"name":"eDP-1"}] -- DP-1 gone
+scoot msg windows   # id 1 + id 2, both output: 1, visible: false, focused: false
+```
+
+The compositor saw the same transition its udev monitor delivers on a real
+pull:
+
+```
+INFO scoot::compositor::tty::hotplug: drm: this connector went away connector=DP-1
+INFO scoot::compositor::tty::hotplug: drm: a display went away; removing its output output=2
+```
+
+`wlr-randr` lists only eDP-1 afterwards. The eDP-1 screenshot is
+byte-identical to the baseline empty-panel shot (sha256
+`409a0f30…51444` both) — the adopted workspace stays inactive, so nothing
+piled onto the visible desktop. Observed, not judged: with nothing on the
+panel, both adopted windows report `focused: false`; there is no window on
+the active workspace to hold focus, and the design never moves it.
+
+**Leg 1 result: pass.** Output removed, both windows adopted to eDP-1 and
+still open.
+
+### Leg 2 — return: force `on`, workspaces restored, binds follow
+
+```sh
+echo on | sudo tee /sys/kernel/debug/dri/2/DP-1/force    # reads back: on
+# status still disconnected/0 modes until the trigger
+sudo udevadm trigger --subsystem-match=drm --action=change
+# 6 s later: status=connected, 21 modes
+scoot msg outputs   # [{"id":1,"name":"eDP-1"},{"id":3,"name":"DP-1"}]
+scoot msg windows   # id 1 + id 2, both output: 3, visible: true
+```
+
+The returned monitor comes back under a **fresh id (3, not 2)**, exactly
+the case #249 was built for, and the restore fired:
+
+```
+INFO scoot::compositor::tty::hotplug: drm: driving a newly connected display connector=DP-1 crtc=crtc::Handle(68) width=1920 height=1080 scanout="dumb"
+INFO scoot::compositor::tty::hotplug: drm: a display was connected; added an output for it connector=DP-1 output=3 width=1920 height=1080
+INFO scoot::compositor::reconnect: a display came back; restored its workspaces connector=DP-1 output=3 windows=2
+INFO scoot::compositor::tty::dumb: drm: modeset (full commit)
+```
+
+Column order preserved exactly (id 1 x=1719 w=622, id 2 x=2353 w=622 —
+identical rects to the baseline), both `visible: true` (the restored
+workspace is active again). The returned head's screenshot shows both
+foot windows with the same shell content as the baseline (a ~300-byte PNG
+difference is the cursor blink phase, verified by eye); the panel shot is
+unchanged. Fresh full-commit modeset, no stale frames.
+
+Bind proof, through real key injection of the **default** binds (a window
+was placed on each screen first so both directions are observable):
+
+- `super+shift+period` with a focused window on eDP-1 → the window lands
+  on output 3 with focus following it.
+- `super+period` with focus on eDP-1 → focus moves to the DP-1 window on
+  output 3; `super+comma` → focus returns to the eDP-1 window.
+
+**Leg 2 result: pass.** Fresh-`OutputId` restore by connector identity,
+active workspace back, both positional binds reach the returned monitor.
+
+### Leg 3 — multi-head mode change, and the runtime refusal that is by design
+
+First the negative half, against the running session: `wlr-randr` offers
+DP-1 exactly one mode (1920x1080, preferred + current), and
+`wlr-randr --output DP-1 --mode 1280x720` answers `unknown mode`, rc=1.
+That is the documented shape — `wlr-output-management-v1` is read-only
+(`README.md`), per-output geometry lives in the config file
+(`docs/backlog/core/per-output-scale-mode.md`), and scoot advertises one
+mode per output by construction (`set_mode` in
+`crates/scoot/src/compositor/headless.rs`: preferred + current, nothing
+else). There is no IPC mode path either. The refused session carried on
+undisturbed at 1920x1080.
+
+The positive half is the startup `--mode` path, which is the real modeset
+mechanism: session restarted with `--mode 1280x720` (a mode DP-1 offers;
+eDP-1 offers only 2560x1600):
+
+```
+WARN scoot::compositor::tty::gpu: drm: connector offers no mode of the requested size; using its preferred mode connector=eDP-1 width=1280 height=720
+INFO drm_atomic:create_surface{crtc=crtc::Handle(68) mode=Mode { name: "1280x720", clock: 74250, ... }}
+INFO scoot::compositor::tty: drm: driving this device path=/dev/dri/card2 connector=eDP-1 crtc=crtc::Handle(50) width=2560 height=1600 scanout="dumb"
+INFO scoot::compositor::tty: drm: driving this device path=/dev/dri/card2 connector=DP-1 crtc=crtc::Handle(68) width=1280 height=720 scanout="dumb"
+```
+
+(`Unable to become drm master, assuming unprivileged mode` appears once in
+this log and once in leg 1's — routine, not caused by `--mode`.)
+
+`outputs` reports DP-1 at logical 854x480; `wlr-randr` (itself the client
+observing `wl_output.mode`/`done`) lists 1280x720 as preferred + current.
+A `foot` spawned and carried to the second screen maps `visible: true`,
+focused, and its screenshot shows a correct layout at the new mode with
+the focus ring and no garbage; the panel is untouched.
+
+**Leg 3 result: pass**, with the premise corrected: no runtime mode switch
+exists to test (refused by design, refusal itself verified harmless); the
+`--mode` startup modeset is the change path and works per connector.
+
+### Teardown and final box state
+
+`~/fx/vt-stop.sh`: active VT back to 1, nothing left running,
+`/run/seatd.sock` gone, the user's tty1/seat0 login untouched. Then
+`sudo reboot` (remote-safe, same generation) to clear the sticky
+force override, and re-verification: kernel 7.1.13, force `unspecified`,
+eDP-1 connected, no compositor running, no strays.
+
+One honest deviation: DP-1 reads `disconnected`/0 modes after the final
+reboot — the monitor entered standby during the ~80 s with no signal and
+dropped HPD for real (force `unspecified`, so no override is masking
+anything). A forced-`on` probe still read `disconnected`/0, i.e. the panel
+answers nothing even driven, which is the documented "needs a power
+button" state, not a stuck override; a second reboot cleared the probe's
+`on` back to `unspecified`. All three legs ran while the monitor was
+awake, so nothing above is affected — but the box was found with DP-1
+awake and is left with it asleep.
+
+### Results, 2026-09-26 — #249's live leg is proven, no product change needed
+
+Remove → adopt, return → restore-by-identity under a fresh id with column
+order and the active workspace back, positional binds reaching the
+returned monitor, reconnected full-commit modeset with fresh pixels, and
+the per-connector `--mode` modeset — all on the dumb tier at `326edd0`.
+Nothing failed, so there is no fix ticket and no product diff; this
+section is the proof ticket. The only surprise was the rig's (the
+`soc:display-subsystem` force alias does not latch; `dri/2/DP-1/force`
+does), recorded above so the next run does not rediscover it.
 
 ## Keys for the 2026-09-25 runs
 
