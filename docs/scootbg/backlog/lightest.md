@@ -73,8 +73,9 @@ Each checked against the numbers, not assumed:
     thread) after eight live sets.
   - With the wrapper, heap stayed at or under 0.65 MB across JPEG, PNG
     and WebP sets, on both thread models, with no tuning. CPU matched
-    glibc `mallopt` + `malloc_trim`, which it replaces, because scootbg
-    calls no C. It costs +37 KB.
+    glibc `mallopt` + `malloc_trim` (measured with `fast_image_resize`),
+    which it replaces, because scootbg calls no C. It costs +32 KB with
+    pic-scale-safe (+37 KB with `fast_image_resize`).
   - The chosen pipeline peaked at 131.2 MB for a 6000×4000 JPEG against
     169.8 MB for the round-one design.
   - `mimalloc` kept 148 MB.

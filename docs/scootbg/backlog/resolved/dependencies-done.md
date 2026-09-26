@@ -812,8 +812,19 @@ Safety argument:
   promises.
 - **Failure returns null**, `GlobalAlloc`'s out-of-memory signal. Nothing
   panics inside the allocator.
-- **Page size:** use `rustix::param::page_size()`, not the prototype's
-  hard-coded 4096.
+- **Page size: a constant 4096, never a runtime lookup inside the
+  allocator.** 4096 is used only as an alignment bound, and every Linux
+  page size is at least 4096 while `mmap` returns page-aligned memory, so
+  the constant is correct everywhere. `rustix::param::page_size()` must
+  not be called here: in rustix 1.1.4 it lazily runs `init_auxv()`, which
+  `unwrap()`s (`backend/linux_raw/param/auxv.rs:268`) and so panics on a
+  kernel without `PR_GET_AUXV` (< 6.4) and no `/proc`, and its `/proc`
+  fallback allocates from inside the allocator. (Superseded advice from
+  an earlier draft of this record; the review of #266 caught it.)
+- **A big block aligned above 4096 goes to `System`**, and a large
+  glibc memalign is itself mmapped, whose free raises glibc's dynamic
+  threshold again. This is rare (no known caller asks for it), and the
+  code should say so in a comment rather than route it.
 
 **b) `shm.rs`, the `wl_shm` buffer.** It creates a `memfd`, sizes it,
 maps it `MAP_SHARED`, and hands out `&mut [u8]`. Its `unsafe`:
@@ -830,6 +841,15 @@ Safety argument:
 - `Drop` unmaps exactly the `(ptr, len)` that `mmap` returned.
 - `Send` without `Sync`: a decode thread fills the buffer and hands it
   over.
+- `len` and `stride` are also bounded to `i32::MAX`: `wl_shm.create_pool`
+  and `create_buffer` take `int32`, and the output size comes from the
+  compositor, so an overflow would otherwise be a protocol error.
+- **Never write after attach.** Once the buffer is attached and
+  committed, scootbg does not touch it until `wl_buffer.release`. Enforce
+  it with type state: attaching consumes the writable handle. This
+  matters because Smithay maps client pools `PROT_READ | PROT_WRITE`
+  (`wayland/shm/pool.rs:265`), so "the compositor only reads" is
+  compositor behaviour, not something the kernel guarantees.
 
 **Seal the memfd, which the prototype did not do.** Create it with
 `MFD_ALLOW_SEALING`, and after `ftruncate` add

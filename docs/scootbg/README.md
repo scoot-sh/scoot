@@ -152,7 +152,9 @@ safety are not traded against each other:
 - **Pure Rust, no C.** No C calls and no C dependencies: no `libc` crate,
   no `-sys` crate that links a library, no build script that compiles C.
   The honest exception is the Rust standard library itself, which on
-  `*-linux-gnu` links glibc, `libm` and `libgcc_s`.
+  `*-linux-gnu` links glibc, `libm` and `libgcc_s`. `wayland-backend`'s
+  and `wayland-sys`'s C-bringing features (`client_system`, `log`) stay
+  off; turning either on would link libwayland or compile C.
 - **`#![forbid(unsafe_code)]` in `scootbg`.** The only `unsafe` is
   isolated in one small crate, `scootbg-mem`:
   - the global allocator that returns large blocks to the kernel;
