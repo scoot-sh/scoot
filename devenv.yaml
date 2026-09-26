@@ -1,0 +1,12 @@
+# devenv inputs. nixpkgs is pinned to the same revision as flake.nix and vm/,
+# so `devenv shell`, `nix develop` and the dev VM agree on every library and
+# nothing is downloaded twice. Bump all three together.
+#
+# Shallow `git+https` rather than `github:` so this also works where only
+# git-protocol reads of GitHub are allowed (Claude Code on the web's proxy
+# refuses GitHub tarball downloads). It fetches one commit either way.
+inputs:
+  nixpkgs:
+    url: git+https://github.com/NixOS/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe&shallow=1
+  devenv:
+    url: git+https://github.com/cachix/devenv?ref=main&shallow=1
