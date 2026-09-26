@@ -104,6 +104,7 @@ use smithay::wayland::shell::xdg::{
 };
 
 use super::popup_count::{MAX_POPUPS_PER_CLIENT, PopupCount};
+use super::popup_index::PopupIndex;
 
 /// The most popups a parent chain may hold, the new one included: the 64th
 /// nested popup is admitted, a 65th is refused.
@@ -491,9 +492,9 @@ pub(super) fn check_adoption(popup: &PopupSurface) {
 }
 
 /// `XdgShellHandler::popup_destroyed`: closes `popup`'s [`PopupRecord`],
-/// releases its per-client count (`popup_count.rs`), and refuses the destroy
-/// if the popup still had live child popups
-/// (`xdg_wm_base.not_the_topmost_popup`).
+/// releases its per-client count (`popup_count.rs`), forgets its index
+/// entry (`popup_index.rs`), and refuses the destroy if the popup still
+/// had live child popups (`xdg_wm_base.not_the_topmost_popup`).
 ///
 /// Smithay calls this for every `xdg_popup` that goes away, refused ones
 /// included, so the record is only touched if this popup is the one that
@@ -516,7 +517,11 @@ pub(super) fn check_adoption(popup: &PopupSurface) {
 /// role object is already an error Smithay posts), with `xdg_wm_base`'s
 /// code for the error -- which on `xdg_surface` happens to be the number of
 /// its own `already_constructed`, so the message names the real error.
-pub(super) fn popup_destroyed(popup: &PopupSurface, count: &mut PopupCount) {
+pub(super) fn popup_destroyed(
+    popup: &PopupSurface,
+    count: &mut PopupCount,
+    index: &mut PopupIndex,
+) {
     let record = with_record(popup.wl_surface(), |record| {
         let owns = record
             .owner
@@ -534,10 +539,12 @@ pub(super) fn popup_destroyed(popup: &PopupSurface, count: &mut PopupCount) {
         return;
     };
     // First, whatever else this destroy turns out to be: the popup was
-    // admitted and charged, and now it is gone.
+    // admitted and charged, and now it is gone -- from the count and from
+    // the configure lookup's index alike.
     if let Some(client) = counted_client {
         count.release(&client);
     }
+    index.remove(popup.wl_surface());
     if let Some(parent) = counted_parent.and_then(|parent| parent.upgrade().ok()) {
         with_record(&parent, |record| {
             record.live_children = record.live_children.saturating_sub(1);
