@@ -22,9 +22,15 @@ The first real PR, and the one that creates the crate.
   derive the name from its final component (or a hash) rather than
   splicing it in. Line-framed
   JSON requests and replies, versioned from day one like `scoot-ipc`.
-  Whether to reuse `scoot-ipc`'s framing code or keep scootbg's protocol
-  self-contained is a decision for this PR: reuse only if it does not
-  pull compositor types into a client that must build for any compositor.
+  Self-contained, not reusing `scoot-ipc`: it would pull no compositor
+  types, but it would share only ~25 lines of generic framing and would
+  put `crates/scoot-ipc/` on scootbg's CI path
+  ([decided](resolved/dependencies-done.md#5-serialization-control-socket-and-state-file)).
+- Dependencies as decided in
+  [`resolved/dependencies-done.md`](resolved/dependencies-done.md), each
+  with a one-line reason in `Cargo.toml` comments linking there. Weigh the
+  release binary with `cargo build --release -p scootbg`, not a
+  `--workspace` build (feature unification).
 - A second `scootbg daemon` on the same display refuses loudly (socket
   already live) instead of stacking a second set of surfaces; a stale
   socket from a crashed daemon is detected and replaced.

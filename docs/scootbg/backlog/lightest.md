@@ -63,9 +63,14 @@ Each checked against the numbers, not assumed:
 - Colours never touch shared memory (`wp_single_pixel_buffer_manager_v1`).
 - `XRGB8888` buffers at exactly the output's device size, nothing larger.
 - The decoded source is dropped after scaling, and freed heap is returned
-  to the OS (`malloc_trim` or an allocator that does it) so idle memory
-  falls back after a change instead of keeping the decode's high-water
-  mark.
+  to the OS so idle memory falls back after a change instead of keeping
+  the decode's high-water mark. Measured: `malloc_trim` alone is not
+  enough, because a decode thread's glibc arena kept 61.6 MB across live
+  sets. With `mallopt(M_MMAP_THRESHOLD, 1 MiB)` and `mallopt(M_ARENA_MAX, 1)`
+  at startup, plus `malloc_trim(0)` after each set, it stays under
+  200 KB. `mimalloc` kept 148 MB
+  ([evidence](resolved/dependencies-done.md#6-returning-heap-to-the-os)).
 - Only the image-format features actually shipped are compiled in.
-- A tiny state file format instead of a general config parser, if that
-  saves real bytes (measure `toml` against a hand-written line format).
+- A tiny state file format instead of a general config parser: measured,
+  `toml` costs +180 KB over a hand-written line format's +20 KB, so the
+  line format it is ([evidence](resolved/dependencies-done.md#5-serialization-control-socket-and-state-file)).

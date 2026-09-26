@@ -14,7 +14,13 @@ blocked: null
   single-pixel buffer, viewport destination set to the surface size. No
   shared memory at all.
 - Without them: a 1×1 `wl_shm` buffer and `wp_viewporter`, or, with no
-  viewporter either, a full-size buffer filled once.
+  viewporter either, a full-size buffer filled once. Check the 1×1 path's
+  pixels, not just that it maps: on `scoot --headless` (pixman) a
+  viewport-upscaled 1×1 `wl_shm` buffer rendered as a bilinear fade to
+  transparent at every edge, not a flat colour
+  ([observed](resolved/dependencies-done.md#incidental-finding-a-11-wl_shm-buffer-upscaled-on-scoot)).
+  That is a compositor bug; scoot itself offers single-pixel buffers, so
+  scootbg never takes this path there.
 - Opaque region set to the whole surface.
 - scoot's direct-scanout path (`docs/tty.md`) treats a covering, fully
   opaque, **black** single-pixel wallpaper as the background, so a

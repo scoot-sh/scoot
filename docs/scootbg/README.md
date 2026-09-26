@@ -132,8 +132,9 @@ to it over its socket.
 MIT, like the rest of scoot. awww/swww are GPL-3.0 and may inspire the
 design (their feature set is the bar to meet), but no code, shaders or
 assets are copied from them, nor from any other GPL wallpaper daemon.
-Every dependency's licence is checked before it is added; see
-[`backlog/dependencies.md`](backlog/dependencies.md).
+Every dependency's licence is checked before it is added. The chosen
+set and its licences are recorded in
+[`backlog/resolved/dependencies-done.md`](backlog/resolved/dependencies-done.md).
 
 ## Standards
 
