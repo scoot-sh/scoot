@@ -139,6 +139,15 @@ keep one; AGX shows that expectation cannot be assumed.
   opening. XWayland windows are not counted — they enter through their own
   mapping path — and bounding them is a separate item (see
   [`backlog/core/xwayland-toplevel-cap.md`](backlog/core/xwayland-toplevel-cap.md)).
+- **128 live `xdg_popup`s per client.** A client already holding 128 that
+  opens one more is disconnected with `wl_display.error` `no_memory` ("at
+  most 128 live xdg_popups per client"); closing or losing its popups
+  frees the count, and one client at its bound never stops another from
+  opening. Input-method popups are not counted — they cannot be anyone's
+  parent and are bounded by the seats and text inputs they hang off — and
+  neither are XWayland menus, which never enter the popup tree; bounding
+  those is a separate item (see
+  [`backlog/core/xwayland-toplevel-cap.md`](backlog/core/xwayland-toplevel-cap.md)).
 
 Real clients are far below all of these: a `foot` window keeps 2 fds, a
 GPU client one per buffer it has allocated (a few per window), a Vulkan
@@ -827,6 +836,14 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   require), is unaffected, and so is a client disconnecting with menus
   open. An input method's candidate window over a menu's text field does
   not count as the menu's child: the menu can close under it.
+- **One client may hold at most 128 live popups.** Side by side counts as
+  much as nested: a client already holding 128 popups that opens one more
+  is disconnected with `wl_display.error` `no_memory` — see
+  [Per-client limits](#per-client-limits-on-what-scoot-keeps). Thousands of
+  popups in one burst used to stall the compositor for seconds (every
+  popup's tracking searched the whole tree for its parent, and every first
+  commit walked every tree again); now the burst is cut off in
+  milliseconds.
 - **The grab's serial has to name a real interaction.** A grab is refused —
   dismissed, with a warning in the compositor log naming the client and
   serial, since the protocol posts no error — unless its serial is a recent

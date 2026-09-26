@@ -94,13 +94,16 @@ use std::sync::{Mutex, PoisonError};
 use smithay::reexports::wayland_protocols::xdg::shell::server::{
     xdg_popup::XdgPopup, xdg_surface, xdg_wm_base,
 };
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{Resource, Weak};
+use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource, Weak};
 use smithay::utils::{Logical, Point};
 use smithay::wayland::compositor::{get_role, with_states};
 use smithay::wayland::shell::xdg::{
     PopupCachedState, PopupSurface, XDG_POPUP_ROLE, XdgPopupSurfaceData, XdgShellSurfaceUserData,
 };
+
+use super::popup_count::{MAX_POPUPS_PER_CLIENT, PopupCount};
 
 /// The most popups a parent chain may hold, the new one included: the 64th
 /// nested popup is admitted, a 65th is refused.
@@ -172,6 +175,15 @@ struct PopupRecord {
     /// Whether it was admitted with no parent at all -- the only kind a
     /// layer surface may adopt (see [`check_adoption`]).
     parentless: bool,
+    /// The client its live popup's per-client count was charged to, if any
+    /// -- read back when that popup dies to release it (`popup_count.rs`).
+    /// A popup admitted with no client is admitted uncounted and releases
+    /// nothing. Written only by [`admit`], taken only by
+    /// [`popup_destroyed`] when the dying popup still owns this record, so
+    /// a refused popup (which never owned one) and a reincarnated surface's
+    /// old popup (which released its claim when it died) can never
+    /// double-release.
+    counted_client: Option<ClientId>,
 }
 
 impl PopupRecord {
@@ -241,11 +253,13 @@ enum Refusal {
 /// rules, and records it if not. `new_popup` calls this before tracking the
 /// popup, because tracking is itself the first walk up its chain.
 ///
-/// The order matters in one place: the walk runs before the parent-liveness
+/// The order matters in two places: the walk runs before the parent-liveness
 /// check, so a popup that names its own `xdg_surface` as its parent is
 /// reported as the loop it is, not as a parent with no live popup (which,
-/// mid-creation, it also is).
-pub(super) fn admit(popup: &PopupSurface) -> Admission {
+/// mid-creation, it also is); and every check that can refuse runs before
+/// anything is mutated -- the parent's `live_children`, the record, the
+/// per-client count -- so a refusal never has anything to unwind.
+pub(super) fn admit(popup: &PopupSurface, count: &mut PopupCount, dh: &DisplayHandle) -> Admission {
     let surface = popup.wl_surface();
     let (previous_owner, live_owner) = with_record(surface, |record| {
         (record.owner.is_some(), record.live_owner())
@@ -259,19 +273,16 @@ pub(super) fn admit(popup: &PopupSurface) -> Admission {
         return Admission::Refused;
     }
     let parent = popup_link(surface).and_then(|(parent, _)| parent);
+    // Read-only first: whether the parent could take a child, without
+    // counting it yet. A toplevel or layer surface parent is a chain's root
+    // for good; a popup parent must still own a live `xdg_popup`.
     let counted_parent = match parent.as_ref().map(|parent| (parent, get_role(parent))) {
         // Parentless (a layer surface's popup, adopted later), or a toplevel
         // or layer surface: a root for good.
         None => None,
         Some((_, Some(role))) if role != XDG_POPUP_ROLE => None,
         Some((parent, Some(_))) => {
-            let alive = with_record(parent, |record| {
-                let alive = record.live_owner().is_some();
-                if alive {
-                    record.live_children = record.live_children.saturating_add(1);
-                }
-                alive
-            });
+            let alive = with_record(parent, |record| record.live_owner().is_some());
             if !alive {
                 refuse(popup, Refusal::NoLiveParent);
                 return Admission::Refused;
@@ -283,12 +294,33 @@ pub(super) fn admit(popup: &PopupSurface) -> Admission {
             return Admission::Refused;
         }
     };
+    // Then the per-client count (`popup_count.rs`): past it the client is
+    // disconnected, before the parent counts the child it will never have.
+    let client = surface.client();
+    if let Some(ref client) = client
+        && let Err(live) = count.try_claim(&client.id())
+    {
+        refuse_past_cap(popup, client, dh, live);
+        return Admission::Refused;
+    }
+    // Nothing below this point can refuse, so the mutations are safe: the
+    // parent counts its new child, and the record takes the charged client
+    // alongside everything else, to hand back when this popup dies.
+    if let Some(parent) = counted_parent
+        .as_ref()
+        .and_then(|parent| parent.upgrade().ok())
+    {
+        with_record(&parent, |record| {
+            record.live_children = record.live_children.saturating_add(1);
+        });
+    }
     with_record(surface, |record| {
         *record = PopupRecord {
             owner: Some(popup.xdg_popup().downgrade()),
             counted_parent,
             live_children: 0,
             parentless: parent.is_none(),
+            counted_client: client.as_ref().map(|client| client.id()),
         };
     });
     if previous_owner {
@@ -387,6 +419,40 @@ fn refuse(popup: &PopupSurface, refusal: Refusal) {
     );
 }
 
+/// Refuses `popup` for holding more than [`MAX_POPUPS_PER_CLIENT`] live
+/// popups: clears its parent, disconnects its client with
+/// `wl_display.error(no_memory)`, and logs at `warn` like the other
+/// refusals, so the disconnect is diagnosable.
+///
+/// The parent is cleared for the same reason [`refuse`] clears it: a refused
+/// popup's chain must not outlive the refusal into the client's teardown,
+/// which destroys objects in no stated order. The error goes on the
+/// client's display object rather than on the popup because no `xdg_popup`
+/// error means "too many" -- this is the per-client resource-bound refusal
+/// (`popup_count.rs`), the shape of the toplevel cap, not a malformed
+/// parent.
+fn refuse_past_cap(popup: &PopupSurface, client: &Client, dh: &DisplayHandle, live: u32) {
+    with_states(popup.wl_surface(), |states| {
+        if let Some(data) = states.data_map.get::<XdgPopupSurfaceData>() {
+            data.lock().unwrap_or_else(PoisonError::into_inner).parent = None;
+        }
+    });
+    tracing::warn!(
+        client = ?client.id(),
+        live,
+        cap = MAX_POPUPS_PER_CLIENT,
+        "refusing an xdg_popup past the per-client cap; disconnecting the client"
+    );
+    super::no_memory::disconnect(
+        dh,
+        client,
+        format!(
+            "at most {MAX_POPUPS_PER_CLIENT} live xdg_popups per client, \
+             and this client holds {live}"
+        ),
+    );
+}
+
 /// `WlrLayerShellHandler::new_popup`: refuses the adoption, and disconnects
 /// the client, unless `popup` was admitted with no parent and has not been
 /// configured yet -- what `zwlr_layer_surface_v1.get_popup`
@@ -424,8 +490,9 @@ pub(super) fn check_adoption(popup: &PopupSurface) {
     }
 }
 
-/// `XdgShellHandler::popup_destroyed`: closes `popup`'s [`PopupRecord`] and
-/// refuses the destroy if the popup still had live child popups
+/// `XdgShellHandler::popup_destroyed`: closes `popup`'s [`PopupRecord`],
+/// releases its per-client count (`popup_count.rs`), and refuses the destroy
+/// if the popup still had live child popups
 /// (`xdg_wm_base.not_the_topmost_popup`).
 ///
 /// Smithay calls this for every `xdg_popup` that goes away, refused ones
@@ -438,6 +505,9 @@ pub(super) fn check_adoption(popup: &PopupSurface) {
 /// wayland-backend takes a dying client out of its client store before it
 /// runs any of its destructors (`ClientStore::cleanup`), so `client()` is
 /// `None` for every one of its objects then, and never during a request.
+/// That is why the release reads the charged client back out of the record
+/// instead of re-deriving it from the surface: by now there may be nothing
+/// to derive it from.
 ///
 /// **Where the error goes.** The `xdg_popup` is already dead here -- Smithay
 /// only calls this from the popup's destructor -- so an error on it would
@@ -446,17 +516,28 @@ pub(super) fn check_adoption(popup: &PopupSurface) {
 /// role object is already an error Smithay posts), with `xdg_wm_base`'s
 /// code for the error -- which on `xdg_surface` happens to be the number of
 /// its own `already_constructed`, so the message names the real error.
-pub(super) fn popup_destroyed(popup: &PopupSurface) {
+pub(super) fn popup_destroyed(popup: &PopupSurface, count: &mut PopupCount) {
     let record = with_record(popup.wl_surface(), |record| {
         let owns = record
             .owner
             .as_ref()
             .is_some_and(|owner| owner.id() == popup.xdg_popup().id());
-        owns.then(|| (record.counted_parent.take(), record.live_children))
+        owns.then(|| {
+            (
+                record.counted_parent.take(),
+                record.live_children,
+                record.counted_client.take(),
+            )
+        })
     });
-    let Some((counted_parent, live_children)) = record else {
+    let Some((counted_parent, live_children, counted_client)) = record else {
         return;
     };
+    // First, whatever else this destroy turns out to be: the popup was
+    // admitted and charged, and now it is gone.
+    if let Some(client) = counted_client {
+        count.release(&client);
+    }
     if let Some(parent) = counted_parent.and_then(|parent| parent.upgrade().ok()) {
         with_record(&parent, |record| {
             record.live_children = record.live_children.saturating_sub(1);

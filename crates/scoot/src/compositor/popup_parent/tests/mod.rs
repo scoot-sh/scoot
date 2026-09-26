@@ -51,6 +51,7 @@ use crate::compositor::test_support::{self, Harness, wait_for};
 mod adopt;
 mod bench;
 mod bypass;
+mod count;
 mod depth;
 mod ime;
 pub(in crate::compositor) mod subsurfaces;
