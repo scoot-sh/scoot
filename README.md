@@ -346,10 +346,11 @@ command against Mesa's software EGL the way CI runs the GLES tests:
 
 ```sh
 soft-egl cargo nextest run --workspace   # without it the GLES tests fail on a GPU-less box
-scripts/smoke-test.sh                    # deliberately no EGL: proves the GPU-free path
+scripts/smoke-test.sh                    # without soft-egl: don't hand it Mesa
 ```
 
-`devenv shell` gives the identical shell (both read `nix/dev-shell.nix`), and
+`devenv shell` gives a shell with the same contents (both read
+`nix/dev-shell.nix`), and
 enters faster once warm because devenv caches its evaluation.
 `scripts/devenv-bootstrap.sh` installs single-user Nix and devenv on a
 disposable Linux box that has neither (a container, a Claude Code on the web

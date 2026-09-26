@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs Nix and devenv on a fresh Linux box that has neither -- a Claude
-# Code on the web container, a throwaway VM, a CI runner -- so `devenv shell`
+# Code on the web container, or a throwaway VM -- so `devenv shell`
 # works from this repo. Idempotent: rerunning skips whatever is already there.
 #
 #   scripts/devenv-bootstrap.sh
@@ -44,10 +44,17 @@ if ! command -v devenv >/dev/null 2>&1; then
 fi
 
 # Put both on the default PATH so a non-login shell (an agent's tool shell)
-# finds them without sourcing the Nix profile script.
+# finds them without sourcing the Nix profile script. Link wherever each one
+# actually resolved, and only if it did, so an install elsewhere (multi-user
+# Nix, a devenv from another profile) never becomes a dangling link.
 if [ -w /usr/local/bin ]; then
-    ln -sf "$HOME/.nix-profile/bin/nix" /usr/local/bin/nix
-    ln -sf "$HOME/.nix-profile/bin/devenv" /usr/local/bin/devenv
+    for tool in nix devenv; do
+        target=$(command -v "$tool" || true)
+        case "$target" in
+            /usr/local/bin/*|"") ;;
+            *) [ -x "$target" ] && ln -sf "$target" "/usr/local/bin/$tool" ;;
+        esac
+    done
 fi
 
 nix --version

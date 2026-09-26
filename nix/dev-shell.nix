@@ -5,8 +5,8 @@
 # the long form); this file only says *what*.
 #
 # Everything Linux-only here is also in the dev VM's system closure
-# (vm/configuration.nix), so the Linux shell stays a subset of it and
-# entering it on the VM fetches nothing new.
+# (vm/configuration.nix), so entering the shell on the VM fetches nothing
+# new beyond a local build of the tiny `soft-egl` script.
 pkgs:
 let
   inherit (pkgs) lib;
@@ -31,19 +31,38 @@ rec {
   # script cannot run at all), `jq` for IPC replies, ImageMagick to sample
   # screenshot pixels, `wayland-info` for the dmabuf check. The same four CI
   # hands its smoke step through `nix shell`.
-  smokeTools = lib.optionals isLinux [
-    pkgs.foot
-    pkgs.jq
-    pkgs.imagemagick
-    pkgs.wayland-utils
-  ];
+  #
+  # Wrapped as one package holding only `bin/` symlinks, not listed bare:
+  # mkShell runs every input through `chooseDevOutputs`, so a bare
+  # `jq`/`imagemagick` brings its `-dev` output and everything that
+  # propagates -- about fifty `-dev` outputs (openssl, curl, zlib,
+  # freetype, ...) on PKG_CONFIG_PATH and the compiler's search paths, where
+  # a future `-sys` crate would silently link against a smoke-test leftover.
+  # (`lib.getBin` alone is not enough: imagemagick has no `bin` output, so
+  # its `lib/` would still land on NIX_LDFLAGS.) Only the executables are
+  # wanted, and this adds nothing but PATH.
+  smokeTools = lib.optional isLinux (
+    pkgs.runCommandLocal "scoot-smoke-tools" { } ''
+      mkdir -p $out/bin
+      for tool in ${
+        lib.concatMapStringsSep " " (p: "${lib.getBin p}/bin") [
+          pkgs.foot
+          pkgs.jq
+          pkgs.imagemagick
+          pkgs.wayland-utils
+        ]
+      }; do
+        ln -s "$tool"/* $out/bin/
+      done
+    ''
+  );
 
   # `soft-egl <cmd>` runs one command against Mesa's software EGL, the way
   # CI's test steps do ("Resolve a software EGL" in .github/workflows/ci.yml):
   # the GLES tests fail rather than skip without a loadable EGL device.
   # Scoped to the one command and never exported shell-wide, for CI's
-  # reasons -- the smoke test must keep proving scoot runs with no EGL at
-  # all, and nixpkgs' Mesa must not shadow a host's real driver.
+  # reasons -- a smoke run must not be handed Mesa it would not otherwise
+  # have, and nixpkgs' Mesa must not shadow a host's real driver.
   softEgl = pkgs.writeShellScriptBin "soft-egl" ''
     LD_LIBRARY_PATH="''${LIBRARY_PATH:+$LIBRARY_PATH:}${pkgs.mesa}/lib" \
     __EGL_VENDOR_LIBRARY_DIRS="${pkgs.mesa}/share/glvnd/egl_vendor.d" \
@@ -61,13 +80,15 @@ rec {
   # writable $XDG_RUNTIME_DIR. A login session provides one; a container or
   # CI shell often doesn't. Only fill the gap, never override a real one:
   # /run/user/<uid> first (scripts/smoke-test.sh defaults its sockets
-  # there), a private /tmp dir where /run isn't writable.
+  # there), else a fresh private dir from mktemp. Either must be owned by
+  # us: a predictable path another user created first would put the
+  # compositor's sockets in a directory they control.
   xdgRuntimeDirHook = lib.optionalString isLinux ''
     if [ -z "''${XDG_RUNTIME_DIR:-}" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
       XDG_RUNTIME_DIR="/run/user/$(id -u)"
-      if ! mkdir -p -m 0700 "$XDG_RUNTIME_DIR" 2>/dev/null || [ ! -w "$XDG_RUNTIME_DIR" ]; then
-        XDG_RUNTIME_DIR="/tmp/scoot-runtime-$(id -u)"
-        mkdir -p -m 0700 "$XDG_RUNTIME_DIR"
+      mkdir -p -m 0700 "$XDG_RUNTIME_DIR" 2>/dev/null
+      if [ ! -O "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
+        XDG_RUNTIME_DIR="$(mktemp -d "''${TMPDIR:-/tmp}/scoot-runtime.XXXXXX")"
       fi
       export XDG_RUNTIME_DIR
     fi

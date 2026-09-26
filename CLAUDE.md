@@ -261,7 +261,7 @@ unmodified.
 ## Dev environment (devenv)
 
 `devenv shell` is the quickest way to a working tree on any Linux box, the
-dev VM included. It gives the same shell as `nix develop`: both read
+dev VM included. Its contents match `nix develop`'s: both read
 `nix/dev-shell.nix`, so change the shell's contents there, never in only one
 of them. That shell has the pinned toolchain, the compositor's libraries,
 the smoke test's tools, `soft-egl`, and an `$XDG_RUNTIME_DIR` when the box
@@ -294,8 +294,11 @@ devenv test                  # quick check that the shell itself is sound
 
 - **`soft-egl`** runs one command against Mesa's software EGL, the way CI
   runs the tests. Without it, the GLES tests fail on a box with no GPU.
-  Never export it shell-wide: the smoke test runs without it on purpose,
-  because it is the proof that scoot works with no GPU stack.
+  Never export it shell-wide, and run the smoke test without it. Even so, a
+  local smoke run is not proof of the GPU-free path: both shells put
+  libglvnd on `LD_LIBRARY_PATH`, and a NixOS host has a real EGL. CI's
+  smoke step (`nix shell`, asserted with `ldconfig`) is the one that
+  proves it.
 - **A running session to poke at:**
   `target/debug/scoot --headless --outputs 2 -- foot` gives two virtual
   monitors (up to 8), driven with `scoot msg` and inspected with
