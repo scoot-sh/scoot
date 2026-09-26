@@ -98,11 +98,12 @@ to it over its socket.
 
 ## Relation to scoot
 
-- **scoot drives scootbg, never the reverse.** At startup, and on a
-  reload that changed `[wallpaper]`, scoot spawns one command,
+- **scoot drives scootbg, never the reverse.** At startup and on each
+  reload, while `[wallpaper]` exists, scoot spawns one command,
   `scootbg apply-config`, with the section's values. It starts the daemon
-  if none is running and otherwise hands the values over. scoot never
-  waits on it from its event loop. scoot depends only on scootbg's CLI,
+  if none is running, otherwise hands the values over, and changes the
+  wallpaper only if the section itself changed. scoot never waits on it
+  from its event loop. scoot depends only on scootbg's CLI,
   not its crate, and scootbg knows nothing about scoot's config, so each
   stays usable without the other. See
   [`backlog/scoot-integration.md`](backlog/scoot-integration.md).

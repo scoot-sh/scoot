@@ -37,11 +37,20 @@ Stated once here, and the same way in the README and in
 ### Mechanism: one command for everything from the config
 
 Everything scoot does with scootbg goes through one command,
-`scootbg apply-config '<json>'`, where the JSON is the whole `[wallpaper]`
-section (`{}` when the section is absent). scoot never uses `set`,
-`clear` or `daemon` itself. `apply-config`:
+`scootbg apply-config --profile NAME '<json>'`, where the JSON is the
+`[wallpaper]` section's wallpaper values (`{}` when the section is
+absent). scoot never uses `set`, `clear` or `daemon` itself.
+`apply-config`:
 
-1. Computes a fingerprint of the section.
+1. Computes a fingerprint of the values, over a **canonical encoding**:
+   scootbg parses the JSON and re-encodes it with sorted keys before
+   hashing, never trusting the sender's byte order (a `HashMap` of
+   per-output tables serializes in a different order every process). The
+   values are taken after scoot resolves paths, and **`command` is not
+   among them**: it is scoot's own key for finding the binary, and with
+   the home-manager module it is a store path that changes on every
+   upgrade, which would otherwise re-apply the config and wipe a
+   `scootbg set` pick on each one.
 2. If a daemon answers on the socket, hands it the section. If none does,
    becomes the daemon itself with the section as its starting point. Two
    racing starts (scoot's and an `[autostart]` entry's, say) are settled
@@ -77,12 +86,27 @@ documented rather than worked around.
 
 ## How scoot drives it
 
-- **Startup, and reload when `[wallpaper]` changed:** spawn
-  `scootbg apply-config '<json>'`, alongside `[autostart]`. No autostart
-  entry is needed. Spawn order does not decide which client commits first,
-  so nothing here promises the wallpaper appears before a bar.
+- **Startup, and every reload, while `[wallpaper]` exists:** spawn
+  `scootbg apply-config`, alongside `[autostart]`. No autostart entry is
+  needed. Spawning on every reload, not only when the section changed,
+  costs one short process and is a no-op when nothing changed (the
+  fingerprint matches), and it means `scootctl reload` brings back a
+  daemon that crashed, since scoot does not supervise it. Spawn order
+  does not decide which client commits first, so nothing here promises
+  the wallpaper appears before a bar.
+- **No section at startup: scoot spawns nothing.** A user without
+  scootbg installed never sees a missing-binary warning, and a user who
+  runs `scootbg daemon` from `[autostart]` without a section keeps their
+  `scootbg set` pick (a first `apply-config '{}'` would count as "never
+  applied" and clear it).
 - **Removing the section** is a reload with `{}`: the wallpaper clears,
   and the daemon keeps running (so a later `scootbg set` still works).
+  `apply-config '{}'` with no daemon running records the fingerprint and
+  exits, rather than starting a daemon only to clear.
+- **The profile** names the state `apply-config` restores and records
+  (see [restore-state.md](restore-state.md)): scoot passes `scoot`, or
+  `scoot-nested` under `--nested`, so a nested session and its host keep
+  separate state.
 - **Paths are resolved by scoot**, which owns its config's meaning: `~/`
   expanded and a relative path taken against the config file's directory,
   before encoding. scoot spawns without a shell, so nothing else expands
