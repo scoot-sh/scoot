@@ -400,6 +400,26 @@ fn a_pressured_newcomer_gets_eof() {
 }
 
 #[test]
+fn a_newcomer_in_the_ipc_served_window_still_gets_eof() {
+    // The split window sheds Wayland while serving IPC: 100 free is below
+    // the 128 Wayland line (so this sheds) and above the 16 IPC line (so
+    // `an_ipc_connection_in_the_wayland_shed_window_is_served` admits).
+    // Pins the Wayland half of the split against a future line move.
+    let _serial = serial();
+    let (_event_loop, mut state) = admit_state();
+    let (server, peer) = UnixStream::pair().expect("a socket pair");
+    admit(
+        &mut state,
+        server,
+        Some(Table {
+            used: 924,
+            soft: 1024,
+        }),
+    );
+    expect_eof(peer);
+}
+
+#[test]
 fn a_calm_table_admits() {
     // An observed table with headroom: the newcomer is inserted, and its
     // peer stays open.

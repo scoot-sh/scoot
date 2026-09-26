@@ -37,7 +37,7 @@ use smithay::reexports::wayland_server::Display;
 
 use super::*;
 use crate::compositor::decorations::Appearance;
-use crate::compositor::fd_pressure::Table;
+use crate::compositor::fd_pressure::{IPC_RESERVE_FDS, RESERVE_FDS, Table};
 use crate::compositor::ipc::MAX_TYPE_CHARS;
 use crate::compositor::ipc::slots::{MAX_CONNECTIONS, Slots};
 use crate::compositor::ipc::tests::set_sndbuf;
@@ -1905,6 +1905,54 @@ fn a_calm_fd_table_admits() {
         "a calm table did not admit"
     );
     assert_eq!(harness.slots.live(), 1);
+}
+
+#[test]
+fn an_ipc_connection_in_the_wayland_shed_window_is_served() {
+    // The ticket's window: fewer than `RESERVE_FDS` free sheds Wayland
+    // newcomers, but IPC admits down to `IPC_RESERVE_FDS`. A `scootctl`
+    // dial arriving mid-pressure is served, not refused.
+    let mut harness = Harness::new();
+    let free = RESERVE_FDS - 1;
+    assert!(
+        free >= IPC_RESERVE_FDS,
+        "setup: {free} free must be inside the split window"
+    );
+    let mut fresh = harness.connect_under_table(Some(Table {
+        used: 1024 - free,
+        soft: 1024,
+    }));
+    fresh.send(request_line(&Request::Version).as_bytes());
+    assert!(
+        matches!(fresh.expect_reply(&mut harness), Response::Version { .. }),
+        "an ipc connection with {free} free was not served"
+    );
+    assert_eq!(harness.slots.live(), 1);
+}
+
+#[test]
+fn an_ipc_connection_past_the_ipc_line_is_refused_with_a_reason() {
+    // The deeper line still bites: one fd below it refuses like the old
+    // shared line did, with the reason naming the pressure.
+    let mut harness = Harness::new();
+    let free = IPC_RESERVE_FDS - 1;
+    let mut refused = harness.connect_under_table(Some(Table {
+        used: 1024 - free,
+        soft: 1024,
+    }));
+    match refused.expect_reply(&mut harness) {
+        Response::Error { message } => assert!(
+            message.contains("pressure"),
+            "the refusal did not say why: {message}"
+        ),
+        other => panic!("a connection past the ipc line was served: {other:?}"),
+    }
+    refused.expect_closed(&mut harness);
+    assert_eq!(
+        harness.slots.live(),
+        0,
+        "a pressure-refused connection took a slot anyway"
+    );
 }
 
 #[test]
