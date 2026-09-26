@@ -51,10 +51,10 @@ pub struct Arrangement {
 
 /// One column's place in the scrolling strip, as `World::column_spans`
 /// measures it.
-struct Span {
-    width: i32,
+pub(super) struct Span {
+    pub(super) width: i32,
     /// The column's fullscreen window, when it has one.
-    fullscreen: Option<WindowId>,
+    pub(super) fullscreen: Option<WindowId>,
 }
 
 impl Arrangement {
@@ -182,7 +182,12 @@ impl World {
     /// where a fullscreen column sits. The fullscreen check rides on the
     /// window lookups the minimum width already makes, so a tiled
     /// arrangement pays no extra map lookup for it.
-    fn column_spans(&self, ws: &Workspace, available: i32, full_width: i32) -> Vec<Span> {
+    pub(super) fn column_spans(
+        &self,
+        ws: &Workspace,
+        available: i32,
+        full_width: i32,
+    ) -> Vec<Span> {
         ws.columns
             .iter()
             .map(|column| {
@@ -208,7 +213,7 @@ impl World {
             .collect()
     }
 
-    fn column_heights(&self, column: &Column, available: i32) -> Vec<i32> {
+    pub(super) fn column_heights(&self, column: &Column, available: i32) -> Vec<i32> {
         let mins: Vec<i32> = column
             .windows
             .iter()

@@ -132,6 +132,13 @@ keep one; AGX shows that expectation cannot be assumed.
   buffer (see [GPU-rendering clients](#gpu-rendering-clients-zwp_linux_dmabuf_v1)),
   128 imported timelines and 64 commits waiting on acquire points (see
   [Explicit sync](#explicit-sync-linux-drm-syncobj-v1)).
+- **128 live `xdg_toplevel`s per client.** A client already holding 128 that
+  opens one more is disconnected with `wl_display.error` `no_memory` ("at
+  most 128 live xdg_toplevels per client"); closing or losing its windows
+  frees the count, and one client at its bound never stops another from
+  opening. XWayland windows are not counted — they enter through their own
+  mapping path — and bounding them is a separate item (see
+  [`backlog/core/xwayland-toplevel-cap.md`](backlog/core/xwayland-toplevel-cap.md)).
 
 Real clients are far below all of these: a `foot` window keeps 2 fds, a
 GPU client one per buffer it has allocated (a few per window), a Vulkan
@@ -171,7 +178,9 @@ never both, and gets the four back when it leaves. A [floating
 window](#floating-windows) is sent neither — it sizes itself, and is told
 so. A client bound
 to `xdg_wm_base` below version 2 is sent none of the tiled states (they do
-not exist at its version).
+not exist at its version). One client may hold at most 128 live
+`xdg_toplevel`s; the 129th disconnects it — see
+[Per-client limits](#per-client-limits-on-what-scoot-keeps).
 
 Being told it is tiled is what makes a client fill its slot exactly. A
 client that believes it floats may size itself: `foot`'s default
