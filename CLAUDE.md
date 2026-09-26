@@ -258,50 +258,63 @@ unmodified.
   soundness (did they wait for idle before sampling? is the screenshot's
   content consistent with the claim?) rather than repeating every scenario.
 
-## Developing without Nix
+## Dev environment (devenv)
 
-`nix develop` / `devenv shell` (both read `nix/dev-shell.nix`) is the
-supported path and the only one CI checks. Without Nix, a Debian/Ubuntu box
-with rustup works too — verified 2026-09-26 on Ubuntu 24.04 (build, nextest,
-clippy, fmt and `scripts/smoke-test.sh` all matched the Nix shell's results):
+`devenv shell` is the quickest way to a working tree on any Linux box, the
+dev VM included. It gives the same shell as `nix develop`: both read
+`nix/dev-shell.nix`, so change the shell's contents there, never in only one
+of them. That shell has the pinned toolchain, the compositor's libraries,
+the smoke test's tools, `soft-egl`, and an `$XDG_RUNTIME_DIR` when the box
+has none. devenv caches its evaluation, so a warm entry takes ~0.2s against
+~1.5s for `nix develop`, which adds up for an agent that wraps every
+command in it.
+
+**Setup:**
+- **A box with no Nix** (a container, a Claude Code on the web session, a
+  throwaway VM): run `scripts/devenv-bootstrap.sh`. It installs single-user
+  Nix (safe as root, where the stock installer fails on the missing
+  `nixbld` group) and devenv, links both into `/usr/local/bin`, and is
+  idempotent.
+- **A box that already has Nix:** `nix profile add nixpkgs#devenv`
+  (`nix profile install` on older Nix).
+- **Claude Code on the web:** set the environment's setup script to
+  `cd /home/user/scoot && bash scripts/devenv-bootstrap.sh`, so every session
+  starts with devenv installed; the first `devenv shell` then takes ~40s.
+
+**Use:**
 
 ```sh
-# The compositor's C libraries -- one apt name per entry in
-# vm/compositor-deps.nix, in its order (libegl-dev = libglvnd,
-# libudev-dev = systemdLibs) -- plus the smoke test's tools.
-sudo apt install pkg-config libwayland-dev wayland-protocols libxkbcommon-dev \
-  libinput-dev libdrm-dev libdisplay-info-dev libseat-dev libudev-dev \
-  libpixman-1-dev libegl-dev libdbus-1-dev libgbm-dev \
-  foot jq imagemagick wayland-utils
-rustup toolchain install 1.97.1 --component clippy,rustfmt
-curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ~/.cargo/bin
-cargo +1.97.1 build --workspace   # and so on for nextest, clippy, fmt
+devenv shell -- cargo build --workspace
+devenv shell -- soft-egl cargo nextest run --workspace
+devenv shell -- cargo clippy -p scoot --all-targets -- -D warnings
+devenv shell -- cargo fmt --check -p scoot
+devenv shell -- scripts/smoke-test.sh
+devenv test                  # quick check that the shell itself is sound
 ```
 
-What differs from the Nix shell, each found by running it:
-- **Match the pinned toolchain version, not just `rust-version`.** The
-  workspace builds on anything from 1.87, but the lint set changes between
-  clippy releases: rustup's 1.94 stable fails `clippy -D warnings` with seven
-  `unnecessary_cast` errors on `rlim_t` casts (`nofile.rs`, `fd_pressure.rs`,
-  two test files) that the pinned nixpkgs' 1.97.1 does not flag. The clippy
-  gate is whatever version the flake pins — when nixpkgs is bumped, the
-  version above has to move with it (`nix develop -c rustc --version`).
-- **This apt list is a second dependency list** — the drift CI's header
-  refuses to take on — and nothing checks it. When
-  `vm/compositor-deps.nix` changes, update it by hand, or expect a `-sys`
-  crate's pkg-config probe to fail.
-- **`$XDG_RUNTIME_DIR` must be set** (a desktop login provides it; a
-  container, `su` shell or CI job may not), or every test that binds a
-  wayland socket fails and the smoke test can't start. The Nix shells fill
-  it in when missing; here, `export XDG_RUNTIME_DIR=/run/user/$(id -u)` and
-  create it `0700`.
-- **The GLES tests pass without `soft-egl`**, because `libgbm-dev` pulls in
-  Mesa's EGL system-wide. The flip side: on this box `scripts/smoke-test.sh`
-  can load an EGL, so it no longer proves the GPU-free path the way CI's
-  smoke step does. Don't cite a non-Nix smoke run as evidence for that.
-- **Running as root** fails one test,
-  `config::tests::an_unwritable_parent_is_a_loud_refusal` (root ignores the
-  permission it relies on). Same under Nix; it passes as a normal user.
+- **`soft-egl`** runs one command against Mesa's software EGL, the way CI
+  runs the tests. Without it, the GLES tests fail on a box with no GPU.
+  Never export it shell-wide: the smoke test runs without it on purpose,
+  because it is the proof that scoot works with no GPU stack.
+- **A running session to poke at:**
+  `target/debug/scoot --headless --outputs 2 -- foot` gives two virtual
+  monitors (up to 8), driven with `scoot msg` and inspected with
+  `scoot msg screenshot --output N`.
+- **Running as root** (the web container) fails one test,
+  `config::tests::an_unwritable_parent_is_a_loud_refusal`, because root
+  ignores the permission it relies on. It passes as a normal user; it is
+  not a regression.
+
+**Gotchas:**
+- **`devenv.yaml` uses shallow `git+https` inputs, not `github:`.** The web
+  sessions' proxy allows git fetches from GitHub but refuses the tarball
+  downloads `github:` uses. For the same reason, `nix develop` there needs
+  `--override-input nixpkgs 'git+https://github.com/NixOS/nixpkgs?rev=<rev
+  from flake.lock>&shallow=1'`. Keep the nixpkgs rev in `devenv.yaml`,
+  `flake.nix` and `vm/` identical.
+- **Leave `claude.code.enable` off in `devenv.nix`.** devenv would generate
+  `.claude/settings.json` and overwrite the hand-maintained one, including
+  its `gh pr merge` permission.
 
 ## Local scratch/handoff state
 
