@@ -26,9 +26,10 @@ edges instead of keeping its edge pixels:
   scales included: a full logical-size buffer with no viewport, on
   `[output] scale = 2.0`, has a 1-px edge at about alpha 0.75
   (`srgba(144,36,24,0.749)` at an edge midpoint) and 0.56 at the corners
-  (`srgba(108,27,18,0.561)`), around an interior of `srgba(192,48,32,1)`. That is every client that
-  does not do HiDPI itself, and likely XWayland windows, on any scaled
-  output. On XRGB scanout the edge shows as a dark line.
+  (`srgba(108,27,18,0.561)`), around an interior of
+  `srgba(192,48,32,1)`. That is every client that does not do HiDPI
+  itself, and likely XWayland windows, on any scaled output. On XRGB
+  scanout the edge shows as a dark line.
 
 Both the colour channels and alpha fade (premultiplied toward black), so an
 `XRGB` surface comes out partly transparent too.
@@ -52,8 +53,9 @@ path.
 
 `Repeat::Pad` on the source image, pixman's equivalent of GL's
 clamp-to-edge, with a before/after render benchmark in the fix PR since
-it touches the pixman hot path. (Forcing alpha to 1 for opaque formats would *not* fix it:
-the colour channels still fade, giving an opaque dark vignette instead.)
+it touches the pixman hot path. (Forcing alpha to 1 for opaque formats
+would *not* fix it: the colour channels still fade, giving an opaque dark
+vignette instead.)
 
 The code is Smithay's, so the fix is a commit on the scoot-sh/smithay fork,
 listed in [`docs/forks.md`](../../forks.md) in the same PR, per `CLAUDE.md`'s
