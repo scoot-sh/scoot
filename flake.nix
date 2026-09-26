@@ -400,6 +400,7 @@
               export LIBRARY_PATH="''${LIBRARY_PATH:+$LIBRARY_PATH:}${dev.libraryPath}"
               export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${dev.ldLibraryPath}"
               ${dev.xdgRuntimeDirHook}
+              ${dev.localeHook}
             '';
           };
         }
