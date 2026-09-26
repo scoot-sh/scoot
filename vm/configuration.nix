@@ -59,7 +59,11 @@ in
       # aarch64 `virt` has no default display adapter, and this is also the DRM
       # device scoot will drive. Deliberately no virgl: Cocoa has no host GL
       # passthrough, so Mesa lands on llvmpipe. KMS and input are still real.
-      "-device virtio-gpu-pci,xres=1600,yres=1000"
+      # max_outputs=2: a second fixed virtual head for multi-output and
+      # hotplug-transition testing (per-head pull via the connector `force`
+      # debugfs file + synthetic udev change events; heads are otherwise
+      # always connected). Nobody watches the second head; verify via IPC.
+      "-device virtio-gpu-pci,xres=1600,yres=1000,max_outputs=2"
       # Boot log and a root shell in the terminal you launched from, alongside
       # the graphical console in the QEMU window.
       "-serial mon:stdio"
