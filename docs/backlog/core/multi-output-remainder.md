@@ -61,7 +61,8 @@ unlike a quicker unplug that morning.
    `MoveTo` fallback (needs the only lit screen to be pullable), and a mode
    change with several heads.
 2. **Reconnect restore and output ids on replug.** Now its own ticket,
-   [output-reconnect-restore](./output-reconnect-restore.md): match a
+   [output-reconnect-restore](../resolved/output-reconnect-restore-done.md)
+   (RESOLVED 2026-09-25, PR #249): match a
    returning monitor by connector identity, give its windows and workspaces
    back, and have the default output-2 binds follow the connector, not the
    id. **Subsumed by that ticket's implementation** (positional default binds
