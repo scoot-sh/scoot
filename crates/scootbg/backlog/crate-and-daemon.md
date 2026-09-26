@@ -16,7 +16,10 @@ The first real PR, and the one that turns the directory into a crate.
 - One binary with subcommands: `daemon` runs the Wayland client, and every
   other subcommand is a client of its control socket.
 - Control socket at `$XDG_RUNTIME_DIR/scootbg-$WAYLAND_DISPLAY.sock`, so
-  two sessions (a nested scoot inside another) never share one. Line-framed
+  two sessions (a nested scoot inside another) never share one.
+  `WAYLAND_DISPLAY` may be an absolute path, which libwayland allows, so
+  derive the name from its final component (or a hash) rather than
+  splicing it in. Line-framed
   JSON requests and replies, versioned from day one like `scoot-ipc`.
   Whether to reuse `scoot-ipc`'s framing code or keep scootbg's protocol
   self-contained is a decision for this PR: reuse only if it does not
@@ -26,7 +29,8 @@ The first real PR, and the one that turns the directory into a crate.
   socket from a crashed daemon is detected and replaced.
 - A Wayland disconnect (compositor exit) ends the daemon cleanly with a
   non-zero status, never a panic.
-- Nix: a `scootbg` package output and a place in the dev shell; CI builds
+- Nix: a `scootbg` package output of its own (the `scoot` package stays
+  `scoot` only, as with `scootctl`) and a place in the dev shell; CI builds
   and tests it with the rest of the workspace.
 
 Done when `scootbg daemon` connects, binds its globals, answers `query`

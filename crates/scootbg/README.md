@@ -48,10 +48,14 @@ per-frame budget.
 
 ## How it will work
 
-In scoot, the whole setup is the config:
+In scoot, the whole setup is to be one config section. **This is planned,
+not working:** no scoot release accepts `[wallpaper]` yet, and scoot's
+config rejects unknown sections by ignoring the *whole* file, keybindings
+and layout included. Do not add it until the
+[integration item](backlog/scoot-integration.md) lands.
 
 ```toml
-# ~/.config/scoot/config.toml
+# ~/.config/scoot/config.toml  (planned; see above)
 [wallpaper]
 image = "~/Pictures/hills.jpg"   # or: color = "#1e1e2e"
 mode = "fill"                    # fill | fit | stretch | center | tile
@@ -65,6 +69,7 @@ And one command changes it live, in scoot or anywhere else:
 ```sh
 scootbg set ~/Pictures/city.png                # every output
 scootbg set '#1e1e2e'                          # a colour: anything starting with '#'
+scootbg set ./#draft.png                       # a file whose name starts with '#'
 scootbg set ~/Pictures/city.png --output DP-1 --mode fit --fill '#101014'
 scootbg query                                  # what each output shows, as JSON
 scootbg clear --output DP-1                    # back to the compositor's own background
@@ -78,7 +83,7 @@ to it over its socket.
 - **One `background`-layer surface per output**, anchored to all four edges,
   exclusive zone `-1`, no keyboard interactivity and an empty input region,
   so clicks reach the desktop underneath, as on any other compositor.
-- **Solid colours** use `wp_single_pixel_buffer_v1` scaled by
+- **Solid colours** use `wp_single_pixel_buffer_manager_v1` scaled by
   `wp_viewporter`: one pixel of memory for a whole output, with a 1×1
   `wl_shm` buffer where the compositor lacks the protocol.
 - **Images** are decoded once, scaled once per output size and scale, and
@@ -95,15 +100,19 @@ to it over its socket.
 ## Relation to scoot
 
 - **scoot drives scootbg, never the reverse.** With a `[wallpaper]`
-  section, scoot spawns `scootbg daemon` at startup and, on reload, runs
-  `scootbg set` with the new values. scoot depends only on scootbg's CLI,
+  section, scoot spawns `scootbg daemon` at startup (passing the section's
+  values) and, on reload, spawns `scootbg set` with the new ones, never
+  waiting on either from its event loop. scoot depends only on scootbg's CLI,
   not its crate, and scootbg knows nothing about scoot's config, so each
   stays usable without the other. See
   [`backlog/scoot-integration.md`](backlog/scoot-integration.md).
-- **Config versus `scootbg set`.** The config is the startup default. A
-  `scootbg set` is live and remembered across restarts; a reload only
-  re-applies `[wallpaper]` when that section itself changed, so it never
-  silently undoes a wallpaper you just picked.
+- **Config versus `scootbg set`: whichever you changed last wins.** Edit
+  `[wallpaper]` and the config's wallpaper shows. Run `scootbg set` after
+  that and your choice shows, across restarts and unrelated reloads, until
+  you next change `[wallpaper]` itself.
+- **Packaging.** `scootbg` is its own package, like `scootctl`. scoot runs
+  it from `PATH` (or `[wallpaper] command`), and the home-manager module
+  installs it and points scoot at it when `[wallpaper]` is set.
 - scoot's `[appearance] background_color` stays: it is the frame clear
   colour, what shows with no wallpaper client at all. scootbg draws over it
   on the background layer.

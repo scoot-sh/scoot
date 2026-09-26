@@ -690,6 +690,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 ### Requested 2026-09-24
 - [Floating windows (dialogs auto-float, window rules, toggle, move/resize)](./resolved/floating-windows-done.md) — RESOLVED 2026-09-25 in two PRs. PR 1 (#242): the floating layer, auto-float by `xdg-dialog-v1`/parent/fixed size, `[[window_rule]]`, the toggle and focus switch, IPC. PR 2 (#243): `[floating] modifier` (Super) + left/right drag moves/resizes, the client's own `xdg_toplevel.move`/`resize` honoured on its held press (tiled windows' ignored), IPC `move-floating`/`resize-floating`, cross-output moves, a window's dialogs always drawn above it (the re-review's fullscreen-game case), resize configures paced to client acks; no allocation per pointer motion (a resize allocates only for its configures, ~11 each, about one per client ack).
 
+### From the PR #264 review (2026-09-26)
+- [Withhold frame callbacks from layer surfaces nobody can see](./core/frame-callbacks-for-hidden-surfaces.md) — low: every mapped layer surface gets `frame` on every render with no occlusion check, so an animated wallpaper under a fullscreen window never learns it is covered. Blocks scootbg's animated wallpapers (its milestone 2), not v1.
+
 ### From the PR #243 review (2026-09-25)
 - [No per-client toplevel cap: floods or chains of toplevels stall arrange](./core/per-client-toplevel-cap.md) — medium: `arrange` runs per frame per output and is multi-ms at a few thousand windows; floating a transient window runs a full `arrange` (`parent_centre`), so n transients are O(n^2) (4000-chain build 7.3 s debug), and `recentre_floating` does the same per floating window on an output change. Model a cap on the popup/subsurface caps (64).
 

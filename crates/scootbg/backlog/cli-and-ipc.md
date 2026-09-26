@@ -20,8 +20,12 @@ Requests for v1: `set`, `clear`, `query`, `kill`, `version`.
 - Replies are `ok` or an error with a reason (file not found, not an image,
   image too large, unknown output). A failed decode leaves the previous
   wallpaper in place.
-- `set` returns once the new buffer is committed on every targeted output,
-  not when the request is merely queued, so a script can take a screenshot
-  straight after.
+- `set` returns once the new buffer is committed on every targeted output
+  *and* a `wl_display.sync` round trip after the commit has come back, so
+  the compositor has processed the commit before the reply and a script can
+  take a screenshot straight after. Never called synchronously from inside
+  the compositor: see [scoot-integration.md](scoot-integration.md).
+- A file whose name starts with `#` is given as `./#name.png`; the README
+  says so.
 - `--help` for every subcommand; the README's command list is updated in
   the same PR as any change to it.

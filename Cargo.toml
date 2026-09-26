@@ -3,7 +3,8 @@ resolver = "3"
 members = ["crates/*"]
 # scootbg is docs only (a README and its backlog) until its first feature
 # lands; without this, the `crates/*` glob fails on its missing Cargo.toml.
-# Drop the line in the PR that adds crates/scootbg/Cargo.toml.
+# Drop the line in the PR that adds crates/scootbg/Cargo.toml (and the
+# matching `fileset.difference` in flake.nix).
 exclude = ["crates/scootbg"]
 
 [workspace.package]
