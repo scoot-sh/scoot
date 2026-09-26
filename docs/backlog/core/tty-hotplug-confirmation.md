@@ -66,3 +66,26 @@ still open:
   screen to be unpluggable, and this machine's panel is not;
 - **path 1 (a new mode list on the same connector):** it needs vfkit-style
   host rescaling.
+
+## Update 2026-09-26: path 1 attempted on vkms, `edid_override` is inert there
+
+Tried to drive a mode-list change without host rescaling: dev VM kernel
+6.18.50, vkms card1/`Virtual-3`, two hand-built 128-byte EDIDs each with
+a single 1280x720@60 DTD (74.25 MHz, `di-edid-decode`-clean, valid
+checksum; the first fully valid including zeroed chromaticity, the
+second with an sRGB block). Both stored fine (128 bytes readable back
+from `edid_override`) and both had **zero effect**: the probed list
+stayed the 34-mode no-EDID fallback with 1024x768 preferred, across a
+fresh `modprobe`, repeated `modetest` probes minutes apart, and
+`force` off/on cycles; sysfs `edid` stayed 0 bytes throughout. So on
+this kernel the knob does not feed the mode list a `GETCONNECTOR`
+probe (or `connector_mode(Reprobe)`) reads, and path 1 still has no
+live driver on any rig tried so far. Not a scoot misbehaviour — nothing
+reached `replan`, so no fix ticket; the `NewMode` logic stays pinned by
+`hotplug/heads.rs: a_new_mode_on_any_head_is_followed_on_that_head_only`
+and `hotplug/tests.rs` until vfkit/rescale-capable hardware (or a
+kernel where the knob works) can drive it. The Hold/Reconnected halves
+of the neighbouring multi-output remainder *were* proven live on the
+same rig the same day — see `multi-output-remainder.md` follow-up 1 —
+including the runbook (synthetic trigger required, ~2–5 s `force`
+latch, card0 sentinel).
