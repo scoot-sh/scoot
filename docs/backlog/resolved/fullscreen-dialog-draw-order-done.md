@@ -1,12 +1,33 @@
 ---
-title: "Fuzz seeds past the historical set break the fullscreen dialog draw-order invariant"
-status: "open"
-area: "core"
-priority: "medium"
-blocked: "none — repro below; needs minimizing before anyone can say whether production can reach it"
+title: "Fuzz seeds past the historical set break the fullscreen dialog draw-order invariant — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
 ---
 
-# Fuzz seeds past the historical set break the fullscreen dialog draw-order invariant
+# Fuzz seeds past the historical set break the fullscreen dialog draw-order invariant — RESOLVED
+
+RESOLVED 2026-09-26 (PR #256, branch
+`fullscreen-dialog-draw-order-fuzz`). Verdict: **realistic, real bug** —
+the seed-17/step-1234 repro minimized to an 11-step chain with no
+adversarial ingredients (real ids, no wild indices, no extreme moves): an
+app window floated and drawn, a second window transient-for the app but
+kept tiled, a third window transient-for the tiled one floated and drawn
+(the everyday GTK-dialog shape), `FocusObserved` raising the app above its
+grand-dialog and making it the workspace's focused window, then
+`FullscreenRequested` covering the output — leaving the visible floating
+dialog drawn under the fullscreen parent it blocks. Fixed in
+`crates/scoot-core/src/world/floating_order.rs` with a post-resolve lift
+that draws every dialog of the covering window above it (depths untouched; tiled-column covering needs nothing since the
+whole layer is above it). Fuzz driver re-extended with the
+positional output arms 24/25 (`FocusOutputIndex` /
+`MoveFocusedWindowToOutputIndex`), range `below(24)` → `below(26)`, seeds
+1–24 green. Bench receipt (`covered_chain`, release, local, pre- vs
+post-fix): n=250 40.06 vs 38.93us, n=1000 150.73 vs 146.48us — within
+run-to-run noise, no measurable hot-path cost.
+
+Original ticket prose follows (history).
 
 Filed 2026-09-25 from the `output-reconnect-restore` implementation, which
 extended the invariant fuzz driver (`scoot-core/src/world/tests/invariants.rs`)
