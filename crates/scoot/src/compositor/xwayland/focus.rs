@@ -280,8 +280,9 @@ pub(super) fn same_x_client(a: u32, b: u32) -> bool {
 /// Which X client an X window id was allocated to: the client bits above
 /// [`X_CLIENT_RESOURCE_MASK`], the server's word on which connection created
 /// the window (see [`X_CLIENT_RESOURCE_MASK`]) -- not a Wayland `ClientId`,
-/// and never confused with one. What the per-X-client toplevel cap
-/// (`toplevel_cap.rs`) charges a mapped window to.
+/// and never confused with one. What the per-X-client toplevel cap and the
+/// per-X-client unmanaged-window cap (`toplevel_cap.rs`) each charge a
+/// mapped window to.
 pub(in crate::compositor) fn x_client_key(window_id: u32) -> u32 {
     window_id & !X_CLIENT_RESOURCE_MASK
 }

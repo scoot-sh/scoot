@@ -266,6 +266,147 @@ mod x11 {
 }
 
 // ---------------------------------------------------------------------------
+// The X unmanaged half: the counter `map_x11_unmanaged` claims against,
+// driven directly. (The wire half -- a real X client mapping past the cap
+// -- is the live `xwayland/tests/unmanaged_cap.rs` suite: it needs a real
+// XWayland server.)
+//
+// Gated on the feature with the counter itself: a default build carries no
+// X code at all, and this section names nothing else.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "xwayland")]
+mod x11_unmanaged {
+    use super::super::{MAX_X11_UNMANAGED_PER_CLIENT, X11UnmanagedCap};
+
+    /// Two X clients, as window-id client bits (see `xwayland/focus.rs`):
+    /// the high bits differ, the low 21 do not matter here.
+    const X_A: u32 = 0x0040_0000;
+    const X_B: u32 = 0x0060_0000;
+
+    /// The unmanaged cap is the managed cap's number, spelled out so this
+    /// file does not depend on it (like [`X_CAP`]'s section above): the
+    /// bounds move together only by an explicit decision, never by sharing
+    /// the constant.
+    const X_OR_CAP: u32 = 128;
+
+    fn or_cap() -> X11UnmanagedCap {
+        assert_eq!(
+            MAX_X11_UNMANAGED_PER_CLIENT, X_OR_CAP,
+            "the test's spelled-out unmanaged cap drifted from the code's"
+        );
+        X11UnmanagedCap::default()
+    }
+
+    /// Fresh X window ids for one client, the way the server mints them:
+    /// the client bits fixed, the low bits rising.
+    struct Xids(u32);
+
+    impl Xids {
+        fn next(&mut self, client: u32) -> u32 {
+            self.0 += 1;
+            client | self.0
+        }
+    }
+
+    /// A full client is refused nothing silently: `admits` says no at
+    /// exactly the bound, and the refusal claims nothing.
+    #[test]
+    fn the_unmanaged_bound_refuses_at_exactly_the_cap() {
+        let mut cap = or_cap();
+        let mut xids = Xids(0);
+        for _ in 0..X_OR_CAP {
+            assert!(cap.admits(&X_A));
+            cap.claim(X_A, xids.next(X_A));
+        }
+        assert_eq!(cap.live_for(&X_A), X_OR_CAP);
+        assert_eq!(cap.in_flight(), X_OR_CAP);
+        assert!(!cap.admits(&X_A), "the 129th menu was admitted");
+        assert_eq!(cap.live_for(&X_A), X_OR_CAP, "the refusal claimed a unit");
+    }
+
+    /// Per X client: one client at its bound does not stop another, and one
+    /// client's releases never touch another's count. Managed windows never
+    /// touch this count either -- the two caps share no unit -- which the
+    /// live suite pins beside the real map paths.
+    #[test]
+    fn the_unmanaged_bound_is_per_client() {
+        let mut cap = or_cap();
+        let mut xids = Xids(0);
+        for _ in 0..X_OR_CAP {
+            cap.claim(X_A, xids.next(X_A));
+        }
+        for _ in 0..5 {
+            assert!(cap.admits(&X_B));
+            cap.claim(X_B, xids.next(X_B));
+        }
+        assert_eq!(cap.live_for(&X_A), X_OR_CAP);
+        assert_eq!(cap.live_for(&X_B), 5);
+        assert_eq!(cap.in_flight(), X_OR_CAP + 5);
+    }
+
+    /// Releasing hands the bound back: an unmap (or the destroy after it --
+    /// both reach `unmap_x11_unmanaged`) frees the unit, and a drained
+    /// client leaves no entry behind.
+    #[test]
+    fn unmanaged_releases_free_the_bound_and_leave_no_entry() {
+        let mut cap = or_cap();
+        let mut xids = Xids(0);
+        let mut held = Vec::new();
+        for _ in 0..X_OR_CAP {
+            let xid = xids.next(X_A);
+            cap.claim(X_A, xid);
+            held.push(xid);
+        }
+        assert!(!cap.admits(&X_A));
+        cap.release(&held[0]);
+        assert!(cap.admits(&X_A), "an unmap did not free the bound");
+        assert_eq!(cap.live_for(&X_A), X_OR_CAP - 1);
+        for xid in &held[1..] {
+            cap.release(xid);
+        }
+        assert_eq!(cap.live_for(&X_A), 0);
+        assert_eq!(cap.in_flight(), 0, "a drained client left an entry behind");
+    }
+
+    /// The release is idempotent: a refused menu (never claimed) and a
+    /// double release both change nothing.
+    #[test]
+    fn unmanaged_release_is_idempotent() {
+        let mut cap = or_cap();
+        cap.release(&X_A);
+        assert_eq!(cap.in_flight(), 0, "an unknown id claimed a unit");
+        let mut xids = Xids(0);
+        let xid = xids.next(X_A);
+        cap.claim(X_A, xid);
+        cap.release(&xid);
+        cap.release(&xid);
+        assert_eq!(cap.live_for(&X_A), 0, "a double release went negative");
+        assert_eq!(cap.in_flight(), 0);
+    }
+
+    /// The server's death drains everything at once: `clear` forgets both
+    /// clients' claims, so a restarted server reusing window ids starts
+    /// clean.
+    #[test]
+    fn the_server_dying_clears_the_whole_count() {
+        let mut cap = or_cap();
+        let mut xids = Xids(0);
+        for _ in 0..7 {
+            cap.claim(X_A, xids.next(X_A));
+        }
+        for _ in 0..3 {
+            cap.claim(X_B, xids.next(X_B));
+        }
+        cap.clear();
+        assert_eq!(cap.live_for(&X_A), 0);
+        assert_eq!(cap.live_for(&X_B), 0);
+        assert_eq!(cap.in_flight(), 0);
+        assert!(cap.admits(&X_A));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The client
 // ---------------------------------------------------------------------------
 

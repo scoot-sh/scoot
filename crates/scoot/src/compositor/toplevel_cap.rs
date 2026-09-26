@@ -60,9 +60,11 @@
 //!   and released in `remove_window` beside the claim above. A window past
 //!   its client's bound is refused the map, like the insane-frame-extents
 //!   refusal already in `map_x11_window`: X has no client object to post an
-//!   error to, so there is no kill to send. Override-redirect windows are
-//!   not counted: they never enter the core (`x11_unmanaged`), so they carry
-//!   none of the arrangement cost this bounds.
+//!   error to, so there is no kill to send. Override-redirect windows hold
+//!   [`X11UnmanagedCap`] units instead (see below): they never enter the
+//!   core (`x11_unmanaged`), so they carry none of the arrangement cost this
+//!   bounds, but each one still costs the per-motion hit test and the
+//!   per-frame draw.
 //! - **A toplevel with no client is admitted uncounted.** Creation always
 //!   has one in practice; if it somehow has not, there is nothing to charge
 //!   and nothing that could release it, so failing open keeps the maps exact.
@@ -291,5 +293,128 @@ impl X11ToplevelCap {
                 self.per_client.remove(&client);
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The XWayland unmanaged half: one bound per X client, refused by never
+// drawing.
+// ---------------------------------------------------------------------------
+
+/// How many live override-redirect X windows one X client may have, across
+/// all of them. Past it the window is refused its map: never drawn, never
+/// hit-tested, never sent frame callbacks -- the refuse-the-map form, since
+/// an override-redirect window that is refused is simply never drawn.
+///
+/// Deliberately the managed cap's number, not a third decision: one menu
+/// costs every pointer motion a surface-tree walk and every frame a draw
+/// and callbacks, so the same worst case per client deserves the same
+/// bound. Kept a separate constant so changing one never silently changes
+/// the other.
+///
+/// The same window-id client-bits identity as the managed cap (see
+/// `xwayland/focus.rs`'s `x_client_key`), with its own counting: unmanaged
+/// windows share no path with managed ones, so neither count ever sees the
+/// other's windows.
+///
+/// Only in `xwayland` builds: a default build carries no X code at all.
+#[cfg(feature = "xwayland")]
+pub(super) const MAX_X11_UNMANAGED_PER_CLIENT: u32 = 128;
+
+/// The live override-redirect X windows, per X client and per window: the
+/// unmanaged half of [`ToplevelCap`], in the same two-map shape and the
+/// same counting discipline. An entry exists in `per_client` only while it
+/// is nonzero, and in `owner` only while the window is claimed, so both
+/// maps are bounded by live override-redirect windows.
+///
+/// Only in `xwayland` builds, with the counter's users.
+#[cfg(feature = "xwayland")]
+#[derive(Debug, Default)]
+pub struct X11UnmanagedCap {
+    /// Claimed windows per X client, keyed by window-id client bits: what
+    /// the bound reads.
+    per_client: HashMap<u32, u32>,
+    /// Which X client each claimed X window id belongs to: what the
+    /// release reads, so an unmap never touches another client's count.
+    /// Keyed by the X window id itself -- there is no core id for a window
+    /// that never enters the core. Id reuse across servers cannot collide
+    /// with a live entry: the server's death drains both maps (see
+    /// [`X11UnmanagedCap::clear`]), so no claim survives into a restarted
+    /// server.
+    owner: HashMap<u32, u32>,
+}
+
+#[cfg(feature = "xwayland")]
+impl X11UnmanagedCap {
+    /// How many live override-redirect windows `client` (window-id client
+    /// bits) has claimed.
+    fn live(&self, client: &u32) -> u32 {
+        self.per_client.get(client).copied().unwrap_or(0)
+    }
+
+    /// How many live override-redirect windows `client` has claimed. Read
+    /// by the refusal log line as well as the tests, so -- unlike the xdg
+    /// cap's accessor -- not test-gated.
+    pub(super) fn live_for(&self, client: &u32) -> u32 {
+        self.live(client)
+    }
+
+    /// How many override-redirect X windows every X client holds between
+    /// them. Test-only.
+    #[cfg(test)]
+    pub(super) fn in_flight(&self) -> u32 {
+        self.per_client.values().sum()
+    }
+
+    /// Whether `client` may map one more override-redirect window: `false`
+    /// once it holds [`MAX_X11_UNMANAGED_PER_CLIENT`]. A read, so
+    /// `map_x11_unmanaged` can refuse the map before anything is granted;
+    /// the claim itself is recorded by [`X11UnmanagedCap::claim`] once the
+    /// window is in.
+    ///
+    /// The check and the claim are two steps rather than one `try_claim`
+    /// because the map must not double-claim a window Smithay reports
+    /// twice (see `map_x11_unmanaged`'s dedup): claiming before knowing the
+    /// push is fresh would leak a unit. Sound because both run on the
+    /// loop, with no dispatch between them.
+    pub(super) fn admits(&self, client: &u32) -> bool {
+        self.live(client) < MAX_X11_UNMANAGED_PER_CLIENT
+    }
+
+    /// Records the claim on X window `xid` for `client`. Call only after
+    /// [`X11UnmanagedCap::admits`] said yes on the same dispatch and the
+    /// window was freshly pushed: the count cannot overflow (each unit is
+    /// a live override-redirect window, and the cap stops a client far
+    /// below `u32::MAX`), and `map_x11_unmanaged` never claims an id twice
+    /// (a re-mapped window already in the list is not pushed again), so
+    /// this insert never overwrites.
+    pub(super) fn claim(&mut self, client: u32, xid: u32) {
+        *self.per_client.entry(client).or_insert(0) += 1;
+        self.owner.insert(xid, client);
+    }
+
+    /// Forgets the claim on `xid`, if it has one. Idempotent: a refused
+    /// window never reached [`X11UnmanagedCap::claim`], a managed X window
+    /// holds the managed cap's unit instead, and a claimed one is
+    /// forgotten once, wherever its removal runs -- an unmap or a destroy
+    /// (both funnel through `unmap_x11_unmanaged`).
+    pub(super) fn release(&mut self, xid: &u32) {
+        let Some(client) = self.owner.remove(xid) else {
+            return;
+        };
+        if let Some(live) = self.per_client.get_mut(&client) {
+            *live = live.saturating_sub(1);
+            if *live == 0 {
+                self.per_client.remove(&client);
+            }
+        }
+    }
+
+    /// Forgets every claim at once: the server died, and
+    /// `clear_x11_unmanaged` drops every window together, so per-window
+    /// releases would chase ids already gone.
+    pub(super) fn clear(&mut self) {
+        self.per_client.clear();
+        self.owner.clear();
     }
 }

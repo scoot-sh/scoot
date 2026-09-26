@@ -723,6 +723,15 @@ pub struct State {
     /// `toplevel_cap.rs`, which owns the policy and the number.
     #[cfg(feature = "xwayland")]
     pub(super) x11_toplevel_cap: super::toplevel_cap::X11ToplevelCap,
+    /// How many live override-redirect X windows each X client has, keyed
+    /// the same way. Claimed in `map_x11_unmanaged` once the window is in,
+    /// read before anything is granted, released in
+    /// `unmap_x11_unmanaged` and drained whole in `clear_x11_unmanaged`
+    /// on the server's death -- see `toplevel_cap.rs`, which owns the
+    /// policy and the number. Shares no count with the managed cap above:
+    /// neither ever sees the other's windows.
+    #[cfg(feature = "xwayland")]
+    pub(super) x11_unmanaged_cap: super::toplevel_cap::X11UnmanagedCap,
     /// How many live `xdg_popup`s each Wayland client has. Claimed in
     /// `popup_parent::admit` before the popup is tracked, released in
     /// `popup_parent::popup_destroyed` -- see `popup_count.rs`, which owns
@@ -1113,6 +1122,8 @@ impl State {
             toplevel_cap: Default::default(),
             #[cfg(feature = "xwayland")]
             x11_toplevel_cap: Default::default(),
+            #[cfg(feature = "xwayland")]
+            x11_unmanaged_cap: Default::default(),
             popup_count: Default::default(),
             client_fds: Default::default(),
             drm_syncobj: Default::default(),
