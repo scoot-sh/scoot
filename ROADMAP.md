@@ -108,6 +108,19 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Restore windows, workspaces and binds when a monitor reconnects](docs/backlog/resolved/output-reconnect-restore-done.md)**
+  (2026-09-25, PR #249) — under `--tty` every standby cycle that drops
+  hot-plug detect was an unplug plus a replug that piled the external
+  screen's windows onto the panel and broke the output-2 binds (the monitor
+  returns as a fresh `OutputId`). Removal now files the core's
+  `EvictedOutput` keyed by connector identity (name + EDID where a blob
+  reads, name-alone fallback), and an add under a matching identity moves
+  the still-open windows back onto the same workspaces, active index and
+  column order; hand-moved stays, closed drops out, focus untouched. Default
+  binds name the first/second screen and resolve positionally at dispatch.
+  Live Asahi replug unverified (runbook in the PR body), judged
+  non-blocking; no debounce until flap timing is measured on hardware.
+
 - **[XWayland Phase 4: clipboard, primary selection, drags, input methods](docs/backlog/protocols/xwayland-support.md)**
   (2026-09-25, PR #246) — the clipboard and primary selection cross between X and
   Wayland both ways (clipboard managers included), gated like Wayland's own

@@ -743,13 +743,11 @@ binds → scale/mode surface; Asahi proof gates scanout planes; autostart
 policy → renderer/GPU reword. Batch Asahi trips (multi-CRTC + scanout +
 scale/mode) into one hardware session.
 
-- [Restore windows, workspaces and binds when a monitor reconnects](./core/output-reconnect-restore.md)
-  — OPEN, **HIGH** (daily-drive): a replugged monitor (DP monitors drop
-  hot-plug detect in standby) returns as a new output id with an empty
-  workspace while its windows stay piled on the panel, and the default
-  output-2 binds stop reaching it. niri-style restore by connector identity
-  (name + EDID make/model/serial); subsumes the remainder ticket's
-  replug-id follow-up. Filed from PR #247's review.
+- [Restore windows, workspaces and binds when a monitor reconnects](./resolved/output-reconnect-restore-done.md)
+  — RESOLVED 2026-09-25 (PR #249): removal files the core's `EvictedOutput`
+  keyed by connector identity, a matching add restores workspaces in order,
+  binds name the first/second screen. Live Asahi replug unverified (runbook
+  in the PR body); no debounce until flap timing is measured.
 - [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./core/lock-vblank-bound-hardening.md)
   — OPEN, low: `await_vblank`'s "late, never early" should say "within one
   bound of the first blank drawn"; `stale_vblanks` entries should age out so
@@ -762,7 +760,7 @@ scale/mode) into one hardware session.
   rendering, per-output lock waits, hotplug add/remove) LANDED 2026-09-25,
   live on the Asahi M2 Air including a physical unplug and replug. Left:
   GPU-tier runtime add and #48 `MoveTo` on hardware,
-  [reconnect restore](./core/output-reconnect-restore.md), and the
+  [reconnect restore](./resolved/output-reconnect-restore-done.md), and the
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland: drops onto X windows do not land](./protocols/xwayland-pointer-focus-x11.md)

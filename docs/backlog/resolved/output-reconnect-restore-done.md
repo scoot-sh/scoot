@@ -1,12 +1,31 @@
 ---
-title: "Restore windows, workspaces and binds when a monitor reconnects"
-status: "open"
-area: "core"
-priority: "high"
-blocked: "none — design below; needs the --tty hotplug of milestone 19 phase E (landed)"
+title: "Restore windows, workspaces and binds when a monitor reconnects — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
 ---
 
-# Restore windows, workspaces and binds when a monitor reconnects
+# Restore windows, workspaces and binds when a monitor reconnects — RESOLVED
+
+RESOLVED 2026-09-25 (PR #249, branch `output-reconnect-restore`; review
+round fixed three one-line lows post-merge as `c86a99c`). A monitor that
+leaves and comes back under a fresh `OutputId` gets its still-open windows
+back: removal files the core's `EvictedOutput` keyed by connector identity
+(name plus EDID summary where a blob reads, name-alone fallback), and an
+add under a matching identity restores the same workspaces, active index
+and column order (`World::evict_output` / `restore_output`, the latter
+answering how many windows moved). Hand-moved windows stay where the user
+put them, closed ones drop out, focus is never stolen, and a swapped-in
+monitor under the same name inherits nothing (strict equality, pinned).
+The default output binds now name the first/second screen and resolve
+positionally at dispatch (`FocusOutputIndex` / `MoveFocusedWindowToOutputIndex`;
+ids are never reused), with the stability rule in
+`docs/configuration.md#moving-across-outputs`. Live Asahi DP-1 replug was
+still unverified at merge (needs physical hands; runbook in the PR body)
+and was judged non-blocking: a missed restore degrades to the old pile-up,
+and a wrong restore cannot fire. No debounce yet — measure flap timing on
+real hardware first, per the ticket.
 
 Filed 2026-09-25 from PR #247's review, after a physical DP-1 replug on the
 Asahi M2 Air (`Asahi.md` Test 3): the monitor came back as a *new* output

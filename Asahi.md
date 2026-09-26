@@ -477,8 +477,8 @@ final product code, via `nix build .#scoot-gpu`. It ran on VT 2 through
 - **After.**
   - `outputs` lists `eDP-1` (id 1) and `DP-1` (id **3**, at x=1707).
   - `windows` puts both on output 1, and the returned monitor shows an
-    empty workspace. This is the reconnect gap
-    `docs/backlog/core/output-reconnect-restore.md` tracks.
+    empty workspace. This was the reconnect gap, since resolved by PR #249
+    (`docs/backlog/resolved/output-reconnect-restore-done.md`).
 - **Found by review of this run.**
   - foot logged `unmapped from unknown output`: the window's
     `wl_surface.leave` went out after the output's `global_remove`. Fixed

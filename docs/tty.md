@@ -232,12 +232,13 @@ Two limits:
   and re-map its surfaces. That is a bigger lie about what happened than a
   stale name. An output added for a newly plugged monitor always gets its
   own connector's name.
-- **A replugged monitor comes back empty.** Windows moved off a screen
-  that went away stay where they were moved, and the screen returns under
-  a new output id. Monitors that drop hot-plug detect in standby make this
-  visible: every window piles onto the remaining screen. Restoring windows
-  and workspaces on reconnect is tracked in
-  `docs/backlog/core/output-reconnect-restore.md`.
+- **A replugged monitor gets its windows back.** When a screen goes away
+  its workspaces are adopted elsewhere, and when a monitor with a matching
+  connector identity returns, the still-open windows move back onto it
+  (hand-moved windows stay where the user put them). The default output
+  binds name the first/second screen, so they keep reaching the returned
+  monitor. See
+  `docs/backlog/resolved/output-reconnect-restore-done.md`.
 - **Only what the kernel reports is followed.** On the M2 Air with the
   experimental `fairydust` kernel, one quick unplug earlier on 2026-09-25
   never read `disconnected`, while a later ~16 s one did and was followed
