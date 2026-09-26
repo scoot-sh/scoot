@@ -258,6 +258,51 @@ unmodified.
   soundness (did they wait for idle before sampling? is the screenshot's
   content consistent with the claim?) rather than repeating every scenario.
 
+## Developing without Nix
+
+`nix develop` / `devenv shell` (both read `nix/dev-shell.nix`) is the
+supported path and the only one CI checks. Without Nix, a Debian/Ubuntu box
+with rustup works too — verified 2026-09-26 on Ubuntu 24.04 (build, nextest,
+clippy, fmt and `scripts/smoke-test.sh` all matched the Nix shell's results):
+
+```sh
+# The compositor's C libraries -- one apt name per entry in
+# vm/compositor-deps.nix, in its order (libegl-dev = libglvnd,
+# libudev-dev = systemdLibs) -- plus the smoke test's tools.
+sudo apt install pkg-config libwayland-dev wayland-protocols libxkbcommon-dev \
+  libinput-dev libdrm-dev libdisplay-info-dev libseat-dev libudev-dev \
+  libpixman-1-dev libegl-dev libdbus-1-dev libgbm-dev \
+  foot jq imagemagick wayland-utils
+rustup toolchain install 1.97.1 --component clippy,rustfmt
+curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ~/.cargo/bin
+cargo +1.97.1 build --workspace   # and so on for nextest, clippy, fmt
+```
+
+What differs from the Nix shell, each found by running it:
+- **Match the pinned toolchain version, not just `rust-version`.** The
+  workspace builds on anything from 1.87, but the lint set changes between
+  clippy releases: rustup's 1.94 stable fails `clippy -D warnings` with seven
+  `unnecessary_cast` errors on `rlim_t` casts (`nofile.rs`, `fd_pressure.rs`,
+  two test files) that the pinned nixpkgs' 1.97.1 does not flag. The clippy
+  gate is whatever version the flake pins — when nixpkgs is bumped, the
+  version above has to move with it (`nix develop -c rustc --version`).
+- **This apt list is a second dependency list** — the drift CI's header
+  refuses to take on — and nothing checks it. When
+  `vm/compositor-deps.nix` changes, update it by hand, or expect a `-sys`
+  crate's pkg-config probe to fail.
+- **`$XDG_RUNTIME_DIR` must be set** (a desktop login provides it; a
+  container, `su` shell or CI job may not), or every test that binds a
+  wayland socket fails and the smoke test can't start. The Nix shells fill
+  it in when missing; here, `export XDG_RUNTIME_DIR=/run/user/$(id -u)` and
+  create it `0700`.
+- **The GLES tests pass without `soft-egl`**, because `libgbm-dev` pulls in
+  Mesa's EGL system-wide. The flip side: on this box `scripts/smoke-test.sh`
+  can load an EGL, so it no longer proves the GPU-free path the way CI's
+  smoke step does. Don't cite a non-Nix smoke run as evidence for that.
+- **Running as root** fails one test,
+  `config::tests::an_unwritable_parent_is_a_loud_refusal` (root ignores the
+  permission it relies on). Same under Nix; it passes as a normal user.
+
 ## Local scratch/handoff state
 
 `HANDOFF.md` at the repo root is gitignored — the convention for transient,
