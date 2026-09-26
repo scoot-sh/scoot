@@ -329,6 +329,8 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 - [docs/benchmarks.md](docs/benchmarks.md) — measured resource usage (CPU,
   wakeups, memory, startup, screenshots), including an A/B with niri on the
   dev VM, with how it was measured and what it cannot show.
+- [crates/scootbg/README.md](crates/scootbg/README.md) — scootbg, the
+  planned wallpaper daemon (not built yet), with its own backlog.
 - [CHANGELOG.md](CHANGELOG.md) · [ROADMAP.md](ROADMAP.md)
 
 ## Developing
