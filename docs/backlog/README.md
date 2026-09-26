@@ -12,7 +12,7 @@ rg 'blocked: ' docs/backlog/**/*.md | rg -v ': null' # what is waiting on someth
 
 `ROADMAP.md` is the index and carries the ordered work; this directory is
 the detail. scootbg, the wallpaper daemon, keeps its own backlog in
-[`crates/scootbg/backlog/`](../../crates/scootbg/backlog/README.md). Prose is the original backlog entry, moved verbatim.
+[`docs/scootbg/backlog/`](../scootbg/backlog/README.md). Prose is the original backlog entry, moved verbatim.
 
 **Resolved entries** (struck through in the old monolith, kept for the
 diagnosis history) live in [`resolved/`](./resolved/). They are archived, not

@@ -16,7 +16,7 @@ against the last published numbers.
 
 ## What is measured
 
-On the same machine and outputs, published in `crates/scootbg/README.md`:
+On the same machine and outputs, published in `docs/scootbg/README.md`:
 
 | Row | How |
 |---|---|

@@ -16,7 +16,7 @@ blocked: "reuses the frame pacing built for transitions.md"
   on each rendered frame, with no occlusion check (`headless.rs`, the
   post-render path). A fullscreen video over an animated wallpaper would
   keep scootbg blending at the video's frame rate. So this item needs
-  [the scoot-side fix](../../../docs/backlog/core/frame-callbacks-for-hidden-surfaces.md)
+  [the scoot-side fix](../../backlog/core/frame-callbacks-for-hidden-surfaces.md)
   first, or its own pause (e.g. `ext-foreign-toplevel` fullscreen state),
   measured either way.
 - `--no-animate` to show the first frame only.

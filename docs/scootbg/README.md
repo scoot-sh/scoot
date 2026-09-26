@@ -9,10 +9,8 @@ to it: scootbg speaks only standard protocols, so it also runs on any
 compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 
 > **Status: planning.** There is no code yet. This file is the design; the
-> work is in [`backlog/`](backlog/README.md). The crate is excluded from the
-> workspace (`exclude` in the root `Cargo.toml`) until its first real
-> feature lands, so a docs-only directory does not break every `cargo`
-> command.
+> work is in [`backlog/`](backlog/README.md). The code will live in
+> `crates/scootbg/` once its first feature lands; these docs stay here.
 
 ## What it is for
 

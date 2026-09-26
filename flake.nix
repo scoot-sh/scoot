@@ -69,16 +69,13 @@
           # Verified to cover the build: no build.rs outside crates/, no
           # include_str!/include_bytes! of a root-level file, no
           # .cargo/config or toolchain file, and `license.workspace`
-          # is a string, not a file read. crates/scootbg is left out while
-          # it holds only docs (a README and its backlog, excluded from the
-          # cargo workspace too), so editing them does not rebuild scoot;
-          # the PR that gives it a Cargo.toml drops the `difference`.
+          # is a string, not a file read.
           src = pkgs.lib.fileset.toSource {
             root = ./.;
             fileset = pkgs.lib.fileset.unions [
               ./Cargo.toml
               ./Cargo.lock
-              (pkgs.lib.fileset.difference ./crates ./crates/scootbg)
+              ./crates
             ];
           };
 

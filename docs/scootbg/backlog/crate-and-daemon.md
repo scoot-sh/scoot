@@ -8,11 +8,12 @@ blocked: null
 
 # The crate, the daemon and the control socket
 
-The first real PR, and the one that turns the directory into a crate.
+The first real PR, and the one that creates the crate.
 
-- Add `crates/scootbg` as a workspace member (drop the `exclude` entry in
-  the root `Cargo.toml`), MIT, `description` saying "wallpaper daemon for
-  Wayland" (not "compositor": it is a client).
+- Add `crates/scootbg` (the workspace's `crates/*` glob picks it up),
+  MIT, `description` saying "wallpaper daemon for Wayland" (not
+  "compositor": it is a client). A short `crates/scootbg/README.md` may
+  point at `docs/scootbg/`, which stays the home of its docs.
 - One binary with subcommands: `daemon` runs the Wayland client, and every
   other subcommand is a client of its control socket.
 - Control socket at `$XDG_RUNTIME_DIR/scootbg-$WAYLAND_DISPLAY.sock`, so

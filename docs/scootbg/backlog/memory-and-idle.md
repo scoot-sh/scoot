@@ -9,7 +9,7 @@ blocked: null
 # Buffers, memory and zero idle cost
 
 The resource budget is the feature. Targets to measure and publish in
-`crates/scootbg/README.md` once the static path exists:
+`docs/scootbg/README.md` once the static path exists:
 
 - **Idle:** no wakeups at all with a static wallpaper (no timers, no frame
   callbacks requested). Verify with `perf stat` / wakeup counts over a

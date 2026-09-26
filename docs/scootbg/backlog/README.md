@@ -1,13 +1,13 @@
 # scootbg backlog
 
 scootbg's own backlog, kept apart from the compositor's
-([`docs/backlog/`](../../../docs/backlog/README.md)). Same format: one file
+([`docs/backlog/`](../../backlog/README.md)). Same format: one file
 per item, YAML frontmatter (`title`, `status`, `area: "scootbg"`,
 `priority`, `blocked`), so the set filters the same way:
 
 ```sh
-rg -l 'status: "open"' crates/scootbg/backlog
-rg -l 'priority: "high"' crates/scootbg/backlog
+rg -l 'status: "open"' docs/scootbg/backlog
+rg -l 'priority: "high"' docs/scootbg/backlog
 ```
 
 Items move to `resolved/` here when done, with a `-done` suffix, as in the

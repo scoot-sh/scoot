@@ -20,7 +20,7 @@ animated wallpaper under a fullscreen video keeps decoding and blending
 at the video's frame rate, on the CPU under pixman.
 
 This matters for scootbg's animated wallpapers
-([`crates/scootbg/backlog/animated-images.md`](../../../crates/scootbg/backlog/animated-images.md))
+([`docs/scootbg/backlog/animated-images.md`](../../scootbg/backlog/animated-images.md))
 and for any other animated background or bottom-layer client.
 
 ## Constraints on a fix
