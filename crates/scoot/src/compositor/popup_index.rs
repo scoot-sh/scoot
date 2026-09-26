@@ -12,7 +12,10 @@
 //! at 40 x 128 (`scripts/popup-flood/run-many.sh`, dev VM release).
 //!
 //! So every tracked `xdg_popup` is filed here under its surface's id, and
-//! the configure path reads it back in O(1) with no scan and no `Vec`.
+//! the configure path reads it back in O(1) with no global walk and no
+//! global-sized `Vec` (the own-tree membership check still collects one
+//! per-tree `Vec`, bounded by the owner's cap — avoiding even that needs
+//! a Smithay fork change).
 //! Same-client parenting is all the protocol allows (a client names only
 //! its own objects as a popup's parent), so each popup tree holds at most
 //! its owner's popups plus a few input-method leaves -- the per-tree scans
