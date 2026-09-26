@@ -690,6 +690,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 ### Requested 2026-09-24
 - [Floating windows (dialogs auto-float, window rules, toggle, move/resize)](./resolved/floating-windows-done.md) — RESOLVED 2026-09-25 in two PRs. PR 1 (#242): the floating layer, auto-float by `xdg-dialog-v1`/parent/fixed size, `[[window_rule]]`, the toggle and focus switch, IPC. PR 2 (#243): `[floating] modifier` (Super) + left/right drag moves/resizes, the client's own `xdg_toplevel.move`/`resize` honoured on its held press (tiled windows' ignored), IPC `move-floating`/`resize-floating`, cross-output moves, a window's dialogs always drawn above it (the re-review's fullscreen-game case), resize configures paced to client acks; no allocation per pointer motion (a resize allocates only for its configures, ~11 each, about one per client ack).
 
+### Found measuring scootbg's dependencies (2026-09-26)
+- [Upscaled surfaces get a semi-transparent 1-px edge under pixman](./core/shm-viewport-upscale-edge-fade.md) — medium: Smithay's pixman renderer samples bilinear with `Repeat::None`, so every buffer-scale-1 window on a scaled output gets a faded 1-px edge (alpha ~0.56 at scale 2), and a 1×1 shm buffer viewported to the output is a full gradient. Fix: `Repeat::Pad`, as a scoot-sh/smithay fork commit. GLES and single-pixel buffers are unaffected.
+
 ### From the PR #264 review (2026-09-26)
 - [Withhold frame callbacks from layer surfaces nobody can see](./core/frame-callbacks-for-hidden-surfaces.md) — low: every mapped layer surface gets `frame` on every render with no occlusion check, so an animated wallpaper under a fullscreen window never learns it is covered. Blocks scootbg's animated wallpapers (its milestone 2), not v1.
 
