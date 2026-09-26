@@ -83,8 +83,11 @@ Rate tables (N=20 runs, 4 screenshots ~300 ms apart per run,
 
 Pixman is not the clean control the ticket expected — it varies run to
 run too, with the same dotted structure. That already points away from the
-GLES texture path: pixman imports shm with a memcpy, so identical dots on
-both renderers means the dots are in the committed bytes.
+GLES texture path: pixman wraps the live shm pointer zero-copy
+(`Image::from_raw_mut` over the pool mapping, no memcpy —
+`src/backend/renderer/pixman/mod.rs:import_shm_buffer` in the pinned fork),
+so identical dots on both renderers means the dots are in the committed
+bytes.
 
 Pool-byte proof (`pool-bytes.sh`, `catch-dots.sh`): with mpv `--pause`d,
 `/proc/<mpv>/fd` shows its 2–3 `mesa-shared` pools (3052928 B =
@@ -107,10 +110,16 @@ Commit traffic (`timeline-debug.sh`, WAYLAND_DEBUG, gles, 33 s): 2523
 commits + 2522 attaches, all on the video surface, releases 2520,
 `wl_callback.done` 4004 — the compositor keeps up (releases ≈ attaches,
 callbacks fire from every rendered frame's tail) while the screenshots
-stay byte-identical. Stale-texture is impossible on that path anyway: a
-new attach clears the surface's texture cache and both renderers then do
-a full upload (GLES takes the `upload_full || damage.is_empty()` arm on
-empty damage). Frozen screen + flowing releases + firing callbacks means
+stay byte-identical. Stale-texture is impossible on that path anyway: the
+GLES texture object is reused on same-size re-attach and re-uploaded — a
+new attach does not clear the surface's texture cache (a new GL object is
+minted only on size change; `upload_full || damage.is_empty()` then takes
+the `TexImage2D` full-upload arm on empty damage —
+`src/backend/renderer/gles/mod.rs:import_shm_buffer` in the pinned fork).
+Corollary: the GLES leg is the cleaner half of the proof — the upload
+copies bytes at import time, so unlike pixman's per-access
+`with_buffer_contents` re-resolve there is no live borrow of the client
+pool at render. Frozen screen + flowing releases + firing callbacks means
 the client re-committed unchanged bytes. Related: with no vsync headless,
 callbacks fire immediately and mpv commits at ~76 Hz with `Dropped: 112`
 by mid-clip — it presents whatever llvmpipe has finished, including
@@ -131,7 +140,44 @@ Harness kept in `scripts/mpv-shm-rate/`: `run.sh` (rate loop),
 commit/attach/release/callback counts), `paused-vo.sh` (vo isolation),
 `pool-bytes.sh` + `catch-dots.sh` (pool-vs-screenshot proof),
 `gl-control.sh` (es2gears stability). No `SCOOT_TEST_RENDERER` pin test:
-there is no compositor behavior to pin.
+there is no compositor behavior to pin. No upstream issue filed for
+mpv/Mesa per project policy (dependency fixes go in scoot-sh forks, never
+upstream from here).
+
+## Review notes (advisories, recorded — not fixed)
+
+Review of the harness and record returned three advisories below the
+fix bar. They are noted here so a future reader does not mistake the
+harness for hardened tooling.
+
+**Score-threshold fragility / no run-level aggregation.** The
+black/partial/correct cutoffs (std < 0.01 / < 0.30 / >= 0.30) are
+calibrated on a handful of eye-confirmed shots, and content moves the
+metric: a big grey cross in the animation frame lowers std within the
+solid band, so the metric conflates content with fidelity. Scoring is
+per screenshot with a plain tally; the "every run unanimous 4/4" claim
+was checked by eye, not enforced or aggregated mechanically — a future
+re-run that wants rate evidence should aggregate to run-level classes
+first and report the distribution.
+
+**Silent misclassification on tool failure (incl. the rect-mapping
+race).** `score.sh` maps the content rect out of `windows.json` with a
+first-match grep, and a stale or wrong rect still scores without
+complaint — only a fully empty mapping prints `NO RECT`. Worse, if
+`magick` errors the stats string is empty, `std` is empty, and `awk`
+compares empty as 0, so a tool failure scores as "black". Any reuse
+should fail loudly on empty stats and validate the rect against the
+shot dimensions before classifying.
+
+**Harness rot + `pkill` VM-global collision hazard.** The scripts
+hardcode `/var/cargo-target`, a `/nix/store` mpv path, and
+`/home/dev/evidence` paths, so a store or layout change rots them
+silently. `pkill -f testsrc-nv12.mkv` matches every process on the
+shared dev VM whose cmdline contains the clip — including other
+sessions' scoot parents and mpv instances — so two agents running the
+harness concurrently can kill each other's clients mid-run. Left as-is:
+this is throwaway evidence tooling, not CI; re-runners should scope
+teardown to their own PIDs.
 
 ## To do
 

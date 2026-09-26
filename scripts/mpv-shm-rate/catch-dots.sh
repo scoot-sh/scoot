@@ -9,7 +9,20 @@ SCOOTCTL=/var/cargo-target/debug/scootctl
 MPV=/nix/store/dddlcx6mfwrjxlscbf1rhxswj17987vs-mpv-0.41.0/bin/mpv
 CLIP=/home/dev/evidence/gdf/testsrc-nv12.mkv
 mkdir -p "$D"
-for try in $(seq 1 "$MAXTRIES"); do
+# MAXTRIES counts scored tries only: a try where the client died early
+# (notably WAYLAND_DEBUG=1 + --pause intermittently crashes mpv in
+# vo_x11_init, leaving zero windows) is torn down and retried WITHOUT
+# scoring — the empty background would otherwise score std<0.01 "black"
+# and burn a try it could never win. Bounded so a permanently-crashing
+# client still terminates.
+scored=0; attempt=0
+while [ "$scored" -lt "$MAXTRIES" ]; do
+  attempt=$((attempt+1))
+  if [ "$attempt" -gt $((MAXTRIES*3)) ]; then
+    echo "too many unscorable tries ($attempt attempts, $scored scored); giving up"
+    exit 1
+  fi
+  try=$attempt
   T=$D/try-$try; mkdir -p "$T"
   rm -f "$T/scoot.sock"
   RUST_LOG=scoot=warn "$SCOOT" --headless --renderer "$RENDERER" --socket "$T/scoot.sock" \
@@ -18,6 +31,21 @@ for try in $(seq 1 "$MAXTRIES"); do
   CPID=$!
   for t in $(seq 1 50); do [ -S "$T/scoot.sock" ] && break; sleep 0.1; done
   sleep 5
+  if ! kill -0 "$(cat "$T/clientpid" 2>/dev/null)" 2>/dev/null; then
+    echo "try-$try: client exited early, retrying without scoring"
+    pkill -f "testsrc-nv12.mkv" 2>/dev/null
+    sleep 0.3
+    kill $CPID 2>/dev/null; wait $CPID 2>/dev/null
+    continue
+  fi
+  SCOOT_SOCKET="$T/scoot.sock" "$SCOOTCTL" windows > "$T/windows.json" 2>&1
+  if ! grep -q '"width"' "$T/windows.json" 2>/dev/null; then
+    echo "try-$try: zero windows (client crashed?), retrying without scoring"
+    pkill -f "testsrc-nv12.mkv" 2>/dev/null
+    sleep 0.3
+    kill $CPID 2>/dev/null; wait $CPID 2>/dev/null
+    continue
+  fi
   SCOOT_SOCKET="$T/scoot.sock" "$SCOOTCTL" screenshot --out "$T/shot.png" > /dev/null 2>&1
   stats=$(magick "$T/shot.png" -crop 766x960+20+20 +repage \
     -format '%[fx:mean],%[fx:standard_deviation],%[fx:maxima]' info: 2>/dev/null)
@@ -45,6 +73,7 @@ for try in $(seq 1 "$MAXTRIES"); do
   pkill -f "testsrc-nv12.mkv" 2>/dev/null
   sleep 0.3
   kill $CPID 2>/dev/null; wait $CPID 2>/dev/null
+  scored=$((scored+1))
 done
-echo "no dots in $MAXTRIES tries"
+echo "no dots in $scored scored tries ($attempt attempts)"
 exit 1

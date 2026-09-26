@@ -17,7 +17,10 @@ RUST_LOG=scoot=warn "$SCOOT" --headless --renderer "$RENDERER" --socket "$D/scoo
 CPID=$!
 for t in $(seq 1 50); do [ -S "$D/scoot.sock" ] && break; sleep 0.1; done
 sleep 5
-MPV_PID=$(pgrep -f "testsrc-nv12.mkv" | head -1)
+# NOTE: match mpv by exact process name. `pgrep -f testsrc-nv12.mkv` also
+# matches this script's own scoot parent (the clip path is in scoot's
+# `-- sh -c ...` arguments) and `head -1` then returns scoot, not mpv.
+MPV_PID=$(pgrep -x mpv | head -1)
 echo "mpv pid: $MPV_PID"
 ls -la /proc/$MPV_PID/fd/ 2>/dev/null | grep -vE 'socket|pipe|null|/dev/(null|urandom)' | head -20
 echo "--- memfd/shm candidates ---"
