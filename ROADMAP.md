@@ -2133,6 +2133,9 @@ medium priority — the effective top of what's actually open.
    lowest resource use of any wallpaper daemon. It keeps its own backlog in
    [`docs/scootbg/backlog/`](docs/scootbg/backlog/README.md); serves
    daily-drivability (a desktop needs a wallpaper) rather than computer use.
+   Dependencies decided by measurement 2026-09-26
+   ([record](docs/scootbg/backlog/resolved/dependencies-done.md)); the
+   crate itself is next.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

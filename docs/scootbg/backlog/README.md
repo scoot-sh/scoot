@@ -20,8 +20,13 @@ to change it, a `[wallpaper]` section in scoot's config, and numbers
 showing it is the lightest. Roughly in order; each is one PR through the
 full per-feature cycle.
 
-1. [Choosing dependencies](dependencies.md) — research, decided before code
-   against the [weight budget](lightest.md)
+1. [**Choosing dependencies**](resolved/dependencies-done.md) — RESOLVED
+   2026-09-26, by measurement: plain `wayland-client`, `zune-jpeg` +
+   `png` + `image-webp` directly, `pic-scale-safe` (no `unsafe`), a
+   hand-rolled CLI, `serde_json` for the socket, a line-format state file,
+   and a pure-Rust large-allocation allocator to return the heap. No C
+   beyond std's, and the only `unsafe` sits in a small `scootbg-mem`
+   crate
 2. [The crate, the daemon and the control socket](crate-and-daemon.md)
 3. [One background layer surface per output, across hotplug](outputs-and-layer-surfaces.md)
 4. [Solid colours through single-pixel buffers](solid-colour.md)

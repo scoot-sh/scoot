@@ -23,3 +23,17 @@ blocked: null
   outputs at runtime; otherwise note the gap and cover it on `--tty`.
 - Fuzz the image-loading entry point with truncated and corrupt files
   (the decoders are third-party; the guard is ours).
+- A `cargo fuzz` target over the whole path, decode + crop + scale +
+  pack, since `pic-scale-safe` has no fuzzing upstream. It should take
+  arbitrary bytes and odd target sizes: 1×1, 1×N, primes, sizes larger
+  than the source, and extreme aspect ratios. Any panic is a finding,
+  because under `panic = "abort"` a panic kills the daemon.
+- Unit tests for `scootbg-mem`'s allocator:
+  - allocations and reallocations across the 128 KiB threshold in both
+    directions;
+  - `alloc_zeroed` on both paths;
+  - an alignment above the page size (must go to `System`);
+  - a stress loop from several threads.
+
+  For the shm buffer, a test that truncating the memfd is refused once
+  the seals are set.
