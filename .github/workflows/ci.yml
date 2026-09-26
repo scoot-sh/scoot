@@ -61,11 +61,14 @@ jobs:
   # Which kinds of file a pull request changes, so a docs-only PR (every
   # changed path a `*.md` file or under `docs/`) does not spend ~10 minutes
   # rebuilding Smithay to test Markdown: nothing in the build or the tests
-  # reads those files. A job-level `if` rather than a workflow-level
-  # `paths:` filter, because a skipped job reports success to a required
-  # status check, while a workflow that never starts leaves the check
-  # waiting forever. Pushes to main always run everything. When scootbg
-  # gets code, this is where its own path set goes (see
+  # reads those files (if a crate ever does, say an `include_str!` of a
+  # README, narrow the pattern below). `--no-renames` so a code file moved
+  # into docs/ or renamed to .md still counts as a code change: rename
+  # detection would list only its new path. A job-level `if` rather than a
+  # workflow-level `paths:` filter, because a skipped job reports success
+  # to a required status check, while a workflow that never starts leaves
+  # the check waiting forever. Pushes to main always run everything. When
+  # scootbg gets code, this is where its own path set goes (see
   # docs/scootbg/backlog/crate-and-daemon.md).
   changes:
     name: Changed paths
@@ -85,7 +88,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           code=true
-          if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only HEAD^1 HEAD) && [ -n "$changed" ]; then
+          if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$changed" ]; then
             printf 'Changed:\n%s\n' "$changed"
             if ! printf '%s\n' "$changed" | grep -vE '(\.md$|^docs/)' >/dev/null; then
               code=false
@@ -97,7 +100,9 @@ jobs:
   linux:
     name: Linux (compositor)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    # Fail open: only an explicit `false` skips, so a failed `changes` job
+    # (empty output) still runs this one instead of skipping it green.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     # 90, not 60, since the xwayland step (last) rebuilds Smithay a third
     # time and runs the whole scoot suite again under that feature.
@@ -424,7 +429,9 @@ jobs:
     # provides (it drops x86_64-darwin; see the comment there).
     name: macOS (scootctl client)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    # Fail open: only an explicit `false` skips, so a failed `changes` job
+    # (empty output) still runs this one instead of skipping it green.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 30
     env:

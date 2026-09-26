@@ -37,10 +37,14 @@ The first real PR, and the one that creates the crate.
 
   | Changed | Runs |
   |---|---|
-  | `crates/scoot*`, `crates/scootctl`, `scripts/smoke-test.sh`, `vm/compositor-deps.nix` | the scoot jobs |
-  | `crates/scootbg` | a scootbg job (fmt, clippy, tests) |
+  | `crates/scoot/`, `crates/scoot-core/`, `crates/scoot-ipc/`, `crates/scootctl/`, `scripts/smoke-test.sh`, `vm/compositor-deps.nix` | the scoot jobs |
+  | `crates/scootbg/` | a scootbg job (fmt, clippy, tests) |
   | `Cargo.toml`, `Cargo.lock`, `flake.*`, `nix/`, `.github/` | everything |
+  | anything not listed (`.config/nextest.toml`, `resources/`, `devenv.*`, other `scripts/` and `vm/` files, `LICENSE`) | everything |
   | either side | the scootbg-on-headless-scoot integration test |
+
+  Match on directory prefixes with the trailing slash: `crates/scoot*`
+  would also match `crates/scootbg`.
 
   The integration test runs for both because the `apply-config` contract
   couples them: a scoot change can break scootbg's end-to-end run and the
