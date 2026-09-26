@@ -698,6 +698,11 @@ pub struct State {
     /// params object is consumed or destroyed -- see
     /// `dmabuf/pending_planes.rs`, which owns the policy and the number.
     pub(super) pending_planes: super::dmabuf::pending_planes::PendingPlanes,
+    /// How many live `xdg_toplevel`s each Wayland client has. Claimed in
+    /// `add_window` before the window enters the core, released in
+    /// `remove_window` -- see `toplevel_cap.rs`, which owns the policy and
+    /// the number.
+    pub(super) toplevel_cap: super::toplevel_cap::ToplevelCap,
     /// Every fd each Wayland client has handed this compositor that it
     /// keeps (shm pools, dma-buf planes, syncobj timelines), recorded by
     /// number on arrival and forgotten once it really closes -- which is
@@ -1077,6 +1082,7 @@ impl State {
             shm_pools: ShmPools::default(),
             wl_buffers: WlBuffers::default(),
             pending_planes: Default::default(),
+            toplevel_cap: Default::default(),
             client_fds: Default::default(),
             drm_syncobj: Default::default(),
             imports_dmabufs: false,

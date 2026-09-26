@@ -23,9 +23,14 @@
 //!   or by number) replace it with where the user put it; that is
 //!   `floating_move.rs`.
 
-use super::tree::{Anchor, Floating, Slot};
+use std::collections::{HashMap, HashSet};
+
+use super::arrange::Placement;
+use super::floating_move::floating_rect;
+use super::tree::{Anchor, Floating, Output, Slot};
 use super::{Location, World};
-use crate::geometry::{Point, Size};
+use crate::geometry::{Point, Rect, Size};
+use crate::layout;
 use crate::types::WindowId;
 
 /// How many parents [`World::descends_from`] follows before giving up.
@@ -214,9 +219,9 @@ impl World {
     /// otherwise `None`, which centres it on the output's usable area. A
     /// parent scrolled out of view has no part there.
     ///
-    /// Reads a whole arrangement, which is fine for something that happens
-    /// once per float (or per output change) and would not be on `arrange`'s
-    /// own per-frame path.
+    /// A single-window query ([`World::window_rect`]), never a whole
+    /// arrangement: this runs once per float, and floating n windows must
+    /// not cost n arrangements.
     fn parent_centre(&self, id: WindowId, loc: Location) -> Option<Point> {
         let parent = self.windows.get(&id)?.info.parent?;
         if parent == id {
@@ -227,25 +232,108 @@ impl World {
             return None;
         }
         let output = &self.outputs[loc.output];
-        let arrangement = self.arrange();
-        let placed = arrangement.get(parent)?;
+        let rect = self.window_rect(parent, parent_loc)?;
+        centre_in(output, rect)
+    }
+
+    /// [`World::parent_centre`] against one arrangement computed for all the
+    /// windows being re-centred, rather than one query each: what
+    /// [`World::recentre_floating`] reads. The arrangement is the same one
+    /// `arrange` would return, so the answer matches `parent_centre`'s.
+    fn parent_centre_in(
+        &self,
+        placements: &HashMap<WindowId, &Placement>,
+        id: WindowId,
+        loc: Location,
+    ) -> Option<Point> {
+        let parent = self.windows.get(&id)?.info.parent?;
+        if parent == id {
+            return None;
+        }
+        let parent_loc = self.locate(parent)?;
+        if parent_loc.output != loc.output || parent_loc.workspace != loc.workspace {
+            return None;
+        }
+        let output = &self.outputs[loc.output];
+        let placed = placements.get(&parent)?;
         if placed.output != output.id {
             return None;
         }
-        let shown = placed.rect.intersection(output.usable);
-        if shown.w <= 0 || shown.h <= 0 {
-            return None;
+        centre_in(output, placed.rect)
+    }
+
+    /// Where one window is placed, without arranging anything else: the
+    /// single-window query [`World::parent_centre`] centres a floating
+    /// window on its parent with. `None` for a window that is not placed
+    /// (unknown, or waiting for an output).
+    ///
+    /// Reads the same numbers `arrange` places with -- the strip spans and
+    /// heights for a tiled window (a fullscreen column exactly where
+    /// `place_fullscreen_column` puts it), [`floating_rect`] for a floating
+    /// one (a fullscreen one over its whole output, as `place_floating`
+    /// does) -- so this agrees with `arrange().get(id).rect` wherever both
+    /// answer. `world/tests/floating.rs` pins that agreement on every shape
+    /// it matters on.
+    pub(super) fn window_rect(&self, id: WindowId, loc: Location) -> Option<Rect> {
+        let output = self.outputs.get(loc.output)?;
+        let window = self.windows.get(&id)?;
+        match loc.slot {
+            Slot::Floating { .. } => {
+                if window.fullscreen.is_some() {
+                    let area = output.area;
+                    Some(Rect::new(area.x, area.y, area.w.max(1), area.h.max(1)))
+                } else {
+                    Some(floating_rect(window, output).rect)
+                }
+            }
+            Slot::Tiled { column, index } => {
+                self.strip_rect(loc.output, loc.workspace, column, index)
+            }
         }
-        Some(Point::new(
-            shown
-                .x
-                .saturating_add(shown.w / 2)
-                .saturating_sub(output.area.x),
-            shown
-                .y
-                .saturating_add(shown.h / 2)
-                .saturating_sub(output.area.y),
-        ))
+    }
+
+    /// Where the `index`-th window of the `column`-th column of workspace `w`
+    /// of output `o` is placed: the one frame of `place_strip`'s work that
+    /// window needs. `None` past any end of the tree.
+    ///
+    /// The spans, starts and heights are computed the way `place_strip`
+    /// computes them, for the whole workspace and column -- a few small
+    /// transient vectors on a window-open path, not per frame -- so this
+    /// stays bit-identical with the arrangement rather than drifting from
+    /// it with a hand-rolled prefix.
+    fn strip_rect(&self, o: usize, w: usize, column: usize, index: usize) -> Option<Rect> {
+        let output = self.outputs.get(o)?;
+        let ws = output.workspaces.get(w)?;
+        let col = ws.columns.get(column)?;
+        col.windows.get(index)?;
+        let gap = self.config.gap;
+        let usable = output.usable.inset(gap);
+        let spans = self.column_spans(ws, usable.w, output.area.w);
+        let (starts, _) = layout::starts(spans.iter().map(|span| span.width), gap);
+        let (start, span) = starts.get(column).zip(spans.get(column))?;
+        if span.fullscreen.is_some() {
+            // `place_fullscreen_column`'s frame: the covering column is the
+            // output's whole area, any other fullscreen column its strip
+            // slot at the output's size.
+            let area = output.area;
+            let (w, h) = (area.w.max(1), area.h.max(1));
+            if column == ws.focused {
+                return Some(Rect::new(area.x, area.y, w, h));
+            }
+            let x = usable.x.saturating_add(*start).saturating_sub(ws.view_x);
+            return Some(Rect::new(x, area.y, w, h));
+        }
+        let width = span.width;
+        // Saturating, like `place_strip`: see its comment.
+        let x = usable.x.saturating_add(*start).saturating_sub(ws.view_x);
+        let heights = self.column_heights(col, usable.h);
+        let mut y = usable.y;
+        for height in heights.iter().take(index) {
+            // `place_strip`'s own step, plain adds and all.
+            y += *height + gap;
+        }
+        let height = *heights.get(index)?;
+        Some(Rect::new(x, y, width, height))
     }
 
     /// Re-centres floating windows whose output changed under them -- an
@@ -255,15 +343,43 @@ impl World {
     /// names somewhere else: a dialog centred on a 4K output would be
     /// clamped into a corner of a 1080p one. Ids that are not floating (or
     /// not placed) are skipped.
+    ///
+    /// One arrangement for all of them: each window is then map lookups
+    /// (the index below, and one walk of the tree instead of one `locate`
+    /// per window), so re-centring n windows is linear, not n arrangements
+    /// -- or n tree walks -- quadratic.
     pub(super) fn recentre_floating(&mut self, ids: &[WindowId]) {
-        for &id in ids {
-            let Some(loc) = self.locate(id) else {
-                continue;
-            };
-            if !matches!(loc.slot, Slot::Floating { .. }) {
-                continue;
+        if ids.is_empty() {
+            return;
+        }
+        let arrangement = self.arrange();
+        let mut by_id = HashMap::with_capacity(arrangement.placements.len());
+        for placement in &arrangement.placements {
+            by_id.insert(placement.id, placement);
+        }
+        let wanted: HashSet<WindowId> = ids.iter().copied().collect();
+        // Collected first: the walk borrows the tree, the update writes it.
+        // One small vector on an output-change path, not per frame.
+        let mut anchors = Vec::new();
+        for (o, output) in self.outputs.iter().enumerate() {
+            for (w, ws) in output.workspaces.iter().enumerate() {
+                for (index, &id) in ws.floating.iter().enumerate() {
+                    if !wanted.contains(&id) {
+                        continue;
+                    }
+                    let loc = Location {
+                        output: o,
+                        workspace: w,
+                        slot: Slot::Floating { index },
+                    };
+                    anchors.push((
+                        id,
+                        self.parent_centre_in(&by_id, id, loc).map(Anchor::centred),
+                    ));
+                }
             }
-            let anchor = self.parent_centre(id, loc).map(Anchor::centred);
+        }
+        for (id, anchor) in anchors {
             if let Some(floating) = self.windows.get_mut(&id).and_then(|w| w.floating.as_mut()) {
                 floating.anchor = anchor;
             }
@@ -399,4 +515,25 @@ impl World {
         }
         self.fix_view(output);
     }
+}
+
+/// The middle of the part of `rect` inside `output`'s usable area, relative
+/// to the output's area origin -- what [`World::parent_centre`] and
+/// [`World::parent_centre_in`] both centre a floating window on. `None`
+/// when no part of it is there.
+fn centre_in(output: &Output, rect: Rect) -> Option<Point> {
+    let shown = rect.intersection(output.usable);
+    if shown.w <= 0 || shown.h <= 0 {
+        return None;
+    }
+    Some(Point::new(
+        shown
+            .x
+            .saturating_add(shown.w / 2)
+            .saturating_sub(output.area.x),
+        shown
+            .y
+            .saturating_add(shown.h / 2)
+            .saturating_sub(output.area.y),
+    ))
 }

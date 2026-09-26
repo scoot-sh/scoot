@@ -20,9 +20,16 @@ mod tests;
 
 impl State {
     /// Registers a new toplevel with the core, which decides where it goes.
+    ///
+    /// Refused, and its client disconnected, past the client's live-toplevel
+    /// cap (see `toplevel_cap.rs`): the window then reaches neither the core
+    /// nor any other list.
     pub fn add_window(&mut self, surface: ToplevelSurface) {
         self.next_id += 1;
         let id = WindowId(self.next_id);
+        if !self.claim_toplevel(&surface, id) {
+            return;
+        }
         self.windows.insert(id, Window::new_wayland_window(surface));
         // Its first commit decides whether it floats (see `floating.rs`).
         // Only an xdg window's: an X window decides at its map request (see
@@ -71,6 +78,10 @@ impl State {
     }
 
     pub fn remove_window(&mut self, id: WindowId) {
+        // Releases the toplevel cap's claim first, so the count follows the
+        // window on every path here -- an xdg destroy, a disconnect, an X
+        // window's death (which was never claimed, and releases nothing).
+        self.toplevel_cap.release(&id);
         // A drag of this window ends now rather than at the next motion; the
         // `apply()` below is the one it asks for.
         if self.floating_grab_window() == Some(id) {

@@ -63,6 +63,7 @@ mod single_pixel_buffer;
 mod state;
 mod subsurface_depth;
 mod tablet;
+mod toplevel_cap;
 mod toplevel_icon;
 mod tty;
 mod wayland_accept;

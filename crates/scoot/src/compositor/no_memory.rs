@@ -7,9 +7,11 @@
 //! planes. Those bounds disconnect with `no_memory` instead ("server is out
 //! of memory"): it is the code libwayland servers send when a client's
 //! demands cannot be met, and it names the reason. The callers are
-//! `drm_syncobj/acquire.rs` (outstanding acquire waits) and
+//! `drm_syncobj/acquire.rs` (outstanding acquire waits),
 //! `dmabuf/pending_planes.rs` (an `add` past the plane fds held before
-//! `create`, or past the client's fds in the fd ledger, `client_fds.rs`).
+//! `create`, or past the client's fds in the fd ledger, `client_fds.rs`)
+//! and `toplevel_cap.rs` (an `xdg_toplevel` past the client's live-toplevel
+//! cap).
 
 use smithay::reexports::wayland_server::backend::protocol::{Interface, ProtocolError};
 use smithay::reexports::wayland_server::{Client, DisplayHandle};

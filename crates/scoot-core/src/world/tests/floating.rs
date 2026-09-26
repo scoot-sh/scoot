@@ -920,3 +920,70 @@ fn a_dialog_that_waited_for_an_output_is_centred_on_its_parent_there() {
         visible_centre(parent.rect, usable)
     );
 }
+
+/// The single-window query (`window_rect`, what `parent_centre` centres on)
+/// agrees with the arrangement for every window, on every shape it matters
+/// on: stacked columns, a covering and a non-covering fullscreen column, a
+/// scrolled strip, floating windows (a dialog chain and a fullscreen one),
+/// an inactive workspace, and a second output. This is what keeps the query
+/// from drifting from `place_strip` / `place_floating_window`.
+#[test]
+fn every_single_window_query_matches_the_arrangement() {
+    let mut world = world();
+    for id in 1..=8 {
+        open(&mut world, id);
+        draw(&mut world, id, 485, 580);
+        if id % 3 == 0 {
+            world.handle_action(Action::ConsumeOrExpel(Horizontal::Left));
+        }
+    }
+    // Fullscreen on the focused column (covering) and, after moving focus
+    // away, on a column that no longer covers.
+    world.handle_action(Action::FocusWindowId(WindowId(2)));
+    world.handle_action(Action::ToggleFullscreen);
+    world.handle_action(Action::FocusWindowId(WindowId(8)));
+    world.handle_action(Action::ToggleFullscreen);
+    // A dialog chain on a tiled parent, and a fullscreen dialog above them.
+    open_with(&mut world, 9, with_parent(3));
+    float_on_map(&mut world, 9);
+    draw(&mut world, 9, 200, 100);
+    open_with(&mut world, 10, with_parent(9));
+    float_on_map(&mut world, 10);
+    draw(&mut world, 10, 200, 100);
+    world.handle_event(Event::FullscreenRequested {
+        id: WindowId(10),
+        fullscreen: true,
+    });
+    // An inactive workspace with its own strip and a fullscreen column.
+    world.handle_action(Action::FocusWorkspace(Vertical::Down));
+    for id in 11..=13 {
+        open(&mut world, id);
+        draw(&mut world, id, 485, 580);
+    }
+    world.handle_action(Action::ToggleFullscreen);
+    // A second output with tiled and floating windows.
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(2),
+        area: Rect::new(1000, 0, 800, 600),
+    });
+    world.handle_action(Action::FocusOutput(OutputId(2)));
+    for id in 14..=15 {
+        open(&mut world, id);
+        draw(&mut world, id, 300, 200);
+    }
+    open_with(&mut world, 16, with_parent(14));
+    float_on_map(&mut world, 16);
+    draw(&mut world, 16, 200, 100);
+
+    let arrangement = world.arrange();
+    assert!(arrangement.placements.len() >= 16, "all windows placed");
+    for placement in &arrangement.placements {
+        let loc = world.locate(placement.id).expect("placed, so located");
+        assert_eq!(
+            world.window_rect(placement.id, loc),
+            Some(placement.rect),
+            "query disagrees for {:?}",
+            placement.id
+        );
+    }
+}
