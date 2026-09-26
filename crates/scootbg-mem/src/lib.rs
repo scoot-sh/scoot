@@ -1,15 +1,13 @@
 //! The only `unsafe` code in scootbg.
 //!
 //! `scootbg` itself is `#![forbid(unsafe_code)]`; everything that has to be
-//! `unsafe` lives here, in three small modules a reviewer can read end to
+//! `unsafe` lives here, in two small modules a reviewer can read end to
 //! end:
 //!
 //! - [`alloc`]: the global allocator that gives every block of 128 KiB or
 //!   more its own mapping, so freed heap goes back to the kernel;
 //! - [`shm`]: the sealed-memfd buffer behind a `wl_shm` pool, with the
-//!   "never write after attach" rule enforced by type state;
-//! - [`signal`]: blocking SIGTERM, SIGINT and SIGHUP and waiting for them
-//!   on a thread, so the daemon can exit cleanly on one.
+//!   "never write after attach" rule enforced by type state.
 //!
 //! Every `unsafe` block carries a `// SAFETY:` argument and holds exactly
 //! one unsafe operation (clippy's `undocumented_unsafe_blocks` and
@@ -24,8 +22,6 @@
 
 pub mod alloc;
 pub mod shm;
-pub mod signal;
 
 pub use alloc::LargeAlloc;
 pub use shm::{Attached, ShmBuffer, ShmError};
-pub use signal::TerminationSignals;

@@ -127,18 +127,54 @@ fn the_compositor_going_away_ends_the_daemon_with_an_error() {
     assert!(!session.socket().exists());
 }
 
+/// SIGTERM, SIGINT and SIGHUP keep their default action: the daemon dies
+/// at once and its socket file stays. That must be harmless: the kernel
+/// drops the lock with the process, clients meanwhile report "not running"
+/// (connect gets ECONNREFUSED), and the next daemon replaces the file.
 #[test]
-fn termination_signals_are_a_clean_exit() {
+fn a_signal_kills_the_daemon_and_the_next_one_replaces_its_socket() {
     let Some(session) = Session::start("signals") else {
         return;
     };
+    let lock = session
+        .runtime_dir()
+        .join(format!("scootbg-{}.lock", session.wayland_display));
     for sig in [Signal::TERM, Signal::INT, Signal::HUP] {
         let mut daemon = session.daemon();
         signal(&daemon, sig);
         let status = wait_exit(&mut daemon);
-        assert!(status.success(), "{sig:?}: {status}");
-        assert!(!session.socket().exists(), "{sig:?} left the socket");
+        assert_eq!(
+            std::os::unix::process::ExitStatusExt::signal(&status),
+            Some(sig.as_raw()),
+            "{sig:?}: {status}"
+        );
+        // The dead daemon's socket file is still there, nothing listens.
+        assert!(is_socket(&session.socket()), "{sig:?}: socket file gone");
+        assert!(!common::answers(&session.socket()));
+        // The lock was released with the process.
+        let file = std::fs::OpenOptions::new().write(true).open(&lock).unwrap();
+        rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+            .unwrap_or_else(|e| panic!("{sig:?}: lock still held: {e}"));
+        drop(file);
+
+        // Clients say "not running", with exit status 1.
+        for command in ["query", "version", "kill"] {
+            let out = session.run(&[command]);
+            assert_eq!(out.status.code(), Some(1), "{sig:?} {command}");
+            assert!(
+                stderr(&out).contains("no scootbg daemon is running"),
+                "{sig:?} {command}: {}",
+                stderr(&out)
+            );
+        }
     }
+    // The next daemon replaces the stale file and serves.
+    let mut daemon = session.daemon();
+    let query = session.run(&["query"]);
+    assert!(query.status.success(), "{}", stderr(&query));
+    assert!(session.run(&["kill"]).status.success());
+    assert!(wait_exit(&mut daemon).success());
+    assert!(!session.socket().exists());
 }
 
 #[test]

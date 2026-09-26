@@ -45,9 +45,11 @@ USAGE:
 Connects to the compositor named by $WAYLAND_DISPLAY, which must support
 wlr-layer-shell, and serves requests on $XDG_RUNTIME_DIR/scootbg-NAME.sock.
 
-Runs until `scootbg kill`, SIGTERM, SIGINT or SIGHUP (exit status 0), or
-until the compositor goes away (exit status 1). Either way the socket is
-removed.
+Runs until `scootbg kill` (exit status 0) or until the compositor goes
+away (exit status 1); either way the socket is removed. SIGTERM, SIGINT and
+SIGHUP end it at once and leave the socket file behind; that is harmless:
+other commands then report no daemon running, and the next `scootbg daemon`
+replaces the file.
 
 One daemon per display: a second one exits with an error while the first
 is alive. A socket left behind by a daemon that crashed is replaced.
@@ -83,6 +85,10 @@ USAGE:
 
 Returns once the daemon has removed its socket and closed the connection,
 so a new `scootbg daemon` can start straight after.
+
+Exit status: 0 once the daemon has stopped; 1 with \"no scootbg daemon is
+running\" when none answers (none started, or it died and left its socket
+file behind); 1 for any other error.
 ";
 
 /// Which help text to print.

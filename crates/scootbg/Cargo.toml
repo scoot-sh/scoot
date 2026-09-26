@@ -12,7 +12,7 @@ license.workspace = true
 # other target the binary is a stub that says so (see `src/main.rs`).
 [target.'cfg(target_os = "linux")'.dependencies]
 # The only `unsafe` scootbg has: the large-allocation global allocator,
-# the wl_shm buffer mapping and the signal wait (§6b, §11).
+# and the wl_shm buffer mapping (§6b, §11).
 scootbg-mem.workspace = true
 # The Wayland client, plain, no toolkit: 41 KB and 6 s of build lighter
 # than smithay-client-toolkit at identical idle cost (§1). Its pure-Rust
@@ -32,7 +32,7 @@ rustix = { version = "1", default-features = false, features = ["std", "event", 
 serde.workspace = true
 serde_json.workspace = true
 
-# The integration tests send signals to the daemon they start. Dev-only:
-# the binary itself never sends one.
+# The integration tests signal the daemon they start and probe its lock.
+# Dev-only: the binary itself does neither.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "process"] }
+rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }

@@ -3,21 +3,24 @@
 //!
 //! Start-up order matters:
 //!
-//! 1. Termination signals are blocked and handed to a waiting thread,
-//!    before any other thread exists (see `scootbg_mem::signal`).
-//! 2. The control socket is claimed (lock, stale check, bind), so a second
+//! 1. The control socket is claimed (lock, stale check, bind), so a second
 //!    daemon is refused before it touches the compositor, and clients that
 //!    connect during start-up wait in the listen backlog.
-//! 3. The Wayland connection is made and the globals bound.
+//! 2. The Wayland connection is made and the globals bound.
 //!
-//! Then one `poll` over the Wayland fd, the signal pipe, the listener and
-//! each client, with no timeout: when nothing happens the daemon makes no
-//! system call at all. No async runtime and no timers.
+//! Then one thread, one `poll` over the Wayland fd, the listener and each
+//! client, with no timeout: when nothing happens the daemon makes no system
+//! call at all. No async runtime and no timers.
 //!
-//! Every way out removes the socket file first: `kill` (exit 0), SIGTERM,
-//! SIGINT or SIGHUP (exit 0), and the compositor going away or a protocol
-//! error (exit 1). Only a crash leaves it behind, and the next daemon
-//! recognises that by its free lock.
+//! `kill` (exit 0) and the compositor going away or a protocol error
+//! (exit 1) remove the socket file on the way out. **Signals keep their
+//! default action:** SIGTERM, SIGINT or SIGHUP kill the process on the spot
+//! and leave the socket file behind. That is harmless by construction: the
+//! kernel drops the daemon's `flock` with the process, clients get
+//! `ECONNREFUSED` on the dead socket and report "not running", and the next
+//! `scootbg daemon` sees the free lock and replaces the stale file. (Catching
+//! signals would need `unsafe` rustix APIs that are hidden and unstable, as
+//! rustix has no `signalfd`; see crate-and-daemon-done.md.)
 
 mod respond;
 mod wayland;
@@ -30,8 +33,6 @@ use std::io;
 
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
-use scootbg_mem::TerminationSignals;
-use scootbg_mem::signal::WAIT_FAILED;
 use wayland_client::backend::WaylandError as BackendError;
 
 use crate::control::{Claim, ClaimError, Server};
@@ -43,7 +44,7 @@ use wayland::{Wayland, WaylandError};
 /// Why the daemon stopped.
 #[derive(Debug)]
 pub enum Exit {
-    /// `kill` or a termination signal: a clean, requested stop.
+    /// `kill`: a clean, requested stop.
     Stopped,
     /// Anything else: printed, exit status 1.
     Failed(Error),
@@ -51,7 +52,6 @@ pub enum Exit {
 
 #[derive(Debug)]
 pub enum Error {
-    Signals(io::Error),
     Paths(PathError),
     Claim(ClaimError),
     Wayland(WaylandError),
@@ -60,13 +60,11 @@ pub enum Error {
     /// A protocol error, or a dispatch that failed.
     Dispatch(wayland_client::DispatchError),
     Poll(io::Error),
-    SignalWait,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Signals(error) => write!(f, "cannot set up signal handling: {error}"),
             Self::Paths(error) => write!(f, "{error}"),
             Self::Claim(error) => write!(f, "{error}"),
             Self::Wayland(error) => write!(f, "{error}"),
@@ -75,7 +73,6 @@ impl fmt::Display for Error {
             }
             Self::Dispatch(error) => write!(f, "Wayland error: {error}"),
             Self::Poll(error) => write!(f, "poll failed: {error}"),
-            Self::SignalWait => write!(f, "the signal-waiting thread failed"),
         }
     }
 }
@@ -89,7 +86,6 @@ pub fn run() -> Exit {
 }
 
 fn serve() -> Result<(), Error> {
-    let signals = TerminationSignals::install().map_err(Error::Signals)?;
     let paths = paths::from_env().map_err(Error::Paths)?;
     let mut claim = Claim::acquire(&paths).map_err(Error::Claim)?;
     let (wayland, missing) = Wayland::connect().map_err(Error::Wayland)?;
@@ -107,7 +103,7 @@ fn serve() -> Result<(), Error> {
         poll_fds: Vec::new(),
         revents: Vec::new(),
     };
-    let result = daemon.run(&signals, &claim);
+    let result = daemon.run(&claim);
     // Socket and lock first, so a `kill` client that waits for its
     // connection to close finds the path free, and can start a new daemon,
     // once it does.
@@ -130,11 +126,10 @@ struct Daemon {
 
 /// Slot order in the poll set.
 const WAYLAND: usize = 0;
-const SIGNALS: usize = 1;
-const LISTENER: usize = 2;
+const LISTENER: usize = 1;
 
 impl Daemon {
-    fn run(&mut self, signals: &TerminationSignals, claim: &Claim) -> Result<(), Error> {
+    fn run(&mut self, claim: &Claim) -> Result<(), Error> {
         loop {
             self.wayland.dispatch_pending().map_err(Error::Dispatch)?;
             self.flush_wayland()?;
@@ -151,7 +146,6 @@ impl Daemon {
             }
             let wayland_fd = guard.connection_fd();
             fds.push(PollFd::new(&wayland_fd, wayland_events));
-            fds.push(PollFd::new(signals, PollFlags::IN));
             fds.push(PollFd::new(
                 claim.listener(),
                 if listening {
@@ -192,19 +186,6 @@ impl Daemon {
                 }
             } else {
                 drop(guard);
-            }
-
-            if self
-                .revents
-                .get(SIGNALS)
-                .is_some_and(|r| r.intersects(PollFlags::IN))
-            {
-                match signals.take() {
-                    Ok(Some(WAIT_FAILED)) => return Err(Error::SignalWait),
-                    Ok(Some(_)) => return Ok(()),
-                    Ok(None) => {}
-                    Err(error) => return Err(Error::Signals(error)),
-                }
             }
 
             // Clients before accepting, so indices still match the poll set

@@ -1,6 +1,6 @@
 [package]
 name = "scootbg-mem"
-description = "The only unsafe code in scootbg: its allocator, wl_shm buffers and signal wait"
+description = "The only unsafe code in scootbg: its allocator and wl_shm buffers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,12 +12,10 @@ publish = false
 #
 # `rustix` with its `linux_raw` backend (the default on Linux): raw syscalls,
 # no `libc` crate and no C. `mm` for the allocator's and the shm buffer's
-# mappings, `fs` for the sealed memfd, `pipe` for the signal wake-up, and
-# `runtime` for the two signal-mask calls, which rustix has nowhere else.
-# Decided in docs/scootbg/backlog/resolved/dependencies-done.md (§6b, §9,
-# §11); `runtime` is this crate's own addition, see src/signal.rs.
+# mappings, `fs` for the sealed memfd. Decided in
+# docs/scootbg/backlog/resolved/dependencies-done.md (§6b, §9, §11).
 [target.'cfg(target_os = "linux")'.dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "mm", "fs", "pipe", "runtime"] }
+rustix = { version = "1", default-features = false, features = ["std", "mm", "fs"] }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

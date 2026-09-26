@@ -773,8 +773,8 @@ The weakest spot left is wayland-rs: no fuzzing, though only ~10
 
 ## 11. scootbg's own `unsafe`: two modules in one small crate
 
-(The crate PR added a third, `signal.rs`, because rustix has no safe way
-to wait for SIGTERM; see
+(Still two: the crate PR briefly had a third, for waiting on SIGTERM,
+and removed it; see
 [crate-and-daemon-done.md](crate-and-daemon-done.md#departures-from-the-plan-and-why).)
 
 `scootbg` itself is `#![forbid(unsafe_code)]`. All of its `unsafe` lives

@@ -163,12 +163,13 @@ safety are not traded against each other:
 - **`#![forbid(unsafe_code)]` in `scootbg`.** The only `unsafe` is
   isolated in one small crate, `scootbg-mem`:
   - the global allocator that returns large blocks to the kernel;
-  - the `wl_shm` buffer mapping;
-  - blocking SIGTERM, SIGINT and SIGHUP and waiting for them on a thread,
-    so the daemon removes its socket on the way out. rustix has no
-    `signalfd` and no safe `sigaction`, so this is two `rustix::runtime`
-    calls (`sigprocmask`, `sigwait`); added with the daemon, see
-    [its record](backlog/resolved/crate-and-daemon-done.md).
+  - the `wl_shm` buffer mapping.
+
+  Signals are deliberately not caught: SIGTERM and friends kill the daemon
+  with their default action, and the stale socket file it leaves is
+  harmless (a lock, not the file, says a daemon is alive). Catching them
+  would have taken a third `unsafe` module on unstable rustix APIs; see
+  [the record](backlog/resolved/crate-and-daemon-done.md#departures-from-the-plan-and-why).
 
   It is named for what it owns rather than `-sys`, which by Cargo
   convention means bindings to a native library, the one thing it

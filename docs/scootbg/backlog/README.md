@@ -29,8 +29,8 @@ full per-feature cycle.
    crate
 2. [**The crate, the daemon and the control socket**](resolved/crate-and-daemon-done.md)
    — RESOLVED 2026-09-26: `scootbg daemon`, `query`, `version`, `kill`;
-   the socket (lock-guarded), the allocator, the shm buffer type and the
-   signal wait in `scootbg-mem`; the Nix package and the CI split
+   the socket (lock-guarded), the allocator and the shm buffer type in
+   `scootbg-mem`; the Nix package and the CI split
 3. [One background layer surface per output, across hotplug](outputs-and-layer-surfaces.md)
 4. [Solid colours through single-pixel buffers](solid-colour.md)
 5. [The CLI and control protocol](cli-and-ipc.md)

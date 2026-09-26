@@ -83,7 +83,7 @@ pub fn send(request: Request) -> Result<String, Error> {
     };
     match exchange(&mut stream, request) {
         // The daemon closed without answering, and its socket is gone: it
-        // was already stopping (another `kill`, a signal) when this request
+        // was already stopping (another `kill`) when this request
         // arrived. For `kill`, that is the outcome asked for.
         Err(Error::NoReply) if request == Request::Kill && !paths.socket.exists() => {
             Ok(String::new())

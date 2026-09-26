@@ -97,7 +97,7 @@ compositor exit, with tests for the socket lifecycle.
     sealed `SHRINK | GROW | SEAL`; `attach(self)` consumes the writable
     handle and only `Attached::released` gives it back. `Send`, not
     `Sync`. Not used by the daemon yet (ticket 4 onwards).
-  - `signal.rs`: see "Departures" below.
+  - Nothing else: no signal handling (see "Departures" below).
 - **`crates/scootbg`** (`#![forbid(unsafe_code)]`, `LargeAlloc` as
   `#[global_allocator]`), one binary, hand-rolled CLI: `daemon`, `query`,
   `version`, `kill`, `--version`, and `--help` for each. `set`, `clear`
@@ -109,8 +109,8 @@ compositor exit, with tests for the socket lifecycle.
     `wp_fractional_scale_manager_v1` (optional: a one-line note each when
     absent), and binds each `wl_output` as it appears, releasing it on
     `global_remove`. No surfaces.
-  - One thread's `poll` over the Wayland fd, the signal pipe, the
-    listener and each client, with no timeout, and no async runtime or
+  - One thread, one `poll` over the Wayland fd, the listener and each
+    client, with no timeout, and no async runtime or
     timers. The poll set's `Vec` is reused across rounds (a test pins that
     its allocation survives), connection buffers are reused per line, and
     request parsing borrows from the line.
@@ -129,10 +129,14 @@ compositor exit, with tests for the socket lifecycle.
     most 16 accepts per wakeup. If the process ever runs out of fds, a
     spare fd is spent to turn the waiting client away rather than leave
     the listener readable and spin.
-  - Exit: `kill` and SIGTERM/SIGINT/SIGHUP exit 0; a compositor exit, a
-    protocol error or a broken connection exit 1; usage errors exit 2.
-    Every path removes the socket first, and no panic is reachable from
-    input.
+  - Exit: `kill` exits 0; a compositor exit, a protocol error or a
+    broken connection exit 1; usage errors exit 2. Each of those removes
+    the socket first, and no panic is reachable from input. Signals keep
+    their default action (see "Departures").
+  - Clients against no daemon, or a dead daemon's leftover socket (connect
+    gets `ENOENT` or `ECONNREFUSED`), print "no scootbg daemon is running
+    for NAME … start one with `scootbg daemon`" and exit 1; `kill` too,
+    as its `--help` documents.
 - **Nix**: `packages.<linux>.scootbg`, built `-p scootbg` (the `scoot`
   package is unchanged). Linux only: on other systems the crate builds a
   stub `main` that says so, and `scootbg-mem` is empty, so `cargo check
@@ -164,23 +168,30 @@ compositor exit, with tests for the socket lifecycle.
   possibly before the winner has bound. The winner binds straight after
   the lock, before connecting to Wayland, so the window is short, but the
   forwarding `apply-config` must retry its connect briefly.
-- **Signals needed a third `unsafe` module.** The plan put two modules in
-  `scootbg-mem`, and the coordinating design assumed rustix offered a safe
-  `signalfd` or self-pipe. It does not: `signalfd` is in rustix's
-  `not_implemented` list, and its only signal APIs are the `unsafe`,
-  `#[doc(hidden)]`, not-semver-stable `rustix::runtime` functions. A
-  handler through `kernel_sigaction` would also need a per-architecture
-  restorer. So `scootbg-mem/src/signal.rs` blocks the three signals
-  (`kernel_sigprocmask`) before any thread exists and runs one thread
-  (64 KiB stack) that `kernel_sigwait`s and writes the signal number to a
-  pipe the loop polls. That is two `unsafe` calls, with the same
-  documentation bar as the rest. The thread sleeps in the kernel, so idle
-  stays at zero wakeups (measured below). The costs: a dependency on a
-  hidden rustix module (pinned by `Cargo.lock`; a rustix bump could break
-  the build, loudly), and an inherited blocked mask that anything the
-  daemon ever spawns must unblock (it spawns nothing). SIGHUP was added to
-  the ticket's SIGTERM/SIGINT, since a closing terminal sends it and its
-  default action would leave the socket behind.
+- **Signals are not caught; they keep their default action.** The
+  ticket asked for SIGTERM/SIGINT to exit cleanly and remove the socket,
+  through a safe `signalfd` or self-pipe in rustix. **rustix has neither:**
+  `signalfd` is in its `not_implemented` list, and its only signal APIs are
+  the `unsafe`, `#[doc(hidden)]`, not-semver-stable `rustix::runtime`
+  functions (a handler through `kernel_sigaction` would also need a
+  per-architecture restorer). The first version of this PR therefore had a
+  third `unsafe` module in `scootbg-mem`: it blocked TERM/INT/HUP with
+  `kernel_sigprocmask` before any thread existed, and a 64 KiB-stack thread
+  `kernel_sigwait`ed and wrote to a pipe the loop polled.
+  **The coordinating session removed it**, and this is what landed.
+  Cleanup on a signal buys nothing the lock does not already give: the
+  kernel drops the `flock` however the process dies, clients get
+  `ECONNREFUSED` on the leftover file and say "not running", and the next
+  daemon replaces the file. Dropping it removes an `unsafe` module (so
+  `scootbg-mem` is back to exactly its two memory modules and its name
+  stays accurate), the dependency on a hidden rustix API, a blocked signal
+  mask that every future child would inherit, and a thread. The
+  integration test `a_signal_kills_the_daemon_and_the_next_one_replaces_its_socket`
+  pins it: each of TERM, INT and HUP kills the process by that signal, the
+  lock is free straight after, `query`/`version`/`kill` report not running
+  with exit 1, and the next daemon serves. If clean signal exits are ever
+  wanted (a session manager that minds the stale file, say), the options
+  are the hidden rustix API as above, or a rustix release with `signalfd`.
 - **`kill` releases the lock before closing its clients**, so `scootbg
   kill && scootbg daemon` cannot be refused by a daemon still exiting. A
   second, concurrent `kill` whose connection is dropped unanswered as the
@@ -217,17 +228,16 @@ release profile, `cargo build --release -p scootbg`:
 
 | What | Result |
 |---|---|
-| Stripped binary | 680,776 bytes (the Nix package: 681,424) |
+| Stripped binary | 664,288 bytes (680,776 with the signal thread) |
 | `ldd` | `libc.so.6`, `libgcc_s.so.1` (not even `libm`) |
 | `libc` crate in the normal tree | none; rustix build output `cargo:rustc-cfg=linux_raw` |
 | `-sys` crates | `linux-raw-sys`, and `wayland-sys` built with no features |
-| Idle RSS / PSS, 3 s after start | 2,628 / 1,432 kB; heap (`RssAnon`) 176 kB; 2 threads |
-| Idle context switches, both threads, 3 × 30 s | 0, 0, 0 |
+| Idle RSS / PSS / heap, 3 s after start, 3 runs | 2,576 / 1,380 / 164, 2,580 / 1,384 / 164, 2,600 / 1,404 / 164 kB; 1 thread (with the signal thread, interleaved: 2,608–2,624 / 1,412–1,428 / 172–176 kB, 2 threads) |
+| Idle context switches, 3 × 30 s | 0, 0, 0 (with the signal thread: 0, 0, 0) |
 | Idle CPU ticks, 3 × 30 s | 0, 0, 0 |
-| `query` round trip on one connection, 3 × 10,000 | median 27.9 / 26.4 / 26.6 µs, p99 63.3 / 57.7 / 62.3 µs |
+| `query` round trip on one connection, 3 × 10,000 (with the signal thread; the request path is unchanged) | median 27.9 / 26.4 / 26.6 µs, p99 63.3 / 57.7 / 62.3 µs |
 | `scootbg query` as a command, 3 × 100 | 1,654 / 1,688 / 1,636 µs each, process start included |
-| Memory after those ~30,500 requests | RSS 2,628 kB, heap 176 kB: unchanged |
+| Memory after those ~30,500 requests | RSS and heap unchanged (measured with the signal thread) |
 
 The prototype in the dependency record (§1, prototype A) idled at 2,500
-kB RSS and 164 kB heap with no socket, signal thread or allocator
-wrapper; this daemon adds ~130 kB RSS for them.
+kB RSS and 164 kB heap with no socket or allocator wrapper.
