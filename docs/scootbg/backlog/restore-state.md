@@ -23,8 +23,8 @@ blocked: null
   name shifts with start order and stale sockets and is no session
   identity. scoot passes `scoot` (or `scoot-nested`), a sway user's
   autostart can pass `sway`, and sessions with different profiles never
-  restore each other's wallpapers. A daemon started under one profile
-  switches to the profile of the first `apply-config` it receives (see
+  restore each other's wallpapers. A daemon takes its profile from its own
+  `--profile`, and adopts the profile of each `apply-config` it receives (see
   [scoot-integration.md](scoot-integration.md)), so a redundant
   `[autostart]` daemon never splits state across two profiles. Two
   concurrent sessions sharing a

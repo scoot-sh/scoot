@@ -55,8 +55,9 @@ absent). scoot never uses `set`, `clear` or `daemon` itself.
    becomes the daemon itself with the section as its starting point. Two
    racing starts (scoot's and an `[autostart]` entry's, say) are settled
    by the socket bind: the loser forwards to the winner, so the config's
-   values are never dropped. A forwarded `apply-config` carries its
-   profile, and **the daemon adopts it**: from then on it compares,
+   values are never dropped. A daemon started by `apply-config` uses its
+   `--profile`; a forwarded `apply-config` carries its profile, and **the
+   daemon adopts each one**: from then on it compares,
    restores and records (later `scootbg set`s included) in that profile's
    state, whatever profile it started with. The config owns the profile,
    so which process won the bind never changes where state lives.
@@ -134,7 +135,10 @@ documented rather than worked around.
   buffer, scoot shows `background_color`. Measure that gap on `--tty`. If
   it is visible, the goal is to shorten it (commit sooner, decode less),
   not to paint a different placeholder colour, which would be its own
-  flash.
+  flash. A redundant `scootbg daemon` in `[autostart]` that wins the bind
+  first restores the `default` profile, then adopts scoot's, which can
+  flash an old wallpaper; the `[wallpaper]` docs tell users to drop that
+  entry.
 
 ## Finding the binary (packaging)
 
