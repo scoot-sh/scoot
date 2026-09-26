@@ -1,12 +1,22 @@
 ---
-title: "`world.arrange()` runs per output per frame, including no-damage passes"
-status: "open"
-area: "core"
-priority: "low"
+title: "`world.arrange()` runs per output per frame — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# `world.arrange()` runs per output per frame
+# `world.arrange()` runs per output per frame — RESOLVED
+
+RESOLVED 2026-09-26 (PR #267, option (b) hoist). `arrange()` runs once
+per frame tick in `State::render`, threaded as `Option<&Arrangement>`
+(no caching across frames — a cross-tick cache would fail the count==1
+pins). Sound by construction: `arrange(&self)` is pure (zero per-output
+args — a scale/geometry/pointer leak is structurally impossible), the
+draw path never mutates mid-tick, single frame loop for all backends.
+Measured 4–7µs per arrange (~0.3% of a frame); linear in
+windows×(outputs−1). Review re-derived every link + full cheap set
+green (2027/1751).
 
 Filed from `dumb-tier-damage-history-desync.md` (adjacent, priced
 separately -- not fixed there). Not a correctness gap: an optimisation.
