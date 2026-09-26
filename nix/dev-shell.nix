@@ -78,17 +78,26 @@ rec {
 
   # The compositor, and the tests that bind a real wayland socket, need a
   # writable $XDG_RUNTIME_DIR. A login session provides one; a container or
-  # CI shell often doesn't. Only fill the gap, never override a real one:
-  # /run/user/<uid> first (scripts/smoke-test.sh defaults its sockets
-  # there), else a fresh private dir from mktemp. Either must be owned by
-  # us: a predictable path another user created first would put the
-  # compositor's sockets in a directory they control.
+  # CI shell often doesn't. Only fill the gap, never override a real one.
+  # The path must be stable across shell entries -- `scoot msg` in a second
+  # `devenv shell` finds the compositor's socket through it -- and owned by
+  # us, not a symlink, so another user cannot pre-create it and receive the
+  # compositor's sockets. /run/user/<uid> first (scripts/smoke-test.sh
+  # defaults there), then /tmp/scoot-runtime-<uid> (plain /tmp, not
+  # $TMPDIR, which `nix develop` deletes on exit), and a one-off mktemp dir
+  # only when both are taken by someone else.
   xdgRuntimeDirHook = lib.optionalString isLinux ''
     if [ -z "''${XDG_RUNTIME_DIR:-}" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
-      XDG_RUNTIME_DIR="/run/user/$(id -u)"
-      mkdir -p -m 0700 "$XDG_RUNTIME_DIR" 2>/dev/null
-      if [ ! -O "$XDG_RUNTIME_DIR" ] || [ ! -w "$XDG_RUNTIME_DIR" ]; then
-        XDG_RUNTIME_DIR="$(mktemp -d "''${TMPDIR:-/tmp}/scoot-runtime.XXXXXX")"
+      XDG_RUNTIME_DIR=
+      for candidate in "/run/user/$(id -u)" "/tmp/scoot-runtime-$(id -u)"; do
+        mkdir -p -m 0700 "$candidate" 2>/dev/null
+        if [ ! -L "$candidate" ] && [ -O "$candidate" ] && [ -w "$candidate" ]; then
+          XDG_RUNTIME_DIR=$candidate
+          break
+        fi
+      done
+      if [ -z "$XDG_RUNTIME_DIR" ]; then
+        XDG_RUNTIME_DIR=$(mktemp -d /tmp/scoot-runtime.XXXXXX)
       fi
       export XDG_RUNTIME_DIR
     fi
