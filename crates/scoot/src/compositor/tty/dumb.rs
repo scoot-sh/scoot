@@ -116,17 +116,19 @@ impl DumbPresenter {
     /// the same value, and `BufferPool::next_age`'s doc for what it means.
     /// A pure peek: pair every call with
     /// [`advance_generation`](Self::advance_generation) once the render it was
-    /// used for has actually happened.
+    /// used for has actually happened *and reported damage* -- an
+    /// empty-damage render freezes Smithay's history, so advancing past it
+    /// desyncs the next frame (see `BufferPool::advance_generation`'s doc).
     pub(super) fn next_buffer_age(&self) -> usize {
         self.buffers.next_age()
     }
 
     /// Must be called exactly once per `render_output` call this presenter's
-    /// [`next_buffer_age`](Self::next_buffer_age) was used for -- see
-    /// `BufferPool::advance_generation`'s doc for why this can't be folded
-    /// into [`present`](Self::present) itself (it must run even when
-    /// `present` isn't called at all, i.e. when nothing was damaged this
-    /// frame).
+    /// [`next_buffer_age`](Self::next_buffer_age) was used for that reported
+    /// damage -- see `BufferPool::advance_generation`'s doc for why a
+    /// damage-free render must not advance, and why this can't be folded
+    /// into [`present`](Self::present) itself (a damaging render whose
+    /// damage ends up written nowhere still consumed history).
     pub(super) fn advance_generation(&mut self) {
         self.buffers.advance_generation();
     }

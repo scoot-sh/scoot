@@ -405,6 +405,73 @@ fn an_unchanged_frame_reports_no_damage_at_age_one_but_full_damage_at_age_zero()
     assert!(third.damage.is_some());
 }
 
+/// The desync `dumb-tier-damage-history-desync.md` records, pinned through
+/// the same decision the frame path gates `advance_generation` on: three
+/// identical frames must report `Some`, `None`, then still `None`. The
+/// empty-damage frame freezes Smithay's history (the early return runs
+/// before `old_damage.push_front` -- the contract test above pins the
+/// `None`-at-1 half of that), so scoot's generation must freeze with it:
+/// the third frame runs at the same age as the second. Advancing
+/// unconditionally (the old `draw_frame_with` behaviour) puts the third
+/// frame at age 2 against a one-entry history, and the tracker answers a
+/// full repaint instead.
+///
+/// The ages below are what `BufferPool` hands these frames under the gate --
+/// 0 (never written), 1 (written by the first render), 1 again (the second
+/// reported no damage, so no advance) -- per `buffers.rs`'s `age` pins, not
+/// invented here. The advance in the loop goes through the production
+/// `history_advanced`, not a copy of its expression.
+/// Neuter check: make `history_advanced` return `true` unconditionally and
+/// the third frame runs at age 2 and reports the whole 64x64 output, not
+/// `None`.
+#[test]
+fn an_empty_damage_frame_freezes_history_so_the_next_identical_frame_is_still_empty() {
+    let mut renderer = PixmanRenderer::new().expect("a cpu renderer");
+    let mut image = renderer
+        .create_buffer(Fourcc::Argb8888, (64, 64).into())
+        .expect("an image");
+    let mut tracker = OutputDamageTracker::new((64, 64), 1.0, Transform::Normal);
+    let buffer = SolidColorBuffer::new((64, 64), [1.0, 0.0, 1.0, 1.0]);
+    // scoot's own generation, advanced only through the gate the frame path
+    // uses; `last_written` mirrors one slot written by every damaging
+    // render, the way `write_region` records it. The two are deliberately
+    // separate arms, as they are in production: the advance models
+    // `draw_frame_with`'s gate (the fix under test), while the record
+    // models `present`/`write_region` running only for a damaging render --
+    // a `None` frame advances nothing anywhere, but an unconditional advance
+    // (the bug) moves the generation while leaving `last_written` behind.
+    let mut generation = 0u64;
+    let mut last_written = None;
+    for (frame, expect_damage) in [true, false, false].into_iter().enumerate() {
+        let age = last_written.map_or(0, |last| (generation - last + 1) as usize);
+        let mut framebuffer = renderer.bind(&mut image).expect("a framebuffer");
+        let element =
+            SolidColorRenderElement::from_buffer(&buffer, (0, 0), 1.0, 1.0, Kind::Unspecified);
+        let rendered = tracker
+            .render_output(
+                &mut renderer,
+                &mut framebuffer,
+                age,
+                &[element],
+                [0.0, 0.0, 0.0, 1.0],
+            )
+            .expect("a render");
+        assert_eq!(
+            rendered.damage.is_some(),
+            expect_damage,
+            "frame {frame} at age {age}: expected damage-{expect_damage}, got {:?}",
+            rendered.damage,
+        );
+        if history_advanced(rendered.damage) {
+            generation += 1;
+        }
+        if rendered.damage.is_some() {
+            last_written = Some(generation);
+        }
+        drop(rendered);
+    }
+}
+
 #[cfg(feature = "gpu-scanout")]
 #[test]
 fn only_an_empty_recording_forces_a_swapchain_reset() {
