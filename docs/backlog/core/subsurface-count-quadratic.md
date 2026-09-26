@@ -44,3 +44,15 @@ commit, so quadratic over a batch. A synchronized child's commit is only
 cached until its parent's commit, which is why that case is cheap. Confirm
 with a profile before fixing; a fix would coalesce the per-commit window
 work to once per dispatch.
+
+## Update 2026-09-26 (PR #254, commit path coalesced — ticket stays open)
+
+The batch-commit half is fixed: `commit()` notes the window in a pooled
+dedup set and one recompute per dirtied window runs at the dispatch flush
+(`compositor/window_commit.rs`), with `observe_frame` moved alongside it.
+Release on the dev VM: desync 1000/3000/10000 → 5.4/14.6/58.2 ms (was
+21.4/301/4397); sync unchanged. Residual, correctly scoped out of that PR:
+teardown measured ~70–100× for 10× N (6–7 ms at N=1000 vs ~500 ms at
+N=10000 in the PR discussion), suggesting surface destruction itself is
+superlinear on the untouched Smithay path — needs its own measurement
+before anyone fixes it.

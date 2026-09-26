@@ -58,9 +58,10 @@
 //!
 //! The one residual staleness is a handler in the *same* batch reading the
 //! bbox for another purpose -- positioning an input-method popup
-//! (`input_method.rs`) or constraining one (`popup_constraint.rs`) when the
-//! client interleaves those requests with subsurface commits in one flush.
-//! That computation sees the pre-batch box and heals at the flush, with no
+//! (`input_method.rs`, the only such reader; the popup-constrain path reads
+//! the space location and core state, never the bbox) when the client
+//! interleaves those requests with subsurface commits in one flush. That
+//! computation sees the pre-batch box and heals at the flush, with no
 //! protocol error either way; damage, frame callbacks and sync state are
 //! unaffected.
 //!
