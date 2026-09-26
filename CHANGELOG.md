@@ -9,6 +9,17 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-26 — one app can no longer freeze the desktop with menus (PR #253)
+
+- **An app that opens popups without bound is disconnected at 128 live
+  `xdg_popup`s.** Until now, thousands of menus open side by side stalled
+  the compositor for seconds (about 0.7 s for 2000, over 7 s for 5000 in
+  release on the dev machine), freezing every other app with it. The 129th
+  popup now disconnects its client with `wl_display.error` `no_memory`
+  ("at most 128 live xdg_popups per client"); closing its popups frees the
+  count, and one app at its bound never stops another from opening menus.
+  Real apps open a handful. Nothing to configure.
+
 ### 2026-09-25 — `scootctl` stays reachable while file-descriptor pressure sheds new apps (PR #252)
 
 - **While scoot is under file-descriptor pressure, `scootctl` keeps

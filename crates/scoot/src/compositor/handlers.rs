@@ -451,7 +451,7 @@ impl XdgShellHandler for State {
     /// the dead one reaped from the tree first, so its own children cannot
     /// be inserted under the dead node (see `Admission::Reused`).
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
-        match super::popup_parent::admit(&surface) {
+        match super::popup_parent::admit(&surface, &mut self.popup_count, &self.display_handle) {
             Admission::Refused => return,
             Admission::Reused => self.popups.cleanup(),
             Admission::Fresh => {}
@@ -464,7 +464,7 @@ impl XdgShellHandler for State {
     /// Closes the popup's record and refuses a destroy that leaves child
     /// popups behind -- see `popup_parent.rs`.
     fn popup_destroyed(&mut self, surface: PopupSurface) {
-        super::popup_parent::popup_destroyed(&surface);
+        super::popup_parent::popup_destroyed(&surface, &mut self.popup_count);
     }
 
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {

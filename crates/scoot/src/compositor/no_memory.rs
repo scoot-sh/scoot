@@ -9,9 +9,10 @@
 //! demands cannot be met, and it names the reason. The callers are
 //! `drm_syncobj/acquire.rs` (outstanding acquire waits),
 //! `dmabuf/pending_planes.rs` (an `add` past the plane fds held before
-//! `create`, or past the client's fds in the fd ledger, `client_fds.rs`)
-//! and `toplevel_cap.rs` (an `xdg_toplevel` past the client's live-toplevel
-//! cap).
+//! `create`, or past the client's fds in the fd ledger, `client_fds.rs`),
+//! `toplevel_cap.rs` (an `xdg_toplevel` past the client's live-toplevel
+//! cap) and `popup_parent.rs` (an `xdg_popup` past the client's live-popup
+//! cap, `popup_count.rs`).
 
 use smithay::reexports::wayland_server::backend::protocol::{Interface, ProtocolError};
 use smithay::reexports::wayland_server::{Client, DisplayHandle};

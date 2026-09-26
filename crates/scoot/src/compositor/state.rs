@@ -703,6 +703,11 @@ pub struct State {
     /// `remove_window` -- see `toplevel_cap.rs`, which owns the policy and
     /// the number.
     pub(super) toplevel_cap: super::toplevel_cap::ToplevelCap,
+    /// How many live `xdg_popup`s each Wayland client has. Claimed in
+    /// `popup_parent::admit` before the popup is tracked, released in
+    /// `popup_parent::popup_destroyed` -- see `popup_count.rs`, which owns
+    /// the policy and the number.
+    pub(super) popup_count: super::popup_count::PopupCount,
     /// Every fd each Wayland client has handed this compositor that it
     /// keeps (shm pools, dma-buf planes, syncobj timelines), recorded by
     /// number on arrival and forgotten once it really closes -- which is
@@ -1083,6 +1088,7 @@ impl State {
             wl_buffers: WlBuffers::default(),
             pending_planes: Default::default(),
             toplevel_cap: Default::default(),
+            popup_count: Default::default(),
             client_fds: Default::default(),
             drm_syncobj: Default::default(),
             imports_dmabufs: false,
