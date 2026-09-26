@@ -2127,15 +2127,20 @@ medium priority — the effective top of what's actually open.
    (nix store paths, typed strings, screenshot paths) a rename would falsify.
    What remains open here is the `scootctl` crate split, which wants its own
    design pass.
-5. **[scootbg](docs/scootbg/README.md), a wallpaper daemon** (planning,
+5. **[scootbg](docs/scootbg/README.md), a wallpaper daemon** (in progress,
    2026-09-26): colours and images per output, one `scootbg set` command,
    a `[wallpaper]` section in scoot's config, and a release gate of the
    lowest resource use of any wallpaper daemon. It keeps its own backlog in
    [`docs/scootbg/backlog/`](docs/scootbg/backlog/README.md); serves
    daily-drivability (a desktop needs a wallpaper) rather than computer use.
    Dependencies decided by measurement 2026-09-26
-   ([record](docs/scootbg/backlog/resolved/dependencies-done.md)); the
-   crate itself is next.
+   ([record](docs/scootbg/backlog/resolved/dependencies-done.md)). Item 2
+   landed in PR #268
+   ([record](docs/scootbg/backlog/resolved/crate-and-daemon-done.md)):
+   `crates/scootbg` and `crates/scootbg-mem`, `scootbg daemon` with its
+   control socket (`query`, `version`, `kill`), the `scootbg` Nix package
+   and a CI split by path. It draws no wallpaper yet; output tracking and
+   layer surfaces are next.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

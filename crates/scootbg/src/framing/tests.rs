@@ -163,3 +163,30 @@ fn a_slow_client_costs_linear_scanning() {
         assert_eq!(buffer.scanned, i);
     }
 }
+
+/// A line at the limit never makes the buffer larger than `max + 1`, so
+/// with the real 64 KiB limit it stays below the allocator's 128 KiB
+/// own-mapping threshold.
+#[test]
+fn capacity_is_capped_at_max_plus_one() {
+    let max = crate::protocol::MAX_REQUEST_LINE;
+    let mut buffer = LineBuffer::new(max);
+    let mut scratch = [0u8; 4096];
+    let data = vec![b'x'; max + 10];
+    let mut source = Trickle {
+        data: &data,
+        step: 4096,
+    };
+    loop {
+        if buffer.next_line() == Some(Line::TooLong) {
+            break;
+        }
+        assert!(buffer.read_from(&mut source, &mut scratch).unwrap() > 0);
+    }
+    assert!(
+        buffer.buf.capacity() <= max + 1,
+        "{}",
+        buffer.buf.capacity()
+    );
+    assert!(buffer.buf.capacity() < scootbg_mem::alloc::THRESHOLD);
+}

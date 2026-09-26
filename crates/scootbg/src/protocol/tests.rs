@@ -38,8 +38,7 @@ fn malformed_json_is_refused() {
         &b"not json"[..],
         b"",
         b"{",
-        b"[]",
-        b"\"query\"",
+        b"[1,",
         b"{\"protocol\":1,\"type\":\"query\"} trailing",
         b"\xff\xfe",
         b"{\"protocol\":\"1\",\"type\":\"query\"}",
@@ -117,4 +116,30 @@ fn replies_append_to_the_buffer() {
     let mut out = b"previous\n".to_vec();
     write_reply(&mut out, &Reply::Ok);
     assert_eq!(out, b"previous\n{\"type\":\"ok\"}\n");
+}
+
+/// The derived `Deserialize` reads a struct from an array too, so
+/// `[1,"kill"]` would stop the daemon. Only an object is a request.
+#[test]
+fn only_an_object_is_a_request() {
+    for line in [
+        &br#"[1,"kill"]"#[..],
+        br#" [1, "query"] "#,
+        b"[]",
+        b"\"query\"",
+        b"1",
+        b"null",
+        b"true",
+    ] {
+        assert!(
+            matches!(parse(line), Err(RequestError::NotAnObject)),
+            "{:?}",
+            String::from_utf8_lossy(line)
+        );
+    }
+    // Leading whitespace before the object is still fine.
+    assert_eq!(
+        parse(b" \t\r\n{\"protocol\":1,\"type\":\"kill\"}").unwrap(),
+        Request::Kill
+    );
 }

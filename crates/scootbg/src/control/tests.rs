@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use rustix::event::PollFlags;
 
 use super::conn::OUT_SOFT_LIMIT;
-use super::{Claim, ClaimError, Conn, Handler, MAX_CONNECTIONS, Server, Status};
+use super::{
+    AcceptError, Claim, ClaimError, Conn, Handler, MAX_CONNECTIONS, Server, Status, classify,
+};
 use crate::paths::{self, Paths};
 use crate::protocol::MAX_REQUEST_LINE;
 
@@ -128,15 +130,13 @@ fn an_overlong_line_gets_an_error_and_a_close() {
         let _ = client.write_all(&big);
         client
     });
-    let mut status = Status::Keep;
-    for _ in 0..1000 {
-        status = service(&mut conn, &mut echo);
-        if status == Status::Close {
-            break;
-        }
-        std::thread::yield_now();
+    // Wall-clock bound, not an iteration count: on a loaded machine the
+    // writer thread may not run for a while.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while service(&mut conn, &mut echo) != Status::Close {
+        assert!(std::time::Instant::now() < deadline, "never closed");
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
-    assert_eq!(status, Status::Close);
     assert_eq!(echo.handled, 0);
     drop(conn);
     let mut client = writer.join().unwrap();
@@ -158,16 +158,24 @@ fn a_client_that_never_reads_stops_being_served() {
         client
     });
     // Keep servicing: once the reply buffer is stuck, the connection asks
-    // only for POLLOUT and handles nothing more.
-    for _ in 0..20_000 {
-        let revents = conn.interest();
-        if revents == PollFlags::OUT {
-            break;
-        }
+    // only for POLLOUT and handles nothing more. Bounded by wall-clock time,
+    // not an iteration count: on a loaded machine the writer thread may not
+    // run for a while, and each round then reads nothing.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while conn.interest() != PollFlags::OUT {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "replies never backed up; handled {}",
+            echo.handled
+        );
+        let before = echo.handled;
         let mut scratch = [0u8; 4096];
         conn.service(PollFlags::IN, &mut scratch, &mut echo);
+        if echo.handled == before {
+            // Nothing arrived yet: let the writer run.
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
-    assert_eq!(conn.interest(), PollFlags::OUT);
     let handled = echo.handled;
     // Servicing again does nothing new while the client does not read.
     let mut scratch = [0u8; 4096];
@@ -320,16 +328,16 @@ fn a_missing_runtime_dir_is_an_error() {
 fn past_the_limit_the_oldest_connection_is_closed() {
     let scratch = Scratch::new("evict");
     let claim = claim(&scratch).unwrap();
-    let mut server = Server::new();
+    let mut server = Server::new(claim.listener()).unwrap();
     let socket = scratch.paths().socket;
     let mut clients: Vec<UnixStream> = (0..MAX_CONNECTIONS)
         .map(|_| UnixStream::connect(&socket).unwrap())
         .collect();
-    server.accept(claim.listener());
+    server.accept(claim.listener()).unwrap();
     assert_eq!(server.conns().len(), MAX_CONNECTIONS);
 
     clients.push(UnixStream::connect(&socket).unwrap());
-    server.accept(claim.listener());
+    server.accept(claim.listener()).unwrap();
     assert_eq!(server.conns().len(), MAX_CONNECTIONS);
     // The first client was closed: it reads EOF.
     let mut buf = [0u8; 1];
@@ -347,15 +355,15 @@ fn past_the_limit_the_oldest_connection_is_closed() {
 fn a_flood_of_connections_is_accepted_in_bounded_batches() {
     let scratch = Scratch::new("flood");
     let claim = claim(&scratch).unwrap();
-    let mut server = Server::new();
+    let mut server = Server::new(claim.listener()).unwrap();
     let socket = scratch.paths().socket;
     let _clients: Vec<UnixStream> = (0..MAX_CONNECTIONS * 3)
         .map(|_| UnixStream::connect(&socket).unwrap())
         .collect();
     // One call takes one batch; the rest stay queued for the next wakeup.
-    server.accept(claim.listener());
+    server.accept(claim.listener()).unwrap();
     assert_eq!(server.conns().len(), MAX_CONNECTIONS);
-    assert!(server.listening());
+    assert!(server.has_spare());
 }
 
 #[test]
@@ -372,4 +380,102 @@ fn after_release_a_new_claim_succeeds_and_the_old_one_leaves_it_alone() {
     assert!(is_socket(&paths.socket));
     assert!(UnixStream::connect(&paths.socket).is_ok());
     drop(second);
+}
+
+/// With no spare fd (spent, or never had), the server still accepts and
+/// serves, and retakes the spare on the next accept. The old code dropped
+/// the listener from the poll set whenever it had no spare, which left the
+/// daemon deaf; there is no such gate any more.
+#[test]
+fn without_a_spare_clients_are_still_accepted_and_the_spare_is_retaken() {
+    let scratch = Scratch::new("nospare");
+    let claim = claim(&scratch).unwrap();
+    let mut server = Server::with_spare(None);
+    assert!(!server.has_spare());
+    let mut client = UnixStream::connect(scratch.paths().socket).unwrap();
+    server.accept(claim.listener()).unwrap();
+    assert!(server.has_spare());
+    assert_eq!(server.conns().len(), 1);
+    client.write_all(b"x\n").unwrap();
+    let mut echo = Echo::default();
+    assert!(server.service(0, PollFlags::IN, &mut echo));
+    assert_eq!(read_available(&mut client), "{\"echo\":1}\n");
+}
+
+/// Out of fds: the oldest client is closed first, then the spare; with
+/// neither, there is nothing to free.
+#[test]
+fn freeing_an_fd_takes_the_oldest_client_then_the_spare() {
+    let scratch = Scratch::new("free");
+    let claim = claim(&scratch).unwrap();
+    let mut server = Server::new(claim.listener()).unwrap();
+    let socket = scratch.paths().socket;
+    let mut first = UnixStream::connect(&socket).unwrap();
+    let _second = UnixStream::connect(&socket).unwrap();
+    server.accept(claim.listener()).unwrap();
+    assert_eq!(server.conns().len(), 2);
+
+    assert!(server.free_an_fd());
+    assert_eq!(server.conns().len(), 1);
+    let mut buf = [0u8; 1];
+    assert_eq!(first.read(&mut buf).unwrap(), 0, "the oldest was closed");
+    assert!(server.free_an_fd());
+    assert!(server.conns().is_empty());
+    assert!(server.has_spare());
+    assert!(server.free_an_fd());
+    assert!(!server.has_spare());
+    assert!(!server.free_an_fd(), "nothing left to free");
+}
+
+#[test]
+fn accept_errors_are_classified_so_none_can_spin() {
+    use rustix::io::Errno;
+    let of = |errno: Errno| classify(&std::io::Error::from_raw_os_error(errno.raw_os_error()));
+    assert_eq!(of(Errno::AGAIN), AcceptError::Drained);
+    for errno in [Errno::INTR, Errno::CONNABORTED, Errno::PROTO, Errno::PERM] {
+        assert_eq!(of(errno), AcceptError::Retry, "{errno:?}");
+    }
+    assert_eq!(of(Errno::MFILE), AcceptError::OutOfFds);
+    assert_eq!(of(Errno::NFILE), AcceptError::OutOfFds);
+    for errno in [Errno::NOMEM, Errno::NOBUFS, Errno::BADF, Errno::INVAL] {
+        assert_eq!(of(errno), AcceptError::Fatal, "{errno:?}");
+    }
+    assert_eq!(
+        classify(&std::io::Error::other("no errno")),
+        AcceptError::Fatal
+    );
+}
+
+/// A listener that has stopped accepting (a `SIGSTOP`ped holder) with its
+/// backlog full: a blocking `connect` probe would wait forever. The probe
+/// is non-blocking, so the claim refuses at once instead of hanging.
+#[test]
+fn a_live_socket_with_a_full_backlog_is_refused_without_hanging() {
+    use rustix::net::{
+        AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with,
+    };
+    let scratch = Scratch::new("backlog");
+    let paths = scratch.paths();
+    let _stopped = UnixListener::bind(&paths.socket).unwrap();
+    let address = SocketAddrUnix::new(&paths.socket).unwrap();
+    let mut held = Vec::new();
+    let full = loop {
+        let fd = socket_with(
+            AddressFamily::UNIX,
+            SocketType::STREAM,
+            SocketFlags::NONBLOCK,
+            None,
+        )
+        .unwrap();
+        match connect(&fd, &address) {
+            Ok(()) => held.push(fd),
+            Err(rustix::io::Errno::AGAIN) => break true,
+            Err(errno) => panic!("unexpected {errno:?}"),
+        }
+        assert!(held.len() < 100_000, "the backlog never filled");
+    };
+    assert!(full);
+    let started = std::time::Instant::now();
+    assert!(matches!(claim(&scratch), Err(ClaimError::Answering { .. })));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
 }

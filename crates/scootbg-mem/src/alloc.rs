@@ -12,7 +12,12 @@
 //! `docs/scootbg/backlog/resolved/dependencies-done.md` §6.
 //!
 //! Nothing in this module allocates or panics: a failure returns null,
-//! which is `GlobalAlloc`'s out-of-memory signal.
+//! which is `GlobalAlloc`'s out-of-memory signal. One caveat below this
+//! module: on 32-bit x86 only, rustix's first system call lazily finds the
+//! vsyscall entry through the auxv, which can allocate and `unwrap()`. No
+//! scootbg target is x86-32, and the daemon makes rustix calls (the socket
+//! claim's `flock`) outside the allocator long before it ever needs a
+//! large block, so the lazy set-up never runs from in here.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::ffi::c_void;
@@ -30,7 +35,7 @@ pub const THRESHOLD: usize = 128 * 1024;
 /// The largest alignment a mapping satisfies, as a constant.
 ///
 /// Every Linux page size is at least 4096 and `mmap` returns page-aligned
-/// memory, so 4096 is correct on every system as a *bound*. It is never
+/// memory, so 4096 is correct on every Linux system as a *bound*. It is never
 /// used as a size. `rustix::param::page_size()` must not be called here: in
 /// rustix 1.1.4 it lazily reads the auxv, which `unwrap()`s on an old
 /// kernel without `/proc` and allocates from inside the allocator on its

@@ -68,6 +68,15 @@ impl LineBuffer {
         let Some(data) = window.get(..n) else {
             return Err(io::Error::other("reader returned more than it was given"));
         };
+        // Grow by doubling, but never past `max + 1`: `extend` alone would
+        // double 64 KiB to 128 KiB for a line near the limit, which is the
+        // allocator's own-mapping threshold (an mmap/munmap per such
+        // connection) and twice what the buffer can ever hold.
+        let needed = self.buf.len() + data.len();
+        if needed > self.buf.capacity() {
+            let target = needed.max(self.buf.capacity() * 2).min(self.max + 1);
+            self.buf.reserve_exact(target - self.buf.len());
+        }
         self.buf.extend_from_slice(data);
         Ok(n)
     }

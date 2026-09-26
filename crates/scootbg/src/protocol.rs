@@ -88,6 +88,10 @@ impl Request {
 #[derive(Debug)]
 pub enum RequestError {
     Malformed(serde_json::Error),
+    /// Valid JSON, but not an object: the derived `Deserialize` would also
+    /// read the struct from an array such as `[1, "kill"]`, which is not
+    /// this protocol.
+    NotAnObject,
     NoProtocol,
     WrongProtocol(u32),
     NoType,
@@ -98,6 +102,7 @@ impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Malformed(error) => write!(f, "malformed request: {error}"),
+            Self::NotAnObject => write!(f, "a request is one JSON object"),
             Self::NoProtocol => write!(f, "request has no `protocol` field"),
             Self::WrongProtocol(got) => write!(
                 f,
@@ -121,6 +126,22 @@ struct Envelope<'a> {
 
 /// Parses one request line (without its newline).
 pub fn parse(line: &[u8]) -> Result<Request, RequestError> {
+    // JSON whitespace is these four bytes; an object is the only value
+    // that starts with `{`. Anything else is refused before serde, which
+    // would otherwise accept the array form of the struct.
+    let first = line
+        .iter()
+        .find(|b| !matches!(b, b' ' | b'\t' | b'\n' | b'\r'));
+    if first != Some(&b'{') {
+        // Keep "malformed" for what is not JSON at all (an empty line
+        // included), so the message says what is wrong.
+        return Err(
+            match serde_json::from_slice::<serde::de::IgnoredAny>(line) {
+                Err(error) => RequestError::Malformed(error),
+                Ok(_) => RequestError::NotAnObject,
+            },
+        );
+    }
     let envelope: Envelope<'_> = serde_json::from_slice(line).map_err(RequestError::Malformed)?;
     match envelope.protocol {
         None => return Err(RequestError::NoProtocol),

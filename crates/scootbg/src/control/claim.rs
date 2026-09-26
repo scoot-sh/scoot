@@ -19,11 +19,12 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::os::unix::fs::{FileTypeExt, OpenOptionsExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 
 use rustix::fs::{FlockOperation, flock};
 use rustix::io::Errno;
+use rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with};
 
 use crate::paths::Paths;
 
@@ -129,6 +130,31 @@ impl Drop for Claim {
     }
 }
 
+/// Whether something is listening on `socket`, without blocking: a
+/// blocking `connect` would wait for room in the backlog of a listener
+/// that has stopped (`SIGSTOP`), hanging start-up. `EAGAIN` (backlog full)
+/// counts as listening; `ECONNREFUSED` and `ENOENT` as not.
+fn answers(socket: &Path) -> Result<bool, ClaimError> {
+    let io_error = |errno: Errno| ClaimError::Io {
+        what: "probe",
+        path: socket.to_path_buf(),
+        error: errno.into(),
+    };
+    let probe = socket_with(
+        AddressFamily::UNIX,
+        SocketType::STREAM,
+        SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
+        None,
+    )
+    .map_err(io_error)?;
+    let address = SocketAddrUnix::new(socket).map_err(io_error)?;
+    match connect(&probe, &address) {
+        Ok(()) | Err(Errno::AGAIN) | Err(Errno::INPROGRESS) => Ok(true),
+        Err(Errno::CONNREFUSED) | Err(Errno::NOENT) => Ok(false),
+        Err(errno) => Err(io_error(errno)),
+    }
+}
+
 fn take_lock(path: &Path) -> Result<File, ClaimError> {
     let file = OpenOptions::new()
         .read(true)
@@ -174,7 +200,7 @@ fn clear_stale(socket: &Path) -> Result<(), ClaimError> {
             socket: socket.to_path_buf(),
         });
     }
-    if UnixStream::connect(socket).is_ok() {
+    if answers(socket)? {
         return Err(ClaimError::Answering {
             socket: socket.to_path_buf(),
         });

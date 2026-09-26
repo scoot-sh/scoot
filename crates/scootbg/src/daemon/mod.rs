@@ -22,6 +22,7 @@
 //! signals would need `unsafe` rustix APIs that are hidden and unstable, as
 //! rustix has no `signalfd`; see crate-and-daemon-done.md.)
 
+mod crash;
 mod respond;
 mod wayland;
 
@@ -55,11 +56,18 @@ pub enum Error {
     Paths(PathError),
     Claim(ClaimError),
     Wayland(WaylandError),
-    /// The compositor closed the connection or it broke.
+    /// The compositor closed the connection with nothing left to read.
+    CompositorGone,
+    /// The connection broke, or the compositor sent a last message (a
+    /// protocol error) before closing it.
     Disconnected(BackendError),
     /// A protocol error, or a dispatch that failed.
     Dispatch(wayland_client::DispatchError),
     Poll(io::Error),
+    /// The listener cannot accept any more (see `control`).
+    Accept(io::Error),
+    /// The spare fd could not be taken at start-up.
+    Spare(io::Error),
 }
 
 impl fmt::Display for Error {
@@ -68,11 +76,19 @@ impl fmt::Display for Error {
             Self::Paths(error) => write!(f, "{error}"),
             Self::Claim(error) => write!(f, "{error}"),
             Self::Wayland(error) => write!(f, "{error}"),
+            Self::CompositorGone => {
+                write!(
+                    f,
+                    "lost the connection to the compositor: it closed the connection"
+                )
+            }
             Self::Disconnected(error) => {
                 write!(f, "lost the connection to the compositor: {error}")
             }
             Self::Dispatch(error) => write!(f, "Wayland error: {error}"),
             Self::Poll(error) => write!(f, "poll failed: {error}"),
+            Self::Accept(error) => write!(f, "cannot accept clients any more: {error}"),
+            Self::Spare(error) => write!(f, "cannot reserve a spare file descriptor: {error}"),
         }
     }
 }
@@ -88,6 +104,8 @@ pub fn run() -> Exit {
 fn serve() -> Result<(), Error> {
     let paths = paths::from_env().map_err(Error::Paths)?;
     let mut claim = Claim::acquire(&paths).map_err(Error::Claim)?;
+    crash::install(paths.socket.clone());
+    let server = Server::new(claim.listener()).map_err(Error::Spare)?;
     let (wayland, missing) = Wayland::connect().map_err(Error::Wayland)?;
     for interface in missing {
         warn(format_args!(
@@ -97,7 +115,7 @@ fn serve() -> Result<(), Error> {
     }
     let mut daemon = Daemon {
         wayland,
-        server: Server::new(),
+        server,
         responder: Responder::default(),
         wayland_wants_write: false,
         poll_fds: Vec::new(),
@@ -138,7 +156,6 @@ impl Daemon {
                 continue;
             };
 
-            let listening = self.server.listening();
             let mut fds: Vec<PollFd<'_>> = reuse(std::mem::take(&mut self.poll_fds));
             let mut wayland_events = PollFlags::IN;
             if self.wayland_wants_write {
@@ -146,14 +163,9 @@ impl Daemon {
             }
             let wayland_fd = guard.connection_fd();
             fds.push(PollFd::new(&wayland_fd, wayland_events));
-            fds.push(PollFd::new(
-                claim.listener(),
-                if listening {
-                    PollFlags::IN
-                } else {
-                    PollFlags::empty()
-                },
-            ));
+            // Always: see `control`'s module docs for why the listener is
+            // never dropped from the set.
+            fds.push(PollFd::new(claim.listener(), PollFlags::IN));
             for conn in self.server.conns() {
                 fds.push(PollFd::new(conn.stream(), conn.interest()));
             }
@@ -177,6 +189,17 @@ impl Daemon {
                 .unwrap_or(PollFlags::empty());
             if wayland.intersects(PollFlags::OUT) {
                 self.wayland_wants_write = false;
+            }
+            if wayland.intersects(PollFlags::HUP | PollFlags::ERR)
+                && rustix::io::ioctl_fionread(guard.connection_fd()).unwrap_or(0) == 0
+            {
+                // The compositor is gone and sent nothing more. Stop here
+                // rather than let the backend read the EOF: without its
+                // `log` feature (which compiles C) it reports that error
+                // with `eprintln!`, a stray line on every exit, and a panic
+                // if stderr is a pipe whose reader has gone. Anything still
+                // readable (a protocol error, say) is read below instead.
+                return Err(Error::CompositorGone);
             }
             if wayland.intersects(PollFlags::IN | PollFlags::HUP | PollFlags::ERR) {
                 match guard.read() {
@@ -205,7 +228,9 @@ impl Daemon {
                 .get(LISTENER)
                 .is_some_and(|r| r.intersects(PollFlags::IN))
             {
-                self.server.accept(claim.listener());
+                self.server
+                    .accept(claim.listener())
+                    .map_err(Error::Accept)?;
             }
         }
     }

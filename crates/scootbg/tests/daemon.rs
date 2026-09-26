@@ -284,6 +284,15 @@ fn hostile_clients_do_not_wedge_the_daemon() {
     noise.push(b'\n');
     stream.write_all(&noise).unwrap();
     assert_eq!(reply_to(&stream)["type"], "error");
+    // The array form of a request is not a request: it must not stop the
+    // daemon.
+    stream.write_all(b"[1,\"kill\"]\n").unwrap();
+    let array = reply_to(&stream);
+    assert_eq!(array["type"], "error");
+    assert!(
+        daemon.try_wait().unwrap().is_none(),
+        "[1,\"kill\"] stopped it"
+    );
     stream
         .write_all(b"{\"protocol\":2,\"type\":\"query\"}\n")
         .unwrap();
@@ -357,4 +366,130 @@ fn a_double_kill_is_harmless() {
     }
     assert!(wait_exit(&mut daemon).success());
     assert!(!session.socket().exists());
+}
+
+/// Out of file descriptors, `kill` still gets through. Under
+/// `RLIMIT_NOFILE` 7 the idle daemon already holds all seven (stdio, lock,
+/// listener, its spare and the Wayland socket), so every accept fails with
+/// `EMFILE`: the first client is admitted on the spare's fd, each later
+/// one by closing the oldest client. The daemon neither goes deaf nor
+/// spins. Needs util-linux `prlimit`; skipped without it.
+#[test]
+fn out_of_file_descriptors_kill_still_works() {
+    let Some(session) = Session::start("nofile") else {
+        return;
+    };
+    if std::process::Command::new("prlimit")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("skipped -- no prlimit on PATH");
+        return;
+    }
+    let mut daemon = session.daemon_via(&["prlimit", "--nofile=7:7", "--"]);
+    let fds = std::fs::read_dir(format!("/proc/{}/fd", daemon.id()))
+        .unwrap()
+        .count();
+    // 7 with the spare held; 6 when the start-up probe's connection took
+    // the spare's slot (it is retaken on the next accept).
+    assert!((6..=7).contains(&fds), "the daemon holds {fds} fds");
+
+    // Idle clients the daemon has to make room for, repeatedly.
+    let idle: Vec<UnixStream> = (0..5)
+        .map(|_| UnixStream::connect(session.socket()).unwrap())
+        .collect();
+    for _ in 0..3 {
+        let query = session.run(&["query"]);
+        assert!(query.status.success(), "{}", stderr(&query));
+    }
+    // Busy-looping would show as CPU time; a few ticks of start-up at most.
+    let stat = std::fs::read_to_string(format!("/proc/{}/stat", daemon.id())).unwrap();
+    let fields: Vec<&str> = stat
+        .rsplit(')')
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .collect();
+    let ticks: u64 = fields[11].parse::<u64>().unwrap() + fields[12].parse::<u64>().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let stat = std::fs::read_to_string(format!("/proc/{}/stat", daemon.id())).unwrap();
+    let fields: Vec<&str> = stat
+        .rsplit(')')
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .collect();
+    let later: u64 = fields[11].parse::<u64>().unwrap() + fields[12].parse::<u64>().unwrap();
+    assert_eq!(
+        later, ticks,
+        "the daemon used CPU while idle: it is spinning"
+    );
+
+    let started = std::time::Instant::now();
+    let kill = session.run(&["kill"]);
+    assert!(kill.status.success(), "{}", stderr(&kill));
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(wait_exit(&mut daemon).success());
+    assert!(!session.socket().exists());
+    drop(idle);
+}
+
+/// Starts `scootbg daemon` with stderr a pipe whose read end is already
+/// closed, so any write to it fails with EPIPE, and waits until it answers.
+fn daemon_with_broken_stderr(session: &Session, extra_env: &[(&str, &str)]) -> std::process::Child {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let mut command = session.scootbg();
+    command
+        .arg("daemon")
+        .stdout(std::process::Stdio::null())
+        .stderr(writer);
+    for (key, value) in extra_env {
+        command.env(key, value);
+    }
+    command.spawn().unwrap()
+}
+
+/// S2 of the #268 review: with stderr broken, the compositor going away
+/// must still be a clean exit 1 with the socket removed, not a panic
+/// (exit 101 in a debug build, SIGABRT under the release profile).
+#[test]
+fn a_broken_stderr_does_not_turn_compositor_exit_into_a_crash() {
+    let Some(mut session) = Session::start("brokenerr") else {
+        return;
+    };
+    let mut daemon = daemon_with_broken_stderr(&session, &[]);
+    let deadline = std::time::Instant::now() + common::PATIENCE;
+    while !common::answers(&session.socket()) {
+        assert!(
+            daemon.try_wait().unwrap().is_none(),
+            "the daemon exited early"
+        );
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    session.kill_compositor();
+    let status = wait_exit(&mut daemon);
+    assert_eq!(status.code(), Some(1), "{status}");
+    assert!(!session.socket().exists());
+}
+
+/// The crash hook, end to end: `WAYLAND_DEBUG=client` makes
+/// `wayland-backend` trace every message with `eprintln!`, which panics on
+/// the broken stderr during start-up. That must be exit 1 with the socket
+/// removed, the same as any lost connection, not an abort.
+#[test]
+fn a_dependency_printing_to_a_broken_stderr_exits_1_and_removes_the_socket() {
+    let Some(session) = Session::start("debugerr") else {
+        return;
+    };
+    let mut daemon = daemon_with_broken_stderr(&session, &[("WAYLAND_DEBUG", "client")]);
+    let status = wait_exit(&mut daemon);
+    assert_eq!(status.code(), Some(1), "{status}");
+    assert!(!session.socket().exists());
+    // The lock is free: a normal daemon starts at once.
+    let mut next = session.daemon();
+    assert!(session.run(&["kill"]).status.success());
+    assert!(wait_exit(&mut next).success());
 }

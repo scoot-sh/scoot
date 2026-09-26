@@ -158,8 +158,13 @@ safety are not traded against each other:
   no `-sys` crate that links a library, no build script that compiles C.
   The honest exception is the Rust standard library itself, which on
   `*-linux-gnu` links glibc, `libm` and `libgcc_s`. `wayland-backend`'s
-  and `wayland-sys`'s C-bringing features (`client_system`, `log`) stay
-  off; turning either on would link libwayland or compile C.
+  and `wayland-sys`'s C-bringing features stay off: `client_system`
+  links libwayland, and `log`, although it only adds the pure-Rust `log`
+  crate as a dependency, makes `wayland-backend/build.rs` compile two C
+  shims (`src/sys/*/log_shim.c`) with `cc`, even for the pure-Rust
+  backend. (Checked against the pinned fork, `70f81e00`.) Without
+  `log`, the backend reports errors with `eprintln!`, so the daemon
+  guards against that instead: see `crates/scootbg/src/daemon/crash.rs`.
 - **`#![forbid(unsafe_code)]` in `scootbg`.** The only `unsafe` is
   isolated in one small crate, `scootbg-mem`:
   - the global allocator that returns large blocks to the kernel;

@@ -335,7 +335,8 @@ a socket left by a dead one is replaced. It exits 0 on `kill` and 1 when
 the compositor goes away, removing its socket either way. A signal
 (SIGTERM, Ctrl-C) ends it on the spot and leaves the socket file; the other
 commands then say no daemon is running (exit 1), and the next
-`scootbg daemon` replaces the file. Colours, images and `scootbg set` are the next items in
+`scootbg daemon` replaces the file. Every command exits 2 on a usage
+error (an unknown command or argument). Colours, images and `scootbg set` are the next items in
 [its backlog](docs/scootbg/backlog/README.md); scoot's `[wallpaper]` config
 section does not exist yet, so do not add one.
 

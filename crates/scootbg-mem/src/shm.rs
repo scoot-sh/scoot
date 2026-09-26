@@ -6,12 +6,15 @@
 //! `int32` and the size comes from the compositor.
 //!
 //! **Never write after attach.** A compositor may read the pages at any
-//! time between `wl_surface.attach` + `commit` and `wl_buffer.release`, and
-//! nothing in the kernel stops it writing them either (Smithay maps client
-//! pools read-write). So the writable handle, [`ShmBuffer`], is consumed by
-//! [`ShmBuffer::attach`], and the [`Attached`] it returns has no way to
-//! reach the pixels; only [`Attached::released`], called on
-//! `wl_buffer.release`, gives a [`ShmBuffer`] back.
+//! time between `wl_surface.attach` + `commit` and `wl_buffer.release`, so
+//! writing then tears what it shows. The type state keeps scootbg's own
+//! code paths to that rule: [`ShmBuffer::attach`] consumes the writable
+//! handle, and the [`Attached`] it returns has no way to the pixels until
+//! [`Attached::released`] gives a [`ShmBuffer`] back. That is a discipline
+//! for callers, not a guarantee: safe code could still clone the fd and
+//! write through it, and nothing checks that `released` is only called on
+//! a real `wl_buffer.release`. Tearing is all a violation costs; it is not
+//! what memory safety rests on (see `pixels_mut`).
 //!
 //! **Sealed.** The memfd is created with `MFD_ALLOW_SEALING` and sealed
 //! `F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL` once sized. The compositor
@@ -166,9 +169,12 @@ impl ShmBuffer {
         fcntl_add_seals(&fd, SealFlags::SHRINK | SealFlags::GROW | SealFlags::SEAL)?;
 
         // SAFETY: a null hint without `MAP_FIXED` cannot replace any
-        // existing mapping. `len` is non-zero and exactly the file's size,
-        // which the seals now keep from shrinking, so every page of the
-        // mapping stays backed and no access through it can SIGBUS.
+        // existing mapping, and `len` is non-zero. It is exactly the
+        // file's size, which the seals keep from shrinking, so no access
+        // through the mapping can fault for lack of a backing page because
+        // someone truncated the file. (A first touch can still fail for
+        // lack of memory, which the kernel handles like any allocation
+        // failure: that is not a memory-safety question.)
         let mapped = unsafe {
             mmap(
                 ptr::null_mut(),
@@ -197,10 +203,21 @@ impl ShmBuffer {
         // SAFETY: `ptr` is valid for reads and writes of `len` bytes for as
         // long as `self.map` lives (it is unmapped only in its `Drop`); the
         // pages are initialised (a memfd reads as zeros until written); and
-        // the returned slice borrows `self` mutably, so it is the only
-        // reference into the mapping from this process. The compositor may
-        // map the same pages, but only once the buffer is attached, and
-        // `attach` consumes `self`, ending this borrow first.
+        // the slice borrows `self` mutably, so it is the only reference
+        // into the mapping from this process.
+        //
+        // Another process maps the same pages: the compositor, from
+        // `wl_shm.create_pool` (which takes `fd()` before any attach) until
+        // it drops the pool, whatever the buffer's state. So `&mut [u8]`'s
+        // "nothing else changes this memory" holds only because the
+        // compositor does not write a client's shm buffers. That is
+        // `wl_shm`'s contract and every compositor's behaviour, not
+        // something the kernel enforces (Smithay maps pools read-write),
+        // and it is the same trust every shm client places in its
+        // compositor, SCTK's and Smithay's included. scootbg also never
+        // reads these pages back, so nothing it decides depends on their
+        // contents even if a compositor broke that contract. Its reads
+        // while scootbg writes only affect what it displays.
         unsafe { std::slice::from_raw_parts_mut(self.map.ptr.as_ptr(), self.map.len) }
     }
 

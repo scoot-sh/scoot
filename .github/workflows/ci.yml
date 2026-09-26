@@ -69,6 +69,14 @@ jobs:
   #   crates/scootctl/, scripts/smoke-test.sh, vm/compositor-deps.nix
   #                                        -> scoot=true  (Linux, macOS)
   #   crates/scootbg/, crates/scootbg-mem/ -> scootbg=true (scootbg job)
+  #     except their Cargo.toml             -> both, because flake.nix
+  #     reads crates/scootbg/Cargo.toml (`nix flake check`) and the macOS
+  #     job's `cargo check --workspace` compiles both crates
+  #
+  # So a scootbg-only PR that is not a manifest change skips the macOS
+  # `cargo check` and `nix flake check` (both in the scoot jobs). Both
+  # crates are cfg'd to nothing off Linux, so a break there is unlikely;
+  # if one lands, it shows on the next push to main, which runs everything.
   #   anything else that is not docs (Cargo.toml, Cargo.lock, flake.*,
   #   nix/, .github/, .config/, resources/, devenv.*, other scripts/ and
   #   vm/ files, LICENSE)                  -> both
@@ -116,6 +124,12 @@ jobs:
                 *.md | docs/*) ;;
                 crates/scoot/* | crates/scoot-core/* | crates/scoot-ipc/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
                   scoot=true ;;
+                # Their manifests are read by jobs outside scootbg's own
+                # (flake.nix takes the package description from one, and
+                # the macOS job checks the workspace), so they run everything.
+                crates/scootbg/Cargo.toml | crates/scootbg-mem/Cargo.toml)
+                  scoot=true
+                  scootbg=true ;;
                 crates/scootbg/* | crates/scootbg-mem/*)
                   scootbg=true ;;
                 *)

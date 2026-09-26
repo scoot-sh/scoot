@@ -126,11 +126,28 @@ compositor exit, with tests for the socket lifecycle.
     clients: the 17th closes the oldest, so stuck clients can never lock
     out `kill`, with no timers. A connection with unsent replies is not
     read (backpressure), and at most ~4 KiB of replies queue per read. At
-    most 16 accepts per wakeup. If the process ever runs out of fds, a
-    spare fd is spent to turn the waiting client away rather than leave
-    the listener readable and spin.
+    most 16 accepts per wakeup.
+  - The listener never leaves the poll set. Out of fds (`EMFILE`/`ENFILE`,
+    acted on only when a zero-timeout poll shows a client really waiting,
+    because Linux reports them before it looks at the queue), the server
+    closes the oldest client, else its spare fd (a `dup` of the listener,
+    so no path such as `/dev/null` can be missing), and accepts the
+    waiting client, so `kill` gets through. With nothing left to close,
+    and for any `accept` error that is not about one connection (`ENOMEM`,
+    `ENOBUFS`, ...), the daemon exits 1, releasing its lock, rather than
+    spin or go deaf. Per-connection errors (`ECONNABORTED`, `EPROTO`, ...)
+    are skipped.
   - Exit: `kill` exits 0; a compositor exit, a protocol error or a
-    broken connection exit 1; usage errors exit 2. Each of those removes
+    broken connection exit 1; usage errors exit 2. A compositor that
+    hangs up with nothing left to read is recognised before
+    `wayland-backend` is asked to read it, because without its `log`
+    feature (which compiles C, see the Standards in
+    [the README](../../README.md)) the backend reports that error with
+    `eprintln!`: a stray line on every exit, and a panic when stderr is a
+    pipe whose reader has gone. For the backend's other `eprintln!` paths
+    (a protocol error, `WAYLAND_DEBUG`), a panic hook removes the socket and
+    turns std's "failed printing to stderr" panic into exit 1; any other
+    panic still aborts, loudly. scootbg's own writes never panic. Each of those removes
     the socket first, and no panic is reachable from input. Signals keep
     their default action (see "Departures").
   - Clients against no daemon, or a dead daemon's leftover socket (connect
@@ -150,7 +167,12 @@ compositor exit, with tests for the socket lifecycle.
   an `ldd` check for anything beyond std's libraries), and a
   `scootbg-integration` job that builds `scoot` and runs
   `crates/scootbg/tests/daemon.rs` with `SCOOTBG_REQUIRE_SCOOT=1`, so it
-  cannot pass by skipping.
+  cannot pass by skipping. A scootbg-only change skips the macOS
+  `cargo check` and `nix flake check` (they live in the scoot jobs), so
+  a break there would first show on main, which runs everything. The two
+  crates' `Cargo.toml`s are the files those jobs read (`flake.nix` takes
+  the package description from one), so a change to either runs
+  everything.
 
 ### Departures from the plan, and why
 
@@ -203,6 +225,33 @@ compositor exit, with tests for the socket lifecycle.
 - **`scootbg --version`** (local) and **`scootbg version`** (asks the
   daemon) are both there, the same split `scootctl` makes.
 
+### Review of PR #268
+
+Fixed before merge, each with a test:
+
+- **Deaf daemon (blocking).** The listener used to leave the poll set
+  whenever the spare fd, then `File::open("/dev/null")`, could not be
+  had. In a mount namespace with an empty `/dev`, `scootbg version` timed
+  out and `kill` gave up after 30 s. Now the spare is a dup of the
+  listener and the listener is always polled (above). Writing the
+  `RLIMIT_NOFILE` test turned up a second bug: Linux's `accept` returns
+  `EMFILE` before looking at the queue, so the server evicted the client
+  it had just admitted. Hence the zero-timeout poll.
+- **Flaky tests.** Two connection tests bounded their waits by an
+  iteration count, not the clock, and failed under a loaded `cargo test`.
+- **Broken stderr → abort.** Above, under Exit.
+- **Overstated safety comments** in `shm.rs`: the compositor maps the
+  pool from `create_pool` on, not from `attach`, so `pixels_mut`'s
+  soundness rests on the compositor not writing client buffers
+  (`wl_shm`'s contract, not a kernel guarantee), which the comment now
+  says; the type state is described as a discipline for scootbg's own
+  code, not a guarantee.
+- **Nits:** a request must be a JSON object (`[1,"kill"]` used to parse
+  and stop the daemon); the stale-socket probe connects non-blocking
+  (a stopped listener with a full backlog hung start-up); a line buffer
+  never grows past 64 KiB + 1, below the allocator's threshold; the CI
+  path split above; exit status 2 in the README.
+
 ### Left for later tickets
 
 - Output tracking, `OutputEntry`'s fields, and layer surfaces:
@@ -228,12 +277,13 @@ release profile, `cargo build --release -p scootbg`:
 
 | What | Result |
 |---|---|
-| Stripped binary | 664,288 bytes (680,776 with the signal thread) |
+| Stripped binary | 672,480 bytes after review (664,288 before it, 680,776 with the signal thread); +8 KB is rustix `net` (the non-blocking probe), the fd-exhaustion handling and the crash hook. Nix package 669,032 |
 | `ldd` | `libc.so.6`, `libgcc_s.so.1` (not even `libm`) |
 | `libc` crate in the normal tree | none; rustix build output `cargo:rustc-cfg=linux_raw` |
 | `-sys` crates | `linux-raw-sys`, and `wayland-sys` built with no features |
 | Idle RSS / PSS / heap, 3 s after start, 3 runs | 2,576 / 1,380 / 164, 2,580 / 1,384 / 164, 2,600 / 1,404 / 164 kB; 1 thread (with the signal thread, interleaved: 2,608–2,624 / 1,412–1,428 / 172–176 kB, 2 threads) |
 | Idle context switches, 3 × 30 s | 0, 0, 0 (with the signal thread: 0, 0, 0) |
+| After review, interleaved with the pre-review binary, 3 rounds | RSS 2,564 / 2,572 / 2,588 kB, PSS 1,368 / 1,376 / 1,392, heap 164, 1 thread, 7 fds, 0 switches and 0 ticks per 30 s (pre-review: 2,588 / 2,600 / 2,568, 1,392 / 1,404 / 1,372, 160–164; a tie); `query` round trip median 27.2 / 26.2 µs against 26.4 / 26.2 |
 | Idle CPU ticks, 3 × 30 s | 0, 0, 0 |
 | `query` round trip on one connection, 3 × 10,000 (with the signal thread; the request path is unchanged) | median 27.9 / 26.4 / 26.6 µs, p99 63.3 / 57.7 / 62.3 µs |
 | `scootbg query` as a command, 3 × 100 | 1,654 / 1,688 / 1,636 µs each, process start included |

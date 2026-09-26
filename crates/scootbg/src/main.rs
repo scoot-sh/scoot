@@ -81,6 +81,8 @@ fn main() -> ExitCode {
 
 #[cfg(not(target_os = "linux"))]
 fn main() -> ExitCode {
-    eprintln!("scootbg: runs on Linux only");
+    use std::io::Write;
+    // Not `eprintln!`, which panics if stderr is a closed pipe.
+    let _ = writeln!(std::io::stderr(), "scootbg: runs on Linux only");
     ExitCode::FAILURE
 }

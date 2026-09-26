@@ -78,3 +78,24 @@ fn the_poll_set_keeps_its_allocation() {
         assert!(fds.capacity() >= 19);
     }
 }
+
+/// The one panic message the crash hook turns into exit 1: std's own for a
+/// failed `print!`/`eprint!`.
+#[test]
+fn the_crash_hook_recognises_stds_broken_stdio_panic() {
+    use super::crash::is_stdio_message;
+
+    // std's `_eprint` cannot be pointed at a test double, so the real
+    // panic, an `eprintln!` into a pipe with no reader, is exercised end
+    // to end in `tests/daemon.rs` (`WAYLAND_DEBUG` with a broken stderr).
+    assert!(is_stdio_message(
+        "failed printing to stderr: Broken pipe (os error 32)"
+    ));
+    assert!(is_stdio_message(
+        "failed printing to stdout: Broken pipe (os error 32)"
+    ));
+    assert!(!is_stdio_message("index out of bounds"));
+    assert!(!is_stdio_message(
+        "called `Option::unwrap()` on a `None` value"
+    ));
+}
