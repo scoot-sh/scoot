@@ -68,6 +68,7 @@ mod toplevel_cap;
 mod toplevel_icon;
 mod tty;
 mod wayland_accept;
+mod window_commit;
 mod window_rules;
 mod wl_buffers;
 mod xwayland;

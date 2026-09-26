@@ -154,9 +154,14 @@ impl CompositorHandler for State {
                 root = parent;
             }
             if let Some(id) = self.id_of(&root) {
-                if let Some(window) = self.window(id) {
-                    window.on_commit();
-                }
+                // Deferred, not skipped: the window's bbox recompute
+                // (`Window::on_commit`, linear in the surface tree) runs once
+                // for the whole dispatch, in the Wayland display source after
+                // `dispatch_clients` -- see `window_commit.rs` for why that
+                // is observably the same and what stays per commit. Calling
+                // it here made N desynchronized sibling commits in one batch
+                // cost N recomputes over a growing tree, i.e. quadratic.
+                self.note_window_commit(id);
                 // Before the initial configure below: an unmap discarded the
                 // window's toplevel state, and the configure that answers the
                 // re-map must not carry a fullscreen it no longer has.
@@ -167,7 +172,15 @@ impl CompositorHandler for State {
                     self.decide_floating_at_map(id);
                 }
                 send_initial_configure(self, &root);
-                self.observe_frame(id);
+                // No `observe_frame` here: it reads the window's bbox, which
+                // is stale until the flush recomputes it -- observing now
+                // would feed the core a pre-batch size paired with this
+                // commit's acked configure, and the core's learned minimums
+                // only ever grow, so a shrink answered mid-batch would stick
+                // a bogus minimum. The flush observes after recomputing
+                // (see `window_commit.rs`); a per-commit observe could only
+                // ever repeat that (identical inputs, a no-op) or precede
+                // it (stale inputs, wrong).
             } else if !self.commit_layer_surface(&root) {
                 // Neither a window nor a layer surface. The layer map was
                 // still checked first, so an ordinary window's commit never
