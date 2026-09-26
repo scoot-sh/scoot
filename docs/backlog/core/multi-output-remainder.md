@@ -60,6 +60,45 @@ unlike a quicker unplug that morning.
    (fresh `DrmCompositor` and EGL context beside a live one), the #48
    `MoveTo` fallback (needs the only lit screen to be pullable), and a mode
    change with several heads.
+
+   **Update 2026-09-26 (dev VM, vkms `Virtual-3`, dumb tier): the
+   Hold/Reconnected halves are now proven live; `MoveTo`, the GPU-tier
+   add and the multi-head mode change stay open.** `scoot --tty --gpu
+   /dev/dri/card1` drove the single virtual head at its preferred
+   1024x768 with a foot window; each forced change was paired with a
+   synthetic `udevadm trigger --subsystem-match=drm --action=change`
+   (vkms `force` writes emit no uevent of their own — `udevadm monitor`
+   shows only `SYNTH_UUID` events — and the synthetic `drm_minor` change
+   for card1 reaches `reconfigure`: card1 is seat-tagged, no "not in
+   udev's list" warning at startup). Binary built from `187da3c` with no
+   code changes; full log at `/tmp/vkms2.log` on the VM, screenshots at
+   `/tmp/v2-{before,hold,reconnected}.png` (hold and reconnected shots
+   byte-identical to before via `cmp`).
+   - **Hold:** `force=off` + trigger → `Device changed: #57857`
+     (226:1, card1) then `drm: nothing is connected to this device any
+     more; holding the last frame`. Output kept (`Virtual-3` 1024x768,
+     never removed), session answered `version`/`outputs`/`windows`,
+     screenshot identical. A second trigger while still disconnected
+     stayed silent (no duplicate WARN, modeset count unchanged) — the
+     once-per-disconnection arm.
+   - **Reconnected:** `force=on` + trigger → `drm: a display is
+     connected again; forcing a modeset`, then `drm: modeset (full
+     commit)` 21 ms later with zero commit-fail/ERROR lines. Output
+     unchanged, screenshot identical, `wlr-randr` still shows 1024x768
+     preferred+current. A further trigger plans `Keep` (`hotplug changed
+     nothing`), proving `nothing_connected` cleared.
+   - **Sentinels:** card0 (the QEMU window) never forced — `Virtual-1`
+     connected / `Virtual-2` disconnected with identical modes before and
+     after; session survived all cycles; seat released, vkms left loaded
+     pristine (`force=unspecified`, empty override) for the follow-ups.
+   - **Rig note for the next run:** a `force` write latches after ~2–5 s
+     — early `modetest`/sysfs reads show the *old* state while scoot's
+     slightly later re-probe already sees the new one. Poll `modetest`
+     to the intended state (up to ~15 s) *before* triggering; never
+     trust the first probe. `force` cannot be written back to
+     `unspecified` (`Invalid argument`) and a stored `edid_override`
+     cannot be cleared — `rmmod`+`modprobe vkms` is the reset (connector
+     name stayed `Virtual-3` across reloads here).
 2. **Reconnect restore and output ids on replug.** Now its own ticket,
    [output-reconnect-restore](../resolved/output-reconnect-restore-done.md)
    (RESOLVED 2026-09-25, PR #249): match a
