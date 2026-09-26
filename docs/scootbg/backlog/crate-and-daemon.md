@@ -14,6 +14,16 @@ The first real PR, and the one that creates the crate.
   MIT, `description` saying "wallpaper daemon for Wayland" (not
   "compositor": it is a client). A short `crates/scootbg/README.md` may
   point at `docs/scootbg/`, which stays the home of its docs.
+- Add `crates/scootbg-mem` beside it: the only `unsafe` in scootbg.
+  - Two modules: the large-allocation global allocator and the `wl_shm`
+    buffer mapping (sealed memfd). Each `unsafe` block carries a
+    `// SAFETY:` comment, enforced by clippy's
+    `undocumented_unsafe_blocks` lint.
+  - Pure Rust (`rustix`, no `libc`), `publish = false`.
+  - `scootbg` is `#![forbid(unsafe_code)]`.
+
+  See the
+  [design and safety arguments](resolved/dependencies-done.md#11-scootbgs-own-unsafe-two-modules-in-one-small-crate).
 - One binary with subcommands: `daemon` runs the Wayland client, and every
   other subcommand is a client of its control socket.
 - Control socket at `$XDG_RUNTIME_DIR/scootbg-$WAYLAND_DISPLAY.sock`, so
@@ -44,13 +54,14 @@ The first real PR, and the one that creates the crate.
   | Changed | Runs |
   |---|---|
   | `crates/scoot/`, `crates/scoot-core/`, `crates/scoot-ipc/`, `crates/scootctl/`, `scripts/smoke-test.sh`, `vm/compositor-deps.nix` | the scoot jobs |
-  | `crates/scootbg/` | a scootbg job (fmt, clippy, tests) |
+  | `crates/scootbg/`, `crates/scootbg-mem/` | a scootbg job (fmt, clippy, tests) |
   | `Cargo.toml`, `Cargo.lock`, `flake.*`, `nix/`, `.github/` | everything |
   | anything not listed (`.config/nextest.toml`, `resources/`, `devenv.*`, other `scripts/` and `vm/` files, `LICENSE`) | everything |
   | either side | the scootbg-on-headless-scoot integration test |
 
   Match on directory prefixes with the trailing slash: `crates/scoot*`
-  would also match `crates/scootbg`.
+  would also match `crates/scootbg`, and `crates/scootbg/` does not match
+  `crates/scootbg-mem/`, which is why both are listed.
 
   The integration test runs for both because the `apply-config` contract
   couples them: a scoot change can break scootbg's end-to-end run and the

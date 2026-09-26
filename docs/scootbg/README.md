@@ -132,9 +132,12 @@ to it over its socket.
 MIT, like the rest of scoot. awww/swww are GPL-3.0 and may inspire the
 design (their feature set is the bar to meet), but no code, shaders or
 assets are copied from them, nor from any other GPL wallpaper daemon.
-Every dependency's licence is checked before it is added. The chosen
-set and its licences are recorded in
-[`backlog/resolved/dependencies-done.md`](backlog/resolved/dependencies-done.md).
+Every dependency's licence is checked before it is added. All of the
+chosen set is permissive and MIT-compatible: MIT, Apache-2.0, Zlib,
+Unlicense, and BSD-3-Clause OR Apache-2.0 for the scaler,
+`pic-scale-safe`, whose notice a binary package carries alongside the
+others. The set and every licence are recorded in
+[`backlog/resolved/dependencies-done.md`](backlog/resolved/dependencies-done.md#8-licences).
 
 ## Standards
 
@@ -143,4 +146,30 @@ scootbg is held to the same bar as the compositor (see the root
 as data loss, edge cases (zero outputs, hotplug mid-decode, a 20000×20000
 image, a truncated file) considered explicitly, benchmarks before and after
 anything on a hot path, and the full per-feature cycle with independent
-review before merge.
+review before merge. On top of that, as the user set it, speed and
+safety are not traded against each other:
+
+- **Pure Rust, no C.** No C calls and no C dependencies: no `libc` crate,
+  no `-sys` crate that links a library, no build script that compiles C.
+  The honest exception is the Rust standard library itself, which on
+  `*-linux-gnu` links glibc, `libm` and `libgcc_s`.
+- **`#![forbid(unsafe_code)]` in `scootbg`.** The only `unsafe` is
+  isolated in one small crate, `scootbg-mem`:
+  - the global allocator that returns large blocks to the kernel;
+  - the `wl_shm` buffer mapping.
+
+  It is named for what it owns rather than `-sys`, which by Cargo
+  convention means bindings to a native library, the one thing it
+  exists to avoid. Every `unsafe` block there has a written safety
+  argument.
+- **Malformed input never panics where it can be avoided.** Sizes and
+  file contents are validated before they reach a decoder or the scaler,
+  and a bad file is an error reply. A panic aborts the daemon.
+- **Dependencies are weighed on safety as well as weight:** how much
+  `unsafe` they carry and what for, whether they are fuzzed upstream, and
+  their RustSec record. Where a dependency is not fuzzed upstream,
+  scootbg fuzzes the path through it.
+
+The audit behind these rules, and the one measured cost they carry (CPU
+per change from the safe scaler), is in
+[`backlog/resolved/dependencies-done.md`](backlog/resolved/dependencies-done.md).

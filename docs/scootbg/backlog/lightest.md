@@ -62,15 +62,28 @@ Each checked against the numbers, not assumed:
   the socket, plus a short-lived decode thread that exits when done.
 - Colours never touch shared memory (`wp_single_pixel_buffer_manager_v1`).
 - `XRGB8888` buffers at exactly the output's device size, nothing larger.
-- The decoded source is dropped after scaling, and freed heap is returned
-  to the OS so idle memory falls back after a change instead of keeping
-  the decode's high-water mark. Measured: `malloc_trim` alone is not
-  enough, because a decode thread's glibc arena kept 61.6 MB across live
-  sets. With `mallopt(M_MMAP_THRESHOLD, 1 MiB)` and `mallopt(M_ARENA_MAX, 1)`
-  at startup, plus `malloc_trim(0)` after each set, it stays under
-  200 KB. `mimalloc` kept 148 MB
-  ([evidence](resolved/dependencies-done.md#6-returning-heap-to-the-os)).
+- The decoded source is dropped before the output buffer is allocated.
+  No scaler may hold a source-width × target-height intermediate.
+- Freed heap goes back to the OS, so idle memory falls back after a
+  change instead of keeping the decode's high-water mark. That happens by
+  construction, not by tuning. A pure-Rust `#[global_allocator]` wrapper
+  (in `scootbg-mem`) gives every block of 128 KiB or more its own `rustix`
+  mapping, released with `munmap` on free; smaller blocks go to `System`.
+  - Untreated, glibc kept 61.6 MB (main thread) and 79.2 MB (decode
+    thread) after eight live sets.
+  - With the wrapper, heap stayed at or under 0.65 MB across JPEG, PNG
+    and WebP sets, on both thread models, with no tuning. CPU matched
+    glibc `mallopt` + `malloc_trim`, which it replaces, because scootbg
+    calls no C. It costs +37 KB.
+  - The chosen pipeline peaked at 131.2 MB for a 6000×4000 JPEG against
+    169.8 MB for the round-one design.
+  - `mimalloc` kept 148 MB.
+
+  ([evidence](resolved/dependencies-done.md#6b-round-two-pure-rust))
 - Only the image-format features actually shipped are compiled in.
+- No C beyond what std links (glibc, `libm`, `libgcc_s`): no `libc` crate,
+  no `-sys` crate that links anything, no build script that compiles C
+  ([audit](resolved/dependencies-done.md#9-what-c-remains)).
 - A tiny state file format instead of a general config parser: measured,
   `toml` costs +180 KB over a hand-written line format's +20 KB, so the
   line format it is ([evidence](resolved/dependencies-done.md#5-serialization-control-socket-and-state-file)).
