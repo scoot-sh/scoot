@@ -115,8 +115,9 @@ characters type on every one of the fourteen swept Latin layouts (`us`,
   type a capital, since that would leave it on for everything afterwards.
   Sequences come from the session locale (`LC_ALL`, then `LC_CTYPE`, then
   `LANG`, else `C`, as the compositor process sees them — the same source
-  toolkits read; like `setlocale`, an empty variable counts as unset). In every case the characters *before* the failure have already been
-  typed: the request stops at the first character it can't type rather than
+  toolkits read; like `setlocale`, an empty variable counts as unset). In
+  every case the characters *before* the failure have already been typed:
+  the request stops at the first character it can't type rather than
   rolling back.
 - Keybindings apply to what it types, exactly as they would to a real
   keypress. That only matters for a bind with no modifiers, or one on Shift
