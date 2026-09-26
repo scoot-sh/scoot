@@ -142,8 +142,9 @@ pub(super) fn build_map(
                     continue;
                 }
                 // One of two bounded heap allocations in this module (the
-                // other is the at most three locale `OsString`s read by
-                // `session_locale`, once per fallback request): naming
+                // other is the one locale `OsString` `session_locale`
+                // returns, once per fallback request -- an empty variable
+                // it skips copies no bytes): naming
                 // a keysym to test the `dead_` prefix, once per distinct
                 // keysym per request that needs the fallback. Matching the
                 // raw keysym range instead would avoid it but freeze

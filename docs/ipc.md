@@ -113,9 +113,12 @@ characters type on every one of the fourteen swept Latin layouts (`us`,
   latching* modifier gets its own message (``[character] needs a modifier
   this layout only locks or latches``) — scoot will not press Caps Lock to
   type a capital, since that would leave it on for everything afterwards.
-  Sequences come from the session locale (`LC_ALL`, then `LC_CTYPE`, then
-  `LANG`, else `C`, as the compositor process sees them — the same source
-  toolkits read; like `setlocale`, an empty variable counts as unset). In
+  Sequences come from your own XCompose file if you have one
+  (`$XCOMPOSEFILE`, then `$XDG_CONFIG_HOME/XCompose`, then `~/.XCompose`),
+  otherwise from the session locale's table (`LC_ALL`, then `LC_CTYPE`,
+  then `LANG`, else `C`, as the compositor process sees them — the same
+  source toolkits read; like `setlocale`, an empty variable counts as
+  unset). In
   every case the characters *before* the failure have already been typed:
   the request stops at the first character it can't type rather than
   rolling back.
