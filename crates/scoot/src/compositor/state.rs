@@ -142,6 +142,19 @@ pub struct State {
     /// always empty -- a client creates a toplevel and commits it in the same
     /// flush -- so the commit path's check is an empty-`Vec` test.
     pub(super) awaiting_map: Vec<WindowId>,
+    /// Windows whose bbox recompute is waiting for the end of this dispatch
+    /// (see `window_commit.rs`): `commit()` records here instead of running
+    /// `Window::on_commit` per commit, and the Wayland display source
+    /// flushes the set after `dispatch_clients`. First-dirtied order, each
+    /// window at most once, so a batch of `N` commits to one window costs
+    /// one recompute. Pooled: `clear()` keeps the capacity, so nothing here
+    /// allocates past the first batch that dirtied this many windows.
+    pub(super) pending_window_commits: Vec<WindowId>,
+    /// How many windows the last [`State::flush_window_commits`] recomputed.
+    /// Test-only: what the coalescing tests read to pin "one batch, one
+    /// recompute" without timing anything.
+    #[cfg(test)]
+    pub(super) last_window_commit_flush: usize,
     /// `[floating] auto` and the `[[window_rule]]`s the session runs with:
     /// what decides at a window's first commit whether it floats. Set from
     /// the config after `State::new` and swapped whole by a reload.
@@ -1010,6 +1023,9 @@ impl State {
             fullscreen_covers: Vec::new(),
             floating_cover: 0,
             awaiting_map: Vec::new(),
+            pending_window_commits: Vec::new(),
+            #[cfg(test)]
+            last_window_commit_flush: 0,
             floating_rules: super::window_rules::FloatingRules::default(),
             floating_modifier: super::window_rules::DEFAULT_DRAG_MODIFIER,
             floating_grab_resync: false,
@@ -1202,6 +1218,15 @@ impl State {
                     // `Option` check when no menu is open, which is always,
                     // except when one is.
                     state.settle_popup_grab();
+                    // Once per dispatch, not once per commit: the bbox
+                    // recomputes `commit()` deferred (see
+                    // `window_commit.rs`). Here rather than in `mod.rs`'s
+                    // `post_dispatch` so every other source in this loop
+                    // iteration still sees either the pre-batch bbox or the
+                    // flushed one -- the same two states per-commit
+                    // recomputes showed it, just without the N-1 redundant
+                    // ones in between.
+                    state.flush_window_commits();
                     // Replies (e.g. the initial registry globals) should reach
                     // the socket now rather than wait for `mod.rs`'s
                     // `post_dispatch` (which also flushes every client, once
