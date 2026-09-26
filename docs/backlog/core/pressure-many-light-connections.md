@@ -49,6 +49,32 @@ raised table is one ~7 ms readdir, cached for ~140 ms, so filling the table
 no longer makes accepting connections expensive: PR #241 round 3.)
 Priority unchanged (medium).
 
+**Updated 2026-09-25 (PR #252): candidate 1 landed.** IPC accepts now read
+their own lower line (`IPC_RESERVE_FDS`, refused only once fewer than 16
+fds stand free; `Table::ipc_pressured`, read only by `ipc::accept`) while
+Wayland admits and both arrival guards stay on the 128 line. Sized so the
+lower line cannot itself fill the table: one admitted IPC connection costs
+exactly one fd (the socket; its buffers are memory) and the 64-slot cap
+bounds what IPC holds at 64. Measured on the dev VM (release, this tree):
+7 parked connections at 921 fds, newcomer seeing 0 globals, `scootctl`
+refused → SERVED; 63 parked on the raised table served throughout
+(`~/evidence/fdq/runs/ipcline-1024-k7`, `ipcline-raise-k63`).
+
+Candidate 2 assessed unworkable for this shape, not built: each parked
+connection holds its fds below scoot with no object, so the ledger weighs
+every parker near zero — in the K=7 run all seven sat at 921 fds,
+connected and error-free, and `held_by` cannot rank them. Shedding
+heaviest-by-ledger would pick an arbitrary (possibly honest) holder while
+the parkers stay.
+
+**Narrowed residual:** a literally full table only. There `accept` itself
+fails and the listener's `EMFILE` shed consumes the pending connection
+before `ipc::accept` ever runs, so a `scootctl` dial sees EOF/reset, not
+the refusal: an 8-way burst on the 1024-fd table (1024/1024, `scootctl`
+reset) and 64 parked on the raised table (full, newcomers dropped,
+`scootctl` reset; the K=64 log shows the IPC `EMFILE` shed firing)
+(`~/evidence/fdq/runs/ipcline-1024-k8burst`, `ipcline-raise-k64`).
+
 Ruled out: a per-uid budget (every client is the same user), a per-pid one
 (`SO_PEERCRED` is defeated by fork).
 
