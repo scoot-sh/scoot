@@ -8,7 +8,7 @@ blocked: null
 
 # Aggregate popup pressure across connections — RESOLVED
 
-RESOLVED 2026-09-26 (PR #TBD). Design winner, cheapest-first per the
+RESOLVED 2026-09-26 (PR #260). Design winner, cheapest-first per the
 ticket: **option 1, non-scan lookup** -- a scoot-side surface-to-popup
 index (`compositor/popup_index.rs`) replaces `PopupManager::find_popup`
 on the initial-configure path, paired with a membership check over the
