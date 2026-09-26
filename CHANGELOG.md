@@ -9,7 +9,7 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
-### 2026-09-26 — one app can no longer freeze the desktop with menus
+### 2026-09-26 — one app can no longer freeze the desktop with menus (PR #253)
 
 - **An app that opens popups without bound is disconnected at 128 live
   `xdg_popup`s.** Until now, thousands of menus open side by side stalled
