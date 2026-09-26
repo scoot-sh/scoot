@@ -76,6 +76,19 @@ rec {
   # Run time: Smithay dlopens libEGL. libglvnd only, never Mesa.
   ldLibraryPath = lib.makeLibraryPath [ pkgs.libglvnd ];
 
+  # A UTF-8 locale when the shell has none at all. A container or CI shell
+  # often sets no LANG/LC_*, which leaves clients in the "C" locale: `foot`
+  # warns and falls back to C.UTF-8 on every launch, and the compositor's
+  # compose table (`table_from_session_locale`) resolves against "C". Checks
+  # the effective LC_CTYPE (LC_ALL, then LC_CTYPE, then LANG) and fills only
+  # a gap -- an explicit locale, `C` included, is the user's to keep.
+  # C.UTF-8 is built into glibc (2.35+), so it needs no locale archive.
+  localeHook = lib.optionalString isLinux ''
+    if [ -z "''${LC_ALL:-''${LC_CTYPE:-''${LANG:-}}}" ]; then
+      export LANG=C.UTF-8
+    fi
+  '';
+
   # The compositor, and the tests that bind a real wayland socket, need a
   # writable $XDG_RUNTIME_DIR. A login session provides one; a container or
   # CI shell often doesn't. Only fill the gap, never override a real one.

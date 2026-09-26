@@ -332,9 +332,9 @@
       # `nix develop` and `devenv shell` cannot drift apart. Beyond the
       # toolchain and the compositor's libraries they carry the smoke test's
       # tools, the `soft-egl` wrapper for the GLES tests, and an
-      # `$XDG_RUNTIME_DIR` for boxes without a login session -- all in the
-      # VM's system closure too, so entering it there fetches nothing new
-      # (the `soft-egl` script is a trivial local build).
+      # `$XDG_RUNTIME_DIR` and a UTF-8 `LANG` for boxes that set neither --
+      # all in the VM's system closure too, so entering it there fetches
+      # nothing new (the `soft-egl` script is a trivial local build).
       devShells = forEach (
         pkgs:
         let
@@ -400,6 +400,7 @@
               export LIBRARY_PATH="''${LIBRARY_PATH:+$LIBRARY_PATH:}${dev.libraryPath}"
               export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}${dev.ldLibraryPath}"
               ${dev.xdgRuntimeDirHook}
+              ${dev.localeHook}
             '';
           };
         }

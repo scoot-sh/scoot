@@ -341,8 +341,10 @@ cargo nextest run --workspace   # one process per test -- the required runner
 
 On Linux the shell also carries what `scripts/smoke-test.sh` drives (`foot`,
 `jq`, ImageMagick, `wayland-info`), sets `$XDG_RUNTIME_DIR` when the box has
-none (a container, a CI runner), and provides `soft-egl`, which runs one
-command against Mesa's software EGL the way CI runs the GLES tests:
+none (a container, a CI runner), sets `LANG=C.UTF-8` when no locale is set at
+all (`LC_ALL`, `LC_CTYPE` and `LANG` all empty; an explicit one, `C`
+included, is kept), and provides `soft-egl`, which runs one command against
+Mesa's software EGL the way CI runs the GLES tests:
 
 ```sh
 soft-egl cargo nextest run --workspace   # without it the GLES tests fail on a GPU-less box
