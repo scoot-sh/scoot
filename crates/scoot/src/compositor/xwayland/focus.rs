@@ -274,7 +274,16 @@ pub(in crate::compositor) const X_CLIENT_RESOURCE_MASK: u32 = 0x001f_ffff;
 /// Whether two X window ids were allocated to the same X client (the same
 /// connection); see [`X_CLIENT_RESOURCE_MASK`].
 pub(super) fn same_x_client(a: u32, b: u32) -> bool {
-    a & !X_CLIENT_RESOURCE_MASK == b & !X_CLIENT_RESOURCE_MASK
+    x_client_key(a) == x_client_key(b)
+}
+
+/// Which X client an X window id was allocated to: the client bits above
+/// [`X_CLIENT_RESOURCE_MASK`], the server's word on which connection created
+/// the window (see [`X_CLIENT_RESOURCE_MASK`]) -- not a Wayland `ClientId`,
+/// and never confused with one. What the per-X-client toplevel cap
+/// (`toplevel_cap.rs`) charges a mapped window to.
+pub(in crate::compositor) fn x_client_key(window_id: u32) -> u32 {
+    window_id & !X_CLIENT_RESOURCE_MASK
 }
 
 /// `window`'s X client pid through X-Resource, cached on the surface.

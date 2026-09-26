@@ -52,11 +52,17 @@
 //!   backend destroys every object of a dying client. Idempotent by the
 //!   `owner` map: a refused toplevel was never claimed, and an X window
 //!   never is (see below), so neither releases anything.
-//! - **XWayland is not counted.** Managed X windows enter through
-//!   `map_x11_window`, which bypasses `add_window`, so they neither claim
-//!   nor release. That is a separate subsystem with its own mapping path,
-//!   and bounding it is filed separately
-//!   (`docs/backlog/core/xwayland-toplevel-cap.md`).
+//! - **XWayland is counted separately, per X client.** Managed X windows
+//!   enter through `map_x11_window`, which bypasses `add_window`, so they
+//!   never touch the claim above. They hold [`X11ToplevelCap`] units instead
+//!   -- one per live managed window, charged to the window id's client bits
+//!   (see `xwayland/focus.rs`'s `x_client_key`), claimed at the map request
+//!   and released in `remove_window` beside the claim above. A window past
+//!   its client's bound is refused the map, like the insane-frame-extents
+//!   refusal already in `map_x11_window`: X has no client object to post an
+//!   error to, so there is no kill to send. Override-redirect windows are
+//!   not counted: they never enter the core (`x11_unmanaged`), so they carry
+//!   none of the arrangement cost this bounds.
 //! - **A toplevel with no client is admitted uncounted.** Creation always
 //!   has one in practice; if it somehow has not, there is nothing to charge
 //!   and nothing that could release it, so failing open keeps the maps exact.
@@ -174,6 +180,115 @@ impl State {
                     ),
                 );
                 false
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The XWayland half: one bound per X client, refused by refusing the map.
+// ---------------------------------------------------------------------------
+
+/// How many live managed X windows one X client may have, across all of
+/// them. Past it the window is refused its map (see below).
+///
+/// Deliberately the xdg cap's number, not a second decision: one X window
+/// costs the core the same per-frame arrangement as one `xdg_toplevel`, so
+/// the same worst case per client deserves the same bound. Kept a separate
+/// constant so changing one never silently changes the other.
+///
+/// An X client is its window ids' client bits (see `xwayland/focus.rs`'s
+/// `x_client_key`) -- the server's word on which connection created the
+/// window -- not a Wayland `ClientId`. The two identities are not unified:
+/// there is no Wayland object to charge an X window to (XWayland's own
+/// client stands for every X client at once; killing it would take every X
+/// window with it), and no X notion to charge an `xdg_toplevel` to.
+///
+/// Only in `xwayland` builds: a default build carries no X code at all.
+#[cfg(feature = "xwayland")]
+pub(super) const MAX_X11_TOPLEVELS_PER_CLIENT: u32 = 128;
+
+/// The live managed X windows, per X client and per window: the X half of
+/// [`ToplevelCap`], in the same two-map shape and the same counting
+/// discipline. An entry exists in `per_client` only while it is nonzero,
+/// and in `owner` only while the window is claimed, so both maps are
+/// bounded by live managed X windows.
+///
+/// Only in `xwayland` builds, with the counter's users.
+#[cfg(feature = "xwayland")]
+#[derive(Debug, Default)]
+pub struct X11ToplevelCap {
+    /// Claimed windows per X client, keyed by window-id client bits: what
+    /// the bound reads.
+    per_client: HashMap<u32, u32>,
+    /// Which X client each claimed core window id belongs to: what the
+    /// release reads, so an unmap never touches another client's count --
+    /// not even on teardown, when the X window the id came from is gone and
+    /// the count can no longer be re-derived from it.
+    owner: HashMap<WindowId, u32>,
+}
+
+#[cfg(feature = "xwayland")]
+impl X11ToplevelCap {
+    /// How many live managed windows `client` (window-id client bits) has
+    /// claimed.
+    fn live(&self, client: &u32) -> u32 {
+        self.per_client.get(client).copied().unwrap_or(0)
+    }
+
+    /// How many live managed windows `client` has claimed. Read by the
+    /// refusal log line as well as the tests, so -- unlike the xdg cap's
+    /// accessor -- not test-gated.
+    pub(super) fn live_for(&self, client: &u32) -> u32 {
+        self.live(client)
+    }
+
+    /// How many managed X windows every X client holds between them.
+    /// Test-only.
+    #[cfg(test)]
+    pub(super) fn in_flight(&self) -> u32 {
+        self.per_client.values().sum()
+    }
+
+    /// Whether `client` may map one more window: `false` once it holds
+    /// [`MAX_X11_TOPLEVELS_PER_CLIENT`]. A read, so `map_x11_window` can
+    /// refuse the map before anything is granted; the claim itself is
+    /// recorded by [`X11ToplevelCap::claim`] once the window is in.
+    ///
+    /// The check and the claim are two steps rather than one `try_claim`
+    /// because the map grants first (`set_mapped`) and mints the core id
+    /// after: claiming before the grant would leak a unit when the grant
+    /// fails, and claiming-then-unmapping on a full count would map and
+    /// unmap a window the client sees flicker. Sound because both run on
+    /// the loop, with no dispatch between them.
+    pub(super) fn admits(&self, client: &u32) -> bool {
+        self.live(client) < MAX_X11_TOPLEVELS_PER_CLIENT
+    }
+
+    /// Records the claim on core window `id` for `client`. Call only after
+    /// [`X11ToplevelCap::admits`] said yes on the same dispatch: the count
+    /// cannot overflow (each unit is a live managed window, and the cap
+    /// stops a client far below `u32::MAX`), and `map_x11_window` never
+    /// claims an id twice (each claim mints a fresh `next_id`), so this
+    /// insert never overwrites.
+    pub(super) fn claim(&mut self, client: u32, id: WindowId) {
+        *self.per_client.entry(client).or_insert(0) += 1;
+        self.owner.insert(id, client);
+    }
+
+    /// Forgets the claim on `id`, if it has one. Idempotent: an
+    /// `xdg_toplevel` was never claimed here, a refused X window never
+    /// reached [`X11ToplevelCap::claim`], and a claimed one is forgotten
+    /// once, wherever `remove_window` runs for it -- an unmap, a destroy, a
+    /// server death, or the frame-extents withdrawal.
+    pub(super) fn release(&mut self, id: &WindowId) {
+        let Some(client) = self.owner.remove(id) else {
+            return;
+        };
+        if let Some(live) = self.per_client.get_mut(&client) {
+            *live = live.saturating_sub(1);
+            if *live == 0 {
+                self.per_client.remove(&client);
             }
         }
     }

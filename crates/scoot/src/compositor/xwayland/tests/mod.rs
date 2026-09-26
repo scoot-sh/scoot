@@ -672,6 +672,8 @@ fn a_window_manager_that_cannot_attach_withdraws_the_display() {
 #[cfg(feature = "xwayland")]
 mod bench;
 #[cfg(feature = "xwayland")]
+mod cap;
+#[cfg(feature = "xwayland")]
 mod clipboard;
 #[cfg(feature = "xwayland")]
 mod dnd;

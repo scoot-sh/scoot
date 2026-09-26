@@ -147,6 +147,125 @@ fn closed_windows_release_the_bound() {
 }
 
 // ---------------------------------------------------------------------------
+// The X half: the counter `map_x11_window` claims against, driven directly.
+// (The wire half -- a real X client mapping past the cap -- is the live
+// `xwayland/tests/cap.rs` suite: it needs a real XWayland server.)
+//
+// Gated on the feature with the counter itself: a default build carries no
+// X code at all, and this section names nothing else.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "xwayland")]
+mod x11 {
+    use scoot_core::WindowId;
+
+    use super::super::{MAX_X11_TOPLEVELS_PER_CLIENT, X11ToplevelCap};
+
+    /// Two X clients, as window-id client bits (see `xwayland/focus.rs`):
+    /// the high bits differ, the low 21 do not matter here.
+    const X_A: u32 = 0x0040_0000;
+    const X_B: u32 = 0x0060_0000;
+
+    /// The X cap is the xdg cap's number, spelled out so this file does not
+    /// depend on it (like [`CAP`] above): the two bounds move together only
+    /// by an explicit decision, never by sharing the constant.
+    const X_CAP: u32 = 128;
+
+    fn x_cap() -> X11ToplevelCap {
+        assert_eq!(
+            MAX_X11_TOPLEVELS_PER_CLIENT, X_CAP,
+            "the test's spelled-out X cap drifted from the code's"
+        );
+        X11ToplevelCap::default()
+    }
+
+    /// Minting fresh core ids, the way `map_x11_window`'s `next_id` does.
+    struct Ids(u64);
+
+    impl Ids {
+        fn next(&mut self) -> WindowId {
+            self.0 += 1;
+            WindowId(self.0)
+        }
+    }
+
+    /// A full client is refused nothing silently: `admits` says no at
+    /// exactly the bound, and the refusal claims nothing.
+    #[test]
+    fn the_x_bound_refuses_at_exactly_the_cap() {
+        let mut cap = x_cap();
+        let mut ids = Ids(0);
+        for _ in 0..X_CAP {
+            assert!(cap.admits(&X_A));
+            cap.claim(X_A, ids.next());
+        }
+        assert_eq!(cap.live_for(&X_A), X_CAP);
+        assert_eq!(cap.in_flight(), X_CAP);
+        assert!(!cap.admits(&X_A), "the 129th window was admitted");
+        assert_eq!(cap.live_for(&X_A), X_CAP, "the refusal claimed a unit");
+    }
+
+    /// Per X client: one client at its bound does not stop another, and one
+    /// client's releases never touch another's count.
+    #[test]
+    fn the_x_bound_is_per_client() {
+        let mut cap = x_cap();
+        let mut ids = Ids(0);
+        for _ in 0..X_CAP {
+            cap.claim(X_A, ids.next());
+        }
+        for _ in 0..5 {
+            assert!(cap.admits(&X_B));
+            cap.claim(X_B, ids.next());
+        }
+        assert_eq!(cap.live_for(&X_A), X_CAP);
+        assert_eq!(cap.live_for(&X_B), 5);
+        assert_eq!(cap.in_flight(), X_CAP + 5);
+    }
+
+    /// Releasing hands the bound back: unmap (or death, or withdrawal --
+    /// every one reaches `remove_window`) frees the unit, and a drained
+    /// client leaves no entry behind.
+    #[test]
+    fn x_releases_free_the_bound_and_leave_no_entry() {
+        let mut cap = x_cap();
+        let mut ids = Ids(0);
+        let mut held = Vec::new();
+        for _ in 0..X_CAP {
+            let id = ids.next();
+            cap.claim(X_A, id);
+            held.push(id);
+        }
+        assert!(!cap.admits(&X_A));
+        cap.release(&held[0]);
+        assert!(cap.admits(&X_A), "an unmap did not free the bound");
+        assert_eq!(cap.live_for(&X_A), X_CAP - 1);
+        for id in &held[1..] {
+            cap.release(id);
+        }
+        assert_eq!(cap.live_for(&X_A), 0);
+        assert_eq!(cap.in_flight(), 0, "a drained client left an entry behind");
+    }
+
+    /// The release is idempotent: a refused window (never claimed), an
+    /// `xdg_toplevel` (claimed elsewhere), and a double release all change
+    /// nothing.
+    #[test]
+    fn x_release_is_idempotent() {
+        let mut cap = x_cap();
+        let mut ids = Ids(0);
+        cap.release(&ids.next());
+        assert_eq!(cap.in_flight(), 0, "an unknown id claimed a unit");
+        let id = ids.next();
+        cap.claim(X_A, id);
+        cap.release(&id);
+        cap.release(&id);
+        assert_eq!(cap.live_for(&X_A), 0, "a double release went negative");
+        assert_eq!(cap.in_flight(), 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The client
 // ---------------------------------------------------------------------------
 
