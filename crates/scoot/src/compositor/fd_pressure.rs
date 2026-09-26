@@ -27,9 +27,12 @@
 //! - **Wayland accept** (`wayland_accept::admit`): a newcomer past the
 //!   ceiling is dropped -- an immediate EOF, the same wire shape as the
 //!   `EMFILE` shed, there being no protocol channel for a reason.
-//! - **IPC accept** (`ipc::accept`): a newcomer past the ceiling is refused
-//!   with a reason naming the pressure, the same shape as the 64-slot cap
-//!   refusal -- IPC, unlike Wayland, has a channel for it.
+//! - **IPC accept** (`ipc::accept`): a newcomer past the *IPC* ceiling is
+//!   refused with a reason naming the pressure, the same shape as the 64-slot
+//!   cap refusal -- IPC, unlike Wayland, has a channel for it. The IPC line
+//!   ([`IPC_RESERVE_FDS`]) sits well below the Wayland one ([`RESERVE_FDS`]),
+//!   so the agent's channel stays reachable while Wayland newcomers are shed:
+//!   see below for the sizing that keeps that sound.
 //! - **Arrival guards**: every request that hands scoot an fd it keeps
 //!   (`wl_shm.create_pool`, `zwp_linux_buffer_params_v1.add`,
 //!   `import_timeline`) is refused, with the same error its per-client bound
@@ -188,6 +191,29 @@
 //! the reserve left room for a whole greedy connection's burst; it never
 //! did.)
 //!
+//! [`IPC_RESERVE_FDS`] is 16: refuse IPC newcomers only once fewer than 16
+//! fds stand free ([`Table::ipc_pressured`], read only by `ipc::accept`).
+//! The agent's channel stays reachable through all the pressure that sheds
+//! Wayland newcomers, which is the point: `scootctl` is the control channel
+//! computer use drives through, and the connection-count residual
+//! (`docs/backlog/core/pressure-many-light-connections.md`) sheds it along
+//! with every other newcomer otherwise. Sized so the lower line cannot
+//! itself fill the table: one admitted IPC connection costs exactly one fd
+//! (the socket; its buffers are memory), and the 64-slot cap
+//! (`ipc::slots::MAX_CONNECTIONS`) bounds what IPC holds at 64, so even
+//! filling every slot from the Wayland line leaves 128 - 64 = 64 free, and
+//! IPC admissions alone stop at 16 free, never at zero. The 16 is headroom
+//! for what a served `scootctl` request may transiently open past its
+//! socket: a selection pipe (2), a screenshot, a spawn's pipes.
+//!
+//! What the lower line does *not* cover, honestly: a literally full table.
+//! There `accept` itself fails and the listener's `EMFILE` shed consumes the
+//! pending connection before `ipc::accept` ever runs, so a `scootctl` dial
+//! sees EOF, not the refusal. The line moves the shed window from "all of
+//! pressure" to "only full", which on a 1024-fd table is 7 parked
+//! connections served instead of refused, and on the raised table everything
+//! short of 64 connections filling it outright.
+//!
 //! [`MIN_TABLE_FDS`] is 512: below it the guard stays off entirely
 //! ([`table`] returns `None`, every site fails open) and the `EMFILE` shed
 //! is the only backstop. A table that small cannot tell pressure from a
@@ -288,6 +314,14 @@ pub(crate) fn backend_queued_fds(soft: u64) -> u64 {
 /// creations refuse. See the module doc for the sizing.
 pub(crate) const RESERVE_FDS: u64 = 128;
 
+/// How many free fds must remain before IPC newcomers refuse. Well below
+/// [`RESERVE_FDS`], read only by `ipc::accept` through
+/// [`Table::ipc_pressured`]: the agent's channel stays reachable while
+/// Wayland newcomers are shed. See the module doc for why 16 cannot itself
+/// fill the table. Not a config knob: the sizing rests on the 64-slot IPC
+/// cap and the one-fd cost of an IPC connection, both fixed in code.
+pub(crate) const IPC_RESERVE_FDS: u64 = 16;
+
 /// Tables smaller than this get no guard at all ([`table`] returns `None`).
 /// See the module doc for why a small table fails open.
 pub(crate) const MIN_TABLE_FDS: u64 = 512;
@@ -318,6 +352,15 @@ impl Table {
     /// reads as calm here, matching [`table`]'s `None` for the same table.
     pub(crate) fn pressured(&self) -> bool {
         self.soft >= MIN_TABLE_FDS && self.free() < RESERVE_FDS
+    }
+
+    /// Whether the table is pressured for IPC accepts: fewer than
+    /// [`IPC_RESERVE_FDS`] free. Same fail-open shape as [`pressured`]
+    /// (small tables read calm), a deeper line: read only by `ipc::accept`,
+    /// so `scootctl` stays servable while Wayland newcomers shed. Total on
+    /// any input for the same reason.
+    pub(crate) fn ipc_pressured(&self) -> bool {
+        self.soft >= MIN_TABLE_FDS && self.free() < IPC_RESERVE_FDS
     }
 }
 

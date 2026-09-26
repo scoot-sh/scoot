@@ -53,7 +53,7 @@ pub(crate) use self::outbound::Outbound;
 use self::slots::{MAX_CONNECTIONS, Slot, Slots};
 use super::State;
 use super::drawn::drawn_rect;
-use super::fd_pressure::{RESERVE_FDS, Table};
+use super::fd_pressure::{IPC_RESERVE_FDS, Table};
 use super::headless::FRAME_INTERVAL;
 use super::tty::VtSwitchOutcome;
 
@@ -152,7 +152,7 @@ static REFUSAL: LazyLock<String> = LazyLock::new(|| {
 /// not merely that a cap is).
 static PRESSURE_REFUSAL: LazyLock<String> = LazyLock::new(|| {
     encode(&Response::error(format!(
-        "refused: scoot is under file-descriptor pressure (fewer than {RESERVE_FDS} \
+        "refused: scoot is under file-descriptor pressure (fewer than {IPC_RESERVE_FDS} \
          fds free); retry in a moment -- this connection cost nothing, and pressure \
          lifts as soon as whoever is holding fds lets go"
     )))
@@ -214,9 +214,12 @@ fn accept(
 /// Order matters: the peer check first (security, before this connection
 /// costs anything), then non-blocking (every refusal below writes, and
 /// that write must not block the compositor either), then the pressure
-/// refusal (a pressured table must not spend a slot it cannot serve --
-/// and, unlike the cap refusal past it, this one names the pressure
-/// rather than the newcomer's own behaviour), then the slot cap. An
+/// refusal, then the slot cap. The pressure line here is the IPC one
+/// ([`Table::ipc_pressured`], 16 free), well below the Wayland shed line
+/// (128): the agent's channel stays reachable while Wayland newcomers shed
+/// (see `fd_pressure` for the sizing). A pressured table must not spend a
+/// slot it cannot serve -- and, unlike the cap refusal past it, this one
+/// names the pressure rather than the newcomer's own behaviour. An
 /// unknown table (`None`) skips the pressure refusal: shedding on a
 /// broken gauge would deny innocents, and the `EMFILE` shed still catches
 /// real exhaustion underneath.
@@ -258,7 +261,7 @@ fn accept_under(
     // block the compositor either.
     stream.set_nonblocking(true)?;
 
-    if let Some(observed) = table.filter(|observed| observed.pressured()) {
+    if let Some(observed) = table.filter(|observed| observed.ipc_pressured()) {
         // Refused outright like an over-cap connection, and told why like
         // one: retry shortly, not close-and-reuse -- pressure is nobody's
         // behaviour, it lifts on its own. Best-effort write for the same

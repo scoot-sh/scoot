@@ -361,12 +361,21 @@ socket, and the other shortens a wait rather than refusing it.
 - **At most 64 connections at once**, across every client. A 65th is refused
   with a message naming the limit and closed immediately, not queued behind
   the others. This is what keeps the per-connection bounds meaningful.
-- **A newcomer under file-descriptor pressure is refused.** While fewer than
-  128 fds stand free process-wide, a new IPC connection is refused with a
-  message naming the pressure and closed immediately — no slot taken, living
-  connections untouched. Retry in a moment: pressure lifts as soon as whoever
-  is holding fds lets go, and ordinary use (an idle compositor holds 14 fds,
-  a `foot` window 17) never comes near it.
+- **A newcomer under file-descriptor pressure is shed, each channel on its
+  own line.** While fewer than 128 fds stand free process-wide, a new
+  Wayland connection gets an immediate EOF (there is no protocol channel
+  for a reason) — but a new IPC connection is still admitted until fewer
+  than 16 stand free. Past that second line it is refused with `refused:
+  scoot is under file-descriptor pressure (fewer than 16 fds free); retry
+  in a moment -- this connection cost nothing, and pressure lifts as soon
+  as whoever is holding fds lets go` and closed immediately — no slot
+  taken, living connections untouched. Retry in a moment: pressure lifts
+  as soon as whoever is holding fds lets go, and ordinary use (an idle
+  compositor holds 14 fds, a `foot` window 17) never comes near either
+  line. That 16 is headroom for what one served request transiently opens
+  past its socket, not for 64 fd-heavy requests landing together at the
+  boundary — there a dial can still see EOF, the same as a literally full
+  table.
 - **A connection whose peer stops reading is dropped**, ten to twenty seconds
   after the last byte it took (the check runs on a deadline of its own).
   Nothing is sent when this happens — there is nobody reading to send it to;
@@ -397,7 +406,7 @@ allocates in a loop.
 | `wl_shm` pool size | 512 MiB each | Protocol error on `create_pool`. Four full-screen 8K frames' worth. |
 | Live `wl_shm` pools per client | 128 | Protocol error on the excess `create_pool`. Bounds live pool objects and the address-space envelope — *not* fds or mappings, since a buffer outlives its pool and retains both. |
 | Live `wl_buffer`s per client | 512 | Protocol error on the creating object, whatever created it (pool, dmabuf, single-pixel). Each surviving shm or dmabuf buffer is what retains a compositor fd and, for shm, its mapping; single-pixel buffers retain neither but are counted uniformly, because the hook can't observe buffer kind. |
-| Process-wide free fds | 128 | While fewer stand free, a new Wayland connection gets an immediate EOF (there is no protocol channel for a reason) and a new IPC connection is refused with a message. A client already holding past 128 live buffers or 64 live pools is refused its next creation with the same protocol error, so a client under those graces is never refused for another client's greed. |
+| Process-wide free fds | 128 for Wayland, 16 for IPC | While fewer than 128 stand free, a new Wayland connection gets an immediate EOF (there is no protocol channel for a reason); a new IPC connection is still admitted until fewer than 16 stand free, past which it is refused with a message. A client already holding past 128 live buffers or 64 live pools is refused its next creation with the same protocol error, so a client under those graces is never refused for another client's greed. |
 | Manager/list binds per client | 8 | Across the workspace, both window-list and display-management globals combined. The ninth bind is closed with `finished` (plus the `done` batching requires) and announced nothing — a greedy client costs itself its ninth subscription, never another client's. |
 | Unredeemed activation tokens | 64 | Across all clients, expired ones swept first. A spawn past a full table simply gets no token. |
 | Live capture frame objects per client | 16 | The protocol's own `duplicate_frame` error, which disconnects the client that overflowed. |

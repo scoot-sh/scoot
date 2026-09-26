@@ -107,6 +107,47 @@ fn free_is_soft_minus_used() {
 }
 
 #[test]
+fn the_ipc_line_trips_exactly() {
+    // The IPC line sits well below the Wayland one: 16 free is calm for
+    // `scootctl` (the boundary is `<`, matching `pressured`), 15 is not.
+    assert!(!table_with_free(IPC_RESERVE_FDS).ipc_pressured());
+    assert!(table_with_free(IPC_RESERVE_FDS - 1).ipc_pressured());
+    assert!(table_with_free(0).ipc_pressured());
+}
+
+#[test]
+fn the_ipc_line_sits_below_the_wayland_line() {
+    // The whole window this ticket exists for: Wayland newcomers shed while
+    // IPC still admits. Pinned over the full span, not just one point, so a
+    // future move of either line re-derives the ordering here.
+    for free in IPC_RESERVE_FDS..RESERVE_FDS {
+        let table = table_with_free(free);
+        assert!(table.pressured(), "{free} free must shed wayland");
+        assert!(!table.ipc_pressured(), "{free} free must still admit ipc");
+    }
+}
+
+#[test]
+fn a_small_table_is_calm_for_ipc_whatever_it_holds() {
+    // Mirrors `pressured`: below `MIN_TABLE_FDS` there is no guard on
+    // either line, so the predicates must agree there.
+    for soft in [0, 1, 64, MIN_TABLE_FDS - 1] {
+        assert!(
+            !Table { used: soft, soft }.ipc_pressured(),
+            "soft {soft} must read calm for ipc"
+        );
+        assert!(
+            !Table {
+                used: soft + 1000,
+                soft
+            }
+            .ipc_pressured(),
+            "soft {soft} overfull must still read calm for ipc"
+        );
+    }
+}
+
+#[test]
 fn the_live_observer_agrees_with_the_kernel() {
     let table = table().expect("the observer works on this machine");
     assert!(
