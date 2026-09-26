@@ -300,10 +300,11 @@ devenv test                  # quick check that the shell itself is sound
   `target/debug/scoot --headless --outputs 2 -- foot` gives two virtual
   monitors (up to 8), driven with `scoot msg` and inspected with
   `scoot msg screenshot --output N`.
-- **Running as root** (the web container) fails one test,
-  `config::tests::an_unwritable_parent_is_a_loud_refusal`, because root
-  ignores the permission it relies on. It passes as a normal user; it is
-  not a regression.
+- **Running as root** (the web container), permission bits don't bind, so
+  `config::tests::an_unwritable_parent_is_a_loud_refusal` detects that and
+  skips with a message (`--no-capture` shows it);
+  `a_parent_that_is_a_file_is_a_loud_refusal` covers the same refusal for
+  root. A permission-based test added later needs the same premise probe.
 
 **Gotchas:**
 - **`devenv.yaml` uses shallow `git+https` inputs, not `github:`.** The web
