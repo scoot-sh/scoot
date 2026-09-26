@@ -77,7 +77,9 @@ use smithay::xwayland::xwm::{WmWindowType, X11Window};
 
 use super::super::State;
 use super::super::shell::{clamp_hint, hint_limit};
+use super::super::toplevel_cap::MAX_X11_TOPLEVELS_PER_CLIENT;
 use super::super::window_rules::{Decision, MapSignals};
+use super::focus::x_client_key;
 
 /// The largest window dimension an X server accepts. The wire field is a
 /// `CARD16`, but servers refuse anything past `SHRT_MAX` (`BadValue`).
@@ -273,6 +275,23 @@ impl State {
             }
             return;
         }
+        // The per-X-client cap, read before anything is granted: past it the
+        // map is refused outright -- never mapped, never in the core -- the
+        // way the insane-extents refusal above refuses. X has no client
+        // object to post an error to, so there is no kill to send; the
+        // window simply stays unmapped, and its client keeps everything it
+        // had. Other X clients (other client bits) and Wayland clients are
+        // unaffected: the count is per X client.
+        let x_client = x_client_key(window.window_id());
+        if !self.x11_toplevel_cap.admits(&x_client) {
+            tracing::warn!(
+                xid = window.window_id(),
+                live = self.x11_toplevel_cap.live_for(&x_client),
+                cap = MAX_X11_TOPLEVELS_PER_CLIENT,
+                "refusing to map an X11 window: its client is past the per-client cap"
+            );
+            return;
+        }
         if let Err(error) = window.set_mapped(true) {
             // The connection is gone or the window already died: nothing to
             // manage. The death paths clean up whatever the server left.
@@ -282,6 +301,11 @@ impl State {
         let focus = self.x11_focus_on_map(&window);
         self.next_id += 1;
         let id = WindowId(self.next_id);
+        // Claimed now that the window is in: `admits` said yes above, on
+        // this same dispatch, so this cannot overflow the bound (see
+        // `X11ToplevelCap::admits` for why the split is sound). Released in
+        // `remove_window` on every path the window can leave by.
+        self.x11_toplevel_cap.claim(x_client, id);
         self.windows
             .insert(id, Window::new_x11_window(window.clone()));
         self.open_window(id, focus);

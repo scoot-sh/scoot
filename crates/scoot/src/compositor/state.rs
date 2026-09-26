@@ -716,6 +716,13 @@ pub struct State {
     /// `remove_window` -- see `toplevel_cap.rs`, which owns the policy and
     /// the number.
     pub(super) toplevel_cap: super::toplevel_cap::ToplevelCap,
+    /// How many live managed X windows each X client has, keyed by
+    /// window-id client bits rather than any Wayland client. Claimed in
+    /// `map_x11_window` once the window is in, read before anything is
+    /// granted, released in `remove_window` beside the claim above -- see
+    /// `toplevel_cap.rs`, which owns the policy and the number.
+    #[cfg(feature = "xwayland")]
+    pub(super) x11_toplevel_cap: super::toplevel_cap::X11ToplevelCap,
     /// How many live `xdg_popup`s each Wayland client has. Claimed in
     /// `popup_parent::admit` before the popup is tracked, released in
     /// `popup_parent::popup_destroyed` -- see `popup_count.rs`, which owns
@@ -1104,6 +1111,8 @@ impl State {
             wl_buffers: WlBuffers::default(),
             pending_planes: Default::default(),
             toplevel_cap: Default::default(),
+            #[cfg(feature = "xwayland")]
+            x11_toplevel_cap: Default::default(),
             popup_count: Default::default(),
             client_fds: Default::default(),
             drm_syncobj: Default::default(),

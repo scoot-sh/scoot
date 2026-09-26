@@ -78,10 +78,14 @@ impl State {
     }
 
     pub fn remove_window(&mut self, id: WindowId) {
-        // Releases the toplevel cap's claim first, so the count follows the
+        // Releases both caps' claims first, so each count follows its
         // window on every path here -- an xdg destroy, a disconnect, an X
-        // window's death (which was never claimed, and releases nothing).
+        // window's death (which holds only the X claim), an X refusal
+        // (which holds neither). Both releases are idempotent by their
+        // owner maps.
         self.toplevel_cap.release(&id);
+        #[cfg(feature = "xwayland")]
+        self.x11_toplevel_cap.release(&id);
         // A drag of this window ends now rather than at the next motion; the
         // `apply()` below is the one it asks for.
         if self.floating_grab_window() == Some(id) {

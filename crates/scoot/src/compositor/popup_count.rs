@@ -66,8 +66,9 @@
 //!   same scope as the depth cap, which counts only `xdg_popup`s too.
 //! - **XWayland popups are not counted.** Override-redirect menus are drawn
 //!   unmanaged and never enter the `PopupManager`; managed X windows never
-//!   become `xdg_popup`s. Bounding those is filed separately
-//!   (`docs/backlog/core/xwayland-toplevel-cap.md`).
+//!   become `xdg_popup`s (they hold the per-X-client toplevel cap instead --
+//!   see `toplevel_cap.rs`). Bounding the unmanaged ones is filed separately
+//!   (`docs/backlog/core/xwayland-unmanaged-pressure-cap.md`).
 //!
 //! ## Cost
 //!

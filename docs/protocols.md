@@ -136,9 +136,19 @@ keep one; AGX shows that expectation cannot be assumed.
   opens one more is disconnected with `wl_display.error` `no_memory` ("at
   most 128 live xdg_toplevels per client"); closing or losing its windows
   frees the count, and one client at its bound never stops another from
-  opening. XWayland windows are not counted — they enter through their own
-  mapping path — and bounding them is a separate item (see
-  [`backlog/core/xwayland-toplevel-cap.md`](backlog/core/xwayland-toplevel-cap.md)).
+  opening.
+- **128 live managed X windows per X client.** An X client already holding
+  128 that maps one more is refused the map: the window never appears — not
+  in the layout, not in `windows`, not in either toplevel list — while
+  everything the client had stays mapped. X has no channel for an error,
+  so unlike every bound above nothing is disconnected and no message is
+  sent; the refusal is logged. Unmapping or losing its windows frees the
+  count, and one X client at its bound never stops another X client — or
+  any Wayland client — from mapping. "One X client" is one X connection,
+  as the server sees it (a window id's client bits, nothing a client can
+  forge); override-redirect menus are not counted — they never enter the
+  layout — and bounding those is a separate item (see
+  [`backlog/core/xwayland-unmanaged-pressure-cap.md`](backlog/core/xwayland-unmanaged-pressure-cap.md)).
 - **128 live `xdg_popup`s per client.** A client already holding 128 that
   opens one more is disconnected with `wl_display.error` `no_memory` ("at
   most 128 live xdg_popups per client"); closing or losing its popups
@@ -147,7 +157,7 @@ keep one; AGX shows that expectation cannot be assumed.
   parent and are bounded by the seats and text inputs they hang off — and
   neither are XWayland menus, which never enter the popup tree; bounding
   those is a separate item (see
-  [`backlog/core/xwayland-toplevel-cap.md`](backlog/core/xwayland-toplevel-cap.md)).
+  [`backlog/core/xwayland-unmanaged-pressure-cap.md`](backlog/core/xwayland-unmanaged-pressure-cap.md)).
 
 Real clients are far below all of these: a `foot` window keeps 2 fds, a
 GPU client one per buffer it has allocated (a few per window), a Vulkan
