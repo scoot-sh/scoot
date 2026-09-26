@@ -50,6 +50,7 @@ use std::fmt;
 #[cfg(feature = "gpu-scanout")]
 use std::time::Instant;
 
+use scoot_core::Arrangement;
 #[cfg(feature = "gpu-scanout")]
 use scoot_core::OutputId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -1106,11 +1107,18 @@ fn frame_clear_color(state: &State, locked: bool) -> Color32F {
 /// The one place a concrete renderer is chosen. Everything downstream of the
 /// match arm is generic, so a second [`Pipeline`] variant is a second arm
 /// here and nothing else.
+///
+/// `arrangement` is the core's layout for this frame tick, computed once by
+/// the caller (`State::render`) and shared by every output's element
+/// gathering -- `None` while locked, when no window and no ring is drawn.
+/// Passed in rather than derived here so a multi-output tick arranges once,
+/// not once per output (see `arrange-per-output-per-frame.md`).
 pub(super) fn draw_frame(
     state: &mut State,
     backend: &mut Backend,
     output: &Output,
     locked: bool,
+    arrangement: Option<&Arrangement>,
 ) -> FrameOutcome {
     #[cfg(test)]
     if std::mem::take(&mut state.fail_next_draw_for_test) {
@@ -1131,7 +1139,16 @@ pub(super) fn draw_frame(
             // pixman has no GPU buffer to hand over: the host always gets a
             // read-back from this arm.
             draw_frame_with(
-                state, renderer, image, damage, cursor, *size, output, locked, false,
+                state,
+                renderer,
+                image,
+                damage,
+                cursor,
+                *size,
+                output,
+                locked,
+                arrangement,
+                false,
             )
             .0
         }
@@ -1153,7 +1170,16 @@ pub(super) fn draw_frame(
             }
             #[cfg_attr(not(feature = "gpu-scanout"), allow(unused_mut))]
             let (mut outcome, owed) = draw_frame_with(
-                state, renderer, buffer, damage, cursor, *size, output, locked, by_dmabuf,
+                state,
+                renderer,
+                buffer,
+                damage,
+                cursor,
+                *size,
+                output,
+                locked,
+                arrangement,
+                by_dmabuf,
             );
             // The frame the host is owed, as a dma-buf rather than bytes:
             // copied on the GPU into a free host buffer and committed (see
@@ -1179,7 +1205,9 @@ pub(super) fn draw_frame(
         // one function would mean branching inside it on which half of it
         // applies.
         #[cfg(feature = "gpu-scanout")]
-        Pipeline::Scanout(gpu) => draw_frame_scanout(state, gpu, *size, output, locked),
+        Pipeline::Scanout(gpu) => {
+            draw_frame_scanout(state, gpu, *size, output, locked, arrangement)
+        }
     }
 }
 
@@ -1205,6 +1233,7 @@ fn draw_frame_scanout(
     size: (i32, i32),
     output: &Output,
     locked: bool,
+    arrangement: Option<&Arrangement>,
 ) -> FrameOutcome {
     let mut outcome = FrameOutcome::default();
     let scanout::ScanoutBackend {
@@ -1221,6 +1250,7 @@ fn draw_frame_scanout(
         size,
         output,
         locked,
+        arrangement,
         clear_color,
         judge_scratch,
     );
@@ -1324,6 +1354,10 @@ fn draw_frame_scanout(
 /// it was gathered with, so the flags and the elements describe the same
 /// frame. No window and no ring is laid out while locked (the same rule as
 /// `draw_frame_with`), because no frame can show them.
+///
+/// `arrangement` is the tick's shared layout (see [`draw_frame`]), not
+/// derived here: like the other bodies, this tier gathers once per output
+/// from the one arrangement.
 #[cfg(feature = "gpu-scanout")]
 fn scanout_frame_elements<R>(
     state: &mut State,
@@ -1331,6 +1365,7 @@ fn scanout_frame_elements<R>(
     size: (i32, i32),
     output: &Output,
     locked: bool,
+    arrangement: Option<&Arrangement>,
     clear_color: Color32F,
     judge_scratch: &mut primary_direct::JudgeScratch,
 ) -> (
@@ -1349,16 +1384,11 @@ where
         output: state.outputs.id_of(output),
         locked,
     };
-    let arrangement = if locked {
-        None
-    } else {
-        Some(state.world.arrange())
-    };
     let ring_elements: Rings<R> = ring_elements(
         &mut state.decorations,
         &state.appearance,
         &state.windows,
-        arrangement.as_ref(),
+        arrangement,
         &frame,
         renderer,
     );
@@ -1368,7 +1398,7 @@ where
         output,
         &frame,
         ring_elements,
-        arrangement.as_ref(),
+        arrangement,
         draws_cursor,
     );
     let tried_with = primary_direct::TriedWith {
@@ -1402,6 +1432,7 @@ impl State {
         let locked = self.session_lock.is_locked();
         let size = backend.size;
         let clear_color = frame_clear_color(self, locked);
+        let arrangement = (!locked).then(|| self.world.arrange());
         let mut scratch = primary_direct::JudgeScratch::default();
         let direct = match &mut backend.pipeline {
             Pipeline::Pixman(cpu) => {
@@ -1411,6 +1442,7 @@ impl State {
                     size,
                     &output,
                     locked,
+                    arrangement.as_ref(),
                     clear_color,
                     &mut scratch,
                 )
@@ -1423,6 +1455,7 @@ impl State {
                     size,
                     &output,
                     locked,
+                    arrangement.as_ref(),
                     clear_color,
                     &mut scratch,
                 )
@@ -1453,6 +1486,7 @@ impl State {
         let locked = self.session_lock.is_locked();
         let size = backend.size;
         let clear_color = frame_clear_color(self, locked);
+        let arrangement = (!locked).then(|| self.world.arrange());
         let mut scratch = primary_direct::JudgeScratch::default();
         let Pipeline::Pixman(cpu) = &mut backend.pipeline else {
             unreachable!("the cost harness runs on pixman");
@@ -1463,6 +1497,7 @@ impl State {
             size,
             &output,
             locked,
+            arrangement.as_ref(),
             clear_color,
             &mut scratch,
         );
@@ -1513,6 +1548,7 @@ fn draw_frame_with<R, T>(
     size: (i32, i32),
     output: &Output,
     locked: bool,
+    arrangement: Option<&Arrangement>,
     host_by_dmabuf: bool,
 ) -> (FrameOutcome, Option<Rectangle<i32, Physical>>)
 where
@@ -1530,25 +1566,14 @@ where
         locked,
     };
     // The core's arrangement, and this frame's ring segments built from it --
-    // computed once here rather than inside the match below so a failure to
-    // bind the framebuffer still logs without having done this for nothing.
-    // See `decorations.rs`'s module doc for why the background isn't part of
-    // this list.
-    //
-    // Not computed at all while locked: no window and no ring is drawn then,
-    // so laying the windows out would be work for a frame that cannot show
-    // it. `apply()` still runs the layout on every change underneath, so
-    // nothing is lost by the time it unlocks.
-    let arrangement = if locked {
-        None
-    } else {
-        Some(state.world.arrange())
-    };
+    // the tick's one shared layout (see `draw_frame`), gathered into per-output
+    // elements below. See `decorations.rs`'s module doc for why the background
+    // isn't part of this list.
     let ring_elements: Rings<_> = ring_elements(
         &mut state.decorations,
         &state.appearance,
         &state.windows,
-        arrangement.as_ref(),
+        arrangement,
         &frame,
         renderer,
     );
@@ -1560,7 +1585,7 @@ where
                 output,
                 &frame,
                 ring_elements,
-                arrangement.as_ref(),
+                arrangement,
                 draws_cursor,
             );
             outcome.cursor_surface = cursor_surface;

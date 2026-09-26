@@ -541,6 +541,25 @@ impl State {
         if count == 0 {
             return;
         }
+        // The core's arrangement, computed once per frame and shared by
+        // every output's element gathering (see `render::draw_frame`): one
+        // arrange per tick, not one per output per tick. Sound because the
+        // arrangement is a pure function of the core's layout inputs
+        // (windows, workspaces, sizes, focus -- see `World::arrange`), and
+        // none of the frame's per-output inputs (scale, output geometry,
+        // lock state, pointer position) feeds into it: those are consumed
+        // downstream, per output, by the element gathering the arrangement
+        // is passed to. Nothing between outputs mutates the world -- the
+        // frame path never calls `handle_event`/`handle_action` -- so the
+        // arrangement computed here is still current at the last output.
+        // Not computed at all while locked: no window and no ring is drawn
+        // then, so laying the windows out would be work for frames that
+        // cannot show it. `apply()` still runs the layout on every change
+        // underneath, so nothing is lost by the time it unlocks.
+        let arrangement = (!locked).then(|| self.world.arrange());
+        #[cfg(test)]
+        self.arrange_calls_for_test
+            .set(self.arrange_calls_for_test.get() + usize::from(arrangement.is_some()));
         // Cleared on the first attempted draw, not unconditionally up front:
         // the tail below re-arms it on purpose (`lock_transition`,
         // `refresh_layer_zone`'s `apply`, a refused-flip retry), and a clear
@@ -587,8 +606,11 @@ impl State {
             // The frame itself, drawn with whichever renderer this session is
             // carrying. See `render.rs` for why the choice of renderer is an
             // enum dispatched once per frame rather than a type parameter
-            // threaded through `State`.
-            let frame = render::draw_frame(self, &mut backend, &output, locked);
+            // threaded through `State`. The arrangement travels in beside
+            // it: the one computed above for the whole tick, shared by
+            // every output, not re-derived per output.
+            let frame =
+                render::draw_frame(self, &mut backend, &output, locked, arrangement.as_ref());
             self.put_backend(id, backend);
             // What `screencopy.rs` asks "has the scene moved since this
             // session's last capture?" with: only a frame whose pixels moved
