@@ -1,7 +1,8 @@
 //! What the layout's hot calls cost, printed for a human.
 //!
-//! `World::arrange` runs on every `apply()` (every event and action) and on
-//! every rendered frame, so CLAUDE.md's "benchmark whenever a change touches
+//! `World::arrange` runs on every `apply()` (every event and action) and once
+//! per rendered frame tick, shared by every output's element gathering (see
+//! `arrange-per-output-per-frame.md`), so CLAUDE.md's "benchmark whenever a
 //! a hot path" lands here for any change to the layout. Asserts nothing -- a
 //! wall-clock threshold is a flake, not a guarantee -- so it is `#[ignore]`d
 //! like the compositor's `render_frame_cost`, and run by hand:

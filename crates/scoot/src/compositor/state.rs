@@ -1,6 +1,8 @@
 //! What the compositor owns: Smithay's protocol state, the Wayland windows, and
 //! the [`World`] that decides where they go.
 
+#[cfg(test)]
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -414,6 +416,14 @@ pub struct State {
     /// real renderer fail on demand.
     #[cfg(test)]
     pub(crate) fail_next_draw_for_test: bool,
+    /// Test-only count of `World::arrange` calls the frame loop made: the
+    /// one arrangement `State::render` computes per tick (see `render.rs`'s
+    /// `draw_frame`), so a two-output render moves this by one, never two --
+    /// the pin for `arrange-per-output-per-frame.md`'s shared arrangement.
+    /// Counts only the frame loop's own calls, not the capture path's (which
+    /// arranges per capture) or any test's direct `world.arrange()`.
+    #[cfg(test)]
+    pub(crate) arrange_calls_for_test: Cell<usize>,
     /// Test-only: the listening socket's and the display's loop
     /// registrations, so a test harness can remove both on teardown even
     /// when its event loop outlives it (see `test_support`'s
@@ -1162,6 +1172,8 @@ impl State {
             frame_cursor_for_test: None,
             #[cfg(test)]
             fail_next_draw_for_test: false,
+            #[cfg(test)]
+            arrange_calls_for_test: Cell::new(0),
             #[cfg(test)]
             listener_tokens: listener_tokens.to_vec(),
             #[cfg(test)]
