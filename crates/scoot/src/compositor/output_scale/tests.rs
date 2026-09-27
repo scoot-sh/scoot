@@ -162,6 +162,39 @@ fn clamp_scale_is_idempotent_across_the_range() {
     }
 }
 
+/// The range clamp is the identity exactly where the full resolution is
+/// not: 1.33 needs quantization but is in range, 9.0 needs the range clamp.
+/// `into_scale` warns on the first predicate only, so this distinction is
+/// what keeps an in-range scale from logging a false "out of range"
+/// warning. (Warning emission itself follows the codebase's untested
+/// precedent; what is pinned here is the predicate it uses.)
+#[test]
+fn clamp_scale_range_is_the_warning_predicate() {
+    // In range, with and without quantization: the range clamp moves
+    // nothing either way.
+    for scale in [1.0, 1.25, 1.33, 1.254, 2.0] {
+        assert_eq!(
+            clamp_scale_range(scale),
+            scale,
+            "clamp_scale_range({scale}) moved an in-range value"
+        );
+    }
+    // Out of range: the range clamp moves, and the full resolution lands
+    // on the bound (both bounds are exact 120ths).
+    for (configured, bound) in [(0.1, MIN_SCALE), (-1.0, MIN_SCALE), (9.0, MAX_SCALE)] {
+        assert_eq!(
+            clamp_scale_range(configured),
+            bound,
+            "clamp_scale_range({configured}) missed the bound"
+        );
+        assert_eq!(
+            clamp_scale(configured),
+            bound,
+            "clamp_scale({configured}) left the bound"
+        );
+    }
+}
+
 // -- smithay_scale -------------------------------------------------------
 
 /// Exactly 1.0 stays `Scale::Integer(1)`, so a session that never asked for

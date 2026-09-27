@@ -69,7 +69,7 @@ use crate::cli::RendererKind;
 use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
 use super::keybindings::{Bound, Keybindings, Modifiers};
-use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale};
+use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale, clamp_scale_range};
 use super::wallpaper::{WallpaperConfig, WallpaperSetting};
 use super::window_rules::{
     DEFAULT_DRAG_MODIFIER, FloatingConfig, FloatingRules, WindowRuleConfig, drag_modifier,
@@ -124,7 +124,10 @@ impl OutputConfig {
     /// infinity is a compositor that lays nothing out, so this is a
     /// correctness bound, not taste. The clamp itself (`clamp_scale`) also
     /// resolves to the nearest multiple of 1/120, the finest
-    /// `wp_fractional_scale_v1` can express -- see `output_scale.rs`.
+    /// `wp_fractional_scale_v1` can express -- see `output_scale.rs`. That
+    /// resolution is silent: an in-range value like 1.33 is not a
+    /// misconfiguration, so only the range clamp warns, never the
+    /// quantization.
     fn into_scale(self) -> f64 {
         let Some(scale) = self.scale else {
             return 1.0;
@@ -137,9 +140,10 @@ impl OutputConfig {
             return 1.0;
         }
         let clamped = clamp_scale(scale);
-        if clamped != scale {
+        if clamp_scale_range(scale) != scale {
             tracing::warn!(
                 configured = scale,
+                resolved = clamped,
                 min = MIN_SCALE,
                 max = MAX_SCALE,
                 "output scale is out of range; clamping"
@@ -2459,6 +2463,18 @@ mod tests {
         let file: FileConfig = toml::from_str("[output]\nscale = 1.5\n").expect("valid toml");
         assert_eq!(file.output, Some(OutputConfig { scale: Some(1.5) }));
         assert_eq!(LoadedConfig::from_file(file).scale, 1.5);
+    }
+
+    /// An in-range scale that is not a multiple of 1/120 resolves to the
+    /// nearest one through the real config path (`into_scale`), not just
+    /// through `clamp_scale` directly -- and applies silently: the
+    /// out-of-range warning below fires on the range clamp, which is the
+    /// identity here (see `clamp_scale_range_is_the_warning_predicate` in
+    /// `output_scale/tests.rs` for the pinned distinction).
+    #[test]
+    fn an_in_range_output_scale_resolves_to_120ths() {
+        let file: FileConfig = toml::from_str("[output]\nscale = 1.33\n").expect("valid toml");
+        assert_eq!(LoadedConfig::from_file(file).scale, 160.0 / 120.0);
     }
 
     /// TOML integers and floats are distinct types; `scale = 2` is the way

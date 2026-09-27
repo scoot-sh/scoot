@@ -82,6 +82,16 @@ pub(super) const MIN_SCALE: f64 = 0.5;
 /// still-coherent 1920 logical pixels.
 pub(super) const MAX_SCALE: f64 = 4.0;
 
+/// The range half of [`clamp_scale`], on its own so the config layer can
+/// tell an out-of-range value (worth a warning) from one that only needs
+/// 1/120 resolution (silent: a sub-percent adjustment the user did not
+/// misconfigure, documented in `docs/configuration.md`'s `[output]` entry).
+/// `scale` is finite wherever this runs -- `clamp_scale` and `into_scale`
+/// both reject the non-finite spellings first.
+pub(super) fn clamp_scale_range(scale: f64) -> f64 {
+    scale.clamp(MIN_SCALE, MAX_SCALE)
+}
+
 /// The scale a config value actually gets. Pure and separately tested, the
 /// same shape as [`Appearance::clamped`](super::decorations::Appearance::clamped)
 /// and [`Config::clamp_gap`](scoot_core::Config::clamp_gap): out-of-range
@@ -107,7 +117,7 @@ pub(super) const MAX_SCALE: f64 = 4.0;
 /// 1/120 to a value inside the range stays inside it.
 pub(super) fn clamp_scale(scale: f64) -> f64 {
     if scale.is_finite() {
-        let clamped = scale.clamp(MIN_SCALE, MAX_SCALE);
+        let clamped = clamp_scale_range(scale);
         (clamped * 120.0).round() / 120.0
     } else {
         1.0
