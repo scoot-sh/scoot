@@ -294,10 +294,10 @@ impl Canvas {
                     let buffer = manager.create_u32_rgba_buffer(r, g, b, a, qh, id);
                     surface.attach(Some(&buffer), 0, 0);
                     retired = self.pixel.replace((buffer, *color)).map(|(old, _)| old);
-                    // An image was on screen: its buffers are no use now.
-                    if self.current.take().is_some() {
-                        self.drop_free_slots();
-                    }
+                    // Shm buffers (an image's, say) are no use on this
+                    // path: the free ones go now, held ones on release.
+                    self.current = None;
+                    self.drop_free_slots();
                 } else {
                     attached = false;
                 }
@@ -322,7 +322,26 @@ impl Canvas {
                 let content = Content::Image(image.serial);
                 let unchanged =
                     on_screen.is_some_and(|slot| slot.dims == dims && slot.content == content);
-                if !unchanged {
+                // A free buffer already holding it (the surface was
+                // closed and made again): shown as it is, no new decode.
+                let kept = (0..SLOTS).find(|&i| {
+                    self.slots
+                        .get(i)
+                        .and_then(Option::as_ref)
+                        .is_some_and(|slot| {
+                            slot.is_free() && slot.dims == dims && slot.content == content
+                        })
+                });
+                if unchanged {
+                    attached = false;
+                } else if let Some(index) = kept {
+                    if let Some(slot) = self.slots.get_mut(index).and_then(Option::take) {
+                        surface.attach(Some(&slot.buffer), 0, 0);
+                        self.put(index, slot.attached());
+                        self.current = Some(index);
+                        retired = self.pixel.take().map(|(old, _)| old);
+                    }
+                } else {
                     // Anything else waiting is stale: dropped here.
                     let Some(ready) = self
                         .ready
@@ -347,8 +366,6 @@ impl Canvas {
                     self.put(index, slot.attached());
                     self.current = Some(index);
                     retired = self.pixel.take().map(|(old, _)| old);
-                } else {
-                    attached = false;
                 }
             }
         }
@@ -485,9 +502,11 @@ impl Canvas {
 
     /// `wl_buffer.release` for `buffer`: the slot is free again. A free
     /// buffer not on screen is dropped when nothing could reuse it: an old
-    /// size, an image (only a new render could fill its slot), or anything
-    /// while a single-pixel buffer is on screen. Returns whether a stalled
-    /// draw should be retried.
+    /// size, an image while something else is on screen (only a new render
+    /// could fill its slot), or anything while a single-pixel buffer is on
+    /// screen. An image's buffer released because its surface went (closed
+    /// by the compositor) is kept, and shown again on the new surface
+    /// without decoding. Returns whether a stalled draw should be retried.
     pub fn released(&mut self, buffer: &WlBuffer) -> bool {
         let Some(index) = self
             .slots
@@ -506,7 +525,7 @@ impl Canvas {
         let slot = slot.released();
         let stale = Some(index) != self.current
             && (self.pixel.is_some()
-                || matches!(slot.content, Content::Image(_))
+                || (matches!(slot.content, Content::Image(_)) && self.current.is_some())
                 || current_dims.is_some_and(|d| d != slot.dims));
         if stale {
             slot.destroy();
