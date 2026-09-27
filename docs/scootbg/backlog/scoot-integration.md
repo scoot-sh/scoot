@@ -160,6 +160,69 @@ scoot must be able to find it:
 - A missing binary is the fail-open warning above, naming the `command`
   it tried and how to install it.
 
+### NixOS consumers
+
+(User, 2026-09-27: "make sure ticket 10 enhances the nix setup for NixOS
+consumers", and "it should flow well with scoot".)
+
+**The bar: turning scoot on is enough.** A NixOS user who writes
+`programs.scoot.enable = true` and puts a `[wallpaper]` section in their
+config gets a wallpaper. They add no second option, no package, and no
+`command` path. scootbg is a detail of scoot there, not a second thing to
+set up. The same holds for home-manager. Both modules spell the options
+the same way, under `programs.scoot.wallpaper.*`, so one reads like the
+other.
+
+Today the NixOS module (`nix/modules/nixos.nix`, `nixosModules.scoot`)
+owns the scoot binary and the opt-in session entry, and nothing of
+scootbg. After this item, a NixOS user must get a working `[wallpaper]`
+with no hand wiring. That includes a user without home-manager, and one
+who launches scoot from the greeter entry.
+
+- **`programs.scoot.wallpaper.enable`** installs
+  **`programs.scoot.wallpaper.package`** system-wide, so the default
+  `[wallpaper] command = "scootbg"` resolves on `PATH` for any user and
+  for the greeter-launched session.
+  - **It defaults to `programs.scoot.enable`.** Installing a ~1.5 MB
+    binary changes nothing until a config asks for a wallpaper, so this is
+    not a behaviour change, unlike the login entry, which stays opt-in.
+  - Setting it to `false` opts out, for someone using another wallpaper
+    daemon.
+- **One pinned pair.** scoot and scootbg come from the same flake
+  revision by default, so the `apply-config` protocol scoot speaks is
+  always the one the installed scootbg understands. If a user pins only
+  one of them, `apply-config`'s protocol version check reports the
+  mismatch in scoot's log. It must not fail silently.
+- **Package default:** the flake wrapper injects
+  `self.packages.${pkgs.system}.scootbg` with `mkDefault`, the same
+  pattern as `programs.scoot.package`. A direct-module user (no flake)
+  who turns it on without setting `package` gets a loud eval failure,
+  not a session that silently has no wallpaper.
+- **No per-user config from the NixOS side.** The config file stays
+  per-user, in the home-manager module, as it does for scoot, and the
+  NixOS module only guarantees the binary. `docs/nix.md` says so and
+  shows the pairing next to the existing "complete session" example:
+  home-manager `settings.wallpaper` plus NixOS `wallpaper.enable`.
+- **An overlay:** `overlays.default` providing `pkgs.scoot`,
+  `pkgs.scootctl` and `pkgs.scootbg`.
+  - `docs/nix.md` currently says "there is no overlay", and that is why
+    direct-module users must set `package` by hand.
+  - Decide it in this item, and record the reason either way.
+  - If it is added, the modules default to `pkgs.scootbg` where it
+    exists, the flake wrappers keep injecting their own build, and the
+    `docs/nix.md` caveat goes.
+- **Checks:** extend `nix/tests.nix`, the hermetic `evalModules` checks
+  that `nix flake check` runs. Cover the option off (no package), the
+  option on (the package in `environment.systemPackages`), the
+  direct-module failure without a package, the flake wrapper's default,
+  and the overlay if it is added.
+- **An end-to-end VM test:** a `nixosTest` that boots a scoot session
+  and sees a wallpaper pixel would prove the whole path. Add it if CI
+  can carry its cost; decide, and record which.
+- **Docs, in the same PR:** `docs/nix.md`'s NixOS module table and prose
+  (the new options, the pairing, the overlay), and the packaging line in
+  `docs/scootbg/README.md`.
+
 ## Docs
 
 `docs/configuration.md` gets a `[wallpaper]` section (with `command`), the
