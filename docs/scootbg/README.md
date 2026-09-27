@@ -144,7 +144,12 @@ shows it again when it starts.
   or relative (the XDG base directory spec). With neither it nor `HOME`
   an absolute path there is nowhere to keep state: nothing is restored
   or saved, and the daemon says so on stderr. `scootbg daemon --profile
-  NAME` picks the profile, `default` when not given. A name is 1 to 64
+  NAME` picks the profile, `default` when not given. A state directory
+  that already exists but is owned by someone else, or writable by the
+  group or others, is a warning at start-up, not a refusal: whoever can
+  write there can change which wallpaper is restored (the paths are only
+  read, by decoders checked against hostile input), and a group-writable
+  directory is normal under a `umask` of 002 with a group per user. A name is 1 to 64
   of `A-Z a-z 0-9 . _ -`, not starting with `.` and without `..`, so it
   is one plain file name; anything else is a usage error (exit 2).
   Profiles, not displays: scoot binds the first free `wayland-N`, so the
@@ -162,10 +167,16 @@ shows it again when it starts.
   not plugged in now, and images that could not be restored, stay saved
   until a `set` or `clear` replaces them; a `set` for other outputs keeps
   them. A `set` or `clear` without `--output` replaces every per-output
-  choice, as it does on screen.
+  choice, as it does on screen. **At most 256 per-output choices, and
+  256 KiB in all**, the limits the reader takes: past them the least
+  recently *set* go first (setting an old name again makes it recent),
+  with a warning, so the newest always survive. They are written oldest
+  first, and a restore keeps that order.
 - **Written off the loop, atomically:** a temporary file beside it
-  (`.PROFILE.PID.tmp`), `fsync`, `rename` over the old file, `fsync` of
-  the directory; the file is 0600, a directory it makes 0700. The write
+  (`.PROFILE.PID.tmp`: whatever is at that name is removed, then the file
+  is made with `O_CREAT | O_EXCL`, which never follows a symbolic link),
+  `fsync`, `rename` over the old file, `fsync` of the directory; the file
+  is 0600, a directory it makes 0700. The write
   runs on a thread started for it, which ends once nothing more waits
   (an idle daemon has one thread); the loop only builds the text and
   hands it over (tens of µs), so a slow disk never stalls it. While a
@@ -214,13 +225,16 @@ output HDMI-A-1 clear
   whose fields are not UTF-8 once unescaped, or an unknown key is skipped
   with a warning naming its line, and the rest is used. The same key
   twice: the later line counts, with a warning. More than 256 `output`
-  lines: the rest are skipped. A file over 256 KiB, or whose first line is
-  not `scootbg-state` and a version, restores nothing and is replaced at
-  the next save. **A later version** (a newer scootbg's file) restores
+  lines: the last 256 are kept (lines are oldest first; scootbg never
+  writes more). A file over 256 KiB, or whose first line is not
+  `scootbg-state` and a version, restores nothing and is replaced at the
+  next save. **A later version** (a newer scootbg's file) restores
   nothing and is never written over, so a downgrade cannot destroy what
   the newer build saved. A file that cannot be read (permissions, not a
-  regular file) restores nothing, and nothing is saved over it that
-  session.
+  regular file) restores nothing, and nothing is saved over it. In those
+  two cases **saving is off until the daemon restarts**: stderr says at
+  start-up which file to remove or fix, then restart, to save again, and
+  `query` reports `"saving":false` meanwhile.
 - **Compatibility:** within version 1 a key may be added only if a reader
   that skips it (with its warning) loses nothing it needs; anything else
   bumps the version. `profile` and `fingerprint` are read and kept from
@@ -241,7 +255,7 @@ object per line each way, each request naming the protocol it speaks.
                                                               -> {"type":"ok"}
 {"protocol":1,"type":"clear"}                                 -> {"type":"ok"}
 {"protocol":1,"type":"clear","output":"DP-1"}                 -> {"type":"ok"}
-{"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...]}
+{"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...],"saving":true}
 {"protocol":1,"type":"version"}                               -> {"type":"version","protocol":1,"version":"..."}
 {"protocol":1,"type":"kill"}                                  -> {"type":"ok"}
 anything wrong                                                -> {"type":"error","message":"..."}
@@ -301,6 +315,12 @@ anything wrong                                                -> {"type":"error"
 - A choice for every output is kept for outputs plugged in later; a choice
   for one output is kept by its name, across unplugging it, and across a
   daemon restart ([Restore](#restore)).
+- `query`'s `draw_failed` (per output) is `true` when the last attempt to
+  draw what that output should show failed (stderr says why), so a
+  `shows` of `null` from a failure is told apart from a `clear`; the
+  next request for it, or a new size, retries. The top-level `saving` is
+  `false` while changes are not saved for the next start
+  ([Restore](#restore)).
 - **An image `set` sent before its outputs are configured** (as the
   daemon starts) waits to be decoded until none of the outputs it targets
   is about to be configured, bounded by a round trip the daemon has
@@ -344,7 +364,7 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 | What | Result |
 |---|---|
-| Stripped binary | 1,557,352 B with images and restore (1,516,392 B before ticket 9, 1,500,008 B at ticket 6; 783,072 B with colors only then); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
+| Stripped binary | 1,569,640 B with images and restore (1,557,352 B at ticket 9 before its review fixes, 1,516,392 B before ticket 9, 1,500,008 B at ticket 6; 783,072 B with colors only then); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
 | `set` of a 6000×4000 JPEG onto a 3840×2160 output, request to reply, ×3 | 397.0–433.6 ms, 390–420 ms of CPU (PNG 408.1–417.6 ms; WebP 1,218.0–1,289.4 ms); peak RSS 120.5–120.6 MB with the previous wallpaper still mapped (88.0 MB for a first set; PNG 120.4–120.6 MB; WebP 142.0–142.1 MB) |
 | After it, idle 30 s | 1 thread, heap 372–568 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
 | A few hundred bytes claiming 16384×16384 (PNG, JPEG, WebP) | refused in under 1 ms; peak RSS within 72 kB of before |

@@ -284,9 +284,10 @@ fn replies_are_one_tagged_line() {
     assert_eq!(reply_string(&Reply::Ok), "{\"type\":\"ok\"}\n");
     assert_eq!(
         reply_string(&Reply::Outputs {
-            outputs: &[] as &[OutputEntry<'_>; 0]
+            outputs: &[] as &[OutputEntry<'_>; 0],
+            saving: true,
         }),
-        "{\"type\":\"outputs\",\"outputs\":[]}\n"
+        "{\"type\":\"outputs\",\"outputs\":[],\"saving\":true}\n"
     );
     assert_eq!(
         reply_string(&Reply::Version {
@@ -328,6 +329,7 @@ fn output_entries_have_a_fixed_shape() {
                 height: 2880,
             }),
         },
+        draw_failed: false,
         shows: Some(super::Shows(&color)),
     };
     let unknown = OutputEntry {
@@ -343,10 +345,12 @@ fn output_entries_have_a_fixed_shape() {
             scale: None,
             pixels: None,
         },
+        draw_failed: true,
         shows: None,
     };
     let line = reply_string(&Reply::Outputs {
         outputs: &[known, unknown],
+        saving: false,
     });
     assert_eq!(line.matches('\n').count(), 1);
     let value: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -366,6 +370,7 @@ fn output_entries_have_a_fixed_shape() {
                     "scale": 1.5,
                     "pixels": {"width": 1620, "height": 2880},
                 },
+                "draw_failed": false,
                 "shows": {"color": "#c03020"},
             },
             {
@@ -376,9 +381,10 @@ fn output_entries_have_a_fixed_shape() {
                 "transform": "normal",
                 "logical": null,
                 "surface": {"state": "waiting", "size": null, "scale": null, "pixels": null},
+                "draw_failed": true,
                 "shows": null,
             },
-        ]})
+        ], "saving": false})
     );
 }
 

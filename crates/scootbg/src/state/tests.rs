@@ -136,7 +136,7 @@ fn color(v: u8) -> Option<Wallpaper> {
     Some(Wallpaper::Color(Color { r: v, g: v, b: v }))
 }
 
-fn lines(saved: &Saved) -> Vec<String> {
+fn lines(saved: &mut Saved) -> Vec<String> {
     saved.text().lines().skip(2).map(str::to_owned).collect()
 }
 
@@ -150,7 +150,7 @@ fn saved_choices_follow_sets_rules() {
     saved.choices.set(Some("GONE-1"), color(2), 2);
     saved.record(Some("DP-1"), &image("/a b.jpg", 3), 3);
     assert_eq!(
-        lines(&saved),
+        lines(&mut saved),
         [
             "all color #010101",
             "output GONE-1 color #020202",
@@ -158,19 +158,19 @@ fn saved_choices_follow_sets_rules() {
         ]
     );
     saved.record(Some("DP-1"), &None, 4);
-    assert_eq!(lines(&saved)[2], "output DP-1 clear");
+    assert_eq!(lines(&mut saved)[2], "output DP-1 clear");
     // An image landing late, older than a choice made since, changes
     // nothing: newest wins, as on screen.
     saved.record(Some("DP-1"), &color(9), 3);
-    assert_eq!(lines(&saved)[2], "output DP-1 clear");
+    assert_eq!(lines(&mut saved)[2], "output DP-1 clear");
     // Every output: every named entry goes, as `set` without --output says.
     saved.record(None, &color(5), 5);
-    assert_eq!(lines(&saved), ["all color #050505"]);
+    assert_eq!(lines(&mut saved), ["all color #050505"]);
 }
 
 #[test]
 fn the_fingerprint_and_profile_are_kept_as_read() {
-    let saved = Saved::new(
+    let mut saved = Saved::new(
         Profile::parse("scoot").unwrap(),
         None,
         Some("abc123".to_owned()),
@@ -208,4 +208,46 @@ fn no_temp_files(dir: &Path) {
         names.iter().all(|n| !n.to_string_lossy().ends_with(".tmp")),
         "{names:?}"
     );
+}
+
+/// Past the limit, the least recently *set* entry goes, not the least
+/// recently added: setting an old name again makes it newest. The table
+/// forgets what the file drops, and a restore keeps the order.
+#[test]
+fn the_least_recently_set_entries_are_dropped_first() {
+    use super::format::MAX_OUTPUTS;
+    let mut saved = Saved::nowhere();
+    let mut generation = 0;
+    let mut set = |saved: &mut Saved, name: &str, v: u8| {
+        generation += 1;
+        saved.record(Some(name), &color(v), generation);
+        let _ = saved.text();
+    };
+    for i in 0..MAX_OUTPUTS {
+        set(&mut saved, &format!("O-{i}"), 1);
+    }
+    // O-0 is the oldest name, but set again now.
+    set(&mut saved, "O-0", 2);
+    set(&mut saved, "NEW-1", 3);
+    set(&mut saved, "NEW-2", 4);
+    let names: Vec<String> = saved.choices.named().map(|(n, ..)| n.to_owned()).collect();
+    assert_eq!(
+        names.len(),
+        MAX_OUTPUTS,
+        "the table forgot what the file dropped"
+    );
+    assert!(!names.contains(&"O-1".to_owned()) && !names.contains(&"O-2".to_owned()));
+    assert!(names.contains(&"O-0".to_owned()), "re-set: recent");
+    // The file lists them oldest first, and reads back whole.
+    let text = saved.text();
+    let parsed = super::format::decode(text.as_bytes());
+    assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
+    let order: Vec<&str> = parsed
+        .record
+        .named
+        .iter()
+        .map(|(n, _)| n.as_str())
+        .collect();
+    assert_eq!(order.first(), Some(&"O-3"));
+    assert_eq!(&order[MAX_OUTPUTS - 3..], ["O-0", "NEW-1", "NEW-2"]);
 }

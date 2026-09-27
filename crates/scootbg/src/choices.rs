@@ -94,11 +94,19 @@ impl Choices {
         (self.all.1 > 0).then_some(&self.all.0)
     }
 
-    /// The choices for single outputs, by name, oldest name first.
-    pub fn named(&self) -> impl Iterator<Item = (&str, &Choice)> {
+    /// The choices for single outputs, by name, with the generation each
+    /// was made at (larger: more recent), in the order the names were
+    /// first chosen.
+    pub fn named(&self) -> impl Iterator<Item = (&str, &Choice, u64)> {
         self.named
             .iter()
-            .map(|(name, choice, _)| (name.as_str(), choice))
+            .map(|(name, choice, made)| (name.as_str(), choice, *made))
+    }
+
+    /// Drops the choice for `name`, as if none had been made: for the
+    /// saved table only (`crate::state`), when the file has no room for it.
+    pub fn forget(&mut self, name: &str) {
+        self.named.retain(|(n, ..)| n != name);
     }
 
     #[cfg(test)]

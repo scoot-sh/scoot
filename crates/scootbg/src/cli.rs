@@ -55,8 +55,10 @@ and going; with no outputs at all the daemon waits for one.
 
 Every `set` and `clear` is saved, per output, in the profile's state file,
 $XDG_STATE_HOME/scootbg/PROFILE (~/.local/state/scootbg/PROFILE when
-XDG_STATE_HOME is unset), and the daemon shows it again when it next
-starts. A saved image that is gone (moved, deleted) is skipped with a
+XDG_STATE_HOME is unset, empty or relative), and the daemon shows it again
+when it next starts. If the file cannot be used (unreadable, or written by
+a newer scootbg), saving is off until the daemon restarts, stderr says how
+to recover, and `scootbg query` reports \"saving\":false. A saved image that is gone (moved, deleted) is skipped with a
 warning on stderr, and that output shows the compositor's own background; the
 daemon starts all the same, and the entry stays saved until a `set` or
 `clear` replaces it. Choices for outputs that are not plugged in stay
@@ -169,12 +171,15 @@ USAGE:
     scootbg query
 
 Prints the daemon's reply, one line of JSON with one entry per output:
-{\"type\":\"outputs\",\"outputs\":[...]}
+{\"type\":\"outputs\",\"outputs\":[...],\"saving\":true}
 Each entry has the output's name, description, mode, scale, transform and
 logical size, its surface's state: waiting, pending, configured (with its
-size), closed or gave-up (until the output is replugged), and what it
-shows: {\"color\":\"#rrggbb\"}, {\"image\":\"/path\",\"mode\":\"fill\",
-\"fill\":\"#rrggbb\",\"filter\":\"lanczos3\"}, or null for nothing.
+size), closed or gave-up (until the output is replugged), whether drawing
+what it should show failed (draw_failed; the daemon's stderr says why),
+and what it shows: {\"color\":\"#rrggbb\"}, {\"image\":\"/path\",
+\"mode\":\"fill\",\"fill\":\"#rrggbb\",\"filter\":\"lanczos3\"}, or null
+for nothing. After the list, \"saving\" says whether changes are saved for
+the next start (see `scootbg daemon --help`).
 ";
 
 pub const VERSION_HELP: &str = "\

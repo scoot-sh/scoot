@@ -161,6 +161,10 @@ impl Changes for Control<'_> {
         &self.state.outputs
     }
 
+    fn saving(&self) -> bool {
+        self.state.saved.saving()
+    }
+
     fn change(
         &mut self,
         conn: ConnId,

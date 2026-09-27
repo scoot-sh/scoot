@@ -43,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::choices::{Choice, Choices};
+use crate::print::warn;
 use format::Parsed;
 use saver::Saver;
 
@@ -194,23 +195,67 @@ impl Saved {
         if !self.choices.set(output, choice.clone(), generation) {
             return;
         }
-        let Some(saver) = &self.saver else {
+        if self.saver.is_none() {
             return;
-        };
-        saver.save(self.text());
+        }
+        let text = self.text();
+        if let Some(saver) = &self.saver {
+            saver.save(text);
+        }
     }
 
-    /// The file's text for what is recorded now.
-    pub fn text(&self) -> String {
+    /// The file's text for what is recorded now. What the file has no room
+    /// for (`format::encode`: the least recently set per-output choices
+    /// beyond its limits) is forgotten here too, with a warning, so the
+    /// table and the file agree.
+    pub fn text(&mut self) -> String {
         let mut text = String::with_capacity(256);
-        format::encode(
+        let mut named: Vec<(&str, &Choice, u64)> = self.choices.named().collect();
+        named.sort_by_key(|&(.., made)| made);
+        let oldest_first: Vec<(&str, &Choice)> = named
+            .iter()
+            .map(|&(name, choice, _)| (name, choice))
+            .collect();
+        let left = format::encode(
             &mut text,
             self.profile.as_str(),
             self.fingerprint.as_deref(),
             self.choices.every(),
-            self.choices.named(),
+            &oldest_first,
         );
+        let dropped: Vec<String> = oldest_first
+            .iter()
+            .take(left.named)
+            .map(|&(name, _)| name.to_owned())
+            .collect();
+        if left.all {
+            warn(format_args!(
+                "scootbg: the choice for every output is too long for the state file \
+                 ({} bytes at most) and is not saved",
+                format::MAX_BYTES
+            ));
+        }
+        if !dropped.is_empty() {
+            warn(format_args!(
+                "scootbg: the state file keeps at most {} per-output choices ({} bytes in \
+                 all); the {} least recently set are no longer saved",
+                format::MAX_OUTPUTS,
+                format::MAX_BYTES,
+                dropped.len()
+            ));
+            for name in &dropped {
+                self.choices.forget(name);
+            }
+        }
         text
+    }
+
+    /// Whether changes are saved: `false` when there is no state
+    /// directory, or the file could not be read or is a newer scootbg's
+    /// (said on stderr at start-up, with how to recover). `query` reports
+    /// it.
+    pub fn saving(&self) -> bool {
+        self.saver.is_some()
     }
 
     /// Waits, at most `limit`, for a write under way (on the way out).

@@ -130,6 +130,24 @@ fn drain(file: &Path, shared: &(Mutex<Slot>, Condvar)) {
     }
 }
 
+/// Why a state directory that already exists is not private to this
+/// user, if it is not: owned by someone else, or writable by the group or
+/// others. Anyone who can write there can replace the state file (which
+/// only picks a wallpaper: its paths are opened read-only, and decoded by
+/// code fuzzed for hostile input), so this is a warning, not a refusal: a
+/// group-writable directory is the norm under a `umask` of 002 with a group
+/// per user, and refusing would lose the user's wallpaper for no safety
+/// gained there. One `stat`, at start-up.
+pub fn exposed(dir: &Path) -> Option<String> {
+    let stat = rustix::fs::stat(dir).ok()?;
+    let uid = rustix::process::getuid().as_raw();
+    if stat.st_uid != uid {
+        return Some(format!("it is owned by uid {}, not {uid}", stat.st_uid));
+    }
+    let mode = stat.st_mode & 0o777;
+    (mode & 0o022 != 0).then(|| format!("its mode is {mode:03o}: others can write to it"))
+}
+
 /// Replaces `file` with `bytes`, atomically: a reader (or a crash) sees
 /// the old file or the new one, whole. The file is private (0600), its
 /// directory made private (0700) if it has to be made.
@@ -144,11 +162,19 @@ pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
     // sessions may share a profile), and never a profile's name (those
     // cannot start with a dot).
     let temp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    // Whatever is there (a file left by a killed daemon of the same pid,
+    // or a symbolic link someone put there) goes first; then `create_new`
+    // (`O_CREAT | O_EXCL`) makes a new file or fails. `O_EXCL` never
+    // follows a symbolic link, dangling or not, so the write can only land
+    // in a fresh 0600 file of ours, never in a file a link points at.
+    match fs::remove_file(&temp) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
     let written = (|| {
         let mut out = OpenOptions::new()
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .mode(0o600)
             .open(&temp)?;
         out.write_all(bytes)?;
@@ -156,9 +182,13 @@ pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
         drop(out);
         fs::rename(&temp, file)
     })();
-    if written.is_err() {
-        let _ = fs::remove_file(&temp);
-        return written;
+    if let Err(error) = written {
+        // Only a file this call made: after a failed `create_new` the name
+        // may be someone else's again.
+        if error.kind() != io::ErrorKind::AlreadyExists {
+            let _ = fs::remove_file(&temp);
+        }
+        return Err(error);
     }
     // The rename itself on disk. Best effort: some file systems refuse
     // to sync a directory, and the file is in place either way.

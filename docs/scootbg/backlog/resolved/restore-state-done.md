@@ -365,7 +365,89 @@ after it adds this record, the numbers, and help-text wording).
   (450–476 ms early `set`, 451–497 ms restore, on 4K). A color-only daemon
   is 340–370 kB larger in RSS after its first save (clean code pages, not
   heap); the binary is 40,960 B larger.
+- **Observability, [testing.md](../testing.md):** a restored image that
+  exists but will not decode used to show `shows: null` in `query`, the
+  same as a `clear`. Review of PR #290 added `draw_failed` (below), which
+  tells the two apart; `query` still does not say *why* (stderr does), and
+  a failed draw on a live `set` has no end-to-end `draw_failed` check yet.
 - [config-and-rotation.md](../config-and-rotation.md): if a config file
   ever ships, TOML for it and the state file together may cost less than
   two formats (dependencies-done.md §5); the state format's versioning
   rule is above.
+
+## Review of PR #290
+
+Review found nothing blocking; five findings were fixed in follow-up
+commits on the same branch (the sixth, `--no-restore` then `set --output
+X` keeping the old every-output entry, is the documented, deliberate
+behavior, and stays).
+
+1. **The temporary file followed a symbolic link** (confirmed live by
+   review). `write_atomic` opened `.PROFILE.PID.tmp` with `create` and
+   `truncate`, so a link placed at that name made the write truncate and
+   overwrite whatever file the user can write, keeping that file's mode,
+   and the `rename` then moved the link into place. Now whatever is at the
+   name is removed first and the file is made with `create_new`
+   (`O_CREAT | O_EXCL`, mode 0600), which never follows a link, dangling or
+   not; a failure to create it removes nothing that is not ours. Unit
+   tests: a link to a victim file (untouched, still 0644; the state file a
+   fresh 0600 file), a dangling link (its target not created), a leftover
+   temporary file (replaced). The link test fails against the old open
+   flags ("untouched": left `state\n`).
+   **And the directory:** a state directory that already exists and is
+   owned by another uid, or writable by the group or others, is a warning
+   at start-up (one `rustix::fs::stat`, `rustix::process::getuid`; the
+   `process` feature was already enabled in the tree). **A warning, not a
+   refusal:** whoever can write there can replace the state file, which
+   only picks a wallpaper (paths are opened read-only, and decoded by
+   decoders checked against hostile input), while a group-writable
+   directory is the norm under a `umask` of 002 with a group per user;
+   refusing would cost those users their wallpaper for no safety gained.
+   The directory scootbg makes itself is 0700. Unit-tested, and end to end
+   (a 0777 directory: the warning, and restore and save still work).
+2. **The writer and the reader disagreed on limits.** The reader takes
+   256 `output` lines and 256 KiB, but `encode` wrote the saved table
+   unbounded, in the order names were first chosen, so past 256 connectors
+   the newest entries were the ones dropped at every start. Now `encode`
+   takes the per-output choices oldest first (by the generation they were
+   set at, so setting an old name again makes it recent), keeps whole
+   lines newest first while both limits allow, and writes them oldest
+   first, so a restore gives them generations in that order and recency
+   survives restarts; the saved table forgets what the file dropped, with
+   a warning, so the two agree. The reader, past 256 lines, now keeps the
+   last ones too (a hand-edited file). An `all` line longer than the whole
+   file (only a hand-edited file can make one: a request's path is at most
+   64 KiB, 192 KiB escaped) is left out, with a warning, rather than write
+   a file that restores nothing. Unit tests: the line limit, the byte limit
+   with 20 KiB paths (read back whole, no warning), the huge `all` line,
+   the longest request path fitting, and least-recently-*set* eviction
+   through `Saved`.
+3. **Saving turned off silently.** With a newer-version or unreadable
+   state file, `set` worked on screen and saved nothing, and only the
+   start-up warning said so, without saying what to do. The start-up
+   messages now name the file and the recovery ("remove or rename PATH
+   … then restart `scootbg daemon`, to save again"; "fix or remove PATH
+   …"; for no state directory, set one and restart), and `query` has a
+   top-level `"saving"`, `false` while changes are not saved: additive to
+   protocol 1 (keys may be added). End to end: `saving` false with a
+   newer file, true once a broken one is to be replaced.
+4. **A restored image that exists but will not decode** showed `shows:
+   null`, like a `clear`. Added `draw_failed` to each `query` entry: the
+   model's existing "the last draw failed" flag (`Output::has_failed`),
+   one bool, set by every draw failure and cleared by the next request
+   for the output or a new size, so it needed no new state and no new
+   failure path. End to end: a restored PNG corrupted since reads
+   `draw_failed: true, shows: null`, and a `set` clears it. What is left
+   (no reason in `query`; no end-to-end check for a live `set`'s failed
+   draw) is in [testing.md](../testing.md) and "For the next tickets".
+5. **Help text:** `scootbg daemon --help` now says the `~/.local/state`
+   fallback applies when `XDG_STATE_HOME` is unset, empty or relative, as
+   the code and docs do, and describes the saving-off case; `scootbg
+   query --help` lists `draw_failed` and `saving`.
+
+The binary grows 12,288 B more (1,569,640 B stripped), from the
+limit-fitting encode, the directory check and the new `query` fields;
+still `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` only, no `libc`
+crate. Nothing on the loop's hot path changed: the extra work is in a
+save (a sort of at most 256 names, per `set`) and at start-up (one
+`stat`).

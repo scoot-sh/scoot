@@ -110,3 +110,73 @@ fn a_failing_save_does_not_wedge() {
     saver.save("x\n".to_owned());
     assert!(saver.flush(Duration::from_secs(20)));
 }
+
+/// A symbolic link put at the temporary name is not followed: the file it
+/// points at is untouched, and the state file is a fresh private one.
+/// Dangling links too (`O_EXCL` would otherwise create their target).
+#[test]
+fn a_symlink_at_the_temporary_name_is_not_followed() {
+    let scratch = Scratch::new("symlink");
+    let dir = scratch.0.join("scootbg");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("default");
+    let temp = dir.join(format!(".default.{}.tmp", std::process::id()));
+    let victim = scratch.0.join("victim");
+    std::fs::write(&victim, b"precious\n").unwrap();
+    std::fs::set_permissions(&victim, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::os::unix::fs::symlink(&victim, &temp).unwrap();
+    write_atomic(&file, b"state\n").unwrap();
+    assert_eq!(std::fs::read(&victim).unwrap(), b"precious\n", "untouched");
+    assert_eq!(mode(&victim), 0o644);
+    let meta = std::fs::symlink_metadata(&file).unwrap();
+    assert!(meta.file_type().is_file(), "a regular file, not the link");
+    assert_eq!(mode(&file), 0o600);
+    assert_eq!(std::fs::read(&file).unwrap(), b"state\n");
+    assert!(std::fs::symlink_metadata(&temp).is_err(), "nothing left");
+
+    let nowhere = scratch.0.join("never-made");
+    std::os::unix::fs::symlink(&nowhere, &temp).unwrap();
+    write_atomic(&file, b"again\n").unwrap();
+    assert!(!nowhere.exists(), "a dangling link's target is not created");
+    assert_eq!(std::fs::read(&file).unwrap(), b"again\n");
+}
+
+/// A temporary file left behind (a daemon of the same pid killed
+/// mid-write) is replaced, not appended to or refused.
+#[test]
+fn a_leftover_temporary_file_is_replaced() {
+    let scratch = Scratch::new("leftover");
+    std::fs::create_dir_all(&scratch.0).unwrap();
+    let file = scratch.0.join("default");
+    let temp = scratch
+        .0
+        .join(format!(".default.{}.tmp", std::process::id()));
+    std::fs::write(&temp, b"half a file from before, and longer").unwrap();
+    write_atomic(&file, b"whole\n").unwrap();
+    assert_eq!(std::fs::read(&file).unwrap(), b"whole\n");
+}
+
+#[test]
+fn a_directory_open_to_others_is_noticed() {
+    let scratch = Scratch::new("exposed");
+    std::fs::create_dir_all(&scratch.0).unwrap();
+    std::fs::set_permissions(&scratch.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(super::exposed(&scratch.0), None);
+    std::fs::set_permissions(&scratch.0, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(super::exposed(&scratch.0), None, "readable is fine");
+    for mode in [0o775, 0o757, 0o777] {
+        std::fs::set_permissions(&scratch.0, std::fs::Permissions::from_mode(mode)).unwrap();
+        let why = super::exposed(&scratch.0).unwrap();
+        assert!(why.contains(&format!("{mode:03o}")), "{why}");
+    }
+    // Owned by someone else: `/` is root's; skip the case when running as
+    // root, where it is ours.
+    if rustix::process::getuid().as_raw() != 0 {
+        assert!(
+            super::exposed(std::path::Path::new("/"))
+                .unwrap()
+                .contains("owned by")
+        );
+    }
+    assert_eq!(super::exposed(&scratch.0.join("missing")), None);
+}

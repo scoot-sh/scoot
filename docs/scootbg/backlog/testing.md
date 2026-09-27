@@ -50,3 +50,12 @@ shape 1–5 × 1–5 in both directions and a set of extreme aspects, every
 filter. Deterministic, not coverage-guided: the `cargo fuzz` target over
 decode + crop + scale + pack above is still to do, and is the place
 `pic-scale-safe`'s lack of upstream fuzzing is answered.
+
+**From [ticket 9](resolved/restore-state-done.md#review-of-pr-290):**
+`query`'s per-output `draw_failed` tells a failed draw from a `clear`
+(both show `shows: null`), and is covered end to end only for a restored
+image that no longer decodes (`tests/restore.rs`). A failed draw on a
+live `set` (a buffer too large for `wl_shm`, out of memory) is covered by
+the reply's error and stderr, not yet by a `draw_failed` check; nor does
+`query` say *why* a draw failed (stderr does). Worth a test, and a reason
+string in `query`, if an agent ever needs to tell the causes apart.

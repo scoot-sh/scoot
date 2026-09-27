@@ -28,7 +28,7 @@ use super::wayland::State;
 use crate::choices::Choice;
 use crate::print::warn;
 use crate::state::format::{Pick, Record};
-use crate::state::{self, Profile, Saved};
+use crate::state::{self, Profile, Saved, saver};
 use crate::wallpaper::{Image, Wallpaper};
 
 /// Reads `profile`'s state file. Returns the table to save into, set to
@@ -39,19 +39,31 @@ pub fn load(profile: Profile) -> (Saved, Record) {
     let Some(dir) = state::dir_from_env() else {
         warn(format_args!(
             "scootbg: neither XDG_STATE_HOME nor HOME is an absolute path, so there is \
-             nowhere to keep state: the wallpaper is not restored, and changes are not saved"
+             nowhere to keep state: the wallpaper is not restored, and changes are not saved \
+             (set one and restart `scootbg daemon` to save; `scootbg query` says \
+             \"saving\":false meanwhile)"
         ));
         return (Saved::new(profile, None, None), Record::default());
     };
+    if let Some(why) = saver::exposed(&dir) {
+        warn(format_args!(
+            "scootbg: warning: the state directory {} is not private to you ({why}); \
+             whoever else can write there can change which wallpaper is restored \
+             (`chmod 700` it, or remove it and scootbg makes it private)",
+            dir.display()
+        ));
+    }
     let file = dir.join(profile.as_str());
     let parsed = match state::load(&file) {
         Ok(Some(parsed)) => parsed,
         Ok(None) => return (Saved::new(profile, Some(file), None), Record::default()),
         Err(error) => {
             warn(format_args!(
-                "scootbg: cannot read the state file {}: {error}; nothing was restored, \
-                 and changes are not saved (so as not to write over what it holds)",
-                file.display()
+                "scootbg: cannot read the state file {path}: {error}; nothing was restored, \
+                 and saving is off until the daemon restarts (so as not to write over what \
+                 it holds): fix or remove {path}, then restart `scootbg daemon`, to save \
+                 again (`scootbg query` says \"saving\":false meanwhile)",
+                path = file.display()
             ));
             return (Saved::new(profile, None, None), Record::default());
         }
@@ -72,6 +84,15 @@ pub fn load(profile: Profile) -> (Saved, Record) {
                 profile.as_str()
             ));
         }
+    }
+    if parsed.newer {
+        warn(format_args!(
+            "scootbg: saving is off until the daemon restarts, so a newer scootbg's state \
+             is not written over: remove or rename {path} (or run that newer scootbg), \
+             then restart `scootbg daemon`, to save again (`scootbg query` says \
+             \"saving\":false meanwhile)",
+            path = file.display()
+        ));
     }
     let file = (!parsed.newer).then_some(file);
     let fingerprint = record.fingerprint.clone();

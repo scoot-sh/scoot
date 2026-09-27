@@ -33,9 +33,10 @@
 //!   extra, a bad escape, a relative path, an unknown mode), whose fields
 //!   are not UTF-8 once unescaped, or whose key is unknown, is skipped with
 //!   a warning, and the rest of the file still counts. A file over
-//!   [`MAX_BYTES`] is not read at all; more than [`MAX_OUTPUTS`] `output`
-//!   lines, the rest are skipped. The same key twice: the later line wins,
-//!   with a warning.
+//!   [`MAX_BYTES`] is not read at all; of more than [`MAX_OUTPUTS`]
+//!   `output` lines, the last ones are kept (lines are oldest first, and
+//!   [`encode`] itself never writes more, dropping the least recently set).
+//!   The same key twice: the later line wins, with a warning.
 //!
 //! **Within version 1**, a key may be added only if a reader that skips
 //! it (with its warning) loses nothing it needs; anything else bumps the
@@ -103,18 +104,36 @@ pub struct Parsed {
     pub newer: bool,
 }
 
+/// What [`encode`] had to leave out to stay within what [`decode`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Left {
+    /// The oldest per-output choices, this many from the front of `named`.
+    pub named: usize,
+    /// The choice for every output (only a line longer than the whole
+    /// file may be, which only a hand-edited file can lead to).
+    pub all: bool,
+}
+
 /// Appends the file for `profile` to `out`: the header, the profile, the
 /// fingerprint if there is one, the choice for every output if one was
-/// made, then each named choice. A name that is empty is left out: no
-/// output can be given one by name (`--output ''` names none a
-/// compositor reports), and the format has no way to write it.
-pub fn encode<'a>(
+/// made, then the named choices, `named` given **oldest first**, and
+/// written in that order, so a restore gives them generations in the same
+/// order and "least recently set" survives a restart.
+///
+/// **Within what the reader takes** ([`MAX_OUTPUTS`] lines, [`MAX_BYTES`]
+/// in all): when the named choices do not all fit, the oldest are left
+/// out, so the newest always survive; the caller forgets them too
+/// ([`Left`]), so the table and the file agree. A name that is empty is
+/// left out (and not counted): no output can be given one by name, and
+/// the format has no way to write it.
+pub fn encode(
     out: &mut String,
     profile: &str,
     fingerprint: Option<&str>,
     all: Option<&Choice>,
-    named: impl Iterator<Item = (&'a str, &'a Choice)>,
-) {
+    named: &[(&str, &Choice)],
+) -> Left {
+    let start = out.len();
     // Writing into a `String` cannot fail.
     let _ = writeln!(out, "{MAGIC} {VERSION}");
     out.push_str("profile ");
@@ -125,18 +144,49 @@ pub fn encode<'a>(
         escape(out, fingerprint);
         out.push('\n');
     }
+    let mut left = Left::default();
     if let Some(choice) = all {
+        let before = out.len();
         out.push_str("all ");
         pick(out, choice);
         out.push('\n');
+        // A path from a request is at most `MAX_REQUEST_LINE` (64 KiB), so
+        // three times that escaped fits; only a hand-edited file's can not.
+        if out.len() - start > MAX_BYTES {
+            out.truncate(before);
+            left.all = true;
+        }
     }
-    for (name, choice) in named.filter(|(name, _)| !name.is_empty()) {
-        out.push_str("output ");
-        escape(out, name);
-        out.push(' ');
-        pick(out, choice);
-        out.push('\n');
+    // Newest first, each whole line while it fits, then written oldest
+    // first. One `String` per line, per save: a save is per `set`.
+    let mut budget = MAX_BYTES.saturating_sub(out.len() - start);
+    let mut lines: Vec<String> = Vec::new();
+    let mut kept = 0;
+    for (name, choice) in named.iter().rev() {
+        if name.is_empty() {
+            kept += 1;
+            continue;
+        }
+        if lines.len() == MAX_OUTPUTS {
+            break;
+        }
+        let mut line = String::from("output ");
+        escape(&mut line, name);
+        line.push(' ');
+        pick(&mut line, choice);
+        line.push('\n');
+        if line.len() > budget {
+            break;
+        }
+        budget -= line.len();
+        lines.push(line);
+        kept += 1;
     }
+    for line in lines.iter().rev() {
+        out.push_str(line);
+    }
+    left.named = named.len() - kept;
+    left
 }
 
 fn pick(out: &mut String, choice: &Choice) {
@@ -231,8 +281,7 @@ pub fn decode(bytes: &[u8]) -> Parsed {
             parsed.newer = true;
             parsed.warnings.push(format!(
                 "it is version {later} of the format, from a newer scootbg; this one reads \
-                 version {VERSION}, so nothing was restored from it, and it is left as it is \
-                 (choices made now are not saved)"
+                 version {VERSION}, so nothing was restored from it, and it is left as it is"
             ));
             return parsed;
         }
@@ -255,6 +304,7 @@ pub fn decode(bytes: &[u8]) -> Parsed {
                 Skip::Duplicate(what) => {
                     format!("line {number}: a second {what}; the later one counts")
                 }
+                Skip::TooMany => format!("line {number}: {}", Skip::TooMany),
                 other => format!("line {number}: {other}; skipped"),
             };
             parsed.warnings.push(note);
@@ -307,7 +357,10 @@ impl std::fmt::Display for Skip {
                 write!(f, "the fingerprint is over {MAX_FINGERPRINT} bytes")
             }
             Self::Empty(what) => write!(f, "the {what} is empty"),
-            Self::TooMany => write!(f, "more than {MAX_OUTPUTS} outputs"),
+            Self::TooMany => write!(
+                f,
+                "more than {MAX_OUTPUTS} outputs: the earliest `output` line kept so far is dropped"
+            ),
             Self::Duplicate(what) => write!(f, "a second {what}"),
         }
     }
@@ -356,7 +409,13 @@ fn entry(record: &mut Record, line: &[u8], seen_all: &mut bool) -> Result<(), Sk
                     *slot = pick;
                     Err(Skip::Duplicate("line for this output"))
                 }
-                None if full => Err(Skip::TooMany),
+                // Lines are oldest first, as scootbg writes them: over the
+                // limit, the oldest goes, as the writer would drop it.
+                None if full => {
+                    record.named.remove(0);
+                    record.named.push((name, pick));
+                    Err(Skip::TooMany)
+                }
                 None => {
                     record.named.push((name, pick));
                     Ok(())

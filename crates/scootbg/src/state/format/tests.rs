@@ -39,7 +39,10 @@ fn text(fingerprint: Option<&str>, all: Option<&Choice>, named: &[(&str, Choice)
         "default",
         fingerprint,
         all,
-        named.iter().map(|(name, choice)| (*name, choice)),
+        &named
+            .iter()
+            .map(|(name, choice)| (*name, choice))
+            .collect::<Vec<_>>(),
     );
     out
 }
@@ -325,25 +328,122 @@ fn duplicates_warn_and_the_later_line_counts() {
     assert_eq!(record.fingerprint.as_deref(), Some("g"));
 }
 
+/// Lines are oldest first: past the limit the reader keeps the last
+/// (newest) ones, as the writer would.
 #[test]
-fn outputs_beyond_the_limit_are_skipped() {
+fn outputs_beyond_the_limit_keep_the_newest() {
     let body: String = (0..MAX_OUTPUTS + 3)
         .map(|i| format!("output O-{i} clear\n"))
         .collect();
     let parsed = with_body(&body);
     assert_eq!(parsed.record.named.len(), MAX_OUTPUTS);
     assert_eq!(parsed.warnings.len(), 3, "{:?}", parsed.warnings);
-    // A name already read is still replaced at the limit.
-    let body = format!("{body}output O-0 color #ffffff\n");
-    let parsed = with_body(&body);
+    assert_eq!(parsed.record.named[0].0, "O-3", "the three oldest went");
     assert_eq!(
-        parsed.record.named[0].1,
-        Pick::Color(Color {
-            r: 255,
-            g: 255,
-            b: 255
-        })
+        parsed.record.named[MAX_OUTPUTS - 1].0,
+        format!("O-{}", MAX_OUTPUTS + 2)
     );
+    // A name already read is replaced in place, at the limit or not.
+    let body = format!("{body}output O-10 color #ffffff\n");
+    let parsed = with_body(&body);
+    assert_eq!(parsed.record.named.len(), MAX_OUTPUTS);
+    assert_eq!(
+        parsed.record.named[7],
+        (
+            "O-10".to_owned(),
+            Pick::Color(Color {
+                r: 255,
+                g: 255,
+                b: 255
+            })
+        )
+    );
+}
+
+fn encoded(all: Option<&Choice>, named: &[(String, Choice)]) -> (String, super::Left) {
+    let mut out = String::new();
+    let list: Vec<(&str, &Choice)> = named.iter().map(|(n, c)| (n.as_str(), c)).collect();
+    let left = encode(&mut out, "default", Some("f"), all, &list);
+    (out, left)
+}
+
+/// The writer stays within what the reader takes: at most `MAX_OUTPUTS`
+/// lines, the newest (last given) kept, in the order given.
+#[test]
+fn the_writer_keeps_the_newest_within_the_line_limit() {
+    let named: Vec<(String, Choice)> = (0..MAX_OUTPUTS + 5)
+        .map(|i| (format!("O-{i}"), color(1, 2, 3)))
+        .collect();
+    let (text, left) = encoded(Some(&None), &named);
+    assert_eq!(
+        left,
+        super::Left {
+            named: 5,
+            all: false
+        }
+    );
+    let record = clean(text.as_bytes());
+    assert_eq!(record.named.len(), MAX_OUTPUTS);
+    assert_eq!(record.named[0].0, "O-5");
+    assert_eq!(
+        record.named.last().unwrap().0,
+        format!("O-{}", MAX_OUTPUTS + 4)
+    );
+    assert_eq!(record.all, Some(Pick::Clear));
+    // At the limit exactly, nothing is left out.
+    let (_, left) = encoded(None, &named[..MAX_OUTPUTS]);
+    assert_eq!(left, super::Left::default());
+}
+
+/// Long paths: whole lines, newest first, while they fit in `MAX_BYTES`;
+/// the file is then read back whole, with no warning.
+#[test]
+fn the_writer_keeps_the_newest_within_the_byte_limit() {
+    // 20 KiB paths of spaces: 60 KiB escaped, so four fit beside `all`.
+    let long = |i: usize| format!("/{i}{}", " ".repeat(20 * 1024));
+    let named: Vec<(String, Choice)> = (0..10)
+        .map(|i| (format!("O-{i}"), image(&long(i))))
+        .collect();
+    let (text, left) = encoded(Some(&image(&long(99))), &named);
+    assert!(text.len() <= MAX_BYTES, "{}", text.len());
+    assert!(left.named > 0 && !left.all, "{left:?}");
+    let record = clean(text.as_bytes());
+    let kept: Vec<&str> = record.named.iter().map(|(n, _)| n.as_str()).collect();
+    let want: Vec<String> = (left.named..10).map(|i| format!("O-{i}")).collect();
+    assert_eq!(kept, want);
+    assert_eq!(record.all, Some(pick_image(&long(99))));
+    // One line longer than any file: it alone is left out.
+    let huge = format!("/{}", "\n".repeat(MAX_BYTES / 2));
+    let (text, left) = encoded(Some(&image(&huge)), &named[9..]);
+    assert_eq!(
+        left,
+        super::Left {
+            named: 0,
+            all: true
+        }
+    );
+    let record = clean(text.as_bytes());
+    assert_eq!((record.all, record.named.len()), (None, 1));
+    let (text, left) = encoded(None, &[("BIG".to_owned(), image(&huge)), named[9].clone()]);
+    assert_eq!(
+        left,
+        super::Left {
+            named: 1,
+            all: false
+        },
+        "the older, huge one"
+    );
+    assert_eq!(clean(text.as_bytes()).named[0].0, "O-9");
+}
+
+/// The longest path a request can carry (the 64 KiB request line), every
+/// byte escaped, still fits as the `all` line.
+#[test]
+fn the_longest_request_path_fits() {
+    let path = format!("/{}", "\u{1}".repeat(crate::protocol::MAX_REQUEST_LINE));
+    let (text, left) = encoded(Some(&image(&path)), &[]);
+    assert_eq!(left, super::Left::default());
+    assert_eq!(clean(text.as_bytes()).all, Some(pick_image(&path)));
 }
 
 #[test]

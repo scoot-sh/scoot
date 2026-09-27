@@ -146,8 +146,14 @@ fn every_and_named_list_what_was_chosen() {
     choices.set(Some("B"), red.clone(), 1);
     choices.set(Some("A"), None, 2);
     assert!(choices.every().is_none());
-    let names: Vec<_> = choices.named().map(|(n, c)| (n, c.is_some())).collect();
-    assert_eq!(names, [("B", true), ("A", false)]);
+    let names: Vec<_> = choices
+        .named()
+        .map(|(n, c, made)| (n, c.is_some(), made))
+        .collect();
+    assert_eq!(names, [("B", true, 1), ("A", false, 2)]);
+    choices.forget("B");
+    choices.forget("nobody");
+    assert_eq!(choices.named().map(|(n, ..)| n).collect::<Vec<_>>(), ["A"]);
     choices.set(None, None, 3);
     assert_eq!(choices.every(), Some(&None), "a clear of every output");
     assert_eq!(choices.named().count(), 0);

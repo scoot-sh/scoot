@@ -421,14 +421,24 @@ fn an_unusable_state_file_never_stops_the_daemon() {
     let mut daemon = session.daemon();
     let names = configured_names(&session, 1);
     names_configured_showing_nothing(&session, &names);
+    assert_eq!(
+        session.query()["saving"],
+        false,
+        "saving is off, and says so"
+    );
     ok(&session, &["set", BLUE]);
     let stderr = stop(&session, &mut daemon);
     assert!(stderr.contains("version 2"), "{stderr}");
+    assert!(
+        stderr.contains("remove or rename") && stderr.contains("to save again"),
+        "how to recover: {stderr}"
+    );
     assert_eq!(std::fs::read_to_string(&file).unwrap(), newer, "left alone");
 
     std::fs::write(&file, "garbage\n\u{0}\u{ff}").unwrap();
     let mut daemon = session.daemon();
     names_configured_showing_nothing(&session, &names);
+    assert_eq!(session.query()["saving"], true, "a broken file is replaced");
     ok(&session, &["set", BLUE]);
     let stderr = stop(&session, &mut daemon);
     assert!(stderr.contains("first line"), "{stderr}");
@@ -439,6 +449,49 @@ fn an_unusable_state_file_never_stops_the_daemon() {
     let mut daemon = session.daemon();
     shows(&session, &[(names[0].as_str(), color(BLUE))]);
     stop(&session, &mut daemon);
+
+    // A state directory others can write to: a warning, and it still works.
+    let dir = file.parent().unwrap();
+    std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o777)).unwrap();
+    let mut daemon = session.daemon();
+    shows(&session, &[(names[0].as_str(), color(BLUE))]);
+    assert_eq!(session.query()["saving"], true);
+    let stderr = stop(&session, &mut daemon);
+    assert!(
+        stderr.contains("not private") && stderr.contains("777"),
+        "{stderr}"
+    );
+}
+
+/// A restored image that exists but cannot be decoded: the output shows
+/// nothing, and `query` tells that apart from a `clear` (`draw_failed`);
+/// the next `set` clears it.
+#[test]
+fn a_restored_image_that_cannot_be_drawn_says_so() {
+    let Some(session) = Session::start_with("rs-corrupt", 1, "") else {
+        return;
+    };
+    let picture = session.scratch.0.join("broken.png");
+    write_png(&picture, [0, 0, 255]);
+    let mut daemon = session.daemon();
+    let names = configured_names(&session, 1);
+    ok(&session, &["set", picture.to_str().unwrap()]);
+    assert_eq!(session.query()["outputs"][0]["draw_failed"], false);
+    stop(&session, &mut daemon);
+    std::fs::write(&picture, b"\x89PNG\r\n\x1a\nnot really").unwrap();
+
+    let mut daemon = session.daemon();
+    session.query_until("the draw failed", |o| {
+        o.len() == 1 && o[0]["draw_failed"] == true && o[0]["shows"].is_null()
+    });
+    ok(&session, &["set", GREEN]);
+    shows(&session, &[(names[0].as_str(), color(GREEN))]);
+    assert_eq!(session.query()["outputs"][0]["draw_failed"], false);
+    let stderr = stop(&session, &mut daemon);
+    assert!(
+        stderr.contains("cannot draw") && stderr.contains("broken.png"),
+        "{stderr}"
+    );
 }
 
 /// Counts the times a file is opened, by anyone (inotify `IN_OPEN`): how

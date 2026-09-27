@@ -462,12 +462,17 @@ absolute), and `scootbg daemon` shows it again when it starts:
 - **When it is saved:** a color or a `clear` as soon as the daemon has it,
   an image once it has decoded (one that cannot be shown changes nothing,
   so saves nothing). The file is written off the daemon's loop,
-  atomically (a temporary file, `fsync`, `rename`), private (0600, in a
-  0700 directory); `scootbg kill` waits for a write under way, and a
-  signal leaves the old file or the new one, never half of each.
+  atomically (a fresh temporary file that never follows a symbolic link,
+  `fsync`, `rename`), private (0600, in a 0700 directory; a state
+  directory that already exists and is someone else's, or writable by
+  others, is a warning at start-up); `scootbg kill` waits for a write
+  under way, and a signal leaves the old file or the new one, never half
+  of each.
 - **What survives:** a choice for an output that is not plugged in now
   stays saved and comes back with it; `set` without `--output` replaces
   every per-output choice, as it does on screen. A restore saves nothing.
+  At most 256 per-output choices are kept (and 256 KiB in all): past
+  that, the least recently set go first, with a warning.
 - **A saved image that is gone** (moved, deleted, on a disk not mounted
   yet) is skipped with a warning on the daemon's stderr, and that output
   shows the compositor's own background. The daemon starts all the same,
@@ -481,8 +486,11 @@ absolute), and `scootbg daemon` shows it again when it starts:
   256 KiB) restores nothing and is replaced at the next save; a newer
   scootbg's format (a later version) restores nothing and is never
   written over; an unreadable one restores nothing, and nothing is saved
-  over it that session. The format is a documented, versioned line
-  format ([docs/scootbg/README.md](docs/scootbg/README.md#restore)).
+  over it. In those two cases **saving is off until the daemon
+  restarts**: `set` still works on screen, stderr says at start-up which
+  file to remove or fix to save again, and `scootbg query` reports
+  `"saving":false`. The format is a documented, versioned line format
+  ([docs/scootbg/README.md](docs/scootbg/README.md#restore)).
 - **A restored image is decoded once**, when its outputs are configured:
   about 450 ms to a 6000×4000 JPEG on screen on a 4K output, the same as a
   `set` on a running daemon. So is an image `set` sent the moment the
@@ -501,7 +509,7 @@ simply waits. `scootbg query` answers, on one line (wrapped here):
  "logical":{"width":2560,"height":1440},
  "surface":{"state":"configured","size":{"width":2560,"height":1440},
             "scale":1.5,"pixels":{"width":3840,"height":2160}},
- "shows":{"color":"#1e1e2e"}}]}
+ "draw_failed":false,"shows":{"color":"#1e1e2e"}}],"saving":true}
 ```
 
 Every key is always present, `null` when not known yet. `mode` is in
@@ -523,7 +531,12 @@ are unaffected; it lasts until that output is unplugged and plugged back
 in, which makes it a new output). `shows` is what the output has on
 screen: `{"color":"#rrggbb"}` (lowercase),
 `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
-or `null` for nothing. New keys
+or `null` for nothing. `draw_failed` is `true` when the last attempt to
+draw what the output should show failed (an image that exists but cannot
+be decoded, a buffer too large; stderr says why), which tells that `null`
+apart from a `clear`; the next request for the output, or a new size,
+retries. `saving` (after the list) is `false` while `set` and `clear` are
+not saved for the next start (see above). New keys
 may be added; none changes meaning within protocol 1. If the daemon cannot
 accept clients (out of file descriptors, say), it keeps the wallpaper up,
 says so once on stderr, and retries every second rather than exit. The

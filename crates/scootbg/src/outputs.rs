@@ -585,6 +585,11 @@ impl Output {
         self.failed = true;
     }
 
+    /// Whether the last draw failed and has not been retried yet.
+    pub fn has_failed(&self) -> bool {
+        self.failed
+    }
+
     /// What is on screen: what the configured surface was last committed
     /// with.
     pub fn shows(&self) -> Option<&Wallpaper> {

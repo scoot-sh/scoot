@@ -49,6 +49,10 @@ impl Changes for Fake<'_> {
         self.outputs
     }
 
+    fn saving(&self) -> bool {
+        true
+    }
+
     fn change(
         &mut self,
         conn: ConnId,
@@ -79,7 +83,10 @@ fn query_answers_an_empty_output_list() {
     let mut fake = Fake::new(NO_OUTPUTS);
     let mut responder = Responder::new(&mut fake);
     let reply = ask(&mut responder, Request::Query.line().trim_end());
-    assert_eq!(reply, serde_json::json!({"type": "outputs", "outputs": []}));
+    assert_eq!(
+        reply,
+        serde_json::json!({"type": "outputs", "outputs": [], "saving": true})
+    );
     assert!(!responder.stop);
 }
 
@@ -419,6 +426,8 @@ fn query_reports_each_output_and_its_surface() {
         let _ = first.settled();
         let _ = first.prefer_fractional(180);
         let _ = first.configure(7, 1707, 960);
+        // A draw that failed shows as such.
+        first.draw_failed();
     }
     {
         let second = &mut outputs.get_mut(b).unwrap().output;
@@ -450,6 +459,7 @@ fn query_reports_each_output_and_its_surface() {
                     "scale": 1.5,
                     "pixels": {"width": 2561, "height": 1440},
                 },
+                "draw_failed": true,
                 "shows": null,
             },
             {
@@ -460,6 +470,7 @@ fn query_reports_each_output_and_its_surface() {
                 "transform": "normal",
                 "logical": null,
                 "surface": {"state": "gave-up", "size": null, "scale": null, "pixels": null},
+                "draw_failed": false,
                 "shows": null,
             },
             {
@@ -470,9 +481,10 @@ fn query_reports_each_output_and_its_surface() {
                 "transform": "normal",
                 "logical": null,
                 "surface": {"state": "waiting", "size": null, "scale": null, "pixels": null},
+                "draw_failed": false,
                 "shows": null,
             },
-        ]})
+        ], "saving": true})
     );
     // Removing one updates the next reply.
     let _ = outputs.remove_global(4);
