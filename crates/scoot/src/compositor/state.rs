@@ -314,6 +314,13 @@ pub struct State {
     /// identity -- see `reconnect.rs`. Written only by
     /// `State::remove_output`, consumed only by `State::restore_displaced`.
     pub(super) displaced: HashMap<OutputIdentity, DisplacedOutput>,
+    /// What connector name each live adoption origin stands for: the
+    /// `ext-workspace-v1` origin names ("2 DP-1") and IPC's adopted flags
+    /// compose from this. Written by `State::remove_output` beside the
+    /// `displaced` record, swept by `State::restore_displaced` down to the
+    /// origins workspaces still carry -- so a chained adoption's earlier
+    /// origin keeps its name while any workspace still names it.
+    pub(super) origin_names: HashMap<u64, String>,
     /// The output scale resolved from `[output] scale` (see
     /// `output_scale.rs`), set at startup and re-applied live by a config
     /// reload (see `reload.rs`) -- except under `--nested`, where it stays
@@ -1077,6 +1084,7 @@ impl State {
             outputs: Outputs::default(),
             output_identities: HashMap::new(),
             displaced: HashMap::new(),
+            origin_names: HashMap::new(),
             output_scale: scale,
             integer_scale: super::output_scale::integer_scale(scale),
             renderer,

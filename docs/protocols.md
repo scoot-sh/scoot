@@ -958,8 +958,10 @@ them. The global is `ext_workspace_manager_v1`.
   active index: switching on one output never disturbs another's.
 - **One `ext_workspace_handle_v1` per workspace**, named `"1"`, `"2"`, … in
   layout order, with matching one-dimensional `coordinates` — sort by those,
-  not by name (`"10"` sorts before `"2"` as a string). The active one carries
-  the `active` state bit; nothing else is ever set.
+  not by name (`"10"` sorts before `"2"` as a string). A workspace adopted
+  from an unplugged monitor carries its monitor's name (`"2 DP-1"`, back to
+  `"2"` when the monitor returns or the workspace empties). The active one
+  carries the `active` state bit; nothing else is ever set.
 - **`activate` is the only capability advertised**, on workspaces. The group
   advertises none.
 - **Changes arrive in batches closed by `done`**, one per change, and none at

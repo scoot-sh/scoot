@@ -24,7 +24,9 @@ use std::collections::HashMap;
 
 pub use arrange::{Arrangement, Placement};
 pub use floating_move::FloatingGeometry;
-pub use reconnect::{ColumnSnapshot, EvictedOutput, OutputSnapshot, WorkspaceSnapshot};
+pub use reconnect::{
+    AdopterView, ColumnSnapshot, EvictedOutput, OutputSnapshot, WorkspaceSnapshot,
+};
 
 use crate::config::Config;
 use crate::geometry::Rect;
@@ -77,6 +79,16 @@ pub struct World {
     /// `floating_order.rs`), kept so a frame that needs one allocates
     /// nothing. Not state: nothing reads it between arrangements.
     order_scratch: floating_order::OrderScratchCell,
+    /// How many adoptions have been tagged: the next workspace origin id
+    /// `remove_output` mints. Opaque to everyone but the shell, which maps
+    /// each live one back to the connector name it filed the eviction under.
+    next_origin: u64,
+    /// Bumped whenever adoption tags move or clear, so a shell publishing
+    /// per-workspace names can tell "the tags changed" without rebuilding
+    /// them on every refresh. `remove_output` and `restore_output` are the
+    /// only writers; workspace drops need no bump, because a drop always
+    /// changes the workspace count the shell already compares.
+    origin_revision: u64,
 }
 
 impl World {
@@ -203,6 +215,54 @@ impl World {
             count: output.workspaces.len(),
             active: output.active,
         })
+    }
+
+    /// Which adoption each of one output's workspaces came from, if any, in
+    /// workspace order -- what the shell composes `ext-workspace-v1` origin
+    /// names and IPC's adopted flags from. `None` for an unknown output.
+    ///
+    /// A per-request path (a `windows` listing, a workspace refresh that
+    /// already found the tags changed), never a per-frame one.
+    pub fn workspace_origins(&self, id: OutputId) -> Option<Vec<Option<u64>>> {
+        self.outputs
+            .iter()
+            .find(|o| o.id == id)
+            .map(|o| o.workspaces.iter().map(|ws| ws.origin).collect())
+    }
+
+    /// Which output and workspace `id` sits on, and which adoption that
+    /// workspace came from, if any. `None` for an unknown window or one
+    /// waiting in `unplaced`.
+    ///
+    /// A per-request path like [`World::workspace_origins`].
+    pub fn window_workspace(&self, id: WindowId) -> Option<(OutputId, usize, Option<u64>)> {
+        let loc = self.locate(id)?;
+        let output = self.outputs.get(loc.output)?;
+        let origin = output.workspaces.get(loc.workspace)?.origin;
+        Some((output.id, loc.workspace, origin))
+    }
+
+    /// [`World::origin_revision`]'s value: what a shell publishing
+    /// per-workspace names compares (beside the workspace count) to learn
+    /// the tags changed without rebuilding them.
+    pub fn origin_revision(&self) -> u64 {
+        self.origin_revision
+    }
+
+    /// Mints the next workspace origin id. Wrapping rather than panicking:
+    /// exhausting it takes one adoption per `u64`, and a compositor crash
+    /// takes every client's unsaved state with it.
+    fn mint_origin(&mut self) -> u64 {
+        let origin = self.next_origin;
+        self.next_origin = self.next_origin.wrapping_add(1);
+        self.origin_revision = self.origin_revision.wrapping_add(1);
+        origin
+    }
+
+    /// Notes that adoption tags were cleared, for
+    /// [`World::origin_revision`]'s readers.
+    fn cleared_origin(&mut self) {
+        self.origin_revision = self.origin_revision.wrapping_add(1);
     }
 
     fn output_index(&self, id: OutputId) -> Option<usize> {

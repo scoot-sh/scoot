@@ -761,16 +761,17 @@ scale/mode) into one hardware session.
   bound of the first blank drawn"; `stale_vblanks` entries should age out so
   a driver that never delivers an owed vblank can't freeze a reused CRTC.
   Filed from PR #247's round-2 review.
-- [An unplugged monitor's windows seem to disappear](./core/unplug-adopted-windows-invisible.md)
-  — OPEN, medium (daily-drive, filed from `Asahi.md` Test 12): on unplug the
+- [An unplugged monitor's windows seem to disappear](./resolved/unplug-adopted-windows-visible-done.md)
+  — RESOLVED, medium (daily-drive, filed from `Asahi.md` Test 12): on unplug the
   monitor's workspaces are adopted as background workspaces of the focused
   screen and nothing visible changes, so the person at the machine read it
-  as the window vanishing. Requirement (user): make clear where both the
-  removed monitor's workspaces and the panel's swapped-out view went. Design:
-  show the adopted workspace when focus was on the removed screen
-  (restore-safe), name adopted workspaces by origin over `ext-workspace-v1`,
-  add `workspace` to IPC `windows`; notifications via a later IPC event, not
-  drawn by scoot.
+  as the window vanishing. Shipped: the adopter switches to the adopted
+  workspace holding the focused window (focus elsewhere: unchanged), a
+  replug restores both the monitor and the adopter's pre-adopt view with
+  focus following a carried window home, adopted workspaces are named by
+  origin over `ext-workspace-v1` ("2 DP-1"), and IPC `windows` reports the
+  0-based workspace, adoption and origin. Follow-up filed:
+  [IPC output-removed/restored event](./ipc/output-removed-restored-event.md).
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
   — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
   + H (default `Super+comma/period` output binds) LANDED 2026-09-21

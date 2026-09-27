@@ -2,7 +2,7 @@
 //! every step.
 
 use super::*;
-use crate::{Action, Edges, Horizontal, Size, SizeHints, Vertical};
+use crate::{Action, Edges, EvictedOutput, Horizontal, Size, SizeHints, Vertical};
 
 /// xorshift64*: deterministic and dependency-free.
 struct Rng(u64);
@@ -258,6 +258,21 @@ fn random_output(rng: &mut Rng, outputs: &[OutputId]) -> OutputId {
 enum Step {
     Event(Event),
     Action(Action),
+    /// An output leaving with its eviction record kept, like the shell files
+    /// it under a connector identity for a later restore.
+    Evict(OutputId),
+    /// A restore of a kept record onto a live output: a monitor coming back
+    /// under a fresh id, or onto an output that never lost anything (which
+    /// must still hold the invariants).
+    Restore {
+        record: usize,
+        target: OutputId,
+    },
+    /// A monitor coming back under a fresh id: a new output, then a kept
+    /// record restored onto it.
+    Replug {
+        record: usize,
+    },
 }
 
 impl Step {
@@ -308,10 +323,37 @@ impl Step {
     }
 }
 
-fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) -> Step {
+fn random_step(
+    world: &mut World,
+    rng: &mut Rng,
+    next_id: &mut u64,
+    stashed: usize,
+    evict_steps: &mut u64,
+    restore_steps: &mut u64,
+) -> Step {
     let windows: Vec<WindowId> = world.windows().into_iter().map(|(id, _)| id).collect();
     let areas = world.outputs();
     let outputs: Vec<OutputId> = areas.iter().map(|&(id, _)| id).collect();
+    // An output leaving with its eviction record kept, and a kept record
+    // restored onto a live output: the evict → switch → restore shape, as
+    // the shell drives it. A few percent of steps, so the tree still spends
+    // most of its time in the shapes the counters below are tuned against.
+    if !outputs.is_empty() && rng.chance(2) {
+        *evict_steps += 1;
+        return Step::Evict(outputs[rng.below(outputs.len())]);
+    }
+    if stashed > 0 && !outputs.is_empty() && rng.chance(3) {
+        *restore_steps += 1;
+        if rng.chance(75) {
+            return Step::Replug {
+                record: rng.below(stashed),
+            };
+        }
+        return Step::Restore {
+            record: rng.below(stashed),
+            target: outputs[rng.below(outputs.len())],
+        };
+    }
     let floating: Vec<WindowId> = windows
         .iter()
         .copied()
@@ -384,11 +426,43 @@ fn random_step(world: &mut World, rng: &mut Rng, next_id: &mut u64) -> Step {
     Step::Event(event)
 }
 
-fn apply_step(world: &mut World, step: Step) {
+fn apply_step(world: &mut World, step: Step, stashed: &mut Vec<EvictedOutput>, next_id: &mut u64) {
     match step {
         Step::Event(event) => world.handle_event(event),
         Step::Action(action) => {
             world.handle_action(action);
+        }
+        Step::Evict(id) => {
+            if let Some(evicted) = world.evict_output(id) {
+                // Bounded like the shell's map of displaced outputs: a
+                // monitor per entry, and there are never many monitors.
+                if stashed.len() >= 4 {
+                    stashed.remove(0);
+                }
+                stashed.push(evicted);
+            }
+        }
+        Step::Restore { record, target } => {
+            if let Some(evicted) = stashed.get(record) {
+                // Cloned, so the record survives for a later restore: a
+                // restore must hold the invariants however often it runs.
+                world.restore_output(target, evicted.clone());
+            }
+        }
+        Step::Replug { record } => {
+            // A monitor coming back under a fresh id, the shape PR #249
+            // restores by: a new output, then the kept record onto it. New
+            // outputs are also what keeps this driver multi-output against
+            // the evictions draining them.
+            *next_id += 1;
+            let id = OutputId(*next_id);
+            world.handle_event(Event::OutputAdded {
+                id,
+                area: Rect::new(0, 0, 1000, 600),
+            });
+            if let Some(evicted) = stashed.get(record) {
+                world.restore_output(id, evicted.clone());
+            }
         }
     }
 }
@@ -498,7 +572,14 @@ fn assert_invariants(world: &World) {
     // ancestors on its workspace -- followed through floating parents on
     // the same workspace, at any depth (see `floating_order.rs`); a chain
     // that loops back to the window is skipped (one of its links is
-    // dropped, so no order can satisfy every window in it).
+    // dropped, so no order can satisfy every window in it). Two shapes the
+    // walk cannot mirror, both from adversarial transient links a client
+    // may legally set, are skipped the same way: a repeat anywhere on the
+    // walked chain (the drawing order drops the link that closes the loop,
+    // wherever it sits), and a placement on a parent cycle of its own (the
+    // walk stops at the first non-floating link, but the drawing order
+    // still lifts a dialog of the covering window above it through tiled
+    // windows -- see `a_dialog_on_a_parent_cycle_still_draws_above`).
     let at = |id: WindowId| arrangement.placements.iter().position(|p| p.id == id);
     for placement in arrangement
         .placements
@@ -508,6 +589,9 @@ fn assert_invariants(world: &World) {
         let Some(home) = world.locate(placement.id) else {
             continue;
         };
+        if world.descends_from(placement.id, placement.id) {
+            continue;
+        }
         let mut ancestors = Vec::new();
         let mut current = placement.id;
         let mut looped = false;
@@ -515,7 +599,7 @@ fn assert_invariants(world: &World) {
             let Some(parent) = world.window_info(current).and_then(|info| info.parent) else {
                 break;
             };
-            if parent == placement.id {
+            if parent == placement.id || ancestors.contains(&parent) {
                 looped = true;
                 break;
             }
@@ -657,12 +741,26 @@ fn random_sequences_keep_the_tree_consistent() {
     // window, moves that carried one to another output, and steps ending
     // with a visible dialog drawn over a visible floating parent.
     let (mut geometry_steps, mut transfers, mut lifted_steps) = (0, 0, 0);
+    // And for evictions: scheduled evict and restore steps, so the
+    // evict → switch → restore shape is known to have been exercised
+    // rather than passing vacuously.
+    let (mut evict_steps, mut restore_steps) = (0, 0);
     for seed in 1..=24 {
         let mut rng = Rng(seed);
         let mut world = World::new(config());
         let mut next_id = 0;
-        for step in 0..1500 {
-            let random = random_step(&mut world, &mut rng, &mut next_id);
+        // Eviction records the shell would file under connector identities,
+        // for the scheduled restores below.
+        let mut stashed: Vec<EvictedOutput> = Vec::new();
+        for step in 0..2600 {
+            let random = random_step(
+                &mut world,
+                &mut rng,
+                &mut next_id,
+                stashed.len(),
+                &mut evict_steps,
+                &mut restore_steps,
+            );
             let strip_before = random
                 .floating_only(&world)
                 .then(|| (tiled_rects(&world), format!("{random:?}")));
@@ -675,7 +773,7 @@ fn random_sequences_keep_the_tree_consistent() {
                 ) => world.floating_geometry(*id).map(|g| (*id, g)),
                 _ => None,
             };
-            apply_step(&mut world, random);
+            apply_step(&mut world, random, &mut stashed, &mut next_id);
             if let Some((id, before)) = geometry_of {
                 let after = world.floating_geometry(id);
                 if after != Some(before) {
@@ -772,6 +870,14 @@ fn random_sequences_keep_the_tree_consistent() {
     assert!(
         focus_checks > 500,
         "only {focus_checks} focus-keeping steps were checked"
+    );
+    assert!(
+        evict_steps > 500,
+        "only {evict_steps} steps evicted an output"
+    );
+    assert!(
+        restore_steps > 500,
+        "only {restore_steps} steps restored an evicted output"
     );
 }
 

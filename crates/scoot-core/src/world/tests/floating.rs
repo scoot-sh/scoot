@@ -642,6 +642,45 @@ fn a_dialog_through_a_tiled_window_draws_above_its_covering_parent() {
     assert_eq!(order, vec![1, 3], "the dialog is above its parent");
 }
 
+/// The same lift when the transient links close a loop: a hostile client can
+/// name any parent, including a cycle through a tiled window back to the
+/// covering window itself. The dialog still draws above the covering window
+/// it descends from (found by the randomized invariant test, which asserts
+/// "every window above its parent" and had no exemption for this shape).
+#[test]
+fn a_dialog_on_a_parent_cycle_still_draws_above_its_covering_parent() {
+    let mut world = world();
+    // The app, tiled and transient for a window that does not exist yet.
+    open_with(&mut world, 1, with_parent(3));
+    draw(&mut world, 1, 200, 200);
+    // Its dialog, floating and transient for the app...
+    open_with(&mut world, 2, with_parent(1));
+    float_on_map(&mut world, 2);
+    draw(&mut world, 2, 200, 200);
+    // ...whose own dialog is floating, transient for the first dialog,
+    // closing the loop back to the app.
+    open_with(&mut world, 3, with_parent(2));
+    float_on_map(&mut world, 3);
+    draw(&mut world, 3, 200, 200);
+    // Click the dialog and take it fullscreen: it covers the output, with
+    // the app's dialog above it.
+    world.handle_event(Event::FocusObserved { id: WindowId(3) });
+    world.handle_event(Event::FullscreenRequested {
+        id: WindowId(3),
+        fullscreen: true,
+    });
+    assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(3)));
+    assert!(placement(&world, 2).visible, "the dialog stays up");
+    let order: Vec<u64> = world
+        .arrange()
+        .placements
+        .iter()
+        .filter(|p| p.visible)
+        .map(|p| p.id.0)
+        .collect();
+    assert_eq!(order, vec![3, 2], "the dialog is above its parent");
+}
+
 #[test]
 fn floating_or_un_floating_a_fullscreen_window_ends_its_fullscreen() {
     let mut world = strip_of(2, 1);

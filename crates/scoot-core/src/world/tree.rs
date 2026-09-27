@@ -176,6 +176,17 @@ pub(super) enum Slot {
 pub(super) struct Workspace {
     pub(super) columns: Vec<Column>,
     pub(super) focused: usize,
+    /// Which adoption brought this workspace onto its current output, if any:
+    /// the opaque id [`World::remove_output`](super::World::remove_output)
+    /// minted when it moved the workspace off its old output. `None` for a
+    /// workspace that was never adopted. The core never interprets it -- it
+    /// is the handle the shell maps back to a connector name (for
+    /// `ext-workspace-v1` origin names and IPC's adopted flags), and what
+    /// [`World::restore_output`](super::World::restore_output) clears when
+    /// the monitor comes back. A fresh workspace (opened, split, restored
+    /// home) has none; only `adopt` sets one, and only on workspaces that do
+    /// not already carry one (a chained adoption keeps the earliest origin).
+    pub(super) origin: Option<u64>,
     /// Scroll offset into the strip of columns. It lives beside the columns
     /// rather than inside them because layout takes it as an input.
     pub(super) view_x: i32,
@@ -614,14 +625,43 @@ impl Output {
 
     /// Takes in workspaces from elsewhere, such as an unplugged output, placing
     /// them before the trailing empty workspace without changing focus.
-    pub(super) fn adopt(&mut self, workspaces: impl IntoIterator<Item = Workspace>) {
-        let adopted: Vec<Workspace> = workspaces.into_iter().filter(|ws| !ws.is_empty()).collect();
+    ///
+    /// Tags every adopted workspace that does not already carry one with
+    /// `origin`: a chained adoption (an adopter that is itself unplugged)
+    /// keeps the earliest origin, so the tag always names where the workspace
+    /// first came from. Returns how many workspaces were actually adopted
+    /// (the adoption drops empties).
+    pub(super) fn adopt(
+        &mut self,
+        workspaces: impl IntoIterator<Item = Workspace>,
+        origin: u64,
+    ) -> usize {
+        let mut adopted: Vec<Workspace> =
+            workspaces.into_iter().filter(|ws| !ws.is_empty()).collect();
+        for ws in &mut adopted {
+            if ws.origin.is_none() {
+                ws.origin = Some(origin);
+            }
+        }
+        let count = adopted.len();
         let at = self.workspaces.len() - 1;
         if self.active >= at {
-            self.active += adopted.len();
+            self.active += count;
         }
         self.workspaces.splice(at..at, adopted);
         self.normalize();
+        count
+    }
+
+    /// Forgets one adoption's tag on every workspace that still carries it --
+    /// what a restore runs on the adopter once the monitor is back, so a
+    /// workspace the user kept there stops claiming a monitor that returned.
+    pub(super) fn clear_origin(&mut self, origin: u64) {
+        for ws in &mut self.workspaces {
+            if ws.origin == Some(origin) {
+                ws.origin = None;
+            }
+        }
     }
 
     /// Drops empty workspaces other than the active one, and keeps exactly one

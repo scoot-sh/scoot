@@ -1,4 +1,4 @@
-use super::Change::{Added, Removed, Restated};
+use super::Change::{Added, Removed, Renamed, Restated};
 use super::*;
 
 fn snapshot(count: usize, active: usize) -> Workspaces {
@@ -175,6 +175,12 @@ fn no_change_ever_names_an_index_outside_the_list_it_belongs_to() {
                                 );
                                 index
                             }
+                            // `changes` never renames: renames come from the
+                            // origins half (`renames`), which these lists do
+                            // not cover.
+                            Renamed { .. } => {
+                                unreachable!("{change:?} for {published:?} -> {current:?}")
+                            }
                         };
                         assert!(
                             !seen.contains(&index),
@@ -220,6 +226,10 @@ fn exactly_one_handle_is_left_active_afterwards() {
                                 assert_eq!(index + 1, client.len(), "removals must be a suffix");
                                 client.pop();
                             }
+                            // See above: `changes` never renames.
+                            Renamed { .. } => {
+                                unreachable!("{change:?} for {published:?} -> {current:?}")
+                            }
                         }
                     }
                     assert_eq!(client.len(), current_count, "{published:?} -> {current:?}");
@@ -233,4 +243,64 @@ fn exactly_one_handle_is_left_active_afterwards() {
             }
         }
     }
+}
+
+/// The renames between two origin tag lists, as a `Vec`.
+fn renamed_between(published: &[Option<u64>], current: &[Option<u64>]) -> Vec<Change> {
+    let mut out = Vec::new();
+    renames(published, current, &mut out);
+    out
+}
+
+#[test]
+fn identical_tags_rename_nothing() {
+    for tags in [
+        vec![],
+        vec![None],
+        vec![None, None, None],
+        vec![Some(7)],
+        vec![None, Some(7), None],
+    ] {
+        assert_eq!(renamed_between(&tags, &tags), &[], "{tags:?}");
+    }
+}
+
+#[test]
+fn a_new_tag_renames_only_its_workspace() {
+    assert_eq!(
+        renamed_between(&[None, None, None], &[None, Some(7), None]),
+        &[Renamed { index: 1 }]
+    );
+}
+
+#[test]
+fn a_cleared_tag_renames_only_its_workspace() {
+    assert_eq!(
+        renamed_between(&[None, Some(7), None], &[None, None, None]),
+        &[Renamed { index: 1 }]
+    );
+}
+
+#[test]
+fn a_changed_tag_renames_only_its_workspace() {
+    // A chained adoption re-tagging only untagged workspaces never does
+    // this (it keeps the earliest origin), but a defensive executor must
+    // still rename exactly the workspace that changed.
+    assert_eq!(
+        renamed_between(&[Some(7)], &[Some(9)]),
+        &[Renamed { index: 0 }]
+    );
+}
+
+#[test]
+fn renames_never_reach_past_the_overlap() {
+    // Added and removed tails are the count half's business: a longer list
+    // with new tags renames nothing (the `Added` carries the name), and a
+    // shorter one renames only survivors.
+    assert_eq!(renamed_between(&[], &[Some(7), Some(7)]), &[]);
+    assert_eq!(renamed_between(&[Some(7), Some(7), None], &[Some(7)]), &[]);
+    assert_eq!(
+        renamed_between(&[Some(7), None], &[None]),
+        &[Renamed { index: 0 }]
+    );
 }

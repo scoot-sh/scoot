@@ -629,6 +629,9 @@ fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
         title: "zsh".into(),
         icon: None,
         output: 1,
+        workspace: 0,
+        adopted: false,
+        origin: None,
         rect: Rect {
             x: 0,
             y: 0,
@@ -649,6 +652,9 @@ fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
             "title": "zsh",
             "icon": null,
             "output": 1,
+            "workspace": 0,
+            "adopted": false,
+            "origin": null,
             "rect": { "x": 0, "y": 0, "width": 800, "height": 600 },
             "visible": true,
             "focused": false,
@@ -676,5 +682,32 @@ fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
             id: 1,
             focused: false,
         }
+    );
+}
+
+/// `workspace`, `adopted` and `origin` are additive and defaulted like
+/// `floating` before them: an older server's snapshot still decodes (as
+/// "first workspace, not adopted, no origin"), and a new server's carries
+/// them.
+#[test]
+fn a_window_snapshot_carries_its_workspace_and_adoption_on_the_wire() {
+    let old: WindowSnapshot = decode(
+        r#"{"id":1,"app_id":"foot","title":"zsh","output":1,"rect":{"x":0,"y":0,"width":800,"height":600},"visible":true,"focused":true}"#,
+    )
+    .expect("an older server's window snapshot still decodes");
+    assert_eq!(old.workspace, 0);
+    assert!(!old.adopted);
+    assert_eq!(old.origin, None);
+
+    let new: WindowSnapshot = decode(
+        r#"{"id":1,"app_id":"foot","title":"zsh","output":1,"workspace":2,"adopted":true,"origin":"DP-1","rect":{"x":0,"y":0,"width":800,"height":600},"visible":false,"focused":false}"#,
+    )
+    .unwrap();
+    assert_eq!(new.workspace, 2);
+    assert!(new.adopted);
+    assert_eq!(new.origin.as_deref(), Some("DP-1"));
+    assert_eq!(
+        decode::<WindowSnapshot>(&encode(&new).unwrap()).unwrap(),
+        new
     );
 }

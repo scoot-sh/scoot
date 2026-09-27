@@ -1,8 +1,8 @@
 //! Applying what a platform shell observed.
 
 use super::World;
-use super::reconnect::Removal;
-use super::tree::{Output, WindowState};
+use super::reconnect::{AdopterView, Removal};
+use super::tree::{Output, WindowState, Workspace};
 use crate::geometry::{Rect, Size};
 use crate::messages::Event;
 use crate::types::{OutputId, WindowId, WindowInfo};
@@ -109,21 +109,38 @@ impl World {
         }
     }
 
-    /// The removed output's workspaces join the focused output, after its own,
-    /// without moving focus. With no output left to take them, their windows
-    /// wait, as single columns, for the next output.
+    /// The removed output's workspaces join the focused output, after its own.
+    /// With no output left to take them, their windows wait, as single
+    /// columns, for the next output.
     ///
-    /// Answers what it did with them: the adopter, if any, and the workspace
+    /// When the session was looking at the removed output, its view follows:
+    /// the adopter activates the adopted workspace that held the focused
+    /// window (or the one at the removed output's active position, when
+    /// nothing there had focus) and keeps focus on it. The adopter's own
+    /// previous workspace keeps its index, one keystroke away. When focus was
+    /// elsewhere, nothing on the adopter changes, as before -- a monitor
+    /// dropping in standby while the user works on the panel leaves the
+    /// panel exactly as it was.
+    ///
+    /// Answers what it did with them: the adopter, if any, the workspace
     /// index in it the adopted block starts at -- what
     /// [`World::restore_output`](super::World::restore_output) verifies each
-    /// window against before moving it back.
+    /// window against before moving it back -- the opaque origin the adopted
+    /// workspaces were tagged with, and where the adopter was looking before.
     pub(super) fn remove_output(&mut self, id: OutputId) -> Removal {
         let Some(o) = self.output_index(id) else {
             return Removal {
                 adopted_by: None,
                 adopted_at: 0,
+                origin: None,
+                adopter_active: None,
             };
         };
+        // Decided before the removal: was the session looking at this
+        // output, and at which window and workspace.
+        let focused_here = self.focused_output == o;
+        let focused_wid = focused_here.then(|| self.focused_window()).flatten();
+        let removed_active = self.outputs[o].active;
         let removed = self.outputs.remove(o);
         if self.focused_output > o {
             self.focused_output -= 1;
@@ -140,6 +157,27 @@ impl World {
             .iter()
             .flat_map(|ws| ws.floating.iter().copied())
             .collect();
+        // The origin the adopted workspaces are tagged with, minted only
+        // when something actually moves: an empty adoption tags nothing,
+        // so it names nothing.
+        let origin = removed
+            .workspaces
+            .iter()
+            .any(|ws| !ws.is_empty())
+            .then(|| self.mint_origin());
+        // Where the removed output was looking, in its own terms: the
+        // ordinal of its active workspace among its non-empty ones, for the
+        // no-focused-window fallback below.
+        let mut nonempty_before = 0;
+        let mut nonempty_total = 0;
+        for (index, ws) in removed.workspaces.iter().enumerate() {
+            if !ws.is_empty() {
+                if index < removed_active {
+                    nonempty_before += 1;
+                }
+                nonempty_total += 1;
+            }
+        }
         match self.outputs.get_mut(target) {
             Some(output) => {
                 // Before the adopt: the adopted block starts where the
@@ -148,12 +186,72 @@ impl World {
                 // to read.
                 let adopted_at = output.workspaces.len() - 1;
                 let adopted_by = output.id;
-                output.adopt(removed.workspaces);
+                // The adopter's view before the switch below, read before
+                // the adopt moves it.
+                let before_switch = output.active;
+                output.adopt(removed.workspaces, origin.unwrap_or(0));
+                // How many workspaces in front of `end` the switch's
+                // normalize will drop: every inactive empty one. The
+                // adopted workspaces are never empty, and the switch moves
+                // the active workspace into the block, so these are exactly
+                // the positions the block and the previous view shift by.
+                let dropped_before = |workspaces: &[Workspace], end: usize| {
+                    workspaces[..end.min(workspaces.len())]
+                        .iter()
+                        .filter(|ws| ws.is_empty())
+                        .count()
+                };
+                let mut adopted_here = adopted_at;
+                let mut adopter_active = None;
+                // The switch itself: the session was looking at the removed
+                // output, so the adopter shows the adopted workspace that
+                // held the focused window and keeps focus on it. Otherwise
+                // nothing on the adopter changes.
+                if focused_here && nonempty_total > 0 {
+                    // The previous view, for the restore to return to --
+                    // recorded against the post-switch list, which is when
+                    // the restore reads it. A trailing sitter goes back to
+                    // the trailing empty; an emptied workspace the switch
+                    // drops has no view to return to; anything else is that
+                    // many workspaces before the block.
+                    let trailing = output.workspaces.len() - 1;
+                    let view = before_switch
+                        + if before_switch == adopted_at {
+                            nonempty_total
+                        } else {
+                            0
+                        };
+                    if view == trailing {
+                        adopter_active = Some(AdopterView::Trailing);
+                    } else if !output.workspaces[view].is_empty() {
+                        let view_here = view - dropped_before(&output.workspaces, view);
+                        adopted_here = adopted_at - dropped_before(&output.workspaces, adopted_at);
+                        adopter_active = Some(AdopterView::BeforeBlock(adopted_here - view_here));
+                    } else {
+                        adopted_here = adopted_at - dropped_before(&output.workspaces, adopted_at);
+                    }
+                    match focused_wid
+                        .and_then(|wid| self.locate(wid))
+                        .filter(|loc| loc.output == target)
+                    {
+                        Some(loc) => self.focus_location(loc),
+                        // No focused window (the removed output's active
+                        // workspace was empty): show the adopted workspace
+                        // at the position the session was looking at.
+                        None => {
+                            let switch_to = adopted_at + nonempty_before.min(nonempty_total - 1);
+                            self.outputs[target].focus_workspace_index(switch_to);
+                            self.fix_view(target);
+                        }
+                    }
+                }
                 self.fix_view(target);
                 self.recentre_floating_on_output(target, &floating);
                 Removal {
                     adopted_by: Some(adopted_by),
-                    adopted_at,
+                    adopted_at: adopted_here,
+                    origin,
+                    adopter_active,
                 }
             }
             None => {
@@ -161,6 +259,8 @@ impl World {
                 Removal {
                     adopted_by: None,
                     adopted_at: 0,
+                    origin: None,
+                    adopter_active: None,
                 }
             }
         }
