@@ -211,7 +211,7 @@ there because nothing was drawn, belongs here.
 ### Verified where
 
 All on a Claude Code web container (x86_64, 4 CPUs), no dev VM. Code at
-CODE_SHA_PLACEHOLDER; the docs came after, in a docs-only commit. The
+`5179c09`; the docs came after, in a docs-only commit. The
 screenshot and trace checks below were first run on `72e59a6`, and again
 on the final code by the suite and the stress run.
 
@@ -259,13 +259,38 @@ on the final code by the suite and the stress run.
   waiters' generations, shared syncs, forgetting, and no reallocation;
   deferred replies on a connection: ordering, a hang-up while waiting, a
   half-closed client, delivery by id after eviction).
-- **Commands**: `cargo test -p scootbg -p scootbg-mem` and
-  `cargo nextest run --workspace` (under `soft-egl`), with
+- **Commands**, at `5179c09`: `cargo nextest run --workspace` (2,218
+  passed, 24 skipped, all of them the compositor's `#[ignore]`d tests) and
+  `cargo test --workspace` (2,218 passed), both under `soft-egl`, with
   `SCOOTBG_REQUIRE_SCOOT=1 SCOOTBG_REQUIRE_SWAY=1` and
   `SCOOTBG_TEST_SWAY` from `nix build --inputs-from . nixpkgs#sway`;
   `cargo clippy -p scoot -p scootbg -p scootbg-mem --all-targets -- -D warnings`;
-  `cargo fmt --check`.
-- **Stress**: STRESS_PLACEHOLDER
+  `cargo fmt --all --check`; `actionlint` 1.7.12 on `ci.yml` reports one
+  finding, SC2174 at line 180 (`mkdir -p -m 700`), identical on `main` and
+  in a step this change does not touch.
+- **No knob in a release build**: the Nix package (`nix build .#scootbg`,
+  sandboxed) run with `SCOOTBG_DEBUG_PATH=full-shm` against headless scoot
+  still made a single-pixel buffer and no shm pool, printed no debug line,
+  and `strings` finds no `SCOOTBG_DEBUG_PATH` in the binary.
+- **Nix**: `nix flake check` passes (sandbox on); `nix build .#scootbg`
+  builds (779,624 B). In this container the sandboxed fetch of the
+  smithay fork needed the agent proxy's CA
+  (`NIX_GIT_SSL_CAINFO=/root/.ccr/ca-bundle.crt` and that one file in
+  `extra-sandbox-paths`), an environment detail, not the flake's.
+- **Stress**, at `5179c09`, all of `-p scootbg -p scootbg-mem` (188 tests),
+  scoot and sway required: `cargo nextest run --stress-count 20 -j 16`
+  20/20 idle (555 s) and 20/20 under eight busy loops (load average ~10 on
+  4 CPUs, 1,344 s); `cargo test -- --test-threads 16` ×20, 20/20 idle and
+  20/20 under the same load. An earlier stress run, at `72e59a6`, is what
+  caught the over-claiming unplug test (above); it was stopped there, the
+  test fixed, and every configuration run again from the start.
+- **The unplug race, both ways**: idle, 50 rounds out of 50 went the `ok`
+  way (the request taken before the removal); the unknown-output way was
+  hit under the first stress run. Neither integration run can force the
+  third order, the removal arriving while the reply is still waiting for
+  the draw (a single-pixel draw resolves within the same turn); that case
+  is the waiters' unit tests (an output gone from the list no longer holds
+  a generation back).
 
 ### Not verified, and why
 
@@ -287,27 +312,34 @@ on the final code by the suite and the stress run.
 
 ### Measurements
 
-Release (`cargo build --release -p scootbg`); before is `3b2722f` (main),
-built from a separate worktree and target dir; against
+Release (`cargo build --release -p scootbg`) at `5179c09`; before is
+`3b2722f` (main), built from a separate worktree and target dir; against
 `scoot --headless --outputs 2` (a debug build, 1600×1000 each), measured
-by `measure.py` (a Python client on the control socket; `/proc` for the
-rest), three rounds interleaved.
+by a Python client on the control socket and `/proc`, three rounds
+interleaved (before, after without a color, after with one). An earlier
+run of every row on `72e59a6` gave the same memory numbers and latencies
+within a few percent.
 
 | What | Before | After |
 |---|---|---|
-| Stripped binary | 733,920 B | 783,072 B (+49,152). Symbols +43.6 KB: `reconcile` with the canvas drawing inlined 14.6 KB, `LayerObjects::create` now out of line 5.2 KB, the request handler 3.7 KB, the `set`/`clear` parser 3.4 KB, the rest Wayland dispatch and request code instantiated for `wl_buffer`, `wl_shm_pool`, `wp_viewport` and `wl_region` |
+| Stripped binary (`cargo build --release`; the Nix package is 779,624 B) | 733,920 B | 783,072 B (+49,152). Symbols +43.6 KB: `reconcile` with the canvas drawing inlined 14.6 KB, `LayerObjects::create` now out of line 5.2 KB, the request handler 3.7 KB, the `set`/`clear` parser 3.4 KB, the rest Wayland dispatch and request code instantiated for `wl_buffer`, `wl_shm_pool`, `wp_viewport` and `wl_region` |
 | `ldd` | `libgcc_s.so.1`, `libc.so.6` | `libgcc_s.so.1`, `libc.so.6` (unchanged) |
 | `libc` crate in the normal tree | none | none (CI's check, `cargo tree -p scootbg -e normal --prefix none \| grep '^libc '`, finds 0 lines); `-sys`: `linux-raw-sys`, `wayland-sys` with no features (unchanged). The new dev-dependencies (`png`, `base64`) reach only the tests |
-| Idle, no color, 3 s after start: RSS / PSS / `[heap]` Rss / threads / fds | 2,668 / 1,472 / 32 / 1 / 8; 2,620 / 1,424 / 32 / 1 / 8; 2,664 / 1,468 / 32 / 1 / 8 kB | 2,720 / 1,524 / 36 / 1 / 8; 2,716 / 1,522 / 36 / 1 / 8; 2,720 / 1,524 / 36 / 1 / 8 kB |
-| Idle **with a color set** (path 1), 3 s after the `set` | n/a | 2,720 / 1,524 / 36 / 1 / 8 kB, ×3 identical |
+| Idle, no color, 3 s after start: RSS / PSS / `[heap]` Rss / threads / fds | 2,636 / 1,440 / 32 / 1 / 8; 2,628 / 1,432 / 32 / 1 / 8; 2,616 / 1,420 / 32 / 1 / 8 | 2,720 / 1,524 / 36 / 1 / 8, ×3 identical |
+| Idle **with a color set** (path 1), 3 s after the `set` | n/a | 2,720 / 1,524 / 36 / 1 / 8, ×3 identical |
 | Context switches, CPU ticks over 30 s, ×3 | 0, 0 (no color) | 0, 0 without a color; 0, 0 with one |
-| First `set` after start, request to reply | n/a | 1,089 / 996 / 952 µs |
-| 10,000 `set`s alternating four colors on one connection, ×3: median / p99 / max | n/a | 414.8 / 1,975.0 / 3,622.9 µs; 427.3 / 1,837.2 / 3,100.7 µs; 410.1 / 1,709.3 / 6,519.3 µs |
-| Memory after those 10,000 (3 s later) | n/a | RSS, PSS, heap and fds unchanged in every round (2,720 / 1,524 / 36 kB / 8 twice, 2,724 / 1,528 / 36 / 8 once, each equal to its own start); 0 switches over the next 5 s |
-| PSS with a color, 2 outputs, per path, ×3 (a release build with `debug-assertions` on, the only way to force a path in an optimised binary) | n/a | single-pixel 1,556 kB (×3); 1×1 shm 1,560 / 1,560 / 1,552 kB (fds 10); full-size shm 7,808 / 7,812 / 7,808 kB (fds 10), and 14,060 / 14,064 / 14,060 kB after 20 changes (a released spare per output; fds 12). RSS: 2,752 vs 15,256 vs 27,760 kB |
+| First `set` after start, request to reply | n/a | 958 / 761 / 718 µs |
+| 10,000 `set`s alternating four colors on one connection, ×3: median / p99 / max | n/a | 404.4 / 1,607.0 / 3,260.6 µs; 432.8 / 1,614.6 / 4,631.8 µs; 400.3 / 1,581.2 / 3,264.3 µs |
+| Memory after those 10,000 (3 s later) | n/a | 2,720 / 1,524 / 36 kB / 8 fds, each round equal to its own start; 0 switches over the next 5 s |
+| Per path, 2 outputs, a color set, ×3 (a release build with `debug-assertions` on, the only way to force a path in an optimised binary): PSS / RSS | n/a | single-pixel 1,556–1,560 / 2,752–2,756 kB, 8 fds; 1×1 shm 1,556–1,560 / 2,756–2,760 kB, 10 fds; full-size shm 7,807–7,808 / 15,252–15,256 kB, 10 fds, and 14,059–14,060 / 27,756–27,760 kB, 12 fds, after 20 changes (a released spare per output) |
+| `set` median over 20 changes, per path | n/a | single-pixel 535–607 µs; 1×1 shm 399–467 µs; full-size shm 3,003–3,167 µs (6.4 MB filled per output per change) |
 
 The `set` latency is a compositor round trip on top of the daemon's work,
 against a *debug* scoot: `query`, which needs no round trip, took
 27–38 µs median in ticket 3's record. "Heap" is the `[heap]` mapping's
 resident pages; the +4 kB is the waiters' and the ready list's capacity,
-made once.
+made once. The fds are stdio, the lock, the listener, its spare and the
+Wayland socket (7, checked by listing `/proc/PID/fd` under a plain
+parent), plus the measuring client's own connection, which stayed open
+(Python's `makefile` holds the socket past `close`), the same for both
+builds; each shm buffer adds its memfd.

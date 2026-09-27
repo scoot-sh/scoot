@@ -156,10 +156,10 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 | What | Result |
 |---|---|
-| Stripped binary | 783,072 B |
+| Stripped binary | 783,072 B; links only `libc.so.6` and `libgcc_s.so.1` |
 | Idle with a color set, 30 s ×3 | 0 context switches, 0 CPU ticks; RSS 2,720 kB, PSS 1,524 kB, 1 thread |
-| PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556 / 1,552–1,560 / 7,808 kB (14,060 kB once a change leaves a spare buffer per output) |
-| `set`, request to reply, 10,000 changes ×3 | median 410–427 µs, p99 1.7–2.0 ms; no memory growth |
+| PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556–1,560 / 1,556–1,560 / 7,808 kB (14,060 kB once a change leaves a spare buffer per output) |
+| `set`, request to reply, 10,000 changes ×3 | median 400–433 µs, p99 1.6 ms; no memory growth |
 
 ## Relation to scoot
 
