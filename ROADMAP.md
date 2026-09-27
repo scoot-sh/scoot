@@ -138,8 +138,9 @@ each item's own file records why it landed when it did.
   unrelated event): 64 KiB truncation
   both ways, unbounded buffering behind a stuck X reader, unbounded pastes
   behind a silent owner, an unsent ownership change, and the owner/drag
-  hooks. X → Wayland drags work live; drops onto X windows do not (filed,
-  [pointer focus X arm](docs/backlog/protocols/xwayland-pointer-focus-x11.md));
+  hooks. X → Wayland drags work live; Wayland → X drops land since the
+  [pointer focus X arm](docs/backlog/protocols/xwayland-pointer-focus-x11.md)
+  (X → X waits on a one-line Smithay fork flush, verified locally);
   XIM not provided; an IM keyboard grab pre-empts X focus (tested).
   Ticket stays OPEN for Phases 5–7.
 

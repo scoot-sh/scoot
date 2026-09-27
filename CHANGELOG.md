@@ -9,6 +9,16 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — drop from a Wayland app onto an X app
+
+- **With `--xwayland`, dragging from a Wayland app onto an X window now
+  drops there** — text from a Wayland editor into an X one, say. Until
+  now the drop did nothing. The X window has to take drops, as toolkit
+  text fields and file views do. Dragging from an X app onto an X window
+  (another X app, or moving text within one) still does nothing, and
+  nothing is lost; dragging from an X app into a Wayland app works as
+  before.
+
 ### 2026-09-26 — scootbg, the wallpaper daemon, exists (early)
 
 - **A new binary and package, `scootbg`** (`nix build .#scootbg`, Linux).
