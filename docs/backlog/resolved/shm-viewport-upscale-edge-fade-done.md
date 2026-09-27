@@ -1,12 +1,18 @@
 ---
-title: "Upscaled surfaces get a semi-transparent 1-px edge under pixman (Smithay samples past the texture edge)"
-status: "open"
-area: "core"
-priority: "medium"
+title: "Upscaled surfaces get a semi-transparent 1-px edge under pixman — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# Upscaled surfaces get a semi-transparent 1-px edge under pixman (Smithay samples past the texture edge)
+# Upscaled surfaces get a semi-transparent 1-px edge under pixman — RESOLVED
+
+RESOLVED 2026-09-27 (PR #272). One fork commit (`Repeat::None`→`Pad` at
+the single pixman scaler call site — GLES already clamped): upscaled
+edges byte-exact, downscales unchanged, full suite green at the repin,
+`nix build` green. Review re-derived fail-first (pre-fix bytes match the
+ticket) and recomputed the flake hash independently.
 
 Found while measuring scootbg's dependencies (2026-09-26, see
 [`docs/scootbg/backlog/resolved/dependencies-done.md`](../../scootbg/backlog/resolved/dependencies-done.md)),
