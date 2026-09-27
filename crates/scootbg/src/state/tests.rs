@@ -303,3 +303,30 @@ fn nothing_older_than_an_adoption_is_recorded() {
     saved.record(None, &color(3), 11);
     assert_eq!(saved.choices.every(), Some(&color(3)));
 }
+
+/// One writer per file: a `Saved` of the same profile takes a busy old
+/// one's writer; another profile's, or one that does not save, takes none.
+#[test]
+fn a_writer_is_taken_back_only_for_its_own_profile() {
+    let scratch = Scratch::new("writer");
+    let file = scratch.0.join("a");
+    let profile = |name| Profile::parse(name).unwrap();
+    let mut old = Saved::new(profile("a"), Some(file.clone()), None);
+    assert!(old.idle(), "nothing written yet");
+    old.record(None, &color(1), 1);
+    let mut other = Saved::new(profile("b"), Some(scratch.0.join("b")), None);
+    assert!(!other.take_writer(&mut old));
+    let mut not_saving = Saved::new(profile("a"), None, None);
+    assert!(!not_saving.take_writer(&mut old));
+    let mut again = Saved::new(profile("a"), Some(file.clone()), None);
+    assert!(again.take_writer(&mut old));
+    assert!(!again.take_writer(&mut old), "taken once");
+    assert!(old.idle(), "no writer left to wait for");
+    again.record(None, &color(2), 2);
+    assert!(again.flush(Duration::from_secs(10)));
+    let parsed = load(&file).unwrap().unwrap();
+    assert_eq!(
+        parsed.record.all,
+        Some(Pick::Color(Color { r: 2, g: 2, b: 2 }))
+    );
+}

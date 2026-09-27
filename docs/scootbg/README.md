@@ -315,7 +315,10 @@ test on headless scoot (`crates/scootbg/tests/config.rs`).
 
 **The profile.** A running daemon **adopts** the profile of each
 `apply-config` it gets: from then on it restores and saves that profile's
-state, whatever `--profile` it started with (it says so on stderr). So an
+state, whatever `--profile` it started with (it says so on stderr); the
+state file of a profile adopted again while its last save is still being
+written is read once that write is done (waited for up to 2 s), and one
+file never has two writers. So an
 `[autostart]` `scootbg daemon` that won the race still ends up on scoot's
 profile; on adopting, it shows that profile's saved state if the section
 is unchanged, the section if not. A request made before the adoption (an
@@ -324,7 +327,9 @@ image `set` still decoding) never lands in the new profile.
 **Starting the daemon.** With none answering on the socket:
 
 - **A non-empty section:** `apply-config` starts one, the same binary
-  (`/proc/self/exe`) as `apply-config --serve` (internal, not for use by
+  (`/proc/self/exe` itself, so the same file even if its path now names an
+  upgraded one; `current_exe`'s path without `/proc`) as
+  `apply-config --serve` (internal, not for use by
   hand), with stdin and stdout on `/dev/null`, **stderr where
   `apply-config`'s goes** (scoot's log), and `/` as its working directory.
   It calls `setsid(2)` first: a session and process group of its own, no
@@ -348,8 +353,11 @@ image `set` still decoding) never lands in the new profile.
 - **Races** are settled by the lock: two `apply-config`s at once (or one
   and a `scootbg daemon`) make exactly one daemon; a started one that loses
   forwards its section to the winner, as `apply-config` itself does, so the
-  config's values are never dropped. A daemon that is starting (its lock
-  taken, its socket bound, its loop not yet serving) is waited for.
+  config's values are never dropped; if the winner goes away without
+  serving (a `{}` being recorded, a daemon that fails before binding), the
+  loser tries once more to be the daemon itself. A daemon that is starting
+  (its lock taken, its socket bound, its loop not yet serving) is waited
+  for: tries every 1 ms for the first 50 ms, then every 15 ms, 5 s in all.
 - **Stderr and pipes.** Because the daemon writes where `apply-config`'s
   stderr goes, a caller that reads that stderr to its end through a pipe
   waits for the daemon too: send it to a file or a log.
@@ -365,7 +373,16 @@ reload). A daemon is never restarted behind your back.
 compositor has processed it, as for `set`; `apply-config` prints nothing on
 success. An image in the section that is not a file is reported at once
 (exit 1, which one on which output); the rest of the section is applied,
-and the choice stays saved, so a restart shows it once the file is back.
+and the choice stays saved. **Every `apply-config` reports it until the
+file is back**, the unchanged ones included (so the first one after a
+cold start does too), and the first one after the file is back shows it:
+an image the section chose that is still saved as the section's choice
+there, but not showing, is checked with one `stat` and put back, at the
+generation it was chosen at. **A `set` made since always stands**: a
+`set` or `clear` for that output, or for every output, replaced the saved
+choice, so the entry is no longer the section's and is neither put back
+nor reported (and putting back at the old generation can never undo a
+newer request still decoding).
 
 **Exit status:** 0 applied, or unchanged, and on screen (or `{}` recorded
 with no daemon); 1 no daemon could be started or reached within 5 s, no

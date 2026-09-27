@@ -158,3 +158,27 @@ fn every_and_named_list_what_was_chosen() {
     assert_eq!(choices.every(), Some(&None), "a clear of every output");
     assert_eq!(choices.named().count(), 0);
 }
+
+#[test]
+fn exact_does_not_fall_back_and_fill_keeps_the_generation() {
+    let mut choices = Choices::default();
+    assert_eq!(choices.exact(None), None);
+    assert!(!choices.fill(None, None));
+    choices.set(None, c("#010101"), 5);
+    choices.set(Some("DP-1"), None, 5);
+    assert_eq!(
+        choices.exact(Some("DP-2")),
+        None,
+        "no fallback to every output"
+    );
+    assert_eq!(choices.exact(Some("DP-1")), Some(&None));
+    assert!(choices.fill(Some("DP-1"), c("#020202")));
+    assert!(!choices.fill(Some("DP-2"), None));
+    // Filled at generation 5: a request of 5 is still superseded only by
+    // something newer, and a newer one replaces it.
+    assert!(!choices.supersedes(Some("DP-1"), 5));
+    assert!(choices.set(Some("DP-1"), None, 6));
+    assert!(choices.fill(None, None));
+    assert_eq!(choices.exact(None), Some(&None));
+    assert_eq!(choices.named_len(), 1, "filling every output drops nothing");
+}

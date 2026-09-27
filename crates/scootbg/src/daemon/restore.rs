@@ -183,7 +183,7 @@ pub fn put(state: &mut State, record: Record, show: bool, origin: Origin) -> Vec
 
 /// Whether `path` is a regular file now (following links), and if not,
 /// why.
-fn present(path: &str) -> Result<(), String> {
+pub fn present(path: &str) -> Result<(), String> {
     match std::fs::metadata(path) {
         Ok(meta) if meta.is_file() => Ok(()),
         Ok(_) => Err("not a regular file".to_owned()),
@@ -192,7 +192,7 @@ fn present(path: &str) -> Result<(), String> {
 }
 
 /// "every output", or the named one, for a message.
-struct Target<'a>(Option<&'a str>);
+pub struct Target<'a>(pub Option<&'a str>);
 
 impl std::fmt::Display for Target<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

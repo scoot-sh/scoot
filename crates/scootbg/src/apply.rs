@@ -18,11 +18,15 @@
 //!    socket is bound just after its lock, and connections wait in its
 //!    backlog until it serves), so step 1 is retried.
 //!
-//! Finding or starting a daemon is bounded by [`START_WAIT`], the reply by
-//! the client's usual timeout; a daemon is started at most once per run.
+//! Finding or starting a daemon is bounded by [`START_WAIT`] (tries every
+//! [`RETRY`] for the first [`FAST`], then every [`SLOW_RETRY`]), the reply
+//! by the client's usual timeout; a daemon is started at most once per
+//! run.
 //!
-//! **Detaching.** The daemon is this binary again (`/proc/self/exe`, so the
-//! same build), spawned with `apply-config --serve`: stdin and stdout
+//! **Detaching.** The daemon is this binary again (`/proc/self/exe`
+//! itself, so the same file even if its path now names an upgraded one;
+//! the path from `current_exe` without `/proc`), spawned with
+//! `apply-config --serve`: stdin and stdout
 //! `/dev/null`, stderr this command's (scoot's log, when scoot runs it),
 //! working directory `/`. That process calls `setsid(2)` first, so it has a
 //! session and process group of its own and no controlling terminal: a
@@ -40,7 +44,10 @@
 //! `[autostart]` `scootbg daemon`) are settled by the lock: exactly one
 //! daemon claims the socket. A started daemon that loses forwards its
 //! section to the winner (as this command does too), so the config's values
-//! are never dropped. Which section arrives last is not decided here: two
+//! are never dropped; and if the winner goes away without serving (a `{}`
+//! being recorded holds the lock and starts nothing; a daemon that fails
+//! before binding), it tries once more to be the daemon itself, so the
+//! chain is bounded: no process starts another. Which section arrives last is not decided here: two
 //! reloads in quick succession race, and scoot (part B) should not start a
 //! second `apply-config` while one runs.
 
@@ -75,6 +82,12 @@ pub const REPLY_WAIT: Duration = Duration::from_secs(30);
 /// cold start), and a failed `connect` costs microseconds.
 const RETRY: Duration = Duration::from_millis(1);
 
+/// After [`FAST`] of tries every [`RETRY`], every [`SLOW_RETRY`]: a daemon
+/// that has not answered by then is slow (a compositor busy at login), and
+/// waiting for it need not cost a wakeup a millisecond.
+const FAST: Duration = Duration::from_millis(50);
+const SLOW_RETRY: Duration = Duration::from_millis(15);
+
 /// The longest reply read.
 const MAX_REPLY: u64 = 64 * 1024;
 
@@ -89,7 +102,7 @@ pub fn run(options: ApplyOptions) -> u8 {
     if serving {
         return serve(profile, section);
     }
-    match deliver(&profile, &section, true) {
+    match deliver(&profile, &section, MayStart::Once).map_err(Undelivered::message) {
         Ok(()) => 0,
         Err(message) => {
             warn(format_args!("scootbg: apply-config: {message}"));
@@ -116,36 +129,76 @@ fn serve(profile: Profile, section: Section) -> u8 {
         profile: profile.clone(),
         restore: true,
     };
-    match daemon::run(options, Some(&start)) {
-        daemon::Exit::Stopped => 0,
-        daemon::Exit::Failed(error) if error.lost_the_race() => {
-            match deliver(&profile, &start.section, false) {
-                Ok(()) => 0,
-                Err(message) => {
-                    warn(format_args!("scootbg: apply-config: {message}"));
-                    1
+    // Twice at most: losing the race, the section goes to the winner; if
+    // the winner is gone before it answers (a `{}` being recorded holds
+    // the lock and starts nothing; a daemon that failed before binding),
+    // the lock is free again and this one tries once more to be the
+    // daemon itself, rather than start yet another process.
+    for last in [false, true] {
+        match daemon::run(options.clone(), Some(&start)) {
+            daemon::Exit::Stopped => return 0,
+            daemon::Exit::Failed(error) if error.lost_the_race() => {
+                match deliver(&profile, &start.section, MayStart::Never) {
+                    Ok(()) => return 0,
+                    Err(Undelivered::NoDaemon) if !last => {}
+                    Err(error) => {
+                        warn(format_args!("scootbg: apply-config: {}", error.message()));
+                        return 1;
+                    }
                 }
             }
+            daemon::Exit::Failed(error) => {
+                warn(format_args!("scootbg: {error}"));
+                return 1;
+            }
         }
-        daemon::Exit::Failed(error) => {
-            warn(format_args!("scootbg: {error}"));
-            1
+    }
+    1
+}
+
+/// Whether [`deliver`] may start a daemon when none runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MayStart {
+    /// At most once (`apply-config` itself).
+    Once,
+    /// Never: return [`Undelivered::NoDaemon`] instead (a `--serve` that
+    /// lost, which then tries to be the daemon itself).
+    Never,
+}
+
+/// Why [`deliver`] did not get the section to a daemon.
+#[derive(Debug)]
+enum Undelivered {
+    /// No daemon runs, and the lock is free (only with [`MayStart::Never`]).
+    NoDaemon,
+    Said(String),
+}
+
+impl Undelivered {
+    fn message(self) -> String {
+        match self {
+            Self::NoDaemon => {
+                "no daemon answered, and none was starting, so the section was not sent".to_owned()
+            }
+            Self::Said(message) => message,
         }
     }
 }
 
-/// Gets `section` to a daemon for this display, starting one (at most
-/// once) if `may_start` and none runs; see the module docs.
-fn deliver(profile: &Profile, section: &Section, may_start: bool) -> Result<(), String> {
-    let paths = paths::from_env().map_err(|error| error.to_string())?;
-    let deadline = Instant::now() + START_WAIT;
+/// Gets `section` to a daemon for this display, starting one when none
+/// runs as `may_start` says; see the module docs.
+fn deliver(profile: &Profile, section: &Section, may_start: MayStart) -> Result<(), Undelivered> {
+    let said = Undelivered::Said;
+    let paths = paths::from_env().map_err(|error| said(error.to_string()))?;
+    let began = Instant::now();
+    let deadline = began + START_WAIT;
     let mut started: Option<Child> = None;
     loop {
         match UnixStream::connect(&paths.socket) {
             Ok(stream) => {
                 return match exchange(stream, profile, section) {
-                    Err(Failure::Gone) => Err(gone(started.as_mut())),
-                    Err(Failure::Said(message)) => Err(message),
+                    Err(Failure::Gone) => Err(said(gone(started.as_mut()))),
+                    Err(Failure::Said(message)) => Err(said(message)),
                     Ok(()) => Ok(()),
                 };
             }
@@ -154,27 +207,28 @@ fn deliver(profile: &Profile, section: &Section, may_start: bool) -> Result<(), 
                     error.kind(),
                     io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
                 ) => {}
-            Err(error) => return Err(format!("{}: {error}", paths.socket.display())),
+            Err(error) => return Err(said(format!("{}: {error}", paths.socket.display()))),
         }
         // Nothing answers yet.
         if let Some(child) = started.as_mut() {
             if let Ok(Some(status)) = child.try_wait() {
                 if !status.success() {
-                    return Err(format!(
+                    return Err(said(format!(
                         "the daemon it started exited ({status}) before answering; \
                          why is above"
-                    ));
+                    )));
                 }
                 // It lost the race and forwarded the section: a daemon
                 // runs, and answers soon.
             }
-        } else if may_start {
-            match lock_if_free(&paths.lock).map_err(|error| error.to_string())? {
+        } else {
+            match lock_if_free(&paths.lock).map_err(|error| said(error.to_string()))? {
+                Some(_) if may_start == MayStart::Never => return Err(Undelivered::NoDaemon),
                 Some(lock) if section.is_empty() => {
                     let dir = state::dir_from_env();
                     let written = record_clear(dir.as_deref(), profile, section);
                     drop(lock);
-                    return written;
+                    return written.map_err(said);
                 }
                 Some(lock) => {
                     // Released first: the daemon takes it. Another may win
@@ -182,24 +236,43 @@ fn deliver(profile: &Profile, section: &Section, may_start: bool) -> Result<(), 
                     drop(lock);
                     started = Some(
                         start(profile, section)
-                            .map_err(|error| format!("cannot start the daemon: {error}"))?,
+                            .map_err(|error| said(format!("cannot start the daemon: {error}")))?,
                     );
                 }
                 // A daemon is starting: its socket is bound next.
                 None => {}
             }
         }
-        if Instant::now() >= deadline {
-            return Err(no_answer(&paths, started.is_some()));
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(said(no_answer(&paths, started.is_some())));
         }
-        std::thread::sleep(RETRY);
+        std::thread::sleep(if now - began < FAST {
+            RETRY
+        } else {
+            SLOW_RETRY
+        });
     }
 }
 
-/// Starts the detached daemon (see the module docs).
+/// Starts the detached daemon (see the module docs). The binary is
+/// `/proc/self/exe` itself, not the path it resolves to: that is this very
+/// file even if the path now names another (a package upgraded meanwhile)
+/// or none. Without `/proc`, the path `current_exe` last knew. `argv[0]`
+/// is that path either way, for `ps`.
 fn start(profile: &Profile, section: &Section) -> io::Result<Child> {
-    let exe = std::env::current_exe()?;
-    Command::new(exe)
+    const SELF: &str = "/proc/self/exe";
+    let named = std::env::current_exe();
+    let mut command = if Path::new(SELF).exists() {
+        let mut command = Command::new(SELF);
+        if let Ok(path) = &named {
+            std::os::unix::process::CommandExt::arg0(&mut command, path);
+        }
+        command
+    } else {
+        Command::new(named?)
+    };
+    command
         .arg("apply-config")
         .arg(crate::cli::SERVE)
         .arg(format!("--profile={}", profile.as_str()))

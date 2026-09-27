@@ -125,7 +125,7 @@ impl fmt::Display for Error {
 /// How long the daemon waits on its way out for a state file write under
 /// way (`crate::state::saver`). A write is a few hundred bytes; only a
 /// stalled disk takes longer.
-const SAVE_GRACE: Duration = Duration::from_secs(2);
+pub(super) const SAVE_GRACE: Duration = Duration::from_secs(2);
 
 /// Runs the daemon until it is told to stop or cannot go on. `start` is
 /// the section a daemon started by `apply-config` starts from
@@ -175,11 +175,11 @@ fn serve(options: DaemonOptions, start: Option<&Start>) -> Result<(), Error> {
     // Before the socket goes: a `kill` client, answered once it does, then
     // finds the last change on disk.
     let state = &daemon.wayland.state;
-    let flushed = state.saved.flush(SAVE_GRACE)
-        && state
-            .retired
-            .as_ref()
-            .is_none_or(|retired| retired.flush(SAVE_GRACE));
+    // Every writer, each given the grace (not `&&`, which would skip the
+    // rest after one that ran out).
+    let flushed = std::iter::once(&state.saved)
+        .chain(&state.retired)
+        .fold(true, |all, saved| saved.flush(SAVE_GRACE) & all);
     if !flushed {
         warn(format_args!(
             "scootbg: the state file was still being written after {} s; stopping \

@@ -483,9 +483,12 @@ setting silently not applied.
   for `apply-config` an error.
 - It returns once every output shows it, as `set` does, and prints nothing
   on success. Exit status: 0 applied or unchanged, and shown; 1 no daemon
-  could be started or reached (5 s), no reply (30 s), another protocol, an
-  image in the section that is not a file (the rest is applied), drawing
-  failed, or the state file could not be written; 2 a usage error.
+  could be started or reached (5 s), no reply (30 s), the daemon closed
+  the connection before answering (`scootbg kill`, a crash), another
+  protocol, a daemon too old for `apply-config`, an image in the section
+  that is not a file (the rest is applied; reported by every
+  `apply-config` until the file is back, and then shown), drawing failed,
+  or the state file could not be written; 2 a usage error.
 
 The schema, the fingerprint's exact encoding, the precedence table and
 the protocol are in

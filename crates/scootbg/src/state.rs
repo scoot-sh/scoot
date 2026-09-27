@@ -295,6 +295,26 @@ impl Saved {
         self.saver.is_some()
     }
 
+    /// Nothing is being written or waits to be: dropping this loses no
+    /// save.
+    pub fn idle(&self) -> bool {
+        self.flush(Duration::ZERO)
+    }
+
+    /// Takes `old`'s writer, a writer for this same profile (an earlier
+    /// `Saved` of it, still busy), in place of this one's own, so one file
+    /// has one writer and its saves land in the order they were made.
+    /// Returns `false` (and takes nothing) when this one does not save at
+    /// all, or `old` is another profile's or has no writer: `old` must then
+    /// still be waited for.
+    pub fn take_writer(&mut self, old: &mut Saved) -> bool {
+        if self.saver.is_none() || old.profile != self.profile || old.saver.is_none() {
+            return false;
+        }
+        self.saver = old.saver.take();
+        true
+    }
+
     /// Waits, at most `limit`, for a write under way (on the way out).
     pub fn flush(&self, limit: Duration) -> bool {
         self.saver.as_ref().is_none_or(|saver| saver.flush(limit))

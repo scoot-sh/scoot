@@ -266,10 +266,13 @@ Returns once every output shows what it should and the compositor has
 processed it, as `set` does; prints nothing on success.
 
 Exit status: 0 applied, or unchanged, and shown; 1 no daemon could be
-started or reached within 5 s, no reply within 30 s, a daemon from another
-protocol or too old, an image in the section that is not a file (the rest
-is applied), drawing failed, or the state file could not be written; 2
-for a usage error, the section refused above included.
+started or reached within 5 s, no reply within 30 s, the daemon closed the
+connection before answering, a daemon from another protocol or too old,
+an image in the section that is not a file (the rest is applied; every
+run says so until the file is back, and the first run after shows it,
+unless a `scootbg set` has replaced it there since), drawing failed, or
+the state file could not be written; 2 for a usage error, the section
+refused above included.
 ";
 
 /// Which help text to print.

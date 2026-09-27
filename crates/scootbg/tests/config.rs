@@ -514,6 +514,84 @@ fn a_missing_image_is_loud_and_the_rest_applies() {
     shot(&session, &names[1]).assert_all([0, 255, 0], "back, restored");
 }
 
+/// A missing image is reported by every `apply-config` until it is back,
+/// the cold start's first one included, and an unchanged one then shows
+/// it; a `set` made meanwhile always stands (review of PR #293, F1).
+#[test]
+fn a_missing_image_is_reported_until_it_is_back() {
+    let shared = Scratch::new("ac-back");
+    let Some(session) = start("ac-back", &shared) else {
+        return;
+    };
+    let names = scoot_names(&session);
+    let image_of = |path: &Path| {
+        json!({"image": path.to_str().unwrap(), "mode": "fill", "fill": "#000000",
+               "filter": "lanczos3"})
+    };
+    let exits_1_naming = |session: &Session, json: &str, path: &Path| {
+        let run = run_apply(session, "scoot", json);
+        assert_eq!(run.status.code(), Some(1), "{json}: {}", run.stderr);
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert!(run.stderr.contains(name), "{}", run.stderr);
+    };
+
+    // A per-output image, missing at a cold start: the first reply says so.
+    let p = shared.0.join("p.png");
+    let s1 = json!({"color": BLUE, "output": {names[1].clone(): {"image": p.to_str().unwrap()}}})
+        .to_string();
+    exits_1_naming(&session, &s1, &p);
+    configured_names(&session, 2);
+    exits_1_naming(&session, &s1, &p);
+    // A `set` for the other output, meanwhile, then the file appears.
+    ok(&session, &["set", YELLOW, "--output", &names[0]]);
+    write_png(&p, [0, 255, 0]);
+    let stderr = apply(&session, "scoot", &s1);
+    assert!(stderr.is_empty(), "{stderr}");
+    shot(&session, &names[1]).assert_all([0, 255, 0], "put back once there");
+    shot(&session, &names[0]).assert_all(rgb(YELLOW), "the set stands");
+    assert_eq!(showing(&session).0[1].1, image_of(&p));
+
+    // The image for every output, missing; a `set` for one output; the
+    // file appears: every other output shows it, the set one keeps its set.
+    let q = shared.0.join("q.png");
+    let s2 = json!({"image": q.to_str().unwrap()}).to_string();
+    exits_1_naming(&session, &s2, &q);
+    ok(&session, &["set", RED, "--output", &names[1]]);
+    exits_1_naming(&session, &s2, &q);
+    write_png(&q, [0, 0, 255]);
+    apply(&session, "scoot", &s2);
+    shot(&session, &names[0]).assert_all([0, 0, 255], "every output's, put back");
+    shot(&session, &names[1]).assert_all(rgb(RED), "the set for this one stands");
+
+    // A `set` on the very output the missing image was for replaces it:
+    // nothing is reported any more, and the file coming back changes
+    // nothing.
+    let r = shared.0.join("r.png");
+    let s3 = json!({"color": GREEN, "output": {names[1].clone(): {"image": r.to_str().unwrap()}}})
+        .to_string();
+    exits_1_naming(&session, &s3, &r);
+    ok(&session, &["set", YELLOW, "--output", &names[1]]);
+    apply(&session, "scoot", &s3);
+    write_png(&r, [255, 0, 255]);
+    apply(&session, "scoot", &s3);
+    shot(&session, &names[1]).assert_all(rgb(YELLOW), "the set stands over the section");
+    shot(&session, &names[0]).assert_all(rgb(GREEN), "the rest of the section");
+
+    // And across a restart: the file gone at start, back by the next
+    // (unchanged) reload.
+    let t = shared.0.join("t.png");
+    let s4 = json!({"image": t.to_str().unwrap()}).to_string();
+    exits_1_naming(&session, &s4, &t);
+    let session = restart(session, "ac-backb");
+    exits_1_naming(&session, &s4, &t);
+    write_png(&t, [0, 255, 255]);
+    apply(&session, "scoot", &s4);
+    configured_names(&session, 2);
+    for name in &names {
+        shot(&session, name).assert_all([0, 255, 255], "back after a restart");
+    }
+}
+
 /// A section refused by validation is a usage error (2) that starts
 /// nothing and changes nothing; so is malformed or non-UTF-8 JSON, and JSON
 /// over the size limit.
@@ -680,6 +758,94 @@ fn a_set_racing_apply_config_stays_consistent() {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+}
+
+/// A started daemon that lost the lock to something that then went away
+/// without serving (here the test itself, holding the lock as a `{}`
+/// being recorded does) becomes the daemon itself, rather than drop the
+/// section (review of PR #293, F3).
+#[test]
+fn a_loser_whose_winner_never_serves_becomes_the_daemon() {
+    let shared = Scratch::new("ac-loser");
+    let Some(session) = start("ac-los", &shared) else {
+        return;
+    };
+    let lock_path = session
+        .scratch
+        .0
+        .join(format!("scootbg-{}.lock", session.wayland_display));
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .unwrap();
+    rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive).unwrap();
+    let log = session.scratch.0.join("loser.log");
+    let mut loser = session
+        .scootbg()
+        .args([
+            "apply-config",
+            "--serve",
+            "--profile",
+            "scoot",
+            &section(RED),
+        ])
+        .stdout(Stdio::null())
+        .stderr(std::fs::File::create(&log).unwrap())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        loser.try_wait().unwrap().is_none(),
+        "it waits for the winner"
+    );
+    drop(lock);
+    let deadline = Instant::now() + PATIENCE;
+    while !answers(&session.socket()) {
+        assert!(
+            loser.try_wait().unwrap().is_none(),
+            "it gave up: {}",
+            std::fs::read_to_string(&log).unwrap_or_default()
+        );
+        assert!(Instant::now() < deadline, "it never became the daemon");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    configured_names(&session, 2);
+    both_show(&session, RED, "the loser's section");
+    ok(&session, &["kill"]);
+    assert!(wait_exit(&mut loser).success());
+}
+
+/// Profiles adopted back and forth quickly: each state file ends as the
+/// last change made in it (review of PR #293, F2). A consistency check
+/// only: on this disk a save takes about 0.3 ms and each `apply-config` a
+/// few, so it passed with the fix taken out, three runs of three; the
+/// writer handover itself is `state::tests`'
+/// `a_writer_is_taken_back_only_for_its_own_profile`.
+#[test]
+fn rapid_adoptions_keep_each_file_newest() {
+    let shared = Scratch::new("ac-aba");
+    let Some(session) = start("ac-aba", &shared) else {
+        return;
+    };
+    apply(&session, "a", &section(RED));
+    configured_names(&session, 2);
+    let mut last_a = String::new();
+    for round in 0..20u8 {
+        let hex = format!("#{round:02x}00{:02x}", 255 - round);
+        ok(&session, &["set", &hex]);
+        last_a = hex;
+        apply(&session, "b", &section(BLUE));
+        apply(&session, "a", &section(RED));
+    }
+    ok(&session, &["kill"]);
+    wait_daemon_gone(&session);
+    let a = state_text(&shared.0, "a");
+    assert!(a.contains(&format!("all color {last_a}\n")), "{a}");
+    let b = state_text(&shared.0, "b");
+    assert!(b.contains(&format!("all color {BLUE}\n")), "{b}");
 }
 
 // ---- Failures --------------------------------------------------------------
