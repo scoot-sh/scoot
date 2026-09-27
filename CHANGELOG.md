@@ -9,15 +9,14 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
-### 2026-09-27 — drop from a Wayland app onto an X app
+### 2026-09-27 — drag-and-drop with X apps works in every direction
 
-- **With `--xwayland`, dragging from a Wayland app onto an X window now
-  drops there** — text from a Wayland editor into an X one, say. Until
-  now the drop did nothing. The X window has to take drops, as toolkit
-  text fields and file views do. Dragging from an X app onto an X window
-  (another X app, or moving text within one) still does nothing, and
-  nothing is lost; dragging from an X app into a Wayland app works as
-  before.
+- **With `--xwayland`, drag-and-drop works in every direction**: from a
+  Wayland app onto an X window, from one X app onto another, and within
+  one X app (moving selected text in an X editor), as well as from an X
+  app into a Wayland one as before. Until now drops onto X windows did
+  nothing. The X window has to take drops, as toolkit text fields and
+  file views do.
 
 ### 2026-09-27 — scootbg tracks outputs and places a surface on each (early)
 

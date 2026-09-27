@@ -80,13 +80,11 @@ inspired this project.
   Copy and paste works between X and Wayland apps both ways (clipboard
   and middle-click primary; `xclip`/`xsel` and `wl-copy`/`wl-paste` see
   each other), but an X app reads or sets it only while an X window has
-  the keyboard. Drag-and-drop works between X and Wayland apps both ways
-  (touch drags from X apps are refused); a drag from an X app onto an X
-  window — another X app, or within the same X app — does not land yet
-  (nothing is lost, the drop just does nothing;
-  [details](docs/protocols.md#clipboard-drag-and-drop-and-input-methods)).
-  Not there yet: drops from X apps onto X windows, and X input methods
-  (XIM).
+  the keyboard. Drag-and-drop works in every direction: X to Wayland,
+  Wayland to X, X to another X app, and within one X app (moving selected
+  text, say); touch drags from X apps are refused
+  ([details](docs/protocols.md#clipboard-drag-and-drop-and-input-methods)).
+  Not there yet: X input methods (XIM).
 - **GPU scanout is opt-in.** With a real GPU it is worth trying: on an
   Apple M2 under Asahi Linux it uses **4–5x less CPU** than the default under
   load, puts the same pixels on screen, and costs 7–16 MB more memory
@@ -310,7 +308,7 @@ refusing: `[tty] gpu` naming a device that will not open, and
 | Read display modes (`wlr-randr`, Settings → Display) | `wlr-output-management-v1`, **read-only** | [protocols.md](docs/protocols.md#display-information-wlr-output-management-v1) |
 | Drive the session from a script or an agent | the control socket: input injection, screenshots, introspection | [ipc.md](docs/ipc.md) |
 | Run scoot inside another compositor (webtop, a nested test session) | `--nested`, following the host window's size as it changes | [configuration.md](docs/configuration.md#command-line-flags) |
-| Run X11 applications | `--xwayland` / `[xwayland] enabled` (opt-in; X clients are fully trusted by design); clipboard and primary selection cross both ways while an X window is focused; drag-and-drop works between X and Wayland apps both ways (not from touch), from an X app onto an X window not yet; no XIM | [protocols.md](docs/protocols.md#xwayland-opt-in) |
+| Run X11 applications | `--xwayland` / `[xwayland] enabled` (opt-in; X clients are fully trusted by design); clipboard and primary selection cross both ways while an X window is focused; drag-and-drop works in every direction between X and Wayland apps, X to X and within one X app included (not from touch); no XIM | [protocols.md](docs/protocols.md#xwayland-opt-in) |
 
 The full protocol/version table, and the ones that are deliberately absent,
 are at the top of [docs/protocols.md](docs/protocols.md).

@@ -1,15 +1,85 @@
 ---
-title: "XWayland: drops onto X windows do not land (pointer focus needs an X arm)"
-status: "open"
-area: "protocols"
-priority: "medium"
+title: "XWayland: drops onto X windows do not land (pointer focus needs an X arm) — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# XWayland: give the pointer focus an X arm, so drops onto X windows land
+# XWayland: give the pointer focus an X arm, so drops onto X windows land — RESOLVED
+
+RESOLVED 2026-09-27 (branch `claude/scoot-backlog-issues-3rfkfv`).
+Drag-and-drop between X and Wayland apps works in every direction: X to
+Wayland (as before), Wayland to X, X to another X app, and within one X
+app. The pointer focus got its X arm (`compositor/pointer_focus.rs`; the
+three commits under PROGRESS below), and the last piece -- X-origin drags
+-- went through once scoot-sh/smithay `6e6fe896` flushed the XDND proxy's
+remap (`X11Surface`'s `DndFocus::leave`, `let _ = xwm.conn.flush();` after
+the `configure_window`, as `enter` does after its unmap). The fork is
+repinned there (`crates/scoot/Cargo.toml`, `Cargo.lock`, `flake.nix`,
+[`docs/forks.md`](../../forks.md)).
+
+- **The gate is gone.** An X focus now goes to Smithay's X target with an
+  X offer or none (`PointerOffer::as_x11`); only a surface offer on an X
+  focus -- which cannot happen -- goes the surface's way. Over an X window
+  an X drag's target unmaps the proxy (the source finds the real window),
+  maps it back on leave, and its `drop` ends the window manager's side of
+  the X drag.
+- **Tests.** The four ignored X-origin tests in
+  `compositor/xwayland/tests/drop.rs` run: X to X
+  (`an_x_drag_drops_onto_another_x_clients_window`), within one window
+  (`an_x_drag_finds_its_own_window_under_the_pointer`), the hovered
+  window closing (`an_x_drag_whose_hovered_window_closes_finds_the_proxy_again`),
+  and the proxy back over Wayland, which duplicated the old gate-pinning
+  test and was folded into it:
+  `an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland` now
+  asserts the proxy is out of the way over the X window *and* back over
+  the Wayland one, which pins the fork flush.
+- **Fail-first, measured** (web container, Xwayland 24.1.13 from the
+  flake's nixpkgs, `SCOOT_REQUIRE_XWAYLAND=1`, `cargo nextest run -p scoot
+  --features xwayland -E 'test(/xwayland::tests::(drop|dnd)::/)'`, three
+  runs each): at scoot `a1f364c` with only the fork rev swapped back to
+  `74edbf32`, 10 of 12 pass and the two proxy tests fail every run
+  (`left: "no window"`, `right: "Smithay XDND proxy"`); at `6e6fe896`,
+  12 of 12, every run. With the gate still in place (the merge commit
+  `da869d4`, `--run-ignored all`), the four X-origin tests fail.
+- **Benchmark:** not re-run. The change deletes a branch in `DndFocus`
+  (drag-only paths: `enter` on each focus change of a drag, and
+  `motion`/`leave`/`drop`); pointer motion without a drag, which
+  `pointer_motion` and `x11_hot_path_cost` measure, does not reach it.
+- **Live matrix** (web container, scoot `a1f364c` built `--features
+  xwayland`, `scoot --headless --width 2400 --xwayland`, `mousepad` 0.7.0
+  twice over `GDK_BACKEND=x11` and once native, one-third columns, driven
+  by `scootctl pointer`/`screenshot`): X to X (a line from one X mousepad
+  into the other; the source kept it), within one X window (a word moved
+  to the end of its line), Wayland to X, and X to Wayland from a drag that
+  started over its own X window -- the case the flush is for -- all land.
+  One X-to-Wayland attempt did not: the scripted press came inside GTK's
+  multi-click interval and extended the text selection instead of
+  dragging (its screenshot shows the selection growing); with the pause
+  before the press at 1.2 s it dropped. No `refusing an X drag` lines in
+  the log. (Screenshots were in the session's scratch space.)
+
+## Review follow-up -- open when this was written
+
+Independent review of the X arm found two issues in Smithay's X drop target
+that the Wayland-to-X half made reachable (`main` never made an X offer):
+
+- **B1, blocking:** a Wayland drop onto an X target that never answers and
+  then dies, or that is dropped on and then dies or hangs without
+  `XdndFinished`, leaves the window manager's `active_offer` set, and it
+  takes `XdndSelection` back from every later X drag until scoot restarts.
+- **N1:** a validated drop tells the Wayland source `dnd_drop_performed`
+  twice; a refused one is still sent `XdndDrop` (then `cancelled`).
+
+Both need scoot-sh/smithay commits. Their acceptance tests are in
+`compositor/xwayland/tests/drop_end.rs`, ignored until the fork is
+repinned; all six fail at `6e6fe896`. **Do not treat this entry as
+resolved until they pass.** Review note N3 (the drag gate's liveness
+check) is fixed on the scoot side.
 
 Filed 2026-09-25 by XWayland Phase 4, PR #246 (see
-[`xwayland-support.md`](./xwayland-support.md)'s Phase 4 record). Serves
+[`xwayland-support.md`](../protocols/xwayland-support.md)'s Phase 4 record). Serves
 daily use: dragging a file into an X file manager, text into an X editor, or
 a tab within an X app are ordinary actions an X user hits before any
 X-to-Wayland drag.

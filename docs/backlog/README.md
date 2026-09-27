@@ -783,15 +783,13 @@ scale/mode) into one hardware session.
   resolved. Left: #48 `MoveTo` on hardware and the
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
-- [XWayland: drops onto X windows do not land](./protocols/xwayland-pointer-focus-x11.md)
-  — OPEN, medium (filed by XWayland Phase 4, PR #246). The pointer focus
-  has its X arm (behaviour-neutral enum first, then the arm; benchmarked):
-  **Wayland → X drops land**. X → X and in-app X drops still do nothing:
-  Smithay's XWM never flushes the XDND proxy's remap when a drag leaves an
-  X window, so turning them on as-is would break X → Wayland drops. Left:
-  pin a one-line scoot-sh/smithay flush commit (written and verified
-  locally, not pushed), drop the X-origin gate in `pointer_focus.rs`,
-  un-ignore the four X-origin tests in `xwayland/tests/drop.rs`.
+- [XWayland: drops onto X windows do not land](./resolved/xwayland-pointer-focus-x11-done.md)
+  — RESOLVED except its review follow-up (filed by XWayland Phase 4, PR
+  #246). The pointer focus has an X arm, and with the fork's proxy-remap
+  flush (`6e6fe896`) drops work in every direction, live. Pending: fork
+  commits so a Wayland drop onto an X target that dies or hangs before
+  finishing does not wedge X drags (B1) and the source hears the drop
+  once (N1); tests ignored in `xwayland/tests/drop_end.rs`.
 - [XWayland support](./protocols/xwayland-support.md)
   — OPEN, low: spike (PR #220), skeleton (PR #221) and mapping + focus gate
   (Phases 2+3, PR #244) landed: X windows tile, dialogs float, rules
@@ -806,8 +804,8 @@ scale/mode) into one hardware session.
   changed hands since it crossed (raises the bar; a forged owner answer is
   still possible), X drags need a press on the dragging client's own
   window (presses on Wayland surfaces protected; on X windows not), and thirteen measured XWM fixes/hooks moved into the Smithay fork;
-  X → Wayland drags and Wayland → X drops work, X → X drops do not yet
-  ([pointer focus X arm](./protocols/xwayland-pointer-focus-x11.md), medium),
+  drag-and-drop works in every direction
+  ([pointer focus X arm](./resolved/xwayland-pointer-focus-x11-done.md)),
   no XIM.
   Remaining: capture pins/packaging (5–7). The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its

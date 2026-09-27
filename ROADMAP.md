@@ -139,8 +139,11 @@ each item's own file records why it landed when it did.
   both ways, unbounded buffering behind a stuck X reader, unbounded pastes
   behind a silent owner, an unsent ownership change, and the owner/drag
   hooks. X → Wayland drags work live; Wayland → X drops land since the
-  [pointer focus X arm](docs/backlog/protocols/xwayland-pointer-focus-x11.md)
-  (X → X waits on a one-line Smithay fork flush, verified locally);
+  [pointer focus X arm](docs/backlog/resolved/xwayland-pointer-focus-x11-done.md),
+  and X → X and in-window X drops since the fork's proxy-remap flush
+  (`6e6fe896`) — every direction works live; a Wayland drop onto an X
+  target that dies or hangs before finishing still wedges X drags (fork
+  fix pending, tests ignored in `drop_end.rs`);
   XIM not provided; an IM keyboard grab pre-empts X focus (tested).
   Ticket stays OPEN for Phases 5–7.
 
