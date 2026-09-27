@@ -252,7 +252,7 @@ fn a_click_inside_a_grabbing_popup_keeps_it() {
 /// output is resized -- and the grab lives through it: a configure carries
 /// geometry, a grab routes input, and the two do not fight.
 ///
-/// The grab half of `docs/backlog/core/popup-reactive-reconstrain.md`: a
+/// The grab half of `docs/backlog/resolved/popup-reactive-reconstrain-done.md`: a
 /// grabbed menu is usually dismissed before anything scrolls it (a click
 /// outside, a focus steal), but an IPC-driven change owes no dismissal, so
 /// the menu is re-slid with its keyboard still in it and no `popup_done`.

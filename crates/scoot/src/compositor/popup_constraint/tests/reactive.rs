@@ -1,7 +1,7 @@
 //! A `reactive` popup is re-constrained when its parent moves; a
 //! non-reactive twin is left alone.
 //!
-//! The ticket (`docs/backlog/core/popup-reactive-reconstrain.md`): a menu
+//! The ticket (`docs/backlog/resolved/popup-reactive-reconstrain-done.md`): a menu
 //! slid inside the output at open time must be re-slid when its column
 //! scrolls, answered with a fresh configure pair -- while a non-reactive
 //! popup must never be re-configured (the protocol forbids it). Everything

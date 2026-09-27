@@ -654,8 +654,8 @@ each item's own file records why it landed when it did.
   Smithay's arithmetic from overflowing. Verified live against a GTK3
   context menu (asks for all six adjustments). Also fixed, pre-existing:
   a popup whose parent chain loops back to itself hung the compositor in
-  Smithay's root walk; now refused (`popup_parent.rs`). Follow-up filed:
-  [reactive re-constraining](docs/backlog/core/popup-reactive-reconstrain.md).
+  Smithay's root walk; now refused (`popup_parent.rs`). Follow-up shipped:
+  [reactive re-constraining](docs/backlog/resolved/popup-reactive-reconstrain-done.md).
 
 - **[Windows stay on their own output](docs/backlog/resolved/windows-bleed-across-outputs-done.md)**
   (2026-09-23, PR #224) — a window is drawn and takes input only on the

@@ -47,11 +47,11 @@ unrelated `scootbg` backlog test -- see below), working tree at `4fc5a22`
 plus this branch's uncommitted diff:
 
 - `cargo test -p scoot --bin scoot compositor::popup_constraint` --
-  24 passed, including the 3 new `reactive.rs` tests (ticket's pin:
+  25 passed, including the 4 new `reactive.rs` tests (ticket's pin:
   reactive `SlideX` menu re-slid on column scroll, non-reactive twin quiet,
-  both twins at once).
+  both twins at once, no fight with an unacked reposition).
 - `cargo test -p scoot --bin scoot compositor::layer_shell::tests::popup` --
-  37 passed, including `a_grabbed_reactive_popup_is_reconstrained_when_its_output_is_resized`
+  38 passed, including `a_grabbed_reactive_popup_is_reconstrained_when_its_output_is_resized`
   and `a_dismissed_popup_is_not_reconstrained`.
 - `cargo test -p scoot --bin scoot
   compositor::popup_constraint::tests::reactive` -- 4 passed, including
