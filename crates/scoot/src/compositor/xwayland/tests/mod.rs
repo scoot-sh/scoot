@@ -83,8 +83,22 @@ fn read_marker(marker: &std::path::Path) -> String {
     loop {
         match std::fs::read_to_string(marker) {
             Ok(text) => {
-                let _ = std::fs::remove_file(marker);
-                return text;
+                // `sh -c "echo … > marker"` creates (or truncates) the file
+                // at redirect setup before echo writes a byte: an
+                // exists-but-empty read is the shell mid-spawn, not the
+                // child's answer, so keep polling rather than returning "".
+                // (Checked on the raw text, not the trim: every spawn here
+                // echoes at least a newline, so empty can only be the gap.)
+                if !text.is_empty() {
+                    let _ = std::fs::remove_file(marker);
+                    return text;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "the spawned child left its marker empty: {}",
+                    marker.display()
+                );
+                std::thread::sleep(Duration::from_millis(5));
             }
             Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
             Err(error) => panic!("the spawned child never wrote its marker: {error}"),
