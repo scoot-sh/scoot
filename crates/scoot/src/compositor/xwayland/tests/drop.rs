@@ -64,7 +64,7 @@ pub(super) fn visible(what: &str, placement: &Placement) {
 /// Moves the pointer to `(x, y)` and answers the top-level X window the X
 /// server then has under its pointer, having checked the X pointer really
 /// is there (XWayland learns it from the drag's `wl_pointer` motion).
-fn move_and_look(live: &mut Live, (x, y): (f64, f64)) -> XWindow {
+pub(super) fn move_and_look(live: &mut Live, (x, y): (f64, f64)) -> XWindow {
     live.fixture.state.pointer_move(x, y);
     live.drain();
     let (px, py, under) = live.x.pointer();
@@ -105,7 +105,7 @@ fn announce_to_proxy(live: &mut Live, owner: XWindow) -> XWindow {
 /// Presses on `rect`, has `live.x` take the `XdndSelection` -- the drag
 /// starting -- and announces it to the proxy. Answers the drag's owner
 /// window and the proxy.
-fn start_x_drag(live: &mut Live, rect: Rect) -> (XWindow, XWindow) {
+pub(super) fn start_x_drag(live: &mut Live, rect: Rect) -> (XWindow, XWindow) {
     press_at(&mut live.fixture.state, rect);
     live.drain();
     let owner = live.x.take_selection("XdndSelection");
@@ -116,7 +116,7 @@ fn start_x_drag(live: &mut Live, rect: Rect) -> (XWindow, XWindow) {
 }
 
 /// An X window of `client`, mapped, placed and a drop target.
-fn x_target(live: &mut Live, client: &XClient, pixel: u32) -> (XWindow, Placement) {
+pub(super) fn x_target(live: &mut Live, client: &XClient, pixel: u32) -> (XWindow, Placement) {
     let xid = client.map(&Props::new(pixel));
     let id = live.managed(xid);
     client.xdnd_aware(xid);

@@ -822,7 +822,10 @@ scale/mode) into one hardware session.
   client can race a launched app to its `_NET_STARTUP_ID` within the
   token's 30 s) and [an X drag released on its first motion into an X
   window may drop on the proxy](./protocols/xwayland-x-drag-first-motion-race.md)
-  (low, reasoned from code, not reproduced).
+  (low; reproduced live with GTK by two mechanisms -- a drag's first motion
+  onto an X window before the source named its types, 0/20 drops landed; a
+  proxy flicker between two X windows, 2-3/20 -- fix verified against a
+  patched scoot-sh/smithay, waiting on the fork).
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes
