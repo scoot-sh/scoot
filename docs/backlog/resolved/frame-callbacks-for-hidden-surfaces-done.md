@@ -8,8 +8,7 @@ blocked: null
 
 # Withhold frame callbacks from layer surfaces nobody can see
 
-**RESOLVED (2026-09-27) in 732aaf1 (PR number recorded separately, per
-repo convention).** The frame-callback pass in `State::render` skips a
+**RESOLVED (2026-09-27) in 732aaf1, PR #279.** The frame-callback pass in `State::render` skips a
 layer surface that already committed a buffer and is fully covered by
 opaque window content on its output; everything else is served exactly as
 before. No user-facing surface: no config, binds, CLI or IPC change, so no
