@@ -40,12 +40,12 @@ Two side effects on the rounded path, both corrections:
   `round(x * s) + round(w * s)`, and those differ by one for some
   positions (odd `x` and `w` at 1.5). The new physical bars land on the
   band exactly, so a few edge pixels change there.
-- **Translucent ring colours.** They used to blend twice where the strips
+- **Translucent ring colors.** They used to blend twice where the strips
   overlapped the bars. They no longer overlap.
 
 The shoulder fix does not touch the square ring (`corner_radius = 0`):
 `ring_rects` is unchanged. The square ring's only change in PR #240 is that
-it follows the drawn rect. On the rounded path, opaque colours at integer scales change
+it follows the drawn rect. On the rounded path, opaque colors at integer scales change
 only in the shoulder pixels this ticket is about. The ring still draws four
 elements per window.
 

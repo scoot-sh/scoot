@@ -32,7 +32,7 @@
 //!    composites, exactly as it did before this existed.
 //! 4. **no element in the frame is translucent** (`alpha() < 1.0`, which is
 //!    where `wp_alpha_modifier_v1`'s multiplier lands). A translucent bottom
-//!    element could only be tried over a black clear colour, where Smithay
+//!    element could only be tried over a black clear color, where Smithay
 //!    would ask the primary plane's own `alpha` property to stand in for the
 //!    blend -- a rarely exercised property on the one plane every driver
 //!    treats specially. Compositing is exact; that is the one worth trusting.
@@ -47,7 +47,7 @@
 //! 6. **the element Smithay would try is the covering window's own**
 //!    (see [`smithay_walk`] and [`rule6`]). Smithay tries the primary only
 //!    for the *last* element of its visible list, and only if that element
-//!    is opaque over, and spans, the whole output or the clear colour is
+//!    is opaque over, and spans, the whole output or the clear color is
 //!    black or transparent (`render_frame`'s `try_assign_primary_plane`
 //!    guard at the pinned rev). The visible list ends at the first element,
 //!    front to back, that is opaque over and spans the output; without one
@@ -65,11 +65,11 @@
 //!
 //!    The walk mirrors Smithay's single-pixel-buffer substitution too: when
 //!    the first opaque, output-spanning element is a single-pixel buffer (a
-//!    solid-colour wallpaper, or a video player's black root under its video
-//!    subsurface), Smithay drops it, makes its colour the clear colour, and
+//!    solid-color wallpaper, or a video player's black root under its video
+//!    subsurface), Smithay drops it, makes its color the clear color, and
 //!    the element above it becomes the last -- so an alpha window over a
 //!    *black* single-pixel wallpaper is tried (and eligible), and over any
-//!    other colour it is not.
+//!    other color it is not.
 //!
 //!    One part of Smithay's decision is left out, and it errs toward calling
 //!    a frame eligible that Smithay then composites (a steer that buys
@@ -165,7 +165,7 @@ pub(crate) enum PrimaryDirect {
     /// An element in the frame is a rounded window.
     Rounded,
     /// Nothing in the frame is opaque over, and spans, the whole output, and
-    /// the clear colour is neither black nor transparent (or nothing in the
+    /// the clear color is neither black nor transparent (or nothing in the
     /// frame is visible at all): Smithay would not try the primary for any
     /// element (rule 6).
     NothingOpaqueCovers,
@@ -185,7 +185,7 @@ impl PrimaryDirect {
 /// Decides whether this frame of `output` may go primary-direct.
 ///
 /// `locked` must be the value the element list was gathered with, and
-/// `elements` that list; `frame` is the size, scale and clear colour that
+/// `elements` that list; `frame` is the size, scale and clear color that
 /// frame is rendered with -- `draw_frame_scanout` passes all of them
 /// straight through. Everything past the first two rules -- the clock read,
 /// the capture-session scan, the element scans -- only runs on an unlocked,
@@ -240,7 +240,7 @@ where
         |index| {
             elements
                 .get(index)
-                .and_then(|element| solid_colour(element, renderer))
+                .and_then(|element| solid_color(element, renderer))
         },
         scratch,
     );
@@ -252,7 +252,7 @@ where
 }
 
 /// What rule 6 needs to know about the frame beyond its element list: the
-/// physical size and scale it is rendered at, and the clear colour
+/// physical size and scale it is rendered at, and the clear color
 /// `DrmCompositor::render_frame` is handed -- the same three values Smithay
 /// makes its own decision with.
 pub(crate) struct TriedWith {
@@ -333,11 +333,11 @@ where
                 .filter_map(|region| region.intersection(output)),
         );
         let spans_opaque = opaque && visible.contains_rect(output);
-        if spans_opaque && let Some(colour) = solid(index) {
+        if spans_opaque && let Some(color) = solid(index) {
             // Smithay's single-pixel-buffer substitution: the element is
-            // dropped, its colour clears the frame, and the element above it
+            // dropped, its color clears the frame, and the element above it
             // (already `end`, if any) stays the last one.
-            clear_color = colour;
+            clear_color = color;
             break;
         }
         end = Some(WalkEnd {
@@ -352,7 +352,7 @@ where
 }
 
 /// What [`smithay_walk`] ends with: the last element on the visible list,
-/// and the clear colour the frame will actually be cleared to -- the one it
+/// and the clear color the frame will actually be cleared to -- the one it
 /// was given, or a covering single-pixel buffer's.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Walked {
@@ -360,12 +360,12 @@ pub(super) struct Walked {
     pub(super) clear_color: Color32F,
 }
 
-/// The colour of `element` if its buffer is a single-pixel buffer, as
+/// The color of `element` if its buffer is a single-pixel buffer, as
 /// Smithay reads it for the substitution (`underlying_storage` ->
 /// `get_single_pixel_buffer` -> `rgba32f`). Asked only for the first
 /// opaque, output-spanning element, once per frame; a pointer read and a
 /// user-data lookup, no allocation.
-fn solid_colour<R>(element: &Elements<R>, renderer: &mut R) -> Option<Color32F>
+fn solid_color<R>(element: &Elements<R>, renderer: &mut R) -> Option<Color32F>
 where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Texture + 'static,
@@ -380,7 +380,7 @@ where
 
 /// Rule 6 over where the walk ended: Smithay's guard (the last element
 /// opaque over and spanning the output, or a black or transparent clear
-/// colour), then whether that element is the covering window's
+/// color), then whether that element is the covering window's
 /// (`in_window`, asked only when the guard passes).
 fn rule6(
     end: Option<WalkEnd>,

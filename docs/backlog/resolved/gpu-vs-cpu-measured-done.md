@@ -64,7 +64,7 @@ than by the run:
   different event counts in the same window (156 vs 176 relayouts), so a
   per-round total would compare different amounts of work.
 - **"Confirm which tier is live before trusting a number" was necessary and
-  nearly failed.** The compositor coloured its log unconditionally, so
+  nearly failed.** The compositor colored its log unconditionally, so
   `scanout="gpu"` in a redirected log is really
   `scanout\x1b[0m\x1b[2m=\x1b[0m"gpu"`; the harness reported the tier as
   absent on a run where it had come up. Fixed at the source (`225719e`,
@@ -88,7 +88,7 @@ against surviving artefacts.
 16 columns, not 18: run 1 predates the two power-under-damage columns. This
 is also why `connector` reads `?` and `scanout` reads `none` — run 1's
 harness predated the ANSI stripping, so it could not read those fields out
-of its own colourised log. Both facts are part of the record.
+of its own colorized log. Both facts are part of the record.
 
 ```
 round	tier	came_up	paused	connector	scanout	idle_jiffies	idle_secs	idle_uW_mean	move_jiffies	move_events	move_ms	width_jiffies	width_events	width_ms	rss_kB

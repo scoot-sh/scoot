@@ -9,6 +9,15 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — "color" throughout
+
+- **The project now spells it "color" everywhere** (code, docs, script
+  output). Nothing scoot itself prints, and no config key, IPC field or
+  CLI flag, changed — those were already "color". The only visible
+  wording changes are in the helper scripts: `scripts/smoke-test.sh`'s
+  `skipped: $LOG is not a regular file, so color may legitimately be on`
+  and a hint line in `scripts/asahi-test4.sh`.
+
 ### 2026-09-27 — scootbg shows solid colors (early)
 
 - **`scootbg set '#rrggbb'` puts a color on every output**, including
@@ -464,8 +473,8 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ### 2026-09-21 — logs are plain text when they are not going to a terminal
 
-- **`scoot`'s log output no longer contains colour escape sequences when
-  stdout is redirected or piped.** Colour is still there when you are
+- **`scoot`'s log output no longer contains color escape sequences when
+  stdout is redirected or piped.** Color is still there when you are
   watching a terminal. Before this, `scoot --tty … > session.log` or
   `… | tee session.log` wrote sequences like
   `scanout\x1b[0m\x1b[2m=\x1b[0m"gpu"` into the file, so `grep` for a field

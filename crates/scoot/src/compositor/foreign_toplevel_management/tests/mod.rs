@@ -728,7 +728,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
 /// A `width`x`height` opaque `wl_buffer` over a real memfd -- the same path any
 /// toolkit takes, and what a layer surface needs before it counts as mapped.
 ///
-/// The colour does not matter: nothing in this suite reads a pixel. What
+/// The color does not matter: nothing in this suite reads a pixel. What
 /// matters is that a buffer exists at the size the compositor configured.
 fn solid_buffer(
     shm: &wl_shm::WlShm,

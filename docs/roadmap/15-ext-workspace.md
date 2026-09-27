@@ -152,7 +152,7 @@ and six events sent per workspace appearing, and a client woken per
 batch), not overhead on the quiet path.
 
 **Pre-existing, found while bug-bashing, not fixed here:**
-`scripts/smoke-test.sh` under `MODE=--tty` fails its background-colour
+`scripts/smoke-test.sh` under `MODE=--tty` fails its background-color
 check (`the background pixel at (3,3) is rgb(0,0,0)`). It is the *cursor*:
 under `--tty` the pointer starts at (0,0) and the built-in arrow is drawn
 there, so the sample point lands on the cursor's black outline (a pixel

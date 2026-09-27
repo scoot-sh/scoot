@@ -431,7 +431,7 @@ final product code, via `nix build .#scoot-gpu`. It ran on VT 2 through
   activated`, then a full modeset on each CRTC, and both screens come back.
   The re-probe of both connectors on activation took about 240 ms.
 - **Lock.** swaylock (`-c 7a1fa0`) covers both screens (both screenshots
-  are that colour). `session lock confirmed: every output's blanked frame
+  are that color). `session lock confirmed: every output's blanked frame
   reached scanout` came about 60 ms after `locking the session`.
 - **Both tiers.** Pixman/dumb buffers by default. The GPU scanout tier with
   `--renderer gles` shows `scanout="gpu"` on both heads. For the GPU tier:
@@ -638,14 +638,14 @@ tier.
 freshly mapped `foot` windows, pointer parked at 1280,800 — the two tiers
 are identical across all 4.096M pixels *except* an 18×34 box at physical
 1911,1184, with a maximum channel delta of 3/255. That box is the cursor:
-1280,800 × 1.5 = physical 1920,1200, the crop holds 118 distinct colours
+1280,800 × 1.5 = physical 1920,1200, the crop holds 118 distinct colors
 (an antialiased glyph, not a flat block), and the same crop taken anywhere
 else differs by exactly zero. The control matters as much as the result —
 the same tier captured in different rounds gives `AE = 0`, byte-identical,
 so the scene really is pinned and the 18×34 box is the whole difference.
 For scale, a whole-frame one-least-significant-bit difference at this
 resolution measures `AE ≈ 4016` if one channel of four differs everywhere,
-or `AE ≈ 12044` if all three colour channels do (measured, not derived — add
+or `AE ≈ 12044` if all three color channels do (measured, not derived — add
 `1/255` to R, G and B and compare). Observed: **1.003**, four orders of
 magnitude below either. The `AE = 0` control is the stronger half of this:
 the captures are byte-identical `md5`-wise within a tier.
@@ -732,7 +732,7 @@ of checking the prose:
   one scene and penalising the other; the medians give 18–31x.
 
 Two harness traps found while running it, in the tradition of the ones above.
-First, the compositor coloured its log output unconditionally, so
+First, the compositor colored its log output unconditionally, so
 `scanout="gpu"` in a redirected log is really
 `scanout\x1b[0m\x1b[2m=\x1b[0m"gpu"` — the harness read the tier as absent on
 a run where it had come up, i.e. it mis-reported the single most important
@@ -839,7 +839,7 @@ overlay_planes=1`), one overlay, and no tiled or compressed modifier on
 either plane. **No VRR:** the connector has no `vrr_capable` property at
 all (only the CRTC's `VRR_ENABLED`, at 0), and niri reports `Variable
 refresh rate: not supported` for the same panel. The swapchain line: `Testing Formats: [AR24 Invalid, AR24
-Linear]` (Smithay's plane set, filtered to its colour formats, is
+Linear]` (Smithay's plane set, filtered to its color formats, is
 `{XR24, AR24} x {Invalid, Linear}`).
 
 **The trap: the software cursor blocks direct scanout.** With no cursor

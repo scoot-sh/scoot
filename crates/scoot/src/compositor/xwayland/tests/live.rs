@@ -16,7 +16,7 @@ use crate::compositor::test_support::Harness;
 /// The framebuffer, square.
 pub(super) const CANVAS: i32 = 400;
 
-/// Colours as the X server takes them (`0xRRGGBB` background pixels) and as
+/// Colors as the X server takes them (`0xRRGGBB` background pixels) and as
 /// the BGRA framebuffer holds them.
 pub(super) const RED: u32 = 0x00ff_0000;
 pub(super) const RED_BGRA: [u8; 4] = [0x00, 0x00, 0xff, 0xff];
@@ -33,7 +33,7 @@ pub(super) struct Live {
 }
 
 /// No ring and a flat background, so a pixel test reads a window's own
-/// colour wherever it samples inside it.
+/// color wherever it samples inside it.
 fn appearance() -> Appearance {
     Appearance {
         focus_ring_width: 0,

@@ -41,7 +41,7 @@ fn covering(fixture: &mut Fixture) {
 
 /// A black background with no ring and no gap: the shape in which Smithay
 /// would try the bottom window for the primary on its own (a
-/// black clear colour passes its check for any element), i.e. the one in
+/// black clear color passes its check for any element), i.e. the one in
 /// which `ANY` reaching a frame without a covering window would do harm.
 fn black() -> Appearance {
     Appearance {
@@ -61,7 +61,7 @@ fn a_covering_fullscreen_window_is_eligible() {
 #[test]
 fn a_tiled_window_is_never_eligible_even_over_black() {
     // No covering window, no primary bit: a lone tiled window over a black
-    // background would pass Smithay's own clear-colour check, and `ANY`
+    // background would pass Smithay's own clear-color check, and `ANY`
     // would hand it the primary whatever it is. It must not get the chance.
     for appearance in [appearance(), black()] {
         let mut fixture = Fixture::with_appearance(appearance);
@@ -374,10 +374,10 @@ fn judge_cost() {
 #[test]
 fn over_a_black_single_pixel_wallpaper_an_alpha_window_is_tried() {
     // Smithay drops a covering single-pixel buffer and clears the frame to
-    // its colour, making the element above it -- the window -- the last
+    // its color, making the element above it -- the window -- the last
     // one. Black: the window passes the guard whatever its alpha, as it did
     // before rule 6 existed (the regression review caught). Any other
-    // colour: nothing passes, as Smithay would try nothing.
+    // color: nothing passes, as Smithay would try nothing.
     for background in [appearance(), black()] {
         let mut fixture = Fixture::with_appearance(background.clone());
         fixture.done(Step::CreateLayer(Layer::PixelWallpaper { black: true }));

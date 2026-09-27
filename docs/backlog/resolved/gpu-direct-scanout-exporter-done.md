@@ -91,7 +91,7 @@ gate is the swapchain format match, now its own ticket
   virtio: 10/10 and 24/28 frames assigned to the primary, KMS state showing
   plane 33 on the client's `XR24`/modifier `0x0` 1600x1000 fb; each IPC
   screenshot logged `capture forces a composite frame` and returned the
-  client's current shade (single colour 192 or 64, cursor absent on its
+  client's current shade (single color 192 or 64, cursor absent on its
   plane); a screenshot while VT-switched away refused with `the current
   frame is held for direct scanout; retry once a composite frame lands`;
   after the switch back it succeeded again. Evidence paths and raw output

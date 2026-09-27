@@ -50,7 +50,7 @@ const NATURAL: (i32, i32) = (60, 40);
 /// The ring thickness [`appearance`] asks for.
 const RING: i32 = 3;
 
-// Colours, as the BGRA bytes an `Argb8888` pixman buffer holds them in, all
+// Colors, as the BGRA bytes an `Argb8888` pixman buffer holds them in, all
 // distinct in every channel.
 const TILED_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
 const DIALOG_BGRA: [u8; 4] = [0xE0, 0xE0, 0x20, 0xFF];

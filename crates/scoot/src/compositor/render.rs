@@ -1089,9 +1089,9 @@ pub(super) struct FrameOutcome {
     pub(super) damaged: bool,
 }
 
-/// The colour a frame is cleared to: the lock screen's while locked, the
+/// The color a frame is cleared to: the lock screen's while locked, the
 /// configured background otherwise. One function for every tier -- and for
-/// `render::primary_direct`, whose rule 6 must judge the very colour
+/// `render::primary_direct`, whose rule 6 must judge the very color
 /// `DrmCompositor::render_frame` is handed.
 fn frame_clear_color(state: &State, locked: bool) -> Color32F {
     if locked {
@@ -1218,7 +1218,7 @@ pub(super) fn draw_frame(
 /// `DrmCompositor::render_frame` binds the swapchain slot itself and
 /// `queue_frame` puts it on the CRTC. What is left to do around it is exactly
 /// what the other body does *outside* its own render call: build the frame
-/// context, gather the elements, pick the clear colour, and report what
+/// context, gather the elements, pick the clear color, and report what
 /// happened.
 ///
 /// `damage` is deliberately not a parameter. `Backend`'s own
@@ -1604,9 +1604,9 @@ where
             // The backdrop element already covers the output opaquely while
             // locked; this is the second line of defence behind it, so that
             // even a frame whose elements somehow produced nothing clears to
-            // the lock colour rather than to the configured desktop
+            // the lock color rather than to the configured desktop
             // background -- which a user may have given an alpha, and which
-            // is the colour the unlocked session is showing.
+            // is the color the unlocked session is showing.
             let clear_color = frame_clear_color(state, locked);
             let result =
                 damage.render_output(renderer, &mut framebuffer, age, &elements, clear_color);

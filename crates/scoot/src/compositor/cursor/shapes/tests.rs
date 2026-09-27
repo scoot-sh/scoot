@@ -155,7 +155,7 @@ fn every_drawn_shape_actually_draws_something_at_every_allowed_size() {
             assert!(
                 count(&pixels, size, OUTLINE) > 0,
                 "{shape:?} at {size}px drew no outline, so it would be \
-                 invisible against content of a similar colour"
+                 invisible against content of a similar color"
             );
         }
     }
@@ -311,9 +311,9 @@ fn the_balanced_shapes_are_centred_on_the_bitmap() {
 }
 
 #[test]
-fn a_shape_uses_the_colours_it_was_given_and_no_others() {
+fn a_shape_uses_the_colors_it_was_given_and_no_others() {
     // The bitmaps go straight to the scanout buffer, so a stray byte here is
-    // a stray pixel on a real display. Three colours, no blending, no
+    // a stray pixel on a real display. Three colors, no blending, no
     // antialiasing -- which is also what makes the assertions above able to
     // compare exact pixels.
     let size = 16;
@@ -327,7 +327,7 @@ fn a_shape_uses_the_colours_it_was_given_and_no_others() {
                 assert!(
                     pixel == fill || pixel == outline || pixel == TRANSPARENT,
                     "{shape:?} drew {pixel:?} at ({x}, {y}), which is neither \
-                     colour it was given nor transparent"
+                     color it was given nor transparent"
                 );
             }
         }

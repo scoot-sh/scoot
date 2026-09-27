@@ -65,7 +65,7 @@ const BAR_HEIGHT: u32 = 20;
 /// top-right corner, reserving nothing.
 const NOTE_SIZE: u32 = 30;
 
-// Colours, as the BGRA bytes an `Argb8888` pixman buffer holds them in, all
+// Colors, as the BGRA bytes an `Argb8888` pixman buffer holds them in, all
 // distinct in every channel.
 const WINDOW_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
 const OTHER_BGRA: [u8; 4] = [0xE0, 0xE0, 0x20, 0xFF];
@@ -107,7 +107,7 @@ enum Layer {
     /// The same wallpaper as a `wp_single_pixel_buffer_manager_v1` buffer
     /// scaled over the output with `wp_viewporter`: opaque, black or not.
     /// Smithay's walk drops such a covering buffer and clears the frame to
-    /// its colour instead.
+    /// its color instead.
     #[cfg(feature = "gpu-scanout")]
     PixelWallpaper { black: bool },
 }

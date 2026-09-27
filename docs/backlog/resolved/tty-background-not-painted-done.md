@@ -57,13 +57,13 @@ background/edge-clamping bug would show first, and a moved sample point would
 have silently encoded today's cursor placement and size into a coordinate
 that has no reason to know either. The focused window (not the unfocused one)
 so that even a hypothetical focus-follows-mouse could not change which ring
-colour is which; flexwm has none today (`input.rs`'s `pointer_move_quietly`
+color is which; flexwm has none today (`input.rs`'s `pointer_move_quietly`
 never touches keyboard focus), and the comment in the script says so.
 
 No compositor code changed. The cursor-side facts the diagnosis rests on are
 already unit-tested where they live — `cursor/tests.rs`'s
 `bitmap_honors_the_requested_colors` asserts the diagonal is the outline
-colour, and `bitmap_hotspot_pixel_is_the_outline_color` the corner.
+color, and `bitmap_hotspot_pixel_is_the_outline_color` the corner.
 
 ## Evidence
 

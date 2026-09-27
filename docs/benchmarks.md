@@ -169,7 +169,7 @@ BCDA, CDAB), each in a fresh session:
   [`scripts/niri-ab/niri-anim-off.kdl`](../scripts/niri-ab/niri-anim-off.kdl),
   written for this benchmark to match scoot's defaults as far as niri
   allows. It sets 12 px gaps, half-width new columns, a 3 px ring in scoot's
-  two colours around every window (niri's `border`; its `focus-ring`, which
+  two colors around every window (niri's `border`; its `focus-ring`, which
   rings only the focused window, is off), no shadows, `prefer-no-csd`, and
   `animations { off; }`.
 - **niri-on**: the same file with only the `animations` line removed, so

@@ -102,7 +102,7 @@ input, input method, xdg-popup and per-popup frame-callback steps):
   fail-first (failed on pixels pre-fix, passed after): candidate drawn at
   the caret over the lock screen, `activate` received, frame delivered.
 - `a_background_windows_xdg_popup_is_not_drawn_over_the_lock_screen` --
-  pin, green before and after: whole screen lock-colour, zero callbacks
+  pin, green before and after: whole screen lock-color, zero callbacks
   while locked (the PR #44 guarantee through the new element source).
 - `a_background_windows_ime_popup_is_not_drawn_over_the_lock_screen` --
   drawn + animated pre-lock, gone (pixels and callbacks) post-lock.

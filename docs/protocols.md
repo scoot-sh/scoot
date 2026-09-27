@@ -1348,7 +1348,7 @@ test:
   modifier** (`DRM_FORMAT_MOD_INVALID`, "the driver's default layout") is
   never offered for a format the driver named explicit layouts for: a YUV
   buffer imported that way is sampled as if it were RGB and shows the wrong
-  colours (measured, not assumed). And a format the driver lists without
+  colors (measured, not assumed). And a format the driver lists without
   naming *any* layout — a display without
   `EGL_EXT_image_dma_buf_import_modifiers`, or a driver that refuses the
   modifier query for it — is offered only if it is `Xrgb8888`/`Argb8888`,
@@ -1357,7 +1357,7 @@ test:
 
 A client too old for feedback (protocol version 1 or 2) is told only
 fourccs, with no layout, and allocates implicitly; for a YUV format under
-GLES that is the wrong-colours path below — a wrong picture rather than a
+GLES that is the wrong-colors path below — a wrong picture rather than a
 disconnect on the drivers measured (llvmpipe only; a driver that refuses
 implicit YUV imports would refuse it instead).
 
@@ -1365,7 +1365,7 @@ A client that ignores the feedback and offers a layout the table never
 named gets whatever the renderer says: `failed` on the asynchronous
 `create`, which it survives, and a protocol error on `create_immed`, which
 the protocol prescribes. (Under GLES a client that allocates an implicit
-YUV buffer anyway is not killed — it just draws the wrong colours.)
+YUV buffer anyway is not killed — it just draws the wrong colors.)
 
 On the dev VM's software GL (Mesa llvmpipe) the GLES table is 57 formats,
 all at `LINEAR` — Mesa lists no other layout there. On an Apple M2 (Mesa's

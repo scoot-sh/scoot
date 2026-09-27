@@ -575,7 +575,7 @@ impl State {
         // scene change is then still not on screen.
         let mut scene = false;
         let mut every_output_drew = true;
-        // Read once, here, so the element gathering, the clear colour and
+        // Read once, here, so the element gathering, the clear color and
         // the frame callbacks below are all answering the same question
         // about the same frame.
         let mut retry_render = false;

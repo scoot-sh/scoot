@@ -330,7 +330,7 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
     semantics restored by mutation (any output's matching seq confirms at
     once), 7 of the 8 fail; the eighth, the timeout-over-placeholder pin,
     exercises a path the mutation does not touch. Live: both screens
-    blank (swaylock colour on both IPC screenshots) and the log's
+    blank (swaylock color on both IPC screenshots) and the log's
     confirmation reads "every output's blanked frame reached scanout" ~60 ms
     after `locking the session`, on both tiers.
   - **E2, hotplug add/remove.** `tty/hotplug/heads.rs` re-plans every head

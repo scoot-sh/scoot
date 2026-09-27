@@ -227,7 +227,7 @@ END {
 # expect if the ONLY difference is renderer rounding is one least-significant
 # bit per pixel. Two yardsticks, because they differ by 3x and the wrong one
 # invites a false investigation: ONE channel of four differing everywhere is
-# w*h/255/4, about 4016 at 2560x1600; all three colour channels differing
+# w*h/255/4, about 4016 at 2560x1600; all three color channels differing
 # everywhere measures about 12044 (measured, ImageMagick 7.1.2 Q16-HDRI, by
 # adding 1/255 to R,G,B and comparing). Much
 # larger means the tiers really drew different things and wants investigating;
@@ -255,7 +255,7 @@ elif [ -z "$CMP" ]; then
     echo "  nix shell nixpkgs#imagemagick -c compare -metric AE \\"
     echo "    $OUT/r1-dumb-pinned.png $OUT/r1-gpu-pinned.png null:"
     echo "yardsticks at 2560x1600 if only renderer rounding differed: ~4016 for one"
-    echo "channel of four, ~12044 for all three colour channels. Far below either means"
+    echo "channel of four, ~12044 for all three color channels. Far below either means"
     echo "the tiers drew the same frame; far above means go and look at the crop."
 fi
 

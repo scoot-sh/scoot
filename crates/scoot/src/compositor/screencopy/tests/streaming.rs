@@ -24,7 +24,7 @@ use crate::compositor::screencopy::{STREAM_WINDOW, requested_recently};
 /// `Argb8888` buffer, which neither spans the output nor is opaque, so over
 /// any other background Smithay would not try the primary for them and the
 /// judgement would stop at rule 6 (`NothingOpaqueCovers`) before the stream
-/// rule these tests are about. Over black, Smithay's clear-colour arm makes
+/// rule these tests are about. Over black, Smithay's clear-color arm makes
 /// any bottom element a candidate.
 fn start_black() -> Fixture {
     let mut fixture = Harness::headless(

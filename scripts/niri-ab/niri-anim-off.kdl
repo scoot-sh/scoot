@@ -1,7 +1,7 @@
 // Measurement-only niri config for scripts/niri-ab-bench.sh, written for this
 // benchmark (not derived from niri's shipped default config). It shapes niri
 // like scoot's built-in defaults as far as niri allows: 12px gaps, half-width
-// new columns, no titlebars, and a 3px ring in scoot's two default colours
+// new columns, no titlebars, and a 3px ring in scoot's two default colors
 // around *every* window. niri's `focus-ring` draws only around the focused
 // window, while scoot rings every window, so the ring here is niri's
 // `border` (which niri draws around all windows) and `focus-ring` is off.

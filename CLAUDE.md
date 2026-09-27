@@ -68,6 +68,8 @@ window layout OmniWM-style through the Accessibility API.
   description really is just "window management state and layout" — it has no
   compositor concerns (no Wayland, no I/O), so that wording is accurate and
   should not change to match this rule.
+- **American spelling: "color", not "colour"** — in code, docs and
+  user-facing text alike (user, 2026-09-27).
 - **Where a Wayland protocol standard exists (emerging or established),
   implement that rather than a bespoke alternative, unless there's a concrete
   reason it doesn't fit.** E.g. `ext-workspace-v1` over the older one-off wlr

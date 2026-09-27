@@ -51,7 +51,7 @@ const CANVAS: i32 = 200;
 /// `Config::default`'s gap.
 const GAP: i32 = 12;
 
-// Colours, as the BGRA bytes an `Argb8888` buffer holds them in.
+// Colors, as the BGRA bytes an `Argb8888` buffer holds them in.
 const WINDOW_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
 const BAR_BGRA: [u8; 4] = [0xE0, 0x20, 0x20, 0xFF];
 const POPUP_BGRA: [u8; 4] = [0x20, 0xE0, 0xE0, 0xFF];
@@ -59,7 +59,7 @@ const POPUP_BGRA: [u8; 4] = [0x20, 0xE0, 0xE0, 0xFF];
 fn appearance() -> Appearance {
     Appearance {
         // No ring: nothing here is about it, and it would only be one more
-        // colour to keep distinct from the popup's.
+        // color to keep distinct from the popup's.
         focus_ring_width: 0,
         background_color: Color::new(0.07058824, 0.20392157, 0.3372549, 1.0),
         ..Appearance::default()
