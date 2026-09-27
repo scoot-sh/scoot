@@ -2021,12 +2021,16 @@ advertised three ways, matching what clients actually support:
   an output gets it automatically (re-sent on bind and whenever the output's
   state changes). A scale of `1.5` is advertised as `2` here, which is what a
   client that only understands integer scaling should draw at.
-- **`wp_fractional_scale_v1`** — the exact fractional value. A client that
+- **`wp_fractional_scale_v1`** — the configured value resolved to the
+  nearest 1/120th, the finest the protocol can express (`preferred_scale`
+  is a count of 120ths, so `1.33` arrives as 160). A client that
   creates a `wp_fractional_scale_v1` for one of its surfaces is sent
-  `preferred_scale` (`1.5`, not `2`), and can render a larger buffer and let
+  that `preferred_scale` (`1.5`, not `2`), and can render a larger buffer and let
   the compositor scale it down. The `wp_viewporter` global is advertised
   alongside it, because that is the protocol a client uses to submit such a
-  buffer — without it, a fractional client has no way to render.
+  buffer — without it, a fractional client has no way to render. Rendering
+  uses the same resolved value, so a buffer sized for the announced scale
+  lands one to one.
 - **`wl_surface.preferred_buffer_scale`** (needs client `wl_compositor` v6) —
   the integer preference that accompanies the fractional value, sent with the
   default `preferred_buffer_transform` (`normal`). It is a separate event on

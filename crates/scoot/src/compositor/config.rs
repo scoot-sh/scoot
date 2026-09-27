@@ -122,7 +122,9 @@ impl OutputConfig {
     /// before the range clamp. `Scale::fractional_scale()` feeding
     /// `physical / scale` (and `wl_output.scale`'s `ceil`) with NaN or
     /// infinity is a compositor that lays nothing out, so this is a
-    /// correctness bound, not taste.
+    /// correctness bound, not taste. The clamp itself (`clamp_scale`) also
+    /// resolves to the nearest multiple of 1/120, the finest
+    /// `wp_fractional_scale_v1` can express -- see `output_scale.rs`.
     fn into_scale(self) -> f64 {
         let Some(scale) = self.scale else {
             return 1.0;

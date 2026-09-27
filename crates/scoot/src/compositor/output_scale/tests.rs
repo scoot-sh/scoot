@@ -96,6 +96,72 @@ fn a_non_finite_scale_is_never_returned() {
     }
 }
 
+/// The configured scale is resolved to the nearest multiple of 1/120 -- the
+/// only fractional scale `wp_fractional_scale_v1.preferred_scale` can say --
+/// so rendering and what clients are told are the same number. 1.33 becomes
+/// 160/120 (the ticket's resampled checkerboard); 1.254, just below its
+/// nearest 120th, becomes 150/120 (the ticket's scootbg-at-integer-scale
+/// case). Expected values are spelled as `n.0 / 120.0`, never as decimal
+/// literals, so the assertion is exact rather than "close to 1.3333".
+#[test]
+fn clamp_scale_resolves_to_the_nearest_120th() {
+    for (configured, expected_120ths) in [
+        (1.33, 160),
+        (1.1, 132),
+        (1.66, 199),
+        (1.254, 150),
+        (1.25, 150),
+        (1.5, 180),
+        (1.75, 210),
+        (2.0, 240),
+        (MIN_SCALE, 60),
+        (MAX_SCALE, 480),
+    ] {
+        assert_eq!(
+            clamp_scale(configured),
+            f64::from(expected_120ths) / 120.0,
+            "clamp_scale({configured}) was wrong"
+        );
+    }
+}
+
+/// The bounds and the integer scales must survive the rounding bit-exact:
+/// 1.0 has to stay exactly 1.0 (it is what keeps `Scale::Integer(1)`), and
+/// the rounding must never push a clamped value back out of range.
+#[test]
+fn clamp_scale_keeps_exact_multiples_exact() {
+    for scale in [MIN_SCALE, 0.75, 1.0, 1.25, 1.5, 2.0, MAX_SCALE] {
+        assert_eq!(
+            clamp_scale(scale),
+            scale,
+            "clamp_scale({scale}) moved an exact multiple of 1/120"
+        );
+    }
+    assert!(matches!(smithay_scale(clamp_scale(1.0)), Scale::Integer(1)));
+}
+
+/// Resolving twice is the same as resolving once, over the whole range in
+/// fine steps. This is what makes the single stored value safe to compare
+/// with `==`: a reload of an already-resolved scale agrees silently instead
+/// of re-applying, and no consumer needs to round again.
+#[test]
+fn clamp_scale_is_idempotent_across_the_range() {
+    let mut scale = MIN_SCALE;
+    while scale <= MAX_SCALE {
+        let once = clamp_scale(scale);
+        assert_eq!(
+            clamp_scale(once),
+            once,
+            "clamp_scale({scale}) is not a fixed point"
+        );
+        assert!(
+            (MIN_SCALE..=MAX_SCALE).contains(&once),
+            "clamp_scale({scale}) left the range: {once}"
+        );
+        scale += 0.001;
+    }
+}
+
 // -- smithay_scale -------------------------------------------------------
 
 /// Exactly 1.0 stays `Scale::Integer(1)`, so a session that never asked for
@@ -1051,5 +1117,135 @@ fn a_reload_rescales_what_a_live_client_sees() {
         bgra_at(&after, moved.x * 2 + 5, moved.y * 2 + 5),
         WINDOW_BGRA,
         "the mapped window's pixels are not at its rescaled rectangle {moved:?}"
+    );
+}
+
+/// At 1.33 the client must be told exactly what scoot renders. The config
+/// value resolves to 160/120 at the clamp, and that one value is what the
+/// `Output` carries (rendering, `wl_output.scale`'s `ceil`, the
+/// `wlr-output-management` report) and what `preferred_scale` says. Before
+/// the fix the surface rendered at 1.33 while the client was told 160/120,
+/// so a protocol-exact buffer of `round(logical * 160 / 120)` was resampled
+/// into `logical * 1.33` device pixels.
+///
+/// Both equalities below fail there: `preferred_scale` arrives as
+/// 160/120 = 1.3333... against a stored 1.33, and the `Output`'s own scale
+/// is 1.33 against the advertised 160/120. Either one failing means a
+/// client buffer sized by the protocol cannot land one to one.
+#[test]
+fn a_protocol_exact_buffer_lands_one_to_one_at_1_33() {
+    // Through the same funnel production uses: config load resolves before
+    // `State::new` ever sees the value.
+    let mut fixture = Fixture::new(clamp_scale(1.33));
+    assert_eq!(fixture.state.output_scale, 160.0 / 120.0);
+    assert_eq!(fixture.state.integer_scale, 2);
+
+    // The live client hears exactly that value: the same f64 the session
+    // renders at, not 1.33 rounded on the wire.
+    let Ack::Negotiated {
+        preferred_scale,
+        output_scale,
+        ..
+    } = fixture.run(Step::Negotiate)
+    else {
+        panic!("the negotiate step must report what it saw");
+    };
+    assert_eq!(
+        preferred_scale,
+        Some(160.0 / 120.0),
+        "the client was not told the scale scoot renders at"
+    );
+    assert_eq!(output_scale, Some(2));
+
+    // And the `Output` itself carries it: this is the number the render
+    // path, `wl_output.scale`'s `ceil` and the `wlr-output-management`
+    // head all read.
+    let output = fixture
+        .state
+        .outputs
+        .primary()
+        .expect("the headless output")
+        .clone();
+    assert_eq!(
+        output.current_scale().fractional_scale(),
+        160.0 / 120.0,
+        "rendering disagrees with what the client was told"
+    );
+
+    // A client buffer sized exactly the way the protocol blesses --
+    // `round(45 * 160 / 120)` = 60 -- with the viewport destination at the
+    // logical size, draws at the physical rectangle: scaled, not logical.
+    fixture.run(Step::MapWindow {
+        buffer: 60,
+        destination: Some((45, 45)),
+    });
+    let pixels = fixture.render();
+    let rect = fixture.window_rect();
+    let scale = fixture.state.output_scale;
+    let origin = (
+        (rect.x as f64 * scale) as i32,
+        (rect.y as f64 * scale) as i32,
+    );
+    assert_eq!(
+        bgra_at(&pixels, origin.0 + 30, origin.1 + 30),
+        WINDOW_BGRA,
+        "the protocol-exact buffer is not at its physical rectangle {rect:?}"
+    );
+}
+
+/// A reload of `scale = 1.33` applies 160/120 to the live session and
+/// re-sends it to a pre-existing surface -- and reloading the same file
+/// again agrees silently, because what the session stored is already the
+/// resolved value. If the rounding lived anywhere past the clamp (or the
+/// stored value kept the configured 1.33), the second reload would compare
+/// unequal and re-apply, re-advertise and re-lay-out for a value that never
+/// settles. The empty `applied` below pins that it does not flap.
+#[test]
+fn a_reload_applies_1_33_as_160_over_120_and_settles() {
+    let mut fixture = Fixture::new(1.0);
+    fixture.install_config("");
+
+    fixture.run(Step::MapScaledWindow {
+        buffer: 20,
+        destination: None,
+    });
+
+    let response = fixture.reload_with("[output]\nscale = 1.33\n");
+    let Response::Reloaded { applied, refused } = response else {
+        panic!("a valid scale reload should report, not error: {response:?}");
+    };
+    assert_eq!(applied, &["output.scale".to_owned()]);
+    assert!(
+        refused.is_empty(),
+        "nothing here should refuse: {refused:?}"
+    );
+    assert_eq!(fixture.state.output_scale, 160.0 / 120.0);
+    assert_eq!(fixture.state.integer_scale, 2);
+
+    let Ack::Scales {
+        preferred_scale,
+        preferred_buffer_scale,
+        output_scale,
+    } = fixture.run(Step::ReportScales)
+    else {
+        panic!("the report step must send the cached scales");
+    };
+    assert_eq!(preferred_scale, Some(160.0 / 120.0));
+    assert_eq!(preferred_buffer_scale, Some(2));
+    assert_eq!(output_scale, Some(2));
+
+    // Same file again: the live value is already the resolved one, so the
+    // reload agrees instead of re-applying.
+    let response = fixture.reload_with("[output]\nscale = 1.33\n");
+    let Response::Reloaded { applied, refused } = response else {
+        panic!("a repeat reload should report, not error: {response:?}");
+    };
+    assert!(
+        applied.is_empty(),
+        "reloading the settled scale re-applied: {applied:?}"
+    );
+    assert!(
+        refused.is_empty(),
+        "nothing here should refuse: {refused:?}"
     );
 }
