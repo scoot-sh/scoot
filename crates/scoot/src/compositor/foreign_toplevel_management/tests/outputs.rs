@@ -13,6 +13,7 @@
 
 use super::*;
 use crate::compositor::test_support::Harness;
+use scoot_core::{Horizontal, Vertical};
 
 /// A live compositor with two side-by-side outputs and one connected client.
 ///
@@ -466,6 +467,76 @@ fn a_new_window_with_the_pointer_over_no_output_falls_back_to_primary() {
         OutputId(1),
         "a window opened with the pointer over no output did not fall back to the primary"
     );
+}
+
+// ---------------------------------------------------------------------------
+// `output_of_window` reads the placement, not the bounding box
+// ---------------------------------------------------------------------------
+
+/// A window whose rect crosses the shared edge is still reported on the
+/// output it is placed on -- fail-first: the bounding-box read scanned
+/// outputs in creation order, so an overhang onto the first output was
+/// announced (and rebound) there, corrected only by the next `apply()`'s
+/// membership diff.
+#[test]
+fn a_window_overhanging_the_first_output_is_reported_on_the_second() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.take_log();
+
+    // Two columns on the second output, the left one widened across the
+    // shared edge with the right one focused -- the same scene the
+    // output-clip suite pins the pixels of.
+    fixture.state.pointer_move(f64::from(CANVAS) + 100.0, 100.0);
+    fixture.run(Step::MapWindow);
+    fixture.state.act(Action::SetColumnWidth(2));
+    fixture.run(Step::MapWindow);
+    fixture.state.act(Action::SetColumnWidth(2));
+    fixture.state.act(Action::FocusColumn(Horizontal::Right));
+    fixture.settle();
+    let arrangement = fixture.state.world.arrange();
+    let rect = arrangement.get(WindowId(1)).expect("a placed window").rect;
+    assert_eq!(
+        arrangement
+            .get(WindowId(1))
+            .expect("a placed window")
+            .output,
+        OutputId(2),
+    );
+    assert!(
+        rect.x < CANVAS && rect.right() > CANVAS,
+        "the scene needs the left column across the shared edge: {rect:?}"
+    );
+
+    let second = fixture.state.outputs.get(OutputId(2)).cloned();
+    assert_eq!(fixture.state.output_of_window(WindowId(1)), second);
+}
+
+/// A window that is not mapped -- invisible on another workspace -- has no
+/// placement stamp, so the report falls back to the core's own placement
+/// where the window has one, rather than the pointer's output.
+#[test]
+fn an_unmapped_window_falls_back_to_its_core_placement() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.take_log();
+
+    fixture.state.pointer_move(f64::from(CANVAS) + 100.0, 100.0);
+    fixture.run(Step::MapWindow);
+    // Away to an empty workspace: the window goes invisible and unmapped,
+    // and the pointer moves to the other screen, so the two fallbacks
+    // disagree.
+    fixture.state.act(Action::FocusWorkspace(Vertical::Down));
+    fixture.settle();
+    assert!(fixture.state.space.elements().next().is_none());
+    fixture.state.pointer_move(100.0, 100.0);
+
+    let second = fixture.state.outputs.get(OutputId(2)).cloned();
+    assert_eq!(fixture.state.output_of_window(WindowId(1)), second);
 }
 
 /// A window on an output that is taken away (a `--tty` monitor unplugged)

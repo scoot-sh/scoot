@@ -658,7 +658,7 @@ each item's own file records why it landed when it did.
   so no output after the first ever showed a ring. Single-output frames
   byte-identical under both renderers. Follow-ups filed:
   [popup constraint adjustment](docs/backlog/resolved/popup-constraint-adjustment-done.md),
-  [output membership by geometry](docs/backlog/core/output-membership-by-geometry.md).
+  [output membership by geometry](docs/backlog/resolved/output-membership-by-geometry-done.md).
 
 - **[Client fullscreen](docs/backlog/resolved/client-fullscreen-done.md)**
   (2026-09-22, PR #223) — a per-window fullscreen state
