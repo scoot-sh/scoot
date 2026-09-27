@@ -428,7 +428,9 @@ fn random_step(
 
 fn apply_step(world: &mut World, step: Step, stashed: &mut Vec<EvictedOutput>, next_id: &mut u64) {
     match step {
-        Step::Event(event) => world.handle_event(event),
+        Step::Event(event) => {
+            let _ = world.handle_event(event);
+        }
         Step::Action(action) => {
             world.handle_action(action);
         }

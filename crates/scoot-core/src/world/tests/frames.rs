@@ -1,12 +1,12 @@
 use super::*;
 use crate::{Action, Horizontal, Size, SizeHints};
 
-fn observe(world: &mut World, id: u64, requested: Size, actual: Size) {
+fn observe(world: &mut World, id: u64, requested: Size, actual: Size) -> bool {
     world.handle_event(Event::FrameObserved {
         id: WindowId(id),
         requested,
         actual,
-    });
+    })
 }
 
 #[test]
@@ -65,7 +65,6 @@ fn taller_than_asked_raises_the_minimum_height() {
     assert_eq!(placement(&world, 1).rect.h, 400);
     assert_eq!(placement(&world, 2).rect, Rect::new(10, 420, 485, 170));
 }
-
 #[test]
 fn window_changed_updates_size_hints() {
     let mut world = world();
@@ -82,4 +81,144 @@ fn window_changed_updates_size_hints() {
         info: wide,
     });
     assert_eq!(placement(&world, 1).rect.w, 700);
+}
+
+#[test]
+fn a_frame_reports_whether_it_changed_the_arrangement() {
+    // What the shell's flush applies on: a refusal that raised the minimum
+    // answers true, everything that changed nothing answers false -- so a
+    // video committing at frame rate never earns a relayout.
+    let mut world = world();
+    open(&mut world, 1);
+    assert!(observe(
+        &mut world,
+        1,
+        Size::new(485, 580),
+        Size::new(600, 580)
+    ));
+    // Same refusal again: the minimum is already there, nothing moved.
+    assert!(!observe(
+        &mut world,
+        1,
+        Size::new(600, 580),
+        Size::new(600, 580)
+    ));
+    // Smaller, or within tolerance: teaches nothing.
+    assert!(!observe(
+        &mut world,
+        1,
+        Size::new(600, 580),
+        Size::new(300, 580)
+    ));
+    assert!(!observe(
+        &mut world,
+        1,
+        Size::new(600, 580),
+        Size::new(602, 582)
+    ));
+    // Unknown windows change nothing.
+    assert!(!observe(
+        &mut world,
+        9,
+        Size::new(485, 580),
+        Size::new(600, 580)
+    ));
+}
+
+#[test]
+fn a_fullscreen_frame_reports_no_change() {
+    let mut world = world();
+    open(&mut world, 1);
+    world.handle_event(Event::FullscreenRequested {
+        id: WindowId(1),
+        fullscreen: true,
+    });
+    // An output-sized frame says nothing about the tiled minimum.
+    assert!(!observe(
+        &mut world,
+        1,
+        Size::new(485, 580),
+        Size::new(980, 580)
+    ));
+}
+
+#[test]
+fn a_floating_frame_reports_only_a_move() {
+    use crate::Event::FloatingRequested;
+    let mut world = world();
+    open(&mut world, 1);
+    world.handle_event(FloatingRequested {
+        id: WindowId(1),
+        floating: true,
+        size: None,
+    });
+    // First frame places it: the arrangement moved.
+    assert!(observe(&mut world, 1, Size::default(), Size::new(400, 300)));
+    // Same size again: already there.
+    assert!(!observe(
+        &mut world,
+        1,
+        Size::default(),
+        Size::new(400, 300)
+    ));
+    // A new size moves it again -- and never teaches the strip.
+    assert!(observe(&mut world, 1, Size::default(), Size::new(500, 300)));
+    assert_eq!(placement(&world, 1).rect.w, 500);
+}
+
+#[test]
+fn only_a_frame_observation_can_report_change() {
+    // Every other event answers false: their callers already re-apply
+    // unconditionally, so the return is only meaningful for frames.
+    // (`handle_event` has nine non-frame match arms covering ten variants;
+    // all ten are exercised below, so a future arm that spuriously returns
+    // `true` -- e.g. echoing a changed flag out of `WindowChanged` or
+    // `OutputChanged`, which would relayout on every title change or bar
+    // redraw -- fails here.) Where cheap, the payload is one that really
+    // moves the arrangement, so the test guards the contract, not just the
+    // no-op path. Destructive events go last: closing window 2, then
+    // removing the extra output.
+    let mut world = world();
+    open(&mut world, 1);
+    assert!(!world.handle_event(Event::OutputAdded {
+        id: OutputId(2),
+        area: Rect::new(1000, 0, 800, 600),
+    }));
+    assert!(!world.handle_event(Event::OutputChanged {
+        id: OutputId(1),
+        area: Rect::new(0, 0, 1600, 600),
+    }));
+    assert!(!world.handle_event(Event::OutputUsableAreaChanged {
+        id: OutputId(1),
+        area: Rect::new(0, 30, 1600, 570),
+    }));
+    assert!(!world.handle_event(Event::WindowOpened {
+        id: WindowId(2),
+        info: WindowInfo::default(),
+        output: None,
+        focus: true,
+    }));
+    // A wider minimum re-tiles the strip, and still answers false.
+    assert!(!world.handle_event(Event::WindowChanged {
+        id: WindowId(1),
+        info: WindowInfo {
+            hints: SizeHints {
+                min: Size::new(700, 0),
+                ..SizeHints::default()
+            },
+            ..WindowInfo::default()
+        },
+    }));
+    assert!(!world.handle_event(Event::FocusObserved { id: WindowId(1) }));
+    assert!(!world.handle_event(Event::FullscreenRequested {
+        id: WindowId(1),
+        fullscreen: true,
+    }));
+    assert!(!world.handle_event(Event::FloatingRequested {
+        id: WindowId(2),
+        floating: true,
+        size: None,
+    }));
+    assert!(!world.handle_event(Event::WindowClosed { id: WindowId(2) }));
+    assert!(!world.handle_event(Event::OutputRemoved { id: OutputId(2) }));
 }

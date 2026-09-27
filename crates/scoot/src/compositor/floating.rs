@@ -36,8 +36,9 @@
 //!
 //! - **Frames in.** A floating window is placed at the size it last drew, so
 //!   `observe_frame` reports its frames whatever size it was asked for, and
-//!   re-applies the arrangement when one moved or resized it -- only then,
-//!   since a floating video commits at its frame rate.
+//!   answers whether one moved or resized it -- the dispatch flush applies
+//!   once when any frame did, only then, since a floating video commits at
+//!   its frame rate.
 //!
 //! - **Moving and resizing** by pointer (a modifier drag, or the client's
 //!   own `xdg_toplevel.move`/`.resize`): `floating/grab.rs`.

@@ -13,28 +13,49 @@ const FRAME_TOLERANCE: i32 = 2;
 
 impl World {
     /// Apply something a platform shell observed.
-    pub fn handle_event(&mut self, event: Event) {
+    ///
+    /// Returns whether the event changed the arrangement in a way the shell
+    /// has not yet pushed out. Only [`Event::FrameObserved`] can answer
+    /// true: a frame that raised a window's learned minimum (re-scrolling
+    /// its workspace) or moved a floating window. Every other event's caller
+    /// already re-applies unconditionally, so they answer false -- the
+    /// return is only meaningful for frames, and exists so the shell can
+    /// apply exactly when a frame changed something, never per commit
+    /// unconditionally (commits arrive at frame rate).
+    pub fn handle_event(&mut self, event: Event) -> bool {
         match event {
             Event::OutputAdded { id, area } | Event::OutputChanged { id, area } => {
                 self.upsert_output(id, area);
+                false
             }
-            Event::OutputUsableAreaChanged { id, area } => self.set_usable_area(id, area),
+            Event::OutputUsableAreaChanged { id, area } => {
+                self.set_usable_area(id, area);
+                false
+            }
             Event::OutputRemoved { id } => {
                 self.remove_output(id);
+                false
             }
             Event::WindowOpened {
                 id,
                 info,
                 output,
                 focus,
-            } => self.open_window(id, info, output, focus),
+            } => {
+                self.open_window(id, info, output, focus);
+                false
+            }
             Event::WindowChanged { id, info } => {
                 if let Some(window) = self.windows.get_mut(&id) {
                     window.info = info;
                     self.fix_all_views();
                 }
+                false
             }
-            Event::WindowClosed { id } => self.close_window(id),
+            Event::WindowClosed { id } => {
+                self.close_window(id);
+                false
+            }
             Event::FrameObserved {
                 id,
                 requested,
@@ -45,10 +66,15 @@ impl World {
                     self.focus_location(loc);
                     self.settle_fullscreen();
                 }
+                false
             }
-            Event::FullscreenRequested { id, fullscreen } => self.set_fullscreen(id, fullscreen),
+            Event::FullscreenRequested { id, fullscreen } => {
+                self.set_fullscreen(id, fullscreen);
+                false
+            }
             Event::FloatingRequested { id, floating, size } => {
                 self.set_floating(id, floating, size);
+                false
             }
         }
     }
@@ -289,6 +315,10 @@ impl World {
     /// Raises a window's learned minimum when it settled larger than it was
     /// asked to be, capped to the usable area of its output.
     ///
+    /// Returns whether the frame changed the arrangement: a raised minimum
+    /// (which re-scrolls the workspace) or a moved floating window. The
+    /// shell applies exactly then, never per frame unconditionally.
+    ///
     /// Not while the window is fullscreen: a frame sized for the whole output
     /// says nothing about how narrow the window can be in its column, and
     /// learning from one would widen that column for good once it leaves.
@@ -297,24 +327,31 @@ impl World {
     /// not a refusal to take one the strip asked for. What it drew is kept
     /// for every window (`WindowState::drawn`), which is what a floating
     /// window is placed at.
-    fn learn_from_frame(&mut self, id: WindowId, requested: Size, actual: Size) {
+    fn learn_from_frame(&mut self, id: WindowId, requested: Size, actual: Size) -> bool {
         let Some(window) = self.windows.get_mut(&id) else {
-            return;
+            return false;
         };
-        window.drawn = Size::new(actual.w.max(0), actual.h.max(0));
+        let drawn = Size::new(actual.w.max(0), actual.h.max(0));
+        // Read off the borrow already held, not with a second map lookup:
+        // this runs per commit, at frame rate, and a floating window's
+        // steady state must stay a no-op (see `flush_window_commits`).
+        let before = window
+            .floating
+            .map(|floating| (window.drawn, floating.request));
+        window.drawn = drawn;
         if window.floating.is_some() {
             // A fullscreen frame is the output's size by design, not a
             // window too large for its usable area.
             if window.fullscreen.is_none() {
                 self.floating_frame(id, actual);
             }
-            return;
+            return self.floating_size(id) != before;
         }
         if self.is_fullscreen(id) {
-            return;
+            return false;
         }
         let Some(loc) = self.locate(id) else {
-            return;
+            return false;
         };
         // `usable`, not `area`: the cap is "as large as this window could
         // legitimately be", and a window can never legitimately fill the
@@ -324,7 +361,7 @@ impl World {
             .inset(self.config.gap)
             .size();
         let Some(window) = self.windows.get_mut(&id) else {
-            return;
+            return false;
         };
         let learn = |requested: i32, actual: i32, current: i32, limit: i32| {
             if actual > requested + FRAME_TOLERANCE {
@@ -340,6 +377,8 @@ impl World {
         if learned != window.learned_min {
             window.learned_min = learned;
             self.fix_all_views();
+            return true;
         }
+        false
     }
 }

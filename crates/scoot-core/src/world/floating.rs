@@ -51,10 +51,10 @@ impl World {
     /// `actual`, zero before it has drawn) and the size the core asks it for,
     /// if any, before clamping. `None` for a window that does not float.
     ///
-    /// What a shell compares before and after reporting a floating window's
-    /// frame, to re-apply the arrangement only when that frame changed where
-    /// the window goes -- one map lookup, cheap on the per-commit path that
-    /// asks.
+    /// What [`World::handle_event`] compares before and after reporting a
+    /// floating window's frame, to re-apply the arrangement only when that
+    /// frame changed where the window goes -- one map lookup, cheap on the
+    /// per-commit path that asks.
     pub fn floating_size(&self, id: WindowId) -> Option<(Size, Option<Size>)> {
         let window = self.windows.get(&id)?;
         let floating = window.floating?;
