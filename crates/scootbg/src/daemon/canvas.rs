@@ -6,7 +6,10 @@
 //! Every draw is one batch: attach (only when the buffer changes), buffer
 //! scale, viewport destination and opaque region (the whole surface; each
 //! only when it differs from what the surface has, as they persist),
-//! damage (the whole buffer), commit. The surface's latest `configure` was
+//! damage (the whole buffer), commit. The viewport sizes any buffer that is
+//! not the surface's size at its own buffer scale (a 1×1 color, or a
+//! buffer at a fractional scale, `crate::density`); once a surface has one,
+//! its destination is kept at the surface's size whatever is drawn. The surface's latest `configure` was
 //! acked when it arrived, before any of this, so each commit carries it.
 //!
 //! ## Buffers
@@ -24,7 +27,8 @@
 //!   dropped at once rather than kept. The `wl_shm_pool` is destroyed as
 //!   soon as its buffer exists: the buffer keeps the memory alive.
 //!
-//! - **Images**: a full-size shm buffer the worker thread rendered
+//! - **Images**: a full-size shm buffer (the surface's real device pixels)
+//!   the worker thread rendered
 //!   (`daemon::worker`), offered here ([`Canvas::offer`]) and put in a slot
 //!   like a color's. A draw with no rendered buffer for the image at that
 //!   size says so ([`Drew::NeedsRender`]) and the caller asks the worker.
@@ -56,6 +60,7 @@ use scootbg_mem::{Attached, ShmBuffer, ShmError};
 use super::surfaces::LayerObjects;
 use super::wayland::{Globals, State};
 use crate::color::Color;
+use crate::density::Scale;
 use crate::outputs::{OutputId, Size};
 use crate::paint::{Drawn, Path, Pick, SLOTS, Slot, pick};
 use crate::wallpaper::Wallpaper;
@@ -65,7 +70,7 @@ use crate::wallpaper::Wallpaper;
 pub enum DrawError {
     /// The buffer's size overflows (a compositor asking for an absurd
     /// surface).
-    TooLarge(Size, u32),
+    TooLarge(Size, Scale),
     Shm(ShmError),
     /// The path's global is not bound. Cannot happen: the path is chosen
     /// from the globals bound at start-up, which stay bound.
@@ -280,9 +285,10 @@ impl Canvas {
         target: &Drawn,
     ) -> Result<Drew, DrawError> {
         let path = globals.path;
-        let dims = target
-            .buffer_dims(path)
+        let buffer = target
+            .buffer(path)
             .ok_or(DrawError::TooLarge(target.size, target.scale))?;
+        let dims = buffer.dims;
         let surface = layer.surface.clone();
         // What replaces the old single-pixel buffer, destroyed after the
         // commit.
@@ -387,17 +393,22 @@ impl Canvas {
         }
         // Persistent, double-buffered state: sent only when it differs
         // from what the surface has.
-        if layer.buffer_scale != target.scale {
-            surface.set_buffer_scale(clamp(target.scale));
-            layer.buffer_scale = target.scale;
+        if layer.buffer_scale != buffer.scale {
+            surface.set_buffer_scale(clamp(buffer.scale));
+            layer.buffer_scale = buffer.scale;
             if !attached {
-                // The same buffer at a new scale (a scale and a mode that
-                // change together keep its size). The protocol applies the
-                // scale at the commit either way, but Smithay-based
+                // The same buffer at a new buffer scale (a scale and a mode
+                // that change together keep its size, or an integer scale
+                // becomes the same fractional one). The protocol applies
+                // the scale at the commit either way, but Smithay-based
                 // compositors (scoot's pinned fork included) read it only
                 // with a newly attached buffer and would keep showing the
                 // old scale; attaching the buffer on screen again costs
-                // nothing and is right everywhere.
+                // nothing and is right everywhere. A new viewport
+                // destination alone needs no such help: Smithay works the
+                // surface's view out again at every commit
+                // (`RendererSurfaceState::update_buffer`), and
+                // `tests/image.rs` checks it by screenshot.
                 //
                 // Attached again, the buffer is the compositor's again until
                 // its next release, even if it had been released (wlroots
@@ -414,10 +425,12 @@ impl Canvas {
                 }
             }
         }
-        // A 1×1 color is sized by the viewport; anything drawn on a surface
-        // that has one keeps its destination the surface size, so the
-        // buffer is shown at the size it was drawn for.
-        let viewported = path.uses_viewport() && matches!(target.content, Wallpaper::Color(_));
+        // A buffer that is not the surface's size at its buffer scale (a 1×1
+        // color, a fractional-scale buffer) is sized by the viewport;
+        // anything drawn on a surface that has one keeps its destination
+        // the surface size, so the buffer is shown at the size it was drawn
+        // for.
+        let viewported = !buffer.fits(target.size);
         if (viewported || layer.viewport.is_some()) && layer.destination != Some(target.size) {
             let viewporter = globals
                 .viewporter

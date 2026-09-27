@@ -399,7 +399,8 @@ fn a_persistent_accept_failure_is_retried_at_a_bounded_rate() {
     assert_eq!(polls_with_listener, 10);
 }
 
-/// `query` lists the model's outputs as they stand, in order.
+/// `query` lists the model's outputs as they stand, in order: the first at
+/// 1.5 (scoot's `wl_output` says 2; the fraction comes from the surface).
 #[test]
 fn query_reports_each_output_and_its_surface() {
     use crate::outputs::Outputs;
@@ -416,7 +417,8 @@ fn query_reports_each_output_and_its_surface() {
         first.stage_scale(2);
         first.done();
         let _ = first.settled();
-        let _ = first.configure(7, 1280, 720);
+        let _ = first.prefer_fractional(180);
+        let _ = first.configure(7, 1707, 960);
     }
     {
         let second = &mut outputs.get_mut(b).unwrap().output;
@@ -441,8 +443,13 @@ fn query_reports_each_output_and_its_surface() {
                 "mode": {"width": 2560, "height": 1440},
                 "scale": 2,
                 "transform": "normal",
-                "logical": {"width": 1280, "height": 720},
-                "surface": {"state": "configured", "size": {"width": 1280, "height": 720}},
+                "logical": {"width": 1707, "height": 960},
+                "surface": {
+                    "state": "configured",
+                    "size": {"width": 1707, "height": 960},
+                    "scale": 1.5,
+                    "pixels": {"width": 2561, "height": 1440},
+                },
                 "shows": null,
             },
             {
@@ -452,7 +459,7 @@ fn query_reports_each_output_and_its_surface() {
                 "scale": 1,
                 "transform": "normal",
                 "logical": null,
-                "surface": {"state": "gave-up", "size": null},
+                "surface": {"state": "gave-up", "size": null, "scale": null, "pixels": null},
                 "shows": null,
             },
             {
@@ -462,7 +469,7 @@ fn query_reports_each_output_and_its_surface() {
                 "scale": 1,
                 "transform": "normal",
                 "logical": null,
-                "surface": {"state": "waiting", "size": null},
+                "surface": {"state": "waiting", "size": null, "scale": null, "pixels": null},
                 "shows": null,
             },
         ]})

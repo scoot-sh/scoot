@@ -370,7 +370,8 @@ fn show<'a>(
 /// {"name":"DP-1","description":"Dell U2720Q (DP-1)",
 ///  "mode":{"width":3840,"height":2160},"scale":2,"transform":"normal",
 ///  "logical":{"width":1920,"height":1080},
-///  "surface":{"state":"configured","size":{"width":1920,"height":1080}},
+///  "surface":{"state":"configured","size":{"width":1920,"height":1080},
+///             "scale":2,"pixels":{"width":3840,"height":2160}},
 ///  "shows":null}
 /// ```
 ///
@@ -383,7 +384,8 @@ pub struct OutputEntry<'a> {
     pub description: Option<&'a str>,
     /// The current mode, in device pixels.
     pub mode: Option<Size>,
-    /// `wl_output`'s integer scale.
+    /// `wl_output`'s integer scale: a fractional scale rounded up. The
+    /// scale the wallpaper is drawn at is `surface.scale`.
     pub scale: u32,
     /// `wl_output.transform`: `normal`, `90`, `180`, `270`, `flipped`,
     /// `flipped-90`, ... Rotations count counter-clockwise, as the
@@ -391,7 +393,8 @@ pub struct OutputEntry<'a> {
     pub transform: &'a str,
     /// The output's size in logical pixels, as well as it is known (see
     /// `Output::logical`): exact once the surface is configured; before
-    /// that, at a fractional scale, possibly too small.
+    /// that, worked out from the mode and the best scale known, within a
+    /// pixel.
     pub logical: Option<Size>,
     pub surface: SurfaceEntry,
     /// What the output shows: `{"color":"#rrggbb"}`,
@@ -434,11 +437,18 @@ impl Serialize for Shows<'_> {
 /// the output is replugged).
 /// `size`, in logical pixels, is set only while `configured`, and even
 /// then `null` if the compositor left the size to scootbg before the
-/// output reported a mode.
+/// output reported a mode. `scale` is the scale the surface is drawn at:
+/// `wp_fractional_scale_v1`'s (1.5, say) where the compositor sent one and
+/// has a viewporter, else `wl_surface.preferred_buffer_scale`, else
+/// `wl_output`'s; `pixels` is the size of a full-size buffer at it (an
+/// image's, in device pixels: 1601×1001 for scoot's 1067×667 at 1.5). Both
+/// `null` whenever `size` is.
 #[derive(Debug, Serialize)]
 pub struct SurfaceEntry {
     pub state: &'static str,
     pub size: Option<Size>,
+    pub scale: Option<crate::density::Scale>,
+    pub pixels: Option<Size>,
 }
 
 /// The daemon's outputs, as a `query` reply lists them.

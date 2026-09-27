@@ -632,8 +632,9 @@ jobs:
   # lifecycle and its per-output surfaces end to end
   # (crates/scootbg/tests/{daemon,outputs}.rs), outputs coming and going
   # on a headless sway (tests/hotplug.rs), and colors and images checked
-  # by real pixels on both (tests/color.rs, tests/image.rs: scoot's own
-  # screenshots, and sway's through a wlr-screencopy client in the test).
+  # by real pixels on both (tests/color.rs, tests/image.rs, and
+  # tests/scale.rs at fractional scales: scoot's own screenshots, and
+  # sway's through a wlr-screencopy client in the test).
   # Runs when either side changes, since each can break the other's
   # end-to-end run.
   # `SCOOTBG_REQUIRE_SCOOT` and `SCOOTBG_REQUIRE_SWAY` turn the tests'
@@ -696,5 +697,5 @@ jobs:
           SCOOTBG_REQUIRE_SCOOT: "1"
           SCOOTBG_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --no-fail-fast
-          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image
+          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --no-fail-fast
+          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale

@@ -322,6 +322,11 @@ fn output_entries_have_a_fixed_shape() {
                 width: 1080,
                 height: 1920,
             }),
+            scale: Some(crate::density::Scale::Fractional(180)),
+            pixels: Some(Size {
+                width: 1620,
+                height: 2880,
+            }),
         },
         shows: Some(super::Shows(&color)),
     };
@@ -335,6 +340,8 @@ fn output_entries_have_a_fixed_shape() {
         surface: SurfaceEntry {
             state: "waiting",
             size: None,
+            scale: None,
+            pixels: None,
         },
         shows: None,
     };
@@ -353,7 +360,12 @@ fn output_entries_have_a_fixed_shape() {
                 "scale": 2,
                 "transform": "90",
                 "logical": {"width": 1080, "height": 1920},
-                "surface": {"state": "configured", "size": {"width": 1080, "height": 1920}},
+                "surface": {
+                    "state": "configured",
+                    "size": {"width": 1080, "height": 1920},
+                    "scale": 1.5,
+                    "pixels": {"width": 1620, "height": 2880},
+                },
                 "shows": {"color": "#c03020"},
             },
             {
@@ -363,7 +375,7 @@ fn output_entries_have_a_fixed_shape() {
                 "scale": 1,
                 "transform": "normal",
                 "logical": null,
-                "surface": {"state": "waiting", "size": null},
+                "surface": {"state": "waiting", "size": null, "scale": null, "pixels": null},
                 "shows": null,
             },
         ]})

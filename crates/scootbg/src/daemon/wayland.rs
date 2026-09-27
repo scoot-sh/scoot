@@ -10,7 +10,7 @@
 //! | `zwlr_layer_shell_v1` | required: a wallpaper is a background layer surface |
 //! | `wp_viewporter` | optional: scales a 1x1 color buffer to the output |
 //! | `wp_single_pixel_buffer_manager_v1` | optional: colors without shared memory |
-//! | `wp_fractional_scale_manager_v1` | optional: device-pixel sizes at fractional scales |
+//! | `wp_fractional_scale_manager_v1` | optional: device-pixel sizes at fractional scales (with `wp_viewporter`) |
 //! | `wl_output` (each) | bound as they appear, released as they go |
 //! | `zxdg_output_manager_v1` | bound only once an output older than v4 (no `name`) appears |
 //!
@@ -23,9 +23,12 @@
 //! The fallback paths must be tested against compositors that offer
 //! everything (scoot and sway both do), so a **debug build** reads
 //! `SCOOTBG_DEBUG_PATH` = `viewport-shm` or `full-shm` and takes that path
-//! instead, if the globals allow it. A release build does not read it: the
-//! code is compiled out (`cfg(debug_assertions)`), so the shipped binary
-//! has no hidden knob. The tests run debug builds, as `cargo test` and
+//! instead, if the globals allow it (`full-shm` stands for a compositor
+//! with no viewporter, so it draws no fractional-scale buffers either), and
+//! `SCOOTBG_DEBUG_NO_FRACTIONAL_SCALE` (any value) to leave
+//! `wp_fractional_scale_manager_v1` unbound, as on a compositor without it.
+//! A release build reads neither: the code is compiled out
+//! (`cfg(debug_assertions)`), so the shipped binary has no hidden knob. The tests run debug builds, as `cargo test` and
 //! `cargo nextest` do by default, and skip the forced-path cases when built
 //! without debug assertions.
 
@@ -100,11 +103,23 @@ pub struct Globals {
     pub shm: WlShm,
     pub viewporter: Option<WpViewporter>,
     pub single_pixel: Option<WpSinglePixelBufferManagerV1>,
-    /// Held so it stays bound for hidpi-fractional-scale.md.
-    #[allow(dead_code)]
-    pub fractional_scale: Option<WpFractionalScaleManagerV1>,
+    /// Read through [`Globals::fractional_scale`], which says when it can
+    /// be used.
+    fractional_scale: Option<WpFractionalScaleManagerV1>,
     /// How colors are drawn, from the globals above.
     pub path: Path,
+}
+
+impl Globals {
+    /// The fractional-scale manager, where scootbg can act on what it says:
+    /// a fractional-scale buffer is sized by a viewport, so only with a
+    /// viewporter, which is exactly when the path uses one ([`Path::FullShm`]
+    /// is the path with none; forced in a debug build, it stands for a
+    /// compositor without one). See `crate::density`.
+    pub fn fractional_scale(&self) -> Option<&WpFractionalScaleManagerV1> {
+        let usable = self.viewporter.is_some() && self.path.uses_viewport();
+        self.fractional_scale.as_ref().filter(|_| usable)
+    }
 }
 
 /// The event-dispatch state.
@@ -173,7 +188,11 @@ impl Wayland {
             shm,
             viewporter,
             single_pixel,
-            fractional_scale: optional(&mut missing, list.bind(&qh, 1..=1, ())),
+            fractional_scale: if no_fractional_scale() {
+                None
+            } else {
+                optional(&mut missing, list.bind(&qh, 1..=1, ()))
+            },
             path,
         };
 
@@ -247,6 +266,26 @@ fn forced_path() -> Option<Path> {
 #[cfg(not(debug_assertions))]
 fn forced_path() -> Option<Path> {
     None
+}
+
+/// `SCOOTBG_DEBUG_NO_FRACTIONAL_SCALE` in a debug build (see the module
+/// docs): behave as if the compositor had no fractional-scale manager.
+#[cfg(debug_assertions)]
+fn no_fractional_scale() -> bool {
+    let set = std::env::var_os("SCOOTBG_DEBUG_NO_FRACTIONAL_SCALE").is_some();
+    if set {
+        crate::print::warn(format_args!(
+            "scootbg: debug: SCOOTBG_DEBUG_NO_FRACTIONAL_SCALE leaves \
+             wp_fractional_scale_manager_v1 unbound"
+        ));
+    }
+    set
+}
+
+/// A release build has no knob.
+#[cfg(not(debug_assertions))]
+fn no_fractional_scale() -> bool {
+    false
 }
 
 /// An optional global: `None`, with its name noted, when absent or too

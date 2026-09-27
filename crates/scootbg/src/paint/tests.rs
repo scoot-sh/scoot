@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use super::{Drawn, Path, Pick, SLOTS, Slot, buffer_scale, pick};
+use super::{Drawn, Path, Pick, SLOTS, Slot, pick, scale_for};
 use crate::color::Color;
+use crate::density::{Buffer, Scale};
 use crate::image::render::Look;
 use crate::image::{Filter, Mode};
 use crate::wallpaper::{Image, Wallpaper};
@@ -63,36 +64,78 @@ fn path_names_round_trip() {
     assert_eq!(Path::from_name(""), None);
 }
 
+/// A color on a viewport path is a 1×1 buffer at scale 1 whatever the
+/// surface's scale, so a new scale leaves it alone; an image, and a color
+/// on the full-size path, take the surface's scale, fractional included.
 #[test]
-fn only_a_full_size_buffer_takes_the_output_scale() {
-    assert_eq!(Path::FullShm.buffer_scale(2), 2);
-    assert_eq!(Path::FullShm.buffer_scale(0), 1, "never 0");
-    assert_eq!(Path::SinglePixel.buffer_scale(3), 1);
-    assert_eq!(Path::ViewportShm.buffer_scale(2), 1);
+fn only_a_full_size_buffer_takes_the_surface_scale() {
+    let red = Wallpaper::Color(Color { r: 255, g: 0, b: 0 });
+    let fraction = Scale::Fractional(180);
+    for path in [Path::SinglePixel, Path::ViewportShm] {
+        assert_eq!(scale_for(path, Some(&red), fraction), Scale::Integer(1));
+        assert_eq!(scale_for(path, None, Scale::Integer(2)), Scale::Integer(1));
+        assert_eq!(scale_for(path, Some(&image()), fraction), fraction);
+    }
+    assert_eq!(scale_for(Path::FullShm, Some(&red), fraction), fraction);
+    assert_eq!(
+        scale_for(Path::FullShm, Some(&image()), Scale::Integer(3)),
+        Scale::Integer(3)
+    );
 }
 
 #[test]
-fn buffer_dims_follow_the_path_and_never_overflow() {
-    let drawn = |width, height, scale| Drawn {
-        content: Wallpaper::Color(Color { r: 0, g: 0, b: 0 }),
+fn the_buffer_follows_the_path_and_the_scale_and_never_overflows() {
+    let drawn = |content: Wallpaper, width, height, scale| Drawn {
+        content,
         size: Size { width, height },
         scale,
     };
+    let black = || Wallpaper::Color(Color { r: 0, g: 0, b: 0 });
+    let one = Buffer {
+        dims: (1, 1),
+        scale: 1,
+    };
     assert_eq!(
-        drawn(1600, 1000, 1).buffer_dims(Path::SinglePixel),
-        Some((1, 1))
+        drawn(black(), 1600, 1000, Scale::Integer(1)).buffer(Path::SinglePixel),
+        Some(one)
     );
     assert_eq!(
-        drawn(1600, 1000, 2).buffer_dims(Path::ViewportShm),
-        Some((1, 1))
+        drawn(black(), 1600, 1000, Scale::Integer(2)).buffer(Path::ViewportShm),
+        Some(one)
     );
     assert_eq!(
-        drawn(1600, 1000, 2).buffer_dims(Path::FullShm),
-        Some((3200, 2000))
+        drawn(black(), 800, 500, Scale::Integer(2)).buffer(Path::FullShm),
+        Some(Buffer {
+            dims: (1600, 1000),
+            scale: 2
+        })
     );
-    assert_eq!(drawn(u32::MAX, 1, 2).buffer_dims(Path::FullShm), None);
+    // A fractional scale: device pixels at buffer scale 1, on any path for
+    // an image, and on the full-size path for a color.
+    let fractional = Some(Buffer {
+        dims: (1601, 1001),
+        scale: 1,
+    });
     assert_eq!(
-        drawn(1, u32::MAX / 2 + 1, 2).buffer_dims(Path::FullShm),
+        drawn(black(), 1067, 667, Scale::Fractional(180)).buffer(Path::FullShm),
+        fractional
+    );
+    for path in [Path::SinglePixel, Path::ViewportShm, Path::FullShm] {
+        assert_eq!(
+            drawn(image(), 1067, 667, Scale::Fractional(180)).buffer(path),
+            fractional
+        );
+    }
+    assert_eq!(
+        drawn(black(), u32::MAX, 1, Scale::Integer(2)).buffer(Path::FullShm),
+        None
+    );
+    assert_eq!(
+        drawn(image(), 1, u32::MAX / 2 + 1, Scale::Integer(2)).buffer(Path::SinglePixel),
+        None
+    );
+    assert_eq!(
+        drawn(image(), u32::MAX, 1, Scale::Fractional(181)).buffer(Path::SinglePixel),
         None
     );
 }
@@ -190,24 +233,28 @@ fn every_combination_picks_a_legal_slot() {
     }
 }
 
-/// An image is always a full-size buffer at the output's scale, on every
+/// An image is always a full-size buffer at the surface's scale, on every
 /// path: only colors take the viewport shortcuts.
 #[test]
 fn an_image_is_full_size_on_every_path() {
     let color = Wallpaper::Color(Color { r: 1, g: 2, b: 3 });
     for path in [Path::SinglePixel, Path::ViewportShm, Path::FullShm] {
-        assert_eq!(buffer_scale(path, Some(&image()), 2), 2);
-        assert_eq!(buffer_scale(path, Some(&image()), 0), 1, "never 0");
-        assert_eq!(buffer_scale(path, Some(&color), 2), path.buffer_scale(2));
-        assert_eq!(buffer_scale(path, None, 3), path.buffer_scale(3));
+        let two = Scale::Integer(2);
+        assert_eq!(scale_for(path, Some(&image()), two), two);
+        let expected = if path == Path::FullShm {
+            two
+        } else {
+            Scale::Integer(1)
+        };
+        assert_eq!(scale_for(path, Some(&color), two), expected);
         let drawn = Drawn {
             content: image(),
             size: Size {
                 width: 1600,
                 height: 1000,
             },
-            scale: 2,
+            scale: two,
         };
-        assert_eq!(drawn.buffer_dims(path), Some((3200, 2000)));
+        assert_eq!(drawn.buffer(path).map(|b| b.dims), Some((3200, 2000)));
     }
 }

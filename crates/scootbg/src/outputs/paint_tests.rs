@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use super::{Effect, OutputId, Outputs, Size, Surface};
 use crate::color::Color;
+use crate::density::Scale;
 use crate::image::render::Look;
 use crate::image::{Filter, Mode};
 use crate::paint::{Drawn, Plan};
@@ -35,7 +36,7 @@ fn drawn(text: &str, width: u32, height: u32, scale: u32) -> Drawn {
     Drawn {
         content: color(text),
         size: size(width, height),
-        scale,
+        scale: Scale::Integer(scale),
     }
 }
 
@@ -56,17 +57,31 @@ fn nothing_is_drawn_before_the_first_configure() {
     let id = outputs.add(1, |_| ());
     let red = Some(color("#c03020"));
     let output = &mut outputs.get_mut(id).unwrap().output;
-    assert_eq!(output.plan(red.as_ref(), 1), Plan::Nothing, "waiting");
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Waiting);
     assert_eq!(
-        output.progress(None, 1),
+        output.plan(red.as_ref(), Scale::Integer(1)),
+        Plan::Nothing,
+        "waiting"
+    );
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
+    assert_eq!(
+        output.progress(None, Scale::Integer(1)),
         Progress::Done,
         "shows nothing, as wanted"
     );
     output.done();
     let _ = output.settled();
-    assert_eq!(output.plan(red.as_ref(), 1), Plan::Nothing, "pending");
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Waiting);
+    assert_eq!(
+        output.plan(red.as_ref(), Scale::Integer(1)),
+        Plan::Nothing,
+        "pending"
+    );
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
     assert_eq!(output.shows(), None);
 }
 
@@ -77,21 +92,33 @@ fn a_configured_surface_is_drawn_at_its_size_then_left_alone() {
     let red = Some(color("#c03020"));
     let output = &mut outputs.get_mut(id).unwrap().output;
     let _ = output.configure(3, 1600, 1000);
-    assert_eq!(output.progress(None, 1), Progress::Done);
+    assert_eq!(output.progress(None, Scale::Integer(1)), Progress::Done);
     let target = drawn("#c03020", 1600, 1000, 1);
-    assert_eq!(output.plan(red.as_ref(), 1), Plan::Show(target.clone()));
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Waiting);
+    assert_eq!(
+        output.plan(red.as_ref(), Scale::Integer(1)),
+        Plan::Show(target.clone())
+    );
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
     output.drew(target);
-    assert_eq!(output.plan(red.as_ref(), 1), Plan::Nothing);
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Done);
+    assert_eq!(output.plan(red.as_ref(), Scale::Integer(1)), Plan::Nothing);
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Done
+    );
     assert_eq!(output.shows(), Some(&color("#c03020")));
     // Another color: drawn again.
     let blue = Some(color("#101014"));
     assert_eq!(
-        output.plan(blue.as_ref(), 1),
+        output.plan(blue.as_ref(), Scale::Integer(1)),
         Plan::Show(drawn("#101014", 1600, 1000, 1))
     );
-    assert_eq!(output.progress(blue.as_ref(), 1), Progress::Waiting);
+    assert_eq!(
+        output.progress(blue.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
 }
 
 /// A later `configure` keeps what is shown (the surface is still mapped)
@@ -107,15 +134,18 @@ fn a_resize_or_a_new_scale_redraws() {
     assert_eq!(output.configure(4, 800, 500), Effect::Ack(4));
     assert_eq!(output.shows(), Some(&color("#c03020")), "still mapped");
     assert_eq!(
-        output.plan(red.as_ref(), 1),
+        output.plan(red.as_ref(), Scale::Integer(1)),
         Plan::Show(drawn("#c03020", 800, 500, 1))
     );
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Waiting);
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
     output.drew(drawn("#c03020", 800, 500, 1));
-    assert_eq!(output.plan(red.as_ref(), 1), Plan::Nothing);
+    assert_eq!(output.plan(red.as_ref(), Scale::Integer(1)), Plan::Nothing);
     // The same size at another buffer scale (a full-size buffer's path).
     assert_eq!(
-        output.plan(red.as_ref(), 2),
+        output.plan(red.as_ref(), Scale::Integer(2)),
         Plan::Show(drawn("#c03020", 800, 500, 2))
     );
 }
@@ -127,20 +157,23 @@ fn clearing_a_drawn_surface_replaces_it_and_waits_for_nothing() {
     let output = &mut outputs.get_mut(id).unwrap().output;
     let _ = output.configure(3, 1600, 1000);
     // Nothing drawn: nothing to clear.
-    assert_eq!(output.plan(None, 1), Plan::Nothing);
+    assert_eq!(output.plan(None, Scale::Integer(1)), Plan::Nothing);
     output.drew(drawn("#c03020", 1600, 1000, 1));
-    assert_eq!(output.plan(None, 1), Plan::Clear);
-    assert_eq!(output.progress(None, 1), Progress::Waiting);
+    assert_eq!(output.plan(None, Scale::Integer(1)), Plan::Clear);
+    assert_eq!(output.progress(None, Scale::Integer(1)), Progress::Waiting);
     output.recreated();
     assert_eq!(output.surface(), &Surface::Pending);
     assert_eq!(output.shows(), None);
-    assert_eq!(output.progress(None, 1), Progress::Done);
+    assert_eq!(output.progress(None, Scale::Integer(1)), Progress::Done);
     // Set again: waits for the fresh surface's configure, then draws.
     let red = Some(color("#c03020"));
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Waiting);
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
     let _ = output.configure(4, 1600, 1000);
     assert_eq!(
-        output.plan(red.as_ref(), 1),
+        output.plan(red.as_ref(), Scale::Integer(1)),
         Plan::Show(drawn("#c03020", 1600, 1000, 1)),
         "the fresh surface starts with nothing drawn"
     );
@@ -156,17 +189,23 @@ fn a_closed_surface_forgets_what_it_drew() {
     output.drew(drawn("#c03020", 1600, 1000, 1));
     assert_eq!(output.closed(), Effect::DestroyAndRetry);
     assert_eq!(output.shows(), None);
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Waiting);
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
     assert_eq!(output.retry(), Effect::Create);
     let _ = output.configure(4, 1600, 1000);
     assert_eq!(
-        output.plan(red.as_ref(), 1),
+        output.plan(red.as_ref(), Scale::Integer(1)),
         Plan::Show(drawn("#c03020", 1600, 1000, 1))
     );
     // Closed again: given up, and nothing waits on it any more.
     assert_eq!(output.closed(), Effect::DestroyAndGiveUp);
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Done);
-    assert_eq!(output.plan(red.as_ref(), 1), Plan::Nothing);
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Done
+    );
+    assert_eq!(output.plan(red.as_ref(), Scale::Integer(1)), Plan::Nothing);
     // `recreated` only acts on a live surface.
     output.recreated();
     assert_eq!(output.surface(), &Surface::GaveUp);
@@ -180,17 +219,27 @@ fn a_failed_draw_is_not_retried_until_something_changes() {
     let output = &mut outputs.get_mut(id).unwrap().output;
     let _ = output.configure(3, 1600, 1000);
     output.draw_failed();
-    assert_eq!(output.plan(red.as_ref(), 1), Plan::Nothing, "no retry loop");
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Failed);
+    assert_eq!(
+        output.plan(red.as_ref(), Scale::Integer(1)),
+        Plan::Nothing,
+        "no retry loop"
+    );
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Failed
+    );
     // A new request is a new chance.
     output.want(7);
     assert_eq!(output.stamp(), 7);
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Waiting);
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
     output.draw_failed();
     // So is a new configure.
     let _ = output.configure(4, 800, 500);
     assert_eq!(
-        output.plan(red.as_ref(), 1),
+        output.plan(red.as_ref(), Scale::Integer(1)),
         Plan::Show(drawn("#c03020", 800, 500, 1))
     );
 }
@@ -205,12 +254,15 @@ fn an_unsized_surface_waits_for_a_mode() {
     let output = &mut outputs.get_mut(id).unwrap().output;
     let _ = output.settled();
     let _ = output.configure(1, 0, 0);
-    assert_eq!(output.plan(red.as_ref(), 1), Plan::Nothing);
-    assert_eq!(output.progress(red.as_ref(), 1), Progress::Waiting);
+    assert_eq!(output.plan(red.as_ref(), Scale::Integer(1)), Plan::Nothing);
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
     output.stage_mode(true, 1280, 720);
     output.done();
     assert_eq!(
-        output.plan(red.as_ref(), 1),
+        output.plan(red.as_ref(), Scale::Integer(1)),
         Plan::Show(drawn("#c03020", 1280, 720, 1))
     );
 }
@@ -234,19 +286,34 @@ fn an_image_is_drawn_per_request_and_scale() {
     let target = Drawn {
         content: first.clone(),
         size: size(1600, 1000),
-        scale: 2,
+        scale: Scale::Integer(2),
     };
-    assert_eq!(output.plan(Some(&first), 2), Plan::Show(target.clone()));
+    assert_eq!(
+        output.plan(Some(&first), Scale::Integer(2)),
+        Plan::Show(target.clone())
+    );
     output.drew(target);
-    assert_eq!(output.plan(Some(&first), 2), Plan::Nothing);
-    assert_eq!(output.progress(Some(&first), 2), Progress::Done);
+    assert_eq!(output.plan(Some(&first), Scale::Integer(2)), Plan::Nothing);
+    assert_eq!(
+        output.progress(Some(&first), Scale::Integer(2)),
+        Progress::Done
+    );
     assert_eq!(output.shows(), Some(&first));
     // Set again (a new serial): drawn again, same file or not.
     let again = image(5);
-    assert!(matches!(output.plan(Some(&again), 2), Plan::Show(_)));
-    assert_eq!(output.progress(Some(&again), 2), Progress::Waiting);
+    assert!(matches!(
+        output.plan(Some(&again), Scale::Integer(2)),
+        Plan::Show(_)
+    ));
+    assert_eq!(
+        output.progress(Some(&again), Scale::Integer(2)),
+        Progress::Waiting
+    );
     // A new scale: drawn again.
-    assert!(matches!(output.plan(Some(&first), 1), Plan::Show(_)));
+    assert!(matches!(
+        output.plan(Some(&first), Scale::Integer(1)),
+        Plan::Show(_)
+    ));
 }
 
 #[test]

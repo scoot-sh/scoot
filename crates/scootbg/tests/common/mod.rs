@@ -18,7 +18,7 @@
 mod shots;
 
 #[allow(unused_imports)] // Only the binaries that check pixels use it.
-pub use shots::rgb;
+pub use shots::{Shot, rgb};
 
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -302,6 +302,7 @@ impl Session {
             .env_remove("WAYLAND_SOCKET")
             .env_remove("WAYLAND_DEBUG")
             .env_remove("SCOOTBG_DEBUG_PATH")
+            .env_remove("SCOOTBG_DEBUG_NO_FRACTIONAL_SCALE")
             .stdin(Stdio::null());
         command
     }

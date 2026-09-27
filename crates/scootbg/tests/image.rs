@@ -687,18 +687,28 @@ fn reload(session: &Session, config: &str) {
     assert_eq!(reloaded["type"], "reloaded", "{reloaded}");
 }
 
-/// An image is drawn at the output's real pixels, the surface size times
-/// its integer scale, as one full-size buffer with its opaque region set.
-/// A new scale that keeps that buffer size (scale 2 on a 1600×1000 mode:
+/// On a compositor without `wp_fractional_scale_v1` (a debug build leaves
+/// scoot's unbound), an image is drawn at the surface size times the
+/// integer scale, as one full-size buffer with its opaque region set. A
+/// new scale that keeps that buffer size (scale 2 on a 1600×1000 mode:
 /// 800×500 at 2) is redrawn from the buffer already there, with no new
-/// decode; one that changes it (1.5, which `wl_output` rounds to 2 over a
-/// 1067×667 surface) decodes and draws again at 2134×1334.
+/// decode, and attached again for Smithay's sake (see `daemon::canvas`);
+/// one that changes it (1.5, which `wl_output` rounds to 2 over a
+/// 1067×667 surface) decodes and draws again at 2134×1334. With the
+/// fraction, `tests/scale.rs` checks the device-exact drawing.
 #[test]
 fn a_new_scale_redraws_at_the_real_pixel_size() {
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped -- SCOOTBG_DEBUG_NO_FRACTIONAL_SCALE exists only in debug builds");
+        return;
+    }
     let Some(session) = Session::start_with("iscale", 1, "") else {
         return;
     };
-    let mut daemon = session.daemon_logged(&[("WAYLAND_DEBUG", "client")]);
+    let mut daemon = session.daemon_logged(&[
+        ("WAYLAND_DEBUG", "client"),
+        ("SCOOTBG_DEBUG_NO_FRACTIONAL_SCALE", "1"),
+    ]);
     configured(&session, 1);
     let id = scoot_ids(&session)[0];
     let image = session.runtime_dir().join("q.png");
