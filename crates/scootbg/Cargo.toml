@@ -1,0 +1,38 @@
+[package]
+name = "scootbg"
+description = "Wallpaper daemon for Wayland"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Every dependency below was chosen by measurement; the record, with the
+# alternatives and their numbers, is
+# docs/scootbg/backlog/resolved/dependencies-done.md. Linux only: on any
+# other target the binary is a stub that says so (see `src/main.rs`).
+[target.'cfg(target_os = "linux")'.dependencies]
+# The only `unsafe` scootbg has: the large-allocation global allocator,
+# and the wl_shm buffer mapping (§6b, §11).
+scootbg-mem.workspace = true
+# The Wayland client, plain, no toolkit: 41 KB and 6 s of build lighter
+# than smithay-client-toolkit at identical idle cost (§1). Its pure-Rust
+# `rs` backend is the default; the C-bringing `client_system` feature of
+# `wayland-backend` stays off, so nothing links libwayland.
+wayland-client = "0.31"
+# `wp_viewporter`, `wp_single_pixel_buffer_manager_v1` (staging) and
+# `wp_fractional_scale_manager_v1` (staging), all client side (§1).
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+# `zwlr_layer_shell_v1`, the one protocol scootbg cannot work without (§1).
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# poll(2), flock(2) and a non-blocking connect probe through raw syscalls, no `libc`
+# crate: the same `rustix` the Wayland crates already pull in (§9).
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net"] }
+# The control socket's line-framed JSON: +74 KB, already workspace
+# dependencies, and able to express versioned, tagged replies (§5).
+serde.workspace = true
+serde_json.workspace = true
+
+# The integration tests signal the daemon they start and probe its lock.
+# Dev-only: the binary itself does neither.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }

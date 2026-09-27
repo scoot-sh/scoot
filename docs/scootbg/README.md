@@ -8,9 +8,12 @@ It is built for scoot and set up by scoot's own config, but it is not tied
 to it: scootbg speaks only standard protocols, so it also runs on any
 compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 
-> **Status: planning.** There is no code yet. This file is the design; the
-> work is in [`backlog/`](backlog/README.md). The code will live in
-> `crates/scootbg/` once its first feature lands; these docs stay here.
+> **Status: early.** The daemon exists (`crates/scootbg/`, with its
+> `unsafe` in `crates/scootbg-mem/`): `scootbg daemon` connects, binds the
+> globals it will need, and serves its control socket; `scootbg query`, `version`
+> and `kill` work. **It draws no wallpaper yet**: output tracking, colours
+> and images are the next items in [`backlog/`](backlog/README.md). These
+> docs stay here.
 
 ## What it is for
 
@@ -75,7 +78,9 @@ scootbg clear --output DP-1                    # back to the compositor's own ba
 scootbg daemon                                 # outside scoot: start it yourself
 ```
 
-The commands above are the planned interface, not a working one yet.
+The commands above are the planned interface; of them, only `query` and
+`daemon` work so far (with `version` and `kill`), and `query`'s output list
+is empty until outputs are tracked.
 One binary: `daemon` runs the Wayland client, every other subcommand talks
 to it over its socket.
 
@@ -153,12 +158,23 @@ safety are not traded against each other:
   no `-sys` crate that links a library, no build script that compiles C.
   The honest exception is the Rust standard library itself, which on
   `*-linux-gnu` links glibc, `libm` and `libgcc_s`. `wayland-backend`'s
-  and `wayland-sys`'s C-bringing features (`client_system`, `log`) stay
-  off; turning either on would link libwayland or compile C.
+  and `wayland-sys`'s C-bringing features stay off: `client_system`
+  links libwayland, and `log`, although it only adds the pure-Rust `log`
+  crate as a dependency, makes `wayland-backend/build.rs` compile two C
+  shims (`src/sys/*/log_shim.c`) with `cc`, even for the pure-Rust
+  backend. (Checked against the pinned fork, `70f81e00`.) Without
+  `log`, the backend reports errors with `eprintln!`, so the daemon
+  guards against that instead: see `crates/scootbg/src/daemon/crash.rs`.
 - **`#![forbid(unsafe_code)]` in `scootbg`.** The only `unsafe` is
   isolated in one small crate, `scootbg-mem`:
   - the global allocator that returns large blocks to the kernel;
   - the `wl_shm` buffer mapping.
+
+  Signals are deliberately not caught: SIGTERM and friends kill the daemon
+  with their default action, and the stale socket file it leaves is
+  harmless (a lock, not the file, says a daemon is alive). Catching them
+  would have taken a third `unsafe` module on unstable rustix APIs; see
+  [the record](backlog/resolved/crate-and-daemon-done.md#departures-from-the-plan-and-why).
 
   It is named for what it owns rather than `-sys`, which by Cargo
   convention means bindings to a native library, the one thing it

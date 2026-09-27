@@ -37,6 +37,8 @@
         (builtins.fromTOML (builtins.readFile ./crates/scoot/Cargo.toml)).package.description;
       scootctlDescription =
         (builtins.fromTOML (builtins.readFile ./crates/scootctl/Cargo.toml)).package.description;
+      scootbgDescription =
+        (builtins.fromTOML (builtins.readFile ./crates/scootbg/Cargo.toml)).package.description;
     in
     {
       # `nix build` / `nix run`, for getting the binaries without a dev shell.
@@ -62,7 +64,7 @@
           # target/ (~1GB in-store) and .git along -- no longer bust the
           # derivation's cache and force a full rebuild. Everything else
           # this flake reads at eval time (./Cargo.toml for `version`,
-          # ./crates/scoot/Cargo.toml and ./crates/scootctl/Cargo.toml for
+          # ./crates/{scoot,scootctl,scootbg}/Cargo.toml for
           # the descriptions, ./Cargo.lock for `cargoLock.lockFile`,
           # ./vm/compositor-deps.nix for buildInputs) resolves against
           # the flake tree, not `src`, so it stays out of the filter.
@@ -255,11 +257,44 @@
               platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
             };
           };
+
+          # The wallpaper daemon, its own package like `scootctl` (the
+          # `scoot` package stays `scoot` only): `-p scootbg` puts just the
+          # one binary in `$out/bin`. Pure Rust on the `linux_raw` rustix
+          # backend, so, like the client, nothing to probe or link beyond
+          # what std links (docs/scootbg/backlog/resolved/dependencies-done.md
+          # §9). Linux only: it is a Wayland client, and on other systems
+          # the crate builds a stub that says so, so no Darwin package is
+          # offered.
+          scootbg = pkgs.rustPlatform.buildRustPackage {
+            pname = "scootbg";
+            inherit version src cargoLock;
+            cargoBuildFlags = [
+              "-p"
+              "scootbg"
+            ];
+            # Same profile-put-back and no-test reasons as the packages
+            # above.
+            stripAllList = [ "bin" ];
+            doCheck = false;
+            meta = {
+              description = scootbgDescription;
+              homepage = "https://github.com/scoot-sh/scoot";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "scootbg";
+              platforms = pkgs.lib.platforms.linux;
+            };
+          };
         in
         {
           # Linux gets the compositor, Darwin gets the client.
           default = if pkgs.stdenv.hostPlatform.isDarwin then scootctl else scoot;
           inherit scoot scootctl;
+        }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          inherit scootbg;
+        }
+        // {
           # The GPU scanout tier as a package (gh #177): off by default in
           # the build above because `backend_gbm` is a link-time libgbm
           # dependency and GPU-free operation is a fixed decision (see

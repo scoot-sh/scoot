@@ -818,6 +818,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "scootbg"
+version = "0.1.0"
+dependencies = [
+ "rustix 1.1.4",
+ "scootbg-mem",
+ "serde",
+ "serde_json",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+]
+
+[[package]]
+name = "scootbg-mem"
+version = "0.1.0"
+dependencies = [
+ "rustix 1.1.4",
+]
+
+[[package]]
 name = "scootctl"
 version = "0.1.0"
 dependencies = [

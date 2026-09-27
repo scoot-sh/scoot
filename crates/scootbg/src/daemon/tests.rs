@@ -1,0 +1,134 @@
+//! The request-to-reply mapping. The loop itself runs against a real
+//! compositor in `crates/scootbg/tests/`.
+
+use super::respond::Responder;
+use crate::control::Handler;
+use crate::protocol::{PROTOCOL_VERSION, Request};
+
+fn ask(responder: &mut Responder, line: &str) -> serde_json::Value {
+    let mut out = Vec::new();
+    responder.handle(line.as_bytes(), &mut out);
+    assert_eq!(out.last(), Some(&b'\n'), "one line, newline-terminated");
+    assert_eq!(out.iter().filter(|&&b| b == b'\n').count(), 1);
+    serde_json::from_slice(&out).unwrap()
+}
+
+#[test]
+fn query_answers_an_empty_output_list() {
+    let mut responder = Responder::default();
+    let reply = ask(&mut responder, Request::Query.line().trim_end());
+    assert_eq!(reply, serde_json::json!({"type": "outputs", "outputs": []}));
+    assert!(!responder.stop);
+}
+
+#[test]
+fn version_answers_the_build_and_protocol() {
+    let mut responder = Responder::default();
+    let reply = ask(&mut responder, Request::Version.line().trim_end());
+    assert_eq!(reply["type"], "version");
+    assert_eq!(reply["protocol"], PROTOCOL_VERSION);
+    assert_eq!(reply["version"], env!("CARGO_PKG_VERSION"));
+}
+
+#[test]
+fn kill_answers_ok_and_asks_the_loop_to_stop() {
+    let mut responder = Responder::default();
+    let reply = ask(&mut responder, Request::Kill.line().trim_end());
+    assert_eq!(reply, serde_json::json!({"type": "ok"}));
+    assert!(responder.stop);
+}
+
+#[test]
+fn bad_requests_answer_errors_and_change_nothing() {
+    let mut responder = Responder::default();
+    for line in [
+        "garbage",
+        "",
+        r#"{"type":"kill"}"#,
+        r#"{"protocol":99,"type":"kill"}"#,
+        r#"{"protocol":1,"type":"set"}"#,
+        r#"{"protocol":1}"#,
+    ] {
+        let reply = ask(&mut responder, line);
+        assert_eq!(reply["type"], "error", "{line:?}");
+        assert!(reply["message"].as_str().is_some_and(|m| !m.is_empty()));
+    }
+    assert!(!responder.stop);
+}
+
+/// The poll set's allocation survives the round trip through `reuse`, so
+/// the loop allocates nothing once warm. If std ever stopped collecting in
+/// place, this fails rather than the loop quietly allocating per wakeup.
+#[test]
+fn the_poll_set_keeps_its_allocation() {
+    use rustix::event::{PollFd, PollFlags};
+
+    let (a, _b) = std::os::unix::net::UnixStream::pair().unwrap();
+    let mut fds: Vec<PollFd<'static>> = Vec::with_capacity(19);
+    let ptr = fds.as_ptr();
+    for _ in 0..3 {
+        let mut round: Vec<PollFd<'_>> = super::reuse(fds);
+        for _ in 0..19 {
+            round.push(PollFd::new(&a, PollFlags::IN));
+        }
+        assert_eq!(round.as_ptr(), ptr);
+        fds = super::reuse(round);
+        assert!(fds.is_empty());
+        assert_eq!(fds.as_ptr(), ptr);
+        assert!(fds.capacity() >= 19);
+    }
+}
+
+/// The one panic message the crash hook turns into exit 1: std's own for a
+/// failed `print!`/`eprint!`.
+#[test]
+fn the_crash_hook_recognises_stds_broken_stdio_panic() {
+    use super::crash::is_stdio_message;
+
+    // std's `_eprint` cannot be pointed at a test double, so the real
+    // panic, an `eprintln!` into a pipe with no reader, is exercised end
+    // to end in `tests/daemon.rs` (`WAYLAND_DEBUG` with a broken stderr).
+    assert!(is_stdio_message(
+        "failed printing to stderr: Broken pipe (os error 32)"
+    ));
+    assert!(is_stdio_message(
+        "failed printing to stdout: Broken pipe (os error 32)"
+    ));
+    assert!(!is_stdio_message("index out of bounds"));
+    assert!(!is_stdio_message(
+        "called `Option::unwrap()` on a `None` value"
+    ));
+}
+
+/// The hook removes the socket only while armed, and at most once; after
+/// `disarm` (which the daemon calls before releasing its claim) a panic
+/// leaves the path alone, whoever has bound it since.
+#[test]
+fn the_crash_hook_removes_the_socket_only_while_armed() {
+    use super::crash::{Armed, remove_if_armed};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    let dir = std::env::temp_dir().join(format!("sbg-crash-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let socket = dir.join("s.sock");
+
+    // Armed: removed, and the hold is spent.
+    std::fs::write(&socket, b"").unwrap();
+    let armed = Armed::for_test(Arc::new(AtomicBool::new(true)));
+    remove_if_armed(&armed, &socket);
+    assert!(!socket.exists());
+    // A new daemon's socket at the same path afterwards survives a second
+    // panic of the old one.
+    std::fs::write(&socket, b"new").unwrap();
+    remove_if_armed(&armed, &socket);
+    assert!(socket.exists());
+
+    // Disarmed before any panic: never removed.
+    let disarmed = Armed::for_test(Arc::new(AtomicBool::new(true)));
+    disarmed.disarm();
+    remove_if_armed(&disarmed, &socket);
+    assert!(socket.exists());
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
