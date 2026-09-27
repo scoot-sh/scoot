@@ -251,3 +251,82 @@ fn the_least_recently_set_entries_are_dropped_first() {
     assert_eq!(order.first(), Some(&"O-3"));
     assert_eq!(&order[MAX_OUTPUTS - 3..], ["O-0", "NEW-1", "NEW-2"]);
 }
+
+/// Only `apply-config` sets the fingerprint: it is written with the
+/// section's choices in one save, and every later `set` keeps it.
+#[test]
+fn an_applied_section_records_its_fingerprint() {
+    let scratch = Scratch::new("applied");
+    let file = scratch.0.join("scoot");
+    let mut saved = Saved::new(
+        Profile::parse("scoot").unwrap(),
+        Some(file.clone()),
+        Some("old".to_owned()),
+    );
+    assert_eq!(saved.fingerprint(), Some("old"));
+    assert_eq!(saved.profile().as_str(), "scoot");
+    saved.choices.set(None, color(1), 1);
+    saved.choices.set(Some("DP-2"), color(2), 1);
+    saved.applied_config("f00d".to_owned());
+    assert_eq!(saved.fingerprint(), Some("f00d"));
+    assert!(saved.flush(Duration::from_secs(10)));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "scootbg-state 1\nprofile scoot\nfingerprint f00d\nall color #010101\n\
+         output DP-2 color #020202\n"
+    );
+    // A `set` after it keeps the fingerprint.
+    saved.record(None, &color(3), 2);
+    assert!(saved.flush(Duration::from_secs(10)));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "scootbg-state 1\nprofile scoot\nfingerprint f00d\nall color #030303\n"
+    );
+    // With nowhere to save, it is still remembered for the daemon's life.
+    let mut nowhere = Saved::nowhere();
+    nowhere.applied_config("beef".to_owned());
+    assert_eq!(nowhere.fingerprint(), Some("beef"));
+}
+
+/// A profile adopted at a generation records nothing older: an image
+/// `set` sent before the adoption, landing after it, is not this
+/// profile's, even where nothing newer covers its output.
+#[test]
+fn nothing_older_than_an_adoption_is_recorded() {
+    let mut saved = Saved::nowhere();
+    saved.adopted_at(10);
+    saved.record(None, &color(1), 9);
+    saved.record(Some("DP-1"), &color(1), 9);
+    assert!(saved.choices.every().is_none());
+    assert_eq!(saved.choices.named_len(), 0);
+    saved.record(Some("DP-1"), &color(2), 10);
+    saved.record(None, &color(3), 11);
+    assert_eq!(saved.choices.every(), Some(&color(3)));
+}
+
+/// One writer per file: a `Saved` of the same profile takes a busy old
+/// one's writer; another profile's, or one that does not save, takes none.
+#[test]
+fn a_writer_is_taken_back_only_for_its_own_profile() {
+    let scratch = Scratch::new("writer");
+    let file = scratch.0.join("a");
+    let profile = |name| Profile::parse(name).unwrap();
+    let mut old = Saved::new(profile("a"), Some(file.clone()), None);
+    assert!(old.idle(), "nothing written yet");
+    old.record(None, &color(1), 1);
+    let mut other = Saved::new(profile("b"), Some(scratch.0.join("b")), None);
+    assert!(!other.take_writer(&mut old));
+    let mut not_saving = Saved::new(profile("a"), None, None);
+    assert!(!not_saving.take_writer(&mut old));
+    let mut again = Saved::new(profile("a"), Some(file.clone()), None);
+    assert!(again.take_writer(&mut old));
+    assert!(!again.take_writer(&mut old), "taken once");
+    assert!(old.idle(), "no writer left to wait for");
+    again.record(None, &color(2), 2);
+    assert!(again.flush(Duration::from_secs(10)));
+    let parsed = load(&file).unwrap().unwrap();
+    assert_eq!(
+        parsed.record.all,
+        Some(Pick::Color(Color { r: 2, g: 2, b: 2 }))
+    );
+}

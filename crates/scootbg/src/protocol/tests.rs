@@ -273,8 +273,8 @@ fn a_missing_or_unknown_type_is_refused() {
         parse(br#"{"protocol":1}"#),
         Err(RequestError::NoType)
     ));
-    match parse(br#"{"protocol":1,"type":"apply-config"}"#) {
-        Err(RequestError::Unknown(name)) => assert_eq!(name, "apply-config"),
+    match parse(br#"{"protocol":1,"type":"apply-configs"}"#) {
+        Err(RequestError::Unknown(name)) => assert_eq!(name, "apply-configs"),
         other => panic!("expected Unknown, got {other:?}"),
     }
 }
@@ -286,8 +286,9 @@ fn replies_are_one_tagged_line() {
         reply_string(&Reply::Outputs {
             outputs: &[] as &[OutputEntry<'_>; 0],
             saving: true,
+            profile: "default",
         }),
-        "{\"type\":\"outputs\",\"outputs\":[],\"saving\":true}\n"
+        "{\"type\":\"outputs\",\"outputs\":[],\"saving\":true,\"profile\":\"default\"}\n"
     );
     assert_eq!(
         reply_string(&Reply::Version {
@@ -351,6 +352,7 @@ fn output_entries_have_a_fixed_shape() {
     let line = reply_string(&Reply::Outputs {
         outputs: &[known, unknown],
         saving: false,
+        profile: "scoot",
     });
     assert_eq!(line.matches('\n').count(), 1);
     let value: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -384,7 +386,7 @@ fn output_entries_have_a_fixed_shape() {
                 "draw_failed": true,
                 "shows": null,
             },
-        ], "saving": false})
+        ], "saving": false, "profile": "scoot"})
     );
 }
 
@@ -451,5 +453,85 @@ fn an_image_shows_its_path_mode_fill_and_filter() {
             "fill": "#101014",
             "filter": "catmull-rom",
         })
+    );
+}
+
+fn section(json: &str) -> crate::section::Section {
+    crate::section::Section::parse(json.as_bytes()).unwrap()
+}
+
+#[test]
+fn apply_config_round_trips() {
+    let request = Request::ApplyConfig {
+        profile: crate::state::Profile::parse("scoot").unwrap(),
+        section: section(r##"{"image":"/a b.png","output":{"DP-2":{"color":"#101014"}}}"##),
+    };
+    let line = request.line();
+    assert!(line.ends_with('\n'));
+    assert_eq!(parse(line.trim_end().as_bytes()).unwrap(), request);
+    assert_eq!(request.name(), "apply-config");
+    // Keys in any order, other fields ignored, as for every request.
+    let reordered = br##"{"config":{"output":{"DP-2":{"color":"#101014"}},"image":"/a b.png"},
+        "extra":[1,2],"profile":"scoot","type":"apply-config","protocol":1}"##;
+    assert_eq!(parse(reordered).unwrap(), request);
+}
+
+#[test]
+fn apply_config_is_checked() {
+    for (line, says) in [
+        (
+            r#"{"protocol":1,"type":"apply-config","config":{}}"#,
+            "needs a `profile`",
+        ),
+        (
+            r#"{"protocol":1,"type":"apply-config","profile":"scoot"}"#,
+            "needs a `config`",
+        ),
+        (
+            r#"{"protocol":1,"type":"apply-config","profile":"../x","config":{}}"#,
+            "profile name",
+        ),
+        (
+            r#"{"protocol":1,"type":"apply-config","profile":7,"config":{}}"#,
+            "bad apply-config request",
+        ),
+        (
+            r#"{"protocol":1,"type":"apply-config","profile":"scoot","config":{"imgae":"/a"}}"#,
+            "unknown field `imgae`",
+        ),
+        (
+            r#"{"protocol":1,"type":"apply-config","profile":"scoot","config":{"image":"a"}}"#,
+            "not absolute",
+        ),
+        (
+            r#"{"protocol":1,"type":"apply-config","profile":"scoot","config":{"image":"/a","image":"/b"}}"#,
+            "duplicate field",
+        ),
+        (
+            r#"{"protocol":1,"type":"apply-config","profile":"scoot","config":[]}"#,
+            "bad apply-config request",
+        ),
+        (
+            r#"{"protocol":2,"type":"apply-config","profile":"scoot","config":{}}"#,
+            "protocol mismatch",
+        ),
+    ] {
+        match parse(line.as_bytes()) {
+            Ok(request) => panic!("{line} parsed as {request:?}"),
+            Err(error) => {
+                let message = error.to_string();
+                assert!(message.contains(says), "{line}: {message}");
+            }
+        }
+    }
+}
+
+/// `config` and `profile` on any other request stay ignored unknown
+/// fields: only `apply-config` reads them.
+#[test]
+fn config_on_another_request_is_ignored() {
+    assert_eq!(
+        parse(br#"{"protocol":1,"type":"query","config":{"imgae":1},"profile":"../"}"#).unwrap(),
+        Request::Query
     );
 }

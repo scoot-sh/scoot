@@ -1,10 +1,12 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
-use super::{Command, DaemonOptions, Error, Topic, USAGE, parse, version_string};
+use super::{ApplyOptions, Command, DaemonOptions, Error, Topic, USAGE, parse, version_string};
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
 use crate::protocol::{ImageRequest, Request, Show};
+use crate::section::Section;
+use crate::state::Profile;
 
 fn args(list: &[&str]) -> Result<Command, Error> {
     parse(list.iter().map(OsString::from))
@@ -35,6 +37,7 @@ fn help_is_there_for_everything() {
         ("query", Topic::Query),
         ("version", Topic::Version),
         ("kill", Topic::Kill),
+        ("apply-config", Topic::ApplyConfig),
     ] {
         assert_eq!(args(&[name, "--help"]), Ok(Command::Help(topic)));
         assert_eq!(args(&[name, "-h"]), Ok(Command::Help(topic)));
@@ -52,6 +55,7 @@ fn the_main_help_lists_only_what_works() {
         "query",
         "version",
         "kill",
+        "apply-config",
         "--version",
         "--help",
     ] {
@@ -60,7 +64,7 @@ fn the_main_help_lists_only_what_works() {
             "{listed} missing"
         );
     }
-    for later in ["apply-config", "--mode", "--fill", "--profile"] {
+    for later in ["--serve", "--mode", "--fill", "--profile"] {
         assert!(
             !USAGE.split_whitespace().any(|word| word == later),
             "{later} is advertised before it exists"
@@ -75,12 +79,12 @@ fn nothing_is_an_error() {
 
 #[test]
 fn unknown_commands_are_errors() {
-    for unknown in ["apply-config", "--daemon", "", "Query", "Set"] {
+    for unknown in ["apply", "--daemon", "", "Query", "Set", "--serve"] {
         assert_eq!(args(&[unknown]), Err(Error::Unknown(unknown.to_owned())));
     }
     assert_eq!(
-        args(&["help", "apply-config"]),
-        Err(Error::Unknown("apply-config".to_owned()))
+        args(&["help", "apply"]),
+        Err(Error::Unknown("apply".to_owned()))
     );
 }
 
@@ -516,4 +520,95 @@ fn a_non_utf8_daemon_argument_is_an_error_not_a_panic() {
         OsString::from_vec(vec![b'a', 0xff]),
     ]);
     assert!(matches!(got, Err(Error::Unexpected { .. })), "{got:?}");
+}
+
+fn apply(profile: &str, json: &str, serve: bool) -> Result<Command, Error> {
+    Ok(Command::ApplyConfig(ApplyOptions {
+        profile: Profile::parse(profile).unwrap(),
+        section: Section::parse(json.as_bytes()).unwrap(),
+        serve,
+    }))
+}
+
+#[test]
+fn apply_config_takes_a_profile_and_the_section() {
+    let json = r##"{"color":"#1e1e2e"}"##;
+    assert_eq!(args(&["apply-config", json]), apply("default", json, false));
+    assert_eq!(
+        args(&["apply-config", "--profile", "scoot", json]),
+        apply("scoot", json, false)
+    );
+    assert_eq!(
+        args(&["apply-config", json, "--profile=scoot-nested"]),
+        apply("scoot-nested", json, false)
+    );
+    assert_eq!(
+        args(&["apply-config", "--serve", "--profile=scoot", "{}"]),
+        apply("scoot", "{}", true)
+    );
+    // Whitespace around the object is JSON's.
+    assert_eq!(
+        args(&["apply-config", " {} "]),
+        apply("default", "{}", false)
+    );
+}
+
+#[test]
+fn apply_config_arguments_are_checked() {
+    assert_eq!(args(&["apply-config"]), Err(Error::MissingSection));
+    assert_eq!(
+        args(&["apply-config", "--profile", "scoot"]),
+        Err(Error::MissingSection)
+    );
+    assert_eq!(
+        args(&["apply-config", "--profile"]),
+        Err(Error::MissingValue {
+            command: "apply-config",
+            flag: "--profile",
+        })
+    );
+    assert!(matches!(
+        args(&["apply-config", "--profile", "a/b", "{}"]),
+        Err(Error::Profile(_))
+    ));
+    assert_eq!(
+        args(&["apply-config", "--profile=a", "--profile=b", "{}"]),
+        Err(Error::Repeated {
+            command: "apply-config",
+            flag: "--profile",
+        })
+    );
+    assert_eq!(
+        args(&["apply-config", "--serve", "--serve", "{}"]),
+        Err(Error::Repeated {
+            command: "apply-config",
+            flag: "--serve",
+        })
+    );
+    assert_eq!(
+        args(&["apply-config", "{}", "{}"]),
+        Err(Error::Unexpected {
+            command: "apply-config",
+            argument: "{}".into(),
+        })
+    );
+    assert_eq!(
+        args(&["apply-config", "--output", "{}"]),
+        Err(Error::Unexpected {
+            command: "apply-config",
+            argument: "--output".into(),
+        })
+    );
+    for bad in [r#"{"imgae":"/a"}"#, "{", r#"{"image":"a.png"}"#, "[]"] {
+        let error = args(&["apply-config", bad]).unwrap_err();
+        assert!(matches!(error, Error::Section(_)), "{bad}: {error:?}");
+        assert!(error.to_string().contains("apply-config --help"), "{error}");
+    }
+}
+
+#[test]
+fn a_non_utf8_section_is_an_error_not_a_panic() {
+    let raw = OsString::from_vec(b"{\"image\":\"/\xff\"}".to_vec());
+    let parsed = parse([OsString::from("apply-config"), raw]);
+    assert_eq!(parsed, Err(Error::SectionNotUtf8));
 }

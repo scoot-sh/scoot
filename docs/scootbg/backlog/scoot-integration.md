@@ -3,10 +3,16 @@ title: "Seamless in scoot: a [wallpaper] config section"
 status: "open"
 area: "scootbg"
 priority: "high"
-blocked: "needs scootbg's daemon and set command first"
+blocked: null
 ---
 
 # Seamless in scoot: a [wallpaper] config section
+
+**Part A, scootbg's half, landed 2026-09-27; part B, scoot's half and the
+Nix modules, is open.** What part A delivered, where it departs from the
+plan below, its measurements and what part B must still do are in
+[Part A (scootbg): landed](#part-a-scootbg-landed) at the end; the plan
+follows unchanged.
 
 In scoot, the wallpaper should be one config section, with nothing else to
 wire up.
@@ -277,3 +283,378 @@ behaviour, all in the PR that lands this.
 The scoot half goes through scoot's own review bar (it is compositor
 code), with the smoke test extended to check a wallpaper pixel on each
 headless output.
+
+## Part A (scootbg): landed
+
+Landed 2026-09-27 on branch `claude/scoot-screenshot-verify-0ocx5p`: the
+code at `4a3cdf6`, this record in the docs-only commit after it. The
+ticket stays open for part B.
+
+### What landed
+
+- **`scootbg apply-config [--profile NAME] JSON`** (`crates/scootbg/src/apply.rs`,
+  `cli.rs`): `--profile` as for `daemon` (`state::Profile::parse`,
+  default `default`); the JSON one argument, at most 64,512 bytes.
+- **The section** (`section.rs`): parsed and validated strictly: `image`
+  (absolute, no NUL, at most 4095 bytes), `color` (`#rrggbb`), never both;
+  `mode`, `fill`, `filter` with an image only; `output` tables by
+  connector name (not empty, at most 256, each the same five keys);
+  `command` accepted and ignored. Refused, as a usage error (exit 2): an
+  unknown key at either level, a key given twice (serde's derive for
+  fields, a binary search for output names), `null`, a value of the wrong
+  type, an array where an object belongs (`Object<T>`, since a derived
+  struct also reads an array), trailing text, non-UTF-8. The daemon
+  re-validates what it gets through the same type.
+- **The fingerprint** (`Section::canonical`, `sha256.rs`): SHA-256, hex, of
+  compact JSON with keys in byte order at both levels, strings as given,
+  `command` left out, every other key present as it was. A user can check
+  it: `printf '%s' "$canonical" | sha256sum`.
+- **The daemon's side** (`daemon/config.rs`): adopt the profile if it is
+  another (load its state, an every-output `clear` at the adoption's
+  generation, `Saved::adopted_at` so nothing older lands in the new
+  file); compare fingerprints; different: apply the section as a `set` of
+  everything and record the fingerprint in the same write
+  (`Saved::applied_config`, the only setter); the same: keep what shows,
+  or on adopting show the profile's saved state. Then every output is
+  stamped and reconciled, and the reply waits like a `set`'s. A daemon
+  *started* by `apply-config` does this before serving anyone
+  (`config::start`), from the section.
+- **Starting the daemon** (`apply.rs`): with nothing answering and the
+  display's lock free, `apply-config` re-execs itself (`/proc/self/exe`)
+  as `apply-config --serve --profile=NAME CANONICAL`, stdin and stdout
+  `/dev/null`, stderr inherited, working directory `/`; that process calls
+  `setsid(2)`, then runs the daemon with the section as its start. The
+  caller then retries its connection (every 1 ms, 5 s in all) and sends the
+  section as to any daemon, so it gets a reply and an exit status. A
+  lock held with nothing answering is a daemon starting: waited for. A
+  started daemon that loses the lock forwards its section to the winner
+  and exits.
+- **`{}` with no daemon**: under the lock, the profile's state file gets
+  `all clear` and the fingerprint (`state::load`, `format::encode`,
+  `saver::write_atomic`), unless it has that fingerprint already; a file
+  that cannot be read, or is a newer scootbg's, is left alone (exit 1).
+- **Protocol**: `apply-config` is additive to protocol 1
+  (`{"protocol":1,"type":"apply-config","profile":…,"config":{…}}`,
+  both fields required; on other requests they stay ignored unknown
+  fields); `query` gains a top-level `profile`. The command sends
+  `version` first on the same connection: another version is a warning,
+  another protocol or `unknown request` (a daemon that predates
+  `apply-config`) an error naming both builds and what to do.
+- **Exit status**: 0 applied or unchanged, and on screen (or `{}`
+  recorded); 1 no daemon started or reached in 5 s, no reply in 30 s (one
+  bound for the whole exchange), the connection closed before the reply,
+  another protocol or too old, an image in the section that is not a file
+  (the rest applied), a failed draw, the state file not written; 2 usage,
+  a refused section included.
+- **Docs**: the root README's scootbg section, `docs/scootbg/README.md`
+  (a new `apply-config` section with the schema, the fingerprint, the
+  precedence table, starting, exit codes, timing; the protocol; the
+  budget), `scootbg apply-config --help`, `query --help`.
+- **Tests**: unit tests for the section (schema, strictness, canonical
+  encoding, fingerprints, bounds, 20,000 generated inputs), SHA-256 (FIPS
+  vectors, and lengths 55, 56, 63, 64, 65, 119, 120, 128 against
+  coreutils), the `{}` writer, reply classification, the protocol, the
+  CLI, the responder, `Saved`'s fingerprint and adoption floor.
+  `tests/config.rs`, 20 tests on headless scoot, added to CI's
+  integration job: every row of the precedence table across a real
+  restart (the compositor killed, a new one over the same state
+  directory, `apply-config` run as scoot's start-up would), the order it
+  cannot see, per-output tables and an image, a missing image, refused
+  sections, `{}` with no daemon, eight racing starts, a start racing a
+  plain `daemon`, `set` racing `apply-config` (the file agreeing with the
+  screen), no compositor, the daemon SIGKILLed mid-apply, `apply-config`
+  killed mid-wait, and a fake daemon on the socket of another version,
+  another protocol, and one that predates `apply-config`.
+
+### Departures from the plan, and why
+
+- **`setsid` in a re-exec'd child, not a double fork.** `fork` is not
+  reachable from safe Rust (`forbid(unsafe_code)`), and `pre_exec` is
+  `unsafe` too, so the child calls `setsid` itself (rustix's safe call).
+  No second fork is needed: `apply-config` is the short-lived
+  intermediate, and it exits without waiting, so the daemon is reparented.
+  `setsid` is what keeps a signal to the caller's process group away from
+  it. Checked: the daemon's `/proc/PID/stat` has ppid 1, and its pid as
+  both process group and session, no tty.
+- **The section is sent twice on a cold start**: once as the started
+  daemon's starting point (so the saved state never flashes first), then
+  by `apply-config` as to any daemon (so it gets a reply and an exit
+  status; the fingerprint then matches, so nothing changes). The ticket
+  said "becomes the daemon itself": the caller becoming the daemon would
+  leave scoot no exit status to log, and would not be detached.
+- **The old profile's writer is not flushed on adopting.** `Saved::flush`
+  would stall the loop up to 2 s on a slow disk. The writer thread finishes
+  on its own (it holds its own reference); the old `Saved` is kept
+  (`State::retired`) and flushed with the current one on the way out.
+- **An image in the section that is not a file** is an error reply at
+  once, after the rest is applied, and stays saved (as a restored image
+  that has gone does). Its output shows nothing.
+- **A gone image now shows nothing on its output**, in a restore too,
+  rather than the every-output choice: the docs already said "that output
+  shows the compositor's own background", and on adopting, falling back to
+  an older choice would have been wrong. `restore::apply` became
+  `restore::put` with an origin for its messages and a list of problems.
+- **Each table stands alone** (an output's image does not inherit the top
+  level's `mode`/`fill`/`filter`), as `scootbg set` does. The plan did not
+  say; this is the simpler rule, and it is documented.
+- **The canonical encoding is literal**, as the plan says: strings as
+  given, so `#1E1E2E` and `#1e1e2e`, or an explicit `mode = "fill"` and
+  none, are different sections. Normalizing would make a cosmetic edit
+  not count as "changing the section", which the rule is phrased in.
+- **`{}` holds the lock while it writes** (race safety with a daemon
+  starting). A `scootbg daemon` started in those milliseconds finds the
+  lock held and exits "already running". Only a reload that removes the
+  section, at the same moment as a hand-started daemon, can meet it.
+- **The binary grows by 106,496 B** (1,569,640 → 1,676,136 stripped). By
+  symbol, about 27 KB is `std::process::Command` (the only way to start a
+  process without `unsafe`), 23 KB the strict serde parse, 20 KB the client
+  half; the output-table sort was replaced by sorted insertion (−12,288 B).
+  Still `libc.so.6`, `libm.so.6`, `libgcc_s.so.1` only; no `libc` crate.
+
+### Measurements
+
+**Setup.** The Claude Code web container (x86_64, 4 CPUs, no GPU, root).
+`scootbg` release at `4a3cdf6` (sha256 `6fb730cd…`, 1,676,136 B); base
+`4e2d82b` built in its own worktree and target directory (`634c8133…`,
+1,569,640 B). The compositor a debug `scoot --headless --outputs 2`
+(1600×1000 each), empty config. Script: `bench.py` in the session's
+scratch record: each round with a fresh state directory, `apply-config`
+of a color with no daemon (it starts one), five unchanged, five changed,
+five `set`s, `kill`; `{}` with no daemon twice (written, then already
+recorded); then a plain `scootbg daemon` and a `set` retried until it
+succeeds, from `Popen`. Each time is from `subprocess.run` to exit, which
+is after the change is on screen and the compositor has it. 10 rounds a
+run, two runs; medians, (min–max):
+
+| ms | run 1 | run 2 |
+|---|---|---|
+| cold `apply-config` (starts the daemon) | 6.09 (4.80–7.90) | 6.05 (4.98–8.93) |
+| cold `daemon`, then `set` | 3.80 (3.48–4.68) | 4.48 (4.02–8.64) |
+| warm, unchanged | 1.77 (1.55–6.86) | 2.10 (1.70–8.59) |
+| warm, changed | 2.24 (1.88–4.45) | 2.60 (2.11–7.11) |
+| warm `set` | 2.19 (1.85–6.21) | 2.44 (2.00–4.31) |
+| `{}`, no daemon, written | 2.28 (2.02–3.64) | 2.50 (2.11–2.93) |
+| `{}`, no daemon, already recorded | 1.48 (1.36–1.78) | 1.62 (1.42–3.30) |
+
+A cold `apply-config` costs about 2 ms more than `daemon` then `set`: one
+more process start, and a spawn. The retry interval was 5 ms at first,
+which cost about 3 ms of every cold start (median 7.27, 7.16–8.15): now
+1 ms. A changed `apply-config` costs what a `set` does; an unchanged one
+a little less (nothing is drawn).
+
+**Idle**, the daemon `apply-config` started, a color, after 1 s settled,
+then 30 s: 0 voluntary and 0 involuntary context switches, 0 user and 0
+system ticks (`/proc/PID/status`, `stat`); 1 thread, 8 fds, VmRSS
+3,976 kB, RssAnon 224 kB; ppid 1, process group and session its own pid,
+no tty.
+
+**A stopped daemon** (`SIGSTOP`): `apply-config` exits 1 after 30.3 s,
+"the daemon did not answer within 30 s (the change may still happen)";
+on `SIGCONT` the daemon carries on.
+
+### Verified where
+
+On the container above, at `4a3cdf6`:
+
+- `SCOOTBG_REQUIRE_SCOOT=1 SCOOTBG_REQUIRE_SWAY=1
+  SCOOTBG_TEST_SWAY=…sway-1.12/bin/sway devenv shell -- soft-egl cargo
+  nextest run -p scootbg -p scootbg-mem`: 419 passed, 2 skipped (the
+  `#[ignore]`d benchmarks).
+- `cargo test -p scootbg -p scootbg-mem` (same variables): every suite
+  passed, `tests/config.rs` 20 of 20.
+- `cargo clippy -p scootbg -p scootbg-mem --all-targets -- -D warnings`,
+  `cargo fmt --check -p scootbg -p scootbg-mem`, `RUSTFLAGS="-D warnings"
+  cargo build --release -p scootbg`: clean; `ldd` and the `libc`-crate
+  check as CI runs them: clean.
+- `nix build .#scootbg --option sandbox true` (with the proxy's CA bundle
+  as an extra sandbox path): built.
+- **The tests catch what they claim**, checked by breaking the code:
+  ignoring the fingerprint (always applying) fails four tests (rows 1, 2
+  and 6, and the unseen order); putting `command` in the canonical
+  encoding fails `a_set_survives_an_unchanged_section`; skipping adoption
+  fails `an_autostart_daemon_adopts_the_profile`; skipping `setsid` fails
+  `a_section_starts_the_daemon`.
+
+### Not verified, and why
+
+- **`--tty`, the dev VM**: not reachable from this container. The gap
+  before the first frame at login is part B's to measure there.
+- **A real scoot driving it**: part B. The tests stand in for scoot by
+  running `apply-config` as it will.
+- **A systemd user session as the subreaper** that reaps the detached
+  daemon: here PID 1 reparents it (and reaps lazily: exited daemons sat as
+  zombies of PID 1 for a while). A subreaper that never reaps would keep
+  one zombie per daemon exit; none known does that.
+- **A permission-denied state file** for the `{}` path: as root,
+  permission bits do not bind; a directory in the file's place stands in.
+
+### What part B must do
+
+The scoot side, in scoot's own review bar, plus the Nix work above:
+
+- **Config**: a `[wallpaper]` section (the keys above, `output."NAME"`
+  tables, `command`, default `scootbg`), resolving `~/` and relative
+  `image` paths against the config file's directory, then encoding it as
+  JSON in any key order. Send only keys the user wrote: scootbg refuses
+  unknown ones, and an explicit default counts as a change. `command` is a
+  string (scootbg refuses anything else).
+- **Spawning**: `COMMAND apply-config --profile scoot JSON` (`scoot-nested`
+  under `--nested`) at start-up and on every reload while the section
+  exists, `{}` on a reload that removes it, nothing at start-up without
+  one. Leave stdin, stdout and stderr as for `[autostart]` (stderr to
+  scoot's log: the daemon writes there too; never a pipe scoot reads).
+- **Ordering**: two reloads in quick succession start two `apply-config`s
+  that race, and the older section can land last. Do not start one while
+  the previous one runs (queue the newest), or pass them in order.
+- **Exit statuses**: the reaper logs a non-zero status with the command:
+  1 is a runtime failure (stderr already says which), 2 a section scootbg
+  refused (a scoot/scootbg mismatch, or a value scoot did not check). A
+  missing binary is the warning above.
+- **Nix**: the NixOS and home-manager options, the overlay decision, the
+  checks and the docs listed under [NixOS consumers](#nixos-consumers).
+- **Docs and tests**: `docs/configuration.md`, the root README's
+  "Running", `docs/nix.md`; the smoke test checking a wallpaper pixel on
+  each headless output; the `--tty` gap before the first frame.
+- **A bounded queue** (review of PR #293, F4): the queue of `apply-config`
+  runs above must not wait on one forever. A run can take 5 s to find a
+  daemon and 30 s for its reply; stop waiting on a run after about 40 s,
+  log it, and move on to the newest queued section (the run itself keeps
+  going and exits on its own).
+- **Clean file descriptors** (F4): spawn `apply-config` with no
+  descriptors of scoot's but stdio (everything else `CLOEXEC`, as std's
+  `Command` leaves them; anything scoot opens without it would be inherited
+  by `apply-config`, and from it by the long-lived daemon).
+- **A hung disk on the `{}` path** (F4): with no daemon, `apply-config
+  '{}'` writes the state file (`fsync`, `rename`, directory `fsync`)
+  holding the display's lock, and that is not bounded: on a hung NFS home
+  it waits as long as the kernel does, and a `scootbg daemon` started
+  meanwhile finds the lock held and exits "already running". Not bounded
+  here, because it cannot be cheaply: a timeout would have to give up on a
+  thread still inside `fsync` while the lock is held, and a process in an
+  uninterruptible `fsync` cannot even exit to release it. So part B's
+  bounded queue (above) is what keeps scoot moving: it stops waiting on
+  that run, and the next reload's run finds the lock and waits for it,
+  bounded by its own 5 s.
+
+  - **What moving on costs** (re-review of PR #293, N1):
+    - That next run fails after its 5 s ("a daemon holds the lock but did
+      not answer"), and its newer section is not applied.
+    - When the stuck `fsync` finally ends, the old `{}` is what the state
+      file records.
+  - So part B logs a failed run and keeps its section queued as the
+    newest, rather than treating the failure as final. The next successful
+    run then applies it.
+- **A `stat` on the wallpaper client's loop** (re-review of PR #293, N2):
+  - scootbg checks that each image in a changed section exists, and
+    re-checks missing ones on an unchanged apply, on its Wayland loop.
+  - On a hung network mount that stalls scootbg (not the compositor), as
+    restore at start-up already could.
+  - Recorded here, not fixed: moving the `stat` off the loop belongs with
+    the other slow-disk work.
+
+## Review of PR #293
+
+Review found no crash, hang or data-loss blockers, and one finding that
+had to be fixed before merge (F1). All fixed on the same branch in
+`0c1c48d` and `dc8196f` (the second a regression the first introduced,
+found while re-verifying: see F5); this record in the docs-only commit
+after them.
+
+- **F1 (must fix): a missing image exited 0 on a cold start or an
+  unchanged apply, and a reload after the file came back never showed
+  it.** A started daemon's `config::start` said its problems only on
+  stderr; the caller's own request then found the fingerprint matching,
+  and the "same" branch checked nothing. Now the "same" branch re-checks
+  the section's images that are not showing (`config::recheck`): an entry
+  whose *saved* choice is still the section's own (the same path and look)
+  but whose live choice is not is `stat`ed, put back if the file is there
+  (`Choices::fill`, at the generation it was chosen at), and reported if
+  not (exit 1). The cold path is covered by the same check: the caller's
+  request, the first reply it gets, arrives unchanged and re-checks.
+  **The decision on `set`:** a `set` or `clear` for that output, or for
+  every output, replaces the saved entry, so it is no longer the
+  section's and is neither put back nor reported; and putting back at the
+  old generation (not a new one) makes the image no newer than it was, so
+  it cannot undo a newer request still decoding, and putting back the
+  choice for every output drops no per-output choice (a new generation
+  would drop every older one, `set`s included). That is the precedence
+  rule unchanged: the section's choice fills in only where it is still
+  the last thing chosen. Tests: `a_missing_image_is_reported_until_it_is_back`
+  (a per-output image missing at a cold start: 1; unchanged: 1; a `set`
+  for the other output; the file appears: 0, shown, the `set` stands; the
+  every-output image missing, a `set` for one output, the file appears:
+  the others show it, the `set` stands; a `set` on the very output: 0
+  from then on, the file appearing changes nothing; across a restart).
+  Against the tree without the recheck it fails on the first cold run
+  ("left: Some(0)" with the missing-image warning on stderr: the
+  reviewer's evidence); with the put-back at a fresh generation it fails
+  on "the set for this one stands".
+- **F2: two writers for one profile could race** (A→B→A within one
+  save). Adopting a profile whose retired writer is still busy now waits
+  for that write (up to 2 s, `SAVE_GRACE`) before reading the file, so the
+  file read is the newest, and if it is still stuck takes that writer back
+  (`Saved::take_writer`) rather than start a second. Retired writers are a
+  list; idle ones are dropped (nothing to lose), the rest flushed on exit,
+  each given the grace. Unit test: `a_writer_is_taken_back_only_for_its_own_profile`.
+  `rapid_adoptions_keep_each_file_newest` (20 rounds of `set`, adopt B,
+  adopt A) is a consistency check only: it passed with the fix taken
+  out, three runs of three, since a save takes about 0.3 ms here and each
+  `apply-config` a few.
+- **F3: the forwarder could lose the section.** A `--serve` that lost the
+  lock and then finds no daemon serving and the lock free (the winner
+  recorded `{}`, or died before binding) now tries once more to be the
+  daemon itself; twice at most, and no process starts another.
+  `a_loser_whose_winner_never_serves_becomes_the_daemon` (the test holds
+  the lock, then drops it) fails without the retry ("no daemon answered,
+  and none was starting").
+- **F4 (part B):** in [What part B must do](#what-part-b-must-do): a
+  bounded queue, clean descriptors, and the `{}` path's `fsync` under the
+  lock, documented as unbounded, with why.
+- **F5: exec the running binary, not `current_exe`'s text.** First landed
+  (`0c1c48d`) as an exec of `/proc/self/exe` always, which named the
+  daemon's process `exe` (the kernel takes `comm` from the exec'd file
+  name): `pgrep scootbg`, `pkill scootbg` and `ps -C scootbg` no longer
+  found it. Found while re-verifying (a `pgrep -x scootbg` found no
+  daemon). Now (`dc8196f`) the `current_exe` path is exec'd while it is
+  the same file (device and inode) as `/proc/self/exe`, and
+  `/proc/self/exe` only when the path names another file or none (an
+  upgrade meanwhile), so a different build never runs; the path alone
+  without `/proc`. `a_section_starts_the_daemon` checks `/proc/PID/comm`
+  is `scootbg` (fails with `exe` against `0c1c48d`'s F5).
+- **F6:** connects are tried every 1 ms for the first 50 ms, then every
+  15 ms. A cold daemon answers well inside 50 ms, so cold start is
+  unchanged (below).
+- **F7:** the root README's exit-1 list names the connection closed before
+  an answer and a daemon too old for `apply-config`.
+
+**Numbers at `dc8196f`** (same setup and script as
+[Measurements](#measurements); release sha256 `39e2c361…`, 1,684,328 B,
++8,192 over `4a3cdf6`). Medians (min–max), ms, two runs:
+
+| | run 1 | run 2 |
+|---|---|---|
+| cold `apply-config` | 6.90 (4.85–7.74) | 5.61 (4.89–10.54) |
+| cold `daemon`, then `set` | 4.27 (3.70–4.64) | 4.01 (3.50–5.20) |
+| warm, unchanged | 1.96 (1.58–10.04) | 1.86 (1.53–9.15) |
+| warm, changed | 2.55 (2.04–4.68) | 2.31 (1.92–4.32) |
+| warm `set` | 2.39 (1.98–5.71) | 2.34 (1.92–4.95) |
+| `{}`, no daemon, written | 2.52 (2.24–3.11) | 2.37 (2.27–2.86) |
+| `{}`, no daemon, recorded | 1.51 (1.43–2.37) | 1.76 (1.36–2.03) |
+
+Cold raw, run 1: 7.14, 5.60, 5.52, 7.74, 7.06, 6.74, 7.63, 7.44, 4.85,
+5.20; run 2: 5.59, 5.00, 7.92, 5.63, 6.78, 10.54, 5.26, 5.55, 7.73, 4.89.
+At `0c1c48d` (the retry backoff in, F5's first form): 6.23 and 6.46; at
+`4a3cdf6`: 6.09 and 6.05. The spread is the host's (the `daemon`+`set`
+baseline moves with it), not the backoff, which never engages on a cold
+start here. Idle, the daemon `apply-config` started at `dc8196f`: comm
+`scootbg`, ppid 1, its own process group and session, no tty, 8 fds, 1
+thread, VmRSS 3,968 kB; 0 context switches and 0 CPU ticks in 30 s.
+
+**Verified at `dc8196f`:** `SCOOTBG_REQUIRE_SCOOT=1 SCOOTBG_REQUIRE_SWAY=1
+SCOOTBG_TEST_SWAY=…sway-1.12/bin/sway devenv shell -- soft-egl cargo
+nextest run -p scootbg -p scootbg-mem`: 424 passed, 2 skipped (the
+`#[ignore]`d benchmarks); `cargo test` (same variables): every suite
+passed, `tests/config.rs` 23 of 23; clippy `-D warnings`, `fmt --check`,
+`RUSTFLAGS="-D warnings"` release build, `ldd` (libc, libm, libgcc_s) and
+no `libc` crate: clean; `nix build .#scootbg --option sandbox true`:
+built.

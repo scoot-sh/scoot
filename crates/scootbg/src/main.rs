@@ -9,6 +9,8 @@
 #![forbid(unsafe_code)]
 
 #[cfg(target_os = "linux")]
+mod apply;
+#[cfg(target_os = "linux")]
 mod choices;
 #[cfg(target_os = "linux")]
 mod cli;
@@ -38,6 +40,10 @@ mod paths;
 mod print;
 #[cfg(target_os = "linux")]
 mod protocol;
+#[cfg(target_os = "linux")]
+mod section;
+#[cfg(target_os = "linux")]
+mod sha256;
 #[cfg(target_os = "linux")]
 mod share;
 #[cfg(target_os = "linux")]
@@ -74,7 +80,7 @@ fn main() -> ExitCode {
         cli::Command::Help(topic) => print::print(topic.text()),
         cli::Command::Version => print::print(&format!("{}\n", cli::version_string())),
         cli::Command::Daemon(options) => {
-            return match daemon::run(options) {
+            return match daemon::run(options, None) {
                 daemon::Exit::Stopped => ExitCode::SUCCESS,
                 daemon::Exit::Failed(error) => {
                     warn(format_args!("scootbg: {error}"));
@@ -82,6 +88,7 @@ fn main() -> ExitCode {
                 }
             };
         }
+        cli::Command::ApplyConfig(options) => return ExitCode::from(apply::run(options)),
         cli::Command::Client(request) => match client::send(&request) {
             // `kill`, `set` and `clear` print nothing on success; the
             // others print the reply.

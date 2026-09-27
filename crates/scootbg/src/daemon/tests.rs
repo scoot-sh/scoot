@@ -8,6 +8,8 @@ use crate::color::Color;
 use crate::control::{Answer, ConnId, Handler};
 use crate::image::{Filter, Mode};
 use crate::protocol::{ImageRequest, OutputEntry, OutputList, PROTOCOL_VERSION, Request, Show};
+use crate::section::Section;
+use crate::state::Profile;
 use crate::waiters::Outcome;
 
 /// What was asked, owned.
@@ -32,6 +34,8 @@ struct Fake<'a> {
     outputs: &'a dyn OutputList,
     changes: Vec<(u64, Option<String>, Choice)>,
     refuse: Option<ChangeError>,
+    applied: Vec<(u64, Profile, Section)>,
+    refuse_apply: Option<String>,
 }
 
 impl<'a> Fake<'a> {
@@ -40,6 +44,8 @@ impl<'a> Fake<'a> {
             outputs,
             changes: Vec::new(),
             refuse: None,
+            applied: Vec::new(),
+            refuse_apply: None,
         }
     }
 }
@@ -51,6 +57,24 @@ impl Changes for Fake<'_> {
 
     fn saving(&self) -> bool {
         true
+    }
+
+    fn profile(&self) -> &str {
+        "default"
+    }
+
+    fn apply_config(
+        &mut self,
+        conn: ConnId,
+        profile: Profile,
+        section: &Section,
+    ) -> Result<(), String> {
+        if let Some(message) = &self.refuse_apply {
+            return Err(message.clone());
+        }
+        let id = if conn == ConnId::for_test(1) { 1 } else { 0 };
+        self.applied.push((id, profile, section.clone()));
+        Ok(())
     }
 
     fn change(
@@ -85,7 +109,7 @@ fn query_answers_an_empty_output_list() {
     let reply = ask(&mut responder, Request::Query.line().trim_end());
     assert_eq!(
         reply,
-        serde_json::json!({"type": "outputs", "outputs": [], "saving": true})
+        serde_json::json!({"type": "outputs", "outputs": [], "saving": true, "profile": "default"})
     );
     assert!(!responder.stop);
 }
@@ -484,7 +508,7 @@ fn query_reports_each_output_and_its_surface() {
                 "draw_failed": false,
                 "shows": null,
             },
-        ], "saving": true})
+        ], "saving": true, "profile": "default"})
     );
     // Removing one updates the next reply.
     let _ = outputs.remove_global(4);
@@ -566,4 +590,53 @@ fn a_superseded_image_request_waits_like_a_color() {
     let mut ready = Vec::new();
     waiters.synced(sync, |conn, outcome| ready.push((conn, outcome)));
     assert_eq!(ready, [(conn, Outcome::Shown)]);
+}
+
+#[test]
+fn apply_config_waits_for_its_reply() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
+    let line =
+        r##"{"protocol":1,"type":"apply-config","profile":"scoot","config":{"color":"#102030"}}"##;
+    let mut out = Vec::new();
+    let answer = responder.handle(ConnId::for_test(1), line.as_bytes(), &mut out);
+    assert_eq!(answer, Answer::Later);
+    assert!(out.is_empty());
+    assert_eq!(fake.applied.len(), 1);
+    let (conn, profile, section) = &fake.applied[0];
+    assert_eq!(*conn, 1);
+    assert_eq!(profile.as_str(), "scoot");
+    assert_eq!(
+        section.canonical(),
+        r##"{"color":"#102030"}"##,
+        "the section as sent"
+    );
+}
+
+#[test]
+fn apply_config_problems_are_answered_at_once() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    fake.refuse_apply = Some("the section was applied, except: x".into());
+    let mut responder = Responder::new(&mut fake);
+    let reply = ask(
+        &mut responder,
+        r#"{"protocol":1,"type":"apply-config","profile":"scoot","config":{}}"#,
+    );
+    assert_eq!(reply["type"], "error");
+    assert_eq!(reply["message"], "the section was applied, except: x");
+}
+
+#[test]
+fn a_bad_apply_config_changes_nothing() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
+    for line in [
+        r#"{"protocol":1,"type":"apply-config","profile":"scoot","config":{"mode":"fit"}}"#,
+        r#"{"protocol":1,"type":"apply-config","config":{}}"#,
+        r#"{"protocol":1,"type":"apply-config","profile":"a/b","config":{}}"#,
+    ] {
+        let reply = ask(&mut responder, line);
+        assert_eq!(reply["type"], "error", "{line}");
+    }
+    assert!(fake.applied.is_empty());
 }

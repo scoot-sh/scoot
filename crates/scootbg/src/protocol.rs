@@ -19,6 +19,9 @@
 //! with an error reply, so a client and a daemon from different builds
 //! disagree loudly rather than misread each other. Unknown fields are
 //! ignored, which leaves room for the arguments later requests carry.
+//! A request type is added within a protocol version when a daemon that
+//! predates it refusing it (`unknown request`) is the right outcome, as
+//! for `apply-config`, whose client reports that loudly (`crate::apply`).
 //!
 //! Parsing borrows from the line and allocates nothing unless a string in
 //! it contains escapes; replies are written straight into the
@@ -32,6 +35,8 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
 use crate::outputs::Size;
+use crate::section::Section;
+use crate::state::{Profile, ProfileError};
 use crate::wallpaper::Wallpaper;
 
 #[cfg(test)]
@@ -42,13 +47,13 @@ mod tests;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The longest request line accepted, newline excluded. Requests are small
-/// (the largest planned, `apply-config`, carries one config section with
-/// paths); anything longer is refused and the connection closed, so a
-/// client cannot make the daemon buffer without bound.
+/// (the largest, `apply-config`, carries one config section with paths, at
+/// most `section::MAX_SECTION` bytes); anything longer is refused and the
+/// connection closed, so a client cannot make the daemon buffer without
+/// bound.
 pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 
-/// What a client can ask for. `apply-config` arrives with the scoot
-/// integration (docs/scootbg/backlog/scoot-integration.md).
+/// What a client can ask for.
 ///
 /// ```text
 /// {"protocol":1,"type":"set","color":"#1e1e2e"}
@@ -56,6 +61,7 @@ pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 /// {"protocol":1,"type":"set","image":"/abs/a.jpg","mode":"fit","fill":"#101014","filter":"lanczos3"}
 /// {"protocol":1,"type":"clear"}
 /// {"protocol":1,"type":"clear","output":"DP-1"}
+/// {"protocol":1,"type":"apply-config","profile":"scoot","config":{"color":"#1e1e2e"}}
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request<'a> {
@@ -73,6 +79,10 @@ pub enum Request<'a> {
     /// Show nothing (the compositor's own background) on every output, or
     /// on the outputs named `output`.
     Clear { output: Option<Cow<'a, str>> },
+    /// A `[wallpaper]` section from scoot's config, for `profile`
+    /// (`crate::section`, `daemon::config`): adopt the profile, and apply
+    /// the section if it changed since it was last applied.
+    ApplyConfig { profile: Profile, section: Section },
 }
 
 /// What a `set` shows.
@@ -107,12 +117,16 @@ impl Request<'_> {
             Self::Version => "version",
             Self::Set { .. } => "set",
             Self::Clear { .. } => "clear",
+            Self::ApplyConfig { .. } => "apply-config",
         }
     }
 
     /// The request line a client sends, newline included. Strings are
     /// JSON-escaped, so any output name or path round-trips.
     pub fn line(&self) -> String {
+        if let Self::ApplyConfig { profile, section } = self {
+            return section.request_line(profile);
+        }
         #[derive(Serialize)]
         struct Line<'r> {
             protocol: u32,
@@ -155,7 +169,7 @@ impl Request<'_> {
                 }
             }
             Self::Clear { output } => line.output = output.as_deref(),
-            Self::Query | Self::Kill | Self::Version => {}
+            Self::Query | Self::Kill | Self::Version | Self::ApplyConfig { .. } => {}
         }
         // Serializing strings and numbers into a `String` cannot fail; if
         // it ever did, the empty line gets a "malformed" reply, not a panic.
@@ -198,6 +212,15 @@ pub enum RequestError {
     ImageOnly(&'static str),
     /// An image path that is not absolute.
     RelativePath(String),
+    /// `apply-config` whose `profile` or `config` is not one (serde's
+    /// message, from `crate::section`'s strict parse).
+    BadApply(serde_json::Error),
+    /// `apply-config` without a `profile`.
+    NoProfile,
+    /// `apply-config` with a profile name that cannot be one.
+    BadProfile(ProfileError),
+    /// `apply-config` without a `config`.
+    NoConfig,
 }
 
 impl fmt::Display for RequestError {
@@ -233,6 +256,13 @@ impl fmt::Display for RequestError {
                 f,
                 "the image path {path:?} is not absolute (the daemon's working directory \
                  is not yours; `scootbg set` makes a path absolute before sending it)"
+            ),
+            Self::BadApply(error) => write!(f, "bad apply-config request: {error}"),
+            Self::NoProfile => write!(f, "`apply-config` needs a `profile`"),
+            Self::BadProfile(error) => write!(f, "`apply-config`: {error}"),
+            Self::NoConfig => write!(
+                f,
+                "`apply-config` needs a `config` object (`{{}}` when the section is absent)"
             ),
         }
     }
@@ -304,8 +334,27 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
         "clear" => Ok(Request::Clear {
             output: envelope.output,
         }),
+        "apply-config" => apply_config(line),
         _ => Err(RequestError::Unknown(kind.into_owned())),
     }
+}
+
+/// `apply-config`'s own fields, read in a second pass over the line (only
+/// for this request, which comes once per scoot reload), so that a `config`
+/// on any other request stays an ignored unknown field, and the section's
+/// strict parse (unknown keys, duplicates) sees the object itself.
+fn apply_config(line: &[u8]) -> Result<Request<'static>, RequestError> {
+    #[derive(Deserialize)]
+    struct Apply<'a> {
+        #[serde(borrow)]
+        profile: Option<Cow<'a, str>>,
+        config: Option<Section>,
+    }
+    let apply: Apply<'_> = serde_json::from_slice(line).map_err(RequestError::BadApply)?;
+    let profile = apply.profile.ok_or(RequestError::NoProfile)?;
+    let profile = Profile::parse(&profile).map_err(RequestError::BadProfile)?;
+    let section = apply.config.ok_or(RequestError::NoConfig)?;
+    Ok(Request::ApplyConfig { profile, section })
 }
 
 /// What a `set` asks to show, from its fields.
@@ -489,6 +538,9 @@ pub enum Reply<'a> {
         /// directory, or a state file that could not be read or is a newer
         /// scootbg's; the daemon's stderr said why at start-up).
         saving: bool,
+        /// The profile whose state the daemon restores and saves: its
+        /// `--profile`, or the last one an `apply-config` made it adopt.
+        profile: &'a str,
     },
     Error {
         #[serde(serialize_with = "display")]
