@@ -82,7 +82,7 @@ but that is an estimate, not a measurement.
   - Round one's fix was two `mallopt` calls plus a trim, through `libc`.
     That is **superseded** by the allocator wrapper (§6b), which needs no
     C call and no tuning and also covers dependencies' internal buffers.
-- **[images-decode-and-fit.md](../images-decode-and-fit.md): scale with
+- **[images-decode-and-fit-done.md](images-decode-and-fit-done.md): scale with
   `pic-scale-safe`, then pack.**
   - Crop to the fill rectangle in place: rows are a sub-slice, and
     columns are compacted row by row.

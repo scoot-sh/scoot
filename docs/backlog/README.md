@@ -693,6 +693,9 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 ### Found measuring scootbg's dependencies (2026-09-26)
 - [Upscaled surfaces get a semi-transparent 1-px edge under pixman](./core/shm-viewport-upscale-edge-fade.md) — medium: Smithay's pixman renderer samples bilinear with `Repeat::None`, so every buffer-scale-1 window on a scaled output gets a faded 1-px edge (at scale 2, alpha ~0.75 along edges, ~0.56 at corners), and a 1×1 shm buffer viewported to the output is a full gradient. Fix: `Repeat::Pad`, as a scoot-sh/smithay fork commit. GLES and single-pixel buffers are unaffected.
 
+### Found building scootbg's images (2026-09-27)
+- [A new buffer scale is ignored until a new buffer is attached](./core/buffer-scale-needs-a-new-buffer.md) — low: Smithay reads `set_buffer_scale`/`set_buffer_transform` only with a newly attached buffer, so a commit changing only the scale keeps the old one (reproduced on scoot; scootbg attaches again to work around it). Fix belongs in the scoot-sh/smithay fork.
+
 ### From the PR #264 review (2026-09-26)
 - [Withhold frame callbacks from layer surfaces nobody can see](./core/frame-callbacks-for-hidden-surfaces.md) — low: every mapped layer surface gets `frame` on every render with no occlusion check, so an animated wallpaper under a fullscreen window never learns it is covered. Blocks scootbg's animated wallpapers (its milestone 2), not v1.
 

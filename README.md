@@ -328,13 +328,17 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 
 `scootbg` is scoot's wallpaper daemon, a separate binary and package that
 works on any compositor with `wlr-layer-shell`. **It is early: it shows a
-solid color on every output, or on one; images come in a later version.**
-What works today:
+solid color or an image (PNG, JPEG, WebP) on every output, or on one; it
+does not yet restore it at the next start.** What works today:
 
 ```sh
 scootbg daemon                        # connect to $WAYLAND_DISPLAY and serve the control socket
 scootbg set '#1e1e2e'                 # every output, including ones plugged in later
 scootbg set '#101014' --output DP-2   # one output, by connector name (as `query` lists them)
+scootbg set ~/Pictures/hills.jpg      # an image, covering every output (--mode fill)
+scootbg set ./#draft.png              # a file whose name starts with '#'
+scootbg set city.png --output DP-2 --mode fit --fill '#101014'
+scootbg set tile.png --mode tile --filter nearest
 scootbg clear                         # back to the compositor's own background
 scootbg clear --output DP-2           # ... on one output
 scootbg query                         # each output, its surface and what it shows, one JSON line
@@ -344,14 +348,37 @@ scootbg --help                        # and `scootbg COMMAND --help`
 ```
 
 **Colors** are `#rrggbb`, six hex digits in either case; quote them, since
-the shell reads `#` as a comment. Nothing else is accepted yet: no `#rgb`
-shorthand, no alpha (a wallpaper is opaque), and anything not starting with
-`#` is refused with "images come in a later version" (exit 2). `set` with
-no `--output` replaces every choice, per-output ones included; with
-`--output NAME` it sets that output only, and the choice is kept by name,
-so the monitor shows it again when it is unplugged and plugged back in. A
-name no output has right now is an error (exit 1) and changes nothing.
-`clear` does the same with nothing to show.
+the shell reads `#` as a comment. No `#rgb` shorthand, no alpha (a
+wallpaper is opaque). **Anything not starting with `#` is an image path**,
+so a file whose name starts with `#` is given as `./#name.png`. The path is
+made absolute before it is sent (the daemon's working directory is not
+yours) and must be valid UTF-8. PNG, JPEG and WebP are read, told apart by
+content, not by name (an animated PNG or WebP shows its first frame);
+transparency is shown over the fill color, and a JPEG's or WebP's EXIF
+orientation is applied. `--mode` fits it to each output:
+
+| `--mode` | |
+|---|---|
+| `fill` (default) | cover the output, cropping what overflows, centred |
+| `fit` | all of it, as large as fits, centred, the rest in `--fill` |
+| `stretch` | the output's size, whatever the aspect |
+| `center` | unscaled, centred: cropped if larger, the rest in `--fill` |
+| `tile` | unscaled, repeated from the top-left corner |
+
+`--fill '#rrggbb'` is the color around a fitted or centred image (default
+`#000000`), `--filter lanczos3|catmull-rom|bilinear|nearest` the scaling
+filter (default `lanczos3`; `nearest` keeps pixel art hard). `--mode`,
+`--fill` and `--filter` with a color are a usage error. The image is
+decoded and scaled on a worker thread, drawn at each output's surface size
+times its scale, and the decoded pixels are dropped once drawn: an output
+plugged in later, or a new scale, reads the file again. Images over
+16384×16384 pixels are refused.
+
+`set` with no `--output` replaces every choice, per-output ones included;
+with `--output NAME` it sets that output only, and the choice is kept by
+name, so the monitor shows it again when it is unplugged and plugged back
+in. A name no output has right now is an error (exit 1) and changes
+nothing. `clear` does the same with nothing to show.
 
 **`set` and `clear` return once it is on screen:** every targeted output
 shows the change and the compositor has processed it (a `wl_display.sync`
@@ -360,9 +387,15 @@ it. An output unplugged meanwhile is left out of that wait; one whose
 surface is not configured yet is waited for; one scootbg has given up on
 (`gave-up` in `query`, said on stderr) is left out and shows nothing, and
 `set` still exits 0. They print nothing on
-success. Exit status: 0 done; 1 no daemon running, unknown output, or
-drawing failed (the daemon's stderr says why); 2 usage error, a malformed
-color included.
+success. **An image that cannot be shown** (no such file, not a regular
+file, not a PNG/JPEG/WebP, too large, truncated or corrupt) is an error
+saying why, and every output keeps what it showed. **The newest request
+wins**: a `set` or `clear` sent while an earlier image is still decoding is
+never undone when that image finishes; the earlier `set` then returns 0
+without changing anything. Exit status: 0 done; 1 no daemon running,
+unknown output, image that cannot be shown, or drawing failed (the
+daemon's stderr says why); 2 usage error, a malformed color or an unknown
+`--mode`/`--filter` included.
 
 On a compositor with `wp_single_pixel_buffer_manager_v1` and
 `wp_viewporter` (scoot, sway, and most others) a color costs no shared
@@ -406,14 +439,17 @@ output has not reported itself yet), `pending`, `configured` (with `size`),
 stopped trying on that output, says so on stderr, and the other outputs
 are unaffected; it lasts until that output is unplugged and plugged back
 in, which makes it a new output). `shows` is what the output has on
-screen: `{"color":"#rrggbb"}` (lowercase), or `null` for nothing. New keys
+screen: `{"color":"#rrggbb"}` (lowercase),
+`{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
+or `null` for nothing. New keys
 may be added; none changes meaning within protocol 1. If the daemon cannot
 accept clients (out of file descriptors, say), it keeps the wallpaper up,
 says so once on stderr, and retries every second rather than exit. The
 control protocol itself (one JSON object per line, for scripts that skip
 the CLI) is in [docs/scootbg/README.md](docs/scootbg/README.md#the-control-protocol).
-Images are the next items in [its backlog](docs/scootbg/backlog/README.md);
-scoot's `[wallpaper]` config section does not exist yet, so do not add one.
+Restoring the wallpaper at the next start is the next item in
+[its backlog](docs/scootbg/backlog/README.md); scoot's `[wallpaper]` config
+section does not exist yet, so do not add one.
 
 ## Documentation
 
@@ -484,7 +520,7 @@ split by path: a change under `crates/scootbg/` or `crates/scootbg-mem/`
 alone runs only scootbg's own job (fmt, clippy, tests, a no-`libc`-crate
 check, the release size) plus scootbg's integration tests (on a headless
 scoot, and on a headless sway from the pinned nixpkgs for outputs coming
-and going, with colors checked by real pixels on both), and a compositor-only change skips scootbg's job; shared files
+and going, with colors and images checked by real pixels on both), and a compositor-only change skips scootbg's job; shared files
 (`Cargo.*`, `flake.*`, `nix/`, `.github/`, and anything unlisted) run
 everything. The
 packaged artifacts themselves (`nix build .#scoot .#scootctl .#scootbg`) build on every

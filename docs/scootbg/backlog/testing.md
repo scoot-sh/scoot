@@ -41,3 +41,12 @@ blocked: null
 
   For the shm buffer, a test that truncating the memfd is refused once
   the seals are set.
+
+**From [ticket 6](resolved/images-decode-and-fit-done.md#verified-where):**
+the unit tests now cut every test file (JPEG baseline and progressive,
+PNG, WebP) at every length and flip random bytes in 300 copies of each,
+through the real decode entry point; the scaler is called over every
+shape 1–5 × 1–5 in both directions and a set of extreme aspects, every
+filter. Deterministic, not coverage-guided: the `cargo fuzz` target over
+decode + crop + scale + pack above is still to do, and is the place
+`pic-scale-safe`'s lack of upstream fuzzing is answered.
