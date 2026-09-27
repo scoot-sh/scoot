@@ -2266,8 +2266,10 @@ fd counts per phase, raw (`~/fx/t13-leg*/N-*/fds`):
 
 | session | start (both heads) | remove | add | window on DP-1 | replug cycle |
 | --- | --- | --- | --- | --- | --- |
-| leg 1 (preferred) | 66 | 51 | 63 | 63 | — |
-| leg 2 (`--mode`) | 66 | 51 | — | 66 | 63 (restored) |
+| leg 1 (preferred) | 66 | 51 | 63 | 66 | — |
+| leg 2 (`--mode`) | 66 | 51† | — | 69 | 63 (restored) |
+
+† leg-2 remove 51 was observed live, not snapshotted (the snap script only ran for 0/1/2/9-final); the 69 window-on-DP-1 read is +3 over Test 12's 66, inside the known ±3 jitter class — both PASS verdicts stand (66 reproduces Test 12 exactly; removes return to exactly 51).
 
 No jiffies/CPU sampled this run (functional legs only; Test 4 and the
 phase-E numbers stand).
