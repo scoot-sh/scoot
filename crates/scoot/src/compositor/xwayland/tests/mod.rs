@@ -696,6 +696,10 @@ mod drop;
 #[cfg(feature = "xwayland")]
 mod drop_end;
 #[cfg(feature = "xwayland")]
+mod first_motion;
+#[cfg(feature = "xwayland")]
+mod first_motion_race;
+#[cfg(feature = "xwayland")]
 mod focus;
 #[cfg(feature = "xwayland")]
 mod ime;
