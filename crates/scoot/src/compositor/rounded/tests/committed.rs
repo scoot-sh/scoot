@@ -35,7 +35,7 @@ fn check_under_fill(scale: f64) {
     assert_ring_hugs_content(&pixels, drawn, scale, RADIUS, THICKNESS);
 
     // The strip of the slot the client left undrawn is background: no ring
-    // around the slot's far corner, no window colour.
+    // around the slot's far corner, no window color.
     let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
     let slot_clip = clip_rect(slot, scale);
     let (right, bottom) = (

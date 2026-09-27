@@ -79,7 +79,7 @@ const WINDOW_BUFFER: i32 = 40;
 
 // Colors as the BGRA bytes a pixman `Argb8888` buffer holds them in.
 const WINDOW_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
-/// An `overlay` layer-shell surface's colour -- the layer that draws in
+/// An `overlay` layer-shell surface's color -- the layer that draws in
 /// *front* of ordinary windows, so it is the strongest version of "a
 /// layer-shell client must not be visible while locked".
 const OVERLAY_BGRA: [u8; 4] = [0x20, 0x20, 0xE0, 0xFF];
@@ -88,11 +88,11 @@ const LOCK_BGRA: [u8; 4] = [0xE0, 0x20, 0xE0, 0xFF];
 const BLACK_BGRA: [u8; 4] = [0x00, 0x00, 0x00, 0xFF];
 /// ...and [`super::ABANDONED_BACKDROP`].
 const RED_BGRA: [u8; 4] = [0x00, 0x00, 0xFF, 0xFF];
-/// What [`appearance`]'s `background_color` comes out as: the colour an
+/// What [`appearance`]'s `background_color` comes out as: the color an
 /// *unlocked* empty session shows, and therefore the one a locked frame must
 /// never contain.
 const BACKGROUND_BGRA: [u8; 4] = [0x56, 0x34, 0x12, 0xFF];
-/// A background window's `xdg_popup`, deliberately unlike every colour above
+/// A background window's `xdg_popup`, deliberately unlike every color above
 /// so its presence over a lock screen reads unambiguously.
 const XDG_POPUP_BGRA: [u8; 4] = [0xE0, 0xE0, 0x20, 0xFF];
 /// An input-method candidate window, likewise unmistakable.

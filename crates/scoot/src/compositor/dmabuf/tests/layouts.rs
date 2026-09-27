@@ -17,14 +17,14 @@
 //! that [`LAYOUTS`] knows how to fill, allocate one, hand it over through
 //! `create_immed` -- the request with no soft refusal, so a promise the
 //! renderer breaks kills this client and fails the test -- show it in a real
-//! `xdg_toplevel`, and assert the composited framebuffer shows the colour it
-//! was filled with. Each step's colour differs from the one before it (red,
+//! `xdg_toplevel`, and assert the composited framebuffer shows the color it
+//! was filled with. Each step's color differs from the one before it (red,
 //! green, blue, dark red, as the layout can express), encoded in the layout's
 //! own terms (BT.601 limited-range `Y'CbCr` for the YUV ones), so a render
 //! that silently did not happen -- a stale frame still showing the previous
-//! buffer -- fails rather than passing on the last colour, and a layout
+//! buffer -- fails rather than passing on the last color, and a layout
 //! sampled wrongly (chroma ignored, channels swapped, a YUV image bound as
-//! `GL_TEXTURE_2D`) shows up as the wrong colour.
+//! `GL_TEXTURE_2D`) shows up as the wrong color.
 //!
 //! **What it cannot reach: explicit tiled or compressed modifiers.** A dumb
 //! buffer is linear by definition, and the only GLES driver this project can
@@ -68,7 +68,7 @@ const CANVAS: i32 = 128;
 /// here (2x2- and 2x1-subsampled) has whole samples.
 const SIDE: u32 = 32;
 
-/// An opaque colour, 8 bits a channel.
+/// An opaque color, 8 bits a channel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Rgb {
     r: u8,
@@ -81,12 +81,12 @@ const GREEN: Rgb = Rgb { r: 0, g: 255, b: 0 };
 const BLUE: Rgb = Rgb { r: 0, g: 0, b: 255 };
 const DARK_RED: Rgb = Rgb { r: 128, g: 0, b: 0 };
 
-/// Every colour a step may use. Channels are only ever 0, 128 or 255, which
+/// Every color a step may use. Channels are only ever 0, 128 or 255, which
 /// is what [`half`] can encode exactly and what keeps any two of these at
 /// least 127 apart in some channel -- far outside [`TOLERANCE`].
 const PALETTE: [Rgb; 4] = [RED, GREEN, BLUE, DARK_RED];
 
-/// How far a composited channel may land from the colour filled in. A YUV
+/// How far a composited channel may land from the color filled in. A YUV
 /// round trip through BT.601 limited range, and a 10-bit or half-float
 /// channel, land within a few units; the palette's nearest pair is 127 apart.
 const TOLERANCE: i32 = 40;
@@ -102,7 +102,7 @@ impl Rgb {
         (y.round() as u8, cb.round() as u8, cr.round() as u8)
     }
 
-    /// Whether a BGRA framebuffer pixel is this colour.
+    /// Whether a BGRA framebuffer pixel is this color.
     fn matches(self, pixel: &[u8]) -> bool {
         let near = |got: u8, want: u8| (i32::from(got) - i32::from(want)).abs() <= TOLERANCE;
         near(pixel[2], self.r) && near(pixel[1], self.g) && near(pixel[0], self.b)
@@ -124,17 +124,17 @@ fn half(channel: u8) -> u16 {
     }
 }
 
-/// How a buffer of one fourcc is laid out and filled with one colour.
+/// How a buffer of one fourcc is laid out and filled with one color.
 struct Layout {
     fourcc: Fourcc,
     /// Per plane: `(bytes per sample, horizontal subsampling, vertical
     /// subsampling)`. A plane's stride is `SIDE / h * bytes` and it has
     /// `SIDE / v` rows.
     planes: &'static [(u32, u32, u32)],
-    /// Whether this layout can show `colour` at all: a one-channel format
+    /// Whether this layout can show `color` at all: a one-channel format
     /// samples as `(r, 0, 0)`, so it has no green or blue.
     shows: fn(Rgb) -> bool,
-    /// Writes `colour` into `planes`, one byte slice per plane in order.
+    /// Writes `color` into `planes`, one byte slice per plane in order.
     fill: fn(&mut [&mut [u8]], Rgb),
 }
 
@@ -265,10 +265,10 @@ fn fill_repeating(planes: &mut [&mut [u8]], index: usize, pattern: &[u8]) {
 enum Step {
     /// Bind the dmabuf global at v4, read the default feedback's table.
     ReadTable,
-    /// Allocate one buffer of `LAYOUTS[index]` filled with `colour`,
+    /// Allocate one buffer of `LAYOUTS[index]` filled with `color`,
     /// `create_immed` it, and show it in the client's one window (mapping it
     /// on first use).
-    Show { index: usize, colour: Rgb },
+    Show { index: usize, color: Rgb },
 }
 
 /// What a client answers a [`Step`] with.
@@ -313,8 +313,8 @@ impl Drop for Allocation {
 }
 
 /// Allocates `layout` as one dumb buffer on `/dev/dri/card0`, filled with
-/// `colour`, planes packed back to back. `Err` names why this machine cannot.
-fn allocate(layout: &Layout, colour: Rgb) -> Result<Allocation, String> {
+/// `color`, planes packed back to back. `Err` names why this machine cannot.
+fn allocate(layout: &Layout, color: Rgb) -> Result<Allocation, String> {
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -349,7 +349,7 @@ fn allocate(layout: &Layout, colour: Rgb) -> Result<Allocation, String> {
             slices.push(plane);
             rest = tail;
         }
-        (layout.fill)(&mut slices, colour);
+        (layout.fill)(&mut slices, color);
     }
     let fd = card
         .buffer_to_prime_fd(dumb.handle(), drm::CLOEXEC | drm::RDWR)
@@ -401,9 +401,9 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 feedback.destroy();
                 Ack::Table(table)
             }
-            Step::Show { index, colour } => {
+            Step::Show { index, color } => {
                 let layout = &LAYOUTS[index];
-                match allocate(layout, colour) {
+                match allocate(layout, color) {
                     Err(reason) => Ack::NoDevice(reason),
                     Ok(allocation) => {
                         show(&mut client, &mut queue, &qh, layout, allocation)?;
@@ -582,18 +582,18 @@ fn every_advertised_layout_imports_and_draws() {
         if !table.contains(&(layout.fourcc as u32, linear)) {
             continue;
         }
-        // The next palette colour after the previous step's that this
-        // layout can show: never the colour of the step before, so a frame
+        // The next palette color after the previous step's that this
+        // layout can show: never the color of the step before, so a frame
         // that was not redrawn cannot pass on the previous buffer's pixels,
         // and rotating so every channel (and so both chroma planes) gets
-        // exercised rather than two colours alternating.
+        // exercised rather than two colors alternating.
         let start = previous.map_or(0, |previous| previous + 1);
-        let (slot, colour) = (0..PALETTE.len())
+        let (slot, color) = (0..PALETTE.len())
             .map(|step| (start + step) % PALETTE.len())
             .map(|slot| (slot, PALETTE[slot]))
-            .find(|(slot, colour)| (layout.shows)(*colour) && Some(*slot) != previous)
-            .expect("every layout shows two palette colours");
-        match fixture.run(Step::Show { index, colour }) {
+            .find(|(slot, color)| (layout.shows)(*color) && Some(*slot) != previous)
+            .expect("every layout shows two palette colors");
+        match fixture.run(Step::Show { index, color }) {
             Ack::NoDevice(reason) => {
                 eprintln!(
                     "every_advertised_layout_imports_and_draws: skipped -- no dumb \
@@ -607,19 +607,19 @@ fn every_advertised_layout_imports_and_draws() {
         let pixels = fixture.render();
         let shown = pixels
             .chunks_exact(4)
-            .filter(|pixel| colour.matches(pixel))
+            .filter(|pixel| color.matches(pixel))
             .count();
         let area = (SIDE * SIDE) as usize;
         assert!(
             shown >= area / 2,
             "{:?} (advertised at LINEAR) imported but drew {shown} pixels of \
-             {colour:?} for a {SIDE}x{SIDE} buffer of it -- sampled as the wrong \
-             colour, not drawn, or a stale frame",
+             {color:?} for a {SIDE}x{SIDE} buffer of it -- sampled as the wrong \
+             color, not drawn, or a stale frame",
             layout.fourcc
         );
         drawn.push(layout.fourcc);
         previous = Some(slot);
-        eprintln!("  {:?} drawn as {colour:?}", layout.fourcc);
+        eprintln!("  {:?} drawn as {color:?}", layout.fourcc);
     }
     let untested: Vec<String> = table
         .iter()
@@ -704,7 +704,7 @@ fn a_dmabuf_window_draws_across_a_resize_without_a_reimport() {
         fixture.spawn(run_client);
         match fixture.run(Step::Show {
             index: xrgb,
-            colour: RED,
+            color: RED,
         }) {
             Ack::NoDevice(reason) => {
                 eprintln!(
@@ -717,10 +717,10 @@ fn a_dmabuf_window_draws_across_a_resize_without_a_reimport() {
             Ack::Table(_) => panic!("expected a shown buffer"),
         }
         let area = (SIDE * SIDE) as usize;
-        let shown = |pixels: &[u8], colour: Rgb| {
+        let shown = |pixels: &[u8], color: Rgb| {
             pixels
                 .chunks_exact(4)
-                .filter(|pixel| colour.matches(pixel))
+                .filter(|pixel| color.matches(pixel))
                 .count()
         };
         let red = shown(&fixture.render(), RED);
@@ -795,7 +795,7 @@ fn a_dmabuf_window_draws_across_a_resize_without_a_reimport() {
         // A new buffer after the resize imports and draws on the new target.
         match fixture.run(Step::Show {
             index: xrgb,
-            colour: GREEN,
+            color: GREEN,
         }) {
             Ack::Shown => {}
             Ack::NoDevice(reason) => panic!("{renderer}: the second buffer: {reason}"),

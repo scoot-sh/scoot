@@ -73,7 +73,7 @@
 //! Pinned over the wire, against the session's own backend
 //! (`dmabuf/tests.rs::every_advertised_format_is_one_the_renderer_imports`),
 //! and end to end -- allocated, handed over through `create_immed`, and
-//! checked on screen for the right colour -- for one representative of each
+//! checked on screen for the right color -- for one representative of each
 //! layout class the table carries (`dmabuf/tests/layouts.rs`).
 //!
 //! **"Will really take" is a wider question than "lists at `LINEAR`", and
@@ -284,7 +284,7 @@
 //!   refused (`UnsupportedNumberOfPlanes`/`UnsupportedModifier`); under GLES
 //!   it is whatever EGL says -- including an *implicit*-modifier buffer
 //!   (`Modifier::Invalid`), which EGL accepts and which, for a YUV format,
-//!   Smithay binds as `GL_TEXTURE_2D` and draws as the wrong colour (measured
+//!   Smithay binds as `GL_TEXTURE_2D` and draws as the wrong color (measured
 //!   on llvmpipe: the `layouts.rs` red fill drew zero red pixels at
 //!   `Invalid`, all of them at `LINEAR`). That is why the table never offers
 //!   it; a client that allocates implicitly anyway gets a wrong picture, not
@@ -297,7 +297,7 @@
 //!   include `LINEAR` or `Invalid` (`wayland/dmabuf/dispatch.rs`, `bind`),
 //!   which under GLES now includes the YUV ones. Such a client allocates
 //!   implicitly and sends `Invalid`, and a YUV buffer imported that way draws
-//!   the wrong colours as above -- a wrong picture rather than a kill on the
+//!   the wrong colors as above -- a wrong picture rather than a kill on the
 //!   one driver measured (llvmpipe; a driver refusing implicit YUV would
 //!   refuse the import instead), and only for a client too old to have been
 //!   told better. Modern clients bind v4+.

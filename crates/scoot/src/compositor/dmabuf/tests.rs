@@ -1371,7 +1371,7 @@ fn bind_storm_cost() {
 /// `/dev/udmabuf` this line appears only under `cargo test -- --nocapture`
 /// (or `cargo nextest run --no-capture`), or bundled into the output of some
 /// *other* failing test in the same binary. It is not a `#[ignore]` and it
-/// does not colour the summary: nine of this suite's tests will report `ok`
+/// does not color the summary: nine of this suite's tests will report `ok`
 /// having checked nothing.
 ///
 /// That is the deliberate trade -- see the module doc -- but it means

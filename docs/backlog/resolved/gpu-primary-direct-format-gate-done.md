@@ -37,7 +37,7 @@ composites as before.
   and transform; and the only real difference, alpha under the opaque
   fallback, cannot show on the bottom plane, which Smithay only hands an
   element that is opaque edge to edge or sits over a black/transparent
-  clear colour. Reordering `COLOR_FORMATS` was rejected because it changes
+  clear color. Reordering `COLOR_FORMATS` was rejected because it changes
   the format of every composited frame on every device. (Corrected in
   review: on virtio the client framebuffer is `XR24`/`Invalid`, so only the
   fourcc differed from the `AR24`/`Invalid` swapchain there, and a reorder
@@ -139,7 +139,7 @@ swapchain format was never recorded -- `Asahi.md` Test 5 asks for it):
 2. **An eligible bottom element.** Smithay only tries the primary for the
    bottom visible element when nothing composited sits above it (the cursor
    must be on its own plane) *and* the element is opaque and covers the whole
-   output, or the clear colour is black/transparent. When this was filed
+   output, or the clear color is black/transparent. When this was filed
    scoot had no path to that on its defaults: it did not honour client
    fullscreen at all, the default focus ring (3 px) is a composited element
    over the focused window, and the default background is not black. The
@@ -200,7 +200,7 @@ let a forced capture frame go direct.
   and leaves the atomic `TEST` as the only judge -- the simplest lift, and
   the one measured working. Its risk is the reason it is a separate bit:
   it hands KMS buffers whose format differs from the swapchain's, which a
-  driver may accept and display with the wrong alpha/colour interpretation
+  driver may accept and display with the wrong alpha/color interpretation
   rather than refuse. Alternatively put `Xrgb8888` first in `COLOR_FORMATS`
   *and* allocate the swapchain with an explicit `LINEAR` where the plane
   allows it -- narrower, but it changes every composited frame's format and
@@ -208,7 +208,7 @@ let a forced capture frame go direct.
   assumption).
 - **Which elements may be tried.** Primary-direct needs the bottom visible
   element with everything above it on planes, and either a black/transparent
-  clear colour or a whole-output opaque element. With a black
+  clear color or a whole-output opaque element. With a black
   `background_color` *any* bottom window qualifies -- and `Rounded` forwards
   `underlying_storage`, so a rounded window taken direct loses its corner
   clip. Decide whether the eligibility rule lives here (e.g. only when the

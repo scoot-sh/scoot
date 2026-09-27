@@ -588,7 +588,7 @@ be revisited.
   methodology lessons: the VM's unpaced-injection benchmark measures nothing
   on hardware 14x faster per IPC round trip (damage gets coalesced away), and
   "confirm which tier is live" nearly failed because the compositor
-  colourised redirected logs.
+  colorized redirected logs.
 - [Rounded window corners](./resolved/rounded-window-corners-done.md) — the cost
   is not the corners, it is that a rounded window is no longer opaque, so
   what is behind it can no longer be skipped. Measure with *overlapping*
@@ -710,7 +710,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 ### GPU tier, after primary-direct (2026-09-23)
 - [A/B resource usage vs niri](./resolved/niri-ab-benchmark-done.md) — RESOLVED 2026-09-24 (PR #237, dev VM half), at the user's direct request: both compositors nested in the same cage host on llvmpipe, three rotating rounds, results and caveats in [`docs/benchmarks.md`](../benchmarks.md). The real-GPU half is the next entry.
 - [A/B vs niri on a real GPU, `--tty` included](./testing/niri-ab-real-gpu.md) — low: **run 2026-09-25** on the Apple M2 (`Asahi.md` Test 9, `docs/benchmarks.md`); only input-to-present latency remains, which needs a method first.
-- [GLES tier advertises only LINEAR dma-bufs](./resolved/gles-dmabuf-full-formats-done.md) — RESOLVED 2026-09-23 (PR #229): under `gles` the feedback is the driver's own import set (every fourcc at every explicit modifier, external-only YUV included), `Invalid` never offered next to explicit layouts (an implicit YUV buffer draws the wrong colour, measured), pixman byte-identical. On llvmpipe: 57 formats at `LINEAR`, `NV12`/`P010`/`YU12`/`YUYV` imported through `create_immed` and drawn correctly from dumb buffers. Real GPU: `Asahi.md` Test 6.
+- [GLES tier advertises only LINEAR dma-bufs](./resolved/gles-dmabuf-full-formats-done.md) — RESOLVED 2026-09-23 (PR #229): under `gles` the feedback is the driver's own import set (every fourcc at every explicit modifier, external-only YUV included), `Invalid` never offered next to explicit layouts (an implicit YUV buffer draws the wrong color, measured), pixman byte-identical. On llvmpipe: 57 formats at `LINEAR`, `NV12`/`P010`/`YU12`/`YUYV` imported through `create_immed` and drawn correctly from dumb buffers. Real GPU: `Asahi.md` Test 6.
 - [Scanout-tranche feedback + `zero_copy` flag](./resolved/gpu-scanout-candidates-done.md) — RESOLVED 2026-09-23: see the GPU tier completion entry above. Dev VM: tranche `XR24`/`AR24` at `LINEAR`, sent/reverted live, `zero_copy` on exactly the frames Smithay scanned out directly. Real GPU (does a GL client reallocate into it and go direct): `Asahi.md` Test 6 Part C.
 - [Windows on overlay planes](./core/gpu-overlay-window-candidates.md) — low, **unblocked 2026-09-25**: Asahi's `apple,dcp` has one overlay (zpos 1, `LINEAR` only, alpha RGB + YUV formats, no `XR24`) and no cursor plane.
 - [A composited cursor blocks primary-direct](./core/gpu-direct-blocked-by-composited-cursor.md) — medium, found on Asahi 2026-09-25: with no cursor plane, a visible pointer denies every fullscreen window a primary attempt; mpv went direct once it hid its pointer (~60% less compositor CPU). A cursor on the overlay needs a Smithay-fork change.

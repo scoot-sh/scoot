@@ -184,14 +184,14 @@ teardown to their own PIDs.
 1. **Measure it as a rate, not a picture.** Loop N runs (N >= 20) per
    configuration, and for each take several screenshots a few hundred ms
    apart. Score each with a pixel metric over the window's content rect,
-   e.g. the fraction of pixels that match `testsrc2`'s bar colours within a
+   e.g. the fraction of pixels that match `testsrc2`'s bar colors within a
    tolerance (correct: most of the video rect; striped: a sparse fraction;
    black: ~0). Report the distribution per build and per renderer; pixman is
    the control and should score correct every time.
 2. **Bisect with that loop**, one mpv behaviour at a time in a scratch
    client: viewport-scaled `wl_shm` on a subsurface; `i32::MAX` damage on a
    subsurface; a synchronised vs desynchronised subsurface; the black
-   single-colour backdrop surfaces mpv stacks under the video.
+   single-color backdrop surfaces mpv stacks under the video.
 3. Fix, and pin with a pixel-readback test that runs under
    `SCOOT_TEST_RENDERER=gles` -- repeated, since a single frame cannot show
    a race.

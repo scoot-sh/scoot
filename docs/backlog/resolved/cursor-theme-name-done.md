@@ -1,5 +1,5 @@
 ---
-title: "Custom/client cursor support — DONE: client surfaces (item 8), size/colour (item 13), drawn per-shape cursors and real xcursor theme loading (issue #40)."
+title: "Custom/client cursor support — DONE: client surfaces (item 8), size/color (item 13), drawn per-shape cursors and real xcursor theme loading (issue #40)."
 status: "resolved"
 area: "resolved"
 priority: null
@@ -10,7 +10,7 @@ blocked: null
 
 ~~(a) honor `CursorImageStatus::Surface` by rendering the client's actual
 supplied buffer~~ — landed as item 8. ~~(b) a user/config-level override for
-the fallback shape's size and colour~~ — landed as item 13. ~~(c) drawing a
+the fallback shape's size and color~~ — landed as item 13. ~~(c) drawing a
 different shape per requested name, and honoring a theme *name*, both blocked
 on sourcing a license-clean cursor theme~~ — **DONE**, 2026-09-15, with
 `wp-cursor-shape-v1` (`docs/backlog/resolved/foot-protocol-warnings-done.md`).

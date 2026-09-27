@@ -243,7 +243,7 @@ run_round() {
     fi
 
     export SCOOT_SOCKET="$sock"
-    # Strip ANSI first. The compositor used to colour its output even when
+    # Strip ANSI first. The compositor used to color its output even when
     # stdout was a file, so `scanout="gpu"` was really
     # `scanout\e[0m\e[2m=\e[0m"gpu"` in the bytes and the naive pattern below
     # matched nothing -- which reported the *most important field in this
@@ -277,7 +277,7 @@ run_round() {
     # positions. Within a single tier, captures from different rounds differed
     # by AE 13853-46852 -- swamping any renderer difference, which for
     # 2560x1600 would be about 4016 (one channel of four) or about 12044
-    # (all three colour channels, measured) if every pixel differed by one
+    # (all three color channels, measured) if every pixel differed by one
     # least-significant bit. The end-of-round capture is kept too, as a record
     # of where each round finished; it is `-end` and is not the comparison.
     "$ctl" pointer move 1280 800 >/dev/null 2>&1

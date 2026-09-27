@@ -23,7 +23,7 @@ fn an_all_opaque_unrounded_frame_is_eligible() {
     );
     // A covered output whose frame gathered nothing: nothing to scan out,
     // and nothing that could be wrongly scanned out either. Smithay has no
-    // element to try and composites the clear colour.
+    // element to try and composites the clear color.
     assert_eq!(judge_elements([]), PrimaryDirect::Eligible);
 }
 
@@ -129,7 +129,7 @@ fn decide(elements: Vec<Entry>, clear: Color32F, window: usize) -> PrimaryDirect
     decide_with_solid(elements, clear, window, None)
 }
 
-/// [`decide`], with the element at `solid.0` a single-pixel buffer of colour
+/// [`decide`], with the element at `solid.0` a single-pixel buffer of color
 /// `solid.1`.
 fn decide_with_solid(
     elements: Vec<Entry>,
@@ -141,7 +141,7 @@ fn decide_with_solid(
         elements,
         OUTPUT,
         clear,
-        |index| solid.and_then(|(at, colour)| (at == index).then_some(colour)),
+        |index| solid.and_then(|(at, color)| (at == index).then_some(color)),
         &mut JudgeScratch::default(),
     );
     rule6(walked.end, walked.clear_color, |index| index == window)
@@ -331,9 +331,9 @@ fn the_scratch_is_reused_across_frames() {
 #[test]
 fn a_black_single_pixel_wallpaper_hands_the_primary_to_the_window_above_it() {
     // Smithay's substitution: the covering single-pixel buffer is dropped,
-    // its colour clears the frame, and the element above it -- here an
+    // its color clears the frame, and the element above it -- here an
     // alpha window with no opaque region -- is the last one. Over black it
-    // passes the guard; over any other colour it does not.
+    // passes the guard; over any other color it does not.
     let alpha_window = full(Vec::new());
     let wallpaper = full(whole());
     assert_eq!(
@@ -367,7 +367,7 @@ fn a_black_single_pixel_wallpaper_hands_the_primary_to_the_window_above_it() {
 }
 
 #[test]
-fn only_the_element_that_ends_the_walk_is_asked_for_its_colour() {
+fn only_the_element_that_ends_the_walk_is_asked_for_its_color() {
     // The substitution applies to the first opaque, output-spanning element
     // only: one that is not opaque over the output is never replaced.
     let asked = std::cell::Cell::new(Vec::new());

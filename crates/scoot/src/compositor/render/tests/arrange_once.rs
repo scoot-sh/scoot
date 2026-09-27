@@ -22,7 +22,7 @@
 //! like `headless::bench`'s scenes): no client surface means the window
 //! gather finds nothing mapped, but the focus ring is still drawn for every
 //! placed window -- which is exactly the arrangement-dependent pixel this
-//! suite watches. A mutation that re-lays-out recolours a ring (focus) or
+//! suite watches. A mutation that re-lays-out recolors a ring (focus) or
 //! moves one (geometry), so the framebuffer changes; a mutation the frame
 //! missed leaves stale ring pixels behind.
 //!
@@ -227,7 +227,7 @@ fn open_and_close_refresh() {
     );
 }
 
-/// Moving focus recolours the ring; moving it back restores the exact
+/// Moving focus recolors the ring; moving it back restores the exact
 /// pixels. The arrangement itself round-trips too, so a pixel mismatch
 /// would blame the frame, not the layout.
 #[test]
@@ -244,7 +244,7 @@ fn focus_change_refreshes_and_restores() {
     let (moved_first, _) = render_all(&mut fixture);
     assert_ne!(
         moved_first, before_first,
-        "a focus move must recolour output 1's rings"
+        "a focus move must recolor output 1's rings"
     );
     // `act` reports spawn success, not movement, so the arrangement
     // comparison below is the real assertion that focus moved back.

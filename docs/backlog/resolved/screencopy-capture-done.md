@@ -295,7 +295,7 @@ $ sha256sum unlocked-grim.png lock-grim.png
 ```
 
 `lock-grim.png` pulled to the Mac and viewed: **a solid `#2060c0` field, the
-exact colour passed to `swaylock -c`, with no trace of the `foot` window, the
+exact color passed to `swaylock -c`, with no trace of the `foot` window, the
 focus ring or the desktop background.** `flexwm msg windows` still listed the
 window at that moment (the window did not go away; it simply is not in the
 frame), which is what makes this a capture-path result rather than a
@@ -595,7 +595,7 @@ combining all three conditions that separate these paths: `Xrgb8888` (so the
 opacity pass actually runs), a sibling buffer ahead of it in the pool (so
 `data.offset` is non-zero), and 16 bytes of row padding (so `data.stride`
 exceeds the pixels). It asserts the sibling is byte-for-byte untouched, every
-row's padding is untouched, and every pixel is both the frame's colour *and*
+row's padding is untouched, and every pixel is both the frame's color *and*
 alpha-forced, at its own stride.
 
 The two near-duplicate steps round 2 added were collapsed into one

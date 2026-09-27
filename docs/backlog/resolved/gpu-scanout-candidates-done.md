@@ -38,7 +38,7 @@ eligibility half landed with the
   first cut steered while `render::primary_direct` said eligible even when
   Smithay's own precondition for trying the primary (`render_frame`: the
   bottom element opaque over and spanning the output, or a black/
-  transparent clear colour) could not hold. Review measured it live: an
+  transparent clear color) could not hold. Review measured it live: an
   `AR24` probe with no opaque region over the default grey background was
   steered twice and never went direct (0 primary assignments). `judge` now
   has a rule 6 mirroring Smithay's walk: the element Smithay would try (the
@@ -49,7 +49,7 @@ eligibility half landed with the
   covering element -- a wallpaper under an alpha window made it eligible.
   Round 3 added Smithay's single-pixel-buffer substitution to the mirror
   (a covering single-pixel buffer is dropped and clears the frame to its
-  colour), without which an alpha window over a black single-pixel
+  color), without which an alpha window over a black single-pixel
   wallpaper -- direct at PR #228 -- was refused. What is still not
   mirrored is whether every element above the last got a plane: a pointer
   composited on hardware with no cursor or overlay plane keeps the window
@@ -179,7 +179,7 @@ Smithay's **overlay** assignment only considers `ScanoutCandidate` (and
 Primary-direct is gated differently: `try_assign_primary_plane` has no kind
 check at all. It is tried only for the bottom visible element with nothing
 composited above it, that element opaque and covering the whole output (or
-a black/transparent clear colour), and then requires the client
+a black/transparent clear color), and then requires the client
 framebuffer's whole `Format` to equal the swapchain's
 ([format gate](../resolved/gpu-primary-direct-format-gate-done.md) -- now
 skipped with `ANY` on eligible frames). On default config no

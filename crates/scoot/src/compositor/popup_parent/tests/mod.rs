@@ -66,7 +66,7 @@ pub(in crate::compositor) const CAP: usize = 64;
 /// The output's framebuffer, square.
 pub(in crate::compositor) const CANVAS: i32 = 200;
 
-// Colours, as the BGRA bytes an `Argb8888` buffer holds them in.
+// Colors, as the BGRA bytes an `Argb8888` buffer holds them in.
 const WINDOW_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
 const BAR_BGRA: [u8; 4] = [0xE0, 0x20, 0x20, 0xFF];
 pub(in crate::compositor) const POPUP_BGRA: [u8; 4] = [0x20, 0xE0, 0xE0, 0xFF];

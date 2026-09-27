@@ -14,7 +14,7 @@
 //! `docs/backlog/resolved/large-test-file-organization-done.md`). It lives
 //! here now. What stays per-suite is what genuinely differs: each suite's own
 //! `Step`/`Ack` vocabulary, its `TestClient` and the `Dispatch` impls for the
-//! protocol it exercises, and its buffer and colour choices.
+//! protocol it exercises, and its buffer and color choices.
 //!
 //! The intended shape for a suite is a type alias plus an inherent impl:
 //!

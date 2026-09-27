@@ -492,7 +492,7 @@ each item's own file records why it landed when it did.
   is placed per output (multi-output), and `Rounded::relocate` keeps a
   relocated window's corner cut. Dev VM: arrow pixels identical across the
   scanout and dumb tiers (tiers differ only in the pre-existing 1-LSB clear
-  colour), exactly one cursor in each capture through primary-direct, IPC
+  color), exactly one cursor in each capture through primary-direct, IPC
   == `grim` both ways; on the llvmpipe scanout tier with the cursor on its
   plane a 0.4-0.9 ms region per pointer-requesting capture (29 → 37-39
   jiffies per 40 screenshots) whose wall-latency effect is dominated by
@@ -511,7 +511,7 @@ each item's own file records why it landed when it did.
   nothing new is promised. Eligibility is `render::primary_direct`'s, which
   gained a rule 6 in review: Smithay's own walk, mirrored -- the element it
   would try for the primary must pass its guard (opaque and spanning, or a
-  black clear colour) *and* be the covering window's -- so an alpha client
+  black clear color) *and* be the covering window's -- so an alpha client
   with no opaque region, over the grey default or over any wallpaper, is
   neither given the direct flags nor steered (it was, and never went
   direct). Sent
@@ -1054,7 +1054,7 @@ each item's own file records why it landed when it did.
   (deliberate: nothing applied can disclose locked content). New
   `Response::Reloaded` moved `PROTOCOL_VERSION` 2 → 3; the request half
   degrades to error + continue on older servers. Live proof on the dev
-  VM: gap + colour + bind change, screenshot pixel diff, injected-key
+  VM: gap + color + bind change, screenshot pixel diff, injected-key
   bind fire, malformed-file untouched.
 
 - **[Workspace shortcuts: numbered binds plus

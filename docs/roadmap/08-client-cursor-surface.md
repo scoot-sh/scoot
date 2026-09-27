@@ -108,7 +108,7 @@ device at 1600x1000, all against `03cd51c` — no production code changed
 since; a later commit added one more test and this paragraph). Driven
 by a throwaway raw-protocol client (built in `/tmp` on the VM, nothing
 committed, no image asset involved — the pixels come from the client over
-the wire) that maps a toplevel and hands over a flat-coloured cursor
+the wire) that maps a toplevel and hands over a flat-colored cursor
 surface of a chosen size and hotspot. Exact commands and raw
 pixel/jiffies output are in the PR description. Summary:
 a 24x24 magenta cursor with hotspot `(4,6)` lands pixel-exact around the
@@ -119,7 +119,7 @@ shape (Smithay resets to `default_named()` on focus leave,
 counter sat at **0 for 187s** while its cursor wasn't presented, then
 climbed at ~46/s the moment the pointer entered, and **froze again**
 (1156 → 1156 over 3s) when the pointer left — the callback gating works
-in both directions; screenshots caught both animation colours. Destroying
+in both directions; screenshots caught both animation colors. Destroying
 the cursor surface while active, and `kill -9` on the client while
 active, both leave the compositor up and drawing the fallback, with no
 panic or error in its log.
