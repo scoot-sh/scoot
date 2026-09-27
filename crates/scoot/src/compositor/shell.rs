@@ -372,6 +372,15 @@ impl State {
         if floating_moved || cover_moved {
             self.refresh_pointer_focus();
         }
+        // Last, once every placement above is published: a parent that moved
+        // (or an output/usable area that changed) re-constrains the reactive
+        // popups hanging off it -- see `popup_reconstrain.rs`. Here rather
+        // than at each caller so layout actions, resizes, output add/remove
+        // and layer commits all reach it, and after the deferred commit
+        // flush's own `apply()` for the same reason: the target walk reads
+        // where the parent is, never mid-batch. Gated on any popup being
+        // open, so the common path pays one length check.
+        self.reconstrain_reactive_popups();
         self.request_render();
     }
 

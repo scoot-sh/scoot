@@ -174,9 +174,12 @@ What it is **not**, yet, is tracked in
   outputs](#moving-across-outputs)) — positions 2 and up stay manual;
 - no per-output mode/scale/position configuration surface:
   `wlr-output-management` `apply`/`test` stay refused;
-- a menu left open while its window scrolls, or while an output changes, is
-  not re-fitted to the new position (tracked in
-  `docs/backlog/core/popup-reactive-reconstrain.md`).
+
+A menu left open while its window scrolls, or while an output changes, is
+re-fitted to the new position when it asked `reactive`, and told with a
+fresh configure pair (a non-reactive menu is never re-configured — the
+protocol forbids it; see
+`docs/backlog/resolved/popup-reactive-reconstrain-done.md`).
 
 ## Starting a session
 

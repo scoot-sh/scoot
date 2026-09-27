@@ -858,9 +858,11 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   A popup that asked for no adjustment on an axis is left exactly where it
   asked to be on that axis, and cut if that is off the screen — the
   protocol's rule. The fit is applied when the menu opens and on
-  `xdg_popup.reposition`. It is not redone afterwards: a `reactive` popup
-  whose window scrolls while it is open keeps its position (tracked in
-  [`docs/backlog/core/popup-reactive-reconstrain.md`](backlog/core/popup-reactive-reconstrain.md)).
+  `xdg_popup.reposition`, and redone afterwards for a `reactive` popup: when
+  its window scrolls, its output is resized, or a bar's exclusive zone
+  changes, it is re-fitted and told with a fresh configure pair (a
+  non-reactive popup is never re-configured — the protocol forbids it; see
+  [`docs/backlog/resolved/popup-reactive-reconstrain-done.md`](backlog/resolved/popup-reactive-reconstrain-done.md)).
 - **Popups nest at most 64 deep, and cannot loop.** A menu, its submenu,
   that submenu's submenu and so on may go 64 levels deep — real menus stop
   at a handful — and a 65th is refused. That holds for how scoot itself
