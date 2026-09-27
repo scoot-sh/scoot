@@ -4,7 +4,7 @@
 
 mod common;
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::time::Duration;
 
@@ -368,16 +368,32 @@ fn a_double_kill_is_harmless() {
     assert!(!session.socket().exists());
 }
 
+/// The daemon's open fd numbers, sorted.
+fn open_fds(pid: u32) -> Vec<u32> {
+    let mut fds: Vec<u32> = std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .unwrap()
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
+        .collect();
+    fds.sort_unstable();
+    fds
+}
+
 /// Out of file descriptors, `kill` still gets through.
 ///
-/// The daemon starts with its normal limit and is left to settle (serving,
-/// spare fd retaken); then its `RLIMIT_NOFILE` is lowered, at run time, to
-/// exactly the fds it holds, so every later accept fails with `EMFILE`
-/// however many fds it inherited (a CI runner hands children more than a
-/// developer shell; a fixed limit at spawn broke on one). The first client
-/// is admitted on the spare's fd, each later one by closing the oldest
-/// client. The daemon neither goes deaf nor spins. Needs util-linux
-/// `prlimit`: skipped without it, or a failure under
+/// `RLIMIT_NOFILE` bounds fd *numbers*: a new fd gets the lowest free
+/// number, and only if that is below the limit. So the test waits until the
+/// daemon's fd set is stable and lowers the running daemon's limit
+/// (`prlimit --pid`) to its lowest *free* fd number. fds above it (a CI
+/// runner's inherited ones leave gaps) stay open, which is legal, and every
+/// new fd now fails with `EMFILE`, however the fds are numbered. The first
+/// idle client is admitted on the spare's fd, and each later one only by
+/// closing the oldest, which that client sees as EOF: with five idle
+/// clients at least four must be evicted, against none without the limit
+/// (the 16-client cap is far away). That is the behavioural proof that
+/// exhaustion was reached. A limit set at spawn, or to the fd *count*,
+/// both broke on CI.
+///
+/// Needs util-linux `prlimit`: skipped without it, a failure under
 /// `SCOOTBG_REQUIRE_SCOOT`.
 #[test]
 fn out_of_file_descriptors_kill_still_works() {
@@ -399,15 +415,26 @@ fn out_of_file_descriptors_kill_still_works() {
     }
     let mut daemon = session.daemon();
     let pid = daemon.id();
-    // One more accept, so the spare the start-up probe spent is retaken
-    // and the count below includes it.
-    assert!(common::answers(&session.socket()));
-    let held = std::fs::read_dir(format!("/proc/{pid}/fd"))
-        .unwrap()
-        .count();
-    let limit = format!("--nofile={held}:{held}");
+
+    // A steady state: the start-up probe's connection closed, nothing else
+    // in flight. Same fd set on two reads 100 ms apart, three times over.
+    let deadline = std::time::Instant::now() + common::PATIENCE;
+    let mut stable = 0;
+    let mut fds = open_fds(pid);
+    while stable < 3 {
+        assert!(std::time::Instant::now() < deadline, "fds never settled");
+        std::thread::sleep(Duration::from_millis(100));
+        let again = open_fds(pid);
+        stable = if again == fds { stable + 1 } else { 0 };
+        fds = again;
+    }
+    let limit = (0..).find(|n| fds.binary_search(n).is_err()).unwrap();
     let lowered = std::process::Command::new("prlimit")
-        .args(["--pid", &pid.to_string(), &limit])
+        .args([
+            "--pid",
+            &pid.to_string(),
+            &format!("--nofile={limit}:{limit}"),
+        ])
         .output()
         .unwrap();
     assert!(
@@ -416,19 +443,39 @@ fn out_of_file_descriptors_kill_still_works() {
         stderr(&lowered)
     );
 
-    // Idle clients the daemon has to make room for, repeatedly.
-    let idle: Vec<UnixStream> = (0..5)
+    // Five idle clients: at this limit the daemon can hold at most one.
+    let mut idle: Vec<UnixStream> = (0..5)
         .map(|_| UnixStream::connect(session.socket()).unwrap())
         .collect();
+    // Queries are accepted after the idle clients (the backlog is FIFO), so
+    // once one is answered the daemon has been through all of them.
     for _ in 0..3 {
         let query = session.run(&["query"]);
         assert!(query.status.success(), "{}", stderr(&query));
     }
-    // The limit really bound: the daemon is at it, not below.
-    let now = std::fs::read_dir(format!("/proc/{pid}/fd"))
-        .unwrap()
-        .count();
-    assert!(now <= held, "{now} fds open against a limit of {held}");
+    // Exhaustion was reached: idle clients were closed to make room (EOF;
+    // a still-open one has nothing to read, so it would block). Without
+    // the limit, all five would still be open.
+    let mut evicted = 0;
+    for client in &mut idle {
+        client.set_nonblocking(true).unwrap();
+        if matches!(client.read(&mut [0u8; 1]), Ok(0)) {
+            evicted += 1;
+        }
+    }
+    // The kernel's guarantee, checked: nothing the daemon opened after the
+    // limit is numbered at or above it.
+    for fd in open_fds(pid) {
+        assert!(
+            fd < limit || fds.contains(&fd),
+            "fd {fd} opened past the limit {limit}"
+        );
+    }
+    assert!(
+        evicted >= 4,
+        "only {evicted} of 5 idle clients were evicted: the limit never bound"
+    );
+
     // Busy-looping would show as CPU time.
     let ticks = || {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();

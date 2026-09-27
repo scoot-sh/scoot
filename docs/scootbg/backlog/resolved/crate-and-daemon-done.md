@@ -236,13 +236,35 @@ Fixed before merge, each with a test:
   listener and the listener is always polled (above). Writing the
   `RLIMIT_NOFILE` test turned up a second bug: Linux's `accept` returns
   `EMFILE` before looking at the queue, so the server evicted the client
-  it had just admitted. Hence the zero-timeout poll. That test first set
-  a fixed limit (`prlimit --nofile=7:7`) at spawn, which failed on the CI
-  runner (the daemon inherited more fds and hit the limit at start-up; its
-  clean exit 1 there was correct). It now lowers the running daemon's
-  limit to the fds it measurably holds (`prlimit --pid`), so it reaches
-  exhaustion however many fds the environment hands down, and it fails
-  rather than skips without `prlimit` under `SCOOTBG_REQUIRE_SCOOT`.
+  it had just admitted. Hence the zero-timeout poll. Getting that
+  test right took three tries, all failing on the CI runner, which hands
+  its children more fds than a developer shell:
+  1. A fixed limit at spawn (`prlimit --nofile=7:7`): the daemon inherited
+     more and hit it at start-up (its clean exit 1 there was correct).
+  2. The running daemon's limit set to its open fd *count*. That rests on a
+     false premise: `RLIMIT_NOFILE` bounds fd *numbers* (a new fd takes the
+     lowest free number, and only if it is below the limit), not how many
+     are open. With inherited fds at high numbers there were free numbers
+     below the limit, accepts succeeded into them, and "open ≤ limit"
+     failed. That is deterministic, not a race: two non-contiguous
+     inherited fds (`exec 10</dev/null 11</dev/null`) reproduce it every
+     time, and contiguous ones never do, which is why a first harness
+     passed. The claim that it "reached exhaustion however many fds the
+     environment hands down" was wrong.
+  3. Now: wait until the daemon's fd set is stable, then set its limit to
+     its lowest *free* fd number (fds already open above that stay open,
+     which is legal). Every new fd then fails with `EMFILE` whatever the
+     numbering. Exhaustion is proven by behaviour (with five idle clients
+     at least four are evicted, against none without the limit, far below
+     the 16-client cap) and by fd numbers (nothing opened after the limit
+     is at or above it), not by an open-count bound. Proven ×50 per
+     configuration, 0 failures: non-contiguous inherited fds at 0, 2, 20
+     and 200, contiguous ones at 2, 20 and 200, and the non-contiguous
+     ones again under four CPU hogs. strace shows 14 `accept4 … EMFILE`
+     in each configuration.
+
+  The test fails rather than skips without `prlimit` under
+  `SCOOTBG_REQUIRE_SCOOT`.
 - **Crash hook disarmed before release.** The panic hook used to stay
   armed after `claim.release()`, so a panic during shutdown (closing
   clients, dropping the Wayland connection), after a new daemon had
@@ -312,7 +334,7 @@ release profile, `cargo build --release -p scootbg`:
 | `-sys` crates | `linux-raw-sys`, and `wayland-sys` built with no features |
 | Idle RSS / PSS / heap, 3 s after start, 3 runs | 2,576 / 1,380 / 164, 2,580 / 1,384 / 164, 2,600 / 1,404 / 164 kB; 1 thread (with the signal thread, interleaved: 2,608–2,624 / 1,412–1,428 / 172–176 kB, 2 threads) |
 | Idle context switches, 3 × 30 s | 0, 0, 0 (with the signal thread: 0, 0, 0) |
-| After review, interleaved with the pre-review binary, 3 rounds | RSS 2,564 / 2,572 / 2,588 kB, PSS 1,368 / 1,376 / 1,392, heap 164, 1 thread, 7 fds (stdio, lock, listener, spare, Wayland; 6 for a moment after an accept has spent the spare, until the next one retakes it), 0 switches and 0 ticks per 30 s (pre-review: 2,588 / 2,600 / 2,568, 1,392 / 1,404 / 1,372, 160–164; a tie); `query` round trip median 27.2 / 26.2 µs against 26.4 / 26.2 |
+| After review, interleaved with the pre-review binary, 3 rounds | RSS 2,564 / 2,572 / 2,588 kB, PSS 1,368 / 1,376 / 1,392, heap 164, 1 thread, 7 fds (stdio, lock, listener, spare, Wayland), always, idle or serving: a normal accept never touches the spare, which is spent only at the fd limit (`EMFILE`/`ENFILE` with a client waiting), so 6 appears only there, 0 switches and 0 ticks per 30 s (pre-review: 2,588 / 2,600 / 2,568, 1,392 / 1,404 / 1,372, 160–164; a tie); `query` round trip median 27.2 / 26.2 µs against 26.4 / 26.2 |
 | Idle CPU ticks, 3 × 30 s | 0, 0, 0 |
 | `query` round trip on one connection, 3 × 10,000 (with the signal thread; the request path is unchanged) | median 27.9 / 26.4 / 26.6 µs, p99 63.3 / 57.7 / 62.3 µs |
 | `scootbg query` as a command, 3 × 100 | 1,654 / 1,688 / 1,636 µs each, process start included |
