@@ -17,7 +17,8 @@ three commits under PROGRESS below), and the last piece -- X-origin drags
 remap (`X11Surface`'s `DndFocus::leave`, `let _ = xwm.conn.flush();` after
 the `configure_window`, as `enter` does after its unmap). The fork is
 repinned there (`crates/scoot/Cargo.toml`, `Cargo.lock`, `flake.nix`,
-[`docs/forks.md`](../../forks.md)).
+[`docs/forks.md`](../../forks.md)), and after review to `9515d7e5`, then
+`d3a4cd73` (see the two review sections below).
 
 - **The gate is gone.** An X focus now goes to Smithay's X target with an
   X offer or none (`PointerOffer::as_x11`); only a surface offer on an X
@@ -47,7 +48,7 @@ repinned there (`crates/scoot/Cargo.toml`, `Cargo.lock`, `flake.nix`,
   (drag-only paths: `enter` on each focus change of a drag, and
   `motion`/`leave`/`drop`); pointer motion without a drag, which
   `pointer_motion` and `x11_hot_path_cost` measure, does not reach it.
-- **Live matrix** (web container, scoot `a1f364c` built `--features
+- **Live matrix, at `a1f364c`** (before the review fixes; web container, scoot `a1f364c` built `--features
   xwayland`, `scoot --headless --width 2400 --xwayland`, `mousepad` 0.7.0
   twice over `GDK_BACKEND=x11` and once native, one-third columns, driven
   by `scootctl pointer`/`screenshot`): X to X (a line from one X mousepad
@@ -72,10 +73,11 @@ that the Wayland-to-X half made reachable (`main` never made an X offer):
 - **N1:** a validated drop tells the Wayland source `dnd_drop_performed`
   twice; a refused one is still sent `XdndDrop` (then `cancelled`).
 
-Both fixed in the fork and pinned (rev `9515d7e5`): `7388af13` tells the
+Both fixed in the fork (pinned then at `9515d7e5`): `7388af13` tells the
 source once and only for a drop made (a refused one is left with
 `XdndLeave`), and `9515d7e5` ends the offer when its target or proxy is
-destroyed, or when an X client takes `XdndSelection` after the drop. The
+destroyed, or when an X client takes `XdndSelection` after the drop --
+narrowed by `d3a4cd73` below to an X drag `allow_drag` accepts. The
 acceptance tests are `compositor/xwayland/tests/drop_end.rs` (six: never
 answers, never answers then dies, refuses, dies after the drop, hangs
 after the drop, and the finished control): all six fail at `6e6fe896`,
@@ -83,13 +85,54 @@ after the drop, and the finished control): all six fail at `6e6fe896`,
 note N3 (the drag gate's liveness check) is fixed on the scoot side;
 N4 (the protocols.md wording) too.
 
+## Final review -- no blocking issues
+
+The final review, at `1ad66c1` (fork `9515d7e5`), found no blocking
+issues. Its live spot-check at that head -- Wayland to X, X to Wayland, and
+within one X window -- all landed, each with `Sending XdndDrop` then `Got
+XDND finished msg` in the log. Its non-blocking notes:
+
+- **N-A, fixed (fork `d3a4cd73`).** `9515d7e5` gave up a dropped but
+  unfinished offer whenever *any* X client took `XdndSelection`, with
+  nothing held, so a rough client could end a drop in flight and keep the
+  selection. Now only a drag `allow_drag` accepts gives it up; any other
+  taker is taken back from (flushed). Test:
+  `drop_end.rs`'s `a_rough_x_client_cannot_end_a_pending_drop` -- fails at
+  `9515d7e5` (`left: 8388608 right: 8388608`: the rough client kept the
+  selection), passes at `d3a4cd73`; the drop, drop_end, dnd, xdnd,
+  clipboard and peer suites 46/46, three runs; full `--features xwayland`
+  nextest 1851 passed, 24 skipped.
+- **N-B, fixed (same commit).** A new Wayland drag onto X that replaced a
+  stale dropped offer never told that offer's source how its drop ended;
+  it is now cancelled.
+- **N-C, left.** A Wayland drag entering an X window makes synchronous
+  property round trips to the X server (`XdndProxy`, `XdndAware`) on each
+  X window it enters. Drag-only, once per enter; not measured as a cost.
+- **First-motion race, left, unverified.** Reasoned from the code, not
+  reproduced: an X-origin drag released on its very first motion into an
+  X window may send `XdndDrop` to the proxy scoot has just unmapped.
+  Filed as
+  [`xwayland-x-drag-first-motion-race.md`](../protocols/xwayland-x-drag-first-motion-race.md).
+- **Slow target, inherent.** If a genuinely new X drag starts while a
+  slow target is still converting the previous drop, the target reads the
+  new drag's data: X has one `XdndSelection`, and the new drag owns it.
+  Nothing on the window manager's side can hold two.
+
+## History: the entry as filed and as worked
+
+Everything below is the record as it was written while the work was in
+progress, kept for its measurements. Its present tense describes the tree
+at the time -- it is superseded by the sections above: every direction
+now lands, the X-origin gate is gone, and the fork fixes it describes as
+pending are pinned.
+
 Filed 2026-09-25 by XWayland Phase 4, PR #246 (see
 [`xwayland-support.md`](../protocols/xwayland-support.md)'s Phase 4 record). Serves
 daily use: dragging a file into an X file manager, text into an X editor, or
 a tab within an X app are ordinary actions an X user hits before any
 X-to-Wayland drag.
 
-## What does not work, measured
+### What did not work, measured (before `a641f1c`)
 
 Live on the dev VM (`~/evidence/xw4/live-dnd/`, `mousepad` 0.7.0 over
 `GDK_BACKEND=x11` and native Wayland, scoot `--headless --xwayland`):
@@ -110,7 +153,7 @@ This predates Phase 4. Phase 4's drag gate only ever refuses a drag;
 an allowed X drag takes exactly the path `main` took before it (the window
 manager's drag grab over a `WlSurface` focus).
 
-## Why
+### Why
 
 Smithay's `DnDGrab::new_pointer` pins the drag's target type to
 `SeatHandler::PointerFocus` (`input/dnd/grab.rs` at the pinned fork), and
@@ -125,7 +168,7 @@ enters an X window; with a `WlSurface` focus the proxy stays up for the
 whole drag and catches the X source's own XDND traffic, which is why X → X
 fails too, not only Wayland → X.
 
-## What to do
+### What to do (the plan, since done)
 
 Give the pointer focus an X arm, the way `SeatHandler::KeyboardFocus` got
 one in Phase 2+3 (`keyboard_focus.rs`): an enum with
@@ -150,7 +193,7 @@ its callers (`input.rs`, `tablet.rs`, `relative_pointer.rs`,
   x11rb client speaking the XDND target side, plus the live `mousepad`
   matrix above.
 
-## PROGRESS — the X arm landed; Wayland → X drops land; X → X waits on a fork flush
+### PROGRESS at `7366568` — the X arm landed; Wayland → X drops land; X → X waited on a fork flush
 
 Three commits on one branch (2026-09-27), the `KeyboardFocus` precedent
 plus a measured optimization:
@@ -185,23 +228,26 @@ with the Wayland type, `XdndPosition` at the pointer, answers
 Wayland source's payload). Fail-first at `a641f1c`: "timed out waiting
 for XdndEnter".
 
-**X → X and in-window moves do not, yet, and that is deliberate.** Found
-while building it: Smithay's `DndFocus for X11Surface` unmaps the XWM's
-full-screen XDND proxy when an X drag enters an X window and maps it back
-on leave -- but the remap (`xwm/dnd.rs` `leave`, offer-less branch) is
-never flushed, at the pinned fork rev and upstream `928d4a9` alike.
+**At `7366568`, X → X and in-window moves did not land yet, deliberately**
+(fixed since by `6e6fe896` and `a1f364c`). Found while building it:
+Smithay's `DndFocus for X11Surface` unmaps the XWM's full-screen XDND
+proxy when an X drag enters an X window and maps it back on leave -- but
+the remap (`xwm/dnd.rs` `leave`, offer-less branch) was never flushed, at
+the fork rev pinned then (`5b575329`) and upstream `928d4a9` alike.
 Measured: an X drag that crossed an X window found *no window* under the
 pointer over a Wayland window; one unrelated XWM request (whose handler
 flushes) later, the proxy was there. Every X drag crosses an X window --
-it starts over its own -- so turning X-origin drags on as-is would break
-X → Wayland drops, which work today. So the X target is reached only
-through an X offer, which only a drag from Wayland gets: its offer-less
-branches (the remap, finishing an X drag) are unreachable, and X-origin
-drags take exactly the `WlSurface` path they took before
-(`an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland` pins
-it; with the gate mutated away it fails "no window").
+it starts over its own -- so turning X-origin drags on as-is would have
+broken X → Wayland drops, which worked then. So at that commit the X
+target was reached only through an X offer, which only a drag from
+Wayland got: its offer-less branches (the remap, finishing an X drag)
+were unreachable, and X-origin drags took exactly the `WlSurface` path
+they took before (`an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland`
+pinned it then; it now pins the flush instead, see the top section).
 
-**What is left** (one short PR):
+**What was left then** (all since done: the fork flush is `6e6fe896`,
+the gate went in `a1f364c`, and the matrix was re-run at `a1f364c` --
+see the top section):
 
 - A scoot-sh/smithay commit on `5b575329`: `let _ = xwm.conn.flush();`
   after the remap's `configure_window` in `X11Surface`'s `DndFocus::leave`
@@ -217,7 +263,7 @@ it; with the gate mutated away it fails "no window").
   hovered window closing).
 - The live `mousepad` matrix again.
 
-**Design notes.**
+**Design notes** (still current).
 
 - `PartialEq` is written out: Smithay compares the new focus with the old
   on every motion, and `X11Surface`'s own eq takes both windows' state
@@ -239,7 +285,7 @@ it; with the gate mutated away it fails "no window").
   (`X11Surface`'s own user data cannot hold the `Arc`: it would be a
   reference cycle.)
 
-**Benchmarks** (release, this web container, 4 cores; each binary built
+**Benchmarks, at `7366568`** (release, this web container, 4 cores; each binary built
 in its own worktree and target dir; base `87e1935` and head interleaved,
 three rounds of the benches' own 5 x 20000 medians):
 
@@ -254,7 +300,7 @@ The head is within noise of the base everywhere. The `--tty` jiffies
 sample was **not** taken: this was built in a web container with no dev
 VM and no `--tty` hardware.
 
-**Live matrix** (`mousepad` 0.7.0, one over `GDK_BACKEND=x11` and one
+**Live matrix, at `7366568`** (`mousepad` 0.7.0, one over `GDK_BACKEND=x11` and one
 native, `scoot --headless --xwayland`, driven by `scoot msg`; same script
 at base `87e1935` and head `7366568`):
 

@@ -795,7 +795,8 @@ scale/mode) into one hardware session.
   an X arm, and with the fork's proxy-remap flush (`6e6fe896`) drops work
   in every direction, live; review follow-ups fixed in the fork
   (`7388af13`, `9515d7e5`: a dead or hung X target no longer wedges X
-  drags, the source hears a drop once).
+  drags, the source hears a drop once; `d3a4cd73`: only a drag scoot lets
+  start gives a pending drop up).
 - [XWayland support](./protocols/xwayland-support.md)
   — OPEN, low: spike (PR #220), skeleton (PR #221) and mapping + focus gate
   (Phases 2+3, PR #244) landed: X windows tile, dialogs float, rules
@@ -819,7 +820,9 @@ scale/mode) into one hardware session.
   WM attaches). Follow-up filed: [bind startup-id redemption to the spawned
   process](./protocols/xwayland-startup-id-race.md) (low: a watching X
   client can race a launched app to its `_NET_STARTUP_ID` within the
-  token's 30 s).
+  token's 30 s) and [an X drag released on its first motion into an X
+  window may drop on the proxy](./protocols/xwayland-x-drag-first-motion-race.md)
+  (low, reasoned from code, not reproduced).
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes
