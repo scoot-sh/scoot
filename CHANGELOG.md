@@ -9,6 +9,31 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — a `[wallpaper]` section in the config sets the wallpaper
+
+- **`[wallpaper]` in `config.toml` is all it takes.** Name an `image` (PNG,
+  JPEG, WebP; `~/` and relative paths work) or a `color`, per output if you
+  like (`[wallpaper.output."DP-2"]`), and scoot starts scootbg, the
+  wallpaper daemon, with it; `scootctl reload` re-applies it, and removing
+  the section clears it. A `scootbg set` made afterwards keeps showing
+  across restarts and reloads until you next change the section. See
+  [configuration.md](docs/configuration.md#wallpaper).
+- **scootbg is a separate package** and has to be installed; the NixOS and
+  home-manager modules do that for you. Without it the session starts as
+  usual, with a warning in the log saying how to install it.
+- **A mistake inside `[wallpaper]`** (a misspelled key, a number where a
+  string belongs) costs only the wallpaper: the rest of your config still
+  applies, and the log names the problem. Elsewhere in the file an unknown
+  key still means the whole file is ignored.
+- **NixOS:** `programs.scoot.enable` now also installs scootbg
+  (`programs.scoot.wallpaper.enable`, on by default; set it to `false` to
+  opt out). If you import the module file directly rather than through the
+  flake, set `programs.scoot.wallpaper.package`, apply the new
+  `overlays.default`, or turn it off: evaluation now fails with a message
+  naming the option otherwise.
+- **Nix:** a new overlay, `overlays.default`, provides `pkgs.scoot`,
+  `pkgs.scootctl` and (on Linux) `pkgs.scootbg`.
+
 ### 2026-09-27 — a quick drag from one X app onto another lands
 
 - **With `--xwayland`, a quick drag straight from one X app onto another

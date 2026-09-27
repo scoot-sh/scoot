@@ -441,21 +441,46 @@
         }
       );
 
+      # `pkgs.scoot`, `pkgs.scootctl` and (Linux only, where it builds)
+      # `pkgs.scootbg`: this flake's own builds, the same derivations as
+      # `packages`, so an overlay user runs exactly what the flake ships --
+      # scoot and scootbg from one revision, the `apply-config` pair
+      # matched -- and builds nothing twice. Not rebuilt against the
+      # consumer's nixpkgs (`final.rustPlatform`): that would tie the
+      # build to whatever Rust their nixpkgs carries (this workspace needs
+      # edition 2024) and split the pinned pair. With it applied, the
+      # modules below default `package` and `wallpaper.package` to these,
+      # so a direct-module user needs no hand-set package. A system this
+      # flake does not build for gets nothing rather than an eval error.
+      overlays.default =
+        final: prev:
+        let
+          built = self.packages.${prev.stdenv.hostPlatform.system} or { };
+        in
+        nixpkgs.lib.getAttrs (builtins.filter (name: built ? ${name}) [
+          "scoot"
+          "scootctl"
+          "scootbg"
+        ]) built;
+
       # `programs.scoot`: a home-manager module (per-user config file,
       # session script hook, portals.conf install) and a NixOS module
       # (system package + opt-in login-screen session entry). Split the
       # way they are because the config file is per-user while session
       # wiring is system-level -- most compositors ship both, thin.
-      # Each wrapper below is one `mkDefault` for `package` over the
-      # pure module in `nix/modules/`: without an overlay there is no
-      # `pkgs.scoot` to default to, so the flake's own build (the same
-      # per-system default as `packages`) is injected here instead, and
-      # an explicit setting still wins -- except on Darwin on the HM
-      # side (see below). See docs/nix.md.
+      # Each wrapper below is `mkDefault`s for `package` and
+      # `wallpaper.package` over the pure module in `nix/modules/`: the
+      # flake's own builds (the same per-system defaults as `packages`)
+      # are injected here, whether or not the overlay is applied, and an
+      # explicit setting still wins -- except on Darwin on the HM side
+      # (see below). See docs/nix.md.
       homeManagerModules =
         let
           hmWrapper =
             { pkgs, ... }:
+            let
+              built = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
+            in
             {
               imports = [ ./nix/modules/home.nix ];
               # On Darwin the per-system default would be `scootctl`, a
@@ -466,8 +491,11 @@
               # files-only, which the module explicitly supports. Darwin
               # users who want the client set `package` explicitly.
               programs.scoot.package = nixpkgs.lib.mkDefault (
-                if pkgs.stdenv.hostPlatform.isDarwin then null else self.packages.${pkgs.system}.default
+                if pkgs.stdenv.hostPlatform.isDarwin then null else built.default or null
               );
+              # scootbg is Linux-only: null elsewhere (and on Darwin a
+              # `[wallpaper]` renders as written, for the Linux box).
+              programs.scoot.wallpaper.package = nixpkgs.lib.mkDefault (built.scootbg or null);
             };
         in
         {
@@ -484,9 +512,13 @@
         let
           osWrapper =
             { pkgs, ... }:
+            let
+              built = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
+            in
             {
               imports = [ ./nix/modules/nixos.nix ];
-              programs.scoot.package = nixpkgs.lib.mkDefault self.packages.${pkgs.system}.default;
+              programs.scoot.package = nixpkgs.lib.mkDefault (built.default or null);
+              programs.scoot.wallpaper.package = nixpkgs.lib.mkDefault (built.scootbg or null);
             };
         in
         {
@@ -499,7 +531,19 @@
       # so no benchmark applies -- nothing here runs per-event or
       # per-frame; it runs once per `nix flake check`.
       checks = forEach (pkgs: {
-        scoot-modules = pkgs.callPackage ./nix/tests.nix { };
+        scoot-modules = pkgs.callPackage ./nix/tests.nix {
+          # The flake's own wrappers, overlay and packages, so the checks
+          # cover what a flake consumer imports, not just the pure modules;
+          # and aarch64-darwin's package set, evaluated (never built) to
+          # prove a macOS home-manager config with a `[wallpaper]` table
+          # evaluates.
+          flake = {
+            inherit (self) overlays packages;
+            homeModule = self.homeModules.scoot;
+            nixosModule = self.nixosModules.scoot;
+          };
+          darwinPkgs = nixpkgs.legacyPackages.aarch64-darwin;
+        };
       });
 
       formatter = forEach (pkgs: pkgs.nixfmt);

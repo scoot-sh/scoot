@@ -70,6 +70,7 @@ mod tablet;
 mod toplevel_cap;
 mod toplevel_icon;
 mod tty;
+mod wallpaper;
 mod wayland_accept;
 mod window_commit;
 mod window_rules;
@@ -408,6 +409,13 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // this must not run after the first spawn either. Only the compositor
     // installs it -- `scootctl` keeps the default meaning of HUP.
     sighup::install(&event_loop.handle())?;
+
+    // The `[wallpaper]` section, handed to `scootbg apply-config` (see
+    // `wallpaper.rs`): spawned, never waited on, so it costs startup one
+    // fork/exec. Before `[autostart]`, so the wallpaper daemon starts as
+    // early as anything else; spawn order promises nothing about which
+    // client draws first.
+    state.start_wallpaper(&loaded.wallpaper, options.nested);
 
     // `[autostart]` first (the declared session baseline), then `--` (the
     // session script): both run through actions the session already knows

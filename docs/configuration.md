@@ -3,7 +3,7 @@
 - [Command-line flags](#command-line-flags)
 - [The config file](#the-config-file)
 - [Reloading the config](#reloading-the-config)
-- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[xwayland]`](#xwayland) · [`[autostart]`](#autostart) · [`[floating]`](#floating) · [`[[window_rule]]`](#window_rule) · [`[binds]`](#binds)
+- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[xwayland]`](#xwayland) · [`[autostart]`](#autostart) · [`[floating]`](#floating) · [`[[window_rule]]`](#window_rule) · [`[wallpaper]`](#wallpaper) · [`[binds]`](#binds)
 - [Default keybindings](#default-keybindings)
 - [Example `config.toml`](#example-configtoml)
 
@@ -237,10 +237,10 @@ session script carries the behavior half — see
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks for
 `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml` if `$XDG_CONFIG_HOME` is unset or empty, and
-runs on built-in defaults if neither exists. Nine optional tables:
+runs on built-in defaults if neither exists. Ten optional tables:
 `[layout]`, `[appearance]`, `[output]`, `[renderer]`, `[tty]`,
-`[xwayland]`, `[autostart]`, `[floating]`, `[binds]` — plus any number of
-`[[window_rule]]` entries (an array of tables).
+`[xwayland]`, `[autostart]`, `[floating]`, `[wallpaper]`, `[binds]` — plus
+any number of `[[window_rule]]` entries (an array of tables).
 Every field in every table is itself optional and defaults independently, so
 a config that only sets `gap` leaves everything else — including the rest of
 `[layout]` — at its built-in default.
@@ -267,7 +267,8 @@ re-reads this same file and re-applies the layout (gap, column widths and
 the default column width), the output scale, the appearance (including
 the cursor size, color and theme), the
 keybindings, `[floating]` and the `[[window_rule]]`s (for windows that map
-after the reload), and new `[autostart]` spawn entries. Only `[tty] gpu`,
+after the reload), new `[autostart]` spawn entries, and `[wallpaper]`
+(handed to scootbg again). Only `[tty] gpu`,
 `[renderer] backend` and `[xwayland] enabled` need a restart, and a reload
 refuses them with a message naming that rather than silently ignoring them.
 
@@ -295,6 +296,10 @@ cases where guessing would be worse than refusing — see below and
   size that is not positive, ...): logged as a warning, and only that
   field/bind/entry/rule falls back — every other field, bind and rule in the
   file still applies.
+- Anything wrong inside `[wallpaper]` (an unknown key, a value of the wrong
+  type, a path that cannot be resolved): logged as an error, and only the
+  wallpaper is skipped — the rest of the file applies. An unknown key
+  anywhere else still discards the whole file, as above.
 - A set-but-unusable `[tty] gpu` (a wrong path, or an empty one): a hard
   startup error naming the key, not a silent fallback to the automatic pick.
   This is one of the two deliberate startup exceptions; the other is
@@ -352,7 +357,11 @@ that is not a modifier is refused by name), and
 (swapped whole; they decide for windows that map after the reload, and
 windows already mapped keep their place -- a rule that cannot be used is
 refused by name, e.g. `window_rule #3 (sets neither float nor size): skipped
-as unusable`, on every reload that finds it).
+as unusable`, on every reload that finds it), and `[wallpaper]` (handed to
+scootbg on every reload while the section exists, `{}` on the reload that
+removes it; reported as `wallpaper` when its values changed and
+`wallpaper.command` when `command` did, and refused by name, keeping the
+running section, when it has a problem -- see [`[wallpaper]`](#wallpaper)).
 
 **Refused, explicitly, pending a restart:**
 `[tty] gpu` (the session already
@@ -765,6 +774,113 @@ match_title = "*Properties*"
 float = false
 ```
 
+## `[wallpaper]`
+
+The wallpaper, drawn by [scootbg](scootbg/README.md), scoot's wallpaper
+daemon (its own binary and package). The section is all it takes: scoot
+starts scootbg itself and re-applies the section on every reload, with no
+`[autostart]` entry and no session script.
+
+```toml
+[wallpaper]
+image = "~/Pictures/hills.jpg"   # or: color = "#1e1e2e"
+mode = "fill"                    # fill | fit | stretch | center | tile
+
+[wallpaper.output."DP-2"]        # optional, one table per output
+color = "#101014"
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `image` | string (path) | A PNG, JPEG or WebP image. `~` and `~/...` expand against `HOME`, and a relative path resolves against the directory the config file is in (the link's directory for a symlinked config, not its target's). |
+| `color` | string (`"#rrggbb"`) | A solid color. `image` or `color`, never both; neither is nothing (the compositor's own `background_color`). |
+| `mode` | string | With an `image` only: `fill` (cover and crop, scootbg's default), `fit` (letterbox with `fill`), `stretch`, `center` or `tile`. |
+| `fill` | string (`"#rrggbb"`) | With an `image` only: the color around a `fit` or `center` image. |
+| `filter` | string | With an `image` only: the scaling filter, `lanczos3`, `catmull-rom`, `bilinear` or `nearest`. |
+| `output."NAME"` | table | The same five keys for one output, by connector name (as `scootbg query` and `scootctl outputs` list them: `headless-2`, `DP-2`, ...). Each output table stands alone: an output's `image` does not take the top level's `mode`. An empty table is nothing on that output. |
+| `command` | string | The `scootbg` to run. Default `"scootbg"`, found on `PATH`; a path with a `/` in it resolves like `image`. The Nix modules set it to the installed package's store path. |
+
+An empty `[wallpaper]` table is a section too: it says "no wallpaper from
+the config" and clears whatever the config set before. For no wallpaper
+handling at all, leave the whole table out.
+
+**What scoot does with it.** At startup, and on every reload, while the
+section exists, scoot runs `COMMAND apply-config --profile PROFILE JSON`
+with the section's values as JSON (paths resolved, only the keys you
+wrote, `command` left out); on the reload that removes it, the same with
+`{}`; at startup without one, nothing. `PROFILE` is `scoot`, or
+`scoot-nested` under `--nested`, so a nested session and its host keep
+their own saved wallpaper. `apply-config` starts the scootbg daemon when
+none runs and hands it the section otherwise; see
+[scootbg's `apply-config`](scootbg/README.md#apply-config-scoots-wallpaper-section)
+for everything on its side.
+
+**Whichever you changed last wins.** Edit `[wallpaper]` (and start or
+reload scoot): the config's wallpaper shows. Run `scootbg set` after that:
+your pick shows, and keeps showing across restarts and unrelated reloads,
+until you next change `[wallpaper]` itself. scootbg compares a fingerprint
+of the section with the last one applied for the profile, so a reload that
+leaves the section alone re-applies nothing (the run still happens: it is
+what brings back a daemon that crashed).
+
+| Sequence | Result |
+|---|---|
+| section A, `scootbg set X`, restart | A unchanged, so X |
+| section A, reload with B, `scootbg set X`, restart | B unchanged since its reload, so X |
+| section A, reload with B, restart | B |
+| section removed by a reload, later re-added as A | A |
+
+"Changed" is as written: `#1E1E2E` and `#1e1e2e`, or an explicit `mode =
+"fill"` and none, are different sections, and so is a moved image. A new
+`command` alone is not a change (the Nix modules' store path moves on every
+upgrade). One order is not seen: the section removed while scoot is not
+running and re-added unchanged before the next start counts as unchanged.
+
+**Never in the way.** scoot spawns `apply-config` and never waits for it
+(`apply-config` returns once the wallpaper is on screen, which takes scoot
+processing scootbg's frames). Its stdin, stdout and stderr are scoot's, so
+its messages (and the daemon's) land in scoot's log; it gets no other file
+descriptor of scoot's. Runs are one at a time: a reload while one runs
+waits for it, and of several waiting only the newest section runs. A run
+is waited on for 40 s at most, then scoot logs that and moves on (a state
+file on a hung network disk is the only way to get there); the run is
+still reaped and its end logged. Nothing here costs anything per frame or
+per input event.
+
+**When it fails, the session carries on** with its `background_color`:
+
+- **scootbg is not installed** (or `command` names nothing): a warning in
+  scoot's log naming the command and how to install it. The next reload
+  tries again.
+- **A run fails**: scoot logs its exit status and command. Status 1 is a
+  runtime failure (scootbg says which just above in the log: an image that
+  is not a file, no daemon reached, ...); status 2 is a section scootbg
+  refused (a malformed color, an unknown mode or filter: values scoot
+  passes through for scootbg to check). A failed section is tried again on
+  the next reload, and whenever a run scoot stopped waiting on ends.
+- **The section itself has a problem** (an unknown key, a value that is not
+  a string, `~` with no `HOME`): at startup, an error in the log names it
+  and no wallpaper is set from the file, but **the rest of the file
+  applies** -- unlike other tables, where an unknown key discards the whole
+  file (see [Failure semantics](#failure-semantics)); on a reload, the
+  field is refused by name and the running section kept.
+
+**Reloading.** `scootctl reload` reports `wallpaper` as applied when the
+section's values changed (added, edited or removed) and
+`wallpaper.command` when only `command` did; "applied" means handed to
+scootbg, and the outcome is in the log. An unchanged section is silent in
+the reply but still runs. It applies under session lock too: the
+wallpaper is on the background layer, which a locked frame does not show.
+
+**Leave `scootbg daemon` out of `[autostart]`** and your session script
+when you use this section: `apply-config` starts the daemon. A second
+start is harmless (one daemon wins, and it moves to scoot's profile), but
+one that starts first shows the `default` profile's wallpaper for a moment
+before scoot's section replaces it.
+
+**Until scootbg's first frame**, scoot shows its `background_color`. How
+long that is at a real `--tty` login has not been measured yet.
+
 ## Default keybindings
 
 | Combo | Action |
@@ -924,4 +1040,12 @@ modifier = "alt"
 match_app_id = "*pavucontrol"
 float = true
 size = [700, 500]
+
+# Needs scootbg installed (the Nix modules do it for you).
+[wallpaper]
+image = "~/Pictures/hills.jpg"
+mode = "fill"
+
+[wallpaper.output."DP-2"]
+color = "#101014"
 ```

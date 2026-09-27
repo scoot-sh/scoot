@@ -30,6 +30,13 @@
 //! never-block-startup rule for this one key. See [`LoadedConfig::gpu`]
 //! and `tty::gpu::resolve`.
 //!
+//! `[wallpaper]` is read more leniently still, and deliberately: an unknown
+//! key or a value of the wrong type in it costs only the wallpaper (startup
+//! logs the problem and runs no `scootbg`; a reload refuses the field and
+//! applies the rest), never the rest of the file. See
+//! `wallpaper/section.rs` for why, and for how that parse stays as cheap as
+//! a derived one.
+//!
 //! `[renderer] backend` is a near-miss worth spelling out, because it splits
 //! the two halves across the rule. An *unknown* name (`backend = "vulkan"`)
 //! is an ordinary malformed value: warn, use the default, start. But a name
@@ -62,6 +69,7 @@ use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
 use super::keybindings::{Bound, Keybindings, Modifiers};
 use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale};
+use super::wallpaper::{WallpaperConfig, WallpaperSetting};
 use super::window_rules::{
     DEFAULT_DRAG_MODIFIER, FloatingConfig, FloatingRules, WindowRuleConfig, drag_modifier,
 };
@@ -358,6 +366,11 @@ struct FileConfig {
     /// `[[window_rule]]`, an array of tables: see `window_rules.rs`.
     #[serde(default)]
     window_rule: Vec<WindowRuleConfig>,
+    /// `[wallpaper]`: read by a `Deserialize` that never fails, so a
+    /// mistake in it costs the wallpaper, never the rest of the file (see
+    /// `wallpaper/section.rs`).
+    #[serde(default)]
+    wallpaper: Option<WallpaperConfig>,
     #[serde(default)]
     binds: HashMap<String, String>,
 }
@@ -423,6 +436,12 @@ pub struct LoadedConfig {
     /// warned and uses the default; a reload refuses it by name and keeps
     /// the session's (see `reload.rs`).
     pub invalid_floating_modifier: Option<String>,
+    /// `[wallpaper]`, its paths resolved against the config file's
+    /// directory and `HOME`: what scoot hands `scootbg apply-config` (see
+    /// `wallpaper.rs`). Absent, a usable section, or a section with a
+    /// problem (named; startup logs it and runs nothing, a reload refuses
+    /// the field).
+    pub wallpaper: WallpaperSetting,
 }
 
 impl LoadedConfig {
@@ -440,21 +459,26 @@ impl LoadedConfig {
             skipped_rules: Vec::new(),
             floating_modifier: DEFAULT_DRAG_MODIFIER,
             invalid_floating_modifier: None,
+            wallpaper: WallpaperSetting::Absent,
         }
     }
 
+    /// For the tests that build a `LoadedConfig` from a parsed file with no
+    /// path: a relative `[wallpaper]` image resolves against `/`.
+    #[cfg(test)]
     fn from_file(file: FileConfig) -> Self {
-        Self::from_file_with_vt(file, false)
+        Self::from_file_with_vt(file, Path::new("/config.toml"), false)
     }
 
-    /// Like [`from_file`](Self::from_file), but for a live reload rather
-    /// than startup: `vt` says whether this session drives `--tty`, in
-    /// which case the replacement table gets the `Ctrl+Alt+F1..F12`
-    /// recovery bindings layered on last -- exactly what `tty::init` does
-    /// to the startup table (see [`enforce_vt_binds`]). Startup itself
-    /// always passes `false` here: the VT bindings are added later, once
-    /// `--tty` is known to be the backend.
-    fn from_file_with_vt(file: FileConfig, vt: bool) -> Self {
+    /// Builds the loaded config from a parsed file. `path` is the file it
+    /// came from, which relative `[wallpaper]` paths resolve against. `vt`
+    /// says whether this session drives `--tty`, in which case the
+    /// replacement table gets the `Ctrl+Alt+F1..F12` recovery bindings
+    /// layered on last -- exactly what `tty::init` does to the startup
+    /// table (see [`enforce_vt_binds`]). Startup itself always passes
+    /// `false` here: the VT bindings are added later, once `--tty` is known
+    /// to be the backend.
+    fn from_file_with_vt(file: FileConfig, path: &Path, vt: bool) -> Self {
         let config = file.layout.unwrap_or_default().into_config();
         let appearance = file
             .appearance
@@ -480,6 +504,8 @@ impl LoadedConfig {
             };
         let (floating, skipped_rules) =
             FloatingRules::from_config(file.floating, &file.window_rule);
+        let wallpaper =
+            WallpaperSetting::resolve(file.wallpaper, path, std::env::var_os("HOME").as_deref());
         for skipped in &skipped_rules {
             tracing::warn!(rule = %skipped, "skipping an unusable [[window_rule]]");
         }
@@ -496,6 +522,7 @@ impl LoadedConfig {
             skipped_rules,
             floating_modifier,
             invalid_floating_modifier,
+            wallpaper,
         }
     }
 }
@@ -537,7 +564,7 @@ pub fn reload_from(path: &Path, vt: bool) -> Result<LoadedConfig, ReloadError> {
         reason: source.to_string(),
     })?;
     toml::from_str::<FileConfig>(&text)
-        .map(|file| LoadedConfig::from_file_with_vt(file, vt))
+        .map(|file| LoadedConfig::from_file_with_vt(file, path, vt))
         .map_err(|source| ReloadError {
             path: path.to_owned(),
             reason: source.to_string(),
@@ -650,11 +677,12 @@ pub fn default_config_toml() -> String {
          # commented for the real default (see docs/configuration.md, which these\n\
          # comments summarize, not replace).\n\
          #\n\
-          # Gap, column widths, the output scale, the ring/background/cursor
-          # appearance fields, binds, [floating] and [[window_rule]], and new
-          # [autostart] spawn entries re-apply live with `scootctl reload`; [tty] gpu, [renderer]
-          # backend and [xwayland] enabled take effect on restart and a reload
-          # refuses them with a message.\n",
+         # Gap, column widths, the output scale, the ring/background/cursor\n\
+         # appearance fields, binds, [floating] and [[window_rule]], new\n\
+         # [autostart] spawn entries and [wallpaper] re-apply live with\n\
+         # `scootctl reload`; [tty] gpu, [renderer] backend and [xwayland]\n\
+         # enabled take effect on restart and a reload refuses them with a\n\
+         # message.\n",
     );
 
     out.push_str("\n[layout]\n");
@@ -757,6 +785,19 @@ pub fn default_config_toml() -> String {
         "# modifier = \"{}\"\n",
         DEFAULT_DRAG_MODIFIER.name()
     ));
+
+    out.push_str(
+        "\n# [wallpaper] -- handed to scootbg, the wallpaper daemon (its own package),\n\
+         # at startup and on every reload. Leave the whole table commented out for no\n\
+         # wallpaper: an empty [wallpaper] means \"clear it\". `~/` and relative\n\
+         # paths resolve against HOME and this file's directory.\n",
+    );
+    out.push_str("# [wallpaper]\n");
+    out.push_str("# image = \"~/Pictures/hills.jpg\"   # or: color = \"#1e1e2e\"\n");
+    out.push_str("# mode = \"fill\"                    # fill | fit | stretch | center | tile\n");
+    out.push_str("# command = \"scootbg\"              # found on PATH unless a path is given\n");
+    out.push_str("# [wallpaper.output.\"DP-2\"]        # optional, per output\n");
+    out.push_str("# color = \"#101014\"\n");
 
     out.push_str("\n# [[window_rule]] -- repeat the table for more rules. Each rule names at\n");
     out.push_str("# least one whole-string glob (* any run, ? one character, case-sensitive)\n");
@@ -1210,7 +1251,7 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 ///   rather than over 7, and 32,100 KiB debug, which does not fit at all.
 fn parse_or_defaults(text: &str, path: &Path) -> LoadedConfig {
     match toml::from_str::<FileConfig>(text) {
-        Ok(file) => LoadedConfig::from_file(file),
+        Ok(file) => LoadedConfig::from_file_with_vt(file, path, false),
         Err(error) => {
             tracing::error!(
                 path = %path.display(), %error,

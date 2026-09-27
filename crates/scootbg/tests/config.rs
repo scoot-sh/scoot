@@ -3,7 +3,7 @@
 //! scoot will (at start-up and on each reload), and check what shows by
 //! `query` and by screenshot.
 //!
-//! The precedence table of docs/scootbg/backlog/scoot-integration.md, row
+//! The precedence table of docs/scootbg/backlog/resolved/scoot-integration-done.md, row
 //! by row, each across a restart (the compositor killed, a new one started
 //! over the same state directory, and `apply-config` run again as scoot's
 //! start-up would); then starting the daemon (detached, raced, failing),

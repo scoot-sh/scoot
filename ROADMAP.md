@@ -2170,8 +2170,12 @@ medium priority — the effective top of what's actually open.
    ([record](docs/scootbg/backlog/resolved/restore-state-done.md)): every
    `set` and `clear` saved per output and profile (`--profile`,
    `--no-restore`) and restored at startup, and an image `set` sent as the
-   daemon starts decoded once instead of twice. scoot's `[wallpaper]`
-   section is next.
+   daemon starts decoded once instead of twice. Item 10
+   ([record](docs/scootbg/backlog/resolved/scoot-integration-done.md)):
+   `scootbg apply-config` (part A), then scoot's `[wallpaper]` section,
+   spawned at startup and on every reload, one run at a time, bounded and
+   retried, and the Nix modules and overlay that install scootbg for it
+   (part B).
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

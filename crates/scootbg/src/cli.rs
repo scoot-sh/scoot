@@ -2,9 +2,10 @@
 //! +299 KB for `clap`). One binary: `daemon` runs the Wayland client, and
 //! every other command is a client of its control socket.
 //!
-//! `apply-config` is scoot's one command (scoot-integration.md); its
-//! `--serve` flag is internal, the detached daemon it starts
-//! (`crate::apply`), and is not advertised.
+//! `apply-config` is scoot's one command
+//! (docs/scootbg/backlog/resolved/scoot-integration-done.md); its `--serve`
+//! flag is internal, the detached daemon it starts (`crate::apply`), and is
+//! not advertised.
 
 use std::borrow::Cow;
 use std::ffi::OsString;

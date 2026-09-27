@@ -1,6 +1,6 @@
 //! `apply-config` in the daemon: scoot's `[wallpaper]` section, and the
 //! rule it keeps, "whichever you changed last wins"
-//! (docs/scootbg/backlog/scoot-integration.md).
+//! (docs/scootbg/backlog/resolved/scoot-integration-done.md).
 //!
 //! Every `apply-config` carries a profile and a section. The daemon:
 //!

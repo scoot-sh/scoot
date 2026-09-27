@@ -1,5 +1,5 @@
 //! `scootbg apply-config`: the one command scoot runs
-//! (docs/scootbg/backlog/scoot-integration.md). The daemon's half, what a
+//! (docs/scootbg/backlog/resolved/scoot-integration-done.md). The daemon's half, what a
 //! section does once it arrives, is `daemon::config`; this is getting it
 //! there.
 //!

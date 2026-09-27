@@ -17,11 +17,11 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > real device pixels, fractional scales included; `query` reports what
 > each output shows, and `version` and `kill` work. **The wallpaper is
 > restored at the next start**, per profile ([below](#restore)).
-> **`scootbg apply-config`**, the one command scoot's `[wallpaper]`
-> section will drive, works ([below](#apply-config-scoots-wallpaper-section));
-> scoot's side of it (the section itself, spawning, the Nix modules) is
-> not there yet, the rest of [its item](backlog/scoot-integration.md).
-> These docs stay here.
+> **In scoot, a `[wallpaper]` section is all it takes**: scoot runs
+> `scootbg apply-config` with it at start-up and on every reload
+> ([below](#apply-config-scoots-wallpaper-section); the section itself is
+> in [scoot's configuration reference](../configuration.md#wallpaper)),
+> and the Nix modules install scootbg for it.
 
 ## What it is for
 
@@ -61,16 +61,15 @@ per-frame budget.
 
 ## How it will work
 
-In scoot, the whole setup is to be one config section. **This is planned,
-not working:** no scoot release accepts `[wallpaper]` yet, and scoot's
-config rejects unknown sections by ignoring the *whole* file, keybindings
-and layout included. Do not add it until the
-[integration item](backlog/scoot-integration.md) lands. scootbg's half,
-the `apply-config` command scoot will run with the section, is there
-([below](#apply-config-scoots-wallpaper-section)).
+In scoot, the whole setup is one config section (every key, and what
+happens when scootbg is missing, in
+[scoot's configuration reference](../configuration.md#wallpaper)). scoot
+runs `scootbg apply-config` with it
+([below](#apply-config-scoots-wallpaper-section)): no autostart entry, no
+session script.
 
 ```toml
-# ~/.config/scoot/config.toml  (planned; see above)
+# ~/.config/scoot/config.toml
 [wallpaper]
 image = "~/Pictures/hills.jpg"   # or: color = "#1e1e2e"
 mode = "fill"                    # fill | fit | stretch | center | tile
@@ -93,8 +92,8 @@ scootbg daemon --profile sway                  # ... restoring and saving the `s
 ```
 
 Every command above works today (`set` also takes `--filter
-lanczos3|catmull-rom|bilinear|nearest`, and `daemon` `--no-restore`); what
-does not yet is the `[wallpaper]` section. The root
+lanczos3|catmull-rom|bilinear|nearest`, and `daemon` `--no-restore`), and
+so does the `[wallpaper]` section. The root
 [README](../../README.md#scootbg-early) has the details (exit codes, what
 `set` waits for). One binary: `daemon` runs the Wayland client, every
 other subcommand talks to it over its socket.
@@ -249,7 +248,8 @@ output HDMI-A-1 clear
 
 `scootbg apply-config [--profile NAME] JSON` is the one command scoot runs
 (at start-up and on every reload while its config has a `[wallpaper]`
-section; scoot's side is [not there yet](backlog/scoot-integration.md)).
+section, and with `{}` on the reload that removes it; see
+[scoot's side](../configuration.md#wallpaper)).
 You rarely run it yourself, but anything that owns a config can: it is
 how a config, rather than a person, sets the wallpaper.
 
@@ -394,7 +394,7 @@ image in the section that is not a file, drawing failed, or the state file
 could not be written; 2 a usage error, a refused section included.
 
 **Timing** (release build, `scoot --headless --outputs 2`, a color, two
-runs; [the record](backlog/scoot-integration.md#review-of-pr-293)):
+runs; [the record](backlog/resolved/scoot-integration-done.md#review-of-pr-293)):
 from running `apply-config` with no daemon to the section on screen,
 medians 6.90 and 5.61 ms (4.85–10.54; a plain `scootbg daemon` then
 `set`: 4.27 and 4.01 ms); unchanged on a running daemon 1.96 and 1.86 ms;
@@ -523,7 +523,7 @@ The image is a 6000×4000 JPEG, `fill`.
 | to the image on one 4K output, likewise | 450–476 ms, one decode (714–820 ms for the build before ticket 9 in the same runs, two decodes; a `set` once the output is configured takes 437–468 ms) |
 | **to a restored image** on one 4K output (the state file names the JPEG) | 451–497 ms to the first `query` that reports it shown: one decode ([restore-state-done.md](backlog/resolved/restore-state-done.md#measurements)) |
 | Saving a choice | 23–33 µs on the loop, medians (build the text, hand it over); the atomic write on a thread of its own, medians 334–455 µs, worst 1.0–54.5 ms per 200, on ext4 |
-| **`apply-config`**, a color on 2× 1600×1000: with no daemon (it starts one) / unchanged / changed, to on screen | medians 5.61–6.90 / 1.86–1.96 / 2.31–2.55 ms over two runs (a `set` 2.34–2.39 ms; `daemon` then `set` from cold 4.01–4.27 ms); the daemon it starts idles like any other: 0 context switches and 0 CPU ticks in 30 s, 1 thread, 8 fds, RSS 3,968 kB ([record](backlog/scoot-integration.md#review-of-pr-293)) |
+| **`apply-config`**, a color on 2× 1600×1000: with no daemon (it starts one) / unchanged / changed, to on screen | medians 5.61–6.90 / 1.86–1.96 / 2.31–2.55 ms over two runs (a `set` 2.34–2.39 ms; `daemon` then `set` from cold 4.01–4.27 ms); the daemon it starts idles like any other: 0 context switches and 0 CPU ticks in 30 s, 1 thread, 8 fds, RSS 3,968 kB ([record](backlog/resolved/scoot-integration-done.md#review-of-pr-293)) |
 | File descriptors | 8 whatever is shown: a buffer's memfd is closed once the compositor has it |
 
 ## Measured so far
@@ -553,21 +553,27 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 - **scoot drives scootbg, never the reverse.** At startup and on each
   reload, while `[wallpaper]` exists, scoot spawns one command,
-  `scootbg apply-config`, with the section's values (scootbg's side works,
-  [above](#apply-config-scoots-wallpaper-section); scoot's is next). It
-  starts the daemon if none is running, otherwise hands the values over,
-  and changes the wallpaper only if the section itself changed. scoot
-  never waits on it from its event loop. scoot depends only on scootbg's CLI,
+  `scootbg apply-config`, with the section's values
+  ([above](#apply-config-scoots-wallpaper-section)), one run at a time.
+  It starts the daemon if none is running, otherwise hands the values
+  over, and changes the wallpaper only if the section itself changed.
+  scoot never waits on it from its event loop: the run is reaped, and its
+  exit status logged, when it ends. scoot depends only on scootbg's CLI,
   not its crate, and scootbg knows nothing about scoot's config, so each
   stays usable without the other. See
-  [`backlog/scoot-integration.md`](backlog/scoot-integration.md).
+  [scoot's configuration reference](../configuration.md#wallpaper) and
+  [the item's record](backlog/resolved/scoot-integration-done.md).
 - **Config versus `scootbg set`: whichever you changed last wins.** Edit
   `[wallpaper]` and the config's wallpaper shows. Run `scootbg set` after
   that and your choice shows, across restarts and unrelated reloads, until
   you next change `[wallpaper]` itself.
-- **Packaging.** `scootbg` is its own package, like `scootctl`. scoot runs
-  it from `PATH` (or `[wallpaper] command`), and the home-manager module
-  installs it and points scoot at it when `[wallpaper]` is set.
+- **Packaging.** `scootbg` is its own package, like `scootctl`
+  (`packages.<system>.scootbg`, Linux only, and `pkgs.scootbg` from the
+  flake's overlay). scoot runs it from `PATH` (or `[wallpaper] command`).
+  The home-manager module installs it and points `command` at it whenever
+  its settings have a `wallpaper` table; the NixOS module installs it
+  system-wide whenever `programs.scoot.enable` is on
+  (`programs.scoot.wallpaper.enable`). See [docs/nix.md](../nix.md).
 - scoot's `[appearance] background_color` stays: it is the frame clear
   color, what shows with no wallpaper client at all. scootbg draws over it
   on the background layer.

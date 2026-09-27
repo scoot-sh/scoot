@@ -21,7 +21,7 @@ ticket follows unchanged.
   warning.
 - The state file also records the fingerprint of the last section
   applied through `scootbg apply-config`, which is how the rule in
-  [scoot-integration.md](../scoot-integration.md) (whichever you changed
+  [scoot-integration-done.md](scoot-integration-done.md) (whichever you changed
   last wins) survives restarts. Only `apply-config` writes it.
 - **One state file per profile** (`--profile NAME`, default `default`),
   not per display: scoot binds the first free `wayland-N`, so the socket
@@ -30,7 +30,7 @@ ticket follows unchanged.
   autostart can pass `sway`, and sessions with different profiles never
   restore each other's wallpapers. A daemon takes its profile from its own
   `--profile`, and adopts the profile of each `apply-config` it receives (see
-  [scoot-integration.md](../scoot-integration.md)), so a redundant
+  [scoot-integration-done.md](scoot-integration-done.md)), so a redundant
   `[autostart]` daemon never splits state across two profiles. Two
   concurrent sessions sharing a
   profile share state, last writer wins; that is the documented
@@ -100,7 +100,7 @@ ticket follows unchanged.
   (`state::Profile::parse`); anything else is a usage error, exit 2.
 - **The fingerprint is reserved**: read, kept, and written back by every
   save; nothing sets it until `apply-config`
-  ([scoot-integration.md](../scoot-integration.md#what-ticket-9-provides)).
+  ([scoot-integration-done.md](scoot-integration-done.md#what-ticket-9-provides)).
   So is `profile`. Neither needs a version bump later.
 - **The double decode is gone** (`Output::coming`, `Jobs::next`,
   `daemon::images::trial_targets`). A trial's targets are decided when it
@@ -167,7 +167,7 @@ ticket follows unchanged.
   [release-gate row](../lightest.md); on top come 15 MB of disk per output
   size and the invalidation a cache needs (path, size, mtime, look, buffer
   size). The gap it would shorten is the one
-  [ticket 10](../scoot-integration.md) measures on `--tty` ("the gap
+  [ticket 10](scoot-integration-done.md) measures on `--tty` ("the gap
   before the first frame"). If that gap is visible there, the option is a
   cache written lazily (only once a wallpaper has stayed up a while), and
   these are its numbers.
@@ -350,14 +350,14 @@ after it adds this record, the numbers, and help-text wording).
 
 ### For the next tickets
 
-- [scoot-integration.md](../scoot-integration.md): the fingerprint and
+- [scoot-integration-done.md](scoot-integration-done.md): the fingerprint and
   profile lines exist, are read and kept by every save, and need no format
   bump; `--profile` exists and is validated; `restore::load` and
   `restore::apply(…, show)` are separate, so `apply-config` can compare
   before showing anything; adopting a profile mid-life must also
   reconcile every output, which start-up does not need; `write_atomic` is
   public for `apply-config '{}'` with no daemon. The details are in its
-  [What ticket 9 provides](../scoot-integration.md#what-ticket-9-provides).
+  [What ticket 9 provides](scoot-integration-done.md#what-ticket-9-provides).
   The start-up gap to measure on `--tty` is 450–500 ms with a 4K JPEG
   here, nearly all decode; the cache numbers above are the option if it
   shows.

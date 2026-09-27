@@ -199,6 +199,11 @@ scootctl screenshot --out /tmp/shot.png
 scootctl type "hello"
 ```
 
+With a `[wallpaper]` section in the config (see [Configuring](#configuring)),
+scoot starts `scootbg`, the wallpaper daemon, itself: at startup, and again
+on every `scootctl reload`. It needs `scootbg` on `PATH` (or `[wallpaper]
+command`); without it the session starts anyway, with a warning in the log.
+
 `scootctl` is the client every example on this page uses; `scoot msg ...`
 is the same client kept as a permanent alias on the compositor binary.
 Screenshots show the pointer, the same way whichever backend and renderer
@@ -277,6 +282,12 @@ background_color = "#101014"
 [autostart]
 commands = ["spawn waybar"]
 
+# The wallpaper: scoot runs scootbg (install it; the Nix modules do) with
+# this at startup and on every reload. `scootbg set` overrides it until you
+# next change the section.
+[wallpaper]
+image = "~/Pictures/hills.jpg"   # or: color = "#1e1e2e"
+
 # Float this app's windows above the strip instead of giving them a column
 # (pavucontrol's app id is org.pulseaudio.pavucontrol; `scootctl windows`
 # shows any window's).
@@ -288,6 +299,9 @@ float = true
 How a session starts its programs — a session script (`scoot -- ...`) vs
 `[autostart]` — is in
 [docs/configuration.md](docs/configuration.md#starting-a-session).
+`[wallpaper]` (its keys, what wins over `scootbg set`, what happens when
+scootbg is missing) is in
+[docs/configuration.md](docs/configuration.md#wallpaper).
 
 Every table, field, default and failure mode is in
 [docs/configuration.md](docs/configuration.md). Almost nothing in it can stop
@@ -328,9 +342,9 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 `scootbg` is scoot's wallpaper daemon, a separate binary and package that
 works on any compositor with `wlr-layer-shell`. **It is early: it shows a
 solid color or an image (PNG, JPEG, WebP) on every output, or on one, and
-shows it again when the daemon next starts; `scootbg apply-config`, the
-command scoot's `[wallpaper]` section will drive, works, but scoot's
-config does not have that section yet.** What works today:
+shows it again when the daemon next starts.** In scoot, a `[wallpaper]`
+section in the config is all it takes (see [Configuring](#configuring));
+scoot runs `scootbg apply-config` with it. What works today:
 
 ```sh
 scootbg daemon                        # connect to $WAYLAND_DISPLAY and serve the control socket
@@ -348,7 +362,7 @@ scootbg query                         # each output, its surface and what it sho
 scootbg version                       # the running daemon's version and protocol
 scootbg kill                          # stop it; returns once a new daemon can start
 scootbg apply-config --profile scoot '{"color":"#1e1e2e"}'
-                                      # what scoot will run with its [wallpaper] section (below)
+                                      # what scoot runs with its [wallpaper] section (below)
 scootbg --help                        # and `scootbg COMMAND --help`
 ```
 
@@ -450,7 +464,7 @@ commands then say no daemon is running (exit 1), and the next
 error (an unknown command or argument, or a bad `--profile` name).
 
 **`scootbg apply-config [--profile NAME] JSON`** is how a config, rather
-than a person, sets the wallpaper: scoot will run it at start-up and on
+than a person, sets the wallpaper: scoot runs it at start-up and on
 every reload with its `[wallpaper]` section as JSON (`{}` once the section
 is gone). The JSON is one object: `image` (an absolute path) or `color`
 (`#rrggbb`), with `mode`/`fill`/`filter` for an image as `set` takes them;
@@ -592,10 +606,8 @@ accept clients (out of file descriptors, say), it keeps the wallpaper up,
 says so once on stderr, and retries every second rather than exit. The
 control protocol itself (one JSON object per line, for scripts that skip
 the CLI) is in [docs/scootbg/README.md](docs/scootbg/README.md#the-control-protocol).
-scoot's `[wallpaper]` config section, which will run `apply-config`, is
-the rest of that item in
-[its backlog](docs/scootbg/backlog/README.md); scoot does not accept it
-yet, so do not add one.
+scoot's `[wallpaper]` section, which runs `apply-config`, is in
+[docs/configuration.md](docs/configuration.md#wallpaper).
 
 ## Documentation
 
@@ -614,8 +626,9 @@ yet, so do not add one.
   wakeups, memory, startup, screenshots), including an A/B with niri on the
   dev VM, with how it was measured and what it cannot show.
 - [docs/scootbg/README.md](docs/scootbg/README.md) — scootbg, the
-  wallpaper daemon (early: the daemon and its socket, no wallpapers yet),
-  with its design and its own backlog.
+  wallpaper daemon (early: colors and images per output, restored at
+  start-up, set from scoot's `[wallpaper]` section), with its design and
+  its own backlog.
 - [CHANGELOG.md](CHANGELOG.md) · [ROADMAP.md](ROADMAP.md)
 
 ## Developing

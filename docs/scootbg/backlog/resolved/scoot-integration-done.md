@@ -1,26 +1,24 @@
 ---
 title: "Seamless in scoot: a [wallpaper] config section"
-status: "open"
+status: "resolved"
 area: "scootbg"
-priority: "high"
+priority: null
 blocked: null
 ---
 
-# Seamless in scoot: a [wallpaper] config section
+# Seamless in scoot: a [wallpaper] config section — RESOLVED
 
-**Part A, scootbg's half, landed 2026-09-27; part B, scoot's half and the
-Nix modules, is open.** What part A delivered, where it departs from the
-plan below, its measurements and what part B must still do are in
-[Part A (scootbg): landed](#part-a-scootbg-landed) at the end; the plan
-follows unchanged.
+**Both halves landed 2026-09-27.** Part A, scootbg's `apply-config`:
+[Part A (scootbg): landed](#part-a-scootbg-landed). Part B, scoot's
+`[wallpaper]` section, its spawning and the Nix modules:
+[Part B (scoot and Nix): landed](#part-b-scoot-and-nix-landed). The plan
+follows unchanged, except that the example below no longer carries its
+"do not add this yet" warning.
 
 In scoot, the wallpaper should be one config section, with nothing else to
 wire up.
 
 ```toml
-# Planned. No scoot release accepts this yet: scoot's config rejects
-# unknown sections and, when it does, ignores the WHOLE file (your binds
-# and layout included). Do not add it until this item lands.
 [wallpaper]
 image = "~/Pictures/hills.jpg"   # or: color = "#1e1e2e"
 mode = "fill"
@@ -32,7 +30,7 @@ color = "#101014"
 ## The rule: whichever you changed last wins
 
 Stated once here, and the same way in the README and in
-[restore-state-done.md](resolved/restore-state-done.md):
+[restore-state-done.md](restore-state-done.md):
 
 - Edit `[wallpaper]` (and start or reload scoot): the config's wallpaper
   shows.
@@ -43,9 +41,9 @@ Stated once here, and the same way in the README and in
 ### Mechanism: one command for everything from the config
 
 `apply-config` belongs to this ticket: it moved here from the CLI ticket
-([cli-and-ipc-done.md](resolved/cli-and-ipc-done.md#resolution)) when
+([cli-and-ipc-done.md](cli-and-ipc-done.md#resolution)) when
 that ticket's other items landed, because it needs ticket 9's saved state
-([restore-state-done.md](resolved/restore-state-done.md)) for its
+([restore-state-done.md](restore-state-done.md)) for its
 fingerprint. That state now exists (see [below](#what-ticket-9-provides));
 `apply-config` itself does not yet: the CLI neither parses nor advertises
 it.
@@ -105,8 +103,8 @@ documented rather than worked around.
 
 ### What ticket 9 provides
 
-Ticket 9 ([restore-state-done.md](resolved/restore-state-done.md), and
-[the Restore section](../README.md#restore) for the user-facing rules)
+Ticket 9 ([restore-state-done.md](restore-state-done.md), and
+[the Restore section](../../README.md#restore) for the user-facing rules)
 built the state this mechanism compares against, and left these hooks:
 
 - **The fingerprint has its line already.** The state file (version 1)
@@ -161,7 +159,7 @@ built the state this mechanism compares against, and left these hooks:
   a daemon only to clear; a later `scootbg daemon --profile scoot` shows
   nothing, as the config asked.
 - **The profile** names the state `apply-config` restores and records
-  (see [restore-state-done.md](resolved/restore-state-done.md)): scoot passes `scoot`, or
+  (see [restore-state-done.md](restore-state-done.md)): scoot passes `scoot`, or
   `scoot-nested` under `--nested`, so a nested session and its host keep
   separate state.
 - **Paths are resolved by scoot**, which owns its config's meaning: `~/`

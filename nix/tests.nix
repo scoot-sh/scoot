@@ -21,12 +21,27 @@
 #   byte-identical, `-- COMMAND` append, wrapper-script path, quoting
 #   with spaces/quotes/pipes intact), stays inert with the entry off,
 #   and refuses empty/blank and package-less combinations at eval;
-# - the two settings failure modes behave as documented (see below).
+# - the two settings failure modes behave as documented (see below);
+# - scootbg for `[wallpaper]` (ticket 10): the NixOS
+#   `wallpaper.enable` follows `enable` and installs `wallpaper.package`,
+#   off installs nothing, on without a package fails loudly at eval; the
+#   home-manager side installs it whenever `settings.wallpaper` exists and
+#   renders `command` as its store path (a user's own `command` wins);
+#   the flake wrappers default both packages to the flake's own builds;
+#   a macOS home-manager config with a `[wallpaper]` table evaluates, with
+#   no scootbg; and the overlay provides `pkgs.scootbg` (Linux only) and
+#   is what the pure modules default to.
 {
   lib,
   pkgs,
   runCommand,
   python3,
+  # The flake's own outputs (`overlays`, `packages`, `homeModule`,
+  # `nixosModule`) and aarch64-darwin's package set, from `flake.nix`'s
+  # `checks`. Null when this file is evaluated on its own: the checks that
+  # need them are then skipped.
+  flake ? null,
+  darwinPkgs ? null,
 }:
 
 let
@@ -115,23 +130,137 @@ let
       specialArgs = { inherit pkgs; };
     };
 
-  evalNixos =
-    cfg:
+  # The pure NixOS module with `pkgs` as given. Every configuration
+  # below that is not about scootbg gets a stand-in `wallpaper.package`
+  # (`evalNixos`), so that `wallpaper.enable` (on by default) cannot make
+  # an unrelated pin's assertions fail -- or, worse, make a pin that
+  # expects a failure pass for the wrong reason.
+  evalNixosWith =
+    modules: pkgs': cfg:
     lib.evalModules {
-      modules = [
-        ./modules/nixos.nix
+      modules = modules ++ [
         baseStubs
         nixosStubs
         ({ config, ... }: { programs.scoot = cfg; })
       ];
-      specialArgs = { inherit pkgs; };
+      specialArgs = {
+        pkgs = pkgs';
+      };
     };
+  evalNixosBare = evalNixosWith [ ./modules/nixos.nix ] pkgs;
+  evalNixos = evalNixosWith [
+    ./modules/nixos.nix
+    { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+  ] pkgs;
 
   fakePkg = pkgs.runCommand "fake-scoot" { } ''
     mkdir -p $out/bin
     echo '#!/bin/sh' > $out/bin/scoot
     chmod +x $out/bin/scoot
   '';
+  fakeBg = pkgs.runCommand "fake-scootbg" { } ''
+    mkdir -p $out/bin
+    echo '#!/bin/sh' > $out/bin/scootbg
+    chmod +x $out/bin/scootbg
+  '';
+
+  drvs = map (p: p.drvPath);
+  system = pkgs.stdenv.hostPlatform.system;
+  isLinux = pkgs.stdenv.hostPlatform.isLinux;
+  failing = cfg: map (a: a.message) (lib.filter (a: !a.assertion) cfg.assertions);
+
+  # --- scootbg ([wallpaper]) evaluations under test ---
+  # NixOS: on by default with `enable`, installing the package.
+  osWallOn = evalNixos {
+    enable = true;
+    package = fakePkg;
+  };
+  # NixOS: opted out.
+  osWallOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    wallpaper.enable = false;
+  };
+  # NixOS: scootbg alone, for another compositor.
+  osWallOnly = evalNixos { wallpaper.enable = true; };
+  # NixOS, direct module, no overlay: on (by default) with no package.
+  osWallNoPkg = evalNixosBare {
+    enable = true;
+    package = fakePkg;
+  };
+  # Home-manager: a `[wallpaper]` table installs scootbg and gets its path.
+  hmWall = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    settings.wallpaper = {
+      image = "~/Pictures/hills.jpg";
+      output."DP-2".color = "#101014";
+    };
+  };
+  # ...a `command` the user set wins.
+  hmWallOwnCommand = evalHome {
+    enable = true;
+    wallpaper.package = fakeBg;
+    settings.wallpaper = {
+      color = "#1e1e2e";
+      command = "/opt/scootbg/bin/scootbg";
+    };
+  };
+  # ...no table: nothing installed, nothing added.
+  hmNoWall = evalHome {
+    enable = true;
+    wallpaper.package = fakeBg;
+    settings.layout.gap = 4;
+  };
+  # ...opted out: the table renders as written, nothing installed.
+  hmWallOff = evalHome {
+    enable = true;
+    wallpaper.enable = false;
+    wallpaper.package = fakeBg;
+    settings.wallpaper.color = "#1e1e2e";
+  };
+  # ...a `wallpaper` that is not a table renders as written (scoot refuses
+  # it by name at startup) rather than failing evaluation.
+  hmWallNotTable = evalHome {
+    enable = true;
+    wallpaper.package = fakeBg;
+    settings.wallpaper = "blue";
+  };
+
+  # --- the flake's wrappers, overlay and Darwin (only from flake.nix) ---
+  withFlake = flake != null;
+  built = flake.packages.${system} or { };
+  evalHomeWith =
+    module: pkgs': cfg:
+    lib.evalModules {
+      modules = [
+        module
+        baseStubs
+        homeStubs
+        ({ config, ... }: { programs.scoot = cfg; })
+      ];
+      specialArgs = {
+        pkgs = pkgs';
+      };
+    };
+  # A flake consumer: `enable` and a `[wallpaper]` table, nothing else.
+  osFlake = evalNixosWith [ flake.nixosModule ] pkgs { enable = true; };
+  hmFlake = evalHomeWith flake.homeModule pkgs {
+    enable = true;
+    settings.wallpaper.color = "#1e1e2e";
+  };
+  # The same home configuration on a Mac: evaluates, installs nothing,
+  # renders the table as written for the Linux box it deploys to.
+  hmDarwin = evalHomeWith flake.homeModule darwinPkgs {
+    enable = true;
+    settings.wallpaper.image = "~/Pictures/hills.jpg";
+  };
+  # The overlay, and the pure module defaulting to what it provides.
+  overlaid = pkgs.appendOverlays [ flake.overlays.default ];
+  osOverlaid = evalNixosWith [ ./modules/nixos.nix ] overlaid { enable = true; };
+  darwinOverlaid = darwinPkgs.appendOverlays [ flake.overlays.default ];
+  sorted = packages: lib.sort lib.lessThan (drvs packages);
 
   # --- home-manager evaluations under test ---
   hmEmpty = evalHome { enable = true; };
@@ -415,6 +544,100 @@ let
       true
     )
 
+    # --- scootbg ([wallpaper]) ---
+    # NixOS: on with `enable`, the package installed beside scoot.
+    (
+      assert allAssertionsHold osWallOn.config;
+      true
+    )
+    (
+      assert osWallOn.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    (
+      assert
+        sorted osWallOn.config.environment.systemPackages == sorted [
+          fakePkg
+          fakeBg
+        ];
+      true
+    )
+    # ...off: nothing of scootbg, and no package needed.
+    (
+      assert allAssertionsHold osWallOff.config;
+      true
+    )
+    (
+      assert drvs osWallOff.config.environment.systemPackages == drvs [ fakePkg ];
+      true
+    )
+    # ...follows `enable`: off with scoot off.
+    (
+      assert !osOff.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    # ...on its own, without scoot.
+    (
+      assert allAssertionsHold osWallOnly.config;
+      true
+    )
+    (
+      assert drvs osWallOnly.config.environment.systemPackages == drvs [ fakeBg ];
+      true
+    )
+    # ...direct module, no overlay, no package: exactly one failing
+    # assertion, naming the option to set.
+    (
+      assert builtins.length (failing osWallNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "programs.scoot.wallpaper.package is null" (
+        builtins.head (failing osWallNoPkg.config)
+      );
+      true
+    )
+    # Home-manager: a `[wallpaper]` table installs scootbg...
+    (
+      assert allAssertionsHold hmWall.config;
+      true
+    )
+    (
+      assert hmWall.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    (
+      assert
+        drvs hmWall.config.home.packages == drvs [
+          fakePkg
+          fakeBg
+        ];
+      true
+    )
+    (
+      assert drvs hmWallOwnCommand.config.home.packages == drvs [ fakeBg ];
+      true
+    )
+    # ...no table: nothing.
+    (
+      assert !hmNoWall.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    (
+      assert hmNoWall.config.home.packages == [ ];
+      true
+    )
+    # ...opted out: nothing installed.
+    (
+      assert hmWallOff.config.home.packages == [ ];
+      true
+    )
+    # ...not a table: evaluates (and installs; nothing is injected).
+    (
+      assert drvs hmWallNotTable.config.home.packages == drvs [ fakeBg ];
+      true
+    )
+
     # The representable-but-wrong scoot type (a string for `gap`)
     # type-checks: the refusal happens at session start, fail-safe
     # (whole file discarded for defaults, session still boots) -- NOT
@@ -425,6 +648,105 @@ let
       true
     )
   ];
+
+  # The flake's own outputs, when evaluated from flake.nix.
+  _flakePins =
+    lib.optionals withFlake [
+      # A flake NixOS consumer who only sets `enable`: scoot and scootbg,
+      # the flake's own builds, and every assertion holds.
+      (
+        assert allAssertionsHold osFlake.config;
+        true
+      )
+      (
+        assert allAssertionsHold hmFlake.config;
+        true
+      )
+    ]
+    ++ lib.optionals (withFlake && isLinux) [
+      (
+        assert
+          sorted osFlake.config.environment.systemPackages == sorted [
+            built.default
+            built.scootbg
+          ];
+        true
+      )
+      (
+        assert
+          drvs hmFlake.config.home.packages == drvs [
+            built.default
+            built.scootbg
+          ];
+        true
+      )
+      # The overlay is the flake's own builds...
+      (
+        assert overlaid.scootbg.drvPath == built.scootbg.drvPath;
+        true
+      )
+      (
+        assert overlaid.scoot.drvPath == built.scoot.drvPath;
+        true
+      )
+      (
+        assert overlaid.scootctl.drvPath == built.scootctl.drvPath;
+        true
+      )
+      # ...and what the pure module defaults to, with no package set.
+      (
+        assert allAssertionsHold osOverlaid.config;
+        true
+      )
+      (
+        assert
+          sorted osOverlaid.config.environment.systemPackages == sorted [
+            overlaid.scoot
+            overlaid.scootbg
+          ];
+        true
+      )
+    ]
+    ++ lib.optionals (withFlake && !isLinux) [
+      # This check run on Darwin itself: no scootbg, nothing installed.
+      (
+        assert hmFlake.config.programs.scoot.wallpaper.package == null;
+        true
+      )
+      (
+        assert hmFlake.config.home.packages == [ ];
+        true
+      )
+    ]
+    ++ lib.optionals (withFlake && darwinPkgs != null) [
+      # A macOS home configuration with a `[wallpaper]` table evaluates,
+      # with no scootbg (Linux-only) and no binary: files only.
+      (
+        assert allAssertionsHold hmDarwin.config;
+        true
+      )
+      (
+        assert hmDarwin.config.programs.scoot.wallpaper.package == null;
+        true
+      )
+      (
+        assert hmDarwin.config.home.packages == [ ];
+        true
+      )
+      (
+        assert builtins.isString hmDarwin.config.xdg.configFile."scoot/config.toml".source.drvPath;
+        true
+      )
+      # The overlay gives Darwin the client, and no scootbg.
+      (
+        assert !(darwinOverlaid ? scootbg);
+        true
+      )
+      (
+        assert darwinOverlaid.scootctl.drvPath == flake.packages.aarch64-darwin.scootctl.drvPath;
+        true
+      )
+    ];
 
   # Renders (build succeeds); the live loader proof boots it and shows
   # the session starting on defaults with an error logged.
@@ -443,8 +765,14 @@ let
   cmdDesktopFile = "${builtins.head osSessionCmd.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
   wrapperDesktopFile = "${builtins.head osSessionWrapper.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
   quotingDesktopFile = "${builtins.head osSessionQuoting.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
+  hmWallToml = hmWall.config.xdg.configFile."scoot/config.toml".source;
+  hmWallOwnCommandToml = hmWallOwnCommand.config.xdg.configFile."scoot/config.toml".source;
+  hmWallOffToml = hmWallOff.config.xdg.configFile."scoot/config.toml".source;
+  hmNoWallToml = hmNoWall.config.xdg.configFile."scoot/config.toml".source;
+  hmWallNotTableToml = hmWallNotTable.config.xdg.configFile."scoot/config.toml".source;
 in
 assert lib.all (x: x) _pins;
+assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   set -euo pipefail
 
@@ -516,6 +844,37 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   #    loader, at session start, that refuses it -- fail-safe).
   grep -q '^gap = "wide"$' ${wrongTypeToml}
   echo "ok: wrong-but-representable types render (refused at startup, not at build)"
+
+  # 8. [wallpaper]: `command` is the installed scootbg's store path, the
+  #    rest of the table as written...
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))["wallpaper"]
+  want = {"command": sys.argv[2], "image": "~/Pictures/hills.jpg", "output": {"DP-2": {"color": "#101014"}}}
+  assert got == want, f"{got} != {want}"
+  ' ${hmWallToml} '${fakeBg}/bin/scootbg'
+  echo "ok: [wallpaper] command points at the installed scootbg"
+  #    ...a command the user set wins...
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))["wallpaper"]
+  assert got == {"color": "#1e1e2e", "command": "/opt/scootbg/bin/scootbg"}, got
+  ' ${hmWallOwnCommandToml}
+  echo "ok: a [wallpaper] command the user set is kept"
+  #    ...opted out, the table renders as written...
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got == {"wallpaper": {"color": "#1e1e2e"}}, got
+  ' ${hmWallOffToml}
+  echo "ok: wallpaper.enable = false renders the table as written"
+  #    ...no table, none is added; not a table, it renders as written.
+  python3 -c '
+  import sys,tomllib
+  assert tomllib.load(open(sys.argv[1],"rb")) == {"layout": {"gap": 4}}
+  assert tomllib.load(open(sys.argv[2],"rb")) == {"wallpaper": "blue"}
+  ' ${hmNoWallToml} ${hmWallNotTableToml}
+  echo "ok: no [wallpaper] table is added, and a non-table renders as written"
 
   touch $out
   echo "scoot-modules: all file-content checks passed"

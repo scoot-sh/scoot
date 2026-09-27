@@ -43,6 +43,12 @@
 # the run's first lines print each binary's path, source and mtime -- read
 # them and confirm the binary is your build, especially where
 # CARGO_TARGET_DIR is shared between checkouts.
+#
+# SCOOTBG is the wallpaper daemon the [wallpaper] section runs (default: the
+# scootbg next to SCOOT, the same build; `cargo build -p scootbg`). Without
+# one, the wallpaper section is skipped with a message, unless
+# SMOKE_REQUIRE_SCOOTBG=1 (CI sets it), which makes a missing scootbg a
+# failure rather than a silent skip.
 set -euo pipefail
 
 MODE=${MODE:---headless}
@@ -114,6 +120,22 @@ echo "SCOOT=$SCOOT ($SCOOT_SRC)"
 ls -l "$SCOOT"
 echo "SCOOTCTL=$SCOOTCTL ($SCOOTCTL_SRC)"
 ls -l "$SCOOTCTL"
+if [ -n "${SCOOTBG:-}" ]; then
+    SCOOTBG_SRC="environment"
+else
+    SCOOTBG="$(dirname "$SCOOT")/scootbg"
+    SCOOTBG_SRC="default next to SCOOT (same build)"
+fi
+if [ -f "$SCOOTBG" ] && [ -x "$SCOOTBG" ]; then
+    echo "SCOOTBG=$SCOOTBG ($SCOOTBG_SRC)"
+    ls -l "$SCOOTBG"
+elif [ "${SMOKE_REQUIRE_SCOOTBG:-}" = 1 ]; then
+    echo "error: SMOKE_REQUIRE_SCOOTBG=1 but there is no scootbg at SCOOTBG=$SCOOTBG ($SCOOTBG_SRC) -- build it (cargo build -p scootbg) or set SCOOTBG"
+    exit 1
+else
+    echo "SCOOTBG=$SCOOTBG ($SCOOTBG_SRC): not there -- the [wallpaper] section will be skipped (build it with cargo build -p scootbg)"
+    SCOOTBG=""
+fi
 # RENDERER picks which renderer composites the frames this run checks
 # (`pixman` -- the default when unset -- or `gles`, which needs --headless or
 # --nested; see README). Unset means the flag is not passed at all, so the
@@ -149,6 +171,9 @@ if [ -n "$SMOKE_PREFIX" ]; then
     XWAYLAND_SOCK="$SMOKE_PREFIX-xwayland.sock"
     XWAYLAND_LOG="$SMOKE_PREFIX-xwayland.log"
     XWAYLAND_DISPLAY_MARKER="$SMOKE_PREFIX-xdisplay.txt"
+    WALLPAPER_SOCK="$SMOKE_PREFIX-wp.sock"
+    WALLPAPER_LOG="$SMOKE_PREFIX-wp.log"
+    WALLPAPER_DIR="$SMOKE_PREFIX-wp"
 else
     SOCKET=${SOCKET:-/run/user/$(id -u)/scoot-smoke.sock}
     SHOT=${SHOT:-/tmp/scoot-smoke.png}
@@ -168,6 +193,9 @@ else
     XWAYLAND_SOCK="/run/user/$(id -u)/scoot-smoke-xwayland.sock"
     XWAYLAND_LOG=/tmp/scoot-smoke-xwayland.log
     XWAYLAND_DISPLAY_MARKER=/tmp/scoot-smoke-xdisplay.txt
+    WALLPAPER_SOCK="/run/user/$(id -u)/scoot-smoke-wp.sock"
+    WALLPAPER_LOG=/tmp/scoot-smoke-wp.log
+    WALLPAPER_DIR=/tmp/scoot-smoke-wp
 fi
 export SCOOT_SOCKET="$SOCKET"
 
@@ -843,6 +871,192 @@ run_broken_config_test() {
     echo "ok: normal operation (spawning a window) works after the fallback"
 }
 ( run_broken_config_test ) || exit 1
+
+echo "=== [wallpaper]: scoot hands the section to scootbg, and reloads re-apply it ==="
+# A compositor of its own with two outputs and a [wallpaper] section, and
+# its own XDG_STATE_HOME so scootbg's saved state is scratch, never yours.
+# `command` is a wrapper that records the file descriptors it was started
+# with, then execs scootbg: the fd audit below reads that record. Always
+# --headless: it needs two outputs, and config handling is backend-agnostic.
+run_wallpaper_test() {
+    local socket="$WALLPAPER_SOCK"
+    local log="$WALLPAPER_LOG"
+    local dir="$WALLPAPER_DIR"
+    rm -rf "$dir"
+    mkdir -p "$dir/state"
+    rm -f "$socket" "$log"
+    export XDG_STATE_HOME="$dir/state"
+
+    local cmd="$dir/scootbg-wrapper"
+    {
+        echo '#!/bin/sh'
+        echo "out='$dir/fds.'\$\$"
+        echo 'for f in /proc/$$/fd/*; do'
+        echo '    printf "%s %s\n" "${f##*/}" "$(readlink "$f")"'
+        echo 'done >"$out.tmp"'
+        echo 'mv "$out.tmp" "$out"'
+        echo "exec '$SCOOTBG' \"\$@\""
+    } >"$cmd"
+    chmod +x "$cmd"
+
+    # Distinctive colors, none of them the compositor's own background.
+    local top="2a7f62" out2="7f2a4c" changed="4c2a7f" picked="c8b400" bg="123456"
+    local cfg="$dir/config.toml"
+    write_section() {
+        printf '[appearance]\nbackground_color = "#%s"\n\n' "$bg" >"$cfg"
+        printf '[wallpaper]\ncommand = "%s"\ncolor = "#%s"\n\n' "$cmd" "$1" >>"$cfg"
+        printf '[wallpaper.output."headless-2"]\ncolor = "#%s"\n' "$out2" >>"$cfg"
+    }
+    write_section "$top"
+
+    "$SCOOT" --headless --outputs 2 --width 400 --height 300 --socket "$socket" \
+        --config "$cfg" >"$log" 2>&1 &
+    # Not `local` -- and EXIT, not RETURN -- see run_config_bind_test's
+    # identical trap for why.
+    pid=$!
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
+    export SCOOT_SOCKET="$socket"
+    for _ in $(seq 1 60); do
+        [ -S "$socket" ] && break
+        sleep 0.1
+    done
+    if [ ! -S "$socket" ]; then
+        echo "wallpaper test: the control socket never appeared; compositor log:"
+        tail -20 "$log"
+        return 1
+    fi
+
+    # Polls output $1 until two far-apart pixels are $2, for 15 s.
+    local shot="$dir/shot.png"
+    wait_pixel() {
+        local output="$1" want="$2" what="$3"
+        for _ in $(seq 1 75); do
+            if "$SCOOT" msg screenshot --output "$output" --no-cursor --out "$shot" >/dev/null 2>&1 \
+                && expect_pixel_color "$shot" 20 20 "$want" "$what" >/dev/null 2>&1 \
+                && expect_pixel_color "$shot" 380 280 "$want" "$what" >/dev/null 2>&1; then
+                echo "ok: output $output shows $what (#$want)"
+                return 0
+            fi
+            sleep 0.2
+        done
+        expect_pixel_color "$shot" 20 20 "$want" "$what (output $output)" || true
+        echo "BUG: output $output never showed $what; compositor log:"
+        tail -30 "$log"
+        return 1
+    }
+    applied_count() {
+        grep -c 'scootbg applied the \[wallpaper\] section' "$log" || true
+    }
+    wait_applied() {
+        local want="$1"
+        for _ in $(seq 1 75); do
+            [ "$(applied_count)" -ge "$want" ] && return 0
+            sleep 0.2
+        done
+        echo "BUG: scootbg apply-config never reported success ($want expected, $(applied_count) seen); compositor log:"
+        tail -30 "$log"
+        return 1
+    }
+
+    echo "--- at startup: the section on each output ---"
+    wait_pixel 1 "$top" "the [wallpaper] color" || return 1
+    wait_pixel 2 "$out2" "the per-output [wallpaper] color" || return 1
+    wait_applied 1 || return 1
+
+    echo "--- apply-config inherits no descriptor of scoot's but stdio ---"
+    # Every descriptor the compositor holds past stdio, by what it points at
+    # (a socket's inode, a memfd's name, a file's path), minus whatever the
+    # compositor itself inherited from this shell (not its to close). None of
+    # them may be in the list the wrapper recorded at its start, which is
+    # exactly what `apply-config` got from scoot.
+    local record
+    record=$(find "$dir" -maxdepth 1 -name 'fds.*' ! -name '*.tmp' | head -1)
+    if [ -z "$record" ]; then
+        echo "BUG: the [wallpaper] command wrapper never ran"
+        tail -30 "$log"
+        return 1
+    fi
+    if ! grep -q '^1 ' "$record"; then
+        echo "BUG: the fd record lists no stdout -- the probe observes nothing: $(cat "$record")"
+        return 1
+    fi
+    local inherited ours leaked="" n target
+    inherited=$(for f in /proc/$$/fd/*; do readlink "$f"; done 2>/dev/null | sort -u)
+    ours=$(for f in /proc/"$pid"/fd/*; do
+        n=${f##*/}
+        if [ "$n" -gt 2 ]; then readlink "$f"; fi
+    done 2>/dev/null | sort -u)
+    if [ -z "$ours" ]; then
+        echo "BUG: could not read the compositor's own descriptors -- the audit would pass vacuously"
+        return 1
+    fi
+    while read -r n target; do
+        [ "$n" -gt 2 ] || continue
+        [ -n "$target" ] || continue
+        if printf '%s\n' "$ours" | grep -qxF -- "$target" \
+            && ! printf '%s\n' "$inherited" | grep -qxF -- "$target"; then
+            leaked="$leaked fd $n -> $target;"
+        fi
+    done <"$record"
+    if [ -n "$leaked" ]; then
+        echo "BUG: apply-config inherited compositor descriptors:$leaked"
+        echo "record: $(tr '\n' ' ' <"$record")"
+        return 1
+    fi
+    echo "ok: apply-config started with stdio and nothing of scoot's ($(wc -l <"$record") fds in its table; $(printf '%s\n' "$ours" | wc -l) compositor targets checked)"
+
+    echo "--- a reload that changes the section ---"
+    write_section "$changed"
+    local reply
+    reply=$("$SCOOT" msg reload)
+    if ! printf '%s' "$reply" | jq -e '.applied | index("wallpaper")' >/dev/null; then
+        echo "BUG: a changed [wallpaper] was not reported applied: $reply"
+        return 1
+    fi
+    echo "ok: the reload reported the section applied"
+    wait_pixel 1 "$changed" "the changed [wallpaper] color" || return 1
+    wait_pixel 2 "$out2" "the per-output color, unchanged" || return 1
+    wait_applied 2 || return 1
+
+    echo "--- a scootbg set survives a reload that leaves the section unchanged ---"
+    local wayland
+    wayland=$(grep 'scoot is up' "$log" | grep -o 'wayland-[0-9]*' | head -1)
+    WAYLAND_DISPLAY="$wayland" "$SCOOTBG" set "#$picked"
+    wait_pixel 1 "$picked" "the scootbg set color" || return 1
+    reply=$("$SCOOT" msg reload)
+    if [ "$(printf '%s' "$reply" | jq -c '.applied')" != "[]" ]; then
+        echo "BUG: an unchanged reload reported something applied: $reply"
+        return 1
+    fi
+    # The unchanged reload still ran apply-config (that is what brings back
+    # a crashed daemon); wait for it to finish before looking.
+    wait_applied 3 || return 1
+    wait_pixel 1 "$picked" "the scootbg set color, after the unchanged reload" || return 1
+    wait_pixel 2 "$picked" "the scootbg set color, after the unchanged reload" || return 1
+
+    echo "--- a reload that removes the section clears the wallpaper ---"
+    printf '[appearance]\nbackground_color = "#%s"\n' "$bg" >"$cfg"
+    reply=$("$SCOOT" msg reload)
+    if ! printf '%s' "$reply" | jq -e '.applied | index("wallpaper")' >/dev/null; then
+        echo "BUG: removing [wallpaper] was not reported applied: $reply"
+        return 1
+    fi
+    wait_applied 4 || return 1
+    wait_pixel 1 "$bg" "the compositor's background (the wallpaper cleared)" || return 1
+    wait_pixel 2 "$bg" "the compositor's background (the wallpaper cleared)" || return 1
+
+    if grep -q 'scootbg apply-config failed\|scootbg refused\|cannot run scootbg\|scootbg apply-config was killed' "$log"; then
+        echo "BUG: a wallpaper run failed:"
+        grep 'scoot::compositor::wallpaper' "$log" | tail -5
+        return 1
+    fi
+    echo "ok: every apply-config run succeeded ($(applied_count) runs)"
+}
+if [ -n "$SCOOTBG" ]; then
+    ( run_wallpaper_test ) || exit 1
+else
+    echo "skipped: no scootbg binary (see the binaries header above)"
+fi
 
 echo "=== xwayland: the opt-in server starts and maps X windows, or falls back loudly ==="
 run_xwayland_test() {
