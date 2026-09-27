@@ -168,3 +168,60 @@ fn a_stranger_naming_the_pressed_x_window_still_takes_the_press_over() {
         .pointer_button(scoot_ipc::PointerButton::Left, false);
     live.drain();
 }
+
+/// The pressed X window destroyed before its client takes the
+/// `XdndSelection`: refused, as a press on no window would be. A behaviour
+/// pin rather than a fail-first test of one check: the gate reads the
+/// pressed window off the press's pointer focus, which outlives the window,
+/// and refuses it both because XWayland destroys the window's surface with
+/// it and because the window is no longer alive -- the second closes the
+/// race where the window manager has seen the destroy and scoot has not yet
+/// seen the surface go, which a test cannot time. The window is an
+/// override-redirect one (a menu, say), so destroying it moves no window of
+/// the layout under the held press.
+#[test]
+fn a_press_on_a_since_destroyed_x_window_starts_no_drag() {
+    let Some(mut live) = live("a_press_on_a_since_destroyed_x_window_starts_no_drag") else {
+        return;
+    };
+    let menu = live.x.map(&Props {
+        rect: (100, 100, 40, 40),
+        override_redirect: true,
+        ..Props::new(RED)
+    });
+    live.drain();
+    press_at(
+        &mut live.fixture.state,
+        scoot_core::Rect {
+            x: 100,
+            y: 100,
+            w: 40,
+            h: 40,
+        },
+    );
+    live.drain();
+    assert!(
+        still_a_plain_press(&live.fixture.state),
+        "the press on the menu holds no pointer"
+    );
+    use x11rb::connection::Connection as _;
+    use x11rb::protocol::xproto::ConnectionExt as _;
+    live.x
+        .conn
+        .destroy_window(menu)
+        .expect("a destroy request")
+        .check()
+        .expect("the X server destroyed the menu");
+    live.x.conn.flush().expect("flushed");
+    live.drain();
+    live.x.take_selection("XdndSelection");
+    live.drain();
+    assert!(
+        !taken_over(&live.fixture.state),
+        "a press on a destroyed X window started a drag"
+    );
+    live.fixture
+        .state
+        .pointer_button(scoot_ipc::PointerButton::Left, false);
+    live.drain();
+}

@@ -104,6 +104,15 @@ impl State {
         let PointerFocus::X11 { window, .. } = &pressed else {
             return refuse("the pressed surface is no X window scoot knows");
         };
+        // The focus is the press's, and outlives the window: ask whether it
+        // is still there, as the lookup this replaced did by finding it
+        // among the live X windows. XWayland destroys the window's surface
+        // with it, which `client()` above mostly catches first; this closes
+        // the gap between the window manager seeing the window destroyed and
+        // scoot seeing the surface go. Once per drag attempt: one lock.
+        if !window.alive() {
+            return refuse("the pressed X window is gone");
+        }
         if !same_x_client(window.window_id(), owner) {
             return refuse("the press landed on another X client's window");
         }
