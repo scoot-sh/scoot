@@ -107,7 +107,9 @@ processed it, so a screenshot taken straight after shows it. An image that
 cannot be shown (no such file, not an image, too large, truncated or
 corrupt) is an error, and every output keeps what it showed. An output
 unplugged meanwhile is left out of that wait; an output whose surface is
-not configured yet is waited for; an output scootbg gave up on (`gave-up`
+not configured yet is waited for, until a round trip after scootbg made
+it (one the compositor is slower than that to configure is drawn when it
+is, and does not hold up the reply); an output scootbg gave up on (`gave-up`
 in `scootbg query`, said on stderr) is left out, shows nothing, and does
 not change the exit status. When a newer `set` or `clear` replaces the
 choice before this image is shown, this one changes nothing (it may never

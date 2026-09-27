@@ -33,3 +33,15 @@ blocked: null
 - Optional follow-up, measured first: cache the scaled buffer (compressed)
   in `$XDG_CACHE_HOME/scootbg/` so restore skips decode and scale. Only
   worth it if startup measurements say decode is the slow part.
+- **Measured in [ticket 8](resolved/memory-and-idle-done.md#startup),
+  without restore:** a color is on screen 3.0–4.1 ms after `scootbg
+  daemon` is started, but an image `set` sent straight away takes
+  642–720 ms against about 440 ms on a running daemon, because it
+  **decodes the file twice**: the trial finds no configured output to draw
+  for, so it decodes only to validate, and the `configure` that follows
+  asks for a render that decodes it again (two opens of the file, by
+  strace; one when the `set` comes after the `configure`). A restore at
+  login is exactly that request, so this ticket should make it one decode
+  (let a trial with no configured target wait for the first `configure`
+  of its outputs, bounded like the replies are) and measure startup again
+  with a restored 4K JPEG.

@@ -62,7 +62,14 @@ full per-feature cycle.
    `wl_output.scale`; a stale smaller scale gives way; `query` reports
    `surface.scale` and `surface.pixels`; 44% fewer buffer bytes at 1.5;
    checked by a one-pixel checker on headless scoot and headless sway
-8. [Buffers, memory and zero idle cost](memory-and-idle.md)
+8. [**Buffers, memory and zero idle cost**](resolved/memory-and-idle-done.md)
+   — RESOLVED 2026-09-27: the resource budget measured and published
+   (idle, memory for 1× 1080p, 1× 4K and 2× 4K, startup); outputs of one
+   size showing one image share its pixels (one memfd and pool, a
+   `wl_buffer` each: 2× 4K 69.2 → 36.7 MB RSS), and an output plugged in
+   later shares them with no decode; memfds closed once pooled; no spare
+   buffer kept at rest; a surface the compositor never configures no
+   longer holds up replies
 9. [Restoring the last wallpaper at startup](restore-state.md)
 10. [Seamless in scoot: a `[wallpaper]` config section](scoot-integration.md)
 11. [Lowest resource use of any wallpaper daemon](lightest.md) — the
