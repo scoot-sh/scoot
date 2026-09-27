@@ -8,7 +8,7 @@ blocked: null
 
 # Frame learning now flushes its own relayout — RESOLVED
 
-RESOLVED 2026-09-27 (PR #TBD). `World::handle_event` answers whether the
+RESOLVED 2026-09-27 (PR #291). `World::handle_event` answers whether the
 event changed the arrangement in a way the shell has not yet pushed out --
 today only a `FrameObserved` that raised a learned minimum or moved a
 floating window answers true; every other event answers false, since its
