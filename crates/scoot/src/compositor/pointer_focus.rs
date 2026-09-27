@@ -18,17 +18,20 @@
 //! the Wayland source's behalf. With a `WlSurface` focus that never ran,
 //! and a drop from Wayland onto an X window did nothing.
 //!
-//! So the X variant carries the `X11Surface`, and a drag from Wayland over
-//! it goes to Smithay's X target. The surface beside it is what every other
-//! consumer reads -- pointer delivery, constraints, the interaction-serial
-//! record -- through [`PointerFocus::surface`] or [`WaylandFocus`].
+//! So the X variant carries the `X11Surface`, and a drag over it goes to
+//! Smithay's X target. The surface beside it is what every other consumer
+//! reads -- pointer delivery, constraints, the interaction-serial record --
+//! through [`PointerFocus::surface`] or [`WaylandFocus`].
 //!
-//! Drags *from X* onto X windows (X to X, or within one X app) need the
-//! other half of Smithay's X target -- unmapping the window manager's
-//! full-screen proxy over X windows, so the X source finds the real window
-//! and drops on it itself -- and that half has a bug at the pinned rev that
-//! would break X-to-Wayland drops, which work today; they stay on the
-//! surface's path until a fork commit fixes it (see the `DndFocus` impl).
+//! Drags *from X* need that target too, for the other half of it: over an X
+//! window it unmaps the window manager's full-screen XDND proxy, so the X
+//! source finds the real window under the pointer and drops on it itself
+//! (X to X, or within one X app), and it maps the proxy back when the drag
+//! leaves, so a Wayland window is reachable again. That remap is flushed
+//! only by the pinned scoot-sh/smithay fork's `6e6fe896`; without it an X
+//! drag that had crossed an X window could no longer drop on a Wayland one
+//! (`xwayland/tests/drop.rs`,
+//! `an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland`).
 //!
 //! Without the `xwayland` feature this is a one-variant enum; every match on
 //! it is exhaustive in both builds, so the default build's behaviour is the
@@ -333,9 +336,9 @@ impl PointerTarget<State> for PointerFocus {
 /// `DnDGrab` keeps the offer beside the focus it came from, drops it on
 /// every focus change, and asks the new focus's `enter` for the next one --
 /// so an offer is always the kind its focus's `enter` made. The methods
-/// below still match focus and offer together rather than trust that: only
-/// an X offer on an X focus reaches Smithay's X target, and anything else
-/// goes the surface's way with a surface offer or none -- harmless (no
+/// below still match focus and offer together rather than trust that: an X
+/// focus reaches Smithay's X target with an X offer or none, and anything
+/// else goes the surface's way with a surface offer or none -- harmless (no
 /// offer is what a target that declined `enter` has anyway), where a panic
 /// would take the session down.
 #[derive(Debug)]
@@ -379,34 +382,28 @@ impl<S: Source> PointerOffer<S> {
             Self::X11(_) => None,
         }
     }
-}
 
-/// Whether a drag over `window` comes from X -- from the X server `window`
-/// belongs to -- by Smithay's own test (`X11Surface`'s `DndFocus::enter`).
-#[cfg(feature = "xwayland")]
-fn from_x<S: Source>(window: &X11Surface, source: &S) -> bool {
-    window
-        .xwm_id()
-        .is_none_or(|xwm| source.is_client_local(&xwm))
+    #[cfg(feature = "xwayland")]
+    fn as_x11(&mut self) -> Option<&mut XwmOfferData<S>> {
+        match self {
+            Self::X11(offer) => Some(offer),
+            Self::Surface(_) => None,
+        }
+    }
 }
 
 /// A drag's target: the surface's `wl_data_device`, or -- for an X window
-/// and a drag from Wayland -- Smithay's XDND target (see the module doc).
+/// -- Smithay's XDND target (see the module doc), which handles both kinds
+/// of drag: for one from Wayland it speaks XDND to the window and answers
+/// an X offer; for one from X it answers no offer and moves the window
+/// manager's proxy out of the way (and back on `leave`), and its `drop`
+/// ends the window manager's side of the X drag.
 ///
-/// **Drags from X stay on the surface's path, for now.** Over an X window,
-/// Smithay's X target unmaps the window manager's proxy so the X source
-/// can drop on the window itself, and maps it back when the drag leaves --
-/// but at the pinned rev (and upstream) that remap is never flushed to the
-/// X server: the proxy stays unmapped, and an X drag that has crossed an X
-/// window -- every one does, starting over its own -- can no longer drop
-/// on a Wayland window, which works today. Measured, not assumed:
-/// `tests/drop.rs` found no proxy over the Wayland window until an
-/// unrelated window-manager request flushed the connection. So the X target
-/// is reached only through an X offer, which only a drag from Wayland gets;
-/// its offer-less branches -- the remap, and finishing an X drag -- are
-/// unreachable, and a drag from X takes exactly the `WlSurface` path it
-/// always took. The fork commit that flushes the remap turns the rest on
-/// (`docs/backlog/protocols/xwayland-pointer-focus-x11.md`).
+/// So an X focus goes to the X target with an X offer *or none*, and only
+/// an X focus reaches it. A surface offer on an X focus cannot happen
+/// (`DnDGrab` keeps each offer beside the focus whose `enter` made it, and
+/// an X focus's `enter` makes only X offers); it goes the surface's way,
+/// like every mismatch, rather than panicking.
 impl DndFocus<State> for PointerFocus {
     type OfferData<S>
         = PointerOffer<S>
@@ -424,7 +421,7 @@ impl DndFocus<State> for PointerFocus {
     ) -> Option<Self::OfferData<S>> {
         match self {
             #[cfg(feature = "xwayland")]
-            Self::X11 { window, .. } if !from_x(window, &*source) => {
+            Self::X11 { window, .. } => {
                 DndFocus::enter(&**window, data, dh, source, seat, location, serial)
                     .map(PointerOffer::X11)
             }
@@ -443,8 +440,9 @@ impl DndFocus<State> for PointerFocus {
     ) {
         match (self, offer) {
             #[cfg(feature = "xwayland")]
-            (Self::X11 { window, .. }, Some(PointerOffer::X11(offer))) => {
-                DndFocus::motion(&**window, data, Some(offer), seat, location, time);
+            (Self::X11 { window, .. }, offer @ (None | Some(PointerOffer::X11(_)))) => {
+                let offer = offer.and_then(PointerOffer::as_x11);
+                DndFocus::motion(&**window, data, offer, seat, location, time);
             }
             (focus, offer) => {
                 let offer = offer.and_then(PointerOffer::as_surface);
@@ -461,8 +459,9 @@ impl DndFocus<State> for PointerFocus {
     ) {
         match (self, offer) {
             #[cfg(feature = "xwayland")]
-            (Self::X11 { window, .. }, Some(PointerOffer::X11(offer))) => {
-                DndFocus::leave(&**window, data, Some(offer), seat);
+            (Self::X11 { window, .. }, offer @ (None | Some(PointerOffer::X11(_)))) => {
+                let offer = offer.and_then(PointerOffer::as_x11);
+                DndFocus::leave(&**window, data, offer, seat);
             }
             (focus, offer) => {
                 let offer = offer.and_then(PointerOffer::as_surface);
@@ -479,8 +478,9 @@ impl DndFocus<State> for PointerFocus {
     ) {
         match (self, offer) {
             #[cfg(feature = "xwayland")]
-            (Self::X11 { window, .. }, Some(PointerOffer::X11(offer))) => {
-                DndFocus::drop(&**window, data, Some(offer), seat);
+            (Self::X11 { window, .. }, offer @ (None | Some(PointerOffer::X11(_)))) => {
+                let offer = offer.and_then(PointerOffer::as_x11);
+                DndFocus::drop(&**window, data, offer, seat);
             }
             (focus, offer) => {
                 let offer = offer.and_then(PointerOffer::as_surface);

@@ -10,14 +10,12 @@
 //! under the X pointer and speaks XDND to it; a target answers
 //! `XdndStatus`, and on `XdndDrop` converts `XdndSelection`.
 //!
-//! **Drags from X are the ignored half.** They need Smithay's X target to
-//! unmap and remap the window manager's proxy, and the remap is never
-//! flushed at the pinned rev, which would break X-to-Wayland drops (see
-//! `pointer_focus.rs`'s `DndFocus` impl). Until the fork commit that
-//! flushes it is pinned, drags from X take the surface path they always
-//! did -- which `an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland`
-//! pins -- and the four ignored tests here are that commit's acceptance
-//! tests: all pass with it patched in, and fail without it.
+//! Drags from X need Smithay's X target to unmap the window manager's proxy
+//! over X windows and map it back as the drag leaves them. The remap is
+//! flushed only by the scoot-sh/smithay fork's `6e6fe896`;
+//! `an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland` and
+//! `an_x_drag_whose_hovered_window_closes_finds_the_proxy_again` fail
+//! without it ("no window" over the Wayland window or the desktop).
 
 use std::sync::Arc;
 
@@ -131,7 +129,6 @@ fn x_target(live: &mut Live, client: &XClient, pixel: u32) -> (XWindow, Placemen
 /// Wayland, and the drop went nowhere -- and the release ends scoot's side
 /// of the drag without mapping the proxy back over the target.
 #[test]
-#[ignore = "needs the scoot-sh/smithay commit flushing the XDND proxy remap (xwayland-pointer-focus-x11.md)"]
 fn an_x_drag_drops_onto_another_x_clients_window() {
     let Some(mut live) = live("an_x_drag_drops_onto_another_x_clients_window") else {
         return;
@@ -203,7 +200,6 @@ fn an_x_drag_drops_onto_another_x_clients_window() {
 /// from a window onto itself, and needs the window itself under the
 /// pointer too.
 #[test]
-#[ignore = "needs the scoot-sh/smithay commit flushing the XDND proxy remap (xwayland-pointer-focus-x11.md)"]
 fn an_x_drag_finds_its_own_window_under_the_pointer() {
     let Some(mut live) = live("an_x_drag_finds_its_own_window_under_the_pointer") else {
         return;
@@ -232,46 +228,6 @@ fn an_x_drag_finds_its_own_window_under_the_pointer() {
     );
 }
 
-/// X to Wayland keeps working after an X drag has crossed an X window: the
-/// proxy -- what relays an X drag to a Wayland window -- is back under the
-/// pointer once it is over a Wayland window again.
-#[test]
-#[ignore = "needs the scoot-sh/smithay commit flushing the XDND proxy remap (xwayland-pointer-focus-x11.md)"]
-fn an_x_drag_leaving_x_windows_finds_the_proxy_again() {
-    let Some(mut live) = live("an_x_drag_leaving_x_windows_finds_the_proxy_again") else {
-        return;
-    };
-    let wayland = live.map_peer("wayland");
-    let xid = live.x.map(&Props::new(RED));
-    let id = live.managed(xid);
-    let (on_x, on_wayland) = (live.placement(id), live.placement(wayland));
-    visible("X window", &on_x);
-    visible("Wayland window", &on_wayland);
-    start_x_drag(&mut live, on_x.rect);
-    let (x, y) = centre(on_x.rect);
-    let under = move_and_look(&mut live, (x + 5.0, y + 5.0));
-    assert_eq!(
-        under,
-        xid,
-        "over its own window: {:?}",
-        live.x.name_of(under)
-    );
-    let under = move_and_look(&mut live, centre(on_wayland.rect));
-    assert_eq!(
-        live.x.name_of(under),
-        PROXY_NAME,
-        "over a Wayland window the X drag must find the proxy"
-    );
-    live.fixture
-        .state
-        .pointer_button(PointerButton::Left, false);
-    live.drain();
-    assert!(
-        !grabbed(&live.fixture.state),
-        "the drag outlived the release"
-    );
-}
-
 /// The hovered X window closing mid-drag must not strand the proxy
 /// unmapped: leaving it -- onto bare desktop -- still hands the drag back
 /// to the proxy. (What the X variant carries the `X11Surface` for, rather
@@ -280,7 +236,6 @@ fn an_x_drag_leaving_x_windows_finds_the_proxy_again() {
 /// a menu or tooltip, which the hit test names as the X focus too -- so its
 /// closing moves no window of the layout under the drag.
 #[test]
-#[ignore = "needs the scoot-sh/smithay commit flushing the XDND proxy remap (xwayland-pointer-focus-x11.md)"]
 fn an_x_drag_whose_hovered_window_closes_finds_the_proxy_again() {
     let Some(mut live) = live("an_x_drag_whose_hovered_window_closes_finds_the_proxy_again") else {
         return;
@@ -519,12 +474,13 @@ fn motion_within_an_x_window_enters_it_once() {
     );
 }
 
-/// What the gate on drags from X guarantees until the fork flush is pinned
-/// (see the module doc): an X drag that has crossed an X window -- every
-/// one does, starting over its own -- still finds the proxy over a Wayland
-/// window, which is what an X-to-Wayland drop drops on. Ungated on the
-/// pinned rev, the proxy was unmapped over the X window and never came
-/// back.
+/// X to Wayland keeps working after an X drag has crossed an X window --
+/// every one does, starting over its own: over the X window the proxy is
+/// out of the way (the source finds its own window), and over a Wayland
+/// window it is back under the pointer, which is what an X-to-Wayland drop
+/// drops on. Pins the fork's `6e6fe896`: without that flush of the remap the
+/// X server still had the proxy unmapped over the Wayland window and the
+/// source found "no window" there (3 of 3 runs at `74edbf32`).
 #[test]
 fn an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland() {
     let Some(mut live) = live("an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland")
@@ -539,7 +495,13 @@ fn an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland() {
     visible("Wayland window", &on_wayland);
     start_x_drag(&mut live, on_x.rect);
     let (x, y) = centre(on_x.rect);
-    move_and_look(&mut live, (x + 5.0, y + 5.0));
+    let under = move_and_look(&mut live, (x + 5.0, y + 5.0));
+    assert_eq!(
+        under,
+        xid,
+        "over its own window: {:?}",
+        live.x.name_of(under)
+    );
     let under = move_and_look(&mut live, centre(on_wayland.rect));
     assert_eq!(
         live.x.name_of(under),
