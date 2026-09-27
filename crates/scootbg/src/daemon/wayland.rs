@@ -57,8 +57,9 @@ use crate::paint::Path;
 use crate::waiters::Waiters;
 
 /// Room for every waiting reply there can be (`crate::waiters`: one per
-/// live connection plus one per connection evicted in the current turn).
-const WAITERS: usize = 2 * MAX_CONNECTIONS;
+/// live connection, one per connection evicted in the current turn, and
+/// one per queued image trial a newer request superseded).
+const WAITERS: usize = 2 * MAX_CONNECTIONS + MAX_TRIALS;
 
 #[derive(Debug)]
 pub enum WaylandError {
