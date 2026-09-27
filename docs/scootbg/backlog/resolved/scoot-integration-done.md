@@ -656,3 +656,273 @@ passed, `tests/config.rs` 23 of 23; clippy `-D warnings`, `fmt --check`,
 `RUSTFLAGS="-D warnings"` release build, `ldd` (libc, libm, libgcc_s) and
 no `libc` crate: clean; `nix build .#scootbg --option sandbox true`:
 built.
+
+## Part B (scoot and Nix): landed
+
+Landed 2026-09-27 on branch `claude/scoot-screenshot-verify-0ocx5p`: the
+code at `9464cf2`, a Darwin-only fix to the Nix checks at `4646074`, and
+this record in the docs-only commit after them.
+
+### What landed
+
+- **`[wallpaper]` in scoot's config** (`crates/scoot/src/compositor/wallpaper/section.rs`):
+  `image`, `color`, `mode`, `fill`, `filter`, `output."NAME"` tables of
+  those five, and `command` (a string, default `scootbg` from `PATH`).
+  `~` and `~/` expand against `HOME`; a relative path resolves against the
+  config file's directory, made absolute against the working directory
+  but never through symlinks (a home-manager config is a link into the
+  store, and "relative" means the directory the user sees); `.` components
+  are dropped, `..` kept. `command` resolves the same way when it has a
+  `/`, and stays a bare name for `PATH` otherwise. The JSON carries only
+  the keys written (an explicit empty `output = {}` and empty output
+  tables included, `command` never), from a `BTreeMap`, so it is the same
+  bytes every run; it is refused past 64,512 bytes (scootbg's own bound),
+  as are an empty `image` or `command`, a NUL in `command`, `~` with no
+  `HOME` and a path that is not UTF-8.
+- **Spawning** (`wallpaper.rs`): `COMMAND apply-config --profile
+  scoot|scoot-nested JSON` at startup (before `[autostart]`) and on every
+  reload while the section exists, `{}` on the reload that removes it
+  (through the removed section's own `command`), nothing at startup
+  without one. The child gets the session environment `State::spawn`
+  gives (now one function, `State::session_command`, less the activation
+  token only `spawn` mints) and scoot's stdio, and is never waited on.
+- **The reaper** keeps statuses now: `child_reaper::wait` returns
+  `Running`, `Exited(status)` or `Gone`; `reap_children` sweeps
+  `spawned_children` as before and then the wallpaper runs, one bool check
+  per `SIGCHLD` when none is tracked. Each end is logged with its pid,
+  command and whether it had been abandoned: 0 info; 1 "a runtime failure,
+  which scootbg describes above"; 2 "scootbg refused the section" (a value
+  scoot passes through, or a scootbg that does not match); other codes,
+  signals and `ECHILD` warnings of their own.
+- **The run queue** (`wallpaper/queue.rs`, pure, 18 unit tests): one run
+  at a time; of the sections submitted meanwhile only the newest runs; a
+  run is abandoned after 40 s (still reaped and logged; one calloop timer
+  per run, re-armed if it fires early, removed when the run ends); a failed
+  run of the newest section (any non-zero end, a signal, `ECHILD`, or a
+  spawn that failed) is *held*, and retried on the next trigger, which is
+  a reload (with the section unchanged, absent or invalid alike) or an
+  abandoned run ending, never its own failure (no retry loop); an
+  abandoned run of an older section that ends is followed by the newest
+  again, since it may have landed after it; at most 8 abandoned runs.
+- **Reload** reports `wallpaper` when the section's values changed (added,
+  edited, removed) and `wallpaper.command` when only `command` did, and
+  refuses a broken section by name, keeping the running one. It applies
+  under lock (the background layer is not in a locked frame).
+- **A missing binary** is one warning per attempt: "cannot run scootbg for
+  the [wallpaper] section: the command was not found. Install scootbg
+  (...) or set `command` in [wallpaper] to its path. The session carries
+  on with its background color; the next reload tries again", with the
+  command and the OS error.
+- **Nix.** NixOS: `programs.scoot.wallpaper.enable` (default
+  `programs.scoot.enable`) installs `programs.scoot.wallpaper.package`
+  system-wide; enabled with no package is an assertion naming the option.
+  home-manager: `programs.scoot.wallpaper.enable` (default `settings ?
+  wallpaper`) installs the package and renders `settings.wallpaper.command`
+  as `lib.getExe' package "scootbg"` unless the user set one (only for a
+  table; anything else renders as written for scoot to refuse). Both
+  `wallpaper.package` default to `pkgs.scootbg or null`, and `package` to
+  `pkgs.scoot or null`; the flake wrappers inject `mkDefault` of the
+  flake's own builds (`null` for scootbg where the flake builds none: HM on
+  Darwin). `overlays.default` adds `scoot`, `scootctl` and, where it
+  builds, `scootbg`.
+- **Tests.** scoot: 51 new unit tests in `wallpaper/tests/`: the
+  section's parse, refusals, path resolution and JSON, 23, among them the
+  whole-file regression through `config::load` (a `[wallpaper]` beside
+  `[binds]` and `[layout]`, both still applied); the queue, 18; the glue
+  on a live `State` with a stand-in `scootbg` script, 10: argv, profile,
+  `WAYLAND_DISPLAY`, reload and removal, serialization under two quick
+  reloads, a failed run's status logged and retried, a missing binary, the
+  bound with a 300 ms patience, a new `command`, and the reload report
+  through `State::reload`.
+  scootbg: `tests/scoot_config.rs`, scoot's own section driving scootbg
+  end to end (start-up, a changed reload, a `set` surviving an unchanged
+  reload, the removal), in CI's integration job. `nix/tests.nix`: 41 new
+  pins and four new file checks. `scripts/smoke-test.sh`: see below.
+- **CI.** The Linux job builds `-p scootbg` beside scoot, keeps it aside
+  with the default binaries and runs the smoke test with
+  `SMOKE_REQUIRE_SCOOTBG=1`, so its wallpaper section cannot skip. The
+  path classification is unchanged: a scootbg-only change skips the Linux
+  job, and the pair is still checked by `tests/scoot_config.rs` in the
+  integration job, which runs on either side's change.
+
+### Decisions, and departures from the plan
+
+- **`[wallpaper]` is read leniently, not with `deny_unknown_fields`.**
+  Every other table is strict, and an unknown key anywhere discards the
+  whole file at startup. Held to that, a typo in a wallpaper key would cost
+  a user their binds, the very regression this item had to avoid. So the
+  section has a hand-written `Deserialize` that never fails: unknown keys
+  and wrong types are collected as problems (every one, not just the
+  first), the value drained through `IgnoredAny` (no allocation, recursion
+  bounded by `toml`'s own limits; a `toml::Table` passthrough is the
+  expensive target `parse_or_defaults`' doc warns about). Startup logs the
+  problems and runs nothing; a reload refuses the field and applies the
+  rest, as `[floating] modifier` does. Values' meaning (color syntax, mode
+  names) stays scootbg's to check (exit 2, logged): one parser for those
+  rules.
+- **An empty `[wallpaper]` is a section** (`{}`), as the plan implies: the
+  generated starting config keeps the whole table commented out, header
+  included, and the docs say so.
+- **stdin is inherited too**, as the plan says ("as for `[autostart]`"),
+  not `/dev/null`: `apply-config` never reads it, and the daemon it starts
+  puts its own on `/dev/null`.
+- **Retry triggers, precisely.** N1 asked for "the next trigger or
+  reload". A trigger here is a reload (whatever it says about the section)
+  or an abandoned run ending; a run's own failure is not, or a scootbg that
+  always fails would be run in a loop. A refused section (2) is held like
+  any failure: retrying it costs one short process per trigger, and it is
+  the same rule to reason about.
+- **A late run is followed by the newest section**, beyond the plan: the
+  hung `{}` of F4 finishing after a newer section was applied would
+  otherwise leave the older section in force. It needs a run to have been
+  abandoned first, so it costs nothing otherwise.
+- **The overlay: added.** It provides the flake's own builds, the same
+  derivations as `packages`, not a rebuild against the consumer's nixpkgs
+  (`final.rustPlatform`): that would tie the build to whatever Rust their
+  nixpkgs carries (the workspace needs edition 2024) and split the scoot
+  and scootbg pair, which is the thing `apply-config`'s protocol check
+  exists to catch. With it the pure modules have something honest to
+  default to, so docs/nix.md's "there is no overlay" caveat is gone.
+  Neither `scoot`, `scootctl` nor `scootbg` exists in nixpkgs at the
+  pinned rev (checked with `nix eval`), so `pkgs.scoot or null` guesses
+  nothing.
+- **A new eval failure for direct NixOS module users.** `wallpaper.enable`
+  follows `enable` as the plan says, so a direct-module user without the
+  overlay who upgrades now gets the assertion until they set
+  `wallpaper.package`, apply the overlay or opt out. The CHANGELOG says so.
+- **No `nixosTest`.** It would add a NixOS system build and a VM boot to
+  every CI run, for a path the smoke test and `tests/scoot_config.rs`
+  already prove end to end (a real scoot, its section, scootbg, pixels on
+  each output); the modules' own part is pinned by evaluation. Recorded in
+  docs/nix.md.
+- **The home-manager side has `wallpaper.enable` too**, so both modules
+  spell their options the same way (the plan asked for that); it defaults
+  to the settings having a `wallpaper` table, which is the plan's "whenever
+  its rendered settings contain `wallpaper`".
+- **The starting config's header** (`--print-default-config`) had four
+  lines emitted with ten spaces before their `#`; the lines this item
+  edited are fixed (the `[xwayland]` block's indentation is untouched).
+
+### File descriptors (F4)
+
+Measured live by the smoke test (every run from now on): the `command`
+wrapper records its fd table at exec, and no target of the compositor's
+own fds past stdio (less what the compositor inherited from the test's
+shell) may be in it. At `9464cf2`: "ok: apply-config started with stdio
+and nothing of scoot's (6 fds in its table; 10 compositor targets
+checked)". Sensitive: with every compositor fd's close-on-exec cleared just
+before the spawn (a throwaway change, reverted), the same check failed
+naming 15 of them (eventpolls, eventfds, the timerfd, both sealed memfds,
+the wayland lockfile, both listener sockets, the spare `/dev/null`s).
+Source audit of what was added since the 2026-09-18 audit
+(`docs/backlog/resolved/spawn-fd-cloexec-audit-done.md`): the `SIGHUP`
+eventfd and the reaper's (`EFD_CLOEXEC`, and each `dup` given
+`FD_CLOEXEC` back before anything can spawn), the per-output memfd
+(`MemfdFlags::CLOEXEC`), the `--nested` GBM and `--tty` render-node opens
+(`OFlags::CLOEXEC`), Smithay's XWayland sockets, lock and display pipe
+(`CLOEXEC`, cleared only in the X server's own `pre_exec`, after the
+fork). No straggler.
+
+### Measurements
+
+Container as for part A (x86_64, 4 CPUs, no GPU). Release builds:
+base `5b373a2` (scoot sha256 `b0e2b5d4…`, 6,998,112 B) and head `4646074`
+(scoot `d8824ba3…`, 7,080,320 B, +82,208 B; scootbg unchanged, `c2ea42c2…`).
+Scripts `bench.py`, `startup.py` and `firstframe.py` in the session's
+scratch record. `scoot --headless --outputs 2`.
+
+- **Startup** (Popen until the control socket answers `version`, base and
+  head interleaved, 40 each, a config with only `[layout]`): base median
+  8.85 ms (7.31–13.61), head 8.54 ms (7.46–12.02). With a `[wallpaper]`
+  (5 rounds, two runs): 9.34 and 9.82 ms; one `fork`/`exec`, not waited on.
+- **Reload** (`{"type":"reload"}` written to reply read, 250 per run, 50
+  ms apart so each `apply-config` finishes first), medians (p90):
+
+  | | run 1 | run 2 |
+  |---|---|---|
+  | base, no `[wallpaper]` | 0.523 (0.618) | 0.520 (0.666) |
+  | head, no `[wallpaper]` | 0.520 (0.652) | 0.542 (0.657) |
+  | head, `[wallpaper]` unchanged | 1.011 (1.182) | 1.096 (1.291) |
+
+  The half millisecond with a section is the spawn of `apply-config` on the
+  reload path; every one of the 51 runs per session succeeded.
+- **Start to wallpaper on screen** (Popen until scoot logs that
+  `apply-config` exited 0, which it does once the wallpaper is on screen
+  and the compositor has it; fresh state, so the daemon cold-starts; 10
+  runs): median 13.69 ms (12.77–15.96); from scoot's first log line to the
+  spawn 4.29 ms, spawn to applied 3.97 ms.
+- **Idle**, 10 s after a 1 s settle: 0 CPU ticks and 0 context switches
+  for scoot, with and without a section, base and head.
+- **Hot paths**: nothing on the render, input or IPC dispatch paths
+  changed; the reaper gained one bool check per `SIGCHLD`, and `spawn` is
+  the same calls reordered through `session_command`.
+
+### Verified where
+
+At `9464cf2` unless noted, on the container above:
+
+- `devenv shell -- soft-egl cargo nextest run --workspace`: 2557 passed,
+  26 skipped.
+- `devenv shell -- soft-egl cargo test -p scoot`: 1843 passed, 23 ignored.
+- `cargo clippy -p scoot --all-targets -- -D warnings`, `cargo fmt --check
+  -p scoot`, and the same for `-p scootbg -p scootbg-mem`: clean.
+- `devenv shell -- scripts/smoke-test.sh` (no `soft-egl`,
+  `SMOKE_REQUIRE_SCOOTBG=1`): rc 0, 34 `ok:` lines, the wallpaper section's
+  twelve among them. With `SCOOTBG=/nonexistent/scootbg`: rc 0, "skipped:
+  no scootbg binary"; with that and `SMOKE_REQUIRE_SCOOTBG=1`: rc 1 at
+  once, naming the missing binary.
+- `SCOOTBG_REQUIRE_SCOOT=1 SCOOTBG_REQUIRE_SWAY=1
+  SCOOTBG_TEST_SWAY=…sway-1.12/bin/sway devenv shell -- soft-egl cargo
+  nextest run -p scootbg -p scootbg-mem`: 425 passed, 2 skipped; `cargo
+  test` with the same variables: every suite passed, `scoot_config` 1 of
+  1, `config` 23 of 23.
+- At `4646074`: `nix flake check -L` (sandboxed): all checks passed;
+  `nix build .#checks.x86_64-linux.scoot-modules --rebuild`: every file
+  check printed, the four new ones included; `nix eval` of
+  `checks.aarch64-darwin.scoot-modules.drvPath` and
+  `checks.aarch64-linux...`: evaluated (every pin holds on those systems;
+  the first evaluation of the Darwin one failed on a NixOS pin, fixed in
+  `4646074`). `nix fmt --check` over every tracked `.nix`: clean.
+- **The tests catch what they claim**, each by breaking the code: runs
+  allowed to overlap (5 tests fail, the live overlap test among them); a
+  failure never held (4); never abandoning (7, the live 300 ms one
+  included); a late older run not followed by the newest (2); `[wallpaper]`
+  dropped from `FileConfig`, the whole-file regression (4); unwritten keys
+  sent as `null` (5); relative paths not resolved (5); the NixOS default
+  off, the home-manager `command` not injected, the NixOS wrapper without
+  scootbg, and an overlay that adds `scootbg` on Darwin (each fails the
+  module check).
+- The configs in docs/configuration.md (the section's example and the
+  full example) and the README's Configuring example, run through a real
+  `scoot --headless`: no parse error, and the section recognized.
+
+### Not verified, and why
+
+- **`--tty`, and the gap before the first frame at a real login:** no dev
+  VM from this container. On headless, start to wallpaper is 13.69 ms
+  (above); the `--tty` number is still to take.
+- **`nix build .#scoot`** at the head: not run (the container's disk had
+  6 GB free, a sandboxed Smithay build needs more headroom than that
+  leaves). The new files are under `crates/`, inside the package's
+  fileset; CI's `nix-build.yml` builds it on `main`.
+- **A real NixOS or home-manager evaluation:** the checks use stand-in
+  options, as the existing ones do; `nix flake check` evaluated the modules
+  as NixOS modules.
+- **A Mac:** the Darwin check was evaluated from Linux, not built on
+  Darwin; CI's macOS job does that.
+- **The 40 s bound in real time:** the glue's test runs it at 300 ms
+  (`Queue::set_patience`, test-only); the constant and the queue's rules
+  are unit-tested at 40 s with a fake clock.
+
+### For the next tickets
+
+- **Measure the `--tty` gap** before scootbg's first frame at login, on the
+  dev VM (this item's plan asked for it; still open).
+- **N2** (a `stat` on scootbg's loop for each image) stays with the other
+  slow-disk work.
+- **The reload reply** says "applied" when the section was handed over;
+  if an agent needs the outcome, a later protocol addition could carry it,
+  but it would mean waiting on scootbg, which this item deliberately never
+  does.
+- **[lightest.md](../lightest.md)** can now measure scootbg as a scoot
+  user runs it: started by `apply-config` from the config.
