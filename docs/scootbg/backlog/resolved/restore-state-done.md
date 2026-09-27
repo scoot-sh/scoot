@@ -450,4 +450,6 @@ limit-fitting encode, the directory check and the new `query` fields;
 still `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` only, no `libc`
 crate. Nothing on the loop's hot path changed: the extra work is in a
 save (a sort of at most 256 names, per `set`) and at start-up (one
-`stat`).
+`stat`). `state::bench` at `68ab299`, same setup as above: building the
+text median 1.2 µs (0.8 before), handing it over 19.3 µs, the atomic
+write on its thread median 346.3 µs, worst 1,031.4 µs of 200.
