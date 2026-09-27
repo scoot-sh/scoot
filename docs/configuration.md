@@ -561,6 +561,21 @@ EDID blob to read (name alone for panels without one, KVMs hiding it, and
 the connector-less backends) — so a *different* monitor plugged into the
 same connector does not inherit the old one's windows.
 
+When the removed output had focus, the adopting screen switches to the
+adopted workspace holding the focused window and keeps focus on it: the
+work follows the session instead of vanishing behind the screen's own
+workspace, which stays one keystroke away (`Super+1`, `Super+Ctrl+k`). When
+focus was elsewhere, nothing on the adopting screen changes — a monitor
+dropping in standby while you work on the other screen leaves it exactly as
+it was, and its return does too. The restore returns the adopting screen to
+the workspace it showed before, when it is still showing the adopted one,
+and the focused window follows its own window home; otherwise focus stays
+where it is. Adopted workspaces announce themselves to bars over
+`ext-workspace-v1` with their monitor's name ("2 DP-1", back to "2" on
+restore or once you empty them), and `scootctl windows` reports each
+window's 0-based workspace, whether it was adopted, and from which
+connector.
+
 Two failure behaviors specific to `[binds]`, both worth knowing since they
 fail silently rather than as a startup error:
 

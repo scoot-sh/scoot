@@ -31,7 +31,9 @@
 //!   stable across multiple sessions"; these are not stable across the next
 //!   window closing.
 //! - **`name` is the 1-based position** ("1", "2", ...), which is what a bar
-//!   displays. The IPC twin is 0-based: `scoot msg action
+//!   displays -- with the adopting monitor's connector name while the
+//!   workspace carries an adoption tag ("2 DP-1", see `workspace_name`).
+//!   The IPC twin is 0-based: `scoot msg action
 //!   focus-workspace-index N` drives the same core action `activate` does,
 //!   so a bar label `"2"` means `focus-workspace-index 1`, not `2` --
 //!   nothing on either side adjusts, and nothing warns. See
@@ -102,8 +104,7 @@
 //! atomically"). A client that never sends `commit` never switches anything.
 
 use scoot_core::{Action, OutputId, Workspaces};
-use smithay::output::Output;
-use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_group_handle_v1::{
+use smithay::output::Output;use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_group_handle_v1::{
     self, ExtWorkspaceGroupHandleV1, GroupCapabilities,
 };
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1::{
@@ -147,7 +148,13 @@ const VERSION: u32 = 1;
 #[derive(Debug, Default)]
 pub struct ExtWorkspaceState {
     managers: Vec<Manager>,
-    published: Vec<(OutputId, Workspaces)>,
+    published: Vec<PublishedOutput>,
+    /// The core's [`origin_revision`](scoot_core::World::origin_revision)
+    /// the names were last published at. Adoption tags move only on
+    /// output remove/restore, so comparing this beside the workspace
+    /// counts tells "the tags changed" without rebuilding them on every
+    /// refresh.
+    published_revision: u64,
     /// Reused across refreshes rather than allocated per refresh: this runs
     /// on every `State::apply`.
     changes: Vec<Change>,
@@ -156,6 +163,18 @@ pub struct ExtWorkspaceState {
     /// across refreshes; only the previous snapshot's is ever dropped, and
     /// that one becomes this one on the next pass (see `refresh_workspaces`).
     current: Vec<(OutputId, Workspaces)>,
+}
+
+/// What every registered manager has already been told about one output:
+/// its workspaces, and the adoption origin each handle was named with.
+#[derive(Debug)]
+struct PublishedOutput {
+    output: OutputId,
+    workspaces: Workspaces,
+    /// One entry per workspace, in order: which adoption it came from, if
+    /// any. Persistent storage, not a per-refresh allocation: rewritten
+    /// only when the output's workspaces changed.
+    origins: Vec<Option<u64>>,
 }
 
 impl ExtWorkspaceState {
@@ -194,6 +213,23 @@ impl ExtWorkspaceState {
                 .map(|(output, index)| (manager, output, index))
         })
     }
+}
+
+/// One output's batch of changes to this manager's group for it.
+///
+/// Borrowed, never stored: the handles stay positional, and the next refresh
+/// re-reads everything here.
+struct OutputBatch<'a> {
+    output: OutputId,
+    smithay_output: Option<&'a Output>,
+    current: Workspaces,
+    changes: &'a [Change],
+    /// The output's adoption origins in workspace order, for naming added
+    /// and renamed handles.
+    origins: &'a [Option<u64>],
+    /// The shell's live origin-to-connector names (see
+    /// `State::origin_names`).
+    connectors: &'a std::collections::HashMap<u64, String>,
 }
 
 /// One client's bound `ext_workspace_manager_v1` and the objects created for
@@ -254,11 +290,16 @@ impl Manager {
         &mut self,
         dh: &DisplayHandle,
         client: &Client,
-        output: OutputId,
-        smithay_output: Option<&Output>,
-        current: Workspaces,
-        changes: &[Change],
+        batch: OutputBatch<'_>,
     ) -> bool {
+        let OutputBatch {
+            output,
+            smithay_output,
+            current,
+            changes,
+            origins,
+            connectors: origin_names,
+        } = batch;
         let version = self.manager.version();
         // The entry, created (but not the object) on first sight.
         let position = match self.groups.iter().position(|group| group.output == output) {
@@ -367,11 +408,29 @@ impl Manager {
                         "workspace handles are positional"
                     );
                     self.manager.workspace(&handle);
-                    describe(&handle, index, active);
+                    describe(
+                        &handle,
+                        index,
+                        active,
+                        &workspace_name(index, origins.get(index).copied().flatten(), origin_names),
+                    );
                     if let Some(group) = &group {
                         group.workspace_enter(&handle);
                     }
                     group_entry.workspaces.push(handle.downgrade());
+                }
+                Change::Renamed { index } => {
+                    // The handle keeps its position: only its origin tag
+                    // changed (adopted, restored, or renumbered past), so
+                    // only its name goes out again. `coordinates` is the
+                    // position and has not moved.
+                    if let Some(handle) = group_entry.handle(index) {
+                        handle.name(workspace_name(
+                            index,
+                            origins.get(index).copied().flatten(),
+                            origin_names,
+                        ));
+                    }
                 }
             }
         }
@@ -439,44 +498,112 @@ impl State {
             ext.current = current;
             return;
         }
-        // Fast path: every snapshot matches -- no events, and no `done`.
-        let unchanged = current.len() == ext.published.len()
+        let revision = self.world.origin_revision();
+        // Fast path: every snapshot matches and no adoption tag moved -- no
+        // events, and no `done`.
+        let unchanged = ext.published_revision == revision
+            && current.len() == ext.published.len()
             && current
                 .iter()
                 .zip(ext.published.iter())
-                .all(|(a, b)| a == b);
+                .all(|(a, b)| a.0 == b.output && a.1 == b.workspaces);
         if !unchanged {
-            ext.managers.retain_mut(|manager| {
-                let Ok(client) = dh.get_client(manager.manager.id()) else {
-                    return false;
-                };
-                let mut changed = false;
-                for (id, state) in &current {
-                    let told = ext
-                        .published
+            // Per-output work, once rather than once per manager: what
+            // changed, and the names backing it. A fresh `Vec` per refresh
+            // that changed anything: window opens/closes and output hotplug
+            // are cold next to `apply`'s steady state, which takes the fast
+            // path above and allocates nothing. Computed outside the manager
+            // loop so `published` below is updated even with no managers
+            // bound yet (a bind announces from `published`).
+            let mut touched: Vec<(OutputId, Vec<Option<u64>>)> = Vec::new();
+            for (id, state) in &current {
+                let published_entry = ext.published.iter().find(|entry| entry.output == *id);
+                let told = published_entry
+                    .map(|entry| entry.workspaces)
+                    .unwrap_or_default();
+                if told == *state && ext.published_revision == revision {
+                    continue;
+                }
+                // The names backing this output's handles, rebuilt only on
+                // a change (see `PublishedOutput::origins`).
+                touched.push((*id, self.world.workspace_origins(*id).unwrap_or_default()));
+            }
+            if !touched.is_empty() {
+                ext.managers.retain_mut(|manager| {
+                    let Ok(client) = dh.get_client(manager.manager.id()) else {
+                        return false;
+                    };
+                    let mut changed = false;
+                    for (id, origins) in &touched {
+                        let state = current
+                            .iter()
+                            .find(|(known, _)| known == id)
+                            .map(|(_, workspaces)| *workspaces)
+                            .unwrap_or_default();
+                        let published_entry =
+                            ext.published.iter().find(|entry| entry.output == *id);
+                        let told = published_entry
+                            .map(|entry| entry.workspaces)
+                            .unwrap_or_default();
+                        let told_origins: &[Option<u64>] = published_entry
+                            .map(|entry| entry.origins.as_slice())
+                            .unwrap_or(&[]);
+                        changes.clear();
+                        diff::changes(told, state, &mut changes);
+                        diff::renames(told_origins, origins, &mut changes);
+                        changed |= !changes.is_empty();
+                        let smithay_output = self.outputs.get(*id);
+                        if !manager.apply_output(
+                            &dh,
+                            &client,
+                            OutputBatch {
+                                output: *id,
+                                smithay_output,
+                                current: state,
+                                changes: &changes,
+                                origins,
+                                connectors: &self.origin_names,
+                            },
+                        ) {
+                            return false;
+                        }
+                    }
+                    if changed {
+                        manager.manager.done();
+                    }
+                    true
+                });
+                // Publish what was sent: the touched outputs' snapshots move
+                // into their entries (or new entries), so the next refresh
+                // diffs against what clients now hold. Untouched outputs keep
+                // their entries as they were.
+                for (id, origins) in touched {
+                    let workspaces = current
                         .iter()
-                        .find(|(known, _)| known == id)
+                        .find(|(known, _)| known == &id)
                         .map(|(_, workspaces)| *workspaces)
                         .unwrap_or_default();
-                    if told == *state {
-                        continue;
-                    }
-                    changes.clear();
-                    diff::changes(told, *state, &mut changes);
-                    changed |= !changes.is_empty();
-                    let smithay_output = self.outputs.get(*id);
-                    if !manager.apply_output(&dh, &client, *id, smithay_output, *state, &changes) {
-                        return false;
+                    if let Some(entry) = ext.published.iter_mut().find(|entry| entry.output == id) {
+                        entry.workspaces = workspaces;
+                        entry.origins = origins;
+                    } else {
+                        ext.published.push(PublishedOutput {
+                            output: id,
+                            workspaces,
+                            origins,
+                        });
                     }
                 }
-                if changed {
-                    manager.manager.done();
-                }
-                true
-            });
-            // `current` becomes the new snapshot; the previous one becomes
-            // the scratch buffer, so neither allocation is lost.
-            std::mem::swap(&mut ext.published, &mut current);
+                ext.published_revision = revision;
+                // Entries for outputs `current` no longer names are dropped,
+                // as the old snapshot swap did: the next refresh diffs
+                // against what clients were actually told, and a gone
+                // output's handles were retired with its group.
+                ext.published
+                    .retain(|entry| current.iter().any(|(id, _)| *id == entry.output));
+            }
+            // `current` becomes the scratch buffer again, so its allocation
+            // survives to the next refresh.
             current.clear();
         }
         ext.changes = changes;
@@ -519,7 +646,7 @@ impl State {
             }
             manager.manager.done();
         }
-        ext.published.retain(|(output, _)| *output != id);
+        ext.published.retain(|entry| entry.output != id);
     }
 
     /// Applies whatever clients staged before this `commit` -- every group
@@ -702,7 +829,8 @@ impl State {
         self.refresh_workspaces();
         let mut groups = Vec::with_capacity(self.ext_workspace.published.len());
         for slot in 0..self.ext_workspace.published.len() {
-            let (id, state) = self.ext_workspace.published[slot];
+            let entry = &self.ext_workspace.published[slot];
+            let (id, state) = (entry.output, entry.workspaces);
             let created = client.create_resource::<ExtWorkspaceGroupHandleV1, _, State>(
                 dh,
                 manager.version(),
@@ -754,7 +882,20 @@ impl State {
                     return;
                 };
                 manager.workspace(&handle);
-                describe(&handle, index, index == state.active);
+                describe(
+                    &handle,
+                    index,
+                    index == state.active,
+                    &workspace_name(
+                        index,
+                        self.ext_workspace.published[slot]
+                            .origins
+                            .get(index)
+                            .copied()
+                            .flatten(),
+                        &self.origin_names,
+                    ),
+                );
                 group.workspace_enter(&handle);
                 workspaces.push(handle.downgrade());
             }
@@ -774,17 +915,39 @@ impl State {
 
 /// Sends everything a newly created workspace handle needs: what it is called,
 /// where it sits, what may be asked of it, and whether it is active.
-fn describe(handle: &ExtWorkspaceHandleV1, index: usize, active: bool) {
-    // 1-based, matching how a bar labels workspaces and how a user counts
-    // them. No `id` event: see this module's doc. Derived once and used for
-    // both events on purpose: `name` and `coordinates` are documented as the
-    // same number, and two independent expressions of "1-based index" is how
-    // they silently drifted apart once already.
-    let position = index.saturating_add(1);
-    handle.name(position.to_string());
-    handle.coordinates(coordinates(position));
+fn describe(handle: &ExtWorkspaceHandleV1, index: usize, active: bool, name: &str) {
+    // `coordinates` is the 1-based position (see `coordinates`); `name` is
+    // what a bar displays, which carries the adoption origin while one is
+    // tagged (see `workspace_name`). Derived once for `coordinates` and
+    // taken as an argument for `name` on purpose: two independent
+    // expressions of "1-based index" is how they silently drifted apart
+    // once already, and the name is composed where the origins live.
+    handle.name(name.to_string());
+    handle.coordinates(coordinates(index.saturating_add(1)));
     handle.capabilities(WorkspaceCapabilities::Activate);
     handle.state(workspace_state(active));
+}
+
+/// One workspace's bar name: its 1-based position, with the adopting
+/// monitor's connector name while the workspace carries an adoption tag
+/// ("2 DP-1"). A workspace that was never adopted keeps its bare position,
+/// exactly as before. The protocol sends `name` "whenever the name of the
+/// workspace changes" and requires neither stability nor uniqueness, so a
+/// tag that arrives on adopt and leaves on restore (or when the user empties
+/// the workspace) is an ordinary rename.
+///
+/// An origin the shell has no name for (its record already swept) falls back
+/// to the bare position rather than a number nobody can resolve.
+fn workspace_name(
+    index: usize,
+    origin: Option<u64>,
+    origin_names: &std::collections::HashMap<u64, String>,
+) -> String {
+    let position = index.saturating_add(1);
+    match origin.and_then(|origin| origin_names.get(&origin)) {
+        Some(connector) => format!("{position} {connector}"),
+        None => position.to_string(),
+    }
 }
 
 /// A workspace's 1-based position as this protocol's `coordinates` array: one

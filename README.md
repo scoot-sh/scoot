@@ -55,7 +55,13 @@ inspired this project.
   `Super+comma`/`Super+period` (with `Shift` to carry the focused window)
   move between the first two outputs. Plugging a monitor in while the session runs adds
   an output for it. Pulling one out removes its output and moves its
-  windows to a remaining one; the last screen is never taken away. What is
+  windows, as their own workspaces, onto a remaining screen after its own;
+  the last screen is never taken away. When the window you were working on
+  was on the monitor you pulled, that screen switches to its workspace with
+  your window still focused -- nothing vanishes, and `Super+1` (or
+  `Super+Ctrl+k`) takes you back to the screen's own previous workspace. A
+  bar shows the adopted workspaces with their monitor's name ("2 DP-1"), and
+  `scootctl windows` reports each window's workspace. What is
   not there yet:
   - **Per-output scale, mode and position.** One `[output] scale` applies
     to every screen and `--mode WxH` to every connector that offers that
@@ -65,8 +71,12 @@ inspired this project.
   - **A replugged monitor comes back with its windows.** Its workspaces move
     back from the screen they were adopted by -- the windows that are still
     open and that were not moved by hand in between, in the same order with
-    the same active workspace -- and the default `Super+period` binds follow
-    it (they name the second screen, not output id 2). A *different* monitor
+    the same active workspace -- and the adopting screen goes back to the
+    workspace it showed before, with the focused window following its own
+    window home; a standby cycle that drops the connection while you work
+    on the other screen leaves that screen exactly as it was. The default
+    `Super+period` binds follow it (they name the second screen, not output
+    id 2). A *different* monitor
     on the same connector does not inherit them: identity is the connector
     name plus the EDID make/model/serial where one can be read.
 - **XWayland is opt-in, and partial.** X11 applications run with

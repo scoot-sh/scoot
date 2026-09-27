@@ -55,6 +55,14 @@ fn handle_in_group(log: &[Seen], group: u32) -> usize {
         .expect("the log should have entered a handle into that group")
 }
 
+/// What IPC `windows` reports right now. A `windows` request arranges
+/// read-only, so it adds nothing to the protocol log above.
+fn windows(fixture: &mut Fixture) -> Vec<scoot_ipc::WindowSnapshot> {
+    match fixture.state.handle_request(scoot_ipc::Request::Windows) {
+        scoot_ipc::Response::Windows { windows } => windows,
+        other => panic!("expected windows, got {other:?}"),
+    }
+}
 /// A fixture bound to both outputs and the manager with the burst drained,
 /// holding two windows on the first output's workspaces: window 1 on
 /// workspace 1, window 2 on the active workspace 2. The second output is
@@ -223,7 +231,184 @@ fn stop_ends_updates_for_both_groups() {
     );
 }
 
-// -- cross-output moves (milestone 19, phase F) ----------------------------
+// -- adopted workspaces carry their origin name -----------------------------
+
+// A fixture with window A on output 1 and window B focused on output 2, and
+// a bound manager that has seen everything so far: the shape an unplug
+// starts from.
+fn adopted_fixture() -> Fixture {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    fixture.take_log();
+    // Window A on output 1's first workspace...
+    fixture.run(Step::MapWindow);
+    fixture.take_log();
+    // ...window B on output 2's, focused: the unplug below switches to it.
+    // Windows open on the pointer's output, so the pointer moves across
+    // first (a focus change alone would not move it).
+    fixture.state.pointer_move(CANVAS as f64 + 10.0, 10.0);
+    fixture.settle();
+    fixture.take_log();
+    fixture.run(Step::MapWindow);
+    fixture.take_log();
+    assert_eq!(workspaces_of(&fixture, 1), (2, 0));
+    assert_eq!(workspaces_of(&fixture, 2), (2, 0));
+    assert_eq!(fixture.state.world.focused_output(), Some(OutputId(2)));
+    fixture
+}
+
+/// An unplug with focus on the removed output shows the adopted work under
+/// its origin name: output 1's list grows "1 2" -> "1 2 headless-2 3" with
+/// the active marker following the adopted workspace.
+#[test]
+fn unplugging_with_focus_there_names_the_adopted_workspace_for_its_monitor() {
+    let mut fixture = adopted_fixture();
+
+    assert!(fixture.state.remove_output(OutputId(2)));
+    fixture.settle();
+    assert_eq!(workspaces_of(&fixture, 1), (3, 1));
+    // Handles so far: 0 and 1 are the two groups' first workspaces, 2 is
+    // output 1's trailing empty, 3 is output 2's. The adopt adds output 1's
+    // new trailing empty as handle 4.
+    assert_eq!(
+        fixture.take_log(),
+        vec![
+            Seen::WorkspaceLeave(1, 1),
+            Seen::Removed(1),
+            Seen::WorkspaceLeave(1, 3),
+            Seen::Removed(3),
+            Seen::GroupRemoved(1),
+            Seen::Done(0),
+            Seen::State(0, INACTIVE),
+            Seen::State(2, ACTIVE),
+            Seen::Workspace(4),
+            Seen::Name(4, "3".into()),
+            Seen::Coordinates(4, vec![3]),
+            Seen::Capabilities(4, 1),
+            Seen::State(4, INACTIVE),
+            Seen::WorkspaceEnter(0, 4),
+            Seen::Name(2, "2 headless-2".into()),
+            Seen::Done(0),
+        ]
+    );
+    // IPC agrees, in 0-based workspaces: window B sits on workspace 1,
+    // adopted from headless-2; window A on workspace 0, never adopted.
+    let listed = windows(&mut fixture);
+    assert_eq!(listed.len(), 2);
+    let adopted = listed
+        .iter()
+        .find(|w| w.workspace == 1)
+        .expect("one window on the adopted workspace");
+    assert_eq!(adopted.output, 1);
+    assert!(adopted.adopted);
+    assert_eq!(adopted.origin.as_deref(), Some("headless-2"));
+    let own = listed
+        .iter()
+        .find(|w| w.workspace == 0)
+        .expect("one window on the adopter's own workspace");
+    assert_eq!(own.output, 1);
+    assert!(!own.adopted);
+    assert_eq!(own.origin, None);
+}
+
+/// Closing the adopter's own workspace renumbers the adopted one past it:
+/// the handle keeps its position, so its name is re-sent following the
+/// content ("2 headless-2" -> "1 headless-2", and the trailing "3" -> "2").
+#[test]
+fn closing_in_front_of_an_adopted_workspace_renames_it() {
+    let mut fixture = adopted_fixture();
+    assert!(fixture.state.remove_output(OutputId(2)));
+    fixture.settle();
+    fixture.take_log();
+
+    // Window A is the client's first window: closing it empties output 1's
+    // first workspace, which drops away under the adopted one.
+    fixture.run(Step::CloseWindow(0));
+    fixture.settle();
+    assert_eq!(workspaces_of(&fixture, 1), (2, 0));
+    assert_eq!(
+        fixture.take_log(),
+        vec![
+            Seen::State(2, INACTIVE),
+            Seen::State(0, ACTIVE),
+            Seen::WorkspaceLeave(0, 4),
+            Seen::Removed(4),
+            Seen::Name(0, "1 headless-2".into()),
+            Seen::Name(2, "2".into()),
+            Seen::Done(0),
+        ]
+    );
+}
+
+/// A replug moves the adopted workspace home and takes the origin names back
+/// off: the returned monitor's group is announced with bare positions, and
+/// the adopter's trailing handle loses its tag.
+#[test]
+fn replugging_restores_the_workspace_and_clears_its_origin_name() {
+    let mut fixture = adopted_fixture();
+    assert!(fixture.state.remove_output(OutputId(2)));
+    fixture.settle();
+    fixture.take_log();
+
+    headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("the monitor comes back");
+    fixture.settle();
+    // Window B is home on the new output's first workspace; the adopter is
+    // back on its own window, and focus followed B home.
+    assert_eq!(workspaces_of(&fixture, 3), (2, 0));
+    assert_eq!(workspaces_of(&fixture, 1), (2, 0));
+    assert_eq!(fixture.state.world.focused_output(), Some(OutputId(3)));
+    // Handles 5 and 6 are the returned output's group: announced with bare
+    // positions, never tagged -- they are home, not adopted. The add
+    // announces the empty group first; the restore then grows it and takes
+    // the adopter's tag back off, each in its own batch.
+    assert_eq!(
+        fixture.take_log(),
+        vec![
+            Seen::Group(2),
+            Seen::GroupCapabilities(2, 0),
+            Seen::Workspace(5),
+            Seen::Name(5, "1".into()),
+            Seen::Coordinates(5, vec![1]),
+            Seen::Capabilities(5, 1),
+            Seen::State(5, ACTIVE),
+            Seen::WorkspaceEnter(2, 5),
+            Seen::Done(0),
+            Seen::State(2, INACTIVE),
+            Seen::State(0, ACTIVE),
+            Seen::WorkspaceLeave(0, 4),
+            Seen::Removed(4),
+            Seen::Name(2, "2".into()),
+            Seen::Workspace(6),
+            Seen::Name(6, "2".into()),
+            Seen::Coordinates(6, vec![2]),
+            Seen::Capabilities(6, 1),
+            Seen::State(6, INACTIVE),
+            Seen::WorkspaceEnter(2, 6),
+            Seen::Done(0),
+        ]
+    );
+    // IPC agrees: window B is home on output 3's workspace 0, no longer
+    // adopted; window A never left output 1's workspace 0.
+    let listed = windows(&mut fixture);
+    assert_eq!(listed.len(), 2);
+    let home = listed
+        .iter()
+        .find(|w| w.output == 3)
+        .expect("one window back on the returned monitor");
+    assert_eq!(home.workspace, 0);
+    assert!(!home.adopted);
+    assert_eq!(home.origin, None);
+    let stayed = listed
+        .iter()
+        .find(|w| w.output == 1)
+        .expect("one window still on the first output");
+    assert_eq!(stayed.workspace, 0);
+    assert!(!stayed.adopted);
+    assert_eq!(stayed.origin, None);
+}
 
 /// Moving a window across outputs reassigns no group to any output: each
 /// group keeps the screen it was announced with, so no `output_leave` (and

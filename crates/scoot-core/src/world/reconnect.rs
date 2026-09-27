@@ -61,8 +61,37 @@ pub struct EvictedOutput {
     pub snapshot: OutputSnapshot,
     pub adopted_by: Option<OutputId>,
     /// The workspace index in the adopter the adopted block starts at. `0`
-    /// with no adopter (the windows wait in `unplaced` instead).
+    /// with no adopter (the windows wait in `unplaced` instead). Recorded
+    /// after the removal's focus switch and its normalize, which is the list
+    /// the restore verifies each window against.
     pub adopted_at: usize,
+    /// The opaque id the adopted workspaces were tagged with, for the shell
+    /// to map back to a connector name. `None` when nothing was adopted.
+    pub origin: Option<u64>,
+    /// Where the adopter was looking before the adoption, for the restore to
+    /// return to. `None` when the removal switched nothing (focus was
+    /// elsewhere, so the adopter never moved) or when the view workspace was
+    /// emptied and the switch dropped it -- in both cases the restore leaves
+    /// the adopter's active workspace alone.
+    pub adopter_active: Option<AdopterView>,
+}
+
+/// Where the adopter was looking before an adoption, measured against the
+/// post-switch list -- the same coordinate frame as
+/// [`EvictedOutput::adopted_at`].
+///
+/// Relative to the adopted block rather than a raw index, deliberately: the
+/// block is what the restore verifies positions against, so a view expressed
+/// against it refuses itself (rather than landing somewhere unasked) when an
+/// intervening change moved the block over it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdopterView {
+    /// That many workspaces before the adopted block: the restore activates
+    /// `adopted_at - n`, and only when that still lands before the block.
+    BeforeBlock(usize),
+    /// The trailing empty workspace: the restore activates whatever the
+    /// trailing empty workspace is then.
+    Trailing,
 }
 
 /// What [`World::remove_output`](super::World::remove_output) did with the
@@ -71,6 +100,8 @@ pub struct EvictedOutput {
 pub(super) struct Removal {
     pub(super) adopted_by: Option<OutputId>,
     pub(super) adopted_at: usize,
+    pub(super) origin: Option<u64>,
+    pub(super) adopter_active: Option<AdopterView>,
 }
 
 /// One window still where the adoption put it, on its way back: its snapshot
@@ -114,6 +145,8 @@ impl World {
             snapshot,
             adopted_by: removal.adopted_by,
             adopted_at: removal.adopted_at,
+            origin: removal.origin,
+            adopter_active: removal.adopter_active,
         })
     }
 
@@ -130,8 +163,22 @@ impl World {
     /// where they are; a workspace left with nothing kept is dropped, and an
     /// empty snapshot restores nothing at all. The restored workspaces keep
     /// their column order, presets and floating order; the output's active
-    /// index is the snapshot's, clamped. Focus stays where it was -- a
-    /// replugged monitor must not steal it.
+    /// index is the snapshot's, clamped.
+    ///
+    /// Focus follows a carried window home: when the focused window is among
+    /// the windows moved back, it stays focused on the returned monitor.
+    /// Otherwise focus stays where it was -- a replugged monitor must not
+    /// steal it, and a standby cycle while the user works on the panel leaves
+    /// the panel exactly as it was.
+    ///
+    /// The adopter goes back to its pre-adopt view while it is still showing
+    /// the adopted block: [`EvictedOutput::adopter_active`], verified against
+    /// the block rather than trusted blindly. When the user has since switched
+    /// the adopter elsewhere, its active workspace is left alone.
+    ///
+    /// The adoption's origin tag comes off the adopter's remaining workspaces
+    /// either way: a restore ends the association, so a workspace the user
+    /// kept there stops claiming a monitor that is back.
     ///
     /// Unknown outputs (new or adopter) are ignored, as is restoring onto
     /// the adopter itself: there is nothing to pull back to itself.
@@ -141,6 +188,8 @@ impl World {
             snapshot,
             adopted_by,
             adopted_at,
+            origin,
+            adopter_active,
         } = evicted;
         if snapshot.workspaces.is_empty() {
             return 0;
@@ -152,6 +201,22 @@ impl World {
             return 0;
         }
         let a = adopted_by.and_then(|by| self.output_index(by));
+        // A restore against a live adopter ends the association, whatever
+        // moves: the adopter's leftovers stop naming the returned monitor.
+        if let (Some(ax), Some(origin)) = (a, origin) {
+            self.outputs[ax].clear_origin(origin);
+            self.cleared_origin();
+        }
+        // Decided before the takes, which empty the block and let normalize
+        // move the active workspace: focus follows a carried window home,
+        // and the adopter returns to its pre-adopt view while it is still
+        // showing the adopted block.
+        let focused = self.focused_window();
+        let return_adopter = a.is_some_and(|ax| {
+            adopter_active.is_some()
+                && (adopted_at..adopted_at.saturating_add(snapshot.workspaces.len()))
+                    .contains(&self.outputs[ax].active)
+        });
 
         // Phase 1, read-only: which snapshot windows are still on their
         // adopted workspace. Nothing here mutates, so every position it
@@ -286,22 +351,33 @@ impl World {
 
         // Phase 3: rebuild the workspaces in snapshot order. Focus follows
         // the focused window when it survived, and clamps to what did
-        // otherwise; a workspace left with nothing kept is dropped.
+        // otherwise; a workspace left with nothing kept is dropped. When
+        // the session's focused window is carried home, its rebuilt
+        // workspace focuses it rather than the snapshot's window -- the
+        // session follows the window, so the window must hold the focus.
         let mut moved_floating: Vec<WindowId> = Vec::new();
         let mut restored: Vec<Workspace> = Vec::with_capacity(rebuilt.len());
         for ws in rebuilt {
             if ws.columns.is_empty() && ws.floating.is_empty() {
                 continue;
             }
+            let followed = focused.filter(|wid| {
+                ws.columns.iter().any(|column| column.windows.contains(wid))
+                    || ws.floating.contains(wid)
+            });
             let mut columns = Vec::with_capacity(ws.columns.len());
             let mut focused = 0;
             for (c, column) in ws.columns.into_iter().enumerate() {
-                let j = column
-                    .focused_wid
+                let j = followed
                     .and_then(|wid| column.windows.iter().position(|w| *w == wid))
+                    .or_else(|| {
+                        column
+                            .focused_wid
+                            .and_then(|wid| column.windows.iter().position(|w| *w == wid))
+                    })
                     .unwrap_or_else(|| column.focused.min(column.windows.len() - 1));
-                if ws
-                    .focused_wid
+                if followed
+                    .or(ws.focused_wid)
                     .is_some_and(|wid| column.windows.contains(&wid))
                 {
                     focused = c;
@@ -313,19 +389,23 @@ impl World {
                 });
             }
             if !columns.is_empty() {
-                focused = ws
-                    .focused_wid
+                focused = followed
+                    .or(ws.focused_wid)
                     .and_then(|wid| columns.iter().position(|col| col.windows.contains(&wid)))
                     .unwrap_or_else(|| ws.focused.min(columns.len() - 1));
             }
             moved_floating.extend(ws.floating.iter().copied());
-            let floating_focused = ws.floating_focused && !ws.floating.is_empty();
+            let floating_focused = (followed.is_some_and(|wid| ws.floating.contains(&wid))
+                || ws.floating_focused)
+                && !ws.floating.is_empty();
             restored.push(Workspace {
                 columns,
                 focused,
                 view_x: 0,
                 floating: ws.floating,
                 floating_focused,
+                // Home again: a restored workspace names no monitor.
+                origin: None,
             });
         }
         // Structural, not defensive: `carries` is non-empty (returned above
@@ -340,12 +420,45 @@ impl World {
         self.fix_view(n);
         if let Some(ax) = a {
             self.outputs[ax].normalize();
+            if return_adopter {
+                // Verified, not trusted: a before-block view only applies
+                // while it still lands before the block, so an intervening
+                // change that moved the block over it refuses itself rather
+                // than switching somewhere unasked. A trailing sitter goes
+                // back to whatever the trailing empty workspace is now.
+                let adopter = &mut self.outputs[ax];
+                let index = match adopter_active {
+                    Some(AdopterView::BeforeBlock(distance)) => adopted_at.checked_sub(distance),
+                    Some(AdopterView::Trailing) => Some(adopter.workspaces.len() - 1),
+                    None => None,
+                };
+                let verified = index.is_some_and(|index| {
+                    index < adopter.workspaces.len()
+                        && (matches!(adopter_active, Some(AdopterView::Trailing))
+                            || index < adopted_at)
+                });
+                if let (Some(index), true) = (index, verified) {
+                    adopter.active = index;
+                    // The adopted workspace just left may have survived the
+                    // normalize above only because it was active: leaving it
+                    // behind strands a stray empty workspace, so normalize
+                    // again around the returned-to view.
+                    adopter.normalize();
+                }
+            }
             self.fix_view(ax);
         }
         // A centre measured against the old output's area means nothing on a
         // screen of another size -- the same re-centring the removal does on
         // the way out.
         self.recentre_floating_on_output(n, &moved_floating);
+        // Focus follows a carried window home (see the doc above): the
+        // rebuild already focuses it within its workspace, and the output's
+        // active index is the snapshot's, which held focus when the session
+        // was looking at the removed output.
+        if focused.is_some_and(|wid| carries.iter().any(|carry| carry.wid == wid)) {
+            self.focused_output = n;
+        }
         carries.len()
     }
 

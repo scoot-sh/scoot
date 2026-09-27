@@ -1,12 +1,20 @@
 ---
-title: "An unplugged monitor's windows seem to disappear"
-status: "open"
-area: "core"
-priority: "medium"
+title: "An unplugged monitor's windows seem to disappear — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# An unplugged monitor's windows seem to disappear
+# An unplugged monitor's windows seem to disappear — RESOLVED
+
+RESOLVED 2026-09-27 (PR #277, branch `unplug-adopted-switch`).
+An unplug with focus on the removed monitor now switches the adopter to the
+adopted workspace holding the focused window, keeping focus; a replug
+restores both the returned monitor and the adopter's pre-adopt view, with
+focus following a carried window home. Adopted workspaces announce their
+origin over `ext-workspace-v1` ("2 DP-1"), and IPC `windows` reports each
+window's 0-based workspace, adoption and origin connector.
 
 Filed 2026-09-26 from `Asahi.md` Test 12 (a real DP-1 unplug on the Asahi
 M2 Air, GPU tier, `main` `87e1935`). Serves **daily-drive**: a docked laptop
@@ -202,3 +210,59 @@ make the rest legible, in order of cost:
 - README's multi-monitor text says what happens on unplug and how to get
   back, `docs/configuration.md`'s unplug/restore paragraph is updated, and
   `docs/ipc.md` documents the new field.
+
+## Resolution record
+
+Every settle-first item settled as the ticket asked, with the pick
+recorded:
+
+- **Focus on restore: follows a carried window home.** When the focused
+  window is among the windows moved back, it stays focused on the returned
+  monitor (and its rebuilt workspace focuses it, not the snapshot's
+  window); otherwise focus stays where it was. This generalizes the old
+  "never steal" rule: the no-focus-on-removed case keeps it exactly, and a
+  standby cycle while the user works on the panel leaves the panel
+  untouched (pinned).
+- **The adopter's previous view is stored relative to the adopted block**
+  (`AdopterView::BeforeBlock(distance)` / `Trailing` in `EvictedOutput`,
+  recorded after the switch's normalize), and the restore applies it only
+  while the adopted block is still shown, verifying a before-block view
+  still lands before the block. A view workspace the switch dropped (it
+  was empty) records nothing: there is no view to return to.
+- **The review's scratch repro is a regression test**
+  (`switching_from_an_empty_active_workspace_still_restores`): adopter
+  `{count: 4, active: 1}` with ws1 empty and active records `adopted_at`
+  post-switch and restores the window.
+- **Origin naming chosen after the bar evaluation.** Waybar's
+  `ext/workspaces` (the standard `ext-workspace-v1` bar module) shows
+  `{name}` verbatim by default with click-to-activate, and the protocol
+  sends `name` "whenever the name changes" with no uniqueness or stability
+  requirement -- so "2 DP-1" is usefully shown, and the documented
+  alternative (positions only) was not taken. Never-adopted workspaces keep
+  bare positions; `coordinates` is untouched (bars sort by it). Renames go
+  out as a new `Renamed` change beside the count half.
+- **Chained unplug keeps the earliest origin** (adoption tags only
+  untagged workspaces); **a partial restore untags what stays** on the
+  adopter (the association is over once the monitor is back).
+- **The IPC output-removed/restored event is filed separately**
+  (`docs/backlog/ipc/output-removed-restored-event.md`), not built here.
+  The bar-less residual stands as accepted (user decision): the switch
+  makes the focused work visible, and the panel's previous workspace stays
+  one keystroke away.
+
+Found and fixed on the way (see the PR body for evidence):
+
+- The adopter-return abandoned the emptied ex-active adopted workspace as
+  a stray empty (the first normalize keeps it while active; the return
+  moves active away): the restore normalizes again around the
+  returned-to view (regression test
+  `returning_leaves_no_emptied_adopted_workspace_behind`).
+- The rebuilt workspace kept the snapshot's focus while session focus
+  followed a different carried window: the rebuild focuses the carried
+  focused window.
+- The randomized invariant driver (extended with evict/restore/replug
+  steps) reached a parent-cycle-through-tiled shape where the drawing
+  order lifts a covering window's dialog above it by design
+  (`floating_order.rs`), which the walk did not model: the walk now skips
+  placements on a parent cycle and repeats on the walked chain (test-only;
+  pinned by `a_dialog_on_a_parent_cycle_still_draws_above_its_covering_parent`).

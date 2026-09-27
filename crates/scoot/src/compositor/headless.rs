@@ -1410,6 +1410,15 @@ impl State {
         // overwrites the first -- the latest state wins.
         if let Some(evicted) = self.world.evict_output(id) {
             if !evicted.snapshot.workspaces.is_empty() {
+                if let Some(origin) = evicted.origin {
+                    // The connector name the adopted workspaces are tagged
+                    // with from now until a restore clears them: what bars
+                    // show ("2 DP-1") and what IPC reports them adopted
+                    // from. Filed beside the restore record, under the same
+                    // emptiness rule (an output that held no windows names
+                    // nothing).
+                    self.origin_names.insert(origin, identity.name.clone());
+                }
                 self.displaced.insert(identity, DisplacedOutput { evicted });
             }
         } else {
