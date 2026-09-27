@@ -58,7 +58,7 @@
 //! ## Which surfaces get feedback
 //!
 //! Exactly the surfaces the frame drew -- the same set that got frame
-//! callbacks on it: every mapped window and layer surface (popups included,
+//! callbacks on it: every window placed on that output, every layer surface (popups included,
 //! via Smithay's own `take_presentation_feedback`), the client cursor surface
 //! when one was drawn, and -- while locked -- only the lock surfaces (plus
 //! the cursor). A surface that was not displayed keeps its feedback queued:
@@ -137,6 +137,7 @@ use smithay::utils::{Clock, Monotonic};
 use smithay::wayland::presentation::Refresh;
 
 use super::State;
+use super::output_clip::placed_on;
 
 #[cfg(test)]
 mod tests;
@@ -193,12 +194,20 @@ impl State {
             self.session_lock
                 .take_presentation_feedback(output, &mut feedback, flags);
         } else {
+            // One output's frame stamps one output's windows: a window is
+            // paced by the output it is placed on (see `output_clip`), the
+            // same output whose frame sends its frame callbacks -- an
+            // overhanging window's feedback drained by the neighbour's frame
+            // would carry the neighbour as its sync output.
+            let id = self.outputs.id_of(output);
             for window in self.space.elements() {
-                window.take_presentation_feedback(
-                    &mut feedback,
-                    |_, _| Some(output.clone()),
-                    surface_flags,
-                );
+                if id.is_some_and(|id| placed_on(window) == Some(id)) {
+                    window.take_presentation_feedback(
+                        &mut feedback,
+                        |_, _| Some(output.clone()),
+                        surface_flags,
+                    );
+                }
             }
             for layer in layer_map_for_output(output).layers() {
                 layer.take_presentation_feedback(
