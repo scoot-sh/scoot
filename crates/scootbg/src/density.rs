@@ -134,10 +134,14 @@ impl Scale {
     /// (an axis of 0: not known, not checked) falls short of `device`, the
     /// output's mode rotated as the output is, by more than the rounding
     /// can explain: by at least the scale plus half a pixel on an axis.
-    /// A surface covering the whole output at the scale the compositor
-    /// renders at never does (a compositor that rounds the logical size
-    /// down, as wlroots does, falls short by less than that); a stale
-    /// fraction does. Never true for an integer scale: that is the
+    /// A surface covering the whole output never does when the compositor
+    /// renders at exactly `v120`/120 (a compositor that rounds the logical
+    /// size down, as wlroots does, falls short by less than that); a stale
+    /// fraction does. So can a compositor rendering at a scale *below* the
+    /// 120th it sends (scoot at 1.254 sends 150): that falls back to the
+    /// integer scale for as long as the scale is set, larger and sharp but
+    /// about 2.5× the pixels. One *above* it (1.33, sent as 160) keeps the
+    /// fraction. Never true for an integer scale: that is the
     /// fallback, and is checked against `wl_output.scale` instead.
     pub fn falls_short(self, logical: Size, device: Size) -> bool {
         let Self::Fractional(v120) = self else {

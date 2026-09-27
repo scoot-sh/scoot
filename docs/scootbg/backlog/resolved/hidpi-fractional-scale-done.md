@@ -151,7 +151,13 @@ sha256 `ae084758…`, so every measurement here holds for both).
     scale plus half a pixel (`Scale::falls_short`: sway's 1066-wide
     surface at a stale 1.25 is 1333 for a 1600-pixel mode) gives way to
     the integer scale. The unit tests show a fraction the compositor
-    really renders at never trips it, over the same 26,944 cases.
+    renders at exactly (a multiple of 1/120, as sway always is) never
+    trips it, over the same 26,944 cases. A compositor rendering *below*
+    the 120th it sends does trip it, for good: scoot at `scale = 1.254`
+    sends 150 and gets a 2552×1594 buffer at integer scale 2 for a
+    1600×1000 output (review, measured), about 2.5× the fraction's
+    pixels; neither is exact there. See
+    [the compositor item](../../../backlog/core/fractional-scale-in-120ths.md).
 
   On sway either case draws 1066×666 at buffer scale 2 (2132×1332) first,
   and once on screen sway sends 180 and it is redrawn at 1599×999, exact:

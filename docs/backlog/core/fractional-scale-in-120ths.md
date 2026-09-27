@@ -40,6 +40,13 @@ scale: text and images are resampled by a fraction of a pixel everywhere,
 the blur fractional scaling exists to avoid. Scales people usually pick
 (1.25, 1.5, 1.75, 2) are unaffected.
 
+**A second consequence, for scootbg:** a scale *below* its nearest 120th
+(1.254 sent as 150) makes scootbg's full-output buffer at that fraction
+fall short of the mode, which scootbg reads as a stale scale, so it draws
+at the integer scale instead for as long as the scale is set: 2552×1594
+for a 1600×1000 output at 1.254 (measured), about 2.5× the pixels. The fix
+below removes the case.
+
 **Fix:** resolve `[output] scale` to the nearest multiple of 1/120 where it
 is clamped (so 1.33 becomes 160/120), and use that one value everywhere:
 rendering, `wl_output.scale`'s rounding up, `preferred_scale`, and the
