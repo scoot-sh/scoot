@@ -60,7 +60,8 @@ recoverable:
 **Accepted residual (the user's decision, 2026-09-26): a session with no
 bar.** There, the switch makes the removed monitor's focused work visible,
 but nothing on screen says the panel's own previous workspace went out of
-view (it stays one keystroke away, `Super+1`). A daily-drive setup runs a
+view (it stays one keystroke away: `Super+N` for its number, `Super+1` in
+Test 12). A daily-drive setup runs a
 bar, and the bar shows the swap. A cue that scoot draws itself (a switch
 animation or a text label) is out of scope here.
 
@@ -142,8 +143,9 @@ make the rest legible, in order of cost:
     holds an opaque origin id, and the shell maps it to "DP-1", as it does
     for the `EvictedOutput` key.
   - Define when a tag clears in two cases. After a partial restore,
-    windows moved by hand stay on the adopter, so their workspace must lose
-    the "DP-1" tag. After a chained unplug (three outputs: DP-2 adopts
+    windows that stayed on the adopter (moved by hand, or shifted out of
+    place by other changes) keep their workspace, which must lose the
+    "DP-1" tag. After a chained unplug (three outputs: DP-2 adopts
     DP-1's workspaces, then DP-2 goes too), decide whether the tag says
     DP-1 or DP-2.
 
