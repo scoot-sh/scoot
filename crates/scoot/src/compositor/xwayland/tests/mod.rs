@@ -680,6 +680,8 @@ mod dnd;
 #[cfg(feature = "xwayland")]
 mod drop;
 #[cfg(feature = "xwayland")]
+mod drop_end;
+#[cfg(feature = "xwayland")]
 mod focus;
 #[cfg(feature = "xwayland")]
 mod ime;

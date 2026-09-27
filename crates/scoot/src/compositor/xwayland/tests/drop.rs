@@ -30,16 +30,16 @@ use super::x11::{Props, XClient};
 use super::xdnd::{Inbox, PROXY_NAME, XDND_VERSION, packed};
 use crate::compositor::State;
 
-const MIME: &str = "text/plain;charset=utf-8";
+pub(super) const MIME: &str = "text/plain;charset=utf-8";
 
-fn centre(rect: Rect) -> (f64, f64) {
+pub(super) fn centre(rect: Rect) -> (f64, f64) {
     (
         f64::from(rect.x + rect.w / 2),
         f64::from(rect.y + rect.h / 2),
     )
 }
 
-fn grabbed(state: &State) -> bool {
+pub(super) fn grabbed(state: &State) -> bool {
     state
         .seat
         .get_pointer()
@@ -48,13 +48,13 @@ fn grabbed(state: &State) -> bool {
 
 /// A few settles, as `Live::drain` does, for when the X client is borrowed
 /// apart from the fixture.
-fn settle(fixture: &mut Fixture) {
+pub(super) fn settle(fixture: &mut Fixture) {
     for _ in 0..20 {
         fixture.settle();
     }
 }
 
-fn visible(what: &str, placement: &Placement) {
+pub(super) fn visible(what: &str, placement: &Placement) {
     assert!(
         placement.visible && placement.rect.w > 0 && placement.rect.h > 0,
         "the {what} is not on screen: {placement:?}"
@@ -289,7 +289,7 @@ fn an_x_drag_whose_hovered_window_closes_finds_the_proxy_again() {
 
 /// The Wayland peer's drag, started from its window on the press the test
 /// just made there.
-fn start_wayland_drag(live: &mut Live, from: Rect, payload: &Arc<Vec<u8>>) {
+pub(super) fn start_wayland_drag(live: &mut Live, from: Rect, payload: &Arc<Vec<u8>>) {
     press_at(&mut live.fixture.state, from);
     live.drain();
     let serial = live

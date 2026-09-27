@@ -80,6 +80,8 @@ pub(super) enum Ack {
     Ends(Vec<(bool, usize)>),
     /// Key codes an input method received.
     Keys(Vec<u32>),
+    /// Named events, in the order they arrived.
+    Events(Vec<&'static str>),
 }
 
 #[derive(Default)]

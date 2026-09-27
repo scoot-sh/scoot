@@ -91,6 +91,9 @@ pub(in crate::compositor::xwayland::tests) enum ClipStep {
         payload: Arc<Vec<u8>>,
         serial: u32,
     },
+    /// What the peer's drag sources have been told of their drags, in
+    /// order: `dnd_drop_performed`, `dnd_finished`, `cancelled`.
+    DragEvents,
 }
 
 /// What the clipboard half holds.
@@ -116,6 +119,9 @@ pub(super) struct Clip {
     primary_sources: Vec<(primary_source::ZwpPrimarySelectionSourceV1, Arc<Vec<u8>>)>,
     control_sources: Vec<(control_source::ZwlrDataControlSourceV1, Arc<Vec<u8>>)>,
     written: Arc<AtomicUsize>,
+    /// Every drag-lifecycle event a data source was sent, in order (see
+    /// [`ClipStep::DragEvents`]).
+    drag_events: Vec<&'static str>,
     /// The reads `ReceiveLater` started, what each has received and whether
     /// it has ended.
     later: Vec<Later>,
@@ -416,6 +422,10 @@ pub(super) fn step(
             later.ended = true;
             Ok(Ack::Bytes(Ok(received)))
         }
+        ClipStep::DragEvents => {
+            roundtrip(queue, peer)?;
+            Ok(Ack::Events(peer.clip.drag_events.clone()))
+        }
     }
 }
 
@@ -466,10 +476,19 @@ impl Dispatch<wl_data_source::WlDataSource, ()> for Peer {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_data_source::Event::Send { fd, .. } = event
-            && let Some((_, payload)) = peer.clip.data_sources.iter().find(|(s, _)| s == source)
-        {
-            serve(fd, payload.clone(), peer.clip.written.clone());
+        match event {
+            wl_data_source::Event::Send { fd, .. } => {
+                if let Some((_, payload)) = peer.clip.data_sources.iter().find(|(s, _)| s == source)
+                {
+                    serve(fd, payload.clone(), peer.clip.written.clone());
+                }
+            }
+            wl_data_source::Event::DndDropPerformed => {
+                peer.clip.drag_events.push("dnd_drop_performed");
+            }
+            wl_data_source::Event::DndFinished => peer.clip.drag_events.push("dnd_finished"),
+            wl_data_source::Event::Cancelled => peer.clip.drag_events.push("cancelled"),
+            _ => {}
         }
     }
 }
