@@ -46,16 +46,20 @@ use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_manager_v1::ZxdgOutputManagerV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 
+use super::images::Images;
+use super::respond::Ready;
 use super::surfaces::{Objects, XdgOutputs};
 use crate::choices::Choices;
 use crate::control::{ConnId, MAX_CONNECTIONS};
+use crate::jobs::MAX_TRIALS;
 use crate::outputs::Outputs;
 use crate::paint::Path;
-use crate::waiters::{Outcome, Waiters};
+use crate::waiters::Waiters;
 
 /// Room for every waiting reply there can be (`crate::waiters`: one per
-/// live connection plus one per connection evicted in the current turn).
-const WAITERS: usize = 2 * MAX_CONNECTIONS;
+/// live connection, one per connection evicted in the current turn, and
+/// one per queued image trial a newer request superseded).
+const WAITERS: usize = 2 * MAX_CONNECTIONS + MAX_TRIALS;
 
 #[derive(Debug)]
 pub enum WaylandError {
@@ -113,9 +117,13 @@ pub struct State {
     pub choices: Choices,
     /// `set`s and `clear`s waiting for the compositor.
     pub waiters: Waiters<ConnId>,
-    /// Replies whose sync came back, for the loop to deliver. Sized for
-    /// every waiter there can be, and emptied every loop turn.
-    pub ready: Vec<(ConnId, Outcome)>,
+    /// Images waiting for the worker thread, and the worker.
+    pub images: Images,
+    /// Replies ready for the loop to deliver: those whose sync came back,
+    /// and image requests answered without one (refused, or superseded).
+    /// Sized for every waiter and every queued image request there can
+    /// be, and emptied every loop turn.
+    pub ready: Vec<(ConnId, Ready)>,
 }
 
 pub struct Wayland {
@@ -128,7 +136,7 @@ pub struct Wayland {
 impl Wayland {
     /// Connects through `WAYLAND_DISPLAY`/`WAYLAND_SOCKET`, lists the
     /// globals (one round trip), binds them, and binds each output.
-    pub fn connect() -> Result<(Self, Vec<&'static str>), WaylandError> {
+    pub fn connect(images: Images) -> Result<(Self, Vec<&'static str>), WaylandError> {
         let conn = Connection::connect_to_env().map_err(WaylandError::Connect)?;
         let (list, queue) = registry_queue_init::<State>(&conn).map_err(WaylandError::Registry)?;
         let qh = queue.handle();
@@ -175,7 +183,8 @@ impl Wayland {
             xdg: XdgOutputs::default(),
             choices: Choices::default(),
             waiters: Waiters::with_capacity(WAITERS),
-            ready: Vec::with_capacity(WAITERS),
+            images,
+            ready: Vec::with_capacity(WAITERS + MAX_TRIALS),
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {

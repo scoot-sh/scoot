@@ -23,10 +23,14 @@
 //! waiting or in flight. Waiters whose connection is gone (hung up,
 //! evicted) are forgotten at the start of every loop turn
 //! ([`Waiters::forget_gone`]); their changes still happen, only the reply
-//! is dropped. So at any time the lists hold at most one entry per live
-//! connection plus one per connection evicted during the current turn:
-//! twice the connection limit, the capacity they are made with, and they
-//! never grow past it. No request is ever refused for being one too many.
+//! is dropped. A queued image trial outlives its client, and a newer
+//! request superseding it adds a waiter for it whether or not that client
+//! is still there (at most `MAX_TRIALS` of them). So at any time the lists
+//! hold at most one entry per live connection, one per connection evicted
+//! during the current turn and one per superseded trial: twice the
+//! connection limit plus the trial limit, the capacity they are made with,
+//! and they never grow past it. No request is ever refused for being one
+//! too many.
 
 #[cfg(test)]
 mod tests;
@@ -143,10 +147,10 @@ impl<C: Copy> Waiters<C> {
 
     /// Sync number `sync` came back, so every earlier one did too: their
     /// waiters' replies go to `ready`.
-    pub fn synced(&mut self, sync: u64, ready: &mut Vec<(C, Outcome)>) {
+    pub fn synced(&mut self, sync: u64, mut ready: impl FnMut(C, Outcome)) {
         self.in_flight.retain(|&(conn, outcome, number)| {
             if number <= sync {
-                ready.push((conn, outcome));
+                ready(conn, outcome);
                 false
             } else {
                 true

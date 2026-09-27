@@ -3,7 +3,8 @@ use std::os::unix::ffi::OsStringExt;
 
 use super::{Command, Error, Topic, USAGE, parse, version_string};
 use crate::color::{Color, ColorError};
-use crate::protocol::Request;
+use crate::image::{Filter, Mode};
+use crate::protocol::{ImageRequest, Request, Show};
 
 fn args(list: &[&str]) -> Result<Command, Error> {
     parse(list.iter().map(OsString::from))
@@ -138,7 +139,25 @@ fn the_version_line_names_the_protocol() {
 
 fn set(color: &str, output: Option<&str>) -> Result<Command, Error> {
     Ok(Command::Client(Request::Set {
-        color: Color::parse(color).unwrap(),
+        show: Show::Color(Color::parse(color).unwrap()),
+        output: output.map(|o| o.to_owned().into()),
+    }))
+}
+
+fn image(
+    path: &str,
+    mode: Mode,
+    fill: &str,
+    filter: Filter,
+    output: Option<&str>,
+) -> Result<Command, Error> {
+    Ok(Command::Client(Request::Set {
+        show: Show::Image(ImageRequest {
+            path: path.to_owned().into(),
+            mode,
+            fill: Color::parse(fill).unwrap(),
+            filter,
+        }),
         output: output.map(|o| o.to_owned().into()),
     }))
 }
@@ -187,39 +206,167 @@ fn clear_takes_an_optional_output() {
 }
 
 #[test]
-fn a_path_is_refused_until_images_exist() {
-    for path in [
-        "~/Pictures/hills.jpg",
-        "./#draft.png",
-        "/tmp/x.png",
-        "c03020",
-        "red",
-    ] {
-        let error = args(&["set", path]).unwrap_err();
+fn a_path_is_an_image_made_absolute() {
+    let cwd = std::env::current_dir().unwrap();
+    let here = |name: &str| cwd.join(name).into_os_string().into_string().unwrap();
+    assert_eq!(
+        args(&["set", "/tmp/x.png"]),
+        image("/tmp/x.png", Mode::Fill, "#000000", Filter::Lanczos3, None)
+    );
+    // Relative paths are resolved here: the daemon's directory is not ours.
+    assert_eq!(
+        args(&["set", "hills.jpg"]),
+        image(
+            &here("hills.jpg"),
+            Mode::Fill,
+            "#000000",
+            Filter::Lanczos3,
+            None
+        )
+    );
+    // A name starting with '#', given as the README says (`.` is dropped;
+    // `..` is kept, since resolving it could change the file named).
+    assert_eq!(
+        args(&["set", "./#draft.png"]),
+        image(
+            &here("#draft.png"),
+            Mode::Fill,
+            "#000000",
+            Filter::Lanczos3,
+            None
+        )
+    );
+    assert_eq!(
+        args(&["set", "../up.png"]),
+        image(
+            &here("../up.png"),
+            Mode::Fill,
+            "#000000",
+            Filter::Lanczos3,
+            None
+        )
+    );
+    // Words that are not colors are paths too.
+    assert_eq!(
+        args(&["set", "red"]),
+        image(&here("red"), Mode::Fill, "#000000", Filter::Lanczos3, None)
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            "/p/a.webp",
+            "--mode",
+            "fit",
+            "--fill",
+            "#101014",
+            "--filter",
+            "nearest",
+            "--output",
+            "DP-1"
+        ]),
+        image(
+            "/p/a.webp",
+            Mode::Fit,
+            "#101014",
+            Filter::Nearest,
+            Some("DP-1")
+        )
+    );
+    assert_eq!(
+        args(&[
+            "set",
+            "--mode=tile",
+            "--filter=catmull-rom",
+            "--fill=#ABCDEF",
+            "/p/a.png"
+        ]),
+        image("/p/a.png", Mode::Tile, "#abcdef", Filter::CatmullRom, None)
+    );
+    for mode in Mode::ALL {
         assert_eq!(
-            error,
-            Error::Color {
-                argument: path.to_owned(),
-                error: ColorError::NotAColor
-            }
+            args(&["set", "/a", "--mode", mode.name()]),
+            image("/a", mode, "#000000", Filter::Lanczos3, None)
         );
-        assert!(error.to_string().contains("later version"), "{error}");
+    }
+}
+
+#[test]
+fn image_flags_are_checked() {
+    assert_eq!(
+        args(&["set", "/a", "--mode", "cover"]),
+        Err(Error::BadValue {
+            flag: "--mode",
+            value: "cover".into()
+        })
+    );
+    assert_eq!(
+        args(&["set", "/a", "--filter", "lanczos"]),
+        Err(Error::BadValue {
+            flag: "--filter",
+            value: "lanczos".into()
+        })
+    );
+    assert_eq!(
+        args(&["set", "/a", "--fill", "black"]),
+        Err(Error::Color {
+            argument: "black".into(),
+            error: ColorError::NotAColor
+        })
+    );
+    assert_eq!(
+        args(&["set", "/a", "--mode", "fit", "--mode", "fill"]),
+        Err(Error::Repeated {
+            command: "set",
+            flag: "--mode"
+        })
+    );
+    assert_eq!(
+        args(&["set", "/a", "--fill"]),
+        Err(Error::MissingValue {
+            command: "set",
+            flag: "--fill"
+        })
+    );
+    // With a color they mean nothing: refused rather than ignored.
+    for flag in ["--mode", "--fill", "--filter"] {
+        assert_eq!(
+            args(&["set", "#000000", flag, "x"]),
+            Err(Error::ImageOnly(flag))
+        );
+    }
+    // And `clear` takes none of them.
+    assert!(matches!(
+        args(&["clear", "--mode", "fit"]),
+        Err(Error::Unexpected { .. })
+    ));
+    let message = Error::BadValue {
+        flag: "--mode",
+        value: "x".into(),
+    }
+    .to_string();
+    assert!(
+        message.contains("fill, fit, stretch, center or tile"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_non_utf8_path_says_why() {
+    let bad = OsString::from_vec(b"/pics/\xff.png".to_vec());
+    match parse([OsString::from("set"), bad]) {
+        Err(error @ Error::NotUtf8(_)) => assert!(error.to_string().contains("UTF-8"), "{error}"),
+        other => panic!("{other:?}"),
     }
 }
 
 #[test]
 fn a_malformed_color_is_a_usage_error() {
-    for bad in ["#fff", "#c03020ff", "#c0302g", "#c03020 ", " #c03020", "#"] {
-        let expected = if bad.starts_with('#') {
-            ColorError::Malformed
-        } else {
-            ColorError::NotAColor
-        };
+    for bad in ["#fff", "#c03020ff", "#c0302g", "#c03020 ", "#"] {
         assert_eq!(
             args(&["set", bad]),
             Err(Error::Color {
                 argument: bad.to_owned(),
-                error: expected
+                error: ColorError::Malformed
             }),
             "{bad:?}"
         );
@@ -228,8 +375,11 @@ fn a_malformed_color_is_a_usage_error() {
 
 #[test]
 fn set_and_clear_refuse_what_they_do_not_take() {
-    assert_eq!(args(&["set"]), Err(Error::MissingColor));
-    assert_eq!(args(&["set", "--output", "DP-1"]), Err(Error::MissingColor));
+    assert_eq!(args(&["set"]), Err(Error::MissingTarget));
+    assert_eq!(
+        args(&["set", "--output", "DP-1"]),
+        Err(Error::MissingTarget)
+    );
     assert_eq!(
         args(&["set", "#c03020", "--output"]),
         Err(Error::MissingValue {
@@ -246,7 +396,7 @@ fn set_and_clear_refuse_what_they_do_not_take() {
     );
     for (list, extra) in [
         (&["set", "#c03020", "#101014"][..], "#101014"),
-        (&["set", "#c03020", "--mode", "fit"], "--mode"),
+        (&["set", "/a.png", "/b.png"], "/b.png"),
         (&["set", "-x"], "-x"),
         (&["set", "#c03020", "--help"], "--help"),
         (&["clear", "#c03020"], "#c03020"),

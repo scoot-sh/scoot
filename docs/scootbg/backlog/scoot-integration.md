@@ -36,6 +36,12 @@ Stated once here, and the same way in the README and in
 
 ### Mechanism: one command for everything from the config
 
+`apply-config` belongs to this ticket: it moved here from the CLI ticket
+([cli-and-ipc-done.md](resolved/cli-and-ipc-done.md#resolution)) when
+that ticket's other items landed, because it needs ticket 9's saved state
+([restore-state.md](restore-state.md)) for its fingerprint. Nothing of it
+exists yet; the CLI neither parses nor advertises it.
+
 Everything scoot does with scootbg goes through one command,
 `scootbg apply-config --profile NAME '<json>'`, where the JSON is the
 `[wallpaper]` section's wallpaper values (`{}` when the section is

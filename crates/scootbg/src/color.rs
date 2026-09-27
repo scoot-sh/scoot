@@ -21,8 +21,8 @@ pub struct Color {
 /// Why a string is not a color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorError {
-    /// It does not start with `#`: in `scootbg set`, that is a path, and
-    /// images arrive in a later version.
+    /// It does not start with `#` (in `scootbg set`, that is an image
+    /// path).
     NotAColor,
     /// It starts with `#` but is not `#` and six hex digits.
     Malformed,
@@ -33,7 +33,7 @@ impl fmt::Display for ColorError {
         match self {
             Self::NotAColor => write!(
                 f,
-                "only colors can be set for now (\"#rrggbb\"); images come in a later version"
+                "a color starts with '#': \"#rrggbb\" (such as \"#1e1e2e\")"
             ),
             Self::Malformed => write!(
                 f,

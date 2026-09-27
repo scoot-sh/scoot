@@ -8,10 +8,12 @@
 //!    connect during start-up wait in the listen backlog.
 //! 2. The Wayland connection is made and the globals bound.
 //!
-//! Then one thread, one `poll` over the Wayland fd, the listener and each
-//! client, with no timeout: when nothing happens the daemon makes no system
-//! call at all. No async runtime and no timers; the one timeout there is
-//! exists only while the listener rests after a failed accept (`listen`).
+//! Then one thread, one `poll` over the Wayland fd, the listener, the image
+//! worker's wake-up fd and each client, with no timeout: when nothing
+//! happens the daemon makes no system call at all. No async runtime and no
+//! timers; the one timeout there is exists only while the listener rests
+//! after a failed accept (`listen`). Images are decoded and scaled on a
+//! thread started per job (`worker`, `images`), never on this one.
 //!
 //! Zero outputs is a normal state (a headless session before its first
 //! output, a laptop with the lid shut): nothing to draw, the same poll, no
@@ -37,10 +39,12 @@
 mod canvas;
 mod change;
 mod crash;
+mod images;
 mod listen;
 mod respond;
 mod surfaces;
 mod wayland;
+mod worker;
 
 #[cfg(test)]
 mod tests;
@@ -57,8 +61,9 @@ use crate::control::{Claim, ClaimError, Server};
 use crate::paths::{self, PathError};
 use crate::print::warn;
 use change::Control;
+use images::Images;
 use listen::Listening;
-use respond::{Responder, write_outcome};
+use respond::{Responder, write_ready};
 use wayland::{Wayland, WaylandError};
 
 /// Why the daemon stopped.
@@ -85,6 +90,8 @@ pub enum Error {
     Poll(io::Error),
     /// The spare fd could not be taken at start-up.
     Spare(io::Error),
+    /// The image worker's wake-up fd could not be made.
+    Worker(io::Error),
 }
 
 impl fmt::Display for Error {
@@ -105,6 +112,7 @@ impl fmt::Display for Error {
             Self::Dispatch(error) => write!(f, "Wayland error: {error}"),
             Self::Poll(error) => write!(f, "poll failed: {error}"),
             Self::Spare(error) => write!(f, "cannot reserve a spare file descriptor: {error}"),
+            Self::Worker(error) => write!(f, "cannot set up image decoding: {error}"),
         }
     }
 }
@@ -122,7 +130,8 @@ fn serve() -> Result<(), Error> {
     let mut claim = Claim::acquire(&paths).map_err(Error::Claim)?;
     let armed = crash::install(paths.socket.clone());
     let server = Server::new(claim.listener()).map_err(Error::Spare)?;
-    let (wayland, missing) = Wayland::connect().map_err(Error::Wayland)?;
+    let images = Images::new().map_err(Error::Worker)?;
+    let (wayland, missing) = Wayland::connect(images).map_err(Error::Wayland)?;
     for interface in missing {
         warn(format_args!(
             "scootbg: note: the compositor has no {interface}; \
@@ -161,9 +170,11 @@ struct Daemon {
     revents: Vec<PollFlags>,
 }
 
-/// Slot order in the poll set.
+/// Slot order in the poll set; the clients follow.
 const WAYLAND: usize = 0;
 const LISTENER: usize = 1;
+const WORKER: usize = 2;
+const CLIENTS: usize = 3;
 
 impl Daemon {
     fn run(&mut self, claim: &Claim) -> Result<(), Error> {
@@ -189,6 +200,11 @@ impl Daemon {
                 &self.wayland.conn,
                 &self.wayland.qh,
             );
+            if images::pump(&mut self.wayland.state, &self.wayland.qh) {
+                // A job failed to start and was landed: its reply goes out
+                // before the loop sleeps.
+                continue;
+            }
             self.flush_wayland()?;
             let Some(guard) = self.wayland.queue.prepare_read() else {
                 // Events arrived for our queue meanwhile: dispatch them.
@@ -212,6 +228,9 @@ impl Daemon {
                 PollFlags::empty()
             };
             fds.push(PollFd::new(claim.listener(), listener_events));
+            // Readable only once a job's result waits: no wakeups when idle.
+            let worker_fd = self.wayland.state.images.worker.fd();
+            fds.push(PollFd::new(&worker_fd, PollFlags::IN));
             for conn in self.server.conns() {
                 fds.push(PollFd::new(conn.stream(), conn.interest()));
             }
@@ -257,6 +276,16 @@ impl Daemon {
                 drop(guard);
             }
 
+            if self
+                .revents
+                .get(WORKER)
+                .is_some_and(|r| r.intersects(PollFlags::IN))
+            {
+                if let Some(done) = self.wayland.state.images.worker.take() {
+                    images::land(&mut self.wayland.state, done, &self.wayland.qh);
+                }
+            }
+
             // Clients before accepting, so indices still match the poll set
             // (accepting may close the oldest client).
             let mut control = Control {
@@ -265,7 +294,7 @@ impl Daemon {
             };
             let mut responder = Responder::new(&mut control);
             let mut index = 0;
-            for &revents in self.revents.get(LISTENER + 1..).unwrap_or_default() {
+            for &revents in self.revents.get(CLIENTS..).unwrap_or_default() {
                 // A closed client leaves the next one at the same index.
                 if revents.is_empty() || self.server.service(index, revents, &mut responder) {
                     index += 1;
@@ -300,9 +329,9 @@ impl Daemon {
             qh: &self.wayland.qh,
         };
         let mut responder = Responder::new(&mut control);
-        for (conn, outcome) in ready.drain(..) {
+        for (conn, reply) in ready.drain(..) {
             self.server
-                .complete(conn, |out| write_outcome(out, outcome), &mut responder);
+                .complete(conn, |out| write_ready(out, &reply), &mut responder);
         }
         let stop = responder.stop;
         self.wayland.state.ready = ready;

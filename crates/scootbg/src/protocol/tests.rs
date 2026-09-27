@@ -1,5 +1,13 @@
-use super::{OutputEntry, PROTOCOL_VERSION, Reply, Request, RequestError, parse, write_reply};
+use std::sync::Arc;
+
+use super::{
+    DEFAULT_FILL, ImageRequest, OutputEntry, PROTOCOL_VERSION, Reply, Request, RequestError, Show,
+    parse, write_reply,
+};
 use crate::color::Color;
+use crate::image::render::Look;
+use crate::image::{Filter, Mode};
+use crate::wallpaper::{Image, Wallpaper};
 
 fn reply_string(reply: &Reply<'_>) -> String {
     let mut out = Vec::new();
@@ -18,11 +26,20 @@ fn each_request_parses() {
         Request::Kill,
         Request::Version,
         Request::Set {
-            color: red(),
+            show: Show::Color(red()),
             output: None,
         },
         Request::Set {
-            color: red(),
+            show: Show::Color(red()),
+            output: Some("DP-1".into()),
+        },
+        Request::Set {
+            show: Show::Image(ImageRequest {
+                path: "/home/me/Pictures/a b \"c\".jpg".into(),
+                mode: Mode::Tile,
+                fill: red(),
+                filter: Filter::Nearest,
+            }),
             output: Some("DP-1".into()),
         },
         Request::Clear { output: None },
@@ -40,7 +57,7 @@ fn each_request_parses() {
 #[test]
 fn set_and_clear_lines_are_what_the_docs_say() {
     let set = Request::Set {
-        color: Color::parse("#1E1E2E").unwrap(),
+        show: Show::Color(Color::parse("#1E1E2E").unwrap()),
         output: Some("DP-1".into()),
     };
     assert_eq!(
@@ -82,11 +99,11 @@ fn any_output_name_round_trips() {
 fn a_set_needs_a_valid_color() {
     assert!(matches!(
         parse(br#"{"protocol":1,"type":"set"}"#),
-        Err(RequestError::NoColor)
+        Err(RequestError::NoTarget)
     ));
     assert!(matches!(
-        parse(br#"{"protocol":1,"type":"set","image":"/x.png"}"#),
-        Err(RequestError::NoColor)
+        parse(br##"{"protocol":1,"type":"set","color":"#000000","image":"/x.png"}"##),
+        Err(RequestError::Both)
     ));
     for bad in ["#fff", "c03020", "#c03020 ", "#c03020ff", ""] {
         let line = format!("{{\"protocol\":1,\"type\":\"set\",\"color\":{bad:?}}}");
@@ -103,10 +120,95 @@ fn a_set_needs_a_valid_color() {
     assert_eq!(
         parse(br##"{"protocol":1,"type":"set","color":"#C03020"}"##).unwrap(),
         Request::Set {
-            color: red(),
+            show: Show::Color(red()),
             output: None
         }
     );
+    // Image options do not go with a color.
+    for field in ["mode", "fill", "filter"] {
+        let line = format!(
+            "{{\"protocol\":1,\"type\":\"set\",\"color\":\"#000000\",\"{field}\":\"fit\"}}"
+        );
+        match parse(line.as_bytes()) {
+            Err(RequestError::ImageOnly(named)) => assert_eq!(named, field),
+            other => panic!("{field}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn an_image_set_has_defaults_and_checks_every_field() {
+    assert_eq!(
+        parse(br#"{"protocol":1,"type":"set","image":"/p/a.png"}"#).unwrap(),
+        Request::Set {
+            show: Show::Image(ImageRequest {
+                path: "/p/a.png".into(),
+                mode: Mode::Fill,
+                fill: DEFAULT_FILL,
+                filter: Filter::Lanczos3,
+            }),
+            output: None,
+        }
+    );
+    let full = br##"{"protocol":1,"type":"set","image":"/p/a.png","mode":"center","fill":"#ABCDEF","filter":"bilinear","output":"X"}"##;
+    assert_eq!(
+        parse(full).unwrap(),
+        Request::Set {
+            show: Show::Image(ImageRequest {
+                path: "/p/a.png".into(),
+                mode: Mode::Center,
+                fill: Color::parse("#abcdef").unwrap(),
+                filter: Filter::Bilinear,
+            }),
+            output: Some("X".into()),
+        }
+    );
+    // The documented line.
+    let line = Request::Set {
+        show: Show::Image(ImageRequest {
+            path: "/abs/a.jpg".into(),
+            mode: Mode::Fit,
+            fill: Color::parse("#101014").unwrap(),
+            filter: Filter::Lanczos3,
+        }),
+        output: None,
+    }
+    .line();
+    assert_eq!(
+        line,
+        "{\"protocol\":1,\"type\":\"set\",\"image\":\"/abs/a.jpg\",\"mode\":\"fit\",\
+         \"fill\":\"#101014\",\"filter\":\"lanczos3\"}\n"
+    );
+    for (line, check) in [
+        (
+            &br#"{"protocol":1,"type":"set","image":"a.png"}"#[..],
+            "not absolute",
+        ),
+        (br#"{"protocol":1,"type":"set","image":""}"#, "not absolute"),
+        (
+            br#"{"protocol":1,"type":"set","image":"~/a.png"}"#,
+            "not absolute",
+        ),
+        (
+            br#"{"protocol":1,"type":"set","image":"/a","mode":"cover"}"#,
+            "unknown mode",
+        ),
+        (
+            br#"{"protocol":1,"type":"set","image":"/a","filter":"lanczos"}"#,
+            "unknown filter",
+        ),
+        (
+            br#"{"protocol":1,"type":"set","image":"/a","fill":"black"}"#,
+            "bad fill",
+        ),
+        (
+            br##"{"protocol":1,"type":"set","image":"/a","fill":"#fff"}"##,
+            "bad fill",
+        ),
+    ] {
+        let error = parse(line).unwrap_err().to_string();
+        assert!(error.contains(check), "{error}");
+    }
 }
 
 #[test]
@@ -200,6 +302,7 @@ fn replies_are_one_tagged_line() {
 #[test]
 fn output_entries_have_a_fixed_shape() {
     use super::{Size, SurfaceEntry};
+    let color = Wallpaper::Color(Color::parse("#C03020").unwrap());
     let known = OutputEntry {
         name: Some("DP-1"),
         description: Some("A \"quoted\" monitor"),
@@ -220,9 +323,7 @@ fn output_entries_have_a_fixed_shape() {
                 height: 1920,
             }),
         },
-        shows: Some(super::Shows {
-            color: Color::parse("#C03020").unwrap(),
-        }),
+        shows: Some(super::Shows(&color)),
     };
     let unknown = OutputEntry {
         name: None,
@@ -309,5 +410,28 @@ fn only_an_object_is_a_request() {
     assert_eq!(
         parse(b" \t\r\n{\"protocol\":1,\"type\":\"kill\"}").unwrap(),
         Request::Kill
+    );
+}
+
+#[test]
+fn an_image_shows_its_path_mode_fill_and_filter() {
+    let image = Wallpaper::Image(Arc::new(Image {
+        path: "/home/me/a \"b\".png".into(),
+        look: Look {
+            mode: Mode::Fit,
+            fill: Color::parse("#101014").unwrap(),
+            filter: Filter::CatmullRom,
+        },
+        serial: 7,
+    }));
+    let value = serde_json::to_value(super::Shows(&image)).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "image": "/home/me/a \"b\".png",
+            "mode": "fit",
+            "fill": "#101014",
+            "filter": "catmull-rom",
+        })
     );
 }

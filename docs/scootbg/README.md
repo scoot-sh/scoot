@@ -11,10 +11,13 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > **Status: early.** The daemon exists (`crates/scootbg/`, with its
 > `unsafe` in `crates/scootbg-mem/`): `scootbg daemon` connects, tracks
 > every output as it comes and goes, and gives each one a `background`
-> layer surface. **Solid colors work**: `scootbg set '#rrggbb'`, on every
-> output or one (`--output NAME`), and `scootbg clear`; `query` reports
-> what each output shows, and `version` and `kill` work. Images are the
-> next items in [`backlog/`](backlog/README.md). These docs stay here.
+> layer surface. **Solid colors and images work**: `scootbg set '#rrggbb'`
+> or `scootbg set PATH` (PNG, JPEG, WebP) with a fit mode, on every output
+> or one (`--output NAME`), and `scootbg clear`; `query` reports what each
+> output shows, and `version` and `kill` work. Not yet: restoring the
+> wallpaper at the next start, drawing at fractional scales exactly, and
+> scoot's `[wallpaper]` section; they are the next items in
+> [`backlog/`](backlog/README.md). These docs stay here.
 
 ## What it is for
 
@@ -79,10 +82,9 @@ scootbg clear --output DP-1                    # back to the compositor's own ba
 scootbg daemon                                 # outside scoot: start it yourself
 ```
 
-The commands above are the planned interface. What works so far:
-`daemon`, `set` with a color (`#rrggbb`) and `--output`, `clear` with
-`--output`, `query`, `version` and `kill`; `set` with a path says images
-come in a later version, and `--mode`/`--fill` do not exist yet. The root
+Every command above works today (`set` also takes `--filter
+lanczos3|catmull-rom|bilinear|nearest`); what does not yet is the
+`[wallpaper]` section, and restoring at login. The root
 [README](../../README.md#scootbg-early) has the details (exit codes, what
 `set` waits for). One binary: `daemon` runs the Wayland client, every
 other subcommand talks to it over its socket.
@@ -96,9 +98,16 @@ other subcommand talks to it over its socket.
   single-pixel buffers, and a full-size `wl_shm` buffer where it has no
   viewporter either. Working, and measured
   ([below](#measured-so-far)).
-- **Images** are decoded once, scaled once per output size and scale, and
-  written into an opaque `XRGB8888` buffer with its opaque region set, so a
-  compositor can skip drawing anything beneath it.
+- **Images** are decoded on a worker thread, never on the Wayland loop,
+  once for every output that needs them, scaled once per buffer size, and
+  written into an opaque `XRGB8888` buffer the surface size times the
+  output's scale, with its opaque region set, so a compositor can skip
+  drawing anything beneath it. The decoded image is dropped once drawn (an
+  output plugged in later reads the file again). EXIF orientation is
+  applied as the pixels are packed, with no extra buffer. A file that
+  cannot be shown (missing, not PNG/JPEG/WebP, over 16384×16384 pixels,
+  truncated or corrupt) is an error reply that changes nothing. Working,
+  and measured ([below](#measured-so-far)).
 - **Fit modes:** `fill` (cover and crop, the default), `fit` (letterbox
   with a color), `stretch`, `center`, `tile`.
 - **Outputs come and go.** A monitor plugged in gets the wallpaper meant
@@ -117,6 +126,9 @@ object per line each way, each request naming the protocol it speaks.
 ```text
 {"protocol":1,"type":"set","color":"#1e1e2e"}                 -> {"type":"ok"}
 {"protocol":1,"type":"set","color":"#1e1e2e","output":"DP-1"} -> {"type":"ok"}
+{"protocol":1,"type":"set","image":"/abs/a.jpg"}              -> {"type":"ok"}
+{"protocol":1,"type":"set","image":"/abs/a.jpg","mode":"fit","fill":"#101014","filter":"lanczos3","output":"DP-1"}
+                                                              -> {"type":"ok"}
 {"protocol":1,"type":"clear"}                                 -> {"type":"ok"}
 {"protocol":1,"type":"clear","output":"DP-1"}                 -> {"type":"ok"}
 {"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...]}
@@ -134,16 +146,37 @@ anything wrong                                                -> {"type":"error"
   waited for; an output scootbg gave up on (`gave-up` in `query`, said on
   stderr) is left out and shows nothing, and the reply is still `ok`. A client that hangs up before its reply loses only the
   reply: the change still happens.
+- `set` takes a `color` or an `image`, never both. An `image` is an
+  absolute path (the daemon's working directory is not the client's;
+  `scootbg set` resolves a relative one before sending it) to a PNG, JPEG
+  or WebP; `mode` (`fill`, `fit`, `stretch`, `center`, `tile`), `fill`
+  (`#rrggbb`) and `filter` (`lanczos3`, `catmull-rom`, `bilinear`,
+  `nearest`) may be left out, for `fill`, `#000000` and `lanczos3`, and
+  are refused with a `color`.
+- **An image changes nothing until it has been decoded.** One that cannot
+  be shown gets an error reply saying why (no such file, not a regular
+  file, not an image scootbg reads, image too large, truncated or
+  corrupt), and every output keeps what it showed. Decoding runs on a
+  worker thread; other requests are served meanwhile.
+- **The newest request wins**, whatever order the work finishes in: a
+  `set` or `clear` sent after an image's `set` is never undone when that
+  image finishes decoding. An image request that newer ones have replaced
+  on every output it asked for, before it was decoded or while, is
+  answered `ok` once what replaced it is on screen, as a replaced color
+  is, and changes nothing (it may never be decoded at all). At most 32 image
+  requests wait at once; one more is refused ("too many images are
+  waiting"), nothing changed.
 - A request refused outright changes nothing: an unknown `output` name
   (the name must belong to an output present now), a `color` that is not
-  `#rrggbb`, a `set` with no `color`. A draw that fails on an output (a
-  buffer too large for `wl_shm`, out of memory) is different: the choice
-  is recorded and every other targeted output shows it; the reply is an
-  error once they have, and the daemon's stderr says which output failed
-  and why.
-- `query`'s `shows` is `{"color":"#rrggbb"}`, lowercase, or `null`. Every
-  key of an entry is always present; keys may be added within protocol 1,
-  none removed or changed.
+  `#rrggbb`, a relative `image` path, an unknown `mode` or `filter`. A
+  draw that fails on an output (a buffer too large for `wl_shm`, out of
+  memory) is different: the choice is recorded and every other targeted
+  output shows it; the reply is an error once they have, and the daemon's
+  stderr says which output failed and why.
+- `query`'s `shows` is `{"color":"#rrggbb"}` (lowercase),
+  `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
+  or `null`. Every key of an entry is always present; keys may be added
+  within protocol 1, none removed or changed.
 - A choice for every output is kept for outputs plugged in later; a choice
   for one output is kept by its name, across unplugging it. Choices are
   not saved across a daemon restart yet
@@ -152,14 +185,19 @@ anything wrong                                                -> {"type":"error"
 ## Measured so far
 
 Release build, against `scoot --headless --outputs 2` (1600×1000 each,
-a debug build of scoot), on a 4-CPU Claude Code web container; the record,
-with the method and every raw number, is in
-[solid-color-done.md](backlog/resolved/solid-color-done.md#measurements).
+a debug build of scoot; the image rows on one 3840×2160 output), on a
+4-CPU Claude Code web container; the records, with the method and every
+raw number, are in
+[solid-color-done.md](backlog/resolved/solid-color-done.md#measurements)
+and [images-decode-and-fit-done.md](backlog/resolved/images-decode-and-fit-done.md#measurements).
 Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 | What | Result |
 |---|---|
-| Stripped binary | 783,072 B; links only `libc.so.6` and `libgcc_s.so.1` |
+| Stripped binary | 1,500,008 B with images (783,072 B with colors only); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
+| `set` of a 6000×4000 JPEG onto a 3840×2160 output, request to reply, ×3 | 397.0–433.6 ms, 390–420 ms of CPU (PNG 408.1–417.6 ms; WebP 1,218.0–1,289.4 ms); peak RSS 120.5–120.6 MB with the previous wallpaper still mapped (88.0 MB for a first set; PNG 120.4–120.6 MB; WebP 142.0–142.1 MB) |
+| After it, idle 30 s | 1 thread, heap 372–568 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
+| A few hundred bytes claiming 16384×16384 (PNG, JPEG, WebP) | refused in under 1 ms; peak RSS within 72 kB of before |
 | Idle with a color set, 30 s ×3 | 0 context switches, 0 CPU ticks; RSS 2,720 kB, PSS 1,524 kB, 1 thread |
 | PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556–1,560 / 1,556–1,560 / 7,808 kB (14,060 kB once a change leaves a spare buffer per output) |
 | `set`, request to reply, 10,000 changes ×3 | median 400–433 µs, p99 1.6 ms; no memory growth |

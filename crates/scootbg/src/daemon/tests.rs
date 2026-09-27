@@ -1,12 +1,29 @@
 //! The request-to-reply mapping. The loop itself runs against a real
 //! compositor in `crates/scootbg/tests/`.
 
-use super::respond::{ChangeError, Responder, Wallpaper, write_outcome};
-use crate::choices::Choice;
+use std::borrow::Cow;
+
+use super::respond::{ChangeError, Changes, Ready, Responder, write_ready};
 use crate::color::Color;
 use crate::control::{Answer, ConnId, Handler};
-use crate::protocol::{OutputEntry, OutputList, PROTOCOL_VERSION, Request};
+use crate::image::{Filter, Mode};
+use crate::protocol::{ImageRequest, OutputEntry, OutputList, PROTOCOL_VERSION, Request, Show};
 use crate::waiters::Outcome;
+
+/// What was asked, owned.
+type Choice = Option<Show<'static>>;
+
+fn owned(show: Show<'_>) -> Show<'static> {
+    match show {
+        Show::Color(color) => Show::Color(color),
+        Show::Image(image) => Show::Image(ImageRequest {
+            path: Cow::Owned(image.path.into_owned()),
+            mode: image.mode,
+            fill: image.fill,
+            filter: image.filter,
+        }),
+    }
+}
 
 const NO_OUTPUTS: &[OutputEntry<'static>; 0] = &[];
 
@@ -27,7 +44,7 @@ impl<'a> Fake<'a> {
     }
 }
 
-impl Wallpaper for Fake<'_> {
+impl Changes for Fake<'_> {
     fn outputs(&self) -> &dyn OutputList {
         self.outputs
     }
@@ -36,13 +53,14 @@ impl Wallpaper for Fake<'_> {
         &mut self,
         conn: ConnId,
         output: Option<&str>,
-        choice: Choice,
+        show: Option<Show<'_>>,
     ) -> Result<(), ChangeError> {
         if let Some(error) = self.refuse {
             return Err(error);
         }
         let id = if conn == ConnId::for_test(1) { 1 } else { 0 };
-        self.changes.push((id, output.map(str::to_owned), choice));
+        self.changes
+            .push((id, output.map(str::to_owned), show.map(owned)));
         Ok(())
     }
 }
@@ -98,6 +116,9 @@ fn bad_requests_answer_errors_and_change_nothing() {
         r##"{"protocol":1,"type":"set","color":"#fff"}"##,
         r##"{"protocol":1,"type":"set","color":7}"##,
         r##"{"protocol":1,"type":"set","color":"#c03020","output":7}"##,
+        r#"{"protocol":1,"type":"set","image":"relative.png"}"#,
+        r#"{"protocol":1,"type":"set","image":"/a.png","mode":"zoom"}"#,
+        r##"{"protocol":1,"type":"set","image":"/a.png","color":"#000000"}"##,
         r#"{"protocol":1,"type":"clear","output":["DP-1"]}"#,
         r#"{"protocol":1,"type":"apply-config"}"#,
         r#"{"protocol":1}"#,
@@ -118,14 +139,24 @@ fn set_and_clear_change_the_wallpaper_and_answer_later() {
     let mut responder = Responder::new(&mut fake);
     let red = Color::parse("#c03020").unwrap();
     let quoted = "DP-\"1\"";
+    let image = Show::Image(ImageRequest {
+        path: "/p/a.jpg".into(),
+        mode: Mode::Center,
+        fill: red,
+        filter: Filter::Bilinear,
+    });
     for request in [
         Request::Set {
-            color: red,
+            show: Show::Color(red),
             output: None,
         },
         Request::Set {
-            color: red,
+            show: Show::Color(red),
             output: Some("DP-2".into()),
+        },
+        Request::Set {
+            show: image.clone(),
+            output: None,
         },
         Request::Clear { output: None },
         Request::Clear {
@@ -141,13 +172,14 @@ fn set_and_clear_change_the_wallpaper_and_answer_later() {
     let changes: Vec<_> = fake
         .changes
         .iter()
-        .map(|(_, o, c)| (o.clone(), *c))
+        .map(|(_, o, c)| (o.clone(), c.clone()))
         .collect();
     assert_eq!(
         changes,
         [
-            (None, Some(red)),
-            (Some("DP-2".to_owned()), Some(red)),
+            (None, Some(Show::Color(red))),
+            (Some("DP-2".to_owned()), Some(Show::Color(red))),
+            (None, Some(image)),
             (None, None),
             (Some(quoted.to_owned()), None),
         ]
@@ -164,7 +196,7 @@ fn a_refused_change_is_an_error_now_naming_the_output() {
     fake.refuse = Some(ChangeError::UnknownOutput);
     let mut responder = Responder::new(&mut fake);
     let line = Request::Set {
-        color: Color::parse("#c03020").unwrap(),
+        show: Show::Color(Color::parse("#c03020").unwrap()),
         output: Some("HDMI-A-9".into()),
     }
     .line();
@@ -176,15 +208,37 @@ fn a_refused_change_is_an_error_now_naming_the_output() {
 }
 
 #[test]
+fn too_many_waiting_images_is_an_error_now() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    fake.refuse = Some(ChangeError::Busy);
+    let mut responder = Responder::new(&mut fake);
+    let reply = ask(
+        &mut responder,
+        r#"{"protocol":1,"type":"set","image":"/a.png"}"#,
+    );
+    assert_eq!(reply["type"], "error");
+    let message = reply["message"].as_str().unwrap();
+    assert!(message.contains("nothing was changed"), "{message}");
+}
+
+#[test]
 fn the_late_reply_is_ok_or_an_error() {
     let mut out = Vec::new();
-    write_outcome(&mut out, Outcome::Shown);
+    write_ready(&mut out, &Ready::Done(Outcome::Shown));
     assert_eq!(out, b"{\"type\":\"ok\"}\n");
     out.clear();
-    write_outcome(&mut out, Outcome::Failed);
+    write_ready(&mut out, &Ready::Done(Outcome::Failed));
     let reply: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(reply["type"], "error");
     assert!(reply["message"].as_str().unwrap().contains("stderr"));
+    out.clear();
+    write_ready(
+        &mut out,
+        &Ready::Refused("cannot show \"/x\": no such file".into()),
+    );
+    let reply: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(reply["type"], "error");
+    assert_eq!(reply["message"], "cannot show \"/x\": no such file");
 }
 
 /// The poll set's allocation survives the round trip through `reuse`, so
@@ -449,4 +503,49 @@ fn a_query_reply_reuses_the_output_buffer() {
         assert!(out.len() < 4096);
         assert_eq!(out.as_ptr(), ptr, "the buffer was reallocated");
     }
+}
+
+/// A queued image request that a newer choice covers is taken out of the
+/// queue (never decoded) and its reply waits at its own generation, as a
+/// superseded color's does: it resolves once the outputs the newer choice
+/// stamped show it, not at once.
+#[test]
+fn a_superseded_image_request_waits_like_a_color() {
+    use std::sync::Arc;
+
+    use super::change::sweep;
+    use crate::choices::Choices;
+    use crate::image::render::Look;
+    use crate::jobs::{Jobs, Trial};
+    use crate::waiters::{Outcome, Progress, Waiters, outcome};
+    use crate::wallpaper::{Image, Wallpaper};
+
+    let conn = ConnId::for_test(5);
+    let mut jobs: Jobs<ConnId> = Jobs::default();
+    let image = Arc::new(Image {
+        path: "/a.png".into(),
+        look: Look {
+            mode: Mode::Fill,
+            fill: Color { r: 0, g: 0, b: 0 },
+            filter: Filter::Lanczos3,
+        },
+        serial: 1,
+    });
+    jobs.trial(image, Trial { conn, output: None }, vec![])
+        .unwrap();
+    // A color for every output, generation 2, recorded; its output (stamp
+    // 2) is still drawing.
+    let mut choices = Choices::default();
+    assert!(choices.set(None, Some(Wallpaper::Color(Color { r: 1, g: 2, b: 3 })), 2));
+    let mut waiters: Waiters<ConnId> = Waiters::with_capacity(4);
+    sweep(&mut jobs, &choices, &mut waiters);
+    assert_eq!(jobs.queued(), 0, "never decoded");
+    assert_eq!(waiters.counts(), (1, 0), "waiting, not answered");
+    let drawing = [(2, Progress::Waiting)];
+    assert_eq!(waiters.resolve(|g| outcome(g, drawing.into_iter())), None);
+    let shown = [(2, Progress::Done)];
+    let sync = waiters.resolve(|g| outcome(g, shown.into_iter())).unwrap();
+    let mut ready = Vec::new();
+    waiters.synced(sync, |conn, outcome| ready.push((conn, outcome)));
+    assert_eq!(ready, [(conn, Outcome::Shown)]);
 }

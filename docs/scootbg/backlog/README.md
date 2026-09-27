@@ -42,8 +42,18 @@ full per-feature cycle.
    buffer + viewport, else a full-size one; replies after a sync round
    trip, without blocking the loop; `query` reports what each output
    shows; checked by real pixels on headless scoot and headless sway
-5. [The CLI and control protocol](cli-and-ipc.md)
-6. [Decoding images and fitting them to an output](images-decode-and-fit.md)
+5. [**The CLI and control protocol**](resolved/cli-and-ipc-done.md) —
+   RESOLVED 2026-09-27, across tickets 4 and 6: `set` with a color or an
+   image path, `clear`, `query`, `kill`, `version`, `--help` everywhere,
+   replies after the compositor has the change; `apply-config` moved to
+   ticket 10, which it exists for
+6. [**Decoding images and fitting them to an output**](resolved/images-decode-and-fit-done.md)
+   — RESOLVED 2026-09-27: `scootbg set PATH` with `--mode
+   fill|fit|stretch|center|tile`, `--fill` and `--filter`; PNG, JPEG and
+   WebP decoded and scaled on a worker thread, EXIF orientation applied in
+   the packing pass; a file that cannot be shown is an error that changes
+   nothing, and the newest request wins; checked by real pixels on
+   headless scoot and headless sway
 7. [Drawing at real device pixels on scaled outputs](hidpi-fractional-scale.md)
 8. [Buffers, memory and zero idle cost](memory-and-idle.md)
 9. [Restoring the last wallpaper at startup](restore-state.md)

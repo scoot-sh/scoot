@@ -3,7 +3,7 @@ title: "More image formats: AVIF, JPEG XL, HEIF (later)"
 status: "open"
 area: "scootbg"
 priority: "low"
-blocked: "after the v1 decoders in images-decode-and-fit.md"
+blocked: null
 ---
 
 # More image formats: AVIF, JPEG XL, HEIF (later)

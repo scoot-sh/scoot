@@ -33,13 +33,27 @@ rustix = { version = "1", default-features = false, features = ["std", "event", 
 # dependencies, and able to express versioned, tagged replies (§5).
 serde.workspace = true
 serde_json.workspace = true
+# Images: the decoders directly, not through `image`, which costs 139 KB
+# more, reads a whole JPEG into memory first (+9.5 MB of peak) and copies
+# the whole image to apply EXIF orientation (§2). `zune-jpeg`'s `unsafe` is
+# its SIMD kernels, fuzzed upstream; `png` and `image-webp` are
+# `forbid(unsafe_code)` (§10).
+zune-jpeg = "0.5"
+zune-core = "0.5"
+png = "0.18"
+image-webp = "0.2"
+# The scaler: `forbid(unsafe_code)`, 174 ms and +25 MB (the output only) for
+# 6000x4000 -> 3840x2160 Lanczos3, against fir's 80 ms / +63 MB and ~650
+# `unsafe` sites; the user's choice after both were measured (§3b). Behind
+# one function (`image::scale`), so a swap stays contained.
+pic-scale-safe = "0.1"
 
 # The integration tests signal the daemon they start and probe its lock,
-# and read screenshots back: scoot's arrive as base64 PNG over its IPC, and
-# sway's through a small wlr-screencopy client into a memfd (`fs`), read
-# back with `read`. Dev-only: the binary itself does none of this, and none
-# of it reaches its dependency tree.
+# and read screenshots back: scoot's arrive as base64 PNG over its IPC
+# (decoded with `png`, a normal dependency above), and sway's through a
+# small wlr-screencopy client into a memfd (`fs`), read back with `read`.
+# Dev-only: the binary itself does none of this, and none of it reaches
+# its dependency tree.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
 base64.workspace = true
-png = "0.18"

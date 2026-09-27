@@ -277,7 +277,7 @@ No blocking findings. Fixed:
   `Output::surface_size()`, commit, and fill `query`'s `shows`. A
   `configure` arriving later (a mode change) needs a redraw at the new
   size. The screenshot check of output 2 lives there now.
-- [images-decode-and-fit.md](../images-decode-and-fit.md): a decode result
+- [images-decode-and-fit-done.md](images-decode-and-fit-done.md): a decode result
   carries the `OutputId` it was for and looks it up with
   `Outputs::get_mut` when it lands; an output removed meanwhile is not
   found and the result is dropped. Ids are never reused, so a replugged
