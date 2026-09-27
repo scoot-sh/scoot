@@ -532,7 +532,9 @@ X app -- do not land: `DnDGrab` delivers to `SeatHandler::PointerFocus`,
 scoot's is a plain `WlSurface`, and XWayland binds no `wl_data_device`.
 Pre-existing (the gate only refuses), harmless (source intact after move
 drags, X input fine afterwards, measured), filed as
-[`xwayland-pointer-focus-x11.md`](./xwayland-pointer-focus-x11.md).
+[`xwayland-pointer-focus-x11-done.md`](../resolved/xwayland-pointer-focus-x11-done.md)
+-- since resolved: the pointer focus has an X arm and drops land in every
+direction (fork `6e6fe896` flushes the proxy remap X to X needs).
 
 **Input methods**: XIM is not provided (XWayland links no `text-input-v3`,
 checked with `strings`); an `input-method-v2` keyboard grab pre-empts an X

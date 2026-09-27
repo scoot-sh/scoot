@@ -158,7 +158,7 @@ impl State {
             // half too -- otherwise the cursor would sit on a surface that
             // never saw `enter`.
             self.pointer_move(x, y);
-            let under = self.surface_under(location);
+            let under = self.tool_under(location);
             let handle = self.tool_or_add(tablet, tool);
             handle.proximity_in(
                 self,
@@ -202,7 +202,7 @@ impl State {
         let time = InputTime::from_millis(self.millis());
         self.pointer_move(x, y);
         if let Some(handle) = self.tool(tool) {
-            let under = self.surface_under(location);
+            let under = self.tool_under(location);
             handle.axis(self, axis);
             handle.motion(
                 self,
@@ -291,6 +291,22 @@ impl State {
         // A redraw where frames draw the cursor, a capture tick where only
         // captures do -- the same path as `SeatHandler::cursor_image`.
         self.cursor_changed();
+    }
+
+    /// What a tool event at `location` is addressed to: the surface the
+    /// pointer hit test finds there. `ToolFocus` stays a plain `WlSurface`
+    /// (see `handlers.rs`), so the pointer focus's surface is unwrapped --
+    /// for an X window, the same `wl_surface` Smithay's `X11Surface` tool
+    /// target would forward to.
+    fn tool_under(
+        &self,
+        location: Point<f64, Logical>,
+    ) -> Option<(
+        smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+        Point<f64, Logical>,
+    )> {
+        self.surface_under(location)
+            .map(|(focus, origin)| (focus.into_surface(), origin))
     }
 
     /// The known handle for `tool`, if the seat ever saw it enter

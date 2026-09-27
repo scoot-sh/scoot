@@ -67,6 +67,7 @@ use super::nested::Host;
 use super::output_identity::OutputIdentity;
 use super::output_management::OutputManagement;
 use super::outputs::Outputs;
+use super::pointer_focus::PointerFocus;
 use super::popup::ActivePopupGrab;
 use super::reconnect::DisplacedOutput;
 use super::render::Backend;
@@ -488,8 +489,13 @@ pub struct State {
     /// the hit test, the frame gathering, and the frame-callback and
     /// presentation passes -- each behind its lock branch. Empty in every
     /// session without an X client, so each reader costs an empty-`Vec` test.
+    /// Each shared (`Arc`), allocated once at map: the pointer's X focus
+    /// holds its window this way, so a hit test on a menu costs one
+    /// reference count rather than an `X11Surface` clone (see
+    /// `pointer_focus.rs`). Not cached in the window's own user data, which
+    /// would be a reference cycle -- the `X11Surface` owns that map.
     #[cfg(feature = "xwayland")]
-    pub x11_unmanaged: Vec<smithay::xwayland::X11Surface>,
+    pub x11_unmanaged: Vec<std::sync::Arc<smithay::xwayland::X11Surface>>,
     /// Every X window, mapped or not, that currently carries a
     /// `_NET_STARTUP_ID`, by X window id -- so the focus gate can read a
     /// toolkit's startup id off its *client leader* (GTK puts it
@@ -1361,23 +1367,32 @@ impl State {
     pub fn surface_under(
         &self,
         pos: Point<f64, Logical>,
-    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+    ) -> Option<(PointerFocus, Point<f64, Logical>)> {
+        //
+        // An X window -- managed (`window_under`) or override-redirect
+        // (`x11_unmanaged_under`) -- is answered as the X variant, the one
+        // a drop onto it needs (see `pointer_focus.rs`); every other hit is
+        // a plain surface.
+        let surface = |(surface, origin)| (PointerFocus::Surface(surface), origin);
         // Before every other candidate, and returning whatever it finds --
         // including `None`. While the session is locked nothing but a lock
         // surface may be pointed at, so this is a replacement for the search
         // below, never a first entry in it (see `session_lock.rs`).
         if self.session_lock.is_locked() {
-            return self.lock_surface_under(pos);
+            return self.lock_surface_under(pos).map(surface);
         }
-        let above = self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos);
+        let above = self
+            .layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos)
+            .map(surface);
         // Override-redirect X windows (menus, tooltips) sit between the top
         // layers and the windows, as they are drawn (see
         // `xwayland/unmanaged.rs`).
         #[cfg(feature = "xwayland")]
         let above = above.or_else(|| self.x11_unmanaged_under(pos));
-        above
-            .or_else(|| self.window_under(pos))
-            .or_else(|| self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos))
+        above.or_else(|| self.window_under(pos)).or_else(|| {
+            self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos)
+                .map(surface)
+        })
     }
 
     /// The window surface at `pos`, ignoring layer surfaces entirely --
@@ -1386,12 +1401,17 @@ impl State {
     pub(super) fn window_under(
         &self,
         pos: Point<f64, Logical>,
-    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+    ) -> Option<(PointerFocus, Point<f64, Logical>)> {
         self.window_element_under(pos)
             .and_then(|(window, location)| {
                 window
                     .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(surface, point)| (surface, (point + location).to_f64()))
+                    .map(|(surface, point)| {
+                        (
+                            PointerFocus::on_window(window, surface),
+                            (point + location).to_f64(),
+                        )
+                    })
             })
     }
 

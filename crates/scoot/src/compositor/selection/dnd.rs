@@ -453,7 +453,7 @@ fn window_points(harness: &mut Harness) -> Vec<(f64, f64)> {
             if let Some((surface, _)) = harness
                 .state
                 .surface_under(Point::<f64, Logical>::from((x, y)))
-                && harness.state.id_of(&surface).is_some()
+                && harness.state.id_of(surface.surface()).is_some()
             {
                 points.push((x, y));
             }

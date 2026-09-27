@@ -9,6 +9,15 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — drag-and-drop with X apps works in every direction
+
+- **With `--xwayland`, drag-and-drop works in every direction**: from a
+  Wayland app onto an X window, from one X app onto another, and within
+  one X app (moving selected text in an X editor), as well as from an X
+  app into a Wayland one as before. Until now drops onto X windows did
+  nothing. The X window has to take drops, as toolkit text fields and
+  file views do.
+
 ### 2026-09-27 — "color" throughout
 
 - **The project now spells it "color" everywhere** (code, docs, script

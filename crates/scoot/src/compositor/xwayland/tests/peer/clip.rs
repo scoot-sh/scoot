@@ -82,6 +82,18 @@ pub(in crate::compositor::xwayland::tests) enum ClipStep {
     /// Read the `index`th read `ReceiveLater` started until the other end
     /// closes, and hand back everything it received.
     DrainLater(usize),
+    /// `wl_data_device.start_drag` from the peer's first window, offering
+    /// `payload` as `mime` with the copy action, on the button press
+    /// `serial` names -- what a toolkit reads off `wl_pointer.button`. The
+    /// peer binds no pointer, so the test reads it off the seat instead.
+    Drag {
+        mime: &'static str,
+        payload: Arc<Vec<u8>>,
+        serial: u32,
+    },
+    /// What the peer's drag sources have been told of their drags, in
+    /// order: `dnd_drop_performed`, `dnd_finished`, `cancelled`.
+    DragEvents,
 }
 
 /// What the clipboard half holds.
@@ -107,6 +119,9 @@ pub(super) struct Clip {
     primary_sources: Vec<(primary_source::ZwpPrimarySelectionSourceV1, Arc<Vec<u8>>)>,
     control_sources: Vec<(control_source::ZwlrDataControlSourceV1, Arc<Vec<u8>>)>,
     written: Arc<AtomicUsize>,
+    /// Every drag-lifecycle event a data source was sent, in order (see
+    /// [`ClipStep::DragEvents`]).
+    drag_events: Vec<&'static str>,
     /// The reads `ReceiveLater` started, what each has received and whether
     /// it has ended.
     later: Vec<Later>,
@@ -379,6 +394,26 @@ pub(super) fn step(
             }
             Ok(Ack::Done)
         }
+        ClipStep::Drag {
+            mime,
+            payload,
+            serial,
+        } => {
+            let manager = peer.clip.data_manager.clone().ok_or("no data manager")?;
+            let device = peer.clip.data_device.clone().ok_or("not bound")?;
+            let origin = peer
+                .surfaces
+                .first()
+                .cloned()
+                .ok_or("no window to drag from")?;
+            let source = manager.create_data_source(&qh, ());
+            source.offer(mime.to_owned());
+            source.set_actions(wl_data_device_manager::DndAction::Copy);
+            device.start_drag(Some(&source), &origin, None, serial);
+            peer.clip.data_sources.push((source, payload));
+            roundtrip(queue, peer)?;
+            Ok(Ack::Done)
+        }
         ClipStep::DrainLater(index) => {
             let later = peer.clip.later.get_mut(index).ok_or("no such read")?;
             let file = later.file.take().ok_or("that read was dropped")?;
@@ -386,6 +421,10 @@ pub(super) fn step(
             received.extend(drain(OwnedFd::from(file))?);
             later.ended = true;
             Ok(Ack::Bytes(Ok(received)))
+        }
+        ClipStep::DragEvents => {
+            roundtrip(queue, peer)?;
+            Ok(Ack::Events(peer.clip.drag_events.clone()))
         }
     }
 }
@@ -437,10 +476,19 @@ impl Dispatch<wl_data_source::WlDataSource, ()> for Peer {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_data_source::Event::Send { fd, .. } = event
-            && let Some((_, payload)) = peer.clip.data_sources.iter().find(|(s, _)| s == source)
-        {
-            serve(fd, payload.clone(), peer.clip.written.clone());
+        match event {
+            wl_data_source::Event::Send { fd, .. } => {
+                if let Some((_, payload)) = peer.clip.data_sources.iter().find(|(s, _)| s == source)
+                {
+                    serve(fd, payload.clone(), peer.clip.written.clone());
+                }
+            }
+            wl_data_source::Event::DndDropPerformed => {
+                peer.clip.drag_events.push("dnd_drop_performed");
+            }
+            wl_data_source::Event::DndFinished => peer.clip.drag_events.push("dnd_finished"),
+            wl_data_source::Event::Cancelled => peer.clip.drag_events.push("cancelled"),
+            _ => {}
         }
     }
 }

@@ -80,6 +80,8 @@ pub(super) enum Ack {
     Ends(Vec<(bool, usize)>),
     /// Key codes an input method received.
     Keys(Vec<u32>),
+    /// Named events, in the order they arrived.
+    Events(Vec<&'static str>),
 }
 
 #[derive(Default)]
@@ -101,6 +103,8 @@ struct Peer {
     clip: clip::Clip,
     /// The input-method half (see `peer/ime.rs`).
     ime: ime::Ime,
+    /// Each mapped window's surface, in map order: where a drag starts.
+    surfaces: Vec<wl_surface::WlSurface>,
 }
 
 struct ExtKnown {
@@ -395,6 +399,7 @@ pub(super) fn peer(
                 surface.damage(0, 0, width, height);
                 surface.commit();
                 queue.roundtrip(&mut peer).map_err(|e| e.to_string())?;
+                peer.surfaces.push(surface.clone());
                 windows.push((surface, xdg, toplevel, buffer));
                 Ack::Done
             }

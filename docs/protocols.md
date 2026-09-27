@@ -50,13 +50,10 @@ read your files anyway.
 
 **Not implemented:**
 
-- **Dropping into X windows, and XIM.** The clipboard and primary
-  selection cross between X and Wayland both ways, and a drag that starts
-  in an X app drops into Wayland apps (see
+- **XIM.** The clipboard and primary selection cross between X and
+  Wayland both ways, and drag-and-drop works in every direction (see
   [Clipboard, drag-and-drop and input methods](#clipboard-drag-and-drop-and-input-methods));
-  but a drop *onto* an X window -- from a Wayland app, from another X app,
-  or within one X app -- does not land, and X input methods (XIM) are not
-  provided.
+  but X input methods (XIM) are not provided.
 
 The rest of this list *is* deliberate:
 
@@ -530,8 +527,7 @@ to its startup id (below).
   unlock.
 - **Not yet:** X clients draw at scale 1 (upscaled at a fractional
   `[output] scale`), `_NET_WM_MOVERESIZE` (an X app's own titlebar drag) is
-  ignored, `_NET_WM_ICON` is not read, drops onto X windows do not land and
-  XIM is not provided (see
+  ignored, `_NET_WM_ICON` is not read, and XIM is not provided (see
   [Clipboard, drag-and-drop and input methods](#clipboard-drag-and-drop-and-input-methods)).
 
 ### Focus: X windows ask, scoot decides
@@ -651,8 +647,8 @@ Selection types from X are filtered to mime types (no X-only target names,
 at most 255 bytes, at most 64 of them), so a hostile atom name cannot reach
 a Wayland client.
 
-**Drag-and-drop: out of X works, into X does not.** A drag that starts in
-an X app drops into Wayland apps (text from `mousepad` over X into a
+**Drag-and-drop works in every direction: X to Wayland, Wayland to X,
+X to X, and within one X app.** A drag that starts in an X app drops into Wayland apps (text from `mousepad` over X into a
 Wayland `mousepad`, measured). It starts only where a Wayland drag would:
 from a real, recent button press delivered to an X window whose X client is
 that of the window taking the drag's selection -- never while locked, and
@@ -663,15 +659,37 @@ of its own data and drop it wherever you released; **presses on Wayland
 windows are now protected. Presses on X windows are not:** X accepts any
 window as the owner of the drag's selection, so a stranger naming the X
 window you pressed on still takes the press over, and the window manager
-cannot tell who asked. A drop onto an X window -- from a Wayland app, from
-another X app, or inside one X app, like moving selected text within an X
-editor -- does not land: the drag ends and nothing is inserted or lost, and
-the X apps stay usable. The cause is on scoot's side: Smithay's drag grab
-delivers to the pointer's focus type, which in scoot is a plain
-`wl_surface`, and XWayland takes drops only through its window manager,
-never through `wl_data_device`; giving scoot's pointer focus an X arm is
-filed as
-[`backlog/protocols/xwayland-pointer-focus-x11.md`](backlog/protocols/xwayland-pointer-focus-x11.md).
+cannot tell who asked.
+
+A drag from a Wayland app drops onto an X window (text from a Wayland
+`mousepad` into one over X, measured): over one, the window manager speaks
+XDND -- X's drag-and-drop protocol -- to it on the Wayland app's behalf,
+and the X app reads the dropped data from the window manager as it would
+from any X source. The X window has to take drops (`XdndAware`,
+as toolkit text fields and file views do); over one that does not, the drag
+simply finds no target, and releasing there ends it with nothing dropped.
+An X target that refuses the drop is left, not dropped on, and the Wayland
+app is told the drag was cancelled; one that dies or hangs after the drop
+does not stop later drags: the window manager gives the drop up when the
+target's window goes, or when an X app starts a new drag that scoot lets
+start (from a pointer press held on an X window). An X app that takes the
+drag's selection with no such drag behind it is refused -- the window
+manager takes the selection back and the drop stands -- so no X app can
+end a drop in flight (scoot's Smithay fork, `7388af13`, `9515d7e5` and
+`d3a4cd73`).
+
+A drag from an X app onto an X window -- another X app's, or inside one X
+app, like moving selected text within an X editor -- lands too, and X does
+it itself: while an X drag is over an X window, the window manager hides
+the full-screen window it relays X drags to Wayland through, so the X app
+finds the real window under the pointer and speaks XDND to it directly;
+when the drag moves on, that window is shown again, so the same drag can
+still drop on a Wayland app. Upstream Smithay queues the requests that
+show it again but never flushes them to the X server, so they sat unsent
+until some unrelated request went out, and an X drag that had crossed an X
+window could not drop on a Wayland one; scoot's Smithay fork flushes them
+(`6e6fe896`, [forks.md](forks.md))
+([`backlog/resolved/xwayland-pointer-focus-x11-done.md`](backlog/resolved/xwayland-pointer-focus-x11-done.md)).
 
 **Input methods: XIM is not provided.** X clients compose text through XIM
 (an X-side protocol an input-method daemon speaks as an X client); XWayland

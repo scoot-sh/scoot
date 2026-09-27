@@ -43,6 +43,7 @@ mod output_management;
 mod output_scale;
 mod outputs;
 mod pixman_upscale;
+mod pointer_focus;
 mod popup;
 mod popup_constraint;
 mod popup_count;

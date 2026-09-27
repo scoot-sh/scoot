@@ -611,7 +611,11 @@ impl SeatHandler for State {
     /// A Wayland surface or an X11 window -- see `keyboard_focus.rs` for why
     /// the X half cannot be its `wl_surface`.
     type KeyboardFocus = super::keyboard_focus::KeyboardFocus;
-    type PointerFocus = WlSurface;
+    /// A `WlSurface` behind an enum -- see `pointer_focus.rs`.
+    type PointerFocus = super::pointer_focus::PointerFocus;
+    /// A plain `WlSurface`: touch drags are refused (`dnd_requested`, and
+    /// the X side in `xwayland/dnd.rs`), so no drag ever needs a touch
+    /// target other than a surface's `wl_data_device`.
     type TouchFocus = WlSurface;
 
     fn seat_state(&mut self) -> &mut SeatState<State> {
@@ -662,11 +666,12 @@ impl SeatHandler for State {
 /// [`State::set_tool_cursor_image`] lands it in the same cursor status the
 /// pointer half uses.
 ///
-/// `ToolFocus` is `WlSurface` to match the three focus types in
-/// [`SeatHandler`] above: the trait requires the same `WaylandFocus` bound
-/// they satisfy, and the tool events in `tablet.rs` are addressed to
-/// whatever `surface_under` finds -- the same surfaces pointer focus
-/// names, not a second notion of focus.
+/// `ToolFocus` is a plain `WlSurface`: the trait requires a `WaylandFocus`
+/// bound it satisfies, and the tool events in `tablet.rs` are addressed to
+/// the surface `surface_under` finds -- the same surfaces the pointer focus
+/// names (`State::tool_under` unwraps it), not a second notion of focus. A
+/// tool never drags, which is the one thing the pointer focus's enum is
+/// for.
 impl TabletSeatHandler for State {
     type ToolFocus = WlSurface;
 

@@ -50,6 +50,7 @@ use smithay::xwayland::XWaylandClientData;
 use smithay::xwayland::xwm::X11Window;
 
 use super::super::State;
+use super::super::pointer_focus::PointerFocus;
 use super::focus::same_x_client;
 
 impl State {
@@ -87,7 +88,7 @@ impl State {
         let Some((pressed, _)) = start.focus else {
             return refuse("the press landed on no surface");
         };
-        let Some(client) = pressed.client() else {
+        let Some(client) = pressed.surface().client() else {
             return refuse("the pressed surface is gone");
         };
         if client.get_data::<XWaylandClientData>().is_none() {
@@ -96,26 +97,25 @@ impl State {
         if !self.interaction_serials.contains(serial, &client.id()) {
             return refuse("its serial is not a recent button press delivered to an X window");
         }
-        let Some(window) = self.x11_window_with_surface(&pressed) else {
+        // The hit test names every X window -- managed or override-redirect
+        // -- as the X focus (`State::surface_under`), so a press on one
+        // carries the window itself; an XWayland surface under the plain
+        // variant is none scoot has placed.
+        let PointerFocus::X11 { window, .. } = &pressed else {
             return refuse("the pressed surface is no X window scoot knows");
         };
-        if !same_x_client(window, owner) {
+        // The focus is the press's, and outlives the window: ask whether it
+        // is still there, as the lookup this replaced did by finding it
+        // among the live X windows. XWayland destroys the window's surface
+        // with it, which `client()` above mostly catches first; this closes
+        // the gap between the window manager seeing the window destroyed and
+        // scoot seeing the surface go. Once per drag attempt: one lock.
+        if !window.alive() {
+            return refuse("the pressed X window is gone");
+        }
+        if !same_x_client(window.window_id(), owner) {
             return refuse("the press landed on another X client's window");
         }
         true
-    }
-
-    /// The X window -- managed or override-redirect -- whose `wl_surface`
-    /// is `surface`. Per drag attempt: a walk over the X windows.
-    fn x11_window_with_surface(
-        &self,
-        surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
-    ) -> Option<X11Window> {
-        self.windows
-            .values()
-            .filter_map(smithay::desktop::Window::x11_surface)
-            .chain(self.x11_unmanaged.iter())
-            .find(|x11| x11.wl_surface().as_ref() == Some(surface))
-            .map(smithay::xwayland::X11Surface::window_id)
     }
 }

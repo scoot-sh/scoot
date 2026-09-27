@@ -11,14 +11,14 @@ top**, so it stays easy to review, rebase, and drop.
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
-| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling | **yes**, `crates/scoot/Cargo.toml` rev `74edbf32` (this PR; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without the last, every upscaled surface fades to a semi-transparent 1-px border under the default renderer (see below). |
+| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling; then `6e6fe896`: flush the XDND proxy's remap when a drag leaves an X window; then `7388af13` and `9515d7e5`: end a Wayland drop onto X once, and end an offer whose target is gone or never finishes; then `d3a4cd73`: only a real X drag gives up a pending drop onto X | **yes**, `crates/scoot/Cargo.toml` rev `d3a4cd73` (the XWayland pointer-focus X arm; `74edbf32` was PR #272; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without `74edbf32`, every upscaled surface fades to a semi-transparent 1-px border under the default renderer; without `6e6fe896`, an X drag that crossed an X window cannot drop on a Wayland one, so drags from X could not be let onto X windows; without `9515d7e5`, a Wayland drop onto an X target that dies or hangs before finishing stops every later X drag until scoot restarts, and without `d3a4cd73` any X client can end such a drop in flight and keep the selection (see below). |
 | [`scoot-sh/wayland-rs`](https://github.com/scoot-sh/wayland-rs/tree/scoot/server-fd-queue-cap-adaptive) | [Smithay/wayland-rs](https://github.com/Smithay/wayland-rs) | `72f7fe0d` (the wayland-backend 0.3.17 release, `v0.31.x` branch) | `a39311b8`: server side, disconnects a client leaving too many received fds unclaimed; `70f81e00`: sizes that cap at one eighth of the soft `RLIMIT_NOFILE`, 128..=1024 | **yes**, root `Cargo.toml` `[patch.crates-io]` rev `70f81e00` (PR #241) | wayland-backend queues fds a client sends with fd-less requests for the connection's life, so one idle client could fill scoot's fd table and shed every newcomer, `scootctl` included. |
 
 ## Per fork
 
 ### `scoot-sh/smithay`
 
-- **Branch:** `scoot/xwayland-selection-dnd`, fifteen commits on `0ff00983`.
+- **Branch:** `scoot/xwayland-selection-dnd`, nineteen commits on `0ff00983`.
   Its first, `43f50eb2`, is also the tip of `scoot/syncobj-timeline-drop`,
   which PR #233 pinned; that branch is kept as it was, and nothing pins it
   now. The XWayland commits, in order, each measured before it was written
@@ -114,16 +114,82 @@ top**, so it stays easy to review, rebase, and drop.
     under pixman; the scale-2 test passes under `SCOOT_TEST_RENDERER=gles`
     on both revs), plus a downscale test that is exact on both revs, pinning
     the fix changed nothing there. See
-    `docs/backlog/core/shm-viewport-upscale-edge-fade.md`.
+    `docs/backlog/resolved/shm-viewport-upscale-edge-fade-done.md`.
+
+  One more on top, from the XWayland pointer focus's X arm:
+  - `6e6fe896` **flush the XDND proxy's remap when a drag leaves an X
+    window.** `X11Surface`'s `DndFocus::leave` maps the window manager's
+    full-screen XDND proxy back (and raises it) when an X-origin drag
+    leaves an X window, but never flushed the connection -- unlike the unmap
+    in `enter` -- so the requests sat in x11rb's write buffer until some
+    unrelated request flushed it. Every X drag starts over its own window,
+    so with scoot's pointer focus routing X-origin drags to the X target
+    (needed for X to X and in-window moves), an X drag then found no window
+    over a Wayland one and could not drop there. Measured fail-first with
+    that routing on, at `74edbf32`, 3 of 3 runs:
+    `xwayland/tests/drop.rs`'s
+    `an_x_drag_crossing_an_x_window_still_finds_the_proxy_over_wayland` and
+    `an_x_drag_whose_hovered_window_closes_finds_the_proxy_again` failed
+    `left: "no window", right: "Smithay XDND proxy"`; at `6e6fe896` all
+    drop and drag-gate tests pass, 3 of 3. See
+    `docs/backlog/resolved/xwayland-pointer-focus-x11-done.md`.
+
+  Two more from the review of that X arm, which made Smithay's X drop
+  target reachable from a Wayland drag (scoot never made an X offer
+  before). Acceptance tests: `compositor/xwayland/tests/drop_end.rs`, six
+  tests, all failing at `6e6fe896`:
+  - `7388af13` **tell a Wayland source about a drop onto X once, and only
+    if it happened** (review N1). `DnDGrab::drop` already tells the source;
+    `X11Surface`'s `DndFocus::drop` (and `handle_status`, for a deferred
+    drop) told it `drop_performed` again, so a validated drop sent
+    `wl_data_source.dnd_drop_performed` twice, and a refused one sent
+    `dnd_drop_performed` then `cancelled` and still sent `XdndDrop`. An
+    unaccepted offer is now left (`XdndLeave`); a deferred drop whose answer
+    refuses is left and cancelled. Measured at `6e6fe896`: the finished
+    control heard `["dnd_drop_performed", "dnd_drop_performed",
+    "dnd_finished"]`; a refusing target was sent `XdndDrop`.
+  - `9515d7e5` **end an XDND offer whose target is gone or never
+    finishes** (review B1, blocking). The offer lived until `XdndFinished`,
+    and while it lived `xfixes_selection_notify` took `XdndSelection` back
+    from any X client: a target destroyed or hung after the drop stopped
+    every later X drag, X to Wayland included, until scoot restarted. The
+    offer now ends when its target or proxy is destroyed (a dropped one
+    cancels its source), and a dropped offer is given up when an X client
+    takes the selection (narrowed by `d3a4cd73` to a drag `allow_drag`
+    accepts); one still in flight keeps it. Measured at
+    `6e6fe896`: "an X drag could not start" after a silent target died and
+    after a target hung past the drop. With `7388af13` alone, 4 of the 6
+    tests pass (dying- and hanging-after-the-drop fail), so each commit is
+    load-bearing; with both, all 6.
+  - `d3a4cd73` **only a real X drag gives up a pending drop onto X**
+    (final review N-A, N-B). `9515d7e5` gave up a dropped offer whose
+    target had not finished whenever any X client took `XdndSelection`,
+    before the grab lookup and `allow_drag`, so an X client with nothing
+    held could end a drop in flight and keep the selection, and a target
+    converting late would read that client's data. Now only a drag
+    `allow_drag` accepts gives it up; any other taker is taken back from,
+    and the take-back is flushed. It also cancels the source of a stale
+    dropped offer that a new Wayland drag onto X replaces, which otherwise
+    never heard how its drop ended. Acceptance test:
+    `drop_end.rs`'s `a_rough_x_client_cannot_end_a_pending_drop`, which
+    fails at `9515d7e5` (`left: 8388608 right: 8388608`, the rough
+    client's window still owning the selection) and passes at `d3a4cd73`;
+    the drop, drop_end, dnd, xdnd, clipboard and peer suites 46/46, 3 of 3
+    runs; the full `--features xwayland` nextest run 1851 passed, 24
+    skipped.
 - **Evidence:** `docs/backlog/resolved/syncobj-handle-leak-done.md`, and on the
   dev VM `~/evidence/sync/master-validation/`. Upstream master `79bbed5e1`
   (2026-09-22) was built and measured: it leaks 3.5–4.1 MB per test run,
   against about zero with the fork.
 - **Upstream status (last checked 2026-09-25, master `79bbed5e1`, plus the
-  pixman hunk re-checked 2026-09-27):** all fifteen unfixed on master (the
-  XWM code carries the double delete, the `O_NONBLOCK` pipe, the unpaused
-  read, the unflushed owner change and no hooks; the pixman scaler still
-  pairs `Filter::Bilinear` with `Repeat::None` at the same site). No issue
+  pixman hunk re-checked 2026-09-27 and the XDND remap flush 2026-09-27 at
+  master `928d4a9b`):** all eighteen earlier ones unfixed on master (the XWM code carries
+  the double delete, the `O_NONBLOCK` pipe, the unpaused read, the
+  unflushed owner change, the unflushed proxy remap, the doubled
+  `drop_performed`, the offer that outlives its target and no hooks; the
+  pixman scaler still pairs `Filter::Bilinear` with `Repeat::None` at the
+  same site). `d3a4cd73` narrows `9515d7e5`'s give-up, which exists
+  only in the fork, so it has no upstream counterpart of its own. No issue
   or PR exists. Nothing has been filed from here.
 - **Upstream policy note, for the maintainer's decision:** Smithay's
   `AI.md` asks contributors to disclose AI-generated code, discourages
@@ -137,7 +203,9 @@ top**, so it stays easy to review, rebase, and drop.
   6 runs without the commit); the syncobj commit's own measurement is in
   its resolved record; `compositor/pixman_upscale/tests.rs` fails on the
   pre-fix fork for both upscale cases (the downscale test passes on both
-  revs, pinning the no-change half).
+  revs, pinning the no-change half); `compositor/xwayland/tests/drop.rs`
+  fails without `6e6fe896` (two tests, "no window" where the proxy should
+  be); `drop_end.rs` fails without `7388af13`, `9515d7e5` and `d3a4cd73`.
 
 ### `scoot-sh/wayland-rs`
 

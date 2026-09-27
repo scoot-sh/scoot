@@ -692,6 +692,10 @@ mod clipboard;
 #[cfg(feature = "xwayland")]
 mod dnd;
 #[cfg(feature = "xwayland")]
+mod drop;
+#[cfg(feature = "xwayland")]
+mod drop_end;
+#[cfg(feature = "xwayland")]
 mod focus;
 #[cfg(feature = "xwayland")]
 mod ime;
@@ -709,6 +713,8 @@ mod scanout;
 mod unmanaged_cap;
 #[cfg(feature = "xwayland")]
 mod x11;
+#[cfg(feature = "xwayland")]
+mod xdnd;
 #[cfg(feature = "xwayland")]
 mod xsel;
 
