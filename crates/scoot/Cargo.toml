@@ -144,7 +144,7 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus fourteen
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus fifteen
 # commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
 # each one and why):
 #
@@ -165,15 +165,21 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   Wayland selection sat unsent to the X server; and the hooks scoot's
 #   gates need: `X11Wm::selection_owner`, `X11Wm::selection_generation`,
 #   `XwmHandler::allow_drag`, `X11Wm::set_selection_transfer_timeout`.
+# - `74edbf32` clamps the pixman source image to its edge (`Repeat::Pad`)
+#   when scaling: bilinear taps at the texture edge used to read past it,
+#   where pixman returns transparent black, so any upscaled surface faded
+#   to a semi-transparent 1-px border (see
+#   `docs/backlog/core/shm-viewport-upscale-edge-fade.md`).
 #
-# Upstream status (checked 2026-09-25): none of these is on Smithay `master`
+# Upstream status (checked 2026-09-25; the pixman hunk re-checked 2026-09-27):
+# none of these is on Smithay `master`
 # or in a release; an upstream PR is the user's to file. Repin to upstream --
 # and drop the fork -- once a Smithay rev carries equivalents
 # (`docs/backlog/core/smithay-fork-repin.md`).
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "5b575329f31ceae7651dd8fc2f600b43d99af946"
+rev = "74edbf3210fa03a6626264e11c91850b110f1e9b"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session
