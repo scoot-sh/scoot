@@ -12,6 +12,7 @@ mod client;
 mod codec;
 #[cfg(feature = "core")]
 mod convert;
+mod event;
 mod key;
 mod request;
 mod response;
@@ -21,6 +22,7 @@ pub use action::{Action, Horizontal, Vertical};
 #[cfg(unix)]
 pub use client::Client;
 pub use codec::{decode, encode, read_message, read_message_buffered, write_message};
+pub use event::{EventKind, OutputRemoved, OutputRestored};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
 pub use request::{PointerButton, Request, SCREENSHOT_CURSOR_DEFAULT};
 pub use response::{OutputSnapshot, Rect, Response, Screenshot, WindowSnapshot};
@@ -44,4 +46,13 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// half -- an unknown `Request` tag is a decode error the server answers
 /// with an ordinary `Error` and keeps serving (see `unknown_request_types_are_rejected`),
 /// so an older server meets a new `reload` client with an error, not a kill.
-pub const PROTOCOL_VERSION: u32 = 3;
+///
+/// And the same bar moves it 3 → 4 for the event subscription (2026-09, the
+/// output removed/restored event): `Response::Subscribed`,
+/// `Response::OutputRemoved` and `Response::OutputRestored` are three new
+/// tags at once, under one bump. A client that never sends
+/// `Request::Subscribe` never receives any of them -- the bump costs
+/// existing clients nothing at runtime -- while an unknown event kind in a
+/// `subscribe` is answered with an ordinary `Error` like any unknown
+/// request tag, so an older server meets a newer subscriber the same way.
+pub const PROTOCOL_VERSION: u32 = 4;

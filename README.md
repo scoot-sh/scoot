@@ -33,7 +33,9 @@ Two needs drove scoot's creation:
   (`screenshot`, `--no-cursor` to omit it), waiting until the screen
   settles (`wait-idle`), and window and output queries (`windows`,
   `outputs`) in which every window reports its rectangle in the same
-  coordinates `pointer click` takes. scoot's own end-to-end test drives it
+  coordinates `pointer click` takes. A connection can also subscribe to
+  output removed/restored events (`scootctl subscribe`) instead of polling
+  for them. scoot's own end-to-end test drives it
   this way. Because the socket can inject any keystroke, it lives in
   `$XDG_RUNTIME_DIR` (override with `$SCOOT_SOCKET`), is created `0600`,
   and serves only the compositor's own user. Reference:

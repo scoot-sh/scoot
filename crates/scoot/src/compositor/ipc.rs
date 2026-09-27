@@ -26,6 +26,7 @@
 
 pub(super) mod accept;
 mod connection;
+mod events;
 mod line;
 mod listener;
 mod outbound;
@@ -49,6 +50,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode};
 
 use self::connection::Limits;
+pub(crate) use self::events::Subscriber;
 pub(crate) use self::outbound::Outbound;
 use self::slots::{MAX_CONNECTIONS, Slot, Slots};
 use super::State;
@@ -303,7 +305,17 @@ fn accept_under(
                 limits,
                 NEXT_CONN.fetch_add(1, Ordering::Relaxed),
             )?,
-            |_readiness, connection, state: &mut State| connection.step(state),
+            // A connection leaving the loop takes its subscription with
+            // it: a client that subscribes and disconnects leaves no
+            // record (and no fd) behind, even if no event ever fires to
+            // reap it (see `events.rs`).
+            |_readiness, connection, state: &mut State| {
+                let step = connection.step(state);
+                if matches!(step, connection::Step::Close) {
+                    state.drop_subscriber(connection.id());
+                }
+                step
+            },
         )
         // The message rather than the error itself: an `InsertError` carries
         // the source back out, and a source is single-threaded (it holds the
@@ -435,6 +447,17 @@ impl State {
                     "Screenshot reached handle_request; Connection::serve must intercept it"
                 );
                 Response::error("could not take a screenshot: internal routing error")
+            }
+            // Like `Screenshot` above: `Connection::serve` answers
+            // `Subscribe` itself (and dedicates the connection), so reaching
+            // here is a bypass -- an error rather than an abort, loud in
+            // debug builds.
+            Request::Subscribe { .. } => {
+                debug_assert!(
+                    false,
+                    "Subscribe reached handle_request; Connection::serve must intercept it"
+                );
+                Response::error("could not subscribe: internal routing error")
             }
             Request::PointerMove { x, y } => {
                 self.pointer_move(x, y);

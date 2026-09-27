@@ -50,6 +50,8 @@ use scoot_core::OutputId;
 use smithay::output::Output;
 
 #[cfg(test)]
+mod events;
+#[cfg(test)]
 mod per_output;
 #[cfg(test)]
 mod reconnect;

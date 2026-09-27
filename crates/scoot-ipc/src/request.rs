@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::action::Action;
+use crate::event::EventKind;
 use crate::key::KeyCombo;
 
 /// Whether a [`Request::Screenshot`] that does not say draws the pointer:
@@ -99,4 +100,16 @@ pub enum Request {
     /// the request half. (The reply half is a new `Response` variant, which
     /// is why the version still moved -- see `Response::Reloaded`.)
     Reload,
+    /// Subscribe this connection to events of the named kinds, dedicating
+    /// it to them: the reply is `Response::Subscribed`, and afterwards the
+    /// connection carries events only (any other request on it is refused
+    /// with an error -- open another connection for requests).
+    ///
+    /// Additive like `Reload`: a client that never sends this tag decodes
+    /// exactly as before, so no `PROTOCOL_VERSION` bump for the request
+    /// half. (The reply and event halves are new `Response` variants, which
+    /// is why the version still moved -- see `Response::Subscribed`.)
+    Subscribe {
+        events: Vec<EventKind>,
+    },
 }

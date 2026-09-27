@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::event::{EventKind, OutputRemoved, OutputRestored};
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
     pub x: i32,
@@ -245,6 +247,34 @@ pub enum Response {
         applied: Vec<String>,
         refused: Vec<String>,
     },
+    /// What a `Subscribe` request answers on success: the event kinds this
+    /// connection is now dedicated to, echoed back. Afterwards the
+    /// connection carries [`OutputRemoved`]/[`OutputRestored`] (and whatever
+    /// later kinds subscribe to) unasked, and any other request on it is
+    /// refused with an error.
+    ///
+    /// A new variant, so this is one of the halves that moved
+    /// `PROTOCOL_VERSION` 3 → 4 (see that constant's doc): an older client
+    /// handed one would fail its decode. In practice only a client new
+    /// enough to send `Subscribe` ever receives one -- and a client that
+    /// never subscribes never receives an event either, so the bump costs
+    /// existing clients nothing at runtime.
+    Subscribed {
+        events: Vec<EventKind>,
+    },
+    /// An output was removed; see [`OutputRemoved`] for what each field
+    /// means and when this fires. Sent only to connections subscribed to
+    /// [`EventKind::Output`].
+    ///
+    /// A new variant, so this shares the 3 → 4 `PROTOCOL_VERSION` move with
+    /// `Subscribed` above: an older client handed one would fail its
+    /// decode, which can only happen to a client new enough to have
+    /// subscribed.
+    OutputRemoved(OutputRemoved),
+    /// An output was restored; see [`OutputRestored`]. Sent only to
+    /// connections subscribed to [`EventKind::Output`], under the same
+    /// version move as `OutputRemoved`.
+    OutputRestored(OutputRestored),
     Error {
         message: String,
     },

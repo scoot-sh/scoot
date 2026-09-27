@@ -37,6 +37,7 @@ REQUESTS:
     type TEXT                       types text, working out each character's
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
+    subscribe [EVENT...]          stream events until killed (default: output)
 
 ACTIONS:
     focus-column|move-column|consume-or-expel   left|right

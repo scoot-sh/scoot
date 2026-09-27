@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use scoot_core::Config;
-use scoot_ipc::{Request, Response, decode, encode};
+use scoot_ipc::{EventKind, Request, Response, decode, encode};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 
@@ -2385,4 +2385,183 @@ fn an_agent_asking_outputs_again_after_a_resize_is_told_the_new_size() {
         (AFTER, AFTER),
         "the usable area still describes the pre-resize mode"
     );
+}
+
+// --- event subscription ----------------------------------------------------
+// A subscription dedicates one connection to events: the handshake below,
+// the refusal every other request meets afterwards, and the delivery of an
+// emission without any request at all. The payload itself is pinned where
+// the outputs exist to produce it (`outputs/events.rs`); what is pinned
+// here is the connection contract around it.
+
+fn subscribe_line() -> String {
+    request_line(&Request::Subscribe {
+        events: vec![EventKind::Output],
+    })
+}
+
+fn synthetic_removed() -> scoot_ipc::OutputRemoved {
+    scoot_ipc::OutputRemoved {
+        output: 9,
+        name: "DP-9".into(),
+        adopter: Some(1),
+        adopted_start: 0,
+        adopted_count: 1,
+        adopter_prev_active: Some(0),
+        adopter_active: Some(1),
+        origin: Some("DP-9".into()),
+    }
+}
+
+#[test]
+fn a_subscribe_is_answered_with_what_it_asked_for() {
+    let mut harness = Harness::new();
+    let mut client = harness.connect(None);
+    client.send(subscribe_line().as_bytes());
+    assert_eq!(
+        client.expect_reply(&mut harness),
+        Response::Subscribed {
+            events: vec![EventKind::Output]
+        }
+    );
+}
+
+#[test]
+fn a_subscribed_connection_serves_no_further_requests() {
+    let mut harness = Harness::new();
+    let mut client = harness.connect(None);
+    client.send(subscribe_line().as_bytes());
+    assert!(matches!(
+        client.expect_reply(&mut harness),
+        Response::Subscribed { .. }
+    ));
+
+    // Any other request -- including a second subscribe -- is refused with
+    // a reason, not answered and not silently swallowed.
+    for request in [
+        Request::Windows,
+        Request::Version,
+        Request::Subscribe {
+            events: vec![EventKind::Output],
+        },
+    ] {
+        client.send(request_line(&request).as_bytes());
+        match client.expect_reply(&mut harness) {
+            Response::Error { message } => assert!(
+                message.contains("serves no requests"),
+                "the refusal names the rule: {message}"
+            ),
+            other => panic!("a subscribed connection answered {request:?} with {other:?}"),
+        }
+    }
+
+    // And the subscription itself still stands: an emission arrives
+    // afterwards, unasked.
+    harness.state.emit_output_removed(synthetic_removed());
+    assert_eq!(
+        client.expect_reply(&mut harness),
+        Response::OutputRemoved(synthetic_removed())
+    );
+}
+
+#[test]
+fn an_empty_subscribe_is_refused_and_keeps_serving() {
+    // The mirror of the dedicated rule above: a subscribe that files
+    // nothing must not dedicate anything.
+    let mut harness = Harness::new();
+    let mut client = harness.connect(None);
+    client.send(request_line(&Request::Subscribe { events: vec![] }).as_bytes());
+    assert!(matches!(
+        client.expect_reply(&mut harness),
+        Response::Error { .. }
+    ));
+
+    client.send(request_line(&Request::Version).as_bytes());
+    assert!(matches!(
+        client.expect_reply(&mut harness),
+        Response::Version { .. }
+    ));
+    assert!(
+        harness.state.subscribers.is_empty(),
+        "a refused subscribe files no record"
+    );
+}
+
+#[test]
+fn a_subscriber_learns_about_an_emission_without_asking() {
+    // No request after the subscribe: the event arrives on its own, which
+    // is the whole of the push contract -- a client that polled `windows`
+    // instead would never see this line.
+    let mut harness = Harness::new();
+    let mut client = harness.connect(None);
+    client.send(subscribe_line().as_bytes());
+    assert!(matches!(
+        client.expect_reply(&mut harness),
+        Response::Subscribed { .. }
+    ));
+
+    harness.state.emit_output_removed(synthetic_removed());
+    assert_eq!(
+        client.expect_reply(&mut harness),
+        Response::OutputRemoved(synthetic_removed())
+    );
+}
+
+#[test]
+fn closing_a_subscribed_connection_drops_its_subscription() {
+    // A client that subscribes and disconnects leaves no record behind --
+    // even though no event ever fires to reap it.
+    let mut harness = Harness::new();
+    let mut client = harness.connect(None);
+    client.send(subscribe_line().as_bytes());
+    assert!(matches!(
+        client.expect_reply(&mut harness),
+        Response::Subscribed { .. }
+    ));
+    assert_eq!(harness.state.subscribers.len(), 1);
+
+    drop(client);
+    harness.pump_until("a closed subscriber kept its record", |harness| {
+        harness.state.subscribers.is_empty()
+    });
+}
+
+#[test]
+fn a_subscriber_that_never_reads_is_disconnected_past_the_high_water_mark() {
+    // The backpressure half through the real loop: a tiny send buffer and
+    // no reads at all. Emissions queue until the 1 MiB bound, then the
+    // subscription is disconnected -- and the emits themselves never
+    // blocked, which is what `expect_replies` not hanging below proves.
+    let mut harness = Harness::new();
+    let mut client = harness.connect(Some(TINY_SNDBUF));
+    client.send(subscribe_line().as_bytes());
+    assert!(matches!(
+        client.expect_reply(&mut harness),
+        Response::Subscribed { .. }
+    ));
+
+    for _ in 0..20_000 {
+        harness.state.emit_output_removed(synthetic_removed());
+        if harness.state.subscribers.is_empty() {
+            break;
+        }
+    }
+    assert!(
+        harness.state.subscribers.is_empty(),
+        "twenty thousand unread lines did not disconnect the subscriber"
+    );
+    // The disconnect reaches the peer as the end of the stream, after
+    // whatever events did go out -- the `notify-send` wiring's cue to
+    // resubscribe. (`expect_closed` would fail here by design: it asserts
+    // nothing unread is left behind, while this client deliberately never
+    // read.)
+    let deadline = Instant::now() + PATIENCE;
+    while !client.closed {
+        harness.pump();
+        client.collect();
+        assert!(
+            Instant::now() < deadline,
+            "the wedged subscriber stayed open"
+        );
+    }
 }
