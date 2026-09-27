@@ -168,7 +168,7 @@ shows it again when it starts.
   the directory; the file is 0600, a directory it makes 0700. The write
   runs on a thread started for it, which ends once nothing more waits
   (an idle daemon has one thread); the loop only builds the text and
-  hands it over (about 26 µs), so a slow disk never stalls it. While a
+  hands it over (tens of µs), so a slow disk never stalls it. While a
   write is under way a newer text replaces any that waits, so a burst of
   changes is at most two writes, ending with the last. `scootbg kill`
   waits for a write under way (up to 2 s) before the daemon exits; a
@@ -321,13 +321,13 @@ The image is a 6000×4000 JPEG, `fill`.
 | **Memory at rest with the image**, 1× 1920×1080 | RSS 12.3–12.4 MB, PSS 7.1–7.3 MB (the 8.1 MB buffer is shared with the compositor, so PSS counts half); anonymous 456 kB, `[heap]` 40 kB; 8 fds |
 | 1× 3840×2160 | RSS 36.7–36.8 MB, PSS 19.4–19.5 MB; anonymous 564–572 kB, `[heap]` 40 kB; 8 fds |
 | **2× 3840×2160** | **RSS 36.7–36.8 MB, PSS 19.4–19.6 MB**, the same as one output: both show one 32.4 MB buffer's pixels (69.2 MB and 35.7–35.8 MB before ticket 8) |
-| Memory at rest with a color (a single-pixel buffer: no shared memory at any size), on 3840×2160 | RSS 3.6–3.7 MB, PSS 2.0–2.1 MB; anonymous 196–200 kB |
+| Memory at rest with a color (a single-pixel buffer: no shared memory at any size), on 3840×2160 | RSS 4.0 MB, PSS 2.8–2.9 MB; anonymous 208–216 kB. 3.6–3.7 MB before ticket 9: saving the choice touches 340–370 kB more of clean code pages (the daemon's own, libc's thread start), not heap |
 | **Peak while changing** the image on 2× 4K | 120.4–120.7 MB (152.9–153.0 MB before ticket 8); 87.9–88.1 MB for a first image |
 | **Startup**, `scootbg daemon` to its first answer | 1.8–2.5 ms |
 | to a color on screen (a `set` sent at once, answered after the commit and a round trip) | 3.0–4.1 ms |
-| to the image on one 4K output, likewise | 450–491 ms, one decode (705–718 ms before ticket 9, two decodes; a `set` once the output is configured takes 437–468 ms) |
-| **to a restored image** on one 4K output (the state file names the JPEG) | 443–477 ms to the first `query` that reports it shown: one decode, [restore-state-done.md](backlog/resolved/restore-state-done.md#measurements) |
-| Saving a choice | about 26 µs on the loop (build the text, hand it over); the atomic write on a thread of its own, median 334 µs, worst 54.5 ms of 200 on ext4 |
+| to the image on one 4K output, likewise | 450–476 ms, one decode (714–820 ms for the build before ticket 9 in the same runs, two decodes; a `set` once the output is configured takes 437–468 ms) |
+| **to a restored image** on one 4K output (the state file names the JPEG) | 451–497 ms to the first `query` that reports it shown: one decode ([restore-state-done.md](backlog/resolved/restore-state-done.md#measurements)) |
+| Saving a choice | 23–33 µs on the loop, medians (build the text, hand it over); the atomic write on a thread of its own, medians 334–455 µs, worst 1.0–54.5 ms per 200, on ext4 |
 | File descriptors | 8 whatever is shown: a buffer's memfd is closed once the compositor has it |
 
 ## Measured so far
@@ -344,7 +344,7 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 | What | Result |
 |---|---|
-| Stripped binary | 1,500,008 B with images (783,072 B with colors only); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
+| Stripped binary | 1,557,352 B with images and restore (1,516,392 B before ticket 9, 1,500,008 B at ticket 6; 783,072 B with colors only then); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
 | `set` of a 6000×4000 JPEG onto a 3840×2160 output, request to reply, ×3 | 397.0–433.6 ms, 390–420 ms of CPU (PNG 408.1–417.6 ms; WebP 1,218.0–1,289.4 ms); peak RSS 120.5–120.6 MB with the previous wallpaper still mapped (88.0 MB for a first set; PNG 120.4–120.6 MB; WebP 142.0–142.1 MB) |
 | After it, idle 30 s | 1 thread, heap 372–568 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
 | A few hundred bytes claiming 16384×16384 (PNG, JPEG, WebP) | refused in under 1 ms; peak RSS within 72 kB of before |

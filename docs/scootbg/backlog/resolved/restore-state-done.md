@@ -154,19 +154,23 @@ ticket follows unchanged.
   size, so a later one shares the pixels), so it was taken out again as
   speculative. `a_restore_on_outputs_of_two_sizes_decodes_once_on_sway`
   is the check that it is not needed there.
-- **The scaled-buffer cache is not built.** Decode is nearly all of a
-  restore (443–477 ms of it, against 3–4 ms for a color), and a cache
-  would cut it to about 110–160 ms (a 3840×2160 PNG of the same image
-  decodes in 105–109 ms at ImageMagick's level 6, 155–162 ms at level 1),
-  but every `set` would pay for it: the `png` crate's `Fast` encode of a
-  4K buffer takes 75–80 ms of CPU and writes 15.4 MB (`Balanced`: 1.39–1.47
-  s, 14.9 MB), about 18% more CPU per change, a
-  [release-gate row](../lightest.md), plus 15 MB of disk per output size
-  and the invalidation it needs (path, size, mtime, look, buffer size). The
-  gap it would shorten is the one [ticket 10](../scoot-integration.md)
-  measures on `--tty` ("the gap before the first frame"); if that gap is
-  visible there, a cache written lazily (only once a wallpaper has stayed
-  up a while) is the option, with these numbers.
+- **The scaled-buffer cache is not built.** Decoding and scaling are
+  nearly all of a restore (451–497 ms in all, against 3.0–4.1 ms to a
+  color on screen). A cache would cut that to about 160 ms: on a running
+  daemon, a `set` of a 3840×2160 PNG of the same image (no scale, decode
+  only) takes 155–162 ms request to reply when it is compressed as fast as
+  the `png` crate's `Fast` would write it (ImageMagick level 1, 15.2 MB),
+  105–109 ms at level 6 (13.8 MB), against 437–468 ms for the 6000×4000
+  JPEG. But every `set` would pay for it: the `png` crate's `Fast` encode
+  of a 4K buffer takes 75–80 ms of CPU and writes 15.4 MB (`Balanced`
+  1.39–1.47 s for 14.9 MB), about 18% more CPU per change, which is a
+  [release-gate row](../lightest.md); on top come 15 MB of disk per output
+  size and the invalidation a cache needs (path, size, mtime, look, buffer
+  size). The gap it would shorten is the one
+  [ticket 10](../scoot-integration.md) measures on `--tty` ("the gap
+  before the first frame"). If that gap is visible there, the option is a
+  cache written lazily (only once a wallpaper has stayed up a while), and
+  these are its numbers.
 
 ### Found along the way
 
@@ -181,3 +185,187 @@ ticket follows unchanged.
   that the outputs are configured first. The test sends the request from
   its own process the moment the socket listens, which it does before the
   daemon connects to the compositor.
+
+### Measurements
+
+**Setup.** The Claude Code web container of ticket 8 (x86_64, 4 CPUs, no
+GPU, root, ext4 on a virtual disk), the same scripts extended (`lib.py`
+unchanged; `restore_startup.py`, `opens.py`, `opens_restore.py`,
+`idle_check.py`, `maps_diff.py`, `cache_cost.py`, in the session's scratch
+record, not the repository). Release builds, stripped: **base** is
+`origin/main` at `c5f5454`, built in its own worktree and
+`CARGO_TARGET_DIR` (sha256 `df09ef3b…`, 1,516,392 B); **final** is
+`a2595ca` (`473f9343…`, 1,557,352 B). The compositor is a debug
+`scoot --headless --width 3840 --height 2160 --outputs 1`, empty config,
+scale 1. The image is ticket 8's 6000×4000 JPEG (same recipe, 8,851,735
+B), `fill`.
+
+#### Startup
+
+From `Popen` of `scootbg daemon`: for an **early `set`**, to the reply to
+a `set` of the JPEG sent the moment the socket takes a connection (the
+reply comes after the commit and a round trip); for a **restore** (a
+state file naming the JPEG for every output, `XDG_STATE_HOME` pointed at
+it), to the first `query` that reports the output showing it (polled
+every 0.5 ms), i.e. its first commit. Base and final interleaved in each
+round, 5 rounds per run, two runs:
+
+| | run 1, ms (CPU ms) | run 2, ms (CPU ms) |
+|---|---|---|
+| base, early `set` | 821.9, 939.9, 969.5, 984.7, 791.3 (760–960) | 819.5, 713.6, 724.8, 736.8, 757.7 (690–800) |
+| final, early `set` | 644.4, 578.2, 659.6, 613.5, 474.4 (460–630) | 456.5, 450.3, 467.5, 475.8, 473.6 (440–460) |
+| final, restore | 638.1, 619.3, 603.1, 555.1, 641.1 (580–670) | 451.4, 477.4, 459.5, 476.2, 497.2 (470–500) |
+
+Run 1 was slow for both builds alike (the host, not the code: nothing
+else ran in the container, and base itself took 791–985 ms against
+714–820 in run 2 and 642–720 in ticket 8), so run 2 is the one quoted;
+final is 0.6–0.8 of base in both. An earlier run on the pre-commit tree (the same code, a
+different binary hash) gave base 705.1–717.9, early `set` 450.4–490.8,
+restore 443.3–476.6. Ticket 8 measured base at 642–720. Peak RSS is
+unchanged, 87.7–88.2 MB in every row. **A restore, and an early `set`, now
+cost what a `set` on a running daemon does** (437.3–467.5 ms, below).
+
+Ticket 8's own `startup.py` (the same three measures, `XDG_STATE_HOME`
+set to an empty directory so there is nothing to restore), base and
+final interleaved, 5 rounds: to the first answer, base 2.1, 2.0, 2.3,
+2.9, 2.1 ms, final 2.0, 2.1, 2.0, 2.0, 2.8; to a color on screen, base
+3.3, 3.6, 4.5, 4.2, 3.6, final 3.8, 4.1, 6.9, 3.3, 3.5 (the save's
+thread start is some 25 µs of that); to the JPEG, base 765.9, 693.5,
+733.0, **461.7**, 700.1, final 459.7, 455.0, 443.2, 471.7, 462.4. Base's
+461.7 is the race the hold removes: that once, its `set` was read after
+the `configure`, and it decoded once.
+
+#### Opens of the file
+
+`strace -f -e trace=%file,clone,clone3` on the daemon, counting opens of
+the JPEG (rustix opens with `open(2)` on x86_64), 3 runs each:
+
+| | base | final |
+|---|---|---|
+| `set` sent as the daemon starts | 2, 2, 2 | **1, 1, 1** |
+| `set` once the output is configured | 1 | 1 |
+| restore | (none) | **1, 1, 1**: one `statx` on the loop (the presence check), one `open` on the decode thread |
+
+End to end, in debug builds: `tests/restore.rs` counts opens
+by inotify for a restore, an early `set` (three rounds), and a restore on
+two outputs of different sizes on sway, all 1. With the hold taken out
+(`trial_targets` never returning `None`), the early-`set` test fails with
+2 in debug, and `opens.py` counts 2, 2, 2 for a release build of it.
+
+#### Saving
+
+`state::bench` (an `#[ignore]`d test, release, `SCOOTBG_BENCH_DIR` on
+the container's ext4), a 308-byte file (an image for every output, three
+per-output choices, a 64-byte fingerprint), 200 rounds each; three runs
+at `a2595ca`, plus one on the tree before it:
+
+| | medians, µs | worst, µs |
+|---|---|---|
+| on the loop: build the text | 0.8, 0.8, 0.8, 1.4 | 3.8–31.7 |
+| on the loop: hand it over (starts the thread) | 25.3, 22.2, 23.4, 31.6 | 66.4–81.1 |
+| on the thread: write atomically (temp, `fsync`, `rename`, dir `fsync`) | 334.0, 407.8, 454.5, 355.7 | 965.9, 1,511.2, 4,694.0, **54,498.4** |
+
+That worst case, 54.5 ms of one `fsync`, on a disk with nothing else
+writing, is why the write is not on the loop: a busy or network disk
+stalls far longer, and the loop's cost is the tens of µs above.
+
+#### Idle and memory
+
+Once settled (one thread, context switches still for 1 s), a 30 s window,
+then `/proc`; 3 rounds, base and final side by side:
+
+| | base | final |
+|---|---|---|
+| context switches, CPU ticks in 30 s (color, image) | 0, 0 | 0, 0 |
+| threads, fds | 1, 8 | 1, 8 (the save thread has ended) |
+| color: RSS kB | 3,592, 3,644, 3,644 | 3,956, 3,968, 4,012 |
+| color: anonymous kB | 196–200 | 208–216 |
+| image: RSS kB | 36,704, 36,724, 36,780 | 36,636, 36,692, 36,700 |
+| image: anonymous kB | 564–568 | 360–368 |
+
+With a color the daemon holds 340–370 kB more, all of it clean,
+file-backed code (per mapping, `maps_diff.py`: scootbg's own text +232
+kB, `libc.so.6` +192 kB, `libm.so.6` +16 kB): the save, the first thing a
+color-only daemon does that starts a thread and writes a file, touches
+code a color never did before. It is reclaimable page cache, not heap
+(anonymous memory is within 20 kB), and with an image, whose decode
+thread touched it already, there is no difference.
+
+#### The cache decision
+
+On a running daemon, request to reply, 5 rounds: the 6000×4000 JPEG
+437.3–467.5 ms (440–450 ms CPU); a 3840×2160 PNG of it, `stretch`,
+105.1–109.2 ms at ImageMagick's compression level 6 (13,776,035 B) and
+155.2–162.3 ms at level 1 (15,218,401 B). The `png` 0.18 crate encoding
+that 4K image (a throwaway program outside the repository, release, 3
+runs each): `Fast` 75.4–80.0 ms, 15,392,016 B; `Balanced` 1,392–1,469
+ms, 14,853,309 B; `High` 1,392–1,636 ms, 14,853,307 B. See
+[Departures](#departures-from-the-plan-and-why).
+
+#### Binary
+
+Release, stripped: 1,516,392 B before, 1,557,352 B after (+40,960). Links
+`libgcc_s`, `libm` and `libc` only; no `libc` crate in the normal tree.
+
+### Verified where
+
+On the container above, at `a2595ca` for the code (the docs-only commit
+after it adds this record, the numbers, and help-text wording).
+
+- `SCOOTBG_REQUIRE_SCOOT=1 SCOOTBG_REQUIRE_SWAY=1
+  SCOOTBG_TEST_SWAY=…sway-1.12/bin/sway devenv shell -- soft-egl cargo
+  nextest run -p scootbg -p scootbg-mem`: every test passed; the two
+  skipped are the `#[ignore]`d benchmarks.
+- `cargo test -p scootbg -p scootbg-mem` (same variables): every suite
+  passed, `tests/restore.rs` 9 of 9.
+- `cargo clippy -p scootbg -p scootbg-mem --all-targets -- -D warnings`,
+  `cargo fmt --check -p scootbg -p scootbg-mem`, `RUSTFLAGS="-D warnings"
+  cargo build --release -p scootbg`: clean.
+- `nix build .#scootbg` in the sandbox: built.
+- **The end-to-end tests catch what they claim**, checked by breaking the
+  code: restore not filling the saved table fails four of the restore
+  tests (the absent output's entry, `--no-restore` keeping the state, the
+  moved image staying saved, and the survive-a-restart test's later
+  checks); ignoring `--no-restore` fails its test; taking the hold out
+  fails the early-`set` decode count (after the inotify fix above).
+
+### Not verified, and why
+
+- **`--tty`, the dev VM, a GPU**: not reachable from this container. The
+  visible gap before the first frame at login is ticket 10's to measure
+  there.
+- **A slow or network disk**: the write is off the loop by construction,
+  and its worst case here was 54.5 ms; no slower disk was available.
+- **A compositor slow to configure, or configuring outputs one per
+  batch**: the hold ends when the round trip already sent comes back, as
+  a reply's wait does; neither compositor checked is slow, and on both a
+  restore on several outputs decoded once. Unit-tested in the model (`Output::coming`
+  through every state) and in `Jobs`.
+- **The `profile` mismatch warning and the unreadable-file path** (a
+  permission-denied state file) are exercised by reading only: as root,
+  permission bits do not bind here, and a directory in the file's place is
+  the unit test's stand-in.
+- **`cargo nextest run --workspace`, `nix flake check`, macOS `cargo
+  check`**: no compositor code changed; CI runs them.
+
+### For the next tickets
+
+- [scoot-integration.md](../scoot-integration.md): the fingerprint and
+  profile lines exist, are read and kept by every save, and need no format
+  bump; `--profile` exists and is validated; `restore::load` and
+  `restore::apply(…, show)` are separate, so `apply-config` can compare
+  before showing anything; adopting a profile mid-life must also
+  reconcile every output, which start-up does not need; `write_atomic` is
+  public for `apply-config '{}'` with no daemon. The details are in its
+  [What ticket 9 provides](../scoot-integration.md#what-ticket-9-provides).
+  The start-up gap to measure on `--tty` is 450–500 ms with a 4K JPEG
+  here, nearly all decode; the cache numbers above are the option if it
+  shows.
+- [lightest.md](../lightest.md): startup with an image is now one decode
+  (450–476 ms early `set`, 451–497 ms restore, on 4K). A color-only daemon
+  is 340–370 kB larger in RSS after its first save (clean code pages, not
+  heap); the binary is 40,960 B larger.
+- [config-and-rotation.md](../config-and-rotation.md): if a config file
+  ever ships, TOML for it and the state file together may cost less than
+  two formats (dependencies-done.md §5); the state format's versioning
+  rule is above.

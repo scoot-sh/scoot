@@ -431,7 +431,7 @@ without a viewporter a full-size buffer. A static color asks for no frame
 callbacks and wakes the daemon for nothing.
 
 Once on screen a wallpaper costs no CPU (no wakeups in a minute, measured)
-and one buffer per output at most: about 3.7 MB RSS with a color, 36.8 MB
+and one buffer per output at most: about 4.0 MB RSS with a color, 36.8 MB
 with an image on a 4K output, and the same 36.8 MB with two 4K outputs
 showing it. The measured budget is in
 [`docs/scootbg/README.md`](docs/scootbg/README.md#the-resource-budget).

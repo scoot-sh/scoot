@@ -77,8 +77,8 @@ full per-feature cycle.
    `scootbg daemon` (`--profile NAME`, `--no-restore`); a moved image falls
    back with a warning, entries for absent outputs survive, the
    `apply-config` fingerprint is reserved; an image `set` sent as the
-   daemon starts, and a restore, decode once (705–718 → 450–491 ms to a
-   4K image on screen; a restored one 443–477 ms)
+   daemon starts, and a restore, decode once (714–820 → 450–476 ms to a
+   4K image on screen; a restored one 451–497 ms)
 10. [Seamless in scoot: a `[wallpaper]` config section](scoot-integration.md)
 11. [Lowest resource use of any wallpaper daemon](lightest.md) — the
     release gate: v1 ships only when no competitor beats scootbg beyond the
