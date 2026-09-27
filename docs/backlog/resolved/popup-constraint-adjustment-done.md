@@ -27,9 +27,9 @@ rectangle; the rules, and why each, are in
   edge measured from its parent menu.
 - **When.** At the initial configure, not `new_popup` as this entry said:
   a layer surface's popup has no parent yet at `new_popup`, while by its
-  first commit it must have one. Also on `xdg_popup.reposition`. Not
-  re-done later -- [reactive re-constraining](../core/popup-reactive-reconstrain.md)
-  is filed.
+  first commit it must have one. Also on `xdg_popup.reposition`. Later
+  re-done for reactive positioners — see
+  [`resolved/popup-reactive-reconstrain-done.md`](../resolved/popup-reactive-reconstrain-done.md).
 - **No target** (parent unmapped, parentless ancestor) or **any input
   beyond 2^24** leaves the positioner's own geometry. The bound is what
   keeps Smithay's `get_unconstrained_geometry` from overflowing `i32`,
