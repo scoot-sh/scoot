@@ -360,6 +360,10 @@ fn startup_placement_centres_on_the_logical_extent() {
 const CANVAS: i32 = 200;
 /// The opaque BGRA bytes a test window commits as its buffer.
 const WINDOW_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];
+/// The buffer edge the scale-only-commit test maps: big enough that the
+/// window's top-left quarter after a scale-2 commit still clears the rounded
+/// corner, and small enough to fit the one-window placement twice over.
+const SCALE_ONLY_BUFFER: i32 = 80;
 
 /// One instruction for the client thread.
 enum Step {
@@ -384,6 +388,11 @@ enum Step {
         buffer: i32,
         destination: Option<(i32, i32)>,
     },
+    /// Commit `set_buffer_scale(scale)` on the first mapped surface with no
+    /// new `attach` -- the shape a client takes when only the scale changes
+    /// and it keeps its buffer. The compositor must apply the cached scale
+    /// on such a commit, not only when a new buffer arrives.
+    SetBufferScale { scale: i32 },
 }
 
 /// What the client reports back.
@@ -758,6 +767,14 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 surface.commit();
                 keep_alive.push((surface, Some(xdg), Some(toplevel), Some(fractional)));
             }
+            Step::SetBufferScale { scale } => {
+                let (surface, _, _, _) = keep_alive
+                    .first()
+                    .expect("a scale-only commit needs a mapped window first");
+                surface.set_buffer_scale(*scale);
+                surface.damage_buffer(0, 0, SCALE_ONLY_BUFFER, SCALE_ONLY_BUFFER);
+                surface.commit();
+            }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
         acks.send(outcome).map_err(|e| e.to_string())?;
@@ -1037,6 +1054,64 @@ fn a_scaled_surface_lands_at_the_physical_rectangle() {
         bgra_at(&pixels, 2, 2),
         WINDOW_BGRA,
         "nothing should be drawn at the top-left corner"
+    );
+}
+
+/// A commit that changes only the buffer scale -- no new `attach` -- still
+/// rescales the surface.
+///
+/// `wl_surface.set_buffer_scale` is double-buffered state: it applies on the
+/// next commit with or without a new buffer. The pinned fork used to read it
+/// only when a new buffer arrived (`update_buffer`'s `NewBuffer` arm), so a
+/// scale-only commit kept rendering at the old scale: an 80x80 buffer
+/// committed at scale 2 with no re-attach still covered its whole 80x80,
+/// the top-left quarter blown up. The fork fix reads the cached scale on
+/// every commit that has a buffer (see `docs/forks.md`); this test fails on
+/// the pre-fix fork -- the far pixel is still window fill -- and passes
+/// after. Scaling back to 1 in a second scale-only commit covers several
+/// scales in a row; the transform takes the same path (two adjacent
+/// assignments under the same guard), and a square solid buffer could not
+/// show a transform-only commit anyway.
+#[test]
+fn a_scale_only_commit_rescales_the_surface() {
+    let mut fixture = Fixture::new(1.0);
+    fixture.run(Step::MapWindow {
+        buffer: SCALE_ONLY_BUFFER,
+        destination: None,
+    });
+    let rect = fixture.window_rect();
+    assert!(
+        rect.w >= SCALE_ONLY_BUFFER && rect.h >= SCALE_ONLY_BUFFER,
+        "the test needs a window the {SCALE_ONLY_BUFFER}x{SCALE_ONLY_BUFFER} buffer \
+         covers at scale 1, found {rect:?}"
+    );
+    let before = fixture.render();
+    assert_eq!(
+        bgra_at(&before, rect.x + 60, rect.y + 60),
+        WINDOW_BGRA,
+        "control: the 80x80 buffer at scale 1 must cover the window's top-left 80x80"
+    );
+
+    fixture.run(Step::SetBufferScale { scale: 2 });
+    let after = fixture.render();
+    assert_eq!(
+        bgra_at(&after, rect.x + 10, rect.y + 10),
+        WINDOW_BGRA,
+        "the buffer's top-left quarter must still draw at scale 2"
+    );
+    assert_ne!(
+        bgra_at(&after, rect.x + 60, rect.y + 60),
+        WINDOW_BGRA,
+        "a scale-only commit left the surface at scale 1: \
+         the buffer still covers its whole 80x80"
+    );
+
+    fixture.run(Step::SetBufferScale { scale: 1 });
+    let back = fixture.render();
+    assert_eq!(
+        bgra_at(&back, rect.x + 60, rect.y + 60),
+        WINDOW_BGRA,
+        "a second scale-only commit back to 1 must restore the full 80x80"
     );
 }
 

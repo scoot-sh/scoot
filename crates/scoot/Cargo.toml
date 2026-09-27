@@ -144,8 +144,8 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-one
-# commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-two
+# commits, branch `scoot/buffer-scale-without-new-buffer` (see `docs/forks.md` for
 # each one and why):
 #
 # - `43f50eb2` (also branch `scoot/syncobj-timeline-drop`) adds a `Drop` for
@@ -203,6 +203,18 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   order, a window mapped again under the drag -- the same window id under
 #   a new `wl_surface` -- was entered, then its old surface left, which
 #   mapped the proxy back over it (`first_motion.rs`, remap test).
+# - `6ab8b4a2` applies a commit's cached `buffer_scale` and
+#   `buffer_transform` on every commit that has a buffer, not only on a new
+#   one: `set_buffer_scale`/`set_buffer_transform` are double-buffered state
+#   that applies on commit with or without a new `attach`, but the old code
+#   read them only in the `NewBuffer` arm, so a scale-only commit kept
+#   rendering at the old scale (a same-size buffer committed at scale 2
+#   drew its top-left quarter over the whole surface until a re-attach).
+#   Pinned by `compositor/output_scale/tests.rs`'s scale-only-commit test.
+#   Content-identical to `e7130254`, cherry-picked onto `7e18b661` on its
+#   own branch: `e7130254` sits on `scoot/xwayland-selection-dnd` past two
+#   other-lane XWayland commits (`b16cd6a2`, `fcf6f314`) this lane must not
+#   carry, so they stay unpinned on that branch for the other lane's repin.
 #
 # Upstream status (checked 2026-09-25; the pixman hunk re-checked 2026-09-27,
 # the XDND commits 2026-09-27):
@@ -213,7 +225,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "7e18b661143cc1cfc33bda49bbab27d33f8a478c"
+rev = "6ab8b4a26a8f81328967951f750649861b40dc35"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session
