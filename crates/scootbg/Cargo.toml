@@ -19,9 +19,11 @@ scootbg-mem.workspace = true
 # `rs` backend is the default; the C-bringing `client_system` feature of
 # `wayland-backend` stays off, so nothing links libwayland.
 wayland-client = "0.31"
-# `wp_viewporter`, `wp_single_pixel_buffer_manager_v1` (staging) and
-# `wp_fractional_scale_manager_v1` (staging), all client side (§1).
-wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+# `wp_viewporter`, `wp_single_pixel_buffer_manager_v1` (staging),
+# `wp_fractional_scale_manager_v1` (staging), all client side (§1), and
+# `zxdg_output_manager_v1` (unstable), bound only for an output older than
+# `wl_output` v4, to learn its name.
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 # `zwlr_layer_shell_v1`, the one protocol scootbg cannot work without (§1).
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # poll(2), flock(2) and a non-blocking connect probe through raw syscalls, no `libc`

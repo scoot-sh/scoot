@@ -19,9 +19,11 @@ mod daemon;
 #[cfg(target_os = "linux")]
 mod framing;
 #[cfg(target_os = "linux")]
-mod output;
+mod outputs;
 #[cfg(target_os = "linux")]
 mod paths;
+#[cfg(target_os = "linux")]
+mod print;
 #[cfg(target_os = "linux")]
 mod protocol;
 
@@ -39,7 +41,7 @@ const USAGE_ERROR: u8 = 2;
 
 #[cfg(target_os = "linux")]
 fn main() -> ExitCode {
-    use output::warn;
+    use print::warn;
 
     let command = match cli::parse(std::env::args_os().skip(1)) {
         Ok(command) => command,
@@ -49,8 +51,8 @@ fn main() -> ExitCode {
         }
     };
     let printed = match command {
-        cli::Command::Help(topic) => output::print(topic.text()),
-        cli::Command::Version => output::print(&format!("{}\n", cli::version_string())),
+        cli::Command::Help(topic) => print::print(topic.text()),
+        cli::Command::Version => print::print(&format!("{}\n", cli::version_string())),
         cli::Command::Daemon => {
             return match daemon::run() {
                 daemon::Exit::Stopped => ExitCode::SUCCESS,
@@ -63,7 +65,7 @@ fn main() -> ExitCode {
         cli::Command::Client(request) => match client::send(request) {
             // `kill` prints nothing on success; the others print the reply.
             Ok(_) if request == protocol::Request::Kill => Ok(()),
-            Ok(reply) => output::print(&reply),
+            Ok(reply) => print::print(&reply),
             Err(error) => {
                 warn(format_args!("scootbg: {error}"));
                 return ExitCode::FAILURE;

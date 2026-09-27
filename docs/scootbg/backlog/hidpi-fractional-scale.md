@@ -17,6 +17,9 @@ blocked: null
   output's current mode size there, and test the rounding cases.
 - Without fractional scale: `wl_surface.set_buffer_scale` with the integer
   `preferred_buffer_scale` (surface v6) or the output's scale.
+- Today `wl_surface.preferred_buffer_scale`/`_transform` are ignored and
+  `query`'s `logical` is an integer-scale estimate until the surface is
+  configured ([ticket 3](resolved/outputs-and-layer-surfaces-done.md#for-the-next-tickets)).
 - A scale change rescales from the source (re-decoding if it was dropped),
   never from the previous scaled buffer.
 

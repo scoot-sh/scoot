@@ -31,6 +31,15 @@ pub fn scootbg_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_scootbg"))
 }
 
+fn sway_bin() -> Option<PathBuf> {
+    if let Some(explicit) = std::env::var_os("SCOOTBG_TEST_SWAY").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(explicit));
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join("sway"))
+        .find(|candidate| candidate.is_file())
+}
+
 fn scoot_bin() -> Option<PathBuf> {
     if let Some(explicit) = std::env::var_os("SCOOTBG_TEST_SCOOT").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(explicit));
@@ -70,12 +79,20 @@ pub struct Session {
     pub scratch: Scratch,
     compositor: Option<Child>,
     pub wayland_display: String,
+    /// For a sway session: `swaymsg`'s expected path and sway's IPC socket.
+    sway_ipc: Option<(PathBuf, PathBuf)>,
 }
 
 impl Session {
-    /// Starts `scoot --headless`, or returns `None` (after saying why) when
-    /// there is no `scoot` binary and it is not required.
+    /// Starts `scoot --headless --outputs 2`, or returns `None` (after
+    /// saying why) when there is no `scoot` binary and it is not required.
     pub fn start(tag: &str) -> Option<Self> {
+        Self::start_with(tag, 2, "")
+    }
+
+    /// Starts `scoot --headless --outputs N` with `config` as its config
+    /// file; `None` as for [`Session::start`].
+    pub fn start_with(tag: &str, outputs: u32, config: &str) -> Option<Self> {
         let Some(scoot) = scoot_bin() else {
             if std::env::var_os("SCOOTBG_REQUIRE_SCOOT").is_some() {
                 panic!(
@@ -91,11 +108,12 @@ impl Session {
             return None;
         };
         let scratch = Scratch::new(tag);
-        let config = scratch.0.join("config.toml");
-        fs::write(&config, "").unwrap();
-        let log = fs::File::create(scratch.0.join("scoot.log")).unwrap();
+        let config_path = scratch.0.join("config.toml");
+        fs::write(&config_path, config).unwrap();
+        let config = config_path;
+        let log = fs::File::create(scratch.0.join("compositor.log")).unwrap();
         let compositor = Command::new(&scoot)
-            .args(["--headless", "--outputs", "2", "--socket"])
+            .args(["--headless", "--outputs", &outputs.to_string(), "--socket"])
             .arg(scratch.0.join("scoot.sock"))
             .arg("--config")
             .arg(&config)
@@ -111,18 +129,125 @@ impl Session {
             scratch,
             compositor: Some(compositor),
             wayland_display: String::new(),
+            sway_ipc: None,
         };
-        session.wayland_display = session.wait_for_wayland();
+        session.wayland_display = session.wait_for_wayland(|dir| {
+            let ipc = dir.join("scoot.sock");
+            is_socket(&ipc).then_some(ipc)
+        });
         Some(session)
     }
 
-    /// The first `wayland-N` socket scoot binds in the fresh directory.
-    fn wait_for_wayland(&mut self) -> String {
+    /// Starts a headless sway (pixman, no GPU, no input devices, one
+    /// output), or returns `None` (after saying why) when there is no sway
+    /// and it is not required.
+    ///
+    /// The binary is `$SCOOTBG_TEST_SWAY` if set, else `sway` on `PATH`; a
+    /// headless instance in a scratch `XDG_RUNTIME_DIR` never touches a
+    /// running session. `SCOOTBG_REQUIRE_SWAY` turns the skip into a
+    /// failure, as `SCOOTBG_REQUIRE_SCOOT` does for scoot.
+    pub fn sway(tag: &str) -> Option<Self> {
+        let Some(sway) = sway_bin() else {
+            if std::env::var_os("SCOOTBG_REQUIRE_SWAY").is_some() {
+                panic!(
+                    "SCOOTBG_REQUIRE_SWAY is set but there is no sway: put it on PATH or \
+                     set SCOOTBG_TEST_SWAY"
+                );
+            }
+            eprintln!("skipped -- no sway on PATH (or set SCOOTBG_TEST_SWAY)");
+            return None;
+        };
+        let scratch = Scratch::new(tag);
+        let config = scratch.0.join("sway.conf");
+        // No swaybg (it would be a second background client), no Xwayland.
+        fs::write(&config, "swaybg_command -\nxwayland disable\n").unwrap();
+        let log = fs::File::create(scratch.0.join("compositor.log")).unwrap();
+        let mut command = Command::new(&sway);
+        command
+            .arg("-c")
+            .arg(&config)
+            .env("XDG_RUNTIME_DIR", &scratch.0)
+            .env("WLR_BACKENDS", "headless")
+            .env("WLR_RENDERER", "pixman")
+            .env("WLR_LIBINPUT_NO_DEVICES", "1")
+            .env("WLR_HEADLESS_OUTPUTS", "1")
+            .env_remove("WAYLAND_DISPLAY")
+            .env_remove("WAYLAND_SOCKET")
+            .env_remove("SWAYSOCK")
+            .env_remove("DISPLAY")
+            // A bus address, even one nothing listens on: nixpkgs' wrapper
+            // otherwise starts sway under `dbus-run-session`, which needs a
+            // system dbus config. A headless test sway needs no bus.
+            .env(
+                "DBUS_SESSION_BUS_ADDRESS",
+                format!("unix:path={}", scratch.0.join("no-bus").display()),
+            )
+            .stdin(Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log);
+        // Its own process group: a packaged sway may run under a wrapper
+        // (nixpkgs' starts it through `dbus-run-session`), and killing the
+        // group reaches sway itself.
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        let compositor = command
+            .spawn()
+            .unwrap_or_else(|e| panic!("cannot start {}: {e}", sway.display()));
+        let mut session = Self {
+            scratch,
+            compositor: Some(compositor),
+            wayland_display: String::new(),
+            sway_ipc: None,
+        };
+        let mut ipc = None;
+        session.wayland_display = session.wait_for_wayland(|dir| {
+            let found = fs::read_dir(dir)
+                .ok()?
+                .filter_map(Result::ok)
+                .find_map(|entry| {
+                    let name = entry.file_name().into_string().ok()?;
+                    (name.starts_with("sway-ipc.") && is_socket(&entry.path()))
+                        .then(|| entry.path())
+                });
+            ipc.clone_from(&found);
+            found
+        });
+        session.sway_ipc = ipc.map(|socket| (sway.with_file_name("swaymsg"), socket));
+        Some(session)
+    }
+
+    /// `swaymsg ARGS` against this session's sway; panics unless it
+    /// succeeds.
+    pub fn swaymsg(&self, args: &[&str]) -> String {
+        let (swaymsg, socket) = self.sway_ipc.as_ref().expect("not a sway session");
+        // Beside sway when packaged together, else on PATH.
+        let program = if swaymsg.is_file() {
+            swaymsg.clone()
+        } else {
+            PathBuf::from("swaymsg")
+        };
+        let output = Command::new(program)
+            .arg("-s")
+            .arg(socket)
+            .args(args)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        assert!(
+            output.status.success(),
+            "swaymsg {args:?}: {stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        stdout
+    }
+
+    /// Waits until the compositor's Wayland socket and its IPC socket
+    /// (found by `ipc`) are both up.
+    fn wait_for_wayland(&mut self, mut ipc: impl FnMut(&Path) -> Option<PathBuf>) -> String {
         let deadline = Instant::now() + PATIENCE;
         loop {
-            // Both sockets: scoot binds the Wayland one first and its IPC
-            // socket once it is fully up.
-            let ipc_up = is_socket(&self.scratch.0.join("scoot.sock"));
+            // Both sockets: the Wayland one comes first and the IPC socket
+            // once the compositor is fully up.
+            let ipc_up = ipc(&self.scratch.0).is_some();
             let wayland = fs::read_dir(&self.scratch.0).ok().and_then(|entries| {
                 entries.filter_map(Result::ok).find_map(|entry| {
                     let name = entry.file_name().into_string().ok()?;
@@ -133,11 +258,14 @@ impl Session {
                 return name;
             }
             if let Some(status) = self.compositor.as_mut().and_then(|c| c.try_wait().unwrap()) {
-                panic!("scoot exited during start-up ({status}):\n{}", self.log());
+                panic!(
+                    "the compositor exited during start-up ({status}):\n{}",
+                    self.log()
+                );
             }
             assert!(
                 Instant::now() < deadline,
-                "scoot did not come up within {PATIENCE:?}:\n{}",
+                "the compositor did not come up within {PATIENCE:?}:\n{}",
                 self.log()
             );
             std::thread::sleep(Duration::from_millis(20));
@@ -145,7 +273,7 @@ impl Session {
     }
 
     pub fn log(&self) -> String {
-        fs::read_to_string(self.scratch.0.join("scoot.log")).unwrap_or_default()
+        fs::read_to_string(self.scratch.0.join("compositor.log")).unwrap_or_default()
     }
 
     pub fn runtime_dir(&self) -> &Path {
@@ -183,6 +311,78 @@ impl Session {
         self.start_daemon(command)
     }
 
+    /// Starts `scootbg daemon` with `env` added and its stderr written to
+    /// [`Session::daemon_log`] rather than a pipe, which a protocol trace
+    /// (`WAYLAND_DEBUG`) could fill, and waits until it answers.
+    pub fn daemon_logged(&self, env: &[(&str, &str)]) -> Child {
+        let log = fs::File::create(self.daemon_log()).unwrap();
+        let mut command = self.scootbg();
+        command.arg("daemon").envs(env.iter().copied());
+        let mut child = command.stdout(Stdio::null()).stderr(log).spawn().unwrap();
+        let deadline = Instant::now() + PATIENCE;
+        while !answers(&self.socket()) {
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!(
+                    "scootbg daemon exited during start-up ({status}): {}",
+                    fs::read_to_string(self.daemon_log()).unwrap_or_default()
+                );
+            }
+            assert!(Instant::now() < deadline, "the daemon never answered");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        child
+    }
+
+    /// Where [`Session::daemon_logged`] writes the daemon's stderr.
+    pub fn daemon_log(&self) -> PathBuf {
+        self.scratch.0.join("scootbg.log")
+    }
+
+    /// `scootbg query`'s reply, parsed.
+    pub fn query(&self) -> serde_json::Value {
+        let output = self.run(&["query"]);
+        assert!(
+            output.status.success(),
+            "query: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    }
+
+    /// Queries until `done` holds for the output list, failing after
+    /// [`PATIENCE`] with the last reply. Returns the list.
+    pub fn query_until(
+        &self,
+        what: &str,
+        mut done: impl FnMut(&[serde_json::Value]) -> bool,
+    ) -> Vec<serde_json::Value> {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let reply = self.query();
+            let outputs = reply["outputs"].as_array().cloned().unwrap_or_default();
+            if done(&outputs) {
+                return outputs;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "never {what}; last reply: {reply}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// One request to scoot's own control socket (a scoot session only),
+    /// its reply parsed.
+    pub fn scoot_ipc(&self, request: &str) -> serde_json::Value {
+        let stream = UnixStream::connect(self.scoot_socket()).unwrap();
+        stream.set_read_timeout(Some(PATIENCE)).unwrap();
+        (&stream).write_all(request.as_bytes()).unwrap();
+        (&stream).write_all(b"\n").unwrap();
+        let mut line = String::new();
+        BufReader::new(&stream).read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap_or_else(|e| panic!("scoot replied {line:?}: {e}"))
+    }
+
     fn start_daemon(&self, mut command: Command) -> Child {
         let mut child = command
             .stdout(Stdio::piped())
@@ -203,12 +403,22 @@ impl Session {
         child
     }
 
-    /// Kills the compositor (SIGKILL: it gets no chance to say goodbye).
+    /// Kills the compositor (SIGKILL: it gets no chance to say goodbye),
+    /// and for sway its whole process group (see [`Session::sway`]).
     pub fn kill_compositor(&mut self) {
         if let Some(mut compositor) = self.compositor.take() {
+            if self.sway_ipc.is_some() {
+                let group = rustix::process::Pid::from_child(&compositor);
+                let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+            }
             let _ = compositor.kill();
             let _ = compositor.wait();
         }
+    }
+
+    /// The `scoot` control socket (a scoot session only).
+    pub fn scoot_socket(&self) -> PathBuf {
+        self.scratch.0.join("scoot.sock")
     }
 }
 

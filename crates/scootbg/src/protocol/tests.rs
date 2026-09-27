@@ -88,7 +88,7 @@ fn replies_are_one_tagged_line() {
     assert_eq!(reply_string(&Reply::Ok), "{\"type\":\"ok\"}\n");
     assert_eq!(
         reply_string(&Reply::Outputs {
-            outputs: &[] as &[OutputEntry]
+            outputs: &[] as &[OutputEntry<'_>; 0]
         }),
         "{\"type\":\"outputs\",\"outputs\":[]}\n"
     );
@@ -98,6 +98,78 @@ fn replies_are_one_tagged_line() {
             version: "0.1.0"
         }),
         "{\"type\":\"version\",\"protocol\":1,\"version\":\"0.1.0\"}\n"
+    );
+}
+
+/// The `query` entry's wire shape, pinned: every key present, `null`
+/// when unknown, sizes as objects. Scripts read this.
+#[test]
+fn output_entries_have_a_fixed_shape() {
+    use super::{Size, SurfaceEntry};
+    let known = OutputEntry {
+        name: Some("DP-1"),
+        description: Some("A \"quoted\" monitor"),
+        mode: Some(Size {
+            width: 3840,
+            height: 2160,
+        }),
+        scale: 2,
+        transform: "90",
+        logical: Some(Size {
+            width: 1080,
+            height: 1920,
+        }),
+        surface: SurfaceEntry {
+            state: "configured",
+            size: Some(Size {
+                width: 1080,
+                height: 1920,
+            }),
+        },
+        shows: None,
+    };
+    let unknown = OutputEntry {
+        name: None,
+        description: None,
+        mode: None,
+        scale: 1,
+        transform: "normal",
+        logical: None,
+        surface: SurfaceEntry {
+            state: "waiting",
+            size: None,
+        },
+        shows: None,
+    };
+    let line = reply_string(&Reply::Outputs {
+        outputs: &[known, unknown],
+    });
+    assert_eq!(line.matches('\n').count(), 1);
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({"type": "outputs", "outputs": [
+            {
+                "name": "DP-1",
+                "description": "A \"quoted\" monitor",
+                "mode": {"width": 3840, "height": 2160},
+                "scale": 2,
+                "transform": "90",
+                "logical": {"width": 1080, "height": 1920},
+                "surface": {"state": "configured", "size": {"width": 1080, "height": 1920}},
+                "shows": null,
+            },
+            {
+                "name": null,
+                "description": null,
+                "mode": null,
+                "scale": 1,
+                "transform": "normal",
+                "logical": null,
+                "surface": {"state": "waiting", "size": null},
+                "shows": null,
+            },
+        ]})
     );
 }
 

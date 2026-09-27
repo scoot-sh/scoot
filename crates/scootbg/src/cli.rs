@@ -16,8 +16,8 @@ mod tests;
 pub const USAGE: &str = "\
 scootbg -- wallpaper daemon for Wayland
 
-Early days: the daemon runs and answers on its control socket, but it does
-not draw a wallpaper yet.
+Early days: the daemon places a background surface on every output and
+answers on its control socket, but it does not draw a wallpaper yet.
 
 USAGE:
     scootbg COMMAND
@@ -44,6 +44,8 @@ USAGE:
 
 Connects to the compositor named by $WAYLAND_DISPLAY, which must support
 wlr-layer-shell, and serves requests on $XDG_RUNTIME_DIR/scootbg-NAME.sock.
+Each output gets one background-layer surface, kept across outputs coming
+and going; with no outputs at all the daemon waits for one.
 
 Runs until `scootbg kill` (exit status 0) or until the compositor goes
 away (exit status 1); either way the socket is removed. SIGTERM, SIGINT and
@@ -61,9 +63,11 @@ scootbg query -- print what each output shows
 USAGE:
     scootbg query
 
-Prints the daemon's reply, one line of JSON:
+Prints the daemon's reply, one line of JSON with one entry per output:
 {\"type\":\"outputs\",\"outputs\":[...]}
-Outputs are not tracked yet, so the list is empty for now.
+Each entry has the output's name, description, mode, scale, transform and
+logical size, and its surface's state: waiting, pending, configured (with
+its size), closed or gave-up. Nothing is drawn yet, so \"shows\" is null.
 ";
 
 pub const VERSION_HELP: &str = "\

@@ -10,7 +10,12 @@
 //!
 //! Then one thread, one `poll` over the Wayland fd, the listener and each
 //! client, with no timeout: when nothing happens the daemon makes no system
-//! call at all. No async runtime and no timers.
+//! call at all. No async runtime and no timers; the one timeout there is
+//! exists only while the listener rests after a failed accept (`listen`).
+//!
+//! Zero outputs is a normal state (a headless session before its first
+//! output, a laptop with the lid shut): nothing to draw, the same poll, no
+//! wakeups, until an output's global arrives.
 //!
 //! `kill` (exit 0) and the compositor going away or a protocol error
 //! (exit 1) remove the socket file on the way out. **Signals keep their
@@ -23,7 +28,9 @@
 //! rustix has no `signalfd`; see crate-and-daemon-done.md.)
 
 mod crash;
+mod listen;
 mod respond;
+mod surfaces;
 mod wayland;
 
 #[cfg(test)]
@@ -31,14 +38,16 @@ mod tests;
 
 use std::fmt;
 use std::io;
+use std::time::{Duration, Instant};
 
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
 use wayland_client::backend::WaylandError as BackendError;
 
 use crate::control::{Claim, ClaimError, Server};
-use crate::output::warn;
 use crate::paths::{self, PathError};
+use crate::print::warn;
+use listen::Listening;
 use respond::Responder;
 use wayland::{Wayland, WaylandError};
 
@@ -64,8 +73,6 @@ pub enum Error {
     /// A protocol error, or a dispatch that failed.
     Dispatch(wayland_client::DispatchError),
     Poll(io::Error),
-    /// The listener cannot accept any more (see `control`).
-    Accept(io::Error),
     /// The spare fd could not be taken at start-up.
     Spare(io::Error),
 }
@@ -87,7 +94,6 @@ impl fmt::Display for Error {
             }
             Self::Dispatch(error) => write!(f, "Wayland error: {error}"),
             Self::Poll(error) => write!(f, "poll failed: {error}"),
-            Self::Accept(error) => write!(f, "cannot accept clients any more: {error}"),
             Self::Spare(error) => write!(f, "cannot reserve a spare file descriptor: {error}"),
         }
     }
@@ -116,7 +122,7 @@ fn serve() -> Result<(), Error> {
     let mut daemon = Daemon {
         wayland,
         server,
-        responder: Responder::default(),
+        listening: Listening::default(),
         wayland_wants_write: false,
         poll_fds: Vec::new(),
         revents: Vec::new(),
@@ -136,7 +142,7 @@ fn serve() -> Result<(), Error> {
 struct Daemon {
     wayland: Wayland,
     server: Server,
-    responder: Responder,
+    listening: Listening,
     /// The last flush could not send everything: wait for POLLOUT.
     wayland_wants_write: bool,
     /// Reused across iterations so the loop allocates nothing once warm:
@@ -166,14 +172,21 @@ impl Daemon {
             }
             let wayland_fd = guard.connection_fd();
             fds.push(PollFd::new(&wayland_fd, wayland_events));
-            // Always: see `control`'s module docs for why the listener is
-            // never dropped from the set.
-            fds.push(PollFd::new(claim.listener(), PollFlags::IN));
+            // Always, unless resting after a failed accept (see `listen`
+            // and `control`'s module docs). Resting keeps its slot, with no
+            // events asked for, so the indices below stay fixed.
+            let (listen, timeout) = self.listening.poll_plan(Instant::now);
+            let listener_events = if listen {
+                PollFlags::IN
+            } else {
+                PollFlags::empty()
+            };
+            fds.push(PollFd::new(claim.listener(), listener_events));
             for conn in self.server.conns() {
                 fds.push(PollFd::new(conn.stream(), conn.interest()));
             }
 
-            match poll(&mut fds, None) {
+            match poll(&mut fds, timeout.map(timespec).as_ref()) {
                 Ok(_) => {}
                 Err(Errno::INTR) => {
                     self.poll_fds = reuse(fds);
@@ -216,24 +229,45 @@ impl Daemon {
 
             // Clients before accepting, so indices still match the poll set
             // (accepting may close the oldest client).
+            let mut responder = Responder::new(&self.wayland.state.outputs);
             let mut index = 0;
             for &revents in self.revents.get(LISTENER + 1..).unwrap_or_default() {
                 // A closed client leaves the next one at the same index.
-                if revents.is_empty() || self.server.service(index, revents, &mut self.responder) {
+                if revents.is_empty() || self.server.service(index, revents, &mut responder) {
                     index += 1;
                 }
             }
-            if self.responder.stop {
+            if responder.stop {
                 return Ok(());
             }
-            if self
-                .revents
-                .get(LISTENER)
-                .is_some_and(|r| r.intersects(PollFlags::IN))
+            if listen
+                && self
+                    .revents
+                    .get(LISTENER)
+                    .is_some_and(|r| r.intersects(PollFlags::IN))
             {
-                self.server
-                    .accept(claim.listener())
-                    .map_err(Error::Accept)?;
+                self.accept(claim);
+            }
+        }
+    }
+
+    /// Accepts waiting clients. A failure rests the listener rather than
+    /// end the daemon, which would take the wallpaper with it (`listen`).
+    fn accept(&mut self, claim: &Claim) {
+        match self.server.accept(claim.listener()) {
+            Ok(()) => {
+                if self.listening.worked() {
+                    warn(format_args!("scootbg: accepting clients again"));
+                }
+            }
+            Err(error) => {
+                if self.listening.failed(Instant::now()) {
+                    warn(format_args!(
+                        "scootbg: cannot accept clients: {error}; the wallpaper stays \
+                         up, and accepting is retried every {} s",
+                        listen::REST.as_secs()
+                    ));
+                }
             }
         }
     }
@@ -248,6 +282,15 @@ impl Daemon {
             Err(error) => Err(Error::Disconnected(error)),
         }
     }
+}
+
+/// A poll timeout. At most `listen::REST`, so it always fits; a second
+/// is the fallback all the same, never a timeout of zero (a spin).
+fn timespec(duration: Duration) -> rustix::event::Timespec {
+    rustix::event::Timespec::try_from(duration).unwrap_or(rustix::event::Timespec {
+        tv_sec: 1,
+        tv_nsec: 0,
+    })
 }
 
 /// Empties `fds` and hands its allocation back with a new lifetime.
