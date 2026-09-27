@@ -8,7 +8,7 @@ blocked: null
 
 # Output membership read from geometry — RESOLVED
 
-RESOLVED 2026-09-27 (PR #TBD, branch `output-membership-by-placement`).
+RESOLVED 2026-09-27 (PR #289, branch `output-membership-by-placement`).
 All three sites now read `output_clip::placed_on`:
 
 - **Frame callbacks** (`headless.rs`): the per-output loop fires a window
