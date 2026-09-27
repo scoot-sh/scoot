@@ -379,17 +379,10 @@ fn full_size_colors_never_write_into_pixels_another_output_shows() {
             s.assert_all(common::rgb("#2040c0"), w)
         });
     }
-    // Colors are never shared: a full-size buffer each, and at most a
-    // spare each besides (a released color of the same size is kept for
-    // the next change), all 1600×1000; the image's pages are gone with
-    // its last buffer.
+    // Colors are never shared: one full-size buffer each, no spare, and
+    // the image's pages gone with its last buffer.
     let kb = buffer_kb(1600, 1000);
-    std::thread::sleep(Duration::from_millis(300));
-    let maps = memfd_maps(pid);
-    assert!(
-        (2..=4).contains(&maps.len()) && maps.iter().all(|&m| m == kb),
-        "{maps:?}"
-    );
+    assert_eq!(wait_maps(pid, 2, "a color each"), [kb, kb]);
     assert_eq!(memfd_fds(pid), 0);
     assert_idle(pid, "full-size colors");
     assert_quiet_log(&session);

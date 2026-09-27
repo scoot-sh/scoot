@@ -24,8 +24,12 @@
 //!   buffer is written only while writable (never attached, or released,
 //!   and its pixels shared with no other buffer: [`crate::share`]), so a
 //!   change reuses a released buffer in place, else takes the other slot,
-//!   else waits for a release ([`Canvas::stalled`]). A released buffer of
-//!   a size no longer drawn is dropped at once rather than kept. The
+//!   else waits for a release ([`Canvas::stalled`]). A buffer released
+//!   while another is on screen is dropped at once, not kept as a spare:
+//!   a static wallpaper needs one buffer, and the next change allocating
+//!   again costs a few milliseconds (13 ms more at 4K, measured in
+//!   `docs/scootbg/backlog/resolved/memory-and-idle-done.md`) against a
+//!   whole output's worth of memory held for as long as it stays up. The
 //!   memfd is closed as soon as its `wl_shm_pool` exists (the compositor
 //!   has its own copy, the mapping keeps the memory); the pool is kept,
 //!   with no fd, for as long as the pixels are, so another output's buffer
@@ -38,9 +42,7 @@
 //!   (why not one: `crate::share`), put in a slot like a color's. A draw
 //!   with no rendered pixels for the image at that size says so
 //!   ([`Drew::NeedsRender`]) and the caller asks the worker, or finds them
-//!   on another output (`daemon::images::pump`). A released buffer
-//!   holding an image that is no longer on screen is dropped at once: only
-//!   a new render could use its slot.
+//!   on another output (`daemon::images::pump`).
 //!
 //! ## Clearing
 //!
@@ -564,13 +566,13 @@ impl Canvas {
         }
     }
 
-    /// `wl_buffer.release` for `buffer`: the slot is free again. A free
-    /// buffer not on screen is dropped when nothing could reuse it: an old
-    /// size, an image while something else is on screen (only a new render
-    /// could fill its slot), or anything while a single-pixel buffer is on
-    /// screen. An image's buffer released because its surface went (closed
-    /// by the compositor) is kept, and shown again on the new surface
-    /// without decoding. Returns whether a stalled draw should be retried.
+    /// `wl_buffer.release` for `buffer`: the slot is free again. A buffer
+    /// released while something else is on screen (another slot, or a
+    /// single-pixel buffer) is dropped: no spare is kept (see the module
+    /// docs). One released because its surface went (closed by the
+    /// compositor) is kept, and an image's is shown again on the new
+    /// surface without decoding. Returns whether a stalled draw should be
+    /// retried.
     pub fn released(&mut self, buffer: &WlBuffer) -> bool {
         let Some(index) = self
             .slots
@@ -579,19 +581,11 @@ impl Canvas {
         else {
             return false;
         };
-        let current_dims = self
-            .current
-            .and_then(|i| self.slots.get(i)?.as_ref())
-            .map(|slot| slot.memory().dims);
         let Some(mut slot) = self.slots.get_mut(index).and_then(Option::take) else {
             return false;
         };
         slot.released();
-        let memory = slot.memory();
-        let stale = Some(index) != self.current
-            && (self.pixel.is_some()
-                || (matches!(memory.content, Content::Image(_)) && self.current.is_some())
-                || current_dims.is_some_and(|d| d != memory.dims));
+        let stale = Some(index) != self.current && (self.pixel.is_some() || self.current.is_some());
         if stale {
             destroy(slot);
         } else {
