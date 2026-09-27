@@ -753,20 +753,28 @@ scale/mode) into one hardware session.
 - [Restore windows, workspaces and binds when a monitor reconnects](./resolved/output-reconnect-restore-done.md)
   — RESOLVED 2026-09-25 (PR #249): removal files the core's `EvictedOutput`
   keyed by connector identity, a matching add restores workspaces in order,
-  binds name the first/second screen. Live Asahi replug unverified (runbook
-  in the PR body); no debounce until flap timing is measured.
+  binds name the first/second screen. Live on the Asahi M2 Air since:
+  virtual pull on the dumb tier (`Asahi.md` Test 11) and a real replug on
+  the GPU tier (Test 12). No debounce until flap timing is measured.
 - [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./core/lock-vblank-bound-hardening.md)
   — OPEN, low: `await_vblank`'s "late, never early" should say "within one
   bound of the first blank drawn"; `stale_vblanks` entries should age out so
   a driver that never delivers an owed vblank can't freeze a reused CRTC.
   Filed from PR #247's round-2 review.
+- [An unplugged monitor's windows seem to disappear](./core/unplug-adopted-windows-invisible.md)
+  — OPEN, medium (daily-drive, filed from `Asahi.md` Test 12): on unplug the
+  monitor's workspaces are adopted as background workspaces of the focused
+  screen and nothing visible changes, so the person at the machine read it
+  as the window vanishing. Candidates: show the adopted workspace when focus
+  was on the removed screen, or a cue; needs a restore-safe design.
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
   — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
   + H (default `Super+comma/period` output binds) LANDED 2026-09-21
   (PR #208). E1 (every connector driven at startup) + E2 (per-head
   rendering, per-output lock waits, hotplug add/remove) LANDED 2026-09-25,
-  live on the Asahi M2 Air including a physical unplug and replug. Left:
-  GPU-tier runtime add and #48 `MoveTo` on hardware,
+  live on the Asahi M2 Air including a physical unplug and replug; the
+  GPU-tier runtime add and the multi-head mode change since proven there
+  (`Asahi.md` Tests 11–12). Left: #48 `MoveTo` on hardware,
   [reconnect restore](./resolved/output-reconnect-restore-done.md), and the
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.

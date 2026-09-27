@@ -22,7 +22,7 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | --- | --- | --- | --- |
 | [Ghostty fails at `scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md) | high → none | no | **RESOLVED, not reproducible** (2026-09-18) |
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
-| Issue #48's unconfirmed connector fallback, and multi-output phase E | — | yes | **mostly answered** (2026-09-25): both monitors driven at once on both tiers, lock and VT verified live, and a physical DP-1 unplug/replug removed and re-added its output; still open: #48's fallback onto a *different* connector (the panel can't be unplugged) and a GPU-tier runtime add |
+| Issue #48's unconfirmed connector fallback, and multi-output phase E | — | yes | **mostly answered** (2026-09-25): both monitors driven at once on both tiers, lock and VT verified live, and a physical DP-1 unplug/replug removed and re-added its output; still open: #48's fallback onto a *different* connector (the panel can't be unplugged); the GPU-tier runtime add was answered by Test 12 |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
 | [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | **ANSWERED** (2026-09-25): mpv goes direct (~60% less compositor CPU) once it hides its pointer; `apple,dcp` has no cursor plane, so a visible pointer rules out any primary attempt ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)); planes: 1 primary, 1 overlay, 0 cursor |
 | [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | **ANSWERED** (2026-09-25): 162 pairs (54 formats x tiled-compressed/tiled/`LINEAR`); clients pick compressed and Mesa follows the scanout tranche to `LINEAR`; mpv `dmabuf-wayland` cannot run (no hardware decoder: AVD firmware missing) |
@@ -31,6 +31,7 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | [Test 9: scoot vs niri on a real GPU](docs/benchmarks.md) | medium | Part B only | **ANSWERED** (2026-09-25) except input latency: on the real panel scoot-gpu used the least total CPU for relayout and pointer motion (no frame counts there); pixman the most |
 | Test 10: does the GPU driver keep an fd per imported plane | — | yes | **ANSWERED** (2026-09-25): yes, one (`copies_per_plane_per_output=1`). While a client runs scoot counts it exactly; after a client quits, one fd can linger until the next redraw, and one extra fd in one session is unexplained |
 | Test 11: output remove/restore, reconnected modeset and multi-head mode change on the dumb tier (the #249 runbook, for real) | — | yes | **ANSWERED** (2026-09-26): virtual-pull force-off/on of DP-1 removed and re-added its output; both windows adopted then restored in order under a fresh id, positional binds reach the returned monitor; `--mode 1280x720` drives DP-1 at that mode with eDP-1 warned onto preferred; runtime mode switch stays refused by design (read-only `wlr-output-management`) |
+| Test 12: GPU-tier runtime add, real-HPD remove/restore and multi-head mode change | — | yes | **ANSWERED** (2026-09-26): powering on a sleeping monitor adds a GPU-scanout head in ~50 ms; a real unplug adopts its window and the replug restores it under a fresh id with binds following; `--mode 1280x720` drives DP-1 at that mode on the GPU tier and a replug keeps it; adopted windows feel like they disappear ([UX ticket](docs/backlog/core/unplug-adopted-windows-invisible.md)) |
 
 ## Results so far (run 2026-09-18, `main` at `f688ac9`)
 
@@ -486,9 +487,9 @@ final product code, via `nix build .#scoot-gpu`. It ran on VT 2 through
     in PR #247's review round (`remove_output` refreshes the `Space` before
     withdrawing the global).
 - **Still unexecuted on hardware.**
-  - A GPU-tier runtime add (this run was dumb buffers).
+  - A GPU-tier runtime add (this run was dumb buffers). *Since run: Test 12.*
   - #48's `MoveTo` fallback.
-  - A mode change with several heads.
+  - A mode change with several heads. *Since run: Test 11 (dumb tier), Test 12 (GPU tier).*
 
 ---
 
@@ -1996,6 +1997,128 @@ section is the proof ticket. The only surprise was the rig's (one
 aliased-path write echoed without latching — same file via symlink,
 cause unknown), recorded above so the next run verifies every write by
 read-back.
+
+## Test 12 — GPU-tier runtime add, real replug and multi-head mode change (physical hands)
+
+Why: after Test 11 three hotplug paths were still unrun on hardware: a
+GPU-tier runtime add (a fresh `DrmCompositor` and EGL context beside a
+live one), a real-HPD remove/restore on the GPU tier (Test 11 used the
+virtual-pull rig on the dumb tier), and a multi-head mode change on the GPU
+tier. The DP-1 monitor was asleep all day and nothing remote could wake it
+(`ASAHI.local.md`), so this run waited for someone at the machine. Every
+transition below is a real power-on or cable pull. No `force` override was
+written, so no reboot was needed afterwards.
+
+Built on the machine from `main` at `87e1935` with
+`cargo build -p scoot --features gpu-scanout` in the flake dev shell, into
+its own target dir (`~/scoot-live-target`, `scoot` sha256 `57555773…9b1515d`).
+Same machine, kernel, VT 2 + private `seatd` recipe and `[output] scale =
+1.5` config as Test 11, `--renderer gles`. Scripts: `~/fx/live-start.sh`,
+`live-snap.sh NAME` (outputs, windows, fd count, one screenshot per output)
+and `live-stop.sh`. A udev monitor and a 0.5 s DP-1 sysfs poller ran
+throughout. Raw logs, snapshots and screenshots are under `~/fx/live/`
+(legs 1–2) and `~/fx/live-mode/` (leg 3), one directory per phase.
+
+### Leg 1 — runtime add on the GPU tier: power on a sleeping monitor
+
+scoot came up with only eDP-1 (DP-1 `disconnected`, 0 modes), two foot
+windows on it, 51 fds. Then the monitor's power button was pressed:
+
+```
+21:02:57.60  sysfs DP-1: connected, 21 modes
+INFO scoot::compositor::tty::hotplug: drm: driving a newly connected display connector=DP-1 crtc=crtc::Handle(68) width=1920 height=1080 scanout="gpu"
+INFO scoot::compositor::tty::hotplug: drm: a display was connected; added an output for it connector=DP-1 output=2 width=1920 height=1080
+```
+
+The first hotplug log line (01:02:57.571Z) was 50 ms ahead of the new output
+(57.622Z), with a second EGL context and GLES renderer created beside the
+live one. `outputs` lists DP-1 as id 2 at logical x=1707, 1280x720
+(scale 1.5). `super+shift+period` carried window 2 there. Its screenshot
+shows a correct half-width column with the focus ring. fds 51 → 66 with a
+window on the new head.
+
+**Leg 1 result: pass.**
+
+### Leg 2 — real unplug and replug on the GPU tier
+
+Cable pulled with window 2 focused on DP-1:
+
+```
+INFO scoot::compositor::tty::hotplug: drm: this connector went away connector=DP-1
+INFO scoot::compositor::tty::hotplug: drm: a display went away; removing its output output=2
+```
+
+The output was removed 57 ms after the change event (01:03:30.390Z →
+.447Z). Window 2 was adopted by eDP-1 (`output: 1`, `visible: false`, on
+the adopted background workspace) and focus fell to window 1. fds went back
+to exactly 51, the count before DP-1 existed.
+**Observed by the person at the machine: the window "feels like it
+disappears".** That is the designed adopt-as-background-workspace
+behaviour. It is filed as a UX ticket,
+[`unplug-adopted-windows-invisible`](docs/backlog/core/unplug-adopted-windows-invisible.md),
+not as a failure of this leg.
+
+Cable back in:
+
+```
+INFO scoot::compositor::tty::hotplug: drm: driving a newly connected display connector=DP-1 crtc=crtc::Handle(68) width=1920 height=1080 scanout="gpu"
+INFO scoot::compositor::tty::hotplug: drm: a display was connected; added an output for it connector=DP-1 output=3 width=1920 height=1080
+INFO scoot::compositor::reconnect: a display came back; restored its workspaces connector=DP-1 output=3 windows=1
+```
+
+The monitor returned under a fresh id (3), with window 2 restored to it,
+`visible: true` and the same geometry as before. fds were back to 63, the
+same as after the first add. The default `super+shift+period` then moved
+window 1 onto output 3, so positional binds reach the returned head on
+this tier too.
+
+**Leg 2 result: pass.** No `ERROR` lines and no foot `unknown output`
+warnings in either session.
+
+### Leg 3 — multi-head mode change on the GPU tier, and replug keeps it
+
+Session restarted with `--mode 1280x720` (DP-1 offers it, eDP-1 does not):
+
+```
+WARN scoot::compositor::tty::gpu: drm: connector offers no mode of the requested size; using its preferred mode connector=eDP-1 width=1280 height=720
+INFO scoot::compositor::tty: drm: driving this device path=/dev/dri/card2 connector=eDP-1 crtc=crtc::Handle(50) width=2560 height=1600 scanout="gpu"
+INFO scoot::compositor::tty: drm: driving this device path=/dev/dri/card2 connector=DP-1 crtc=crtc::Handle(68) width=1280 height=720 scanout="gpu"
+```
+
+`wlr-randr` lists DP-1 at 1280x720 (preferred + current), `outputs` gives
+logical 854x480, and a foot carried there renders correctly at that mode.
+Then a real unplug (output removed in 30 ms, fds back to 51) and replug:
+
+```
+INFO drm_atomic:create_surface{crtc=crtc::Handle(68) mode=Mode { name: "1280x720", ... }}
+INFO scoot::compositor::tty::hotplug: drm: a display was connected; added an output for it connector=DP-1 output=3 width=1280 height=720
+INFO scoot::compositor::reconnect: a display came back; restored its workspaces connector=DP-1 output=3 windows=1
+```
+
+The hotplug-add path honours `--mode` (`hotplug.rs` reads
+`requested_mode`). The returned head came back at 1280x720, not its
+preferred 1920x1080, with window 2 restored to it.
+
+**Leg 3 result: pass.** One cosmetic finding: the eDP-1 "offers no mode of
+the requested size" `WARN` repeats on every hotplug event (3 times in this
+session), because each re-plan re-picks modes for every connector. It is
+harmless and not ticketed.
+
+### Teardown and final box state
+
+`live-stop.sh` after each session: VT 1, nothing left running, seatd gone.
+Both `force` files are empty (never written), so no reboot was needed.
+DP-1 was left connected and awake.
+
+### Results, 2026-09-26 — the GPU-tier hotplug paths are proven, no product change needed
+
+A GPU-tier runtime add, a real-HPD remove/adopt and restore by identity
+under a fresh id, binds that follow the returned head, and a two-head
+`--mode` modeset that survives a replug all passed on the GPU scanout tier
+at `87e1935`. Of the hardware-bound hotplug paths, only #48's `MoveTo`
+fallback remains. It needs the only lit screen to be pullable, and the
+panel is not. The one product finding is UX, not correctness: adopted
+windows are hard to find (ticket above).
 
 ## Keys for the 2026-09-25 runs
 
