@@ -82,6 +82,16 @@ pub(super) const MIN_SCALE: f64 = 0.5;
 /// still-coherent 1920 logical pixels.
 pub(super) const MAX_SCALE: f64 = 4.0;
 
+/// The range half of [`clamp_scale`], on its own so the config layer can
+/// tell an out-of-range value (worth a warning) from one that only needs
+/// 1/120 resolution (silent: a sub-percent adjustment the user did not
+/// misconfigure, documented in `docs/configuration.md`'s `[output]` entry).
+/// `scale` is finite wherever this runs -- `clamp_scale` and `into_scale`
+/// both reject the non-finite spellings first.
+pub(super) fn clamp_scale_range(scale: f64) -> f64 {
+    scale.clamp(MIN_SCALE, MAX_SCALE)
+}
+
 /// The scale a config value actually gets. Pure and separately tested, the
 /// same shape as [`Appearance::clamped`](super::decorations::Appearance::clamped)
 /// and [`Config::clamp_gap`](scoot_core::Config::clamp_gap): out-of-range
@@ -91,9 +101,24 @@ pub(super) const MAX_SCALE: f64 = 4.0;
 /// A non-finite value (TOML can spell `nan` and `inf`) has no meaningful
 /// clamp -- `NaN.clamp(..)` is `NaN` -- so it resolves to 1.0, the same value
 /// its absence would.
+///
+/// The clamped value is then resolved to the nearest multiple of 1/120, so
+/// 1.33 becomes 160/120. `wp_fractional_scale_v1.preferred_scale` is a count
+/// of 120ths -- the only fractional scale the protocol can say -- while the
+/// render path would otherwise draw at the configured value as given, and a
+/// client buffer sized `round(logical * 160 / 120)` would be resampled into
+/// `logical * 1.33` device pixels. Resolving here makes the one stored value
+/// what rendering, `wl_output.scale`'s `ceil`, `preferred_scale` and the
+/// `wlr-output-management` report all agree on (Smithay's own
+/// `set_preferred_scale` sends `round(scale * 120)`, verified against the
+/// pinned rev's `fractional_scale/mod.rs`, so the round trip is exact).
+/// Rounding after the clamp cannot leave the range: both ends (0.5 = 60/120,
+/// 4.0 = 480/120) are exact multiples already, and the nearest multiple of
+/// 1/120 to a value inside the range stays inside it.
 pub(super) fn clamp_scale(scale: f64) -> f64 {
     if scale.is_finite() {
-        scale.clamp(MIN_SCALE, MAX_SCALE)
+        let clamped = clamp_scale_range(scale);
+        (clamped * 120.0).round() / 120.0
     } else {
         1.0
     }

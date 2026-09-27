@@ -1,12 +1,23 @@
 ---
-title: "A scale that is not a multiple of 1/120 cannot be drawn exactly by any client"
-status: "open"
-area: "core"
-priority: "low"
+title: "A scale that is not a multiple of 1/120 cannot be drawn exactly by any client — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# A scale that is not a multiple of 1/120 cannot be drawn exactly by any client
+# A scale that is not a multiple of 1/120 cannot be drawn exactly by any client — RESOLVED
+
+RESOLVED 2026-09-27 (PR #298). `[output] scale` is resolved to the nearest
+multiple of 1/120 where it is clamped (`compositor/output_scale.rs`,
+`clamp_scale`), so 1.33 becomes 160/120 everywhere: rendering,
+`wl_output.scale`'s `ceil`, `preferred_scale` and the `wlr-output-management`
+report. The original measurement below is kept as the before-evidence; the
+fix is pinned by config unit tests (rounding, exact multiples,
+idempotence), a live-client regression test (a protocol-exact buffer lands
+one to one at 1.33) and a reload-settles test, with the `[output] scale`
+entry (`docs/configuration.md`) and the output-scaling section
+(`docs/protocols.md`) updated.
 
 Found 2026-09-27 drawing scootbg at fractional scales
 ([hidpi-fractional-scale-done.md](../../scootbg/backlog/resolved/hidpi-fractional-scale-done.md)).
