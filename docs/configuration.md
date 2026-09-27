@@ -574,7 +574,9 @@ where it is. Adopted workspaces announce themselves to bars over
 `ext-workspace-v1` with their monitor's name ("2 DP-1", back to "2" on
 restore or once you empty them), and `scootctl windows` reports each
 window's 0-based workspace, whether it was adopted, and from which
-connector.
+connector. Without a bar there is no on-screen cue that the panel's own
+previous workspace went out of view — it stays one keystroke away, but
+nothing says so.
 
 Two failure behaviors specific to `[binds]`, both worth knowing since they
 fail silently rather than as a startup error:

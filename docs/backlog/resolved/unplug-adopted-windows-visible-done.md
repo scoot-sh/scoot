@@ -243,7 +243,12 @@ recorded:
   out as a new `Renamed` change beside the count half.
 - **Chained unplug keeps the earliest origin** (adoption tags only
   untagged workspaces); **a partial restore untags what stays** on the
-  adopter (the association is over once the monitor is back).
+  adopter (the association is over once the monitor is back). Known
+  corner, cosmetic only: if the *earlier* monitor of a chain returns
+  first, its record finds the adopter gone, nothing moves, and the
+  `"N DP-1"` tags linger on the remaining screen until the later monitor
+  returns through its own record — no loss, no mis-restore, positions
+  still verified per record.
 - **The IPC output-removed/restored event is filed separately**
   (`docs/backlog/ipc/output-removed-restored-event.md`), not built here.
   The bar-less residual stands as accepted (user decision): the switch
