@@ -1,26 +1,105 @@
 ---
-title: "XWayland: an X drag released on its first motion into an X window may drop on the proxy"
-status: "open"
-area: "protocols"
-priority: "low"
-blocked: "a scoot-sh/smithay change (proposed below, verified locally, not pushed)"
+title: "XWayland: an X drag released on its first motion into an X window may drop on the proxy — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
 ---
 
-# XWayland: an X drag released on its first motion into an X window may drop on the proxy
+# XWayland: an X drag released on its first motion into an X window may drop on the proxy — RESOLVED
 
-Filed 2026-09-27 from the final review of the pointer focus's X arm
-([`xwayland-pointer-focus-x11-done.md`](../resolved/xwayland-pointer-focus-x11-done.md)).
-Serves daily use (a quick flick-and-release drag between X apps) and
+RESOLVED 2026-09-27 (branch `claude/scoot-backlog-issues-3rfkfv`), by
+scoot-sh/smithay `b1ac3ca7` ("dnd: an X drag enters another client's X
+window without waiting for types", on `d3a4cd73`) and a one-method forward
+in `compositor/pointer_focus.rs`. Filed from the final review of the
+pointer focus's X arm
+([`xwayland-pointer-focus-x11-done.md`](./xwayland-pointer-focus-x11-done.md)).
+Served daily use (a quick flick-and-release drag between X apps) and
 computer use (an agent's drag is a few `pointer move` jumps).
 
-**Reproduced 2026-09-27, live with GTK and in the harness -- by two
-mechanisms, one of them not the one this entry was filed for.** A fix is
-worked out and verified against a patched local copy of the fork; it is a
-scoot-sh/smithay change, not pushed (the session that found it had no
-mandate to push to the fork), plus a one-method forward in scoot once the
-fork is repinned. Priority stays low: every failing drag below needs the
-release to come with no further motion after the pointer lands, which a
-hand on a mouse rarely does and an agent often does.
+## Resolution
+
+**Verdict: it reproduced, by two mechanisms -- neither quite the one it
+was filed for.** Details and raw tables in the record below.
+
+- **Direct** (the drag's first motion onto another client's X window):
+  GTK and Qt take `XdndSelection` and look for a target before the window
+  manager's proxy exists, so they name their types to nobody; Smithay's
+  `DnDGrab` entered no target without types, so the proxy was never
+  unmapped and the drop went to it. Live, GTK `mousepad` over X: **0/20**
+  landed; the harness pin failed 3 of 3.
+- **Own** (a drag that crossed the source's own window first): leaving it
+  mapped and raised the proxy, entering the target unmapped it, and the
+  raise's `ConfigureNotify` could reach GTK's window cache first. Live:
+  **18/20** (17/20 in a first run).
+- The filed mechanism (the X server delivering the motion before the
+  proxy's `UnmapNotify`) is real but, measured in
+  `compositor/xwayland/tests/first_motion_race.rs`, bites only a source
+  that resolves from an eager event cache at once on the motion (45/50
+  lost, "announced, settled, cache"); a source that queries the server
+  never lost one, and GTK defers its lookup to an idle.
+
+**The fix** (fork `b1ac3ca7`, touching Smithay's generic `input/dnd` as
+well as the XWM): a new defaulted `DndFocus::enter_needs_metadata(&self,
+data, source) -> bool` (default `true`, today's behavior). `DnDGrab`
+asks it before delaying an enter for want of types, and enters such a
+target before leaving the old one. `X11Surface` answers `false` for an X
+drag over another client's X window (or the source's own, once it has
+named types), and its `leave` skips the proxy remap when another X window
+was entered since -- no map/unmap between two X windows. scoot forwards
+the method from `PointerFocus` (the X arm to the `X11Surface`, everything
+else to the `WlSurface`, which keeps the default). Wayland-origin drags
+and drags onto Wayland windows keep today's order and gate. Repinned in
+`crates/scoot/Cargo.toml`, `Cargo.lock`, `flake.nix` and
+[`docs/forks.md`](../../forks.md).
+
+**Fail-first.** The three pins in
+`compositor/xwayland/tests/first_motion.rs` (now un-ignored) fail on every
+run at `d3a4cd73` (the first with "found \"Smithay XDND proxy\"", the
+two crossing pins with "mapped the proxy back in between"); with only the
+metadata half of the patch, the crossing pin still fails; with
+`b1ac3ca7`, all three pass.
+
+**Measured with the fix** (the coordinating session, against a local path
+patch of exactly `b1ac3ca7`): the first_motion, drop, drop_end, dnd, xdnd,
+clipboard and peer suites 49/49, three runs; full `--features xwayland`
+nextest 1870 passed, 25 skipped; workspace 2357 passed, 25 skipped.
+Live, mousepad over X: direct one-motion X to X drop **0/20 -> 20/20**;
+five steps then the jump **18/20 -> 20/20**; X to Wayland unchanged,
+10/10. Rerun on the repinned tree (the commit that moved this entry
+here, fork from git): `--features xwayland` nextest with
+`SCOOT_REQUIRE_XWAYLAND=1`, 1870 passed, 25 skipped; the same seven
+suites 49/49, three runs; workspace nextest 2357 passed, 25 skipped;
+clippy `-D warnings` clean with and without `--features xwayland`; `fmt
+--check` clean; `scripts/smoke-test.sh` passed. The live GTK drags were
+not rerun on the repinned tree (same fork source as the path patch).
+
+**Not fixed, and not fixable here.** A direct or own drag whose release
+comes in the same step as the motion onto the target fails on every build
+(0/10 before and after): GTK 3 decides a release on the target it had
+*before* the motion (`gtk_drag_button_release_cb` reads the context before
+the motion's low-priority `gtk_drag_update_idle` runs), and nothing reaches
+the proxy. That would happen on any X server; the compositor cannot
+reorder a toolkit's idle. Documented for users and agents in
+[`docs/protocols.md`](../../protocols.md#clipboard-drag-and-drop-and-input-methods):
+let the move settle before the release.
+
+**Unverified.**
+- No live Qt or Chromium test; only GTK (`mousepad`) was driven live. Qt's
+  start-of-drag behavior is from its code; the harness's `QueryPointer`
+  source stands in for Qt and Chromium.
+- "wl, same step" (an own drag crossing onto the Wayland window, released
+  in the same step) went 9/10, 9/10 before to 8/10 with the fix. Small,
+  within noise at ten drags, and unexplained; not chased.
+- Found in passing: in the harness, a move from one X window onto another
+  followed by a press in the same batch never delivered the press to any X
+  window. Filed separately as
+  [`xwayland-press-after-crossing-move-lost.md`](../protocols/xwayland-press-after-crossing-move-lost.md).
+
+## History: the entry as filed and as worked
+
+Kept verbatim for its measurements. Its present tense ("not pushed",
+"proposed below") describes the tree before the fork commit and repin.
 
 ## As filed (reasoned from code)
 

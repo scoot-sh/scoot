@@ -111,9 +111,9 @@ XDND finished msg` in the log. Its non-blocking notes:
 - **First-motion race, left, unverified then.** Reasoned from the code:
   an X-origin drag released on its very first motion into an X window may
   send `XdndDrop` to the proxy scoot has just unmapped. Filed as
-  [`xwayland-x-drag-first-motion-race.md`](../protocols/xwayland-x-drag-first-motion-race.md),
-  and since reproduced live (by a related mechanism: the proxy never
-  unmapped at all), with a fork fix proposed there.
+  [`xwayland-x-drag-first-motion-race-done.md`](./xwayland-x-drag-first-motion-race-done.md),
+  since reproduced live (by a related mechanism: the proxy never unmapped
+  at all) and resolved by fork `b1ac3ca7`.
 - **Slow target, inherent.** If a genuinely new X drag starts while a
   slow target is still converting the previous drop, the target reads the
   new drag's data: X has one `XdndSelection`, and the new drag owns it.

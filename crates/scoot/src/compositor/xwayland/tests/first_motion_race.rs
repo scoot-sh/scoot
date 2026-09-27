@@ -2,7 +2,7 @@
 //! source's motion and the window manager's proxy unmap reach the source
 //! when the drag's first motion onto another X window moves the proxy out
 //! of the way. Its numbers are recorded in
-//! `docs/backlog/protocols/xwayland-x-drag-first-motion-race.md`.
+//! `docs/backlog/resolved/xwayland-x-drag-first-motion-race-done.md`.
 //!
 //! scoot flushes the unmap to the X server before it flushes the motion to
 //! XWayland, but the X server does not keep that order: it handles input

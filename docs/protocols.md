@@ -691,6 +691,21 @@ window could not drop on a Wayland one; scoot's Smithay fork flushes them
 (`6e6fe896`, [forks.md](forks.md))
 ([`backlog/resolved/xwayland-pointer-focus-x11-done.md`](backlog/resolved/xwayland-pointer-focus-x11-done.md)).
 
+A quick drag straight from one X app onto another lands too, released on
+the first motion that reaches the other window. GTK and Qt start an X drag
+without telling anyone what they are dragging, and upstream Smithay's drag
+enters no window until it knows, so the full-screen window stayed over the
+target and such a drop went nowhere (GTK `mousepad` over X: 0 of 20
+landed). scoot's Smithay fork lets an X drag enter another client's X
+window at once, and go from one X window to the next without showing the
+full-screen window in between (`b1ac3ca7`; 20 of 20)
+([`backlog/resolved/xwayland-x-drag-first-motion-race-done.md`](backlog/resolved/xwayland-x-drag-first-motion-race-done.md)).
+One limit is GTK's own, on any X server: a release that arrives together
+with the motion that brings the pointer onto the target (an agent sending
+`pointer move` and the button release back to back, with no pause) is
+decided on the window the pointer was over *before* that motion, so it
+drops nothing. Let the move settle before the release.
+
 **Input methods: XIM is not provided.** X clients compose text through XIM
 (an X-side protocol an input-method daemon speaks as an X client); XWayland
 does not bind `text-input-v3` (its binary links no such interface), so a

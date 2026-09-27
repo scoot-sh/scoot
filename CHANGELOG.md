@@ -9,6 +9,18 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — a quick drag from one X app onto another lands
+
+- **With `--xwayland`, a quick drag straight from one X app onto another
+  now lands**, released on the first motion that reaches it. Before, a
+  GTK or Qt drag that got to the other X window in one motion dropped
+  nothing, and one that crossed from one X window onto another failed now
+  and then (GTK `mousepad` over X: 0/20 and 18/20 landed; both 20/20
+  now). A release sent together with that motion, with no pause (an agent
+  pipelining `pointer move` and the release), still drops nothing in GTK
+  apps: GTK decides it on the window the pointer was over before the
+  move. Let the move settle first.
+
 ### 2026-09-27 — drag-and-drop with X apps works in every direction
 
 - **With `--xwayland`, drag-and-drop works in every direction**: from a

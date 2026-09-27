@@ -144,7 +144,7 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus nineteen
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty
 # commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
 # each one and why):
 #
@@ -189,6 +189,15 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   flight and keep the selection. Any other taker is now taken back from
 #   (flushed). It also cancels the source of a stale dropped offer a new
 #   Wayland drag onto X replaces.
+# - `b1ac3ca7` lets an X drag enter another client's X window without
+#   waiting for the source's types (a new, defaulted
+#   `DndFocus::enter_needs_metadata`, which `pointer_focus.rs` forwards),
+#   and enters it before leaving the old one. GTK and Qt name their types
+#   to nobody when a drag starts, so the grab entered nothing, the proxy
+#   stayed over the target, and a quick drag released on its first motion
+#   onto another X app dropped nothing (live, mousepad over X: 0/20 before,
+#   20/20 after; see
+#   `docs/backlog/resolved/xwayland-x-drag-first-motion-race-done.md`).
 #
 # Upstream status (checked 2026-09-25; the pixman hunk re-checked 2026-09-27,
 # the XDND commits 2026-09-27):
@@ -199,7 +208,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "d3a4cd7385e39d4dea55337a22b3805d24e52d49"
+rev = "b1ac3ca7d8dc57e0a6f0b4c78f01897a23cfd49d"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session

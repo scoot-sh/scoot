@@ -1,6 +1,6 @@
 //! An X drag's first motion onto another X window, and a drag crossing
 //! from one X window onto another. See
-//! `docs/backlog/protocols/xwayland-x-drag-first-motion-race.md`.
+//! `docs/backlog/resolved/xwayland-x-drag-first-motion-race-done.md`.
 //!
 //! GTK and Qt start an X drag by taking `XdndSelection` and at once looking
 //! for the window under the pointer -- before the window manager has made
@@ -13,12 +13,11 @@
 //! first and unmaps it as it enters the second, so a source that looks in
 //! between finds the proxy over the second (live: 2-3 of 20).
 //!
-//! Both need a scoot-sh/smithay change not pinned yet, so these are
-//! ignored: they fail at `d3a4cd73` (the first with "found \"Smithay XDND
-//! proxy\"", the other two with "mapped the proxy back in between") and pass
-//! with the patch the backlog entry describes. Un-ignore them with the
-//! repin, and forward `DndFocus::enter_needs_metadata` in
-//! `pointer_focus.rs`.
+//! Both are fixed in scoot-sh/smithay `b1ac3ca7` (`DndFocus::
+//! enter_needs_metadata`, which `pointer_focus.rs` forwards). These pins
+//! fail at `d3a4cd73`, the fork rev before it (the first with "found
+//! \"Smithay XDND proxy\"", the other two with "mapped the proxy back in
+//! between"), and pass at `b1ac3ca7`.
 //!
 //! `first_motion_race.rs` measures the timing half: that the window
 //! manager's unmap and the motion reach the source unordered.
@@ -38,7 +37,6 @@ use super::xdnd::{Inbox, XDND_VERSION, packed};
 /// there, not the proxy, and the drop released without another motion
 /// lands.
 #[test]
-#[ignore = "needs the scoot-sh/smithay first-motion patch: see this module's doc"]
 fn an_x_drags_first_motion_onto_an_x_window_finds_that_window() {
     let Some(mut live) = live("an_x_drags_first_motion_onto_an_x_window_finds_that_window") else {
         return;
@@ -108,7 +106,6 @@ fn an_x_drags_first_motion_onto_an_x_window_finds_that_window() {
 /// nothing. Pinned on what the source is told: no `MapNotify` for the
 /// proxy on that motion. Onto another client's window...
 #[test]
-#[ignore = "needs the scoot-sh/smithay first-motion patch: see this module's doc"]
 fn an_x_drag_crossing_onto_another_clients_window_never_maps_the_proxy() {
     crossing_never_maps_the_proxy(
         "an_x_drag_crossing_onto_another_clients_window_never_maps_the_proxy",
@@ -119,7 +116,6 @@ fn an_x_drag_crossing_onto_another_clients_window_never_maps_the_proxy() {
 /// ...and onto another window of the source's own client (two windows of
 /// one app instance).
 #[test]
-#[ignore = "needs the scoot-sh/smithay first-motion patch: see this module's doc"]
 fn an_x_drag_crossing_onto_its_own_clients_other_window_never_maps_the_proxy() {
     crossing_never_maps_the_proxy(
         "an_x_drag_crossing_onto_its_own_clients_other_window_never_maps_the_proxy",
