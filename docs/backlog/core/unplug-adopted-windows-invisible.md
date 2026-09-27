@@ -25,11 +25,13 @@ output. That only matters with three or more outputs. The adopted
 workspaces are inactive. Nothing on the panel changes except the focus
 ring: the window reports `output: 1, visible: false` and focus falls to
 whatever was already on the panel. There was no bar in that session, so
-nothing on screen said where the window went. From the person at the machine: "hasn't shown back on
-the original screen yet", then "it feels like they disappear".
+nothing on screen said where the window went. From the person at the
+machine: "hasn't shown back on the original screen yet", then "it feels
+like they disappear".
 
-The window is not lost. `Super+2` or `Super+Ctrl+j` reaches the adopted workspace, and a
-replug restores it (PR #249, proven live in Tests 11 and 12). But a user who
+The window is not lost. `Super+2` or `Super+Ctrl+j` reaches the adopted
+workspace, and a replug restores it (PR #249, proven live in Tests 11 and
+12). But a user who
 does not know the design sees their work vanish, which is the failure that
 matters for a daily driver.
 
@@ -62,14 +64,16 @@ exactly the adopted block, in order, with the snapshot's active index.
      `EvictedOutput`. `normalize` can shift it if the user's workspaces
      change in between, so store it relative to the adopted block (or
      verify it) rather than as a raw index.
-2. **A visible cue without changing the layout.** The cheapest form needs
-   no scoot change: a bar that speaks `ext-workspace-v1` already shows
-   workspace 2 appear on the panel at the moment of the unplug. Test 12
-   ran without a bar, which is part of why it read as a disappearance. A
-   stronger form is an OSD or notification ("DP-1 disconnected: 1 window
-   moved to workspace 2"), which needs a path scoot does not have yet.
-   Either way the window stays a keystroke away, so this is a cue, not a
-   fix.
+2. **A visible cue without changing the layout.** A bar alone is a weak
+   cue. A bar that speaks `ext-workspace-v1` sees the panel's workspace
+   list grow by one at the unplug ("1 2" → "1 2 3": `diff::changes` emits
+   only `Added { index: 2 }`, the new trailing empty workspace). But scoot
+   publishes only each output's count and active index
+   (`compositor/ext_workspace.rs`), with no occupancy, so nothing marks
+   workspace 2 as where the window went. A usable cue is an OSD or
+   notification ("DP-1 disconnected: 1 window moved to workspace 2"),
+   which needs a path scoot does not have yet. Either way the window stays
+   a keystroke away, so this is a cue, not a fix.
 3. **Merge into the active workspace.** Rejected unless 1 and 2 fail: it
    brings back the pile-up the current design exists to prevent, and it
    makes "restore exactly what was adopted" much harder.

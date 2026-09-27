@@ -2074,7 +2074,8 @@ INFO scoot::compositor::reconnect: a display came back; restored its workspaces 
 ```
 
 The monitor returned under a fresh id (3), with window 2 restored to it,
-`visible: true` and the same geometry as before. The default `super+shift+period` then moved
+`visible: true` and the same geometry as before. The default
+`super+shift+period` then moved
 window 1 onto output 3, so positional binds reach the returned head on
 this tier too.
 
