@@ -5,16 +5,23 @@
 //! to `i32::MAX`, because `wl_shm.create_pool` and `create_buffer` take
 //! `int32` and the size comes from the compositor.
 //!
-//! **Never write after attach.** A compositor may read the pages at any
-//! time between `wl_surface.attach` + `commit` and `wl_buffer.release`, so
-//! writing then tears what it shows. The type state keeps scootbg's own
-//! code paths to that rule: [`ShmBuffer::attach`] consumes the writable
-//! handle, and the [`Attached`] it returns has no way to the pixels until
-//! [`Attached::released`] gives a [`ShmBuffer`] back. That is a discipline
-//! for callers, not a guarantee: safe code could still clone the fd and
-//! write through it, and nothing checks that `released` is only called on
-//! a real `wl_buffer.release`. Tearing is all a violation costs; it is not
-//! what memory safety rests on (see `pixels_mut`).
+//! **Never write while the compositor may read.** A compositor may read the
+//! pages at any time between `wl_surface.attach` + `commit` and
+//! `wl_buffer.release`, so writing then tears what it shows. This type
+//! cannot know when that is: one mapping may back several `wl_buffer`s, on
+//! several outputs' surfaces at once, each attached and released on its own.
+//! The rule is kept by the daemon, which reaches [`ShmBuffer::pixels_mut`]
+//! only through one gate (`scootbg::share::Slot::memory_mut`: its own
+//! buffer released, and no other buffer on the same pages), unit-tested
+//! there. That is a discipline for callers, not a guarantee: tearing is all
+//! a violation costs; it is not what memory safety rests on (see
+//! `pixels_mut`).
+//!
+//! **The fd is closed once the pool exists** ([`ShmBuffer::close_fd`]):
+//! `wl_shm.create_pool` sends the compositor its own copy (the Wayland
+//! library `dup`s it when the request is queued), and the mapping keeps the
+//! memory alive on this side, so holding the memfd open would only cost a
+//! file descriptor per buffer.
 //!
 //! **Sealed.** The memfd is created with `MFD_ALLOW_SEALING` and sealed
 //! `F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL` once sized. The compositor
@@ -137,10 +144,11 @@ impl Drop for Mapping {
     }
 }
 
-/// A buffer scootbg may write: not attached, or released by the
-/// compositor.
+/// The pages behind one or more `wl_buffer`s, mapped writable. When they
+/// may be written is the daemon's to decide (see the module docs).
 pub struct ShmBuffer {
-    fd: OwnedFd,
+    /// The memfd, until [`ShmBuffer::close_fd`].
+    fd: Option<OwnedFd>,
     map: Mapping,
     geometry: Geometry,
 }
@@ -192,7 +200,7 @@ impl ShmBuffer {
             return Err(ShmError::Io(io::Error::other("mmap returned null")));
         };
         Ok(Self {
-            fd,
+            fd: Some(fd),
             map: Mapping { ptr, len },
             geometry,
         })
@@ -208,7 +216,7 @@ impl ShmBuffer {
         //
         // Another process maps the same pages: the compositor, from
         // `wl_shm.create_pool` (which takes `fd()` before any attach) until
-        // it drops the pool, whatever the buffer's state. So `&mut [u8]`'s
+        // it drops the pool, whatever the buffers' states. So `&mut [u8]`'s
         // "nothing else changes this memory" holds only because the
         // compositor does not write a client's shm buffers. That is
         // `wl_shm`'s contract and every compositor's behaviour, not
@@ -227,38 +235,16 @@ impl ShmBuffer {
         self.geometry
     }
 
-    /// The memfd, to pass to `wl_shm.create_pool`.
-    pub fn fd(&self) -> BorrowedFd<'_> {
-        self.fd.as_fd()
+    /// The memfd, to pass to `wl_shm.create_pool`; `None` once closed.
+    pub fn fd(&self) -> Option<BorrowedFd<'_>> {
+        self.fd.as_ref().map(AsFd::as_fd)
     }
 
-    /// Hands the buffer to the compositor: call this where the buffer is
-    /// attached and committed. The pixels are unreachable until
-    /// [`Attached::released`].
-    pub fn attach(self) -> Attached {
-        Attached { inner: self }
-    }
-}
-
-/// A buffer the compositor may be reading. It has no way to reach the
-/// pixels; `wl_buffer.release` turns it back into a [`ShmBuffer`].
-#[derive(Debug)]
-pub struct Attached {
-    inner: ShmBuffer,
-}
-
-impl Attached {
-    /// The compositor sent `wl_buffer.release`: the buffer is ours to write
-    /// again.
-    pub fn released(self) -> ShmBuffer {
-        self.inner
-    }
-
-    pub fn geometry(&self) -> Geometry {
-        self.inner.geometry
-    }
-
-    pub fn fd(&self) -> BorrowedFd<'_> {
-        self.inner.fd()
+    /// Closes the memfd. The pages stay: this mapping keeps them, and so
+    /// does every mapping the compositor made from its own copy of the fd.
+    /// The seals stay with the file, so no one who still holds it can
+    /// shrink it under this mapping either.
+    pub fn close_fd(&mut self) {
+        self.fd = None;
     }
 }

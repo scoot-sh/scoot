@@ -13,7 +13,9 @@
 //!   drawn it at: an output plugged in or reconfigured, a new scale. The
 //!   decoded source is never kept (tens of MB for nothing), so this decodes
 //!   the file again. Renders of the same image merge into one job while it
-//!   waits, so it is decoded once for all of them.
+//!   waits, so it is decoded once for all of them. A target another output
+//!   already shows at that size is taken out before the job runs
+//!   ([`Jobs::satisfy`]): it shares those pixels, and is not decoded for.
 //!
 //! **The worker runs one job at a time, newest first.** A burst of `set`s
 //! then shows the last one after one decode, not after all of them: when
@@ -168,6 +170,26 @@ impl<C> Jobs<C> {
                 index += 1;
             }
         }
+    }
+
+    /// Takes out of the waiting renders every target `shared` says it
+    /// served from pixels an output already has (and a render left with
+    /// none); returns whether any was. Trials are left alone: nothing has
+    /// their image yet.
+    pub fn satisfy(&mut self, mut shared: impl FnMut(&Arc<Image>, Target) -> bool) -> bool {
+        let mut any = false;
+        for Job { image, targets, .. } in self.queue.iter_mut().filter(|job| job.trial.is_none()) {
+            targets.retain(|&target| {
+                let served = shared(image, target);
+                any |= served;
+                !served
+            });
+        }
+        if any {
+            self.queue
+                .retain(|job| job.trial.is_some() || !job.targets.is_empty());
+        }
+        any
     }
 
     /// Takes the newest job to run, if none runs now: first dropping the

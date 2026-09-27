@@ -326,3 +326,97 @@ fn a_stamp_never_goes_back() {
     output.want(4);
     assert_eq!(output.stamp(), 9);
 }
+
+/// A surface the compositor has not configured a round trip after it was
+/// made stops holding up replies, and is still drawn when its `configure`
+/// comes. Each new surface gets the round trip afresh, and a round trip
+/// about an older surface says nothing about the live one.
+#[test]
+fn a_surface_not_configured_a_round_trip_after_it_was_made_holds_up_no_reply() {
+    let mut outputs = Outputs::<()>::default();
+    let id = pending(&mut outputs);
+    let red = Some(color("#c03020"));
+    let output = &mut outputs.get_mut(id).unwrap().output;
+    let first = output.creation();
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting,
+        "a fresh surface is waited for"
+    );
+    // A round trip about some other surface: nothing changes.
+    assert!(!output.unanswered(first.wrapping_add(1)));
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
+    // Its own round trip, and still no configure: late.
+    assert!(output.unanswered(first));
+    assert!(!output.unanswered(first), "said once");
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Done
+    );
+    assert_eq!(output.plan(red.as_ref(), Scale::Integer(1)), Plan::Nothing);
+    // The configure comes after all: drawn, and waited for as usual.
+    let _ = output.configure(3, 1600, 1000);
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
+    assert_eq!(
+        output.plan(red.as_ref(), Scale::Integer(1)),
+        Plan::Show(drawn("#c03020", 1600, 1000, 1))
+    );
+    output.drew(drawn("#c03020", 1600, 1000, 1));
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Done
+    );
+    // A round trip that comes back after the configure: not late.
+    assert!(!output.unanswered(output.creation()));
+
+    // A `clear` makes a new surface: waited for afresh, and the old
+    // surface's round trip does not count against it.
+    output.recreated();
+    let second = output.creation();
+    assert_ne!(second, first);
+    assert!(!output.unanswered(first));
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
+    assert!(output.unanswered(second));
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Done
+    );
+
+    // Closed and made again: a new surface again, and a failed draw still
+    // reports as failed whatever the surface.
+    let _ = output.configure(4, 1600, 1000);
+    assert_eq!(output.closed(), Effect::DestroyAndRetry);
+    assert!(!output.unanswered(second), "closed, not pending");
+    assert_eq!(output.retry(), Effect::Create);
+    let third = output.creation();
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Waiting
+    );
+    assert!(output.unanswered(third));
+    output.draw_failed();
+    assert_eq!(
+        output.progress(red.as_ref(), Scale::Integer(1)),
+        Progress::Failed
+    );
+}
+
+/// Nothing wanted is never waited for, late or not.
+#[test]
+fn a_late_surface_changes_nothing_for_a_clear() {
+    let mut outputs = Outputs::<()>::default();
+    let id = pending(&mut outputs);
+    let output = &mut outputs.get_mut(id).unwrap().output;
+    assert_eq!(output.progress(None, Scale::Integer(1)), Progress::Done);
+    assert!(output.unanswered(output.creation()));
+    assert_eq!(output.progress(None, Scale::Integer(1)), Progress::Done);
+}

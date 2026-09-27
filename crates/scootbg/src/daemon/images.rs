@@ -9,6 +9,14 @@
 //! size the output no longer has, is dropped too (a later draw asks for a
 //! new one).
 //!
+//! **Sharing.** The worker draws each size once; the pixels are wrapped
+//! for the compositor once and offered to every output of that size
+//! (`daemon::canvas::Pixels`), each showing them through its own
+//! `wl_buffer` (`crate::share`). A render asked for an output whose size
+//! another output already shows the image at (one plugged in later, a
+//! surface re-created) is served from those pixels in [`pump`], with no
+//! decode at all.
+//!
 //! A **trial** (a `set` of an image) changes nothing until it lands:
 //!
 //! - it could not be decoded: its reply is the reason, and every output
@@ -22,14 +30,16 @@
 //!   them like a color's (`crate::waiters`).
 
 use std::io;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use wayland_client::QueueHandle;
 
+use super::canvas::{self, Content};
 use super::change::{image_dims, reconcile, sweep};
 use super::respond::Ready;
 use super::surfaces::Objects;
-use super::wayland::State;
+use super::wayland::{Globals, State};
 use super::worker::{Done, JobError, Rendered, Worker};
 use crate::choices::Choices;
 use crate::control::ConnId;
@@ -69,9 +79,11 @@ fn wants(choices: &Choices, entry: &Entry<Objects>, image: &Image) -> bool {
         .is_some_and(|wanted| wanted.serial == image.serial)
 }
 
-/// Starts the next job if the worker is free. Returns whether one failed
-/// to start (and was landed as failed), which may have queued a reply.
+/// Starts the next job if the worker is free, after serving what it can
+/// from pixels already drawn ([`share`]). Returns whether a job failed to
+/// start (and was landed as failed), which may have queued a reply.
 pub fn pump(state: &mut State, qh: &QueueHandle<State>) -> bool {
+    share(state, qh);
     let State {
         outputs,
         choices,
@@ -97,6 +109,47 @@ pub fn pump(state: &mut State, qh: &QueueHandle<State>) -> bool {
     }
 }
 
+/// Serves each waiting render from pixels an output already has for that
+/// image at that size (on screen, kept, or waiting to be), so the output
+/// shares them rather than decode the file again; then draws the outputs
+/// served. Nothing to do, and no cost, while no render waits.
+fn share(state: &mut State, qh: &QueueHandle<State>) {
+    let State {
+        globals,
+        outputs,
+        choices,
+        images,
+        ..
+    } = &mut *state;
+    let served = images.jobs.satisfy(|image, target| {
+        let Some(pixels) = outputs
+            .iter()
+            .find_map(|entry| entry.objects.canvas.image(image.serial, target.dims))
+            .map(Rc::clone)
+        else {
+            return false;
+        };
+        // Still there, still wanting it, still that size; anything else is
+        // for `next` to drop.
+        match outputs.get_mut(target.output) {
+            Some(entry)
+                if wants(choices, entry, image)
+                    && image_dims(&entry.output) == Some(target.dims) =>
+            {
+                entry.objects.canvas.offer(pixels);
+                true
+            }
+            _ => false,
+        }
+    });
+    if served {
+        // Idempotent: an output with nothing to change sends nothing.
+        for entry in outputs.iter_mut() {
+            reconcile(globals, choices, &mut images.jobs, entry, qh);
+        }
+    }
+}
+
 /// Lands the running job's result (see the module docs).
 pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
     let State {
@@ -116,7 +169,15 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
         // A render: the image is already the choice.
         match done {
             Ok(rendered) => {
-                offer(outputs, choices, &image, rendered);
+                offer(
+                    globals,
+                    qh,
+                    outputs,
+                    choices,
+                    &image,
+                    &job.targets,
+                    rendered,
+                );
                 for target in &job.targets {
                     if let Some(entry) = outputs.get_mut(target.output) {
                         reconcile(globals, choices, &mut images.jobs, entry, qh);
@@ -164,42 +225,67 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
     for entry in outputs.iter_mut().filter(|entry| applies(entry)) {
         entry.output.want(generation);
     }
-    offer(outputs, choices, &image, rendered);
+    offer(
+        globals,
+        qh,
+        outputs,
+        choices,
+        &image,
+        &job.targets,
+        rendered,
+    );
     for entry in outputs.iter_mut().filter(|entry| applies(entry)) {
         reconcile(globals, choices, &mut images.jobs, entry, qh);
     }
     waiters.push(trial.conn, generation);
 }
 
-/// Hands each rendered buffer to its output, if that output is still
-/// there, still wants this image, and is still that size; reports a draw
-/// that failed.
+/// Hands each rendered size to the job's targets of that size that are
+/// still there, still want this image, and are still that size: wrapped
+/// for the compositor once, and shared by all of them (a buffer nobody
+/// takes is dropped). Reports a draw that failed.
 fn offer(
+    globals: &Globals,
+    qh: &QueueHandle<State>,
     outputs: &mut Outputs<Objects>,
     choices: &Choices,
     image: &Image,
+    targets: &[Target],
     rendered: Vec<Rendered>,
 ) {
-    for (Target { output, dims }, result) in rendered {
-        let Some(entry) = outputs.get_mut(output) else {
-            continue;
+    for (dims, result) in rendered {
+        let targeted = |entry: &Entry<Objects>| {
+            targets
+                .iter()
+                .any(|t| t.output == entry.output.id() && t.dims == dims)
+                && wants(choices, entry, image)
         };
-        if !wants(choices, entry, image) {
-            continue;
-        }
-        match result {
-            Ok(buffer) => {
-                if image_dims(&entry.output) == Some(dims) {
-                    entry.objects.canvas.offer(image.serial, dims, buffer);
+        // Still that size: a buffer for a size gone stale is dropped.
+        let takes =
+            |entry: &Entry<Objects>| targeted(entry) && image_dims(&entry.output) == Some(dims);
+        let shared = match result {
+            Ok(buffer) if outputs.iter().any(takes) => {
+                canvas::pixels(globals, qh, buffer, Content::Image(image.serial))
+                    .map_err(|error| error.to_string())
+            }
+            Ok(_) => continue,
+            Err(message) => Err(message),
+        };
+        match shared {
+            Ok(pixels) => {
+                for entry in outputs.iter_mut().filter(|entry| takes(entry)) {
+                    entry.objects.canvas.offer(Rc::clone(&pixels));
                 }
             }
             Err(message) => {
-                warn(format_args!(
-                    "scootbg: cannot draw {:?} on {}: {message}",
-                    image.path,
-                    entry.output.label()
-                ));
-                entry.output.draw_failed();
+                for entry in outputs.iter_mut().filter(|entry| targeted(entry)) {
+                    warn(format_args!(
+                        "scootbg: cannot draw {:?} on {}: {message}",
+                        image.path,
+                        entry.output.label()
+                    ));
+                    entry.output.draw_failed();
+                }
             }
         }
     }

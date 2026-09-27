@@ -33,10 +33,10 @@ fn scratch(name: &str) -> std::path::PathBuf {
     dir
 }
 
-/// One decode for every target: each distinct size drawn once, and an
-/// output of a size already drawn gets a copy of the same pixels.
+/// One decode for every target, and one buffer per distinct size: outputs
+/// of one size share it (no copy is made for the second one).
 #[test]
-fn every_target_gets_its_buffer_from_one_decode() {
+fn every_size_gets_one_buffer_from_one_decode() {
     let dir = scratch("targets");
     let file = dir.join("q.jpg");
     std::fs::write(&file, samples::QUADRANTS_JPEG).unwrap();
@@ -57,20 +57,17 @@ fn every_target_gets_its_buffer_from_one_decode() {
             dims: (64, 40),
         },
     ];
-    let mut done = work(&image(&file, Mode::Fill), &targets).unwrap();
-    assert_eq!(done.len(), 3);
-    done.sort_by_key(|(target, _)| target.dims);
-    let mut pixels: Vec<(Target, Vec<u8>)> = done
+    let done = work(&image(&file, Mode::Fill), &targets).unwrap();
+    let mut sizes: Vec<(u32, u32)> = done
         .into_iter()
-        .map(|(target, buffer)| {
-            let mut buffer = buffer.unwrap();
-            let geometry = buffer.geometry();
-            assert_eq!((geometry.width as u32, geometry.height as u32), target.dims);
-            (target, buffer.pixels_mut().to_vec())
+        .map(|(dims, buffer)| {
+            let geometry = buffer.unwrap().geometry();
+            assert_eq!((geometry.width as u32, geometry.height as u32), dims);
+            dims
         })
         .collect();
-    pixels.sort_by_key(|(target, _)| (target.dims, target.output == c));
-    assert_eq!(pixels[1].1, pixels[2].1, "the same size: the same pixels");
+    sizes.sort_unstable();
+    assert_eq!(sizes, [(30, 20), (64, 40)], "one buffer per size");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -121,8 +118,9 @@ fn one_target_failing_leaves_the_others() {
     ];
     for mode in Mode::ALL {
         let done = work(&image(&file, mode), &targets).unwrap();
-        for (target, result) in done {
-            assert_eq!(result.is_ok(), target.output == b, "{mode:?} {target:?}");
+        assert_eq!(done.len(), 2, "{mode:?}");
+        for (dims, result) in done {
+            assert_eq!(result.is_ok(), dims == (16, 16), "{mode:?} {dims:?}");
         }
     }
     std::fs::remove_dir_all(&dir).unwrap();

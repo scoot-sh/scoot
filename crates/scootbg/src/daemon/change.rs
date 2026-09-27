@@ -86,8 +86,15 @@ pub fn reconcile(
                 layer.destroy();
             }
             objects.canvas.clear();
-            objects.layer = Some(LayerObjects::create(globals, &objects.output, qh, id));
             entry.output.recreated();
+            let creation = entry.output.creation();
+            objects.layer = Some(LayerObjects::create(
+                globals,
+                &objects.output,
+                qh,
+                id,
+                creation,
+            ));
             true
         }
     }
