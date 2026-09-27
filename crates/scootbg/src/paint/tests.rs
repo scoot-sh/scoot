@@ -1,5 +1,22 @@
-use super::{Drawn, Path, Pick, SLOTS, Slot, pick};
+use std::sync::Arc;
+
+use super::{Drawn, Path, Pick, SLOTS, Slot, buffer_scale, pick};
 use crate::color::Color;
+use crate::image::render::Look;
+use crate::image::{Filter, Mode};
+use crate::wallpaper::{Image, Wallpaper};
+
+fn image() -> Wallpaper {
+    Wallpaper::Image(Arc::new(Image {
+        path: "/a.png".into(),
+        look: Look {
+            mode: Mode::Fill,
+            fill: Color { r: 0, g: 0, b: 0 },
+            filter: Filter::Lanczos3,
+        },
+        serial: 1,
+    }))
+}
 use crate::outputs::Size;
 
 #[test]
@@ -57,7 +74,7 @@ fn only_a_full_size_buffer_takes_the_output_scale() {
 #[test]
 fn buffer_dims_follow_the_path_and_never_overflow() {
     let drawn = |width, height, scale| Drawn {
-        color: Color { r: 0, g: 0, b: 0 },
+        content: Wallpaper::Color(Color { r: 0, g: 0, b: 0 }),
         size: Size { width, height },
         scale,
     };
@@ -170,5 +187,27 @@ fn every_combination_picks_a_legal_slot() {
                 assert!(i < SLOTS);
             }
         }
+    }
+}
+
+/// An image is always a full-size buffer at the output's scale, on every
+/// path: only colors take the viewport shortcuts.
+#[test]
+fn an_image_is_full_size_on_every_path() {
+    let color = Wallpaper::Color(Color { r: 1, g: 2, b: 3 });
+    for path in [Path::SinglePixel, Path::ViewportShm, Path::FullShm] {
+        assert_eq!(buffer_scale(path, Some(&image()), 2), 2);
+        assert_eq!(buffer_scale(path, Some(&image()), 0), 1, "never 0");
+        assert_eq!(buffer_scale(path, Some(&color), 2), path.buffer_scale(2));
+        assert_eq!(buffer_scale(path, None, 3), path.buffer_scale(3));
+        let drawn = Drawn {
+            content: image(),
+            size: Size {
+                width: 1600,
+                height: 1000,
+            },
+            scale: 2,
+        };
+        assert_eq!(drawn.buffer_dims(path), Some((3200, 2000)));
     }
 }

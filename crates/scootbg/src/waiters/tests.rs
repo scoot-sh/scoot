@@ -47,12 +47,12 @@ fn waiters_resolved_together_share_one_sync() {
     // Nothing more resolves: no sync.
     assert_eq!(waiters.resolve(|_| None), None);
     let mut ready = Vec::new();
-    waiters.synced(1, &mut ready);
+    waiters.synced(1, |conn, outcome| ready.push((conn, outcome)));
     assert_eq!(ready, [(10, Outcome::Shown), (12, Outcome::Shown)]);
     // The last one fails, in a later turn, behind the next sync.
     assert_eq!(waiters.resolve(|_| Some(Outcome::Failed)), Some(2));
     ready.clear();
-    waiters.synced(2, &mut ready);
+    waiters.synced(2, |conn, outcome| ready.push((conn, outcome)));
     assert_eq!(ready, [(11, Outcome::Failed)]);
     assert!(waiters.is_idle());
 }
@@ -67,12 +67,12 @@ fn a_sync_releases_every_earlier_one() {
     waiters.push(2, 2);
     assert_eq!(waiters.resolve(|_| Some(Outcome::Shown)), Some(2));
     let mut ready = Vec::new();
-    waiters.synced(1, &mut ready);
+    waiters.synced(1, |conn, outcome| ready.push((conn, outcome)));
     assert_eq!(ready, [(1, Outcome::Shown)]);
     waiters.push(3, 3);
     assert_eq!(waiters.resolve(|_| Some(Outcome::Shown)), Some(3));
     ready.clear();
-    waiters.synced(3, &mut ready);
+    waiters.synced(3, |conn, outcome| ready.push((conn, outcome)));
     assert_eq!(ready, [(2, Outcome::Shown), (3, Outcome::Shown)]);
     assert!(waiters.is_idle());
 }
@@ -90,11 +90,11 @@ fn waiters_of_gone_connections_are_forgotten() {
     waiters.forget_gone(|conn| conn % 2 == 0);
     assert_eq!(waiters.counts(), (1, 1));
     let mut ready = Vec::new();
-    waiters.synced(1, &mut ready);
+    waiters.synced(1, |conn, outcome| ready.push((conn, outcome)));
     assert_eq!(ready, [(2, Outcome::Shown)]);
     assert_eq!(waiters.resolve(|_| Some(Outcome::Shown)), Some(2));
     ready.clear();
-    waiters.synced(2, &mut ready);
+    waiters.synced(2, |conn, outcome| ready.push((conn, outcome)));
     assert_eq!(ready, [(4, Outcome::Shown)]);
 }
 
@@ -113,7 +113,7 @@ fn within_capacity_nothing_reallocates() {
         }
         let sync = waiters.resolve(|_| Some(Outcome::Shown)).unwrap();
         ready.clear();
-        waiters.synced(sync, &mut ready);
+        waiters.synced(sync, |conn, outcome| ready.push((conn, outcome)));
         assert_eq!(ready.len(), CAPACITY);
     }
     assert_eq!(waiters.waiting.as_ptr(), waiting);

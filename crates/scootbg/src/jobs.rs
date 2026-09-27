@@ -1,0 +1,210 @@
+//! The images waiting for the worker thread: what to decode and for which
+//! outputs, with no threads and no Wayland objects, so every ordering is a
+//! unit test. `daemon::images` runs them.
+//!
+//! Two kinds of job:
+//!
+//! - A **trial**: a `set` of an image. Nothing is changed until it has
+//!   decoded, so a file that is missing, not an image, too large or
+//!   corrupt leaves every output as it was and the reply says why. It
+//!   renders the outputs configured when it was asked, so the success
+//!   path needs no second decode.
+//! - A **render**: an image already chosen, needed at a size nobody has
+//!   drawn it at: an output plugged in or reconfigured, a new scale. The
+//!   decoded source is never kept (tens of MB for nothing), so this decodes
+//!   the file again. Renders of the same image merge into one job while it
+//!   waits, so it is decoded once for all of them.
+//!
+//! **The worker runs one job at a time, newest first.** A burst of `set`s
+//! then shows the last one after one decode, not after all of them: when
+//! it succeeds, every older trial it covers is superseded (`Choices`) and
+//! answered without being decoded. If it fails, the next newest runs, so
+//! the newest request that *can* be shown wins. A render carries the
+//! serial of its image, which is that image's request generation.
+//!
+//! **Bounded.** A connection has one request in flight, but a client that
+//! hangs up can connect again, and the change it asked for still happens,
+//! so trials are capped at [`MAX_TRIALS`] queued; one more is refused
+//! (nothing changed). Renders number at most one job per chosen image,
+//! with at most one target per output.
+
+use std::sync::Arc;
+
+use crate::outputs::OutputId;
+use crate::wallpaper::Image;
+
+#[cfg(test)]
+mod tests;
+
+/// Trials waiting at once, at most: twice the connection limit, the same
+/// bound as the waiting replies (`crate::waiters`).
+pub const MAX_TRIALS: usize = 2 * crate::control::MAX_CONNECTIONS;
+
+/// One output to draw an image for, at a buffer size in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Target {
+    pub output: OutputId,
+    pub dims: (u32, u32),
+}
+
+/// A trial's request: who to answer, and which outputs it chose for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Trial<C> {
+    pub conn: C,
+    /// `None` for every output.
+    pub output: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct Job<C> {
+    pub image: Arc<Image>,
+    pub targets: Vec<Target>,
+    /// `Some` for a trial.
+    pub trial: Option<Trial<C>>,
+}
+
+impl<C> Job<C> {
+    fn serial(&self) -> u64 {
+        self.image.serial
+    }
+
+    fn covers(&self, serial: u64, target: Target) -> bool {
+        self.serial() == serial && self.targets.contains(&target)
+    }
+}
+
+/// Trials already at [`MAX_TRIALS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Busy;
+
+#[derive(Debug)]
+pub struct Jobs<C> {
+    queue: Vec<Job<C>>,
+    /// The job on the worker, while it is there.
+    running: Option<Job<C>>,
+}
+
+impl<C> Default for Jobs<C> {
+    fn default() -> Self {
+        Self {
+            queue: Vec::new(),
+            running: None,
+        }
+    }
+}
+
+impl<C> Jobs<C> {
+    /// Queues a trial of `image` for `targets`.
+    pub fn trial(
+        &mut self,
+        image: Arc<Image>,
+        trial: Trial<C>,
+        targets: Vec<Target>,
+    ) -> Result<(), Busy> {
+        let trials = self.queue.iter().filter(|job| job.trial.is_some()).count();
+        if trials >= MAX_TRIALS {
+            return Err(Busy);
+        }
+        self.queue.push(Job {
+            image,
+            targets,
+            trial: Some(trial),
+        });
+        Ok(())
+    }
+
+    /// Asks for `image` drawn at `target`, unless a job already will.
+    pub fn render(&mut self, image: &Arc<Image>, target: Target) {
+        let serial = image.serial;
+        let covered = self
+            .running
+            .iter()
+            .chain(&self.queue)
+            .any(|job| job.covers(serial, target));
+        if covered {
+            return;
+        }
+        // One target per output: a newer size replaces an older one.
+        let waiting = self
+            .queue
+            .iter_mut()
+            .find(|job| job.trial.is_none() && job.serial() == serial);
+        match waiting {
+            Some(job) => {
+                job.targets.retain(|t| t.output != target.output);
+                job.targets.push(target);
+            }
+            None => self.queue.push(Job {
+                image: Arc::clone(image),
+                targets: vec![target],
+                trial: None,
+            }),
+        }
+    }
+
+    /// Removes the trials that `superseded` (their output and serial) says
+    /// newer choices have made moot, calling `answer` with each one's
+    /// connection. Not the running one: it is answered when it lands.
+    pub fn sweep(
+        &mut self,
+        superseded: impl Fn(Option<&str>, u64) -> bool,
+        mut answer: impl FnMut(C),
+    ) {
+        let mut index = 0;
+        while index < self.queue.len() {
+            let moot = self.queue.get(index).is_some_and(|job| {
+                job.trial
+                    .as_ref()
+                    .is_some_and(|trial| superseded(trial.output.as_deref(), job.serial()))
+            });
+            if moot {
+                let job = self.queue.remove(index);
+                if let Some(trial) = job.trial {
+                    answer(trial.conn);
+                }
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    /// Takes the newest job to run, if none runs now: first dropping the
+    /// render targets `wanted` says are no longer wanted (and render jobs
+    /// left with none). Returns the job's image and targets for the
+    /// worker; the job itself stays here until [`Jobs::finished`].
+    pub fn next(
+        &mut self,
+        wanted: impl Fn(&Arc<Image>, Target) -> bool,
+    ) -> Option<(Arc<Image>, Vec<Target>)> {
+        if self.running.is_some() {
+            return None;
+        }
+        for job in self.queue.iter_mut().filter(|job| job.trial.is_none()) {
+            let image = Arc::clone(&job.image);
+            job.targets.retain(|&target| wanted(&image, target));
+        }
+        self.queue
+            .retain(|job| job.trial.is_some() || !job.targets.is_empty());
+        let newest = (0..self.queue.len())
+            .max_by_key(|&i| self.queue.get(i).map_or(0, |job| job.serial()))?;
+        let job = self.queue.remove(newest);
+        let work = (Arc::clone(&job.image), job.targets.clone());
+        self.running = Some(job);
+        Some(work)
+    }
+
+    /// The running job is done: it is handed back to be landed.
+    pub fn finished(&mut self) -> Option<Job<C>> {
+        self.running.take()
+    }
+
+    #[cfg(test)]
+    pub fn is_running(&self) -> bool {
+        self.running.is_some()
+    }
+
+    #[cfg(test)]
+    pub fn queued(&self) -> usize {
+        self.queue.len()
+    }
+}

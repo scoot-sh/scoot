@@ -13,31 +13,37 @@
 //! to the connections. See `crate::waiters` for the bookkeeping and its
 //! bounds.
 
+use std::sync::Arc;
+
 use wayland_client::{Connection, QueueHandle};
 
 use super::canvas::Drew;
-use super::respond::{ChangeError, Wallpaper};
+use super::respond::{ChangeError, Changes, Ready};
 use super::surfaces::{LayerObjects, Objects, RoundTrip};
 use super::wayland::{Globals, State};
 use crate::choices::{Choice, Choices};
 use crate::control::ConnId;
-use crate::outputs::Entry;
-use crate::paint::Plan;
+use crate::jobs::{Jobs, Target, Trial};
+use crate::outputs::{Entry, Output};
+use crate::paint::{self, Plan};
 use crate::print::warn;
-use crate::protocol::OutputList;
-use crate::waiters;
+use crate::protocol::{OutputList, Show};
+use crate::waiters::{self, Outcome};
+use crate::wallpaper::{Image, Wallpaper};
 
 /// Makes `entry`'s surface show what `choices` says for it. Returns whether
-/// it committed.
+/// it committed. An image with no buffer rendered at the size needed is
+/// asked of the worker (`jobs`), and drawn when it lands.
 pub fn reconcile(
     globals: &Globals,
     choices: &Choices,
+    jobs: &mut Jobs<ConnId>,
     entry: &mut Entry<Objects>,
     qh: &QueueHandle<State>,
 ) -> bool {
     let info = entry.output.info();
     let wanted = choices.for_output(info.name.as_deref());
-    let scale = globals.path.buffer_scale(info.scale);
+    let scale = paint::buffer_scale(globals.path, wanted, info.scale);
     let id = entry.output.id();
     match entry.output.plan(wanted, scale) {
         Plan::Nothing => false,
@@ -48,12 +54,18 @@ pub fn reconcile(
             let Some(layer) = objects.layer.as_mut() else {
                 return false;
             };
-            match objects.canvas.show(globals, qh, id, layer, target) {
+            match objects.canvas.show(globals, qh, id, layer, &target) {
                 Ok(Drew::Committed) => {
                     entry.output.drew(target);
                     true
                 }
                 Ok(Drew::Stalled) => false,
+                Ok(Drew::NeedsRender(dims)) => {
+                    if let Wallpaper::Image(image) = &target.content {
+                        jobs.render(image, Target { output: id, dims });
+                    }
+                    false
+                }
                 Err(error) => {
                     warn(format_args!(
                         "scootbg: cannot draw on {}: {error}",
@@ -77,6 +89,18 @@ pub fn reconcile(
     }
 }
 
+/// The buffer size, in pixels, an image would be drawn at on `output` now:
+/// its surface size times its integer scale. `None` while it has no size,
+/// or if that overflows (the draw then fails and says so).
+pub fn image_dims(output: &Output) -> Option<(u32, u32)> {
+    let size = output.surface_size()?;
+    let scale = output.info().scale.max(1);
+    Some((
+        size.width.checked_mul(scale)?,
+        size.height.checked_mul(scale)?,
+    ))
+}
+
 /// Sends one sync for the waiting requests whose outputs now show them.
 pub fn progress(state: &mut State, conn: &Connection, qh: &QueueHandle<State>) {
     if state.waiters.is_idle() {
@@ -97,8 +121,8 @@ pub fn progress(state: &mut State, conn: &Connection, qh: &QueueHandle<State>) {
                 let output = &entry.output;
                 let info = output.info();
                 let wanted = choices.for_output(info.name.as_deref());
-                let progress = output.progress(wanted, path.buffer_scale(info.scale));
-                (output.stamp(), progress)
+                let scale = paint::buffer_scale(path, wanted, info.scale);
+                (output.stamp(), output.progress(wanted, scale))
             }),
         )
     });
@@ -107,13 +131,22 @@ pub fn progress(state: &mut State, conn: &Connection, qh: &QueueHandle<State>) {
     }
 }
 
+/// Answers `ok` to every queued image request that newer choices have made
+/// moot: it would change nothing, so it is not decoded (`crate::jobs`).
+pub fn sweep(jobs: &mut Jobs<ConnId>, choices: &Choices, ready: &mut Vec<(ConnId, Ready)>) {
+    jobs.sweep(
+        |output, generation| choices.supersedes(output, generation),
+        |conn| ready.push((conn, Ready::Done(Outcome::Shown))),
+    );
+}
+
 /// The daemon's state as the request handler sees it.
 pub struct Control<'a> {
     pub state: &'a mut State,
     pub qh: &'a QueueHandle<State>,
 }
 
-impl Wallpaper for Control<'_> {
+impl Changes for Control<'_> {
     fn outputs(&self) -> &dyn OutputList {
         &self.state.outputs
     }
@@ -122,13 +155,15 @@ impl Wallpaper for Control<'_> {
         &mut self,
         conn: ConnId,
         output: Option<&str>,
-        choice: Choice,
+        show: Option<Show<'_>>,
     ) -> Result<(), ChangeError> {
         let State {
             globals,
             outputs,
             choices,
             waiters,
+            images,
+            ready,
             ..
         } = &mut *self.state;
         let targets = |entry: &Entry<Objects>| {
@@ -138,10 +173,46 @@ impl Wallpaper for Control<'_> {
             return Err(ChangeError::UnknownOutput);
         }
         let generation = waiters.next_generation();
-        choices.set(output, choice);
+        let choice: Choice = match show {
+            None => None,
+            Some(Show::Color(color)) => Some(Wallpaper::Color(color)),
+            Some(Show::Image(request)) => {
+                // Nothing changes until it has decoded (`crate::jobs`): a
+                // trial, drawn for the outputs configured now.
+                let image = Arc::new(Image {
+                    path: request.path.into_owned(),
+                    look: crate::image::render::Look {
+                        mode: request.mode,
+                        fill: request.fill,
+                        filter: request.filter,
+                    },
+                    serial: generation,
+                });
+                let draw_for = outputs
+                    .iter()
+                    .filter(|entry| targets(entry))
+                    .filter_map(|entry| {
+                        Some(Target {
+                            output: entry.output.id(),
+                            dims: image_dims(&entry.output)?,
+                        })
+                    })
+                    .collect();
+                let trial = Trial {
+                    conn,
+                    output: output.map(str::to_owned),
+                };
+                return images
+                    .jobs
+                    .trial(image, trial, draw_for)
+                    .map_err(|_| ChangeError::Busy);
+            }
+        };
+        choices.set(output, choice, generation);
+        sweep(&mut images.jobs, choices, ready);
         for entry in outputs.iter_mut().filter(|entry| targets(entry)) {
             entry.output.want(generation);
-            reconcile(globals, choices, entry, self.qh);
+            reconcile(globals, choices, &mut images.jobs, entry, self.qh);
         }
         // Answered by `progress` at the top of the next loop turn, once
         // every targeted output shows it.

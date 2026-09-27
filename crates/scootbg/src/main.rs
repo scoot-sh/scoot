@@ -23,6 +23,10 @@ mod daemon;
 #[cfg(target_os = "linux")]
 mod framing;
 #[cfg(target_os = "linux")]
+mod image;
+#[cfg(target_os = "linux")]
+mod jobs;
+#[cfg(target_os = "linux")]
 mod outputs;
 #[cfg(target_os = "linux")]
 mod paint;
@@ -34,6 +38,8 @@ mod print;
 mod protocol;
 #[cfg(target_os = "linux")]
 mod waiters;
+#[cfg(target_os = "linux")]
+mod wallpaper;
 
 use std::process::ExitCode;
 

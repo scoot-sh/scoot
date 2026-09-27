@@ -2,15 +2,16 @@
 //! +299 KB for `clap`). One binary: `daemon` runs the Wayland client, and
 //! every other command is a client of its control socket.
 //!
-//! `apply-config` arrives with cli-and-ipc.md, and image paths for `set`
-//! with images; neither is parsed nor advertised until it works.
+//! `apply-config` arrives with the scoot integration (scoot-integration.md);
+//! it is neither parsed nor advertised until it works.
 
 use std::borrow::Cow;
 use std::ffi::OsString;
 use std::fmt;
 
 use crate::color::{Color, ColorError};
-use crate::protocol::{PROTOCOL_VERSION, Request};
+use crate::image::{Filter, Mode};
+use crate::protocol::{DEFAULT_FILL, ImageRequest, PROTOCOL_VERSION, Request, Show};
 
 #[cfg(test)]
 mod tests;
@@ -18,7 +19,8 @@ mod tests;
 pub const USAGE: &str = "\
 scootbg -- wallpaper daemon for Wayland
 
-Early days: solid colors work; images come in a later version.
+Early days: colors and images (PNG, JPEG, WebP) work; restoring them at
+the next start comes later.
 
 USAGE:
     scootbg COMMAND
@@ -28,7 +30,7 @@ USAGE:
 
 COMMANDS:
     daemon     run the daemon for this Wayland display
-    set        show a color on every output, or on one
+    set        show a color or an image on every output, or on one
     clear      back to the compositor's own background
     query      print what each output shows, as JSON
     version    print the running daemon's version and protocol, as JSON
@@ -61,33 +63,59 @@ is alive. A socket left behind by a daemon that crashed is replaced.
 ";
 
 pub const SET_HELP: &str = "\
-scootbg set -- show a color on every output, or on one
+scootbg set -- show a color or an image on every output, or on one
 
 USAGE:
-    scootbg set '#rrggbb'
-    scootbg set '#rrggbb' --output NAME
+    scootbg set '#rrggbb' [--output NAME]
+    scootbg set PATH [--output NAME] [--mode MODE] [--fill '#rrggbb']
+                     [--filter FILTER]
 
-A color is '#' and six hex digits, either case, such as '#1e1e2e'; quote
-it, since the shell reads '#' as a comment. Anything not starting with '#'
-is refused for now: images come in a later version. Wallpapers are opaque,
-so there is no alpha.
+An argument starting with '#' is a color: '#' and six hex digits, either
+case, such as '#1e1e2e'; quote it, since the shell reads '#' as a comment.
+Wallpapers are opaque, so there is no alpha.
 
-Without --output, every output shows the color, including outputs plugged
-in later, and any choice made for a single output is replaced. With
---output NAME (a connector name, as `scootbg query` lists them), only that
-output does, and it keeps the color when it is unplugged and plugged back
-in. A name that no output has now is an error, and nothing is changed.
+Anything else is the path of an image: PNG, JPEG or WebP (the first frame
+of an animated one), told apart by content, not by name. It is made
+absolute here, so a relative path means from this directory. A file whose
+name starts with '#' is given as './#name.png'. The file is read when the
+daemon gets the request (and again for an output plugged in later), not
+kept in memory. A JPEG's or WebP's EXIF orientation is applied.
 
-Returns once every targeted output shows the color and the compositor has
-processed it, so a screenshot taken straight after shows it. An output
+    --mode MODE      how the image fits the output:
+                       fill     cover it, cropping what overflows, centred
+                                (the default)
+                       fit      all of it, as large as fits, centred, the
+                                rest in the fill color
+                       stretch  the output's size, whatever the aspect
+                       center   unscaled, centred: cropped if larger, the
+                                rest in the fill color
+                       tile     unscaled, repeated from the top-left corner
+    --fill '#rrggbb' the color around a fitted or centred image, and under
+                     a transparent one (default '#000000')
+    --filter FILTER  the scaling filter: lanczos3 (the default), catmull-rom,
+                     bilinear or nearest (hard pixels, for pixel art)
+
+Without --output, every output shows it, including outputs plugged in
+later, and any choice made for a single output is replaced. With --output
+NAME (a connector name, as `scootbg query` lists them), only that output
+does, and it keeps it when it is unplugged and plugged back in. A name that
+no output has now is an error, and nothing is changed.
+
+Returns once every targeted output shows it and the compositor has
+processed it, so a screenshot taken straight after shows it. An image that
+cannot be shown (no such file, not an image, too large, truncated or
+corrupt) is an error, and every output keeps what it showed. An output
 unplugged meanwhile is left out of that wait; an output whose surface is
 not configured yet is waited for; an output scootbg gave up on (`gave-up`
 in `scootbg query`, said on stderr) is left out, shows nothing, and does
-not change the exit status. Prints nothing on success.
+not change the exit status. When a newer `set` or `clear` has replaced the
+choice before this image was decoded, this one returns at once, with
+status 0, and the newer one is what shows. Prints nothing on success.
 
 Exit status: 0 once shown; 1 when no daemon is running, the output is
-unknown, or drawing failed (the daemon's stderr says why); 2 for a usage
-error, such as a malformed color.
+unknown, the image cannot be shown, or drawing failed (the daemon's stderr
+says why); 2 for a usage error, such as a malformed color or an unknown
+mode.
 ";
 
 pub const CLEAR_HELP: &str = "\
@@ -118,7 +146,8 @@ Prints the daemon's reply, one line of JSON with one entry per output:
 Each entry has the output's name, description, mode, scale, transform and
 logical size, its surface's state: waiting, pending, configured (with its
 size), closed or gave-up (until the output is replugged), and what it
-shows: {\"color\":\"#rrggbb\"}, or null for nothing.
+shows: {\"color\":\"#rrggbb\"}, {\"image\":\"/path\",\"mode\":\"fill\",
+\"fill\":\"#rrggbb\",\"filter\":\"lanczos3\"}, or null for nothing.
 ";
 
 pub const VERSION_HELP: &str = "\
@@ -190,12 +219,26 @@ pub enum Error {
         command: &'static str,
         argument: String,
     },
-    /// `set` with no color.
-    MissingColor,
+    /// `set` with neither a color nor a path.
+    MissingTarget,
     /// `set` with something that is not a color.
     Color {
         argument: String,
         error: ColorError,
+    },
+    /// `--mode` or `--filter` with a value it does not take.
+    BadValue {
+        flag: &'static str,
+        value: String,
+    },
+    /// `--mode`, `--fill` or `--filter` with a color.
+    ImageOnly(&'static str),
+    /// A path that the control protocol (JSON) cannot carry.
+    NotUtf8(String),
+    /// The path could not be made absolute (no working directory).
+    Path {
+        argument: String,
+        error: String,
     },
     /// A flag given without its value.
     MissingValue {
@@ -218,12 +261,36 @@ impl fmt::Display for Error {
                 f,
                 "unexpected argument `{argument}` for `{command}` (try `scootbg {command} --help`)"
             ),
-            Self::MissingColor => write!(
+            Self::MissingTarget => write!(
                 f,
-                "`set` needs a color, such as '#1e1e2e' (try `scootbg set --help`)"
+                "`set` needs a color, such as '#1e1e2e', or an image path \
+                 (try `scootbg set --help`)"
             ),
             Self::Color { argument, error } => {
                 write!(f, "`{argument}`: {error} (try `scootbg set --help`)")
+            }
+            Self::BadValue { flag, value } => {
+                let takes = if *flag == MODE {
+                    "fill, fit, stretch, center or tile"
+                } else {
+                    "lanczos3, catmull-rom, bilinear or nearest"
+                };
+                write!(
+                    f,
+                    "`{flag}` takes {takes}, not `{value}` (try `scootbg set --help`)"
+                )
+            }
+            Self::ImageOnly(flag) => write!(
+                f,
+                "`{flag}` applies to an image, not a color (try `scootbg set --help`)"
+            ),
+            Self::NotUtf8(lossy) => write!(
+                f,
+                "`{lossy}`: the path is not valid UTF-8, which the control protocol cannot \
+                 carry; rename the file or link to it from a UTF-8 path"
+            ),
+            Self::Path { argument, error } => {
+                write!(f, "`{argument}`: cannot make the path absolute: {error}")
             }
             Self::MissingValue { command, flag } => {
                 write!(f, "`{flag}` needs a value (try `scootbg {command} --help`)")
@@ -318,56 +385,133 @@ fn help<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Comma
     }
 }
 
-/// `set COLOR [--output NAME]` and `clear [--output NAME]`, flags in any
-/// order after the command; `--output=NAME` works too. `--help` alone asks
-/// for help, as for every command.
+const OUTPUT: &str = "--output";
+const MODE: &str = "--mode";
+const FILL: &str = "--fill";
+const FILTER: &str = "--filter";
+
+/// `set COLOR|PATH [--output NAME] [--mode M] [--fill C] [--filter F]` and
+/// `clear [--output NAME]`, flags in any order after the command, each
+/// also as `--flag=VALUE`. `--help` alone asks for help, as for every
+/// command.
 fn change<I: Iterator<Item = Result<String, String>>>(
     command: &'static str,
     topic: Topic,
     mut args: I,
 ) -> Result<Command, Error> {
-    const OUTPUT: &str = "--output";
+    let flags: &[&'static str] = if command == "set" {
+        &[OUTPUT, MODE, FILL, FILTER]
+    } else {
+        &[OUTPUT]
+    };
     let unexpected = |argument: String| Error::Unexpected { command, argument };
-    let mut color: Option<String> = None;
-    let mut output: Option<String> = None;
+    let mut target: Option<String> = None;
+    // Indexed as `flags`.
+    let mut values: [Option<String>; 4] = Default::default();
     let mut first = true;
     while let Some(arg) = args.next() {
-        let arg = arg.map_err(unexpected)?;
-        let value = if arg == OUTPUT {
-            Some(args.next().ok_or(Error::MissingValue {
-                command,
-                flag: OUTPUT,
-            })?)
-        } else {
-            arg.strip_prefix("--output=").map(|v| Ok(v.to_owned()))
+        let arg = match arg {
+            Ok(arg) => arg,
+            // Not UTF-8: as the path, say why it cannot be sent.
+            Err(lossy) if command == "set" && target.is_none() && !lossy.starts_with('-') => {
+                return Err(Error::NotUtf8(lossy));
+            }
+            Err(lossy) => return Err(unexpected(lossy)),
         };
-        if let Some(value) = value {
-            let value = value.map_err(unexpected)?;
-            if output.replace(value).is_some() {
-                return Err(Error::Repeated {
-                    command,
-                    flag: OUTPUT,
-                });
+        let flag = flags.iter().enumerate().find_map(|(index, &flag)| {
+            if arg == flag {
+                Some((index, flag, None))
+            } else {
+                let value = arg.strip_prefix(flag)?.strip_prefix('=')?;
+                Some((index, flag, Some(value.to_owned())))
+            }
+        });
+        if let Some((index, flag, value)) = flag {
+            let value = match value {
+                Some(value) => value,
+                None => args
+                    .next()
+                    .ok_or(Error::MissingValue { command, flag })?
+                    .map_err(unexpected)?,
+            };
+            let Some(slot) = values.get_mut(index) else {
+                return Err(unexpected(arg));
+            };
+            if slot.replace(value).is_some() {
+                return Err(Error::Repeated { command, flag });
             }
         } else if is_help(&arg) && first {
             return match args.next() {
                 None => Ok(Command::Help(topic)),
                 Some(extra) => Err(unexpected(extra.unwrap_or_else(|lossy| lossy))),
             };
-        } else if command == "set" && color.is_none() && !arg.starts_with('-') {
-            color = Some(arg);
+        } else if command == "set" && target.is_none() && !arg.starts_with('-') {
+            target = Some(arg);
         } else {
             return Err(unexpected(arg));
         }
         first = false;
     }
+    let [output, mode, fill, filter] = values;
     let output = output.map(Cow::Owned);
     if command == "clear" {
         return Ok(Command::Client(Request::Clear { output }));
     }
-    let argument = color.ok_or(Error::MissingColor)?;
-    match Color::parse(&argument) {
-        Ok(color) => Ok(Command::Client(Request::Set { color, output })),
-        Err(error) => Err(Error::Color { argument, error }),
+    let argument = target.ok_or(Error::MissingTarget)?;
+    if argument.starts_with('#') {
+        for (flag, given) in [(MODE, &mode), (FILL, &fill), (FILTER, &filter)] {
+            if given.is_some() {
+                return Err(Error::ImageOnly(flag));
+            }
+        }
+        return match Color::parse(&argument) {
+            Ok(color) => Ok(Command::Client(Request::Set {
+                show: Show::Color(color),
+                output,
+            })),
+            Err(error) => Err(Error::Color { argument, error }),
+        };
     }
+    let mode = match mode {
+        None => Mode::default(),
+        Some(value) => Mode::from_name(&value).ok_or(Error::BadValue { flag: MODE, value })?,
+    };
+    let filter = match filter {
+        None => Filter::default(),
+        Some(value) => Filter::from_name(&value).ok_or(Error::BadValue {
+            flag: FILTER,
+            value,
+        })?,
+    };
+    let fill = match fill {
+        None => DEFAULT_FILL,
+        Some(argument) => match Color::parse(&argument) {
+            Ok(color) => color,
+            Err(error) => return Err(Error::Color { argument, error }),
+        },
+    };
+    let path = absolute(&argument)?;
+    Ok(Command::Client(Request::Set {
+        show: Show::Image(ImageRequest {
+            path: Cow::Owned(path),
+            mode,
+            fill,
+            filter,
+        }),
+        output,
+    }))
+}
+
+/// `path` made absolute against the working directory, without touching
+/// the file system beyond that (symbolic links stay as given; the daemon
+/// reports a missing file).
+fn absolute(path: &str) -> Result<String, Error> {
+    let absolute = std::path::absolute(path).map_err(|error| Error::Path {
+        argument: path.to_owned(),
+        error: error.to_string(),
+    })?;
+    absolute
+        .into_os_string()
+        .into_string()
+        .map_err(|lossy| Error::NotUtf8(lossy.to_string_lossy().into_owned()))
 }

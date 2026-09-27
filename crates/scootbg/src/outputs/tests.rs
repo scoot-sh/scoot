@@ -52,14 +52,14 @@ fn the_surface_is_created_once_settled_and_only_once() {
     output.done();
     assert_eq!(
         output.surface(),
-        Surface::Waiting,
+        &Surface::Waiting,
         "done alone is not settled"
     );
     assert_eq!(output.settled(), Effect::Create);
-    assert_eq!(output.surface(), Surface::Pending);
+    assert_eq!(output.surface(), &Surface::Pending);
     assert_eq!(output.settled(), Effect::None);
     output.done();
-    assert_eq!(output.surface(), Surface::Pending);
+    assert_eq!(output.surface(), &Surface::Pending);
 }
 
 /// A v1 `wl_output` never sends `done`; a broken compositor might not
@@ -85,7 +85,7 @@ fn configure_is_acked_and_its_size_used() {
     assert_eq!(output.configure(5, 1920, 1080), Effect::Ack(5));
     assert_eq!(
         output.surface(),
-        Surface::Configured {
+        &Surface::Configured {
             serial: 5,
             requested: size(1920, 1080),
             drawn: None,
@@ -197,18 +197,18 @@ fn closed_is_retried_once_then_given_up() {
     let output = &mut outputs.get_mut(id).unwrap().output;
     let _ = output.configure(1, 1920, 1080);
     assert_eq!(output.closed(), Effect::DestroyAndRetry);
-    assert_eq!(output.surface(), Surface::Closed);
+    assert_eq!(output.surface(), &Surface::Closed);
     assert_eq!(output.surface_size(), None);
     // A second `closed` for the destroyed surface is stale: nothing.
     assert_eq!(output.closed(), Effect::None);
     assert_eq!(output.configure(2, 10, 10), Effect::None, "stale configure");
     assert_eq!(output.retry(), Effect::Create);
-    assert_eq!(output.surface(), Surface::Pending);
+    assert_eq!(output.surface(), &Surface::Pending);
     assert_eq!(output.retry(), Effect::None, "one retry per close");
 
     // Closed again, before or after a configure: given up.
     assert_eq!(output.closed(), Effect::DestroyAndGiveUp);
-    assert_eq!(output.surface(), Surface::GaveUp);
+    assert_eq!(output.surface(), &Surface::GaveUp);
     assert_eq!(output.surface().name(), "gave-up");
     assert_eq!(output.retry(), Effect::None);
     assert_eq!(output.closed(), Effect::None);
@@ -240,9 +240,9 @@ fn giving_up_on_one_output_leaves_the_others_alone() {
     let _ = first.closed();
     let _ = first.retry();
     let _ = first.closed();
-    assert_eq!(first.surface(), Surface::GaveUp);
+    assert_eq!(first.surface(), &Surface::GaveUp);
     let second = &mut outputs.get_mut(b).unwrap().output;
-    assert_eq!(second.surface(), Surface::Pending);
+    assert_eq!(second.surface(), &Surface::Pending);
     assert_eq!(second.configure(1, 5, 5), Effect::Ack(1));
 }
 

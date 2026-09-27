@@ -1,5 +1,10 @@
-//! How a color gets onto an output: the pure decisions, with no Wayland
-//! objects, so each is a unit test. `daemon::canvas` carries them out.
+//! How a color or an image gets onto an output: the pure decisions, with
+//! no Wayland objects, so each is a unit test. `daemon::canvas` carries
+//! them out.
+//!
+//! An image is always a full-size `wl_shm` buffer, the surface size times
+//! the output's integer scale (as path 3 draws a color), whatever the path:
+//! the paths below are how *colors* are drawn.
 //!
 //! ## Three paths, best first
 //!
@@ -23,8 +28,8 @@
 //! most [`SLOTS`] in all; with both still held by the compositor the draw
 //! waits for a `wl_buffer.release` ([`pick`]).
 
-use crate::color::Color;
 use crate::outputs::Size;
+use crate::wallpaper::Wallpaper;
 
 #[cfg(test)]
 mod tests;
@@ -89,21 +94,32 @@ impl Path {
     }
 }
 
-/// What a surface was last committed with: a color at a size (logical
-/// pixels) and buffer scale.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The `wl_surface` buffer scale to draw `wanted` at on `path`: an image
+/// always has pixels to make sharp, a color only on the full-size path
+/// ([`Path::buffer_scale`]).
+pub fn buffer_scale(path: Path, wanted: Option<&Wallpaper>, output_scale: u32) -> u32 {
+    match wanted {
+        Some(Wallpaper::Image(_)) => output_scale.max(1),
+        Some(Wallpaper::Color(_)) | None => path.buffer_scale(output_scale),
+    }
+}
+
+/// What a surface was last committed with: a color or an image at a size
+/// (logical pixels) and buffer scale.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Drawn {
-    pub color: Color,
+    pub content: Wallpaper,
     pub size: Size,
     pub scale: u32,
 }
 
 impl Drawn {
-    /// The buffer's size in pixels on `path`: 1×1 with a viewport, else the
-    /// surface size times the scale. `None` if that overflows `u32`; the
-    /// buffer type then refuses anything past `i32::MAX` bytes.
-    pub fn buffer_dims(self, path: Path) -> Option<(u32, u32)> {
-        if path.uses_viewport() {
+    /// The buffer's size in pixels on `path`: 1×1 for a color with a
+    /// viewport, else the surface size times the scale. `None` if that
+    /// overflows `u32`; the buffer type then refuses anything past
+    /// `i32::MAX` bytes.
+    pub fn buffer_dims(&self, path: Path) -> Option<(u32, u32)> {
+        if path.uses_viewport() && matches!(self.content, Wallpaper::Color(_)) {
             return Some((1, 1));
         }
         Some((
@@ -114,14 +130,15 @@ impl Drawn {
 }
 
 /// What to do to make a surface show what it should.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Plan {
     /// It already does, or cannot yet (not configured, no size known).
     Nothing,
-    /// Attach (or keep) a buffer with this color at this size, and commit.
+    /// Attach (or keep) a buffer with this content at this size, and
+    /// commit.
     Show(Drawn),
-    /// It shows a color and should show nothing: replace the surface with
-    /// a fresh one (see `daemon::canvas` for why not a null attach).
+    /// It shows something and should show nothing: replace the surface
+    /// with a fresh one (see `daemon::canvas` for why not a null attach).
     Clear,
 }
 

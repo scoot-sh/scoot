@@ -30,7 +30,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::color::{Color, ColorError};
+use crate::image::{Filter, Mode};
 use crate::outputs::Size;
+use crate::wallpaper::Wallpaper;
 
 #[cfg(test)]
 mod tests;
@@ -45,12 +47,13 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// client cannot make the daemon buffer without bound.
 pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 
-/// What a client can ask for. `apply-config` arrives with the CLI ticket
-/// (docs/scootbg/backlog/cli-and-ipc.md), image paths with images.
+/// What a client can ask for. `apply-config` arrives with the scoot
+/// integration (docs/scootbg/backlog/scoot-integration.md).
 ///
 /// ```text
 /// {"protocol":1,"type":"set","color":"#1e1e2e"}
 /// {"protocol":1,"type":"set","color":"#1e1e2e","output":"DP-1"}
+/// {"protocol":1,"type":"set","image":"/abs/a.jpg","mode":"fit","fill":"#101014","filter":"lanczos3"}
 /// {"protocol":1,"type":"clear"}
 /// {"protocol":1,"type":"clear","output":"DP-1"}
 /// ```
@@ -62,15 +65,38 @@ pub enum Request<'a> {
     Kill,
     /// The daemon's version and protocol.
     Version,
-    /// Show `color` on every output, or on the outputs named `output`.
+    /// Show `show` on every output, or on the outputs named `output`.
     Set {
-        color: Color,
+        show: Show<'a>,
         output: Option<Cow<'a, str>>,
     },
     /// Show nothing (the compositor's own background) on every output, or
     /// on the outputs named `output`.
     Clear { output: Option<Cow<'a, str>> },
 }
+
+/// What a `set` shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Show<'a> {
+    Color(Color),
+    Image(ImageRequest<'a>),
+}
+
+/// An image, as a `set` asks for it. On the wire `mode`, `fill` and
+/// `filter` may be left out, for `fill`, `#000000` and `lanczos3`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageRequest<'a> {
+    /// Absolute: the daemon refuses anything else, since its working
+    /// directory is not the client's.
+    pub path: Cow<'a, str>,
+    pub mode: Mode,
+    /// Behind a letterboxed or centred image, and under transparency.
+    pub fill: Color,
+    pub filter: Filter,
+}
+
+/// The fill color when a request names none.
+pub const DEFAULT_FILL: Color = Color { r: 0, g: 0, b: 0 };
 
 impl Request<'_> {
     /// The `type` string on the wire.
@@ -84,8 +110,8 @@ impl Request<'_> {
         }
     }
 
-    /// The request line a client sends, newline included. The output name
-    /// is JSON-escaped, so any name the compositor could report round-trips.
+    /// The request line a client sends, newline included. Strings are
+    /// JSON-escaped, so any output name or path round-trips.
     pub fn line(&self) -> String {
         #[derive(Serialize)]
         struct Line<'r> {
@@ -95,19 +121,42 @@ impl Request<'_> {
             #[serde(skip_serializing_if = "Option::is_none")]
             color: Option<Color>,
             #[serde(skip_serializing_if = "Option::is_none")]
+            image: Option<&'r str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            mode: Option<Mode>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            fill: Option<Color>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            filter: Option<Filter>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             output: Option<&'r str>,
         }
-        let (color, output) = match self {
-            Self::Set { color, output } => (Some(*color), output.as_deref()),
-            Self::Clear { output } => (None, output.as_deref()),
-            Self::Query | Self::Kill | Self::Version => (None, None),
-        };
-        let line = Line {
+        let mut line = Line {
             protocol: PROTOCOL_VERSION,
             kind: self.name(),
-            color,
-            output,
+            color: None,
+            image: None,
+            mode: None,
+            fill: None,
+            filter: None,
+            output: None,
         };
+        match self {
+            Self::Set { show, output } => {
+                line.output = output.as_deref();
+                match show {
+                    Show::Color(color) => line.color = Some(*color),
+                    Show::Image(image) => {
+                        line.image = Some(&image.path);
+                        line.mode = Some(image.mode);
+                        line.fill = Some(image.fill);
+                        line.filter = Some(image.filter);
+                    }
+                }
+            }
+            Self::Clear { output } => line.output = output.as_deref(),
+            Self::Query | Self::Kill | Self::Version => {}
+        }
         // Serializing strings and numbers into a `String` cannot fail; if
         // it ever did, the empty line gets a "malformed" reply, not a panic.
         let mut text = serde_json::to_string(&line).unwrap_or_default();
@@ -129,13 +178,26 @@ pub enum RequestError {
     WrongProtocol(u32),
     NoType,
     Unknown(String),
-    /// `set` with no `color` (an image, from a later client, say).
-    NoColor,
+    /// `set` with neither a `color` nor an `image`.
+    NoTarget,
+    /// `set` with both.
+    Both,
     /// `set` with a `color` that is not `#rrggbb`.
     BadColor {
         text: String,
         error: ColorError,
     },
+    /// An image `fill` that is not `#rrggbb`.
+    BadFill {
+        text: String,
+        error: ColorError,
+    },
+    BadMode(String),
+    BadFilter(String),
+    /// `mode`, `fill` or `filter` with a color.
+    ImageOnly(&'static str),
+    /// An image path that is not absolute.
+    RelativePath(String),
 }
 
 impl fmt::Display for RequestError {
@@ -151,11 +213,27 @@ impl fmt::Display for RequestError {
             ),
             Self::NoType => write!(f, "request has no `type` field"),
             Self::Unknown(name) => write!(f, "unknown request `{name}`"),
-            Self::NoColor => write!(
+            Self::NoTarget => write!(
                 f,
-                "`set` needs a `color` (\"#rrggbb\"); images come in a later version"
+                "`set` needs a `color` (\"#rrggbb\") or an `image` (an absolute path)"
             ),
+            Self::Both => write!(f, "`set` takes a `color` or an `image`, not both"),
             Self::BadColor { text, error } => write!(f, "bad color {text:?}: {error}"),
+            Self::BadFill { text, error } => write!(f, "bad fill color {text:?}: {error}"),
+            Self::BadMode(mode) => write!(
+                f,
+                "unknown mode {mode:?}: fill, fit, stretch, center or tile"
+            ),
+            Self::BadFilter(filter) => write!(
+                f,
+                "unknown filter {filter:?}: lanczos3, catmull-rom, bilinear or nearest"
+            ),
+            Self::ImageOnly(field) => write!(f, "`{field}` applies to an image, not a color"),
+            Self::RelativePath(path) => write!(
+                f,
+                "the image path {path:?} is not absolute (the daemon's working directory \
+                 is not yours; `scootbg set` makes a path absolute before sending it)"
+            ),
         }
     }
 }
@@ -169,6 +247,14 @@ struct Envelope<'a> {
     kind: Option<Cow<'a, str>>,
     #[serde(borrow)]
     color: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    image: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    mode: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    fill: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    filter: Option<Cow<'a, str>>,
     #[serde(borrow)]
     output: Option<Cow<'a, str>>,
 }
@@ -203,13 +289,15 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
         "kill" => Ok(Request::Kill),
         "version" => Ok(Request::Version),
         "set" => {
-            let text = envelope.color.ok_or(RequestError::NoColor)?;
-            let color = Color::parse(&text).map_err(|error| RequestError::BadColor {
-                text: text.into_owned(),
-                error,
-            })?;
+            let show = show(
+                envelope.color,
+                envelope.image,
+                envelope.mode,
+                envelope.fill,
+                envelope.filter,
+            )?;
             Ok(Request::Set {
-                color,
+                show,
                 output: envelope.output,
             })
         }
@@ -217,6 +305,61 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
             output: envelope.output,
         }),
         _ => Err(RequestError::Unknown(kind.into_owned())),
+    }
+}
+
+/// What a `set` asks to show, from its fields.
+fn show<'a>(
+    color: Option<Cow<'a, str>>,
+    image: Option<Cow<'a, str>>,
+    mode: Option<Cow<'a, str>>,
+    fill: Option<Cow<'a, str>>,
+    filter: Option<Cow<'a, str>>,
+) -> Result<Show<'a>, RequestError> {
+    match (color, image) {
+        (Some(_), Some(_)) => Err(RequestError::Both),
+        (None, None) => Err(RequestError::NoTarget),
+        (Some(text), None) => {
+            for (field, given) in [("mode", &mode), ("fill", &fill), ("filter", &filter)] {
+                if given.is_some() {
+                    return Err(RequestError::ImageOnly(field));
+                }
+            }
+            Color::parse(&text)
+                .map(Show::Color)
+                .map_err(|error| RequestError::BadColor {
+                    text: text.into_owned(),
+                    error,
+                })
+        }
+        (None, Some(path)) => {
+            if !path.starts_with('/') {
+                return Err(RequestError::RelativePath(path.into_owned()));
+            }
+            let mode = match mode {
+                None => Mode::default(),
+                Some(name) => Mode::from_name(&name)
+                    .ok_or_else(|| RequestError::BadMode(name.into_owned()))?,
+            };
+            let filter = match filter {
+                None => Filter::default(),
+                Some(name) => Filter::from_name(&name)
+                    .ok_or_else(|| RequestError::BadFilter(name.into_owned()))?,
+            };
+            let fill = match fill {
+                None => DEFAULT_FILL,
+                Some(text) => Color::parse(&text).map_err(|error| RequestError::BadFill {
+                    text: text.into_owned(),
+                    error,
+                })?,
+            };
+            Ok(Show::Image(ImageRequest {
+                path,
+                mode,
+                fill,
+                filter,
+            }))
+        }
     }
 }
 
@@ -251,16 +394,37 @@ pub struct OutputEntry<'a> {
     /// that, at a fractional scale, possibly too small.
     pub logical: Option<Size>,
     pub surface: SurfaceEntry,
-    /// What the output shows: `{"color":"#rrggbb"}`, or `null` for
-    /// nothing (the compositor's own background, or no surface yet).
-    pub shows: Option<Shows>,
+    /// What the output shows: `{"color":"#rrggbb"}`,
+    /// `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
+    /// or `null` for nothing (the compositor's own background, or no
+    /// surface yet).
+    pub shows: Option<Shows<'a>>,
 }
 
-/// What an output shows, when it shows something. An object, so images
-/// can add their own keys later.
-#[derive(Debug, Serialize)]
-pub struct Shows {
-    pub color: Color,
+/// What an output shows, when it shows something: an object, which may
+/// gain keys within a protocol version.
+#[derive(Debug)]
+pub struct Shows<'a>(pub &'a Wallpaper);
+
+impl Serialize for Shows<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self.0 {
+            Wallpaper::Color(color) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("color", color)?;
+                map.end()
+            }
+            Wallpaper::Image(image) => {
+                let mut map = serializer.serialize_map(Some(4))?;
+                map.serialize_entry("image", &image.path)?;
+                map.serialize_entry("mode", &image.look.mode)?;
+                map.serialize_entry("fill", &image.look.fill)?;
+                map.serialize_entry("filter", &image.look.filter)?;
+                map.end()
+            }
+        }
+    }
 }
 
 /// Where an output's wallpaper surface stands: `state` is one of

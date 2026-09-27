@@ -32,21 +32,20 @@
 //!
 //! Each bound output gets an [`OutputId`] that is never reused for the
 //! daemon's life (registry names can be: a compositor may hand a replugged
-//! monitor its old global name). Anything that answers later, the settle
-//! and retry callbacks today and an image decoded on a worker thread in
-//! images-decode-and-fit.md, carries the id and looks the output up again
-//! when it lands. An output removed meanwhile is simply not found, and the
-//! result is dropped.
+//! monitor its old global name). Anything that answers later (the settle
+//! and retry callbacks, and an image decoded on the worker thread,
+//! `daemon::images`) carries the id and looks the output up again when it
+//! lands. An output removed meanwhile is simply not found, and the result
+//! is dropped.
 
 #[cfg(test)]
 mod paint_tests;
 #[cfg(test)]
 mod tests;
 
-use crate::choices::Choice;
-use crate::color::Color;
 use crate::paint::{Drawn, Plan};
 use crate::waiters::Progress;
+use crate::wallpaper::Wallpaper;
 
 /// Identifies one bound output for the daemon's whole life; never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,7 +198,7 @@ impl Staged {
 }
 
 /// Where an output's wallpaper surface stands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Surface {
     /// No surface yet: the output has not settled.
     Waiting,
@@ -232,7 +231,7 @@ pub enum Surface {
 
 impl Surface {
     /// The name `query` reports.
-    pub fn name(self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             Self::Waiting => "waiting",
             Self::Pending => "pending",
@@ -243,7 +242,7 @@ impl Surface {
     }
 
     /// Whether a live layer surface exists for it.
-    pub fn is_live(self) -> bool {
+    pub fn is_live(&self) -> bool {
         matches!(self, Self::Pending | Self::Configured { .. })
     }
 }
@@ -299,8 +298,8 @@ impl Output {
         &self.info
     }
 
-    pub fn surface(&self) -> Surface {
-        self.surface
+    pub fn surface(&self) -> &Surface {
+        &self.surface
     }
 
     /// The output as a message to stderr names it. The name comes from the
@@ -388,8 +387,8 @@ impl Output {
     /// ([`Output::plan`]). A new size is also a new chance for a draw that
     /// failed.
     pub fn configure(&mut self, serial: u32, width: u32, height: u32) -> Effect {
-        let drawn = match self.surface {
-            Surface::Configured { drawn, .. } => drawn,
+        let drawn = match &mut self.surface {
+            Surface::Configured { drawn, .. } => drawn.take(),
             Surface::Pending => None,
             // No live surface: a stale event, already handled by the
             // glue's object check. Nothing to ack.
@@ -412,9 +411,11 @@ impl Output {
         }
     }
 
-    /// A `set` or `clear` of generation `stamp` targets this output.
+    /// A `set` or `clear` of generation `stamp` targets this output. An
+    /// image lands after it is decoded, maybe after newer requests stamped
+    /// the output, so the stamp only ever grows.
     pub fn want(&mut self, stamp: u64) {
-        self.stamp = stamp;
+        self.stamp = self.stamp.max(stamp);
         self.failed = false;
     }
 
@@ -435,27 +436,27 @@ impl Output {
         self.failed = true;
     }
 
-    /// The color on screen: what the configured surface was last
-    /// committed with.
-    pub fn shows(&self) -> Option<Color> {
-        match self.surface {
-            Surface::Configured { drawn, .. } => drawn.map(|d| d.color),
+    /// What is on screen: what the configured surface was last committed
+    /// with.
+    pub fn shows(&self) -> Option<&Wallpaper> {
+        match &self.surface {
+            Surface::Configured { drawn, .. } => drawn.as_ref().map(|d| &d.content),
             _ => None,
         }
     }
 
     /// What to do so the surface shows `wanted`, drawn at buffer scale
-    /// `scale` (see `Path::buffer_scale`). Only a configured surface can
+    /// `scale` (see `paint::buffer_scale`). Only a configured surface can
     /// be drawn on; the others show nothing and wait for their
     /// `configure`.
-    pub fn plan(&self, wanted: Choice, scale: u32) -> Plan {
-        let Surface::Configured { drawn, .. } = self.surface else {
+    pub fn plan(&self, wanted: Option<&Wallpaper>, scale: u32) -> Plan {
+        let Surface::Configured { drawn, .. } = &self.surface else {
             return Plan::Nothing;
         };
         if self.failed {
             return Plan::Nothing;
         }
-        let Some(color) = wanted else {
+        let Some(content) = wanted else {
             return if drawn.is_some() {
                 Plan::Clear
             } else {
@@ -465,20 +466,26 @@ impl Output {
         let Some(size) = self.surface_size() else {
             return Plan::Nothing;
         };
-        let target = Drawn { color, size, scale };
-        if drawn == Some(target) {
+        let shown = drawn
+            .as_ref()
+            .is_some_and(|d| &d.content == content && d.size == size && d.scale == scale);
+        if shown {
             Plan::Nothing
         } else {
-            Plan::Show(target)
+            Plan::Show(Drawn {
+                content: content.clone(),
+                size,
+                scale,
+            })
         }
     }
 
     /// Whether it shows `wanted` (at `scale`), for a waiting reply.
-    pub fn progress(&self, wanted: Choice, scale: u32) -> Progress {
+    pub fn progress(&self, wanted: Option<&Wallpaper>, scale: u32) -> Progress {
         if self.failed {
             return Progress::Failed;
         }
-        let shown = match self.surface {
+        let shown = match &self.surface {
             // Nothing will ever be shown there: nothing to wait for.
             Surface::GaveUp => return Progress::Done,
             Surface::Configured { drawn, .. } => {
@@ -535,9 +542,10 @@ impl Output {
     /// [`Info::logical`]). `None` while not configured, or while a 0 axis
     /// has nothing to resolve against yet.
     pub fn surface_size(&self) -> Option<Size> {
-        let Surface::Configured { requested, .. } = self.surface else {
+        let Surface::Configured { requested, .. } = &self.surface else {
             return None;
         };
+        let requested = *requested;
         if requested.width != 0 && requested.height != 0 {
             return Some(requested);
         }

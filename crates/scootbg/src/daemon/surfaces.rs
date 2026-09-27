@@ -15,7 +15,7 @@
 //! so pointer and touch events fall through to the desktop. It is committed
 //! once with no buffer, which asks for a `configure`; each `configure` is
 //! acked straight away, and the surface is then drawn (or redrawn at its
-//! new size) by `change::reconcile` if it should show a color. A layer
+//! new size) by `change::reconcile` if it should show a color or an image. A layer
 //! surface maps only with a buffer: with nothing chosen, nothing is shown.
 
 use wayland_client::protocol::wl_buffer::{self, WlBuffer};
@@ -36,6 +36,7 @@ use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
 use super::canvas::{Canvas, destroy_viewport};
 use super::change::reconcile;
+use super::respond::Ready;
 use super::wayland::{Globals, State};
 use crate::outputs::{Effect, Entry, OutputId, Surface, Transform};
 use crate::print::warn;
@@ -90,11 +91,13 @@ pub struct LayerObjects {
     pub(super) surface: WlSurface,
     layer: ZwlrLayerSurfaceV1,
     pub(super) viewport: Option<WpViewport>,
-    /// The size (logical) and buffer scale this surface's persistent state
-    /// was last sent for: viewport destination, buffer scale and opaque
-    /// region are double-buffered and stay until changed, so a draw at the
-    /// same size sends none of them again. `None` for a fresh surface.
-    pub(super) sized: Option<(crate::outputs::Size, u32)>,
+    /// What this surface's persistent, double-buffered state was last set
+    /// to, so a draw sends only what changes: the buffer scale (1 on a
+    /// fresh surface, as the protocol says), the viewport's destination and
+    /// the opaque region (logical sizes; `None` while never set).
+    pub(super) buffer_scale: u32,
+    pub(super) destination: Option<crate::outputs::Size>,
+    pub(super) opaque: Option<crate::outputs::Size>,
 }
 
 impl LayerObjects {
@@ -128,7 +131,9 @@ impl LayerObjects {
             surface,
             layer,
             viewport: None,
-            sized: None,
+            buffer_scale: 1,
+            destination: None,
+            opaque: None,
         }
     }
 
@@ -401,7 +406,13 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
             // Draw, or redraw at the new size. A mapped surface commits
             // after the ack even when nothing about it changed, so the ack
             // takes effect; an unmapped one has nothing to commit.
-            let committed = reconcile(&state.globals, &state.choices, entry, qh);
+            let committed = reconcile(
+                &state.globals,
+                &state.choices,
+                &mut state.images.jobs,
+                entry,
+                qh,
+            );
             if !committed && entry.output.shows().is_some() {
                 if let Some(layer) = &entry.objects.layer {
                     layer.surface.commit();
@@ -428,7 +439,13 @@ impl Dispatch<WlBuffer, OutputId> for State {
         };
         // Single-pixel buffers are released too; only shm slots care.
         if entry.objects.canvas.released(buffer) {
-            reconcile(&state.globals, &state.choices, entry, qh);
+            reconcile(
+                &state.globals,
+                &state.choices,
+                &mut state.images.jobs,
+                entry,
+                qh,
+            );
         }
     }
 }
@@ -450,14 +467,23 @@ impl Dispatch<WlCallback, RoundTrip> for State {
             RoundTrip::Retry(id) => (id, true),
             RoundTrip::Redraw(id) => {
                 if let Some(entry) = state.outputs.get_mut(id) {
-                    reconcile(&state.globals, &state.choices, entry, qh);
+                    reconcile(
+                        &state.globals,
+                        &state.choices,
+                        &mut state.images.jobs,
+                        entry,
+                        qh,
+                    );
                 }
                 return;
             }
             RoundTrip::Replies(sync) => {
                 // Within the capacity `ready` was made with (the bound in
                 // `crate::waiters`), and drained every loop turn.
-                state.waiters.synced(sync, &mut state.ready);
+                let ready = &mut state.ready;
+                state.waiters.synced(sync, |conn, outcome| {
+                    ready.push((conn, Ready::Done(outcome)))
+                });
                 return;
             }
         };
@@ -485,7 +511,7 @@ impl Dispatch<WlCallback, RoundTrip> for State {
 
 // A wallpaper takes no input and needs no feedback from its surface yet:
 // `preferred_buffer_scale` and friends are hidpi-fractional-scale.md's. No
-// frame callbacks either: a static color is drawn once per change.
+// frame callbacks either: a static wallpaper is drawn once per change.
 delegate_noop!(State: ignore WlSurface);
 delegate_noop!(State: WlRegion);
 

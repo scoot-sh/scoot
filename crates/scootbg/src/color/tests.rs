@@ -101,7 +101,7 @@ fn xrgb8888_is_little_endian_bgrx() {
 #[test]
 fn errors_say_what_to_do() {
     let not = ColorError::NotAColor.to_string();
-    assert!(not.contains("later version"), "{not}");
+    assert!(not.contains("starts with '#'"), "{not}");
     assert!(not.contains("#rrggbb"), "{not}");
     let bad = ColorError::Malformed.to_string();
     assert!(bad.contains("#rrggbb"), "{bad}");

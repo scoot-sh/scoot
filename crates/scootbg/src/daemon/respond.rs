@@ -2,27 +2,27 @@
 
 use std::fmt;
 
-use crate::choices::Choice;
 use crate::control::{Answer, ConnId, Handler};
 use crate::outputs::Outputs;
 use crate::protocol::{
-    self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, Shows, SurfaceEntry,
+    self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, Show, Shows, SurfaceEntry,
 };
 use crate::waiters::Outcome;
 
 /// What the handler needs from the daemon's state: the outputs, for
 /// `query`, and a way to change what they show, for `set` and `clear`.
-pub trait Wallpaper {
+pub trait Changes {
     fn outputs(&self) -> &dyn OutputList;
 
     /// Makes every output (`output` is `None`), or the outputs named
-    /// `output`, show `choice`, and registers `conn` to be answered once
-    /// they do. `Err` changes nothing.
+    /// `output`, show `show` (nothing when `None`), and registers `conn` to
+    /// be answered once they do, or, for an image that cannot be shown,
+    /// with why. `Err` changes nothing.
     fn change(
         &mut self,
         conn: ConnId,
         output: Option<&str>,
-        choice: Choice,
+        show: Option<Show<'_>>,
     ) -> Result<(), ChangeError>;
 }
 
@@ -31,6 +31,8 @@ pub trait Wallpaper {
 pub enum ChangeError {
     /// No output has that name now.
     UnknownOutput,
+    /// Too many images already wait to be decoded (`crate::jobs`).
+    Busy,
 }
 
 /// The reply text for a refused change.
@@ -47,19 +49,32 @@ impl fmt::Display for Refused<'_> {
                 "no output is named {:?} (`scootbg query` lists them); nothing was changed",
                 self.output.unwrap_or_default()
             ),
+            ChangeError::Busy => write!(
+                f,
+                "too many images are waiting to be decoded; nothing was changed (try again \
+                 once they are shown)"
+            ),
         }
     }
+}
+
+/// A reply that waited: a change shown (or not), or an image refused with
+/// the reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ready {
+    Done(Outcome),
+    Refused(String),
 }
 
 /// The request handler for one round of the poll loop.
 pub struct Responder<'a> {
     /// Set by `kill`: the poll loop stops after this round.
     pub stop: bool,
-    wallpaper: &'a mut dyn Wallpaper,
+    wallpaper: &'a mut dyn Changes,
 }
 
 impl<'a> Responder<'a> {
-    pub fn new(wallpaper: &'a mut dyn Wallpaper) -> Self {
+    pub fn new(wallpaper: &'a mut dyn Changes) -> Self {
         Self {
             stop: false,
             wallpaper,
@@ -68,23 +83,24 @@ impl<'a> Responder<'a> {
 }
 
 /// The reply to a `set` or `clear` that waited.
-pub fn write_outcome(out: &mut Vec<u8>, outcome: Outcome) {
-    match outcome {
-        Outcome::Shown => protocol::write_reply(out, &Reply::Ok),
-        Outcome::Failed => protocol::write_reply(
+pub fn write_ready(out: &mut Vec<u8>, ready: &Ready) {
+    match ready {
+        Ready::Done(Outcome::Shown) => protocol::write_reply(out, &Reply::Ok),
+        Ready::Done(Outcome::Failed) => protocol::write_reply(
             out,
             &Reply::Error {
-                message: &"the color could not be drawn on every output it was meant for \
+                message: &"it could not be drawn on every output it was meant for \
                            (the daemon's stderr says why); `scootbg query` shows what each \
                            output shows",
             },
         ),
+        Ready::Refused(message) => protocol::write_reply(out, &Reply::Error { message }),
     }
 }
 
 impl Handler for Responder<'_> {
     fn handle(&mut self, conn: ConnId, line: &[u8], out: &mut Vec<u8>) -> Answer {
-        let (output, choice) = match protocol::parse(line) {
+        let (output, show) = match protocol::parse(line) {
             Ok(Request::Query) => {
                 protocol::write_reply(
                     out,
@@ -109,14 +125,14 @@ impl Handler for Responder<'_> {
                 protocol::write_reply(out, &Reply::Ok);
                 return Answer::Now;
             }
-            Ok(Request::Set { color, output }) => (output, Some(color)),
+            Ok(Request::Set { show, output }) => (output, Some(show)),
             Ok(Request::Clear { output }) => (output, None),
             Err(error) => {
                 protocol::write_reply(out, &Reply::Error { message: &error });
                 return Answer::Now;
             }
         };
-        match self.wallpaper.change(conn, output.as_deref(), choice) {
+        match self.wallpaper.change(conn, output.as_deref(), show) {
             Ok(()) => Answer::Later,
             Err(error) => {
                 let refused = Refused {
@@ -147,7 +163,7 @@ impl<O> OutputList for Outputs<O> {
                     state: output.surface().name(),
                     size: output.surface_size(),
                 },
-                shows: output.shows().map(|color| Shows { color }),
+                shows: output.shows().map(Shows),
             });
         }
     }

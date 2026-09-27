@@ -143,10 +143,10 @@ impl<C: Copy> Waiters<C> {
 
     /// Sync number `sync` came back, so every earlier one did too: their
     /// waiters' replies go to `ready`.
-    pub fn synced(&mut self, sync: u64, ready: &mut Vec<(C, Outcome)>) {
+    pub fn synced(&mut self, sync: u64, mut ready: impl FnMut(C, Outcome)) {
         self.in_flight.retain(|&(conn, outcome, number)| {
             if number <= sync {
-                ready.push((conn, outcome));
+                ready(conn, outcome);
                 false
             } else {
                 true
