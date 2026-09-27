@@ -111,8 +111,8 @@ sha256 `ae084758…`, so every measurement here holds for both).
   `tests/image.rs::a_new_scale_redraws_at_the_real_pixel_size` now runs
   with the knob, so it still covers the integer path and the re-attach.
 - **Filed for the compositor:**
-  [fractional-scale-in-120ths.md](../../../backlog/core/fractional-scale-in-120ths.md)
-  (below); [buffer-scale-needs-a-new-buffer.md](../../../backlog/core/buffer-scale-needs-a-new-buffer.md)
+  [fractional-scale-in-120ths-done.md](../../../backlog/resolved/fractional-scale-in-120ths-done.md)
+  (below; since resolved by PR #298); [buffer-scale-needs-a-new-buffer.md](../../../backlog/core/buffer-scale-needs-a-new-buffer.md)
   updated (scootbg meets it only without the fraction now).
 
 ### Departures from the plan, and why
@@ -157,7 +157,7 @@ sha256 `ae084758…`, so every measurement here holds for both).
     sends 150 and gets a 2552×1594 buffer at integer scale 2 for a
     1600×1000 output (review, measured), about 2.5× the fraction's
     pixels; neither is exact there. See
-    [the compositor item](../../../backlog/core/fractional-scale-in-120ths.md).
+    [the compositor item](../../../backlog/resolved/fractional-scale-in-120ths-done.md).
 
   On sway either case draws 1066×666 at buffer scale 2 (2132×1332) first,
   and once on screen sway sends 180 and it is redrawn at 1599×999, exact:
@@ -216,7 +216,8 @@ sha256 `ae084758…`, so every measurement here holds for both).
   exactly by any client**: at 1.33 it renders at 1.33 and says 160/120,
   and the protocol-exact 1604×1003 buffer is squeezed into 1600 pixels:
   1,596,598 of 1,600,000 checker pixels off (0 at 1.25 and 1.5). Filed as
-  [fractional-scale-in-120ths.md](../../../backlog/core/fractional-scale-in-120ths.md);
+  [fractional-scale-in-120ths-done.md](../../../backlog/resolved/fractional-scale-in-120ths-done.md)
+  (since resolved: the compositor rounds the scale to the nearest 120th);
   no scoot code changed here.
 - **sway at 1.5 on 1600×1000 leaves the output's last column and row
   uncovered** by any full-output layer surface (1066 logical × 1.5 =

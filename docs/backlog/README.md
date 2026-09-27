@@ -697,7 +697,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [A new buffer scale is ignored until a new buffer is attached](./core/buffer-scale-needs-a-new-buffer.md) — low: Smithay reads `set_buffer_scale`/`set_buffer_transform` only with a newly attached buffer, so a commit changing only the scale keeps the old one (reproduced on scoot; scootbg attaches again to work around it). Fix belongs in the scoot-sh/smithay fork.
 
 ### Found drawing scootbg at fractional scales (2026-09-27)
-- [A scale that is not a multiple of 1/120 cannot be drawn exactly by any client](./core/fractional-scale-in-120ths.md) — low: `preferred_scale` is in 120ths, but scoot renders at the configured scale as given, so at 1.33 a protocol-exact client buffer (1604 wide for a 1203-wide surface) is squeezed into 1600 device pixels: 1,596,598 of 1,600,000 pixels of a checkerboard resampled, against 0 at 1.25 and 1.5. Fix: resolve `[output] scale` to the nearest 1/120.
+- [A scale that is not a multiple of 1/120 cannot be drawn exactly by any client](./resolved/fractional-scale-in-120ths-done.md) — RESOLVED 2026-09-27 (PR #298): `[output] scale` resolves to the nearest 1/120 at the clamp (1.33 → 160/120), so rendering and every advertisement agree and a protocol-exact client buffer lands one to one.
 
 ### From the PR #264 review (2026-09-26)
 - [Withhold frame callbacks from layer surfaces nobody can see](./core/frame-callbacks-for-hidden-surfaces.md) — low: every mapped layer surface gets `frame` on every render with no occlusion check, so an animated wallpaper under a fullscreen window never learns it is covered. Blocks scootbg's animated wallpapers (its milestone 2), not v1.
