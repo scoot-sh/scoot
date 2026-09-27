@@ -327,8 +327,10 @@ image `set` still decoding) never lands in the new profile.
 **Starting the daemon.** With none answering on the socket:
 
 - **A non-empty section:** `apply-config` starts one, the same binary
-  (`/proc/self/exe` itself, so the same file even if its path now names an
-  upgraded one; `current_exe`'s path without `/proc`) as
+  (its path while that is still the running file, so `ps`, `pgrep` and
+  `pkill` see `scootbg`; `/proc/self/exe` itself if the path now names
+  another file or none, an upgrade meanwhile, so a different build never
+  runs; the path alone without `/proc`) as
   `apply-config --serve` (internal, not for use by
   hand), with stdin and stdout on `/dev/null`, **stderr where
   `apply-config`'s goes** (scoot's log), and `/` as its working directory.

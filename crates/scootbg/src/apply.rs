@@ -23,9 +23,9 @@
 //! by the client's usual timeout; a daemon is started at most once per
 //! run.
 //!
-//! **Detaching.** The daemon is this binary again (`/proc/self/exe`
-//! itself, so the same file even if its path now names an upgraded one;
-//! the path from `current_exe` without `/proc`), spawned with
+//! **Detaching.** The daemon is this binary again: its path while that is
+//! still this file, else `/proc/self/exe` itself, so a package upgraded
+//! meanwhile never runs a different build ([`start`]); spawned with
 //! `apply-config --serve`: stdin and stdout
 //! `/dev/null`, stderr this command's (scoot's log, when scoot runs it),
 //! working directory `/`. That process calls `setsid(2)` first, so it has a
@@ -255,23 +255,29 @@ fn deliver(profile: &Profile, section: &Section, may_start: MayStart) -> Result<
     }
 }
 
-/// Starts the detached daemon (see the module docs). The binary is
-/// `/proc/self/exe` itself, not the path it resolves to: that is this very
-/// file even if the path now names another (a package upgraded meanwhile)
-/// or none. Without `/proc`, the path `current_exe` last knew. `argv[0]`
-/// is that path either way, for `ps`.
+/// Starts the detached daemon (see the module docs): this very binary.
+/// Its path from `current_exe` while that is still this file (the same
+/// device and inode as `/proc/self/exe`), so the daemon's process name is
+/// `scootbg` for `ps`, `pgrep` and `pkill`; `/proc/self/exe` itself when the
+/// path now names another file or none (a package upgraded or removed
+/// meanwhile), which runs this build all the same, under the process name
+/// `exe`; the path alone without `/proc`.
 fn start(profile: &Profile, section: &Section) -> io::Result<Child> {
+    use std::os::unix::fs::MetadataExt;
     const SELF: &str = "/proc/self/exe";
     let named = std::env::current_exe();
-    let mut command = if Path::new(SELF).exists() {
-        let mut command = Command::new(SELF);
-        if let Ok(path) = &named {
-            std::os::unix::process::CommandExt::arg0(&mut command, path);
+    let running = std::fs::metadata(SELF);
+    let program: std::path::PathBuf = match (named, running) {
+        (Ok(path), Ok(running)) => {
+            let same = std::fs::metadata(&path)
+                .is_ok_and(|m| m.dev() == running.dev() && m.ino() == running.ino());
+            if same { path } else { SELF.into() }
         }
-        command
-    } else {
-        Command::new(named?)
+        (Err(_), Ok(_)) => SELF.into(),
+        (Ok(path), Err(_)) => path,
+        (Err(error), Err(_)) => return Err(error),
     };
+    let mut command = Command::new(program);
     command
         .arg("apply-config")
         .arg(crate::cli::SERVE)

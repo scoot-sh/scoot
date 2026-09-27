@@ -355,6 +355,10 @@ fn a_section_starts_the_daemon() {
     // state ppid pgrp session
     assert_eq!(fields[2], pid.to_string(), "its own process group: {stat}");
     assert_eq!(fields[3], pid.to_string(), "its own session: {stat}");
+    // Named as the binary it is, for `pgrep scootbg` (not `exe`, as an
+    // exec of `/proc/self/exe` would make it).
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap();
+    assert_eq!(comm.trim_end(), "scootbg");
     ok(&session, &["kill"]);
     wait_daemon_gone(&session);
 }
