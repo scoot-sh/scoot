@@ -322,6 +322,16 @@ No blocking findings. Fixed:
 - **A held-up reply** (an output that never configures, a buffer never
   released) is recorded in [memory-and-idle.md](../memory-and-idle.md).
 
+Verified at `6b0fe92`, the review fixes' code: `cargo build --release -p
+scootbg` and the Nix build's log show no warning, and the release binary
+is 783,072 B, the same with or without `RUSTFLAGS="-D warnings"`;
+`cargo nextest run --workspace` 2,218 passed (24 skipped, the compositor's
+`#[ignore]`s), `cargo test --workspace` 2,218 passed and
+`cargo test -p scootbg -p scootbg-mem` 188 passed, with scoot and sway
+required; clippy (debug and `--release`) and fmt clean; `tests/color.rs`
+×10 under eight busy loops (load average ~9.8 on 4 CPUs), 10/10. actionlint
+reports only the SC2174 at line 180 that `main` has too.
+
 ### Not verified, and why
 
 - **Direct scanout over a black single-pixel wallpaper** on the `--tty` GPU
