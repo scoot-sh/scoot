@@ -33,7 +33,7 @@
 //!   served only by the X owner that crossed. `dnd.rs`: an X client starts
 //!   a drag only from a press on its own window. XIM is not provided.
 //! - **Phases 5–7** (capture pins, packaging) are not here yet: see
-//!   `docs/backlog/protocols/xwayland-support.md`.
+//!   `docs/backlog/resolved/xwayland-support-done.md`.
 //!
 //! `wm.rs` holds the Smithay handler impls, each a dispatch into the
 //! module that owns its policy.
@@ -98,8 +98,9 @@
 //!   refused), never silently wrong -- and retracting it would mean
 //!   `env_remove`ing a host `DISPLAY` the session does not own -- but it is
 //!   a known Phase-1 edge: restart the session. A `--tty` login without the
-//!   binary on `PATH` is the same shape (loud fallback), which is why the
-//!   packaging phase must put the binary on the session `PATH`.
+//!   binary on `PATH` is the same shape (loud fallback, naming the binary
+//!   and the `PATH` searched), which is why the flake's `scoot-xwayland`
+//!   packages append nixpkgs' `Xwayland` to `PATH` (see `docs/nix.md`).
 //! - **The session lock blanks X windows like every other window, and
 //!   refuses them input.** The X server keeps running under lock (it must
 //!   -- killing it would take every X client with it, and lock is not

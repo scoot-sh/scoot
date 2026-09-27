@@ -149,6 +149,8 @@ if [ -n "$SMOKE_PREFIX" ]; then
     XWAYLAND_SOCK="$SMOKE_PREFIX-xwayland.sock"
     XWAYLAND_LOG="$SMOKE_PREFIX-xwayland.log"
     XWAYLAND_DISPLAY_MARKER="$SMOKE_PREFIX-xdisplay.txt"
+    NOX_SOCK="$SMOKE_PREFIX-nox.sock"
+    NOX_LOG="$SMOKE_PREFIX-nox.log"
 else
     SOCKET=${SOCKET:-/run/user/$(id -u)/scoot-smoke.sock}
     SHOT=${SHOT:-/tmp/scoot-smoke.png}
@@ -168,6 +170,8 @@ else
     XWAYLAND_SOCK="/run/user/$(id -u)/scoot-smoke-xwayland.sock"
     XWAYLAND_LOG=/tmp/scoot-smoke-xwayland.log
     XWAYLAND_DISPLAY_MARKER=/tmp/scoot-smoke-xdisplay.txt
+    NOX_SOCK="/run/user/$(id -u)/scoot-smoke-nox.sock"
+    NOX_LOG=/tmp/scoot-smoke-nox.log
 fi
 export SCOOT_SOCKET="$SOCKET"
 
@@ -989,13 +993,97 @@ run_xwayland_test() {
 }
 ( run_xwayland_test ) || exit 1
 
+echo "=== xwayland: a PATH without the Xwayland binary falls back loudly, whatever this machine has ==="
+# The section above takes the fallback branch only where the machine has no
+# Xwayland -- never in CI's xwayland run, or on the dev VM. This one hides
+# the binary from the compositor's PATH (every directory holding one is
+# dropped; scoot itself is started by path), which is the `--tty` login
+# whose session PATH lacks it: the packaging's safety net.
+run_xwayland_missing_test() {
+    local socket="$NOX_SOCK"
+    local log="$NOX_LOG"
+    rm -f "$socket" "$log"
+    local mode="$MODE"
+    [ "$mode" = "--tty" ] && mode="--headless"
+
+    local no_x_path="" dir
+    local -a dirs
+    IFS=: read -ra dirs <<<"$PATH"
+    for dir in "${dirs[@]}"; do
+        [ -n "$dir" ] && [ -e "$dir/Xwayland" ] && continue
+        no_x_path="${no_x_path:+$no_x_path:}$dir"
+    done
+    if PATH="$no_x_path" command -v Xwayland >/dev/null 2>&1; then
+        echo "BUG: the filtered PATH still resolves Xwayland: $no_x_path"
+        return 1
+    fi
+
+    PATH="$no_x_path" "$SCOOT" "$mode" --width 640 --height 480 "${RENDERER_ARGS[@]}" \
+        --xwayland --socket "$socket" >"$log" 2>&1 &
+    pid=$!
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
+    export SCOOT_SOCKET="$socket"
+
+    for _ in $(seq 1 60); do
+        [ -S "$socket" ] && break
+        sleep 0.1
+    done
+    if [ ! -S "$socket" ]; then
+        echo "BUG: with no Xwayland on PATH the session never came up; compositor log:"
+        tail -20 "$log"
+        return 1
+    fi
+    local outcome=""
+    for _ in $(seq 1 50); do
+        if grep -q "has no xwayland support" "$log"; then
+            outcome=unbuilt
+        elif grep -q "could not be started" "$log"; then
+            outcome=nobinary
+        elif grep -q "XWayland is ready" "$log"; then
+            outcome=ready
+        fi
+        [ -n "$outcome" ] && break
+        sleep 0.1
+    done
+    case "$outcome" in
+        unbuilt)
+            echo "skipped -- this build has no xwayland feature"
+            ;;
+        nobinary)
+            if ! grep -q "continuing Wayland-only" "$log" ||
+                ! grep -q "Xwayland. must be on PATH" "$log"; then
+                echo "BUG: the missing binary's log line does not say what is missing or what happens next:"
+                tail -20 "$log"
+                return 1
+            fi
+            echo "ok: with Xwayland off PATH the session logged why and runs Wayland-only"
+            ;;
+        *)
+            echo "BUG: with Xwayland off PATH the session neither fell back nor said so (outcome '$outcome'):"
+            tail -20 "$log"
+            return 1
+            ;;
+    esac
+    # Wayland-only, and still a working compositor.
+    "$SCOOT" msg version >/dev/null || return 1
+    echo "ok: the Wayland-only session answers"
+}
+( run_xwayland_missing_test ) || exit 1
+
 echo "--- the default session never mentions xwayland ---"
 # The main session above runs without --xwayland: nothing in the
 # opt-in path may log (or otherwise surface) there. Case-insensitive --
-# this catches XWayland, X11Wm, DISPLAY and xdisplay alike.
-if grep -qi "xwayland\|x11wm\|xdisplay" "$LOG"; then
+# this catches XWayland, X11Wm, DISPLAY and xdisplay alike. The run's own
+# paths are cut out first: the log names the IPC socket, and a SMOKE_PREFIX
+# such as CI's `smoke-xwayland` would otherwise be the match.
+without_prefix() {
+    awk -v prefix="$SMOKE_PREFIX" '
+        prefix != "" { while ((at = index($0, prefix)) > 0) $0 = substr($0, 1, at - 1) substr($0, at + length(prefix)) }
+        { print }' "$1"
+}
+if without_prefix "$LOG" | grep -qi "xwayland\|x11wm\|xdisplay"; then
     echo "BUG: the default (Wayland-only) session mentions xwayland:"
-    grep -ai "xwayland\|x11wm\|xdisplay" "$LOG" | head -5
+    without_prefix "$LOG" | grep -ai "xwayland\|x11wm\|xdisplay" | head -5
     exit 1
 fi
 echo "ok: the default session's log never mentions xwayland"

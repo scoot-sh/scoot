@@ -79,10 +79,13 @@ inspired this project.
     id 2). A *different* monitor
     on the same connector does not inherit them: identity is the connector
     name plus the EDID make/model/serial where one can be read.
-- **XWayland is opt-in, and partial.** X11 applications run with
-  `--xwayland` (or `[xwayland] enabled`) in an `xwayland` build (`cargo
-  build --release --features xwayland`, with `Xwayland` on `PATH`; no flake
-  output ships it yet): their windows tile, dialogs float, fullscreen
+- **XWayland is opt-in.** X11 applications run with
+  `--xwayland` (or `[xwayland] enabled`) in an `xwayland` build: `nix build
+  .#scoot-xwayland`, which also puts `Xwayland` on the compositor's `PATH`
+  ([docs/nix.md](docs/nix.md#xwayland-from-the-flake)), or `cargo build
+  --release --features xwayland` with `Xwayland` on `PATH` yourself (a
+  missing one is logged loudly and the session runs Wayland-only). Their
+  windows tile, dialogs float, fullscreen
   works, and they take focus by themselves only when nothing is focused,
   when they belong to the X app in use, or when scoot started them (that
   app's own process, so another X client cannot race it to the launch).
@@ -95,7 +98,11 @@ inspired this project.
   Wayland to X, X to another X app, and within one X app (moving selected
   text, say); touch drags from X apps are refused
   ([details](docs/protocols.md#clipboard-drag-and-drop-and-input-methods)).
-  Not there yet: X input methods (XIM).
+  Screenshots and screen capture show X windows like any other (per output,
+  blanked under the lock). Not there yet: X input methods (XIM); X apps
+  draw at scale 1 (upscaled under a fractional `[output] scale`); an X
+  app's own titlebar drag (`_NET_WM_MOVERESIZE`) is ignored; X window
+  icons (`_NET_WM_ICON`) are not read.
 - **GPU scanout is opt-in.** With a real GPU it is worth trying: on an
   Apple M2 under Asahi Linux it uses **4–5x less CPU** than the default under
   load, puts the same pixels on screen, and costs 7–16 MB more memory
@@ -159,6 +166,7 @@ Clone, then, from the flake at the repo root:
 ```sh
 nix build                            # ./result/bin/scoot
 nix build .#scoot-gpu                    # ...with the --tty GPU scanout tier
+nix build .#scoot-xwayland           # ...with X11 apps under --xwayland (Xwayland included)
 nix build .#scootctl                 # ./result/bin/scootctl, the client alone
 nix build .#scootbg                  # ./result/bin/scootbg, the wallpaper daemon (early; Linux)
 nix run . -- --headless -- foot      # build and run it in one step
@@ -605,7 +613,9 @@ standards.
 
 Every pull request runs `.github/workflows/ci.yml`, which does the above
 plus `cargo fmt`, `cargo clippy -D warnings`, `scripts/smoke-test.sh` under
-`--headless`, an `ldd` check that the default build links no GPU stack
+`--headless` (twice: the default build, and the `xwayland` build with a real
+`Xwayland` on `PATH`, after that build's clippy and full test suite, whose
+live XWayland suites may not skip there), an `ldd` check that the default build links no GPU stack
 (`libgbm`/`libdrm` are the live assertions; `libEGL`/`libGLESv2` are belt-and-braces,
 since both are `dlopen`ed and never appear in `ldd` either way), a `nix fmt`
 check over all tracked `.nix` files, `nix flake check -L` (Linux and macOS

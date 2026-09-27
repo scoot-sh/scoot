@@ -3,6 +3,7 @@
 - [Consuming the flake](#consuming-the-flake)
 - [Platform notes](#platform-notes)
 - [GPU tiers from the flake](#gpu-tiers-from-the-flake)
+- [XWayland from the flake](#xwayland-from-the-flake)
 - [Home-manager module](#home-manager-module)
 - [NixOS module](#nixos-module)
 - [Migrating from a hand-rolled packaging](#migrating-from-a-hand-rolled-packaging)
@@ -35,11 +36,15 @@ environment.systemPackages = [ inputs.scoot.packages.${pkgs.system}.scoot ];
 the `scoot` binary, with the `scoot msg` client alias kept on it),
 `packages.<system>.scoot-gpu` the same binary with the `gpu-scanout` build
 feature (see [GPU tiers](#gpu-tiers-from-the-flake) below),
+`packages.<system>.scoot-xwayland` and `scoot-gpu-xwayland` those two with
+the `xwayland` build feature and the X server on `PATH` (Linux only; see
+[XWayland](#xwayland-from-the-flake) below),
 `packages.<system>.scootctl` the standalone
 remote-control client, and `packages.<system>.default` is whichever is
 honest on that system (see [Platform notes](#platform-notes)). `apps`
-mirrors all three (`nix run . -- ...`, `nix run .#scootctl -- ...`,
-`nix run .#scoot-gpu -- --tty -- ...`).
+mirrors them (`nix run . -- ...`, `nix run .#scootctl -- ...`,
+`nix run .#scoot-gpu -- --tty -- ...`,
+`nix run .#scoot-xwayland -- --headless --xwayland -- xterm`).
 
 ## Platform notes
 
@@ -86,6 +91,50 @@ Two packages, matching the two GPU tiers in
   it costs 4--5x less compositor CPU under damage than the default tier, for
   7--16 MB more RSS (see [Asahi.md](../Asahi.md)'s Test 4, which settled
   that on 2026-09-21).
+
+## XWayland from the flake
+
+X11 applications need two things the packages above do not carry: the
+`xwayland` Cargo feature, and the `Xwayland` binary on the compositor's
+`PATH` (the server is started as a bare `Xwayland`, a `PATH` lookup and
+nothing else). Two Linux-only packages carry both:
+
+- `packages.<system>.scoot-xwayland` -- `scoot` with the `xwayland`
+  feature;
+- `packages.<system>.scoot-gpu-xwayland` -- `scoot-gpu` with it.
+
+Each wraps `bin/scoot` (a small compiled wrapper, so `scoot` is still an
+ELF binary and `scoot msg` pays no shell start) to *append* nixpkgs'
+Xwayland to `PATH`. Appended, so an `Xwayland` already on the session's
+`PATH` -- NixOS's `programs.xwayland.enable` puts one there -- is the one
+started. Every program the session starts inherits that `PATH`; the
+appended directory holds `Xwayland` and nothing else. The package's
+closure grows by Xwayland's own (it links Mesa for its GL acceleration;
+344 MiB in all on x86_64-linux, all but 11.8 MiB of it Xwayland's closure),
+which is why it is its own package and never the default: the default
+`scoot` stays the GPU-free, X-free build.
+
+The package is only half of it: XWayland still starts only when asked, by
+`--xwayland` or `[xwayland] enabled` (`programs.scoot.settings.xwayland.enabled
+= true` in the home-manager module). The NixOS module needs nothing extra
+-- point `package` at the XWayland build and its session entry's `Exec=`
+starts the wrapper:
+
+```nix
+programs.scoot = {
+  enable = true;
+  package = inputs.scoot.packages.${pkgs.system}.scoot-xwayland;
+  session.enable = true;
+};
+```
+
+Either half alone is loud rather than silent: `[xwayland] enabled` with the
+default `scoot` package logs that the build has no XWayland support, and an
+XWayland build whose `PATH` somehow lacks the binary (a hand-built one, say)
+logs `` `Xwayland` must be on PATH `` with the `PATH` it searched. Both then
+run a Wayland-only session; neither stops the session from starting. Read
+[the trust model](protocols.md#xwayland-opt-in) before turning it on: any X
+client can keylog and read other X clients by design.
 
 ## Home-manager module
 
@@ -179,7 +228,7 @@ programs.scoot = {
 | Option | Default | Meaning |
 |---|---|---|
 | `enable` | `false` | Install `package` system-wide. |
-| `package` | flake's own `scoot` build | The binary to install and to launch from the session entry. |
+| `package` | flake's own `scoot` build | The binary to install and to launch from the session entry. Set it to `scoot-xwayland` for X11 apps (see [XWayland](#xwayland-from-the-flake)). |
 | `session.enable` | `false` | Add a scoot entry to the display-manager/greetd session menu. |
 | `session.command` | `null` | Full `Exec=` line for the session entry. `null` renders the bare `<package>/bin/scoot --tty` (existing configs unchanged). Set it to run something inside the session — usually `<package>/bin/scoot --tty -- <command>`, e.g. the home-manager `sessionScript` output (`/home/alice/.config/scoot/session.sh` for a user `alice` with defaults), or a wrapper script path that launches scoot itself (logging, environment setup). |
 
@@ -308,6 +357,10 @@ and the `--tty` scanout tier needs `packages.scoot-gpu` instead of
 `packages.scoot` — see [GPU tiers from the
 flake](#gpu-tiers-from-the-flake). `[tty] gpu` is unaffected by packaging
 either way: it names a host DRM device path, not a build feature.
+Likewise `[xwayland] enabled = true` needs `packages.scoot-xwayland` (or
+`scoot-gpu-xwayland`) -- see [XWayland from the
+flake](#xwayland-from-the-flake); with the default package it logs a
+warning and the session runs Wayland-only.
 
 ```toml
 [layout]

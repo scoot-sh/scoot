@@ -555,6 +555,14 @@ X client, below.)
   window, and toolkits keep their menus through the focus release (a GTK 3
   context menu measured still open 5 s after locking), so it reappears at
   unlock.
+- **Screenshots and screen capture see X windows** like any other: `scoot
+  msg screenshot` and [`ext-image-copy-capture-v1`](#screen-capture-ext-image-copy-capture-v1)
+  (`grim`) both read an output's composited frame, so an X window -- and an
+  open X menu -- is in the capture of the output it is on and no other's,
+  and under the session lock neither capture holds any X pixel. There is no
+  X-side capture to opt out of, either: an X *client* can still read other X
+  windows' contents through the X server (the trust model above), but never
+  a Wayland window's.
 - **Not yet:** X clients draw at scale 1 (upscaled at a fractional
   `[output] scale`), `_NET_WM_MOVERESIZE` (an X app's own titlebar drag) is
   ignored, `_NET_WM_ICON` is not read, and XIM is not provided (see

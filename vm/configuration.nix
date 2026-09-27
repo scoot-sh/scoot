@@ -182,6 +182,19 @@ in
       sway
       cage
       foot
+      # `--xwayland`'s X server: Smithay starts it as a bare `Xwayland` from
+      # `PATH`, so a `--tty` login here needs it on the system profile or
+      # runs Wayland-only (logged loudly). Most likely no new closure: sway's
+      # wlroots is built with XWayland support, and so already references
+      # it. The two tiny X clients are what the `--features xwayland` live
+      # suites and scripts/smoke-test.sh's X-window half drive (procps's
+      # `pkill`, the third tool they require, is in every NixOS profile).
+      # Not in compositor-deps.nix: that list is link-time libraries, fed to
+      # the package's buildInputs and the dev shell's LIBRARY_PATH; this is
+      # a runtime executable.
+      xwayland
+      xorg.xeyes
+      xorg.xclock
       # Reads specific pixels out of a `scoot msg screenshot` PNG --
       # scripts/smoke-test.sh's decoration checks need this to confirm the
       # focus ring/background actually rendered the configured colors, not

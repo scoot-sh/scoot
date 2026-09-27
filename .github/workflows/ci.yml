@@ -444,6 +444,40 @@ jobs:
           cargo clippy -p scoot --all-targets --features xwayland -- -D warnings
           cargo nextest run -p scoot --features xwayland --no-fail-fast
           cargo test -p scoot --features xwayland
+          # The binary for the smoke run below. Only the `scoot` crate itself
+          # compiles here: the tests above built every dependency with the
+          # same features and profile.
+          cargo build -p scoot -p scootctl --features scoot/xwayland
+          cp target/debug/scoot "$RUNNER_TEMP/scoot-xwayland"
+          cp target/debug/scootctl "$RUNNER_TEMP/scootctl-xwayland"
+
+      # The smoke run above tests the default build, where both xwayland
+      # sections can only report "this build has no xwayland feature". This
+      # runs the whole script against the xwayland build with `Xwayland` and
+      # `xeyes` on PATH, so the real binary's `--xwayland` path is exercised
+      # end to end: the server reaching READY from `compositor::run`,
+      # `DISPLAY` reaching a spawned child, an X window listed and closed over
+      # IPC -- and, with the binary hidden from PATH, the loud Wayland-only
+      # fallback a `--tty` login without Xwayland gets. The ~10 s the script
+      # takes, plus the `scoot` crate's rebuild above (the dependencies are
+      # already built), is the whole cost. No GPU-free assertion here: that is
+      # the default build's run above, and `Xwayland` itself links Mesa.
+      - name: scripts/smoke-test.sh (--headless, --features xwayland, Xwayland on PATH)
+        timeout-minutes: 15
+        env:
+          SCOOT: ${{ runner.temp }}/scoot-xwayland
+          SCOOTCTL: ${{ runner.temp }}/scootctl-xwayland
+          SMOKE_PREFIX: ${{ runner.temp }}/smoke-xwayland
+        shell: nix shell --inputs-from . nixpkgs#foot nixpkgs#jq nixpkgs#imagemagick nixpkgs#wayland-utils nixpkgs#xwayland nixpkgs#xorg.xeyes --command bash -euo pipefail {0}
+        run: |
+          command -v Xwayland xeyes
+          scripts/smoke-test.sh
+          # Both xwayland sections must have run their real branches, not
+          # skipped: a green run that only said "no xwayland feature" here
+          # would prove nothing about this build.
+          log="$RUNNER_TEMP/smoke-xwayland-xwayland.log"
+          grep -q "XWayland is ready" "$log"
+          grep -q "Xwayland. must be on PATH" "$RUNNER_TEMP/smoke-xwayland-nox.log"
 
       - name: Save the cargo cache
         # Not `always()`, which also fires on cancellation -- and

@@ -1,7 +1,8 @@
 //! The Wayland side of the live suites: one ordinary client that can hold a
 //! real window (so an X window has something to steal focus *from*), watch
 //! the wlr foreign-toplevel list the way a taskbar does (and `activate` or
-//! `close` from it), and lock the session.
+//! `close` from it), lock the session, and capture an output the way a
+//! screenshot tool does.
 
 use std::io::Write;
 use std::os::fd::AsFd;
@@ -31,9 +32,11 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_m
 
 use crate::compositor::test_support::wait_for;
 
+mod capture;
 mod clip;
 mod ime;
 
+pub(super) use capture::CaptureStep;
 pub(super) use clip::{ClipStep, Which};
 pub(super) use ime::ImeStep;
 
@@ -63,6 +66,8 @@ pub(super) enum Step {
     Clip(ClipStep),
     /// An input-method step (see `peer/ime.rs`).
     Ime(ImeStep),
+    /// A screen-capture step (see `peer/capture.rs`).
+    Capture(CaptureStep),
 }
 
 /// What the peer answers.
@@ -82,6 +87,8 @@ pub(super) enum Ack {
     Keys(Vec<u32>),
     /// Named events, in the order they arrived.
     Events(Vec<&'static str>),
+    /// A capture's buffer, as the client read it back, or why there is none.
+    Captured(Result<Vec<u8>, String>),
 }
 
 #[derive(Default)]
@@ -103,6 +110,8 @@ struct Peer {
     clip: clip::Clip,
     /// The input-method half (see `peer/ime.rs`).
     ime: ime::Ime,
+    /// The screen-capture half (see `peer/capture.rs`).
+    capture: capture::Capture,
     /// Each mapped window's surface, in map order: where a drag starts.
     surfaces: Vec<wl_surface::WlSurface>,
 }
@@ -158,6 +167,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Peer {
             "zwlr_data_control_manager_v1" => {
                 peer.clip.control_manager = Some(registry.bind(name, version.min(2), qh, ()));
             }
+            // Recorded, not bound: see `peer/capture.rs`.
+            "wl_output" => peer.capture.output_names.push((name, version)),
+            "ext_output_image_capture_source_manager_v1" => {
+                peer.capture.sources_name = Some(name);
+            }
+            "ext_image_copy_capture_manager_v1" => peer.capture.manager_name = Some(name),
             _ => {}
         }
     }
@@ -481,6 +496,7 @@ pub(super) fn peer(
             }
             Step::Clip(step) => clip::step(&mut peer, &mut queue, &conn, step)?,
             Step::Ime(step) => ime::step(&mut peer, &mut queue, step)?,
+            Step::Capture(step) => capture::step(&mut peer, &mut queue, &registry, step)?,
         };
         acks.send(ack).map_err(|e| e.to_string())?;
     }

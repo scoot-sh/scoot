@@ -1,6 +1,6 @@
 //! Tests for opt-in XWayland: the server (Phase 1), window mapping (Phase 2)
 //! and the focus gate (Phase 3) -- see `super`, and
-//! `docs/backlog/protocols/xwayland-support.md`.
+//! `docs/backlog/resolved/xwayland-support-done.md`.
 //!
 //! Two halves, split by what the machine provides:
 //!
@@ -335,40 +335,17 @@ fn wait_until<S, A>(
 /// attempt fails loudly as a returned `Err` (never a panic) while the
 /// session keeps serving. One test, two branches: the machine's `PATH`
 /// picks which behaviour is correct here, and both are asserted, so this
-/// is coverage either way, not a skip.
+/// is coverage either way, not a skip. (Where the binary is present -- CI,
+/// the dev VM -- the missing-binary half still runs, in
+/// [`a_missing_binary_falls_back_whatever_the_machine_has`].)
 #[cfg(feature = "xwayland")]
 #[test]
 fn server_starts_or_falls_back_loudly() {
-    use super::StartError;
-
     if !xwayland_on_path() {
         eprintln!(
             "server_starts_or_falls_back_loudly: skipped live half -- no Xwayland binary on PATH"
         );
-        let mut fixture = Fixture::unstarted();
-        let handle = fixture.state.loop_handle.clone();
-        match super::start(handle, &mut fixture.state) {
-            Err(StartError::Spawn(error)) => {
-                let message = error.to_string();
-                assert!(
-                    message.to_lowercase().contains("not found")
-                        || message.to_lowercase().contains("no such file"),
-                    "the spawn failure should name the missing binary: {message}"
-                );
-                assert!(fixture.state.xdisplay.is_none());
-                assert!(fixture.state.xwm.is_none());
-            }
-            Err(error @ StartError::Insert(_)) => {
-                panic!("a missing binary must fail as Spawn, not as a loop error: {error}")
-            }
-            Ok(display) => {
-                panic!("starting XWayland with no binary on PATH unexpectedly worked: :{display}")
-            }
-        }
-        // The session underneath is unharmed: it still spawns and still
-        // dispatches (the Wayland-only half of the fallback contract).
-        assert!(fixture.state.spawn(&["true".to_owned()]));
-        fixture.settle();
+        assert_a_missing_binary_falls_back();
         return;
     }
     let mut fixture = Fixture::unstarted();
@@ -387,6 +364,115 @@ fn server_starts_or_falls_back_loudly() {
     // ... and the session underneath is a working compositor, not just a
     // process that did not crash: it still spawns.
     assert!(fixture.state.spawn(&["true".to_owned()]));
+}
+
+/// The missing-binary contract: `start` fails as [`StartError::Spawn`]
+/// naming the binary (never a panic, never a loop error), leaves no display
+/// behind for `State::spawn` to export, and the session underneath still
+/// spawns and dispatches -- the Wayland-only half. `compositor::run` turns
+/// that `Err` into its loud log line (`scripts/smoke-test.sh` asserts the
+/// line).
+#[cfg(feature = "xwayland")]
+fn assert_a_missing_binary_falls_back() {
+    use super::StartError;
+
+    let mut fixture = Fixture::unstarted();
+    let handle = fixture.state.loop_handle.clone();
+    match super::start(handle, &mut fixture.state) {
+        Err(error @ StartError::Spawn(_)) => {
+            let message = error.to_string();
+            assert!(
+                message.contains("`Xwayland` must be on PATH"),
+                "the failure should say what is missing and where: {message}"
+            );
+            let cause = std::error::Error::source(&error)
+                .map(ToString::to_string)
+                .unwrap_or_default()
+                .to_lowercase();
+            assert!(
+                cause.contains("not found") || cause.contains("no such file"),
+                "the spawn failure should be the missing binary: {cause}"
+            );
+            assert!(fixture.state.xdisplay.is_none());
+            assert!(fixture.state.xwm.is_none());
+            assert!(fixture.state.xwayland_grab.is_none());
+        }
+        Err(error @ StartError::Insert(_)) => {
+            panic!("a missing binary must fail as Spawn, not as a loop error: {error}")
+        }
+        Ok(display) => {
+            panic!("starting XWayland with no binary on PATH unexpectedly worked: :{display}")
+        }
+    }
+    // The session underneath is unharmed: it still spawns (by absolute
+    // path, since the `PATH` here may hold nothing at all: this test binary,
+    // listing no test) and still dispatches.
+    let exe = std::env::current_exe().expect("the test binary's path");
+    assert!(fixture.state.spawn(&[
+        exe.to_string_lossy().into_owned(),
+        "--list".to_owned(),
+        "--exact".to_owned(),
+        "no-such-test".to_owned(),
+    ]));
+    fixture.settle();
+}
+
+/// Set only on [`missing_binary_helper`]'s re-run, so the helper is a no-op
+/// anywhere else -- including a `cargo test -- --ignored` run.
+#[cfg(feature = "xwayland")]
+const MISSING_BINARY_ENV: &str = "SCOOT_TEST_XWAYLAND_MISSING";
+
+/// The helper's libtest name, for the re-run.
+#[cfg(feature = "xwayland")]
+const MISSING_BINARY_TEST: &str = "compositor::xwayland::tests::missing_binary_helper";
+
+/// The missing-binary fallback, on every machine: where CI and the dev VM
+/// have `Xwayland` on `PATH`, [`server_starts_or_falls_back_loudly`] only
+/// ever takes its live half, so the fallback -- the packaging's safety net
+/// for a `--tty` login whose `PATH` lacks the binary -- would otherwise
+/// never run anywhere automated. This test binary re-runs itself with an
+/// empty directory as its whole `PATH` (changing this process's own
+/// environment would race every other test in a `cargo test` process).
+#[cfg(feature = "xwayland")]
+#[test]
+fn a_missing_binary_falls_back_whatever_the_machine_has() {
+    let exe = std::env::current_exe().expect("the test binary's path");
+    let empty = std::env::temp_dir().join(format!("scoot-no-xwayland-{}", std::process::id()));
+    std::fs::create_dir_all(&empty).expect("an empty PATH directory");
+    let output = std::process::Command::new(&exe)
+        .args(["--exact", MISSING_BINARY_TEST, "--ignored", "--nocapture"])
+        .env("PATH", &empty)
+        .env(MISSING_BINARY_ENV, "1")
+        .env_remove(REQUIRE_XWAYLAND_ENV)
+        .output()
+        .expect("the test binary re-runs");
+    let _ = std::fs::remove_dir(&empty);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "the missing-binary fallback failed:\n{stdout}\n{stderr}"
+    );
+    // The helper really ran (a filter that matched nothing also exits 0).
+    assert!(
+        stdout.contains("1 passed"),
+        "the helper did not run:\n{stdout}\n{stderr}"
+    );
+}
+
+/// [`a_missing_binary_falls_back_whatever_the_machine_has`]'s re-run.
+#[cfg(feature = "xwayland")]
+#[test]
+#[ignore = "run by a_missing_binary_falls_back_whatever_the_machine_has, with an empty PATH"]
+fn missing_binary_helper() {
+    if std::env::var_os(MISSING_BINARY_ENV).is_none() {
+        return;
+    }
+    assert!(
+        !xwayland_on_path(),
+        "the re-run's PATH still holds Xwayland"
+    );
+    assert_a_missing_binary_falls_back();
 }
 
 /// Neither XWayland global becomes visible to an ordinary client once a
@@ -687,6 +773,8 @@ fn a_window_manager_that_cannot_attach_withdraws_the_display() {
 mod bench;
 #[cfg(feature = "xwayland")]
 mod cap;
+#[cfg(feature = "xwayland")]
+mod capture;
 #[cfg(feature = "xwayland")]
 mod clipboard;
 #[cfg(feature = "xwayland")]

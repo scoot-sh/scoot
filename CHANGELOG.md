@@ -9,6 +9,24 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — X apps from Nix: `scoot-xwayland`
+
+- **`nix build .#scoot-xwayland`** (and `.#scoot-gpu-xwayland` for the GPU
+  tier) builds scoot with XWayland support and puts nixpkgs' `Xwayland` on
+  its `PATH`, so `--xwayland` (or `[xwayland] enabled`) runs X11 apps from
+  a `--tty` login or the NixOS module's session entry with nothing else
+  installed. Set `programs.scoot.package` to it in the NixOS or
+  home-manager module. An `Xwayland` already on your `PATH` still wins. The
+  default `scoot` package is unchanged: no XWayland, no X server in its
+  closure ([docs/nix.md](docs/nix.md#xwayland-from-the-flake)).
+- **A missing `Xwayland` now says which file was missing.** The startup
+  line read "could not be started ... No such file or directory"; it now
+  says `` `Xwayland` must be on PATH `` and logs the `PATH` it searched.
+  The session still starts, Wayland-only, as before.
+- Screenshots (`scoot msg screenshot`) and screen capture (`grim`) show X
+  windows and X menus on the output they are on, and nothing of them under
+  the lock. That was already so; it is now tested.
+
 ### 2026-09-27 — X apps drawing with the GPU no longer all close together at ~64 windows
 
 - **With `--xwayland` on the `--tty` GPU tier, about 64 X windows drawing

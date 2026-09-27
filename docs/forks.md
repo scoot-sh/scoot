@@ -24,7 +24,7 @@ top**, so it stays easy to review, rebase, and drop.
   which PR #233 pinned; that branch is kept as it was, and nothing pins it
   now. The XWayland commits, in order, each measured before it was written
   (fail-first records on the dev VM, `~/evidence/xw4/`; see
-  `docs/backlog/protocols/xwayland-support.md`'s Phase 4 record):
+  `docs/backlog/resolved/xwayland-support-done.md`'s Phase 4 record):
   - `35c335e0` **pace incoming INCR transfers on the write.** An X
     selection larger than one chunk was read with `delete=true` and deleted
     again after the write; a prompt owner's next chunk landed between the

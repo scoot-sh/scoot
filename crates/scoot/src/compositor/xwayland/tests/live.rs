@@ -54,11 +54,31 @@ pub(super) fn live(test: &str) -> Option<Live> {
 /// [`live`] with its own `appearance` -- for the one suite that is about
 /// the ring and the rounded clip.
 pub(super) fn live_with(test: &str, appearance: Appearance) -> Option<Live> {
+    live_built(test, appearance, 1)
+}
+
+/// [`live`] with `outputs` headless outputs side by side, each [`CANVAS`]
+/// square, all created before the peer connects (so its registry lists
+/// every one, in id order) -- for the per-output suites.
+pub(super) fn live_on(test: &str, outputs: i32) -> Option<Live> {
+    live_built(test, appearance(), outputs)
+}
+
+fn live_built(test: &str, appearance: Appearance, outputs: i32) -> Option<Live> {
     if !xwayland_on_path() {
         eprintln!("{test}: skipped -- no Xwayland binary on PATH");
         return None;
     }
     let mut fixture: Fixture = Harness::headless(appearance, CANVAS);
+    for index in 2..=outputs {
+        crate::compositor::headless::add_output(
+            &mut fixture.state,
+            &format!("{}-{index}", crate::compositor::headless::OUTPUT_NAME),
+            CANVAS,
+            CANVAS,
+        )
+        .expect("another headless output");
+    }
     fixture.spawn(peer);
     let handle = fixture.state.loop_handle.clone();
     let display = super::super::start(handle, &mut fixture.state).expect("XWayland should start");
