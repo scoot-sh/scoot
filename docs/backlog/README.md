@@ -784,12 +784,11 @@ scale/mode) into one hardware session.
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland: drops onto X windows do not land](./resolved/xwayland-pointer-focus-x11-done.md)
-  — RESOLVED except its review follow-up (filed by XWayland Phase 4, PR
-  #246). The pointer focus has an X arm, and with the fork's proxy-remap
-  flush (`6e6fe896`) drops work in every direction, live. Pending: fork
-  commits so a Wayland drop onto an X target that dies or hangs before
-  finishing does not wedge X drags (B1) and the source hears the drop
-  once (N1); tests ignored in `xwayland/tests/drop_end.rs`.
+  — RESOLVED (filed by XWayland Phase 4, PR #246). The pointer focus has
+  an X arm, and with the fork's proxy-remap flush (`6e6fe896`) drops work
+  in every direction, live; review follow-ups fixed in the fork
+  (`7388af13`, `9515d7e5`: a dead or hung X target no longer wedges X
+  drags, the source hears a drop once).
 - [XWayland support](./protocols/xwayland-support.md)
   — OPEN, low: spike (PR #220), skeleton (PR #221) and mapping + focus gate
   (Phases 2+3, PR #244) landed: X windows tile, dialogs float, rules

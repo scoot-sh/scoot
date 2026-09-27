@@ -11,11 +11,10 @@
 //! client's window, lets it end one way, then starts an X drag from the
 //! first X client's window.
 //!
-//! **All ignored until the scoot-sh/smithay commits fixing this are
-//! pinned.** At `6e6fe896` all six fail (see the resolved backlog record's
-//! review follow-up): the silent-then-dead and hung targets leave X drags
-//! refused, a validated drop tells the source `dnd_drop_performed` twice,
-//! and a refused drop is still sent `XdndDrop`.
+//! These pin scoot-sh/smithay `7388af13` (the source told once) and
+//! `9515d7e5` (the offer ends with its target, or when a new X drag starts
+//! after the drop); all six failed at `6e6fe896`, and with `7388af13` alone
+//! the dying- and hanging-after-the-drop cases still did.
 //!
 //! The Wayland source is told how the drop went exactly once:
 //! `dnd_drop_performed` once for a drop made, then `dnd_finished` or
@@ -151,7 +150,6 @@ fn x_drag_starts(live: &mut Live, rect: scoot_core::Rect, after: &str) {
 /// The control: a target that accepts, reads and finishes. The source hears
 /// `dnd_drop_performed` once, then `dnd_finished`.
 #[test]
-#[ignore = "needs the scoot-sh/smithay commits ending an X drop offer (B1/N1 of the pointer-focus review); fail at 6e6fe896"]
 fn an_x_target_that_finishes_leaves_x_drags_working() {
     let Some(mut live) = live("an_x_target_that_finishes_leaves_x_drags_working") else {
         return;
@@ -172,7 +170,6 @@ fn an_x_target_that_finishes_leaves_x_drags_working() {
 /// and the source hears `cancelled` alone -- not `dnd_drop_performed` for a
 /// drop that was never made.
 #[test]
-#[ignore = "needs the scoot-sh/smithay commits ending an X drop offer (B1/N1 of the pointer-focus review); fail at 6e6fe896"]
 fn an_x_target_that_refuses_is_left_not_dropped_on() {
     let Some(mut live) = live("an_x_target_that_refuses_is_left_not_dropped_on") else {
         return;
@@ -189,7 +186,6 @@ fn an_x_target_that_refuses_is_left_not_dropped_on() {
 /// A target that never answers `XdndStatus`, still alive: the release is no
 /// drop, and nothing waits on the target.
 #[test]
-#[ignore = "needs the scoot-sh/smithay commits ending an X drop offer (B1/N1 of the pointer-focus review); fail at 6e6fe896"]
 fn an_x_target_that_never_answers_leaves_x_drags_working() {
     let Some(mut live) = live("an_x_target_that_never_answers_leaves_x_drags_working") else {
         return;
@@ -206,7 +202,6 @@ fn an_x_target_that_never_answers_leaves_x_drags_working() {
 
 /// The same target, then gone: its client disconnects.
 #[test]
-#[ignore = "needs the scoot-sh/smithay commits ending an X drop offer (B1/N1 of the pointer-focus review); fail at 6e6fe896"]
 fn an_x_target_that_never_answers_and_dies_leaves_x_drags_working() {
     let Some(mut live) = live("an_x_target_that_never_answers_and_dies_leaves_x_drags_working")
     else {
@@ -226,7 +221,6 @@ fn an_x_target_that_never_answers_and_dies_leaves_x_drags_working() {
 /// its windows' destruction ends the drop, and the source hears
 /// `cancelled` after `dnd_drop_performed`.
 #[test]
-#[ignore = "needs the scoot-sh/smithay commits ending an X drop offer (B1/N1 of the pointer-focus review); fail at 6e6fe896"]
 fn an_x_target_dying_after_the_drop_leaves_x_drags_working() {
     let Some(mut live) = live("an_x_target_dying_after_the_drop_leaves_x_drags_working") else {
         return;
@@ -247,7 +241,6 @@ fn an_x_target_dying_after_the_drop_leaves_x_drags_working() {
 /// (the source hears `cancelled`) rather than holding `XdndSelection` for a
 /// target that may never answer.
 #[test]
-#[ignore = "needs the scoot-sh/smithay commits ending an X drop offer (B1/N1 of the pointer-focus review); fail at 6e6fe896"]
 fn an_x_target_hanging_after_the_drop_leaves_x_drags_working() {
     let Some(mut live) = live("an_x_target_hanging_after_the_drop_leaves_x_drags_working") else {
         return;

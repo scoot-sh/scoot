@@ -144,7 +144,7 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus sixteen
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus eighteen
 # commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
 # each one and why):
 #
@@ -176,9 +176,16 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   window over a Wayland one and could not drop there -- which kept X-origin
 #   drags off `pointer_focus.rs`'s X target (see
 #   `docs/backlog/resolved/xwayland-pointer-focus-x11-done.md`).
+# - `7388af13` and `9515d7e5` end a Wayland drop onto an X window properly:
+#   the source hears `dnd_drop_performed` once and only for a drop made (a
+#   refused one is left, not dropped on), and the XWM's XDND offer ends when
+#   its target is destroyed or a new X drag starts after the drop. Before,
+#   a target that died or hung before `XdndFinished` left the offer set and
+#   every later X drag was taken back until scoot restarted
+#   (`compositor/xwayland/tests/drop_end.rs`).
 #
 # Upstream status (checked 2026-09-25; the pixman hunk re-checked 2026-09-27,
-# the XDND remap flush 2026-09-27):
+# the XDND commits 2026-09-27):
 # none of these is on Smithay `master`
 # or in a release; an upstream PR is the user's to file. Repin to upstream --
 # and drop the fork -- once a Smithay rev carries equivalents
@@ -186,7 +193,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "6e6fe896ec29d0731549d283b6f62dc15acb1670"
+rev = "9515d7e59f045435feabb978be530215915e2fef"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session

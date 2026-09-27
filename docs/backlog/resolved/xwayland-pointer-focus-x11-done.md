@@ -60,7 +60,7 @@ repinned there (`crates/scoot/Cargo.toml`, `Cargo.lock`, `flake.nix`,
   before the press at 1.2 s it dropped. No `refusing an X drag` lines in
   the log. (Screenshots were in the session's scratch space.)
 
-## Review follow-up -- open when this was written
+## Review follow-up -- resolved
 
 Independent review of the X arm found two issues in Smithay's X drop target
 that the Wayland-to-X half made reachable (`main` never made an X offer):
@@ -72,11 +72,16 @@ that the Wayland-to-X half made reachable (`main` never made an X offer):
 - **N1:** a validated drop tells the Wayland source `dnd_drop_performed`
   twice; a refused one is still sent `XdndDrop` (then `cancelled`).
 
-Both need scoot-sh/smithay commits. Their acceptance tests are in
-`compositor/xwayland/tests/drop_end.rs`, ignored until the fork is
-repinned; all six fail at `6e6fe896`. **Do not treat this entry as
-resolved until they pass.** Review note N3 (the drag gate's liveness
-check) is fixed on the scoot side.
+Both fixed in the fork and pinned (rev `9515d7e5`): `7388af13` tells the
+source once and only for a drop made (a refused one is left with
+`XdndLeave`), and `9515d7e5` ends the offer when its target or proxy is
+destroyed, or when an X client takes `XdndSelection` after the drop. The
+acceptance tests are `compositor/xwayland/tests/drop_end.rs` (six: never
+answers, never answers then dies, refuses, dies after the drop, hangs
+after the drop, and the finished control): all six fail at `6e6fe896`,
+4 of 6 pass with `7388af13` alone, all six pass at `9515d7e5`. Review
+note N3 (the drag gate's liveness check) is fixed on the scoot side;
+N4 (the protocols.md wording) too.
 
 Filed 2026-09-25 by XWayland Phase 4, PR #246 (see
 [`xwayland-support.md`](../protocols/xwayland-support.md)'s Phase 4 record). Serves

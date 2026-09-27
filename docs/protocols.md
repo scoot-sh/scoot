@@ -668,6 +668,11 @@ and the X app reads the dropped data from the window manager as it would
 from any X source. The X window has to take drops (`XdndAware`,
 as toolkit text fields and file views do); over one that does not, the drag
 simply finds no target, and releasing there ends it with nothing dropped.
+An X target that refuses the drop is left, not dropped on, and the Wayland
+app is told the drag was cancelled; one that dies or hangs after the drop
+does not stop later drags (the window manager gives the drop up when the
+target's window goes, or when an X app starts a new drag; scoot's Smithay
+fork, `7388af13` and `9515d7e5`).
 
 A drag from an X app onto an X window -- another X app's, or inside one X
 app, like moving selected text within an X editor -- lands too, and X does
