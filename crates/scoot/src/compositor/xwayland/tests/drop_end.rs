@@ -11,10 +11,14 @@
 //! client's window, lets it end one way, then starts an X drag from the
 //! first X client's window.
 //!
-//! These pin scoot-sh/smithay `7388af13` (the source told once) and
+//! These pin scoot-sh/smithay `7388af13` (the source told once),
 //! `9515d7e5` (the offer ends with its target, or when a new X drag starts
-//! after the drop); all six failed at `6e6fe896`, and with `7388af13` alone
-//! the dying- and hanging-after-the-drop cases still did.
+//! after the drop) and `d3a4cd73` (only a drag `allow_drag` accepts counts
+//! as a new one: a rough X client taking the selection with nothing held is
+//! taken back from, and the drop stands). The first six failed at
+//! `6e6fe896`, and with `7388af13` alone the dying- and
+//! hanging-after-the-drop cases still did; the rough-client case failed at
+//! `9515d7e5`, where that client kept the selection.
 //!
 //! The Wayland source is told how the drop went exactly once:
 //! `dnd_drop_performed` once for a drop made, then `dnd_finished` or
@@ -24,7 +28,7 @@
 use std::sync::Arc;
 
 use scoot_ipc::PointerButton;
-use x11rb::protocol::xproto::Window as XWindow;
+use x11rb::protocol::xproto::{ConnectionExt as _, Window as XWindow};
 
 use super::dnd::{press_at, taken_over};
 use super::drop::{centre, grabbed, settle, start_wayland_drag, visible};
@@ -253,4 +257,47 @@ fn an_x_target_hanging_after_the_drop_leaves_x_drags_working() {
         ["dnd_drop_performed", "cancelled"]
     );
     drop(target_client);
+}
+
+/// While a drop waits on its target's `XdndFinished`, an X client that
+/// takes `XdndSelection` with no drag to start (nothing held) is a rough
+/// client, not a new drag: the window manager takes the selection back and
+/// the drop stands -- the target still finishes it, and the source hears
+/// `dnd_finished`, not `cancelled`. Only an X drag `allow_drag` accepts
+/// gives a pending drop up (the hanging-target case above).
+#[test]
+fn a_rough_x_client_cannot_end_a_pending_drop() {
+    let Some(mut live) = live("a_rough_x_client_cannot_end_a_pending_drop") else {
+        return;
+    };
+    let (target_client, target_xid, source, _) = drag_over_target(&mut live, Target::Accepts);
+    assert!(release(&mut live, &target_client), "no XdndDrop");
+
+    let rough = XClient::connect(live.display);
+    let rough_owner = rough.take_selection("XdndSelection");
+    live.drain();
+    let selection = rough.atom("XdndSelection");
+    let owner = rough
+        .conn
+        .get_selection_owner(selection)
+        .expect("a get-owner request")
+        .reply()
+        .expect("the owner")
+        .owner;
+    assert_ne!(
+        owner, rough_owner,
+        "a rough X client kept XdndSelection over a pending drop"
+    );
+    assert!(
+        !taken_over(&live.fixture.state),
+        "a rough X client started a drag with nothing held"
+    );
+
+    let copy = target_client.atom("XdndActionCopy");
+    target_client.xdnd_send(source, "XdndFinished", [target_xid, 1, copy, 0, 0]);
+    settle(&mut live.fixture);
+    assert_eq!(
+        source_events(&mut live),
+        ["dnd_drop_performed", "dnd_finished"]
+    );
 }

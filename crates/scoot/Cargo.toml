@@ -144,7 +144,7 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus eighteen
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus nineteen
 # commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
 # each one and why):
 #
@@ -183,6 +183,12 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   a target that died or hung before `XdndFinished` left the offer set and
 #   every later X drag was taken back until scoot restarted
 #   (`compositor/xwayland/tests/drop_end.rs`).
+# - `d3a4cd73` gives a pending drop onto X up only for an X drag that
+#   `allow_drag` accepts: `9515d7e5` gave it up whenever any X client took
+#   `XdndSelection`, so a client with nothing held could end a drop in
+#   flight and keep the selection. Any other taker is now taken back from
+#   (flushed). It also cancels the source of a stale dropped offer a new
+#   Wayland drag onto X replaces.
 #
 # Upstream status (checked 2026-09-25; the pixman hunk re-checked 2026-09-27,
 # the XDND commits 2026-09-27):
@@ -193,7 +199,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "9515d7e59f045435feabb978be530215915e2fef"
+rev = "d3a4cd7385e39d4dea55337a22b3805d24e52d49"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session
