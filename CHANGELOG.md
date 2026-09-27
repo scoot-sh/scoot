@@ -25,12 +25,17 @@ scoot has not cut a numbered release yet; entries are dated.
   string belongs) costs only the wallpaper: the rest of your config still
   applies, and the log names the problem. Elsewhere in the file an unknown
   key still means the whole file is ignored.
+- **Each backend keeps its own saved wallpaper:** `scoot` under `--tty`,
+  `scoot-nested` under `--nested`, `scoot-headless` under `--headless`, so
+  a `scootbg set` in a headless session (an agent's, say) never becomes
+  what your real login restores.
 - **NixOS:** `programs.scoot.enable` now also installs scootbg
-  (`programs.scoot.wallpaper.enable`, on by default; set it to `false` to
-  opt out). If you import the module file directly rather than through the
-  flake, set `programs.scoot.wallpaper.package`, apply the new
-  `overlays.default`, or turn it off: evaluation now fails with a message
-  naming the option otherwise.
+  (`programs.scoot.wallpaper.enable`, on by default when the flake's
+  module or overlay provides the package; set it to `false` to opt out).
+  If you import the module file directly without the overlay, nothing
+  changes: it stays off until you set `programs.scoot.wallpaper.package`
+  (setting `wallpaper.enable = true` with no package fails evaluation,
+  naming the option).
 - **Nix:** a new overlay, `overlays.default`, provides `pkgs.scoot`,
   `pkgs.scootctl` and (on Linux) `pkgs.scootbg`.
 

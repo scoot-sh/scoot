@@ -32,9 +32,13 @@
 //!
 //! # The profile
 //!
-//! `scoot`, or `scoot-nested` under `--nested`, so a nested session and its
-//! host keep their own saved wallpaper (see scootbg's Restore section).
-//! Fixed at startup.
+//! Which saved state scootbg restores and records (see scootbg's Restore
+//! section), one per backend, fixed at startup: `scoot` on `--tty` (the
+//! user's real session), `scoot-nested` under `--nested` (apart from its
+//! host), and `scoot-headless` under `--headless`, so an agent's
+//! `scootbg set` in a throwaway headless session never becomes what the
+//! user's real login restores, and two sessions' daemons never write one
+//! file (review of PR #297, N3).
 
 mod queue;
 mod section;
@@ -54,10 +58,24 @@ pub use section::{Section, WallpaperConfig, WallpaperSetting};
 
 use super::State;
 
-/// The profile a session on its own seat or display uses.
+/// The profile a `--tty` session uses: the user's real one.
 pub const PROFILE: &str = "scoot";
 /// The profile under `--nested`, apart from its host's.
 pub const PROFILE_NESTED: &str = "scoot-nested";
+/// The profile under `--headless`, apart from the user's real session.
+pub const PROFILE_HEADLESS: &str = "scoot-headless";
+
+/// The profile for a session on `--tty` (`tty`), `--nested` (`nested`) or
+/// neither (`--headless`).
+pub fn profile_for(tty: bool, nested: bool) -> &'static str {
+    if tty {
+        PROFILE
+    } else if nested {
+        PROFILE_NESTED
+    } else {
+        PROFILE_HEADLESS
+    }
+}
 
 /// `State`'s wallpaper half.
 #[derive(Debug)]
@@ -76,7 +94,9 @@ impl Default for Wallpaper {
     fn default() -> Self {
         Self {
             queue: Queue::default(),
-            profile: PROFILE,
+            // Replaced at startup (`start_wallpaper`); until then, never the
+            // user's real profile.
+            profile: PROFILE_HEADLESS,
             live: None,
             timer: None,
         }
@@ -110,11 +130,12 @@ pub enum Reloaded {
 }
 
 impl State {
-    /// Startup: runs the section, if the file has a usable one. `nested`
-    /// picks the profile. An invalid section is logged and runs nothing:
-    /// the session starts with its background color, as with no section.
-    pub(super) fn start_wallpaper(&mut self, setting: &WallpaperSetting, nested: bool) {
-        self.wallpaper.profile = if nested { PROFILE_NESTED } else { PROFILE };
+    /// Startup: runs the section, if the file has a usable one, under
+    /// `profile` (see [`profile_for`]). An invalid section is logged and
+    /// runs nothing: the session starts with its background color, as with
+    /// no section.
+    pub(super) fn start_wallpaper(&mut self, setting: &WallpaperSetting, profile: &'static str) {
+        self.wallpaper.profile = profile;
         match setting {
             WallpaperSetting::Absent => {}
             WallpaperSetting::Invalid(problem) => {
@@ -133,11 +154,25 @@ impl State {
 
     /// A reload: re-runs the section while it exists, `{}` when it went,
     /// and retries a held one otherwise. See [`Reloaded`].
+    ///
+    /// A reload whose section has a problem keeps the running section, and
+    /// re-runs *that* one, as any reload re-runs the section in force: it
+    /// is unchanged, so scootbg does nothing but answer, and a daemon that
+    /// crashed comes back (review of PR #297, N6). Without a running one
+    /// (none, or removed) it only retries what is held.
     pub(super) fn reload_wallpaper(&mut self, setting: &WallpaperSetting) -> Reloaded {
         match setting {
             WallpaperSetting::Invalid(problem) => {
-                self.wallpaper.queue.trigger();
-                self.drive_wallpaper();
+                // Whenever `live` is set, the newest submission is `live`'s
+                // own (every submit of a section sets it; the removal's `{}`
+                // clears it), so this supersedes nothing newer.
+                match self.wallpaper.live.clone() {
+                    Some(live) => self.submit_wallpaper(live),
+                    None => {
+                        self.wallpaper.queue.trigger();
+                        self.drive_wallpaper();
+                    }
+                }
                 Reloaded::Refused(problem.clone())
             }
             WallpaperSetting::Absent => {

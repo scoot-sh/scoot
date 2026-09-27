@@ -12,12 +12,12 @@ use serde_json::json;
 
 use crate::compositor::config;
 use crate::compositor::keybindings::{Bound, Modifiers};
-use crate::compositor::wallpaper::section::{DEFAULT_COMMAND, MAX_JSON};
+use crate::compositor::wallpaper::section::{DEFAULT_COMMAND, MAX_DRAIN_DEPTH, MAX_JSON};
 use crate::compositor::wallpaper::{Section, WallpaperConfig, WallpaperSetting};
 
 /// The file around `[wallpaper]`, as `config.rs` reads it: the table is one
 /// optional field among others.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct File {
     #[serde(default)]
     wallpaper: Option<WallpaperConfig>,
@@ -410,28 +410,58 @@ fn values_of_the_wrong_type_are_refused_by_name() {
     }
 }
 
-/// Nesting under `[wallpaper]` as deep as `toml` allows is drained without
-/// building anything (`IgnoredAny`), and refused, never a crash. The depth
-/// is `toml`'s own limit, so the file parses; one more level and the TOML
-/// itself is malformed (the whole-file case `config.rs` owns).
+/// A skipped value nested up to [`MAX_DRAIN_DEPTH`] levels is drained and
+/// refused by name, like any wrong value; one level more and the whole file
+/// is a parse error, the way malformed TOML is, rather than a recursion as
+/// deep as `toml` allows (B1, review of PR #297: see the stack tests at the
+/// end of this file). Each nesting form, at both levels, where it can sit.
 #[test]
-fn deep_nesting_inside_the_section_is_refused_without_a_crash() {
-    let depth = 70;
-    let value = format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
-    let got = problem(&format!("[wallpaper]\nimage = {value}\n"));
-    assert!(
-        got.contains("`wallpaper.image` must be a string, not an array"),
-        "{got}"
-    );
-    let got = problem(&format!("[wallpaper]\nnope = {value}\n"));
-    assert!(got.contains("unknown key `wallpaper.nope`"), "{got}");
-    // Deep tables in an output's place.
-    let dotted = (0..40)
-        .map(|i| format!("k{i}"))
-        .collect::<Vec<_>>()
-        .join(".");
-    let got = problem(&format!("[wallpaper.output.X.{dotted}]\n"));
+fn nesting_is_drained_up_to_the_bound_and_refused_past_it() {
+    let array = |depth: usize| format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
+    let inline = |depth: usize| format!("{}1{}", "{a=".repeat(depth), "}".repeat(depth));
+    let dotted = |depth: usize| {
+        (0..depth)
+            .map(|i| format!("k{i}"))
+            .collect::<Vec<_>>()
+            .join(".")
+    };
+    let parse = |toml: String| toml::from_str::<File>(&toml).map_err(|e| e.to_string());
+    for (what, deepest_ok) in [
+        ("array", array(MAX_DRAIN_DEPTH)),
+        ("inline table", inline(MAX_DRAIN_DEPTH)),
+    ] {
+        let got = problem(&format!("[wallpaper]\nimage = {deepest_ok}\n"));
+        assert!(
+            got.contains("`wallpaper.image` must be a string"),
+            "{what}: {got}"
+        );
+        let got = problem(&format!("[wallpaper]\nnope = {deepest_ok}\n"));
+        assert!(
+            got.contains("unknown key `wallpaper.nope`"),
+            "{what}: {got}"
+        );
+    }
+    // An unknown key's dotted path: the key itself is the first level.
+    let got = problem(&format!(
+        "[wallpaper.output.X.{}]\n",
+        dotted(MAX_DRAIN_DEPTH)
+    ));
     assert!(got.contains("unknown key `wallpaper.output.X.k0`"), "{got}");
+
+    for toml in [
+        format!("[wallpaper]\nimage = {}\n", array(MAX_DRAIN_DEPTH + 1)),
+        format!("[wallpaper]\nnope = {}\n", inline(MAX_DRAIN_DEPTH + 1)),
+        format!("[wallpaper]\noutput = {}\n", array(MAX_DRAIN_DEPTH + 1)),
+        format!("wallpaper = {}\n", array(MAX_DRAIN_DEPTH + 1)),
+        format!(
+            "[wallpaper.output.X]\nfill = {}\n",
+            inline(MAX_DRAIN_DEPTH + 1)
+        ),
+        format!("[wallpaper.output.X.{}]\n", dotted(MAX_DRAIN_DEPTH + 2)),
+    ] {
+        let error = parse(toml.clone()).expect_err("past the bound is a parse error");
+        assert!(error.contains("nests more than"), "{toml:?}: {error}");
+    }
 }
 
 #[test]
@@ -531,4 +561,114 @@ fn the_default_config_leaves_the_section_commented_out() {
         file.wallpaper.is_none(),
         "no live [wallpaper] in the emission"
     );
+}
+
+// -- Nesting: the stack ---------------------------------------------------------
+
+/// The deepest tree `toml`'s limits allow (see `config.rs`'s
+/// `the_deepest_tree_tomls_limits_allow_falls_back_to_defaults_too` and
+/// `docs/backlog/resolved/config-recursion-depth-resolved.md`), rooted
+/// under `[wallpaper]`: an 80-segment array-of-tables header whose first
+/// segment is `wallpaper`, 80 nested inline tables each keyed by an
+/// 80-segment dotted key, and an 80-segment dotted leaf. 13,456 bytes.
+fn deepest_wallpaper_file() -> String {
+    let segments = "a.".repeat(79);
+    let text = format!(
+        "[[wallpaper.{}a]]\n{}{segments}a = 1{}\n",
+        "a.".repeat(78),
+        format!("{segments}a = {{").repeat(80),
+        "}".repeat(80)
+    );
+    assert_eq!(
+        text.len(),
+        13_456,
+        "the worst case this test means to build"
+    );
+    text
+}
+
+/// Runs `f` on an 8 MiB thread: the main thread's stack, which is what
+/// `config::load` (startup) and `State::reload` (the loop thread) run on,
+/// rather than the 2 MiB `cargo test` hands a test. An overflow aborts the
+/// whole test binary, so every test reports nothing rather than this one
+/// failing: that is a real finding about production, as for the strict
+/// path's test.
+fn on_main_thread_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .spawn(f)
+        .expect("spawn the 8 MiB thread")
+        .join()
+        .expect("parsing the deepest possible [wallpaper] must not panic or abort")
+}
+
+/// B1 (review of PR #297): draining an unknown `[wallpaper]` key used to
+/// recurse through every one of those 6,561 levels, which overflowed a
+/// debug build's 8 MiB main thread at startup. The drain is bounded now:
+/// the file is refused as a parse error (full defaults, logged), exactly
+/// like the same nesting anywhere else in the file.
+#[test]
+fn the_deepest_tree_under_wallpaper_falls_back_to_defaults_at_startup() {
+    let text = deepest_wallpaper_file();
+    let (config, wallpaper) = on_main_thread_stack(move || {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(dir.path(), &text);
+        let loaded = config::load(Some(&path)).expect("an explicit, readable file");
+        (loaded.config, loaded.wallpaper)
+    });
+    assert_eq!(config, scoot_core::Config::default(), "full defaults");
+    assert_eq!(wallpaper, WallpaperSetting::Absent);
+}
+
+/// ...and a reload of the same file is an error that keeps the running
+/// config, never an abort of the running compositor.
+#[test]
+fn the_deepest_tree_under_wallpaper_is_a_reload_error() {
+    let text = deepest_wallpaper_file();
+    let error = on_main_thread_stack(move || {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(dir.path(), &text);
+        config::reload_from(&path, false)
+            .map(|_| ())
+            .expect_err("absurd nesting is refused")
+            .to_string()
+    });
+    assert!(error.contains("nests more than"), "{error}");
+}
+
+/// N5 (review of PR #297): `toml` hands a date or time to a visitor as a
+/// one-entry map under a private key. Wherever one lands in the section,
+/// the message says "a date/time" and never names that key.
+#[test]
+fn a_date_is_named_as_one_and_never_by_tomls_private_key() {
+    for (toml, needle) in [
+        (
+            "[wallpaper]\nimage = 1979-05-27\n",
+            "`wallpaper.image` must be a string, not a date/time",
+        ),
+        (
+            "[wallpaper]\ncommand = 07:32:00\n",
+            "`wallpaper.command` must be a string, not a date/time",
+        ),
+        (
+            "wallpaper = 1979-05-27T07:32:00Z\n",
+            "`wallpaper` must be a table ([wallpaper]), not a date/time",
+        ),
+        (
+            "[wallpaper]\noutput = 1979-05-27\n",
+            "`wallpaper.output` must be a table of tables ([wallpaper.output.\"NAME\"]), not a date/time",
+        ),
+        (
+            "[wallpaper.output]\nDP-2 = 1979-05-27\n",
+            "`wallpaper.output.DP-2` must be a table, not a date/time",
+        ),
+        (
+            "[wallpaper.output.X]\ncolor = 1979-05-27T00:00:00\n",
+            "`wallpaper.output.X.color` must be a string, not a date/time",
+        ),
+    ] {
+        let got = problem(toml);
+        assert!(got.contains(needle), "{toml:?}: {got}");
+        assert!(!got.contains("toml_private"), "{toml:?}: {got}");
+    }
 }

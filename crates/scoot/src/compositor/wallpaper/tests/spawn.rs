@@ -10,7 +10,9 @@ use scoot_ipc::Response;
 
 use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::{Harness, capture_logs};
-use crate::compositor::wallpaper::{Section, WallpaperSetting};
+use crate::compositor::wallpaper::{
+    PROFILE, PROFILE_HEADLESS, PROFILE_NESTED, Section, WallpaperSetting, profile_for,
+};
 
 type Fixture = Harness<(), ()>;
 
@@ -136,9 +138,11 @@ fn a_section_runs_apply_config_with_the_profile_and_the_json() {
     let stub = Stub::new();
     let mut fixture = fixture();
     let json = r##"{"color":"#1e1e2e"}"##;
-    fixture.state.start_wallpaper(&stub.setting(json), false);
+    fixture
+        .state
+        .start_wallpaper(&stub.setting(json), PROFILE_HEADLESS);
     settle(&mut fixture);
-    assert_eq!(stub.runs(), [run_line("scoot", json)]);
+    assert_eq!(stub.runs(), [run_line("scoot-headless", json)]);
     let wayland = fs::read_to_string(stub.file("env")).unwrap();
     assert_eq!(
         wayland.trim_end(),
@@ -147,11 +151,27 @@ fn a_section_runs_apply_config_with_the_profile_and_the_json() {
     );
 }
 
+/// N3 (review of PR #297): each backend has its own profile, so a
+/// headless session (an agent's, a test's) never writes the state the
+/// user's real `--tty` login restores, nor shares a file with it.
+#[test]
+fn each_backend_has_its_own_profile() {
+    assert_eq!(profile_for(true, false), PROFILE);
+    assert_eq!(PROFILE, "scoot");
+    assert_eq!(profile_for(false, true), PROFILE_NESTED);
+    assert_eq!(PROFILE_NESTED, "scoot-nested");
+    assert_eq!(profile_for(false, false), PROFILE_HEADLESS);
+    assert_eq!(PROFILE_HEADLESS, "scoot-headless");
+    assert_ne!(PROFILE_HEADLESS, PROFILE);
+}
+
 #[test]
 fn a_nested_session_uses_its_own_profile() {
     let stub = Stub::new();
     let mut fixture = fixture();
-    fixture.state.start_wallpaper(&stub.setting("{}"), true);
+    fixture
+        .state
+        .start_wallpaper(&stub.setting("{}"), PROFILE_NESTED);
     settle(&mut fixture);
     assert_eq!(stub.runs(), [run_line("scoot-nested", "{}")]);
 }
@@ -162,11 +182,12 @@ fn no_section_at_startup_runs_nothing() {
     let mut fixture = fixture();
     fixture
         .state
-        .start_wallpaper(&WallpaperSetting::Absent, false);
+        .start_wallpaper(&WallpaperSetting::Absent, PROFILE_HEADLESS);
     let (_, logs) = capture_logs(|| {
-        fixture
-            .state
-            .start_wallpaper(&WallpaperSetting::Invalid("broken".into()), false)
+        fixture.state.start_wallpaper(
+            &WallpaperSetting::Invalid("broken".into()),
+            PROFILE_HEADLESS,
+        )
     });
     assert!(fixture.state.wallpaper.is_idle());
     assert!(stub.runs().is_empty());
@@ -181,7 +202,9 @@ fn reloads_rerun_the_section_and_a_removal_sends_the_empty_one() {
     let stub = Stub::new();
     let mut fixture = fixture();
     let a = r##"{"color":"#000001"}"##;
-    fixture.state.start_wallpaper(&stub.setting(a), false);
+    fixture
+        .state
+        .start_wallpaper(&stub.setting(a), PROFILE_HEADLESS);
     settle(&mut fixture);
     fixture.state.reload_wallpaper(&stub.setting(a));
     settle(&mut fixture);
@@ -193,9 +216,9 @@ fn reloads_rerun_the_section_and_a_removal_sends_the_empty_one() {
     assert_eq!(
         stub.runs(),
         [
-            run_line("scoot", a),
-            run_line("scoot", a),
-            run_line("scoot", "{}")
+            run_line("scoot-headless", a),
+            run_line("scoot-headless", a),
+            run_line("scoot-headless", "{}")
         ]
     );
 }
@@ -207,7 +230,9 @@ fn runs_never_overlap_and_the_newest_waiting_section_wins() {
     let stub = Stub::new();
     let mut fixture = fixture();
     stub.hold();
-    fixture.state.start_wallpaper(&stub.setting("\"A\""), false);
+    fixture
+        .state
+        .start_wallpaper(&stub.setting("\"A\""), PROFILE_HEADLESS);
     dispatch_until(&mut fixture, "A to start", |_| stub.runs().len() == 1);
     fixture.state.reload_wallpaper(&stub.setting("\"B\""));
     fixture.state.reload_wallpaper(&stub.setting("\"C\""));
@@ -220,7 +245,10 @@ fn runs_never_overlap_and_the_newest_waiting_section_wins() {
     settle(&mut fixture);
     assert_eq!(
         stub.runs(),
-        [run_line("scoot", "\"A\""), run_line("scoot", "\"C\"")],
+        [
+            run_line("scoot-headless", "\"A\""),
+            run_line("scoot-headless", "\"C\"")
+        ],
         "B never ran"
     );
     assert!(!stub.overlapped(), "two runs overlapped");
@@ -232,7 +260,9 @@ fn a_failed_run_is_logged_with_its_status_and_retried_on_a_reload() {
     let mut fixture = fixture();
     stub.exit_with(2);
     let (_, logs) = capture_logs(|| {
-        fixture.state.start_wallpaper(&stub.setting("{}"), false);
+        fixture
+            .state
+            .start_wallpaper(&stub.setting("{}"), PROFILE_HEADLESS);
         settle(&mut fixture);
     });
     assert!(logs.contains("exit status 2"), "{logs}");
@@ -264,9 +294,10 @@ fn a_missing_binary_is_a_warning_and_retried_on_a_reload() {
         json: "{}".to_owned(),
     };
     let (_, logs) = capture_logs(|| {
-        fixture
-            .state
-            .start_wallpaper(&WallpaperSetting::Section(missing.clone()), false)
+        fixture.state.start_wallpaper(
+            &WallpaperSetting::Section(missing.clone()),
+            PROFILE_HEADLESS,
+        )
     });
     assert!(fixture.state.wallpaper.is_idle(), "nothing started");
     assert!(logs.contains("was not found"), "{logs}");
@@ -294,7 +325,9 @@ fn a_hung_run_is_abandoned_after_the_bound() {
         .set_patience(Duration::from_millis(300));
     stub.hold();
     let (_, logs) = capture_logs(|| {
-        fixture.state.start_wallpaper(&stub.setting("\"A\""), false);
+        fixture
+            .state
+            .start_wallpaper(&stub.setting("\"A\""), PROFILE_HEADLESS);
         dispatch_until(&mut fixture, "A to start", |_| stub.runs().len() == 1);
         fixture.state.reload_wallpaper(&stub.setting("\"B\""));
         // The timer, not a reap, is what moves on: A is still running.
@@ -305,7 +338,7 @@ fn a_hung_run_is_abandoned_after_the_bound() {
         settle(&mut fixture);
     });
     assert!(logs.contains("no longer waiting on it"), "{logs}");
-    assert_eq!(stub.runs()[1], run_line("scoot", "\"B\""));
+    assert_eq!(stub.runs()[1], run_line("scoot-headless", "\"B\""));
     assert!(
         logs.contains("abandoned=true"),
         "the abandoned run's end is logged: {logs}"
@@ -368,11 +401,13 @@ fn a_reload_reports_the_section() {
     assert_eq!(
         stub.runs(),
         [
-            run_line("scoot", r##"{"color":"#000001"}"##),
-            run_line("scoot", r##"{"color":"#000001"}"##),
-            run_line("scoot", "{}"),
+            run_line("scoot-headless", r##"{"color":"#000001"}"##),
+            run_line("scoot-headless", r##"{"color":"#000001"}"##),
+            run_line("scoot-headless", r##"{"color":"#000001"}"##),
+            run_line("scoot-headless", "{}"),
         ],
-        "an unchanged section still runs; a refused one does not; a removal sends {{}}"
+        "an unchanged section still runs; a refused one re-runs the running section (N6); \
+         a removal sends {{}}"
     );
 }
 
@@ -382,7 +417,9 @@ fn a_new_command_is_reported_apart() {
     let stub = Stub::new();
     let other = Stub::new();
     let mut fixture = fixture();
-    fixture.state.start_wallpaper(&stub.setting("{}"), false);
+    fixture
+        .state
+        .start_wallpaper(&stub.setting("{}"), PROFILE_HEADLESS);
     settle(&mut fixture);
     let reloaded = fixture.state.reload_wallpaper(&other.setting("{}"));
     assert_eq!(

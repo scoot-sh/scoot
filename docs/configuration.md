@@ -297,7 +297,9 @@ cases where guessing would be worse than refusing — see below and
   field/bind/entry/rule falls back — every other field, bind and rule in the
   file still applies.
 - Anything wrong inside `[wallpaper]` (an unknown key, a value of the wrong
-  type, a path that cannot be resolved): logged as an error, and only the
+  type, a path that cannot be resolved; nesting more than 16 levels deep is
+  the exception, a whole-file parse error like the case above): logged as
+  an error, and only the
   wallpaper is skipped — the rest of the file applies. An unknown key
   anywhere else still discards the whole file, as above.
 - A set-but-unusable `[tty] gpu` (a wrong path, or an empty one): a hard
@@ -360,8 +362,9 @@ refused by name, e.g. `window_rule #3 (sets neither float nor size): skipped
 as unusable`, on every reload that finds it), and `[wallpaper]` (handed to
 scootbg on every reload while the section exists, `{}` on the reload that
 removes it; reported as `wallpaper` when its values changed and
-`wallpaper.command` when `command` did, and refused by name, keeping the
-running section, when it has a problem -- see [`[wallpaper]`](#wallpaper)).
+`wallpaper.command` when `command` changed, either or both, and refused
+by name, keeping and re-running the running section, when it has a
+problem -- see [`[wallpaper]`](#wallpaper)).
 
 **Refused, explicitly, pending a restart:**
 `[tty] gpu` (the session already
@@ -378,13 +381,18 @@ The reply says which was which:
 
 Both lists name only fields that *differed* — a field the file and the
 session agree on appears in neither, so two empty lists together mean "the
-reload changed nothing it was asked to". The one exception is an unusable
-`[[window_rule]]`, refused on every reload that finds it: it is never in
-effect, so it always differs from what the file asks for. A reload that cannot load or
-validate the file at all (unreadable, malformed TOML, an unknown field)
-answers an `error` instead, keeps the running config untouched, and logs —
-never defaults, never a half-applied session, never an exit. `scootctl`
-exits non-zero on that error like any other.
+reload changed nothing it was asked to". Two exceptions are refused on
+every reload that finds them, changed or not, because neither is ever in
+effect, so each always differs from what the file asks for: an unusable
+`[[window_rule]]`, and a `[wallpaper]` section with a problem (an unknown
+key or a value of the wrong type inside it, a path that cannot be
+resolved). A reload that cannot load or validate the file at all
+(unreadable, malformed TOML, an unknown field anywhere but inside
+`[wallpaper]`, a value nested absurdly deep) answers an `error` instead,
+keeps the running config untouched, and logs — never defaults, never a
+half-applied session, never an exit. `scootctl` exits non-zero on that
+error like any other. An unknown field inside `[wallpaper]` is not that
+case: it is the refusal above, and the rest of the file applies.
 
 Two guarantees the applied set pins:
 
@@ -808,9 +816,12 @@ handling at all, leave the whole table out.
 section exists, scoot runs `COMMAND apply-config --profile PROFILE JSON`
 with the section's values as JSON (paths resolved, only the keys you
 wrote, `command` left out); on the reload that removes it, the same with
-`{}`; at startup without one, nothing. `PROFILE` is `scoot`, or
-`scoot-nested` under `--nested`, so a nested session and its host keep
-their own saved wallpaper. `apply-config` starts the scootbg daemon when
+`{}`; at startup without one, nothing. `PROFILE`, the saved state scootbg
+restores and records, is one per backend: `scoot` under `--tty` (your
+real session), `scoot-nested` under `--nested` (apart from its host) and
+`scoot-headless` under `--headless`, so a `scootbg set` made in a
+throwaway headless session (an agent's, a test's) never becomes what your
+real login restores, and two sessions never write one state file. `apply-config` starts the scootbg daemon when
 none runs and hands it the section otherwise; see
 [scootbg's `apply-config`](scootbg/README.md#apply-config-scoots-wallpaper-section)
 for everything on its side.
@@ -863,12 +874,18 @@ per input event.
   and no wallpaper is set from the file, but **the rest of the file
   applies** -- unlike other tables, where an unknown key discards the whole
   file (see [Failure semantics](#failure-semantics)); on a reload, the
-  field is refused by name and the running section kept.
+  field is refused by name, on every reload until it is fixed, and the
+  running section is kept and re-run (so a crashed daemon still comes
+  back).
+- **A value nested absurdly deep** inside `[wallpaper]` (more than 16
+  levels of arrays and tables) is not skipped: the whole file is refused
+  as malformed TOML is, since nothing a wallpaper value means nests that
+  deep.
 
 **Reloading.** `scootctl reload` reports `wallpaper` as applied when the
 section's values changed (added, edited or removed) and
-`wallpaper.command` when only `command` did; "applied" means handed to
-scootbg, and the outcome is in the log. An unchanged section is silent in
+`wallpaper.command` when `command` changed (both, when both did);
+"applied" means handed to scootbg, and the outcome is in the log. An unchanged section is silent in
 the reply but still runs. It applies under session lock too: the
 wallpaper is on the background layer, which a locked frame does not show.
 

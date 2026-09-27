@@ -8,18 +8,28 @@
 //! startup discard the *whole* file (see `config.rs`'s module doc). Adding
 //! `[wallpaper]` the same way would let a typo in a wallpaper path's key cost
 //! a user their binds, and nothing in this section is worth that. So
-//! [`WallpaperConfig`] has a hand-written `Deserialize` that never fails: it
-//! records every unknown key and every value of the wrong type as a problem
-//! and carries on, and the caller turns any problem into
-//! [`WallpaperSetting::Invalid`] (startup: an error in the log and no
-//! wallpaper run; reload: the field refused by name, the rest applied).
+//! [`WallpaperConfig`] has a hand-written `Deserialize` that records every
+//! unknown key and every value of the wrong type as a problem and carries
+//! on, and the caller turns any problem into [`WallpaperSetting::Invalid`]
+//! (startup: an error in the log and no wallpaper run; reload: the field
+//! refused by name, the rest applied).
 //!
-//! It never builds a tree of what it skips: an unknown key's value, or a
-//! value of the wrong type, is drained through `serde::de::IgnoredAny`,
-//! which allocates nothing and whose recursion is bounded by the `toml`
-//! crate's own depth limits (see `config.rs`'s `parse_or_defaults`). A
-//! passthrough `toml::Table` here would be the expensive target that note
-//! warns about.
+//! # Nesting: the one way it fails, deliberately
+//!
+//! What it skips (an unknown key's value, a value of the wrong type) is
+//! drained by [`Drain`], which builds nothing and descends at most
+//! [`MAX_DRAIN_DEPTH`] levels. Past that it returns a deserialize error, so
+//! the whole file fails the way malformed TOML does (startup: logged, full
+//! defaults; reload: an error, the running config kept). It must not
+//! recurse further: `toml`'s own limits allow a tree 6,561 levels deep
+//! (80-level nesting times 80-segment keys, see
+//! `docs/backlog/resolved/config-recursion-depth-resolved.md`), and
+//! draining that with serde's `IgnoredAny`, as this first did, overflowed a
+//! debug build's 8 MiB main thread at startup and on a reload of a running
+//! session (review of PR #297, B1). Nothing a wallpaper value needs comes
+//! near the bound: a legitimate section is three levels deep. A passthrough
+//! `toml::Table` here would be worse still (see `config.rs`'s
+//! `parse_or_defaults`).
 //!
 //! # What scoot checks, and what it leaves to scootbg
 //!
@@ -45,11 +55,23 @@ use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
-use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::de::{
+    self, Deserialize, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor,
+};
 
 /// The program run when the section names no `command`: `scootbg`, looked up
 /// on `PATH`.
 pub const DEFAULT_COMMAND: &str = "scootbg";
+
+/// How many levels of arrays and tables a skipped value may nest before the
+/// file is refused as a parse error (see the module doc). A legitimate
+/// `[wallpaper]` is three levels deep; a value of the wrong type rarely one.
+pub const MAX_DRAIN_DEPTH: usize = 16;
+
+/// The key `toml` puts a date or time under when it hands one to
+/// `deserialize_any`: a one-entry map. An implementation detail of the
+/// crate, never shown to the user.
+const TOML_DATETIME: &str = "$__toml_private_datetime";
 
 /// The most JSON scootbg takes for a section (`section::MAX_SECTION` in
 /// scootbg: its request-line bound less 1 KiB). scootbg checks this itself;
@@ -315,6 +337,10 @@ impl<'de> Visitor<'de> for SectionVisitor {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut config = WallpaperConfig::default();
         while let Some(key) = map.next_key::<String>()? {
+            if key == TOML_DATETIME {
+                map.next_value_seed(Drain::TOP)?;
+                return Ok(not_a_table("a date/time"));
+            }
             match key.as_str() {
                 "command" => {
                     let value = map.next_value::<Text>()?;
@@ -333,7 +359,7 @@ impl<'de> Visitor<'de> for SectionVisitor {
                         &mut config.top,
                         &mut config.problems,
                     )? {
-                        map.next_value::<IgnoredAny>()?;
+                        map.next_value_seed(Drain::TOP)?;
                         config.problems.push(format!(
                             "unknown key `wallpaper.{}` (expected image, color, mode, fill, \
                              filter, output or command)",
@@ -347,34 +373,36 @@ impl<'de> Visitor<'de> for SectionVisitor {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
-        IgnoredAny.visit_seq(seq)?;
-        Ok(not_a_table())
+        Drain::TOP.visit_seq(seq)?;
+        Ok(not_a_table("an array"))
     }
 
     fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E> {
-        Ok(not_a_table())
+        Ok(not_a_table("a boolean"))
     }
 
     fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E> {
-        Ok(not_a_table())
+        Ok(not_a_table("a number"))
     }
 
     fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E> {
-        Ok(not_a_table())
+        Ok(not_a_table("a number"))
     }
 
     fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E> {
-        Ok(not_a_table())
+        Ok(not_a_table("a number"))
     }
 
     fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
-        Ok(not_a_table())
+        Ok(not_a_table("a string"))
     }
 }
 
-fn not_a_table() -> WallpaperConfig {
+fn not_a_table(what: &str) -> WallpaperConfig {
     WallpaperConfig {
-        problems: vec!["`wallpaper` must be a table ([wallpaper])".to_owned()],
+        problems: vec![format!(
+            "`wallpaper` must be a table ([wallpaper]), not {what}"
+        )],
         ..WallpaperConfig::default()
     }
 }
@@ -459,14 +487,24 @@ impl<'de> Visitor<'de> for TextVisitor {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Text, A::Error> {
-        IgnoredAny.visit_seq(seq)?;
+        Drain::TOP.visit_seq(seq)?;
         Ok(Text::Other("an array"))
     }
 
     // A TOML date or time arrives as a one-entry map too.
-    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Text, A::Error> {
-        IgnoredAny.visit_map(map)?;
-        Ok(Text::Other("a table"))
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Text, A::Error> {
+        let Some(key) = map.next_key::<String>()? else {
+            return Ok(Text::Other("a table"));
+        };
+        let datetime = key == TOML_DATETIME;
+        // This map is the skipped value, so its entries are one level in.
+        map.next_value_seed(Drain::TOP.deeper::<A::Error>()?)?;
+        Drain::TOP.visit_map(map)?;
+        Ok(Text::Other(if datetime {
+            "a date/time"
+        } else {
+            "a table"
+        }))
     }
 }
 
@@ -507,6 +545,10 @@ impl<'de> Visitor<'de> for OutputsVisitor {
         let mut tables = BTreeMap::new();
         let mut problems = Vec::new();
         while let Some(name) = map.next_key::<String>()? {
+            if name == TOML_DATETIME {
+                map.next_value_seed(Drain::TOP)?;
+                return Ok(Self::wrong("a date/time"));
+            }
             let at = format!("wallpaper.output.{}", quoted(&name));
             let table = map.next_value_seed(OutputSeed {
                 at: &at,
@@ -525,7 +567,7 @@ impl<'de> Visitor<'de> for OutputsVisitor {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Outputs, A::Error> {
-        IgnoredAny.visit_seq(seq)?;
+        Drain::TOP.visit_seq(seq)?;
         Ok(Self::wrong("an array"))
     }
 
@@ -583,8 +625,12 @@ impl<'de> Visitor<'de> for OutputSeed<'_> {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let mut table = Table::default();
         while let Some(key) = map.next_key::<String>()? {
+            if key == TOML_DATETIME {
+                map.next_value_seed(Drain::TOP)?;
+                return Ok(self.wrong("a date/time"));
+            }
             if !read_table_key(&mut map, &key, self.at, &mut table, self.problems)? {
-                map.next_value::<IgnoredAny>()?;
+                map.next_value_seed(Drain::TOP)?;
                 self.problems.push(format!(
                     "unknown key `{}.{}` (an output's table takes image, color, mode, fill \
                      and filter)",
@@ -597,7 +643,7 @@ impl<'de> Visitor<'de> for OutputSeed<'_> {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
-        IgnoredAny.visit_seq(seq)?;
+        Drain::TOP.visit_seq(seq)?;
         Ok(self.wrong("an array"))
     }
 
@@ -619,5 +665,105 @@ impl<'de> Visitor<'de> for OutputSeed<'_> {
 
     fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
         Ok(self.wrong("a string"))
+    }
+}
+
+/// Skips a value this section has no use for, building nothing, and
+/// refuses one nested more than [`MAX_DRAIN_DEPTH`] levels deep with a
+/// deserialize error instead of recursing (see the module doc). The `usize`
+/// is how many arrays and tables enclose the value being drained, counted
+/// from the value the section skips.
+#[derive(Clone, Copy)]
+struct Drain(usize);
+
+impl Drain {
+    /// A skipped value itself.
+    const TOP: Self = Self(0);
+
+    /// The drain for a value one level inside this one, or the error that
+    /// ends the parse.
+    fn deeper<E: de::Error>(self) -> Result<Self, E> {
+        if self.0 >= MAX_DRAIN_DEPTH {
+            return Err(E::custom(format!(
+                "a value in [wallpaper] nests more than {MAX_DRAIN_DEPTH} levels of arrays \
+                 and tables deep"
+            )));
+        }
+        Ok(Self(self.0 + 1))
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for Drain {
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Drain {
+    type Value = ();
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("any value")
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_i64<E>(self, _: i64) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_u64<E>(self, _: u64) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_i128<E>(self, _: i128) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_u128<E>(self, _: u128) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_bytes<E>(self, _: &[u8]) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_unit<E>(self) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_none<E>(self) -> Result<(), E> {
+        Ok(())
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_any(self.deeper::<D::Error>()?)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        let inner = self.deeper::<A::Error>()?;
+        while seq.next_element_seed(inner)?.is_some() {}
+        Ok(())
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
+        let inner = self.deeper::<A::Error>()?;
+        // Keys are strings in TOML: nothing to descend into.
+        while map.next_key::<IgnoredAny>()?.is_some() {
+            map.next_value_seed(inner)?;
+        }
+        Ok(())
     }
 }

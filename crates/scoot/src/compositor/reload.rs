@@ -84,16 +84,19 @@
 //!   while the section exists, and `{}` on the reload that removes it (see
 //!   `wallpaper.rs`). Reported applied as `wallpaper` when the section's
 //!   values differ from what the session last handed over, and as
-//!   `wallpaper.command` when only `command` does -- "applied" meaning
-//!   handed over, never waited on. A section with a problem is refused by
-//!   name and the running one kept.
+//!   `wallpaper.command` when `command` does (both, when both do) --
+//!   "applied" meaning handed over, never waited on. A section with a
+//!   problem (inside `[wallpaper]`, an unknown key no longer fails the
+//!   whole reload) is refused by name on every reload that finds it, and
+//!   the running one is kept and re-run.
 //!
 //! Every refusal names the field; nothing is silently ignored. Both lists
 //! name only fields that *differed* -- a field the file and the session
 //! agree on appears in neither, so two empty lists together mean "the
-//! reload changed nothing it was asked to". The one exception is an
-//! unusable window rule, which is refused on every reload that finds it
-//! (it is never in effect, so it always differs from what the file says).
+//! reload changed nothing it was asked to". Two exceptions are refused on
+//! every reload that finds them: an unusable window rule, and a
+//! `[wallpaper]` section with a problem (neither is ever in effect, so each
+//! always differs from what the file says).
 //!
 //! # While locked
 //!
@@ -570,9 +573,10 @@ impl State {
     /// the session last handed over -- "applied" meaning handed over: the
     /// run is spawned, never waited on, and its outcome is in the log. A
     /// section with a problem (an unknown key, a value that is not a
-    /// string, a path that cannot be resolved) is refused by name and the
-    /// running one kept. Runs under lock too: the wallpaper is drawn on the
-    /// background layer, which a locked frame does not show.
+    /// string, a path that cannot be resolved) is refused by name on every
+    /// reload that finds it, and the running one kept and re-run (see
+    /// `State::reload_wallpaper`). Runs under lock too: the wallpaper is
+    /// drawn on the background layer, which a locked frame does not show.
     fn apply_wallpaper_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
         match self.reload_wallpaper(&fresh.wallpaper) {
             Reloaded::Unchanged => {}

@@ -24,7 +24,8 @@
 # - the two settings failure modes behave as documented (see below);
 # - scootbg for `[wallpaper]` (ticket 10): the NixOS
 #   `wallpaper.enable` follows `enable` and installs `wallpaper.package`,
-#   off installs nothing, on without a package fails loudly at eval; the
+#   off installs nothing, with no package it defaults off and only an
+#   explicit `true` fails loudly at eval; the
 #   home-manager side installs it whenever `settings.wallpaper` exists and
 #   renders `command` as its store path (a user's own `command` wins);
 #   the flake wrappers default both packages to the flake's own builds;
@@ -183,10 +184,17 @@ let
   };
   # NixOS: scootbg alone, for another compositor.
   osWallOnly = evalNixos { wallpaper.enable = true; };
-  # NixOS, direct module, no overlay: on (by default) with no package.
+  # NixOS, direct module, no overlay, no package: off by default, so an
+  # upgrade breaks nobody's evaluation...
   osWallNoPkg = evalNixosBare {
     enable = true;
     package = fakePkg;
+  };
+  # ...while asking for it explicitly with no package is loud.
+  osWallNoPkgExplicit = evalNixosBare {
+    enable = true;
+    package = fakePkg;
+    wallpaper.enable = true;
   };
   # Home-manager: a `[wallpaper]` table installs scootbg and gets its path.
   hmWall = evalHome {
@@ -585,15 +593,29 @@ let
       assert drvs osWallOnly.config.environment.systemPackages == drvs [ fakeBg ];
       true
     )
-    # ...direct module, no overlay, no package: exactly one failing
+    # ...direct module, no overlay, no package: off by default, every
+    # assertion holds, only scoot installed (N4, review of PR #297)...
+    (
+      assert !osWallNoPkg.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    (
+      assert allAssertionsHold osWallNoPkg.config;
+      true
+    )
+    (
+      assert drvs osWallNoPkg.config.environment.systemPackages == drvs [ fakePkg ];
+      true
+    )
+    # ...and enabled explicitly with no package: exactly one failing
     # assertion, naming the option to set.
     (
-      assert builtins.length (failing osWallNoPkg.config) == 1;
+      assert builtins.length (failing osWallNoPkgExplicit.config) == 1;
       true
     )
     (
       assert lib.hasInfix "programs.scoot.wallpaper.package is null" (
-        builtins.head (failing osWallNoPkg.config)
+        builtins.head (failing osWallNoPkgExplicit.config)
       );
       true
     )

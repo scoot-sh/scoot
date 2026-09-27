@@ -415,7 +415,10 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // fork/exec. Before `[autostart]`, so the wallpaper daemon starts as
     // early as anything else; spawn order promises nothing about which
     // client draws first.
-    state.start_wallpaper(&loaded.wallpaper, options.nested);
+    state.start_wallpaper(
+        &loaded.wallpaper,
+        wallpaper::profile_for(options.tty, options.nested),
+    );
 
     // `[autostart]` first (the declared session baseline), then `--` (the
     // session script): both run through actions the session already knows

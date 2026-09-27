@@ -191,8 +191,8 @@ programs.scoot = {
 |---|---|---|
 | `enable` | `false` | Install `package` system-wide. |
 | `package` | flake's own `scoot` build | The binary to install and to launch from the session entry. |
-| `wallpaper.enable` | `enable` | Install `wallpaper.package` system-wide, so a user's `[wallpaper]` section finds `scootbg` on `PATH` (any user, and a session the greeter starts). `false` opts out (another wallpaper daemon). |
-| `wallpaper.package` | flake's own `scootbg` build | The scootbg to install. Enabled with no package (direct module use without the overlay) is an eval error naming this option. |
+| `wallpaper.enable` | `enable` and a package available | Install `wallpaper.package` system-wide, so a user's `[wallpaper]` section finds `scootbg` on `PATH` (any user, and a session the greeter starts). On with `enable` whenever there is a package (the flake's modules and overlay provide one), off otherwise; `false` opts out (another wallpaper daemon). |
+| `wallpaper.package` | flake's own `scootbg` build | The scootbg to install. Setting `wallpaper.enable = true` with no package (direct module use without the overlay) is an eval error naming this option; leaving it at its default is not. |
 | `session.enable` | `false` | Add a scoot entry to the display-manager/greetd session menu. |
 | `session.command` | `null` | Full `Exec=` line for the session entry. `null` renders the bare `<package>/bin/scoot --tty` (existing configs unchanged). Set it to run something inside the session — usually `<package>/bin/scoot --tty -- <command>`, e.g. the home-manager `sessionScript` output (`/home/alice/.config/scoot/session.sh` for a user `alice` with defaults), or a wrapper script path that launches scoot itself (logging, environment setup). |
 
@@ -262,9 +262,11 @@ module above — the NixOS module owns the binaries and the login entry,
 nothing else. (Direct-module users, importing `nix/modules/*.nix` rather
 than the flake's modules: apply [the overlay](#the-overlay), and
 `package` and `wallpaper.package` default to its `pkgs.scoot` and
-`pkgs.scootbg`; without it, set both explicitly — the NixOS module fails
-loudly at eval, naming the option, rather than writing a session entry
-with no binary or leaving `[wallpaper]` with no `scootbg`.)
+`pkgs.scootbg`; without it, set `package` explicitly — the NixOS module
+fails loudly at eval, naming the option, rather than writing a session
+entry with no binary — and `wallpaper.package` too if you want scootbg:
+without one, `wallpaper.enable` defaults to off, and only an explicit
+`wallpaper.enable = true` with no package fails at eval.)
 
 ## The wallpaper: scootbg
 
@@ -274,8 +276,9 @@ wallpaper daemon, which is its own package. With either module, turning
 scoot on is enough: nothing else to install, no path to write.
 
 - **NixOS** installs `scootbg` system-wide whenever `programs.scoot.enable`
-  is on (`programs.scoot.wallpaper.enable` follows it; set it to `false`
-  to opt out). The default `[wallpaper] command = "scootbg"` finds it on
+  is on (`programs.scoot.wallpaper.enable` follows it whenever a package
+  is available, which the flake's modules and overlay provide; set it to
+  `false` to opt out). The default `[wallpaper] command = "scootbg"` finds it on
   `PATH`, for every user and for a session the greeter starts, with or
   without home-manager. Installing it changes nothing until a config asks
   for a wallpaper, which is why it is on by default while the login

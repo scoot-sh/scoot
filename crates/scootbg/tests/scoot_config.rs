@@ -92,7 +92,19 @@ fn scoots_section_sets_reloads_and_clears_the_wallpaper() {
     // At start-up: scoot ran `apply-config`, which started the daemon.
     wait_shows(&session, TOP, SECOND, "the section at start-up");
     wait_applied(&session, 1);
-    assert_eq!(session.query()["profile"], "scoot");
+    // A headless session's own profile, never the user's real `scoot` one;
+    // and scoot's state lands under it.
+    assert_eq!(session.query()["profile"], "scoot-headless");
+    let state = session.runtime_dir().join("state/scootbg");
+    let deadline = Instant::now() + PATIENCE;
+    while !state.join("scoot-headless").exists() {
+        assert!(Instant::now() < deadline, "no scoot-headless state file");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !state.join("scoot").exists(),
+        "the headless session wrote the real profile"
+    );
 
     // A reload that changes the section.
     std::fs::write(&config_path, config(Some(CHANGED))).unwrap();

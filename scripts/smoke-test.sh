@@ -962,6 +962,19 @@ run_wallpaper_test() {
     wait_pixel 1 "$top" "the [wallpaper] color" || return 1
     wait_pixel 2 "$out2" "the per-output [wallpaper] color" || return 1
     wait_applied 1 || return 1
+    # A headless session keeps its own saved state, never the `scoot`
+    # profile a real --tty login restores.
+    # (scootbg saves off its loop: give the write a moment.)
+    for _ in $(seq 1 50); do
+        [ -f "$dir/state/scootbg/scoot-headless" ] && break
+        sleep 0.1
+    done
+    if [ ! -f "$dir/state/scootbg/scoot-headless" ] || [ -e "$dir/state/scootbg/scoot" ]; then
+        echo "BUG: expected scootbg state under the scoot-headless profile only:"
+        ls -la "$dir/state/scootbg" || true
+        return 1
+    fi
+    echo "ok: the headless session's wallpaper state is its own (profile scoot-headless)"
 
     echo "--- apply-config inherits no descriptor of scoot's but stdio ---"
     # Every descriptor the compositor holds past stdio, by what it points at

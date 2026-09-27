@@ -72,18 +72,24 @@ in
     # `[wallpaper] command = "scootbg"` finds it -- for any user, and for a
     # session the greeter starts.
     wallpaper = {
-      # On whenever scoot is: a ~1.7 MB binary that does nothing until a
-      # config asks for a wallpaper, so installing it changes nothing --
-      # unlike the login entry, which stays opt-in. `false` opts out (for
-      # another wallpaper daemon, say).
+      # On whenever scoot is and there is a scootbg to install: a ~1.7 MB
+      # binary that does nothing until a config asks for a wallpaper, so
+      # installing it changes nothing -- unlike the login entry, which
+      # stays opt-in. With no package (a direct-module user without the
+      # flake's overlay) it stays off rather than failing evaluation, so
+      # upgrading breaks nobody; `true` set explicitly with no package is
+      # the loud assertion below. `false` opts out (another wallpaper
+      # daemon, say).
       enable = lib.mkOption {
         type = lib.types.bool;
-        default = cfg.enable;
-        defaultText = lib.literalExpression "config.programs.scoot.enable";
+        default = cfg.enable && cfg.wallpaper.package != null;
+        defaultText = lib.literalExpression "config.programs.scoot.enable && config.programs.scoot.wallpaper.package != null";
         description = ''
           Install `programs.scoot.wallpaper.package` system-wide, so a
           `[wallpaper]` section in a user's scoot config finds `scootbg`
-          on PATH. Defaults to `programs.scoot.enable`.
+          on PATH. On by default whenever `programs.scoot.enable` is and a
+          package is available (the flake's modules and overlay provide
+          one); setting it to `true` with no package fails evaluation.
         '';
       };
 
@@ -173,17 +179,17 @@ in
       assertions = [
         {
           # Loud at eval, not a `[wallpaper]` that logs "scootbg was not
-          # found" at every login.
+          # found" at every login. Reachable only by setting `enable = true`
+          # explicitly: the default is off without a package.
           assertion = cfg.wallpaper.package != null;
           message = ''
-            programs.scoot.wallpaper.enable is set (it follows
-            programs.scoot.enable by default) but
+            programs.scoot.wallpaper.enable is set to true but
             programs.scoot.wallpaper.package is null. Flake consumers get
             the flake's own scootbg through the nixosModules wrapper, and
             the flake's overlay provides pkgs.scootbg -- this fires only
-            for direct-module use without it: set
-            programs.scoot.wallpaper.package, or set
-            programs.scoot.wallpaper.enable = false.
+            for direct-module use without either: set
+            programs.scoot.wallpaper.package, apply the overlay, or leave
+            programs.scoot.wallpaper.enable at its default.
           '';
         }
       ];

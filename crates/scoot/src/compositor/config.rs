@@ -33,9 +33,10 @@
 //! `[wallpaper]` is read more leniently still, and deliberately: an unknown
 //! key or a value of the wrong type in it costs only the wallpaper (startup
 //! logs the problem and runs no `scootbg`; a reload refuses the field and
-//! applies the rest), never the rest of the file. See
-//! `wallpaper/section.rs` for why, and for how that parse stays as cheap as
-//! a derived one.
+//! applies the rest), never the rest of the file. The one exception is a
+//! skipped value nested more than 16 levels deep, which fails the whole
+//! parse like malformed TOML rather than recursing through it. See
+//! `wallpaper/section.rs` for why, and for the stack that bound protects.
 //!
 //! `[renderer] backend` is a near-miss worth spelling out, because it splits
 //! the two halves across the rule. An *unknown* name (`backend = "vulkan"`)
@@ -1249,6 +1250,12 @@ fn load_from(path: &Path, explicit: bool) -> Result<LoadedConfig, ConfigFileErro
 ///   `toml::Table` (a passthrough section, say) descends the whole tree --
 ///   7,288 KiB release, which still fits in 8 MiB but with under 1 MiB to spare
 ///   rather than over 7, and 32,100 KiB debug, which does not fit at all.
+///   A lenient section that *skips* what it does not know is the same trap
+///   by another route: `[wallpaper]` first drained unknown values with
+///   serde's `IgnoredAny`, which descends as deep as the tree goes, and the
+///   worst case under it overflowed a debug build's 8 MiB (review of PR
+///   #297, B1). Its drain is bounded now (`wallpaper/section.rs`, `Drain`),
+///   and `wallpaper/tests/section.rs` pins the worst case on both paths.
 fn parse_or_defaults(text: &str, path: &Path) -> LoadedConfig {
     match toml::from_str::<FileConfig>(text) {
         Ok(file) => LoadedConfig::from_file_with_vt(file, path, false),
