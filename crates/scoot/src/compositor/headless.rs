@@ -813,17 +813,26 @@ impl State {
                 // Layer surfaces aren't in `self.space` either, and a bar's clock
                 // stops at whatever second it first drew without this -- the same
                 // frame-callback starvation the cursor surface had. Sent to every
-                // mapped layer surface on this output rather than only the ones
-                // that produced an element, matching both the window loop above
-                // and the cursor's own reasoning: a client may legitimately ask
-                // for a callback before its first attach, and withholding it
-                // would stall the very frame that unsticks it.
+                // mapped layer surface on this output that anyone can still see,
+                // rather than only the ones that produced an element, matching
+                // both the window loop above and the cursor's own reasoning: a
+                // client may legitimately ask for a callback before its first
+                // attach, and withholding it would stall the very frame that
+                // unsticks it. A surface nobody can see -- fully covered by
+                // opaque window content on this output -- is skipped instead,
+                // so an animated wallpaper under a fullscreen video stops
+                // decoding frames nobody shows (see
+                // `layer_shell::occlusion`). The skipped callback stays queued
+                // and is completed by the first frame that serves the surface
+                // again, so none is ever lost.
                 let dropped_dead = {
                     let mut layers = layer_map_for_output(&output);
                     for layer in layers.layers() {
-                        layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
-                            Some(output.clone())
-                        });
+                        if !super::layer_shell::occlusion::withhold_frame(self, &output, layer) {
+                            layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+                                Some(output.clone())
+                            });
+                        }
                     }
                     // Second line of defence behind `layer_destroyed` (see
                     // `layer_shell.rs`), for a client whose implicit teardown ran in

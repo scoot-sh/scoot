@@ -91,6 +91,7 @@ use smithay::wayland::shell::xdg::PopupSurface;
 use super::State;
 use super::output_clip::output_holds_point;
 
+pub(super) mod occlusion;
 #[cfg(test)]
 mod tests;
 

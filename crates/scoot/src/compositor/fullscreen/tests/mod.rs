@@ -22,8 +22,8 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use scoot_core::{Rect, WindowId};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool,
-    wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
+    wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, WEnum};
 use wayland_protocols::ext::session_lock::v1::client::{
@@ -44,6 +44,7 @@ use crate::compositor::test_support::{self, Harness, wait_for};
 
 mod drawing;
 mod neighbours;
+mod occlusion;
 #[cfg(feature = "gpu-scanout")]
 mod primary_direct;
 #[cfg(feature = "gpu-scanout")]
@@ -100,8 +101,8 @@ enum Layer {
     /// nothing: opaque (an `Xrgb8888` buffer) or not (`Argb8888`, no opaque
     /// region). Under a covering fullscreen window it stays in the frame's
     /// element list, which is what `render::primary_direct`'s rule 6 has to
-    /// see past.
-    #[cfg(feature = "gpu-scanout")]
+    /// see past -- and what `layer_shell::occlusion` has to withhold frame
+    /// callbacks from.
     Wallpaper { opaque: bool },
     /// The same wallpaper as a `wp_single_pixel_buffer_manager_v1` buffer
     /// scaled over the output with `wp_viewporter`: opaque, black or not.
@@ -177,6 +178,28 @@ enum Step {
     Configures { window: usize },
     /// Map a layer-shell surface.
     CreateLayer(Layer),
+    /// Create a layer surface and commit it without a buffer -- which earns
+    /// its initial configure -- but never attach one: the surface has drawn
+    /// nothing yet, so a frame callback requested now is the first-attach
+    /// case `layer_shell::occlusion` must always serve.
+    /// [`Step::DrawLayer`] is the other half.
+    CreateLayerDeferred(Layer),
+    /// Attach a solid buffer at the size the compositor configured to the
+    /// `index`-th layer surface and commit: the deferred half of
+    /// [`Step::CreateLayerDeferred`]. Draws in `Xrgb8888` when `opaque`,
+    /// `Argb8888` otherwise.
+    DrawLayer {
+        index: usize,
+        color: [u8; 4],
+        opaque: bool,
+    },
+    /// `wl_surface.frame` on the `index`-th layer surface, followed by a
+    /// commit. The callback proxy is kept alive client-side, so a `done`
+    /// arriving late is counted rather than killing the connection.
+    RequestLayerFrame { index: usize },
+    /// Report how many `done` events each requested layer frame callback has
+    /// seen, in request order.
+    ReportLayerFrames,
     /// Report which of this client's surfaces the pointer last entered.
     ReportPointer,
     /// `ext_session_lock_manager_v1.lock`, held and never released -- an
@@ -190,7 +213,6 @@ enum Step {
     /// Ack the newest configure and draw at its size in `Xrgb8888`, with no
     /// opaque region: an opaque-format buffer, the commonest real covering
     /// window (Mesa's default EGL config, mpv, games).
-    #[cfg(feature = "gpu-scanout")]
     DrawXrgb { window: usize },
     /// Declare the `window`-th toplevel's surface opaque as a whole
     /// (`wl_surface.set_opaque_region` with a region larger than any size it
@@ -199,7 +221,6 @@ enum Step {
     /// changes, so a window that is already drawn needs a draw after this. What a
     /// video player or game with an alpha-format buffer does to be scanned
     /// out over a non-black background.
-    #[cfg(feature = "gpu-scanout")]
     SetOpaque { window: usize },
     /// The same, as `stripes` vertical rectangles that together cover the
     /// output and none of which covers it alone -- the shape that takes
@@ -222,6 +243,7 @@ enum Ack {
     Configures(Vec<Configured>),
     DecorationModes(Vec<u32>),
     Pointer(Option<Entered>),
+    LayerFrames(Vec<u32>),
     #[cfg(feature = "gpu-scanout")]
     Feedbacks(Vec<scanout_feedback::SeenFeedback>),
 }
@@ -274,6 +296,10 @@ struct TestClient {
     acked: Vec<Option<u32>>,
     /// Per layer surface: the newest configure's `(serial, width, height)`.
     layer_configures: Vec<Option<(u32, u32, u32)>>,
+    /// Per requested layer frame callback, how many `done` events arrived.
+    /// The proxies themselves live in `run_client`'s `frames`, kept alive so
+    /// a late `done` lands on a live proxy.
+    layer_frame_dones: Vec<u32>,
 }
 
 /// A surface's index in creation order.
@@ -496,8 +522,28 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, Index> for TestClient {
     }
 }
 
+/// Which requested layer frame callback a `done` belongs to, by request
+/// order.
+struct FrameTag(usize);
+
+impl Dispatch<wl_callback::WlCallback, FrameTag> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        tag: &FrameTag,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event
+            && let Some(slot) = client.layer_frame_dones.get_mut(tag.0)
+        {
+            *slot = slot.saturating_add(1);
+        }
+    }
+}
+
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
-#[cfg(feature = "gpu-scanout")]
 wayland_client::delegate_noop!(TestClient: ignore wayland_client::protocol::wl_region::WlRegion);
 #[cfg(feature = "gpu-scanout")]
 wayland_client::delegate_noop!(
@@ -638,6 +684,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     )> = Vec::new();
     let mut locks: Vec<ext_session_lock_v1::ExtSessionLockV1> = Vec::new();
+    // Requested layer frame callbacks, kept alive so a `done` arriving late
+    // lands on a live proxy and is counted rather than killing the
+    // connection outright.
+    let mut frames: Vec<wl_callback::WlCallback> = Vec::new();
     // Per toplevel, the alpha-modifier object once one was asked for: a
     // second `get_surface` for the same surface is a protocol error.
     #[cfg(feature = "gpu-scanout")]
@@ -778,66 +828,15 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             }
             Step::CreateLayer(kind) => {
                 let index = layers.len();
-                client.layer_configures.push(None);
-                let surface = compositor.create_surface(&qh, ());
-                let (layer, anchor, size, zone) = match kind {
-                    Layer::Bar => (
-                        zwlr_layer_shell_v1::Layer::Top,
-                        zwlr_layer_surface_v1::Anchor::Top
-                            | zwlr_layer_surface_v1::Anchor::Left
-                            | zwlr_layer_surface_v1::Anchor::Right,
-                        (0, BAR_HEIGHT),
-                        BAR_HEIGHT as i32,
-                    ),
-                    Layer::Notification => (
-                        zwlr_layer_shell_v1::Layer::Overlay,
-                        zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Right,
-                        (NOTE_SIZE, NOTE_SIZE),
-                        0,
-                    ),
-                    Layer::Dock => (
-                        zwlr_layer_shell_v1::Layer::Top,
-                        zwlr_layer_surface_v1::Anchor::Top
-                            | zwlr_layer_surface_v1::Anchor::Bottom
-                            | zwlr_layer_surface_v1::Anchor::Left,
-                        (DOCK_WIDTH, 0),
-                        DOCK_WIDTH as i32,
-                    ),
-                    Layer::Launcher(layer) => (
-                        layer,
-                        zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Left,
-                        (NOTE_SIZE, NOTE_SIZE),
-                        0,
-                    ),
-                    #[cfg(feature = "gpu-scanout")]
-                    Layer::Wallpaper { .. } | Layer::PixelWallpaper { .. } => (
-                        zwlr_layer_shell_v1::Layer::Background,
-                        zwlr_layer_surface_v1::Anchor::all(),
-                        (0, 0),
-                        -1,
-                    ),
-                };
-                let role = layer_shell.get_layer_surface(
-                    &surface,
-                    None,
-                    layer,
-                    "fullscreen-test".into(),
+                let (surface, role, width, height) = make_layer_surface(
+                    &mut client,
+                    &mut queue,
                     &qh,
-                    Index(index),
-                );
-                role.set_anchor(anchor);
-                role.set_size(size.0, size.1);
-                role.set_exclusive_zone(zone);
-                if let Layer::Launcher(_) = kind {
-                    role.set_keyboard_interactivity(
-                        zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive,
-                    );
-                }
-                surface.commit();
-                let (_, width, height) =
-                    wait_for(&mut queue, &mut client, "a layer configure", |client| {
-                        client.layer_configures[index]
-                    })?;
+                    &compositor,
+                    &layer_shell,
+                    kind,
+                    index,
+                )?;
                 #[cfg(feature = "gpu-scanout")]
                 if let Layer::PixelWallpaper { black } = kind {
                     let pixels = client
@@ -860,12 +859,12 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 }
                 let color = match kind {
                     Layer::Bar | Layer::Dock => BAR_BGRA,
+                    Layer::Wallpaper { .. } => OTHER_BGRA,
                     #[cfg(feature = "gpu-scanout")]
-                    Layer::Wallpaper { .. } | Layer::PixelWallpaper { .. } => OTHER_BGRA,
+                    Layer::PixelWallpaper { .. } => OTHER_BGRA,
                     Layer::Notification | Layer::Launcher(_) => NOTE_BGRA,
                 };
                 let format = match kind {
-                    #[cfg(feature = "gpu-scanout")]
                     Layer::Wallpaper { opaque: true } => wl_shm::Format::Xrgb8888,
                     _ => wl_shm::Format::Argb8888,
                 };
@@ -877,6 +876,65 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 layers.push((surface, role));
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
+            }
+            Step::CreateLayerDeferred(kind) => {
+                let index = layers.len();
+                let (surface, role, _, _) = make_layer_surface(
+                    &mut client,
+                    &mut queue,
+                    &qh,
+                    &compositor,
+                    &layer_shell,
+                    kind,
+                    index,
+                )?;
+                layers.push((surface, role));
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::DrawLayer {
+                index,
+                color,
+                opaque,
+            } => {
+                let (surface, _) = layers.get(index).cloned().ok_or("no such layer surface")?;
+                let (_, width, height) = client
+                    .layer_configures
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .ok_or("no layer configure to draw for")?;
+                let format = if opaque {
+                    wl_shm::Format::Xrgb8888
+                } else {
+                    wl_shm::Format::Argb8888
+                };
+                let (buffer, width, height) =
+                    solid_buffer_in(&shm, &qh, width as i32, height as i32, color, format);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, width, height);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::RequestLayerFrame { index } => {
+                let (surface, _) = layers.get(index).cloned().ok_or("no such layer surface")?;
+                let tag = FrameTag(client.layer_frame_dones.len());
+                client.layer_frame_dones.push(0);
+                // Kept alive in `frames`: dropping the proxy is what turns
+                // a late `done` into a dead connection.
+                let callback = surface.frame(&qh, tag);
+                surface.commit();
+                frames.push(callback);
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::ReportLayerFrames => {
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                // One live proxy per request: the pairing the late-`done`
+                // counting depends on.
+                debug_assert_eq!(frames.len(), client.layer_frame_dones.len());
+                Ack::LayerFrames(client.layer_frame_dones.clone())
             }
             Step::ReportPointer => {
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -900,7 +958,6 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
             }
-            #[cfg(feature = "gpu-scanout")]
             Step::DrawXrgb { window } => {
                 let newest = client.configures[window]
                     .last()
@@ -941,7 +998,6 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
             }
-            #[cfg(feature = "gpu-scanout")]
             Step::SetOpaque { window } => {
                 let surface = &windows[window].surface;
                 let region = compositor.create_region(&qh, ());
@@ -991,6 +1047,94 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     Ok(())
 }
 
+/// Creates a layer surface of `kind`, commits it without a buffer, and waits
+/// for the configure that answers: the common prelude of
+/// [`Step::CreateLayer`] (which then attaches) and
+/// [`Step::CreateLayerDeferred`] (which does not). Hands back the surface,
+/// its role object, and the configured size to draw at.
+fn make_layer_surface(
+    client: &mut TestClient,
+    queue: &mut EventQueue<TestClient>,
+    qh: &QueueHandle<TestClient>,
+    compositor: &wl_compositor::WlCompositor,
+    layer_shell: &zwlr_layer_shell_v1::ZwlrLayerShellV1,
+    kind: Layer,
+    index: usize,
+) -> Result<
+    (
+        wl_surface::WlSurface,
+        zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        u32,
+        u32,
+    ),
+    String,
+> {
+    client.layer_configures.push(None);
+    let surface = compositor.create_surface(qh, ());
+    let (layer, anchor, size, zone) = match kind {
+        Layer::Bar => (
+            zwlr_layer_shell_v1::Layer::Top,
+            zwlr_layer_surface_v1::Anchor::Top
+                | zwlr_layer_surface_v1::Anchor::Left
+                | zwlr_layer_surface_v1::Anchor::Right,
+            (0, BAR_HEIGHT),
+            BAR_HEIGHT as i32,
+        ),
+        Layer::Notification => (
+            zwlr_layer_shell_v1::Layer::Overlay,
+            zwlr_layer_surface_v1::Anchor::Top | zwlr_layer_surface_v1::Anchor::Right,
+            (NOTE_SIZE, NOTE_SIZE),
+            0,
+        ),
+        Layer::Dock => (
+            zwlr_layer_shell_v1::Layer::Top,
+            zwlr_layer_surface_v1::Anchor::Top
+                | zwlr_layer_surface_v1::Anchor::Bottom
+                | zwlr_layer_surface_v1::Anchor::Left,
+            (DOCK_WIDTH, 0),
+            DOCK_WIDTH as i32,
+        ),
+        Layer::Launcher(layer) => (
+            layer,
+            zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Left,
+            (NOTE_SIZE, NOTE_SIZE),
+            0,
+        ),
+        Layer::Wallpaper { .. } => (
+            zwlr_layer_shell_v1::Layer::Background,
+            zwlr_layer_surface_v1::Anchor::all(),
+            (0, 0),
+            -1,
+        ),
+        #[cfg(feature = "gpu-scanout")]
+        Layer::PixelWallpaper { .. } => (
+            zwlr_layer_shell_v1::Layer::Background,
+            zwlr_layer_surface_v1::Anchor::all(),
+            (0, 0),
+            -1,
+        ),
+    };
+    let role = layer_shell.get_layer_surface(
+        &surface,
+        None,
+        layer,
+        "fullscreen-test".into(),
+        qh,
+        Index(index),
+    );
+    role.set_anchor(anchor);
+    role.set_size(size.0, size.1);
+    role.set_exclusive_zone(zone);
+    if let Layer::Launcher(_) = kind {
+        role.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
+    }
+    surface.commit();
+    let (_, width, height) = wait_for(queue, client, "a layer configure", |client| {
+        client.layer_configures[index]
+    })?;
+    Ok((surface, role, width, height))
+}
+
 type Fixture = Harness<Step, Ack>;
 
 impl Fixture {
@@ -1032,6 +1176,20 @@ impl Fixture {
 
     fn done(&mut self, step: Step) {
         assert!(matches!(self.run(step), Ack::Done));
+    }
+
+    /// Asks the `index`-th layer surface for a frame callback.
+    fn request_layer_frame(&mut self, index: usize) {
+        self.done(Step::RequestLayerFrame { index });
+    }
+
+    /// How many `done` events each requested layer frame callback has seen,
+    /// in request order.
+    fn layer_frames(&mut self) -> Vec<u32> {
+        match self.run(Step::ReportLayerFrames) {
+            Ack::LayerFrames(dones) => dones,
+            _ => panic!("expected layer frame dones"),
+        }
     }
 
     fn pointer(&mut self) -> Option<Entered> {
