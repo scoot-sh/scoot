@@ -29,6 +29,12 @@ pub(super) enum Change {
     /// workspace disappears by the list getting shorter, never by a hole
     /// appearing in the middle of it.
     Removed { index: usize },
+    /// An existing handle whose `name` changed: an adopted workspace gained
+    /// or lost its origin tag, or a renumbering in front of one moved its
+    /// position. Never names an index that is also added or removed, and
+    /// never fires for the position part of a name the `Added` already
+    /// carries.
+    Renamed { index: usize },
 }
 
 /// Appends what changed between `published` (what clients were last told) and
@@ -79,5 +85,26 @@ pub(super) fn changes(published: Workspaces, current: Workspaces, out: &mut Vec<
             index,
             active: index == current.active,
         });
+    }
+}
+
+/// Appends a [`Change::Renamed`] for every workspace whose origin tag differs
+/// between `published` (what the client's handles were named with) and
+/// `current` (what they are named now) to `out`.
+///
+/// Both slices are the output's per-workspace adoption origins in order
+/// (`None` for a workspace that was never adopted); only the overlap is
+/// compared, so a rename never names an index the count half above adds or
+/// removes. The position part of a name moves with renumbering, but that
+/// always changes the count too -- which the caller already detects -- so
+/// comparing tags is enough to catch every name change.
+///
+/// Like [`changes`], `out` is a caller-owned buffer, and empty means nothing
+/// to do.
+pub(super) fn renames(published: &[Option<u64>], current: &[Option<u64>], out: &mut Vec<Change>) {
+    for (index, (was, is)) in published.iter().zip(current.iter()).enumerate() {
+        if was != is {
+            out.push(Change::Renamed { index });
+        }
     }
 }

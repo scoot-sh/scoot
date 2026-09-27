@@ -580,9 +580,9 @@ warnings, so nothing fell back.
 pinned scene (two freshly mapped `foot` windows, pointer parked), dumb vs
 gpu is identical across all 4.096M pixels except an 18x34 box at physical
 1911,1184 with a max channel delta of 3/255 -- the cursor, at
-1280,800 x 1.5 = 1920,1200; the crop holds 118 distinct colours and the same
+1280,800 x 1.5 = 1920,1200; the crop holds 118 distinct colors and the same
 crop elsewhere differs by zero. `AE = 1.003` against the ~4016 (one channel
-of four) or ~12044 (all three colour channels, measured) that a whole-frame
+of four) or ~12044 (all three color channels, measured) that a whole-frame
 one-least-significant-bit difference gives at this resolution. The control:
 same tier, different rounds, `AE = 0` exactly, so the scene is genuinely
 pinned rather than merely similar. Note the contrast with the VM, where the

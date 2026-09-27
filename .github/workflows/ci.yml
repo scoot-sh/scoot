@@ -602,7 +602,11 @@ jobs:
           fi
           echo "ok: no libc crate in scootbg's normal dependency tree"
           # Weighed alone, never in a --workspace build (feature unification).
-          cargo build --release -p scootbg
+          # Warnings are errors here: code reached only from debug builds
+          # (`cfg(debug_assertions)`) warns only in a release build, which
+          # no other step makes. `-D warnings` changes lint levels, not
+          # codegen, and the size below is of this same build.
+          RUSTFLAGS="-D warnings" cargo build --release -p scootbg
           echo "release binary: $(stat -c %s target/release/scootbg) bytes (stripped)"
           ldd target/release/scootbg
           extra=$(ldd target/release/scootbg | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
@@ -626,9 +630,13 @@ jobs:
 
   # scootbg against a live `scoot --headless`: the daemon's socket
   # lifecycle and its per-output surfaces end to end
-  # (crates/scootbg/tests/{daemon,outputs}.rs), and outputs coming and going
-  # on a headless sway (tests/hotplug.rs). Runs when either side changes,
-  # since each can break the other's end-to-end run.
+  # (crates/scootbg/tests/{daemon,outputs}.rs), outputs coming and going
+  # on a headless sway (tests/hotplug.rs), and colors and images checked
+  # by real pixels on both (tests/color.rs, tests/image.rs, and
+  # tests/scale.rs at fractional scales: scoot's own screenshots, and
+  # sway's through a wlr-screencopy client in the test).
+  # Runs when either side changes, since each can break the other's
+  # end-to-end run.
   # `SCOOTBG_REQUIRE_SCOOT` and `SCOOTBG_REQUIRE_SWAY` turn the tests'
   # "skipped -- no scoot binary" / "no sway" into failures, so this job
   # cannot go green by skipping.
@@ -689,5 +697,5 @@ jobs:
           SCOOTBG_REQUIRE_SCOOT: "1"
           SCOOTBG_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --no-fail-fast
-          cargo test -p scootbg --test daemon --test outputs --test hotplug
+          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --no-fail-fast
+          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale

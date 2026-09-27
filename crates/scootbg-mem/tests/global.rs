@@ -104,3 +104,38 @@ fn a_large_free_does_not_move_later_blocks_into_the_heap() {
         "a 512 KiB block after a 4 MiB free was not a mapping of its own"
     );
 }
+
+/// `zeroed_bytes` commits nothing until written: 256 MiB of zeros cost no
+/// resident memory until a page is touched, then that page. (Under
+/// `cargo test`'s shared process the other tests' churn is ~24 MiB at
+/// most, well inside the bounds.)
+#[test]
+fn zeroed_bytes_are_committed_only_as_written() {
+    fn rss_anon_kb() -> u64 {
+        let status = std::fs::read_to_string("/proc/self/status").expect("/proc/self/status");
+        status
+            .lines()
+            .find_map(|l| l.strip_prefix("RssAnon:"))
+            .and_then(|v| v.trim().trim_end_matches("kB").trim().parse().ok())
+            .expect("RssAnon in /proc/self/status")
+    }
+    const SIZE: usize = 256 << 20;
+    let before = rss_anon_kb();
+    let mut block = scootbg_mem::zeroed_bytes(SIZE).expect("256 MiB");
+    let allocated = rss_anon_kb();
+    assert!(
+        allocated < before + 64 * 1024,
+        "256 MiB allocated, nothing written: RssAnon {before} -> {allocated} kB"
+    );
+    for page in block.chunks_mut(4096).take(1024) {
+        page[0] = 1;
+    }
+    let written = rss_anon_kb();
+    assert!(
+        written >= allocated + 3 * 1024 && written < allocated + 64 * 1024,
+        "4 MiB written: RssAnon {allocated} -> {written} kB"
+    );
+    assert_eq!(block[SIZE - 1], 0);
+    // More than this machine can give: `None`, not an abort.
+    assert!(scootbg_mem::zeroed_bytes(1 << 46).is_none());
+}

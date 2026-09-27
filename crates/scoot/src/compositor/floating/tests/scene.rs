@@ -19,7 +19,7 @@ const RADII: [i32; 2] = [0, 10];
 
 /// The ring of a floating window is drawn over the tiled window beneath it,
 /// not under it: the pixel just outside the dialog, which lies inside its
-/// parent's column, is ring-coloured.
+/// parent's column, is ring-colored.
 #[test]
 fn a_floating_window_s_ring_is_drawn_over_the_window_beneath_it() {
     for radius in RADII {
@@ -50,7 +50,7 @@ fn ring_over_the_window_beneath(radius: i32) {
     assert_eq!(pixel(&pixels, placed.x - RING - 1, cy), TILED_BGRA);
     if radius > 0 {
         // The rounded clip cuts the dialog's own corner: its top-left pixel
-        // is not the dialog's colour.
+        // is not the dialog's color.
         assert_ne!(pixel(&pixels, placed.x, placed.y), DIALOG_BGRA);
     }
 }
@@ -213,8 +213,8 @@ fn the_strip_draws_as_before_around_a_floating_window() {
                 continue;
             }
             let (was, now) = (pixel(&before, x, y), pixel(&after, x, y));
-            // The column's ring goes inactive-coloured (it lost focus); the
-            // test palette makes both ring colours the same.
+            // The column's ring goes inactive-colored (it lost focus); the
+            // test palette makes both ring colors the same.
             assert_eq!(was, now, "({x}, {y}) changed outside the dialog");
         }
     }

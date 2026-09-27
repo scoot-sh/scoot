@@ -9,23 +9,39 @@
 #![forbid(unsafe_code)]
 
 #[cfg(target_os = "linux")]
+mod choices;
+#[cfg(target_os = "linux")]
 mod cli;
 #[cfg(target_os = "linux")]
 mod client;
+#[cfg(target_os = "linux")]
+mod color;
 #[cfg(target_os = "linux")]
 mod control;
 #[cfg(target_os = "linux")]
 mod daemon;
 #[cfg(target_os = "linux")]
+mod density;
+#[cfg(target_os = "linux")]
 mod framing;
 #[cfg(target_os = "linux")]
+mod image;
+#[cfg(target_os = "linux")]
+mod jobs;
+#[cfg(target_os = "linux")]
 mod outputs;
+#[cfg(target_os = "linux")]
+mod paint;
 #[cfg(target_os = "linux")]
 mod paths;
 #[cfg(target_os = "linux")]
 mod print;
 #[cfg(target_os = "linux")]
 mod protocol;
+#[cfg(target_os = "linux")]
+mod waiters;
+#[cfg(target_os = "linux")]
+mod wallpaper;
 
 use std::process::ExitCode;
 
@@ -62,9 +78,19 @@ fn main() -> ExitCode {
                 }
             };
         }
-        cli::Command::Client(request) => match client::send(request) {
-            // `kill` prints nothing on success; the others print the reply.
-            Ok(_) if request == protocol::Request::Kill => Ok(()),
+        cli::Command::Client(request) => match client::send(&request) {
+            // `kill`, `set` and `clear` print nothing on success; the
+            // others print the reply.
+            Ok(_)
+                if matches!(
+                    request,
+                    protocol::Request::Kill
+                        | protocol::Request::Set { .. }
+                        | protocol::Request::Clear { .. }
+                ) =>
+            {
+                Ok(())
+            }
             Ok(reply) => print::print(&reply),
             Err(error) => {
                 warn(format_args!("scootbg: {error}"));

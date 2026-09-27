@@ -493,7 +493,7 @@ fn post_dispatch(state: &mut State) {
     let _ = state.display_handle.flush_clients();
 }
 
-/// Colour only when a human is actually looking at a terminal.
+/// Color only when a human is actually looking at a terminal.
 ///
 /// `tracing_subscriber::fmt()` writes to stdout with ANSI on unconditionally
 /// -- it never asks whether stdout is a terminal -- so every redirected or

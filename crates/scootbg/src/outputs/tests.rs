@@ -1,6 +1,7 @@
 //! The output model against every event ordering the glue can deliver.
 
 use super::{Effect, Info, OutputId, Outputs, Size, Surface, Transform};
+use crate::density::Scale;
 
 fn size(width: u32, height: u32) -> Size {
     Size { width, height }
@@ -35,7 +36,10 @@ fn properties_apply_at_done_not_before() {
     assert_eq!(output.info().name.as_deref(), Some("HDMI-A-1"));
     assert_eq!(output.info().mode, Some(size(2560, 1440)));
     assert_eq!(output.info().scale, 2);
-    assert_eq!(output.info().logical(), Some(size(1280, 720)));
+    assert_eq!(
+        output.info().logical(Scale::Integer(output.info().scale)),
+        Some(size(1280, 720))
+    );
     // A later batch replaces only what it carries.
     output.stage_scale(1);
     assert_eq!(output.info().scale, 2);
@@ -52,14 +56,14 @@ fn the_surface_is_created_once_settled_and_only_once() {
     output.done();
     assert_eq!(
         output.surface(),
-        Surface::Waiting,
+        &Surface::Waiting,
         "done alone is not settled"
     );
     assert_eq!(output.settled(), Effect::Create);
-    assert_eq!(output.surface(), Surface::Pending);
+    assert_eq!(output.surface(), &Surface::Pending);
     assert_eq!(output.settled(), Effect::None);
     output.done();
-    assert_eq!(output.surface(), Surface::Pending);
+    assert_eq!(output.surface(), &Surface::Pending);
 }
 
 /// A v1 `wl_output` never sends `done`; a broken compositor might not
@@ -85,9 +89,10 @@ fn configure_is_acked_and_its_size_used() {
     assert_eq!(output.configure(5, 1920, 1080), Effect::Ack(5));
     assert_eq!(
         output.surface(),
-        Surface::Configured {
+        &Surface::Configured {
             serial: 5,
-            requested: size(1920, 1080)
+            requested: size(1920, 1080),
+            drawn: None,
         }
     );
     assert_eq!(output.surface_size(), Some(size(1920, 1080)));
@@ -158,11 +163,15 @@ fn logical_size_rounds_down_at_odd_sizes_and_prefers_xdg_output() {
         scale: 2,
         ..Info::default()
     };
-    assert_eq!(info.logical(), Some(size(683, 384)));
+    assert_eq!(info.logical(Scale::Integer(2)), Some(size(683, 384)));
     // The compositor's own logical size (fractional scales) wins.
     info.xdg_logical = Some(size(911, 513));
-    assert_eq!(info.logical(), Some(size(911, 513)));
-    assert_eq!(Info::default().logical(), None, "no mode, no size");
+    assert_eq!(info.logical(Scale::Integer(2)), Some(size(911, 513)));
+    assert_eq!(
+        Info::default().logical(Scale::Integer(1)),
+        None,
+        "no mode, no size"
+    );
 }
 
 #[test]
@@ -186,7 +195,10 @@ fn nonsense_from_the_compositor_is_ignored() {
     output.stage_mode(true, i32::MAX, i32::MAX);
     output.stage_scale(i32::MAX);
     output.done();
-    assert_eq!(output.info().logical(), Some(size(1, 1)));
+    assert_eq!(
+        output.info().logical(Scale::Integer(output.info().scale)),
+        Some(size(1, 1))
+    );
 }
 
 #[test]
@@ -196,18 +208,18 @@ fn closed_is_retried_once_then_given_up() {
     let output = &mut outputs.get_mut(id).unwrap().output;
     let _ = output.configure(1, 1920, 1080);
     assert_eq!(output.closed(), Effect::DestroyAndRetry);
-    assert_eq!(output.surface(), Surface::Closed);
+    assert_eq!(output.surface(), &Surface::Closed);
     assert_eq!(output.surface_size(), None);
     // A second `closed` for the destroyed surface is stale: nothing.
     assert_eq!(output.closed(), Effect::None);
     assert_eq!(output.configure(2, 10, 10), Effect::None, "stale configure");
     assert_eq!(output.retry(), Effect::Create);
-    assert_eq!(output.surface(), Surface::Pending);
+    assert_eq!(output.surface(), &Surface::Pending);
     assert_eq!(output.retry(), Effect::None, "one retry per close");
 
     // Closed again, before or after a configure: given up.
     assert_eq!(output.closed(), Effect::DestroyAndGiveUp);
-    assert_eq!(output.surface(), Surface::GaveUp);
+    assert_eq!(output.surface(), &Surface::GaveUp);
     assert_eq!(output.surface().name(), "gave-up");
     assert_eq!(output.retry(), Effect::None);
     assert_eq!(output.closed(), Effect::None);
@@ -239,9 +251,9 @@ fn giving_up_on_one_output_leaves_the_others_alone() {
     let _ = first.closed();
     let _ = first.retry();
     let _ = first.closed();
-    assert_eq!(first.surface(), Surface::GaveUp);
+    assert_eq!(first.surface(), &Surface::GaveUp);
     let second = &mut outputs.get_mut(b).unwrap().output;
-    assert_eq!(second.surface(), Surface::Pending);
+    assert_eq!(second.surface(), &Surface::Pending);
     assert_eq!(second.configure(1, 5, 5), Effect::Ack(1));
 }
 
@@ -363,7 +375,10 @@ fn the_configured_size_is_the_best_logical_size() {
     assert_eq!(output.logical(), Some(size(800, 500)), "the estimate");
     let _ = output.configure(1, 1067, 667);
     assert_eq!(output.logical(), Some(size(1067, 667)));
-    assert_eq!(output.info().logical(), Some(size(800, 500)));
+    assert_eq!(
+        output.info().logical(Scale::Integer(output.info().scale)),
+        Some(size(800, 500))
+    );
     // Closed: back to the estimate until configured again.
     let _ = output.closed();
     assert_eq!(output.logical(), Some(size(800, 500)));

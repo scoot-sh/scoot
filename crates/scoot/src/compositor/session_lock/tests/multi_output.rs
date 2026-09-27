@@ -14,7 +14,7 @@
 //! screen" cannot pass. The canvas is square and both outputs are the same
 //! size unless a test says otherwise, placed side by side: output 1 covers
 //! `0..CANVAS` on both axes, output 2 covers `CANVAS..2*CANVAS` on `x` and
-//! `0..CANVAS` on `y`. Two colours -- one per output -- so a surface drawn
+//! `0..CANVAS` on `y`. Two colors -- one per output -- so a surface drawn
 //! on the wrong screen reads unambiguously.
 
 use super::*;
@@ -26,7 +26,7 @@ use scoot_core::OutputId;
 const SECOND: usize = 1;
 /// The global `x` the second output starts at: immediately right of the first.
 const X2: f64 = CANVAS as f64;
-/// The second output's lock surface colour: unmistakable against every colour
+/// The second output's lock surface color: unmistakable against every color
 /// `mod.rs` already uses, so cross-output leaks read unambiguously.
 const LOCK2_BGRA: [u8; 4] = [0xE0, 0xE0, 0x20, 0xFF];
 
@@ -83,7 +83,7 @@ fn render_all(fixture: &mut Fixture) -> (Vec<u8>, Vec<u8>) {
     )
 }
 
-/// Draws every output and asserts each one is whole-screen its own colour.
+/// Draws every output and asserts each one is whole-screen its own color.
 fn assert_outputs_are(first: &[u8], second: &[u8], what: &str) {
     for y in 0..CANVAS {
         for x in 0..CANVAS {
@@ -104,7 +104,7 @@ fn assert_outputs_are(first: &[u8], second: &[u8], what: &str) {
 /// Surfaces on both outputs are each configured to their own output's size,
 /// each draws whole-screen on its own output, and `locked` arrives.
 /// Fail-first twice over: drawing every surface onto every output (the old
-/// locked render path) puts the first surface's colour on output 2, and
+/// locked render path) puts the first surface's color on output 2, and
 /// confirming on the first blanked frame is unobservable here only because
 /// both surfaces are up before the first frame -- the ordering half is the
 /// next test's.
@@ -196,7 +196,7 @@ fn keyboard_follows_the_pointer_output_among_lock_surfaces() {
 }
 
 /// A lock covering only output 1: output 2 blanks with no surface -- the
-/// solid-colour fallback -- and `locked` still arrives, because a backdrop
+/// solid-color fallback -- and `locked` still arrives, because a backdrop
 /// frame *is* that output's locked frame. A regression pin rather than
 /// fail-first: pre-fix output 2 reads black too, but only because the one
 /// surface is drawn at an off-target origin and clipped away -- this pins
@@ -333,7 +333,7 @@ fn duplicate_refusal_still_fires_per_physical_output() {
 /// survival pins that exact-size buffers were accepted on both. Fail-first on
 /// the pixels: the old render path draws the 80-wide surface onto the
 /// 120-wide output (and vice versa), so neither output is whole-screen its
-/// own colour.
+/// own color.
 #[test]
 fn each_surface_is_sized_to_its_own_output() {
     const W2: i32 = 80;

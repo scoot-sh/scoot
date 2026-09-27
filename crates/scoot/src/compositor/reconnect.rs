@@ -83,6 +83,17 @@ impl State {
             windows = moved,
             "a display came back; restored its workspaces"
         );
+        // Origins no workspace still carries name nothing: drop their
+        // connector names, so the map cannot grow by one entry per unplug
+        // for the life of the session. A chained adoption's earlier origin
+        // survives this sweep while any workspace still carries it.
+        let mut live = std::collections::HashSet::new();
+        for (known, _) in self.outputs.iter_with_ids() {
+            if let Some(origins) = self.world.workspace_origins(known) {
+                live.extend(origins.into_iter().flatten());
+            }
+        }
+        self.origin_names.retain(|origin, _| live.contains(origin));
         self.apply();
     }
 }

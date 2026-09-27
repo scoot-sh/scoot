@@ -242,7 +242,12 @@ fn usage_errors_exit_2_and_help_exits_0() {
     };
     for args in [
         &[][..],
-        &["set", "#000000"],
+        &["set"],
+        &["set", "#fff"],
+        &["set", "~/Pictures/hills.jpg", "--mode", "zoom"],
+        &["set", "#000000", "--mode", "fit"],
+        &["clear", "extra"],
+        &["apply-config"],
         &["query", "extra"],
         &["bogus"],
     ] {
@@ -250,7 +255,13 @@ fn usage_errors_exit_2_and_help_exits_0() {
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         assert!(stderr(&output).contains("try"), "{args:?}");
     }
-    for args in [&["--help"][..], &["daemon", "--help"], &["help", "kill"]] {
+    for args in [
+        &["--help"][..],
+        &["daemon", "--help"],
+        &["help", "kill"],
+        &["set", "--help"],
+        &["help", "clear"],
+    ] {
         let output = run(args);
         assert!(output.status.success(), "{args:?}");
         assert!(stdout(&output).starts_with("scootbg"));

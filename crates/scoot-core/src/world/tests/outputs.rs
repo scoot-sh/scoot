@@ -61,7 +61,7 @@ fn removing_an_unfocused_output_moves_its_workspaces_and_keeps_focus() {
 }
 
 #[test]
-fn removing_the_focused_output_moves_focus_to_what_remains() {
+fn removing_the_focused_output_keeps_focus_on_the_adopted_window() {
     let mut world = world();
     add_output(&mut world, 2, SECOND);
     open(&mut world, 1);
@@ -69,9 +69,13 @@ fn removing_the_focused_output_moves_focus_to_what_remains() {
     assert_eq!(world.focused_output(), Some(OutputId(2)));
 
     world.handle_event(Event::OutputRemoved { id: OutputId(2) });
+    // The adopter shows the adopted workspace and focus stays on window 2:
+    // the work followed the session, it did not fall back to window 1.
     assert_eq!(world.focused_output(), Some(OutputId(1)));
-    assert_eq!(focused(&world), Some(1));
+    assert_eq!(focused(&world), Some(2));
     assert_eq!(placement(&world, 2).output, OutputId(1));
+    assert!(placement(&world, 2).visible);
+    assert!(!placement(&world, 1).visible);
 }
 
 #[test]

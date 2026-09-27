@@ -377,9 +377,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   (rule 6, mirroring Smithay's walk). That holds when the window is opaque
   over the whole output (an opaque-format buffer, or one whose surface
   declares an opaque region covering it), or when the background is black
-  and nothing visible lies under the window (a solid-colour wallpaper made
+  and nothing visible lies under the window (a solid-color wallpaper made
   of a single-pixel buffer counts as the background: Smithay clears to its
-  colour instead of drawing it, so a black one qualifies). A fullscreen app with an
+  color instead of drawing it, so a black one qualifies). A fullscreen app with an
   alpha-format buffer and no opaque region is not eligible over the default
   background, nor over any wallpaper (Smithay would try the wallpaper, or
   nothing), and so is not steered either (below).
@@ -527,7 +527,7 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   where it used to be `Xrgb8888`/`Argb8888` at `LINEAR` only, which forced
   every GL client into linear buffers and every video player into a
   conversion. Implicit-modifier entries are never offered next to explicit
-  ones (a YUV buffer imported that way draws the wrong colours). On the dev
+  ones (a YUV buffer imported that way draws the wrong colors). On the dev
   VM's llvmpipe that is 57 formats, all `LINEAR`, identical on both GLES
   tiers. On an Apple M2 it is 54 formats at three modifiers each (Apple's
   tiled-compressed, tiled, and `LINEAR`), also identical on both tiers

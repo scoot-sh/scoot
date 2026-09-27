@@ -127,7 +127,7 @@ struct Constraints {
 
 /// One instruction for the client thread.
 enum Step {
-    /// Map an `xdg_toplevel` with a solid buffer of this colour.
+    /// Map an `xdg_toplevel` with a solid buffer of this color.
     MapWindow([u8; 4]),
     /// Create a capture source for the one output and a session on it, then
     /// round-trip until the constraint batch is closed by `done`.
@@ -1135,7 +1135,7 @@ fn an_opaque_capture_honours_the_offset_and_the_stride_as_well() {
             assert_eq!(
                 &captured[..3],
                 &drawn[..3],
-                "row {y} pixel {x}: the colour has to be the frame's, at its own stride"
+                "row {y} pixel {x}: the color has to be the frame's, at its own stride"
             );
             assert_eq!(
                 captured[3], 0xFF,

@@ -37,7 +37,7 @@ edges instead of keeping its edge pixels:
   itself, and likely XWayland windows, on any scaled output. On XRGB
   scanout the edge shows as a dark line.
 
-Both the colour channels and alpha fade (premultiplied toward black), so an
+Both the color channels and alpha fade (premultiplied toward black), so an
 `XRGB` surface comes out partly transparent too.
 
 `wp_single_pixel_buffer_v1` renders exactly, which is why scootbg (it uses
@@ -60,7 +60,7 @@ path.
 `Repeat::Pad` on the source image, pixman's equivalent of GL's
 clamp-to-edge, with a before/after render benchmark in the fix PR since
 it touches the pixman hot path. (Forcing alpha to 1 for opaque formats
-would *not* fix it: the colour channels still fade, giving an opaque dark
+would *not* fix it: the color channels still fade, giving an opaque dark
 vignette instead.)
 
 The code is Smithay's, so the fix is a commit on the scoot-sh/smithay fork,

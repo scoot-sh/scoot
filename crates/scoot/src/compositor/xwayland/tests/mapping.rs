@@ -449,7 +449,7 @@ fn closing_an_x_window_sends_wm_delete_window() {
 }
 
 /// An X window gets scoot's focus ring and rounded clip like any window:
-/// the ring's colour just outside its drawn edge, and -- with a corner
+/// the ring's color just outside its drawn edge, and -- with a corner
 /// radius -- the background, not the window, in its corner pixel.
 #[test]
 fn an_x_window_gets_the_ring_and_the_rounded_clip() {
@@ -471,7 +471,7 @@ fn an_x_window_gets_the_ring_and_the_rounded_clip() {
     let id = live.managed(xid);
     let rect = live.placement(id).rect;
     let mid_y = rect.y + rect.h / 2;
-    // Inside the window, its own colour; just left of its edge, the ring.
+    // Inside the window, its own color; just left of its edge, the ring.
     assert_eq!(live.pixel_at(rect.x + 10, mid_y), RED_BGRA);
     assert_eq!(
         live.pixel_at(rect.x - 2, mid_y),

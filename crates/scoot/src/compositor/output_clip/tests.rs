@@ -44,7 +44,7 @@ const GAP: i32 = 12;
 /// A row every window, popup and ring side crosses.
 const ROW: i32 = 100;
 
-// Colours, as the BGRA bytes an `Argb8888` buffer holds them in: distinct in
+// Colors, as the BGRA bytes an `Argb8888` buffer holds them in: distinct in
 // every channel from each other, and built from channel values (0, 1 and
 // n/255) both renderers turn into the same byte.
 const FIRST_A_BGRA: [u8; 4] = [0x20, 0xE0, 0x20, 0xFF];

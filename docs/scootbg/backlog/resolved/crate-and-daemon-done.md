@@ -309,10 +309,10 @@ gives it surfaces:
   [outputs-and-layer-surfaces-done.md](outputs-and-layer-surfaces-done.md).
   Outputs are bound here, but their events are ignored.
 - `set`, `clear`, `apply-config`, and the `--output`/`--mode`/`--fill`
-  flags: [cli-and-ipc.md](../cli-and-ipc.md).
+  flags: [cli-and-ipc-done.md](cli-and-ipc-done.md).
 - `--profile` and `--no-restore`: [restore-state.md](../restore-state.md).
-- The first real use of `ShmBuffer`: [solid-colour.md](../solid-colour.md)
-  (its 1×1 fallback) and [images-decode-and-fit.md](../images-decode-and-fit.md).
+- The first real use of `ShmBuffer`: [solid-color-done.md](solid-color-done.md)
+  (its 1×1 fallback) and [images-decode-and-fit-done.md](images-decode-and-fit-done.md).
 - Competitor measurements: [lightest.md](../lightest.md).
 - **Not verified here:** `--tty` (no dev VM was reachable from the Claude
   Code web container this was built in; nothing in this ticket touches

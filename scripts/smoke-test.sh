@@ -262,14 +262,14 @@ echo "--- version ---"
 
 echo "--- the log is plain text, since it is going to a file and not a terminal ---"
 # `$LOG` is a redirected stdout, so `init_logging`'s `IsTerminal` gate must
-# have turned colour off. Guarded here because the un-guarded version of this
+# have turned color off. Guarded here because the un-guarded version of this
 # bug was not cosmetic: escapes between a field name and its value made
 # `scanout="gpu"` unmatchable by an obvious grep, and the Asahi Test 4 harness
 # duly reported the presentation tier as absent on a run where it had come up
 # (see Asahi.md's Test 4 traps). Every log consumer in scripts/ greps this
 # shape, and a one-line regression would silently break all of them.
 # Only when `$LOG` really is a file. It is caller-overridable, and a caller
-# who points it at `/dev/tty` or `/dev/stdout` from a terminal makes colour
+# who points it at `/dev/tty` or `/dev/stdout` from a terminal makes color
 # legitimately *on* -- asserting against that would fail correct behaviour.
 if [ -f "$LOG" ]; then
     if grep -qa "$(printf '\033')" "$LOG"; then
@@ -279,7 +279,7 @@ if [ -f "$LOG" ]; then
     fi
     echo "ok: no ANSI escapes in the redirected log"
 else
-    echo "skipped: \$LOG is not a regular file, so colour may legitimately be on"
+    echo "skipped: \$LOG is not a regular file, so color may legitimately be on"
 fi
 
 echo "--- opening a terminal ---"
@@ -590,7 +590,7 @@ if command -v wayland-info >/dev/null 2>&1; then
     # pattern tolerates ANSI escapes between a field name and its value; the
     # second then pulls the bare socket name out of that match. A current
     # build writes no escapes to a redirected log at all (`init_logging` gates
-    # colour on `IsTerminal`), so that tolerance is now only for logs from
+    # color on `IsTerminal`), so that tolerance is now only for logs from
     # older builds -- and the assertion below keeps it that way.
     wayland_socket=$(grep 'scoot is up' "$LOG" | grep -o 'wayland[^"]*"[^"]*"' | head -1 | grep -o 'wayland-[0-9]*' || true)
     if [ -z "$wayland_socket" ]; then

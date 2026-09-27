@@ -82,7 +82,7 @@ but that is an estimate, not a measurement.
   - Round one's fix was two `mallopt` calls plus a trim, through `libc`.
     That is **superseded** by the allocator wrapper (§6b), which needs no
     C call and no tuning and also covers dependencies' internal buffers.
-- **[images-decode-and-fit.md](../images-decode-and-fit.md): scale with
+- **[images-decode-and-fit-done.md](images-decode-and-fit-done.md): scale with
   `pic-scale-safe`, then pack.**
   - Crop to the fill rectangle in place: rows are a sub-slice, and
     columns are compacted row by row.
@@ -745,7 +745,7 @@ the tree.
 
 | Crate | ≈ `unsafe` sites | What for | Upstream fuzzing | RustSec |
 |---|---|---|---|---|
-| zune-jpeg 0.5.15 | 79, 76 of them in SIMD files (IDCT, upsampler, colour convert, AVX2/NEON) | SIMD | `fuzz/` targets and per-format fuzz CI (`etemesi254/zune-image`); also OSS-Fuzz through the `image-rs` project's JPEG fuzzer | none |
+| zune-jpeg 0.5.15 | 79, 76 of them in SIMD files (IDCT, upsampler, color convert, AVX2/NEON) | SIMD | `fuzz/` targets and per-format fuzz CI (`etemesi254/zune-image`); also OSS-Fuzz through the `image-rs` project's JPEG fuzzer | none |
 | png 0.18.1, fdeflate, miniz_oxide, adler2, image-webp, byteorder-lite | **0** (`#![forbid(unsafe_code)]`) | — | png: OSS-Fuzz (`image-png`) + cifuzz; fdeflate: 8 targets; miniz_oxide: OSS-Fuzz; image-webp: 2 targets + OSS-Fuzz through `image-rs` | none |
 | **pic-scale-safe 0.1.12** | **0** (`#![forbid(unsafe_code)]`) | — | **none** (no targets, not in OSS-Fuzz) | none |
 | crc32fast / simd-adler32 | 15 / 36 | SIMD | 1 target / 5 targets + fuzz CI | none |
@@ -876,8 +876,8 @@ Everything else needs no `unsafe`:
 
 ## Incidental finding: a 1×1 `wl_shm` buffer upscaled on scoot
 
-The solid-colour fallback (a 1×1 XRGB8888 `wl_shm` buffer, the viewport
-scaling it to the output) does **not** render as a flat colour on
+The solid-color fallback (a 1×1 XRGB8888 `wl_shm` buffer, the viewport
+scaling it to the output) does **not** render as a flat color on
 `scoot --headless` with the pixman renderer. Setting `PROTO_NO_SPB=1` with
 `#c03020` requested, the samples are:
 
@@ -891,9 +891,9 @@ buffer path is exact. scootbg on scoot always has
 `wp_single_pixel_buffer_manager_v1`, so this reaches scootbg only on a
 compositor without it. It is a compositor-side bug for any client that
 upscales a tiny `wl_shm` buffer. It is tracked as a compositor item,
-[shm-viewport-upscale-edge-fade.md](../../../backlog/core/shm-viewport-upscale-edge-fade.md)
-(widened in review to every upscaled surface), and noted in
-[solid-colour.md](../solid-colour.md), whose fallback it affects.
+[shm-viewport-upscale-edge-fade-done.md](../../../backlog/resolved/shm-viewport-upscale-edge-fade-done.md)
+(widened in review to every upscaled surface, and since resolved), and noted in
+[solid-color-done.md](solid-color-done.md), whose fallback it affects.
 
 ## Not measured, and why
 

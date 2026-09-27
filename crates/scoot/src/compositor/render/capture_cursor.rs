@@ -586,7 +586,7 @@ impl State {
     /// frame lifecycle: no `needs_render`, no `frame_serial`, no frame
     /// callbacks, and the element sources it gathers from are idempotent
     /// for an unchanged scene (the ring buffers only take a new commit when
-    /// their size or colour changes), so the next frame's damage is exactly
+    /// their size or color changes), so the next frame's damage is exactly
     /// what it would have been.
     ///
     /// Cost: when the frame already matches, one cursor-element build (a

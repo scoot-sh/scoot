@@ -13,9 +13,9 @@ rg -l 'priority: "high"' docs/scootbg/backlog
 Items move to `resolved/` here when done, with a `-done` suffix, as in the
 compositor's backlog.
 
-## Milestone 1: colours and images, in scoot (v1)
+## Milestone 1: colors and images, in scoot (v1)
 
-The first shippable version: a colour or an image per output, `scootbg set`
+The first shippable version: a color or an image per output, `scootbg set`
 to change it, a `[wallpaper]` section in scoot's config, and numbers
 showing it is the lightest. Roughly in order; each is one PR through the
 full per-feature cycle.
@@ -36,10 +36,32 @@ full per-feature cycle.
    `background` surface each (configured, nothing drawn yet), `query`
    lists them; a failed `accept` rests the listener instead of ending the
    daemon; checked on headless scoot and headless sway
-4. [Solid colours through single-pixel buffers](solid-colour.md)
-5. [The CLI and control protocol](cli-and-ipc.md)
-6. [Decoding images and fitting them to an output](images-decode-and-fit.md)
-7. [Drawing at real device pixels on scaled outputs](hidpi-fractional-scale.md)
+4. [**Solid colors through single-pixel buffers**](resolved/solid-color-done.md)
+   — RESOLVED 2026-09-27: `scootbg set '#rrggbb' [--output NAME]` and
+   `scootbg clear`; single-pixel buffer + viewport, else a 1×1 `wl_shm`
+   buffer + viewport, else a full-size one; replies after a sync round
+   trip, without blocking the loop; `query` reports what each output
+   shows; checked by real pixels on headless scoot and headless sway
+5. [**The CLI and control protocol**](resolved/cli-and-ipc-done.md) —
+   RESOLVED 2026-09-27, across tickets 4 and 6: `set` with a color or an
+   image path, `clear`, `query`, `kill`, `version`, `--help` everywhere,
+   replies after the compositor has the change; `apply-config` moved to
+   ticket 10, which it exists for
+6. [**Decoding images and fitting them to an output**](resolved/images-decode-and-fit-done.md)
+   — RESOLVED 2026-09-27: `scootbg set PATH` with `--mode
+   fill|fit|stretch|center|tile`, `--fill` and `--filter`; PNG, JPEG and
+   WebP decoded and scaled on a worker thread, EXIF orientation applied in
+   the packing pass; a file that cannot be shown is an error that changes
+   nothing, and the newest request wins; checked by real pixels on
+   headless scoot and headless sway
+7. [**Drawing at real device pixels on scaled outputs**](resolved/hidpi-fractional-scale-done.md)
+   — RESOLVED 2026-09-27: images (and the full-size color fallback) at
+   the surface's device pixels, from `wp_fractional_scale_v1` under a
+   viewport (the protocol's rounding, measured exact where snapping to the
+   mode was not), else the integer `preferred_buffer_scale` or
+   `wl_output.scale`; a stale smaller scale gives way; `query` reports
+   `surface.scale` and `surface.pixels`; 44% fewer buffer bytes at 1.5;
+   checked by a one-pixel checker on headless scoot and headless sway
 8. [Buffers, memory and zero idle cost](memory-and-idle.md)
 9. [Restoring the last wallpaper at startup](restore-state.md)
 10. [Seamless in scoot: a `[wallpaper]` config section](scoot-integration.md)

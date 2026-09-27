@@ -46,7 +46,7 @@ pub(super) const CANVAS: i32 = 200;
 /// A bar's height: full width, fixed rows at the top.
 const BAR_HEIGHT: i32 = 24;
 
-/// A bar's colour, as the BGRA bytes a pixman `Argb8888` buffer holds them
+/// A bar's color, as the BGRA bytes a pixman `Argb8888` buffer holds them
 /// in -- distinct in every channel from the default background, so no
 /// assertion can pass by accident against an undrawn screen.
 pub(super) const BAR_BGRA: [u8; 4] = [0xE0, 0x20, 0x20, 0xFF];
@@ -58,7 +58,7 @@ const SENTINEL: [u8; 4] = [0x11, 0x22, 0x33, 0x44];
 /// One instruction for the client thread. `output` is an index into the
 /// `wl_output` globals in registry order -- 0 is the primary output.
 pub(super) enum Step {
-    /// Map a solid-colour bar on `outputs[output]`, returning its index.
+    /// Map a solid-color bar on `outputs[output]`, returning its index.
     BarOn { output: usize, color: [u8; 4] },
     /// Request a frame callback on bar `bar`.
     RequestBarFrame { bar: usize },
@@ -873,7 +873,7 @@ fn a_second_output_with_nothing_on_it_captures_blank_but_correct() {
     );
     assert!(
         !contains(&second, BAR_BGRA),
-        "nothing mapped on the second output, so no bar colour may be there"
+        "nothing mapped on the second output, so no bar color may be there"
     );
     assert!(
         second.chunks_exact(4).all(|pixel| pixel == &second[0..4]),
@@ -1055,7 +1055,7 @@ fn screencopy_of_an_empty_output_is_blank() {
     assert!(second.ready);
     assert!(
         !contains(&second.pixels, BAR_BGRA),
-        "nothing mapped anywhere, so no bar colour may be captured"
+        "nothing mapped anywhere, so no bar color may be captured"
     );
 }
 

@@ -496,7 +496,7 @@ each item's own file records why it landed when it did.
   is placed per output (multi-output), and `Rounded::relocate` keeps a
   relocated window's corner cut. Dev VM: arrow pixels identical across the
   scanout and dumb tiers (tiers differ only in the pre-existing 1-LSB clear
-  colour), exactly one cursor in each capture through primary-direct, IPC
+  color), exactly one cursor in each capture through primary-direct, IPC
   == `grim` both ways; on the llvmpipe scanout tier with the cursor on its
   plane a 0.4-0.9 ms region per pointer-requesting capture (29 → 37-39
   jiffies per 40 screenshots) whose wall-latency effect is dominated by
@@ -515,7 +515,7 @@ each item's own file records why it landed when it did.
   nothing new is promised. Eligibility is `render::primary_direct`'s, which
   gained a rule 6 in review: Smithay's own walk, mirrored -- the element it
   would try for the primary must pass its guard (opaque and spanning, or a
-  black clear colour) *and* be the covering window's -- so an alpha client
+  black clear color) *and* be the covering window's -- so an alpha client
   with no opaque region, over the grey default or over any wallpaper, is
   neither given the direct flags nor steered (it was, and never went
   direct). Sent
@@ -1058,7 +1058,7 @@ each item's own file records why it landed when it did.
   (deliberate: nothing applied can disclose locked content). New
   `Response::Reloaded` moved `PROTOCOL_VERSION` 2 → 3; the request half
   degrades to error + continue on older servers. Live proof on the dev
-  VM: gap + colour + bind change, screenshot pixel diff, injected-key
+  VM: gap + color + bind change, screenshot pixel diff, injected-key
   bind fire, malformed-file untouched.
 
 - **[Workspace shortcuts: numbered binds plus
@@ -2132,7 +2132,7 @@ medium priority — the effective top of what's actually open.
    What remains open here is the `scootctl` crate split, which wants its own
    design pass.
 5. **[scootbg](docs/scootbg/README.md), a wallpaper daemon** (in progress,
-   2026-09-26): colours and images per output, one `scootbg set` command,
+   2026-09-26): colors and images per output, one `scootbg set` command,
    a `[wallpaper]` section in scoot's config, and a release gate of the
    lowest resource use of any wallpaper daemon. It keeps its own backlog in
    [`docs/scootbg/backlog/`](docs/scootbg/backlog/README.md); serves
@@ -2148,8 +2148,22 @@ medium priority — the effective top of what's actually open.
    outputs tracked through hotplug with one `background` layer surface
    each, `query` listing them, and a failed `accept` resting the listener
    instead of ending the daemon; checked on headless scoot and on headless
-   sway, which CI now runs for the hotplug tests. It draws no wallpaper
-   yet; solid colours are next.
+   sway, which CI now runs for the hotplug tests. Item 4
+   ([record](docs/scootbg/backlog/resolved/solid-color-done.md)): solid
+   colors, `scootbg set '#rrggbb' [--output NAME]` and `scootbg clear`,
+   through a single-pixel buffer (no shared memory) with a 1×1 and a
+   full-size `wl_shm` fallback; replies wait, without blocking the loop,
+   until the compositor has the commit, so a screenshot straight after
+   shows it; checked by real pixels on both compositors, every path.
+   Items 5 and 6
+   ([record](docs/scootbg/backlog/resolved/images-decode-and-fit-done.md)):
+   `scootbg set PATH` for PNG, JPEG and WebP with fit modes, decoded off
+   the loop, newest request wins. Item 7
+   ([record](docs/scootbg/backlog/resolved/hidpi-fractional-scale-done.md)):
+   images drawn at real device pixels on fractionally scaled outputs
+   (`wp_fractional_scale_v1` under a viewport), exact to the pixel on
+   scoot and sway, 44% fewer buffer bytes at 1.5. Restoring the wallpaper
+   at startup and scoot's `[wallpaper]` section are next.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

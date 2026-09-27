@@ -44,13 +44,13 @@ covers the IPC `action` request, `ext-workspace-v1`'s `activate`, and
 any caller added later.
 
 **The backdrop is a real element, not just `render_output`'s
-`clear_color`.** A clear colour is not part of any element's damage, so
+`clear_color`.** A clear color is not part of any element's damage, so
 under `--tty` (the one backend that passes a real buffer age) a frame
 whose elements did not change can report no damage and leave the
 previous pixels on the scanout buffer. A persistent `SolidColorBuffer`
 (the pattern `decorations.rs` already establishes) makes locking,
-unlocking and the switch to the abandoned colour real damage. The clear
-colour is set to the same colour anyway, as a second line of defence.
+unlocking and the switch to the abandoned color real damage. The clear
+color is set to the same color anyway, as a second line of defence.
 
 **Crash recovery, the most safety-critical decision here:** the session
 stays locked (the protocol's own rule), the screen turns **solid red**
@@ -85,7 +85,7 @@ surface's destruction goes through `handlers.rs`'s `destroyed` hook —
 i.e. the signal was correct only by accident of teardown order. Fixed
 with `State::refresh_lock_backdrop`, called from the one place a
 disconnect is observed (the wayland display source), comparing the
-backdrop buffer's *own* colour against what the lock state says it
+backdrop buffer's *own* color against what the lock state says it
 should be, so there is no remembered flag to fall out of step. The
 regression test for it needed two clients — written with one first, and
 the negative control passed, because a single client owning both the
@@ -114,13 +114,13 @@ input" assertion is made from what the client was actually sent
 than from a field inside the compositor. Covered: a window blanked off
 the screen, an `overlay` layer surface blanked too, the lock surface's
 own pixels, a lock surface with no buffer yet, a destroyed lock surface
-falling back to a solid colour, unlock restoring the session, `locked`
+falling back to a solid color, unlock restoring the session, `locked`
 withheld until a frame is drawn (driven by taking the render target
 away, so no timing luck is involved), a second lock refused with
 `finished`, keyboard and pointer reaching only the lock surface, a
 `Super+Q` bind not closing a window, `State::act` and the IPC `action`
 both refused, the session staying locked when the client dies, the
-abandoned colour appearing with nobody asking for a redraw, takeover +
+abandoned color appearing with nobody asking for a redraw, takeover +
 unlock, a replacement locker after one died unconfirmed, an empty
 session locking and unlocking three times (the damage case), and an
 output resize reconfiguring the lock surface.
@@ -128,7 +128,7 @@ output resize reconfiguring the lock surface.
 **Hardware verification** and **benchmarks**: see PR #25's description
 for the exact commands, raw histograms and jiffies figures, all captured
 on the dev VM's real `--tty` `virtio-gpu` device at 1600x1000. In
-summary: a locked frame contains exactly the lock surface's colour plus
+summary: a locked frame contains exactly the lock surface's color plus
 the 136-pixel cursor and nothing else; 44 keystrokes typed over IPC
 while locked reached the lock client and left no trace in the terminal
 behind it; a VT switch away and back left the lock screen

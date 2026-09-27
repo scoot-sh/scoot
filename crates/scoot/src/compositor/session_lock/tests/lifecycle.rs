@@ -245,7 +245,7 @@ fn a_second_lock_is_refused_while_one_is_held() {
 /// Zero windows, zero lock surfaces: the screen still blanks, and stays
 /// blanked across repeated lock/unlock cycles. The repeat is the point --
 /// under `--tty` the damage tracker is what decides whether the framebuffer
-/// is repainted at all, and a blank drawn only by the clear colour could
+/// is repainted at all, and a blank drawn only by the clear color could
 /// legitimately report no damage on the second cycle.
 #[test]
 fn locking_an_empty_session_blanks_and_keeps_blanking() {

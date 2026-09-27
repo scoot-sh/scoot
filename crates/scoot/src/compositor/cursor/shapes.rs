@@ -207,7 +207,7 @@ pub fn generate(shape: Shape, size: i32, fill: [u8; 4], outline: [u8; 4]) -> Vec
 ///
 /// That clamp is what makes [`ink`]'s outline pass complete rather than
 /// clipped. A stroke flush against the bitmap edge has nowhere to put the
-/// outline on that side, so it would show its fill colour directly against
+/// outline on that side, so it would show its fill color directly against
 /// whatever is under the cursor there -- exactly the illegibility the outline
 /// exists to prevent. The fractions alone are not enough to guarantee it:
 /// at `Appearance::MIN_CURSOR_SIZE` (4) the safe box is 2x2, and every
@@ -498,7 +498,7 @@ fn stroke_circle(mask: &mut [bool], size: i32, cx: i32, cy: i32, radius: i32, th
 /// stay transparent.
 ///
 /// The 8-way neighborhood, not 4-way: a 4-way dilation leaves the diagonal
-/// corners of a stroke bare, so a 45-degree arrow would show its fill colour
+/// corners of a stroke bare, so a 45-degree arrow would show its fill color
 /// directly against the content on two of its four sides -- which is the one
 /// thing the outline exists to prevent.
 fn ink(mask: &[bool], size: i32, fill: [u8; 4], outline: [u8; 4]) -> Vec<u8> {

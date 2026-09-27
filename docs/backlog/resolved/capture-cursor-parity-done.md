@@ -94,7 +94,7 @@ does (`grim -c` does). The default is one constant if it should differ.
   `grim` both ways on both tiers; with vs without the cursor differs in
   exactly the 136 px of the arrow in its 16x16 box; the arrow's pixels are
   identical across tiers, and the tiers differ only in the background clear
-  colour (20,20,26 vs 20,20,25 -- 826184 px, pre-existing). Before: every
+  color (20,20,26 vs 20,20,25 -- 826184 px, pre-existing). Before: every
   scanout-tier capture cursorless, every dumb-tier capture cursored.
 - Primary-direct (PR #228 path): a fullscreen dumb-buffer client on the
   primary (fb MATCH), 6 IPC captures each forcing a composite, each holding

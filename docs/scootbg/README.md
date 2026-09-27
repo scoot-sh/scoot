@@ -2,7 +2,7 @@
 
 The lightest wallpaper daemon for Wayland, written in Rust, in place of
 `awww` (formerly `swww`), `swaybg`, `hyprpaper`, `wpaperd` and friends.
-It shows a colour or an image on each output, and one command changes it.
+It shows a color or an image on each output, and one command changes it.
 
 It is built for scoot and set up by scoot's own config, but it is not tied
 to it: scootbg speaks only standard protocols, so it also runs on any
@@ -11,10 +11,13 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > **Status: early.** The daemon exists (`crates/scootbg/`, with its
 > `unsafe` in `crates/scootbg-mem/`): `scootbg daemon` connects, tracks
 > every output as it comes and goes, and gives each one a `background`
-> layer surface; `scootbg query` lists the outputs and their surfaces,
-> and `version` and `kill` work. **It draws no wallpaper yet**: colours
-> and images are the next items in [`backlog/`](backlog/README.md). These
-> docs stay here.
+> layer surface. **Solid colors and images work**: `scootbg set '#rrggbb'`
+> or `scootbg set PATH` (PNG, JPEG, WebP) with a fit mode, on every output
+> or one (`--output NAME`), and `scootbg clear`, drawn at each output's
+> real device pixels, fractional scales included; `query` reports what
+> each output shows, and `version` and `kill` work. Not yet: restoring the
+> wallpaper at the next start and scoot's `[wallpaper]` section; they are
+> the next items in [`backlog/`](backlog/README.md). These docs stay here.
 
 ## What it is for
 
@@ -26,7 +29,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   the same machine, with the table published here. Every
   dependency has to justify its bytes. See
   [`backlog/lightest.md`](backlog/lightest.md).
-- **Colours and images.** A solid colour or a PNG, JPEG or WebP image per
+- **Colors and images.** A solid color or a PNG, JPEG or WebP image per
   output, changed live with one command and restored at login. That is
   v1.
 - **Seamless in scoot.** A `[wallpaper]` section in scoot's `config.toml`
@@ -40,6 +43,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   webtop and no-GPU boxes. A GPU path, if ever, is an optional tier.
 - **Sharp at any scale.** Buffers are drawn at the output's real device
   pixels, fractional scales included, never scaled up by the compositor.
+  Working, and measured ([below](#measured-so-far)).
 - **Scriptable.** A small CLI over a control socket with JSON replies, like
   `scootctl`, so an agent or a script can set, query and clear wallpapers.
 
@@ -71,7 +75,7 @@ And one command changes it live, in scoot or anywhere else:
 
 ```sh
 scootbg set ~/Pictures/city.png                # every output
-scootbg set '#1e1e2e'                          # a colour: anything starting with '#'
+scootbg set '#1e1e2e'                          # a color: anything starting with '#'
 scootbg set ./#draft.png                       # a file whose name starts with '#'
 scootbg set ~/Pictures/city.png --output DP-1 --mode fit --fill '#101014'
 scootbg query                                  # what each output shows, as JSON
@@ -79,28 +83,141 @@ scootbg clear --output DP-1                    # back to the compositor's own ba
 scootbg daemon                                 # outside scoot: start it yourself
 ```
 
-The commands above are the planned interface; of them, only `query` and
-`daemon` work so far (with `version` and `kill`), and `query` reports each
-output and its surface but, with nothing drawn yet, not what it shows.
-One binary: `daemon` runs the Wayland client, every other subcommand talks
-to it over its socket.
+Every command above works today (`set` also takes `--filter
+lanczos3|catmull-rom|bilinear|nearest`); what does not yet is the
+`[wallpaper]` section, and restoring at login. The root
+[README](../../README.md#scootbg-early) has the details (exit codes, what
+`set` waits for). One binary: `daemon` runs the Wayland client, every
+other subcommand talks to it over its socket.
 
 - **One `background`-layer surface per output**, anchored to all four edges,
   exclusive zone `-1`, no keyboard interactivity and an empty input region,
   so clicks reach the desktop underneath, as on any other compositor.
-- **Solid colours** use `wp_single_pixel_buffer_manager_v1` scaled by
-  `wp_viewporter`: one pixel of memory for a whole output, with a 1×1
-  `wl_shm` buffer where the compositor lacks the protocol.
-- **Images** are decoded once, scaled once per output size and scale, and
-  written into an opaque `XRGB8888` buffer with its opaque region set, so a
-  compositor can skip drawing anything beneath it.
+- **Solid colors** use `wp_single_pixel_buffer_manager_v1` scaled by
+  `wp_viewporter`: no shared memory at all for a whole output, with a 1×1
+  `wl_shm` buffer under the viewport where the compositor lacks
+  single-pixel buffers, and a full-size `wl_shm` buffer where it has no
+  viewporter either. Working, and measured
+  ([below](#measured-so-far)).
+- **Images** are decoded on a worker thread, never on the Wayland loop,
+  once for every output that needs them, scaled once per buffer size, and
+  written into an opaque `XRGB8888` buffer at the output's device pixels,
+  with its opaque region set, so a compositor can skip drawing anything
+  beneath it. With `wp_fractional_scale_v1` and `wp_viewporter` that is
+  the surface's logical size times the scale the compositor asks for,
+  rounded as that protocol says, under a viewport (1601×1001 for scoot's
+  1067×667 at 1.5 on a 1600×1000 output, which scoot draws one to one);
+  without them, or for a moment while the compositor has not told the
+  surface its new scale, the surface size times the integer scale (the
+  larger of `wl_surface.preferred_buffer_scale` and `wl_output.scale`),
+  which the compositor scales down, never up. The decoded image is dropped once drawn (an
+  output plugged in later reads the file again). EXIF orientation is
+  applied as the pixels are packed, with no extra buffer. A file that
+  cannot be shown (missing, not PNG/JPEG/WebP, over 16384×16384 pixels,
+  truncated or corrupt) is an error reply that changes nothing. Working,
+  and measured ([below](#measured-so-far)).
 - **Fit modes:** `fill` (cover and crop, the default), `fit` (letterbox
-  with a colour), `stretch`, `center`, `tile`.
+  with a color), `stretch`, `center`, `tile`.
 - **Outputs come and go.** A monitor plugged in gets the wallpaper meant
   for it (by connector name, or the "every output" choice), and one unplugged
   frees its buffer.
 - **Restore.** The last choice per output is kept in
   `$XDG_STATE_HOME/scootbg/`, so `scootbg daemon` at login brings it back.
+
+## The control protocol
+
+Every command but `daemon` is one request on the daemon's socket,
+`$XDG_RUNTIME_DIR/scootbg-NAME.sock` (`NAME` the last component of
+`$WAYLAND_DISPLAY`), so a script or an agent can skip the CLI: one JSON
+object per line each way, each request naming the protocol it speaks.
+
+```text
+{"protocol":1,"type":"set","color":"#1e1e2e"}                 -> {"type":"ok"}
+{"protocol":1,"type":"set","color":"#1e1e2e","output":"DP-1"} -> {"type":"ok"}
+{"protocol":1,"type":"set","image":"/abs/a.jpg"}              -> {"type":"ok"}
+{"protocol":1,"type":"set","image":"/abs/a.jpg","mode":"fit","fill":"#101014","filter":"lanczos3","output":"DP-1"}
+                                                              -> {"type":"ok"}
+{"protocol":1,"type":"clear"}                                 -> {"type":"ok"}
+{"protocol":1,"type":"clear","output":"DP-1"}                 -> {"type":"ok"}
+{"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...]}
+{"protocol":1,"type":"version"}                               -> {"type":"version","protocol":1,"version":"..."}
+{"protocol":1,"type":"kill"}                                  -> {"type":"ok"}
+anything wrong                                                -> {"type":"error","message":"..."}
+```
+
+- `set` and `clear` answer once every targeted output shows the change and
+  a `wl_display.sync` sent after the commits has come back, so the
+  compositor has it; the daemon never blocks on that, other clients are
+  served meanwhile. Requests sent behind one on the same connection are
+  answered after it, in order. An output unplugged before its commit is
+  left out of the wait; an output whose surface is not configured yet is
+  waited for; an output scootbg gave up on (`gave-up` in `query`, said on
+  stderr) is left out and shows nothing, and the reply is still `ok`. A client that hangs up before its reply loses only the
+  reply: the change still happens.
+- `set` takes a `color` or an `image`, never both. An `image` is an
+  absolute path (the daemon's working directory is not the client's;
+  `scootbg set` resolves a relative one before sending it) to a PNG, JPEG
+  or WebP; `mode` (`fill`, `fit`, `stretch`, `center`, `tile`), `fill`
+  (`#rrggbb`) and `filter` (`lanczos3`, `catmull-rom`, `bilinear`,
+  `nearest`) may be left out, for `fill`, `#000000` and `lanczos3`, and
+  are refused with a `color`.
+- **An image changes nothing until it has been decoded.** One that cannot
+  be shown gets an error reply saying why (no such file, not a regular
+  file, not an image scootbg reads, image too large, truncated or
+  corrupt), and every output keeps what it showed. Decoding runs on a
+  worker thread; other requests are served meanwhile.
+- **The newest request wins**, whatever order the work finishes in: a
+  `set` or `clear` sent after an image's `set` is never undone when that
+  image finishes decoding. An image request that newer ones have replaced
+  on every output it asked for, before it was decoded or while, is
+  answered `ok` once what replaced it is on screen, as a replaced color
+  is, and changes nothing (it may never be decoded at all). At most 32 image
+  requests wait at once; one more is refused ("too many images are
+  waiting"), nothing changed.
+- A request refused outright changes nothing: an unknown `output` name
+  (the name must belong to an output present now), a `color` that is not
+  `#rrggbb`, a relative `image` path, an unknown `mode` or `filter`. A
+  draw that fails on an output (a buffer too large for `wl_shm`, out of
+  memory) is different: the choice is recorded and every other targeted
+  output shows it; the reply is an error once they have, and the daemon's
+  stderr says which output failed and why.
+- `query`'s `surface.scale` is the scale an image, or a color on the
+  full-size fallback, is drawn at on that output (`1.5` from
+  `wp_fractional_scale_v1`, else an integer; a color on a single-pixel or
+  1×1 buffer is drawn at 1 whatever it says) and
+  `surface.pixels` the size of an image's buffer in device pixels, both
+  `null` until the surface is configured; the top-level `scale` stays
+  `wl_output`'s integer.
+- `query`'s `shows` is `{"color":"#rrggbb"}` (lowercase),
+  `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
+  or `null`. Every key of an entry is always present; keys may be added
+  within protocol 1, none removed or changed.
+- A choice for every output is kept for outputs plugged in later; a choice
+  for one output is kept by its name, across unplugging it. Choices are
+  not saved across a daemon restart yet
+  ([restore-state.md](backlog/restore-state.md)).
+
+## Measured so far
+
+Release build, against `scoot --headless --outputs 2` (1600×1000 each,
+a debug build of scoot; the image rows on one 3840×2160 output), on a
+4-CPU Claude Code web container; the records, with the method and every
+raw number, are in
+[solid-color-done.md](backlog/resolved/solid-color-done.md#measurements),
+[images-decode-and-fit-done.md](backlog/resolved/images-decode-and-fit-done.md#measurements)
+and [hidpi-fractional-scale-done.md](backlog/resolved/hidpi-fractional-scale-done.md#measurements).
+Not yet against competitors: that is [lightest.md](backlog/lightest.md).
+
+| What | Result |
+|---|---|
+| Stripped binary | 1,500,008 B with images (783,072 B with colors only); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
+| `set` of a 6000×4000 JPEG onto a 3840×2160 output, request to reply, ×3 | 397.0–433.6 ms, 390–420 ms of CPU (PNG 408.1–417.6 ms; WebP 1,218.0–1,289.4 ms); peak RSS 120.5–120.6 MB with the previous wallpaper still mapped (88.0 MB for a first set; PNG 120.4–120.6 MB; WebP 142.0–142.1 MB) |
+| After it, idle 30 s | 1 thread, heap 372–568 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
+| A few hundred bytes claiming 16384×16384 (PNG, JPEG, WebP) | refused in under 1 ms; peak RSS within 72 kB of before |
+| Idle with a color set, 30 s ×3 | 0 context switches, 0 CPU ticks; RSS 2,720 kB, PSS 1,524 kB, 1 thread |
+| PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556–1,560 / 1,556–1,560 / 7,808 kB (14,060 kB once a change leaves a spare buffer per output) |
+| `set`, request to reply, 10,000 changes ×3 | median 400–433 µs, p99 1.6 ms; no memory growth |
+| The same JPEG at scale 1.5 on 3840×2160: buffer, and request to reply ×3 | 33,177,600 B (was 58,982,400 B at `wl_output`'s 2); 420.0–434.4 ms (was 494.9–507.3 ms). On 1600×1000: 6,410,404 B (was 11,387,024 B) |
 
 ## Relation to scoot
 
@@ -121,7 +238,7 @@ to it over its socket.
   it from `PATH` (or `[wallpaper] command`), and the home-manager module
   installs it and points scoot at it when `[wallpaper]` is set.
 - scoot's `[appearance] background_color` stays: it is the frame clear
-  colour, what shows with no wallpaper client at all. scootbg draws over it
+  color, what shows with no wallpaper client at all. scootbg draws over it
   on the background layer.
 - The compositor's `scootctl screenshot` and `ext-image-copy-capture-v1`
   already include layer surfaces, so screenshots show the wallpaper with no

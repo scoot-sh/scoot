@@ -575,7 +575,7 @@ impl State {
         // scene change is then still not on screen.
         let mut scene = false;
         let mut every_output_drew = true;
-        // Read once, here, so the element gathering, the clear colour and
+        // Read once, here, so the element gathering, the clear color and
         // the frame callbacks below are all answering the same question
         // about the same frame.
         let mut retry_render = false;
@@ -813,17 +813,26 @@ impl State {
                 // Layer surfaces aren't in `self.space` either, and a bar's clock
                 // stops at whatever second it first drew without this -- the same
                 // frame-callback starvation the cursor surface had. Sent to every
-                // mapped layer surface on this output rather than only the ones
-                // that produced an element, matching both the window loop above
-                // and the cursor's own reasoning: a client may legitimately ask
-                // for a callback before its first attach, and withholding it
-                // would stall the very frame that unsticks it.
+                // mapped layer surface on this output that anyone can still see,
+                // rather than only the ones that produced an element, matching
+                // both the window loop above and the cursor's own reasoning: a
+                // client may legitimately ask for a callback before its first
+                // attach, and withholding it would stall the very frame that
+                // unsticks it. A surface nobody can see -- fully covered by
+                // opaque window content on this output -- is skipped instead,
+                // so an animated wallpaper under a fullscreen video stops
+                // decoding frames nobody shows (see
+                // `layer_shell::occlusion`). The skipped callback stays queued
+                // and is completed by the first frame that serves the surface
+                // again, so none is ever lost.
                 let dropped_dead = {
                     let mut layers = layer_map_for_output(&output);
                     for layer in layers.layers() {
-                        layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
-                            Some(output.clone())
-                        });
+                        if !super::layer_shell::occlusion::withhold_frame(self, &output, layer) {
+                            layer.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
+                                Some(output.clone())
+                            });
+                        }
                     }
                     // Second line of defence behind `layer_destroyed` (see
                     // `layer_shell.rs`), for a client whose implicit teardown ran in
@@ -1410,6 +1419,15 @@ impl State {
         // overwrites the first -- the latest state wins.
         if let Some(evicted) = self.world.evict_output(id) {
             if !evicted.snapshot.workspaces.is_empty() {
+                if let Some(origin) = evicted.origin {
+                    // The connector name the adopted workspaces are tagged
+                    // with from now until a restore clears them: what bars
+                    // show ("2 DP-1") and what IPC reports them adopted
+                    // from. Filed beside the restore record, under the same
+                    // emptiness rule (an output that held no windows names
+                    // nothing).
+                    self.origin_names.insert(origin, identity.name.clone());
+                }
                 self.displaced.insert(identity, DisplacedOutput { evicted });
             }
         } else {

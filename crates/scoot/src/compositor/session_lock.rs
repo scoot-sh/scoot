@@ -555,7 +555,7 @@ impl SessionLock {
     /// An output records when it drew a locked frame, with two qualifications:
     ///
     /// - An output with no current surface records on its backdrop frame:
-    ///   the solid-colour fallback *is* that output's locked frame, so a
+    ///   the solid-color fallback *is* that output's locked frame, so a
     ///   locker covering only some outputs still gets `locked`. With zero
     ///   surfaces anywhere that is every output, which is the long-pinned
     ///   zero-surface confirmation, unchanged.
@@ -882,7 +882,7 @@ impl SessionLock {
             .map(|surface| surface.wl_surface().clone())
     }
 
-    /// This frame's backdrop element, sized to the output and coloured by
+    /// This frame's backdrop element, sized to the output and colored by
     /// whether the lock has been abandoned.
     fn backdrop_element(
         &mut self,
@@ -897,7 +897,7 @@ impl SessionLock {
         SolidColorRenderElement::from_buffer(&self.backdrop, origin, 1.0, 1.0, Kind::Unspecified)
     }
 
-    /// The colour of both the backdrop element and the frame's clear colour
+    /// The color of both the backdrop element and the frame's clear color
     /// while locked, so the two can never disagree.
     fn backdrop_color(&self) -> Color32F {
         if self.abandoned() {
@@ -1820,7 +1820,7 @@ impl State {
 
     /// Catches up the two things that change when a lock stops being the
     /// current one and *nothing else notices*: the lock surfaces it left
-    /// behind, and the backdrop's colour.
+    /// behind, and the backdrop's color.
     ///
     /// A client disconnecting -- or destroying its lock object while keeping
     /// the connection -- destroys protocol objects; it does not commit a
@@ -1846,7 +1846,7 @@ impl State {
     /// goes through `handlers.rs`'s `destroyed` hook -- i.e. the signal was
     /// correct only by accident of teardown order, which is exactly the kind of
     /// implicit dependency worth removing rather than documenting. Compares
-    /// against the backdrop buffer's *own* colour rather than a remembered
+    /// against the backdrop buffer's *own* color rather than a remembered
     /// flag, so there is no second piece of state to fall out of step with what
     /// was actually drawn.
     ///
@@ -1858,7 +1858,7 @@ impl State {
     /// depends on another one's ordering to be noticed. Costs one
     /// `Option::is_some` on every wayland dispatch cycle with the session
     /// unlocked, which is every cycle in ordinary use; while locked it adds a
-    /// `retain` over one surface per output and one colour compare, on a
+    /// `retain` over one surface per output and one color compare, on a
     /// connection carrying only the lock client's own traffic. No allocation
     /// either way.
     pub(super) fn refresh_lock_state(&mut self) {
@@ -1875,7 +1875,7 @@ impl State {
             // later takeover happens to drop it, it keeps taking pointer
             // events away from the lock screen, so it goes here too. Only
             // reachable on the edge: the next locked frame repaints the
-            // backdrop in the new colour, and the comparison is false again.
+            // backdrop in the new color, and the comparison is false again.
             self.drop_input_grabs();
             self.request_render();
         }
@@ -1905,7 +1905,7 @@ impl State {
         (surfaces, backdrop)
     }
 
-    /// What a locked frame clears to: the same colour as the backdrop element
+    /// What a locked frame clears to: the same color as the backdrop element
     /// that covers it.
     pub(super) fn lock_clear_color(&self) -> Color32F {
         self.session_lock.backdrop_color()

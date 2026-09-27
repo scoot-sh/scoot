@@ -11,10 +11,10 @@ blocked: null
 ## What it said
 
 `README.md`'s "Not yet" list stated it: *"No config reload. Settings are
-read once at startup."* Changing a keybinding, a gap or a colour meant
+read once at startup."* Changing a keybinding, a gap or a color meant
 quitting the session — which on `--tty` means losing every client in it.
 The ticket scoped the honest shape as partial reload with an explicit
-list (gap/colours/focus ring trivial; binds with care around held keys and
+list (gap/colors/focus ring trivial; binds with care around held keys and
 the `--tty` VT rule; scale/gpu/renderer probably not), the IPC request as
 the cheapest trigger, and failure semantics as the load-bearing half: a
 failed reload keeps the running config, never defaults.

@@ -2,7 +2,7 @@
 //! `World::restore_output`), and the positional output actions.
 
 use super::*;
-use crate::{Action, EvictedOutput, Vertical, Workspaces};
+use crate::{Action, AdopterView, EvictedOutput, Vertical, Workspaces};
 
 const SECOND: Rect = Rect::new(1000, 0, 800, 600);
 
@@ -59,17 +59,69 @@ fn evict_second(world: &mut World) -> EvictedOutput {
 }
 
 #[test]
-fn evicting_reports_the_adopter_and_adopts_without_moving_focus() {
+fn evicting_with_focus_on_the_removed_output_shows_the_focused_work() {
     let mut world = two_workspace_world();
+    assert_eq!(focused(&world), Some(11));
     let evicted = evict_second(&mut world);
     assert_eq!(evicted.adopted_by, Some(OutputId(1)));
     assert_eq!(evicted.snapshot.workspaces.len(), 2);
     assert_eq!(evicted.snapshot.active, 1);
-    // Everything moved to the adopter, and focus stayed on output 1's own
-    // window -- removing output 2 must not steal it.
+    // The adopted block starts after the adopter's own workspace, tagged
+    // with a fresh origin, and the adopter's view is one workspace before
+    // the block.
+    assert_eq!(evicted.adopted_at, 1);
+    let origin = evicted.origin.expect("a non-empty adoption is tagged");
+    assert_eq!(evicted.adopter_active, Some(AdopterView::BeforeBlock(1)));
     for id in [10, 11, 12, 13] {
         assert_eq!(placement(&world, id).output, OutputId(1));
     }
+    // The switch: the adopter shows the adopted workspace that held window
+    // 11, and focus stays on window 11.
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 4,
+            active: 2
+        })
+    );
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    assert_eq!(focused(&world), Some(11));
+    assert!(placement(&world, 11).visible);
+    assert!(placement(&world, 12).visible);
+    assert!(!placement(&world, 10).visible);
+    // The adopted workspaces carry the origin; the adopter's own does not.
+    assert_eq!(
+        world.workspace_origins(OutputId(1)),
+        Some(vec![None, Some(origin), Some(origin), None])
+    );
+}
+
+#[test]
+fn evicting_with_focus_elsewhere_changes_nothing_on_the_adopter() {
+    let mut world = two_workspace_world();
+    // Look at the adopter's own window: the standby shape, where the user
+    // works on the panel while the other monitor drops.
+    world.handle_action(Action::FocusWindowId(WindowId(1)));
+    assert_eq!(focused(&world), Some(1));
+    let before = world.workspaces(OutputId(1));
+    let evicted = evict_second(&mut world);
+    assert_eq!(evicted.adopted_by, Some(OutputId(1)));
+    assert!(evicted.origin.is_some());
+    // No switch: the adopted workspaces join after the adopter's own, and
+    // the adopter still shows its own workspace, focus untouched.
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: before.expect("output 1 exists").count + 2,
+            active: 0
+        })
+    );
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    assert_eq!(focused(&world), Some(1));
+    assert!(placement(&world, 1).visible);
+    assert!(!placement(&world, 11).visible);
+    // ...and there is no previous view to return to on restore.
+    assert_eq!(evicted.adopter_active, None);
 }
 
 #[test]
@@ -98,9 +150,191 @@ fn restoring_moves_the_still_open_windows_back_in_order() {
     // Column order within each workspace: left to right.
     assert!(placement(&world, 10).rect.x < placement(&world, 13).rect.x);
     assert!(placement(&world, 11).rect.x < placement(&world, 12).rect.x);
-    // The adopter keeps only its own window, and focus never left it.
+    // The adopter keeps only its own window, and goes back to the view it
+    // had before the adoption (workspace 1, window 1).
     assert_eq!(placement(&world, 1).output, OutputId(1));
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 2,
+            active: 0
+        })
+    );
+    // Focus follows the carried window home: window 11 was focused across
+    // the eviction, so the returned monitor takes focus with it.
+    assert_eq!(world.focused_output(), Some(OutputId(3)));
+    assert_eq!(focused(&world), Some(11));
+}
+
+#[test]
+fn restoring_without_a_carried_focus_leaves_focus_alone() {
+    let mut world = two_workspace_world();
+    // Focus stays on the adopter's own window across the eviction (the
+    // standby shape): nothing switches, so nothing follows home either.
+    world.handle_action(Action::FocusWindowId(WindowId(1)));
+    let evicted = evict_second(&mut world);
+    add_output(&mut world, 3, SECOND);
+    world.restore_output(OutputId(3), evicted);
+
+    for id in [10, 11, 12, 13] {
+        assert_eq!(placement(&world, id).output, OutputId(3), "window {id}");
+    }
+    // The adopter's view never moved, and neither did focus.
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 2,
+            active: 0
+        })
+    );
     assert_eq!(world.focused_output(), Some(OutputId(1)));
+    assert_eq!(focused(&world), Some(1));
+}
+
+/// The review's scratch repro for the switch breaking restore: the adopter
+/// sits on an empty, non-trailing workspace, so the switch's normalize drops
+/// it and the adopted block shifts down one. `adopted_at` is recorded after
+/// that normalize, so the restore still finds every window.
+#[test]
+fn switching_from_an_empty_active_workspace_still_restores() {
+    let mut world = world();
+    open(&mut world, 1);
+    world.handle_action(Action::FocusWorkspace(Vertical::Down));
+    open(&mut world, 2);
+    world.handle_action(Action::FocusWorkspace(Vertical::Down));
+    open(&mut world, 3);
+    world.handle_action(Action::FocusWorkspace(Vertical::Up));
+    close(&mut world, 2);
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 4,
+            active: 1
+        }),
+        "adopter sits on an empty, non-trailing workspace"
+    );
+    add_output(&mut world, 2, SECOND);
+    world.handle_action(Action::FocusOutput(OutputId(2)));
+    open_on(&mut world, 10, 2, true);
+
+    let evicted = evict_second(&mut world);
+    // The switch dropped the empty view workspace: the block moved from 3
+    // to 2, and there is no previous view to return to.
+    assert_eq!(evicted.adopted_at, 2);
+    assert_eq!(evicted.adopter_active, None);
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 4,
+            active: 2
+        })
+    );
+    assert_eq!(focused(&world), Some(10));
+
+    add_output(&mut world, 3, SECOND);
+    let moved = world.restore_output(OutputId(3), evicted);
+    assert_eq!(moved, 1);
+    assert_eq!(placement(&world, 10).output, OutputId(3));
+    assert_eq!(world.focused_output(), Some(OutputId(3)));
+}
+
+/// A trailing sitter goes back to the trailing empty workspace: the adopter
+/// was looking at nothing, and the restore returns it to nothing.
+#[test]
+fn restoring_returns_a_trailing_sitter_to_the_trailing_empty() {
+    let mut world = world();
+    open(&mut world, 1);
+    world.handle_action(Action::FocusWorkspace(Vertical::Down));
+    add_output(&mut world, 2, SECOND);
+    world.handle_action(Action::FocusOutput(OutputId(2)));
+    open_on(&mut world, 10, 2, true);
+
+    let evicted = evict_second(&mut world);
+    assert_eq!(evicted.adopter_active, Some(AdopterView::Trailing));
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 3,
+            active: 1
+        })
+    );
+
+    add_output(&mut world, 3, SECOND);
+    world.restore_output(OutputId(3), evicted);
+    assert_eq!(placement(&world, 10).output, OutputId(3));
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 2,
+            active: 1
+        }),
+        "the adopter is back on its trailing empty workspace"
+    );
+}
+
+/// A chained unplug keeps the earliest origin: workspaces adopted twice are
+/// still named for where they first came from.
+#[test]
+fn a_chained_unplug_keeps_the_earliest_origin() {
+    let mut world = world();
+    open(&mut world, 1);
+    add_output(&mut world, 2, SECOND);
+    world.handle_action(Action::FocusOutput(OutputId(2)));
+    open_on(&mut world, 10, 2, true);
+    add_output(&mut world, 3, SECOND);
+
+    world.handle_action(Action::FocusOutput(OutputId(1)));
+    let first = world.evict_output(OutputId(2)).expect("output 2 exists");
+    let first_origin = first.origin.expect("a non-empty adoption is tagged");
+    world.handle_action(Action::FocusOutput(OutputId(1)));
+    let second = world.evict_output(OutputId(1)).expect("output 1 exists");
+    let second_origin = second.origin.expect("a non-empty adoption is tagged");
+    assert_ne!(first_origin, second_origin);
+
+    // Output 3 holds output 1's own workspace (tagged with the second
+    // origin) and output 2's workspace (still tagged with the first).
+    let origins = world
+        .workspace_origins(OutputId(3))
+        .expect("output 3 exists");
+    assert!(origins.contains(&Some(first_origin)));
+    assert!(origins.contains(&Some(second_origin)));
+    assert_eq!(
+        world.window_workspace(WindowId(10)),
+        Some((OutputId(3), 1, Some(first_origin)))
+    );
+    assert_eq!(
+        world.window_workspace(WindowId(1)),
+        Some((OutputId(3), 0, Some(second_origin)))
+    );
+}
+
+/// A partial restore untags what stays: windows the user kept on the adopter
+/// no longer claim the monitor that came back.
+#[test]
+fn a_partial_restore_untags_what_stays() {
+    let mut world = two_workspace_world();
+    let evicted = evict_second(&mut world);
+    let origin = evicted.origin.expect("a non-empty adoption is tagged");
+    // A new window on the adopted workspace: not in the snapshot, so it
+    // stays where it is.
+    open(&mut world, 20);
+    assert_eq!(placement(&world, 20).output, OutputId(1));
+
+    add_output(&mut world, 3, SECOND);
+    let moved = world.restore_output(OutputId(3), evicted);
+    assert_eq!(moved, 4);
+    assert_eq!(placement(&world, 20).output, OutputId(1));
+    for id in [10, 11, 12, 13] {
+        assert_eq!(placement(&world, id).output, OutputId(3), "window {id}");
+    }
+    assert!(
+        world
+            .workspace_origins(OutputId(1))
+            .expect("output 1 exists")
+            .iter()
+            .all(|o| o != &Some(origin)),
+        "nothing on the adopter still names the returned monitor"
+    );
 }
 
 #[test]
@@ -303,4 +537,42 @@ fn output_at_reports_creation_order() {
     assert_eq!(world.output_at(0), Some(OutputId(1)));
     assert_eq!(world.output_at(1), Some(OutputId(2)));
     assert_eq!(world.output_at(2), None);
+}
+
+/// Returning to the pre-adopt view drops the emptied adopted workspace left
+/// behind: the restore's first normalize can only keep it while it is
+/// active, and the return moves the active workspace elsewhere. Without the
+/// second normalize it strands a stray empty workspace (found by the
+/// randomized invariant test).
+#[test]
+fn returning_leaves_no_emptied_adopted_workspace_behind() {
+    let mut world = two_workspace_world();
+    let evicted = evict_second(&mut world);
+    // A new window, carried onto the adopter's first adopted workspace by
+    // hand, then back to the second: the active adopted workspace will
+    // empty out entirely at restore while its neighbour keeps a window.
+    open(&mut world, 20);
+    world.handle_action(Action::MoveWindowToWorkspaceIndex(1));
+    world.handle_action(Action::FocusWorkspaceIndex(2));
+    // Carrying window 20 out left focus on window 12, which the restore
+    // then carries home.
+    assert_eq!(focused(&world), Some(12));
+
+    add_output(&mut world, 3, SECOND);
+    let moved = world.restore_output(OutputId(3), evicted);
+    assert_eq!(moved, 4);
+    assert_eq!(placement(&world, 20).output, OutputId(1));
+    for id in [10, 11, 12, 13] {
+        assert_eq!(placement(&world, id).output, OutputId(3), "window {id}");
+    }
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 3,
+            active: 0
+        }),
+        "the adopter is back on its own workspace with no strays"
+    );
+    assert_eq!(world.focused_output(), Some(OutputId(3)));
+    assert_eq!(focused(&world), Some(12));
 }

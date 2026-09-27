@@ -591,6 +591,18 @@ impl State {
                     .window_info(placement.id)
                     .cloned()
                     .unwrap_or_default();
+                // The core's locate, once per window per `windows` request
+                // (an agent asking for a list, not a per-frame path): the
+                // 0-based workspace `focus-workspace-index` takes, and which
+                // unplugged monitor adopted it, if any. The connector name
+                // comes from the shell's live origins; an origin swept
+                // already (its restore consumed the record) still reports
+                // adopted, with no name to resolve.
+                let (_, workspace, origin) = self.world.window_workspace(placement.id).unwrap_or((
+                    placement.output,
+                    0,
+                    None,
+                ));
                 WindowSnapshot {
                     id: placement.id.0,
                     app_id: info.app_id,
@@ -602,6 +614,9 @@ impl State {
                     // asking for a list -- not a per-frame path.
                     icon: self.icon_name_of(placement.id),
                     output: placement.output.0,
+                    workspace,
+                    adopted: origin.is_some(),
+                    origin: origin.and_then(|origin| self.origin_names.get(&origin).cloned()),
                     // What is drawn and clickable, not the slot: the slot's
                     // origin and the part of it the client committed (see
                     // `drawn.rs`) -- the same rect the ring surrounds and

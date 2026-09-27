@@ -78,6 +78,36 @@ pub struct WindowSnapshot {
     #[serde(default)]
     pub icon: Option<String>,
     pub output: u64,
+    /// Which workspace of that output the window sits on, 0-based -- the
+    /// same numbering `focus-workspace-index N` and
+    /// `move-window-to-workspace-index N` take, so an agent can switch to
+    /// the window's workspace or carry the window without converting.
+    /// (Bars see the 1-based twin over `ext-workspace-v1`; see that
+    /// module's doc for why the two numberings differ.)
+    ///
+    /// Defaulted like `floating` above, for the same wire reason, so no
+    /// `PROTOCOL_VERSION` bump. Read it asymmetrically: any number from a
+    /// new server is truthful, while `0` means "first workspace, or a
+    /// server predating the field".
+    #[serde(default)]
+    pub workspace: usize,
+    /// Whether the window's workspace was adopted from an unplugged monitor
+    /// (see `adopted` workspaces): with [`WindowSnapshot::origin`], what
+    /// tells an agent where an unplugged monitor's windows went.
+    ///
+    /// Defaulted like `workspace` above, for the same wire reason, so no
+    /// `PROTOCOL_VERSION` bump. `false` means "not adopted, or a server
+    /// predating the field".
+    #[serde(default)]
+    pub adopted: bool,
+    /// Which connector the window's workspace was adopted from ("DP-1"),
+    /// when [`WindowSnapshot::adopted`]. `None` for a workspace that was
+    /// never adopted -- and from a server predating the field.
+    ///
+    /// Defaulted like `adopted` above (`None` decodes from absence), for
+    /// the same wire reason, so no `PROTOCOL_VERSION` bump.
+    #[serde(default)]
+    pub origin: Option<String>,
     /// Where the window's toplevel surface is, in logical pixels (its
     /// popups can draw outside it). Only the part inside its `output`'s own
     /// `rect` is drawn and takes input: a column scrolled part-way past its

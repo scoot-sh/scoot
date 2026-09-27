@@ -178,7 +178,7 @@ fn the_read_back_hands_out_the_logical_top_row_first() {
 /// module's doc).
 ///
 /// Byte equality rather than a tolerance because this scene is opaque solid
-/// colour with no blending, no scaling and no filtering: there is nothing
+/// color with no blending, no scaling and no filtering: there is nothing
 /// for two correct renderers to round differently. A tolerance here would
 /// hide exactly the layout and channel-order bugs this exists to catch.
 #[test]
@@ -194,7 +194,7 @@ fn both_renderers_lay_the_same_frame_out_the_same_way() {
     assert_eq!(
         differing,
         0,
-        "pixman and gles disagree on {differing} of {} pixels of an opaque two-colour frame",
+        "pixman and gles disagree on {differing} of {} pixels of an opaque two-color frame",
         cpu.len() / 4
     );
 }

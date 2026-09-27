@@ -588,7 +588,7 @@ be revisited.
   methodology lessons: the VM's unpaced-injection benchmark measures nothing
   on hardware 14x faster per IPC round trip (damage gets coalesced away), and
   "confirm which tier is live" nearly failed because the compositor
-  colourised redirected logs.
+  colorized redirected logs.
 - [Rounded window corners](./resolved/rounded-window-corners-done.md) — the cost
   is not the corners, it is that a rounded window is no longer opaque, so
   what is behind it can no longer be skipped. Measure with *overlapping*
@@ -693,6 +693,12 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 ### Found measuring scootbg's dependencies (2026-09-26)
 - [Upscaled surfaces get a semi-transparent 1-px edge under pixman](./core/shm-viewport-upscale-edge-fade.md) — medium: Smithay's pixman renderer samples bilinear with `Repeat::None`, so every buffer-scale-1 window on a scaled output gets a faded 1-px edge (at scale 2, alpha ~0.75 along edges, ~0.56 at corners), and a 1×1 shm buffer viewported to the output is a full gradient. Fix: `Repeat::Pad`, as a scoot-sh/smithay fork commit. GLES and single-pixel buffers are unaffected.
 
+### Found building scootbg's images (2026-09-27)
+- [A new buffer scale is ignored until a new buffer is attached](./core/buffer-scale-needs-a-new-buffer.md) — low: Smithay reads `set_buffer_scale`/`set_buffer_transform` only with a newly attached buffer, so a commit changing only the scale keeps the old one (reproduced on scoot; scootbg attaches again to work around it). Fix belongs in the scoot-sh/smithay fork.
+
+### Found drawing scootbg at fractional scales (2026-09-27)
+- [A scale that is not a multiple of 1/120 cannot be drawn exactly by any client](./core/fractional-scale-in-120ths.md) — low: `preferred_scale` is in 120ths, but scoot renders at the configured scale as given, so at 1.33 a protocol-exact client buffer (1604 wide for a 1203-wide surface) is squeezed into 1600 device pixels: 1,596,598 of 1,600,000 pixels of a checkerboard resampled, against 0 at 1.25 and 1.5. Fix: resolve `[output] scale` to the nearest 1/120.
+
 ### From the PR #264 review (2026-09-26)
 - [Withhold frame callbacks from layer surfaces nobody can see](./core/frame-callbacks-for-hidden-surfaces.md) — low: every mapped layer surface gets `frame` on every render with no occlusion check, so an animated wallpaper under a fullscreen window never learns it is covered. Blocks scootbg's animated wallpapers (its milestone 2), not v1.
 
@@ -710,7 +716,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 ### GPU tier, after primary-direct (2026-09-23)
 - [A/B resource usage vs niri](./resolved/niri-ab-benchmark-done.md) — RESOLVED 2026-09-24 (PR #237, dev VM half), at the user's direct request: both compositors nested in the same cage host on llvmpipe, three rotating rounds, results and caveats in [`docs/benchmarks.md`](../benchmarks.md). The real-GPU half is the next entry.
 - [A/B vs niri on a real GPU, `--tty` included](./testing/niri-ab-real-gpu.md) — low: **run 2026-09-25** on the Apple M2 (`Asahi.md` Test 9, `docs/benchmarks.md`); only input-to-present latency remains, which needs a method first.
-- [GLES tier advertises only LINEAR dma-bufs](./resolved/gles-dmabuf-full-formats-done.md) — RESOLVED 2026-09-23 (PR #229): under `gles` the feedback is the driver's own import set (every fourcc at every explicit modifier, external-only YUV included), `Invalid` never offered next to explicit layouts (an implicit YUV buffer draws the wrong colour, measured), pixman byte-identical. On llvmpipe: 57 formats at `LINEAR`, `NV12`/`P010`/`YU12`/`YUYV` imported through `create_immed` and drawn correctly from dumb buffers. Real GPU: `Asahi.md` Test 6.
+- [GLES tier advertises only LINEAR dma-bufs](./resolved/gles-dmabuf-full-formats-done.md) — RESOLVED 2026-09-23 (PR #229): under `gles` the feedback is the driver's own import set (every fourcc at every explicit modifier, external-only YUV included), `Invalid` never offered next to explicit layouts (an implicit YUV buffer draws the wrong color, measured), pixman byte-identical. On llvmpipe: 57 formats at `LINEAR`, `NV12`/`P010`/`YU12`/`YUYV` imported through `create_immed` and drawn correctly from dumb buffers. Real GPU: `Asahi.md` Test 6.
 - [Scanout-tranche feedback + `zero_copy` flag](./resolved/gpu-scanout-candidates-done.md) — RESOLVED 2026-09-23: see the GPU tier completion entry above. Dev VM: tranche `XR24`/`AR24` at `LINEAR`, sent/reverted live, `zero_copy` on exactly the frames Smithay scanned out directly. Real GPU (does a GL client reallocate into it and go direct): `Asahi.md` Test 6 Part C.
 - [Windows on overlay planes](./core/gpu-overlay-window-candidates.md) — low, **unblocked 2026-09-25**: Asahi's `apple,dcp` has one overlay (zpos 1, `LINEAR` only, alpha RGB + YUV formats, no `XR24`) and no cursor plane.
 - [A composited cursor blocks primary-direct](./core/gpu-direct-blocked-by-composited-cursor.md) — medium, found on Asahi 2026-09-25: with no cursor plane, a visible pointer denies every fullscreen window a primary attempt; mpv went direct once it hid its pointer (~60% less compositor CPU). A cursor on the overlay needs a Smithay-fork change.
@@ -761,16 +767,17 @@ scale/mode) into one hardware session.
   bound of the first blank drawn"; `stale_vblanks` entries should age out so
   a driver that never delivers an owed vblank can't freeze a reused CRTC.
   Filed from PR #247's round-2 review.
-- [An unplugged monitor's windows seem to disappear](./core/unplug-adopted-windows-invisible.md)
-  — OPEN, medium (daily-drive, filed from `Asahi.md` Test 12): on unplug the
+- [An unplugged monitor's windows seem to disappear](./resolved/unplug-adopted-windows-visible-done.md)
+  — RESOLVED, medium (daily-drive, filed from `Asahi.md` Test 12): on unplug the
   monitor's workspaces are adopted as background workspaces of the focused
   screen and nothing visible changes, so the person at the machine read it
-  as the window vanishing. Requirement (user): make clear where both the
-  removed monitor's workspaces and the panel's swapped-out view went. Design:
-  show the adopted workspace when focus was on the removed screen
-  (restore-safe), name adopted workspaces by origin over `ext-workspace-v1`,
-  add `workspace` to IPC `windows`; notifications via a later IPC event, not
-  drawn by scoot.
+  as the window vanishing. Shipped: the adopter switches to the adopted
+  workspace holding the focused window (focus elsewhere: unchanged), a
+  replug restores both the monitor and the adopter's pre-adopt view with
+  focus following a carried window home, adopted workspaces are named by
+  origin over `ext-workspace-v1` ("2 DP-1"), and IPC `windows` reports the
+  0-based workspace, adoption and origin. Follow-up filed:
+  [IPC output-removed/restored event](./ipc/output-removed-restored-event.md).
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
   — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
   + H (default `Super+comma/period` output binds) LANDED 2026-09-21

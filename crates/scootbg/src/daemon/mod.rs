@@ -8,14 +8,23 @@
 //!    connect during start-up wait in the listen backlog.
 //! 2. The Wayland connection is made and the globals bound.
 //!
-//! Then one thread, one `poll` over the Wayland fd, the listener and each
-//! client, with no timeout: when nothing happens the daemon makes no system
-//! call at all. No async runtime and no timers; the one timeout there is
-//! exists only while the listener rests after a failed accept (`listen`).
+//! Then one thread, one `poll` over the Wayland fd, the listener, the image
+//! worker's wake-up fd and each client, with no timeout: when nothing
+//! happens the daemon makes no system call at all. No async runtime and no
+//! timers; the one timeout there is exists only while the listener rests
+//! after a failed accept (`listen`). Images are decoded and scaled on a
+//! thread started per job (`worker`, `images`), never on this one.
 //!
 //! Zero outputs is a normal state (a headless session before its first
 //! output, a laptop with the lid shut): nothing to draw, the same poll, no
 //! wakeups, until an output's global arrives.
+//!
+//! A `set` or `clear` draws at once and is answered later, never by
+//! blocking: each turn of the loop, after dispatching events, sends the
+//! `wl_display.sync` for every change the outputs now show, and hands the
+//! replies whose sync came back to their connections (`change`,
+//! `crate::waiters`). A static wallpaper asks for no frame callbacks, so
+//! once drawn it costs no wakeups.
 //!
 //! `kill` (exit 0) and the compositor going away or a protocol error
 //! (exit 1) remove the socket file on the way out. **Signals keep their
@@ -27,11 +36,15 @@
 //! signals would need `unsafe` rustix APIs that are hidden and unstable, as
 //! rustix has no `signalfd`; see crate-and-daemon-done.md.)
 
+mod canvas;
+mod change;
 mod crash;
+mod images;
 mod listen;
 mod respond;
 mod surfaces;
 mod wayland;
+mod worker;
 
 #[cfg(test)]
 mod tests;
@@ -47,8 +60,10 @@ use wayland_client::backend::WaylandError as BackendError;
 use crate::control::{Claim, ClaimError, Server};
 use crate::paths::{self, PathError};
 use crate::print::warn;
+use change::Control;
+use images::Images;
 use listen::Listening;
-use respond::Responder;
+use respond::{Responder, write_ready};
 use wayland::{Wayland, WaylandError};
 
 /// Why the daemon stopped.
@@ -75,6 +90,8 @@ pub enum Error {
     Poll(io::Error),
     /// The spare fd could not be taken at start-up.
     Spare(io::Error),
+    /// The image worker's wake-up fd could not be made.
+    Worker(io::Error),
 }
 
 impl fmt::Display for Error {
@@ -95,6 +112,7 @@ impl fmt::Display for Error {
             Self::Dispatch(error) => write!(f, "Wayland error: {error}"),
             Self::Poll(error) => write!(f, "poll failed: {error}"),
             Self::Spare(error) => write!(f, "cannot reserve a spare file descriptor: {error}"),
+            Self::Worker(error) => write!(f, "cannot set up image decoding: {error}"),
         }
     }
 }
@@ -112,7 +130,8 @@ fn serve() -> Result<(), Error> {
     let mut claim = Claim::acquire(&paths).map_err(Error::Claim)?;
     let armed = crash::install(paths.socket.clone());
     let server = Server::new(claim.listener()).map_err(Error::Spare)?;
-    let (wayland, missing) = Wayland::connect().map_err(Error::Wayland)?;
+    let images = Images::new().map_err(Error::Worker)?;
+    let (wayland, missing) = Wayland::connect(images).map_err(Error::Wayland)?;
     for interface in missing {
         warn(format_args!(
             "scootbg: note: the compositor has no {interface}; \
@@ -151,14 +170,41 @@ struct Daemon {
     revents: Vec<PollFlags>,
 }
 
-/// Slot order in the poll set.
+/// Slot order in the poll set; the clients follow.
 const WAYLAND: usize = 0;
 const LISTENER: usize = 1;
+const WORKER: usize = 2;
+const CLIENTS: usize = 3;
 
 impl Daemon {
     fn run(&mut self, claim: &Claim) -> Result<(), Error> {
         loop {
             self.wayland.dispatch_pending().map_err(Error::Dispatch)?;
+            // Replies nobody can receive any more are not waited for; this
+            // is what bounds the waiting lists (`crate::waiters`).
+            let server = &self.server;
+            self.wayland
+                .state
+                .waiters
+                .forget_gone(|conn| server.has(conn));
+            // Replies first: a connection handed its reply goes on to the
+            // requests queued behind it, and a `set` among them that
+            // changes nothing sends the compositor nothing, so no event
+            // would come back to wake the loop for it. Resolving after
+            // delivering catches it in this same turn.
+            if self.deliver_replies() {
+                return Ok(());
+            }
+            change::progress(
+                &mut self.wayland.state,
+                &self.wayland.conn,
+                &self.wayland.qh,
+            );
+            if images::pump(&mut self.wayland.state, &self.wayland.qh) {
+                // A job failed to start and was landed: its reply goes out
+                // before the loop sleeps.
+                continue;
+            }
             self.flush_wayland()?;
             let Some(guard) = self.wayland.queue.prepare_read() else {
                 // Events arrived for our queue meanwhile: dispatch them.
@@ -182,6 +228,9 @@ impl Daemon {
                 PollFlags::empty()
             };
             fds.push(PollFd::new(claim.listener(), listener_events));
+            // Readable only once a job's result waits: no wakeups when idle.
+            let worker_fd = self.wayland.state.images.worker.fd();
+            fds.push(PollFd::new(&worker_fd, PollFlags::IN));
             for conn in self.server.conns() {
                 fds.push(PollFd::new(conn.stream(), conn.interest()));
             }
@@ -227,11 +276,25 @@ impl Daemon {
                 drop(guard);
             }
 
+            if self
+                .revents
+                .get(WORKER)
+                .is_some_and(|r| r.intersects(PollFlags::IN))
+            {
+                if let Some(done) = self.wayland.state.images.worker.take() {
+                    images::land(&mut self.wayland.state, done, &self.wayland.qh);
+                }
+            }
+
             // Clients before accepting, so indices still match the poll set
             // (accepting may close the oldest client).
-            let mut responder = Responder::new(&self.wayland.state.outputs);
+            let mut control = Control {
+                state: &mut self.wayland.state,
+                qh: &self.wayland.qh,
+            };
+            let mut responder = Responder::new(&mut control);
             let mut index = 0;
-            for &revents in self.revents.get(LISTENER + 1..).unwrap_or_default() {
+            for &revents in self.revents.get(CLIENTS..).unwrap_or_default() {
                 // A closed client leaves the next one at the same index.
                 if revents.is_empty() || self.server.service(index, revents, &mut responder) {
                     index += 1;
@@ -249,6 +312,30 @@ impl Daemon {
                 self.accept(claim);
             }
         }
+    }
+
+    /// Hands every reply whose sync has come back to its connection, which
+    /// then carries on with any request queued behind it. Returns whether
+    /// one of those was a `kill`.
+    fn deliver_replies(&mut self) -> bool {
+        if self.wayland.state.ready.is_empty() {
+            return false;
+        }
+        // Taken out so the handler can borrow the state; put back after,
+        // emptied, so its allocation is kept.
+        let mut ready = std::mem::take(&mut self.wayland.state.ready);
+        let mut control = Control {
+            state: &mut self.wayland.state,
+            qh: &self.wayland.qh,
+        };
+        let mut responder = Responder::new(&mut control);
+        for (conn, reply) in ready.drain(..) {
+            self.server
+                .complete(conn, |out| write_ready(out, &reply), &mut responder);
+        }
+        let stop = responder.stop;
+        self.wayland.state.ready = ready;
+        stop
     }
 
     /// Accepts waiting clients. A failure rests the listener rather than

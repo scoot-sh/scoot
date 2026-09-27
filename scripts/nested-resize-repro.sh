@@ -57,7 +57,7 @@ echo "=== outer host compositor (headless 1200x800) ==="
     >"$OUTER_LOG" 2>&1 &
 outer_pid=$!
 wait_for_socket "$OUTER_SOCK" "$OUTER_LOG"
-# The log is ANSI-coloured, so strip the escapes before matching.
+# The log is ANSI-colored, so strip the escapes before matching.
 outer_display=$(sed 's/\x1b\[[0-9;]*m//g' "$OUTER_LOG" \
     | grep -o 'wayland="[^"]*"' | head -1 | cut -d'"' -f2 || true)
 if [ -z "$outer_display" ]; then

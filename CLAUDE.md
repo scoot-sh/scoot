@@ -42,16 +42,17 @@ window layout OmniWM-style through the Accessibility API.
   verify claims about its behavior against the pinned source, not general
   Smithay knowledge; APIs and semantics shift across revs. **It is
   currently a scoot-sh fork** (`github.com/scoot-sh/smithay`, rev
-  `9515d7e5`, branch `scoot/xwayland-selection-dnd`): upstream's `0ff0098`
-  plus eighteen commits — a `Drop` that stops every syncobj timeline import
+  `d3a4cd73`, branch `scoot/xwayland-selection-dnd`): upstream's `0ff0098`
+  plus nineteen commits — a `Drop` that stops every syncobj timeline import
   leaking a kernel handle (see
   `docs/backlog/resolved/syncobj-handle-leak-done.md`), thirteen XWayland
-  selection/drag commits for Phase 4, a pixman edge clamp for upscaled
-  surfaces, then three XDND commits (a proxy-remap flush, and ending an
-  offer to an X target that refuses, dies or hangs) that let drops land on
-  X windows (see `docs/forks.md`). Make
+  selection/drag commits for Phase 4, one pixman `Repeat::Pad`
+  upscale-edge fix, then four XDND commits (a proxy-remap flush, and
+  ending an offer to an X target that refuses, dies or hangs without
+  letting any X client end one) that let drops land on X windows (see
+  `docs/forks.md`). Make
   verify-against-source claims against the fork rev (its checkout is
-  `~/.cargo/git/checkouts/smithay-*/9515d7e`), and repin to upstream once
+  `~/.cargo/git/checkouts/smithay-*/d3a4cd7`), and repin to upstream once
   a Smithay rev carries the fixes (`docs/backlog/core/smithay-fork-repin.md`).
 - **Dependency fixes go in scoot-sh forks, never upstream from here.**
   (User, 2026-09-24: "Do not open upstream PR's. I would rather fork for now
@@ -70,6 +71,9 @@ window layout OmniWM-style through the Accessibility API.
   description really is just "window management state and layout" — it has no
   compositor concerns (no Wayland, no I/O), so that wording is accurate and
   should not change to match this rule.
+- **Spell it "color", not "colour"** — in code, docs and user-facing
+  text alike (user, 2026-09-27). This covers that one word; it is not a
+  mandate to respell other British forms (behaviour, centre, …).
 - **Where a Wayland protocol standard exists (emerging or established),
   implement that rather than a bespoke alternative, unless there's a concrete
   reason it doesn't fit.** E.g. `ext-workspace-v1` over the older one-off wlr

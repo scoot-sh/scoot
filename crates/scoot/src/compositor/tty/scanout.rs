@@ -178,9 +178,9 @@ type Compositor = DrmCompositor<GbmAllocator<DrmDeviceFd>, LayoutKeepingExporter
 ///   opaque fallback means the display ignores the client's alpha channel.
 ///   Smithay only tries the primary for the *bottom* visible element, with
 ///   everything above it on its own plane, and only when that element is
-///   opaque and covers the whole output *or* the clear colour is
+///   opaque and covers the whole output *or* the clear color is
 ///   black/transparent. Opaque, the alpha channel is 1 wherever it is shown;
-///   over black, a premultiplied pixel composited over the clear colour *is*
+///   over black, a premultiplied pixel composited over the clear color *is*
 ///   its own RGB -- exactly what scanning it out ignoring alpha shows. The
 ///   frame-level eligibility also refuses any element with a sub-1.0
 ///   alpha, so no plane-alpha property is ever asked to stand in for it.
@@ -364,7 +364,7 @@ impl ForceComposite {
 /// `docs/backlog/resolved/capture-cursor-parity-done.md`.
 const EXPORTER_FILTER: NodeFilter = NodeFilter::All;
 
-/// Colour formats offered to `DrmCompositor::new`, in order. `Argb8888` first
+/// Color formats offered to `DrmCompositor::new`, in order. `Argb8888` first
 /// because it is the format every read-back consumer in this compositor
 /// already expects (see `render::read_back`); `Xrgb8888` is the same layout
 /// with the alpha channel ignored, which some planes prefer.

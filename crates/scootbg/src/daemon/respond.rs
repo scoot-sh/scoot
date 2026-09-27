@@ -1,51 +1,147 @@
 //! What the daemon answers to each request.
 
-use crate::control::Handler;
-use crate::outputs::Outputs;
-use crate::protocol::{
-    self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, SurfaceEntry,
-};
+use std::fmt;
 
-/// The request handler for one round of the poll loop: borrows what a
-/// reply needs from the daemon's state.
-pub struct Responder<'a> {
-    /// Set by `kill`: the poll loop stops after this round.
-    pub stop: bool,
-    outputs: &'a dyn OutputList,
+use crate::control::{Answer, ConnId, Handler};
+use crate::outputs::{Outputs, Size};
+use crate::protocol::{
+    self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, Show, Shows, SurfaceEntry,
+};
+use crate::waiters::Outcome;
+
+/// What the handler needs from the daemon's state: the outputs, for
+/// `query`, and a way to change what they show, for `set` and `clear`.
+pub trait Changes {
+    fn outputs(&self) -> &dyn OutputList;
+
+    /// Makes every output (`output` is `None`), or the outputs named
+    /// `output`, show `show` (nothing when `None`), and registers `conn` to
+    /// be answered once they do, or, for an image that cannot be shown,
+    /// with why. `Err` changes nothing.
+    fn change(
+        &mut self,
+        conn: ConnId,
+        output: Option<&str>,
+        show: Option<Show<'_>>,
+    ) -> Result<(), ChangeError>;
 }
 
-impl<'a> Responder<'a> {
-    pub fn new(outputs: &'a dyn OutputList) -> Self {
-        Self {
-            stop: false,
-            outputs,
+/// Why a `set` or `clear` was refused; nothing was changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeError {
+    /// No output has that name now.
+    UnknownOutput,
+    /// Too many images already wait to be decoded (`crate::jobs`).
+    Busy,
+}
+
+/// The reply text for a refused change.
+struct Refused<'a> {
+    error: ChangeError,
+    output: Option<&'a str>,
+}
+
+impl fmt::Display for Refused<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.error {
+            ChangeError::UnknownOutput => write!(
+                f,
+                "no output is named {:?} (`scootbg query` lists them); nothing was changed",
+                self.output.unwrap_or_default()
+            ),
+            ChangeError::Busy => write!(
+                f,
+                "too many images are waiting to be decoded; nothing was changed (try again \
+                 once they are shown)"
+            ),
         }
     }
 }
 
+/// A reply that waited: a change shown (or not), or an image refused with
+/// the reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ready {
+    Done(Outcome),
+    Refused(String),
+}
+
+/// The request handler for one round of the poll loop.
+pub struct Responder<'a> {
+    /// Set by `kill`: the poll loop stops after this round.
+    pub stop: bool,
+    wallpaper: &'a mut dyn Changes,
+}
+
+impl<'a> Responder<'a> {
+    pub fn new(wallpaper: &'a mut dyn Changes) -> Self {
+        Self {
+            stop: false,
+            wallpaper,
+        }
+    }
+}
+
+/// The reply to a `set` or `clear` that waited.
+pub fn write_ready(out: &mut Vec<u8>, ready: &Ready) {
+    match ready {
+        Ready::Done(Outcome::Shown) => protocol::write_reply(out, &Reply::Ok),
+        Ready::Done(Outcome::Failed) => protocol::write_reply(
+            out,
+            &Reply::Error {
+                message: &"it could not be drawn on every output it was meant for \
+                           (the daemon's stderr says why); `scootbg query` shows what each \
+                           output shows",
+            },
+        ),
+        Ready::Refused(message) => protocol::write_reply(out, &Reply::Error { message }),
+    }
+}
+
 impl Handler for Responder<'_> {
-    fn handle(&mut self, line: &[u8], out: &mut Vec<u8>) {
-        match protocol::parse(line) {
+    fn handle(&mut self, conn: ConnId, line: &[u8], out: &mut Vec<u8>) -> Answer {
+        let (output, show) = match protocol::parse(line) {
             Ok(Request::Query) => {
                 protocol::write_reply(
                     out,
                     &Reply::Outputs {
-                        outputs: self.outputs,
+                        outputs: self.wallpaper.outputs(),
                     },
                 );
+                return Answer::Now;
             }
-            Ok(Request::Version) => protocol::write_reply(
-                out,
-                &Reply::Version {
-                    protocol: PROTOCOL_VERSION,
-                    version: env!("CARGO_PKG_VERSION"),
-                },
-            ),
+            Ok(Request::Version) => {
+                protocol::write_reply(
+                    out,
+                    &Reply::Version {
+                        protocol: PROTOCOL_VERSION,
+                        version: env!("CARGO_PKG_VERSION"),
+                    },
+                );
+                return Answer::Now;
+            }
             Ok(Request::Kill) => {
                 self.stop = true;
                 protocol::write_reply(out, &Reply::Ok);
+                return Answer::Now;
             }
-            Err(error) => protocol::write_reply(out, &Reply::Error { message: &error }),
+            Ok(Request::Set { show, output }) => (output, Some(show)),
+            Ok(Request::Clear { output }) => (output, None),
+            Err(error) => {
+                protocol::write_reply(out, &Reply::Error { message: &error });
+                return Answer::Now;
+            }
+        };
+        match self.wallpaper.change(conn, output.as_deref(), show) {
+            Ok(()) => Answer::Later,
+            Err(error) => {
+                let refused = Refused {
+                    error,
+                    output: output.as_deref(),
+                };
+                protocol::write_reply(out, &Reply::Error { message: &refused });
+                Answer::Now
+            }
         }
     }
 }
@@ -66,8 +162,13 @@ impl<O> OutputList for Outputs<O> {
                 surface: SurfaceEntry {
                     state: output.surface().name(),
                     size: output.surface_size(),
+                    scale: output.surface_size().map(|_| output.scale()),
+                    pixels: output.full_buffer().map(|buffer| Size {
+                        width: buffer.dims.0,
+                        height: buffer.dims.1,
+                    }),
                 },
-                shows: None,
+                shows: output.shows().map(Shows),
             });
         }
     }

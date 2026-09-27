@@ -113,7 +113,7 @@ pub(super) struct FrameContext {
     /// produce; such a frame draws no window rather than every window.
     pub(super) output: Option<OutputId>,
     /// Whether the session is locked. Read once by the caller so elements,
-    /// clear colour and frame callbacks are all answering the same question
+    /// clear color and frame callbacks are all answering the same question
     /// about the same frame.
     pub(super) locked: bool,
 }

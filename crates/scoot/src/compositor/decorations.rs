@@ -1697,7 +1697,7 @@ mod tests {
     fn a_fullscreen_window_produces_no_segments_even_partly_on_screen() {
         // Focused away from, a fullscreen window can sit half on screen
         // beside the focused column; it still gets no ring (inactive
-        // colour or otherwise), on either ring path's input.
+        // color or otherwise), on either ring path's input.
         let appearance = Appearance::default();
         let mut fullscreen = placement(1, Rect::new(-400, 0, 800, 600));
         fullscreen.fullscreen = true;

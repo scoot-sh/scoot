@@ -224,7 +224,7 @@ fn destroying_only_the_lock_surfaces_role_falls_back_without_waiting_for_damage(
 
     fixture.run(Step::DestroyLockRoleOnly { index: 0 });
     // A whole frame period with nothing else going on: no pointer motion, no
-    // commit, no colour change -- the damage a stale frame would otherwise be
+    // commit, no color change -- the damage a stale frame would otherwise be
     // waiting for.
     fixture.tick(Duration::from_millis(120));
     let unasked = fixture.pixels();

@@ -162,7 +162,7 @@ fn each_output_gets_one_configured_background_surface() {
             assert_eq!(ours["scale"], 1);
             assert_eq!(ours["transform"], "normal");
             assert!(ours["description"].is_string(), "{ours}");
-            assert_eq!(ours["shows"], Value::Null, "nothing is drawn yet");
+            assert_eq!(ours["shows"], Value::Null, "no color set: nothing shown");
         }
         // Background layer, exclusive zone -1: nothing reserved.
         let scoot = session.scoot_ipc(r#"{"type":"outputs"}"#);
@@ -195,7 +195,7 @@ fn each_output_gets_one_configured_background_surface() {
                 std::slice::from_ref(output),
                 "{surface}"
             );
-            // Nothing attached: nothing drawn.
+            // No color set: nothing attached.
             assert!(
                 !trace.requests[surface].iter().any(|r| r == "attach"),
                 "{surface}: {:?}",
