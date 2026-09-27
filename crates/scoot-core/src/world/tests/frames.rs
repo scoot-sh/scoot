@@ -170,8 +170,55 @@ fn a_floating_frame_reports_only_a_move() {
 fn only_a_frame_observation_can_report_change() {
     // Every other event answers false: their callers already re-apply
     // unconditionally, so the return is only meaningful for frames.
+    // (`handle_event` has nine non-frame match arms covering ten variants;
+    // all ten are exercised below, so a future arm that spuriously returns
+    // `true` -- e.g. echoing a changed flag out of `WindowChanged` or
+    // `OutputChanged`, which would relayout on every title change or bar
+    // redraw -- fails here.) Where cheap, the payload is one that really
+    // moves the arrangement, so the test guards the contract, not just the
+    // no-op path. Destructive events go last: closing window 2, then
+    // removing the extra output.
     let mut world = world();
     open(&mut world, 1);
+    assert!(!world.handle_event(Event::OutputAdded {
+        id: OutputId(2),
+        area: Rect::new(1000, 0, 800, 600),
+    }));
+    assert!(!world.handle_event(Event::OutputChanged {
+        id: OutputId(1),
+        area: Rect::new(0, 0, 1600, 600),
+    }));
+    assert!(!world.handle_event(Event::OutputUsableAreaChanged {
+        id: OutputId(1),
+        area: Rect::new(0, 30, 1600, 570),
+    }));
+    assert!(!world.handle_event(Event::WindowOpened {
+        id: WindowId(2),
+        info: WindowInfo::default(),
+        output: None,
+        focus: true,
+    }));
+    // A wider minimum re-tiles the strip, and still answers false.
+    assert!(!world.handle_event(Event::WindowChanged {
+        id: WindowId(1),
+        info: WindowInfo {
+            hints: SizeHints {
+                min: Size::new(700, 0),
+                ..SizeHints::default()
+            },
+            ..WindowInfo::default()
+        },
+    }));
     assert!(!world.handle_event(Event::FocusObserved { id: WindowId(1) }));
-    assert!(!world.handle_event(Event::WindowClosed { id: WindowId(1) }));
+    assert!(!world.handle_event(Event::FullscreenRequested {
+        id: WindowId(1),
+        fullscreen: true,
+    }));
+    assert!(!world.handle_event(Event::FloatingRequested {
+        id: WindowId(2),
+        floating: true,
+        size: None,
+    }));
+    assert!(!world.handle_event(Event::WindowClosed { id: WindowId(2) }));
+    assert!(!world.handle_event(Event::OutputRemoved { id: OutputId(2) }));
 }
