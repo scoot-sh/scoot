@@ -144,7 +144,7 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-one
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-two
 # commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
 # each one and why):
 #
@@ -203,6 +203,11 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   order, a window mapped again under the drag -- the same window id under
 #   a new `wl_surface` -- was entered, then its old surface left, which
 #   mapped the proxy back over it (`first_motion.rs`, remap test).
+# - `b16cd6a2` has an X drag wait for the source's types only over the X
+#   window its press started on, not every window of the owner's client:
+#   single-instance apps run every window on one X connection, so a quick
+#   drag between two of their windows dropped nothing (live mousepad 0/5;
+#   see `docs/backlog/resolved/xwayland-same-client-quick-drag-done.md`).
 #
 # Upstream status (checked 2026-09-25; the pixman hunk re-checked 2026-09-27,
 # the XDND commits 2026-09-27):
@@ -213,7 +218,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "7e18b661143cc1cfc33bda49bbab27d33f8a478c"
+rev = "b16cd6a258b46f6291fb5bd72b318aaa97aa71ed"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session

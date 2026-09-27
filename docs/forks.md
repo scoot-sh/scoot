@@ -11,14 +11,14 @@ top**, so it stays easy to review, rebase, and drop.
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
-| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling; then `6e6fe896`: flush the XDND proxy's remap when a drag leaves an X window; then `7388af13` and `9515d7e5`: end a Wayland drop onto X once, and end an offer whose target is gone or never finishes; then `d3a4cd73`: only a real X drag gives up a pending drop onto X; then `b1ac3ca7`: an X drag enters another client's X window without waiting for types (Smithay's generic `input/dnd` gains a defaulted `DndFocus::enter_needs_metadata`); then `7e18b661`: remap the proxy only once the drag has left every X window | **yes**, `crates/scoot/Cargo.toml` rev `7e18b661` (the X drag first-motion fix, `b1ac3ca7` and its review fix `7e18b661`; `d3a4cd73` was the XWayland pointer-focus X arm; `74edbf32` was PR #272; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without `74edbf32`, every upscaled surface fades to a semi-transparent 1-px border under the default renderer; without `6e6fe896`, an X drag that crossed an X window cannot drop on a Wayland one, so drags from X could not be let onto X windows; without `9515d7e5`, a Wayland drop onto an X target that dies or hangs before finishing stops every later X drag until scoot restarts, and without `d3a4cd73` any X client can end such a drop in flight and keep the selection; without `b1ac3ca7`, a GTK or Qt drag released on its first motion onto another X app drops nothing, and without `7e18b661` an X window mapped again under an X drag has the proxy over it (see below). |
+| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling; then `6e6fe896`: flush the XDND proxy's remap when a drag leaves an X window; then `7388af13` and `9515d7e5`: end a Wayland drop onto X once, and end an offer whose target is gone or never finishes; then `d3a4cd73`: only a real X drag gives up a pending drop onto X; then `b1ac3ca7`: an X drag enters another client's X window without waiting for types (Smithay's generic `input/dnd` gains a defaulted `DndFocus::enter_needs_metadata`); then `7e18b661`: remap the proxy only once the drag has left every X window; then `b16cd6a2`: wait for types only over the window the drag started on | **yes**, `crates/scoot/Cargo.toml` rev `b16cd6a2` (the same-app quick drag; `7e18b661` was the X drag first-motion fix, `b1ac3ca7` and its review fix; `d3a4cd73` was the XWayland pointer-focus X arm; `74edbf32` was PR #272; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without `74edbf32`, every upscaled surface fades to a semi-transparent 1-px border under the default renderer; without `6e6fe896`, an X drag that crossed an X window cannot drop on a Wayland one, so drags from X could not be let onto X windows; without `9515d7e5`, a Wayland drop onto an X target that dies or hangs before finishing stops every later X drag until scoot restarts, and without `d3a4cd73` any X client can end such a drop in flight and keep the selection; without `b1ac3ca7`, a GTK or Qt drag released on its first motion onto another X app drops nothing, and without `7e18b661` an X window mapped again under an X drag has the proxy over it, and without `b16cd6a2` a quick drag between two windows of one X app instance drops nothing (see below). |
 | [`scoot-sh/wayland-rs`](https://github.com/scoot-sh/wayland-rs/tree/scoot/server-fd-queue-cap-adaptive) | [Smithay/wayland-rs](https://github.com/Smithay/wayland-rs) | `72f7fe0d` (the wayland-backend 0.3.17 release, `v0.31.x` branch) | `a39311b8`: server side, disconnects a client leaving too many received fds unclaimed; `70f81e00`: sizes that cap at one eighth of the soft `RLIMIT_NOFILE`, 128..=1024 | **yes**, root `Cargo.toml` `[patch.crates-io]` rev `70f81e00` (PR #241) | wayland-backend queues fds a client sends with fd-less requests for the connection's life, so one idle client could fill scoot's fd table and shed every newcomer, `scootctl` included. |
 
 ## Per fork
 
 ### `scoot-sh/smithay`
 
-- **Branch:** `scoot/xwayland-selection-dnd`, twenty-one commits on `0ff00983`.
+- **Branch:** `scoot/xwayland-selection-dnd`, twenty-two commits on `0ff00983`.
   Its first, `43f50eb2`, is also the tip of `scoot/syncobj-timeline-drop`,
   which PR #233 pinned; that branch is kept as it was, and nothing pins it
   now. The XWayland commits, in order, each measured before it was written
@@ -220,6 +220,22 @@ top**, so it stays easy to review, rebase, and drop.
     order.) The first_motion, drop, drop_end, dnd, xdnd, clipboard and peer
     suites 50/50, three runs; the full `--features xwayland` nextest run
     1885 passed, 25 skipped.
+  - `b16cd6a2` **wait for types only over the window the drag started
+    on.** `b1ac3ca7` waited over every window of the drag owner's X
+    client, and single-instance apps (mousepad by default, GApplication
+    apps generally) run every window on one X connection, so a quick drag
+    between two of their windows found the proxy over the second on its
+    first motion and dropped nothing (review of `b1ac3ca7`, live: 0/5; a
+    few motions first, 4/4). `XwmActiveDrag` now records the X window the
+    press or touch started on (from the grab's start focus) and the drag
+    waits only over it; with no X window there, the owner's whole client
+    waits, as before. Pinned by `first_motion.rs`'s
+    `an_x_drags_first_motion_onto_its_own_clients_other_window_finds_that_window`:
+    fails 3 of 3 at `7e18b661` ("found \"Smithay XDND proxy\""), passes
+    3 of 3 at `b16cd6a2`; the first_motion, drop, drop_end, dnd, xdnd,
+    clipboard and peer suites 51/51, three runs (X to Wayland drags,
+    which start over their own window, included). See
+    `docs/backlog/resolved/xwayland-same-client-quick-drag-done.md`.
 - **Evidence:** `docs/backlog/resolved/syncobj-handle-leak-done.md`, and on the
   dev VM `~/evidence/sync/master-validation/`. Upstream master `79bbed5e1`
   (2026-09-22) was built and measured: it leaks 3.5–4.1 MB per test run,
@@ -237,7 +253,7 @@ top**, so it stays easy to review, rebase, and drop.
   `DnDGrab` still delays every enter until the source has mime types
   ("delay until they have materialized"), and has no
   `enter_needs_metadata`; `7e18b661` fixes fork-only code from
-  `b1ac3ca7`. No issue
+  `b1ac3ca7`, and `b16cd6a2` narrows it further. No issue
   or PR exists. Nothing has been filed from here.
 - **Upstream policy note, for the maintainer's decision:** Smithay's
   `AI.md` asks contributors to disclose AI-generated code, discourages
@@ -255,7 +271,7 @@ top**, so it stays easy to review, rebase, and drop.
   fails without `6e6fe896` (two tests, "no window" where the proxy should
   be); `drop_end.rs` fails without `7388af13`, `9515d7e5` and `d3a4cd73`;
   `first_motion.rs` fails without `b1ac3ca7` (its remap test without
-  `7e18b661`), and scoot does not compile
+  `7e18b661`, its same-client test without `b16cd6a2`), and scoot does not compile
   against a rev without `DndFocus::enter_needs_metadata`.
 
 ### `scoot-sh/wayland-rs`

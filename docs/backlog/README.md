@@ -831,9 +831,9 @@ scale/mode) into one hardware session.
   window](./protocols/xwayland-press-after-crossing-move-lost.md) (low;
   harness only so far, not investigated). Its review fix is fork
   `7e18b661` (an X window mapped again under an X drag got the proxy over
-  it); its known gap is filed: [a quick drag between two windows of the
-  same X app instance drops nothing](./protocols/xwayland-same-client-quick-drag.md)
-  (low; not a regression).
+  it); its known gap, [a quick drag between two windows of the
+  same X app instance dropping nothing](./resolved/xwayland-same-client-quick-drag-done.md),
+  is RESOLVED too (fork `b16cd6a2`).
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes

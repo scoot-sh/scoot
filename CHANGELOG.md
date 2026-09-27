@@ -9,6 +9,14 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — a quick drag between two windows of one X app lands
+
+- **With `--xwayland`, a quick drag between two windows of the same X app
+  now lands too** -- text between two `mousepad` windows, a file between
+  two windows of one file manager. Most GTK apps run every window in one
+  process, and the fix for quick drags between different X apps left
+  that case out (GTK `mousepad`: 0/5 landed).
+
 ### 2026-09-27 — another X client cannot race an app scoot launched to focus
 
 - **With `--xwayland`, the startup id scoot hands an X app it launched
@@ -33,10 +41,7 @@ scoot has not cut a numbered release yet; entries are dated.
   now). A release sent together with that motion, with no pause (an agent
   pipelining `pointer move` and the release), still drops nothing in GTK
   apps: GTK decides it on the window the pointer was over before the
-  move. Let the move settle first. Nor does a quick drag between two
-  windows of the *same* X app instance (most GTK apps run every window in
-  one process): that still needs a motion or two over the other window
-  before the release.
+  move. Let the move settle first.
 
 ### 2026-09-27 — drag-and-drop with X apps works in every direction
 

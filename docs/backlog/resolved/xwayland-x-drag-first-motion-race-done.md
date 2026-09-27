@@ -119,7 +119,7 @@ live spot-check with GTK `mousepad` over X at HEAD: one-motion X to X
   apps (mousepad by default, GApplication apps generally) run all their
   windows on one X connection. Live at HEAD: direct **0/5**, five steps
   first **4/4**. Filed as
-  [`xwayland-same-client-quick-drag.md`](../protocols/xwayland-same-client-quick-drag.md)
+  [`xwayland-same-client-quick-drag-done.md`](./xwayland-same-client-quick-drag-done.md) (fixed by fork `b16cd6a2`)
   and documented in `docs/protocols.md` and the CHANGELOG.
 - `pointer_focus.rs`'s doc comment said `enter_needs_metadata` is asked
   only on a focus change; it is also asked on each motion while the drag
