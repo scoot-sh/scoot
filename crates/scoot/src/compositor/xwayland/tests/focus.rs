@@ -194,11 +194,7 @@ fn an_x_apps_own_dialog_takes_focus_from_its_focused_window() {
         return;
     };
     live.map_peer("wayland");
-    let token = live
-        .fixture
-        .state
-        .mint_spawn_token("xprobe")
-        .expect("a spawn token");
+    let token = live.launch_token();
     let mut main = Props::new(RED);
     main.startup_id = Some(token.as_str().to_owned());
     let main = live.x.map(&main);
@@ -229,11 +225,7 @@ fn a_spawn_tokens_startup_id_lets_an_x_window_take_focus_once() {
         return;
     };
     let wayland = live.map_peer("wayland");
-    let token = live
-        .fixture
-        .state
-        .mint_spawn_token("xprobe")
-        .expect("a spawn token");
+    let token = live.launch_token();
     let mut props = Props::new(RED);
     props.startup_id = Some(token.as_str().to_owned());
     let xid = live.x.map(&props);
@@ -405,11 +397,7 @@ fn a_token_is_spent_whichever_rule_grants_focus() {
     let Some(mut live) = live("a_token_is_spent_whichever_rule_grants_focus") else {
         return;
     };
-    let token = live
-        .fixture
-        .state
-        .mint_spawn_token("xprobe")
-        .expect("a spawn token");
+    let token = live.launch_token();
     let mut props = Props::new(RED);
     props.startup_id = Some(token.as_str().to_owned());
     let launched = live.x.map(&props);
@@ -451,19 +439,16 @@ fn a_token_is_spent_whichever_rule_grants_focus() {
 /// `WM_HINTS` window group), not on the toplevel it maps -- so a launch
 /// through a wrapper (`sh -c`, a launcher), where the process path cannot
 /// match, redeems its token only if the gate reads the leader. This test's
-/// process is no spawned child, so the leader is the only path that can
-/// grant focus here.
+/// process is no spawned child -- the token's spawn is its parent (see
+/// `Live::launch_token`) -- so the leader is the only path that can grant
+/// focus here.
 #[test]
 fn a_startup_id_on_the_client_leader_is_redeemed() {
     let Some(mut live) = live("a_startup_id_on_the_client_leader_is_redeemed") else {
         return;
     };
     let wayland = live.map_peer("wayland");
-    let token = live
-        .fixture
-        .state
-        .mint_spawn_token("xprobe")
-        .expect("a spawn token");
+    let token = live.launch_token();
     let leader = live.x.leader_with_startup_id(token.as_str());
     live.drain();
     let mut props = Props::new(RED);
@@ -497,11 +482,7 @@ fn a_stranger_naming_another_clients_leader_is_refused() {
         return;
     };
     let wayland = live.map_peer("wayland");
-    let token = live
-        .fixture
-        .state
-        .mint_spawn_token("xprobe")
-        .expect("a spawn token");
+    let token = live.launch_token();
     let leader = live.x.leader_with_startup_id(token.as_str());
     live.drain();
     // A second connection is a second X client, with its own id range.

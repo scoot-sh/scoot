@@ -9,6 +9,20 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — another X client cannot race an app scoot launched to focus
+
+- **With `--xwayland`, the startup id scoot hands an X app it launched
+  now works only for that app's own process** (or a process it starts,
+  so wrapper scripts still work). Before, any X client could read the id
+  off the app's first window, copy it onto a window of its own, map first
+  and take focus from the window you were typing into. The one change you
+  might notice: an X app that forks itself into the background and exits
+  the process scoot started (`gvim` without `-f`, by its documentation)
+  now opens without focus if another window has it; click it. An X app a
+  *Wayland launcher* started keeps the old behavior -- scoot cannot tell
+  which process the launcher started -- see
+  [protocols.md](docs/protocols.md#focus-x-windows-ask-scoot-decides).
+
 ### 2026-09-27 — a quick drag from one X app onto another lands
 
 - **With `--xwayland`, a quick drag straight from one X app onto another

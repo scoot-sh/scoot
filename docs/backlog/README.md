@@ -817,10 +817,11 @@ scale/mode) into one hardware session.
   Remaining: capture pins/packaging (5–7). The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its
   rival-claimant recipe cannot work: XWayland admits no X client before the
-  WM attaches). Follow-up filed: [bind startup-id redemption to the spawned
-  process](./protocols/xwayland-startup-id-race.md) (low: a watching X
-  client can race a launched app to its `_NET_STARTUP_ID` within the
-  token's 30 s). [An X drag released on its first motion into an X
+  WM attaches). [Bind startup-id redemption to the spawned
+  process](./resolved/xwayland-startup-id-race-done.md) is RESOLVED
+  2026-09-27: a spawn token's startup id redeems only for the spawned
+  process or a descendant (bounded `/proc` ppid walk); a Wayland
+  launcher's token keeps the unbound rule, its race documented. [An X drag released on its first motion into an X
   window may drop on the proxy](./resolved/xwayland-x-drag-first-motion-race-done.md)
   is RESOLVED 2026-09-27 (reproduced live with GTK by two mechanisms -- a
   drag's first motion onto an X window before the source named its types,

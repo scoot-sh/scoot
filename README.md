@@ -84,7 +84,8 @@ inspired this project.
   build --release --features xwayland`, with `Xwayland` on `PATH`; no flake
   output ships it yet): their windows tile, dialogs float, fullscreen
   works, and they take focus by themselves only when nothing is focused,
-  when they belong to the X app in use, or when scoot started them.
+  when they belong to the X app in use, or when scoot started them (that
+  app's own process, so another X client cannot race it to the launch).
   Running one extends full trust to it — an X11 client can read and cover
   other windows by design ([protocols.md](docs/protocols.md#xwayland-opt-in)).
   Copy and paste works between X and Wayland apps both ways (clipboard

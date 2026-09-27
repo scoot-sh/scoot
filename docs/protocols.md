@@ -478,9 +478,9 @@ an X window only while scoot has focused one, and the X server's own input
 focus is set by scoot, never left to "whatever is under the pointer"),
 anything drawn under the session lock, the Wayland clipboard or primary
 selection while no X window is focused (below), and -- through the focus gate below
--- the keyboard focus of a Wayland window by asking, with one known window:
-while a scoot-launched X app's token is live, another X client can race it
-to its startup id (below).
+-- the keyboard focus of a Wayland window by asking. (One exception: an X
+app a *Wayland launcher* started can be raced to its startup id by another
+X client, below.)
 
 ### X windows in the layout
 
@@ -554,16 +554,36 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
    into `_NET_STARTUP_ID` on its *client leader* window (Qt is believed to
    do the same; unverified) -- scoot reads it from the mapping window, or
    else from its leader (its `WM_HINTS` window group, and only a leader the
-   same X client created), so a GTK app launched through a wrapper
-   (`sh -c`, measured) still redeems it. A launcher shim or `flatpak run`
-   should too, as long as the variable reaches the app; unverified. A client that sets no
-   startup id (`xterm`) is matched by process instead: the X server reports
-   each client's process id (the X-Resource extension, from the socket's
-   credentials — never the forgeable `_NET_WM_PID`), and a process scoot
-   spawned whose token is still live counts. **A live token a mapping window
-   carries is spent whichever rule grants it focus** -- so a token cannot be
-   left lying around for another X client to copy and redeem later -- and
-   every token expires after 30 seconds.
+   same X client created). **A startup id redeems only for the process it
+   was handed to:** the X server reports each client's process id (the
+   X-Resource extension, from the socket's credentials — never the
+   forgeable `_NET_WM_PID`), and the window's process must be the child
+   scoot spawned (still running, so its pid cannot have been reused) or
+   descend from it within 8 parent links. So a GTK app launched through a
+   wrapper (`sh -c`, measured) or a launcher shim still redeems it;
+   `flatpak run` should too, unverified. Any other X client that copies the
+   id -- it is readable by every X client from the moment a toolkit sets
+   it, before the app's first window maps -- is refused and the token left
+   for the app. When the server cannot say which process a window belongs
+   to, the startup id is refused. The cost: an app that forks itself into
+   the background and lets the process scoot started exit (`gvim` does by
+   default, per its documentation; `gvim -f` does not -- unmeasured here)
+   is no longer that process's descendant, so it maps without focus while
+   another window has it; a click focuses it. A client that sets no startup id
+   (`xterm`) is matched by process alone: a process scoot spawned whose
+   token is still live counts. **A live token a mapping window may redeem
+   is spent whichever rule grants it focus** -- so a token cannot be left
+   lying around for another X client to copy and redeem later -- and every
+   token expires after 30 seconds.
+
+   A token a **Wayland launcher** minted (from a real click; see
+   [focus handoff](#focus-handoff-xdg-activation-v1)) and handed an X app
+   as its startup id -- GLib-based launchers set `DESKTOP_STARTUP_ID` too --
+   redeems for any X window naming it, as before: scoot never learns which
+   process the launcher started (it typically exits straight after,
+   reparenting the app away from it), and refusing these would open every
+   such X app behind the window it was launched from. A token scoot minted
+   with no spawn recorded is refused for X windows outright.
 
 `_NET_ACTIVE_WINDOW` goes through the same three rules, and is never
 honoured while the session is locked. A window that is refused is still
@@ -575,14 +595,14 @@ taskbar and in `scoot msg windows` — and a click, a keybinding, a taskbar's
 clients cannot be told apart by anything they send, and inside the X server
 one can move the other's focus directly (`XSetInputFocus`) anyway. The gate
 is about the Wayland keyboard — which window scoot gives the keys to — and
-that is the one no X client can take by asking, with one known window: a
-startup id is readable by every X client from the moment a toolkit sets it
-on its leader -- before its first window maps -- so an X client watching
-for new windows can copy it onto a window of its own, map *before* the app does, and take focus once,
-while the token is live (up to 30 seconds after the launch). Once the app's
-own window maps it spends the token, whichever rule focuses it, and the copy
-is worthless. Binding the redemption to the spawned process (the token
-already records it) is filed as a follow-up.
+that is the one no X client can take by asking -- with the one exception
+above: a Wayland launcher's token, which an X client watching for new
+windows can copy off the launched app's leader and redeem first, taking
+focus once while the token is live (up to 30 seconds after the launch).
+Tokens scoot minted for its own spawns are bound to the spawned process and
+cannot be raced. (Any process of your own user can also read a spawned
+child's token from `/proc/<pid>/environ`; that is the same-user trust
+boundary every activation token lives inside.)
 
 ### Clipboard, drag-and-drop and input methods
 

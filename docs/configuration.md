@@ -61,7 +61,9 @@ host-provided value under `--nested` survives. While it is live, the child
 also gets the same activation token as `$DESKTOP_STARTUP_ID` (an inherited
 one is removed, like `$XDG_ACTIVATION_TOKEN`): the variable X toolkits turn
 into `_NET_STARTUP_ID`, which is how an X app scoot started takes focus when
-it maps.
+it maps. Only that child, or a process it starts, can redeem it that way:
+another X client that copies the startup id is refused (see
+[protocols.md](protocols.md#focus-x-windows-ask-scoot-decides)).
 
 ### Portals and the D-Bus activation environment
 

@@ -27,13 +27,46 @@
 //!      belongs to the same X client: GTK sets the startup id on that
 //!      unmapped leader window, never on the toplevel it maps, so reading
 //!      the toplevel alone redeemed nothing, measured by review; Qt is
-//!      believed to do the same, unverified) -- names a live token. `State::spawn` hands a child its
+//!      believed to do the same, unverified) -- names a live token *bound
+//!      to this window's process* (below). `State::spawn` hands a child its
 //!      token as `DESKTOP_STARTUP_ID` too while XWayland is live, the
-//!      variable X toolkits read for exactly this, so a GTK app launched
-//!      through a wrapper (`sh -c`, measured) still redeems it; a launcher
-//!      shim or `flatpak run` should too, as long as the variable reaches
-//!      the app (unverified). A token a Wayland launcher minted from a real click
-//!      works the same way: it passed `activation.rs`'s serial gate.
+//!      variable X toolkits read for exactly this.
+//!
+//!      **The binding.** A startup id is a property every X client can
+//!      read, and a toolkit sets it on its client leader at startup, well
+//!      before its first window maps -- so the id alone would let a
+//!      background X client copy it onto a window of its own, map first,
+//!      and take focus with the launch's token. What the id may redeem
+//!      therefore depends on who the token was minted for:
+//!      - a **spawn token** (it carries the [`SpawnedPid`] `State::spawn`
+//!        records while XWayland is live) redeems only for a window whose
+//!        X client process -- by X-Resource pid, below -- is that spawn or
+//!        descends from it within [`MAX_ANCESTRY_DEPTH`](super::ancestry::MAX_ANCESTRY_DEPTH) parent links of
+//!        `/proc/<pid>/stat` (see `ancestry.rs`), and only while the spawn
+//!        is tracked and unreaped, so its pid cannot have been reused. So
+//!        an app behind a wrapper (`sh -c`, measured) or a launcher shim
+//!        still redeems it; `flatpak run` should too, if its `bwrap` chain
+//!        fits the bound (unverified). An unknown pid -- a failed or refused
+//!        X-Resource query -- is refused: the binding fails closed. A
+//!        refused window leaves the token live for the process it belongs
+//!        to. The cost: an app that forks into the background and lets the
+//!        spawn exit is reparented away from it, so its startup id redeems
+//!        nothing and it maps unfocused while another window has focus.
+//!      - a **Wayland client's token** (a launcher's, minted from a real
+//!        click: it passed `activation.rs`'s serial gate) keeps the unbound
+//!        rule -- any window naming it redeems it. scoot never learns which
+//!        process the launcher started (a launcher typically exits right
+//!        after, reparenting the app away from it, so no process tree ties
+//!        them), and GLib hands its launch token over as
+//!        `DESKTOP_STARTUP_ID` too, so refusing these would open every X
+//!        app a GTK launcher or file manager starts behind the window the
+//!        user launched it from. The race stays open for these tokens:
+//!        a watching X client can win one launch's focus, once, within the
+//!        token's 30 s.
+//!      - a token with neither -- one scoot minted for a spawn while
+//!        XWayland was not live, which was never handed to any X toolkit
+//!        as a startup id -- redeems nothing for an X window: an X window
+//!        naming it copied it from somewhere.
 //!    - the X client's process -- read through the X-Resource extension
 //!      (`XResQueryClientIds`), which the X server answers from the socket's
 //!      credentials, never from the forgeable `_NET_WM_PID` -- is a child
@@ -51,8 +84,11 @@
 //!    client-set, and any background X client could name the focused
 //!    window as its parent.
 //!
-//! **A live token a mapping window carries is spent whichever rule grants
-//! it focus**, rule 1 or 3 included. Rule 1 used to short-circuit past it
+//! **A live token a mapping window may redeem is spent whichever rule
+//! grants it focus**, rule 1 or 3 included. (One it may not -- a spawn
+//! token its process is not bound to -- is left alone: spending it would
+//! hand a racer the power to take the launched app's focus away without
+//! taking it for itself.) Rule 1 used to short-circuit past it
 //! and leave the token live for 30 s -- and a startup id is a readable
 //! property, so any X client could copy it off the launched app's window
 //! and redeem it later with `_NET_ACTIVE_WINDOW` to take focus from a
@@ -76,34 +112,29 @@
 //! and why running XWayland extends full trust to every X client (see
 //! `docs/protocols.md`). What the gate stops is an X client taking focus
 //! from a Wayland window, or from a different X application, by asking --
-//! with one known window, below.
+//! except with a Wayland launcher's token, which it can race the launched
+//! app to (rule 2's binding says why that one stays unbound).
 //!
-//! # The startup-id race (known, filed)
-//!
-//! A startup id is readable by every X client from the moment the launched
-//! app sets it -- and a toolkit sets it on its client leader at startup,
-//! well before its first window maps. So an X client watching for new
-//! windows can copy it onto a window of its own and map *before* the app does, redeeming the
-//! token and taking focus once, while the token is live (up to 30 s after
-//! the launch). The redemption does not check that the redeeming window's
-//! process is the one the token was minted for. The tightening -- when the
-//! token carries a [`SpawnedPid`], accept a startup-id redemption only from
-//! that process or a descendant (a bounded parent walk, so wrapper scripts
-//! still work) -- is `docs/backlog/protocols/xwayland-startup-id-race.md`.
-//! (Any same-uid process can also read a child's token out of
-//! `/proc/<pid>/environ`; that is the project's same-uid trust boundary, and
-//! applies to every activation token, X or not.)
+//! Nor does it defend against the same user's own processes: any same-uid
+//! process can read a spawned child's token out of `/proc/<pid>/environ`,
+//! or run an X client under the spawn's own process tree. That is the
+//! project's same-uid trust boundary, and applies to every activation
+//! token, X or not.
+
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use scoot_core::Action;
-use smithay::wayland::xdg_activation::XdgActivationToken;
+use smithay::wayland::xdg_activation::{XdgActivationToken, XdgActivationTokenData};
 use smithay::xwayland::X11Surface;
 
 use super::super::State;
 use super::super::activation::TOKEN_LIFETIME;
+use super::ancestry::descends_from;
 
 /// A token minted for a spawned child records the child's pid here (see
 /// `State::spawn`), so the X-Resource half of the gate can find the token a
-/// given X client's process was started with.
+/// given X client's process was started with, and a startup id naming the
+/// token redeems only for that process or its descendants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::compositor) struct SpawnedPid(pub u32);
 
@@ -112,6 +143,18 @@ pub(in crate::compositor) struct SpawnedPid(pub u32);
 /// client's process never changes.
 #[derive(Clone, Copy, Debug)]
 struct ClientPid(Option<u32>);
+
+/// The spawn an X window's process was last found not to descend from, kept
+/// on the surface so a client spamming `_NET_ACTIVE_WINDOW` with a copied
+/// startup id costs one `/proc` walk, not one per request. Only a refusal is
+/// kept: a process never gains an ancestor (an orphan is reparented to init
+/// or a subreaper already above it), and a spawn that is reaped fails the
+/// tracking check first -- so a cached "no" stays true for as long as it is
+/// consulted. (A subreaper spawn can shorten an orphaned descendant's chain
+/// back under the depth bound; the cache then keeps refusing, which is the
+/// closed side to fail on.) Zero is no pid, so it doubles as "none yet".
+#[derive(Debug)]
+struct RefusedSpawn(AtomicU32);
 
 impl State {
     /// Whether a newly mapped X window takes focus (the module doc's gate).
@@ -208,28 +251,67 @@ impl State {
         }
     }
 
+    /// Whether `window` may redeem a live token its startup id names (the
+    /// module doc's binding): the X-Resource pid of its client is the
+    /// token's [`SpawnedPid`] or descends from it, and that spawn is still
+    /// tracked; or the token is a Wayland client's, which keeps the unbound
+    /// rule. The cheap checks run first: the X round trip (once per window,
+    /// cached) and the `/proc` walk only when a spawn token is in play, and
+    /// at most once per window and spawn when the answer is no
+    /// ([`RefusedSpawn`]).
+    fn startup_id_bound_to(&self, data: &XdgActivationTokenData, window: &X11Surface) -> bool {
+        let Some(&SpawnedPid(spawned)) = data.user_data.get::<SpawnedPid>() else {
+            return data.client_id.is_some();
+        };
+        // Tracked, so not reaped, so its pid is not someone else's yet.
+        if !self.spawned_children.contains(&spawned) {
+            return false;
+        }
+        let Some(pid) = client_pid(window) else {
+            return false;
+        };
+        let user_data = window.user_data();
+        if user_data
+            .get::<RefusedSpawn>()
+            .is_some_and(|refused| refused.0.load(Ordering::Relaxed) == spawned)
+        {
+            return false;
+        }
+        let bound = descends_from(pid, spawned);
+        if !bound {
+            user_data
+                .get_or_insert_threadsafe(|| RefusedSpawn(AtomicU32::new(0)))
+                .0
+                .store(spawned, Ordering::Relaxed);
+        }
+        bound
+    }
+
     /// Finds and spends the spawn token that chains `window` to a spawn of
     /// scoot's own (the module doc's rule 2). `false` when none does.
     fn redeem_x11_spawn_token(&mut self, window: &X11Surface) -> bool {
-        let fresh = |data: &smithay::wayland::xdg_activation::XdgActivationTokenData| {
-            data.timestamp.elapsed() < TOKEN_LIFETIME
-        };
+        let fresh = |data: &XdgActivationTokenData| data.timestamp.elapsed() < TOKEN_LIFETIME;
         if let Some(startup) = window
             .startup_id()
             .or_else(|| self.leader_startup_id(window))
         {
             let token = XdgActivationToken::from(startup);
-            if self
-                .xdg_activation
-                .data_for_token(&token)
-                .is_some_and(fresh)
+            if let Some(data) = self.xdg_activation.data_for_token(&token)
+                && fresh(data)
             {
-                self.xdg_activation.remove_token(&token);
+                if self.startup_id_bound_to(data, window) {
+                    self.xdg_activation.remove_token(&token);
+                    tracing::debug!(
+                        xid = window.window_id(),
+                        "X11 window redeemed its (or its client leader's) startup id"
+                    );
+                    return true;
+                }
+                // Left live: the process it was minted for has yet to map.
                 tracing::debug!(
                     xid = window.window_id(),
-                    "X11 window redeemed its (or its client leader's) startup id"
+                    "refusing an X11 startup id: the window's process is not the one its token was minted for"
                 );
-                return true;
             }
         }
         let Some(pid) = client_pid(window) else {

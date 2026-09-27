@@ -139,6 +139,8 @@ use smithay::xwayland::{XWayland, XWaylandEvent};
 use super::State;
 
 #[cfg(feature = "xwayland")]
+mod ancestry;
+#[cfg(feature = "xwayland")]
 mod dnd;
 #[cfg(feature = "xwayland")]
 mod focus;

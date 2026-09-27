@@ -423,8 +423,10 @@ unverified.
 chain is copyable before the app maps -- `_NET_STARTUP_ID` is readable from
 the moment a toolkit sets it on its leader, so a watching X client can map
 a window with a copy before the app's
-own window maps, within the token's 30 s, and take focus once; binding the redemption to the spawned process (ppid walk) is
-filed as [`xwayland-startup-id-race.md`](./xwayland-startup-id-race.md). (2)
+own window maps, within the token's 30 s, and take focus once; binding the redemption to the spawned process (ppid walk) was
+filed as [`xwayland-startup-id-race.md`](../resolved/xwayland-startup-id-race-done.md),
+RESOLVED 2026-09-27 for spawn tokens (a Wayland launcher's token keeps the
+race, documented). (2)
 The brief asked the lock to *dismiss* X menus; it hides them and refuses
 them input, but cannot close them: the WM cannot unmap an override-redirect
 window and GTK 3 keeps its context menu through the focus release (measured:
