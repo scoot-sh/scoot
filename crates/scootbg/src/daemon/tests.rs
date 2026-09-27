@@ -1,15 +1,56 @@
 //! The request-to-reply mapping. The loop itself runs against a real
 //! compositor in `crates/scootbg/tests/`.
 
-use super::respond::Responder;
-use crate::control::Handler;
-use crate::protocol::{OutputEntry, PROTOCOL_VERSION, Request};
+use super::respond::{ChangeError, Responder, Wallpaper, write_outcome};
+use crate::choices::Choice;
+use crate::color::Color;
+use crate::control::{Answer, ConnId, Handler};
+use crate::protocol::{OutputEntry, OutputList, PROTOCOL_VERSION, Request};
+use crate::waiters::Outcome;
 
 const NO_OUTPUTS: &[OutputEntry<'static>; 0] = &[];
 
+/// Records the changes asked for, or refuses them all with `refuse`.
+struct Fake<'a> {
+    outputs: &'a dyn OutputList,
+    changes: Vec<(u64, Option<String>, Choice)>,
+    refuse: Option<ChangeError>,
+}
+
+impl<'a> Fake<'a> {
+    fn new(outputs: &'a dyn OutputList) -> Self {
+        Self {
+            outputs,
+            changes: Vec::new(),
+            refuse: None,
+        }
+    }
+}
+
+impl Wallpaper for Fake<'_> {
+    fn outputs(&self) -> &dyn OutputList {
+        self.outputs
+    }
+
+    fn change(
+        &mut self,
+        conn: ConnId,
+        output: Option<&str>,
+        choice: Choice,
+    ) -> Result<(), ChangeError> {
+        if let Some(error) = self.refuse {
+            return Err(error);
+        }
+        let id = if conn == ConnId::for_test(1) { 1 } else { 0 };
+        self.changes.push((id, output.map(str::to_owned), choice));
+        Ok(())
+    }
+}
+
 fn ask(responder: &mut Responder, line: &str) -> serde_json::Value {
     let mut out = Vec::new();
-    responder.handle(line.as_bytes(), &mut out);
+    let answer = responder.handle(ConnId::for_test(1), line.as_bytes(), &mut out);
+    assert_eq!(answer, Answer::Now);
     assert_eq!(out.last(), Some(&b'\n'), "one line, newline-terminated");
     assert_eq!(out.iter().filter(|&&b| b == b'\n').count(), 1);
     serde_json::from_slice(&out).unwrap()
@@ -17,7 +58,8 @@ fn ask(responder: &mut Responder, line: &str) -> serde_json::Value {
 
 #[test]
 fn query_answers_an_empty_output_list() {
-    let mut responder = Responder::new(NO_OUTPUTS);
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
     let reply = ask(&mut responder, Request::Query.line().trim_end());
     assert_eq!(reply, serde_json::json!({"type": "outputs", "outputs": []}));
     assert!(!responder.stop);
@@ -25,7 +67,8 @@ fn query_answers_an_empty_output_list() {
 
 #[test]
 fn version_answers_the_build_and_protocol() {
-    let mut responder = Responder::new(NO_OUTPUTS);
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
     let reply = ask(&mut responder, Request::Version.line().trim_end());
     assert_eq!(reply["type"], "version");
     assert_eq!(reply["protocol"], PROTOCOL_VERSION);
@@ -34,7 +77,8 @@ fn version_answers_the_build_and_protocol() {
 
 #[test]
 fn kill_answers_ok_and_asks_the_loop_to_stop() {
-    let mut responder = Responder::new(NO_OUTPUTS);
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
     let reply = ask(&mut responder, Request::Kill.line().trim_end());
     assert_eq!(reply, serde_json::json!({"type": "ok"}));
     assert!(responder.stop);
@@ -42,13 +86,20 @@ fn kill_answers_ok_and_asks_the_loop_to_stop() {
 
 #[test]
 fn bad_requests_answer_errors_and_change_nothing() {
-    let mut responder = Responder::new(NO_OUTPUTS);
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
     for line in [
         "garbage",
         "",
         r#"{"type":"kill"}"#,
         r#"{"protocol":99,"type":"kill"}"#,
         r#"{"protocol":1,"type":"set"}"#,
+        r#"{"protocol":1,"type":"set","color":"red"}"#,
+        r##"{"protocol":1,"type":"set","color":"#fff"}"##,
+        r##"{"protocol":1,"type":"set","color":7}"##,
+        r##"{"protocol":1,"type":"set","color":"#c03020","output":7}"##,
+        r#"{"protocol":1,"type":"clear","output":["DP-1"]}"#,
+        r#"{"protocol":1,"type":"apply-config"}"#,
         r#"{"protocol":1}"#,
     ] {
         let reply = ask(&mut responder, line);
@@ -56,6 +107,84 @@ fn bad_requests_answer_errors_and_change_nothing() {
         assert!(reply["message"].as_str().is_some_and(|m| !m.is_empty()));
     }
     assert!(!responder.stop);
+    assert!(fake.changes.is_empty());
+}
+
+/// `set` and `clear` hand the change over and answer later: nothing is
+/// written now, the reply comes once the compositor has it.
+#[test]
+fn set_and_clear_change_the_wallpaper_and_answer_later() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    let mut responder = Responder::new(&mut fake);
+    let red = Color::parse("#c03020").unwrap();
+    let quoted = "DP-\"1\"";
+    for request in [
+        Request::Set {
+            color: red,
+            output: None,
+        },
+        Request::Set {
+            color: red,
+            output: Some("DP-2".into()),
+        },
+        Request::Clear { output: None },
+        Request::Clear {
+            output: Some(quoted.into()),
+        },
+    ] {
+        let mut out = Vec::new();
+        let line = request.line();
+        let answer = responder.handle(ConnId::for_test(1), line.trim_end().as_bytes(), &mut out);
+        assert_eq!(answer, Answer::Later, "{line}");
+        assert!(out.is_empty(), "nothing written yet: {line}");
+    }
+    let changes: Vec<_> = fake
+        .changes
+        .iter()
+        .map(|(_, o, c)| (o.clone(), *c))
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            (None, Some(red)),
+            (Some("DP-2".to_owned()), Some(red)),
+            (None, None),
+            (Some(quoted.to_owned()), None),
+        ]
+    );
+    assert!(
+        fake.changes.iter().all(|(conn, ..)| *conn == 1),
+        "the asking connection"
+    );
+}
+
+#[test]
+fn a_refused_change_is_an_error_now_naming_the_output() {
+    let mut fake = Fake::new(NO_OUTPUTS);
+    fake.refuse = Some(ChangeError::UnknownOutput);
+    let mut responder = Responder::new(&mut fake);
+    let line = Request::Set {
+        color: Color::parse("#c03020").unwrap(),
+        output: Some("HDMI-A-9".into()),
+    }
+    .line();
+    let reply = ask(&mut responder, line.trim_end());
+    assert_eq!(reply["type"], "error");
+    let message = reply["message"].as_str().unwrap();
+    assert!(message.contains("\"HDMI-A-9\""), "{message}");
+    assert!(message.contains("nothing was changed"), "{message}");
+}
+
+#[test]
+fn the_late_reply_is_ok_or_an_error() {
+    let mut out = Vec::new();
+    write_outcome(&mut out, Outcome::Shown);
+    assert_eq!(out, b"{\"type\":\"ok\"}\n");
+    out.clear();
+    write_outcome(&mut out, Outcome::Failed);
+    let reply: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(reply["type"], "error");
+    assert!(reply["message"].as_str().unwrap().contains("stderr"));
 }
 
 /// The poll set's allocation survives the round trip through `reuse`, so
@@ -246,7 +375,8 @@ fn query_reports_each_output_and_its_surface() {
     }
     let _ = c; // bound, not yet reported: waiting
 
-    let mut responder = Responder::new(&outputs);
+    let mut fake = Fake::new(&outputs);
+    let mut responder = Responder::new(&mut fake);
     let reply = ask(&mut responder, Request::Query.line().trim_end());
     assert_eq!(
         reply,
@@ -285,7 +415,8 @@ fn query_reports_each_output_and_its_surface() {
     );
     // Removing one updates the next reply.
     let _ = outputs.remove_global(4);
-    let mut responder = Responder::new(&outputs);
+    let mut fake = Fake::new(&outputs);
+    let mut responder = Responder::new(&mut fake);
     let reply = ask(&mut responder, Request::Query.line().trim_end());
     assert_eq!(reply["outputs"].as_array().unwrap().len(), 2);
 }
@@ -307,13 +438,14 @@ fn a_query_reply_reuses_the_output_buffer() {
         let _ = output.settled();
         let _ = output.configure(1, 3840, 2160);
     }
-    let mut responder = Responder::new(&outputs);
+    let mut fake = Fake::new(&outputs);
+    let mut responder = Responder::new(&mut fake);
     let line = Request::Query.line();
     let mut out = Vec::with_capacity(4096);
     let ptr = out.as_ptr();
     for _ in 0..3 {
         out.clear();
-        responder.handle(line.trim_end().as_bytes(), &mut out);
+        let _ = responder.handle(ConnId::for_test(1), line.trim_end().as_bytes(), &mut out);
         assert!(out.len() < 4096);
         assert_eq!(out.as_ptr(), ptr, "the buffer was reallocated");
     }

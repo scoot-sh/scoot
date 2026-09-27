@@ -2128,7 +2128,7 @@ medium priority — the effective top of what's actually open.
    What remains open here is the `scootctl` crate split, which wants its own
    design pass.
 5. **[scootbg](docs/scootbg/README.md), a wallpaper daemon** (in progress,
-   2026-09-26): colours and images per output, one `scootbg set` command,
+   2026-09-26): colors and images per output, one `scootbg set` command,
    a `[wallpaper]` section in scoot's config, and a release gate of the
    lowest resource use of any wallpaper daemon. It keeps its own backlog in
    [`docs/scootbg/backlog/`](docs/scootbg/backlog/README.md); serves
@@ -2144,8 +2144,14 @@ medium priority — the effective top of what's actually open.
    outputs tracked through hotplug with one `background` layer surface
    each, `query` listing them, and a failed `accept` resting the listener
    instead of ending the daemon; checked on headless scoot and on headless
-   sway, which CI now runs for the hotplug tests. It draws no wallpaper
-   yet; solid colours are next.
+   sway, which CI now runs for the hotplug tests. Item 4
+   ([record](docs/scootbg/backlog/resolved/solid-color-done.md)): solid
+   colors, `scootbg set '#rrggbb' [--output NAME]` and `scootbg clear`,
+   through a single-pixel buffer (no shared memory) with a 1×1 and a
+   full-size `wl_shm` fallback; replies wait, without blocking the loop,
+   until the compositor has the commit, so a screenshot straight after
+   shows it; checked by real pixels on both compositors, every path. The
+   rest of the CLI (image paths, `apply-config`) and images are next.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

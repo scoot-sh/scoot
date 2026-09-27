@@ -60,7 +60,7 @@ impl std::error::Error for Error {}
 /// (newline included). An error reply is an `Err`. For `kill`, returns only
 /// once the daemon has closed the connection, which it does after removing
 /// its socket and releasing its lock.
-pub fn send(request: Request) -> Result<String, Error> {
+pub fn send(request: &Request<'_>) -> Result<String, Error> {
     let paths = paths::from_env().map_err(Error::Paths)?;
     let io_error = |error| Error::Io {
         socket: paths.socket.clone(),
@@ -85,7 +85,7 @@ pub fn send(request: Request) -> Result<String, Error> {
         // The daemon closed without answering, and its socket is gone: it
         // was already stopping (another `kill`) when this request
         // arrived. For `kill`, that is the outcome asked for.
-        Err(Error::NoReply) if request == Request::Kill && !paths.socket.exists() => {
+        Err(Error::NoReply) if *request == Request::Kill && !paths.socket.exists() => {
             Ok(String::new())
         }
         Err(Error::Io { error, .. }) => Err(io_error(error)),
@@ -95,7 +95,7 @@ pub fn send(request: Request) -> Result<String, Error> {
 
 /// One request and its reply over a connected stream. A connection the
 /// daemon closes early (EOF, EPIPE, ECONNRESET) is [`Error::NoReply`].
-fn exchange(stream: &mut UnixStream, request: Request) -> Result<String, Error> {
+fn exchange(stream: &mut UnixStream, request: &Request<'_>) -> Result<String, Error> {
     let io_error = |error: io::Error| {
         if matches!(
             error.kind(),
@@ -128,7 +128,7 @@ fn exchange(stream: &mut UnixStream, request: Request) -> Result<String, Error> 
         let message = reply["message"].as_str().unwrap_or("(no message)");
         return Err(Error::Daemon(message.to_owned()));
     }
-    if request == Request::Kill {
+    if *request == Request::Kill {
         // Wait for the close: by then the socket file is gone and the
         // lock released, so a new daemon can start straight away. A reset
         // here is that same close.

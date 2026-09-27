@@ -40,6 +40,8 @@ mod claim;
 mod conn;
 
 #[cfg(test)]
+mod deferred_tests;
+#[cfg(test)]
 mod tests;
 
 use std::io;
@@ -50,7 +52,7 @@ use rustix::event::PollFlags;
 use rustix::io::Errno;
 
 pub use claim::{Claim, ClaimError};
-pub use conn::{Conn, Handler, Status};
+pub use conn::{Answer, Conn, ConnId, Handler, Status};
 
 /// Clients served at once. `scootbg` commands are one request each, so
 /// more than a handful at a time means something is stuck or hostile.
@@ -66,6 +68,8 @@ pub struct Server {
     /// module docs). `None` only while it has been spent and not yet
     /// retaken.
     spare: Option<OwnedFd>,
+    /// The next connection's id; never reused.
+    next_id: u64,
 }
 
 impl Server {
@@ -80,11 +84,17 @@ impl Server {
             conns: Vec::with_capacity(MAX_CONNECTIONS),
             scratch: Box::new([0; SCRATCH]),
             spare,
+            next_id: 0,
         }
     }
 
     pub fn conns(&self) -> &[Conn] {
         &self.conns
+    }
+
+    /// Whether connection `id` is still open.
+    pub fn has(&self, id: ConnId) -> bool {
+        self.conns.iter().any(|conn| conn.id() == id)
     }
 
     #[cfg(test)]
@@ -137,10 +147,14 @@ impl Server {
             return;
         }
         if self.conns.len() >= MAX_CONNECTIONS {
-            // The oldest goes; `Vec` order is accept order.
+            // The oldest goes; `Vec` order is accept order. A reply it was
+            // waiting for then finds no connection.
             self.conns.remove(0);
         }
-        self.conns.push(Conn::new(stream));
+        let id = ConnId(self.next_id);
+        // 2^64 connections cannot happen; wrapping keeps it panic-free.
+        self.next_id = self.next_id.wrapping_add(1);
+        self.conns.push(Conn::new(id, stream));
     }
 
     /// Closes the oldest client, else the spare. `false` when there is
@@ -171,6 +185,27 @@ impl Server {
                 self.conns.remove(index);
                 false
             }
+        }
+    }
+
+    /// Delivers the reply connection `id` was waiting for (`write` appends
+    /// it), sends it, and handles the requests behind it with `handler`.
+    /// A connection that has gone (closed, evicted) is not found, and the
+    /// reply is dropped.
+    pub fn complete<H: Handler>(
+        &mut self,
+        id: ConnId,
+        write: impl FnOnce(&mut Vec<u8>),
+        handler: &mut H,
+    ) {
+        let Some(index) = self.conns.iter().position(|conn| conn.id() == id) else {
+            return;
+        };
+        let Some(conn) = self.conns.get_mut(index) else {
+            return;
+        };
+        if conn.complete(write, handler) == Status::Close {
+            self.conns.remove(index);
         }
     }
 

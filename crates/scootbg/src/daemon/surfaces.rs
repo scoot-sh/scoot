@@ -14,9 +14,11 @@
 //! reserves nothing), no keyboard interactivity, and an empty input region
 //! so pointer and touch events fall through to the desktop. It is committed
 //! once with no buffer, which asks for a `configure`; each `configure` is
-//! acked straight away. Nothing is attached, so nothing is shown: a layer
-//! surface maps only with a buffer, which is solid-colour.md's job.
+//! acked straight away, and the surface is then drawn (or redrawn at its
+//! new size) by `change::reconcile` if it should show a color. A layer
+//! surface maps only with a buffer: with nothing chosen, nothing is shown.
 
+use wayland_client::protocol::wl_buffer::{self, WlBuffer};
 use wayland_client::protocol::wl_callback::{self, WlCallback};
 use wayland_client::protocol::wl_output::{self, WlOutput};
 use wayland_client::protocol::wl_region::WlRegion;
@@ -30,8 +32,12 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
     self, Anchor, KeyboardInteractivity, ZwlrLayerSurfaceV1,
 };
 
+use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
+
+use super::canvas::{Canvas, destroy_viewport};
+use super::change::reconcile;
 use super::wayland::{Globals, State};
-use crate::outputs::{Effect, Entry, OutputId, Transform};
+use crate::outputs::{Effect, Entry, OutputId, Surface, Transform};
 use crate::print::warn;
 
 /// The newest `wl_output` scootbg knows. Older outputs are still bound.
@@ -50,20 +56,24 @@ const NAMESPACE: &str = "wallpaper";
 /// The Wayland objects for one output.
 #[derive(Debug)]
 pub struct Objects {
-    output: WlOutput,
+    pub(super) output: WlOutput,
     xdg: Option<ZxdgOutputV1>,
-    layer: Option<LayerObjects>,
+    pub(super) layer: Option<LayerObjects>,
+    /// The buffers drawn on the surface; they outlive a surface that the
+    /// compositor closes and scootbg re-creates.
+    pub(super) canvas: Canvas,
 }
 
 impl Objects {
-    /// Destroys everything, children first: the layer surface, its
-    /// `wl_surface`, the `xdg_output`, then the `wl_output` itself
-    /// (`release` from v3; before that the proxy just stays inert on our
-    /// side, which is all the protocol offers).
+    /// Destroys everything, children first: the layer surface (with its
+    /// viewport and `wl_surface`), the buffers, the `xdg_output`, then the
+    /// `wl_output` itself (`release` from v3; before that the proxy just
+    /// stays inert on our side, which is all the protocol offers).
     fn destroy(mut self) {
         if let Some(layer) = self.layer.take() {
             layer.destroy();
         }
+        self.canvas.clear();
         if let Some(xdg) = self.xdg.take() {
             xdg.destroy();
         }
@@ -73,17 +83,29 @@ impl Objects {
     }
 }
 
-/// A wallpaper surface: the role object and the surface it is on.
+/// A wallpaper surface: the role object, the surface it is on, and the
+/// surface's viewport once a color path needs one.
 #[derive(Debug)]
-struct LayerObjects {
-    surface: WlSurface,
+pub struct LayerObjects {
+    pub(super) surface: WlSurface,
     layer: ZwlrLayerSurfaceV1,
+    pub(super) viewport: Option<WpViewport>,
+    /// The size (logical) and buffer scale this surface's persistent state
+    /// was last sent for: viewport destination, buffer scale and opaque
+    /// region are double-buffered and stay until changed, so a draw at the
+    /// same size sends none of them again. `None` for a fresh surface.
+    pub(super) sized: Option<(crate::outputs::Size, u32)>,
 }
 
 impl LayerObjects {
     /// Creates the surface for `output` and commits it with no buffer, so
     /// the compositor answers with a `configure`.
-    fn create(globals: &Globals, output: &WlOutput, qh: &QueueHandle<State>, id: OutputId) -> Self {
+    pub(super) fn create(
+        globals: &Globals,
+        output: &WlOutput,
+        qh: &QueueHandle<State>,
+        id: OutputId,
+    ) -> Self {
         let surface = globals.compositor.create_surface(qh, ());
         // An empty region: no input anywhere on the surface.
         let region = globals.compositor.create_region(qh, ());
@@ -102,11 +124,18 @@ impl LayerObjects {
         layer.set_exclusive_zone(-1);
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
         surface.commit();
-        Self { surface, layer }
+        Self {
+            surface,
+            layer,
+            viewport: None,
+            sized: None,
+        }
     }
 
-    /// The role first, then the surface, as the protocol asks.
-    fn destroy(self) {
+    /// The viewport and the role first, then the surface, as the protocols
+    /// ask.
+    pub(super) fn destroy(self) {
+        destroy_viewport(self.viewport);
         self.layer.destroy();
         self.surface.destroy();
     }
@@ -162,6 +191,18 @@ pub enum RoundTrip {
     Settle(OutputId),
     /// Sent after a `closed`: the output survived it, so re-create.
     Retry(OutputId),
+    /// Sent after a `done` changed a configured output: redraw it then, not
+    /// at once. A scale or mode change usually brings a `configure` too, and
+    /// the compositor may send it after the `done`; drawing at the `done`
+    /// would draw at the old surface size and the new scale, a buffer up to
+    /// four times too large, only to replace it. By the time this comes
+    /// back any such `configure` has been handled, so this redraws only if
+    /// none came (a mode and scale doubled together keep the size).
+    Redraw(OutputId),
+    /// Sent after the commits the `set`s and `clear`s resolved in one loop
+    /// turn waited for (numbered by `crate::waiters`): the compositor has
+    /// processed them, so their connections get their replies.
+    Replies(u64),
 }
 
 impl State {
@@ -193,6 +234,7 @@ impl State {
                 output,
                 xdg,
                 layer: None,
+                canvas: Canvas::default(),
             }
         });
         // After the bind (and `get_xdg_output`), so its callback comes
@@ -239,6 +281,7 @@ impl State {
                 if let Some(layer) = objects.layer.take() {
                     layer.destroy();
                 }
+                objects.canvas.surface_gone();
                 // Said when the retry happens, not here: a compositor
                 // closes the surfaces of an output it is removing, and
                 // that is no news.
@@ -248,6 +291,7 @@ impl State {
                 if let Some(layer) = objects.layer.take() {
                     layer.destroy();
                 }
+                objects.canvas.clear();
                 warn(format_args!(
                     "scootbg: the compositor closed the wallpaper surface on {} again; \
                      giving up on that output (`scootbg query` shows it as gave-up)",
@@ -264,8 +308,8 @@ impl Dispatch<WlOutput, OutputId> for State {
         _: &WlOutput,
         event: wl_output::Event,
         id: &OutputId,
-        _: &Connection,
-        _: &QueueHandle<Self>,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
     ) {
         let Some(entry) = state.outputs.get_mut(*id) else {
             return;
@@ -285,7 +329,10 @@ impl Dispatch<WlOutput, OutputId> for State {
             wl_output::Event::Scale { factor } => output.stage_scale(factor),
             wl_output::Event::Name { name } => output.stage_name(name),
             wl_output::Event::Description { description } => output.stage_description(description),
-            wl_output::Event::Done => output.done(),
+            wl_output::Event::Done => {
+                output.done();
+                redraw_later(entry, conn, qh);
+            }
             _ => {}
         }
     }
@@ -297,8 +344,8 @@ impl Dispatch<ZxdgOutputV1, OutputId> for State {
         _: &ZxdgOutputV1,
         event: zxdg_output_v1::Event,
         id: &OutputId,
-        _: &Connection,
-        _: &QueueHandle<Self>,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
     ) {
         let Some(entry) = state.outputs.get_mut(*id) else {
             return;
@@ -314,7 +361,10 @@ impl Dispatch<ZxdgOutputV1, OutputId> for State {
             }
             // v1 and v2 apply their own events here; v3 leaves it to
             // `wl_output.done`.
-            zxdg_output_v1::Event::Done => output.done(),
+            zxdg_output_v1::Event::Done => {
+                output.done();
+                redraw_later(entry, conn, qh);
+            }
             _ => {}
         }
     }
@@ -337,16 +387,49 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
         if entry.objects.layer.as_ref().map(|l| &l.layer) != Some(layer) {
             return;
         }
-        let effect = match event {
+        let (effect, configured) = match event {
             zwlr_layer_surface_v1::Event::Configure {
                 serial,
                 width,
                 height,
-            } => entry.output.configure(serial, width, height),
-            zwlr_layer_surface_v1::Event::Closed => entry.output.closed(),
-            _ => Effect::None,
+            } => (entry.output.configure(serial, width, height), true),
+            zwlr_layer_surface_v1::Event::Closed => (entry.output.closed(), false),
+            _ => (Effect::None, false),
         };
         Self::apply(&state.globals, entry, effect, conn, qh);
+        if configured {
+            // Draw, or redraw at the new size. A mapped surface commits
+            // after the ack even when nothing about it changed, so the ack
+            // takes effect; an unmapped one has nothing to commit.
+            let committed = reconcile(&state.globals, &state.choices, entry, qh);
+            if !committed && entry.output.shows().is_some() {
+                if let Some(layer) = &entry.objects.layer {
+                    layer.surface.commit();
+                }
+            }
+        }
+    }
+}
+
+impl Dispatch<WlBuffer, OutputId> for State {
+    fn event(
+        state: &mut Self,
+        buffer: &WlBuffer,
+        event: wl_buffer::Event,
+        id: &OutputId,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_buffer::Event::Release = event else {
+            return;
+        };
+        let Some(entry) = state.outputs.get_mut(*id) else {
+            return;
+        };
+        // Single-pixel buffers are released too; only shm slots care.
+        if entry.objects.canvas.released(buffer) {
+            reconcile(&state.globals, &state.choices, entry, qh);
+        }
     }
 }
 
@@ -362,14 +445,29 @@ impl Dispatch<WlCallback, RoundTrip> for State {
         let wl_callback::Event::Done { .. } = event else {
             return;
         };
-        let (RoundTrip::Settle(id) | RoundTrip::Retry(id)) = *round_trip;
+        let (id, retry) = match *round_trip {
+            RoundTrip::Settle(id) => (id, false),
+            RoundTrip::Retry(id) => (id, true),
+            RoundTrip::Redraw(id) => {
+                if let Some(entry) = state.outputs.get_mut(id) {
+                    reconcile(&state.globals, &state.choices, entry, qh);
+                }
+                return;
+            }
+            RoundTrip::Replies(sync) => {
+                // Within the capacity `ready` was made with (the bound in
+                // `crate::waiters`), and drained every loop turn.
+                state.waiters.synced(sync, &mut state.ready);
+                return;
+            }
+        };
         // Removed meanwhile: nothing to do.
         let Some(entry) = state.outputs.get_mut(id) else {
             return;
         };
-        let effect = match round_trip {
-            RoundTrip::Settle(_) => entry.output.settled(),
-            RoundTrip::Retry(_) => {
+        let effect = match retry {
+            false => entry.output.settled(),
+            true => {
                 let effect = entry.output.retry();
                 if effect == Effect::Create {
                     warn(format_args!(
@@ -386,9 +484,20 @@ impl Dispatch<WlCallback, RoundTrip> for State {
 }
 
 // A wallpaper takes no input and needs no feedback from its surface yet:
-// `preferred_buffer_scale` and friends are hidpi-fractional-scale.md's.
+// `preferred_buffer_scale` and friends are hidpi-fractional-scale.md's. No
+// frame callbacks either: a static color is drawn once per change.
 delegate_noop!(State: ignore WlSurface);
 delegate_noop!(State: WlRegion);
+
+/// After a `done`: a configured surface may need a redraw at a new scale
+/// (a full-size buffer) or, configured 0x0 before any mode was known, a
+/// first draw; see [`RoundTrip::Redraw`] for why one round trip later.
+fn redraw_later(entry: &Entry<Objects>, conn: &Connection, qh: &QueueHandle<State>) {
+    if matches!(entry.output.surface(), Surface::Configured { .. }) {
+        conn.display()
+            .sync(qh, RoundTrip::Redraw(entry.output.id()));
+    }
+}
 
 fn transform_of(transform: wl_output::Transform) -> Transform {
     use wl_output::Transform as W;
