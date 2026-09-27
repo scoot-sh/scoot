@@ -202,13 +202,19 @@ unknown request tag is a decode error the server answers and keeps serving.
 
 `applied` names the fields re-applied live (including `autostart.commands`
 when new spawn entries started -- a spawn entry that fails to start is
-refused by name instead, and stays pending for the next reload), `refused` the ones that
+refused by name instead, and stays pending for the next reload -- and
+`wallpaper` / `wallpaper.command` when the `[wallpaper]` section or its
+`command` changed: handed to scootbg, whose outcome is in the compositor
+log, not in this reply), `refused` the ones that
 differed but cannot be (each with its reason: the two restart fields, a
-non-`spawn` autostart entry by name, a locked-skipped autostart delta, or
-an unusable `[[window_rule]]` by its position in the file). Both name only
+non-`spawn` autostart entry by name, a locked-skipped autostart delta,
+an unusable `[[window_rule]]` by its position in the file, or a
+`[wallpaper]` section with a problem, named -- an unknown key inside
+`[wallpaper]` is this refusal, not an `error`). Both name only
 fields that *differed*: two empty lists together mean the reload changed
-nothing it was asked to -- except an unusable window rule, which is refused
-on every reload that finds it, since it is never in effect. A reload that could not load or validate the file answers
+nothing it was asked to -- except an unusable window rule and a
+`[wallpaper]` section with a problem, each refused on every reload that
+finds it, since neither is ever in effect. A reload that could not load or validate the file answers
 `error` with the running config untouched (`scootctl` exits non-zero).
 
 ## Events

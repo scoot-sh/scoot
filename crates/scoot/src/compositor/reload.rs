@@ -80,12 +80,23 @@
 //!   file, e.g. `window_rule #3 (sets neither float nor size): skipped as
 //!   unusable`, and the rest apply.
 //!
+//! - `[wallpaper]`: handed to `scootbg apply-config` again on every reload
+//!   while the section exists, and `{}` on the reload that removes it (see
+//!   `wallpaper.rs`). Reported applied as `wallpaper` when the section's
+//!   values differ from what the session last handed over, and as
+//!   `wallpaper.command` when `command` does (both, when both do) --
+//!   "applied" meaning handed over, never waited on. A section with a
+//!   problem (inside `[wallpaper]`, an unknown key no longer fails the
+//!   whole reload) is refused by name on every reload that finds it, and
+//!   the running one is kept and re-run.
+//!
 //! Every refusal names the field; nothing is silently ignored. Both lists
 //! name only fields that *differed* -- a field the file and the session
 //! agree on appears in neither, so two empty lists together mean "the
-//! reload changed nothing it was asked to". The one exception is an
-//! unusable window rule, which is refused on every reload that finds it
-//! (it is never in effect, so it always differs from what the file says).
+//! reload changed nothing it was asked to". Two exceptions are refused on
+//! every reload that finds them: an unusable window rule, and a
+//! `[wallpaper]` section with a problem (neither is ever in effect, so each
+//! always differs from what the file says).
 //!
 //! # While locked
 //!
@@ -107,6 +118,10 @@
 //! would strand an agent that edits the file mid-lock with an error for a
 //! request that is safe to serve.
 //!
+//! `[wallpaper]` applies under lock too: scootbg draws on the background
+//! layer, which a locked frame does not show, so the new wallpaper
+//! discloses nothing and is simply there on unlock.
+//!
 //! Autostart is the deliberate exception: a reload under lock neither runs
 //! new spawn entries -- a spawned program at lock time could disclose a
 //! window onto, or interfere with, the locked session -- nor drops them.
@@ -122,6 +137,7 @@ use scoot_ipc::Response;
 use super::State;
 use super::config::{self, LoadedConfig};
 use super::output_scale::integer_scale;
+use super::wallpaper::Reloaded;
 
 #[cfg(test)]
 mod tests;
@@ -151,6 +167,8 @@ mod field {
     pub const FLOATING_MODIFIER: &str = "floating.modifier";
     pub const WINDOW_RULES: &str = "window_rule";
     pub const BINDS: &str = "binds";
+    pub const WALLPAPER: &str = "wallpaper";
+    pub const WALLPAPER_COMMAND: &str = "wallpaper.command";
 }
 
 impl State {
@@ -217,6 +235,7 @@ impl State {
         self.apply_autostart_reload(fresh, &mut report);
         self.apply_floating_reload(fresh, &mut report);
         self.apply_binds_reload(fresh, &mut report);
+        self.apply_wallpaper_reload(fresh, &mut report);
 
         // Recompute the arrangement and request a render when anything
         // visible moved. A binds-only reload skips it: no placement changed,
@@ -543,6 +562,38 @@ impl State {
         } else if fresh.floating_modifier != self.floating_modifier {
             self.floating_modifier = fresh.floating_modifier;
             report.applied.push(field::FLOATING_MODIFIER.to_owned());
+        }
+    }
+
+    /// `[wallpaper]`: handed to `scootbg apply-config` again on every reload
+    /// while the section exists (an unchanged one is a no-op there, and
+    /// brings back a daemon that crashed), `{}` on the reload that removes
+    /// it (see `wallpaper.rs`). Reported applied when the section's values
+    /// (`wallpaper`) or its `command` (`wallpaper.command`) differ from what
+    /// the session last handed over -- "applied" meaning handed over: the
+    /// run is spawned, never waited on, and its outcome is in the log. A
+    /// section with a problem (an unknown key, a value that is not a
+    /// string, a path that cannot be resolved) is refused by name on every
+    /// reload that finds it, and the running one kept and re-run (see
+    /// `State::reload_wallpaper`). Runs under lock too: the wallpaper is
+    /// drawn on the background layer, which a locked frame does not show.
+    fn apply_wallpaper_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        match self.reload_wallpaper(&fresh.wallpaper) {
+            Reloaded::Unchanged => {}
+            Reloaded::Applied { values, command } => {
+                if values {
+                    report.applied.push(field::WALLPAPER.to_owned());
+                }
+                if command {
+                    report.applied.push(field::WALLPAPER_COMMAND.to_owned());
+                }
+            }
+            Reloaded::Refused(problem) => {
+                report.refused.push(refused(
+                    field::WALLPAPER,
+                    &format!("{problem}; kept the running section"),
+                ));
+            }
         }
     }
 

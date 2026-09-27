@@ -433,7 +433,7 @@ binary was built from, with this commit's doc comments and help text).
   16 ms to make and fill). Pixels shared between outputs must not be
   written: animate into buffers of the output's own, and share only the
   last frame.
-- [scoot-integration.md](../scoot-integration.md): nothing new.
+- [scoot-integration-done.md](scoot-integration-done.md): nothing new.
 
 ## Review of PR #287
 

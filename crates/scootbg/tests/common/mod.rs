@@ -128,6 +128,10 @@ impl Session {
             .arg("--config")
             .arg(&config)
             .env("XDG_RUNTIME_DIR", &scratch.0)
+            // What a `[wallpaper]` section's `scootbg apply-config` inherits
+            // (tests/scoot_config.rs): the session's own state directory,
+            // never the user's.
+            .env("XDG_STATE_HOME", scratch.0.join("state"))
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("WAYLAND_SOCKET")
             .stdin(Stdio::null())

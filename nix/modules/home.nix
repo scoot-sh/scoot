@@ -18,7 +18,33 @@ let
   # file discarded for defaults, session still boots), so a typo costs
   # the config, never the session. See
   # docs/configuration.md#failure-semantics.
-  configFile = tomlFormat.generate "scoot-config.toml" cfg.settings;
+  configFile = tomlFormat.generate "scoot-config.toml" renderedSettings;
+
+  # `settings`, plus `wallpaper.command` pointing at the installed scootbg
+  # when the settings have a `[wallpaper]` table and the module installs
+  # the binary -- so the section works whatever is on PATH. A `command`
+  # the user set wins. Only for a table: anything else under `wallpaper`
+  # renders as written and is refused, by name, by scoot itself. The store
+  # path changes with every upgrade; scootbg leaves `command` out of the
+  # section's fingerprint, so an upgrade never re-applies the section over
+  # a `scootbg set` pick.
+  hasWallpaper = cfg.settings ? wallpaper;
+  injectCommand =
+    cfg.wallpaper.enable
+    && cfg.wallpaper.package != null
+    && hasWallpaper
+    && builtins.isAttrs cfg.settings.wallpaper;
+  renderedSettings =
+    if injectCommand then
+      cfg.settings
+      // {
+        wallpaper = {
+          command = lib.getExe' cfg.wallpaper.package "scootbg";
+        }
+        // cfg.settings.wallpaper;
+      }
+    else
+      cfg.settings;
 
   # Session script path: beside the rendered config, derived from
   # `configFile`'s directory, so a relocated config keeps its script
@@ -39,17 +65,19 @@ in
   options.programs.scoot = {
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";
 
-    # No default here: without an overlay there is no `pkgs.scoot`, and a
-    # wrong guess would silently install someone else's build. The flake
-    # wrapper (`homeModules.scoot`, still aliased as
-    # `homeManagerModules.scoot`, in `flake.nix`) fills this with the
-    # flake's own build via `mkDefault` on Linux and with null (files
-    # only) on Darwin; direct-module users set it explicitly (see the
-    # `example`), or leave it null for a files-only setup -- the module
-    # manages files regardless, and asserts nothing about the package.
+    # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
+    # applied, else null: nothing is guessed, since a `scoot` from anywhere
+    # else would silently install someone else's build. The flake wrapper
+    # (`homeModules.scoot`, still aliased as `homeManagerModules.scoot`, in
+    # `flake.nix`) fills this with the flake's own build via `mkDefault` on
+    # Linux and with null (files only) on Darwin; direct-module users
+    # without the overlay set it explicitly (see the `example`), or leave
+    # it null for a files-only setup -- the module manages files
+    # regardless, and asserts nothing about the package.
     package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = null;
+      default = pkgs.scoot or null;
+      defaultText = lib.literalExpression "pkgs.scoot or null";
       example = lib.literalExpression "inputs.scoot.packages.\${pkgs.system}.scoot";
       description = ''
         The scoot package to install. Null means install no binary --
@@ -138,6 +166,42 @@ in
       '';
     };
 
+    # scootbg, the wallpaper daemon a `[wallpaper]` section runs. Spelled
+    # as in the NixOS module (`programs.scoot.wallpaper.*`), so either side
+    # reads like the other.
+    wallpaper = {
+      # Follows the settings: a `[wallpaper]` table is what asks for the
+      # binary, and nothing else here needs it.
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = hasWallpaper;
+        defaultText = lib.literalExpression "config.programs.scoot.settings ? wallpaper";
+        description = ''
+          Install `wallpaper.package` and point `settings.wallpaper.command`
+          at it (unless you set `command` yourself). On whenever `settings`
+          has a `wallpaper` table. Set it to `false` to leave both alone:
+          `[wallpaper]` then runs `scootbg` from PATH (a system package,
+          say: the NixOS module's `programs.scoot.wallpaper`).
+        '';
+      };
+
+      # `pkgs.scootbg` with the flake's overlay, else null. The flake
+      # wrapper injects the flake's own scootbg on Linux (the same revision
+      # as `package`) and null on Darwin, where scootbg does not build: a
+      # macOS config that edits a `[wallpaper]` for a Linux box renders it
+      # as written, with no `command`, and installs nothing.
+      package = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default = pkgs.scootbg or null;
+        defaultText = lib.literalExpression "pkgs.scootbg or null";
+        example = lib.literalExpression "inputs.scoot.packages.\${pkgs.system}.scootbg";
+        description = ''
+          The scootbg package to install when `wallpaper.enable` is set.
+          Null installs nothing and leaves `command` alone.
+        '';
+      };
+    };
+
     portals = {
       # On by default behind `enable`: `scoot-portals.conf` is inert
       # until a session names `XDG_CURRENT_DESKTOP=scoot` (which the
@@ -164,7 +228,9 @@ in
     # portals file -- both harmless. `package`'s description states
     # that null installs no binary.
 
-    home.packages = lib.optional (cfg.package != null) cfg.package;
+    home.packages =
+      lib.optional (cfg.package != null) cfg.package
+      ++ lib.optional (cfg.wallpaper.enable && cfg.wallpaper.package != null) cfg.wallpaper.package;
 
     xdg.configFile.${cfg.configFile}.source = configFile;
 

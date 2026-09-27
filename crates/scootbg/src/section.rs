@@ -1,6 +1,6 @@
 //! A `[wallpaper]` section from scoot's config, as `scootbg apply-config`
 //! takes it: JSON, validated strictly, and fingerprinted over a canonical
-//! encoding (docs/scootbg/backlog/scoot-integration.md).
+//! encoding (docs/scootbg/backlog/resolved/scoot-integration-done.md).
 //!
 //! ```text
 //! {"image":"/home/me/hills.jpg","mode":"fill",

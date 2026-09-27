@@ -417,6 +417,6 @@ is a few integer operations per draw decision.
 - [transitions.md](../transitions.md) and
   [animated-images.md](../animated-images.md): a frame is
   `Output::full_buffer`'s size; budget per frame at device pixels.
-- [scoot-integration.md](../scoot-integration.md): nothing new; scoot's
+- [scoot-integration-done.md](scoot-integration-done.md): nothing new; scoot's
   scale should be a multiple of 1/120 for exact drawing (the compositor
   item above).

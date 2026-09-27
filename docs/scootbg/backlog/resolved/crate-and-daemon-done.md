@@ -185,7 +185,7 @@ compositor exit, with tests for the socket lifecycle.
   never removed (removing it would reopen the race). A connect probe is
   kept as a second check, so a daemon running without the lock (someone
   deleted the file) still gets a refusal rather than its socket stolen.
-  **For [scoot-integration.md](../scoot-integration.md):** the loser of
+  **For [scoot-integration-done.md](scoot-integration-done.md):** the loser of
   two racing `apply-config` starts now learns it lost from the lock,
   possibly before the winner has bound. The winner binds straight after
   the lock, before connecting to Wayland, so the window is short, but the
