@@ -9,6 +9,17 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — a click just after crossing between two X windows lands
+
+- **With `--xwayland`, a click right after the pointer moves from one X
+  window onto another now reaches the window clicked.** Before, the X
+  pointer ended up off that window (by as far again as the move went)
+  until the next motion, so the press went to another window or to none:
+  every `scoot msg pointer click` onto the other of two X apps was lost
+  (0/40 live, two `xev` windows), and so was a `pointer move` followed by
+  a `pointer button`. With a mouse the next motion corrected it within a
+  few milliseconds, so a click there was off by at most one motion event.
+
 ### 2026-09-27 — a quick drag between two windows of one X app lands
 
 - **With `--xwayland`, a quick drag between two windows of the same X app

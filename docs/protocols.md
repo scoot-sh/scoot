@@ -514,6 +514,10 @@ X client, below.)
   enter the layout: they are drawn where they put themselves, above every
   window and below the `top` and `overlay` layers, and take the pointer
   there. A click in one focuses nothing.
+- **A click right after the pointer crosses from one X window to another**
+  lands on the window clicked, `scoot msg pointer click` included (see
+  [relative pointer](#relative-pointer-and-pointer-constraints) for the
+  XWayland behavior scoot works around).
 - **Decorations.** X windows get the focus ring and rounded corners like any
   window. Motif decoration hints are ignored: scoot draws no titlebar for a
   client to opt out of. X has no equivalent of xdg's tiled states, and
@@ -2094,7 +2098,16 @@ relative motion deltas off its relative-pointer object.
 - **Relative events are gated on pointer focus, not on the lock.** A client
   whose surface has pointer focus receives `relative_motion` whether or not
   it locked; a client without focus receives nothing. That is the protocol's
-  own rule.
+  own rule. A motion that moves focus from one surface to another is
+  reported to the surface it left.
+- **Except a motion off an X window, which reports no relative motion.**
+  XWayland (24.1.13) keeps a delta that arrives in the same frame as its
+  pointer leaving an X window and applies it after the pointer next enters
+  one, on top of the position the enter set. The X pointer then sat off the
+  window entered until the next motion, so a click right after the move --
+  every `scoot msg pointer click` onto the other of two X apps -- reached
+  some other window or none. X apps reading raw motion miss that one
+  crossing delta.
 - **Unaccelerated means pre-libinput-acceleration on `--tty`.** A `--tty`
   mouse reports both an accelerated and a raw device delta, and the relative
   event carries each as its own (`dx`/`dy` vs `dx_unaccel`/`dy_unaccel`).

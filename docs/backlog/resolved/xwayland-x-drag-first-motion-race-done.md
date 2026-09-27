@@ -93,8 +93,9 @@ let the move settle before the release.
   within noise at ten drags, and unexplained; not chased.
 - Found in passing: in the harness, a move from one X window onto another
   followed by a press in the same batch never delivered the press to any X
-  window. Filed separately as
-  [`xwayland-press-after-crossing-move-lost.md`](../protocols/xwayland-press-after-crossing-move-lost.md).
+  window. Filed separately, and since resolved (a product bug in any
+  click after an X-to-X crossing, not a batching race):
+  [`xwayland-press-after-crossing-done.md`](./xwayland-press-after-crossing-done.md).
 
 **Independent review of `b1ac3ca7` (branch at `94008f4`): no blocking
 findings.** It re-ran the full set (workspace nextest 2443 passed;

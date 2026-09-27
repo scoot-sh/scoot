@@ -711,6 +711,8 @@ mod lock;
 mod mapping;
 #[cfg(feature = "xwayland")]
 mod peer;
+#[cfg(feature = "xwayland")]
+mod press_after_crossing;
 #[cfg(all(feature = "xwayland", feature = "gpu-scanout"))]
 mod scanout;
 #[cfg(feature = "xwayland")]
