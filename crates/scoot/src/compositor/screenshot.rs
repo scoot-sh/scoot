@@ -395,6 +395,7 @@ impl State {
             // full ~12ms this change exists to remove. Loud, because a
             // machine that cannot spawn one thread is in serious trouble.
             tracing::warn!("could not start the screenshot encoder; refusing the capture");
+            recycle_returned(&mut self.backends, id, capture.bgra);
             return ShotStart::Refused(
                 "the screenshot encoder is unavailable; retry in a few milliseconds".to_string(),
             );

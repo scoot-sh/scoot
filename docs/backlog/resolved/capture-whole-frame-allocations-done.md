@@ -108,9 +108,9 @@ capture another's pixels. Traced at every site:
 - `screenshot::tests::a_buffer_for_a_removed_output_is_dropped_not_kept`.
 - Full cheap set green on the dev VM: `nextest -p scoot -p scoot-core
   -p scoot-ipc -p scootctl` 2081 passed; `SCOOT_TEST_RENDERER=gles`
-  1785 passed (the 7 `dmabuf::tests` import failures are the documented
-  udmabuf-provenance known failures, failing at `Failed vs Created`
-  before any read-back runs); `clippy -p scoot --all-targets -D
+  1785 passed on `-p scoot` (the 7 `dmabuf::tests` import failures are
+  the documented udmabuf-provenance known failures, failing at `Failed
+  vs Created` before any read-back runs); `clippy -p scoot --all-targets -D
   warnings` clean; `fmt --check` clean; `smoke-test.sh` rc=0 with 22
   ok under pixman and under `RENDERER=gles`.
 - README: no user-facing surface changed (no config, keybinding, CLI
