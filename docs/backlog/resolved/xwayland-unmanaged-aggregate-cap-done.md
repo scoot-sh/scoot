@@ -115,8 +115,10 @@ that bounds the aggregate itself.
   `PATH`): `cargo test -p scoot --features xwayland --bin scoot
   unmanaged_aggregate_probe -- --ignored --nocapture --test-threads=1`
   with `SCOOT_AGG_CLIENTS`×`SCOOT_AGG_MENUS` = 2×5, 1×128, 4×32, 2×124.
-  Best-of-5 medians in the table above (full min/med/max in the PR
-  description).
+  Best-of-5 medians in the table above (per-run spreads were not
+  retained — only the one noisy cell's min/max, 49/166µs, survives in the
+  PR discussion; the probe has since been deleted, so they cannot be
+  re-derived).
 - Existing tests unchanged and green on the same binary: the 5 hermetic
   `toplevel_cap::tests::x11_unmanaged` tests and the 3 live
   `xwayland::tests::unmanaged_cap` tests (`SCOOT_REQUIRE_XWAYLAND=1`).
