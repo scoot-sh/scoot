@@ -2010,22 +2010,27 @@ transition below is a real power-on or cable pull. No `force` override was
 written, so no reboot was needed afterwards.
 
 Built on the machine from `main` at `87e1935` with
-`cargo build -p scoot --features gpu-scanout` in the flake dev shell, into
+`cargo build -p scoot --features gpu-scanout`, run through `~/fx/dev.sh`
+(which sources the flake dev shell's exported environment), into
 its own target dir (`~/scoot-live-target`, `scoot` sha256 `57555773…9b1515d`).
 Same machine, kernel, VT 2 + private `seatd` recipe and `[output] scale =
 1.5` config as Test 11, `--renderer gles`. Scripts: `~/fx/live-start.sh`,
 `live-snap.sh NAME` (outputs, windows, fd count, one screenshot per output)
-and `live-stop.sh`. A udev monitor and a 0.5 s DP-1 sysfs poller ran
+and `live-stop.sh` for legs 1–2. Leg 3 used their parameterised copies
+`live-start2.sh` / `live-snap2.sh` / `live-stop2.sh` with
+`LIVE_DIR=live-mode SCOOT_EXTRA="--mode 1280x720"`. Every bind below was
+sent as IPC key injection (`scoot msg key super+shift+period`), not a
+physical keypress. A udev monitor and a 0.5 s DP-1 sysfs poller ran
 throughout. Raw logs, snapshots and screenshots are under `~/fx/live/`
 (legs 1–2) and `~/fx/live-mode/` (leg 3), one directory per phase.
 
 ### Leg 1 — runtime add on the GPU tier: power on a sleeping monitor
 
 scoot came up with only eDP-1 (DP-1 `disconnected`, 0 modes), two foot
-windows on it, 51 fds. Then the monitor's power button was pressed:
+windows on it, 51 fds. Then the monitor's power button was pressed. The
+sysfs poller read `connected`, 21 modes, at 01:02:57.60Z. scoot logged:
 
 ```
-21:02:57.60  sysfs DP-1: connected, 21 modes
 INFO scoot::compositor::tty::hotplug: drm: driving a newly connected display connector=DP-1 crtc=crtc::Handle(68) width=1920 height=1080 scanout="gpu"
 INFO scoot::compositor::tty::hotplug: drm: a display was connected; added an output for it connector=DP-1 output=2 width=1920 height=1080
 ```
@@ -2034,8 +2039,8 @@ The first hotplug log line (01:02:57.571Z) was 50 ms ahead of the new output
 (57.622Z), with a second EGL context and GLES renderer created beside the
 live one. `outputs` lists DP-1 as id 2 at logical x=1707, 1280x720
 (scale 1.5). `super+shift+period` carried window 2 there. Its screenshot
-shows a correct half-width column with the focus ring. fds 51 → 66 with a
-window on the new head.
+shows a correct half-width column with the focus ring. fds: 51 before, 63
+after the add, 66 once window 2 was on the new head.
 
 **Leg 1 result: pass.**
 
@@ -2050,8 +2055,10 @@ INFO scoot::compositor::tty::hotplug: drm: a display went away; removing its out
 
 The output was removed 57 ms after the change event (01:03:30.390Z →
 .447Z). Window 2 was adopted by eDP-1 (`output: 1`, `visible: false`, on
-the adopted background workspace) and focus fell to window 1. fds went back
-to exactly 51, the count before DP-1 existed.
+the adopted background workspace: workspace 2 on eDP-1 per `remove_output`'s
+`adopted_at`, derived from the code, since `windows` carries no workspace
+field) and focus fell to
+window 1. fds went back to exactly 51, the count before DP-1 existed.
 **Observed by the person at the machine: the window "feels like it
 disappears".** That is the designed adopt-as-background-workspace
 behaviour. It is filed as a UX ticket,
@@ -2067,10 +2074,22 @@ INFO scoot::compositor::reconnect: a display came back; restored its workspaces 
 ```
 
 The monitor returned under a fresh id (3), with window 2 restored to it,
-`visible: true` and the same geometry as before. fds were back to 63, the
-same as after the first add. The default `super+shift+period` then moved
+`visible: true` and the same geometry as before. The default `super+shift+period` then moved
 window 1 onto output 3, so positional binds reach the returned head on
 this tier too.
+
+fd counts per phase, raw (`~/fx/live*/N-*/fds`):
+
+| session | start | add | window moved to DP-1 | unplug | replug | bind | final |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| legs 1–2 | 51 | 63 | 66 | 51 | 63 | 66 | 66 |
+| leg 3 (`--mode`) | 66 (both heads) | — | 66 | 51 | 63 | — | 63 |
+
+Every remove returns to exactly 51, so nothing leaks per head. Two 3-fd
+differences are **unexplained**. The replug with window 2 restored reads 63,
+while the same state before the unplug read 66. Leg 3 starts at 66 with two
+heads and no window on DP-1, against 63 after the runtime add. This may be
+Test 10's fd that lingers until the next redraw. It was not chased.
 
 **Leg 2 result: pass.** No `ERROR` lines and no foot `unknown output`
 warnings in either session.
@@ -2085,7 +2104,8 @@ INFO scoot::compositor::tty: drm: driving this device path=/dev/dri/card2 connec
 INFO scoot::compositor::tty: drm: driving this device path=/dev/dri/card2 connector=DP-1 crtc=crtc::Handle(68) width=1280 height=720 scanout="gpu"
 ```
 
-`wlr-randr` lists DP-1 at 1280x720 (preferred + current), `outputs` gives
+`wlr-randr`, run against the live session, listed DP-1 at 1280x720
+(preferred + current). Its output was read live and not saved. `outputs` gives
 logical 854x480, and a foot carried there renders correctly at that mode.
 Then a real unplug (output removed in 30 ms, fds back to 51) and replug:
 
@@ -2100,14 +2120,16 @@ The hotplug-add path honours `--mode` (`hotplug.rs` reads
 preferred 1920x1080, with window 2 restored to it.
 
 **Leg 3 result: pass.** One cosmetic finding: the eDP-1 "offers no mode of
-the requested size" `WARN` repeats on every hotplug event (3 times in this
-session), because each re-plan re-picks modes for every connector. It is
-harmless and not ticketed.
+the requested size" `WARN` is logged once at startup and again on every
+hotplug event (twice here), because `reconfigure` re-picks the mode for
+every driven head. It is harmless and not ticketed.
 
 ### Teardown and final box state
 
 `live-stop.sh` after each session: VT 1, nothing left running, seatd gone.
-Both `force` files are empty (never written), so no reboot was needed.
+No `force` override was ever written. Both
+`/sys/kernel/debug/dri/2/{DP-1,eDP-1}/force` read `unspecified` afterwards
+(read with `sudo cat`), so no reboot was needed.
 DP-1 was left connected and awake.
 
 ### Results, 2026-09-26 — the GPU-tier hotplug paths are proven, no product change needed

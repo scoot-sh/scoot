@@ -106,8 +106,10 @@ unlike a quicker unplug that morning.
    Powering on a sleeping DP-1 under `--tty --renderer gles` added a
    GPU-scanout head (second EGL context beside the live one) 50 ms after
    the hotplug event. A real cable pull adopted its window, and the replug
-   restored it under a fresh id 3 with an identical rect. fds went
-   51 → 63 → 51 → 63 across add/remove/add. `--mode 1280x720` drove DP-1 at
+   restored it under a fresh id 3 with an identical rect. Every remove
+   returned fds to exactly 51, so nothing leaks per head. Two 3-fd
+   differences between like states are unexplained; the table is in Test 12.
+   `--mode 1280x720` drove DP-1 at
    1280x720 beside eDP-1's native mode, and a replug in that session came
    back at 1280x720. `MoveTo` still needs the only lit screen to be
    pullable, and the Asahi panel is not.

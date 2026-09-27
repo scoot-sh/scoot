@@ -774,8 +774,9 @@ scale/mode) into one hardware session.
   rendering, per-output lock waits, hotplug add/remove) LANDED 2026-09-25,
   live on the Asahi M2 Air including a physical unplug and replug; the
   GPU-tier runtime add and the multi-head mode change since proven there
-  (`Asahi.md` Tests 11–12). Left: #48 `MoveTo` on hardware,
-  [reconnect restore](./resolved/output-reconnect-restore-done.md), and the
+  (`Asahi.md` Tests 11–12), and
+  [reconnect restore](./resolved/output-reconnect-restore-done.md) is
+  resolved. Left: #48 `MoveTo` on hardware and the
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland: drops onto X windows do not land](./protocols/xwayland-pointer-focus-x11.md)
