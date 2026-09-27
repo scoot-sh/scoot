@@ -13,11 +13,11 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > every output as it comes and goes, and gives each one a `background`
 > layer surface. **Solid colors and images work**: `scootbg set '#rrggbb'`
 > or `scootbg set PATH` (PNG, JPEG, WebP) with a fit mode, on every output
-> or one (`--output NAME`), and `scootbg clear`; `query` reports what each
-> output shows, and `version` and `kill` work. Not yet: restoring the
-> wallpaper at the next start, drawing at fractional scales exactly, and
-> scoot's `[wallpaper]` section; they are the next items in
-> [`backlog/`](backlog/README.md). These docs stay here.
+> or one (`--output NAME`), and `scootbg clear`, drawn at each output's
+> real device pixels, fractional scales included; `query` reports what
+> each output shows, and `version` and `kill` work. Not yet: restoring the
+> wallpaper at the next start and scoot's `[wallpaper]` section; they are
+> the next items in [`backlog/`](backlog/README.md). These docs stay here.
 
 ## What it is for
 
@@ -43,6 +43,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   webtop and no-GPU boxes. A GPU path, if ever, is an optional tier.
 - **Sharp at any scale.** Buffers are drawn at the output's real device
   pixels, fractional scales included, never scaled up by the compositor.
+  Working, and measured ([below](#measured-so-far)).
 - **Scriptable.** A small CLI over a control socket with JSON replies, like
   `scootctl`, so an agent or a script can set, query and clear wallpapers.
 
@@ -100,9 +101,15 @@ other subcommand talks to it over its socket.
   ([below](#measured-so-far)).
 - **Images** are decoded on a worker thread, never on the Wayland loop,
   once for every output that needs them, scaled once per buffer size, and
-  written into an opaque `XRGB8888` buffer the surface size times the
-  output's scale, with its opaque region set, so a compositor can skip
-  drawing anything beneath it. The decoded image is dropped once drawn (an
+  written into an opaque `XRGB8888` buffer at the output's device pixels,
+  with its opaque region set, so a compositor can skip drawing anything
+  beneath it. With `wp_fractional_scale_v1` and `wp_viewporter` that is
+  the surface's logical size times the scale the compositor asks for,
+  rounded as that protocol says, under a viewport (1601×1001 for scoot's
+  1067×667 at 1.5 on a 1600×1000 output, which scoot draws one to one);
+  without them, the surface size times the integer scale
+  (`wl_surface.preferred_buffer_scale`, else `wl_output.scale`), which the
+  compositor scales down. The decoded image is dropped once drawn (an
   output plugged in later reads the file again). EXIF orientation is
   applied as the pixels are packed, with no extra buffer. A file that
   cannot be shown (missing, not PNG/JPEG/WebP, over 16384×16384 pixels,
@@ -173,6 +180,11 @@ anything wrong                                                -> {"type":"error"
   memory) is different: the choice is recorded and every other targeted
   output shows it; the reply is an error once they have, and the daemon's
   stderr says which output failed and why.
+- `query`'s `surface.scale` is the scale an output's wallpaper is drawn
+  at (`1.5` from `wp_fractional_scale_v1`, else an integer) and
+  `surface.pixels` the size of an image's buffer in device pixels, both
+  `null` until the surface is configured; the top-level `scale` stays
+  `wl_output`'s integer.
 - `query`'s `shows` is `{"color":"#rrggbb"}` (lowercase),
   `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
   or `null`. Every key of an entry is always present; keys may be added
@@ -188,8 +200,9 @@ Release build, against `scoot --headless --outputs 2` (1600×1000 each,
 a debug build of scoot; the image rows on one 3840×2160 output), on a
 4-CPU Claude Code web container; the records, with the method and every
 raw number, are in
-[solid-color-done.md](backlog/resolved/solid-color-done.md#measurements)
-and [images-decode-and-fit-done.md](backlog/resolved/images-decode-and-fit-done.md#measurements).
+[solid-color-done.md](backlog/resolved/solid-color-done.md#measurements),
+[images-decode-and-fit-done.md](backlog/resolved/images-decode-and-fit-done.md#measurements)
+and [hidpi-fractional-scale-done.md](backlog/resolved/hidpi-fractional-scale-done.md#measurements).
 Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 | What | Result |
@@ -201,6 +214,7 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 | Idle with a color set, 30 s ×3 | 0 context switches, 0 CPU ticks; RSS 2,720 kB, PSS 1,524 kB, 1 thread |
 | PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556–1,560 / 1,556–1,560 / 7,808 kB (14,060 kB once a change leaves a spare buffer per output) |
 | `set`, request to reply, 10,000 changes ×3 | median 400–433 µs, p99 1.6 ms; no memory growth |
+| The same JPEG at scale 1.5 on 3840×2160: buffer, and request to reply ×3 | 33,177,600 B (was 58,982,400 B at `wl_output`'s 2); 420.0–434.4 ms (was 494.9–507.3 ms). On 1600×1000: 6,410,404 B (was 11,387,024 B) |
 
 ## Relation to scoot
 

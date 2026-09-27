@@ -9,8 +9,9 @@
 //! damage (the whole buffer), commit. The viewport sizes any buffer that is
 //! not the surface's size at its own buffer scale (a 1×1 color, or a
 //! buffer at a fractional scale, `crate::density`); once a surface has one,
-//! its destination is kept at the surface's size whatever is drawn. The surface's latest `configure` was
-//! acked when it arrived, before any of this, so each commit carries it.
+//! its destination is kept at the surface's size whatever is drawn. The
+//! surface's latest `configure` was acked when it arrived, before any of
+//! this, so each commit carries it.
 //!
 //! ## Buffers
 //!
@@ -408,7 +409,7 @@ impl Canvas {
                 // destination alone needs no such help: Smithay works the
                 // surface's view out again at every commit
                 // (`RendererSurfaceState::update_buffer`), and
-                // `tests/image.rs` checks it by screenshot.
+                // `tests/scale.rs` checks it by screenshot.
                 //
                 // Attached again, the buffer is the compositor's again until
                 // its next release, even if it had been released (wlroots

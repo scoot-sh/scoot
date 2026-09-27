@@ -10,7 +10,7 @@
 //! | `zwlr_layer_shell_v1` | required: a wallpaper is a background layer surface |
 //! | `wp_viewporter` | optional: scales a 1x1 color buffer to the output |
 //! | `wp_single_pixel_buffer_manager_v1` | optional: colors without shared memory |
-//! | `wp_fractional_scale_manager_v1` | optional: device-pixel sizes at fractional scales (with `wp_viewporter`) |
+//! | `wp_fractional_scale_manager_v1` | optional, with `wp_viewporter`: device-pixel sizes at fractional scales |
 //! | `wl_output` (each) | bound as they appear, released as they go |
 //! | `zxdg_output_manager_v1` | bound only once an output older than v4 (no `name`) appears |
 //!
@@ -28,9 +28,10 @@
 //! `SCOOTBG_DEBUG_NO_FRACTIONAL_SCALE` (any value) to leave
 //! `wp_fractional_scale_manager_v1` unbound, as on a compositor without it.
 //! A release build reads neither: the code is compiled out
-//! (`cfg(debug_assertions)`), so the shipped binary has no hidden knob. The tests run debug builds, as `cargo test` and
-//! `cargo nextest` do by default, and skip the forced-path cases when built
-//! without debug assertions.
+//! (`cfg(debug_assertions)`), so the shipped binary has no hidden knob.
+//! The tests run debug builds, as `cargo test` and `cargo nextest` do by
+//! default, and skip the forced-path cases when built without debug
+//! assertions.
 
 use std::fmt;
 
