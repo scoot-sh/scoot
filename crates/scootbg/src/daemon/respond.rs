@@ -14,6 +14,9 @@ use crate::waiters::Outcome;
 pub trait Changes {
     fn outputs(&self) -> &dyn OutputList;
 
+    /// Whether changes are saved for the next start (`query`'s `saving`).
+    fn saving(&self) -> bool;
+
     /// Makes every output (`output` is `None`), or the outputs named
     /// `output`, show `show` (nothing when `None`), and registers `conn` to
     /// be answered once they do, or, for an image that cannot be shown,
@@ -106,6 +109,7 @@ impl Handler for Responder<'_> {
                     out,
                     &Reply::Outputs {
                         outputs: self.wallpaper.outputs(),
+                        saving: self.wallpaper.saving(),
                     },
                 );
                 return Answer::Now;
@@ -168,6 +172,7 @@ impl<O> OutputList for Outputs<O> {
                         height: buffer.dims.1,
                     }),
                 },
+                draw_failed: output.has_failed(),
                 shows: output.shows().map(Shows),
             });
         }

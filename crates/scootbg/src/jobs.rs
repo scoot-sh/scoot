@@ -7,13 +7,27 @@
 //! - A **trial**: a `set` of an image. Nothing is changed until it has
 //!   decoded, so a file that is missing, not an image, too large or
 //!   corrupt leaves every output as it was and the reply says why. It
-//!   renders the outputs configured when it was asked, so the success
-//!   path needs no second decode.
+//!   renders the outputs it targets as they are when it starts, so the
+//!   success path needs no second decode.
 //! - A **render**: an image already chosen, needed at a size nobody has
 //!   drawn it at: an output plugged in or reconfigured, a new scale. The
 //!   decoded source is never kept (tens of MB for nothing), so this decodes
 //!   the file again. Renders of the same image merge into one job while it
-//!   waits, so it is decoded once for all of them.
+//!   waits, so it is decoded once for all of them. A target another output
+//!   already shows at that size is taken out before the job runs
+//!   ([`Jobs::satisfy`]): it shares those pixels, and is not decoded for.
+//!
+//! **A trial does not start while an output it targets is about to be
+//! configured** ([`Jobs::next`]'s `trial_targets`; `daemon::images`
+//! decides, from `Output::coming`). Started then, it would decode only to
+//! validate the file, and the `configure` would ask for it again: a `set`
+//! sent as the daemon starts decoded twice (ticket 8 counted two opens).
+//! Held, it decodes once, for all of them; the hold ends within a round
+//! trip the daemon has already sent. Renders need no hold: they are asked
+//! for only once an output is configured, and outputs configured together
+//! (every compositor checked configures a session's outputs in one batch)
+//! merge into one job, while one of the same size served later shares
+//! the pixels ([`Jobs::satisfy`]).
 //!
 //! **The worker runs one job at a time, newest first.** A burst of `set`s
 //! then shows the last one after one decode, not after all of them: when
@@ -95,20 +109,16 @@ impl<C> Default for Jobs<C> {
 }
 
 impl<C> Jobs<C> {
-    /// Queues a trial of `image` for `targets`.
-    pub fn trial(
-        &mut self,
-        image: Arc<Image>,
-        trial: Trial<C>,
-        targets: Vec<Target>,
-    ) -> Result<(), Busy> {
+    /// Queues a trial of `image`; what it draws for is decided when it
+    /// starts ([`Jobs::next`]).
+    pub fn trial(&mut self, image: Arc<Image>, trial: Trial<C>) -> Result<(), Busy> {
         let trials = self.queue.iter().filter(|job| job.trial.is_some()).count();
         if trials >= MAX_TRIALS {
             return Err(Busy);
         }
         self.queue.push(Job {
             image,
-            targets,
+            targets: Vec::new(),
             trial: Some(trial),
         });
         Ok(())
@@ -170,13 +180,40 @@ impl<C> Jobs<C> {
         }
     }
 
+    /// Takes out of the waiting renders every target `shared` says it
+    /// served from pixels an output already has (and a render left with
+    /// none); returns whether any was. Trials are left alone: nothing has
+    /// their image yet.
+    pub fn satisfy(&mut self, mut shared: impl FnMut(&Arc<Image>, Target) -> bool) -> bool {
+        let mut any = false;
+        for Job { image, targets, .. } in self.queue.iter_mut().filter(|job| job.trial.is_none()) {
+            targets.retain(|&target| {
+                let served = shared(image, target);
+                any |= served;
+                !served
+            });
+        }
+        if any {
+            self.queue
+                .retain(|job| job.trial.is_some() || !job.targets.is_empty());
+        }
+        any
+    }
+
     /// Takes the newest job to run, if none runs now: first dropping the
     /// render targets `wanted` says are no longer wanted (and render jobs
     /// left with none). Returns the job's image and targets for the
     /// worker; the job itself stays here until [`Jobs::finished`].
+    ///
+    /// A trial's targets are `trial_targets`' answer, asked only when the
+    /// trial is the job to run. `None` holds it back: nothing runs this
+    /// time, not even an older job (the newest is the one that will be
+    /// shown; running an older one first would only delay it), and it is
+    /// asked again next time.
     pub fn next(
         &mut self,
         wanted: impl Fn(&Arc<Image>, Target) -> bool,
+        trial_targets: impl FnOnce(&Trial<C>) -> Option<Vec<Target>>,
     ) -> Option<(Arc<Image>, Vec<Target>)> {
         if self.running.is_some() {
             return None;
@@ -189,6 +226,10 @@ impl<C> Jobs<C> {
             .retain(|job| job.trial.is_some() || !job.targets.is_empty());
         let newest = (0..self.queue.len())
             .max_by_key(|&i| self.queue.get(i).map_or(0, |job| job.serial()))?;
+        let job = self.queue.get_mut(newest)?;
+        if let Some(trial) = &job.trial {
+            job.targets = trial_targets(trial)?;
+        }
         let job = self.queue.remove(newest);
         let work = (Arc::clone(&job.image), job.targets.clone());
         self.running = Some(job);

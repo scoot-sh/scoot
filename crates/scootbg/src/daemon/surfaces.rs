@@ -118,12 +118,15 @@ pub struct LayerObjects {
 
 impl LayerObjects {
     /// Creates the surface for `output` and commits it with no buffer, so
-    /// the compositor answers with a `configure`.
+    /// the compositor answers with a `configure`; then a round trip, which
+    /// says whether it did ([`RoundTrip::Created`], `creation` being
+    /// `Output::creation` for this surface).
     pub(super) fn create(
         globals: &Globals,
         output: &WlOutput,
         qh: &QueueHandle<State>,
         id: OutputId,
+        creation: u32,
     ) -> Self {
         let surface = globals.compositor.create_surface(qh, id);
         // Before the first commit, so the scale arrives before the first
@@ -149,6 +152,7 @@ impl LayerObjects {
         layer.set_exclusive_zone(-1);
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
         surface.commit();
+        globals.display.sync(qh, RoundTrip::Created(id, creation));
         Self {
             surface,
             layer,
@@ -243,6 +247,13 @@ pub enum RoundTrip {
     /// before it, however the reads split. A newer `configure` meanwhile
     /// makes this one moot: its own round trip draws.
     Configured(OutputId, u32),
+    /// Sent after a new surface's first commit, which the compositor answers
+    /// with a `configure` (for surface number `creation` on the output,
+    /// `Output::creation`). If none came by the time this does, waiting
+    /// replies stop waiting for that output (`Output::unanswered`): one
+    /// round trip is the bound on how long a compositor slow to configure
+    /// holds up a `set`, with no timer.
+    Created(OutputId, u32),
     /// Sent after the commits the `set`s and `clear`s resolved in one loop
     /// turn waited for (numbered by `crate::waiters`): the compositor has
     /// processed them, so their connections get their replies.
@@ -314,7 +325,14 @@ impl State {
                 if let Some(old) = objects.layer.take() {
                     old.destroy();
                 }
-                objects.layer = Some(LayerObjects::create(globals, &objects.output, qh, id));
+                let creation = entry.output.creation();
+                objects.layer = Some(LayerObjects::create(
+                    globals,
+                    &objects.output,
+                    qh,
+                    id,
+                    creation,
+                ));
             }
             Effect::Ack(serial) => {
                 if let Some(layer) = &objects.layer {
@@ -510,6 +528,9 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                 if entry.output.configured_serial() != Some(serial) {
                     return;
                 }
+                // An image `set` held back for this output may start now
+                // (`Output::coming`); the loop's next `pump` sees it.
+                entry.output.configure_settled(serial);
                 // Draw, or redraw at the new size. A mapped surface commits
                 // after the ack even when nothing about it changed, so the
                 // ack takes effect; an unmapped one has nothing to commit.
@@ -523,6 +544,19 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                 if !committed && entry.output.shows().is_some() {
                     if let Some(layer) = &entry.objects.layer {
                         layer.surface.commit();
+                    }
+                }
+                return;
+            }
+            RoundTrip::Created(id, creation) => {
+                // Late or not, the loop's next `progress` sees it.
+                if let Some(entry) = state.outputs.get_mut(id) {
+                    if entry.output.unanswered(creation) {
+                        warn(format_args!(
+                            "scootbg: the compositor has not configured the wallpaper \
+                             surface on {} yet; replies no longer wait for it",
+                            entry.output.label()
+                        ));
                     }
                 }
                 return;

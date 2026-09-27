@@ -30,15 +30,16 @@ use rustix::io::Errno;
 use scootbg_mem::ShmBuffer;
 
 use crate::image::decode::{DecodeError, decode_file};
-use crate::image::render::{RenderError, Source, render};
+use crate::image::render::{Source, render};
 use crate::jobs::Target;
 use crate::wallpaper::Image;
 
 #[cfg(test)]
 mod tests;
 
-/// What became of one target: its buffer, or why not (for stderr).
-pub type Rendered = (Target, Result<ShmBuffer, String>);
+/// What became of one buffer size (pixels), for every target of that size:
+/// its buffer, shared by all of them, or why not (for stderr).
+pub type Rendered = ((u32, u32), Result<ShmBuffer, String>);
 
 /// A finished job: every target drawn (or not), or the image unusable.
 pub type Done = Result<Vec<Rendered>, JobError>;
@@ -212,10 +213,10 @@ impl Drop for Guard {
     }
 }
 
-/// Decodes the image once and draws it for every target: once per
-/// distinct size (scaled once), copied for other outputs of that size.
-/// The source is handed to the last size's draw by value, so it is
-/// dropped before that buffer is allocated.
+/// Decodes the image once and draws it once per distinct size among the
+/// targets: outputs of one size share that buffer (`daemon::images`
+/// offers it to each). The source is handed to the last size's draw by
+/// value, so it is dropped before that buffer is allocated.
 pub fn work(image: &Image, targets: &[Target]) -> Done {
     let decoded = decode_file(Path::new(&image.path), image.look.fill).map_err(JobError::Decode)?;
     let mut sizes: Vec<(u32, u32)> = Vec::with_capacity(targets.len());
@@ -224,7 +225,7 @@ pub fn work(image: &Image, targets: &[Target]) -> Done {
             sizes.push(target.dims);
         }
     }
-    let mut out = Vec::with_capacity(targets.len());
+    let mut out = Vec::with_capacity(sizes.len());
     let mut source = Some(decoded);
     let last = sizes.len().saturating_sub(1);
     for (index, &dims) in sizes.iter().enumerate() {
@@ -235,37 +236,9 @@ pub fn work(image: &Image, targets: &[Target]) -> Done {
             (false, Some(decoded)) => Some(render(Source::Borrowed(decoded), image.look, dims)),
             (false, None) => None,
         };
-        let Some(drawn) = drawn else {
-            continue;
-        };
-        let mut drawn = drawn.map_err(|error| error.to_string());
-        let mut same = targets.iter().filter(|target| target.dims == dims);
-        let Some(&first) = same.next() else {
-            continue;
-        };
-        for &other in same {
-            let copy = match &mut drawn {
-                Ok(buffer) => copy_of(buffer).map_err(|error| error.to_string()),
-                Err(error) => Err(error.clone()),
-            };
-            out.push((other, copy));
+        if let Some(drawn) = drawn {
+            out.push((dims, drawn.map_err(|error| error.to_string())));
         }
-        out.push((first, drawn));
     }
     Ok(out)
-}
-
-/// A second buffer with the same pixels, for another output of the same
-/// size.
-fn copy_of(buffer: &mut ShmBuffer) -> Result<ShmBuffer, RenderError> {
-    let geometry = buffer.geometry();
-    let (width, height) = (geometry.width as u32, geometry.height as u32);
-    let mut copy = ShmBuffer::new(width, height).map_err(RenderError::Shm)?;
-    let from = buffer.pixels_mut();
-    let to = copy.pixels_mut();
-    if from.len() != to.len() {
-        return Err(RenderError::Empty);
-    }
-    to.copy_from_slice(from);
-    Ok(copy)
 }

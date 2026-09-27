@@ -20,7 +20,7 @@ than scoot's radius, so a crescent of background still shows between their
 curve and the ring (all four corners fail the pixel check, 53–59
 background px each at 1.5). That is much closer than `main`, where the ring
 circled the empty slot, but it is not a match. See
-[`core/client-rounded-corners-vs-ring.md`](../core/client-rounded-corners-vs-ring.md).
+[`resolved/client-rounded-corners-vs-ring-done.md`](../resolved/client-rounded-corners-vs-ring-done.md).
 
 **SHA mapping.** The branch was rebased onto `85c662a` (a backlog-only
 commit) during review, so the evidence SHAs below are pre-rebase:

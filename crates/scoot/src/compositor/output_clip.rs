@@ -165,6 +165,82 @@ impl State {
             .find(|&id| self.output_holds(id, pos))
     }
 
+    /// Brings every mapped window's `wl_surface.enter`/`leave` membership
+    /// back in step with its placement: entered on exactly the output it is
+    /// placed on, on no other.
+    ///
+    /// Runs after every `Space::refresh`, whose overlap bookkeeping this
+    /// corrects rather than relies on: `refresh` enters a window on each
+    /// output its bounding box crosses, so a column scrolled part-way off
+    /// its output (or a fullscreen window its column is focused away from)
+    /// is announced on the neighbour too. Harmless while every output shares
+    /// one scale; once per-output scale lands a client picks its buffer
+    /// scale from the outputs it has entered, and would pick the
+    /// neighbour's. Nothing else in the compositor reads
+    /// `Space::outputs_for_element` -- drawing gathers its own elements and
+    /// hit-testing filters by [`placed_on`] -- so `refresh`'s map is only
+    /// ever this membership, and this is the one place that owns it.
+    ///
+    /// Sound against `refresh` sending the same events itself, because
+    /// Smithay's `Output::enter`/`leave` dedupe per surface: the corrective
+    /// `leave` is a no-op once sent however often the overlap is recomputed,
+    /// and `refresh`'s own `leave` when the overhang ends finds the surface
+    /// already gone and sends nothing -- no unbalanced enter or leave ever
+    /// reaches the client, only a transient enter-plus-leave inside one
+    /// flush while the overhang lasts.
+    ///
+    /// Allocation-free: one bounding-box read and one rectangle
+    /// intersection per window per output, and surface-tree walks only for
+    /// the windows that actually overhang (or sit wholly off) their output.
+    pub(super) fn reconcile_surface_membership(&self) {
+        for window in self.space.elements() {
+            // `None` while unmapped -- and unmapped windows are not in the
+            // space, so this only fires across an output being removed: the
+            // `refresh` above already sent that output's leaves, and there is
+            // no live output to enter. Filtered to live outputs for the
+            // same reason: entering one being retired would announce an
+            // output whose global is already withdrawn.
+            let want = placed_on(window).filter(|id| self.outputs.get(*id).is_some());
+            let Some(bbox) = self.space.element_bbox(window) else {
+                continue;
+            };
+            for (id, output) in self.outputs.iter_with_ids() {
+                // No geometry: the output is not in the space (an output on
+                // its way out -- see `remove_output`, whose refresh runs
+                // between `unmap_output` and `outputs.remove`). `refresh`
+                // already sent those leaves through its unmapped-output
+                // branch, and there is nothing to enter on an output with
+                // nowhere to overlap.
+                let Some(geometry) = self.space.output_geometry(output) else {
+                    continue;
+                };
+                let overlap = geometry.intersection(bbox);
+                if want == Some(id) {
+                    // The window's own output: `refresh` entered it whenever
+                    // the box touches the output, so only the wholly-off
+                    // case needs a send -- a fullscreen window its column
+                    // is focused away from, whose box sits beside its own
+                    // screen. The overlap it stores is then the window's own
+                    // element-local geometry: "all of this window is this
+                    // output's", which is what placement means where no
+                    // pixels overlap. Element-relative like `refresh`'s own
+                    // (which subtracts the box's location) -- this one
+                    // already is.
+                    if overlap.is_none() {
+                        window.output_enter(output, SpaceElement::geometry(window));
+                    }
+                } else if overlap.is_some() {
+                    // Another output the box crosses: `refresh` entered it,
+                    // and none of the window's pixels are drawn there (each
+                    // frame gathers only its own output's windows), so it
+                    // leaves again -- popups included, which are drawn (and
+                    // cut) with their parent.
+                    window.output_leave(output);
+                }
+            }
+        }
+    }
+
     /// The top-most window whose input region accepts `pos`, among the
     /// windows placed on the output `pos` is on, and the location it is
     /// rendered at -- `Space::element_under` with the output rule applied.

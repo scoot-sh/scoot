@@ -567,21 +567,22 @@ impl State {
     /// A frame an X window committed: reported only for a floating one (see
     /// the module doc on minimums), as a window that chooses its own size --
     /// the core places it at the size it drew.
-    pub(in crate::compositor) fn observe_x11_frame(&mut self, id: WindowId) {
-        let Some(floating) = self.world.floating_size(id) else {
-            return;
-        };
+    ///
+    /// Returns whether the frame changed the arrangement, as
+    /// [`State::observe_frame`] does: the flush applies once when any frame
+    /// did.
+    pub(in crate::compositor) fn observe_x11_frame(&mut self, id: WindowId) -> bool {
+        if self.world.floating_size(id).is_none() {
+            return false;
+        }
         let Some(size) = self.window(id).map(|window| window.geometry().size) else {
-            return;
+            return false;
         };
         self.world.handle_event(Event::FrameObserved {
             id,
             requested: Size::default(),
             actual: Size::new(size.w, size.h),
-        });
-        if self.world.floating_size(id) != Some(floating) {
-            self.apply();
-        }
+        })
     }
 
     /// Gives the core a size for every X window floating with none: one the

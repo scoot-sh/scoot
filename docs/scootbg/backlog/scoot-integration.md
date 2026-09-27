@@ -26,7 +26,7 @@ color = "#101014"
 ## The rule: whichever you changed last wins
 
 Stated once here, and the same way in the README and in
-[restore-state.md](restore-state.md):
+[restore-state-done.md](resolved/restore-state-done.md):
 
 - Edit `[wallpaper]` (and start or reload scoot): the config's wallpaper
   shows.
@@ -39,8 +39,10 @@ Stated once here, and the same way in the README and in
 `apply-config` belongs to this ticket: it moved here from the CLI ticket
 ([cli-and-ipc-done.md](resolved/cli-and-ipc-done.md#resolution)) when
 that ticket's other items landed, because it needs ticket 9's saved state
-([restore-state.md](restore-state.md)) for its fingerprint. Nothing of it
-exists yet; the CLI neither parses nor advertises it.
+([restore-state-done.md](resolved/restore-state-done.md)) for its
+fingerprint. That state now exists (see [below](#what-ticket-9-provides));
+`apply-config` itself does not yet: the CLI neither parses nor advertises
+it.
 
 Everything scoot does with scootbg goes through one command,
 `scootbg apply-config --profile NAME '<json>'`, where the JSON is the
@@ -95,6 +97,42 @@ may be a `scootbg set` pick) restores. The config did not change between
 the two runs that scoot saw, so this is still "unchanged", and it is
 documented rather than worked around.
 
+### What ticket 9 provides
+
+Ticket 9 ([restore-state-done.md](resolved/restore-state-done.md), and
+[the Restore section](../README.md#restore) for the user-facing rules)
+built the state this mechanism compares against, and left these hooks:
+
+- **The fingerprint has its line already.** The state file (version 1)
+  reads and keeps `fingerprint VALUE` (escaped like every field, at most
+  `state::format::MAX_FINGERPRINT`, 256 bytes: a hex hash fits) and
+  `profile NAME`; every save writes back the fingerprint it read, so a
+  `scootbg set` never loses it. `apply-config` needs no version bump: it
+  adds a setter on `state::Saved` (only it calls one) and saves as `set`
+  does.
+- **`--profile` exists** on `daemon`, checked by `state::Profile::parse`
+  (1 to 64 of `A-Z a-z 0-9 . _ -`, no leading `.`, no `..`);
+  `apply-config --profile` takes the same parser.
+- **Loading and showing are separate.** `daemon::restore::load` reads a
+  profile's file (every problem a warning, never fatal) and returns the
+  table to save into; `restore::apply(state, record, show)` fills it and,
+  when `show`, the daemon's choices. A daemon started by `apply-config`
+  loads without showing, compares fingerprints, then applies either the
+  section or the saved choices, rather than restore first and flash.
+- **Adopting a profile mid-life** is not the start-up path: by then the
+  outputs are configured, so after `apply` the daemon must `reconcile`
+  every output (start-up needs none: nothing is configured yet), and the
+  previous profile's writer should be flushed (`Saved::flush`) before
+  `state.saved` is replaced. The restored choices take new generations,
+  newer than every earlier request, which is right: adopting is the
+  newest event.
+- **`apply-config '{}'` with no daemon** writes the file itself:
+  `state::load`, the choices cleared and the fingerprint set, and
+  `state::saver::write_atomic` (public for this), synchronously, since
+  the process exits straight after.
+- A restore saves nothing, and `--no-restore` still reads the file, so
+  neither can erase a fingerprint.
+
 ## How scoot drives it
 
 - **Startup, and every reload, while `[wallpaper]` exists:** spawn
@@ -117,7 +155,7 @@ documented rather than worked around.
   a daemon only to clear; a later `scootbg daemon --profile scoot` shows
   nothing, as the config asked.
 - **The profile** names the state `apply-config` restores and records
-  (see [restore-state.md](restore-state.md)): scoot passes `scoot`, or
+  (see [restore-state-done.md](resolved/restore-state-done.md)): scoot passes `scoot`, or
   `scoot-nested` under `--nested`, so a nested session and its host keep
   separate state.
 - **Paths are resolved by scoot**, which owns its config's meaning: `~/`
@@ -159,6 +197,76 @@ scoot must be able to find it:
   package's store path, so a Nix user gets it working with no extra step.
 - A missing binary is the fail-open warning above, naming the `command`
   it tried and how to install it.
+
+### NixOS consumers
+
+(User, 2026-09-27: "make sure ticket 10 enhances the nix setup for NixOS
+consumers", and "it should flow well with scoot".)
+
+**The bar: turning scoot on is enough.** A NixOS user who writes
+`programs.scoot.enable = true` and puts a `[wallpaper]` section in their
+config gets a wallpaper. They add no second option, no package, and no
+`command` path. scootbg is a detail of scoot there, not a second thing to
+set up. The same holds for home-manager. Both modules spell the options
+the same way, under `programs.scoot.wallpaper.*`, so one reads like the
+other.
+
+Today the NixOS module (`nix/modules/nixos.nix`, `nixosModules.scoot`)
+owns the scoot binary and the opt-in session entry, and nothing of
+scootbg. After this item, a NixOS user must get a working `[wallpaper]`
+with no hand wiring. That includes a user without home-manager, and one
+who launches scoot from the greeter entry.
+
+- **`programs.scoot.wallpaper.enable`** installs
+  **`programs.scoot.wallpaper.package`** system-wide, so the default
+  `[wallpaper] command = "scootbg"` resolves on `PATH` for any user and
+  for the greeter-launched session.
+  - **It defaults to `programs.scoot.enable`.** Installing a ~1.5 MB
+    binary changes nothing until a config asks for a wallpaper, so this is
+    not a behaviour change, unlike the login entry, which stays opt-in.
+  - Setting it to `false` opts out, for someone using another wallpaper
+    daemon.
+- **One pinned pair.** scoot and scootbg come from the same flake
+  revision by default, so the `apply-config` protocol scoot speaks is
+  always the one the installed scootbg understands. If a user pins only
+  one of them, `apply-config`'s protocol version check reports the
+  mismatch in scoot's log. It must not fail silently.
+- **Package default:** the flake wrapper injects
+  `self.packages.${pkgs.system}.scootbg` with `mkDefault`, the same
+  pattern as `programs.scoot.package`. A direct-module user (no flake)
+  who turns it on without setting `package` gets a loud eval failure,
+  not a session that silently has no wallpaper.
+- **No per-user config from the NixOS side.** The config file stays
+  per-user, in the home-manager module, as it does for scoot, and the
+  NixOS module only guarantees the binary. `docs/nix.md` says so and
+  shows the pairing next to the existing "complete session" example:
+  home-manager `settings.wallpaper` plus NixOS `wallpaper.enable`.
+- **scootbg is Linux-only** (`flake.nix` exposes `packages.*.scootbg`
+  only where `isLinux`, and its `meta.platforms` is Linux). On Darwin the
+  home-manager wrapper already defaults `programs.scoot.package` to
+  `null`. `wallpaper.package` does the same there, and so does the
+  overlay: it provides `pkgs.scootbg` only on Linux. A Darwin config
+  that edits a `[wallpaper]` section for a Linux box must evaluate,
+  not fail on a missing attribute.
+- **An overlay:** `overlays.default` providing `pkgs.scoot`,
+  `pkgs.scootctl` and `pkgs.scootbg`.
+  - `docs/nix.md` currently says "there is no overlay", and that is why
+    direct-module users must set `package` by hand.
+  - Decide it in this item, and record the reason either way.
+  - If it is added, the modules default to `pkgs.scootbg` where it
+    exists, the flake wrappers keep injecting their own build, and the
+    `docs/nix.md` caveat goes.
+- **Checks:** extend `nix/tests.nix`, the hermetic `evalModules` checks
+  that `nix flake check` runs. Cover the option off (no package), the
+  option on (the package in `environment.systemPackages`), the
+  direct-module failure without a package, the flake wrapper's default,
+  and the overlay if it is added.
+- **An end-to-end VM test:** a `nixosTest` that boots a scoot session
+  and sees a wallpaper pixel would prove the whole path. Add it if CI
+  can carry its cost; decide, and record which.
+- **Docs, in the same PR:** `docs/nix.md`'s NixOS module table and prose
+  (the new options, the pairing, the overlay), and the packaging line in
+  `docs/scootbg/README.md`.
 
 ## Docs
 

@@ -97,3 +97,19 @@ mapped (88.0 MB for a first set); **Set** 397.0–433.6 ms request to reply,
 390–420 ms of CPU; **Size** 1,500,008 B, now linking `libm` (the scaler's
 `sinf`) as predicted. The scaler's cost against fir is the known risk on the Set row
 (dependencies-done.md §3b).
+
+**From [ticket 8](resolved/memory-and-idle-done.md#measurements),
+scootbg's own side of the idle and startup rows**, same setup: **Idle
+wakeups** 0 in 60 s with a color or an image (perf and `/proc`), one
+thread; **Idle memory** with the image 12.3–12.4 MB RSS / 7.1–7.3 MB PSS
+on 1× 1080p and 36.7–36.8 MB / 19.4–19.6 MB on **2× 4K, where both
+outputs share one buffer's pixels**: the floor above is paid once for
+all outputs of one size showing one image, so a daemon with a buffer per
+output holds it twice (scootbg did until ticket 8: 69.2 MB RSS); with a
+color 3.6–3.7 MB / 2.0–2.1 MB (4.0 MB / 2.8–2.9 MB since ticket 9, once
+a save has touched 340–370 kB more of clean code pages: see
+[its record](resolved/restore-state-done.md#idle-and-memory)). **Startup** 1.8–2.5 ms to the first
+answer, 3.0–4.1 ms to a color on screen; an image `set` at start-up
+decoded twice (642–720 ms on 4K) until
+[ticket 9](resolved/restore-state-done.md#measurements): once now,
+450–476 ms, and 451–497 ms to a restored 4K JPEG on screen.

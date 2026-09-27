@@ -26,10 +26,11 @@
 //! ## Buffers on the shm paths
 //!
 //! A buffer the compositor may be reading (attached, not yet released) is
-//! never written (`scootbg_mem::shm`'s type state). A change reuses a
-//! released buffer of the right size in place, else takes a second one, at
-//! most [`SLOTS`] in all; with both still held by the compositor the draw
-//! waits for a `wl_buffer.release` ([`pick`]).
+//! never written, and neither are pixels another output's buffer shares
+//! (`crate::share`). A change reuses a released, unshared buffer of the
+//! right size in place, else takes a second one, at most [`SLOTS`] in all;
+//! with both still held by the compositor the draw waits for a
+//! `wl_buffer.release` ([`pick`]).
 
 use crate::density::{Buffer, Scale};
 use crate::outputs::Size;
@@ -146,8 +147,12 @@ pub const SLOTS: usize = 2;
 
 /// What the decision needs to know about a buffer in a slot.
 pub trait Slot {
-    /// Released (or never attached): ours to write.
+    /// Released (or never attached): the compositor is done with this
+    /// buffer, so it may be dropped.
     fn is_free(&self) -> bool;
+    /// Free, and no other buffer shares its pixels: they may be written in
+    /// place.
+    fn is_writable(&self) -> bool;
     /// Its size in pixels.
     fn dims(&self) -> (u32, u32);
 }
@@ -155,9 +160,10 @@ pub trait Slot {
 /// Where to draw a buffer of `dims`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pick {
-    /// A free buffer of that size: write it in place, no allocation.
+    /// A writable buffer of that size: write it in place, no allocation.
     Reuse(usize),
-    /// A free buffer of another size: drop it and allocate in its place.
+    /// A free buffer that cannot be reused (another size, or pixels another
+    /// output shares): drop it and allocate in its place.
     Replace(usize),
     /// An empty slot: allocate.
     Fill(usize),
@@ -168,14 +174,15 @@ pub enum Pick {
 /// Chooses a slot for a buffer of `dims`, cheapest first: reuse, then
 /// replace a useless free one (so it does not linger), then a new one.
 pub fn pick<S: Slot>(slots: &[Option<S>; SLOTS], dims: (u32, u32)) -> Pick {
-    let free = |i: &usize| slots[*i].as_ref().is_some_and(Slot::is_free);
-    if let Some(i) = (0..SLOTS)
-        .filter(free)
-        .find(|&i| slots[i].as_ref().is_some_and(|slot| slot.dims() == dims))
-    {
+    let reusable = |i: &usize| {
+        slots[*i]
+            .as_ref()
+            .is_some_and(|slot| slot.is_writable() && slot.dims() == dims)
+    };
+    if let Some(i) = (0..SLOTS).find(reusable) {
         return Pick::Reuse(i);
     }
-    if let Some(i) = (0..SLOTS).find(free) {
+    if let Some(i) = (0..SLOTS).find(|&i| slots[i].as_ref().is_some_and(Slot::is_free)) {
         return Pick::Replace(i);
     }
     match (0..SLOTS).find(|&i| slots[i].is_none()) {

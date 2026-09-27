@@ -21,20 +21,28 @@
 //!   no storage to write, so destroying it while the compositor still
 //!   holds it is harmless.
 //! - **Shm** (paths 2 and 3): up to [`SLOTS`] sealed-memfd buffers. A
-//!   buffer is written only while free (never attached, or released:
-//!   `scootbg_mem::shm`'s type state), so a change reuses a released
-//!   buffer in place, else takes the other slot, else waits for a release
-//!   ([`Canvas::stalled`]). A released buffer of a size no longer drawn is
-//!   dropped at once rather than kept. The `wl_shm_pool` is destroyed as
-//!   soon as its buffer exists: the buffer keeps the memory alive.
+//!   buffer is written only while writable (never attached, or released,
+//!   and its pixels shared with no other buffer: [`crate::share`]), so a
+//!   change reuses a released buffer in place, else takes the other slot,
+//!   else waits for a release ([`Canvas::stalled`]). A buffer released
+//!   while another is on screen is dropped at once, not kept as a spare:
+//!   a static wallpaper needs one buffer, and the next change allocating
+//!   again costs a few milliseconds (13 ms more at 4K, measured in
+//!   `docs/scootbg/backlog/resolved/memory-and-idle-done.md`) against a
+//!   whole output's worth of memory held for as long as it stays up. The
+//!   memfd is closed as soon as its `wl_shm_pool` exists (the compositor
+//!   has its own copy, the mapping keeps the memory); the pool is kept,
+//!   with no fd, for as long as the pixels are, so another output's buffer
+//!   can be made over them.
 //!
 //! - **Images**: a full-size shm buffer (the surface's real device pixels)
-//!   the worker thread rendered
-//!   (`daemon::worker`), offered here ([`Canvas::offer`]) and put in a slot
-//!   like a color's. A draw with no rendered buffer for the image at that
-//!   size says so ([`Drew::NeedsRender`]) and the caller asks the worker.
-//!   A released buffer holding an image that is no longer on screen is
-//!   dropped at once: only a new render could use its slot.
+//!   the worker thread rendered (`daemon::worker`), once per size: outputs
+//!   of one size showing one image share the pixels ([`Pixels`], offered
+//!   to each with [`Canvas::offer`]), each through its own `wl_buffer`
+//!   (why not one: `crate::share`), put in a slot like a color's. A draw
+//!   with no rendered pixels for the image at that size says so
+//!   ([`Drew::NeedsRender`]) and the caller asks the worker, or finds them
+//!   on another output (`daemon::images::pump`).
 //!
 //! ## Clearing
 //!
@@ -50,20 +58,23 @@
 //! compositor already takes for scootbg at start-up.
 
 use std::fmt;
+use std::rc::Rc;
 
 use wayland_client::QueueHandle;
 use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_client::protocol::wl_shm;
+use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
-use scootbg_mem::{Attached, ShmBuffer, ShmError};
+use scootbg_mem::{ShmBuffer, ShmError};
 
 use super::surfaces::LayerObjects;
 use super::wayland::{Globals, State};
 use crate::color::Color;
 use crate::density::Scale;
 use crate::outputs::{OutputId, Size};
-use crate::paint::{Drawn, Path, Pick, SLOTS, Slot, pick};
+use crate::paint::{self, Drawn, Path, Pick, SLOTS, pick};
+use crate::share::{Shared, Slot};
 use crate::wallpaper::Wallpaper;
 
 /// Why a draw failed. Reported on stderr, and the waiting reply says so.
@@ -105,118 +116,127 @@ pub enum Drew {
     NeedsRender((u32, u32)),
 }
 
-/// What a slot's pixels hold.
+/// What a buffer's pixels hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Content {
+pub enum Content {
     Color(Color),
     /// The image of this serial (`crate::wallpaper::Image`).
     Image(u64),
 }
 
-/// A buffer the worker rendered, not on screen yet.
-struct Rendered {
-    serial: u64,
+/// The memory behind one or more outputs' buffers: the mapping, and the
+/// `wl_shm_pool` their `wl_buffer`s are made from. The pool goes with the
+/// last share ([`Pixels`]).
+#[derive(Debug)]
+pub struct Memory {
+    shm: ShmBuffer,
+    pool: WlShmPool,
     dims: (u32, u32),
-    memory: ShmBuffer,
-}
-
-/// An shm buffer's memory: ours to write, or the compositor's to read.
-enum Mem {
-    Free(ShmBuffer),
-    Held(Attached),
-}
-
-/// One shm buffer and its `wl_buffer`.
-struct ShmSlot {
-    buffer: WlBuffer,
-    mem: Mem,
-    dims: (u32, u32),
-    /// What its pixels hold.
     content: Content,
 }
 
-impl ShmSlot {
-    /// A new buffer of `dims` filled with `color`.
-    fn new(
-        globals: &Globals,
-        qh: &QueueHandle<State>,
-        id: OutputId,
-        dims: (u32, u32),
-        color: Color,
-    ) -> Result<Self, ShmError> {
-        let mut memory = ShmBuffer::new(dims.0, dims.1)?;
-        fill(&mut memory, color);
-        Ok(Self::wrap(globals, qh, id, memory, Content::Color(color)))
-    }
-
-    /// A `wl_buffer` for `memory`, whose pixels hold `content`.
-    fn wrap(
-        globals: &Globals,
-        qh: &QueueHandle<State>,
-        id: OutputId,
-        memory: ShmBuffer,
-        content: Content,
-    ) -> Self {
-        let geometry = memory.geometry();
-        let pool = globals.shm.create_pool(memory.fd(), geometry.len, qh, ());
-        let buffer = pool.create_buffer(
-            0,
-            geometry.width,
-            geometry.height,
-            geometry.stride,
-            wl_shm::Format::Xrgb8888,
-            qh,
-            id,
-        );
-        // The buffer keeps the pool's memory alive; the pool object itself
-        // is not needed again.
-        pool.destroy();
-        // Positive `i32`s (`Geometry` validated them): lossless.
-        let dims = (geometry.width as u32, geometry.height as u32);
-        Self {
-            buffer,
-            mem: Mem::Free(memory),
-            dims,
-            content,
-        }
-    }
-
-    /// Hands it to the compositor: from here until [`ShmSlot::released`]
-    /// the pixels cannot be reached.
-    fn attached(self) -> Self {
-        let mem = match self.mem {
-            Mem::Free(memory) => Mem::Held(memory.attach()),
-            held @ Mem::Held(_) => held,
-        };
-        Self { mem, ..self }
-    }
-
-    /// `wl_buffer.release`: ours to write again.
-    fn released(self) -> Self {
-        let mem = match self.mem {
-            Mem::Held(attached) => Mem::Free(attached.released()),
-            free @ Mem::Free(_) => free,
-        };
-        Self { mem, ..self }
-    }
-
-    fn destroy(self) {
-        self.buffer.destroy();
-        // The mapping goes with `mem`. If the compositor still holds the
-        // buffer, it has its own mapping of the pool; the wl_buffer
-        // protocol allows destroying before release as long as the storage
-        // is not written again, and it never is.
+impl Drop for Memory {
+    fn drop(&mut self) {
+        // The compositor unmaps the pool once its buffers are gone too.
+        self.pool.destroy();
     }
 }
 
-impl Slot for ShmSlot {
+/// Pixels to show, shared by every output of one size showing one image
+/// (`crate::share`).
+pub type Pixels = Rc<Shared<Memory>>;
+
+/// Hands `shm`, whose pixels hold `content`, to the compositor: a pool
+/// over its memfd, which is then closed. Fails only for a buffer whose fd
+/// is closed already, which every caller's fresh buffer is not.
+pub fn pixels(
+    globals: &Globals,
+    qh: &QueueHandle<State>,
+    mut shm: ShmBuffer,
+    content: Content,
+) -> Result<Pixels, ShmError> {
+    let geometry = shm.geometry();
+    // Positive `i32`s (`Geometry` validated them): lossless.
+    let dims = (geometry.width as u32, geometry.height as u32);
+    let pool = match shm.fd() {
+        Some(fd) => globals.shm.create_pool(fd, geometry.len, qh, ()),
+        None => {
+            return Err(ShmError::Io(std::io::Error::other(
+                "the buffer's memfd is already closed",
+            )));
+        }
+    };
+    // The queued request holds its own copy of the fd until it is sent, and
+    // the compositor its own after that.
+    shm.close_fd();
+    Ok(Shared::new(Memory {
+        shm,
+        pool,
+        dims,
+        content,
+    }))
+}
+
+/// One output's buffer over [`Pixels`].
+type ShmSlot = Slot<WlBuffer, Memory>;
+
+/// A `wl_buffer` for this output over `pixels`, not attached yet.
+fn buffer_over(pixels: Pixels, qh: &QueueHandle<State>, id: OutputId) -> ShmSlot {
+    let memory = pixels.memory();
+    let geometry = memory.shm.geometry();
+    let buffer = memory.pool.create_buffer(
+        0,
+        geometry.width,
+        geometry.height,
+        geometry.stride,
+        wl_shm::Format::Xrgb8888,
+        qh,
+        id,
+    );
+    Slot::new(buffer, pixels)
+}
+
+/// A new buffer of `dims` filled with `color`.
+fn color_buffer(
+    globals: &Globals,
+    qh: &QueueHandle<State>,
+    id: OutputId,
+    dims: (u32, u32),
+    color: Color,
+) -> Result<ShmSlot, ShmError> {
+    let mut shm = ShmBuffer::new(dims.0, dims.1)?;
+    fill(&mut shm, color);
+    let pixels = pixels(globals, qh, shm, Content::Color(color))?;
+    Ok(buffer_over(pixels, qh, id))
+}
+
+/// Destroys the slot's `wl_buffer`. Its pixels (the mapping, the pool) go
+/// with their last share. If the compositor still holds the buffer, the
+/// wl_buffer protocol allows destroying it before its release as long as
+/// the storage is not written again, and it never is (`crate::share`
+/// freezes it for anyone still showing it).
+fn destroy(slot: ShmSlot) {
+    slot.retire().destroy();
+}
+
+impl paint::Slot for ShmSlot {
     fn is_free(&self) -> bool {
-        matches!(self.mem, Mem::Free(_))
+        Slot::is_free(self)
+    }
+
+    fn is_writable(&self) -> bool {
+        Slot::is_writable(self)
     }
 
     fn dims(&self) -> (u32, u32) {
-        self.dims
+        self.memory().dims
     }
+}
+
+/// Whether `slot` shows `content` at `dims`.
+fn holds(slot: &ShmSlot, content: Content, dims: (u32, u32)) -> bool {
+    let memory = slot.memory();
+    memory.content == content && memory.dims == dims
 }
 
 /// Writes `color` into every pixel.
@@ -237,8 +257,9 @@ pub struct Canvas {
     slots: [Option<ShmSlot>; SLOTS],
     /// The slot on the surface now, if any (it may be held or released).
     current: Option<usize>,
-    /// An image the worker rendered, waiting to go on screen.
-    ready: Option<Rendered>,
+    /// An image rendered for this output, waiting to go on screen. At most
+    /// one, and often the same pixels as other outputs' (`Pixels`).
+    ready: Option<Pixels>,
     /// A draw waits for a buffer to be released.
     pub stalled: bool,
 }
@@ -249,31 +270,48 @@ impl fmt::Debug for Canvas {
             .field("pixel", &self.pixel.as_ref().map(|(_, color)| color))
             .field("slots", &self.slots.iter().filter(|s| s.is_some()).count())
             .field("current", &self.current)
-            .field("ready", &self.ready.as_ref().map(|r| (r.serial, r.dims)))
+            .field(
+                "ready",
+                &self
+                    .ready
+                    .as_ref()
+                    .map(|r| (r.memory().content, r.memory().dims)),
+            )
             .field("stalled", &self.stalled)
             .finish()
     }
 }
 
 impl Canvas {
-    /// A buffer the worker rendered for image `serial` at `dims`, to show
-    /// at the next draw that wants exactly that. Replaces (drops) any
-    /// earlier one not yet shown.
-    pub fn offer(&mut self, serial: u64, dims: (u32, u32), memory: ShmBuffer) {
-        self.ready = Some(Rendered {
-            serial,
-            dims,
-            memory,
-        });
+    /// Pixels rendered for an image, to show at the next draw that wants
+    /// exactly that image at that size. Replaces (drops) any earlier ones
+    /// not yet shown.
+    pub fn offer(&mut self, pixels: Pixels) {
+        self.ready = Some(pixels);
     }
 
     /// Drops a rendered image waiting to go on screen unless it is of image
     /// `serial`: once something else is wanted, it could never be shown, and
     /// it is an output-sized buffer.
     pub fn forget_ready_unless(&mut self, serial: Option<u64>) {
-        if self.ready.as_ref().map(|r| r.serial) != serial {
+        let keep = self.ready.as_ref().is_some_and(|ready| {
+            serial.is_some_and(|serial| ready.memory().content == Content::Image(serial))
+        });
+        if !keep {
             self.ready = None;
         }
+    }
+
+    /// Pixels this output has (on screen, kept, or waiting) holding image
+    /// `serial` at `dims`, for another output of that size to share.
+    pub fn image(&self, serial: u64, dims: (u32, u32)) -> Option<&Pixels> {
+        let content = Content::Image(serial);
+        self.slots
+            .iter()
+            .flatten()
+            .map(Slot::shared)
+            .chain(&self.ready)
+            .find(|pixels| pixels.memory().content == content && pixels.memory().dims == dims)
     }
 
     /// Draws `target` on `layer`'s surface and commits, or reports why not.
@@ -325,52 +363,55 @@ impl Canvas {
             }
             Wallpaper::Color(color) => {
                 let content = Content::Color(*color);
-                let unchanged =
-                    on_screen.is_some_and(|slot| slot.dims == dims && slot.content == content);
+                let unchanged = on_screen.is_some_and(|slot| holds(slot, content, dims));
                 if !unchanged {
-                    let Some((index, slot)) = self.take_slot(globals, qh, id, dims, *color)? else {
+                    let Some((index, mut slot)) = self.take_slot(globals, qh, id, dims, *color)?
+                    else {
                         self.stalled = true;
                         return Ok(Drew::Stalled);
                     };
-                    surface.attach(Some(&slot.buffer), 0, 0);
-                    self.put(index, slot.attached());
+                    surface.attach(Some(slot.buffer()), 0, 0);
+                    slot.attached();
+                    self.put(index, slot);
                     self.current = Some(index);
+                    // Any other free buffer is now a spare (one kept across a
+                    // re-created surface, say): none is kept.
+                    self.drop_free_slots();
                 } else {
                     attached = false;
                 }
             }
             Wallpaper::Image(image) => {
                 let content = Content::Image(image.serial);
-                let unchanged =
-                    on_screen.is_some_and(|slot| slot.dims == dims && slot.content == content);
-                // A free buffer already holding it (the surface was
+                let unchanged = on_screen.is_some_and(|slot| holds(slot, content, dims));
+                // A released buffer already holding it (the surface was
                 // closed and made again): shown as it is, no new decode.
                 let kept = (0..SLOTS).find(|&i| {
                     self.slots
                         .get(i)
                         .and_then(Option::as_ref)
-                        .is_some_and(|slot| {
-                            slot.is_free() && slot.dims == dims && slot.content == content
-                        })
+                        .is_some_and(|slot| slot.is_free() && holds(slot, content, dims))
                 });
                 if unchanged {
                     attached = false;
                     self.ready = None;
                 } else if let Some(index) = kept {
                     self.ready = None;
-                    if let Some(slot) = self.slots.get_mut(index).and_then(Option::take) {
-                        surface.attach(Some(&slot.buffer), 0, 0);
-                        self.put(index, slot.attached());
+                    if let Some(mut slot) = self.slots.get_mut(index).and_then(Option::take) {
+                        surface.attach(Some(slot.buffer()), 0, 0);
+                        slot.attached();
+                        self.put(index, slot);
                         self.current = Some(index);
+                        // Any other free buffer is now a spare (one kept across a
+                        // re-created surface, say): none is kept.
+                        self.drop_free_slots();
                         retired = self.pixel.take().map(|(old, _)| old);
                     }
                 } else {
                     // Anything else waiting is stale: dropped here.
-                    let Some(ready) = self
-                        .ready
-                        .take()
-                        .filter(|r| r.serial == image.serial && r.dims == dims)
-                    else {
+                    let Some(ready) = self.ready.take().filter(|ready| {
+                        ready.memory().content == content && ready.memory().dims == dims
+                    }) else {
                         return Ok(Drew::NeedsRender(dims));
                     };
                     let index = match pick(&self.slots, dims) {
@@ -381,13 +422,19 @@ impl Canvas {
                             return Ok(Drew::Stalled);
                         }
                     };
+                    // A free buffer (`pick` names no held one): the
+                    // compositor is done with it.
                     if let Some(old) = self.slots.get_mut(index).and_then(Option::take) {
-                        old.destroy();
+                        destroy(old);
                     }
-                    let slot = ShmSlot::wrap(globals, qh, id, ready.memory, content);
-                    surface.attach(Some(&slot.buffer), 0, 0);
-                    self.put(index, slot.attached());
+                    let mut slot = buffer_over(ready, qh, id);
+                    surface.attach(Some(slot.buffer()), 0, 0);
+                    slot.attached();
+                    self.put(index, slot);
                     self.current = Some(index);
+                    // Any other free buffer is now a spare (one kept across a
+                    // re-created surface, say): none is kept.
+                    self.drop_free_slots();
                     retired = self.pixel.take().map(|(old, _)| old);
                 }
             }
@@ -417,10 +464,11 @@ impl Canvas {
                 // later draw writes into it meanwhile.
                 let current = self
                     .current
-                    .and_then(|i| Some((i, self.slots.get_mut(i)?.take()?)));
-                if let Some((index, slot)) = current {
-                    surface.attach(Some(&slot.buffer), 0, 0);
-                    self.put(index, slot.attached());
+                    .and_then(|i| self.slots.get_mut(i))
+                    .and_then(Option::as_mut);
+                if let Some(slot) = current {
+                    surface.attach(Some(slot.buffer()), 0, 0);
+                    slot.attached();
                 } else if let Some((buffer, _)) = &self.pixel {
                     surface.attach(Some(buffer), 0, 0);
                 }
@@ -467,16 +515,15 @@ impl Canvas {
         for place in &mut self.slots {
             if place.as_ref().is_some_and(Slot::is_free) {
                 if let Some(slot) = place.take() {
-                    slot.destroy();
+                    destroy(slot);
                 }
             }
         }
     }
 
-    /// A free buffer holding `color` at `dims`, taken out of its slot
-    /// (reused and refilled, or newly allocated, as [`pick`] says) for the
-    /// caller to attach and [`put`](Self::put) back; `None` when both are
-    /// held.
+    /// A buffer holding `color` at `dims`, taken out of its slot (reused
+    /// and refilled, or newly allocated, as [`pick`] says) for the caller
+    /// to attach and [`put`](Self::put) back; `None` when both are held.
     fn take_slot(
         &mut self,
         globals: &Globals,
@@ -488,40 +535,30 @@ impl Canvas {
         let index = match pick(&self.slots, dims) {
             Pick::Stall => return Ok(None),
             Pick::Reuse(index) => {
-                // `pick` names a filled, free slot; anything else falls
-                // through to a new buffer rather than panic.
-                match self.slots.get_mut(index).and_then(Option::take) {
-                    Some(ShmSlot {
-                        buffer,
-                        mem: Mem::Free(mut memory),
-                        dims,
-                        content,
-                    }) => {
-                        if content != Content::Color(color) {
-                            fill(&mut memory, color);
+                if let Some(mut slot) = self.slots.get_mut(index).and_then(Option::take) {
+                    // `pick` names a writable slot; anything else falls
+                    // through to a new buffer rather than write into
+                    // pixels the compositor or another output may read.
+                    if let Some(memory) = slot.memory_mut() {
+                        if memory.content != Content::Color(color) {
+                            fill(&mut memory.shm, color);
+                            memory.content = Content::Color(color);
                         }
-                        let slot = ShmSlot {
-                            buffer,
-                            mem: Mem::Free(memory),
-                            dims,
-                            content: Content::Color(color),
-                        };
                         return Ok(Some((index, slot)));
                     }
-                    Some(other) => other.destroy(),
-                    None => {}
+                    destroy(slot);
                 }
                 index
             }
             Pick::Replace(index) => {
                 if let Some(old) = self.slots.get_mut(index).and_then(Option::take) {
-                    old.destroy();
+                    destroy(old);
                 }
                 index
             }
             Pick::Fill(index) => index,
         };
-        let slot = ShmSlot::new(globals, qh, id, dims, color).map_err(DrawError::Shm)?;
+        let slot = color_buffer(globals, qh, id, dims, color).map_err(DrawError::Shm)?;
         Ok(Some((index, slot)))
     }
 
@@ -530,43 +567,36 @@ impl Canvas {
         match self.slots.get_mut(index) {
             Some(place) => {
                 if let Some(old) = place.replace(slot) {
-                    old.destroy();
+                    destroy(old);
                 }
             }
             // `index` came from `pick`, which stays below `SLOTS`.
-            None => slot.destroy(),
+            None => destroy(slot),
         }
     }
 
-    /// `wl_buffer.release` for `buffer`: the slot is free again. A free
-    /// buffer not on screen is dropped when nothing could reuse it: an old
-    /// size, an image while something else is on screen (only a new render
-    /// could fill its slot), or anything while a single-pixel buffer is on
-    /// screen. An image's buffer released because its surface went (closed
-    /// by the compositor) is kept, and shown again on the new surface
-    /// without decoding. Returns whether a stalled draw should be retried.
+    /// `wl_buffer.release` for `buffer`: the slot is free again. A buffer
+    /// released while something else is on screen (another slot, or a
+    /// single-pixel buffer) is dropped: no spare is kept (see the module
+    /// docs). One released because its surface went (closed by the
+    /// compositor) is kept, and an image's is shown again on the new
+    /// surface without decoding. Returns whether a stalled draw should be
+    /// retried.
     pub fn released(&mut self, buffer: &WlBuffer) -> bool {
         let Some(index) = self
             .slots
             .iter()
-            .position(|slot| slot.as_ref().is_some_and(|s| &s.buffer == buffer))
+            .position(|slot| slot.as_ref().is_some_and(|s| s.buffer() == buffer))
         else {
             return false;
         };
-        let current_dims = self
-            .current
-            .and_then(|i| self.slots.get(i)?.as_ref())
-            .map(|slot| slot.dims);
-        let Some(slot) = self.slots.get_mut(index).and_then(Option::take) else {
+        let Some(mut slot) = self.slots.get_mut(index).and_then(Option::take) else {
             return false;
         };
-        let slot = slot.released();
-        let stale = Some(index) != self.current
-            && (self.pixel.is_some()
-                || (matches!(slot.content, Content::Image(_)) && self.current.is_some())
-                || current_dims.is_some_and(|d| d != slot.dims));
+        slot.released();
+        let stale = Some(index) != self.current && (self.pixel.is_some() || self.current.is_some());
         if stale {
-            slot.destroy();
+            destroy(slot);
         } else {
             self.put(index, slot);
         }
@@ -585,13 +615,16 @@ impl Canvas {
         self.stalled = false;
     }
 
-    /// Nothing is to be shown for now (`clear`): every buffer goes.
+    /// Nothing is to be shown for now (`clear`, the output gone, or given
+    /// up on; its surface is destroyed first): every buffer goes. Pixels
+    /// another output shares stay with it, frozen if this output's buffer
+    /// over them was still held (`crate::share`).
     pub fn clear(&mut self) {
         self.surface_gone();
         self.ready = None;
         for slot in &mut self.slots {
             if let Some(slot) = slot.take() {
-                slot.destroy();
+                destroy(slot);
             }
         }
     }

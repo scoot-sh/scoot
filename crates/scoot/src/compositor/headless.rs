@@ -14,6 +14,7 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::utils::{Logical, Point, Transform};
 
 use super::State;
+use super::output_clip::placed_on;
 use super::output_identity::OutputIdentity;
 use super::output_scale::smithay_scale;
 use super::reconnect::DisplacedOutput;
@@ -785,22 +786,21 @@ impl State {
                 // derive it twice for one drop.
                 lock_dropped |= self.lock_post_frame(&output, time);
             } else {
-                // Frame callbacks for this output's own windows: a window
-                // overlapping this output's geometry is told to draw, with
-                // this output as the token -- which is what paces it at this
-                // output's cadence rather than another's. A window with no
-                // bbox yet (never mapped, nothing to overlap-test) is told
-                // unconditionally, matching the old unconditional loop: a
-                // client may legitimately ask for a callback before its first
-                // attach, and withholding it would stall the very frame that
-                // unsticks it.
-                let geometry = self.space.output_geometry(&output);
+                // Frame callbacks for this output's own windows: a window is
+                // paced by the output it is placed on (see `output_clip`),
+                // with that output as the token -- not by whichever output's
+                // geometry its bounding box happens to cross. A column
+                // scrolled part-way off its screen used to be fired by
+                // whichever of the two outputs rendered first, and twice
+                // when both did. An unmapped window is on no screen, so it
+                // is told by none; a mapped-but-never-committed one still
+                // has its stamp (written beside `map_element`), so a client
+                // waiting on its first frame is woken by the frame that
+                // should unstick it, exactly once. `id` is the loop's own
+                // output id, so this is one user-data read per window, where
+                // the overlap read used to walk each window's surface tree.
                 for window in self.space.elements() {
-                    let on_this_output = match (geometry, self.space.element_bbox(window)) {
-                        (Some(region), Some(bbox)) => region.overlaps(bbox),
-                        _ => true,
-                    };
-                    if on_this_output {
+                    if placed_on(window) == Some(id) {
                         window.send_frame(&output, time, Some(Duration::ZERO), |_, _| {
                             Some(output.clone())
                         });
@@ -809,7 +809,7 @@ impl State {
                 // Override-redirect X windows are not in `self.space` either
                 // (see `xwayland/unmanaged.rs`).
                 #[cfg(feature = "xwayland")]
-                self.x11_unmanaged_frames(&output, geometry, time);
+                self.x11_unmanaged_frames(&output, self.space.output_geometry(&output), time);
                 // Layer surfaces aren't in `self.space` either, and a bar's clock
                 // stops at whatever second it first drew without this -- the same
                 // frame-callback starvation the cursor surface had. Sent to every
@@ -887,6 +887,11 @@ impl State {
             self.refresh_keyboard_focus();
         }
         self.space.refresh();
+        // `wl_surface.enter`/`leave` by placement, not by bounding box (see
+        // `output_clip::reconcile_surface_membership`): `refresh` just told
+        // every overhanging window it entered the neighbour, and that
+        // stands corrected here, before any client is flushed to.
+        self.reconcile_surface_membership();
         self.popups.cleanup();
         let _ = self.display_handle.flush_clients();
     }
@@ -1402,6 +1407,11 @@ impl State {
         // outputs until the `apply()` at the end, so this sends leaves only;
         // the matching enters come with that layout.
         self.space.refresh();
+        // The leaves above went to the output being removed; nothing here
+        // may re-enter it (its geometry is already gone from the space, so
+        // the reconcile skips it) and nothing may enter a remaining output
+        // yet (no window is placed on one until the `apply()` below).
+        self.reconcile_surface_membership();
         // Before `outputs.remove` below: the name-only fallback in
         // `take_output_identity` reads the output's `wl_output` name, so
         // taking after the removal would always file under "".

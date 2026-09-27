@@ -612,11 +612,11 @@ maps it); the extra fd is the worker's eventfd.
   plus a viewport destination. A scale change re-renders only when the
   buffer size changes; when it does not, the buffer is attached again for
   Smithay's sake.
-- [memory-and-idle.md](../memory-and-idle.md): two outputs of one size
+- [memory-and-idle-done.md](memory-and-idle-done.md): two outputs of one size
   get two buffers with the same pixels (one `wl_buffer` on both would save
   32.4 MB per extra 4K output); a rendered image waiting on a stalled draw
   is one more buffer per output at most.
-- [restore-state.md](../restore-state.md): an image choice is its path,
+- [restore-state-done.md](restore-state-done.md): an image choice is its path,
   mode, fill and filter (`crate::wallpaper::Image`); restoring one is a
   trial like any `set`, so a file gone since is an error on stderr and the
   output shows nothing rather than something stale. Paths are UTF-8 only

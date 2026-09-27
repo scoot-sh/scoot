@@ -84,6 +84,11 @@ pub struct Session {
     pub scratch: Scratch,
     compositor: Option<Child>,
     pub wayland_display: String,
+    /// `XDG_STATE_HOME` for every `scootbg` run here: a directory in the
+    /// scratch one unless a test points it elsewhere (to share state
+    /// between sessions), so no test restores another's wallpaper, or the
+    /// user's.
+    pub state_home: PathBuf,
     /// For a sway session: `swaymsg`'s expected path and sway's IPC socket.
     sway_ipc: Option<(PathBuf, PathBuf)>,
 }
@@ -130,10 +135,12 @@ impl Session {
             .stderr(log)
             .spawn()
             .unwrap_or_else(|e| panic!("cannot start {}: {e}", scoot.display()));
+        let state_home = scratch.0.join("state");
         let mut session = Self {
             scratch,
             compositor: Some(compositor),
             wayland_display: String::new(),
+            state_home,
             sway_ipc: None,
         };
         session.wayland_display = session.wait_for_wayland(|dir| {
@@ -197,10 +204,12 @@ impl Session {
         let compositor = command
             .spawn()
             .unwrap_or_else(|e| panic!("cannot start {}: {e}", sway.display()));
+        let state_home = scratch.0.join("state");
         let mut session = Self {
             scratch,
             compositor: Some(compositor),
             wayland_display: String::new(),
+            state_home,
             sway_ipc: None,
         };
         let mut ipc = None;
@@ -299,6 +308,7 @@ impl Session {
         command
             .env("XDG_RUNTIME_DIR", &self.scratch.0)
             .env("WAYLAND_DISPLAY", &self.wayland_display)
+            .env("XDG_STATE_HOME", &self.state_home)
             .env_remove("WAYLAND_SOCKET")
             .env_remove("WAYLAND_DEBUG")
             .env_remove("SCOOTBG_DEBUG_PATH")
@@ -316,8 +326,13 @@ impl Session {
     /// means its poll loop is running (the socket file alone appears before
     /// the Wayland handshake, and a stale one is there before the daemon).
     pub fn daemon(&self) -> Child {
+        self.daemon_with(&[])
+    }
+
+    /// [`Session::daemon`] with `args` after `daemon`.
+    pub fn daemon_with(&self, args: &[&str]) -> Child {
         let mut command = self.scootbg();
-        command.arg("daemon");
+        command.arg("daemon").args(args);
         self.start_daemon(command)
     }
 

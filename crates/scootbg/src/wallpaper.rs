@@ -5,7 +5,9 @@
 //! the worker thread decoding it, so passing it around allocates nothing.
 //! Two images are the same wallpaper only if they come from the same
 //! request (`serial`): `set` of the same path again is a new request, and
-//! reads the file again (it may have changed).
+//! reads the file again (it may have changed). Outputs of one size share
+//! one image's pixels only within one request (`daemon::canvas::Pixels`
+//! are found by `serial`).
 
 use std::sync::Arc;
 

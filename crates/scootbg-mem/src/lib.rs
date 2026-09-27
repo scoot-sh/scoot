@@ -7,7 +7,7 @@
 //! - [`alloc`]: the global allocator that gives every block of 128 KiB or
 //!   more its own mapping, so freed heap goes back to the kernel;
 //! - [`shm`]: the sealed-memfd buffer behind a `wl_shm` pool, with the
-//!   "never write after attach" rule enforced by type state;
+//!   fd closed once the compositor has its own copy;
 //! - [`zeroed`]: a zeroed byte buffer that is both fallible and committed
 //!   only as it is written, for decoders' output.
 //!
@@ -27,5 +27,5 @@ pub mod shm;
 pub mod zeroed;
 
 pub use alloc::LargeAlloc;
-pub use shm::{Attached, ShmBuffer, ShmError};
+pub use shm::{ShmBuffer, ShmError};
 pub use zeroed::zeroed_bytes;

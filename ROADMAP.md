@@ -293,9 +293,10 @@ each item's own file records why it landed when it did.
   run, the top-right as well in three of the four, and every outer edge
   failed). A re-mapped window is rebuilt from the layout (size, tiled
   states, activation, `ServerSide`), where it used to come back unsized,
-  untiled and told `ClientSide`. Residual: libadwaita dialogs round their
-  own corners wider than the ring
-  ([`client-rounded-corners-vs-ring`](docs/backlog/core/client-rounded-corners-vs-ring.md)). No
+  untiled and told `ClientSide`. Follow-up (resolved 2026-09-27):
+  libadwaita dialogs round their own corners wider than the ring
+  ([`client-rounded-corners-vs-ring`](docs/backlog/resolved/client-rounded-corners-vs-ring-done.md)),
+  fixed with a ring-colored backdrop under self-decorated windows. No
   measurable frame cost (debug-profile `rounded_corners_cost` and
   `render_frame_cost` within run-to-run noise, pixman and GLES).
 
@@ -657,7 +658,7 @@ each item's own file records why it landed when it did.
   so no output after the first ever showed a ring. Single-output frames
   byte-identical under both renderers. Follow-ups filed:
   [popup constraint adjustment](docs/backlog/resolved/popup-constraint-adjustment-done.md),
-  [output membership by geometry](docs/backlog/core/output-membership-by-geometry.md).
+  [output membership by geometry](docs/backlog/resolved/output-membership-by-geometry-done.md).
 
 - **[Client fullscreen](docs/backlog/resolved/client-fullscreen-done.md)**
   (2026-09-22, PR #223) — a per-window fullscreen state
@@ -2162,8 +2163,15 @@ medium priority — the effective top of what's actually open.
    ([record](docs/scootbg/backlog/resolved/hidpi-fractional-scale-done.md)):
    images drawn at real device pixels on fractionally scaled outputs
    (`wp_fractional_scale_v1` under a viewport), exact to the pixel on
-   scoot and sway, 44% fewer buffer bytes at 1.5. Restoring the wallpaper
-   at startup and scoot's `[wallpaper]` section are next.
+   scoot and sway, 44% fewer buffer bytes at 1.5. Item 8
+   ([record](docs/scootbg/backlog/resolved/memory-and-idle-done.md)): the
+   resource budget measured and published, outputs of one size sharing an
+   image's pixels. Item 9
+   ([record](docs/scootbg/backlog/resolved/restore-state-done.md)): every
+   `set` and `clear` saved per output and profile (`--profile`,
+   `--no-restore`) and restored at startup, and an image `set` sent as the
+   daemon starts decoded once instead of twice. scoot's `[wallpaper]`
+   section is next.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

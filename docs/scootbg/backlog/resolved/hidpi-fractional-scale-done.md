@@ -405,7 +405,7 @@ is a few integer operations per draw decision.
 
 ### For the next tickets
 
-- [memory-and-idle.md](../memory-and-idle.md): an image buffer at 1.5 is
+- [memory-and-idle-done.md](memory-and-idle-done.md): an image buffer at 1.5 is
   now the output's pixels plus at most a column and a row (1601×1001 on
   scoot: 0.16% off-screen); two outputs of one size still get two
   buffers.

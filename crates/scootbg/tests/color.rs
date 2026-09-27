@@ -407,14 +407,39 @@ fn a_client_that_leaves_before_its_reply_is_fine() {
     assert!(wait_exit(&mut daemon).success());
 }
 
+/// How many wallpaper memfds the daemon maps once it has let go of every
+/// buffer the compositor released: the same count on four reads 100 ms
+/// apart.
+fn settled_memfds(pid: u32) -> usize {
+    let count = || {
+        std::fs::read_to_string(format!("/proc/{pid}/maps"))
+            .unwrap()
+            .lines()
+            .filter(|l| l.contains("memfd:scootbg-wallpaper"))
+            .count()
+    };
+    let deadline = Instant::now() + PATIENCE;
+    let mut last = count();
+    let mut stable = 0;
+    while stable < 3 {
+        assert!(Instant::now() < deadline, "memfds never settled");
+        std::thread::sleep(Duration::from_millis(100));
+        let now = count();
+        stable = if now == last { stable + 1 } else { 0 };
+        last = now;
+    }
+    last
+}
+
 /// The fallback paths, forced on scoot, which offers everything: a 1×1
 /// `wl_shm` buffer under a viewport, and a full-size buffer. Both are
 /// exact to the edge. (A viewport-upscaled 1×1 shm buffer used to fade at
 /// every edge under scoot's pixman renderer; that was fixed in the
 /// scoot-sh/smithay fork, docs/backlog/resolved/shm-viewport-upscale-edge-fade-done.md,
-/// and this is its check from the client side.) Color changes reuse a
-/// released buffer or take a second one, never more than two; a new scale
-/// redraws the full-size buffer at the new size.
+/// and this is its check from the client side.) A color change reuses
+/// the released buffer on screen or takes a second one, and the one it
+/// replaced goes once released: one buffer per output at rest, no spare;
+/// a new scale redraws the full-size buffer at the new size.
 #[test]
 fn the_fallback_paths_are_exact_on_scoot() {
     if !debug_paths_available() {
@@ -440,9 +465,14 @@ fn the_fallback_paths_are_exact_on_scoot() {
         );
         let pools = sent(&session, "create_pool");
         assert!(
-            (1..=2).contains(&pools.len()),
+            (1..=6).contains(&pools.len()),
             "{path}: {} buffers for six changes: {pools:?}",
             pools.len()
+        );
+        assert_eq!(
+            settled_memfds(daemon.id()),
+            1,
+            "{path}: one buffer at rest, no spare"
         );
         let buffers = sent(&session, ".create_buffer(");
         let (dims, viewport) = if path == "viewport-shm" {

@@ -39,6 +39,10 @@ mod print;
 #[cfg(target_os = "linux")]
 mod protocol;
 #[cfg(target_os = "linux")]
+mod share;
+#[cfg(target_os = "linux")]
+mod state;
+#[cfg(target_os = "linux")]
 mod waiters;
 #[cfg(target_os = "linux")]
 mod wallpaper;
@@ -69,8 +73,8 @@ fn main() -> ExitCode {
     let printed = match command {
         cli::Command::Help(topic) => print::print(topic.text()),
         cli::Command::Version => print::print(&format!("{}\n", cli::version_string())),
-        cli::Command::Daemon => {
-            return match daemon::run() {
+        cli::Command::Daemon(options) => {
+            return match daemon::run(options) {
                 daemon::Exit::Stopped => ExitCode::SUCCESS,
                 daemon::Exit::Failed(error) => {
                     warn(format_args!("scootbg: {error}"));

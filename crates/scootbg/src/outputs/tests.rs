@@ -403,3 +403,70 @@ fn labels_escape_what_the_compositor_named_the_output() {
         "output \"x\\u{1b}[2J\\nscootbg: fake \\\"line\\\"\\\\\""
     );
 }
+
+/// `coming` is true exactly while a round trip already sent will say what
+/// to draw the surface at, so an image `set` held for it is held for at
+/// most that long.
+#[test]
+fn an_output_is_coming_until_its_configure_has_settled() {
+    let mut outputs = Outputs::<()>::default();
+    let id = outputs.add(7, |_| ());
+    let output = &mut outputs.get_mut(id).unwrap().output;
+    assert!(output.coming(), "not settled yet");
+    output.stage_name("DP-1".into());
+    output.done();
+    assert_eq!(output.settled(), Effect::Create);
+    let creation = output.creation();
+    assert!(output.coming(), "pending: its configure is on the way");
+    assert_eq!(output.configure(5, 1920, 1080), Effect::Ack(5));
+    assert!(output.coming(), "configured, its round trip still out");
+    // A stale round trip (an older serial) settles nothing.
+    output.configure_settled(4);
+    assert!(output.coming());
+    output.configure_settled(5);
+    assert!(!output.coming(), "settled: draw for it now");
+    // A new configure makes it coming again, until its own round trip.
+    assert_eq!(output.configure(6, 1280, 720), Effect::Ack(6));
+    assert!(output.coming());
+    output.configure_settled(5);
+    assert!(
+        output.coming(),
+        "the old serial's round trip does not count"
+    );
+    output.configure_settled(6);
+    assert!(!output.coming());
+    // Closed: re-created after a round trip, then pending again.
+    assert_eq!(output.closed(), Effect::DestroyAndRetry);
+    assert!(output.coming());
+    assert_eq!(output.retry(), Effect::Create);
+    assert!(output.coming());
+    // A compositor late with the configure holds nothing up any longer.
+    let late = output.creation();
+    assert_ne!(late, creation);
+    assert!(output.unanswered(late));
+    assert!(!output.coming(), "late: no longer waited for");
+    // Configured after all: coming until that settles.
+    assert_eq!(output.configure(9, 1920, 1080), Effect::Ack(9));
+    assert!(output.coming());
+    output.configure_settled(9);
+    assert!(!output.coming());
+    // Closed a second time: given up, nothing to wait for.
+    assert_eq!(output.closed(), Effect::DestroyAndGiveUp);
+    assert!(!output.coming());
+}
+
+/// A surface made again (a `clear`) waits for its own configure: a serial
+/// settled on the old surface does not carry over.
+#[test]
+fn a_recreated_surface_is_coming_again() {
+    let mut outputs = Outputs::<()>::default();
+    let id = settled_1080p(&mut outputs);
+    let output = &mut outputs.get_mut(id).unwrap().output;
+    let _ = output.configure(3, 1920, 1080);
+    output.configure_settled(3);
+    assert!(!output.coming());
+    output.recreated();
+    assert!(output.coming());
+    let _ = output.configure(3, 1920, 1080);
+    assert!(output.coming(), "the same serial on a new surface is new");
+}

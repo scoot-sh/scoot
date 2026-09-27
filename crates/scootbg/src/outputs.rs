@@ -298,6 +298,18 @@ pub struct Output {
     /// output it is on, and the new surface's own events replace them,
     /// before its first `configure` on every compositor checked.
     preferred: Preferred,
+    /// Surfaces made for this output so far, so a round trip sent after one
+    /// was made ([`Output::unanswered`]) knows whether it is about the live
+    /// one. Wraps: only equality is ever asked.
+    creation: u32,
+    /// The compositor had not configured the live surface a round trip
+    /// after it was made: a waiting reply stops waiting for it (see
+    /// [`Output::progress`]). Cleared with a new surface.
+    late: bool,
+    /// The serial of the `configure` whose round trip has come back
+    /// (`RoundTrip::Configured`): the surface's size and scale are settled
+    /// for it. See [`Output::coming`].
+    settled_serial: Option<u32>,
 }
 
 impl Output {
@@ -443,11 +455,41 @@ impl Output {
             self.staged.apply(&mut self.info);
         }
         if self.surface == Surface::Waiting {
-            self.surface = Surface::Pending;
+            self.made();
             Effect::Create
         } else {
             Effect::None
         }
+    }
+
+    /// A new surface, committed with no buffer, waits for its first
+    /// `configure`.
+    fn made(&mut self) {
+        self.surface = Surface::Pending;
+        self.creation = self.creation.wrapping_add(1);
+        self.late = false;
+        self.settled_serial = None;
+    }
+
+    /// Which surface this output is on ([`Output::unanswered`]).
+    pub fn creation(&self) -> u32 {
+        self.creation
+    }
+
+    /// A round trip sent right after surface `creation` was made (and
+    /// committed with no buffer) came back. A compositor answers that
+    /// first commit with a `configure`, sent before the round trip's reply
+    /// on every compositor checked; if this surface still has none, the
+    /// compositor is late with it, and waiting replies stop waiting for
+    /// this output. It is drawn when its `configure` does come. Returns
+    /// whether that changed anything.
+    pub fn unanswered(&mut self, creation: u32) -> bool {
+        let late = creation == self.creation && self.surface == Surface::Pending;
+        if late && !self.late {
+            self.late = true;
+            return true;
+        }
+        false
     }
 
     /// A `configure` on the live surface: remember it, and ack it. What a
@@ -471,6 +513,36 @@ impl Output {
         Effect::Ack(serial)
     }
 
+    /// The round trip sent after acking the `configure` with `serial` came
+    /// back, and that is still the surface's latest: what it is drawn at
+    /// is settled.
+    pub fn configure_settled(&mut self, serial: u32) {
+        if self.configured_serial() == Some(serial) {
+            self.settled_serial = Some(serial);
+        }
+    }
+
+    /// Whether the compositor is about to tell scootbg what to draw this
+    /// output's surface at, within a round trip it has already been sent:
+    /// the output has not settled, its surface waits for its `configure`
+    /// (not late with it), is being re-created after a `closed`, or was
+    /// configured but that `configure`'s round trip is still out.
+    ///
+    /// An image `set` is not decoded while an output it targets is coming
+    /// (`daemon::images::pump`): decoding then would only validate the
+    /// file, and the `configure` would ask for it again, a second decode
+    /// of the same file (ticket 8 counted two opens). Each of these states
+    /// ends when a round trip already sent comes back, so the wait is
+    /// bounded as a reply's is, with no timer.
+    pub fn coming(&self) -> bool {
+        match &self.surface {
+            Surface::Waiting | Surface::Closed => true,
+            Surface::Pending => !self.late,
+            Surface::Configured { serial, .. } => self.settled_serial != Some(*serial),
+            Surface::GaveUp => false,
+        }
+    }
+
     /// The serial of the `configure` the live surface was last given, while
     /// it is configured.
     pub fn configured_serial(&self) -> Option<u32> {
@@ -484,7 +556,7 @@ impl Output {
     /// no buffer (`clear`): it waits for its first `configure` again.
     pub fn recreated(&mut self) {
         if self.surface.is_live() {
-            self.surface = Surface::Pending;
+            self.made();
         }
     }
 
@@ -511,6 +583,11 @@ impl Output {
     /// Drawing failed; see the field.
     pub fn draw_failed(&mut self) {
         self.failed = true;
+    }
+
+    /// Whether the last draw failed and has not been retried yet.
+    pub fn has_failed(&self) -> bool {
+        self.failed
     }
 
     /// What is on screen: what the configured surface was last committed
@@ -564,6 +641,10 @@ impl Output {
         let shown = match &self.surface {
             // Nothing will ever be shown there: nothing to wait for.
             Surface::GaveUp => return Progress::Done,
+            // Not configured a round trip after it was made: it is drawn
+            // when the compositor gets to it, but a reply waits no longer
+            // (`Output::unanswered`).
+            Surface::Pending if self.late => return Progress::Done,
             Surface::Configured { drawn, .. } => {
                 drawn.is_some() == wanted.is_some() && self.plan(wanted, scale) == Plan::Nothing
             }
@@ -597,7 +678,7 @@ impl Output {
     /// trip, so its surface is created again.
     pub fn retry(&mut self) -> Effect {
         if self.surface == Surface::Closed {
-            self.surface = Surface::Pending;
+            self.made();
             Effect::Create
         } else {
             Effect::None
@@ -721,6 +802,9 @@ impl<O> Outputs<O> {
                 stamp: 0,
                 failed: false,
                 preferred: Preferred::default(),
+                creation: 0,
+                late: false,
+                settled_serial: None,
             },
             objects: objects(id),
         });

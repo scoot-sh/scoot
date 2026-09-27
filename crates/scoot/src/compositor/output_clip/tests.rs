@@ -26,7 +26,8 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use scoot_core::{Action, Horizontal, OutputId, Rect, WindowId};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
+    wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, WEnum};
 use wayland_protocols::xdg::shell::client::{
@@ -75,6 +76,13 @@ enum Step {
     /// `xdg_toplevel.set_fullscreen` with no output, then wait for the
     /// configure that answers. Does not ack it.
     SetFullscreen { window: usize },
+    /// Request a frame callback on the `window`-th toplevel's surface.
+    RequestFrame { window: usize },
+    /// Report what each toplevel's surface was told about outputs and
+    /// frames: the outputs it is currently entered on (registry order --
+    /// 0 is the first output), how many `enter`/`leave` events it saw in
+    /// all, and how many frame-callback `done`s.
+    ReportSurfaces,
     /// Map a no-grab popup on the `window`-th toplevel whose top-*right*
     /// corner sits at `(x, y)` in the parent's window geometry -- so it grows
     /// leftwards from there, `w` x `h`, with no constraint adjustment.
@@ -92,6 +100,19 @@ enum Step {
 enum Ack {
     Done,
     Pointer(Option<Entered>),
+    Surfaces(Vec<SurfaceWire>),
+}
+
+/// What one toplevel's surface heard about outputs and frames.
+#[derive(Clone, Debug, Default)]
+struct SurfaceWire {
+    /// The outputs it is currently entered on, by registry index.
+    entered: Vec<usize>,
+    /// Every `wl_surface.enter` / `leave` in all.
+    enters: u32,
+    leaves: u32,
+    /// Every frame-callback `done`.
+    frames: u32,
 }
 
 /// A surface the pointer entered, by the order the script created it.
@@ -117,6 +138,12 @@ struct TestClient {
     seat: Option<wl_seat::WlSeat>,
     pointer: Option<wl_pointer::WlPointer>,
     pointer_focus: Option<wl_surface::WlSurface>,
+    /// Every `wl_output` global in registry order, so an `enter` naming one
+    /// can be reported as the output's index.
+    outputs: Vec<wl_output::WlOutput>,
+    /// Per toplevel / popup, in creation order: what its surface heard.
+    windows_wire: Vec<SurfaceWire>,
+    popups_wire: Vec<SurfaceWire>,
     /// Per toplevel: the size the pending `xdg_toplevel.configure` named.
     pending: Vec<(i32, i32)>,
     /// Per toplevel: every completed configure, `(serial, width, height)`.
@@ -147,6 +174,11 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
         match interface.as_str() {
             "wl_compositor" => {
                 client.compositor = Some(registry.bind(name, version.min(4), qh, ()));
+            }
+            "wl_output" => {
+                client
+                    .outputs
+                    .push(registry.bind(name, version.min(4), qh, ()));
             }
             "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
             "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(3), qh, ())),
@@ -256,12 +288,83 @@ impl Dispatch<xdg_surface::XdgSurface, Role> for TestClient {
 }
 
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
-wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
+wayland_client::delegate_noop!(TestClient: ignore wl_output::WlOutput);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore xdg_positioner::XdgPositioner);
 wayland_client::delegate_noop!(TestClient: ignore xdg_popup::XdgPopup);
+
+/// Records an `enter`/`leave` on the surface `role` names, mapping the
+/// `wl_output` object to its registry index first.
+fn record_surface(client: &mut TestClient, role: &Role, output: &wl_output::WlOutput, enter: bool) {
+    let wire = match *role {
+        Role::Window(index) => client
+            .windows_wire
+            .get_mut(index)
+            .expect("an enter for a window this client made"),
+        Role::Popup(index) => client
+            .popups_wire
+            .get_mut(index)
+            .expect("an enter for a popup this client made"),
+    };
+    let index = client
+        .outputs
+        .iter()
+        .position(|known| known == output)
+        .expect("an enter naming a bound output");
+    if enter {
+        if !wire.entered.contains(&index) {
+            wire.entered.push(index);
+        }
+        wire.enters += 1;
+    } else {
+        wire.entered.retain(|known| *known != index);
+        wire.leaves += 1;
+    }
+}
+
+impl Dispatch<wl_surface::WlSurface, Role> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_surface::WlSurface,
+        event: wl_surface::Event,
+        role: &Role,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_surface::Event::Enter { output } => record_surface(client, role, &output, true),
+            wl_surface::Event::Leave { output } => record_surface(client, role, &output, false),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_callback::WlCallback, Role> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        role: &Role,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event {
+            let wire = match *role {
+                Role::Window(index) => client
+                    .windows_wire
+                    .get_mut(index)
+                    .expect("a frame done for a window this client made"),
+                Role::Popup(index) => client
+                    .popups_wire
+                    .get_mut(index)
+                    .expect("a frame done for a popup this client made"),
+            };
+            wire.frames += 1;
+        }
+    }
+}
 
 /// A `width`x`height` buffer of `color` over a real memfd. A zero size (a
 /// configure that left the size to the client) draws 40 square.
@@ -345,12 +448,14 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
 
     let mut windows: Vec<Toplevel> = Vec::new();
-    // Held for the run: a popup whose objects drop is dismissed.
+    // Held for the run: a popup whose objects drop is dismissed, and a frame
+    // callback whose proxy drops may never report its `done`.
     let mut popups: Vec<(
         wl_surface::WlSurface,
         xdg_surface::XdgSurface,
         xdg_popup::XdgPopup,
     )> = Vec::new();
+    let mut frames: Vec<wl_callback::WlCallback> = Vec::new();
     while let Ok(step) = steps.recv() {
         let ack = match step {
             Step::MapWindow { color } => {
@@ -358,7 +463,8 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 client.pending.push((0, 0));
                 client.configures.push(Vec::new());
                 client.acked.push(None);
-                let surface = compositor.create_surface(&qh, ());
+                client.windows_wire.push(SurfaceWire::default());
+                let surface = compositor.create_surface(&qh, Role::Window(index));
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, Role::Window(index));
                 let toplevel = xdg.get_toplevel(&qh, Role::Window(index));
                 surface.commit();
@@ -388,7 +494,8 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::PopupLeftOf { window, x, y, w, h } => {
                 let index = popups.len();
                 client.popup_serials.push(None);
-                let surface = compositor.create_surface(&qh, ());
+                client.popups_wire.push(SurfaceWire::default());
+                let surface = compositor.create_surface(&qh, Role::Popup(index));
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, Role::Popup(index));
                 let positioner = wm_base.create_positioner(&qh, ());
                 positioner.set_size(w, h);
@@ -422,6 +529,22 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     }
                 });
                 Ack::Pointer(entered)
+            }
+            Step::RequestFrame { window } => {
+                let role = Role::Window(window);
+                let surface = &windows.get(window).ok_or("no such window")?.surface;
+                let callback = surface.frame(&qh, role);
+                // The request only counts once committed: without this the
+                // callback sits in the surface's pending state, and a frame
+                // in between would complete nothing.
+                surface.commit();
+                frames.push(callback);
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::ReportSurfaces => {
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Surfaces(client.windows_wire.clone())
             }
         };
         acks.send(ack).map_err(|e| e.to_string())?;
@@ -527,6 +650,14 @@ impl Fixture {
         match self.run(Step::ReportPointer) {
             Ack::Pointer(entered) => entered,
             _ => panic!("expected a pointer report"),
+        }
+    }
+
+    /// What every toplevel's surface heard about outputs and frames.
+    fn surfaces(&mut self) -> Vec<SurfaceWire> {
+        match self.run(Step::ReportSurfaces) {
+            Ack::Surfaces(wire) => wire,
+            _ => panic!("expected a surface report"),
         }
     }
 
@@ -733,6 +864,108 @@ fn a_focused_away_fullscreen_window_stays_on_its_own_output() {
         fixture.point_at(CANVAS + 2, ROW),
         Some(Entered::Window(full))
     );
+
+    // ...and it is entered there too, although its box sits wholly beside
+    // its own screen: the neighbour's enter is corrected away, and its own
+    // output's enter does not need any pixel overlap to be sent.
+    let wire = fixture.surfaces();
+    assert_eq!(wire[full].entered, vec![1], "{wire:?}");
+    assert_eq!(
+        wire[full].enters,
+        wire[full].leaves + 1,
+        "every neighbouring enter must be paired with a corrective leave: {wire:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Output membership by placement, not by bounding box
+// ---------------------------------------------------------------------------
+
+/// A window hanging over the shared edge is paced by the output it is
+/// placed on, not by whichever output renders: with only the neighbouring
+/// output drawing, its frame callback stays pending -- fail-first, the
+/// geometry read fired it from the neighbour's frame, and with both drawing
+/// it fired twice per tick.
+#[test]
+fn an_overhanging_window_is_paced_by_its_own_output() {
+    let mut fixture = Fixture::two_outputs();
+    let left = fixture.second_output_overhang();
+    assert_eq!(fixture.output_of(left), OutputId(2));
+
+    // Only the first output draws from here until its backend goes back:
+    // the frame the step protocol's own dispatch would otherwise draw in
+    // the background can never complete the callback early, so what each
+    // assertion sees is exactly one controlled frame.
+    let second = fixture
+        .state
+        .take_backend(OutputId(2))
+        .expect("a second render target");
+    fixture.done(Step::RequestFrame { window: left });
+    fixture.state.request_render();
+    fixture.state.render();
+    let wire = fixture.surfaces();
+    assert_eq!(
+        wire[left].frames, 0,
+        "the neighbouring output's frame fired a window placed on the other screen"
+    );
+    fixture.state.put_backend(OutputId(2), second);
+
+    // ...while its own output's frame completes it, exactly once -- and a
+    // further frame of each output completes nothing new.
+    let first = fixture
+        .state
+        .take_backend(OutputId(1))
+        .expect("a first render target");
+    fixture.state.request_render();
+    fixture.state.render();
+    fixture.state.put_backend(OutputId(1), first);
+    assert_eq!(
+        fixture.surfaces()[left].frames,
+        1,
+        "the window's own output did not pace its callback"
+    );
+    fixture.state.request_render();
+    fixture.state.render();
+    assert_eq!(
+        fixture.surfaces()[left].frames,
+        1,
+        "a callback fired twice for one request"
+    );
+}
+
+/// A window hanging over the shared edge is entered on the output it is
+/// placed on, and on no other: the neighbour's `enter` is corrected to a
+/// `leave` in the same flush, so a client picking its buffer scale from the
+/// outputs it has entered never picks the neighbour's.
+#[test]
+fn an_overhanging_window_enters_only_its_own_output() {
+    let mut fixture = Fixture::two_outputs();
+    let left = fixture.second_output_overhang();
+    assert_eq!(fixture.output_of(left), OutputId(2));
+
+    // Run the frames that carry the `enter`/`leave` traffic.
+    fixture.frame(1);
+    fixture.frame(2);
+    let wire = fixture.surfaces();
+    assert_eq!(
+        wire[left].entered,
+        vec![1],
+        "the overhanging window is entered on the wrong output: {wire:?}"
+    );
+    assert_eq!(
+        wire[left].enters,
+        wire[left].leaves + 1,
+        "every neighbouring enter must be paired with a corrective leave: {wire:?}"
+    );
+    assert!(
+        wire[left].leaves >= 1,
+        "no corrective leave ever fired for the overhang: {wire:?}"
+    );
+    // The control: the column beside it, wholly on its own output, entered
+    // once and never left.
+    assert_eq!(wire[left + 1].entered, vec![1]);
+    assert_eq!(wire[left + 1].enters, 1);
+    assert_eq!(wire[left + 1].leaves, 0);
 }
 
 // ---------------------------------------------------------------------------

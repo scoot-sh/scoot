@@ -37,6 +37,7 @@ use std::fmt;
 
 use wayland_client::globals::{BindError, GlobalError, GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_compositor::WlCompositor;
+use wayland_client::protocol::wl_display::WlDisplay;
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
@@ -58,6 +59,7 @@ use crate::control::{ConnId, MAX_CONNECTIONS};
 use crate::jobs::MAX_TRIALS;
 use crate::outputs::Outputs;
 use crate::paint::Path;
+use crate::state::Saved;
 use crate::waiters::Waiters;
 
 /// Room for every waiting reply there can be (`crate::waiters`: one per
@@ -99,6 +101,9 @@ impl std::error::Error for WaylandError {}
 /// The bound singletons.
 #[derive(Debug)]
 pub struct Globals {
+    /// The connection's `wl_display`, for round trips sent where there is
+    /// no `Connection` to hand (`LayerObjects::create`).
+    pub display: WlDisplay,
     pub compositor: WlCompositor,
     pub layer_shell: ZwlrLayerShellV1,
     pub shm: WlShm,
@@ -140,6 +145,8 @@ pub struct State {
     /// Sized for every waiter and every queued image request there can
     /// be, and emptied every loop turn.
     pub ready: Vec<(ConnId, Ready)>,
+    /// What is saved for the next start (`crate::state`), and where.
+    pub saved: Saved,
 }
 
 pub struct Wayland {
@@ -152,7 +159,10 @@ pub struct Wayland {
 impl Wayland {
     /// Connects through `WAYLAND_DISPLAY`/`WAYLAND_SOCKET`, lists the
     /// globals (one round trip), binds them, and binds each output.
-    pub fn connect(images: Images) -> Result<(Self, Vec<&'static str>), WaylandError> {
+    pub fn connect(
+        images: Images,
+        saved: Saved,
+    ) -> Result<(Self, Vec<&'static str>), WaylandError> {
         let conn = Connection::connect_to_env().map_err(WaylandError::Connect)?;
         let (list, queue) = registry_queue_init::<State>(&conn).map_err(WaylandError::Registry)?;
         let qh = queue.handle();
@@ -184,6 +194,7 @@ impl Wayland {
             optional(&mut missing, list.bind(&qh, 1..=1, ()));
         let path = Path::choose(viewporter.is_some(), single_pixel.is_some(), forced_path());
         let globals = Globals {
+            display: conn.display(),
             compositor,
             layer_shell,
             shm,
@@ -205,6 +216,7 @@ impl Wayland {
             waiters: Waiters::with_capacity(WAITERS),
             images,
             ready: Vec::with_capacity(WAITERS + MAX_TRIALS),
+            saved,
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {
