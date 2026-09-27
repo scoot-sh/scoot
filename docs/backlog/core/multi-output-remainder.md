@@ -3,7 +3,7 @@ title: "Multi-output remainder: --tty multi-CRTC, placement policy, default bind
 status: "open"
 area: "core"
 priority: "high"
-blocked: "E1/E2 landed and ran on hardware (a physical DP-1 replug on the Asahi M2 Air, 2026-09-25); left: GPU-tier runtime add and #48 MoveTo on hardware, reconnect restore (its own ticket), the scale/mode surface (its own entry)"
+blocked: "E1/E2 landed and ran on hardware (a physical DP-1 replug on the Asahi M2 Air, 2026-09-25; GPU-tier runtime add and multi-head mode change proven there 2026-09-26, Asahi.md Tests 11-12); left: #48 MoveTo on hardware, the scale/mode surface (its own entry)"
 ---
 
 # Multi-output remainder: --tty multi-CRTC, placement policy, default binds
@@ -99,6 +99,20 @@ unlike a quicker unplug that morning.
      `unspecified` (`Invalid argument`) and a stored `edid_override`
      cannot be cleared — `rmmod`+`modprobe vkms` is the reset (connector
      name stayed `Virtual-3` across reloads here).
+   **Update 2026-09-26 (Asahi M2 Air, physical hands, `main` `87e1935`):
+   the GPU-tier runtime add and the multi-head mode change are proven;
+   only `MoveTo` stays open.** Full record: `Asahi.md` Test 12 (the
+   dumb-tier mode change and virtual-pull remove/restore are Test 11).
+   Powering on a sleeping DP-1 under `--tty --renderer gles` added a
+   GPU-scanout head (second EGL context beside the live one) 50 ms after
+   the hotplug event. A real cable pull adopted its window, and the replug
+   restored it under a fresh id 3 with an identical rect. Every remove
+   returned fds to exactly 51, so nothing leaks per head. Two 3-fd
+   differences between like states are unexplained; the table is in Test 12.
+   `--mode 1280x720` drove DP-1 at
+   1280x720 beside eDP-1's native mode, and a replug in that session came
+   back at 1280x720. `MoveTo` still needs the only lit screen to be
+   pullable, and the Asahi panel is not.
 2. **Reconnect restore and output ids on replug.** Now its own ticket,
    [output-reconnect-restore](../resolved/output-reconnect-restore-done.md)
    (RESOLVED 2026-09-25, PR #249): match a

@@ -388,7 +388,9 @@ no second monitor. `crates/scoot/src/compositor/outputs.rs`'s doc on
     the window's `wl_surface.leave` went out after the `global_remove`.
     Fixed in the review round (below). Still unexecuted on hardware: a
     GPU-tier runtime add (the replug ran dumb), the #48 `MoveTo` fallback,
-    and a mode change with several heads. The GPU tier
+    and a mode change with several heads. *(Since run: the multi-head mode
+    change in `Asahi.md` Test 11 on the dumb tier, and the GPU-tier add and
+    mode change in Test 12. Only `MoveTo` remains.)* The GPU tier
     ran with Mesa's paths passed by environment (`GBM_BACKENDS_PATH`,
     `__EGL_VENDOR_LIBRARY_DIRS`) because the booted generation has no
     `/run/opengl-driver`; no system change was made. Gamma: both CRTCs
