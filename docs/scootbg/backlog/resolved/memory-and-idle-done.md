@@ -73,7 +73,7 @@ buffer); the docs, `set --help` and doc comments in the commit after.
   once, as `canvas::Pixels`: the mapping, and one `wl_shm_pool` over its
   memfd, kept (with no fd) for as long as the pixels are. Each output
   gets its own `wl_buffer` from that pool, attached and released on its
-  own; the pool goes with the last share. 2× 4K showing one image: 36.7
+  own; the pool goes with the last share. 2× 4K showing one image: 36.8
   MB RSS where it was 69.2 MB ([below](#memory)).
 - **Not one `wl_buffer` on every surface, and no count of attaches.**
   `wl_surface.attach` (wayland.xml, the copy in the pinned wayland-rs):
