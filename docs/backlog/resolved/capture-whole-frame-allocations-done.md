@@ -8,7 +8,7 @@ blocked: null
 
 # Captures pooled their whole-frame allocations — RESOLVED
 
-RESOLVED 2026-09-27 (PR #TBD). Serves agent-driven computer use (screenshot
+RESOLVED 2026-09-27 (PR #292). Serves agent-driven computer use (screenshot
 latency and CPU when an agent polls) and daily-drive (screen recording).
 
 All evidence below was taken on the dev VM (llvmpipe, 4 vCPU), release
