@@ -75,6 +75,7 @@ mod window_commit;
 mod window_rules;
 mod wl_buffers;
 mod xwayland;
+mod xwayland_budget;
 
 /// The harness the real-`wayland-client` test suites share. Not a module of
 /// the compositor proper -- it exists only under `cfg(test)`.

@@ -837,6 +837,16 @@ scale/mode) into one hardware session.
   it); its known gap, [a quick drag between two windows of the
   same X app instance dropping nothing](./resolved/xwayland-same-client-quick-drag-done.md),
   is RESOLVED too (fork `b16cd6a2`).
+  [XWayland dying at ~250 X windows](./resolved/xwayland-server-death-many-unmanaged-done.md)
+  is RESOLVED 2026-09-27. It was scoot disconnecting the server: one
+  Wayland client for every X window, held to one app's 512 fds and 512
+  buffers at 2 of each per window, so it was killed at the 257th window
+  whichever X clients owned it. Fixed with the server's own budget, a
+  sixteenth of the fd table, 512..=4096 (300 windows over 3 X clients stay
+  up live; still refused at the budget). Follow-up, open and low: [a
+  refused X window still costs the server its
+  buffers](./protocols/xwayland-refused-windows-still-commit.md), which
+  needs a fork commit to withhold `_XWAYLAND_ALLOW_COMMITS`.
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes

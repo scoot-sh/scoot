@@ -121,6 +121,10 @@ use super::client_fds::Kind;
 /// client. So a client never has more than 128 timeline fds held here. The
 /// timelines also count toward the client's 512-fd total
 /// (`client_fds::MAX_FDS_PER_CLIENT`), with its pools and planes.
+///
+/// Not the session's XWayland server: it imports a timeline per X window
+/// pixmap, so its timelines are bounded only by its own, larger fd total
+/// (`client_fds::limits_for`, `xwayland_budget.rs`).
 pub(crate) const MAX_TIMELINES_PER_CLIENT: u32 = 128;
 
 /// How many commits one client may have waiting on unsignalled acquire
@@ -345,7 +349,7 @@ where
     let id = client.id();
     let refusal = match state
         .client_fds
-        .admit_arrival(&id, fd.as_raw_fd(), Kind::Timeline, 1)
+        .admit_arrival(client, fd.as_raw_fd(), Kind::Timeline, 1)
     {
         Ok(()) => {
             state

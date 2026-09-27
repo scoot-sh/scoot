@@ -9,6 +9,19 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — X apps no longer all close together at ~256 X windows
+
+- **With `--xwayland`, the X server is no longer disconnected once about
+  256 X windows are mapped.** That count covers menus, tooltips and
+  ordinary windows across every X app together. scoot held the X server,
+  which is one Wayland client for every X window, to the fd and buffer
+  limits meant for a single app (512). Each X window costs it 2 of each,
+  so the 257th window killed the server, and every X app's windows closed
+  at once. The server now gets its own limit: a sixteenth of scoot's fd
+  table, 4096 on the usual 65536 table (about 2048 X windows). A machine
+  whose hard fd limit is 1024 keeps 512. Past that limit the X server is
+  still disconnected, and the log says why ([protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps)).
+
 ### 2026-09-27 — a click just after crossing between two X windows lands
 
 - **With `--xwayland`, a click right after the pointer moves from one X

@@ -190,6 +190,14 @@
 //! the client alive -- that needs an explicit release, as the async dmabuf
 //! `create` above does.
 //!
+//! ## The XWayland server
+//!
+//! The session's own XWayland server is one connection carrying every X
+//! client's windows, at two buffers each (measured), so it is held to its
+//! own budget ([`max_buffers_for`], `xwayland_budget.rs`: 4096 on the table
+//! scoot raises to, 512 on a 1024-fd one) rather than one app's 512 --
+//! which disconnected it, and every X window with it, at the 257th window.
+//!
 //! ## Per connection, plus a compositor-wide ceiling
 //!
 //! Wayland connections are unbounded, so N connections hold up to 512N
@@ -214,6 +222,17 @@ use smithay::reexports::wayland_server::backend::ClientId;
 /// uninitialized object that panics the compositor the moment the client
 /// touches it (the argument `dispatch.rs` already makes for the pool caps).
 pub(super) const MAX_BUFFERS_PER_CLIENT: u32 = 512;
+
+/// How many live buffers `client` may hold: [`MAX_BUFFERS_PER_CLIENT`], or
+/// the session's XWayland server's budget (`xwayland_budget.rs`) -- one
+/// connection carrying every X client's windows, at two buffers each.
+pub(super) fn max_buffers_for(client: &Client) -> u32 {
+    if super::xwayland_budget::is_server(client) {
+        super::xwayland_budget::bound()
+    } else {
+        MAX_BUFFERS_PER_CLIENT
+    }
+}
 
 /// The per-client live-buffer count. See the module doc for the policy; the
 /// only claim site is `dispatch.rs`'s buffer-creation guard, the only
@@ -246,11 +265,17 @@ impl WlBuffers {
     /// to avoid it would couple this guard to Smithay's handler logic and
     /// drift fail-open on a rev bump.
     pub(super) fn claim_buffer_creation(&mut self, client: &Client) -> bool {
-        let live = self.live_per_client.entry(client.id()).or_insert(0);
-        if *live >= MAX_BUFFERS_PER_CLIENT {
+        self.claim(client.id(), max_buffers_for(client))
+    }
+
+    /// [`Self::claim_buffer_creation`] against an explicit bound `max`: the
+    /// decision itself, testable without a connection of each kind.
+    pub(super) fn claim(&mut self, client: ClientId, max: u32) -> bool {
+        let live = self.live_per_client.entry(client).or_insert(0);
+        if *live >= max {
             tracing::debug!(
                 live = *live,
-                max = MAX_BUFFERS_PER_CLIENT,
+                max,
                 "refusing a wl_buffer past the per-client live count (protocol error)"
             );
             return true;

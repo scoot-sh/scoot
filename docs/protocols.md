@@ -152,6 +152,20 @@ keep one; AGX shows that expectation cannot be assumed.
   other X clients' menus still draw. Unmapping or losing its menus frees
   the count, and the X server's death drains it whole. Same identity as
   the managed bound above, its own counting.
+- **The XWayland server has bigger limits than any one app.** With
+  `--xwayland`, every X application's windows reach scoot through one
+  Wayland connection, the X server's, and each mapped X window costs it 2
+  fds and 2 `wl_buffer`s. So its fd limit (timelines included, with no
+  separate 128) and its live-buffer limit are a sixteenth of scoot's fd
+  table instead of an app's 512: **4096** with the fd limit scoot normally runs with (65536), 512 on
+  a machine whose hard fd limit is 1024, in between otherwise (1250 on a
+  20000-fd table). Before, the 257th mapped X window — menus, tooltips and
+  ordinary windows alike, across every X application — got the X server
+  disconnected, closing every X window in the session at once. Past its
+  limit (about 2048 X windows) it still is: scoot logs `Xwayland
+  disconnected` with the reason, and X comes back only with a restart. A
+  window scoot refuses under the two per-X-client limits above still costs
+  the X server its buffers.
 - **128 live `xdg_popup`s per client.** A client already holding 128 that
   opens one more is disconnected with `wl_display.error` `no_memory` ("at
   most 128 live xdg_popups per client"); closing or losing its popups
@@ -164,8 +178,9 @@ keep one; AGX shows that expectation cannot be assumed.
 Real clients are far below all of these: a `foot` window keeps 2 fds, a
 GPU client one per buffer it has allocated (a few per window), a Vulkan
 window 16 timelines. At every limit at once, one client can make scoot
-hold about 1600 fds, unused ones included, against the point (65408 of
-65536) where scoot starts turning newcomers away. Many clients together
+hold about 1600 fds, unused ones included (the XWayland server about 5200),
+against the point (65408 of 65536) where scoot starts turning newcomers
+away. Many clients together
 still can reach it (see
 [`pressure-many-light-connections`](backlog/core/pressure-many-light-connections.md)).
 
