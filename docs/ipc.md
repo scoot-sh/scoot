@@ -56,7 +56,7 @@ compositor running in a VM.
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |
-| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output` today; naming none means all), streaming them until the session ends or drops the subscription — see [Events](#events). |
+| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output` today; naming none is refused — bare `scootctl subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). |
 
 ```sh
 scootctl windows
@@ -214,8 +214,8 @@ on every reload that finds it, since it is never in effect. A reload that could 
 ## Events
 
 A connection that wants push notifications subscribes instead of polling.
-`subscribe` names the event kinds it wants (`output` today — the only kind,
-so naming none means all of them); the reply echoes the subscription; and
+`subscribe` names the event kinds it wants (`output` today — the only kind;
+naming none is refused, and bare `scootctl subscribe` sends `output`); the reply echoes the subscription; and
 afterwards that connection carries events until the session ends:
 
 ```sh

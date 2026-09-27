@@ -46,7 +46,7 @@ monitor leaving without polling `windows`.
 
 ## Resolution record
 
-RESOLVED 2026-09-27 (PR #TODO, branch `ipc-output-events`).
+RESOLVED 2026-09-27 (PR #296, branch `ipc-output-events`).
 
 **Subscription design (the larger half, no precedent — decided):**
 
@@ -102,7 +102,7 @@ serving, unasked delivery, close drops the record, high-water disconnect
 through the real loop); wire pins in `scoot-ipc` (`subscribe` shape,
 unknown-kind rejection, both payloads, explicit-null adopter). Full
 workspace nextest 2531 green, clippy `-D warnings` + fmt clean, smoke
-23-ok green, live `--headless --outputs 2` handshake (`subscribed` + a
+22-ok green, live `--headless --outputs 2` handshake (`subscribed` + a
 `windows` served meanwhile on another connection). No Asahi needed; the
 dev-VM vkms rig cannot stage remove/restore (one toggleable connector
 only — the last output is never removed), so the two-output headless

@@ -546,7 +546,7 @@ mod tests {
                 scoot_ipc::PROTOCOL_VERSION
             )
         );
-        // And the shape the ticket fixes: `scoot 0.1.0 (ipc protocol 3)`,
+        // And the shape the ticket fixes: `scoot 0.1.0 (ipc protocol 4)`,
         // one line, no trailing newline (`print_line` adds it).
         assert!(version_string().starts_with("scoot "));
         assert!(!version_string().ends_with('\n'));
