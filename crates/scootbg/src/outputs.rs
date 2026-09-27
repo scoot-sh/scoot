@@ -39,7 +39,14 @@
 //! result is dropped.
 
 #[cfg(test)]
+mod paint_tests;
+#[cfg(test)]
 mod tests;
+
+use crate::choices::Choice;
+use crate::color::Color;
+use crate::paint::{Drawn, Plan};
+use crate::waiters::Progress;
 
 /// Identifies one bound output for the daemon's whole life; never reused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,13 +206,17 @@ pub enum Surface {
     /// Created and committed with no buffer; no `configure` yet.
     Pending,
     /// The compositor sent a size and scootbg acked it. A buffer attached
-    /// and committed now (solid-colour.md) maps the surface.
+    /// and committed maps the surface.
     Configured {
         /// The last `configure`'s serial, already acked.
         serial: u32,
         /// The size as the compositor sent it; 0 on an axis means "yours to
         /// choose", resolved by [`Output::surface_size`].
         requested: Size,
+        /// What the surface was last committed with; `None` while nothing
+        /// is attached (it is not mapped). Kept across later `configure`s
+        /// of the same surface, and gone with it.
+        drawn: Option<Drawn>,
     },
     /// The compositor closed it and it is destroyed; it is re-created once
     /// a round trip has shown the output was not removed meanwhile.
@@ -270,6 +281,13 @@ pub struct Output {
     surface: Surface,
     /// The compositor has closed a surface on this output before.
     closed_once: bool,
+    /// The generation of the last `set` or `clear` that targeted this
+    /// output, 0 before any (see `crate::waiters`).
+    stamp: u64,
+    /// Drawing what it should show failed; not retried until a new
+    /// request targets it or the compositor reconfigures it, so a failure
+    /// (a buffer too large for `wl_shm`, out of memory) cannot loop.
+    failed: bool,
 }
 
 impl Output {
@@ -365,18 +383,116 @@ impl Output {
         }
     }
 
-    /// A `configure` on the live surface: remember it, and ack it.
+    /// A `configure` on the live surface: remember it, and ack it. What a
+    /// configured surface shows stays; the glue redraws it at the new size
+    /// ([`Output::plan`]). A new size is also a new chance for a draw that
+    /// failed.
     pub fn configure(&mut self, serial: u32, width: u32, height: u32) -> Effect {
-        if !self.surface.is_live() {
+        let drawn = match self.surface {
+            Surface::Configured { drawn, .. } => drawn,
+            Surface::Pending => None,
             // No live surface: a stale event, already handled by the
             // glue's object check. Nothing to ack.
-            return Effect::None;
-        }
+            Surface::Waiting | Surface::Closed | Surface::GaveUp => return Effect::None,
+        };
         self.surface = Surface::Configured {
             serial,
             requested: Size { width, height },
+            drawn,
         };
+        self.failed = false;
         Effect::Ack(serial)
+    }
+
+    /// The glue replaced the live surface with a fresh one, committed with
+    /// no buffer (`clear`): it waits for its first `configure` again.
+    pub fn recreated(&mut self) {
+        if self.surface.is_live() {
+            self.surface = Surface::Pending;
+        }
+    }
+
+    /// A `set` or `clear` of generation `stamp` targets this output.
+    pub fn want(&mut self, stamp: u64) {
+        self.stamp = stamp;
+        self.failed = false;
+    }
+
+    /// The generation of the last request that targeted it.
+    pub fn stamp(&self) -> u64 {
+        self.stamp
+    }
+
+    /// The surface was committed with `drawn`.
+    pub fn drew(&mut self, drawn: Drawn) {
+        if let Surface::Configured { drawn: slot, .. } = &mut self.surface {
+            *slot = Some(drawn);
+        }
+    }
+
+    /// Drawing failed; see the field.
+    pub fn draw_failed(&mut self) {
+        self.failed = true;
+    }
+
+    /// The color on screen: what the configured surface was last
+    /// committed with.
+    pub fn shows(&self) -> Option<Color> {
+        match self.surface {
+            Surface::Configured { drawn, .. } => drawn.map(|d| d.color),
+            _ => None,
+        }
+    }
+
+    /// What to do so the surface shows `wanted`, drawn at buffer scale
+    /// `scale` (see `Path::buffer_scale`). Only a configured surface can
+    /// be drawn on; the others show nothing and wait for their
+    /// `configure`.
+    pub fn plan(&self, wanted: Choice, scale: u32) -> Plan {
+        let Surface::Configured { drawn, .. } = self.surface else {
+            return Plan::Nothing;
+        };
+        if self.failed {
+            return Plan::Nothing;
+        }
+        let Some(color) = wanted else {
+            return if drawn.is_some() {
+                Plan::Clear
+            } else {
+                Plan::Nothing
+            };
+        };
+        let Some(size) = self.surface_size() else {
+            return Plan::Nothing;
+        };
+        let target = Drawn { color, size, scale };
+        if drawn == Some(target) {
+            Plan::Nothing
+        } else {
+            Plan::Show(target)
+        }
+    }
+
+    /// Whether it shows `wanted` (at `scale`), for a waiting reply.
+    pub fn progress(&self, wanted: Choice, scale: u32) -> Progress {
+        if self.failed {
+            return Progress::Failed;
+        }
+        let shown = match self.surface {
+            // Nothing will ever be shown there: nothing to wait for.
+            Surface::GaveUp => return Progress::Done,
+            Surface::Configured { drawn, .. } => {
+                drawn.is_some() == wanted.is_some() && self.plan(wanted, scale) == Plan::Nothing
+            }
+            // No configured surface shows nothing, which is right only if
+            // nothing is wanted.
+            Surface::Waiting | Surface::Pending | Surface::Closed => wanted.is_none(),
+        };
+        if shown {
+            Progress::Done
+        } else {
+            Progress::Waiting
+        }
     }
 
     /// `closed` on the live surface: retry once, then give up.
@@ -501,6 +617,8 @@ impl<O> Outputs<O> {
                 settled: false,
                 surface: Surface::Waiting,
                 closed_once: false,
+                stamp: 0,
+                failed: false,
             },
             objects: objects(id),
         });
@@ -522,6 +640,10 @@ impl<O> Outputs<O> {
 
     pub fn iter(&self) -> impl Iterator<Item = &Entry<O>> {
         self.list.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Entry<O>> {
+        self.list.iter_mut()
     }
 
     #[cfg(test)]

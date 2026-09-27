@@ -24,8 +24,8 @@ On the same machine and outputs, published in `docs/scootbg/README.md`:
 | Idle memory | RSS and PSS one minute after the wallpaper is up, for 1× 1080p and 2× 4K, reported both with and without the output-sized buffer (see the floor) |
 | Idle wakeups | wakeups and CPU time over 60 s with a static wallpaper (target: zero) |
 | Peak memory | the high-water mark while decoding and scaling a 6000×4000 JPEG |
-| Set | CPU time and latency for one live change to that JPEG, and to a colour |
-| Startup | daemon start to first committed buffer, for a colour and an image |
+| Set | CPU time and latency for one live change to that JPEG, and to a color |
+| Startup | daemon start to first committed buffer, for a color and an image |
 | Restore | startup with the last wallpaper restored |
 | Disk | installed size, plus any cache it writes |
 
@@ -50,7 +50,7 @@ Every daemon needs the output-sized pixels somewhere: a 3840×2160
 `XRGB8888` buffer is ~33 MB, shared with the compositor. That is the same
 for all of them, unless one uses a smaller format or lets the compositor
 scale, which trades quality, and the table says when one does. The
-contest is everything above the floor. Colours are the exception:
+contest is everything above the floor. Colors are the exception:
 single-pixel buffers put the floor near zero, and scootbg should win that
 row by orders of magnitude.
 
@@ -60,7 +60,7 @@ Each checked against the numbers, not assumed:
 
 - No async runtime; one thread with a `poll` loop over the Wayland fd and
   the socket, plus a short-lived decode thread that exits when done.
-- Colours never touch shared memory (`wp_single_pixel_buffer_manager_v1`).
+- Colors never touch shared memory (`wp_single_pixel_buffer_manager_v1`).
 - `XRGB8888` buffers at exactly the output's device size, nothing larger.
 - The decoded source is dropped before the output buffer is allocated.
   No scaler may hold a source-width × target-height intermediate.

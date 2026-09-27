@@ -311,7 +311,7 @@ gives it surfaces:
 - `set`, `clear`, `apply-config`, and the `--output`/`--mode`/`--fill`
   flags: [cli-and-ipc.md](../cli-and-ipc.md).
 - `--profile` and `--no-restore`: [restore-state.md](../restore-state.md).
-- The first real use of `ShmBuffer`: [solid-colour.md](../solid-colour.md)
+- The first real use of `ShmBuffer`: [solid-color-done.md](solid-color-done.md)
   (its 1×1 fallback) and [images-decode-and-fit.md](../images-decode-and-fit.md).
 - Competitor measurements: [lightest.md](../lightest.md).
 - **Not verified here:** `--tty` (no dev VM was reachable from the Claude

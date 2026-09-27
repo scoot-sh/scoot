@@ -821,6 +821,8 @@ dependencies = [
 name = "scootbg"
 version = "0.1.0"
 dependencies = [
+ "base64",
+ "png",
  "rustix 1.1.4",
  "scootbg-mem",
  "serde",

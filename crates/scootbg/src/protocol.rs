@@ -20,8 +20,8 @@
 //! disagree loudly rather than misread each other. Unknown fields are
 //! ignored, which leaves room for the arguments later requests carry.
 //!
-//! Parsing borrows from the line and allocates nothing unless the `type`
-//! string contains escapes; replies are written straight into the
+//! Parsing borrows from the line and allocates nothing unless a string in
+//! it contains escapes; replies are written straight into the
 //! connection's reused output buffer.
 
 use std::borrow::Cow;
@@ -29,6 +29,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize, Serializer};
 
+use crate::color::{Color, ColorError};
 use crate::outputs::Size;
 
 #[cfg(test)]
@@ -44,44 +45,74 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// client cannot make the daemon buffer without bound.
 pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 
-/// What a client can ask for. The wallpaper-changing requests (`set`,
-/// `clear`, `apply-config`) arrive with the CLI ticket
-/// (docs/scootbg/backlog/cli-and-ipc.md).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Request {
+/// What a client can ask for. `apply-config` arrives with the CLI ticket
+/// (docs/scootbg/backlog/cli-and-ipc.md), image paths with images.
+///
+/// ```text
+/// {"protocol":1,"type":"set","color":"#1e1e2e"}
+/// {"protocol":1,"type":"set","color":"#1e1e2e","output":"DP-1"}
+/// {"protocol":1,"type":"clear"}
+/// {"protocol":1,"type":"clear","output":"DP-1"}
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Request<'a> {
     /// What each output shows.
     Query,
     /// Stop the daemon.
     Kill,
     /// The daemon's version and protocol.
     Version,
+    /// Show `color` on every output, or on the outputs named `output`.
+    Set {
+        color: Color,
+        output: Option<Cow<'a, str>>,
+    },
+    /// Show nothing (the compositor's own background) on every output, or
+    /// on the outputs named `output`.
+    Clear { output: Option<Cow<'a, str>> },
 }
 
-impl Request {
+impl Request<'_> {
     /// The `type` string on the wire.
-    pub fn name(self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             Self::Query => "query",
             Self::Kill => "kill",
             Self::Version => "version",
+            Self::Set { .. } => "set",
+            Self::Clear { .. } => "clear",
         }
     }
 
-    fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "query" => Some(Self::Query),
-            "kill" => Some(Self::Kill),
-            "version" => Some(Self::Version),
-            _ => None,
+    /// The request line a client sends, newline included. The output name
+    /// is JSON-escaped, so any name the compositor could report round-trips.
+    pub fn line(&self) -> String {
+        #[derive(Serialize)]
+        struct Line<'r> {
+            protocol: u32,
+            #[serde(rename = "type")]
+            kind: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            color: Option<Color>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            output: Option<&'r str>,
         }
-    }
-
-    /// The request line a client sends, newline included.
-    pub fn line(self) -> String {
-        format!(
-            "{{\"protocol\":{PROTOCOL_VERSION},\"type\":\"{}\"}}\n",
-            self.name()
-        )
+        let (color, output) = match self {
+            Self::Set { color, output } => (Some(*color), output.as_deref()),
+            Self::Clear { output } => (None, output.as_deref()),
+            Self::Query | Self::Kill | Self::Version => (None, None),
+        };
+        let line = Line {
+            protocol: PROTOCOL_VERSION,
+            kind: self.name(),
+            color,
+            output,
+        };
+        // Serializing strings and numbers into a `String` cannot fail; if
+        // it ever did, the empty line gets a "malformed" reply, not a panic.
+        let mut text = serde_json::to_string(&line).unwrap_or_default();
+        text.push('\n');
+        text
     }
 }
 
@@ -98,6 +129,13 @@ pub enum RequestError {
     WrongProtocol(u32),
     NoType,
     Unknown(String),
+    /// `set` with no `color` (an image, from a later client, say).
+    NoColor,
+    /// `set` with a `color` that is not `#rrggbb`.
+    BadColor {
+        text: String,
+        error: ColorError,
+    },
 }
 
 impl fmt::Display for RequestError {
@@ -113,21 +151,30 @@ impl fmt::Display for RequestError {
             ),
             Self::NoType => write!(f, "request has no `type` field"),
             Self::Unknown(name) => write!(f, "unknown request `{name}`"),
+            Self::NoColor => write!(
+                f,
+                "`set` needs a `color` (\"#rrggbb\"); images come in a later version"
+            ),
+            Self::BadColor { text, error } => write!(f, "bad color {text:?}: {error}"),
         }
     }
 }
 
-/// The fields every request has. `type` borrows from the line when it has
-/// no escapes; any other field is ignored.
+/// The fields a request may have. Strings borrow from the line when they
+/// have no escapes; any other field is ignored.
 #[derive(Deserialize)]
 struct Envelope<'a> {
     protocol: Option<u32>,
     #[serde(borrow, rename = "type")]
     kind: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    color: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    output: Option<Cow<'a, str>>,
 }
 
 /// Parses one request line (without its newline).
-pub fn parse(line: &[u8]) -> Result<Request, RequestError> {
+pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
     // JSON whitespace is these four bytes; an object is the only value
     // that starts with `{`. Anything else is refused before serde, which
     // would otherwise accept the array form of the struct.
@@ -151,7 +198,26 @@ pub fn parse(line: &[u8]) -> Result<Request, RequestError> {
         Some(other) => return Err(RequestError::WrongProtocol(other)),
     }
     let kind = envelope.kind.ok_or(RequestError::NoType)?;
-    Request::from_name(&kind).ok_or_else(|| RequestError::Unknown(kind.into_owned()))
+    match &*kind {
+        "query" => Ok(Request::Query),
+        "kill" => Ok(Request::Kill),
+        "version" => Ok(Request::Version),
+        "set" => {
+            let text = envelope.color.ok_or(RequestError::NoColor)?;
+            let color = Color::parse(&text).map_err(|error| RequestError::BadColor {
+                text: text.into_owned(),
+                error,
+            })?;
+            Ok(Request::Set {
+                color,
+                output: envelope.output,
+            })
+        }
+        "clear" => Ok(Request::Clear {
+            output: envelope.output,
+        }),
+        _ => Err(RequestError::Unknown(kind.into_owned())),
+    }
 }
 
 /// One output in a `query` reply, borrowed from the daemon's state so a
@@ -185,9 +251,16 @@ pub struct OutputEntry<'a> {
     /// that, at a fractional scale, possibly too small.
     pub logical: Option<Size>,
     pub surface: SurfaceEntry,
-    /// What the output shows: `null`, nothing, until colours and images
-    /// land (solid-colour.md fills this in).
-    pub shows: Option<Nothing>,
+    /// What the output shows: `{"color":"#rrggbb"}`, or `null` for
+    /// nothing (the compositor's own background, or no surface yet).
+    pub shows: Option<Shows>,
+}
+
+/// What an output shows, when it shows something. An object, so images
+/// can add their own keys later.
+#[derive(Debug, Serialize)]
+pub struct Shows {
+    pub color: Color,
 }
 
 /// Where an output's wallpaper surface stands: `state` is one of
@@ -203,10 +276,6 @@ pub struct SurfaceEntry {
     pub state: &'static str,
     pub size: Option<Size>,
 }
-
-/// Nothing is drawn yet, so `shows` has no value but `null`.
-#[derive(Debug, Serialize)]
-pub enum Nothing {}
 
 /// The daemon's outputs, as a `query` reply lists them.
 pub trait OutputList {

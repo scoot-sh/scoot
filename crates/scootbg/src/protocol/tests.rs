@@ -1,4 +1,5 @@
 use super::{OutputEntry, PROTOCOL_VERSION, Reply, Request, RequestError, parse, write_reply};
+use crate::color::Color;
 
 fn reply_string(reply: &Reply<'_>) -> String {
     let mut out = Vec::new();
@@ -6,13 +7,106 @@ fn reply_string(reply: &Reply<'_>) -> String {
     String::from_utf8(out).unwrap()
 }
 
+fn red() -> Color {
+    Color::parse("#c03020").unwrap()
+}
+
 #[test]
 fn each_request_parses() {
-    for request in [Request::Query, Request::Kill, Request::Version] {
+    for request in [
+        Request::Query,
+        Request::Kill,
+        Request::Version,
+        Request::Set {
+            color: red(),
+            output: None,
+        },
+        Request::Set {
+            color: red(),
+            output: Some("DP-1".into()),
+        },
+        Request::Clear { output: None },
+        Request::Clear {
+            output: Some("HEADLESS-2".into()),
+        },
+    ] {
         let line = request.line();
         assert!(line.ends_with('\n'));
+        assert_eq!(line.matches('\n').count(), 1);
         assert_eq!(parse(line.trim_end().as_bytes()).unwrap(), request);
     }
+}
+
+#[test]
+fn set_and_clear_lines_are_what_the_docs_say() {
+    let set = Request::Set {
+        color: Color::parse("#1E1E2E").unwrap(),
+        output: Some("DP-1".into()),
+    };
+    assert_eq!(
+        set.line(),
+        "{\"protocol\":1,\"type\":\"set\",\"color\":\"#1e1e2e\",\"output\":\"DP-1\"}\n"
+    );
+    assert_eq!(
+        Request::Clear { output: None }.line(),
+        "{\"protocol\":1,\"type\":\"clear\"}\n"
+    );
+    assert_eq!(
+        Request::Query.line(),
+        "{\"protocol\":1,\"type\":\"query\"}\n"
+    );
+}
+
+/// Output names come from the compositor and can hold anything: quotes,
+/// backslashes, control characters, non-ASCII. They round-trip, one line.
+#[test]
+fn any_output_name_round_trips() {
+    for name in [
+        "a\"b",
+        "back\\slash",
+        "new\nline",
+        "\u{1b}[31m",
+        "Écran",
+        "",
+    ] {
+        let request = Request::Clear {
+            output: Some(name.into()),
+        };
+        let line = request.line();
+        assert_eq!(line.matches('\n').count(), 1, "{name:?}");
+        assert_eq!(parse(line.trim_end().as_bytes()).unwrap(), request);
+    }
+}
+
+#[test]
+fn a_set_needs_a_valid_color() {
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"set"}"#),
+        Err(RequestError::NoColor)
+    ));
+    assert!(matches!(
+        parse(br#"{"protocol":1,"type":"set","image":"/x.png"}"#),
+        Err(RequestError::NoColor)
+    ));
+    for bad in ["#fff", "c03020", "#c03020 ", "#c03020ff", ""] {
+        let line = format!("{{\"protocol\":1,\"type\":\"set\",\"color\":{bad:?}}}");
+        match parse(line.as_bytes()) {
+            Err(RequestError::BadColor { text, error }) => {
+                assert_eq!(text, bad);
+                let message = RequestError::BadColor { text, error }.to_string();
+                assert!(message.contains("#rrggbb"), "{message}");
+            }
+            other => panic!("{bad:?}: {other:?}"),
+        }
+    }
+    // Uppercase is fine; the wire form is lowercase.
+    assert_eq!(
+        parse(br##"{"protocol":1,"type":"set","color":"#C03020"}"##).unwrap(),
+        Request::Set {
+            color: red(),
+            output: None
+        }
+    );
 }
 
 #[test]
@@ -77,8 +171,8 @@ fn a_missing_or_unknown_type_is_refused() {
         parse(br#"{"protocol":1}"#),
         Err(RequestError::NoType)
     ));
-    match parse(br#"{"protocol":1,"type":"set"}"#) {
-        Err(RequestError::Unknown(name)) => assert_eq!(name, "set"),
+    match parse(br#"{"protocol":1,"type":"apply-config"}"#) {
+        Err(RequestError::Unknown(name)) => assert_eq!(name, "apply-config"),
         other => panic!("expected Unknown, got {other:?}"),
     }
 }
@@ -126,7 +220,9 @@ fn output_entries_have_a_fixed_shape() {
                 height: 1920,
             }),
         },
-        shows: None,
+        shows: Some(super::Shows {
+            color: Color::parse("#C03020").unwrap(),
+        }),
     };
     let unknown = OutputEntry {
         name: None,
@@ -157,7 +253,7 @@ fn output_entries_have_a_fixed_shape() {
                 "transform": "90",
                 "logical": {"width": 1080, "height": 1920},
                 "surface": {"state": "configured", "size": {"width": 1080, "height": 1920}},
-                "shows": null,
+                "shows": {"color": "#c03020"},
             },
             {
                 "name": null,

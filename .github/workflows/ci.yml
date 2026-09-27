@@ -626,8 +626,10 @@ jobs:
 
   # scootbg against a live `scoot --headless`: the daemon's socket
   # lifecycle and its per-output surfaces end to end
-  # (crates/scootbg/tests/{daemon,outputs}.rs), and outputs coming and going
-  # on a headless sway (tests/hotplug.rs). Runs when either side changes,
+  # (crates/scootbg/tests/{daemon,outputs}.rs), outputs coming and going
+  # on a headless sway (tests/hotplug.rs), and colors checked by real
+  # pixels on both (tests/color.rs: scoot's own screenshots, and sway's
+  # through a wlr-screencopy client in the test). Runs when either side changes,
   # since each can break the other's end-to-end run.
   # `SCOOTBG_REQUIRE_SCOOT` and `SCOOTBG_REQUIRE_SWAY` turn the tests'
   # "skipped -- no scoot binary" / "no sway" into failures, so this job
@@ -689,5 +691,5 @@ jobs:
           SCOOTBG_REQUIRE_SCOOT: "1"
           SCOOTBG_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --no-fail-fast
-          cargo test -p scootbg --test daemon --test outputs --test hotplug
+          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --no-fail-fast
+          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color

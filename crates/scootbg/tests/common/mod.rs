@@ -15,6 +15,11 @@
 
 #![allow(dead_code)] // Each test binary uses a different subset.
 
+mod shots;
+
+#[allow(unused_imports)] // Only the binaries that check pixels use it.
+pub use shots::rgb;
+
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt};
@@ -286,13 +291,17 @@ impl Session {
             .join(format!("scootbg-{}.sock", self.wayland_display))
     }
 
-    /// `scootbg` with this session's environment.
+    /// `scootbg` with this session's environment, and none of the
+    /// variables that change what the daemon does inherited from the one
+    /// the tests run in: a test that wants them sets them itself.
     pub fn scootbg(&self) -> Command {
         let mut command = Command::new(scootbg_bin());
         command
             .env("XDG_RUNTIME_DIR", &self.scratch.0)
             .env("WAYLAND_DISPLAY", &self.wayland_display)
             .env_remove("WAYLAND_SOCKET")
+            .env_remove("WAYLAND_DEBUG")
+            .env_remove("SCOOTBG_DEBUG_PATH")
             .stdin(Stdio::null());
         command
     }

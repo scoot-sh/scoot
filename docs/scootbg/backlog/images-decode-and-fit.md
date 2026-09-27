@@ -9,7 +9,7 @@ blocked: null
 # Decoding images and fitting them to an output
 
 `scootbg set <path> [--output NAME] [--mode fill|fit|stretch|center|tile]
-[--fill COLOUR] [--filter ...]`.
+[--fill COLOR] [--filter ...]`.
 
 - Formats for v1: PNG, JPEG, WebP (still). Others behind cargo features
   later (see `more-formats.md`).
@@ -70,5 +70,5 @@ blocked: null
   pending hotplug or scale change needs it again (then re-decode rather
   than hold tens of MB forever).
 
-Colour management is out of scope for v1: images are treated as sRGB and
+Color management is out of scope for v1: images are treated as sRGB and
 written as 8-bit.

@@ -87,7 +87,8 @@ fn configure_is_acked_and_its_size_used() {
         output.surface(),
         Surface::Configured {
             serial: 5,
-            requested: size(1920, 1080)
+            requested: size(1920, 1080),
+            drawn: None,
         }
     );
     assert_eq!(output.surface_size(), Some(size(1920, 1080)));

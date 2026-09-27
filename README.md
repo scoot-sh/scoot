@@ -317,17 +317,47 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 ## scootbg (early)
 
 `scootbg` is scoot's wallpaper daemon, a separate binary and package that
-works on any compositor with `wlr-layer-shell`. **It is early: the daemon
-runs and places a background surface on every output, but it draws no
-wallpaper yet.** What works today:
+works on any compositor with `wlr-layer-shell`. **It is early: it shows a
+solid color on every output, or on one; images come in a later version.**
+What works today:
 
 ```sh
-scootbg daemon      # connect to $WAYLAND_DISPLAY and serve the control socket
-scootbg query       # each output and its surface, one JSON line (below)
-scootbg version     # the running daemon's version and protocol
-scootbg kill        # stop it; returns once a new daemon can start
-scootbg --help      # and `scootbg COMMAND --help`
+scootbg daemon                        # connect to $WAYLAND_DISPLAY and serve the control socket
+scootbg set '#1e1e2e'                 # every output, including ones plugged in later
+scootbg set '#101014' --output DP-2   # one output, by connector name (as `query` lists them)
+scootbg clear                         # back to the compositor's own background
+scootbg clear --output DP-2           # ... on one output
+scootbg query                         # each output, its surface and what it shows, one JSON line
+scootbg version                       # the running daemon's version and protocol
+scootbg kill                          # stop it; returns once a new daemon can start
+scootbg --help                        # and `scootbg COMMAND --help`
 ```
+
+**Colors** are `#rrggbb`, six hex digits in either case; quote them, since
+the shell reads `#` as a comment. Nothing else is accepted yet: no `#rgb`
+shorthand, no alpha (a wallpaper is opaque), and anything not starting with
+`#` is refused with "images come in a later version" (exit 2). `set` with
+no `--output` replaces every choice, per-output ones included; with
+`--output NAME` it sets that output only, and the choice is kept by name,
+so the monitor shows it again when it is unplugged and plugged back in. A
+name no output has right now is an error (exit 1) and changes nothing.
+`clear` does the same with nothing to show.
+
+**`set` and `clear` return once it is on screen:** every targeted output
+shows the change and the compositor has processed it (a `wl_display.sync`
+round trip after the commits), so a screenshot taken straight after shows
+it. An output unplugged meanwhile is left out of that wait; one whose
+surface is not configured yet is waited for. They print nothing on
+success. Exit status: 0 done; 1 no daemon running, unknown output, or
+drawing failed (the daemon's stderr says why); 2 usage error, a malformed
+color included.
+
+On a compositor with `wp_single_pixel_buffer_manager_v1` and
+`wp_viewporter` (scoot, sway, and most others) a color costs no shared
+memory at all: one single-pixel buffer scaled to the output. Without
+single-pixel buffers it is a 1×1 `wl_shm` buffer under the viewport, and
+without a viewporter a full-size buffer. A static color asks for no frame
+callbacks and wakes the daemon for nothing.
 
 One daemon per display: its socket is
 `$XDG_RUNTIME_DIR/scootbg-NAME.sock`, `NAME` being the last component of
@@ -337,7 +367,8 @@ the compositor goes away, removing its socket either way. A signal
 (SIGTERM, Ctrl-C) ends it on the spot and leaves the socket file; the other
 commands then say no daemon is running (exit 1), and the next
 `scootbg daemon` replaces the file. Every command exits 2 on a usage
-error (an unknown command or argument).
+error (an unknown command or argument). The choices live in the daemon
+only for now: restoring them at the next start is a later item.
 
 Outputs are tracked as they come and go: each gets one surface on the
 `background` layer (namespace `wallpaper`), covering the whole output,
@@ -349,7 +380,7 @@ simply waits. `scootbg query` answers, on one line (wrapped here):
  "mode":{"width":3840,"height":2160},"scale":2,"transform":"normal",
  "logical":{"width":1920,"height":1080},
  "surface":{"state":"configured","size":{"width":1920,"height":1080}},
- "shows":null}]}
+ "shows":{"color":"#1e1e2e"}}]}
 ```
 
 Every key is always present, `null` when not known yet. `mode` is in
@@ -362,13 +393,15 @@ output has not reported itself yet), `pending`, `configured` (with `size`),
 `gave-up` (closed a second time over the output's life: scootbg has
 stopped trying on that output, says so on stderr, and the other outputs
 are unaffected; it lasts until that output is unplugged and plugged back
-in, which makes it a new output). `shows` stays `null`
-until colours land. New keys may be added; none changes meaning within
-protocol 1. If the daemon cannot accept clients (out of file descriptors,
-say), it keeps the wallpaper up, says so once on stderr, and retries every
-second rather than exit. Colours, images and `scootbg set` are the next items in
-[its backlog](docs/scootbg/backlog/README.md); scoot's `[wallpaper]` config
-section does not exist yet, so do not add one.
+in, which makes it a new output). `shows` is what the output has on
+screen: `{"color":"#rrggbb"}` (lowercase), or `null` for nothing. New keys
+may be added; none changes meaning within protocol 1. If the daemon cannot
+accept clients (out of file descriptors, say), it keeps the wallpaper up,
+says so once on stderr, and retries every second rather than exit. The
+control protocol itself (one JSON object per line, for scripts that skip
+the CLI) is in [docs/scootbg/README.md](docs/scootbg/README.md#the-control-protocol).
+Images are the next items in [its backlog](docs/scootbg/backlog/README.md);
+scoot's `[wallpaper]` config section does not exist yet, so do not add one.
 
 ## Documentation
 
@@ -439,7 +472,7 @@ split by path: a change under `crates/scootbg/` or `crates/scootbg-mem/`
 alone runs only scootbg's own job (fmt, clippy, tests, a no-`libc`-crate
 check, the release size) plus scootbg's integration tests (on a headless
 scoot, and on a headless sway from the pinned nixpkgs for outputs coming
-and going), and a compositor-only change skips scootbg's job; shared files
+and going, with colors checked by real pixels on both), and a compositor-only change skips scootbg's job; shared files
 (`Cargo.*`, `flake.*`, `nix/`, `.github/`, and anything unlisted) run
 everything. The
 packaged artifacts themselves (`nix build .#scoot .#scootctl .#scootbg`) build on every

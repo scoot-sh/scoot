@@ -13,9 +13,9 @@ rg -l 'priority: "high"' docs/scootbg/backlog
 Items move to `resolved/` here when done, with a `-done` suffix, as in the
 compositor's backlog.
 
-## Milestone 1: colours and images, in scoot (v1)
+## Milestone 1: colors and images, in scoot (v1)
 
-The first shippable version: a colour or an image per output, `scootbg set`
+The first shippable version: a color or an image per output, `scootbg set`
 to change it, a `[wallpaper]` section in scoot's config, and numbers
 showing it is the lightest. Roughly in order; each is one PR through the
 full per-feature cycle.
@@ -36,7 +36,7 @@ full per-feature cycle.
    `background` surface each (configured, nothing drawn yet), `query`
    lists them; a failed `accept` rests the listener instead of ending the
    daemon; checked on headless scoot and headless sway
-4. [Solid colours through single-pixel buffers](solid-colour.md)
+4. [Solid colors through single-pixel buffers](solid-color.md)
 5. [The CLI and control protocol](cli-and-ipc.md)
 6. [Decoding images and fitting them to an output](images-decode-and-fit.md)
 7. [Drawing at real device pixels on scaled outputs](hidpi-fractional-scale.md)

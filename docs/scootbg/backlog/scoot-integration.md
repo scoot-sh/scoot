@@ -134,7 +134,7 @@ documented rather than worked around.
 - **The gap before the first frame.** Until scootbg commits its first
   buffer, scoot shows `background_color`. Measure that gap on `--tty`. If
   it is visible, the goal is to shorten it (commit sooner, decode less),
-  not to paint a different placeholder colour, which would be its own
+  not to paint a different placeholder color, which would be its own
   flash. A redundant `scootbg daemon` in `[autostart]` that wins the bind
   first restores the `default` profile, then adopts scoot's, which can
   flash an old wallpaper; the `[wallpaper]` docs tell users to drop that

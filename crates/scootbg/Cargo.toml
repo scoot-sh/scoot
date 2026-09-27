@@ -34,7 +34,12 @@ rustix = { version = "1", default-features = false, features = ["std", "event", 
 serde.workspace = true
 serde_json.workspace = true
 
-# The integration tests signal the daemon they start and probe its lock.
-# Dev-only: the binary itself does neither.
+# The integration tests signal the daemon they start and probe its lock,
+# and read screenshots back: scoot's arrive as base64 PNG over its IPC, and
+# sway's through a small wlr-screencopy client into a memfd (`fs`), read
+# back with `read`. Dev-only: the binary itself does none of this, and none
+# of it reaches its dependency tree.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
+base64.workspace = true
+png = "0.18"

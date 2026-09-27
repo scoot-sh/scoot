@@ -54,7 +54,7 @@ layer-shell compositor before calling it portable.
     four edges with size 0×0, exclusive zone -1, keyboard interactivity
     `none`, and an input region that is a `wl_region` with nothing added.
     Committed once with no buffer; each `configure` is acked at once.
-    Nothing is attached, so nothing is shown; solid-colour.md attaches to
+    Nothing is attached, so nothing is shown; solid-color-done.md attaches to
     a `Configured` surface and commits.
   - Removal destroys the layer surface, then its `wl_surface`, then the
     `xdg_output` if any, then `wl_output.release` (v3+).
@@ -72,7 +72,7 @@ layer-shell compositor before calling it portable.
 
   Every key is always there, `null` when not known. `state` is `waiting`,
   `pending`, `configured`, `closed` or `gave-up`; `size` only when
-  configured. `shows` is `null` until solid-colour.md. The entries borrow
+  configured. `shows` is `null` until solid-color-done.md. The entries borrow
   from the model and serialize straight into the connection's reused
   buffer (a unit test pins that the buffer is not reallocated).
 - **Zero outputs** is the same poll with no timeout: no wakeups, measured
@@ -132,12 +132,12 @@ layer-shell compositor before calling it portable.
   compositor checked sends 0 for a surface anchored to all four edges.
 - **No commit after the ack.** An ack takes effect with the next commit,
   and with no buffer to attach there is nothing to commit; the first
-  commit is solid-colour.md's, with its buffer. Several acks before one
+  commit is solid-color-done.md's, with its buffer. Several acks before one
   commit are allowed ("only the last … indicates which configure event the
   client really is responding to").
 - **The ticket's "second output checked by `scootctl screenshot --output
-  2`" moves to solid-colour.md**: with nothing drawn, a screenshot shows
-  only scoot's background colour. What stands in for it here is scoot's
+  2`" moves to solid-color-done.md**: with nothing drawn, a screenshot shows
+  only scoot's background color. What stands in for it here is scoot's
   own `wl_surface.enter`: each surface is entered on exactly the output it
   was made for (`outputs.rs`, from the protocol trace), and `usable` is
   unchanged (exclusive zone -1 reserves nothing). scoot has no IPC request
@@ -272,7 +272,7 @@ No blocking findings. Fixed:
 
 ### For the next tickets
 
-- [solid-colour.md](../solid-colour.md): attach to a surface in
+- [solid-color-done.md](solid-color-done.md): attach to a surface in
   `Surface::Configured` (its serial is already acked) at
   `Output::surface_size()`, commit, and fill `query`'s `shows`. A
   `configure` arriving later (a mode change) needs a redraw at the new

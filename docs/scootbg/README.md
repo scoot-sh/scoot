@@ -2,7 +2,7 @@
 
 The lightest wallpaper daemon for Wayland, written in Rust, in place of
 `awww` (formerly `swww`), `swaybg`, `hyprpaper`, `wpaperd` and friends.
-It shows a colour or an image on each output, and one command changes it.
+It shows a color or an image on each output, and one command changes it.
 
 It is built for scoot and set up by scoot's own config, but it is not tied
 to it: scootbg speaks only standard protocols, so it also runs on any
@@ -12,7 +12,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > `unsafe` in `crates/scootbg-mem/`): `scootbg daemon` connects, tracks
 > every output as it comes and goes, and gives each one a `background`
 > layer surface; `scootbg query` lists the outputs and their surfaces,
-> and `version` and `kill` work. **It draws no wallpaper yet**: colours
+> and `version` and `kill` work. **It draws no wallpaper yet**: colors
 > and images are the next items in [`backlog/`](backlog/README.md). These
 > docs stay here.
 
@@ -26,7 +26,7 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   the same machine, with the table published here. Every
   dependency has to justify its bytes. See
   [`backlog/lightest.md`](backlog/lightest.md).
-- **Colours and images.** A solid colour or a PNG, JPEG or WebP image per
+- **Colors and images.** A solid color or a PNG, JPEG or WebP image per
   output, changed live with one command and restored at login. That is
   v1.
 - **Seamless in scoot.** A `[wallpaper]` section in scoot's `config.toml`
@@ -71,7 +71,7 @@ And one command changes it live, in scoot or anywhere else:
 
 ```sh
 scootbg set ~/Pictures/city.png                # every output
-scootbg set '#1e1e2e'                          # a colour: anything starting with '#'
+scootbg set '#1e1e2e'                          # a color: anything starting with '#'
 scootbg set ./#draft.png                       # a file whose name starts with '#'
 scootbg set ~/Pictures/city.png --output DP-1 --mode fit --fill '#101014'
 scootbg query                                  # what each output shows, as JSON
@@ -88,14 +88,14 @@ to it over its socket.
 - **One `background`-layer surface per output**, anchored to all four edges,
   exclusive zone `-1`, no keyboard interactivity and an empty input region,
   so clicks reach the desktop underneath, as on any other compositor.
-- **Solid colours** use `wp_single_pixel_buffer_manager_v1` scaled by
+- **Solid colors** use `wp_single_pixel_buffer_manager_v1` scaled by
   `wp_viewporter`: one pixel of memory for a whole output, with a 1×1
   `wl_shm` buffer where the compositor lacks the protocol.
 - **Images** are decoded once, scaled once per output size and scale, and
   written into an opaque `XRGB8888` buffer with its opaque region set, so a
   compositor can skip drawing anything beneath it.
 - **Fit modes:** `fill` (cover and crop, the default), `fit` (letterbox
-  with a colour), `stretch`, `center`, `tile`.
+  with a color), `stretch`, `center`, `tile`.
 - **Outputs come and go.** A monitor plugged in gets the wallpaper meant
   for it (by connector name, or the "every output" choice), and one unplugged
   frees its buffer.
@@ -121,7 +121,7 @@ to it over its socket.
   it from `PATH` (or `[wallpaper] command`), and the home-manager module
   installs it and points scoot at it when `[wallpaper]` is set.
 - scoot's `[appearance] background_color` stays: it is the frame clear
-  colour, what shows with no wallpaper client at all. scootbg draws over it
+  color, what shows with no wallpaper client at all. scootbg draws over it
   on the background layer.
 - The compositor's `scootctl screenshot` and `ext-image-copy-capture-v1`
   already include layer surfaces, so screenshots show the wallpaper with no

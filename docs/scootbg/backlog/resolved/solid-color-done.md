@@ -1,14 +1,14 @@
 ---
-title: "Solid colours through single-pixel buffers"
+title: "Solid colors through single-pixel buffers"
 status: "open"
 area: "scootbg"
 priority: "high"
 blocked: null
 ---
 
-# Solid colours through single-pixel buffers
+# Solid colors through single-pixel buffers
 
-`scootbg set '#rrggbb'` sets a whole output to one colour.
+`scootbg set '#rrggbb'` sets a whole output to one color.
 
 - With `wp_single_pixel_buffer_manager_v1` and `wp_viewporter`: one
   single-pixel buffer, viewport destination set to the surface size. No
@@ -17,8 +17,8 @@ blocked: null
   viewporter either, a full-size buffer filled once. Check the 1×1 path's
   pixels, not just that it maps: on `scoot --headless` (pixman) a
   viewport-upscaled 1×1 `wl_shm` buffer rendered as a bilinear fade to
-  transparent at every edge, not a flat colour
-  ([observed](resolved/dependencies-done.md#incidental-finding-a-11-wl_shm-buffer-upscaled-on-scoot)).
+  transparent at every edge, not a flat color
+  ([observed](dependencies-done.md#incidental-finding-a-11-wl_shm-buffer-upscaled-on-scoot)).
   That is a compositor bug; scoot itself offers single-pixel buffers, so
   scootbg never takes this path there.
 - Opaque region set to the whole surface.
@@ -34,7 +34,7 @@ blocked: null
 This is also the cheapest way to prove the daemon, the socket and output
 handling end to end before any image code exists.
 
-From [ticket 3](resolved/outputs-and-layer-surfaces-done.md#for-the-next-tickets):
+From [ticket 3](outputs-and-layer-surfaces-done.md#for-the-next-tickets):
 each output's surface already exists and, once `Surface::Configured`, has
 its `configure` acked; attach at `Output::surface_size()`, commit, redraw on
 a later `configure`, and fill `query`'s `shows`. The screenshot check of

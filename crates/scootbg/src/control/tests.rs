@@ -12,29 +12,38 @@ use rustix::event::PollFlags;
 
 use super::conn::OUT_SOFT_LIMIT;
 use super::{
-    AcceptError, Claim, ClaimError, Conn, Handler, MAX_CONNECTIONS, Server, Status, classify,
+    AcceptError, Answer, Claim, ClaimError, Conn, ConnId, Handler, MAX_CONNECTIONS, Server, Status,
+    classify,
 };
 use crate::paths::{self, Paths};
 use crate::protocol::MAX_REQUEST_LINE;
 
-/// Answers every line with `{"echo":<len>}` and counts them.
+/// Answers every line with `{"echo":<len>}` and counts them; a line
+/// starting with `later` is answered [`Answer::Later`] instead, and the
+/// connection it came from recorded.
 #[derive(Default)]
-struct Echo {
-    handled: usize,
+pub(super) struct Echo {
+    pub(super) handled: usize,
+    pub(super) deferred: Vec<ConnId>,
 }
 
 impl Handler for Echo {
-    fn handle(&mut self, line: &[u8], out: &mut Vec<u8>) {
+    fn handle(&mut self, conn: ConnId, line: &[u8], out: &mut Vec<u8>) -> Answer {
         self.handled += 1;
+        if line.starts_with(b"later") {
+            self.deferred.push(conn);
+            return Answer::Later;
+        }
         out.extend_from_slice(format!("{{\"echo\":{}}}\n", line.len()).as_bytes());
+        Answer::Now
     }
 }
 
 /// A scratch directory, removed on drop.
-struct Scratch(PathBuf);
+pub(super) struct Scratch(PathBuf);
 
 impl Scratch {
-    fn new(tag: &str) -> Self {
+    pub(super) fn new(tag: &str) -> Self {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -45,7 +54,7 @@ impl Scratch {
         Self(dir)
     }
 
-    fn paths(&self) -> Paths {
+    pub(super) fn paths(&self) -> Paths {
         paths::resolve(Some("wayland-9".as_ref()), Some(self.0.as_os_str())).unwrap()
     }
 }
@@ -56,20 +65,20 @@ impl Drop for Scratch {
     }
 }
 
-fn pair() -> (Conn, UnixStream) {
+pub(super) fn pair() -> (Conn, UnixStream) {
     let (ours, theirs) = UnixStream::pair().unwrap();
     ours.set_nonblocking(true).unwrap();
-    (Conn::new(ours), theirs)
+    (Conn::new(ConnId(7), ours), theirs)
 }
 
 /// Services until the connection stops making progress, like the poll loop
 /// would with the socket always readable.
-fn service(conn: &mut Conn, echo: &mut Echo) -> Status {
+pub(super) fn service(conn: &mut Conn, echo: &mut Echo) -> Status {
     let mut scratch = [0u8; 4096];
     conn.service(PollFlags::IN, &mut scratch, echo)
 }
 
-fn read_available(stream: &mut UnixStream) -> String {
+pub(super) fn read_available(stream: &mut UnixStream) -> String {
     stream.set_nonblocking(true).unwrap();
     let mut all = Vec::new();
     let mut buf = [0u8; 65536];
@@ -229,7 +238,7 @@ fn a_reply_to_a_vanished_client_closes_without_a_panic() {
     assert_eq!(second, Status::Close);
 }
 
-fn claim(scratch: &Scratch) -> Result<Claim, ClaimError> {
+pub(super) fn claim(scratch: &Scratch) -> Result<Claim, ClaimError> {
     Claim::acquire(&scratch.paths())
 }
 
