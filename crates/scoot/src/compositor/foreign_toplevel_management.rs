@@ -141,6 +141,7 @@ use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, R
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 
 use super::State;
+use super::output_clip;
 
 #[cfg(test)]
 mod tests;
@@ -352,34 +353,42 @@ fn state_array(activated: bool, fullscreen: bool, version: u32) -> Vec<u8> {
 impl State {
     /// The output a window is on, for the `output_enter` its handles are told.
     ///
-    /// Read off where the window is actually drawn -- the first output whose
-    /// geometry overlaps the window's bounding box in the `Space` -- rather
-    /// than filed at creation, because "which output" is a fact about the
-    /// layout, and the layout is what `apply()` just pushed onto the space.
-    /// A window with no bounding box yet (announced from `add_window` before
-    /// the core has placed it, or never mapped) reads as the pointer's
+    /// Read off where the window is actually drawn -- the output
+    /// [`apply()`](super::State::apply) stamped beside `map_element`, from
+    /// the same placement the frame is gathered from -- rather than off the
+    /// window's bounding box, which a column scrolled part-way off its
+    /// output (or a fullscreen window its column is focused away from)
+    /// carries across the shared edge. The box-overlap read used to announce
+    /// such a window on the neighbour, corrected only by the next `apply()`'s
+    /// membership diff.
+    ///
+    /// `placed_on` is `None` exactly while the window is not mapped, but
+    /// this also announces windows that are not mapped (from `add_window`,
+    /// before the core has placed them): the fallback then is the core's own
+    /// `Placement::output` where the window has one, else the pointer's
     /// output, which is where the window is about to open (`shell.rs` files
     /// `WindowOpened` there too), falling back to the primary when the
     /// pointer is over no output. `None` only when there is no output at all.
     ///
-    /// Costs one bounding-box read and one geometry overlap per output until
-    /// it hits. Announcement and binds are cold paths (per window, per
-    /// `wl_output` bind), not per-event ones.
+    /// Costs one user-data read on the mapped path. The unmapped path
+    /// arranges the core, which is a cold path (per window announce, per
+    /// `wl_output` bind), never a per-event one.
     fn output_of_window(&self, id: WindowId) -> Option<Output> {
         let window = self.windows.get(&id)?;
-        let bbox = self.space.element_bbox(window);
-        let placed = bbox.and_then(|bbox| {
-            self.outputs
-                .iter()
-                .find(|output| {
-                    self.space
-                        .output_geometry(output)
-                        .is_some_and(|region| region.overlaps(bbox))
-                })
-                .cloned()
-        });
-        placed
-            .or_else(|| self.pointer_output())
+        if let Some(placed) = output_clip::placed_on(window)
+            && let Some(output) = self.outputs.get(placed)
+        {
+            return Some(output.clone());
+        }
+        let core = self
+            .world
+            .arrange()
+            .get(id)
+            .map(|placement| placement.output);
+        if let Some(output) = core.and_then(|id| self.outputs.get(id)) {
+            return Some(output.clone());
+        }
+        self.pointer_output()
             .or_else(|| self.outputs.primary().cloned())
     }
 

@@ -30,7 +30,10 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols::wp::presentation_time::client::{wp_presentation, wp_presentation_feedback};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
+use scoot_core::{Action, Horizontal, OutputId, WindowId};
+
 use crate::compositor::decorations::Appearance;
+use crate::compositor::headless;
 use crate::compositor::test_support::{Harness, wait_for};
 
 use super::presented_frame;
@@ -169,6 +172,30 @@ impl Fixture {
             .presented
             .as_ref()
             .expect("no presented event arrived")
+    }
+
+    /// Another mapped client, for the multi-window scenes: its window opens
+    /// on the pointer's output and takes focus, the way `Fixture::start`'s
+    /// own client did.
+    fn spawn_mapped(&mut self) -> usize {
+        let index = self.spawn(run_client);
+        let Ack::Started { presentation, .. } = self.wait_for_ack(index) else {
+            panic!("client {index} reported being mapped before its globals");
+        };
+        assert!(presentation, "no wp_presentation -- the global is missing");
+        let Ack::Mapped = self.wait_for_ack(index) else {
+            panic!("client {index} reported feedback before being mapped");
+        };
+        self.settle();
+        index
+    }
+
+    /// The core id of the `index`-th window mapped so far (ids only
+    /// increment), so a multi-client scene can name its windows.
+    fn window_id(&self, index: usize) -> WindowId {
+        let mut ids: Vec<WindowId> = self.state.windows.keys().copied().collect();
+        ids.sort();
+        ids[index]
     }
 }
 
@@ -957,5 +984,114 @@ fn a_locked_window_gets_no_feedback_until_unlock() {
     assert!(
         presented.sec != 0 || presented.nsec != 0,
         "the post-unlock presented timestamp is zeroed"
+    );
+}
+
+/// A window hanging over the shared edge is presented by the output it is
+/// placed on, not by whichever output renders: the neighbouring output's
+/// frame leaves its feedback queued, and its own output's frame presents it.
+/// Fail-first: the take walked every window in the space, so the neighbour's
+/// frame drained the overhang and stamped it with the wrong sync output --
+/// the same membership the frame-callback pin (`output_clip/tests.rs`) owns.
+#[test]
+fn an_overhanging_window_is_presented_by_its_own_output() {
+    let mut fixture = Fixture::start();
+    headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second output");
+    fixture.settle();
+    // New windows open on the pointer's output: park it on the second one.
+    {
+        let output = fixture
+            .state
+            .outputs
+            .get(OutputId(2))
+            .expect("a second output")
+            .clone();
+        let geometry = fixture
+            .state
+            .space
+            .output_geometry(&output)
+            .expect("a mapped output");
+        fixture.state.pointer_move(
+            f64::from(geometry.loc.x + geometry.size.w / 2),
+            f64::from(geometry.loc.y + geometry.size.h / 2),
+        );
+        fixture.settle();
+    }
+    // Two windows on the second output, the right one focused, so the left
+    // one's rect crosses onto the first output.
+    let overhang = fixture.spawn_mapped();
+    fixture.state.act(Action::SetColumnWidth(2));
+    fixture.settle();
+    fixture.spawn_mapped();
+    fixture.state.act(Action::SetColumnWidth(2));
+    fixture.settle();
+    fixture.state.act(Action::FocusColumn(Horizontal::Right));
+    fixture.settle();
+    // Window 0 is the starter client's, on the first output; window 1 is the
+    // overhanging one.
+    let id = fixture.window_id(1);
+    let arrangement = fixture.state.world.arrange();
+    let place = arrangement.get(id).expect("a placed window");
+    assert_eq!(
+        place.output,
+        OutputId(2),
+        "the scene is on the wrong output"
+    );
+    assert!(
+        place.rect.x < CANVAS && place.rect.right() > CANVAS,
+        "the scene needs the left column across the shared edge: {:?}",
+        place.rect
+    );
+
+    // Only the first output draws from here until its backend goes back: the
+    // frame timer's own render can never complete the feedback early, so
+    // what the report sees is exactly one controlled frame.
+    let second = fixture
+        .state
+        .take_backend(OutputId(2))
+        .expect("a second render target");
+    let Ack::Done = fixture.run_on(overhang, Step::RequestFeedback) else {
+        panic!("a feedback request answered with something else");
+    };
+    fixture.state.request_render();
+    fixture.state.render();
+    let Ack::Feedback { events } = fixture.run_on(overhang, Step::ReportFeedback) else {
+        panic!("a feedback report answered with something else");
+    };
+    fixture.state.put_backend(OutputId(2), second);
+    assert_eq!(
+        events.len(),
+        1,
+        "expected one feedback object, saw {}",
+        events.len()
+    );
+    assert!(
+        !events[0].discarded && events[0].presented.is_none(),
+        "the neighbouring output's frame stamped a window placed on the other screen"
+    );
+
+    // ...while its own output's frame presents it, exactly once.
+    let first = fixture
+        .state
+        .take_backend(OutputId(1))
+        .expect("a first render target");
+    let Ack::Done = fixture.run_on(overhang, Step::RequestFeedback) else {
+        panic!("a feedback request answered with something else");
+    };
+    fixture.state.request_render();
+    fixture.state.render();
+    let Ack::Feedback { events } = fixture.run_on(overhang, Step::ReportFeedback) else {
+        panic!("a feedback report answered with something else");
+    };
+    fixture.state.put_backend(OutputId(1), first);
+    let presented = Fixture::only_presented(&events);
+    assert_eq!(
+        events[0].sync_outputs, 1,
+        "one output's frame means one sync_output before presented"
+    );
+    assert_eq!(
+        presented.seq, 0,
+        "headless has no retrace, so seq MUST be zero"
     );
 }
