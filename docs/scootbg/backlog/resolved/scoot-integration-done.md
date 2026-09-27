@@ -926,3 +926,136 @@ At `9464cf2` unless noted, on the container above:
   does.
 - **[lightest.md](../lightest.md)** can now measure scootbg as a scoot
   user runs it: started by `apply-config` from the config.
+
+## Review of PR #297
+
+One blocking finding (B1), fixed with the rest in `09076bc`; this record
+in the docs-only commit after it. Where this section and "Part B" above
+disagree, this section is current.
+
+- **B1 (blocking): a config file could overflow the stack.** The lenient
+  `[wallpaper]` parse drained what it skipped with serde's `IgnoredAny`,
+  which recurses as deep as the value goes, and `toml`'s own limits allow
+  6,561 levels (80-level nesting times 80-segment keys,
+  `docs/backlog/resolved/config-recursion-depth-resolved.md`). The
+  reviewer's file, that worst case rooted under `[wallpaper]` (an
+  80-segment `[[wallpaper.a.a…]]` header, 80 nested inline tables each
+  keyed by an 80-segment dotted key, an 80-segment dotted leaf; 13,456
+  bytes), aborted a debug build at startup and on `scootctl reload` of a
+  running session, and a release build at `ulimit -s` 4096 and below. The
+  part B doc's claim that `toml`'s limits bounded the drain was wrong: they
+  bound the tree, not the cost of walking all of it.
+  - **Fix:** `Drain` (`wallpaper/section.rs`) skips a value building
+    nothing and returns a deserialize error past `MAX_DRAIN_DEPTH` = 16
+    levels of arrays and tables, so absurd nesting fails the whole file
+    exactly as malformed TOML does (startup: logged, full defaults;
+    reload: an `error`, the running config kept). Every place the section
+    skips a value goes through it (unknown keys at the top and in an output
+    table, a wrong-typed value that is an array or table, `[wallpaper]` or
+    `output` given as an array); `IgnoredAny` is left only for map keys,
+    which are strings in TOML. A legitimate section is three levels deep.
+  - **Pins** (`wallpaper/tests/section.rs`), matching the strict path's
+    `the_deepest_tree_tomls_limits_allow_falls_back_to_defaults_too` (an 8
+    MiB thread, the main thread's stack, which is where `config::load`
+    and `State::reload` run): `the_deepest_tree_under_wallpaper_falls_back_to_defaults_at_startup`
+    (through `config::load`) and
+    `the_deepest_tree_under_wallpaper_is_a_reload_error` (through
+    `config::reload_from`). Fail-first: against `9464cf2`'s drain both
+    died with `thread '<unknown>' has overflowed its stack` / SIGABRT under
+    nextest. `nesting_is_drained_up_to_the_bound_and_refused_past_it`
+    replaces the old deep-nesting test: every form at 16 levels is still a
+    named refusal, at 17 a parse error.
+  - **End to end**, a real `scoot --headless` per cell, startup with the
+    file, then a clean session reloaded onto it (`deep_e2e.sh` in the
+    session's scratch record). Release, `09076bc`'s tree (sha256
+    `5ac1022a…`) vs `4646074` (`d8824ba3…`), and the same worst case at the
+    top level (`[[a.a…]]`, 13,448 bytes: the strict path) for comparison:
+
+    | `ulimit -s` KiB | before, `[wallpaper]` | after, `[wallpaper]` | after, strict |
+    |---|---|---|---|
+    | 8192 | up (the file *parsed*: refused leniently) | up, parse error logged; reload: `error`, still up | same |
+    | 4096 | SIGABRT at startup and on reload | up / `error`, still up | same |
+    | 2048 | SIGABRT at startup and on reload | up / `error`, still up | same |
+    | 1024 | (not run) | up / `error`, still up | same |
+    | 512 | (not run) | SIGABRT (exit 134) | SIGABRT (exit 134) |
+
+    So the section now costs exactly what the strict path costs: the
+    `toml` document's own drop, which neither can avoid. Debug build,
+    `09076bc`'s tree: up at 8192, 7168 and 6144 KiB, startup and reload,
+    no `overflowed` line, the reload reply `could not reload config file
+    …: TOML parse error at line 1, column 45 … a value in [wallpaper]
+    nests more than 16 levels of arrays and tables deep; keeping the
+    running config`.
+- **N3: a headless session had the `scoot` profile**, so an agent's
+  `scootbg set` there would be restored by the user's real `--tty` login,
+  and the two sessions' daemons would write one file. Now one per backend
+  (`wallpaper::profile_for`): `scoot` on `--tty`, `scoot-nested` on
+  `--nested`, `scoot-headless` on `--headless` (also the default before
+  startup sets one, so nothing reaches the real profile by accident).
+  Tested by `each_backend_has_its_own_profile`, by
+  `tests/scoot_config.rs` (the daemon's `query` says `scoot-headless`, its
+  state file is `scoot-headless`, and no `scoot` file appears) and by the
+  smoke test ("ok: the headless session's wallpaper state is its own").
+- **N4: the NixOS change was breaking.** `programs.scoot.wallpaper.enable`
+  now defaults to `enable && wallpaper.package != null`: a direct-module
+  user without the overlay gets no eval failure (and no scootbg); an
+  explicit `wallpaper.enable = true` with no package keeps the loud
+  assertion. Pins: that user's config holds every assertion and installs
+  only scoot; the explicit form has exactly one failing assertion, naming
+  the option. With the old default the first pin fails
+  (`assertion '(! (osWallNoPkg).config.programs.scoot.wallpaper.enable)'
+  failed`). CHANGELOG and docs/nix.md say so.
+- **N5:** a TOML date or time reaches a visitor as a one-entry map under
+  `toml`'s private `$__toml_private_datetime`; the section named that key
+  in its messages. Every place now checks for it and says "a date/time"
+  (`a_date_is_named_as_one_and_never_by_tomls_private_key`, six places).
+- **N6: an invalid-section reload revived nothing.** It now re-runs the
+  section still in force, as every reload re-runs the section in force:
+  unchanged, so scootbg only answers, and a crashed daemon comes back.
+  Chosen over documenting the gap because the refusal keeps that section
+  running, so "the section exists" still holds for it; whenever the
+  session has one, the newest queued submission is that section's own
+  (every submit sets it; the removal's `{}` clears it), so this supersedes
+  nothing. With none (never usable, or removed), the reload only retries
+  what is held, as before. `a_reload_reports_the_section` now expects the
+  extra run.
+- **N1, N2 (docs):** a broken `[wallpaper]` is refused on every reload
+  that finds it, changed or not, and an unknown key inside it is that
+  refusal, not an `error` (docs/configuration.md's reload section and
+  failure semantics, docs/ipc.md, `reload.rs`'s module doc);
+  `wallpaper.command` is reported whenever `command` changed, with
+  `wallpaper` too when the values did.
+
+### The `--tty` gap, still to measure
+
+Two things only real hardware can answer, both for the dev VM:
+
+- **The time before the first frame** at a `--tty` login (the plan's
+  "gap"); 13.7 ms from start to on screen on headless (Part B above).
+- **A reload while switched away to another VT.** Not tested. While the
+  session is VT-away, scoot does not present frames, so scootbg's commit
+  may not be acknowledged the way `apply-config` waits for: the run can
+  hit its 30 s reply bound and exit 1, and scoot then logs "scootbg
+  apply-config failed (exit status 1: a runtime failure …)" and holds the
+  section for a retry, even though the daemon did apply it. Harmless (the
+  retry is an unchanged no-op), but the log line misleads. Not changed
+  without hardware to see what actually happens; to check on the dev VM:
+  switch away, `scootctl reload` over IPC, switch back, read the log.
+
+### Verified at `09076bc`
+
+- `devenv shell -- soft-egl cargo nextest run --workspace`: 2561 passed,
+  26 skipped.
+- `devenv shell -- soft-egl cargo test -p scoot`: 1847 passed, 23 ignored.
+- `cargo clippy -p scoot --all-targets -- -D warnings`, `cargo fmt --check
+  -p scoot`, and the same for `-p scootbg -p scootbg-mem`: rc 0 each.
+- `devenv shell -- scripts/smoke-test.sh` (no `soft-egl`,
+  `SMOKE_REQUIRE_SCOOTBG=1`): rc 0, 35 `ok:` lines.
+- `SCOOTBG_REQUIRE_SCOOT=1 SCOOTBG_REQUIRE_SWAY=1
+  SCOOTBG_TEST_SWAY=…sway-1.12/bin/sway devenv shell -- soft-egl cargo
+  nextest run -p scootbg -p scootbg-mem`: 425 passed, 2 skipped; `cargo
+  test` with the same variables: 14 suites ok, 0 failed.
+- `nix flake check -L` (sandboxed): all checks passed;
+  `nix build .#checks.x86_64-linux.scoot-modules --rebuild`: every file
+  check printed; `checks.aarch64-darwin` and `checks.aarch64-linux`
+  evaluate; `nix fmt --check` over every tracked `.nix`: rc 0.
