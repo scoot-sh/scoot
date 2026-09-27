@@ -261,6 +261,7 @@ built from a separate worktree and target dir; against
 | What | Before | After |
 |---|---|---|
 | Stripped binary | 672,480 B | 729,824 B (+57,344). The `unstable` feature alone (for `xdg_output`) adds 0 B. About 44 KB is text, all Wayland dispatch instantiated per interface: the effect handler with surface creation inlined (7.2 KB), the `wl_output` event callback (5.6 KB), output binding (5.2 KB), `xdg_output` (≈5 KB), the `wl_surface` request path (3.7 KB) |
+| Nix package binary (`nix build .#scootbg`) | 669,032 B (ticket-2 record) | 726,376 B |
 | `ldd` | — | `libgcc_s.so.1`, `libc.so.6` (unchanged) |
 | `libc` crate in the normal tree | none | none; `-sys`: `linux-raw-sys`, `wayland-sys` with no features (unchanged) |
 | Idle RSS / PSS, 3 s after start, 3 rounds interleaved | 2,604 / 1,408, 2,600 / 1,407, 2,584 / 1,388 kB | 2,620 / 1,427, 2,592 / 1,422, 2,632 / 1,436 kB |
