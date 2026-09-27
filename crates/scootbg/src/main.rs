@@ -39,6 +39,8 @@ mod print;
 #[cfg(target_os = "linux")]
 mod protocol;
 #[cfg(target_os = "linux")]
+mod share;
+#[cfg(target_os = "linux")]
 mod waiters;
 #[cfg(target_os = "linux")]
 mod wallpaper;

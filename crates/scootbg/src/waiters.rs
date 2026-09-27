@@ -10,7 +10,11 @@
 //! [`Progress::Waiting`]; that needs no list of outputs per request, and
 //! outputs that appear later carry no stamp and do not hold it up. An
 //! output removed meanwhile is simply gone from the list, so the reply
-//! covers the outputs that remained.
+//! covers the outputs that remained. An output whose surface the
+//! compositor has not configured a round trip after scootbg made it is
+//! done as far as a reply is concerned (`Output::unanswered`): a
+//! compositor slow to configure holds up no reply for longer than that,
+//! with no timer.
 //!
 //! Each loop turn, the waiters resolved in that turn move *in flight*
 //! behind **one** sync, numbered; its callback moves every in-flight

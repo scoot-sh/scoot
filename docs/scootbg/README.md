@@ -36,8 +36,10 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   is all it takes: scoot starts scootbg and re-applies the section on
   `scootctl reload`. No autostart entry, no session script.
 - **Free when idle.** A static wallpaper costs nothing after it is on
-  screen: no timers, no frame callbacks, no wakeups, one buffer per output,
-  and the decoded source image dropped once it is scaled.
+  screen: no timers, no frame callbacks, no wakeups, one buffer per output
+  at most (outputs of one size showing one image share one), no file
+  descriptor held per buffer, and the decoded source image dropped once it
+  is scaled. Measured: [the resource budget](#the-resource-budget).
 - **GPU-free.** Decoding, scaling and (later) transitions all run on the CPU
   into `wl_shm` buffers, the same bar the compositor holds itself to for
   webtop and no-GPU boxes. A GPU path, if ever, is an optional tier.
@@ -111,7 +113,12 @@ other subcommand talks to it over its socket.
   surface its new scale, the surface size times the integer scale (the
   larger of `wl_surface.preferred_buffer_scale` and `wl_output.scale`),
   which the compositor scales down, never up. The decoded image is dropped once drawn (an
-  output plugged in later reads the file again). EXIF orientation is
+  output plugged in later shares the pixels of an output of its size
+  showing the image, and otherwise reads the file again). **Outputs of one
+  size showing one image share one buffer's memory**: one memfd, mapped
+  once, with a `wl_buffer` per output over it (one `wl_buffer` on several
+  surfaces would leave its releases undefined, `wl_surface.attach` says),
+  so a second 4K output costs no second 32.4 MB. EXIF orientation is
   applied as the pixels are packed, with no extra buffer. A file that
   cannot be shown (missing, not PNG/JPEG/WebP, over 16384×16384 pixels,
   truncated or corrupt) is an error reply that changes nothing. Working,
@@ -120,7 +127,7 @@ other subcommand talks to it over its socket.
   with a color), `stretch`, `center`, `tile`.
 - **Outputs come and go.** A monitor plugged in gets the wallpaper meant
   for it (by connector name, or the "every output" choice), and one unplugged
-  frees its buffer.
+  frees its buffer (or its share of one: the others keep showing it).
 - **Restore.** The last choice per output is kept in
   `$XDG_STATE_HOME/scootbg/`, so `scootbg daemon` at login brings it back.
 
@@ -151,7 +158,11 @@ anything wrong                                                -> {"type":"error"
   served meanwhile. Requests sent behind one on the same connection are
   answered after it, in order. An output unplugged before its commit is
   left out of the wait; an output whose surface is not configured yet is
-  waited for; an output scootbg gave up on (`gave-up` in `query`, said on
+  waited for, until a `wl_display.sync` sent after scootbg made that
+  surface comes back: one the compositor has not configured by then no
+  longer holds up replies (said on stderr, once per surface), and is drawn
+  when its `configure` comes. No compositor checked is that slow (scoot
+  and sway configure before the round trip returns). An output scootbg gave up on (`gave-up` in `query`, said on
   stderr) is left out and shows nothing, and the reply is still `ok`. A client that hangs up before its reply loses only the
   reply: the change still happens.
 - `set` takes a `color` or an `image`, never both. An `image` is an
@@ -197,6 +208,27 @@ anything wrong                                                -> {"type":"error"
   not saved across a daemon restart yet
   ([restore-state.md](backlog/restore-state.md)).
 
+## The resource budget
+
+What scootbg costs, measured against `scoot --headless` (a debug build,
+scale 1) on a 4-CPU Claude Code web container with no GPU, release
+builds; the method and every raw number are in
+[memory-and-idle-done.md](backlog/resolved/memory-and-idle-done.md#measurements).
+The image is a 6000×4000 JPEG, `fill`.
+
+| What | Result |
+|---|---|
+| **Idle**, 60 s windows, a color or the image on 3840×2160 | 0 context switches and 0 CPU ticks in every window (`/proc`); `perf stat` counts no task-clock, context switch, page fault or wakeup: the daemon never runs. One thread. |
+| **Memory at rest with the image**, 1× 1920×1080 | RSS 12.3–12.4 MB, PSS 7.1–7.3 MB (the 8.1 MB buffer is shared with the compositor, so PSS counts half); anonymous 456 kB, `[heap]` 40 kB; 8 fds |
+| 1× 3840×2160 | RSS 36.7–36.8 MB, PSS 19.4–19.5 MB; anonymous 564–572 kB, `[heap]` 40 kB; 8 fds |
+| **2× 3840×2160** | **RSS 36.7–36.8 MB, PSS 19.4–19.6 MB**, the same as one output: both show one 32.4 MB buffer's pixels (69.2 MB and 35.7–35.8 MB before ticket 8) |
+| Memory at rest with a color (a single-pixel buffer: no shared memory at any size), on 3840×2160 | RSS 3.6–3.7 MB, PSS 2.0–2.1 MB; anonymous 196–200 kB |
+| **Peak while changing** the image on 2× 4K | 120.4–120.7 MB (152.9–153.0 MB before ticket 8); 87.9–88.1 MB for a first image |
+| **Startup**, `scootbg daemon` to its first answer | 1.8–2.5 ms |
+| to a color on screen (a `set` sent at once, answered after the commit and a round trip) | 3.0–4.1 ms |
+| to the image on one 4K output, likewise | 642–720 ms, two decodes; a `set` once the output is configured takes 421–488 ms, one. Making that one decode, and restoring at login, is [the next ticket](backlog/restore-state.md) |
+| File descriptors | 8 whatever is shown: a buffer's memfd is closed once the compositor has it |
+
 ## Measured so far
 
 Release build, against `scoot --headless --outputs 2` (1600×1000 each,
@@ -204,8 +236,9 @@ a debug build of scoot; the image rows on one 3840×2160 output), on a
 4-CPU Claude Code web container; the records, with the method and every
 raw number, are in
 [solid-color-done.md](backlog/resolved/solid-color-done.md#measurements),
-[images-decode-and-fit-done.md](backlog/resolved/images-decode-and-fit-done.md#measurements)
-and [hidpi-fractional-scale-done.md](backlog/resolved/hidpi-fractional-scale-done.md#measurements).
+[images-decode-and-fit-done.md](backlog/resolved/images-decode-and-fit-done.md#measurements),
+[hidpi-fractional-scale-done.md](backlog/resolved/hidpi-fractional-scale-done.md#measurements)
+and [memory-and-idle-done.md](backlog/resolved/memory-and-idle-done.md#measurements).
 Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 | What | Result |
@@ -215,7 +248,7 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 | After it, idle 30 s | 1 thread, heap 372–568 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
 | A few hundred bytes claiming 16384×16384 (PNG, JPEG, WebP) | refused in under 1 ms; peak RSS within 72 kB of before |
 | Idle with a color set, 30 s ×3 | 0 context switches, 0 CPU ticks; RSS 2,720 kB, PSS 1,524 kB, 1 thread |
-| PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556–1,560 / 1,556–1,560 / 7,808 kB (14,060 kB once a change leaves a spare buffer per output) |
+| PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556–1,560 / 1,556–1,560 / 7,808 kB (14,060 kB once a change left a spare buffer per output, until ticket 8: no spare is kept now) |
 | `set`, request to reply, 10,000 changes ×3 | median 400–433 µs, p99 1.6 ms; no memory growth |
 | The same JPEG at scale 1.5 on 3840×2160: buffer, and request to reply ×3 | 33,177,600 B (was 58,982,400 B at `wl_output`'s 2); 420.0–434.4 ms (was 494.9–507.3 ms). On 1600×1000: 6,410,404 B (was 11,387,024 B) |
 

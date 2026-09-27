@@ -1,5 +1,3 @@
-use std::os::fd::AsFd;
-
 use rustix::fs::{SealFlags, fcntl_get_seals, fstat, ftruncate};
 use rustix::io::{Errno, pread};
 
@@ -70,46 +68,64 @@ fn the_buffer_is_zeroed_writable_and_shared_through_the_fd() {
 
     // What the compositor sees through the fd is what was written.
     let mut read_back = [0u8; 24];
-    assert_eq!(pread(buffer.fd(), &mut read_back, 0).unwrap(), 24);
+    assert_eq!(pread(buffer.fd().unwrap(), &mut read_back, 0).unwrap(), 24);
     assert_eq!(read_back[0], 0xaa);
     assert_eq!(read_back[23], 0x55);
-    assert_eq!(fstat(buffer.fd()).unwrap().st_size, 24);
+    assert_eq!(fstat(buffer.fd().unwrap()).unwrap().st_size, 24);
 }
 
 #[test]
 fn the_memfd_is_sealed_against_resizing() {
     let buffer = ShmBuffer::new(16, 16).unwrap();
-    let seals = fcntl_get_seals(buffer.fd()).unwrap();
+    let seals = fcntl_get_seals(buffer.fd().unwrap()).unwrap();
     assert!(seals.contains(SealFlags::SHRINK | SealFlags::GROW | SealFlags::SEAL));
     // The kernel refuses both directions, so no one holding the fd can
     // make our next write fault.
-    assert_eq!(ftruncate(buffer.fd(), 0), Err(Errno::PERM));
-    assert_eq!(ftruncate(buffer.fd(), 1 << 20), Err(Errno::PERM));
+    assert_eq!(ftruncate(buffer.fd().unwrap(), 0), Err(Errno::PERM));
+    assert_eq!(ftruncate(buffer.fd().unwrap(), 1 << 20), Err(Errno::PERM));
     // And the seal set itself is final.
     assert_eq!(
-        rustix::fs::fcntl_add_seals(buffer.fd(), SealFlags::WRITE),
+        rustix::fs::fcntl_add_seals(buffer.fd().unwrap(), SealFlags::WRITE),
         Err(Errno::PERM)
     );
-    assert_eq!(fstat(buffer.fd()).unwrap().st_size, 16 * 16 * 4);
+    assert_eq!(fstat(buffer.fd().unwrap()).unwrap().st_size, 16 * 16 * 4);
 }
 
 #[test]
-fn attach_then_release_keeps_the_pixels() {
+fn closing_the_fd_keeps_the_pages_and_frees_the_descriptor() {
     let mut buffer = ShmBuffer::new(2, 2).unwrap();
     buffer.pixels_mut().fill(7);
-    let attached = buffer.attach();
-    // While attached only the fd and geometry are reachable.
-    assert_eq!(attached.geometry().len, 16);
-    let _fd = attached.fd().as_fd();
-    let mut buffer = attached.released();
+    // What `wl_shm.create_pool` leaves the compositor: its own copy.
+    let compositor = buffer.fd().unwrap().try_clone_to_owned().unwrap();
+    let ours = format!(
+        "/proc/self/fd/{}",
+        std::os::fd::AsRawFd::as_raw_fd(&buffer.fd().unwrap())
+    );
+    assert!(std::fs::symlink_metadata(&ours).is_ok());
+    buffer.close_fd();
+    assert!(buffer.fd().is_none());
+    assert!(
+        std::fs::symlink_metadata(&ours).is_err(),
+        "the memfd is still open"
+    );
+    // Our mapping still holds the pages, and writes through it reach
+    // the compositor's copy of the file.
     assert!(buffer.pixels_mut().iter().all(|&b| b == 7));
+    buffer.pixels_mut()[0] = 9;
+    let mut read_back = [0u8; 16];
+    assert_eq!(pread(&compositor, &mut read_back, 0).unwrap(), 16);
+    assert_eq!(read_back[..2], [9, 7]);
+    // Still sealed: the other holder cannot shrink it under the mapping.
+    assert_eq!(ftruncate(&compositor, 0), Err(Errno::PERM));
+    // Closing twice is harmless.
+    buffer.close_fd();
+    assert!(buffer.fd().is_none());
 }
 
 #[test]
 fn buffers_can_move_between_threads() {
     fn assert_send<T: Send>() {}
     assert_send::<ShmBuffer>();
-    assert_send::<super::Attached>();
 
     let mut buffer = ShmBuffer::new(4, 4).unwrap();
     buffer.pixels_mut().fill(1);

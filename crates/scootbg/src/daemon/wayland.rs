@@ -37,6 +37,7 @@ use std::fmt;
 
 use wayland_client::globals::{BindError, GlobalError, GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_compositor::WlCompositor;
+use wayland_client::protocol::wl_display::WlDisplay;
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
@@ -99,6 +100,9 @@ impl std::error::Error for WaylandError {}
 /// The bound singletons.
 #[derive(Debug)]
 pub struct Globals {
+    /// The connection's `wl_display`, for round trips sent where there is
+    /// no `Connection` to hand (`LayerObjects::create`).
+    pub display: WlDisplay,
     pub compositor: WlCompositor,
     pub layer_shell: ZwlrLayerShellV1,
     pub shm: WlShm,
@@ -184,6 +188,7 @@ impl Wayland {
             optional(&mut missing, list.bind(&qh, 1..=1, ()));
         let path = Path::choose(viewporter.is_some(), single_pixel.is_some(), forced_path());
         let globals = Globals {
+            display: conn.display(),
             compositor,
             layer_shell,
             shm,

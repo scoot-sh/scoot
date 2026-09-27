@@ -202,7 +202,7 @@ there because nothing was drawn, belongs here.
   change which path a test exercises; a test that wants either sets it.
 - **Each shm buffer keeps its memfd open** (`ShmBuffer` owns the fd): +1 fd
   per buffer on paths 2 and 3, so +4 on two outputs after a change. Left
-  for [memory-and-idle.md](../memory-and-idle.md): the fd is only needed
+  for [memory-and-idle-done.md](memory-and-idle-done.md): the fd is only needed
   for `create_pool`, and dropping it would be a change to `scootbg-mem`.
 - **Path 3 keeps a released spare per output** after a change, as asked
   (reuse without reallocating): idle PSS 7.8 MB with one full-size buffer
@@ -320,7 +320,7 @@ No blocking findings. Fixed:
   `add(0, 0, 800, 500)` once per output, and every pixel stays exact.
   With the check removed the test fails (`left: 3, right: 1`).
 - **A held-up reply** (an output that never configures, a buffer never
-  released) is recorded in [memory-and-idle.md](../memory-and-idle.md).
+  released) is recorded in [memory-and-idle-done.md](memory-and-idle-done.md).
 
 Verified at `6b0fe92`, the review fixes' code: `cargo build --release -p
 scootbg` and the Nix build's log show no warning, and the release binary

@@ -173,3 +173,51 @@ fn trials_are_bounded() {
     jobs.render(&image(7), target(a, 1));
     assert_eq!(jobs.queued(), MAX_TRIALS + 1);
 }
+
+/// A render target another output's pixels serve leaves the queue without
+/// being decoded for; the rest stay, and a render left with no targets
+/// goes. Trials are never offered: nothing has their image yet.
+#[test]
+fn targets_served_by_shared_pixels_are_not_decoded_for() {
+    let [a, b, c] = ids(3)[..] else {
+        unreachable!()
+    };
+    let mut jobs: Jobs<u32> = Jobs::default();
+    let shown = image(1);
+    let other = image(2);
+    jobs.render(&shown, target(a, 100));
+    jobs.render(&shown, target(b, 200));
+    jobs.render(&other, target(c, 100));
+    jobs.trial(image(3), all(1), vec![target(a, 100)]).unwrap();
+    // Nothing served: nothing changes, and it says so.
+    assert!(!jobs.satisfy(|_, _| false));
+    assert_eq!(jobs.queued(), 3);
+    // Image 1 at width 100 is on screen somewhere.
+    let mut asked = Vec::new();
+    let served = jobs.satisfy(|img, t| {
+        asked.push(img.serial);
+        img.serial == 1 && t.dims.0 == 100
+    });
+    assert!(served);
+    assert!(!asked.contains(&3), "a trial is never offered: {asked:?}");
+    assert_eq!(jobs.queued(), 3, "image 1 still needs width 200");
+    let (running, targets) = jobs.next(|_, _| true).unwrap();
+    assert_eq!((running.serial, targets), (3, vec![target(a, 100)]));
+    jobs.finished();
+    // Everything left is served: both renders go.
+    assert!(jobs.satisfy(|_, _| true));
+    assert_eq!(jobs.queued(), 0);
+    assert!(jobs.next(|_, _| true).is_none());
+}
+
+/// The running job is the worker's: nothing is taken from it.
+#[test]
+fn the_running_job_is_not_satisfied_under_the_worker() {
+    let [a] = ids(1)[..] else { unreachable!() };
+    let mut jobs: Jobs<u32> = Jobs::default();
+    jobs.render(&image(1), target(a, 100));
+    jobs.next(|_, _| true).unwrap();
+    assert!(!jobs.satisfy(|_, _| true));
+    let finished = jobs.finished().unwrap();
+    assert_eq!(finished.targets, vec![target(a, 100)]);
+}

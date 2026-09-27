@@ -369,7 +369,10 @@ applied (a JPEG's, a WebP's, or a PNG's `eXIf` chunk). `--mode` fits it to each 
 filter (default `lanczos3`; `nearest` keeps pixel art hard). `--mode`,
 `--fill` and `--filter` with a color are a usage error. The image is
 decoded and scaled on a worker thread and the decoded pixels are dropped
-once drawn: an output plugged in later, or a new scale that needs a new
+once drawn. Outputs of one size showing one image share one buffer's
+memory (32.4 MB at 4K, however many outputs show it). An output plugged
+in later shares the pixels of an output of its size already showing the
+image, with no decode; otherwise it, like a new scale that needs a new
 size, reads the file again. Images over 16384×16384 pixels are refused.
 
 **Images are drawn at each output's real device pixels, fractional scales
@@ -400,7 +403,10 @@ nothing. `clear` does the same with nothing to show.
 shows the change and the compositor has processed it (a `wl_display.sync`
 round trip after the commits), so a screenshot taken straight after shows
 it. An output unplugged meanwhile is left out of that wait; one whose
-surface is not configured yet is waited for; one scootbg has given up on
+surface is not configured yet is waited for, but only until a round trip
+after scootbg made that surface: one the compositor has not configured
+by then no longer holds up the reply (the daemon says so on stderr) and
+is drawn when it is; one scootbg has given up on
 (`gave-up` in `query`, said on stderr) is left out and shows nothing, and
 `set` still exits 0. They print nothing on
 success. **An image that cannot be shown** (no such file, not a regular
@@ -420,6 +426,12 @@ memory at all: one single-pixel buffer scaled to the output. Without
 single-pixel buffers it is a 1×1 `wl_shm` buffer under the viewport, and
 without a viewporter a full-size buffer. A static color asks for no frame
 callbacks and wakes the daemon for nothing.
+
+Once on screen a wallpaper costs no CPU (no wakeups in a minute, measured)
+and one buffer per output at most: about 3.7 MB RSS with a color, 36.8 MB
+with an image on a 4K output, and the same 36.8 MB with two 4K outputs
+showing it. The measured budget is in
+[`docs/scootbg/README.md`](docs/scootbg/README.md#the-resource-budget).
 
 One daemon per display: its socket is
 `$XDG_RUNTIME_DIR/scootbg-NAME.sock`, `NAME` being the last component of

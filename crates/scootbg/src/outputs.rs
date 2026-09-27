@@ -298,6 +298,14 @@ pub struct Output {
     /// output it is on, and the new surface's own events replace them,
     /// before its first `configure` on every compositor checked.
     preferred: Preferred,
+    /// Surfaces made for this output so far, so a round trip sent after one
+    /// was made ([`Output::unanswered`]) knows whether it is about the live
+    /// one. Wraps: only equality is ever asked.
+    creation: u32,
+    /// The compositor had not configured the live surface a round trip
+    /// after it was made: a waiting reply stops waiting for it (see
+    /// [`Output::progress`]). Cleared with a new surface.
+    late: bool,
 }
 
 impl Output {
@@ -443,11 +451,40 @@ impl Output {
             self.staged.apply(&mut self.info);
         }
         if self.surface == Surface::Waiting {
-            self.surface = Surface::Pending;
+            self.made();
             Effect::Create
         } else {
             Effect::None
         }
+    }
+
+    /// A new surface, committed with no buffer, waits for its first
+    /// `configure`.
+    fn made(&mut self) {
+        self.surface = Surface::Pending;
+        self.creation = self.creation.wrapping_add(1);
+        self.late = false;
+    }
+
+    /// Which surface this output is on ([`Output::unanswered`]).
+    pub fn creation(&self) -> u32 {
+        self.creation
+    }
+
+    /// A round trip sent right after surface `creation` was made (and
+    /// committed with no buffer) came back. A compositor answers that
+    /// first commit with a `configure`, sent before the round trip's reply
+    /// on every compositor checked; if this surface still has none, the
+    /// compositor is late with it, and waiting replies stop waiting for
+    /// this output. It is drawn when its `configure` does come. Returns
+    /// whether that changed anything.
+    pub fn unanswered(&mut self, creation: u32) -> bool {
+        let late = creation == self.creation && self.surface == Surface::Pending;
+        if late && !self.late {
+            self.late = true;
+            return true;
+        }
+        false
     }
 
     /// A `configure` on the live surface: remember it, and ack it. What a
@@ -484,7 +521,7 @@ impl Output {
     /// no buffer (`clear`): it waits for its first `configure` again.
     pub fn recreated(&mut self) {
         if self.surface.is_live() {
-            self.surface = Surface::Pending;
+            self.made();
         }
     }
 
@@ -564,6 +601,10 @@ impl Output {
         let shown = match &self.surface {
             // Nothing will ever be shown there: nothing to wait for.
             Surface::GaveUp => return Progress::Done,
+            // Not configured a round trip after it was made: it is drawn
+            // when the compositor gets to it, but a reply waits no longer
+            // (`Output::unanswered`).
+            Surface::Pending if self.late => return Progress::Done,
             Surface::Configured { drawn, .. } => {
                 drawn.is_some() == wanted.is_some() && self.plan(wanted, scale) == Plan::Nothing
             }
@@ -597,7 +638,7 @@ impl Output {
     /// trip, so its surface is created again.
     pub fn retry(&mut self) -> Effect {
         if self.surface == Surface::Closed {
-            self.surface = Surface::Pending;
+            self.made();
             Effect::Create
         } else {
             Effect::None
@@ -721,6 +762,8 @@ impl<O> Outputs<O> {
                 stamp: 0,
                 failed: false,
                 preferred: Preferred::default(),
+                creation: 0,
+                late: false,
             },
             objects: objects(id),
         });
