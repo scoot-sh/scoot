@@ -32,6 +32,29 @@
 //! -- see pitfall #3 in this feature's task notes. Only the ring is built as
 //! real render elements here.
 //!
+//! # Client-side decorations round their own corners
+//!
+//! A client that never creates a `zxdg_toplevel_decoration_v1` object (GTK,
+//! which ignores the protocol) draws client-side decorations and rounds its
+//! own corners at its own radius, which nothing on the wire reports. scoot's
+//! ring and rounded clip use the configured radius, so between the client's
+//! wider curve and the ring's tighter inner edge there is a crescent of
+//! background at every corner (see
+//! `docs/backlog/core/client-rounded-corners-vs-ring.md`).
+//!
+//! Matching the client's radius would need per-commit alpha measurement
+//! (costly and fragile) or per-toolkit guessing (guessing), so this module
+//! does neither. Instead, every window the CSD rule in `render/elements.rs`
+//! calls self-decorated gets a solid backdrop in its own ring color, drawn
+//! directly under it at exactly its drawn rect: the client's own alpha
+//! shapes the visible part, so the corners read as the ring hugging the
+//! client's curve with no radius knowledge anywhere. Square CSD content
+//! covers the backdrop completely, so it changes nothing there;
+//! server-side windows get none at all, nor do windows with a window-wide
+//! translucency (`wp_alpha_modifier_v1` -- an opaque backdrop would tint
+//! every pixel, not just the corners; see the rule in
+//! `render/elements.rs`).
+//!
 //! # Persistent buffers, not fresh ones (the damage-tracking pitfall)
 //!
 //! [`Decorations`] keeps one [`SolidColorBuffer`] per ring segment (top,
@@ -423,6 +446,11 @@ struct WindowRing {
     bottom: SolidColorBuffer,
     left: SolidColorBuffer,
     right: SolidColorBuffer,
+    /// The CSD backdrop (see the module doc's CSD section): one solid rect
+    /// in the window's ring color under its drawn rect. Only pushed for
+    /// self-decorated windows; other windows never touch it, so it stays
+    /// empty and contributes no element.
+    backdrop: SolidColorBuffer,
 }
 
 /// One window's ring element: either a solid bar (the square path, and the
@@ -595,11 +623,18 @@ impl Decorations {
     /// window actually drew (see `drawn.rs`; the caller looks the window up),
     /// in the same global logical coordinates as `placement.rect`.
     ///
+    /// `backdrop` is the CSD backdrop rect per placement, or `None` for no
+    /// backdrop (see the module doc's CSD section): the caller's CSD rule,
+    /// in global logical coordinates like `drawn`. A backdrop is pushed
+    /// directly under its window's ring run, so it travels with the window
+    /// (the floating paths count it in `spans`).
+    ///
     /// This is the square ring: the rounded session reaches
     /// [`Decorations::elements_rounded`] instead, so this path has no branch
     /// on the radius. Painted buffers from an earlier rounded stretch are
     /// dropped here, so toggling the radius back to square frees them
     /// instead of leaking them for the session.
+    #[allow(clippy::too_many_arguments)]
     pub fn elements(
         &mut self,
         arrangement: &Arrangement,
@@ -608,12 +643,32 @@ impl Decorations {
         bounds: Rect,
         scale: f64,
         drawn: impl Fn(&Placement) -> Rect,
+        backdrop: impl Fn(&Placement) -> Option<Rect>,
     ) -> Vec<SolidColorRenderElement> {
         self.retain(arrangement);
         self.painted.clear();
         let mut elements = Vec::new();
         for placement in &arrangement.placements {
             if !placement.floating && ringed(placement, output) {
+                // The CSD backdrop first (deeper than the ring run below);
+                // `None` skips it without touching the persistent buffer.
+                // `focus_ring_width > 0` mirrors the ring's own gate
+                // (`ring_rects` is all-`None` and `push_painted` returns
+                // before painting at width 0): a backdrop with no ring would
+                // be colored corners around nothing.
+                if appearance.focus_ring_width > 0
+                    && let Some(rect) = backdrop(placement)
+                {
+                    let color = ring_color(arrangement, placement.id, appearance);
+                    let ring = self.rings.entry(placement.id).or_default();
+                    push(
+                        &mut elements,
+                        &mut ring.backdrop,
+                        Some(to_output_local(rect, bounds)),
+                        color,
+                        scale,
+                    );
+                }
                 self.push_square(
                     &mut elements,
                     arrangement,
@@ -633,7 +688,9 @@ impl Decorations {
     /// `render/elements.rs`): top of the floating stack first, with how many
     /// elements each window's ring is appended to `spans`. Called after
     /// [`Decorations::elements`] for the same arrangement, whose `retain`
-    /// already dropped closed windows' buffers.
+    /// already dropped closed windows' buffers. Each window's CSD backdrop
+    /// (see `elements`'s `backdrop`) is pushed first and counted in its span,
+    /// so it travels with the window, not with the strip's rings.
     #[allow(clippy::too_many_arguments)]
     pub fn floating_elements(
         &mut self,
@@ -644,11 +701,29 @@ impl Decorations {
         scale: f64,
         drawn: impl Fn(&Placement) -> Rect,
         spans: &mut Vec<(WindowId, usize)>,
+        backdrop: impl Fn(&Placement) -> Option<Rect>,
     ) -> Vec<SolidColorRenderElement> {
         let mut elements = Vec::new();
         for placement in arrangement.placements.iter().rev() {
             if placement.floating && ringed(placement, output) {
                 let before = elements.len();
+                // `focus_ring_width > 0` mirrors the ring's own gate
+                // (`ring_rects` is all-`None` and `push_painted` returns
+                // before painting at width 0): a backdrop with no ring would
+                // be colored corners around nothing.
+                if appearance.focus_ring_width > 0
+                    && let Some(rect) = backdrop(placement)
+                {
+                    let color = ring_color(arrangement, placement.id, appearance);
+                    let ring = self.rings.entry(placement.id).or_default();
+                    push(
+                        &mut elements,
+                        &mut ring.backdrop,
+                        Some(to_output_local(rect, bounds)),
+                        color,
+                        scale,
+                    );
+                }
                 self.push_square(
                     &mut elements,
                     arrangement,
@@ -698,7 +773,10 @@ impl Decorations {
     /// never calls this), so toggling the radius does not leak them. The
     /// same windows get no ring here as there: invisible ones, fullscreen
     /// ones and other outputs' ones -- and the same output-local
-    /// coordinates, around the same `drawn` rect.
+    /// coordinates, around the same `drawn` rect. Each window's CSD backdrop
+    /// (see `elements`'s `backdrop`) is pushed through its persistent buffer
+    /// first, as a square fallback bar: it is a plain rect, which needs no
+    /// paint.
     #[allow(clippy::too_many_arguments)]
     pub fn elements_rounded<R>(
         &mut self,
@@ -709,6 +787,7 @@ impl Decorations {
         scale: f64,
         drawn: impl Fn(&Placement) -> Rect,
         renderer: &mut R,
+        backdrop: impl Fn(&Placement) -> Option<Rect>,
     ) -> Vec<RingElement<R>>
     where
         R: Renderer + ImportAll + ImportMem,
@@ -722,6 +801,20 @@ impl Decorations {
                 continue;
             }
             let color = ring_color(arrangement, placement.id, appearance);
+            // `focus_ring_width > 0` mirrors the ring's own gate: a
+            // backdrop with no ring would be colored corners around nothing.
+            if appearance.focus_ring_width > 0
+                && let Some(rect) = backdrop(placement)
+            {
+                let ring = self.rings.entry(placement.id).or_default();
+                push_painted_rect(
+                    &mut elements,
+                    &mut ring.backdrop,
+                    Some(to_output_local(rect, bounds)),
+                    color,
+                    scale,
+                );
+            }
             self.push_painted(
                 &mut elements,
                 placement.id,
@@ -738,7 +831,8 @@ impl Decorations {
 
     /// [`Decorations::floating_elements`] for the rounded session: the
     /// floating windows' painted rings, top of the stack first, each
-    /// window's element count appended to `spans`.
+    /// window's element count appended to `spans`. Each window's CSD backdrop
+    /// (see `elements`'s `backdrop`) is pushed first and counted in its span.
     #[allow(clippy::too_many_arguments)]
     pub fn floating_elements_rounded<R>(
         &mut self,
@@ -750,6 +844,7 @@ impl Decorations {
         drawn: impl Fn(&Placement) -> Rect,
         renderer: &mut R,
         spans: &mut Vec<(WindowId, usize)>,
+        backdrop: impl Fn(&Placement) -> Option<Rect>,
     ) -> Vec<RingElement<R>>
     where
         R: Renderer + ImportAll + ImportMem,
@@ -763,6 +858,20 @@ impl Decorations {
             }
             let color = ring_color(arrangement, placement.id, appearance);
             let before = elements.len();
+            // `focus_ring_width > 0` mirrors the ring's own gate: a
+            // backdrop with no ring would be colored corners around nothing.
+            if appearance.focus_ring_width > 0
+                && let Some(rect) = backdrop(placement)
+            {
+                let ring = self.rings.entry(placement.id).or_default();
+                push_painted_rect(
+                    &mut elements,
+                    &mut ring.backdrop,
+                    Some(to_output_local(rect, bounds)),
+                    color,
+                    scale,
+                );
+            }
             self.push_painted(
                 &mut elements,
                 placement.id,
@@ -1668,8 +1777,15 @@ mod tests {
         let arrangement = arrangement(vec![placement(1, Rect::new(100, 100, 200, 150))], 1);
         let mut decorations = Decorations::default();
 
-        let elements =
-            decorations.elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0, slot);
+        let elements = decorations.elements(
+            &arrangement,
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            |_| None,
+        );
 
         assert_eq!(elements.len(), 4);
         let expected: Color32F = appearance.focus_ring_active_color.into();
@@ -1688,7 +1804,15 @@ mod tests {
 
         assert!(
             decorations
-                .elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0, slot)
+                .elements(
+                    &arrangement,
+                    &appearance,
+                    OutputId(1),
+                    SCREEN,
+                    1.0,
+                    slot,
+                    |_| None
+                )
                 .is_empty()
         );
     }
@@ -1707,9 +1831,186 @@ mod tests {
         );
         let mut decorations = Decorations::default();
 
-        let elements =
-            decorations.elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0, slot);
+        let elements = decorations.elements(
+            &arrangement,
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            |_| None,
+        );
         assert_eq!(elements.len(), 4, "only the focused tiled window is ringed");
+    }
+
+    // -- CSD backdrops --------------------------------------------------------
+
+    /// The `backdrop` lookup for a self-decorated window: its drawn rect.
+    fn drawn_rect(placement: &Placement) -> Option<Rect> {
+        Some(placement.rect)
+    }
+
+    #[test]
+    fn a_self_decorated_window_gets_a_backdrop_under_its_ring() {
+        let appearance = Appearance::default();
+        let arrangement = arrangement(vec![placement(1, Rect::new(100, 100, 200, 150))], 1);
+        let mut decorations = Decorations::default();
+
+        let elements = decorations.elements(
+            &arrangement,
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            drawn_rect,
+        );
+
+        assert_eq!(elements.len(), 5, "four ring bars plus the backdrop");
+        let active: Color32F = appearance.focus_ring_active_color.into();
+        let backdrops: Vec<_> = elements
+            .iter()
+            .filter(|element| element.geometry(1.0.into()).size == (200, 150).into())
+            .collect();
+        assert_eq!(
+            backdrops.len(),
+            1,
+            "exactly the drawn rect is backdrop-sized"
+        );
+        let backdrop = backdrops[0];
+        assert_eq!(
+            backdrop.geometry(1.0.into()).loc,
+            (100, 100).into(),
+            "the backdrop sits on the drawn rect, output-local"
+        );
+        assert_eq!(backdrop.color(), active);
+    }
+
+    #[test]
+    fn a_self_decorated_unfocused_window_backdrops_in_the_inactive_color() {
+        let appearance = Appearance::default();
+        let arrangement = arrangement(
+            vec![
+                placement(1, Rect::new(100, 100, 200, 150)),
+                placement(2, Rect::new(400, 100, 200, 150)),
+            ],
+            2,
+        );
+        let mut decorations = Decorations::default();
+
+        let elements = decorations.elements(
+            &arrangement,
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            drawn_rect,
+        );
+
+        assert_eq!(
+            elements.len(),
+            10,
+            "two windows, backdrop plus four bars each"
+        );
+        let inactive: Color32F = appearance.focus_ring_inactive_color.into();
+        let unfocused_backdrop = elements
+            .iter()
+            .find(|element| element.geometry(1.0.into()).loc == (100, 100).into())
+            .expect("the unfocused window's backdrop");
+        assert_eq!(unfocused_backdrop.color(), inactive);
+    }
+
+    #[test]
+    fn no_backdrop_without_a_ring_width_fullscreen_or_visibility() {
+        let mut decorations = Decorations::default();
+        let window = placement(1, Rect::new(100, 100, 200, 150));
+
+        // Zero width: the ring pushes nothing, so neither does the backdrop.
+        let narrow = Appearance {
+            focus_ring_width: 0,
+            ..Appearance::default()
+        };
+        let arranged = arrangement(vec![window], 1);
+        assert!(
+            decorations
+                .elements(
+                    &arranged,
+                    &narrow,
+                    OutputId(1),
+                    SCREEN,
+                    1.0,
+                    slot,
+                    drawn_rect
+                )
+                .is_empty()
+        );
+
+        // Fullscreen and invisible: `ringed` excludes them, backdrop included.
+        let mut fullscreen = window;
+        fullscreen.fullscreen = true;
+        let arranged = arrangement(vec![fullscreen], 1);
+        assert!(
+            decorations
+                .elements(
+                    &arranged,
+                    &Appearance::default(),
+                    OutputId(1),
+                    SCREEN,
+                    1.0,
+                    slot,
+                    drawn_rect
+                )
+                .is_empty(),
+            "fullscreen gets no ring and no backdrop"
+        );
+        let mut hidden = window;
+        hidden.visible = false;
+        let arranged = arrangement(vec![hidden], 1);
+        assert!(
+            decorations
+                .elements(
+                    &arranged,
+                    &Appearance::default(),
+                    OutputId(1),
+                    SCREEN,
+                    1.0,
+                    slot,
+                    drawn_rect
+                )
+                .is_empty(),
+            "invisible gets no ring and no backdrop"
+        );
+    }
+
+    #[test]
+    fn a_floating_backdrop_travels_inside_its_windows_span() {
+        let appearance = Appearance::default();
+        let mut dialog = placement(1, Rect::new(400, 200, 300, 220));
+        dialog.floating = true;
+        let arrangement = arrangement(vec![dialog], 1);
+        let mut decorations = Decorations::default();
+        let mut spans = Vec::new();
+
+        let elements = decorations.floating_elements(
+            &arrangement,
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            &mut spans,
+            drawn_rect,
+        );
+
+        assert_eq!(spans, vec![(WindowId(1), 5)], "backdrop plus four bars");
+        assert_eq!(elements.len(), 5);
+        assert!(
+            elements
+                .iter()
+                .any(|element| element.geometry(1.0.into()).size == (300, 220).into()),
+            "the span carries the backdrop with the ring"
+        );
     }
 
     /// The second of two side-by-side outputs, as a frame of it sees it.
@@ -1727,13 +2028,29 @@ mod tests {
 
         assert!(
             decorations
-                .elements(&arrangement, &appearance, OutputId(1), SCREEN, 1.0, slot)
+                .elements(
+                    &arrangement,
+                    &appearance,
+                    OutputId(1),
+                    SCREEN,
+                    1.0,
+                    slot,
+                    |_| None
+                )
                 .is_empty(),
             "the first output drew the second output's ring"
         );
         assert_eq!(
             decorations
-                .elements(&arrangement, &appearance, OutputId(2), SECOND, 1.0, slot)
+                .elements(
+                    &arrangement,
+                    &appearance,
+                    OutputId(2),
+                    SECOND,
+                    1.0,
+                    slot,
+                    |_| None
+                )
                 .len(),
             3,
             "its own output draws the ring, minus the side cut off at its left edge"
@@ -1749,8 +2066,15 @@ mod tests {
         let arrangement = arrangement(vec![window], 1);
         let mut decorations = Decorations::default();
 
-        let elements =
-            decorations.elements(&arrangement, &appearance, OutputId(2), SECOND, 1.0, slot);
+        let elements = decorations.elements(
+            &arrangement,
+            &appearance,
+            OutputId(2),
+            SECOND,
+            1.0,
+            slot,
+            |_| None,
+        );
         let top = elements
             .iter()
             .map(|element| element.geometry(1.0.into()))
@@ -1768,11 +2092,21 @@ mod tests {
         let appearance = Appearance::default();
         let mut decorations = Decorations::default();
         let with_window = arrangement(vec![placement(1, Rect::new(100, 100, 200, 150))], 1);
-        decorations.elements(&with_window, &appearance, OutputId(1), SCREEN, 1.0, slot);
+        decorations.elements(
+            &with_window,
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            |_| None,
+        );
         assert_eq!(decorations.rings.len(), 1);
 
         let closed = Arrangement::default();
-        decorations.elements(&closed, &appearance, OutputId(1), SCREEN, 1.0, slot);
+        decorations.elements(&closed, &appearance, OutputId(1), SCREEN, 1.0, slot, |_| {
+            None
+        });
         assert!(decorations.rings.is_empty());
     }
 
@@ -1793,8 +2127,15 @@ mod tests {
         let b = placement(2, Rect::new(400, 100, 200, 150));
 
         let a_focused = arrangement(vec![a, b], 1);
-        let elements =
-            decorations.elements(&a_focused, &appearance, OutputId(1), SCREEN, 1.0, slot);
+        let elements = decorations.elements(
+            &a_focused,
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            |_| None,
+        );
         assert_eq!(elements.len(), 8);
         for element in &elements {
             let expected = if element.geometry(1.0.into()).loc.x < 350 {
@@ -1806,8 +2147,15 @@ mod tests {
         }
 
         let b_focused = arrangement(vec![a, b], 2);
-        let elements =
-            decorations.elements(&b_focused, &appearance, OutputId(1), SCREEN, 1.0, slot);
+        let elements = decorations.elements(
+            &b_focused,
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            |_| None,
+        );
         assert_eq!(elements.len(), 8);
         for element in &elements {
             let expected = if element.geometry(1.0.into()).loc.x < 350 {

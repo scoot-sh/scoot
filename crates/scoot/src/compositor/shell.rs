@@ -95,6 +95,7 @@ impl State {
             self.space.unmap_elem(&window);
             output_clip::unstamp(&window);
         }
+        self.decoration_bound.remove(&id);
         self.awaiting_map.retain(|&w| w != id);
         // Paired with `add_window`'s announcements: these send `closed` to
         // every client watching either list, so a taskbar drops the entry.

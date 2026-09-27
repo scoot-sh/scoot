@@ -293,9 +293,10 @@ each item's own file records why it landed when it did.
   run, the top-right as well in three of the four, and every outer edge
   failed). A re-mapped window is rebuilt from the layout (size, tiled
   states, activation, `ServerSide`), where it used to come back unsized,
-  untiled and told `ClientSide`. Residual: libadwaita dialogs round their
-  own corners wider than the ring
-  ([`client-rounded-corners-vs-ring`](docs/backlog/core/client-rounded-corners-vs-ring.md)). No
+  untiled and told `ClientSide`. Follow-up (resolved 2026-09-27):
+  libadwaita dialogs round their own corners wider than the ring
+  ([`client-rounded-corners-vs-ring`](docs/backlog/resolved/client-rounded-corners-vs-ring-done.md)),
+  fixed with a ring-colored backdrop under self-decorated windows. No
   measurable frame cost (debug-profile `rounded_corners_cost` and
   `render_frame_cost` within run-to-run noise, pixman and GLES).
 

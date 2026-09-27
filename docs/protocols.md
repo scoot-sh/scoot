@@ -215,14 +215,17 @@ and `mpv` kept its video's size. scoot rounds the corners and draws the focus
 ring around what such a window actually draws, and reports that area as its
 `rect` over IPC ([ipc.md](ipc.md#what-the-replies-carry)). It does not use the whole slot.
 
-One case is not solved yet. libadwaita dialogs (`zenity --info` above)
+One case needed its own fix. libadwaita dialogs (`zenity --info` above)
 round their own corners, with a larger radius than scoot's. With
-`corner_radius` set, a crescent of background can show at each corner,
+`corner_radius` set, a crescent of background showed at each corner,
 between the dialog's own curve and scoot's tighter ring. Such dialogs now
 [float](#floating-windows) (they carry `xdg_dialog_v1`), so the ring hugs a
 window drawn at its own size rather than a short client in a tall column,
-but the corner radius still does not match. Tracked in
-[`core/client-rounded-corners-vs-ring.md`](backlog/core/client-rounded-corners-vs-ring.md).
+and a window that never negotiated server-side decorations (GTK never
+creates a `zxdg_toplevel_decoration_v1` object) gets a ring-colored
+backdrop under its drawn rect, so its own corners read as the ring hugging
+its curve. Tracked in
+[`resolved/client-rounded-corners-vs-ring-done.md`](backlog/resolved/client-rounded-corners-vs-ring-done.md).
 
 ## Floating windows
 

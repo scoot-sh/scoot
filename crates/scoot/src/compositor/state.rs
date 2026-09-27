@@ -124,6 +124,16 @@ pub struct State {
     pub world: World,
     pub windows: HashMap<WindowId, Window>,
     pub next_id: u64,
+    /// Windows whose client created a `zxdg_toplevel_decoration_v1` object
+    /// for its toplevel (see `handlers.rs`'s `XdgDecorationHandler` impl).
+    /// Read by the ring path (`render/elements.rs`): a window whose client
+    /// never negotiated decorations draws client-side decorations -- GTK
+    /// never binds the protocol -- and rounds its own corners, so the ring
+    /// path backs it with a ring-colored backdrop instead of assuming the
+    /// content is square (see `decorations.rs`'s CSD section). Removed in
+    /// `remove_window` beside the window itself, so a closed window's flag
+    /// can never leak onto a later window.
+    pub decoration_bound: HashSet<WindowId>,
     /// The focused *window*, so activation and the focus ring are only moved
     /// when they change. Not necessarily what holds the keyboard: a layer
     /// surface can (see `clicked_layer` and `layer_shell.rs`), and this stays
@@ -1064,6 +1074,7 @@ impl State {
             world: World::new(config),
             windows: HashMap::new(),
             next_id: 0,
+            decoration_bound: HashSet::new(),
             focus: None,
             fullscreen_covers: Vec::new(),
             floating_cover: 0,
