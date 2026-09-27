@@ -92,8 +92,8 @@ Each checked against the numbers, not assumed:
 **From [ticket 6](resolved/images-decode-and-fit-done.md#measurements),
 scootbg's own side of three rows** (not yet against competitors), release,
 on `scoot --headless` 3840×2160: **Peak memory** for a set of the
-6000×4000 JPEG 120.7 MB with the previous wallpaper's buffer still mapped
-(88.0 MB for a first set); **Set** 426–451 ms request to reply, 390–440 ms
-of CPU; **Size** 1,495,912 B, now linking `libm` (the scaler's `sinf`) as
-predicted. The scaler's cost against fir is the known risk on the Set row
+6000×4000 JPEG 120.5–120.6 MB with the previous wallpaper's buffer still
+mapped (88.0 MB for a first set); **Set** 397.0–433.6 ms request to reply,
+390–420 ms of CPU; **Size** 1,500,008 B, now linking `libm` (the scaler's
+`sinf`) as predicted. The scaler's cost against fir is the known risk on the Set row
 (dependencies-done.md §3b).

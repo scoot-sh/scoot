@@ -83,8 +83,9 @@ written as 8-bit.
 
 ### What landed
 
-Code at `67a0c84` (commits `0af2e5a` and `67a0c84`); the docs came after,
-in a docs-only commit.
+Code at `3a8bf74`: `0af2e5a` and `67a0c84`, then `3a8bf74`, the fixes from
+the review of PR #281 ([below](#review-of-pr-281)); the docs came after
+each, in docs-only commits.
 
 - **The command** (`src/cli.rs`): `scootbg set PATH [--output NAME]
   [--mode fill|fit|stretch|center|tile] [--fill '#rrggbb'] [--filter
@@ -106,8 +107,13 @@ in a docs-only commit.
   - `decode`: format sniffed from the first 12 bytes; `zune-jpeg`, `png`,
     `image-webp` directly into packed RGB; the header's size checked
     against `MAX_PIXELS` = 2^28 (16384×16384) before the pixel buffer is
-    reserved, and that reserved fallibly (`try_reserve_exact`), so a bomb
-    or an allocation the system refuses is an error reply. Grey, grey +
+    allocated, and a JPEG's length against the least data its size needs
+    (one bit per 8×8 block, `jpeg_min_len`). The pixel buffer is zeroed
+    memory that is fallible and committed only as it is written
+    (`scootbg_mem::zeroed_bytes`), so the allocator refusing it is an
+    error reply, and a file claiming more than it holds costs what it
+    holds. The decoders' own working memory is not fallible (see
+    [Not verified](#not-verified-and-why)). Grey, grey +
     alpha and RGBA become RGB in place (narrowing forwards, widening
     backwards: no second buffer), alpha flattened over the fill color.
     16-bit PNG channels are stripped to 8, palettes expanded, animated PNG
@@ -143,11 +149,14 @@ in a docs-only commit.
     copy.
 - **Off the loop** (`src/daemon/worker.rs`): a thread per job
   (`scootbg-decode`), ending with it, so an idle daemon has one thread.
-  The result goes down an `mpsc` channel, then the thread writes an
-  `eventfd` the poll loop watches (rustix, no new `unsafe`: `scootbg`
-  stays `#![forbid(unsafe_code)]`). A guard sends a result on unwind, so
-  a panic in a build that unwinds cannot leave the job waited for forever
-  (the release profile aborts). One decode per job; each distinct buffer
+  The result goes down an `mpsc` channel with its job's ticket, then the
+  thread writes an `eventfd` the poll loop watches (rustix, no new
+  `unsafe`: `scootbg` stays `#![forbid(unsafe_code)]`); the loop takes
+  only the awaited ticket's result and discards anything else. A guard,
+  made inside the thread, sends a result on unwind, so a panic in a build
+  that unwinds cannot leave the job waited for forever (the release
+  profile aborts); a thread that cannot be started sends nothing, and its
+  error is `start`'s return value alone. One decode per job; each distinct buffer
   size rendered once (the source borrowed for all but the last, which
   takes it by value); other outputs of that size get a copy.
 - **The queue** (`src/jobs.rs`, pure): a *trial* per image `set`, drawn
@@ -162,7 +171,9 @@ in a docs-only commit.
   looked up again; a buffer for an output gone, no longer wanting the
   image, or no longer that size, is dropped. A failed trial is an error
   reply naming the path and the reason, and nothing changes. A trial that
-  newer choices have covered is answered `ok` and changes nothing. A
+  newer choices have covered changes nothing, and its reply waits at its
+  own generation, as a superseded color's does, so its `ok` comes once
+  what replaced it is on screen. A
   winning trial is recorded, the outputs it now applies to are stamped
   with its generation and drawn, and its reply waits for them through the
   existing `waiters.rs` (commits plus a `wl_display.sync`).
@@ -172,7 +183,8 @@ in a docs-only commit.
   older; a newer named one only that name). A color landing after an
   image was asked therefore stays, and so does an image asked after a
   color whatever order they finish in. When a choice is recorded, queued
-  trials it covers are answered `ok` without being decoded.
+  trials it covers leave the queue without being decoded, their replies
+  waiting as above.
 - **Drawing** (`src/daemon/canvas.rs`): an image is a full-size shm
   buffer (the configured surface size times `wl_output`'s integer scale,
   with `set_buffer_scale`, the size the full-size color path uses) on
@@ -183,7 +195,10 @@ in a docs-only commit.
   holding an image is dropped unless it is on screen (nothing could reuse
   it but a new render), so after a change each output holds one image
   buffer, not two. A kept image buffer is attached again to a surface the
-  compositor closed and scootbg re-created, without a decode.
+  compositor closed and scootbg re-created, without a decode. A rendered
+  image waiting to go on screen is dropped as soon as anything else is
+  drawn or wanted there. A buffer attached again only to carry a new
+  scale is marked held until its next release, like any attach.
 - **CI**: the integration job runs `tests/image.rs` too, with scoot and
   sway required.
 
@@ -204,9 +219,10 @@ in a docs-only commit.
   this: "re-decode rather than hold tens of MB").
 - **Superseded requests answer `ok`**, not an error and not a separate
   marker (the choice the coordinating session left open): `ok` means "what
-  shows reflects this request or a newer one". A request superseded before
-  it started is never decoded, so a missing file in it goes unreported;
-  the newer request's own reply is the one that describes the screen.
+  shows reflects this request or a newer one", and, as for a color, it
+  comes once the newer choice is on screen (at first it came at once; the
+  review asked for this). A request superseded before it started is never
+  decoded, so a missing file in it goes unreported.
 - **Newest first** instead of first come, first served: a burst of sets
   shows the last one after one decode, and the older ones are answered as
   superseded. If the newest fails, the next newest runs, so the newest
@@ -323,13 +339,114 @@ All on a Claude Code web container (x86_64, 4 CPUs), no dev VM.
   `libgcc_s`, `libm` and `libc` only. `nix flake check` was not run here;
   CI runs it.
 
+### Review of PR #281
+
+One blocking finding and six more; all fixed in `3a8bf74`, each with a
+test that fails without its fix where the code can be tested (checked by
+reverting the fix and running it):
+
+1. **Blocking: a thread that could not be started landed twice.** The
+   result guard was built outside the thread and moved into the spawn
+   closure; when `spawn` failed, std dropped the closure, the guard sent
+   "the decoding thread failed" and woke the loop, and `pump` also landed
+   the job as the spawn error. One wakeup takes one message, so two
+   refusals in one loop turn left a stale "failed" behind, which the next
+   job took as its own, and every later result landed one job late.
+   **Reproduced** here as the reviewer did, in a v1 pids cgroup
+   (`pids.max` 1 on the daemon, two image `set`s at once, the limit
+   lifted, two more one by one), 3 rounds on each binary:
+   - `67a0c84`, 3 of 3: both refused ("cannot start a decoding thread"),
+     then blue: exit 1, "the decoding thread failed"; then yellow: exit
+     0, `query` says `cg-yellow.png`, the screen shows (0, 0, 255), blue;
+   - `3a8bf74`, 3 of 3: both refused, then blue: exit 0, screen (0, 0,
+     255), `query` blue; yellow: exit 0, screen (255, 255, 0), `query`
+     yellow.
+
+   **Fix:** the guard is made inside the thread, so a spawn that never
+   ran sends nothing; every result carries its job's ticket and the loop
+   takes only the awaited one (anything else is discarded); `spawn` is a
+   seam (`Worker::with_spawn`). Tests:
+   `a_thread_that_cannot_start_leaves_no_result_behind` (fails with the
+   guard moved back outside: "a refused spawn wakes nothing"),
+   `a_result_for_another_job_is_discarded`.
+2. **A few hundred bytes committed 0.8–1.06 GB.** The decoded buffer was
+   reserved and then filled with zeros, touching every page before a
+   pixel was read. It is now `scootbg_mem::zeroed_bytes`: zeroed memory
+   from the allocator (a fresh mapping for a large block), committed only
+   as written, and fallible. The decoders' own large buffers were zeroed
+   allocations already, so they are lazy too. Measured on every PNG color
+   type, Adam7, 16-bit, progressive JPEG, lossless (opaque and alpha) and
+   lossy WebP ([the table below](#measurements)): from 0.79–1.06 GB and
+   0.5–0.7 s to within 72 kB of the RSS before, under 1 ms. **Also
+   found:** a *baseline* JPEG of 312 bytes claiming 16384×16384 was
+   accepted and shown (2.2 s, 791 MB, flat grey): `zune-jpeg` feeds zeros
+   past an early end-of-image marker, so every pixel was really written
+   and lazy memory could not help. A JPEG must now hold at least one bit
+   per 8×8 block of its full-resolution component (`jpeg_min_len`: every
+   block codes its DC coefficient with a Huffman code of one bit or
+   more), checked from the header. Tests:
+   `zeroed_bytes_are_committed_only_as_written` (`scootbg-mem`),
+   `the_jpeg_size_bound_is_one_bit_per_block`, the bomb test's in-budget
+   JPEG, and end to end
+   `a_file_that_claims_a_large_size_costs_what_it_holds` (six such files
+   against the daemon, peak under 16 MB above; with the old buffer it
+   fails at "rgb.png (4160 bytes): peak 792396 kB from 5996 kB", without
+   the JPEG bound it fails on the baseline JPEG, the debug daemon taking
+   past the client's 30 s to decode 805 MB of grey). The module docs and
+   [Not verified](#not-verified-and-why) now say exactly which
+   allocations are fallible. Also noted: `image-webp` computes a lossless
+   width as `(1 + field) & 0x3FFF`, so 16384, the format's maximum, reads
+   as 0 and is refused as 0×0; harmless, not ours to fix.
+3. **Stale numbers** in `docs/scootbg/README.md` and `lightest.md`: every
+   copy now carries the `3a8bf74` measurements.
+4. **A superseded image answered `ok` at once** while a superseded color
+   waits for the newer choice to be on screen. It now pushes a waiter at
+   its own generation, like a color (`set --help`, both READMEs say so).
+   Test: `a_superseded_image_request_waits_like_a_color` (fails with the
+   immediate reply); `the_newest_set_wins` now screenshots the moment a
+   superseded request answers. (End to end the old and new orders cannot
+   be told apart here: the newer choice is committed in the same loop
+   turn, and the old reply went through a sync too.)
+5. **`Canvas::ready` outlived its use**: a rendered image is now dropped
+   on any draw of something else, when an unchanged or kept buffer is
+   shown, and at every `reconcile` where the output no longer wants that
+   image (which covers a surface not configured yet).
+6. **The scale-only re-attach did not mark the buffer held**; it now goes
+   through the same `attached()` as any attach, so a later draw cannot
+   `Reuse` and fill it while the compositor may be reading it.
+7. **EXIF orientation for PNG** was applied but not documented: `set
+   --help` and the README now say JPEG, WebP and PNG `eXIf`.
+
+Also: three leftover processes from the bug-bash (two headless scoots and
+a scootbg daemon, started by the scratch `run.sh`) were stopped and their
+runtime directories removed.
+
+**Verified** at `3a8bf74` (logs in the scratch record, each headed with
+the SHA and a clean `crates/`):
+
+- `cargo fmt --check -p scootbg -p scootbg-mem`: exit 0;
+- `cargo clippy -p scootbg -p scootbg-mem --all-targets -- -D warnings`:
+  exit 0;
+- `RUSTFLAGS="-D warnings" cargo build --release -p scootbg`: exit 0,
+  1,500,008 B;
+- `SCOOTBG_REQUIRE_SCOOT=1 SCOOTBG_REQUIRE_SWAY=1 SCOOTBG_TEST_SWAY=…
+  soft-egl cargo nextest run -p scootbg -p scootbg-mem`: 275 passed,
+  1 skipped;
+- `cargo test -p scootbg -p scootbg-mem` (same variables): 219 + 9 + 14
+  + 2 + 7 + 3 + 17 + 4 passed, 1 ignored;
+- the same nextest with `--stress-count 10 -j 8`: 10 of 10 iterations
+  (331.3 s);
+- `cargo nextest run --workspace`: 2,330 passed, 25 skipped.
+
 ### Measurements
 
-Release (`cargo build --release -p scootbg`), code at `67a0c84`; the test
-images are the dependencies record's recipe regenerated (ImageMagick
-fractal plasma plus Gaussian noise, 6000×4000, JPEG quality 92 4:2:0,
-7,925,275 B; PNG 44,547,501 B; WebP q90 7,050,508 B; and the JPEG with an
-orientation-6 APP1 segment spliced in, 7,925,311 B).
+Release (`cargo build --release -p scootbg`), code at `3a8bf74` (after the
+review's fixes; the first round, at `67a0c84`, was within a few percent
+on every row but two, noted below). The test images are the dependencies
+record's recipe regenerated (ImageMagick fractal plasma plus Gaussian
+noise, 6000×4000, JPEG quality 92 4:2:0, 7,925,275 B; PNG 44,547,501 B;
+WebP q90 7,050,508 B; and the JPEG with an orientation-6 APP1 segment
+spliced in, 7,925,311 B).
 
 **In-process stages**, `fill` onto 3840×2160, 5 runs each (the
 `#[ignore]`d `image::bench::pipeline`, `cargo test --release -p scootbg
@@ -339,13 +456,18 @@ orientation-6 APP1 segment spliced in, 7,925,311 B).
 
 | File | decode, ms | scale, ms | pack, ms | total, ms | peak, kB | `render()` whole, ms |
 |---|---|---|---|---|---|---|
-| JPEG | 231.9, 230.5, 233.9, 238.4, 244.6 | 160.6, 163.2, 161.6, 167.9, 160.7 | 23.3, 24.3, 22.7, 22.7, 24.1 | 426.7, 428.9, 428.8, 439.5, 440.2 | 88,932, then 88,884 ×4 | 428.5, 430.1, 438.9, 427.4, 432.9 |
-| JPEG, orientation 6 | 236.6, 229.8, 229.9, 227.7, 225.2 | 124.7, 111.7, 111.6, 108.0, 108.5 | 63.2, 44.3, 43.7, 41.6, 42.1 | 434.2, 394.9, 393.5, 385.5, 384.6 | 76,020 ×5 | 410.6, 417.8, 392.8, 384.3, 387.7 |
-| PNG | 230.9, 236.5, 232.0, 261.9, 237.9 | 162.3, 167.9, 161.4, 182.3, 194.9 | 22.7, 24.1, 22.7, 23.9, 33.0 | 426.8, 439.5, 426.9, 480.0, 479.7 | 89,012 ×5 | 416.7, 436.8, 425.0, 426.4, 451.2 |
-| WebP | 1092.2, 1034.0, 1046.7, 1051.6, 1089.1 | 154.0, 152.8, 159.2, 166.9, 166.4 | 21.8, 22.2, 22.1, 22.6, 23.3 | 1278.4, 1219.6, 1238.9, 1252.2, 1289.9 | 120,328 ×5 | 1291.1, 1220.6, 1232.3, 1278.7, 1256.2 |
+| JPEG | 227.1, 222.2, 216.0, 225.3, 226.4 | 156.3, 154.0, 206.4, 158.8, 157.6 | 22.7, 22.3, 30.6, 22.6, 22.5 | 416.7, 409.2, 466.2, 417.7, 417.5 | 88,864, then 88,816 ×4 | 412.0, 409.2, 407.5, 415.7, 407.3 |
+| JPEG, orientation 6 | 220.6, 218.7, 217.1, 221.5, 217.6 | 103.8, 105.6, 121.0, 106.4, 105.5 | 40.7, 42.0, 43.0, 42.3, 43.6 | 373.2, 374.4, 390.1, 378.6, 374.7 | 75,952 ×5 | 378.8, 375.7, 387.2, 380.5, 364.3 |
+| PNG | 217.2, 216.2, 221.6, 214.9, 221.2 | 164.1, 156.2, 155.2, 154.6, 158.4 | 23.3, 21.2, 22.5, 22.0, 20.9 | 415.4, 405.5, 410.6, 402.9, 411.3 | 89,072 ×5 | 399.5, 406.0, 400.3, 410.4, 419.4 |
+| WebP | 1019.9, 1006.6, 1006.4, 1021.8, 1090.8 | 159.7, 148.5, 155.8, 158.1, 153.2 | 21.5, 20.7, 22.2, 22.4, 22.3 | 1211.8, 1186.2, 1194.9, 1213.1, 1278.0 | 110,728 ×5 | 1194.2, 1188.4, 1214.7, 1251.4, 1231.0 |
 
-Crop in place 6.0–8.4 ms each; the shm allocation 0.0–0.1 ms. The test
-process's `RssAnon` settled at 748 kB and stayed there across all 20 runs.
+Crop in place 5.9–8.1 ms each; the shm allocation 0.0 ms. The test
+process's `RssAnon` settled at 748 kB and stayed there across all 20
+runs. Against `67a0c84` (same method, same files): decode 5–15 ms faster
+(the pixel buffer is no longer written with zeros before the decoder
+writes it), and WebP's peak 110,728 kB, down from 120,328 (the frame
+buffer is sized for RGB or RGBA, whichever is larger, and the part the
+decoder never writes is no longer made resident).
 
 **End to end**: the release daemon on `scoot --headless --width 3840
 --height 2160 --outputs 1` (debug scoot), `set` over the socket from a
@@ -356,55 +478,85 @@ daemon's `VmHWM` reset before each `set` (`/proc/PID/clear_refs`); CPU is
 
 | File | request to reply, ms | CPU, ms | peak, kB |
 |---|---|---|---|
-| JPEG | 467.5, 444.8, 415.8 | 430, 440, 420 | 87,868 (the first set, nothing on screen yet), 120,464, 120,572 |
-| JPEG, orientation 6 | 387.8, 387.7, 457.4 | 380, 380, 460 | 107,516, 107,728, 107,668 |
-| PNG | 428.0, 443.2, 414.3 | 430, 440, 400 | 120,320, 120,576, 120,544 |
-| WebP | 1313.1, 1300.1, 1335.6 | 1310, 1290, 1290 | 151,540, 151,636, 151,580 |
+| JPEG | 433.6, 402.6, 397.0 | 420, 400, 390 | 87,992 (the first set, nothing on screen yet), 120,608, 120,536 |
+| JPEG, orientation 6 | 431.5, 446.8, 386.4 | 430, 450, 380 | 107,644, 107,700, 107,804 |
+| PNG | 417.6, 408.1, 409.2 | 420, 400, 410 | 120,444, 120,580, 120,556 |
+| WebP | 1289.4, 1247.5, 1218.0 | 1280, 1240, 1210 | 141,964, 141,952, 142,092 (151,540–151,636 at `67a0c84`) |
 
 After every set: 1 thread, 9 fds (the 8 of a color daemon plus the
 buffer's memfd), `RssShmem` 32,400 kB (one 3840×2160 buffer: the previous
-one is dropped on release), `RssAnon` 372–652 kB, `[heap]` Rss 36 kB, RSS
-36,476–36,804 kB, PSS 18,476–18,804 kB (the buffer is shared with the
+one is dropped on release), `RssAnon` 372–568 kB, `[heap]` Rss 36 kB, RSS
+36,540–36,716 kB, PSS 19,267–19,443 kB (the buffer is shared with the
 compositor). Then 30 s idle: 0 context switches, 0 ms CPU.
+
+**Files that claim more than they hold** (the review's finding 2): each
+claims 16384×16384 (16383×16383 for WebP, the largest `image-webp` reads)
+and holds a few hundred bytes; the daemon's `VmHWM` after each `set`, reset
+before it, against its RSS before (release, one 1600×1000 output, one
+daemon per binary, files in the order listed):
+
+| File (bytes) | `67a0c84`: reply, ms, peak kB | `3a8bf74`: reply, ms, peak kB (RSS before) |
+|---|---|---|
+| PNG RGB (79) | error, 587.2, 789,992 | error, 0.8, 3,760 (3,440) |
+| PNG RGBA (79) | error, 676.8, 1,052,356 | error, 0.5, 3,764 (3,760) |
+| PNG grey (79) | error, 482.3, 790,276 | error, 0.5, 3,768 (3,764) |
+| PNG Adam7 (79) | error, 482.3, 790,280 | error, 0.7, 3,816 (3,768) |
+| PNG 16-bit (79) | error, 487.5, 790,384 | error, 0.7, 3,816 (3,816) |
+| JPEG baseline (312) | **ok (shown: flat grey)**, 2,213.8, 791,152 | error, 0.5, 3,880 (3,816) |
+| JPEG progressive (546) | error, 481.8, 796,768 | error, 0.6, 3,880 (3,880) |
+| WebP lossless, opaque (942) | error, 488.9, 796,640 | error, 0.7, 3,952 (3,880) |
+| WebP lossless, alpha (938) | error, 639.5, 1,058,764 | error, 0.9, 3,952 (3,952) |
+| WebP lossy (176) | error, 498.1, 796,744 | error, 0.8, 3,952 (3,952) |
+
+The files are made by `make.py` in the scratch record (PNG: IHDR plus an
+unfinished zlib stream of 4 KiB of zeros; JPEG: the test fixtures with
+the frame header's size rewritten; WebP: small real files with the
+header's size rewritten); `tests/image.rs` builds the same kinds in code
+and asserts a peak under 16 MB above the RSS before.
 
 **Against the dependencies record's predictions:**
 
-- Scale 174 ms predicted: 152.8–194.9 ms measured (medians: JPEG 161.6,
-  PNG 167.9, WebP 159.2).
-- Decode: JPEG 234.8 ms predicted, 230.5–244.6 measured; PNG 233.4,
-  230.9–261.9; WebP 1,302, 1,034–1,092.
-- Per set 444 ms (J sequence, §3b): 426.7–480.0 ms in-process,
-  414–468 ms request to reply.
-- Pipeline peak 131.2 MB predicted: **88.9 MB** in-process (source cropped
+- Scale 174 ms predicted: 103.8–206.4 ms measured (medians: JPEG 157.6,
+  PNG 156.2, WebP 155.8; orientation 6 scales a narrower stored crop,
+  105.6).
+- Decode: JPEG 234.8 ms predicted, 216.0–227.1 measured; PNG 233.4,
+  214.9–221.6; WebP 1,302, 1,006–1,091.
+- Per set 444 ms (J sequence, §3b): 402.9–466.2 ms in-process,
+  397.0–433.6 ms request to reply.
+- Pipeline peak 131.2 MB predicted: **88.8 MB** in-process (source cropped
   and shrunk, plus the scaled image: 60.8 + 24.9 MB over the process's
-  base), **120.5 MB** in the daemon with the previous wallpaper's 32.4 MB
-  buffer still mapped (and 87.9 MB for a first set). The in-place crop's
-  `shrink_to_fit` returns the 11 MB cropped off before the scaler
+  base), **120.5–120.6 MB** in the daemon with the previous wallpaper's
+  32.4 MB buffer still mapped (and 88.0 MB for a first set). The in-place
+  crop's `shrink_to_fit` returns the 11 MB cropped off before the scaler
   allocates; the prototype's accounting was not re-run to attribute the
   rest of the difference.
 - Orientation in the packing pass, "designed, not measured": packing
-  took 41.6–44.3 ms (one run 63.2) against 22.7–24.3 ms upright, **about
-  +20 ms**, and **no extra memory** (the peak is lower, since the stored
-  crop is narrower), against +60 MB and +200 ms for rotating the source
-  first.
+  took 40.7–43.6 ms against 20.9–30.6 ms upright, **about +20 ms**, and
+  **no extra memory** (the peak is lower, since the stored crop is
+  narrower), against +60 MB and +200 ms for rotating the source first.
 
 **Binary and idle cost** (release, stripped): 783,072 B at `2cbff25`
-(before) → **1,500,008 B** (+716,936) at `67a0c84`; the round-two pipeline
-prototype was 1,229,656 B over a 565,968 B base (+663,688). It now links
-`libm.so.6` (the scaler's `sinf`), as §9 predicted; no `libc` crate
-(`cargo tree -p scootbg -e normal --prefix none | grep -c '^libc '` → 0).
-Idle with a color on two 1600×1000 outputs, 3 rounds interleaved, 10 s
-windows:
+(before) → **1,500,008 B** (+716,936) at `67a0c84` and again at `3a8bf74`
+(sizes come in 4 KiB steps); the round-two pipeline prototype was
+1,229,656 B over a 565,968 B base (+663,688). It now links `libm.so.6`
+(the scaler's `sinf`), as §9 predicted; no `libc` crate (`cargo tree -p
+scootbg -e normal --prefix none | grep -c '^libc '` → 0). Idle with a
+color on two 1600×1000 outputs, 3 rounds interleaved, 10 s windows, two
+batches (PSS depends on what else maps the same libraries at the time,
+so it is compared within a batch):
 
 | | RSS, kB | PSS, kB | `[heap]`, kB | threads | fds | context switches, CPU ticks |
 |---|---|---|---|---|---|---|
-| before | 2,684, 2,656, 2,672 | 1,233, 1,205, 1,224 | 36 | 1 | 7 | 0, 0 |
-| after | 3,540, 3,664, 3,552 | 1,841, 1,978, 1,812 | 36 | 1 | 8 | 0, 0 |
+| before (`2cbff25`) | 2,684, 2,656, 2,672 | 1,233, 1,205, 1,224 | 36 | 1 | 7 | 0, 0 |
+| `67a0c84` | 3,540, 3,664, 3,552 | 1,841, 1,978, 1,812 | 36 | 1 | 8 | 0, 0 |
+| before (`2cbff25`), second batch | 2,656, 2,664, 2,676 | 1,747, 1,755, 1,767 | 36 | 1 | 7 | 0, 0 |
+| `3a8bf74`, second batch | 3,536, 3,536, 3,564 | 2,461, 2,469, 2,509 | 36 | 1 | 8 | 0, 0 |
 
-The +0.9 MB is file-backed code, not heap (per mapping, `/proc/PID/smaps`):
-scootbg's text +416 kB and read-only data +176 kB (a larger binary faults
-more in around what a color touches) and `libm` +388 kB (shared with
-every other process that maps it); the extra fd is the worker's eventfd.
+The +0.9 MB RSS (+0.6 to +0.7 MB PSS) is file-backed code, not heap (per
+mapping, `/proc/PID/smaps`, at `67a0c84`): scootbg's text +416 kB and
+read-only data +176 kB (a larger binary faults more in around what a
+color touches) and `libm` +388 kB (shared with every other process that
+maps it); the extra fd is the worker's eventfd.
 
 ### Not verified, and why
 
@@ -415,13 +567,35 @@ every other process that maps it); the extra fd is the worker's eventfd.
 - **Coverage-guided fuzzing** of decode + scale: not done; the
   deterministic truncation and corruption loops are unit tests
   ([testing.md](../testing.md) keeps the `cargo fuzz` item).
-- **An allocation failure inside the scaler**: `pic-scale-safe` allocates
-  its output infallibly, so a refusal there aborts the daemon. The
-  decoded buffer is reserved fallibly and the target size is checked
-  against `wl_shm`'s limit first, but a legitimate huge target on a box
-  that refuses the memory is not handled. Not reachable under Linux's
-  default overcommit short of the OOM killer, which ends the process
-  either way.
+- **Infallible allocations outside our buffer.** Only the decoded pixel
+  buffer is fallible. These are plain `Vec`s, and the allocator refusing
+  one aborts the daemon:
+  - `zune-jpeg`: its per-MCU-row buffers and upsampler scratch (width-
+    sized), and for a progressive JPEG its coefficients for the whole
+    image (2 bytes per sample per component: up to 1.6 GB at the budget);
+  - `png`: its row and unfiltering buffers (width-sized, and bounded by
+    its own 64 MiB limit);
+  - `image-webp`: the RGBA frame it decodes an opaque lossless image into
+    before copying out RGB (4 bytes a pixel), and a lossy image's YUV
+    planes (1.5 bytes a pixel) and alpha plane;
+  - `pic-scale-safe`: its output (the target's size in RGB), after the
+    target is checked against `wl_shm`'s limit;
+  - scootbg's own crop copy for a second size (`try_reserve_exact`, so
+    that one is fallible) and the copies for same-size outputs (an shm
+    buffer each, fallible).
+
+  The large ones are zeroed allocations (`vec![0; n]`), committed only
+  as written, so a lying file does not make them resident (the table
+  above). What is not handled is a *legitimate* image near the budget on
+  a machine that refuses the memory; under Linux's default overcommit
+  that is the OOM killer's decision, which ends the process either way.
+- **Fixes 5 and 6 of the review** (a rendered image dropped as soon as it
+  is moot; a buffer re-attached for a scale change marked held) are by
+  reading: the canvas works on live Wayland objects and has no unit
+  tests, and neither compositor here stalls an image draw or lets the
+  re-attached buffer be reused while held long enough to observe. The
+  scale test (`a_new_scale_redraws_at_the_real_pixel_size`) runs the
+  re-attach path and still passes.
 - **The kept image buffer on a re-created surface** is by reading: no
   compositor here closes the background surface of an output it keeps
   (the same gap as ticket 3's `closed` path).

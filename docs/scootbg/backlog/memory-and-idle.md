@@ -40,7 +40,9 @@ have never configured out of it) belongs here.
 after an image `set` on a 3840×2160 output (release, 12 sets of 6000×4000
 JPEG, PNG and WebP): one 32.4 MB shm buffer per output (the old one is
 dropped on release: a released buffer holding an image is never kept as
-a spare), heap 372–652 kB anonymous, one thread, 0 wakeups over 30 s.
+a spare), heap 372–568 kB anonymous, one thread, 0 wakeups over 30 s.
+A rendered image no longer wanted (the choice changed before it could be
+shown) is dropped at once.
 Left for here:
 
 - Two outputs of the same size showing one image get two buffers with

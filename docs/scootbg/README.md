@@ -162,8 +162,8 @@ anything wrong                                                -> {"type":"error"
   `set` or `clear` sent after an image's `set` is never undone when that
   image finishes decoding. An image request that newer ones have replaced
   on every output it asked for, before it was decoded or while, is
-  answered `ok` and changes nothing (it may never be decoded at all); the
-  newer request's own reply says when *it* is shown. At most 32 image
+  answered `ok` once what replaced it is on screen, as a replaced color
+  is, and changes nothing (it may never be decoded at all). At most 32 image
   requests wait at once; one more is refused ("too many images are
   waiting"), nothing changed.
 - A request refused outright changes nothing: an unknown `output` name
@@ -194,9 +194,10 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 | What | Result |
 |---|---|
-| Stripped binary | 1,495,912 B with images (783,072 B with colors only); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
-| `set` of a 6000×4000 JPEG onto a 3840×2160 output, request to reply, ×3 | 426–451 ms (PNG 426–433, WebP 1,251–1,297); peak RSS 120.7 MB with the previous wallpaper still mapped (88.0 MB for a first set; WebP 151.7 MB) |
-| After it, idle 30 s | 1 thread, heap 372–652 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
+| Stripped binary | 1,500,008 B with images (783,072 B with colors only); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
+| `set` of a 6000×4000 JPEG onto a 3840×2160 output, request to reply, ×3 | 397.0–433.6 ms, 390–420 ms of CPU (PNG 408.1–417.6 ms; WebP 1,218.0–1,289.4 ms); peak RSS 120.5–120.6 MB with the previous wallpaper still mapped (88.0 MB for a first set; PNG 120.4–120.6 MB; WebP 142.0–142.1 MB) |
+| After it, idle 30 s | 1 thread, heap 372–568 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
+| A few hundred bytes claiming 16384×16384 (PNG, JPEG, WebP) | refused in under 1 ms; peak RSS within 72 kB of before |
 | Idle with a color set, 30 s ×3 | 0 context switches, 0 CPU ticks; RSS 2,720 kB, PSS 1,524 kB, 1 thread |
 | PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556–1,560 / 1,556–1,560 / 7,808 kB (14,060 kB once a change leaves a spare buffer per output) |
 | `set`, request to reply, 10,000 changes ×3 | median 400–433 µs, p99 1.6 ms; no memory growth |

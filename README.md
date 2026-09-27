@@ -354,8 +354,8 @@ so a file whose name starts with `#` is given as `./#name.png`. The path is
 made absolute before it is sent (the daemon's working directory is not
 yours) and must be valid UTF-8. PNG, JPEG and WebP are read, told apart by
 content, not by name (an animated PNG or WebP shows its first frame);
-transparency is shown over the fill color, and a JPEG's or WebP's EXIF
-orientation is applied. `--mode` fits it to each output:
+transparency is shown over the fill color, and EXIF orientation is
+applied (a JPEG's, a WebP's, or a PNG's `eXIf` chunk). `--mode` fits it to each output:
 
 | `--mode` | |
 |---|---|
@@ -391,8 +391,9 @@ success. **An image that cannot be shown** (no such file, not a regular
 file, not a PNG/JPEG/WebP, too large, truncated or corrupt) is an error
 saying why, and every output keeps what it showed. **The newest request
 wins**: a `set` or `clear` sent while an earlier image is still decoding is
-never undone when that image finishes; the earlier `set` then returns 0
-without changing anything. Exit status: 0 done; 1 no daemon running,
+never undone when that image finishes; the earlier `set` changes nothing
+and returns 0 once the newer one is on screen, as a replaced color's `set`
+does. Exit status: 0 done; 1 no daemon running,
 unknown output, image that cannot be shown, or drawing failed (the
 daemon's stderr says why); 2 usage error, a malformed color or an unknown
 `--mode`/`--filter` included.
