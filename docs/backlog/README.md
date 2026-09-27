@@ -327,7 +327,7 @@ falsify. Read `flexwm` there as `scoot`.
   Gamma LUT length re-read per CRTC, live control failed only on change.
   Four fail-first harness tests; the switch itself unverified live
   (single-CRTC dev VM), legacy blind-probe limit stated in the record.
-- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — gh #48 stays open: new-mode-list on the same connector (vkms `edid_override` tried 2026-09-26, inert on the dev VM's 6.18.50 — still needs vfkit/rescale-capable hardware), and fallback to a *different* connector, with before/after proof. Since multi-output phase E the fallback applies only when no driven connector is left; with another screen lit an unplug removes an output instead (confirmed by a physical DP-1 replug on the Asahi M2 Air, 2026-09-25). The Hold/Reconnected halves of the neighbouring [multi-output remainder](./core/multi-output-remainder.md) follow-up 1 were proven live on vkms the same day.
+- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — medium: gh #48 closed 2026-09-27 on unit-test evidence (user decision); `MoveTo` (reachable by moving a lone monitor to another port, DRM half never run) to be proven live on the dev VM next; also the new-mode-list on the same connector (vkms `edid_override` tried 2026-09-26, inert on the dev VM's 6.18.50 — still needs a rig that changes a mode list), with before/after proof. Since multi-output phase E the `MoveTo` fallback applies only when no driven connector is left; with another screen lit an unplug removes an output instead (confirmed by a physical DP-1 replug on the Asahi M2 Air, 2026-09-25). The Hold/Reconnected halves of the neighbouring [multi-output remainder](./core/multi-output-remainder.md) follow-up 1 were proven live on vkms the same day.
 
 ### Core / config / rendering
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.
@@ -753,21 +753,34 @@ scale/mode) into one hardware session.
 - [Restore windows, workspaces and binds when a monitor reconnects](./resolved/output-reconnect-restore-done.md)
   — RESOLVED 2026-09-25 (PR #249): removal files the core's `EvictedOutput`
   keyed by connector identity, a matching add restores workspaces in order,
-  binds name the first/second screen. Live Asahi replug unverified (runbook
-  in the PR body); no debounce until flap timing is measured.
+  binds name the first/second screen. Live on the Asahi M2 Air since:
+  virtual pull on the dumb tier (`Asahi.md` Test 11) and a real replug on
+  the GPU tier (Test 12). No debounce until flap timing is measured.
 - [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./core/lock-vblank-bound-hardening.md)
   — OPEN, low: `await_vblank`'s "late, never early" should say "within one
   bound of the first blank drawn"; `stale_vblanks` entries should age out so
   a driver that never delivers an owed vblank can't freeze a reused CRTC.
   Filed from PR #247's round-2 review.
+- [An unplugged monitor's windows seem to disappear](./core/unplug-adopted-windows-invisible.md)
+  — OPEN, medium (daily-drive, filed from `Asahi.md` Test 12): on unplug the
+  monitor's workspaces are adopted as background workspaces of the focused
+  screen and nothing visible changes, so the person at the machine read it
+  as the window vanishing. Requirement (user): make clear where both the
+  removed monitor's workspaces and the panel's swapped-out view went. Design:
+  show the adopted workspace when focus was on the removed screen
+  (restore-safe), name adopted workspaces by origin over `ext-workspace-v1`,
+  add `workspace` to IPC `windows`; notifications via a later IPC event, not
+  drawn by scoot.
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
   — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
   + H (default `Super+comma/period` output binds) LANDED 2026-09-21
   (PR #208). E1 (every connector driven at startup) + E2 (per-head
   rendering, per-output lock waits, hotplug add/remove) LANDED 2026-09-25,
-  live on the Asahi M2 Air including a physical unplug and replug. Left:
-  GPU-tier runtime add and #48 `MoveTo` on hardware,
-  [reconnect restore](./resolved/output-reconnect-restore-done.md), and the
+  live on the Asahi M2 Air including a physical unplug and replug; the
+  GPU-tier runtime add and the multi-head mode change since proven there
+  (`Asahi.md` Tests 11–12), and
+  [reconnect restore](./resolved/output-reconnect-restore-done.md) is
+  resolved. Left: #48 `MoveTo` on hardware and the
   [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
   stays last.
 - [XWayland: drops onto X windows do not land](./protocols/xwayland-pointer-focus-x11.md)

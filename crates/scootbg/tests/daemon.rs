@@ -32,7 +32,16 @@ fn query_version_and_kill() {
 
     let query = session.run(&["query"]);
     assert!(query.status.success(), "{}", stderr(&query));
-    assert_eq!(stdout(&query), "{\"type\":\"outputs\",\"outputs\":[]}\n");
+    let text = stdout(&query);
+    assert_eq!(text.matches('\n').count(), 1, "one line: {text:?}");
+    let reply = json(&text);
+    assert_eq!(reply["type"], "outputs");
+    // Straight after start-up the outputs may still be settling; tests/
+    // outputs.rs waits for them. The shape is a list either way.
+    assert!(
+        reply["outputs"].as_array().is_some_and(|o| o.len() <= 2),
+        "{reply}"
+    );
 
     let version = session.run(&["version"]);
     assert!(version.status.success(), "{}", stderr(&version));
@@ -105,6 +114,15 @@ fn a_stale_socket_is_replaced() {
     };
     // What a crashed daemon leaves: the file, nobody listening.
     drop(UnixListener::bind(session.socket()).unwrap());
+    // Under `cargo test`, another test's `fork` in this same process can
+    // hold a copy of that listener until its `exec` closes it (CLOEXEC),
+    // and the daemon would rightly refuse a socket that still answers.
+    // Once a connect is refused, no copy is left and none can come back.
+    let deadline = std::time::Instant::now() + common::PATIENCE;
+    while UnixStream::connect(session.socket()).is_ok() {
+        assert!(std::time::Instant::now() < deadline, "never went stale");
+        std::thread::sleep(Duration::from_millis(5));
+    }
     assert!(is_socket(&session.socket()));
     let mut daemon = session.daemon();
     assert!(session.run(&["query"]).status.success());

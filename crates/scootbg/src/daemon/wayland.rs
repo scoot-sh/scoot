@@ -12,14 +12,14 @@
 //! | `wp_single_pixel_buffer_manager_v1` | optional: colours without shared memory |
 //! | `wp_fractional_scale_manager_v1` | optional: device-pixel sizes at fractional scales |
 //! | `wl_output` (each) | bound as they appear, released as they go |
+//! | `zxdg_output_manager_v1` | bound only once an output older than v4 (no `name`) appears |
 //!
-//! No surface is created yet; that is outputs-and-layer-surfaces.md.
+//! The outputs and their surfaces are `surfaces`.
 
 use std::fmt;
 
 use wayland_client::globals::{BindError, GlobalError, GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_compositor::WlCompositor;
-use wayland_client::protocol::wl_output::WlOutput;
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::{
@@ -28,11 +28,11 @@ use wayland_client::{
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use wayland_protocols::wp::single_pixel_buffer::v1::client::wp_single_pixel_buffer_manager_v1::WpSinglePixelBufferManagerV1;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
+use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_manager_v1::ZxdgOutputManagerV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 
-/// `wl_output` v4 adds `name`, which later work uses to match
-/// `--output NAME`; older outputs are still bound.
-const OUTPUT_VERSION: u32 = 4;
+use super::surfaces::{Objects, XdgOutputs};
+use crate::outputs::Outputs;
 
 #[derive(Debug)]
 pub enum WaylandError {
@@ -65,36 +65,40 @@ impl fmt::Display for WaylandError {
 
 impl std::error::Error for WaylandError {}
 
-/// The bound singletons. Held so they stay bound for the surfaces to come.
-#[allow(dead_code)] // Read by the layer-surface work (ticket 3).
+/// The bound singletons.
 #[derive(Debug)]
 pub struct Globals {
     pub compositor: WlCompositor,
-    pub shm: WlShm,
     pub layer_shell: ZwlrLayerShellV1,
+    /// Held so they stay bound for the buffers to come (solid-colour.md,
+    /// hidpi-fractional-scale.md).
+    #[allow(dead_code)]
+    pub shm: WlShm,
+    #[allow(dead_code)]
     pub viewporter: Option<WpViewporter>,
+    #[allow(dead_code)]
     pub single_pixel: Option<WpSinglePixelBufferManagerV1>,
+    #[allow(dead_code)]
     pub fractional_scale: Option<WpFractionalScaleManagerV1>,
 }
 
 /// The event-dispatch state.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct State {
-    /// `(registry name, output)` for each `wl_output` currently advertised.
-    pub outputs: Vec<(u32, WlOutput)>,
+    pub globals: Globals,
+    pub outputs: Outputs<Objects>,
+    pub xdg: XdgOutputs,
 }
 
 pub struct Wayland {
     pub conn: Connection,
     pub queue: EventQueue<State>,
     pub state: State,
-    #[allow(dead_code)] // Read by the layer-surface work (ticket 3).
-    pub globals: Globals,
 }
 
 impl Wayland {
     /// Connects through `WAYLAND_DISPLAY`/`WAYLAND_SOCKET`, lists the
-    /// globals (one round trip) and binds them.
+    /// globals (one round trip), binds them, and binds each output.
     pub fn connect() -> Result<(Self, Vec<&'static str>), WaylandError> {
         let conn = Connection::connect_to_env().map_err(WaylandError::Connect)?;
         let (list, queue) = registry_queue_init::<State>(&conn).map_err(WaylandError::Registry)?;
@@ -124,32 +128,39 @@ impl Wayland {
         let mut missing = Vec::new();
         let globals = Globals {
             compositor,
-            shm,
             layer_shell,
+            shm,
             viewporter: optional(&mut missing, list.bind(&qh, 1..=1, ())),
             single_pixel: optional(&mut missing, list.bind(&qh, 1..=1, ())),
             fractional_scale: optional(&mut missing, list.bind(&qh, 1..=1, ())),
         };
 
-        let mut state = State::default();
+        let mut state = State {
+            globals,
+            outputs: Outputs::default(),
+            xdg: XdgOutputs::default(),
+        };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {
+            // The manager first: an output listed before it may need it.
             for global in advertised {
-                if global.interface == WlOutput::interface().name {
-                    bind_output(&registry, &qh, &mut state, global.name, global.version);
-                }
+                state
+                    .xdg
+                    .advertised(&global.interface, global.name, global.version);
+            }
+            for global in advertised {
+                state.global(
+                    &registry,
+                    &conn,
+                    &qh,
+                    &global.interface,
+                    global.name,
+                    global.version,
+                );
             }
         });
 
-        Ok((
-            Self {
-                conn,
-                queue,
-                state,
-                globals,
-            },
-            missing,
-        ))
+        Ok((Self { conn, queue, state }, missing))
     }
 
     /// Handles the events already read.
@@ -170,24 +181,13 @@ fn optional<I: Proxy>(missing: &mut Vec<&'static str>, bound: Result<I, BindErro
     }
 }
 
-fn bind_output(
-    registry: &WlRegistry,
-    qh: &QueueHandle<State>,
-    state: &mut State,
-    name: u32,
-    version: u32,
-) {
-    let output = registry.bind::<WlOutput, _, _>(name, version.min(OUTPUT_VERSION), qh, ());
-    state.outputs.push((name, output));
-}
-
 impl wayland_client::Dispatch<WlRegistry, GlobalListContents> for State {
     fn event(
         state: &mut Self,
         registry: &WlRegistry,
         event: wl_registry::Event,
         _: &GlobalListContents,
-        _: &Connection,
+        conn: &Connection,
         qh: &QueueHandle<Self>,
     ) {
         match event {
@@ -195,31 +195,23 @@ impl wayland_client::Dispatch<WlRegistry, GlobalListContents> for State {
                 name,
                 interface,
                 version,
-            } if interface == WlOutput::interface().name => {
-                bind_output(registry, qh, state, name, version);
+            } => {
+                state.xdg.advertised(&interface, name, version);
+                state.global(registry, conn, qh, &interface, name, version);
             }
-            wl_registry::Event::GlobalRemove { name } => {
-                if let Some(index) = state.outputs.iter().position(|(n, _)| *n == name) {
-                    let (_, output) = state.outputs.swap_remove(index);
-                    // `release` exists from v3; before that the object
-                    // simply stays inert on our side.
-                    if output.version() >= 3 {
-                        output.release();
-                    }
-                }
-            }
+            wl_registry::Event::GlobalRemove { name } => state.global_remove(name),
             _ => {}
         }
     }
 }
 
-// No events scootbg needs yet: the output's mode, scale and name arrive
-// with outputs-and-layer-surfaces.md, and `wl_shm.format` is not needed
-// because XRGB8888 is mandatory.
-delegate_noop!(State: ignore WlOutput);
+// No events scootbg needs: `wl_shm.format` is not needed because XRGB8888
+// is mandatory. The outputs', surfaces' and callbacks' events are handled
+// in `surfaces`.
 delegate_noop!(State: ignore WlShm);
 delegate_noop!(State: WlCompositor);
 delegate_noop!(State: ZwlrLayerShellV1);
 delegate_noop!(State: WpViewporter);
 delegate_noop!(State: WpSinglePixelBufferManagerV1);
 delegate_noop!(State: WpFractionalScaleManagerV1);
+delegate_noop!(State: ZxdgOutputManagerV1);

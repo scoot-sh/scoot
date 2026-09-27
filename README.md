@@ -319,11 +319,12 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 
 `scootbg` is scoot's wallpaper daemon, a separate binary and package that
 works on any compositor with `wlr-layer-shell`. **It is early: the daemon
-runs, but it draws no wallpaper yet.** What works today:
+runs and places a background surface on every output, but it draws no
+wallpaper yet.** What works today:
 
 ```sh
 scootbg daemon      # connect to $WAYLAND_DISPLAY and serve the control socket
-scootbg query       # {"type":"outputs","outputs":[]} -- one JSON line
+scootbg query       # each output and its surface, one JSON line (below)
 scootbg version     # the running daemon's version and protocol
 scootbg kill        # stop it; returns once a new daemon can start
 scootbg --help      # and `scootbg COMMAND --help`
@@ -337,7 +338,36 @@ the compositor goes away, removing its socket either way. A signal
 (SIGTERM, Ctrl-C) ends it on the spot and leaves the socket file; the other
 commands then say no daemon is running (exit 1), and the next
 `scootbg daemon` replaces the file. Every command exits 2 on a usage
-error (an unknown command or argument). Colours, images and `scootbg set` are the next items in
+error (an unknown command or argument).
+
+Outputs are tracked as they come and go: each gets one surface on the
+`background` layer (namespace `wallpaper`), covering the whole output,
+reserving no space and taking no input. With no outputs at all the daemon
+simply waits. `scootbg query` answers, on one line (wrapped here):
+
+```text
+{"type":"outputs","outputs":[{"name":"DP-1","description":"...",
+ "mode":{"width":3840,"height":2160},"scale":2,"transform":"normal",
+ "logical":{"width":1920,"height":1080},
+ "surface":{"state":"configured","size":{"width":1920,"height":1080}},
+ "shows":null}]}
+```
+
+Every key is always present, `null` when not known yet. `mode` is in
+device pixels. `scale` is `wl_output`'s integer scale (a fractional one
+rounded up), and `transform` is `wl_output`'s, counter-clockwise.
+`logical` is the output's size in logical pixels: exact once the surface is
+configured, an estimate before that. `surface.state` is `waiting` (the
+output has not reported itself yet), `pending`, `configured` (with `size`),
+`closed` (the compositor closed it; scootbg makes it again, once) or
+`gave-up` (closed a second time over the output's life: scootbg has
+stopped trying on that output, says so on stderr, and the other outputs
+are unaffected; it lasts until that output is unplugged and plugged back
+in, which makes it a new output). `shows` stays `null`
+until colours land. New keys may be added; none changes meaning within
+protocol 1. If the daemon cannot accept clients (out of file descriptors,
+say), it keeps the wallpaper up, says so once on stderr, and retries every
+second rather than exit. Colours, images and `scootbg set` are the next items in
 [its backlog](docs/scootbg/backlog/README.md); scoot's `[wallpaper]` config
 section does not exist yet, so do not add one.
 
@@ -408,8 +438,9 @@ jobs each cover their own systems' outputs, modules and checks), and a macOS
 client plus the compositor crate with its Linux halves cfg'd out). Jobs are
 split by path: a change under `crates/scootbg/` or `crates/scootbg-mem/`
 alone runs only scootbg's own job (fmt, clippy, tests, a no-`libc`-crate
-check, the release size) plus the scootbg-on-headless-scoot integration
-tests, and a compositor-only change skips scootbg's job; shared files
+check, the release size) plus scootbg's integration tests (on a headless
+scoot, and on a headless sway from the pinned nixpkgs for outputs coming
+and going), and a compositor-only change skips scootbg's job; shared files
 (`Cargo.*`, `flake.*`, `nix/`, `.github/`, and anything unlisted) run
 everything. The
 packaged artifacts themselves (`nix build .#scoot .#scootctl .#scootbg`) build on every

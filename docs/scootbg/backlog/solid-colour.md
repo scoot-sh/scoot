@@ -33,3 +33,10 @@ blocked: null
 
 This is also the cheapest way to prove the daemon, the socket and output
 handling end to end before any image code exists.
+
+From [ticket 3](resolved/outputs-and-layer-surfaces-done.md#for-the-next-tickets):
+each output's surface already exists and, once `Surface::Configured`, has
+its `configure` acked; attach at `Output::surface_size()`, commit, redraw on
+a later `configure`, and fill `query`'s `shows`. The screenshot check of
+scoot's second output (`scootctl screenshot --output 2`), deferred from
+there because nothing was drawn, belongs here.

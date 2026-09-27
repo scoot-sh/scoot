@@ -11,14 +11,14 @@ top**, so it stays easy to review, rebase, and drop.
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
-| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below) | **yes**, `crates/scoot/Cargo.toml` rev `5b575329` (PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. |
+| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling | **yes**, `crates/scoot/Cargo.toml` rev `74edbf32` (this PR; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without the last, every upscaled surface fades to a semi-transparent 1-px border under the default renderer (see below). |
 | [`scoot-sh/wayland-rs`](https://github.com/scoot-sh/wayland-rs/tree/scoot/server-fd-queue-cap-adaptive) | [Smithay/wayland-rs](https://github.com/Smithay/wayland-rs) | `72f7fe0d` (the wayland-backend 0.3.17 release, `v0.31.x` branch) | `a39311b8`: server side, disconnects a client leaving too many received fds unclaimed; `70f81e00`: sizes that cap at one eighth of the soft `RLIMIT_NOFILE`, 128..=1024 | **yes**, root `Cargo.toml` `[patch.crates-io]` rev `70f81e00` (PR #241) | wayland-backend queues fds a client sends with fd-less requests for the connection's life, so one idle client could fill scoot's fd table and shed every newcomer, `scootctl` included. |
 
 ## Per fork
 
 ### `scoot-sh/smithay`
 
-- **Branch:** `scoot/xwayland-selection-dnd`, fourteen commits on `0ff00983`.
+- **Branch:** `scoot/xwayland-selection-dnd`, fifteen commits on `0ff00983`.
   Its first, `43f50eb2`, is also the tip of `scoot/syncobj-timeline-drop`,
   which PR #233 pinned; that branch is kept as it was, and nothing pins it
   now. The XWayland commits, in order, each measured before it was written
@@ -99,14 +99,32 @@ top**, so it stays easy to review, rebase, and drop.
     a different owner's paste read nothing for 35 s+. An owner can name
     another client's window, which only moves whose share it spends; the
     total holds (the same caveat applies to the outgoing per-client count).
+
+  One more outside the XWayland series, against the same base:
+  - `74edbf32` **clamp the pixman source image to its edge when scaling**
+    (`Repeat::Pad`). The backend paired `Filter::Bilinear` with
+    `Repeat::None`, so a bilinear tap at the texture edge read past it,
+    where pixman returns transparent black, and any upscaled surface faded
+    to a semi-transparent 1-px border: a 1x1 XRGB buffer viewported to the
+    window read alpha 0.25 at the corners and 0.5 at the edge midpoints, a
+    scale-1 buffer on a scale-2 output blended its 1-px edge at about 0.75
+    (corners 0.56) over the background. The GLES backend samples with
+    `CLAMP_TO_EDGE` and never had it. Pinned by
+    `compositor/pixman_upscale/tests.rs` (fail-first on the pre-fix fork
+    under pixman; the scale-2 test passes under `SCOOT_TEST_RENDERER=gles`
+    on both revs), plus a downscale test that is exact on both revs, pinning
+    the fix changed nothing there. See
+    `docs/backlog/core/shm-viewport-upscale-edge-fade.md`.
 - **Evidence:** `docs/backlog/resolved/syncobj-handle-leak-done.md`, and on the
   dev VM `~/evidence/sync/master-validation/`. Upstream master `79bbed5e1`
   (2026-09-22) was built and measured: it leaks 3.5–4.1 MB per test run,
   against about zero with the fork.
-- **Upstream status (last checked 2026-09-25, master `79bbed5e1`):** all
-  fourteen unfixed on master (the XWM code carries the double delete, the
-  `O_NONBLOCK` pipe, the unpaused read, the unflushed owner change and no
-  hooks). No issue or PR exists. Nothing has been filed from here.
+- **Upstream status (last checked 2026-09-25, master `79bbed5e1`, plus the
+  pixman hunk re-checked 2026-09-27):** all fifteen unfixed on master (the
+  XWM code carries the double delete, the `O_NONBLOCK` pipe, the unpaused
+  read, the unflushed owner change and no hooks; the pixman scaler still
+  pairs `Filter::Bilinear` with `Repeat::None` at the same site). No issue
+  or PR exists. Nothing has been filed from here.
 - **Upstream policy note, for the maintainer's decision:** Smithay's
   `AI.md` asks contributors to disclose AI-generated code, discourages
   it, and asks for human-written issue and PR text. Its `DCO.md` requires
@@ -117,7 +135,9 @@ top**, so it stays easy to review, rebase, and drop.
   `dnd.rs` fail if any of the XWayland commits is lost to a repin (each was
   written against a failing test; the flush one is a race, and failed 5 of
   6 runs without the commit); the syncobj commit's own measurement is in
-  its resolved record.
+  its resolved record; `compositor/pixman_upscale/tests.rs` fails on the
+  pre-fix fork for both upscale cases (the downscale test passes on both
+  revs, pinning the no-change half).
 
 ### `scoot-sh/wayland-rs`
 

@@ -2140,8 +2140,13 @@ medium priority — the effective top of what's actually open.
    ([record](docs/scootbg/backlog/resolved/crate-and-daemon-done.md)):
    `crates/scootbg` and `crates/scootbg-mem`, `scootbg daemon` with its
    control socket (`query`, `version`, `kill`), the `scootbg` Nix package
-   and a CI split by path. It draws no wallpaper yet; output tracking and
-   layer surfaces are next.
+   and a CI split by path. Item 3
+   ([record](docs/scootbg/backlog/resolved/outputs-and-layer-surfaces-done.md)):
+   outputs tracked through hotplug with one `background` layer surface
+   each, `query` listing them, and a failed `accept` resting the listener
+   instead of ending the daemon; checked on headless scoot and on headless
+   sway, which CI now runs for the hotplug tests. It draws no wallpaper
+   yet; solid colours are next.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

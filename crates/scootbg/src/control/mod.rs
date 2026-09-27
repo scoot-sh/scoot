@@ -16,13 +16,25 @@
 //! 2. close the spare, a `dup` of the listener taken at start-up (a dup,
 //!    not a path such as `/dev/null`, so it cannot be missing), and
 //!    retake it once a client closes;
-//! 3. with neither, the process owns nothing it can free, cannot serve
-//!    anyone, and would spin: [`Server::accept`] returns an error and the
-//!    daemon exits 1, which releases its lock so a new daemon can start.
+//! 3. with neither, the process owns nothing it can free, and retrying at
+//!    once would spin: [`Server::accept`] returns an error.
 //!
 //! Any other `accept` error that is not about one connection (`ENOMEM`,
-//! `ENOBUFS`, ...) is fatal the same way, for the same reason: retrying
-//! would spin, and ignoring it would leave the daemon deaf.
+//! `ENOBUFS`, ...) is returned the same way, for the same reason. The
+//! daemon does not exit on it, since that would take the wallpaper with
+//! it: the listener *rests* for a second, polled for no events, and is then
+//! tried again (`daemon::listen`), so the loop neither spins nor goes deaf
+//! for good.
+//!
+//! **Starvation at the fd limit is accepted, not fixed.** A process of the
+//! same user that floods connections while the daemon sits at its fd limit
+//! keeps evicting clients (rule 1), so a legitimate `scootbg` command can
+//! fail, fast, with its connection closed. That user can already `kill`
+//! the daemon or change the wallpaper itself, so this is no privilege
+//! boundary; and every way to tell a legitimate client from a flooding
+//! one here (peer credentials, a per-uid quota, a priority queue) finds
+//! the same uid on both. The daemon stays up and keeps its wallpaper
+//! either way.
 
 mod claim;
 mod conn;
@@ -81,8 +93,9 @@ impl Server {
     }
 
     /// Accepts waiting clients: at most [`MAX_CONNECTIONS`] per call, so a
-    /// flood cannot hold the loop. An error means the daemon cannot go on
-    /// serving (see the module docs) and should exit.
+    /// flood cannot hold the loop. An error means accepting again at once
+    /// would only repeat it (see the module docs): the daemon rests the
+    /// listener rather than exit (`daemon::listen`).
     pub fn accept(&mut self, listener: &UnixListener) -> io::Result<()> {
         if self.spare.is_none() {
             // Spent earlier; retake it now if an fd has come free. Only
