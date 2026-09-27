@@ -236,6 +236,7 @@ fn a_submenu_flips_against_the_edge_measured_from_its_parent_menu() {
         gravity: Gravity::BottomRight,
         offset: (0, 0),
         adjust: Adjust::FlipX,
+        reactive: false,
     };
 
     let geometry = fixture.popup(Parent::Popup(0), submenu);

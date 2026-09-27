@@ -248,6 +248,124 @@ fn a_click_inside_a_grabbing_popup_keeps_it() {
     fixture.disconnect_client();
 }
 
+/// A reactive popup opened with an explicit grab is re-constrained when its
+/// output is resized -- and the grab lives through it: a configure carries
+/// geometry, a grab routes input, and the two do not fight.
+///
+/// The grab half of `docs/backlog/core/popup-reactive-reconstrain.md`: a
+/// grabbed menu is usually dismissed before anything scrolls it (a click
+/// outside, a focus steal), but an IPC-driven change owes no dismissal, so
+/// the menu is re-slid with its keyboard still in it and no `popup_done`.
+/// The scroll-shape twin is `popup_constraint`'s
+/// `a_reactive_menu_is_re_slid_when_its_column_scrolls`; this one holds the
+/// grab while the conditions move instead.
+#[test]
+fn a_grabbed_reactive_popup_is_reconstrained_when_its_output_is_resized() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.press_a_key();
+    // Anchored 10px left of the usable area's right edge and growing right:
+    // 40px past it, so `SlideX` pulls it back inside -- until the resize
+    // below moves the edge it slid against.
+    let anchor_x = fixture.usable().right() - fixture.window_rect().x - 10;
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapReactivePopup {
+        parent: PopupParent::Window,
+        color: POPUP_BGRA,
+        grab: Some(GrabSource::Key),
+        anchor_x,
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(
+        configured,
+        "a grabbing reactive popup should still be configured"
+    );
+    assert!(
+        fixture.state.popup_grab.is_some(),
+        "the compositor should be holding the grab it granted"
+    );
+    assert_eq!(fixture.popup_configures(), 1);
+
+    assert!(
+        fixture.state.resize_output(CANVAS + 60, CANVAS),
+        "the output should resize"
+    );
+    fixture.settle();
+
+    assert_eq!(
+        fixture.popup_configures(),
+        2,
+        "the resize should re-slide the reactive popup"
+    );
+    assert_eq!(
+        fixture.popup_dones(),
+        0,
+        "re-constraining must not dismiss the grabbed menu"
+    );
+    assert!(
+        fixture.state.popup_grab.is_some(),
+        "the grab should still be held after the re-constrain"
+    );
+    assert_eq!(
+        fixture.keyboard().focused,
+        Some(Focused::Popup(0)),
+        "the keyboard should never have left the menu"
+    );
+    fixture.disconnect_client();
+}
+
+/// A popup dismissed out of its tree is not re-constrained: the object
+/// lives on until the client destroys it, but its node is gone, so a
+/// resize that would re-slide a live menu leaves it quiet.
+///
+/// Without the membership half of the re-constrain pass this sends: the
+/// dismissed menu is still filed, still reactive, and its recomputed
+/// geometry still differs -- exactly the shape a refused grab leaves
+/// behind, which is why the initial-configure path treats filed-but-gone
+/// the same way.
+#[test]
+fn a_dismissed_popup_is_not_reconstrained() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.press_a_key();
+    let anchor_x = fixture.usable().right() - fixture.window_rect().x - 10;
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapReactivePopup {
+        parent: PopupParent::Window,
+        color: POPUP_BGRA,
+        grab: Some(GrabSource::Key),
+        anchor_x,
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(
+        configured,
+        "a grabbing reactive popup should still be configured"
+    );
+    assert_eq!(fixture.popup_configures(), 1);
+
+    // Clicking outside dismisses the menu but does not destroy it: the
+    // object outlives its tree node.
+    fixture.click(5.0, 5.0);
+    assert_eq!(
+        fixture.popup_dones(),
+        1,
+        "clicking outside should have dismissed the menu"
+    );
+    assert!(fixture.state.popup_grab.is_none());
+
+    assert!(
+        fixture.state.resize_output(CANVAS + 60, CANVAS),
+        "the output should resize"
+    );
+    fixture.settle();
+    assert_eq!(
+        fixture.popup_configures(),
+        1,
+        "a dismissed popup must not be re-configured"
+    );
+    fixture.disconnect_client();
+}
+
 // -------------------------------------------------------------------------
 // Precedence: what a popup grab loses to
 // -------------------------------------------------------------------------

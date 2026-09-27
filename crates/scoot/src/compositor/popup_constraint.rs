@@ -54,7 +54,11 @@
 //!
 //! At the two points the client is told a popup's geometry: the initial
 //! configure (`handlers.rs`'s `send_popup_initial_configure`, on the popup's
-//! first commit) and `xdg_popup.reposition`.
+//! first commit) and `xdg_popup.reposition` -- and, for a `reactive`
+//! positioner, after every `apply()` that moved the conditions (`State::
+//! reconstrain_reactive_popups` in `popup_reconstrain.rs`), answered with a
+//! fresh configure pair. A non-reactive popup is never re-configured: the
+//! protocol forbids it.
 //!
 //! The initial configure rather than `XdgShellHandler::new_popup`: Smithay
 //! fills the pending geometry from the raw positioner at `get_popup`, before
@@ -67,10 +71,8 @@
 //! the moment the configure goes out, without a second tracking path for the
 //! layer case (see `new_popup`'s doc for why that path must stay single).
 //!
-//! **Not re-constrained afterwards.** A `reactive` positioner asks to be
-//! re-constrained when the conditions change (the parent scrolled, an output
-//! was resized); scoot does not do that yet -- see
-//! `docs/backlog/core/popup-reactive-reconstrain.md`.
+//! Re-constraining afterwards is `popup_reconstrain.rs`'s answer, for
+//! `reactive` positioners only.
 //!
 //! # When no target is known
 //!
