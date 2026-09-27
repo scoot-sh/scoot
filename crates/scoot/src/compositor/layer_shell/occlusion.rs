@@ -25,14 +25,17 @@
 //!    (see [`above_windows`](super::above_windows)) -- so it is withheld
 //!    only then. `bottom`/`background` are below every window, so any opaque
 //!    window spanning the output covers them.
-//! 3. **The cover is really opaque, over the whole output.** Either the
-//!    core's covering fullscreen window, or (for the layers below windows) a
-//!    square -- never rounded, whose clip would cut its corners back to the
-//!    layer -- window, whose root surface carries one opaque region spanning
-//!    the output and whose own alpha is exactly 1.0. "Opaque region" here is
-//!    Smithay's own answer ([`RendererSurfaceState::opaque_regions`], which
-//!    already folds an opaque-format buffer into a whole-surface region), so
-//!    this check cannot disagree with what the frame just drew.
+//! 3. **The cover is really opaque, over the whole output, and drawn on
+//!    this output.** Either the core's covering fullscreen window, or (for
+//!    the layers below windows) a square -- never rounded, whose clip would
+//!    cut its corners back to the layer -- window placed on this output (a
+//!    frame draws only the windows placed on it; see `output_clip.rs`),
+//!    whose root surface carries one opaque region spanning the output and
+//!    whose own alpha is exactly 1.0. "Opaque region" here is Smithay's own
+//!    answer ([`RendererSurfaceState::opaque_regions`], which already folds
+//!    an opaque-format buffer -- YUV included, whose fourccs carry no alpha
+//!    -- into a whole-surface region), so this check cannot disagree with
+//!    what the frame just drew.
 //!
 //! Everything else is served, conservatively:
 //!
@@ -43,8 +46,6 @@
 //!   the root stays transparent: no single root region spans the output, so
 //!   the cover is not recognised. A missed optimisation, never a wrong
 //!   pixel.
-//! - A YUV buffer: Smithay's own `buffer_has_alpha` knows no YUV fourcc, so
-//!   such a surface reports no opaque region and is served.
 //! - A cover the compositor cannot see yet (a window `apply()` has not
 //!   mapped, an X window XWayland has not paired, a surface whose state is
 //!   gone): served.
@@ -75,6 +76,7 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::compositor::State;
+use crate::compositor::output_clip::placed_on;
 
 /// Whether this frame may skip `layer`'s frame callbacks: true only for a
 /// surface that already committed a buffer and that no output pixel can
@@ -152,8 +154,8 @@ fn covering_window_is_opaque(state: &State, output: &Output) -> bool {
 
 /// Whether any square window hides everything below the windows on `output`:
 /// the covering fullscreen window (as above), or an unrounded tiled window
-/// that spans the output. Rounded windows are excluded: their clip cuts the
-/// corners back to whatever is beneath.
+/// placed on the output that spans it. Rounded windows are excluded: their
+/// clip cuts the corners back to whatever is beneath.
 fn opaque_window_spans_output(state: &State, output: &Output) -> bool {
     if state.covered_by_fullscreen(output) && covering_window_is_opaque(state, output) {
         return true;
@@ -164,10 +166,23 @@ fn opaque_window_spans_output(state: &State, output: &Output) -> bool {
     // The spanning window is below every `bottom`/`background` surface's
     // cover question, so any match covers all of them; translucent windows
     // above it cannot uncover what its opaque root hides.
+    //
+    // Only a window placed on this output can cover it. A frame draws the
+    // windows placed on it and no other (see `output_clip.rs`), so a window
+    // stamped elsewhere covers nothing here however far its surface spills
+    // past its slot -- an oversized client buffer overhanging the shared
+    // edge, a column scrolled part-way off. Without this a window on the
+    // neighbour whose opaque region contains this output's frame would
+    // withhold layers nobody drew over.
+    let Some(id) = state.outputs.id_of(output) else {
+        return false;
+    };
     state.space.elements().any(|window| {
         // `element_location` is `None` for a window `apply()` has not
         // mapped: nothing drawn, nothing covered.
-        state.space.element_location(window).is_some() && root_covers_output(state, output, window)
+        placed_on(window) == Some(id)
+            && state.space.element_location(window).is_some()
+            && root_covers_output(state, output, window)
     })
 }
 

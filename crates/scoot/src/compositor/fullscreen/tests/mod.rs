@@ -178,6 +178,10 @@ enum Step {
     Configures { window: usize },
     /// Map a layer-shell surface.
     CreateLayer(Layer),
+    /// The same, naming the `output`-th `wl_output` in registry order: a
+    /// wallpaper for the second screen, which the spanning-cover regression
+    /// test needs (an unnamed surface always lands on the primary output).
+    CreateLayerOn { kind: Layer, output: usize },
     /// Create a layer surface and commit it without a buffer -- which earns
     /// its initial configure -- but never attach one: the surface has drawn
     /// nothing yet, so a frame callback requested now is the first-attach
@@ -214,6 +218,15 @@ enum Step {
     /// opaque region: an opaque-format buffer, the commonest real covering
     /// window (Mesa's default EGL config, mpv, games).
     DrawXrgb { window: usize },
+    /// The same, at `width`x`height` instead of the configured size: a
+    /// client whose buffer overhangs its slot (a shrink still in flight),
+    /// whose opaque region can span a neighbouring output's whole frame
+    /// while the window itself is placed -- and drawn -- here.
+    DrawXrgbSized {
+        window: usize,
+        width: i32,
+        height: i32,
+    },
     /// Declare the `window`-th toplevel's surface opaque as a whole
     /// (`wl_surface.set_opaque_region` with a region larger than any size it
     /// will be given; Smithay clips it to the buffer), then commit. Smithay
@@ -653,6 +666,38 @@ fn draw(
     Ok(newest)
 }
 
+/// Acks the newest configure and draws `WINDOW_BGRA` at its size in
+/// `Xrgb8888` -- or at `sized`, for a client overhanging its slot -- and
+/// hands back the configure it answered.
+fn draw_xrgb(
+    client: &mut TestClient,
+    qh: &QueueHandle<TestClient>,
+    shm: &wl_shm::WlShm,
+    window: &Toplevel,
+    index: usize,
+    sized: Option<(i32, i32)>,
+) -> Result<Configured, String> {
+    let newest = client
+        .configures
+        .get(index)
+        .and_then(|all| all.last().copied())
+        .ok_or("no configure to ack")?;
+    ack_newest(client, window, index, newest.serial);
+    let (width, height) = sized.unwrap_or((newest.width, newest.height));
+    let (buffer, width, height) = solid_buffer_in(
+        shm,
+        qh,
+        width,
+        height,
+        WINDOW_BGRA,
+        wl_shm::Format::Xrgb8888,
+    );
+    window.surface.attach(Some(&buffer), 0, 0);
+    window.surface.damage(0, 0, width, height);
+    window.surface.commit();
+    Ok(newest)
+}
+
 /// Acks `serial` unless it is the one this toplevel acked last: acking the
 /// same configure twice is a protocol error, and a redraw with no newer
 /// configure in between has nothing new to ack.
@@ -827,54 +872,36 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 Ack::Configures(client.configures[window].clone())
             }
             Step::CreateLayer(kind) => {
-                let index = layers.len();
-                let (surface, role, width, height) = make_layer_surface(
+                create_layer(
                     &mut client,
                     &mut queue,
                     &qh,
                     &compositor,
+                    &shm,
                     &layer_shell,
                     kind,
-                    index,
+                    None,
+                    &mut layers,
                 )?;
-                #[cfg(feature = "gpu-scanout")]
-                if let Layer::PixelWallpaper { black } = kind {
-                    let pixels = client
-                        .single_pixel
-                        .clone()
-                        .ok_or("no wp_single_pixel_buffer_manager_v1")?;
-                    let viewporter = client.viewporter.clone().ok_or("no wp_viewporter")?;
-                    let channel = if black { 0 } else { u32::MAX / 2 };
-                    let buffer =
-                        pixels.create_u32_rgba_buffer(channel, channel, channel, u32::MAX, &qh, ());
-                    let viewport = viewporter.get_viewport(&surface, &qh, ());
-                    viewport.set_destination(width as i32, height as i32);
-                    surface.attach(Some(&buffer), 0, 0);
-                    surface.damage(0, 0, width as i32, height as i32);
-                    surface.commit();
-                    layers.push((surface, role));
-                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
-                    acks.send(Ack::Done).map_err(|e| e.to_string())?;
-                    continue;
-                }
-                let color = match kind {
-                    Layer::Bar | Layer::Dock => BAR_BGRA,
-                    Layer::Wallpaper { .. } => OTHER_BGRA,
-                    #[cfg(feature = "gpu-scanout")]
-                    Layer::PixelWallpaper { .. } => OTHER_BGRA,
-                    Layer::Notification | Layer::Launcher(_) => NOTE_BGRA,
-                };
-                let format = match kind {
-                    Layer::Wallpaper { opaque: true } => wl_shm::Format::Xrgb8888,
-                    _ => wl_shm::Format::Argb8888,
-                };
-                let (buffer, width, height) =
-                    solid_buffer_in(&shm, &qh, width as i32, height as i32, color, format);
-                surface.attach(Some(&buffer), 0, 0);
-                surface.damage(0, 0, width, height);
-                surface.commit();
-                layers.push((surface, role));
-                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::CreateLayerOn { kind, output } => {
+                let named = client
+                    .outputs
+                    .get(output)
+                    .cloned()
+                    .ok_or("no such output")?;
+                create_layer(
+                    &mut client,
+                    &mut queue,
+                    &qh,
+                    &compositor,
+                    &shm,
+                    &layer_shell,
+                    kind,
+                    Some(named),
+                    &mut layers,
+                )?;
                 Ack::Done
             }
             Step::CreateLayerDeferred(kind) => {
@@ -887,6 +914,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     &layer_shell,
                     kind,
                     index,
+                    None,
                 )?;
                 layers.push((surface, role));
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -959,23 +987,23 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 Ack::Done
             }
             Step::DrawXrgb { window } => {
-                let newest = client.configures[window]
-                    .last()
-                    .copied()
-                    .ok_or("no configure to ack")?;
-                ack_newest(&mut client, &windows[window], window, newest.serial);
-                let (buffer, width, height) = solid_buffer_in(
-                    &shm,
+                draw_xrgb(&mut client, &qh, &shm, &windows[window], window, None)?;
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::DrawXrgbSized {
+                window,
+                width,
+                height,
+            } => {
+                draw_xrgb(
+                    &mut client,
                     &qh,
-                    newest.width,
-                    newest.height,
-                    WINDOW_BGRA,
-                    wl_shm::Format::Xrgb8888,
-                );
-                let surface = &windows[window].surface;
-                surface.attach(Some(&buffer), 0, 0);
-                surface.damage(0, 0, width, height);
-                surface.commit();
+                    &shm,
+                    &windows[window],
+                    window,
+                    Some((width, height)),
+                )?;
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
             }
@@ -1051,7 +1079,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
 /// for the configure that answers: the common prelude of
 /// [`Step::CreateLayer`] (which then attaches) and
 /// [`Step::CreateLayerDeferred`] (which does not). Hands back the surface,
-/// its role object, and the configured size to draw at.
+/// its role object, and the configured size to draw at. `output` names the
+/// `wl_output` to map onto (`None` for the compositor's choice, the primary
+/// output).
+#[allow(clippy::too_many_arguments)]
 fn make_layer_surface(
     client: &mut TestClient,
     queue: &mut EventQueue<TestClient>,
@@ -1060,6 +1091,7 @@ fn make_layer_surface(
     layer_shell: &zwlr_layer_shell_v1::ZwlrLayerShellV1,
     kind: Layer,
     index: usize,
+    output: Option<wl_output::WlOutput>,
 ) -> Result<
     (
         wl_surface::WlSurface,
@@ -1116,7 +1148,7 @@ fn make_layer_surface(
     };
     let role = layer_shell.get_layer_surface(
         &surface,
-        None,
+        output.as_ref(),
         layer,
         "fullscreen-test".into(),
         qh,
@@ -1133,6 +1165,74 @@ fn make_layer_surface(
         client.layer_configures[index]
     })?;
     Ok((surface, role, width, height))
+}
+
+/// [`Step::CreateLayer`]'s body, shared with [`Step::CreateLayerOn`]: maps
+/// `kind` onto `output` and attaches its first buffer, recording the surface
+/// in `layers`.
+#[allow(clippy::too_many_arguments)]
+fn create_layer(
+    client: &mut TestClient,
+    queue: &mut EventQueue<TestClient>,
+    qh: &QueueHandle<TestClient>,
+    compositor: &wl_compositor::WlCompositor,
+    shm: &wl_shm::WlShm,
+    layer_shell: &zwlr_layer_shell_v1::ZwlrLayerShellV1,
+    kind: Layer,
+    output: Option<wl_output::WlOutput>,
+    layers: &mut Vec<(
+        wl_surface::WlSurface,
+        zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    )>,
+) -> Result<(), String> {
+    let index = layers.len();
+    let (surface, role, width, height) = make_layer_surface(
+        client,
+        queue,
+        qh,
+        compositor,
+        layer_shell,
+        kind,
+        index,
+        output,
+    )?;
+    #[cfg(feature = "gpu-scanout")]
+    if let Layer::PixelWallpaper { black } = kind {
+        let pixels = client
+            .single_pixel
+            .clone()
+            .ok_or("no wp_single_pixel_buffer_manager_v1")?;
+        let viewporter = client.viewporter.clone().ok_or("no wp_viewporter")?;
+        let channel = if black { 0 } else { u32::MAX / 2 };
+        let buffer = pixels.create_u32_rgba_buffer(channel, channel, channel, u32::MAX, qh, ());
+        let viewport = viewporter.get_viewport(&surface, qh, ());
+        viewport.set_destination(width as i32, height as i32);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.damage(0, 0, width as i32, height as i32);
+        surface.commit();
+        layers.push((surface, role));
+        queue.roundtrip(client).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let color = match kind {
+        Layer::Bar | Layer::Dock => BAR_BGRA,
+        Layer::Wallpaper { .. } => OTHER_BGRA,
+        #[cfg(feature = "gpu-scanout")]
+        Layer::PixelWallpaper { .. } => OTHER_BGRA,
+        Layer::Notification | Layer::Launcher(_) => NOTE_BGRA,
+    };
+    let format = match kind {
+        Layer::Wallpaper { opaque: true } => wl_shm::Format::Xrgb8888,
+        _ => wl_shm::Format::Argb8888,
+    };
+    let (buffer, width, height) =
+        solid_buffer_in(shm, qh, width as i32, height as i32, color, format);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage(0, 0, width, height);
+    surface.commit();
+    layers.push((surface, role));
+    queue.roundtrip(client).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 type Fixture = Harness<Step, Ack>;

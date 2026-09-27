@@ -244,3 +244,109 @@ fn a_hidden_bar_is_withheld_but_a_notification_is_served() {
         "the bar resumes with the cover gone"
     );
 }
+
+/// A window placed on one output never covers another output's layers,
+/// however far its surface spills past its slot: the neighbour's frame
+/// draws only the windows placed on it (`output_clip.rs`), so an opaque
+/// region containing the neighbour's whole frame withholds nothing there.
+///
+/// Mirrored from the review's literal direction only because the first
+/// output sits at the origin: a window stamped to the second output spills
+/// right, away from the first frame, so only rightward spill -- a
+/// first-output window overhanging the second frame -- can contain a
+/// neighbour's frame. The stamp filter itself is direction-agnostic.
+#[test]
+fn a_window_on_one_output_does_not_cover_another_s_layers() {
+    let mut fixture = Fixture::new();
+    let second =
+        crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+            .expect("a second output");
+    fixture.settle();
+    // The window opens on the pointer's output: the primary one.
+    fixture.map(WINDOW_BGRA);
+    let first = fixture.state.outputs.primary_id().unwrap();
+    assert_eq!(
+        fixture
+            .state
+            .world
+            .arrange()
+            .get(fixture.id(0))
+            .unwrap()
+            .output,
+        first
+    );
+    // A wallpaper per output: index 0 on the second, index 1 on the first.
+    // The second's is alpha-format, so its pixels read back exactly and the
+    // not-drawn assert below is precise rather than by exclusion.
+    fixture.done(Step::CreateLayerOn {
+        kind: Layer::Wallpaper { opaque: false },
+        output: 1,
+    });
+    fixture.done(Step::CreateLayer(Layer::Wallpaper { opaque: true }));
+    // Fullscreen on the first output, drawn double-wide: its opaque region
+    // contains the second output's whole frame, while the window stays
+    // placed -- and drawn -- on the first.
+    fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    assert_eq!(
+        fixture.state.world.fullscreen_on(first),
+        Some(fixture.id(0))
+    );
+    fixture.done(Step::DrawXrgbSized {
+        window: 0,
+        width: 2 * CANVAS,
+        height: CANVAS,
+    });
+    let covered = fixture.render();
+    assert_eq!(
+        pixel(&covered, CANVAS / 2, CANVAS / 2),
+        WINDOW_BGRA,
+        "the overhanging cover is really drawn on the first output"
+    );
+    let neighbour = fixture.pixels_of(second);
+    assert_eq!(
+        pixel(&neighbour, CANVAS / 2, CANVAS / 2),
+        OTHER_BGRA,
+        "the spanning window is not drawn on the second output"
+    );
+    // The first output's wallpaper is genuinely covered; the second's must
+    // still be served.
+    fixture.request_layer_frame(0);
+    fixture.request_layer_frame(1);
+    fixture.render();
+    assert_eq!(
+        fixture.layer_frames(),
+        vec![1, 0],
+        "a spanning window withholds nothing on the output it is not placed on"
+    );
+    // Moved onto the second output, the same window covers it for real: its
+    // wallpaper waits while the first output's resumes.
+    fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: Some(1),
+    });
+    assert_eq!(
+        fixture.state.world.fullscreen_on(second),
+        Some(fixture.id(0))
+    );
+    fixture.done(Step::DrawXrgb { window: 0 });
+    let covered = fixture.pixels_of(second);
+    assert_eq!(
+        pixel(&covered, CANVAS / 2, CANVAS / 2),
+        WINDOW_BGRA,
+        "the moved cover is really drawn on the second output"
+    );
+    fixture.request_layer_frame(0);
+    fixture.request_layer_frame(1);
+    fixture.render();
+    // The second output's new request waits under its real cover; the first
+    // output's first request -- held back while covered -- completes now
+    // that it is visible again, and its new request is served outright.
+    assert_eq!(
+        fixture.layer_frames(),
+        vec![1, 1, 0, 1],
+        "placing the cover on the second output withholds its wallpaper and frees the first's"
+    );
+}

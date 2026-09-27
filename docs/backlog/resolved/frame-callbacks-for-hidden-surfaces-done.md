@@ -32,20 +32,39 @@ README update (stated explicitly rather than skipped silently).
   `_NET_WM_WINDOW_OPACITY` honoured the way the render stack applies it. No
   heap allocation on the path (state reads, integer arithmetic over the
   already-computed regions; `wl_surface()` is a borrow or a refcount bump).
+  The review round added the placement filter the first version missed: only
+  a window placed on the output (`output_clip::placed_on`, the same stamp a
+  frame draws by) is a spanning-cover candidate, so a window on the
+  neighbour whose opaque region contains this output's frame withholds
+  nothing here. The fullscreen path needed no change (already per-output via
+  the core).
 - `headless.rs`: the layer loop calls it; a skipped callback stays queued
   server-side and the next served frame completes it, so none is ever lost.
 - Tests: `fullscreen/tests/occlusion.rs` (7 tests, one per hard
-  constraint plus the layer-depth rule), and plain-protocol fixture steps
+  constraint plus the layer-depth rule; the review round added an 8th, a
+  cross-output spanning cover that must withhold nothing where it is not
+  placed, plus the `DrawXrgbSized`/`CreateLayerOn` fixture steps it needs),
+  and plain-protocol fixture steps
   (`DrawXrgb`, `SetOpaque`, `Wallpaper`) ungated from `gpu-scanout` so they
   run on the default build, plus `CreateLayerDeferred`/`DrawLayer` (the
   first-attach split) and `RequestLayerFrame`/`ReportLayerFrames`.
 
 ### Deliberate misses (conservative = serve, documented in the module)
 
-Multi-rect unions, subsurface-composed opacity, YUV covers (Smithay's
-`buffer_has_alpha` knows no YUV fourcc), layer-covers-layer, and any cover
-the compositor cannot see yet (unmapped window, unpaired X window). An
-alpha-modified or translucent cover is always served.
+Multi-rect unions, subsurface-composed opacity, layer-covers-layer, and any
+cover the compositor cannot see yet (unmapped window, unpaired X window). An
+alpha-modified or translucent cover is always served. YUV is *not* a miss:
+Smithay folds a YUV buffer (its YUV fourccs carry no alpha --
+`format::has_alpha` is false for them, and `buffer_has_alpha` therefore
+reports `Some(false)`) into a whole-surface opaque region, so a YUV cover
+withholds, read from the same `opaque_regions` the damage tracker uses. The
+review round corrected the module doc, which had claimed the opposite, but
+added no YUV test: no live YUV cover can be built in-harness -- the
+compositor advertises only `Argb8888`/`Xrgb8888` shm, Smithay refuses a
+`Yuyv` pool (no bytes-per-pixel entry) and an unadvertised `Nv12` pool, and
+pixman imports neither -- YUV arrives only via dmabuf, which the harness has
+no path for. There is nothing of ours to pin: our code only reads Smithay's
+regions.
 
 ### Bug-bash
 
@@ -78,6 +97,17 @@ Overflow audit above. Teardown paths keep the old unconditional behaviour
   unreachable there by construction). The release bench could not link on
   this VM (fat-LTO rustc OOM-killed at 3.7GB of 3.9GB, no swap) -- recorded
   so the reviewer does not re-try blindly.
+- Layered frame time (review round, dev VM, 2026-09-27, debug 200x200
+  pixman): a scratch BEST-of-5x500 scene with 3 mapped windows plus a
+  wallpaper and a bar, so the occlusion scan runs on every frame (the scenes
+  above map no layers and never reach it). Base (filter reverted in-tree)
+  BEST 323.364/343.409µs vs head 293.086/285.775/296.945µs per frame. Head
+  at or below base in every sample -- the gap is shared-host noise, not a
+  speedup (the filter adds one user-data read per candidate window; it
+  cannot make a frame faster), and either way there is no per-frame cost
+  problem, so the per-output cover result stays computed per layer rather
+  than hoisted. The scratch bench was deleted after measuring; the numbers
+  live here.
 - Full workspace nextest: 2178/2179, `clippy -p scoot --all-targets
   -- -D warnings` clean, `fmt --check` clean, `smoke-test.sh` rc=0, and
   `cargo check --all-targets` clean under `--features xwayland` and
