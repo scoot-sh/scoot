@@ -15,6 +15,10 @@ blocked: null
   later (see `more-formats.md`).
 - Decode on a worker thread, never on the Wayland event loop, so a slow
   or huge file cannot stall frame handling for the other outputs.
+- An output removed while its image decodes: the result carries the
+  output's `OutputId` (never reused) and looks it up again when it lands;
+  not found means dropped, no panic
+  ([the hook](resolved/outputs-and-layer-surfaces-done.md#for-the-next-tickets)).
 - Guard against decompression bombs: refuse images past a pixel budget
   (configurable, default well above 8K×8K) before allocating, and report a
   truncated or corrupt file as an error reply, never a panic.

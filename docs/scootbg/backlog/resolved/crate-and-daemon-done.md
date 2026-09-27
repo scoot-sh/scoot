@@ -288,7 +288,7 @@ Fixed before merge, each with a test:
 ### Revisit in ticket 3
 
 Harmless while the daemon draws nothing, user-visible (a wallpaper that
-vanishes) once [outputs-and-layer-surfaces.md](../outputs-and-layer-surfaces.md)
+vanishes) once [outputs-and-layer-surfaces-done.md](outputs-and-layer-surfaces-done.md)
 gives it surfaces:
 
 - **Exit 1 on transient resource errors.** An `accept` failing with
@@ -306,7 +306,7 @@ gives it surfaces:
 ### Left for later tickets
 
 - Output tracking, `OutputEntry`'s fields, and layer surfaces:
-  [outputs-and-layer-surfaces.md](../outputs-and-layer-surfaces.md).
+  [outputs-and-layer-surfaces-done.md](outputs-and-layer-surfaces-done.md).
   Outputs are bound here, but their events are ignored.
 - `set`, `clear`, `apply-config`, and the `--output`/`--mode`/`--fill`
   flags: [cli-and-ipc.md](../cli-and-ipc.md).

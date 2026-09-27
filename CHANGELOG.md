@@ -9,6 +9,19 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — scootbg tracks outputs and places a surface on each (early)
+
+- **`scootbg daemon` now puts one background-layer surface on every
+  output**, following monitors as they are plugged in and out; with no
+  outputs it waits. It still draws nothing, so nothing changes on
+  screen yet.
+- **`scootbg query` lists the outputs**: name, description, mode, scale,
+  transform, logical size and the surface's state, one JSON line (see the
+  README's scootbg section). It used to answer an empty list.
+- **The daemon no longer exits when it cannot accept clients** (out of
+  file descriptors, say): it keeps its surfaces, prints one line, and
+  retries every second.
+
 ### 2026-09-26 — scootbg, the wallpaper daemon, exists (early)
 
 - **A new binary and package, `scootbg`** (`nix build .#scootbg`, Linux).

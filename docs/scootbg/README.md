@@ -9,9 +9,10 @@ to it: scootbg speaks only standard protocols, so it also runs on any
 compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 
 > **Status: early.** The daemon exists (`crates/scootbg/`, with its
-> `unsafe` in `crates/scootbg-mem/`): `scootbg daemon` connects, binds the
-> globals it will need, and serves its control socket; `scootbg query`, `version`
-> and `kill` work. **It draws no wallpaper yet**: output tracking, colours
+> `unsafe` in `crates/scootbg-mem/`): `scootbg daemon` connects, tracks
+> every output as it comes and goes, and gives each one a `background`
+> layer surface; `scootbg query` lists the outputs and their surfaces,
+> and `version` and `kill` work. **It draws no wallpaper yet**: colours
 > and images are the next items in [`backlog/`](backlog/README.md). These
 > docs stay here.
 
@@ -79,8 +80,8 @@ scootbg daemon                                 # outside scoot: start it yoursel
 ```
 
 The commands above are the planned interface; of them, only `query` and
-`daemon` work so far (with `version` and `kill`), and `query`'s output list
-is empty until outputs are tracked.
+`daemon` work so far (with `version` and `kill`), and `query` reports each
+output and its surface but, with nothing drawn yet, not what it shows.
 One binary: `daemon` runs the Wayland client, every other subcommand talks
 to it over its socket.
 

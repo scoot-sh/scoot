@@ -625,10 +625,13 @@ jobs:
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # scootbg against a live `scoot --headless`: the daemon's socket
-  # lifecycle end to end (crates/scootbg/tests/daemon.rs). Runs when either
-  # side changes, since each can break the other's end-to-end run.
-  # `SCOOTBG_REQUIRE_SCOOT` turns the tests' "skipped -- no scoot binary"
-  # into a failure, so this job cannot go green by skipping.
+  # lifecycle and its per-output surfaces end to end
+  # (crates/scootbg/tests/{daemon,outputs}.rs), and outputs coming and going
+  # on a headless sway (tests/hotplug.rs). Runs when either side changes,
+  # since each can break the other's end-to-end run.
+  # `SCOOTBG_REQUIRE_SCOOT` and `SCOOTBG_REQUIRE_SWAY` turn the tests'
+  # "skipped -- no scoot binary" / "no sway" into failures, so this job
+  # cannot go green by skipping.
   scootbg-integration:
     name: scootbg on headless scoot
     needs: changes
@@ -669,12 +672,22 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo build -p scoot -p scootbg
 
+      # The hotplug tests' second compositor: only sway can add and remove
+      # outputs at runtime (scoot's headless backend cannot yet). Headless,
+      # pixman, no GPU; from the flake's own pinned nixpkgs, out of the
+      # binary cache.
+      - name: Fetch sway
+        run: |
+          sway=$(nix build --inputs-from . nixpkgs#sway --no-link --print-out-paths)
+          echo "SCOOTBG_TEST_SWAY=$sway/bin/sway" >>"$GITHUB_ENV"
+
       # The tests find `scoot` beside `scootbg` in target/debug, built by the
-      # step above from this same tree.
-      - name: Integration tests, compositor required
+      # step above from this same tree, and sway where the step above said.
+      - name: Integration tests, compositors required
         shell: nix develop --command bash -euo pipefail {0}
         env:
           SCOOTBG_REQUIRE_SCOOT: "1"
+          SCOOTBG_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbg --test daemon --no-fail-fast
-          cargo test -p scootbg --test daemon
+          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --no-fail-fast
+          cargo test -p scootbg --test daemon --test outputs --test hotplug

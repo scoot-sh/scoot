@@ -18,7 +18,7 @@
 //!   it can, never panicking itself) and the abort that follows, so a real
 //!   bug still crashes loudly.
 //!
-//! scootbg's own writes never panic (`output`); only dependencies' can.
+//! scootbg's own writes never panic (`print`); only dependencies' can.
 
 use std::panic::{self, PanicHookInfo};
 use std::path::{Path, PathBuf};

@@ -31,7 +31,11 @@ full per-feature cycle.
    — RESOLVED 2026-09-26: `scootbg daemon`, `query`, `version`, `kill`;
    the socket (lock-guarded), the allocator and the shm buffer type in
    `scootbg-mem`; the Nix package and the CI split
-3. [One background layer surface per output, across hotplug](outputs-and-layer-surfaces.md)
+3. [**One background layer surface per output, across hotplug**](resolved/outputs-and-layer-surfaces-done.md)
+   — RESOLVED 2026-09-27: outputs tracked through hotplug, one
+   `background` surface each (configured, nothing drawn yet), `query`
+   lists them; a failed `accept` rests the listener instead of ending the
+   daemon; checked on headless scoot and headless sway
 4. [Solid colours through single-pixel buffers](solid-colour.md)
 5. [The CLI and control protocol](cli-and-ipc.md)
 6. [Decoding images and fitting them to an output](images-decode-and-fit.md)
