@@ -515,4 +515,130 @@ The scoot side, in scoot's own review bar, plus the Nix work above:
 - **Docs and tests**: `docs/configuration.md`, the root README's
   "Running", `docs/nix.md`; the smoke test checking a wallpaper pixel on
   each headless output; the `--tty` gap before the first frame.
+- **A bounded queue** (review of PR #293, F4): the queue of `apply-config`
+  runs above must not wait on one forever. A run can take 5 s to find a
+  daemon and 30 s for its reply; stop waiting on a run after about 40 s,
+  log it, and move on to the newest queued section (the run itself keeps
+  going and exits on its own).
+- **Clean file descriptors** (F4): spawn `apply-config` with no
+  descriptors of scoot's but stdio (everything else `CLOEXEC`, as std's
+  `Command` leaves them; anything scoot opens without it would be inherited
+  by `apply-config`, and from it by the long-lived daemon).
+- **A hung disk on the `{}` path** (F4): with no daemon, `apply-config
+  '{}'` writes the state file (`fsync`, `rename`, directory `fsync`)
+  holding the display's lock, and that is not bounded: on a hung NFS home
+  it waits as long as the kernel does, and a `scootbg daemon` started
+  meanwhile finds the lock held and exits "already running". Not bounded
+  here, because it cannot be cheaply: a timeout would have to give up on a
+  thread still inside `fsync` while the lock is held, and a process in an
+  uninterruptible `fsync` cannot even exit to release it. So part B's
+  bounded queue (above) is what keeps scoot moving: it stops waiting on
+  that run, and the next reload's run finds the lock and waits for it,
+  bounded by its own 5 s.
 
+## Review of PR #293
+
+Review found no crash, hang or data-loss blockers, and one finding that
+had to be fixed before merge (F1). All fixed on the same branch in
+`0c1c48d` and `dc8196f` (the second a regression the first introduced,
+found while re-verifying: see F5); this record in the docs-only commit
+after them.
+
+- **F1 (must fix): a missing image exited 0 on a cold start or an
+  unchanged apply, and a reload after the file came back never showed
+  it.** A started daemon's `config::start` said its problems only on
+  stderr; the caller's own request then found the fingerprint matching,
+  and the "same" branch checked nothing. Now the "same" branch re-checks
+  the section's images that are not showing (`config::recheck`): an entry
+  whose *saved* choice is still the section's own (the same path and look)
+  but whose live choice is not is `stat`ed, put back if the file is there
+  (`Choices::fill`, at the generation it was chosen at), and reported if
+  not (exit 1). The cold path is covered by the same check: the caller's
+  request, the first reply it gets, arrives unchanged and re-checks.
+  **The decision on `set`:** a `set` or `clear` for that output, or for
+  every output, replaces the saved entry, so it is no longer the
+  section's and is neither put back nor reported; and putting back at the
+  old generation (not a new one) makes the image no newer than it was, so
+  it cannot undo a newer request still decoding, and putting back the
+  choice for every output drops no per-output choice (a new generation
+  would drop every older one, `set`s included). That is the precedence
+  rule unchanged: the section's choice fills in only where it is still
+  the last thing chosen. Tests: `a_missing_image_is_reported_until_it_is_back`
+  (a per-output image missing at a cold start: 1; unchanged: 1; a `set`
+  for the other output; the file appears: 0, shown, the `set` stands; the
+  every-output image missing, a `set` for one output, the file appears:
+  the others show it, the `set` stands; a `set` on the very output: 0
+  from then on, the file appearing changes nothing; across a restart).
+  Against the tree without the recheck it fails on the first cold run
+  ("left: Some(0)" with the missing-image warning on stderr: the
+  reviewer's evidence); with the put-back at a fresh generation it fails
+  on "the set for this one stands".
+- **F2: two writers for one profile could race** (A→B→A within one
+  save). Adopting a profile whose retired writer is still busy now waits
+  for that write (up to 2 s, `SAVE_GRACE`) before reading the file, so the
+  file read is the newest, and if it is still stuck takes that writer back
+  (`Saved::take_writer`) rather than start a second. Retired writers are a
+  list; idle ones are dropped (nothing to lose), the rest flushed on exit,
+  each given the grace. Unit test: `a_writer_is_taken_back_only_for_its_own_profile`.
+  `rapid_adoptions_keep_each_file_newest` (20 rounds of `set`, adopt B,
+  adopt A) is a consistency check only: it passed with the fix taken
+  out, three runs of three, since a save takes about 0.3 ms here and each
+  `apply-config` a few.
+- **F3: the forwarder could lose the section.** A `--serve` that lost the
+  lock and then finds no daemon serving and the lock free (the winner
+  recorded `{}`, or died before binding) now tries once more to be the
+  daemon itself; twice at most, and no process starts another.
+  `a_loser_whose_winner_never_serves_becomes_the_daemon` (the test holds
+  the lock, then drops it) fails without the retry ("no daemon answered,
+  and none was starting").
+- **F4 (part B):** in [What part B must do](#what-part-b-must-do): a
+  bounded queue, clean descriptors, and the `{}` path's `fsync` under the
+  lock, documented as unbounded, with why.
+- **F5: exec the running binary, not `current_exe`'s text.** First landed
+  (`0c1c48d`) as an exec of `/proc/self/exe` always, which named the
+  daemon's process `exe` (the kernel takes `comm` from the exec'd file
+  name): `pgrep scootbg`, `pkill scootbg` and `ps -C scootbg` no longer
+  found it. Found while re-verifying (a `pgrep -x scootbg` found no
+  daemon). Now (`dc8196f`) the `current_exe` path is exec'd while it is
+  the same file (device and inode) as `/proc/self/exe`, and
+  `/proc/self/exe` only when the path names another file or none (an
+  upgrade meanwhile), so a different build never runs; the path alone
+  without `/proc`. `a_section_starts_the_daemon` checks `/proc/PID/comm`
+  is `scootbg` (fails with `exe` against `0c1c48d`'s F5).
+- **F6:** connects are tried every 1 ms for the first 50 ms, then every
+  15 ms. A cold daemon answers well inside 50 ms, so cold start is
+  unchanged (below).
+- **F7:** the root README's exit-1 list names the connection closed before
+  an answer and a daemon too old for `apply-config`.
+
+**Numbers at `dc8196f`** (same setup and script as
+[Measurements](#measurements); release sha256 `39e2c361…`, 1,684,328 B,
++8,192 over `4a3cdf6`). Medians (min–max), ms, two runs:
+
+| | run 1 | run 2 |
+|---|---|---|
+| cold `apply-config` | 6.90 (4.85–7.74) | 5.61 (4.89–10.54) |
+| cold `daemon`, then `set` | 4.27 (3.70–4.64) | 4.01 (3.50–5.20) |
+| warm, unchanged | 1.96 (1.58–10.04) | 1.86 (1.53–9.15) |
+| warm, changed | 2.55 (2.04–4.68) | 2.31 (1.92–4.32) |
+| warm `set` | 2.39 (1.98–5.71) | 2.34 (1.92–4.95) |
+| `{}`, no daemon, written | 2.52 (2.24–3.11) | 2.37 (2.27–2.86) |
+| `{}`, no daemon, recorded | 1.51 (1.43–2.37) | 1.76 (1.36–2.03) |
+
+Cold raw, run 1: 7.14, 5.60, 5.52, 7.74, 7.06, 6.74, 7.63, 7.44, 4.85,
+5.20; run 2: 5.59, 5.00, 7.92, 5.63, 6.78, 10.54, 5.26, 5.55, 7.73, 4.89.
+At `0c1c48d` (the retry backoff in, F5's first form): 6.23 and 6.46; at
+`4a3cdf6`: 6.09 and 6.05. The spread is the host's (the `daemon`+`set`
+baseline moves with it), not the backoff, which never engages on a cold
+start here. Idle, the daemon `apply-config` started at `dc8196f`: comm
+`scootbg`, ppid 1, its own process group and session, no tty, 8 fds, 1
+thread, VmRSS 3,968 kB; 0 context switches and 0 CPU ticks in 30 s.
+
+**Verified at `dc8196f`:** `SCOOTBG_REQUIRE_SCOOT=1 SCOOTBG_REQUIRE_SWAY=1
+SCOOTBG_TEST_SWAY=…sway-1.12/bin/sway devenv shell -- soft-egl cargo
+nextest run -p scootbg -p scootbg-mem`: 424 passed, 2 skipped (the
+`#[ignore]`d benchmarks); `cargo test` (same variables): every suite
+passed, `tests/config.rs` 23 of 23; clippy `-D warnings`, `fmt --check`,
+`RUSTFLAGS="-D warnings"` release build, `ldd` (libc, libm, libgcc_s) and
+no `libc` crate: clean; `nix build .#scootbg --option sandbox true`:
+built.

@@ -394,12 +394,12 @@ image in the section that is not a file, drawing failed, or the state file
 could not be written; 2 a usage error, a refused section included.
 
 **Timing** (release build, `scoot --headless --outputs 2`, a color, two
-runs; [the record](backlog/scoot-integration.md#part-a-scootbg-landed)):
+runs; [the record](backlog/scoot-integration.md#review-of-pr-293)):
 from running `apply-config` with no daemon to the section on screen,
-medians 6.09 and 6.05 ms (4.80–8.93; a plain `scootbg daemon` then `set`:
-3.80 and 4.48 ms); unchanged on a running daemon 1.77 and 2.10 ms;
-changed 2.24 and 2.60 ms (a `set`: 2.19 and 2.44 ms); recording `{}` with
-no daemon 2.28 and 2.50 ms. scoot never waits on it: it spawns it.
+medians 6.90 and 5.61 ms (4.85–10.54; a plain `scootbg daemon` then
+`set`: 4.27 and 4.01 ms); unchanged on a running daemon 1.96 and 1.86 ms;
+changed 2.55 and 2.31 ms (a `set`: 2.39 and 2.34 ms); recording `{}` with
+no daemon 2.52 and 2.37 ms. scoot never waits on it: it spawns it.
 
 ## The control protocol
 
@@ -523,7 +523,7 @@ The image is a 6000×4000 JPEG, `fill`.
 | to the image on one 4K output, likewise | 450–476 ms, one decode (714–820 ms for the build before ticket 9 in the same runs, two decodes; a `set` once the output is configured takes 437–468 ms) |
 | **to a restored image** on one 4K output (the state file names the JPEG) | 451–497 ms to the first `query` that reports it shown: one decode ([restore-state-done.md](backlog/resolved/restore-state-done.md#measurements)) |
 | Saving a choice | 23–33 µs on the loop, medians (build the text, hand it over); the atomic write on a thread of its own, medians 334–455 µs, worst 1.0–54.5 ms per 200, on ext4 |
-| **`apply-config`**, a color on 2× 1600×1000: with no daemon (it starts one) / unchanged / changed, to on screen | medians 6.09–6.05 / 1.77–2.10 / 2.24–2.60 ms over two runs (a `set` 2.19–2.44 ms; `daemon` then `set` from cold 3.80–4.48 ms); the daemon it starts idles like any other: 0 context switches and 0 CPU ticks in 30 s, 1 thread, 8 fds, RSS 3,976 kB ([record](backlog/scoot-integration.md#part-a-scootbg-landed)) |
+| **`apply-config`**, a color on 2× 1600×1000: with no daemon (it starts one) / unchanged / changed, to on screen | medians 5.61–6.90 / 1.86–1.96 / 2.31–2.55 ms over two runs (a `set` 2.34–2.39 ms; `daemon` then `set` from cold 4.01–4.27 ms); the daemon it starts idles like any other: 0 context switches and 0 CPU ticks in 30 s, 1 thread, 8 fds, RSS 3,968 kB ([record](backlog/scoot-integration.md#review-of-pr-293)) |
 | File descriptors | 8 whatever is shown: a buffer's memfd is closed once the compositor has it |
 
 ## Measured so far
@@ -540,7 +540,7 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 | What | Result |
 |---|---|
-| Stripped binary | 1,676,136 B with `apply-config` (+106,496 B: by symbol, spawning a process through `std::process` about 27 KB, the strict section parse about 23 KB, the client half about 20 KB); 1,569,640 B with images and restore (1,557,352 B at ticket 9 before its review fixes, 1,516,392 B before ticket 9, 1,500,008 B at ticket 6; 783,072 B with colors only then); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
+| Stripped binary | 1,684,328 B with `apply-config` (+114,688 B: by symbol, spawning a process through `std::process` about 27 KB, the strict section parse about 23 KB, the client half about 20 KB; 8,192 B of it the fixes from its review); 1,569,640 B with images and restore (1,557,352 B at ticket 9 before its review fixes, 1,516,392 B before ticket 9, 1,500,008 B at ticket 6; 783,072 B with colors only then); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
 | `set` of a 6000×4000 JPEG onto a 3840×2160 output, request to reply, ×3 | 397.0–433.6 ms, 390–420 ms of CPU (PNG 408.1–417.6 ms; WebP 1,218.0–1,289.4 ms); peak RSS 120.5–120.6 MB with the previous wallpaper still mapped (88.0 MB for a first set; PNG 120.4–120.6 MB; WebP 142.0–142.1 MB) |
 | After it, idle 30 s | 1 thread, heap 372–568 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
 | A few hundred bytes claiming 16384×16384 (PNG, JPEG, WebP) | refused in under 1 ms; peak RSS within 72 kB of before |
