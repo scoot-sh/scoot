@@ -90,7 +90,7 @@ same rig the same day — see `multi-output-remainder.md` follow-up 1 —
 including the runbook (synthetic trigger required, ~2–5 s `force`
 latch, card0 sentinel).
 
-## Update 2026-09-27: #48 closed on unit-test evidence; live proofs deferred
+## Update 2026-09-27: #48 closed on unit-test evidence; `MoveTo` live proof next
 
 **User decision:** close gh #48, accepting the unit tests plus code
 inspection as the bar for both paths for now, and "fix later". Review then
