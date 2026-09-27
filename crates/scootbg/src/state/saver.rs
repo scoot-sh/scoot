@@ -123,7 +123,8 @@ fn drain(file: &Path, shared: &(Mutex<Slot>, Condvar)) {
         };
         if let Err(error) = write_atomic(file, text.as_bytes()) {
             warn(format_args!(
-                "scootbg: cannot save the wallpaper to {}: {error}",
+                "scootbg: cannot save the wallpaper to {} (written through a temporary \
+                 file beside it, then renamed): {error}",
                 file.display()
             ));
         }
@@ -145,7 +146,13 @@ pub fn exposed(dir: &Path) -> Option<String> {
         return Some(format!("it is owned by uid {}, not {uid}", stat.st_uid));
     }
     let mode = stat.st_mode & 0o777;
-    (mode & 0o022 != 0).then(|| format!("its mode is {mode:03o}: others can write to it"))
+    let who = match (mode & 0o020 != 0, mode & 0o002 != 0) {
+        (true, true) => "its group and others",
+        (true, false) => "its group",
+        (false, true) => "others",
+        (false, false) => return None,
+    };
+    Some(format!("its mode is {mode:03o}: {who} can write to it"))
 }
 
 /// Replaces `file` with `bytes`, atomically: a reader (or a crash) sees

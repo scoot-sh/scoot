@@ -31,6 +31,9 @@ use crate::state::format::{Pick, Record};
 use crate::state::{self, Profile, Saved, saver};
 use crate::wallpaper::{Image, Wallpaper};
 
+/// State-file warnings printed at start-up before the rest are counted.
+const WARNINGS_SHOWN: usize = 8;
+
 /// Reads `profile`'s state file. Returns the table to save into, set to
 /// save to that file unless it must not be written (none can be found, it
 /// could not be read, or it is a newer scootbg's), and what the file says.
@@ -68,9 +71,23 @@ pub fn load(profile: Profile) -> (Saved, Record) {
             return (Saved::new(profile, None, None), Record::default());
         }
     };
-    for warning in &parsed.warnings {
+    // A file far past the limits has one warning per extra line (thousands
+    // for 256 KiB of short lines): the first few say what is wrong, and one
+    // line counts the rest, so a log is not flooded at every start.
+    for warning in parsed.warnings.iter().take(WARNINGS_SHOWN) {
         warn(format_args!(
             "scootbg: state file {}: {warning}",
+            file.display()
+        ));
+    }
+    if let Some(more) = parsed
+        .warnings
+        .len()
+        .checked_sub(WARNINGS_SHOWN)
+        .filter(|&n| n > 0)
+    {
+        warn(format_args!(
+            "scootbg: state file {}: and {more} more warnings like these",
             file.display()
         ));
     }

@@ -56,13 +56,14 @@ and going; with no outputs at all the daemon waits for one.
 Every `set` and `clear` is saved, per output, in the profile's state file,
 $XDG_STATE_HOME/scootbg/PROFILE (~/.local/state/scootbg/PROFILE when
 XDG_STATE_HOME is unset, empty or relative), and the daemon shows it again
-when it next starts. If the file cannot be used (unreadable, or written by
-a newer scootbg), saving is off until the daemon restarts, stderr says how
-to recover, and `scootbg query` reports \"saving\":false. A saved image that is gone (moved, deleted) is skipped with a
-warning on stderr, and that output shows the compositor's own background; the
-daemon starts all the same, and the entry stays saved until a `set` or
-`clear` replaces it. Choices for outputs that are not plugged in stay
-saved too.
+when it next starts. If there is no state directory to use, or the file
+cannot be used (unreadable, or written by a newer scootbg), saving is off
+until the daemon restarts, stderr says how to recover, and `scootbg query`
+reports \"saving\":false. A saved image that is gone (moved, deleted) is
+skipped with a warning on stderr, and that output shows the compositor's
+own background; the daemon starts all the same, and the entry stays saved
+until a `set` or `clear` replaces it. Choices for outputs that are not
+plugged in stay saved too.
 
     --profile NAME  which state to restore and save (default: default).
                     Sessions with different profiles never restore each

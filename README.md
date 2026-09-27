@@ -465,8 +465,8 @@ absolute), and `scootbg daemon` shows it again when it starts:
   atomically (a fresh temporary file that never follows a symbolic link,
   `fsync`, `rename`), private (0600, in a 0700 directory; a state
   directory that already exists and is someone else's, or writable by
-  others, is a warning at start-up); `scootbg kill` waits for a write
-  under way, and a signal leaves the old file or the new one, never half
+  its group or others, is a warning at start-up); `scootbg kill` waits
+  for a write under way, and a signal leaves the old file or the new one, never half
   of each.
 - **What survives:** a choice for an output that is not plugged in now
   stays saved and comes back with it; `set` without `--output` replaces
