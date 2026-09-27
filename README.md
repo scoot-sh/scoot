@@ -359,8 +359,10 @@ rounded up), and `transform` is `wl_output`'s, counter-clockwise.
 configured, an estimate before that. `surface.state` is `waiting` (the
 output has not reported itself yet), `pending`, `configured` (with `size`),
 `closed` (the compositor closed it; scootbg makes it again, once) or
-`gave-up` (closed twice: scootbg has stopped trying on that output, says
-so on stderr, and the other outputs are unaffected). `shows` stays `null`
+`gave-up` (closed a second time over the output's life: scootbg has
+stopped trying on that output, says so on stderr, and the other outputs
+are unaffected; it lasts until that output is unplugged and plugged back
+in, which makes it a new output). `shows` stays `null`
 until colours land. New keys may be added; none changes meaning within
 protocol 1. If the daemon cannot accept clients (out of file descriptors,
 say), it keeps the wallpaper up, says so once on stderr, and retries every

@@ -193,7 +193,8 @@ pub struct OutputEntry<'a> {
 /// Where an output's wallpaper surface stands: `state` is one of
 /// `waiting` (the output has not reported itself yet), `pending` (asked
 /// for, not yet sized), `configured`, `closed` (closed by the compositor,
-/// being re-created) and `gave-up` (closed twice; not tried again).
+/// being re-created) and `gave-up` (closed twice; not tried again until
+/// the output is replugged).
 /// `size`, in logical pixels, is set only while `configured`, and even
 /// then `null` if the compositor left the size to scootbg before the
 /// output reported a mode.

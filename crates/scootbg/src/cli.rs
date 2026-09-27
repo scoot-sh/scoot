@@ -67,7 +67,8 @@ Prints the daemon's reply, one line of JSON with one entry per output:
 {\"type\":\"outputs\",\"outputs\":[...]}
 Each entry has the output's name, description, mode, scale, transform and
 logical size, and its surface's state: waiting, pending, configured (with
-its size), closed or gave-up. Nothing is drawn yet, so \"shows\" is null.
+its size), closed or gave-up (until the output is replugged). Nothing is
+drawn yet, so \"shows\" is null.
 ";
 
 pub const VERSION_HELP: &str = "\

@@ -21,8 +21,9 @@
 //! 3. **Surface.** One background layer surface per output moves through
 //!    [`Surface`]: `Pending` (created, first commit sent, no configure yet),
 //!    `Configured`, and on the compositor's `closed`, `Closed` (destroyed;
-//!    re-created after one more round trip, once) or, closed a second time,
-//!    `GaveUp`, for that output only.
+//!    re-created after one more round trip, once) or, closed a second time
+//!    over the output's life, `GaveUp`, for that output only, until it is
+//!    replugged.
 //! 4. **Removed.** The glue drops the entry whatever state it is in, before
 //!    `done`, mid-configure, or while closed; events still in flight for it
 //!    then find no entry and are dropped.
@@ -210,6 +211,11 @@ pub enum Surface {
     /// a round trip has shown the output was not removed meanwhile.
     Closed,
     /// Closed a second time: scootbg has stopped trying on this output.
+    ///
+    /// For the output's whole life: the one retry is not given back after
+    /// it succeeds, because a compositor that configures and then closes
+    /// every surface would otherwise be answered with a new one forever.
+    /// A replug is a new output (a new id) and starts afresh.
     GaveUp,
 }
 
@@ -277,6 +283,13 @@ impl Output {
 
     pub fn surface(&self) -> Surface {
         self.surface
+    }
+
+    /// The output as a message to stderr names it. The name comes from the
+    /// compositor, so it is escaped (`escape_debug`: control characters,
+    /// quotes and backslashes), never printed raw to a terminal.
+    pub fn label(&self) -> Label<'_> {
+        Label(self.info.name.as_deref())
     }
 
     #[cfg(test)]
@@ -425,6 +438,18 @@ impl Output {
                 requested.height
             },
         })
+    }
+}
+
+/// See [`Output::label`].
+pub struct Label<'a>(Option<&'a str>);
+
+impl std::fmt::Display for Label<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(name) => write!(f, "output \"{}\"", name.escape_debug()),
+            None => f.write_str("an unnamed output"),
+        }
     }
 }
 

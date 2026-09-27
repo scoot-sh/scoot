@@ -272,16 +272,50 @@ fn soft_nofile(pid: u32, soft: &str) {
     );
 }
 
+/// The inodes of the sockets listening on `path`, from `/proc/net/unix`
+/// (columns: `Num RefCount Protocol Flags Type St Inode Path`). Only
+/// listeners: a connection accepted on a socket shows its path too, and
+/// `__SO_ACCEPTCON` (0x10000) in `Flags` marks the listening one.
+fn listening_inodes(path: &std::path::Path) -> Vec<String> {
+    const ACCEPTCON: u32 = 0x1_0000;
+    let table = std::fs::read_to_string("/proc/net/unix").unwrap();
+    let path = path.to_str().unwrap();
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            // Seven fixed columns, then the path, which may hold spaces
+            // (a `TMPDIR` with one): everything after the seventh.
+            let mut columns = Vec::with_capacity(7);
+            let mut rest = line;
+            for _ in 0..7 {
+                rest = rest.trim_start();
+                let end = rest.find(char::is_whitespace)?;
+                columns.push(&rest[..end]);
+                rest = &rest[end..];
+            }
+            let flags = u32::from_str_radix(columns[3], 16).ok()?;
+            let listening = flags & ACCEPTCON != 0;
+            (listening && rest.trim() == path).then(|| columns[6].to_owned())
+        })
+        .collect()
+}
+
 /// The daemon's fd limit at which no new fd can exist and closing its
 /// spare frees nothing usable: every number below it is taken, and the
-/// listener and its spare (the two fds on one socket) are at or above it.
+/// listener and its spare are at or above it.
 ///
 /// `RLIMIT_NOFILE` bounds fd *numbers* (a new fd takes the lowest free
 /// number, only if below the limit), so that is the lowest free number or
 /// the lower of the pair, whichever is less. Not 0: `poll` refuses more fds
 /// than the limit with `EINVAL`, and the daemon polls two (Wayland and the
 /// listener) with no clients, so the limit must stay at least that.
-fn limit_past_the_spare(pid: u32) -> u64 {
+///
+/// The pair is found by what it is, not by shape: the socket listening on
+/// the daemon's path (`/proc/net/unix`), then the daemon's fds on that
+/// inode. "The only socket open twice" broke on an inherited socket that
+/// was itself open twice.
+fn limit_past_the_spare(pid: u32, socket: &std::path::Path) -> u64 {
     let mut fds: Vec<(u64, String)> = std::fs::read_dir(format!("/proc/{pid}/fd"))
         .unwrap()
         .filter_map(|entry| {
@@ -295,14 +329,21 @@ fn limit_past_the_spare(pid: u32) -> u64 {
     let lowest_free = (0..)
         .find(|n| fds.binary_search_by_key(n, |(fd, _)| *fd).is_err())
         .unwrap();
+    let listeners: Vec<String> = listening_inodes(socket)
+        .iter()
+        .map(|inode| format!("socket:[{inode}]"))
+        .collect();
     let pair: Vec<u64> = fds
         .iter()
-        .filter(|(_, target)| {
-            target.starts_with("socket:") && fds.iter().filter(|(_, t)| t == target).count() == 2
-        })
+        .filter(|(_, target)| listeners.contains(target))
         .map(|(fd, _)| *fd)
         .collect();
-    assert_eq!(pair.len(), 2, "no listener/spare pair among {fds:?}");
+    assert_eq!(
+        pair.len(),
+        2,
+        "not exactly a listener and its spare on {socket:?} (listening inodes \
+         {listeners:?}) among {fds:?}"
+    );
     let limit = lowest_free.min(pair[0]);
     assert!(limit >= 2, "limit {limit} below the poll set: {fds:?}");
     limit
@@ -352,12 +393,12 @@ fn an_accept_that_cannot_succeed_rests_the_listener_and_the_wallpaper_stays() {
 
     // A steady state first: the start-up probe's connection is closed.
     let deadline = Instant::now() + common::PATIENCE;
-    let mut limit = limit_past_the_spare(pid);
+    let mut limit = limit_past_the_spare(pid, &session.socket());
     let mut stable = 0;
     while stable < 3 {
         assert!(Instant::now() < deadline, "fds never settled");
         std::thread::sleep(Duration::from_millis(100));
-        let again = limit_past_the_spare(pid);
+        let again = limit_past_the_spare(pid, &session.socket());
         stable = if again == limit { stable + 1 } else { 0 };
         limit = again;
     }

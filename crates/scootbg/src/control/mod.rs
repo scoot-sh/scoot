@@ -22,7 +22,7 @@
 //! Any other `accept` error that is not about one connection (`ENOMEM`,
 //! `ENOBUFS`, ...) is returned the same way, for the same reason. The
 //! daemon does not exit on it, since that would take the wallpaper with
-//! it: the listener *rests* for a second, out of the poll set, and is then
+//! it: the listener *rests* for a second, polled for no events, and is then
 //! tried again (`daemon::listen`), so the loop neither spins nor goes deaf
 //! for good.
 //!
@@ -93,8 +93,9 @@ impl Server {
     }
 
     /// Accepts waiting clients: at most [`MAX_CONNECTIONS`] per call, so a
-    /// flood cannot hold the loop. An error means the daemon cannot go on
-    /// serving (see the module docs) and should exit.
+    /// flood cannot hold the loop. An error means accepting again at once
+    /// would only repeat it (see the module docs): the daemon rests the
+    /// listener rather than exit (`daemon::listen`).
     pub fn accept(&mut self, listener: &UnixListener) -> io::Result<()> {
         if self.spare.is_none() {
             // Spent earlier; retake it now if an fd has come free. Only

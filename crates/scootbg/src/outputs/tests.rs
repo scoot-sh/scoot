@@ -368,3 +368,23 @@ fn the_configured_size_is_the_best_logical_size() {
     let _ = output.closed();
     assert_eq!(output.logical(), Some(size(800, 500)));
 }
+
+/// Output names come from the compositor and reach stderr: control
+/// characters (a terminal escape, a newline forging a second log line)
+/// are escaped.
+#[test]
+fn labels_escape_what_the_compositor_named_the_output() {
+    let mut outputs = Outputs::<()>::default();
+    let id = outputs.add(1, |_| ());
+    let output = &mut outputs.get_mut(id).unwrap().output;
+    assert_eq!(output.label().to_string(), "an unnamed output");
+    output.stage_name("DP-1".into());
+    output.done();
+    assert_eq!(output.label().to_string(), "output \"DP-1\"");
+    output.stage_name("x\u{1b}[2J\nscootbg: fake \"line\"\\".into());
+    output.done();
+    assert_eq!(
+        output.label().to_string(),
+        "output \"x\\u{1b}[2J\\nscootbg: fake \\\"line\\\"\\\\\""
+    );
+}

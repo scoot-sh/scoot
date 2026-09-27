@@ -7,8 +7,13 @@
 //! wrong once it holds the wallpaper, which would vanish with it. Instead
 //! the listener *rests*:
 //!
-//! - it leaves the poll set, so a connection it cannot accept does not
-//!   keep the level-triggered `poll` returning (no spin);
+//! - it keeps its slot in the poll set but asks for no events, so a
+//!   connection it cannot accept does not keep the level-triggered `poll`
+//!   returning (no spin). `poll` still reports `POLLERR` and `POLLHUP`
+//!   unasked, which would wake it: on a listening Unix socket those come
+//!   only from a `shutdown` on it or a socket error, and nothing does
+//!   either, since only this process holds the fd (close-on-exec) and
+//!   scootbg never shuts it down;
 //! - the poll gets a timeout of [`REST`], so the listener is re-armed and
 //!   tried again (never deaf for longer than that);
 //! - the wallpaper surfaces and the Wayland connection carry on meanwhile.

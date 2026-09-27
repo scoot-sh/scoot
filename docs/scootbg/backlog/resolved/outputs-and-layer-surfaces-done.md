@@ -36,7 +36,7 @@ layer-shell compositor before calling it portable.
 
 - **`src/outputs.rs`, a pure model** of each output and its surface, with
   no Wayland objects and no I/O, so every event ordering is a unit test
-  (`src/outputs/tests.rs`, 20 tests). Per output: its registry name, an
+  (`src/outputs/tests.rs`, 19 tests). Per output: its registry name, an
   `OutputId` never reused for the daemon's life, properties *staged* until
   `wl_output.done` applies them (name, description, current mode, scale,
   transform, and `xdg_output`'s logical size), and the surface state:
@@ -213,6 +213,42 @@ working tree on top of `87e1935` that became this PR's commit.
   (107 tests, scoot and sway required): 20/20, idle and again under eight
   busy loops (load average ~10 on 4 CPUs). `cargo test -p scootbg --
   --test-threads 16` × 20: 20/20 idle and 20/20 under the same load.
+
+### Review of PR #273
+
+No blocking findings. Fixed:
+
+- **An environment-dependent test** (should-fix, reproduced by the
+  reviewer). The resting-listener test found the daemon's listener and
+  spare as "the only socket open twice", so a socket inherited twice from
+  the parent (a `socketpair` end `dup2`ed onto fds 40 and 41, not
+  close-on-exec) made two pairs and failed it. It now finds the listener
+  by what it is: the inode listening on the daemon's socket path in
+  `/proc/net/unix` (`__SO_ACCEPTCON` set; accepted connections show the
+  path too), then the daemon's two fds on that inode. The old test fails
+  under the reviewer's harness (`no listener/spare pair among … (40,
+  "socket:[…]"), (41, "socket:[…]")`), the new one passes, and so does
+  every integration binary (`daemon`, `outputs`, `hotplug`) with inherited
+  duplicated sockets at 4,5 / 40,41 / 3,9,17 and inherited sparse fds at
+  10,11 / 20,200 / 3,5,200 and both at once. The other `/proc` helpers
+  were audited: fd-number arithmetic (#268's lowest free number), counts
+  compared within one daemon's life, and `stat`/`status`/`limits` fields;
+  none infers an fd's identity from its shape.
+- **The unit-test count** was given as 20; it was 18, now 19 with the
+  label test below.
+- **Stale comments**: `Server::accept` no longer says the daemon should
+  exit, and the resting listener keeps its slot polled for no events
+  rather than "leaving" the poll set. `poll` still reports `POLLERR` and
+  `POLLHUP` unasked; on a listening Unix socket those need a `shutdown`
+  of it or a socket error, and only this process holds the fd, so the
+  comment now says that is why it cannot spin.
+- **`gave-up` lasts until the output is replugged** (documented in the
+  README, `query`'s docs and `--help`). The one retry is not given back
+  after it succeeds, so a compositor that configures and then closes every
+  surface is not answered with new ones forever.
+- **Output names are escaped on stderr** (`escape_debug`): a name from the
+  compositor with control characters could otherwise write terminal
+  escapes or forge a second log line. Tested.
 
 ### Not verified, and why
 

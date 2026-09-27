@@ -251,21 +251,9 @@ impl State {
                 warn(format_args!(
                     "scootbg: the compositor closed the wallpaper surface on {} again; \
                      giving up on that output (`scootbg query` shows it as gave-up)",
-                    Label(&entry.output)
+                    entry.output.label()
                 ));
             }
-        }
-    }
-}
-
-/// An output as messages name it.
-struct Label<'a>(&'a crate::outputs::Output);
-
-impl std::fmt::Display for Label<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0.info().name {
-            Some(name) => write!(f, "output {name}"),
-            None => write!(f, "an unnamed output"),
         }
     }
 }
@@ -387,7 +375,7 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                     warn(format_args!(
                         "scootbg: the compositor closed the wallpaper surface on {}; \
                          creating it again (once)",
-                        Label(&entry.output)
+                        entry.output.label()
                     ));
                 }
                 effect
