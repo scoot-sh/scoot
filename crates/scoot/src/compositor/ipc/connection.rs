@@ -166,6 +166,7 @@ pub(super) fn source(
             conn,
             closing: false,
             slot: Some(slot),
+            subscribed: false,
             idle_wait: limits.idle_wait,
         },
         socket: Generic::new(stream, Interest::READ, Mode::Level),
@@ -390,7 +391,6 @@ pub(super) enum Step {
     Continue,
     Close,
 }
-
 pub(super) struct Connection {
     /// The socket, the buffer between it and request lines, and the line being
     /// assembled -- which on a non-blocking socket may be half of one, waiting
@@ -432,6 +432,14 @@ pub(super) struct Connection {
     /// (see [`Connection::serve`]), which happens immediately before this
     /// connection leaves the event loop.
     slot: Option<Slot>,
+    /// Whether this connection is subscribed to events (see `events.rs`).
+    ///
+    /// Set by the `Subscribe` arm of [`Connection::serve`], which dedicates
+    /// the connection: afterwards it carries events only, and any other
+    /// request on it is refused with an error. One boolean, checked once
+    /// per served request -- the subscription costs nothing per message or
+    /// frame beyond it.
+    subscribed: bool,
     /// The longest a `wait-idle` on this connection may park for, whatever it
     /// asks for. [`MAX_IDLE_WAIT`] in production; held per connection only so
     /// the tests can shorten it.
@@ -439,6 +447,12 @@ pub(super) struct Connection {
 }
 
 impl Connection {
+    /// What `State` files this connection's parked screenshots -- and now
+    /// its event subscription -- under.
+    pub(super) fn id(&self) -> u64 {
+        self.conn
+    }
+
     /// How many bytes of reply this connection's peer has not taken yet.
     fn pending(&self) -> usize {
         self.outbound.pending()
@@ -639,6 +653,34 @@ impl Connection {
                 return self.answer(&Response::error(message));
             }
         };
+
+        // A subscribed connection carries events only (see `events.rs`):
+        // any other request on it is refused with an error naming the rule.
+        // First, before every other check, so a dedicated connection can
+        // neither screenshot, wait nor act -- and so a second `Subscribe`
+        // meets the same refusal rather than doubling the subscription.
+        if self.subscribed {
+            return self.answer(&Response::error(
+                "this connection is subscribed to events and serves no requests; \
+                 open another connection for requests",
+            ));
+        }
+
+        // A subscription dedicates this connection to the named event kinds:
+        // the reply goes out synchronously like any other, and afterwards
+        // the connection carries those events unasked. The socket clone is
+        // what the events go out through (see `events.rs`); like the
+        // `WaitIdle` arm below, a clone failure closes the connection.
+        if let Request::Subscribe { events } = request {
+            let Ok(stream) = self.lines.socket().try_clone() else {
+                return Step::Close;
+            };
+            let response = state.subscribe(self.conn, stream, events);
+            if matches!(response, Response::Subscribed { .. }) {
+                self.subscribed = true;
+            }
+            return self.answer(&response);
+        }
 
         // A capture in flight answers nothing else first: that connection's
         // screenshot reply has to go out before any later request's, or a

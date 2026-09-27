@@ -332,6 +332,11 @@ pub struct State {
     /// origins workspaces still carry -- so a chained adoption's earlier
     /// origin keeps its name while any workspace still names it.
     pub(super) origin_names: HashMap<u64, String>,
+    /// Connections subscribed to IPC events, filed by connection id -- see
+    /// `ipc/events.rs`. Written by `Request::Subscribe` (which dedicates
+    /// the connection), by the hotplug emitters, and by the accept loop
+    /// when a connection leaves; drained on the frame tick.
+    pub(super) subscribers: Vec<super::ipc::Subscriber>,
     /// The output scale resolved from `[output] scale` (see
     /// `output_scale.rs`), set at startup and re-applied live by a config
     /// reload (see `reload.rs`) -- except under `--nested`, where it stays
@@ -1102,6 +1107,7 @@ impl State {
             output_identities: HashMap::new(),
             displaced: HashMap::new(),
             origin_names: HashMap::new(),
+            subscribers: Vec::new(),
             output_scale: scale,
             integer_scale: super::output_scale::integer_scale(scale),
             renderer,

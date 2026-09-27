@@ -46,8 +46,16 @@ impl Client {
 
     pub fn request(&mut self, request: &Request) -> io::Result<Response> {
         write_message(&mut self.writer, request)?;
-        read_message_buffered(&mut self.reader, &mut self.line)?.ok_or_else(|| {
+        self.next_message()?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::UnexpectedEof, "server closed the connection")
         })
+    }
+
+    /// Reads the next message from the server: the reply to a request, or --
+    /// on a subscribed connection -- the next event. `Ok(None)` at a clean
+    /// end of stream (the session ended, or the server dropped the
+    /// subscription).
+    pub fn next_message(&mut self) -> io::Result<Option<Response>> {
+        read_message_buffered(&mut self.reader, &mut self.line)
     }
 }

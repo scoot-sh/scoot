@@ -76,6 +76,21 @@ impl State {
         let Some(displaced) = self.displaced.remove(&identity) else {
             return;
         };
+        // The adoption record, as the removal filed it: which output had
+        // adopted the block, where the record placed it, and the connector
+        // name the adopted workspaces are tagged with. The name is resolved
+        // before the restore, whose sweep drops names no live workspace
+        // still carries -- which, for this origin, is now.
+        let adopter = displaced.evicted.adopted_by;
+        let adopted_start = displaced.evicted.adopted_at;
+        let adopted_count = displaced.evicted.snapshot.workspaces.len();
+        let origin = displaced
+            .evicted
+            .origin
+            .and_then(|origin| self.origin_names.get(&origin).cloned());
+        let adopter_prev_active = adopter
+            .and_then(|by| self.world.workspaces(by))
+            .map(|work| work.active);
         let moved = self.world.restore_output(id, displaced.evicted);
         tracing::info!(
             connector = %identity.name,
@@ -95,5 +110,23 @@ impl State {
         }
         self.origin_names.retain(|origin, _| live.contains(origin));
         self.apply();
+        // The event fires on every consumed record -- even when nothing
+        // moved back (hand-moved windows and closed ones stay where they
+        // are): the adopter may still have returned to its pre-adopt view,
+        // and the tag clearing above is itself a change worth hearing
+        // about. `moved` says how many still-open windows went back.
+        self.emit_output_restored(scoot_ipc::OutputRestored {
+            output: id.0,
+            name: identity.name.clone(),
+            adopter: adopter.map(|by| by.0),
+            adopted_start,
+            adopted_count,
+            adopter_prev_active,
+            adopter_active: adopter
+                .and_then(|by| self.world.workspaces(by))
+                .map(|work| work.active),
+            origin,
+            moved,
+        });
     }
 }

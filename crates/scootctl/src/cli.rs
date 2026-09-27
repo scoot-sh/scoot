@@ -16,7 +16,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use scoot_ipc::{Action, Horizontal, PointerButton, Request, Vertical};
+use scoot_ipc::{Action, EventKind, Horizontal, PointerButton, Request, Vertical};
 
 /// The request grammar both clients print in their `--help`. The single
 /// owner: `scoot --help` embeds this same block rather than a second copy.
@@ -36,6 +36,7 @@ pub const REQUESTS_HELP: &str = "\
     type TEXT                       types text, working out each character's
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
+    subscribe [EVENT...]          stream events until killed (default: output)
 ";
 
 /// The action grammar both clients print in their `--help`. Same single-owner
@@ -74,6 +75,7 @@ REQUESTS:
     type TEXT                       types text, working out each character's
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
+    subscribe [EVENT...]          stream events until killed (default: output)
 
 ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
@@ -248,6 +250,23 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                 quiet_ms,
                 timeout_ms,
             }
+        }
+        "subscribe" => {
+            let mut events = Vec::new();
+            for name in args {
+                match name.as_str() {
+                    "output" => events.push(EventKind::Output),
+                    other => {
+                        return Err(Error::Unknown(format!(
+                            "event {other} (known events: output)"
+                        )));
+                    }
+                }
+            }
+            if events.is_empty() {
+                events.push(EventKind::Output);
+            }
+            Request::Subscribe { events }
         }
         other => return Err(Error::Unknown(other.to_owned())),
     };
@@ -567,6 +586,45 @@ mod tests {
                 request: Request::Version,
                 out: None,
             })
+        );
+    }
+
+    #[test]
+    fn subscribe_defaults_to_output_and_names_what_it_takes() {
+        assert_eq!(
+            parse_args(&["subscribe"]),
+            Ok(Command::Msg {
+                request: Request::Subscribe {
+                    events: vec![EventKind::Output]
+                },
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["subscribe", "output"]),
+            Ok(Msg {
+                request: Request::Subscribe {
+                    events: vec![EventKind::Output]
+                },
+                out: None,
+            })
+        );
+        assert!(
+            matches!(
+                parse_args(&["subscribe", "hypothetical_future_kind"]),
+                Err(Error::Unknown(_))
+            ),
+            "an unknown event kind is a loud refusal naming the rule, not a guess"
+        );
+    }
+
+    #[test]
+    fn usage_names_subscribe_on_its_own_line() {
+        assert!(
+            USAGE
+                .lines()
+                .any(|line| line.trim().starts_with("subscribe [EVENT...]")),
+            "--help hides the subscribe verb"
         );
     }
 
