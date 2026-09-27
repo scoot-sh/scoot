@@ -3,9 +3,9 @@
 //! what to draw, which buffer) are `crate::paint`'s and the model's; this
 //! carries them out.
 //!
-//! Every draw is one batch: attach (only when the buffer changes), damage,
-//! viewport destination or buffer scale, opaque region (the whole
-//! surface), commit. The surface's latest `configure` was acked when it
+//! Every draw is one batch: attach (only when the buffer changes), buffer
+//! scale or viewport destination, damage (the whole buffer), opaque region
+//! (the whole surface), commit. The surface's latest `configure` was acked when it
 //! arrived, before any of this, so each commit carries it.
 //!
 //! ## Buffers
@@ -233,7 +233,6 @@ impl Canvas {
                     let [r, g, b, a] = target.color.single_pixel();
                     let buffer = manager.create_u32_rgba_buffer(r, g, b, a, qh, id);
                     surface.attach(Some(&buffer), 0, 0);
-                    surface.damage_buffer(0, 0, 1, 1);
                     retired = self
                         .pixel
                         .replace((buffer, target.color))
@@ -252,7 +251,6 @@ impl Canvas {
                         return Ok(Drew::Stalled);
                     };
                     surface.attach(Some(&slot.buffer), 0, 0);
-                    surface.damage_buffer(0, 0, clamp(dims.0), clamp(dims.1));
                     self.put(index, slot.attached());
                     self.current = Some(index);
                 }
@@ -271,6 +269,9 @@ impl Canvas {
                 .get_or_insert_with(|| viewporter.get_viewport(&surface, qh, ()));
             viewport.set_destination(clamp(target.size.width), clamp(target.size.height));
         }
+        // All of it, every time: a draw is rare, and a new buffer scale or
+        // viewport with the same buffer changes every pixel on screen too.
+        surface.damage_buffer(0, 0, clamp(dims.0), clamp(dims.1));
         // Opaque everywhere: the compositor need draw nothing beneath it.
         let region = globals.compositor.create_region(qh, ());
         region.add(0, 0, clamp(target.size.width), clamp(target.size.height));

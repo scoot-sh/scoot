@@ -36,7 +36,12 @@ full per-feature cycle.
    `background` surface each (configured, nothing drawn yet), `query`
    lists them; a failed `accept` rests the listener instead of ending the
    daemon; checked on headless scoot and headless sway
-4. [Solid colors through single-pixel buffers](solid-color.md)
+4. [**Solid colors through single-pixel buffers**](resolved/solid-color-done.md)
+   — RESOLVED 2026-09-27: `scootbg set '#rrggbb' [--output NAME]` and
+   `scootbg clear`; single-pixel buffer + viewport, else a 1×1 `wl_shm`
+   buffer + viewport, else a full-size one; replies after a sync round
+   trip, without blocking the loop; `query` reports what each output
+   shows; checked by real pixels on headless scoot and headless sway
 5. [The CLI and control protocol](cli-and-ipc.md)
 6. [Decoding images and fitting them to an output](images-decode-and-fit.md)
 7. [Drawing at real device pixels on scaled outputs](hidpi-fractional-scale.md)

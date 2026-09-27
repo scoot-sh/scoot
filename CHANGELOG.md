@@ -9,6 +9,25 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — scootbg shows solid colors (early)
+
+- **`scootbg set '#rrggbb'` puts a color on every output**, including
+  monitors plugged in later; `--output NAME` sets one output (the name
+  `scootbg query` shows), and that choice follows the monitor across
+  unplugging it. **`scootbg clear`** (with or without `--output`) goes back
+  to the compositor's own background. Quote the color: the shell reads `#`
+  as a comment.
+- **`set` and `clear` return once the change is on screen**, so a
+  screenshot taken straight after shows it. They print nothing on success
+  and exit 1 for an unknown output name (changing nothing) and 2 for a
+  malformed color. Only `#rrggbb` is accepted for now; a file path is
+  refused with "images come in a later version".
+- **`scootbg query` now says what each output shows**:
+  `"shows":{"color":"#rrggbb"}`, or `null`.
+- On scoot, sway and most compositors a color uses no shared memory (a
+  single-pixel buffer); a static color costs no CPU and no wakeups.
+- Choices are not remembered across a daemon restart yet.
+
 ### 2026-09-27 — scootbg tracks outputs and places a surface on each (early)
 
 - **`scootbg daemon` now puts one background-layer surface on every

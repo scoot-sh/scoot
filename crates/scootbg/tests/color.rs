@@ -543,38 +543,57 @@ fn colors_on_sway_every_path_and_hotplug() {
     }
 }
 
-/// An output unplugged while a `set` for it waits: the reply is `ok` (it
-/// covers the outputs that remain), whichever way the race goes, and the
-/// daemon carries on.
+/// An output unplugged just as a `set --output` for it arrives, raced ten
+/// times. The reply is one of exactly two things, depending on which the
+/// daemon handles first: `ok` if it took the request while the output was
+/// there (the reply then covers the outputs that remain, and the output's
+/// removal ends the wait), or the unknown-output error, which changes
+/// nothing, if the removal came first. Never a hang and never anything
+/// else; the every-output `set` queued behind it always succeeds, and the
+/// remaining output shows it.
 #[test]
 fn an_output_unplugged_during_a_set_still_gets_a_reply() {
     let Some(session) = Session::sway("unplug") else {
         return;
     };
     let mut daemon = session.daemon_logged(&[]);
-    session.swaymsg(&["create_output"]);
-    let outputs = configured(&session, 2);
-    let doomed = outputs[1]["name"].as_str().unwrap().to_owned();
-    let stream = UnixStream::connect(session.socket()).unwrap();
-    stream.set_read_timeout(Some(PATIENCE)).unwrap();
-    let line = format!(
-        "{{\"protocol\":1,\"type\":\"set\",\"color\":\"{RED}\",\"output\":\"{doomed}\"}}\n\
-         {{\"protocol\":1,\"type\":\"set\",\"color\":\"{BLUE}\"}}\n"
-    );
-    (&stream).write_all(line.as_bytes()).unwrap();
-    session.swaymsg(&["output", &doomed, "unplug"]);
-    let mut lines = BufReader::new(&stream).lines();
-    for _ in 0..2 {
-        let reply: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
-        assert_eq!(reply, json!({"type": "ok"}));
+    let (mut ok_first, mut unknown_first) = (0, 0);
+    for round in 0..10 {
+        session.swaymsg(&["create_output"]);
+        let outputs = configured(&session, 2);
+        let doomed = outputs[1]["name"].as_str().unwrap().to_owned();
+        let stream = UnixStream::connect(session.socket()).unwrap();
+        stream.set_read_timeout(Some(PATIENCE)).unwrap();
+        let line = format!(
+            "{{\"protocol\":1,\"type\":\"set\",\"color\":\"{RED}\",\"output\":\"{doomed}\"}}\n\
+             {{\"protocol\":1,\"type\":\"set\",\"color\":\"{BLUE}\"}}\n"
+        );
+        (&stream).write_all(line.as_bytes()).unwrap();
+        session.swaymsg(&["output", &doomed, "unplug"]);
+        let mut lines = BufReader::new(&stream).lines();
+        let first: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+        if first == json!({"type": "ok"}) {
+            ok_first += 1;
+        } else {
+            assert_eq!(first["type"], "error", "round {round}: {first}");
+            let message = first["message"].as_str().unwrap();
+            assert!(
+                message.contains(&format!("{doomed:?}")) && message.contains("nothing was changed"),
+                "round {round}: {message}"
+            );
+            unknown_first += 1;
+        }
+        let second: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+        assert_eq!(second, json!({"type": "ok"}), "round {round}");
+        let left = configured(&session, 1)[0]["name"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        session
+            .screencopy(&left)
+            .assert_all(rgb(BLUE), "the remaining output");
     }
-    let left = configured(&session, 1)[0]["name"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    session
-        .screencopy(&left)
-        .assert_all(rgb(BLUE), "the remaining output");
+    eprintln!("ok first: {ok_first}, unknown output first: {unknown_first}");
     assert_quiet_log(&session);
     assert!(session.run(&["kill"]).status.success());
     assert!(wait_exit(&mut daemon).success());

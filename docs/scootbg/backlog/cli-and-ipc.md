@@ -33,3 +33,21 @@ changes the wallpaper when the section itself changed.
   says so.
 - `--help` for every subcommand; the README's command list is updated in
   the same PR as any change to it.
+
+## Already there, from solid-color-done.md
+
+[Ticket 4](resolved/solid-color-done.md) landed part of this, so what is
+left here is smaller:
+
+- **Done:** `set '#rrggbb' [--output NAME]` and `clear [--output NAME]`
+  (CLI, `--help`, protocol 1 requests), unknown-output errors that change
+  nothing, `query`'s `shows` (`{"color":...}`), and the reply after the
+  commits and a `wl_display.sync` round trip, without blocking the loop
+  (`crates/scootbg/src/waiters.rs`). The README documents all of it, with
+  exit codes.
+- **Left:** `set PATH`, `--mode`, `--fill`, `apply-config`, `shows` for
+  images (an object, so it gains keys, e.g. `{"image":...,"mode":...}`),
+  the "file not found / not an image / too large" errors, and the
+  `./#name.png` note. The CLI refuses a path today with "images come in a
+  later version" (exit 2), so the parser change is to accept it rather
+  than to add a new command.

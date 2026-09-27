@@ -11,10 +11,10 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > **Status: early.** The daemon exists (`crates/scootbg/`, with its
 > `unsafe` in `crates/scootbg-mem/`): `scootbg daemon` connects, tracks
 > every output as it comes and goes, and gives each one a `background`
-> layer surface; `scootbg query` lists the outputs and their surfaces,
-> and `version` and `kill` work. **It draws no wallpaper yet**: colors
-> and images are the next items in [`backlog/`](backlog/README.md). These
-> docs stay here.
+> layer surface. **Solid colors work**: `scootbg set '#rrggbb'`, on every
+> output or one (`--output NAME`), and `scootbg clear`; `query` reports
+> what each output shows, and `version` and `kill` work. Images are the
+> next items in [`backlog/`](backlog/README.md). These docs stay here.
 
 ## What it is for
 
@@ -79,18 +79,23 @@ scootbg clear --output DP-1                    # back to the compositor's own ba
 scootbg daemon                                 # outside scoot: start it yourself
 ```
 
-The commands above are the planned interface; of them, only `query` and
-`daemon` work so far (with `version` and `kill`), and `query` reports each
-output and its surface but, with nothing drawn yet, not what it shows.
-One binary: `daemon` runs the Wayland client, every other subcommand talks
-to it over its socket.
+The commands above are the planned interface. What works so far:
+`daemon`, `set` with a color (`#rrggbb`) and `--output`, `clear` with
+`--output`, `query`, `version` and `kill`; `set` with a path says images
+come in a later version, and `--mode`/`--fill` do not exist yet. The root
+[README](../../README.md#scootbg-early) has the details (exit codes, what
+`set` waits for). One binary: `daemon` runs the Wayland client, every
+other subcommand talks to it over its socket.
 
 - **One `background`-layer surface per output**, anchored to all four edges,
   exclusive zone `-1`, no keyboard interactivity and an empty input region,
   so clicks reach the desktop underneath, as on any other compositor.
 - **Solid colors** use `wp_single_pixel_buffer_manager_v1` scaled by
-  `wp_viewporter`: one pixel of memory for a whole output, with a 1×1
-  `wl_shm` buffer where the compositor lacks the protocol.
+  `wp_viewporter`: no shared memory at all for a whole output, with a 1×1
+  `wl_shm` buffer under the viewport where the compositor lacks
+  single-pixel buffers, and a full-size `wl_shm` buffer where it has no
+  viewporter either. Working, and measured
+  ([below](#measured-so-far)).
 - **Images** are decoded once, scaled once per output size and scale, and
   written into an opaque `XRGB8888` buffer with its opaque region set, so a
   compositor can skip drawing anything beneath it.
@@ -101,6 +106,60 @@ to it over its socket.
   frees its buffer.
 - **Restore.** The last choice per output is kept in
   `$XDG_STATE_HOME/scootbg/`, so `scootbg daemon` at login brings it back.
+
+## The control protocol
+
+Every command but `daemon` is one request on the daemon's socket,
+`$XDG_RUNTIME_DIR/scootbg-NAME.sock` (`NAME` the last component of
+`$WAYLAND_DISPLAY`), so a script or an agent can skip the CLI: one JSON
+object per line each way, each request naming the protocol it speaks.
+
+```text
+{"protocol":1,"type":"set","color":"#1e1e2e"}                 -> {"type":"ok"}
+{"protocol":1,"type":"set","color":"#1e1e2e","output":"DP-1"} -> {"type":"ok"}
+{"protocol":1,"type":"clear"}                                 -> {"type":"ok"}
+{"protocol":1,"type":"clear","output":"DP-1"}                 -> {"type":"ok"}
+{"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...]}
+{"protocol":1,"type":"version"}                               -> {"type":"version","protocol":1,"version":"..."}
+{"protocol":1,"type":"kill"}                                  -> {"type":"ok"}
+anything wrong                                                -> {"type":"error","message":"..."}
+```
+
+- `set` and `clear` answer once every targeted output shows the change and
+  a `wl_display.sync` sent after the commits has come back, so the
+  compositor has it; the daemon never blocks on that, other clients are
+  served meanwhile. Requests sent behind one on the same connection are
+  answered after it, in order. An output unplugged before its commit is
+  left out of the wait; an output whose surface is not configured yet is
+  waited for. A client that hangs up before its reply loses only the
+  reply: the change still happens.
+- An error reply changes nothing: an unknown `output` name (the name must
+  belong to an output present now), a `color` that is not `#rrggbb`, a
+  `set` with no `color`. If drawing fails on an output (a buffer too large
+  for `wl_shm`, out of memory), the reply is an error too, after the others
+  were drawn, and the daemon's stderr says why.
+- `query`'s `shows` is `{"color":"#rrggbb"}`, lowercase, or `null`. Every
+  key of an entry is always present; keys may be added within protocol 1,
+  none removed or changed.
+- A choice for every output is kept for outputs plugged in later; a choice
+  for one output is kept by its name, across unplugging it. Choices are
+  not saved across a daemon restart yet
+  ([restore-state.md](backlog/restore-state.md)).
+
+## Measured so far
+
+Release build, against `scoot --headless --outputs 2` (1600×1000 each,
+a debug build of scoot), on a 4-CPU Claude Code web container; the record,
+with the method and every raw number, is in
+[solid-color-done.md](backlog/resolved/solid-color-done.md#measurements).
+Not yet against competitors: that is [lightest.md](backlog/lightest.md).
+
+| What | Result |
+|---|---|
+| Stripped binary | 783,072 B |
+| Idle with a color set, 30 s ×3 | 0 context switches, 0 CPU ticks; RSS 2,720 kB, PSS 1,524 kB, 1 thread |
+| PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556 / 1,552–1,560 / 7,808 kB (14,060 kB once a change leaves a spare buffer per output) |
+| `set`, request to reply, 10,000 changes ×3 | median 410–427 µs, p99 1.7–2.0 ms; no memory growth |
 
 ## Relation to scoot
 

@@ -891,8 +891,8 @@ buffer path is exact. scootbg on scoot always has
 `wp_single_pixel_buffer_manager_v1`, so this reaches scootbg only on a
 compositor without it. It is a compositor-side bug for any client that
 upscales a tiny `wl_shm` buffer. It is tracked as a compositor item,
-[shm-viewport-upscale-edge-fade.md](../../../backlog/core/shm-viewport-upscale-edge-fade.md)
-(widened in review to every upscaled surface), and noted in
+[shm-viewport-upscale-edge-fade-done.md](../../../backlog/resolved/shm-viewport-upscale-edge-fade-done.md)
+(widened in review to every upscaled surface, and since resolved), and noted in
 [solid-color-done.md](solid-color-done.md), whose fallback it affects.
 
 ## Not measured, and why

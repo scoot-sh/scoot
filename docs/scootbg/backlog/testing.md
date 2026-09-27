@@ -14,7 +14,11 @@ blocked: null
 - End to end: a script like `scripts/smoke-test.sh` that starts
   `scoot --headless --outputs 2`, runs `scootbg daemon`, sets a color and
   an image per output, and samples pixels from `scootctl screenshot
-  --output N` at known points (centre, letterbox bars, corners).
+  --output N` at known points (centre, letterbox bars, corners). The color
+  half is in `crates/scootbg/tests/color.rs` since
+  [solid-color-done.md](resolved/solid-color-done.md) (every pixel of each
+  output, on scoot through its screenshot request and on sway through a
+  wlr-screencopy client in the harness); images add the fit-mode points.
 - The precedence rule end to end: every order in
   [scoot-integration.md](scoot-integration.md)'s table, plus a config
   with two per-output overrides and a changed `command` across a restart,
