@@ -62,16 +62,19 @@ use super::keyboard_focus::KeyboardFocus;
 
 /// The seat's pointer focus.
 ///
-/// The X arm is large (an `X11Surface` carries its connection's whole atom
-/// table by value -- 432 bytes against a `WlSurface`'s 64 at the pinned
-/// rev), and deliberately not boxed, for the reason `KeyboardFocus` gives:
-/// the focus is built by every hit test and cloned into the seat on every
-/// motion, and a box would make each of those a heap allocation. Inline,
-/// the clone is reference-count bumps. What the size costs a motion over a
-/// *Wayland* window -- the moves of a larger value -- is measured in the
-/// `pointer_motion` bench (see the PR that introduced this arm).
+/// The X arm holds its window as a shared `Arc<X11Surface>`, made once per
+/// window and reused by every hit test on it (see [`PointerFocus::on_window`]
+/// and `State::x11_unmanaged`), rather than an `X11Surface` by value the
+/// way `KeyboardFocus` does. Measured, not assumed: an `X11Surface` is 432
+/// bytes (its connection's whole atom table) and about eight reference
+/// counts, and a motion clones and drops the focus several times over --
+/// the hit test, Smithay storing it and handing it back
+/// (`current_focus`), the relative-motion event. By value that cost motion
+/// over an X window ~0.6-0.7 us more in release (`x11_hot_path_cost`,
+/// ~2.2 -> ~2.9 us), and every focus -- Wayland ones too -- was 496 bytes
+/// to move. Shared, a clone is one reference count and the enum stays near
+/// a `WlSurface`'s size.
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
 pub enum PointerFocus {
     /// Any Wayland surface: a toplevel's (or its subsurface's), a layer
     /// surface's, a lock surface's, a popup's.
@@ -82,21 +85,34 @@ pub enum PointerFocus {
     /// which is the origin Smithay's X drop target measures in.
     #[cfg(feature = "xwayland")]
     X11 {
-        window: X11Surface,
+        window: Arc<X11Surface>,
         surface: WlSurface,
     },
 }
 
+/// A managed X window's shared handle, kept in its Smithay `Window`'s user
+/// data so every hit test on the window reuses one allocation. No cycle:
+/// the `Window` holds this, and nothing this holds refers back to the
+/// `Window` (an `X11Surface`'s own user data would -- see
+/// `State::x11_unmanaged` for the override-redirect side).
+#[cfg(feature = "xwayland")]
+struct SharedX11(Arc<X11Surface>);
+
 impl PointerFocus {
     /// The focus for `surface`, found by a hit test on `window`: the X
     /// variant when `window` is an X one. No lock and no allocation for a
-    /// Wayland window (a match on Smithay's `Window` kind); an X window's
-    /// costs the `X11Surface`'s reference-count bumps.
+    /// Wayland window (a match on Smithay's `Window` kind). An X window's
+    /// costs a user-data lookup and one reference count; its shared handle
+    /// is allocated the first time the pointer finds the window, once per
+    /// window, never per event.
     pub fn on_window(window: &Window, surface: WlSurface) -> Self {
         #[cfg(feature = "xwayland")]
         if let Some(x11) = window.x11_surface() {
+            let shared = window
+                .user_data()
+                .get_or_insert(|| SharedX11(Arc::new(x11.clone())));
             return Self::X11 {
-                window: x11.clone(),
+                window: Arc::clone(&shared.0),
                 surface,
             };
         }
@@ -169,15 +185,21 @@ impl From<WlSurface> for PointerFocus {
     }
 }
 
-/// What Smithay's popup grab hands the pointer when it restores the grab's
-/// root: the keyboard focus the root had, carried over variant for variant,
-/// so an X window stays the X focus the hit test would name it.
+/// What Smithay's popup grab starts its pointer grab on: the keyboard focus
+/// of the grab's root, converted once as the grab is made. Carried over
+/// variant for variant, so an X window stays the X focus the hit test would
+/// name it; that arm allocates its handle, which is fine for a once-per-grab
+/// conversion that is not reached anyway -- an `xdg_popup` grab's root is
+/// an xdg toplevel, never an X window.
 impl From<KeyboardFocus> for PointerFocus {
     fn from(focus: KeyboardFocus) -> Self {
         match focus {
             KeyboardFocus::Surface(surface) => Self::Surface(surface),
             #[cfg(feature = "xwayland")]
-            KeyboardFocus::X11 { window, surface } => Self::X11 { window, surface },
+            KeyboardFocus::X11 { window, surface } => Self::X11 {
+                window: Arc::new(window),
+                surface,
+            },
         }
     }
 }
@@ -403,7 +425,7 @@ impl DndFocus<State> for PointerFocus {
         match self {
             #[cfg(feature = "xwayland")]
             Self::X11 { window, .. } if !from_x(window, &*source) => {
-                DndFocus::enter(window, data, dh, source, seat, location, serial)
+                DndFocus::enter(&**window, data, dh, source, seat, location, serial)
                     .map(PointerOffer::X11)
             }
             focus => DndFocus::enter(focus.surface(), data, dh, source, seat, location, serial)
@@ -422,7 +444,7 @@ impl DndFocus<State> for PointerFocus {
         match (self, offer) {
             #[cfg(feature = "xwayland")]
             (Self::X11 { window, .. }, Some(PointerOffer::X11(offer))) => {
-                DndFocus::motion(window, data, Some(offer), seat, location, time);
+                DndFocus::motion(&**window, data, Some(offer), seat, location, time);
             }
             (focus, offer) => {
                 let offer = offer.and_then(PointerOffer::as_surface);
@@ -440,7 +462,7 @@ impl DndFocus<State> for PointerFocus {
         match (self, offer) {
             #[cfg(feature = "xwayland")]
             (Self::X11 { window, .. }, Some(PointerOffer::X11(offer))) => {
-                DndFocus::leave(window, data, Some(offer), seat);
+                DndFocus::leave(&**window, data, Some(offer), seat);
             }
             (focus, offer) => {
                 let offer = offer.and_then(PointerOffer::as_surface);
@@ -458,7 +480,7 @@ impl DndFocus<State> for PointerFocus {
         match (self, offer) {
             #[cfg(feature = "xwayland")]
             (Self::X11 { window, .. }, Some(PointerOffer::X11(offer))) => {
-                DndFocus::drop(window, data, Some(offer), seat);
+                DndFocus::drop(&**window, data, Some(offer), seat);
             }
             (focus, offer) => {
                 let offer = offer.and_then(PointerOffer::as_surface);

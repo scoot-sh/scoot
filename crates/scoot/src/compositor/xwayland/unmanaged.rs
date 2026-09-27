@@ -75,7 +75,7 @@ impl State {
             );
             return;
         }
-        self.x11_unmanaged.push(window);
+        self.x11_unmanaged.push(std::sync::Arc::new(window));
         // Claimed now that the window is in: `admits` said yes above, on
         // this same dispatch, so this cannot overflow the bound (see
         // `X11UnmanagedCap::admits` for why the split is sound). Released
@@ -131,8 +131,8 @@ impl State {
     /// window's surface tree, so its input region is honoured.
     /// Allocation-free: this is on the per-motion hit test, and with no
     /// override-redirect window mapped -- nearly always -- it is an
-    /// empty-`Vec` test; a hit costs the `X11Surface`'s reference-count
-    /// bumps.
+    /// empty-`Vec` test; a hit costs one reference count (the windows are
+    /// kept shared for this -- see `State::x11_unmanaged`).
     pub(in crate::compositor) fn x11_unmanaged_under(
         &self,
         pos: Point<f64, Logical>,
@@ -144,7 +144,7 @@ impl State {
                 .map(|(surface, point)| {
                     (
                         PointerFocus::X11 {
-                            window: window.clone(),
+                            window: std::sync::Arc::clone(window),
                             surface,
                         },
                         (point + location).to_f64(),

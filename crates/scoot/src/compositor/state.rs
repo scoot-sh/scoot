@@ -482,8 +482,13 @@ pub struct State {
     /// the hit test, the frame gathering, and the frame-callback and
     /// presentation passes -- each behind its lock branch. Empty in every
     /// session without an X client, so each reader costs an empty-`Vec` test.
+    /// Each shared (`Arc`), allocated once at map: the pointer's X focus
+    /// holds its window this way, so a hit test on a menu costs one
+    /// reference count rather than an `X11Surface` clone (see
+    /// `pointer_focus.rs`). Not cached in the window's own user data, which
+    /// would be a reference cycle -- the `X11Surface` owns that map.
     #[cfg(feature = "xwayland")]
-    pub x11_unmanaged: Vec<smithay::xwayland::X11Surface>,
+    pub x11_unmanaged: Vec<std::sync::Arc<smithay::xwayland::X11Surface>>,
     /// Every X window, mapped or not, that currently carries a
     /// `_NET_STARTUP_ID`, by X window id -- so the focus gate can read a
     /// toolkit's startup id off its *client leader* (GTK puts it

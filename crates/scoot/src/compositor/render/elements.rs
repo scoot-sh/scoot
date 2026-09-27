@@ -717,7 +717,7 @@ where
 /// both. Nothing is allocated when there are none, which is nearly always.
 #[cfg(feature = "xwayland")]
 fn x11_unmanaged_elements<R>(
-    windows: &[smithay::xwayland::X11Surface],
+    windows: &[std::sync::Arc<smithay::xwayland::X11Surface>],
     renderer: &mut R,
     region: Rectangle<i32, Logical>,
     scale: f64,
@@ -734,7 +734,7 @@ fn x11_unmanaged_elements<R>(
         let location = (rect.loc - region.loc).to_physical_precise_round(scale);
         out.extend(
             AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
-                window,
+                &**window,
                 renderer,
                 location,
                 Scale::from(scale),
