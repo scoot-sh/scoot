@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
-use super::{Command, Error, Topic, USAGE, parse, version_string};
+use super::{Command, DaemonOptions, Error, Topic, USAGE, parse, version_string};
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
 use crate::protocol::{ImageRequest, Request, Show};
@@ -12,7 +12,10 @@ fn args(list: &[&str]) -> Result<Command, Error> {
 
 #[test]
 fn each_command_parses() {
-    assert_eq!(args(&["daemon"]), Ok(Command::Daemon));
+    assert_eq!(
+        args(&["daemon"]),
+        Ok(Command::Daemon(DaemonOptions::default()))
+    );
     assert_eq!(args(&["query"]), Ok(Command::Client(Request::Query)));
     assert_eq!(args(&["kill"]), Ok(Command::Client(Request::Kill)));
     assert_eq!(args(&["version"]), Ok(Command::Client(Request::Version)));
@@ -412,4 +415,105 @@ fn set_and_clear_refuse_what_they_do_not_take() {
         parse([OsString::from("clear"), OsString::from("--output"), bad]),
         Err(Error::Unexpected { .. })
     ));
+}
+
+#[test]
+fn daemon_takes_a_profile_and_no_restore() {
+    use crate::state::Profile;
+    let options = |profile: &str, restore: bool| {
+        Ok(Command::Daemon(DaemonOptions {
+            profile: Profile::parse(profile).unwrap(),
+            restore,
+        }))
+    };
+    assert_eq!(args(&["daemon"]), options("default", true));
+    assert_eq!(
+        args(&["daemon", "--profile", "scoot"]),
+        options("scoot", true)
+    );
+    assert_eq!(args(&["daemon", "--profile=scoot"]), options("scoot", true));
+    assert_eq!(args(&["daemon", "--no-restore"]), options("default", false));
+    assert_eq!(
+        args(&["daemon", "--no-restore", "--profile", "sway"]),
+        options("sway", false)
+    );
+    assert_eq!(
+        args(&["daemon", "--profile=a", "--no-restore"]),
+        options("a", false)
+    );
+    // `--help` first asks for help; later it is just unexpected.
+    assert_eq!(
+        args(&["daemon", "--help"]),
+        Ok(Command::Help(Topic::Daemon))
+    );
+    assert!(matches!(
+        args(&["daemon", "--no-restore", "--help"]),
+        Err(Error::Unexpected { .. })
+    ));
+}
+
+#[test]
+fn daemon_flags_are_checked() {
+    use crate::state::ProfileError;
+    assert_eq!(
+        args(&["daemon", "--profile"]),
+        Err(Error::MissingValue {
+            command: "daemon",
+            flag: "--profile"
+        })
+    );
+    for (name, error) in [
+        ("", ProfileError::Empty),
+        ("a/b", ProfileError::Byte('/')),
+        ("..", ProfileError::Dots),
+        (".x", ProfileError::Dots),
+    ] {
+        assert_eq!(
+            args(&["daemon", "--profile", name]),
+            Err(Error::Profile(error.clone())),
+            "{name:?}"
+        );
+        assert_eq!(
+            args(&["daemon", &format!("--profile={name}")]),
+            Err(Error::Profile(error)),
+            "{name:?}"
+        );
+    }
+    assert_eq!(
+        args(&["daemon", "--profile", "a", "--profile", "b"]),
+        Err(Error::Repeated {
+            command: "daemon",
+            flag: "--profile"
+        })
+    );
+    assert_eq!(
+        args(&["daemon", "--no-restore", "--no-restore"]),
+        Err(Error::Repeated {
+            command: "daemon",
+            flag: "--no-restore"
+        })
+    );
+    for extra in ["--output", "restore", "--profiles=x", "-p"] {
+        assert_eq!(
+            args(&["daemon", extra]),
+            Err(Error::Unexpected {
+                command: "daemon",
+                argument: extra.to_owned()
+            })
+        );
+    }
+    let message = args(&["daemon", "--profile", "a/b"])
+        .unwrap_err()
+        .to_string();
+    assert!(message.starts_with("`--profile`: "), "{message}");
+}
+
+#[test]
+fn a_non_utf8_daemon_argument_is_an_error_not_a_panic() {
+    let got = parse(vec![
+        OsString::from("daemon"),
+        OsString::from("--profile"),
+        OsString::from_vec(vec![b'a', 0xff]),
+    ]);
+    assert!(matches!(got, Err(Error::Unexpected { .. })), "{got:?}");
 }

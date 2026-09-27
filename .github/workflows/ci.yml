@@ -635,7 +635,8 @@ jobs:
   # by real pixels on both (tests/color.rs, tests/image.rs,
   # tests/scale.rs at fractional scales, and tests/share.rs for outputs
   # of one size sharing an image's pixels: scoot's own screenshots, and
-  # sway's through a wlr-screencopy client in the test).
+  # sway's through a wlr-screencopy client in the test), and the last
+  # wallpaper restored across a daemon restart (tests/restore.rs).
   # Runs when either side changes, since each can break the other's
   # end-to-end run.
   # `SCOOTBG_REQUIRE_SCOOT` and `SCOOTBG_REQUIRE_SWAY` turn the tests'
@@ -698,5 +699,5 @@ jobs:
           SCOOTBG_REQUIRE_SCOOT: "1"
           SCOOTBG_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --no-fail-fast
-          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share
+          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --no-fail-fast
+          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore

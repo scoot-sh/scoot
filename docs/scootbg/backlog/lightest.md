@@ -108,5 +108,6 @@ all outputs of one size showing one image, so a daemon with a buffer per
 output holds it twice (scootbg did until ticket 8: 69.2 MB RSS); with a
 color 3.6–3.7 MB / 2.0–2.1 MB. **Startup** 1.8–2.5 ms to the first
 answer, 3.0–4.1 ms to a color on screen; an image `set` at start-up
-decodes twice (642–720 ms on 4K), which
-[restore-state.md](restore-state.md) is to fix and measure again.
+decoded twice (642–720 ms on 4K) until
+[ticket 9](resolved/restore-state-done.md#measurements): once now,
+450–491 ms, and 443–477 ms to a restored 4K JPEG on screen.

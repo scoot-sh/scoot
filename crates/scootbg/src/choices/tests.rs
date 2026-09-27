@@ -132,3 +132,23 @@ fn an_older_request_landing_late_never_overrides_a_newer_one() {
     assert_eq!(choices.for_output(Some("DP-2")).cloned(), image(7));
     assert_eq!(choices.named_len(), 2);
 }
+
+/// What the state file writes: the every-output choice once one was made
+/// (a clear is one), and the named ones oldest first.
+#[test]
+fn every_and_named_list_what_was_chosen() {
+    use crate::color::Color;
+    use crate::wallpaper::Wallpaper;
+    let red = Some(Wallpaper::Color(Color { r: 255, g: 0, b: 0 }));
+    let mut choices = Choices::default();
+    assert!(choices.every().is_none(), "nothing chosen yet");
+    assert_eq!(choices.named().count(), 0);
+    choices.set(Some("B"), red.clone(), 1);
+    choices.set(Some("A"), None, 2);
+    assert!(choices.every().is_none());
+    let names: Vec<_> = choices.named().map(|(n, c)| (n, c.is_some())).collect();
+    assert_eq!(names, [("B", true), ("A", false)]);
+    choices.set(None, None, 3);
+    assert_eq!(choices.every(), Some(&None), "a clear of every output");
+    assert_eq!(choices.named().count(), 0);
+}

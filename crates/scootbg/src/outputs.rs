@@ -306,6 +306,10 @@ pub struct Output {
     /// after it was made: a waiting reply stops waiting for it (see
     /// [`Output::progress`]). Cleared with a new surface.
     late: bool,
+    /// The serial of the `configure` whose round trip has come back
+    /// (`RoundTrip::Configured`): the surface's size and scale are settled
+    /// for it. See [`Output::coming`].
+    settled_serial: Option<u32>,
 }
 
 impl Output {
@@ -464,6 +468,7 @@ impl Output {
         self.surface = Surface::Pending;
         self.creation = self.creation.wrapping_add(1);
         self.late = false;
+        self.settled_serial = None;
     }
 
     /// Which surface this output is on ([`Output::unanswered`]).
@@ -506,6 +511,36 @@ impl Output {
         };
         self.failed = false;
         Effect::Ack(serial)
+    }
+
+    /// The round trip sent after acking the `configure` with `serial` came
+    /// back, and that is still the surface's latest: what it is drawn at
+    /// is settled.
+    pub fn configure_settled(&mut self, serial: u32) {
+        if self.configured_serial() == Some(serial) {
+            self.settled_serial = Some(serial);
+        }
+    }
+
+    /// Whether the compositor is about to tell scootbg what to draw this
+    /// output's surface at, within a round trip it has already been sent:
+    /// the output has not settled, its surface waits for its `configure`
+    /// (not late with it), is being re-created after a `closed`, or was
+    /// configured but that `configure`'s round trip is still out.
+    ///
+    /// An image `set` is not decoded while an output it targets is coming
+    /// (`daemon::images::pump`): decoding then would only validate the
+    /// file, and the `configure` would ask for it again, a second decode
+    /// of the same file (ticket 8 counted two opens). Each of these states
+    /// ends when a round trip already sent comes back, so the wait is
+    /// bounded as a reply's is, with no timer.
+    pub fn coming(&self) -> bool {
+        match &self.surface {
+            Surface::Waiting | Surface::Closed => true,
+            Surface::Pending => !self.late,
+            Surface::Configured { serial, .. } => self.settled_serial != Some(*serial),
+            Surface::GaveUp => false,
+        }
     }
 
     /// The serial of the `configure` the live surface was last given, while
@@ -764,6 +799,7 @@ impl<O> Outputs<O> {
                 preferred: Preferred::default(),
                 creation: 0,
                 late: false,
+                settled_serial: None,
             },
             objects: objects(id),
         });

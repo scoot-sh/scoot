@@ -538,8 +538,7 @@ fn a_superseded_image_request_waits_like_a_color() {
         },
         serial: 1,
     });
-    jobs.trial(image, Trial { conn, output: None }, vec![])
-        .unwrap();
+    jobs.trial(image, Trial { conn, output: None }).unwrap();
     // A color for every output, generation 2, recorded; its output (stamp
     // 2) is still drawing.
     let mut choices = Choices::default();

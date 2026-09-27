@@ -43,7 +43,7 @@ use super::wayland::{Globals, State};
 use super::worker::{Done, JobError, Rendered, Worker};
 use crate::choices::Choices;
 use crate::control::ConnId;
-use crate::jobs::{Jobs, Target};
+use crate::jobs::{Jobs, Target, Trial};
 use crate::outputs::{Entry, Outputs};
 use crate::print::warn;
 use crate::wallpaper::{Image, Wallpaper};
@@ -90,13 +90,16 @@ pub fn pump(state: &mut State, qh: &QueueHandle<State>) -> bool {
         images,
         ..
     } = &mut *state;
-    let work = images.jobs.next(|image, target| {
-        outputs.iter().any(|entry| {
-            entry.output.id() == target.output
-                && wants(choices, entry, image)
-                && image_dims(&entry.output) == Some(target.dims)
-        })
-    });
+    let work = images.jobs.next(
+        |image, target| {
+            outputs.iter().any(|entry| {
+                entry.output.id() == target.output
+                    && wants(choices, entry, image)
+                    && image_dims(&entry.output) == Some(target.dims)
+            })
+        },
+        |trial| trial_targets(outputs, trial),
+    );
     let Some((image, targets)) = work else {
         return false;
     };
@@ -107,6 +110,36 @@ pub fn pump(state: &mut State, qh: &QueueHandle<State>) -> bool {
             true
         }
     }
+}
+
+/// What a trial draws for when it starts: every output it targets that
+/// has a size to draw at. `None` (hold it back) while one of them is about
+/// to be configured (`Output::coming`), so a `set` sent before the outputs
+/// are configured decodes once, for them, rather than once to validate the
+/// file and again for their `configure` (`crate::jobs`). The check
+/// allocates nothing: it is made on every loop turn a trial waits.
+fn trial_targets(outputs: &Outputs<Objects>, trial: &Trial<ConnId>) -> Option<Vec<Target>> {
+    let targeted = |entry: &&Entry<Objects>| {
+        trial
+            .output
+            .as_deref()
+            .is_none_or(|name| entry.output.info().name.as_deref() == Some(name))
+    };
+    if outputs.iter().filter(targeted).any(|e| e.output.coming()) {
+        return None;
+    }
+    Some(
+        outputs
+            .iter()
+            .filter(targeted)
+            .filter_map(|entry| {
+                Some(Target {
+                    output: entry.output.id(),
+                    dims: image_dims(&entry.output)?,
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Serves each waiting render from pixels an output already has for that
@@ -159,6 +192,7 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
         waiters,
         images,
         ready,
+        saved,
         ..
     } = &mut *state;
     let Some(job) = images.jobs.finished() else {
@@ -207,6 +241,9 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
     let generation = image.serial;
     let output = trial.output.as_deref();
     let choice = Some(Wallpaper::Image(Arc::clone(&image)));
+    // Saved by the same newest-wins rule the choices follow, so it is
+    // saved exactly when it is recorded below.
+    saved.record(output, &choice, generation);
     if !choices.set(output, choice, generation) {
         // Superseded while it decoded: what is shown is newer, and
         // `rendered` is dropped. Answered, as a superseded color is, once

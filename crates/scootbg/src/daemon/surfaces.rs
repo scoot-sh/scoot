@@ -528,6 +528,9 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                 if entry.output.configured_serial() != Some(serial) {
                     return;
                 }
+                // An image `set` held back for this output may start now
+                // (`Output::coming`); the loop's next `pump` sees it.
+                entry.output.configure_settled(serial);
                 // Draw, or redraw at the new size. A mapped surface commits
                 // after the ack even when nothing about it changed, so the
                 // ack takes effect; an unmapped one has nothing to commit.

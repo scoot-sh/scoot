@@ -15,9 +15,10 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > or `scootbg set PATH` (PNG, JPEG, WebP) with a fit mode, on every output
 > or one (`--output NAME`), and `scootbg clear`, drawn at each output's
 > real device pixels, fractional scales included; `query` reports what
-> each output shows, and `version` and `kill` work. Not yet: restoring the
-> wallpaper at the next start and scoot's `[wallpaper]` section; they are
-> the next items in [`backlog/`](backlog/README.md). These docs stay here.
+> each output shows, and `version` and `kill` work. **The wallpaper is
+> restored at the next start**, per profile ([below](#restore)). Not yet:
+> scoot's `[wallpaper]` section, the next item in
+> [`backlog/`](backlog/README.md). These docs stay here.
 
 ## What it is for
 
@@ -83,11 +84,12 @@ scootbg set ~/Pictures/city.png --output DP-1 --mode fit --fill '#101014'
 scootbg query                                  # what each output shows, as JSON
 scootbg clear --output DP-1                    # back to the compositor's own background
 scootbg daemon                                 # outside scoot: start it yourself
+scootbg daemon --profile sway                  # ... restoring and saving the `sway` profile
 ```
 
 Every command above works today (`set` also takes `--filter
-lanczos3|catmull-rom|bilinear|nearest`); what does not yet is the
-`[wallpaper]` section, and restoring at login. The root
+lanczos3|catmull-rom|bilinear|nearest`, and `daemon` `--no-restore`); what
+does not yet is the `[wallpaper]` section. The root
 [README](../../README.md#scootbg-early) has the details (exit codes, what
 `set` waits for). One binary: `daemon` runs the Wayland client, every
 other subcommand talks to it over its socket.
@@ -129,7 +131,100 @@ other subcommand talks to it over its socket.
   for it (by connector name, or the "every output" choice), and one unplugged
   frees its buffer (or its share of one: the others keep showing it).
 - **Restore.** The last choice per output is kept in
-  `$XDG_STATE_HOME/scootbg/`, so `scootbg daemon` at login brings it back.
+  `$XDG_STATE_HOME/scootbg/PROFILE`, so `scootbg daemon` at login brings
+  it back. Working ([below](#restore)).
+
+## Restore
+
+Every `set` and `clear` the daemon records is saved, and `scootbg daemon`
+shows it again when it starts.
+
+- **One state file per profile:** `$XDG_STATE_HOME/scootbg/PROFILE`, or
+  `~/.local/state/scootbg/PROFILE` when `XDG_STATE_HOME` is unset, empty
+  or relative (the XDG base directory spec). With neither it nor `HOME`
+  an absolute path there is nowhere to keep state: nothing is restored
+  or saved, and the daemon says so on stderr. `scootbg daemon --profile
+  NAME` picks the profile, `default` when not given. A name is 1 to 64
+  of `A-Z a-z 0-9 . _ -`, not starting with `.` and without `..`, so it
+  is one plain file name; anything else is a usage error (exit 2).
+  Profiles, not displays: scoot binds the first free `wayland-N`, so the
+  socket name shifts with start order and is no session identity.
+  Sessions with different profiles never restore each other's wallpaper;
+  two sharing one share it, the last change winning.
+- **What is saved** is the daemon's choices as `set` and `clear` made them:
+  the one for every output, and each one made with `--output NAME`, by
+  connector name, plugged in now or not. A color or a `clear` is saved as
+  soon as the daemon has it, an image once it has decoded (one that
+  cannot be shown changes nothing, so saves nothing). A request superseded
+  by a newer one before it landed saves nothing: the file follows the
+  same newest-wins rule as the screen.
+- **What survives:** a restore itself writes nothing. Choices for outputs
+  not plugged in now, and images that could not be restored, stay saved
+  until a `set` or `clear` replaces them; a `set` for other outputs keeps
+  them. A `set` or `clear` without `--output` replaces every per-output
+  choice, as it does on screen.
+- **Written off the loop, atomically:** a temporary file beside it
+  (`.PROFILE.PID.tmp`), `fsync`, `rename` over the old file, `fsync` of
+  the directory; the file is 0600, a directory it makes 0700. The write
+  runs on a thread started for it, which ends once nothing more waits
+  (an idle daemon has one thread); the loop only builds the text and
+  hands it over (about 26 µs), so a slow disk never stalls it. While a
+  write is under way a newer text replaces any that waits, so a burst of
+  changes is at most two writes, ending with the last. `scootbg kill`
+  waits for a write under way (up to 2 s) before the daemon exits; a
+  signal leaves the old file or the new one, whole, and at worst a
+  temporary file.
+- **Restoring:** the choice for every output first, then each per-output
+  one, before the daemon serves any request (so any request is newer).
+  Each output is drawn when its `configure` comes; an image is decoded
+  once for them. **A saved image that is gone** (checked with one `stat`,
+  not a decode) is skipped with a warning on stderr, and that output shows
+  the compositor's own background; the daemon starts all the same. One
+  that exists but cannot be decoded fails when it is drawn, and says so
+  then. `--no-restore` shows nothing at start; the file is still read, so
+  a `set` then updates it, keeping the rest.
+
+**The file** is a hand-written line format, versioned
+([`dependencies-done.md` §5](backlog/resolved/dependencies-done.md#5-serialization-control-socket-and-state-file)
+chose it over TOML, 180 KB lighter):
+
+```text
+scootbg-state 1
+profile default
+fingerprint 9c1e…
+all color #1e1e2e
+output DP-1 image /home/me/My%20Pictures/hills.jpg fill #000000 lanczos3
+output HDMI-A-1 clear
+```
+
+- The first line is `scootbg-state` and the version. Each other line is a
+  key and its fields, single spaces between. `all` and `output NAME` take
+  `clear`, `color #rrggbb`, or `image PATH MODE FILL FILTER` (a path is
+  absolute). `profile` names the profile the file belongs to (the file
+  name is the authority; a mismatch is a warning). `fingerprint` is
+  reserved for scoot's `[wallpaper]` section
+  ([scoot-integration.md](backlog/scoot-integration.md)): only
+  `apply-config` will write it, and every other save keeps it as read.
+- **Fields are escaped:** `%`, space and every ASCII control byte (newline
+  and tab included) are written `%XX`, so any path or connector name
+  round-trips exactly, `#` and spaces included. Other bytes, UTF-8
+  included, are written as they are.
+- **Read defensively; never fatal.** A malformed line (a field missing or
+  extra, a bad escape, a relative path, an unknown mode or filter), one
+  whose fields are not UTF-8 once unescaped, or an unknown key is skipped
+  with a warning naming its line, and the rest is used. The same key
+  twice: the later line counts, with a warning. More than 256 `output`
+  lines: the rest are skipped. A file over 256 KiB, or whose first line is
+  not `scootbg-state` and a version, restores nothing and is replaced at
+  the next save. **A later version** (a newer scootbg's file) restores
+  nothing and is never written over, so a downgrade cannot destroy what
+  the newer build saved. A file that cannot be read (permissions, not a
+  regular file) restores nothing, and nothing is saved over it that
+  session.
+- **Compatibility:** within version 1 a key may be added only if a reader
+  that skips it (with its warning) loses nothing it needs; anything else
+  bumps the version. `profile` and `fingerprint` are read and kept from
+  version 1 on, so the scoot integration writes them with no bump.
 
 ## The control protocol
 
@@ -204,9 +299,13 @@ anything wrong                                                -> {"type":"error"
   or `null`. Every key of an entry is always present; keys may be added
   within protocol 1, none removed or changed.
 - A choice for every output is kept for outputs plugged in later; a choice
-  for one output is kept by its name, across unplugging it. Choices are
-  not saved across a daemon restart yet
-  ([restore-state.md](backlog/restore-state.md)).
+  for one output is kept by its name, across unplugging it, and across a
+  daemon restart ([Restore](#restore)).
+- **An image `set` sent before its outputs are configured** (as the
+  daemon starts) waits to be decoded until none of the outputs it targets
+  is about to be configured, bounded by a round trip the daemon has
+  already sent, so the file is decoded once, for them (it used to be
+  decoded once to check it and again for the `configure`).
 
 ## The resource budget
 
@@ -226,7 +325,9 @@ The image is a 6000×4000 JPEG, `fill`.
 | **Peak while changing** the image on 2× 4K | 120.4–120.7 MB (152.9–153.0 MB before ticket 8); 87.9–88.1 MB for a first image |
 | **Startup**, `scootbg daemon` to its first answer | 1.8–2.5 ms |
 | to a color on screen (a `set` sent at once, answered after the commit and a round trip) | 3.0–4.1 ms |
-| to the image on one 4K output, likewise | 642–720 ms, two decodes; a `set` once the output is configured takes 421–488 ms, one. Making that one decode, and restoring at login, is [the next ticket](backlog/restore-state.md) |
+| to the image on one 4K output, likewise | 450–491 ms, one decode (705–718 ms before ticket 9, two decodes; a `set` once the output is configured takes 437–468 ms) |
+| **to a restored image** on one 4K output (the state file names the JPEG) | 443–477 ms to the first `query` that reports it shown: one decode, [restore-state-done.md](backlog/resolved/restore-state-done.md#measurements) |
+| Saving a choice | about 26 µs on the loop (build the text, hand it over); the atomic write on a thread of its own, median 334 µs, worst 54.5 ms of 200 on ext4 |
 | File descriptors | 8 whatever is shown: a buffer's memfd is closed once the compositor has it |
 
 ## Measured so far

@@ -12,6 +12,7 @@ use std::fmt;
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
 use crate::protocol::{DEFAULT_FILL, ImageRequest, PROTOCOL_VERSION, Request, Show};
+use crate::state::{Profile, ProfileError};
 
 #[cfg(test)]
 mod tests;
@@ -19,8 +20,8 @@ mod tests;
 pub const USAGE: &str = "\
 scootbg -- wallpaper daemon for Wayland
 
-Early days: colors and images (PNG, JPEG, WebP) work; restoring them at
-the next start comes later.
+Early days: colors and images (PNG, JPEG, WebP) work, and the daemon
+shows the last ones again when it next starts.
 
 USAGE:
     scootbg COMMAND
@@ -45,12 +46,30 @@ pub const DAEMON_HELP: &str = "\
 scootbg daemon -- run the wallpaper daemon
 
 USAGE:
-    scootbg daemon
+    scootbg daemon [--profile NAME] [--no-restore]
 
 Connects to the compositor named by $WAYLAND_DISPLAY, which must support
 wlr-layer-shell, and serves requests on $XDG_RUNTIME_DIR/scootbg-NAME.sock.
 Each output gets one background-layer surface, kept across outputs coming
 and going; with no outputs at all the daemon waits for one.
+
+Every `set` and `clear` is saved, per output, in the profile's state file,
+$XDG_STATE_HOME/scootbg/PROFILE (~/.local/state/scootbg/PROFILE when
+XDG_STATE_HOME is unset), and the daemon shows it again when it next
+starts. A saved image that is gone (moved, deleted) is skipped with a
+warning on stderr, and that output shows the compositor's own background; the
+daemon starts all the same, and the entry stays saved until a `set` or
+`clear` replaces it. Choices for outputs that are not plugged in stay
+saved too.
+
+    --profile NAME  which state to restore and save (default: default).
+                    Sessions with different profiles never restore each
+                    other's wallpaper; two sessions sharing one share it,
+                    the last change winning. NAME is 1 to 64 of A-Z, a-z,
+                    0-9, '.', '_' and '-', not starting with '.' and
+                    without '..'
+    --no-restore    start with nothing shown; the state is still read, and
+                    a `set` or `clear` then updates it as usual
 
 Runs until `scootbg kill` (exit status 0) or until the compositor goes
 away (exit status 1); either way the socket is removed. SIGTERM, SIGINT and
@@ -116,6 +135,9 @@ choice before this image is shown, this one changes nothing (it may never
 be decoded) and returns with status 0 once the newer one is shown, as a
 replaced color does. Prints nothing on success.
 
+The choice is saved and shown again when the daemon next starts (see
+`scootbg daemon --help`): a color at once, an image once it has decoded.
+
 Exit status: 0 once shown; 1 when no daemon is running, the output is
 unknown, the image cannot be shown, or drawing failed (the daemon's stderr
 says why); 2 for a usage error, such as a malformed color or an unknown
@@ -136,7 +158,8 @@ plugged in later shows nothing until the next `scootbg set`, unless a
 color was set for it by name.
 
 Returns once the compositor has processed it, like `set`, and prints
-nothing on success. Exit status as for `set`.
+nothing on success. Saved like a `set`, so the daemon starts with it
+cleared. Exit status as for `set`.
 ";
 
 pub const QUERY_HELP: &str = "\
@@ -210,9 +233,28 @@ pub enum Command {
     Help(Topic),
     /// `--version`: this binary, answered locally.
     Version,
-    Daemon,
+    Daemon(DaemonOptions),
     /// A request for the running daemon.
     Client(Request<'static>),
+}
+
+/// `scootbg daemon`'s flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonOptions {
+    /// Whose state to restore and save (`crate::state`).
+    pub profile: Profile,
+    /// `--no-restore` makes it false.
+    pub restore: bool,
+}
+
+impl Default for DaemonOptions {
+    /// Plain `scootbg daemon`: the default profile, restored.
+    fn default() -> Self {
+        Self {
+            profile: Profile::default(),
+            restore: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -254,6 +296,8 @@ pub enum Error {
         command: &'static str,
         flag: &'static str,
     },
+    /// `--profile` with a name that cannot be one.
+    Profile(ProfileError),
 }
 
 impl fmt::Display for Error {
@@ -302,6 +346,7 @@ impl fmt::Display for Error {
             Self::Repeated { command, flag } => {
                 write!(f, "`{flag}` given twice (try `scootbg {command} --help`)")
             }
+            Self::Profile(error) => write!(f, "`{PROFILE}`: {error}"),
         }
     }
 }
@@ -335,7 +380,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
     let (command, topic): (Command, Topic) = match first.as_str() {
         "--help" | "-h" | "help" => return help(args),
         "--version" | "-V" => (Command::Version, Topic::Main),
-        "daemon" => (Command::Daemon, Topic::Daemon),
+        "daemon" => return daemon(args),
         "set" => return change("set", Topic::Set, args),
         "clear" => return change("clear", Topic::Clear, args),
         "query" => (Command::Client(Request::Query), Topic::Query),
@@ -345,7 +390,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
     };
     let name = match &command {
         Command::Version => "--version",
-        Command::Daemon => "daemon",
+        Command::Daemon(_) => "daemon",
         Command::Client(request) => request.name(),
         Command::Help(_) => "help",
     };
@@ -387,6 +432,67 @@ fn help<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Comma
             argument: extra.unwrap_or_else(|lossy| lossy),
         }),
     }
+}
+
+const PROFILE: &str = "--profile";
+const NO_RESTORE: &str = "--no-restore";
+
+/// `daemon [--profile NAME] [--no-restore]`, flags in any order, `--profile`
+/// also as `--profile=NAME`; `--help` alone asks for help.
+fn daemon<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Command, Error> {
+    const COMMAND: &str = "daemon";
+    let unexpected = |argument: String| Error::Unexpected {
+        command: COMMAND,
+        argument,
+    };
+    let mut profile: Option<String> = None;
+    let mut no_restore = false;
+    let mut first = true;
+    while let Some(arg) = args.next() {
+        let arg = arg.map_err(unexpected)?;
+        if is_help(&arg) && first {
+            return match args.next() {
+                None => Ok(Command::Help(Topic::Daemon)),
+                Some(extra) => Err(unexpected(extra.unwrap_or_else(|lossy| lossy))),
+            };
+        }
+        first = false;
+        if arg == NO_RESTORE {
+            if std::mem::replace(&mut no_restore, true) {
+                return Err(Error::Repeated {
+                    command: COMMAND,
+                    flag: NO_RESTORE,
+                });
+            }
+            continue;
+        }
+        let value = if arg == PROFILE {
+            args.next()
+                .ok_or(Error::MissingValue {
+                    command: COMMAND,
+                    flag: PROFILE,
+                })?
+                .map_err(unexpected)?
+        } else if let Some(value) = arg.strip_prefix(PROFILE).and_then(|v| v.strip_prefix('=')) {
+            value.to_owned()
+        } else {
+            return Err(unexpected(arg));
+        };
+        if profile.replace(value).is_some() {
+            return Err(Error::Repeated {
+                command: COMMAND,
+                flag: PROFILE,
+            });
+        }
+    }
+    let profile = match profile {
+        None => Profile::default(),
+        Some(name) => Profile::parse(&name).map_err(Error::Profile)?,
+    };
+    Ok(Command::Daemon(DaemonOptions {
+        profile,
+        restore: !no_restore,
+    }))
 }
 
 const OUTPUT: &str = "--output";
