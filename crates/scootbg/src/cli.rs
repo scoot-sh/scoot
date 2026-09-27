@@ -2,8 +2,9 @@
 //! +299 KB for `clap`). One binary: `daemon` runs the Wayland client, and
 //! every other command is a client of its control socket.
 //!
-//! `apply-config` arrives with the scoot integration (scoot-integration.md);
-//! it is neither parsed nor advertised until it works.
+//! `apply-config` is scoot's one command (scoot-integration.md); its
+//! `--serve` flag is internal, the detached daemon it starts
+//! (`crate::apply`), and is not advertised.
 
 use std::borrow::Cow;
 use std::ffi::OsString;
@@ -12,6 +13,7 @@ use std::fmt;
 use crate::color::{Color, ColorError};
 use crate::image::{Filter, Mode};
 use crate::protocol::{DEFAULT_FILL, ImageRequest, PROTOCOL_VERSION, Request, Show};
+use crate::section::{Section, SectionError};
 use crate::state::{Profile, ProfileError};
 
 #[cfg(test)]
@@ -36,6 +38,9 @@ COMMANDS:
     query      print what each output shows, as JSON
     version    print the running daemon's version and protocol, as JSON
     kill       stop the running daemon
+    apply-config
+               apply scoot's [wallpaper] section, starting the daemon if
+               none runs (what scoot runs; see `scootbg apply-config --help`)
 
 The daemon listens on $XDG_RUNTIME_DIR/scootbg-NAME.sock, where NAME is the
 last component of $WAYLAND_DISPLAY (wayland-0 when unset); every other
@@ -172,7 +177,7 @@ USAGE:
     scootbg query
 
 Prints the daemon's reply, one line of JSON with one entry per output:
-{\"type\":\"outputs\",\"outputs\":[...],\"saving\":true}
+{\"type\":\"outputs\",\"outputs\":[...],\"saving\":true,\"profile\":\"default\"}
 Each entry has the output's name, description, mode, scale, transform and
 logical size, its surface's state: waiting, pending, configured (with its
 size), closed or gave-up (until the output is replugged), whether drawing
@@ -180,7 +185,9 @@ what it should show failed (draw_failed; the daemon's stderr says why),
 and what it shows: {\"color\":\"#rrggbb\"}, {\"image\":\"/path\",
 \"mode\":\"fill\",\"fill\":\"#rrggbb\",\"filter\":\"lanczos3\"}, or null
 for nothing. After the list, \"saving\" says whether changes are saved for
-the next start (see `scootbg daemon --help`).
+the next start (see `scootbg daemon --help`), and \"profile\" whose state
+is restored and saved: the daemon's --profile, or the last one an
+`apply-config` made it adopt.
 ";
 
 pub const VERSION_HELP: &str = "\
@@ -208,6 +215,63 @@ running\" when none answers (none started, or it died and left its socket
 file behind); 1 for any other error.
 ";
 
+pub const APPLY_CONFIG_HELP: &str = "\
+scootbg apply-config -- apply scoot's [wallpaper] section
+
+USAGE:
+    scootbg apply-config [--profile NAME] JSON
+
+What scoot runs at start-up and on every reload while its config has a
+[wallpaper] section; you rarely need it yourself. JSON is the section, as
+one object ('{}' when the section is gone):
+
+    {\"image\": \"/abs/path.jpg\", \"mode\": \"fill\",
+     \"output\": {\"DP-2\": {\"color\": \"#101014\"}},
+     \"command\": \"scootbg\"}
+
+At the top, the wallpaper for every output: \"image\" (an absolute path)
+or \"color\" (\"#rrggbb\"), never both, and for an image \"mode\", \"fill\"
+and \"filter\", as `scootbg set` takes them; neither is nothing (the
+compositor's own background). \"output\" holds per-output tables by
+connector name, each the same keys; an empty one means nothing there. Each
+table stands alone: an output's image does not take the top level's mode.
+\"command\" is scoot's, and ignored. Anything else is refused: an unknown
+key, a key given twice, null, a relative path, a malformed color, an
+unknown mode or filter, more than 256 outputs, over 63 KiB.
+
+Whichever you changed last wins: the section is applied only if it changed
+since the last apply-config for this profile (a fingerprint of it is kept
+in the profile's state, see `scootbg daemon --help`). Unchanged, what
+shows stays, so a `scootbg set` made since survives restarts and reloads
+until you next change the section itself. \"command\" is not part of the
+fingerprint.
+
+When a daemon answers, it is sent the section and adopts --profile NAME
+(default: default): from then on it restores and saves that profile's
+state, whatever profile it started with. When none does, apply-config
+starts one, detached (its own session, its stderr this command's), with
+the section as its starting point, then sends it the section as above.
+Two started at once settle it by the daemon's lock: one daemon runs, and
+both sections reach it. With no daemon and an empty section ('{}', or only
+\"command\"), it starts none: it records the clear in the profile's state
+file, so a later `scootbg daemon --profile NAME` shows nothing.
+
+A daemon from another scootbg build is reported on stderr: a different
+version is a warning (the section is still sent); a different protocol, or
+a daemon too old to know apply-config, is an error. A caller that reads
+this command's stderr to its end waits for a daemon it started too, which
+writes there: send stderr to a file or a log, not a pipe read to the end.
+
+Returns once every output shows what it should and the compositor has
+processed it, as `set` does; prints nothing on success.
+
+Exit status: 0 applied, or unchanged, and shown; 1 no daemon could be
+started or reached within 5 s, no reply within 30 s, a daemon from another
+protocol or too old, an image in the section that is not a file (the rest
+is applied), drawing failed, or the state file could not be written; 2
+for a usage error, the section refused above included.
+";
+
 /// Which help text to print.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Topic {
@@ -218,6 +282,7 @@ pub enum Topic {
     Query,
     Version,
     Kill,
+    ApplyConfig,
 }
 
 impl Topic {
@@ -230,6 +295,7 @@ impl Topic {
             Self::Query => QUERY_HELP,
             Self::Version => VERSION_HELP,
             Self::Kill => KILL_HELP,
+            Self::ApplyConfig => APPLY_CONFIG_HELP,
         }
     }
 }
@@ -242,6 +308,18 @@ pub enum Command {
     Daemon(DaemonOptions),
     /// A request for the running daemon.
     Client(Request<'static>),
+    /// `apply-config` (`crate::apply`).
+    ApplyConfig(ApplyOptions),
+}
+
+/// `scootbg apply-config`'s arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplyOptions {
+    pub profile: Profile,
+    pub section: Section,
+    /// `--serve` (internal): this process is the detached daemon an
+    /// `apply-config` started.
+    pub serve: bool,
 }
 
 /// `scootbg daemon`'s flags.
@@ -304,6 +382,12 @@ pub enum Error {
     },
     /// `--profile` with a name that cannot be one.
     Profile(ProfileError),
+    /// `apply-config` without its JSON.
+    MissingSection,
+    /// `apply-config` with JSON that is not UTF-8.
+    SectionNotUtf8,
+    /// `apply-config` with a section that is refused.
+    Section(SectionError),
 }
 
 impl fmt::Display for Error {
@@ -353,6 +437,16 @@ impl fmt::Display for Error {
                 write!(f, "`{flag}` given twice (try `scootbg {command} --help`)")
             }
             Self::Profile(error) => write!(f, "`{PROFILE}`: {error}"),
+            Self::MissingSection => write!(
+                f,
+                "`apply-config` needs the [wallpaper] section as JSON, '{{}}' for none \
+                 (try `scootbg apply-config --help`)"
+            ),
+            Self::SectionNotUtf8 => write!(f, "`apply-config`: the JSON is not valid UTF-8"),
+            Self::Section(error) => write!(
+                f,
+                "apply-config: {error} (try `scootbg apply-config --help`)"
+            ),
         }
     }
 }
@@ -392,6 +486,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
         "query" => (Command::Client(Request::Query), Topic::Query),
         "version" => (Command::Client(Request::Version), Topic::Version),
         "kill" => (Command::Client(Request::Kill), Topic::Kill),
+        "apply-config" => return apply_config(args),
         _ => return Err(Error::Unknown(first)),
     };
     let name = match &command {
@@ -399,6 +494,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
         Command::Daemon(_) => "daemon",
         Command::Client(request) => request.name(),
         Command::Help(_) => "help",
+        Command::ApplyConfig(_) => "apply-config",
     };
     match args.next() {
         None => Ok(command),
@@ -427,6 +523,7 @@ fn help<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Comma
             "query" => Topic::Query,
             "version" => Topic::Version,
             "kill" => Topic::Kill,
+            "apply-config" => Topic::ApplyConfig,
             _ => return Err(Error::Unknown(name)),
         },
         Some(Err(lossy)) => return Err(Error::Unknown(lossy)),
@@ -498,6 +595,82 @@ fn daemon<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Com
     Ok(Command::Daemon(DaemonOptions {
         profile,
         restore: !no_restore,
+    }))
+}
+
+/// `apply-config`'s internal flag: this process is the detached daemon
+/// (`crate::apply`).
+pub const SERVE: &str = "--serve";
+
+/// `apply-config [--profile NAME] JSON`, flags in any order, `--profile`
+/// also as `--profile=NAME`; `--help` alone asks for help. `--serve` is
+/// internal (see [`ApplyOptions::serve`]).
+fn apply_config<I: Iterator<Item = Result<String, String>>>(mut args: I) -> Result<Command, Error> {
+    const COMMAND: &str = "apply-config";
+    let unexpected = |argument: String| Error::Unexpected {
+        command: COMMAND,
+        argument,
+    };
+    let mut profile: Option<String> = None;
+    let mut json: Option<String> = None;
+    let mut serve = false;
+    let mut first = true;
+    while let Some(arg) = args.next() {
+        let arg = match arg {
+            Ok(arg) => arg,
+            Err(lossy) if json.is_none() && !lossy.starts_with('-') => {
+                return Err(Error::SectionNotUtf8);
+            }
+            Err(lossy) => return Err(unexpected(lossy)),
+        };
+        if is_help(&arg) && first {
+            return match args.next() {
+                None => Ok(Command::Help(Topic::ApplyConfig)),
+                Some(extra) => Err(unexpected(extra.unwrap_or_else(|lossy| lossy))),
+            };
+        }
+        first = false;
+        if arg == SERVE {
+            if std::mem::replace(&mut serve, true) {
+                return Err(Error::Repeated {
+                    command: COMMAND,
+                    flag: SERVE,
+                });
+            }
+            continue;
+        }
+        let value = if arg == PROFILE {
+            args.next()
+                .ok_or(Error::MissingValue {
+                    command: COMMAND,
+                    flag: PROFILE,
+                })?
+                .map_err(unexpected)?
+        } else if let Some(value) = arg.strip_prefix(PROFILE).and_then(|v| v.strip_prefix('=')) {
+            value.to_owned()
+        } else if json.is_none() && !arg.starts_with('-') {
+            json = Some(arg);
+            continue;
+        } else {
+            return Err(unexpected(arg));
+        };
+        if profile.replace(value).is_some() {
+            return Err(Error::Repeated {
+                command: COMMAND,
+                flag: PROFILE,
+            });
+        }
+    }
+    let profile = match profile {
+        None => Profile::default(),
+        Some(name) => Profile::parse(&name).map_err(Error::Profile)?,
+    };
+    let json = json.ok_or(Error::MissingSection)?;
+    let section = Section::parse(json.as_bytes()).map_err(Error::Section)?;
+    Ok(Command::ApplyConfig(ApplyOptions {
+        profile,
+        section,
+        serve,
     }))
 }
 

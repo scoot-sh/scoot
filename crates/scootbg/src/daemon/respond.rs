@@ -7,6 +7,8 @@ use crate::outputs::{Outputs, Size};
 use crate::protocol::{
     self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, Show, Shows, SurfaceEntry,
 };
+use crate::section::Section;
+use crate::state::Profile;
 use crate::waiters::Outcome;
 
 /// What the handler needs from the daemon's state: the outputs, for
@@ -16,6 +18,20 @@ pub trait Changes {
 
     /// Whether changes are saved for the next start (`query`'s `saving`).
     fn saving(&self) -> bool;
+
+    /// The profile restored and saved (`query`'s `profile`).
+    fn profile(&self) -> &str;
+
+    /// `apply-config`: adopts `profile` and applies `section` if it changed
+    /// since it was last applied (`daemon::config`), registering `conn` to
+    /// be answered once every output shows what it should. `Err` is the
+    /// reply, at once: what could not be applied (the rest was).
+    fn apply_config(
+        &mut self,
+        conn: ConnId,
+        profile: Profile,
+        section: &Section,
+    ) -> Result<(), String>;
 
     /// Makes every output (`output` is `None`), or the outputs named
     /// `output`, show `show` (nothing when `None`), and registers `conn` to
@@ -110,6 +126,7 @@ impl Handler for Responder<'_> {
                     &Reply::Outputs {
                         outputs: self.wallpaper.outputs(),
                         saving: self.wallpaper.saving(),
+                        profile: self.wallpaper.profile(),
                     },
                 );
                 return Answer::Now;
@@ -131,6 +148,15 @@ impl Handler for Responder<'_> {
             }
             Ok(Request::Set { show, output }) => (output, Some(show)),
             Ok(Request::Clear { output }) => (output, None),
+            Ok(Request::ApplyConfig { profile, section }) => {
+                return match self.wallpaper.apply_config(conn, profile, &section) {
+                    Ok(()) => Answer::Later,
+                    Err(message) => {
+                        protocol::write_reply(out, &Reply::Error { message: &message });
+                        Answer::Now
+                    }
+                };
+            }
             Err(error) => {
                 protocol::write_reply(out, &Reply::Error { message: &error });
                 return Answer::Now;

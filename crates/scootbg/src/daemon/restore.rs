@@ -121,6 +121,23 @@ pub fn load(profile: Profile) -> (Saved, Record) {
 /// first, then each named one, so a named choice stays over the one for
 /// every output, as it did when it was made.
 pub fn apply(state: &mut State, record: Record, show: bool) {
+    put(state, record, show, Origin::StateFile);
+}
+
+/// Where the choices [`put`] puts come from, for its messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// The state file, at start-up or on adopting a profile.
+    StateFile,
+    /// A `[wallpaper]` section, through `apply-config`.
+    Config,
+}
+
+/// [`apply`], from either origin. Returns what could not be shown (an image
+/// that is not a regular file now), one line each, also said on stderr;
+/// each stays saved all the same.
+pub fn put(state: &mut State, record: Record, show: bool, origin: Origin) -> Vec<String> {
+    let mut problems = Vec::new();
     let mut put = |output: Option<&str>, pick: Pick| {
         let generation = state.waiters.next_generation();
         let choice: Choice = match pick {
@@ -138,13 +155,18 @@ pub fn apply(state: &mut State, record: Record, show: bool) {
         }
         if let Some(Wallpaper::Image(image)) = &choice {
             if let Err(why) = present(&image.path) {
-                let target = Target(output);
+                let problem = format!("{:?} for {}: {why}", image.path, Target(output));
+                let what = match origin {
+                    Origin::StateFile => "cannot restore",
+                    Origin::Config => "cannot show, from the [wallpaper] section,",
+                };
                 warn(format_args!(
-                    "scootbg: cannot restore {:?} for {target}: {why}; showing the \
-                     compositor's own background there (it stays saved until the next \
-                     `scootbg set` or `clear` for it)",
-                    image.path
+                    "scootbg: {what} {problem}; showing the compositor's own background \
+                     there (it stays saved until the next `scootbg set` or `clear` for it)"
                 ));
+                problems.push(problem);
+                // Nothing older shows there instead.
+                state.choices.set(output, None, generation);
                 return;
             }
         }
@@ -156,6 +178,7 @@ pub fn apply(state: &mut State, record: Record, show: bool) {
     for (name, pick) in record.named {
         put(Some(&name), pick);
     }
+    problems
 }
 
 /// Whether `path` is a regular file now (following links), and if not,

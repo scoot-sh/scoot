@@ -155,6 +155,18 @@ fn answers(socket: &Path) -> Result<bool, ClaimError> {
     }
 }
 
+/// This display's lock, if no daemon holds it (`None` if one does): held,
+/// no daemon can start for the display until it is dropped. `apply-config`
+/// holds it while it writes a profile's state with no daemon running, so
+/// no daemon starting meanwhile reads the file before the write.
+pub fn lock_if_free(path: &Path) -> Result<Option<File>, ClaimError> {
+    match take_lock(path) {
+        Ok(file) => Ok(Some(file)),
+        Err(ClaimError::AlreadyRunning { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 fn take_lock(path: &Path) -> Result<File, ClaimError> {
     let file = OpenOptions::new()
         .read(true)

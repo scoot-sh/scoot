@@ -163,8 +163,15 @@ pub struct Saved {
     profile: Profile,
     /// Recorded choices, as the file has them.
     pub choices: Choices,
-    /// Kept as read: only `apply-config` (ticket 10) changes it.
+    /// The fingerprint of the last `[wallpaper]` section applied from
+    /// scoot's config (`crate::section`): kept as read, and changed only by
+    /// `apply-config` ([`Saved::applied_config`]).
     fingerprint: Option<String>,
+    /// Requests older than this generation are not this profile's: it was
+    /// adopted after them (`daemon::config`), so an image `set` sent
+    /// before, landing after, is not saved here. 0 for a daemon's first
+    /// profile.
+    floor: u64,
     /// `None`: nowhere to save (no state directory, or a newer
     /// scootbg's file that must not be written over).
     saver: Option<Saver>,
@@ -178,8 +185,33 @@ impl Saved {
             profile,
             choices: Choices::default(),
             fingerprint,
+            floor: 0,
             saver: file.map(Saver::new),
         }
+    }
+
+    /// The profile saved to.
+    pub fn profile(&self) -> &Profile {
+        &self.profile
+    }
+
+    /// The fingerprint of the last section `apply-config` applied, as read
+    /// or as set since.
+    pub fn fingerprint(&self) -> Option<&str> {
+        self.fingerprint.as_deref()
+    }
+
+    /// Adopted at `generation`: nothing older is recorded here.
+    pub fn adopted_at(&mut self, generation: u64) {
+        self.floor = generation;
+    }
+
+    /// `apply-config` applied the section with `fingerprint`, its choices
+    /// already put in [`Saved::choices`]: the fingerprint is recorded and
+    /// the file written, once for the whole section.
+    pub fn applied_config(&mut self, fingerprint: String) {
+        self.fingerprint = Some(fingerprint);
+        self.save();
     }
 
     /// Nothing saved, nowhere to save it: for tests.
@@ -192,9 +224,14 @@ impl Saved {
     /// choice: recorded here too (by the same rules, so newer choices are
     /// kept), and the file written in the background.
     pub fn record(&mut self, output: Option<&str>, choice: &Choice, generation: u64) {
-        if !self.choices.set(output, choice.clone(), generation) {
+        if generation < self.floor || !self.choices.set(output, choice.clone(), generation) {
             return;
         }
+        self.save();
+    }
+
+    /// Writes the file for what is recorded now, in the background.
+    fn save(&mut self) {
         if self.saver.is_none() {
             return;
         }

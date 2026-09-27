@@ -328,8 +328,9 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 `scootbg` is scoot's wallpaper daemon, a separate binary and package that
 works on any compositor with `wlr-layer-shell`. **It is early: it shows a
 solid color or an image (PNG, JPEG, WebP) on every output, or on one, and
-shows it again when the daemon next starts; scoot's `[wallpaper]` config
-section does not exist yet.** What works today:
+shows it again when the daemon next starts; `scootbg apply-config`, the
+command scoot's `[wallpaper]` section will drive, works, but scoot's
+config does not have that section yet.** What works today:
 
 ```sh
 scootbg daemon                        # connect to $WAYLAND_DISPLAY and serve the control socket
@@ -346,6 +347,8 @@ scootbg clear --output DP-2           # ... on one output
 scootbg query                         # each output, its surface and what it shows, one JSON line
 scootbg version                       # the running daemon's version and protocol
 scootbg kill                          # stop it; returns once a new daemon can start
+scootbg apply-config --profile scoot '{"color":"#1e1e2e"}'
+                                      # what scoot will run with its [wallpaper] section (below)
 scootbg --help                        # and `scootbg COMMAND --help`
 ```
 
@@ -446,6 +449,48 @@ commands then say no daemon is running (exit 1), and the next
 `scootbg daemon` replaces the file. Every command exits 2 on a usage
 error (an unknown command or argument, or a bad `--profile` name).
 
+**`scootbg apply-config [--profile NAME] JSON`** is how a config, rather
+than a person, sets the wallpaper: scoot will run it at start-up and on
+every reload with its `[wallpaper]` section as JSON (`{}` once the section
+is gone). The JSON is one object: `image` (an absolute path) or `color`
+(`#rrggbb`), with `mode`/`fill`/`filter` for an image as `set` takes them;
+`output` holding a table of the same keys per connector name (each table
+stands alone: an output's image does not take the top level's `mode`);
+and `command` (scoot's, ignored). Anything else (an unknown key, a key
+given twice, `null`, a relative path, a bad color, mode or filter, over
+256 outputs or 63 KiB) is refused with exit 2, so a typo is never a
+setting silently not applied.
+
+- **Whichever you changed last wins.** The section is applied only if it
+  changed since the last `apply-config` for that profile (a SHA-256
+  fingerprint of it, `command` left out, kept in the profile's state
+  file). So a `scootbg set` made afterwards keeps showing across restarts
+  and reloads until the section itself changes. The one order it cannot
+  see: a section removed while scoot is not running and re-added unchanged
+  before the next start counts as unchanged.
+- **It starts the daemon when none runs**, detached (a session of its own,
+  its stderr `apply-config`'s: send that to a file or a log, not a pipe
+  read to its end), starting from the section, so the saved state never
+  flashes first. Two started at once make one daemon, settled by its lock.
+  With no daemon and an empty section it starts none, and records the
+  clear in the profile's state instead.
+- **A running daemon adopts the profile** it is sent, whatever
+  `--profile` it started with, so an `[autostart]` `scootbg daemon` ends up
+  on scoot's profile too. `scootbg query` reports the profile in use
+  (`"profile"`, after `"saving"`).
+- **Another build is reported:** a daemon of another version is a
+  warning (the section is still sent), one of another protocol or too old
+  for `apply-config` an error.
+- It returns once every output shows it, as `set` does, and prints nothing
+  on success. Exit status: 0 applied or unchanged, and shown; 1 no daemon
+  could be started or reached (5 s), no reply (30 s), another protocol, an
+  image in the section that is not a file (the rest is applied), drawing
+  failed, or the state file could not be written; 2 a usage error.
+
+The schema, the fingerprint's exact encoding, the precedence table and
+the protocol are in
+[docs/scootbg/README.md](docs/scootbg/README.md#apply-config-scoots-wallpaper-section).
+
 **The wallpaper is restored at the next start.** Every `set` and `clear`
 is saved, per output (the choice for every output, and each one made with
 `--output NAME`), in a state file, `$XDG_STATE_HOME/scootbg/PROFILE`
@@ -509,7 +554,8 @@ simply waits. `scootbg query` answers, on one line (wrapped here):
  "logical":{"width":2560,"height":1440},
  "surface":{"state":"configured","size":{"width":2560,"height":1440},
             "scale":1.5,"pixels":{"width":3840,"height":2160}},
- "draw_failed":false,"shows":{"color":"#1e1e2e"}}],"saving":true}
+ "draw_failed":false,"shows":{"color":"#1e1e2e"}}],"saving":true,
+ "profile":"default"}
 ```
 
 Every key is always present, `null` when not known yet. `mode` is in
@@ -536,15 +582,17 @@ draw what the output should show failed (an image that exists but cannot
 be decoded, a buffer too large; stderr says why), which tells that `null`
 apart from a `clear`; the next request for the output, or a new size,
 retries. `saving` (after the list) is `false` while `set` and `clear` are
-not saved for the next start (see above). New keys
+not saved for the next start (see above), and `profile` is the profile
+whose state is restored and saved. New keys
 may be added; none changes meaning within protocol 1. If the daemon cannot
 accept clients (out of file descriptors, say), it keeps the wallpaper up,
 says so once on stderr, and retries every second rather than exit. The
 control protocol itself (one JSON object per line, for scripts that skip
 the CLI) is in [docs/scootbg/README.md](docs/scootbg/README.md#the-control-protocol).
-scoot's `[wallpaper]` config section is the next item in
-[its backlog](docs/scootbg/backlog/README.md); it does not exist yet, so
-do not add one.
+scoot's `[wallpaper]` config section, which will run `apply-config`, is
+the rest of that item in
+[its backlog](docs/scootbg/backlog/README.md); scoot does not accept it
+yet, so do not add one.
 
 ## Documentation
 

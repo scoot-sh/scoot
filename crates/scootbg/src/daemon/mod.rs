@@ -38,6 +38,7 @@
 
 mod canvas;
 mod change;
+mod config;
 mod crash;
 mod images;
 mod listen;
@@ -67,6 +68,8 @@ use images::Images;
 use listen::Listening;
 use respond::{Responder, write_ready};
 use wayland::{Wayland, WaylandError};
+
+pub use config::Start;
 
 /// Why the daemon stopped.
 #[derive(Debug)]
@@ -124,15 +127,25 @@ impl fmt::Display for Error {
 /// stalled disk takes longer.
 const SAVE_GRACE: Duration = Duration::from_secs(2);
 
-/// Runs the daemon until it is told to stop or cannot go on.
-pub fn run(options: DaemonOptions) -> Exit {
-    match serve(options) {
+/// Runs the daemon until it is told to stop or cannot go on. `start` is
+/// the section a daemon started by `apply-config` starts from
+/// (`daemon::config`); without one it restores the profile's state (unless
+/// `options.restore` is off).
+pub fn run(options: DaemonOptions, start: Option<&Start>) -> Exit {
+    match serve(options, start) {
         Ok(()) => Exit::Stopped,
         Err(error) => Exit::Failed(error),
     }
 }
 
-fn serve(options: DaemonOptions) -> Result<(), Error> {
+impl Error {
+    /// Another daemon holds this display's lock: it won the race to start.
+    pub fn lost_the_race(&self) -> bool {
+        matches!(self, Self::Claim(ClaimError::AlreadyRunning { .. }))
+    }
+}
+
+fn serve(options: DaemonOptions, start: Option<&Start>) -> Result<(), Error> {
     let paths = paths::from_env().map_err(Error::Paths)?;
     let mut claim = Claim::acquire(&paths).map_err(Error::Claim)?;
     let armed = crash::install(paths.socket.clone());
@@ -140,7 +153,10 @@ fn serve(options: DaemonOptions) -> Result<(), Error> {
     let images = Images::new().map_err(Error::Worker)?;
     let (saved, record) = restore::load(options.profile);
     let (mut wayland, missing) = Wayland::connect(images, saved).map_err(Error::Wayland)?;
-    restore::apply(&mut wayland.state, record, options.restore);
+    match start {
+        None => restore::apply(&mut wayland.state, record, options.restore),
+        Some(start) => config::start(&mut wayland.state, record, start),
+    }
     for interface in missing {
         warn(format_args!(
             "scootbg: note: the compositor has no {interface}; \
@@ -158,7 +174,13 @@ fn serve(options: DaemonOptions) -> Result<(), Error> {
     let result = daemon.run(&claim);
     // Before the socket goes: a `kill` client, answered once it does, then
     // finds the last change on disk.
-    if !daemon.wayland.state.saved.flush(SAVE_GRACE) {
+    let state = &daemon.wayland.state;
+    let flushed = state.saved.flush(SAVE_GRACE)
+        && state
+            .retired
+            .as_ref()
+            .is_none_or(|retired| retired.flush(SAVE_GRACE));
+    if !flushed {
         warn(format_args!(
             "scootbg: the state file was still being written after {} s; stopping \
              without waiting for it",
