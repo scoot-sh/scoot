@@ -536,6 +536,22 @@ The scoot side, in scoot's own review bar, plus the Nix work above:
   that run, and the next reload's run finds the lock and waits for it,
   bounded by its own 5 s.
 
+  - **What moving on costs** (re-review of PR #293, N1):
+    - That next run fails after its 5 s ("a daemon holds the lock but did
+      not answer"), and its newer section is not applied.
+    - When the stuck `fsync` finally ends, the old `{}` is what the state
+      file records.
+  - So part B logs a failed run and keeps its section queued as the
+    newest, rather than treating the failure as final. The next successful
+    run then applies it.
+- **A `stat` on the wallpaper client's loop** (re-review of PR #293, N2):
+  - scootbg checks that each image in a changed section exists, and
+    re-checks missing ones on an unchanged apply, on its Wayland loop.
+  - On a hung network mount that stalls scootbg (not the compositor), as
+    restore at start-up already could.
+  - Recorded here, not fixed: moving the `stat` off the loop belongs with
+    the other slow-disk work.
+
 ## Review of PR #293
 
 Review found no crash, hang or data-loss blockers, and one finding that
