@@ -150,22 +150,24 @@ impl State {
     /// A floating window's frames are reported whatever it was asked for
     /// (usually nothing: it chooses its own size), with a zero `requested`
     /// when it was asked for none: it is placed at the size it drew, which
-    /// the core takes from `actual` and never learns a minimum from. When the
-    /// frame changed where it goes -- a new size, or a size the core now asks
-    /// it to fit -- the arrangement is re-applied; the floating state is read
-    /// before and after (two map lookups), so a floating video committing
-    /// every frame at the same size costs no relayout.
-    pub fn observe_frame(&mut self, id: WindowId) {
+    /// the core takes from `actual` and never learns a minimum from.
+    ///
+    /// Returns whether the frame changed the arrangement -- a raised learned
+    /// minimum, or a moved floating window -- as [`World::handle_event`]
+    /// answers. The caller ([`State::flush_window_commits`]) applies once
+    /// for the whole dispatch when any frame did; nothing here applies
+    /// itself, so a floating video committing every frame at the same size
+    /// costs no relayout.
+    pub fn observe_frame(&mut self, id: WindowId) -> bool {
         let Some(window) = self.window(id) else {
-            return;
+            return false;
         };
         #[cfg(feature = "xwayland")]
         if window.x11_surface().is_some() {
-            self.observe_x11_frame(id);
-            return;
+            return self.observe_x11_frame(id);
         }
         let Some(toplevel) = window.toplevel() else {
-            return;
+            return false;
         };
         let answered = toplevel.with_committed_state(|state| {
             state.map(|state| {
@@ -179,17 +181,14 @@ impl State {
         let requested = match answered {
             Some((Some(requested), false)) => Size::new(requested.w, requested.h),
             Some((None, false)) if floating.is_some() => Size::default(),
-            _ => return,
+            _ => return false,
         };
         let size = window.geometry().size;
         self.world.handle_event(Event::FrameObserved {
             id,
             requested,
             actual: Size::new(size.w, size.h),
-        });
-        if floating.is_some() && self.world.floating_size(id) != floating {
-            self.apply();
-        }
+        })
     }
 
     /// Rebuilds a toplevel's pending configure state from where the layout

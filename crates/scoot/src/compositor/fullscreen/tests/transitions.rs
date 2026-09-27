@@ -604,6 +604,46 @@ fn a_frame_the_window_refuses_to_shrink_below_is_still_learned() {
 }
 
 #[test]
+fn a_learned_minimum_reaches_the_client_without_further_input() {
+    // The pin for `docs/backlog/core/frame-learning-apply-flush.md`:
+    // `observe_frame` feeds the core, which raises the learned minimum and
+    // re-scrolls -- but without an `apply()` after it the new width reaches
+    // the client only at the next unrelated event. A refusing frame must
+    // earn its configure from the same dispatch's flush, with nothing else
+    // happening in between. The core rect alone cannot pin this: the core
+    // learns in the flush either way, so only what the client was told
+    // distinguishes the fix.
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.map(OTHER_BGRA);
+    let tiled = fixture.rect_of(1);
+    assert_eq!(tiled.w, 82);
+    let seen = fixture.configures(1).len();
+
+    fixture.done(Step::DrawSized {
+        window: 1,
+        width: 150,
+        height: tiled.h,
+    });
+    // No further input of any kind: the rect moved on the refusing frame
+    // alone...
+    let learned = fixture.rect_of(1);
+    assert_eq!(learned.w, 150, "a real refusal to shrink was not learned");
+    // ...and the client was told, in that same flush.
+    let after = fixture.configures(1);
+    assert!(
+        after.len() > seen,
+        "the refusing frame earned no configure: the relayout never flushed"
+    );
+    let newest = *after.last().expect("a configure");
+    assert_eq!(
+        (newest.width, newest.height),
+        (150, tiled.h),
+        "the flushed configure is not the learned size: {newest:?}"
+    );
+}
+
+#[test]
 fn a_request_that_changes_nothing_is_answered_without_a_relayout() {
     // A client repeating `unset_fullscreen` on a tiled window (or
     // `set_fullscreen` on a fullscreen one) must still get its configure,

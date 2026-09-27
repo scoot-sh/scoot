@@ -106,12 +106,18 @@ impl State {
     /// no bbox left to recompute, and `observe_frame` would early-return on
     /// it anyway.
     ///
+    /// When any frame changed the arrangement (a raised learned minimum, a
+    /// moved floating window), one [`State::apply`] covers the whole
+    /// dispatch -- never one per window, and never per commit. A batch of
+    /// unchanged frames (a video's steady state) applies nothing.
+    ///
     /// Runs once per dispatch, never per commit; an empty pending set is
     /// one length check. Single-threaded like the rest of dispatch: nothing
     /// else marks windows while this drains, but the cursor form is used
     /// anyway so a mark from anywhere could only add work, never lose it.
     pub(super) fn flush_window_commits(&mut self) -> usize {
         let mut recomputed = 0;
+        let mut relayout = false;
         let mut index = 0;
         while index < self.pending_window_commits.len() {
             let id = self.pending_window_commits[index];
@@ -122,10 +128,13 @@ impl State {
                 };
                 window.on_commit();
             }
-            self.observe_frame(id);
+            relayout |= self.observe_frame(id);
             recomputed += 1;
         }
         self.pending_window_commits.clear();
+        if relayout {
+            self.apply();
+        }
         #[cfg(test)]
         {
             self.last_window_commit_flush = recomputed;
