@@ -8,7 +8,7 @@ blocked: null
 
 # Reactive popup re-constraining — RESOLVED
 
-RESOLVED 2026-09-27 (PR pending at write time). `State::apply()` ends with
+RESOLVED 2026-09-27 (PR #295). `State::apply()` ends with
 `State::reconstrain_reactive_popups()` (`crates/scoot/src/compositor/
 popup_reconstrain.rs`), which recomputes `constrained_popup_geometry` for
 every tracked `xdg_popup` whose committed positioner is `reactive` and, when

@@ -108,6 +108,16 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[Reactive popup re-constraining](docs/backlog/resolved/popup-reactive-reconstrain-done.md)**
+  (2026-09-27, PR #295) — a `reactive` popup is re-constrained when its
+  conditions change (column scroll, output resize, exclusive-zone edits),
+  answered with a fresh configure pair; non-reactive popups are never
+  re-configured (the protocol forbids it). Runs at the end of `apply()`,
+  gated on any popup being open; skips dismissed popups and unacked
+  repositions, and coexists with popup grabs (re-slid with the keyboard
+  still in the menu, no `popup_done`). Serves daily-drive (a menu left open
+  while its column scrolls).
+
 - **[Restore windows, workspaces and binds when a monitor reconnects](docs/backlog/resolved/output-reconnect-restore-done.md)**
   (2026-09-25, PR #249) — under `--tty` every standby cycle that drops
   hot-plug detect was an unplug plus a replug that piled the external
