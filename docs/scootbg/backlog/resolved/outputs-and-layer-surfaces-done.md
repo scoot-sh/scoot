@@ -282,7 +282,7 @@ No blocking findings. Fixed:
   `Outputs::get_mut` when it lands; an output removed meanwhile is not
   found and the result is dropped. Ids are never reused, so a replugged
   monitor under its old name cannot receive a stale result.
-- [hidpi-fractional-scale.md](../hidpi-fractional-scale.md):
+- [hidpi-fractional-scale-done.md](hidpi-fractional-scale-done.md):
   `wl_surface.preferred_buffer_scale` and `preferred_buffer_transform` are
   ignored for now, and `wp_fractional_scale_v1` is bound but not used per
   surface; `logical` falls back to an integer-scale estimate that

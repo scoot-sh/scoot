@@ -54,7 +54,14 @@ full per-feature cycle.
    the packing pass; a file that cannot be shown is an error that changes
    nothing, and the newest request wins; checked by real pixels on
    headless scoot and headless sway
-7. [Drawing at real device pixels on scaled outputs](hidpi-fractional-scale.md)
+7. [**Drawing at real device pixels on scaled outputs**](resolved/hidpi-fractional-scale-done.md)
+   — RESOLVED 2026-09-27: images (and the full-size color fallback) at
+   the surface's device pixels, from `wp_fractional_scale_v1` under a
+   viewport (the protocol's rounding, measured exact where snapping to the
+   mode was not), else the integer `preferred_buffer_scale` or
+   `wl_output.scale`; a stale smaller scale gives way; `query` reports
+   `surface.scale` and `surface.pixels`; 44% fewer buffer bytes at 1.5;
+   checked by a one-pixel checker on headless scoot and headless sway
 8. [Buffers, memory and zero idle cost](memory-and-idle.md)
 9. [Restoring the last wallpaper at startup](restore-state.md)
 10. [Seamless in scoot: a `[wallpaper]` config section](scoot-integration.md)

@@ -1,6 +1,7 @@
 //! The output model against every event ordering the glue can deliver.
 
 use super::{Effect, Info, OutputId, Outputs, Size, Surface, Transform};
+use crate::density::Scale;
 
 fn size(width: u32, height: u32) -> Size {
     Size { width, height }
@@ -35,7 +36,10 @@ fn properties_apply_at_done_not_before() {
     assert_eq!(output.info().name.as_deref(), Some("HDMI-A-1"));
     assert_eq!(output.info().mode, Some(size(2560, 1440)));
     assert_eq!(output.info().scale, 2);
-    assert_eq!(output.info().logical(), Some(size(1280, 720)));
+    assert_eq!(
+        output.info().logical(Scale::Integer(output.info().scale)),
+        Some(size(1280, 720))
+    );
     // A later batch replaces only what it carries.
     output.stage_scale(1);
     assert_eq!(output.info().scale, 2);
@@ -159,11 +163,15 @@ fn logical_size_rounds_down_at_odd_sizes_and_prefers_xdg_output() {
         scale: 2,
         ..Info::default()
     };
-    assert_eq!(info.logical(), Some(size(683, 384)));
+    assert_eq!(info.logical(Scale::Integer(2)), Some(size(683, 384)));
     // The compositor's own logical size (fractional scales) wins.
     info.xdg_logical = Some(size(911, 513));
-    assert_eq!(info.logical(), Some(size(911, 513)));
-    assert_eq!(Info::default().logical(), None, "no mode, no size");
+    assert_eq!(info.logical(Scale::Integer(2)), Some(size(911, 513)));
+    assert_eq!(
+        Info::default().logical(Scale::Integer(1)),
+        None,
+        "no mode, no size"
+    );
 }
 
 #[test]
@@ -187,7 +195,10 @@ fn nonsense_from_the_compositor_is_ignored() {
     output.stage_mode(true, i32::MAX, i32::MAX);
     output.stage_scale(i32::MAX);
     output.done();
-    assert_eq!(output.info().logical(), Some(size(1, 1)));
+    assert_eq!(
+        output.info().logical(Scale::Integer(output.info().scale)),
+        Some(size(1, 1))
+    );
 }
 
 #[test]
@@ -364,7 +375,10 @@ fn the_configured_size_is_the_best_logical_size() {
     assert_eq!(output.logical(), Some(size(800, 500)), "the estimate");
     let _ = output.configure(1, 1067, 667);
     assert_eq!(output.logical(), Some(size(1067, 667)));
-    assert_eq!(output.info().logical(), Some(size(800, 500)));
+    assert_eq!(
+        output.info().logical(Scale::Integer(output.info().scale)),
+        Some(size(800, 500))
+    );
     // Closed: back to the estimate until configured again.
     let _ = output.closed();
     assert_eq!(output.logical(), Some(size(800, 500)));

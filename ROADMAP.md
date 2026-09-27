@@ -2150,8 +2150,16 @@ medium priority — the effective top of what's actually open.
    through a single-pixel buffer (no shared memory) with a 1×1 and a
    full-size `wl_shm` fallback; replies wait, without blocking the loop,
    until the compositor has the commit, so a screenshot straight after
-   shows it; checked by real pixels on both compositors, every path. The
-   rest of the CLI (image paths, `apply-config`) and images are next.
+   shows it; checked by real pixels on both compositors, every path.
+   Items 5 and 6
+   ([record](docs/scootbg/backlog/resolved/images-decode-and-fit-done.md)):
+   `scootbg set PATH` for PNG, JPEG and WebP with fit modes, decoded off
+   the loop, newest request wins. Item 7
+   ([record](docs/scootbg/backlog/resolved/hidpi-fractional-scale-done.md)):
+   images drawn at real device pixels on fractionally scaled outputs
+   (`wp_fractional_scale_v1` under a viewport), exact to the pixel on
+   scoot and sway, 44% fewer buffer bytes at 1.5. Restoring the wallpaper
+   at startup and scoot's `[wallpaper]` section are next.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

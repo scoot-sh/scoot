@@ -605,7 +605,7 @@ maps it); the extra fd is the worker's eventfd.
 
 ### For the next tickets
 
-- [hidpi-fractional-scale.md](../hidpi-fractional-scale.md): the buffer
+- [hidpi-fractional-scale-done.md](hidpi-fractional-scale-done.md): the buffer
   size is decided in one place, `daemon::change::image_dims` (surface
   size times the integer scale), and every image draw is the worker's
   full-size render, so a `wp_fractional_scale_v1` size is a change there

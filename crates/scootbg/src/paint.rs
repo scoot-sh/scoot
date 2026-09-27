@@ -2,9 +2,11 @@
 //! no Wayland objects, so each is a unit test. `daemon::canvas` carries
 //! them out.
 //!
-//! An image is always a full-size `wl_shm` buffer, the surface size times
-//! the output's integer scale (as path 3 draws a color), whatever the path:
-//! the paths below are how *colors* are drawn.
+//! An image is always a full-size `wl_shm` buffer at the surface's real
+//! device pixels (`crate::density`: the fractional scale under a viewport
+//! where the compositor has both, else an integer buffer scale), as path 3
+//! draws a color, whatever the path: the paths below are how *colors* are
+//! drawn.
 //!
 //! ## Three paths, best first
 //!
@@ -15,8 +17,9 @@
 //!    black one, `docs/tty.md`).
 //! 2. **[`Path::ViewportShm`]**: no single-pixel buffers, but a viewporter:
 //!    a 1×1 `wl_shm` buffer, scaled the same way. 4 bytes of pixels.
-//! 3. **[`Path::FullShm`]**: neither: a `wl_shm` buffer the surface's size
-//!    times the output's integer scale, filled once.
+//! 3. **[`Path::FullShm`]**: neither: a full-size `wl_shm` buffer, filled
+//!    once. With no viewporter that is the surface's size times an integer
+//!    scale; a fractional one needs a viewport to size the buffer.
 //!
 //! The path is chosen once, from the globals bound at start-up.
 //!
@@ -28,6 +31,7 @@
 //! most [`SLOTS`] in all; with both still held by the compositor the draw
 //! waits for a `wl_buffer.release` ([`pick`]).
 
+use crate::density::{Buffer, Scale};
 use crate::outputs::Size;
 use crate::wallpaper::Wallpaper;
 
@@ -77,55 +81,49 @@ impl Path {
             .find(|path| path.name() == name)
     }
 
-    /// The `wl_surface` buffer scale to draw at. Only a full-size buffer
-    /// has pixels to make sharp; a 1×1 buffer stays at scale 1, which a
-    /// larger scale would make a protocol error (a buffer size must be a
-    /// multiple of the scale), and its viewport sets the size anyway.
-    pub fn buffer_scale(self, output_scale: u32) -> u32 {
-        match self {
-            Self::FullShm => output_scale.max(1),
-            Self::SinglePixel | Self::ViewportShm => 1,
-        }
-    }
-
     /// Whether the surface is sized by a `wp_viewport`.
     pub fn uses_viewport(self) -> bool {
         self != Self::FullShm
     }
 }
 
-/// The `wl_surface` buffer scale to draw `wanted` at on `path`: an image
-/// always has pixels to make sharp, a color only on the full-size path
-/// ([`Path::buffer_scale`]).
-pub fn buffer_scale(path: Path, wanted: Option<&Wallpaper>, output_scale: u32) -> u32 {
+/// The scale to draw `wanted` at on `path`, given the surface's
+/// (`Output::scale`): an image always has pixels to make sharp, a color
+/// only on the full-size path. A 1×1 color buffer stays at scale 1, which
+/// a larger buffer scale would make a protocol error (a buffer's size must
+/// be a multiple of it), and its viewport sets the size anyway; so a new
+/// scale does not redraw it.
+pub fn scale_for(path: Path, wanted: Option<&Wallpaper>, surface: Scale) -> Scale {
     match wanted {
-        Some(Wallpaper::Image(_)) => output_scale.max(1),
-        Some(Wallpaper::Color(_)) | None => path.buffer_scale(output_scale),
+        Some(Wallpaper::Image(_)) => surface,
+        Some(Wallpaper::Color(_)) | None if path == Path::FullShm => surface,
+        Some(Wallpaper::Color(_)) | None => Scale::Integer(1),
     }
 }
 
 /// What a surface was last committed with: a color or an image at a size
-/// (logical pixels) and buffer scale.
+/// (logical pixels) and scale.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Drawn {
     pub content: Wallpaper,
     pub size: Size,
-    pub scale: u32,
+    pub scale: Scale,
 }
 
 impl Drawn {
-    /// The buffer's size in pixels on `path`: 1×1 for a color with a
-    /// viewport, else the surface size times the scale. `None` if that
+    /// The buffer on `path`: 1×1 at scale 1 for a color with a viewport,
+    /// else the surface size at its scale ([`Scale::buffer`], the one
+    /// place a full-size buffer's size is worked out). `None` if that
     /// overflows `u32`; the buffer type then refuses anything past
     /// `i32::MAX` bytes.
-    pub fn buffer_dims(&self, path: Path) -> Option<(u32, u32)> {
+    pub fn buffer(&self, path: Path) -> Option<Buffer> {
         if path.uses_viewport() && matches!(self.content, Wallpaper::Color(_)) {
-            return Some((1, 1));
+            return Some(Buffer {
+                dims: (1, 1),
+                scale: 1,
+            });
         }
-        Some((
-            self.size.width.checked_mul(self.scale)?,
-            self.size.height.checked_mul(self.scale)?,
-        ))
+        self.scale.buffer(self.size)
     }
 }
 

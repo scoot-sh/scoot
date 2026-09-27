@@ -21,6 +21,8 @@ mod control;
 #[cfg(target_os = "linux")]
 mod daemon;
 #[cfg(target_os = "linux")]
+mod density;
+#[cfg(target_os = "linux")]
 mod framing;
 #[cfg(target_os = "linux")]
 mod image;

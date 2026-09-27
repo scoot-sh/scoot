@@ -47,7 +47,7 @@ pub fn reconcile(
     // whether or not anything can be drawn.
     let serial = wanted.and_then(Wallpaper::image).map(|image| image.serial);
     entry.objects.canvas.forget_ready_unless(serial);
-    let scale = paint::buffer_scale(globals.path, wanted, info.scale);
+    let scale = paint::scale_for(globals.path, wanted, entry.output.scale());
     let id = entry.output.id();
     match entry.output.plan(wanted, scale) {
         Plan::Nothing => false,
@@ -94,15 +94,13 @@ pub fn reconcile(
 }
 
 /// The buffer size, in pixels, an image would be drawn at on `output` now:
-/// its surface size times its integer scale. `None` while it has no size,
-/// or if that overflows (the draw then fails and says so).
+/// its surface size at its scale, fractional where the compositor said one
+/// (`Output::full_buffer`, which the draw's `Drawn::buffer` agrees with by
+/// sharing `density::Scale::buffer`). `None` while it has no size, or if
+/// that overflows (the draw then fails and says so). A render is asked
+/// for, kept and offered only while this still says its size.
 pub fn image_dims(output: &Output) -> Option<(u32, u32)> {
-    let size = output.surface_size()?;
-    let scale = output.info().scale.max(1);
-    Some((
-        size.width.checked_mul(scale)?,
-        size.height.checked_mul(scale)?,
-    ))
+    output.full_buffer().map(|buffer| buffer.dims)
 }
 
 /// Sends one sync for the waiting requests whose outputs now show them.
@@ -123,9 +121,8 @@ pub fn progress(state: &mut State, conn: &Connection, qh: &QueueHandle<State>) {
             generation,
             outputs.iter().map(|entry| {
                 let output = &entry.output;
-                let info = output.info();
-                let wanted = choices.for_output(info.name.as_deref());
-                let scale = paint::buffer_scale(path, wanted, info.scale);
+                let wanted = choices.for_output(output.info().name.as_deref());
+                let scale = paint::scale_for(path, wanted, output.scale());
                 (output.stamp(), output.progress(wanted, scale))
             }),
         )

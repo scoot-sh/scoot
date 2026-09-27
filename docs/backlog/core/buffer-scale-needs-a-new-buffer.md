@@ -34,7 +34,12 @@ redraw at a new scale and attach, so it rarely shows. scootbg now attaches
 its buffer again whenever it sends a new scale without a new buffer
 (`crates/scootbg/src/daemon/canvas.rs`), which is correct everywhere, and
 `crates/scootbg/tests/image.rs::a_new_scale_redraws_at_the_real_pixel_size`
-fails without that workaround.
+fails without that workaround. Since scootbg draws with
+`wp_fractional_scale_v1` (2026-09-27), it keeps buffer scale 1 on scoot
+and meets this only on a compositor without that protocol (the test runs
+with it left unbound). A new `wp_viewport` destination alone is applied
+without a new buffer (`update_buffer` works the surface view out at every
+commit; `crates/scootbg/tests/scale.rs` checks it by screenshot).
 
 **Fix:** in the fork, apply the cached `buffer_scale` and
 `buffer_transform` on every commit that has a buffer, not only on a new

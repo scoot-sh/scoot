@@ -369,10 +369,27 @@ applied (a JPEG's, a WebP's, or a PNG's `eXIf` chunk). `--mode` fits it to each 
 `#000000`), `--filter lanczos3|catmull-rom|bilinear|nearest` the scaling
 filter (default `lanczos3`; `nearest` keeps pixel art hard). `--mode`,
 `--fill` and `--filter` with a color are a usage error. The image is
-decoded and scaled on a worker thread, drawn at each output's surface size
-times its scale, and the decoded pixels are dropped once drawn: an output
-plugged in later, or a new scale, reads the file again. Images over
-16384×16384 pixels are refused.
+decoded and scaled on a worker thread and the decoded pixels are dropped
+once drawn: an output plugged in later, or a new scale that needs a new
+size, reads the file again. Images over 16384×16384 pixels are refused.
+
+**Images are drawn at each output's real device pixels, fractional scales
+included.** On a compositor with `wp_fractional_scale_v1` and
+`wp_viewporter` (scoot, sway, and most others) the buffer is the surface's
+logical size times the scale the compositor asks for, rounded as that
+protocol says: 1601×1001 for scoot's 1067×667 surface at 1.5 on a
+1600×1000 output, which scoot draws one buffer pixel to one device pixel
+(the last column and row fall off the edge). An image the size of the
+output with `--mode center` comes out exact to the pixel. Without those
+protocols it is drawn at the integer scale (the larger of `wl_surface`'s
+preferred buffer scale and `wl_output`'s) and the compositor scales it
+down: sharp, but larger than the output (2134×1334 there). The same
+happens for a moment when the compositor has not yet told a surface its
+new scale (sway does not while nothing is shown on it): the image is on
+screen when `set` returns, drawn larger and scaled down, never stretched,
+and redrawn exact once the compositor sends the scale. A compositor scale that is
+not a multiple of 1/120 (1.33, say) cannot be drawn exactly by any client,
+since the protocol cannot say it.
 
 `set` with no `--output` replaces every choice, per-output ones included;
 with `--output NAME` it sets that output only, and the choice is kept by
@@ -424,8 +441,9 @@ simply waits. `scootbg query` answers, on one line (wrapped here):
 ```text
 {"type":"outputs","outputs":[{"name":"DP-1","description":"...",
  "mode":{"width":3840,"height":2160},"scale":2,"transform":"normal",
- "logical":{"width":1920,"height":1080},
- "surface":{"state":"configured","size":{"width":1920,"height":1080}},
+ "logical":{"width":2560,"height":1440},
+ "surface":{"state":"configured","size":{"width":2560,"height":1440},
+            "scale":1.5,"pixels":{"width":3840,"height":2160}},
  "shows":{"color":"#1e1e2e"}}]}
 ```
 
@@ -433,7 +451,13 @@ Every key is always present, `null` when not known yet. `mode` is in
 device pixels. `scale` is `wl_output`'s integer scale (a fractional one
 rounded up), and `transform` is `wl_output`'s, counter-clockwise.
 `logical` is the output's size in logical pixels: exact once the surface is
-configured, an estimate before that. `surface.state` is `waiting` (the
+configured, before that worked out from the mode and the best scale known
+(within a pixel). `surface.scale` is the scale an image, or a color on the
+full-size fallback, is drawn at on that surface (`1.5` from
+`wp_fractional_scale_v1`, else an integer; a color on a single-pixel or
+1×1 buffer is always drawn at 1) and `surface.pixels` the size in device
+pixels an image is drawn at, both `null` until the surface is
+configured. `surface.state` is `waiting` (the
 output has not reported itself yet), `pending`, `configured` (with `size`),
 `closed` (the compositor closed it; scootbg makes it again, once) or
 `gave-up` (closed a second time over the output's life: scootbg has
@@ -521,7 +545,8 @@ split by path: a change under `crates/scootbg/` or `crates/scootbg-mem/`
 alone runs only scootbg's own job (fmt, clippy, tests, a no-`libc`-crate
 check, the release size) plus scootbg's integration tests (on a headless
 scoot, and on a headless sway from the pinned nixpkgs for outputs coming
-and going, with colors and images checked by real pixels on both), and a compositor-only change skips scootbg's job; shared files
+and going, with colors and images checked by real pixels on both,
+fractional scales included), and a compositor-only change skips scootbg's job; shared files
 (`Cargo.*`, `flake.*`, `nix/`, `.github/`, and anything unlisted) run
 everything. The
 packaged artifacts themselves (`nix build .#scoot .#scootctl .#scootbg`) build on every

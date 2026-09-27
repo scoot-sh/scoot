@@ -14,9 +14,20 @@
 //! reserves nothing), no keyboard interactivity, and an empty input region
 //! so pointer and touch events fall through to the desktop. It is committed
 //! once with no buffer, which asks for a `configure`; each `configure` is
-//! acked straight away, and the surface is then drawn (or redrawn at its
-//! new size) by `change::reconcile` if it should show a color or an image. A layer
-//! surface maps only with a buffer: with nothing chosen, nothing is shown.
+//! acked straight away, and one round trip later ([`RoundTrip::Configured`])
+//! the surface is drawn (or redrawn at its new size) by `change::reconcile`
+//! if it should show a color or an image. A layer surface maps only with a
+//! buffer: with nothing chosen, nothing is shown.
+//!
+//! **Scale.** Where the compositor has `wp_fractional_scale_v1` and
+//! `wp_viewporter`, each surface gets a fractional-scale object before its
+//! first commit, so its `preferred_scale` arrives before its first
+//! `configure` (scoot sends it when the object is made; sway when the
+//! layer surface is, and wlroots again whenever the output's scale
+//! changes). `wl_surface.preferred_buffer_scale` (v6) is read too. A new
+//! scale redraws the surface one round trip later, as a `done` does
+//! ([`RoundTrip::Redraw`]); what the scales mean for the buffer is
+//! `crate::density`'s.
 
 use wayland_client::protocol::wl_buffer::{self, WlBuffer};
 use wayland_client::protocol::wl_callback::{self, WlCallback};
@@ -32,6 +43,9 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
     self, Anchor, KeyboardInteractivity, ZwlrLayerSurfaceV1,
 };
 
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
+    self, WpFractionalScaleV1,
+};
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
 use super::canvas::{Canvas, destroy_viewport};
@@ -84,12 +98,14 @@ impl Objects {
     }
 }
 
-/// A wallpaper surface: the role object, the surface it is on, and the
-/// surface's viewport once a color path needs one.
+/// A wallpaper surface: the role object, the surface it is on, its
+/// fractional-scale object where the compositor has one (and a viewporter
+/// to act on it with), and its viewport once a draw needs one.
 #[derive(Debug)]
 pub struct LayerObjects {
     pub(super) surface: WlSurface,
     layer: ZwlrLayerSurfaceV1,
+    fractional: Option<WpFractionalScaleV1>,
     pub(super) viewport: Option<WpViewport>,
     /// What this surface's persistent, double-buffered state was last set
     /// to, so a draw sends only what changes: the buffer scale (1 on a
@@ -109,7 +125,13 @@ impl LayerObjects {
         qh: &QueueHandle<State>,
         id: OutputId,
     ) -> Self {
-        let surface = globals.compositor.create_surface(qh, ());
+        let surface = globals.compositor.create_surface(qh, id);
+        // Before the first commit, so the scale arrives before the first
+        // `configure` and the first draw is at it; only where it can be
+        // acted on (`Globals::fractional_scale`).
+        let fractional = globals
+            .fractional_scale()
+            .map(|manager| manager.get_fractional_scale(&surface, qh, id));
         // An empty region: no input anywhere on the surface.
         let region = globals.compositor.create_region(qh, ());
         surface.set_input_region(Some(&region));
@@ -130,6 +152,7 @@ impl LayerObjects {
         Self {
             surface,
             layer,
+            fractional,
             viewport: None,
             buffer_scale: 1,
             destination: None,
@@ -137,9 +160,12 @@ impl LayerObjects {
         }
     }
 
-    /// The viewport and the role first, then the surface, as the protocols
-    /// ask.
+    /// The fractional-scale object, the viewport and the role first, then
+    /// the surface, as the protocols ask.
     pub(super) fn destroy(self) {
+        if let Some(fractional) = self.fractional {
+            fractional.destroy();
+        }
         destroy_viewport(self.viewport);
         self.layer.destroy();
         self.surface.destroy();
@@ -196,14 +222,27 @@ pub enum RoundTrip {
     Settle(OutputId),
     /// Sent after a `closed`: the output survived it, so re-create.
     Retry(OutputId),
-    /// Sent after a `done` changed a configured output: redraw it then, not
-    /// at once. A scale or mode change usually brings a `configure` too, and
-    /// the compositor may send it after the `done`; drawing at the `done`
-    /// would draw at the old surface size and the new scale, a buffer up to
-    /// four times too large, only to replace it. By the time this comes
-    /// back any such `configure` has been handled, so this redraws only if
-    /// none came (a mode and scale doubled together keep the size).
+    /// Sent after a `done` changed a configured output, or the surface was
+    /// given a new scale: redraw it then, not at once. A scale or mode
+    /// change usually brings a `configure` too, and the compositor may send
+    /// it after the `done` or the new scale; drawing at once would draw at
+    /// the old surface size and the new scale, a buffer up to four times
+    /// too large, only to replace it. By the time this comes back any such
+    /// `configure` has been handled, so this redraws only if none came (a
+    /// mode and scale doubled together keep the size).
     Redraw(OutputId),
+    /// Sent after acking the `configure` with this serial: draw (or redraw)
+    /// then, not at once. A scale change reaches a surface in several
+    /// events, and neither compositor checked sends the `configure` last:
+    /// sway sends it before `wl_output.done` (the new scale and mode still
+    /// staged), scoot before the surface's new `preferred_scale`. Drawn at
+    /// the `configure`, an image would be asked for at a size about to go
+    /// stale. The worker drops a queued size that is stale by the time it
+    /// starts, but that holds only while the whole batch arrives in one
+    /// read; this callback comes after every event the compositor sent
+    /// before it, however the reads split. A newer `configure` meanwhile
+    /// makes this one moot: its own round trip draws.
+    Configured(OutputId, u32),
     /// Sent after the commits the `set`s and `clear`s resolved in one loop
     /// turn waited for (numbered by `crate::waiters`): the compositor has
     /// processed them, so their connections get their replies.
@@ -392,32 +431,19 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
         if entry.objects.layer.as_ref().map(|l| &l.layer) != Some(layer) {
             return;
         }
-        let (effect, configured) = match event {
+        let effect = match event {
             zwlr_layer_surface_v1::Event::Configure {
                 serial,
                 width,
                 height,
-            } => (entry.output.configure(serial, width, height), true),
-            zwlr_layer_surface_v1::Event::Closed => (entry.output.closed(), false),
-            _ => (Effect::None, false),
+            } => entry.output.configure(serial, width, height),
+            zwlr_layer_surface_v1::Event::Closed => entry.output.closed(),
+            _ => Effect::None,
         };
         Self::apply(&state.globals, entry, effect, conn, qh);
-        if configured {
-            // Draw, or redraw at the new size. A mapped surface commits
-            // after the ack even when nothing about it changed, so the ack
-            // takes effect; an unmapped one has nothing to commit.
-            let committed = reconcile(
-                &state.globals,
-                &state.choices,
-                &mut state.images.jobs,
-                entry,
-                qh,
-            );
-            if !committed && entry.output.shows().is_some() {
-                if let Some(layer) = &entry.objects.layer {
-                    layer.surface.commit();
-                }
-            }
+        if let Effect::Ack(serial) = effect {
+            conn.display()
+                .sync(qh, RoundTrip::Configured(entry.output.id(), serial));
         }
     }
 }
@@ -477,6 +503,30 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                 }
                 return;
             }
+            RoundTrip::Configured(id, serial) => {
+                let Some(entry) = state.outputs.get_mut(id) else {
+                    return;
+                };
+                if entry.output.configured_serial() != Some(serial) {
+                    return;
+                }
+                // Draw, or redraw at the new size. A mapped surface commits
+                // after the ack even when nothing about it changed, so the
+                // ack takes effect; an unmapped one has nothing to commit.
+                let committed = reconcile(
+                    &state.globals,
+                    &state.choices,
+                    &mut state.images.jobs,
+                    entry,
+                    qh,
+                );
+                if !committed && entry.output.shows().is_some() {
+                    if let Some(layer) = &entry.objects.layer {
+                        layer.surface.commit();
+                    }
+                }
+                return;
+            }
             RoundTrip::Replies(sync) => {
                 // Within the capacity `ready` was made with (the bound in
                 // `crate::waiters`), and drained every loop turn.
@@ -509,15 +559,73 @@ impl Dispatch<WlCallback, RoundTrip> for State {
     }
 }
 
-// A wallpaper takes no input and needs no feedback from its surface yet:
-// `preferred_buffer_scale` and friends are hidpi-fractional-scale.md's. No
-// frame callbacks either: a static wallpaper is drawn once per change.
-delegate_noop!(State: ignore WlSurface);
+/// `wp_fractional_scale_v1.preferred_scale`, the best scale there is.
+impl Dispatch<WpFractionalScaleV1, OutputId> for State {
+    fn event(
+        state: &mut Self,
+        fractional: &WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        id: &OutputId,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wp_fractional_scale_v1::Event::PreferredScale { scale } = event else {
+            return;
+        };
+        let Some(entry) = state.outputs.get_mut(*id) else {
+            return;
+        };
+        // The live surface's only: a destroyed one's may be in flight.
+        let live = entry
+            .objects
+            .layer
+            .as_ref()
+            .and_then(|l| l.fractional.as_ref());
+        if live == Some(fractional) && entry.output.prefer_fractional(scale) {
+            redraw_later(entry, conn, qh);
+        }
+    }
+}
+
+/// `wl_surface`'s own events (v6): the integer scale to draw at, used where
+/// there is no fractional one. A wallpaper takes no input, and needs no
+/// frame callbacks: a static wallpaper is drawn once per change.
+impl Dispatch<WlSurface, OutputId> for State {
+    fn event(
+        state: &mut Self,
+        surface: &WlSurface,
+        event: wayland_client::protocol::wl_surface::Event,
+        id: &OutputId,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        use wayland_client::protocol::wl_surface::Event;
+        let Some(entry) = state.outputs.get_mut(*id) else {
+            return;
+        };
+        if entry.objects.layer.as_ref().map(|l| &l.surface) != Some(surface) {
+            return;
+        }
+        // `preferred_buffer_transform` is left alone on purpose. A buffer
+        // drawn pre-rotated would spare a compositor that composites in
+        // software a transformed copy of it, but neither compositor scootbg
+        // is checked on sends anything but `normal` for an shm buffer
+        // (wlroots sends the output's transform only with dmabuf feedback
+        // for scanout, which an shm buffer never gets; scoot always sends
+        // `normal`), and an untransformed buffer is correct everywhere.
+        if let Event::PreferredBufferScale { factor } = event {
+            if entry.output.prefer_buffer_scale(factor) {
+                redraw_later(entry, conn, qh);
+            }
+        }
+    }
+}
 delegate_noop!(State: WlRegion);
 
-/// After a `done`: a configured surface may need a redraw at a new scale
-/// (a full-size buffer) or, configured 0x0 before any mode was known, a
-/// first draw; see [`RoundTrip::Redraw`] for why one round trip later.
+/// After a `done` or a new preferred scale: a configured surface may need a
+/// redraw at a new scale (a full-size buffer) or, configured 0x0 before any
+/// mode was known, a first draw; see [`RoundTrip::Redraw`] for why one
+/// round trip later.
 fn redraw_later(entry: &Entry<Objects>, conn: &Connection, qh: &QueueHandle<State>) {
     if matches!(entry.output.surface(), Surface::Configured { .. }) {
         conn.display()

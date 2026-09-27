@@ -41,8 +41,11 @@
 #[cfg(test)]
 mod paint_tests;
 #[cfg(test)]
+mod scale_tests;
+#[cfg(test)]
 mod tests;
 
+use crate::density::{Buffer, Preferred, Scale};
 use crate::paint::{Drawn, Plan};
 use crate::waiters::Progress;
 use crate::wallpaper::Wallpaper;
@@ -127,37 +130,38 @@ impl Default for Info {
 }
 
 impl Info {
-    /// The output's size in logical pixels, when it can be known.
+    /// The output's size in logical pixels, when it can be known from
+    /// `wl_output` and `xdg_output` alone.
     ///
     /// The compositor's own answer when it gave one (`xdg_output`'s logical
     /// size, bound only for outputs older than v4). Otherwise the current
-    /// mode, rotated by the transform, divided by the integer scale and
-    /// rounded down, which is what wlroots computes. That is exact at
-    /// integer scales. At a fractional scale `wl_output` reports the scale
-    /// rounded up, so this comes out smaller than the real logical size.
+    /// mode, rotated by the transform, divided by `scale` ([`Scale::logical`]:
+    /// rounded down for an integer, as wlroots does, which is exact at
+    /// integer scales; up for a fraction). With `wl_output`'s own integer
+    /// scale, a fractional output's scale rounded up, this comes out smaller
+    /// than the real logical size; [`Output::derived_logical`] passes the
+    /// surface's fractional scale when the compositor sent one.
     ///
-    /// [`Output::logical`] prefers the configured surface's size to this.
-    /// Here it is the fallback for a `configure` of 0: a surface anchored to all
-    /// four edges gets its real size from the compositor, and every
-    /// compositor checked (scoot, sway) sends it. Before the output has
-    /// reported a mode there is nothing to derive from, and the answer is
-    /// `None`: the surface waits for a later `configure` or `done` rather
-    /// than guess.
-    pub fn logical(&self) -> Option<Size> {
+    /// Before the output has reported a mode there is nothing to derive
+    /// from, and the answer is `None`.
+    pub fn logical(&self, scale: Scale) -> Option<Size> {
         if let Some(logical) = self.xdg_logical {
             return Some(logical);
         }
+        Some(scale.logical(self.device()?))
+    }
+
+    /// The current mode rotated as the output is: the output's size in
+    /// device pixels, the way its surfaces are laid out.
+    pub fn device(&self) -> Option<Size> {
         let mode = self.mode?;
-        let (width, height) = if self.transform.swaps_axes() {
-            (mode.height, mode.width)
+        Some(if self.transform.swaps_axes() {
+            Size {
+                width: mode.height,
+                height: mode.width,
+            }
         } else {
-            (mode.width, mode.height)
-        };
-        // `scale` is never 0 (see `stage_scale`); `max` keeps it so.
-        let scale = self.scale.max(1);
-        Some(Size {
-            width: width / scale,
-            height: height / scale,
+            mode
         })
     }
 }
@@ -287,6 +291,13 @@ pub struct Output {
     /// request targets it or the compositor reconfigures it, so a failure
     /// (a buffer too large for `wl_shm`, out of memory) cannot loop.
     failed: bool,
+    /// The scales the compositor asked the wallpaper surface to be drawn
+    /// at (`wp_fractional_scale_v1`, `wl_surface.preferred_buffer_scale`),
+    /// from the live surface's events only (the glue drops a stale
+    /// surface's). Kept when the surface is re-created: they describe the
+    /// output it is on, and the new surface's own events replace them,
+    /// before its first `configure` on every compositor checked.
+    preferred: Preferred,
 }
 
 impl Output {
@@ -300,6 +311,59 @@ impl Output {
 
     pub fn surface(&self) -> &Surface {
         &self.surface
+    }
+
+    /// The scale to draw the surface at: the best the compositor said
+    /// ([`Preferred::scale`]: a fraction, else the larger of the surface's
+    /// and `wl_output`'s integer scales); the integer scale
+    /// instead of a fraction that would draw the configured surface short
+    /// of the output's mode, which only a stale fraction does
+    /// ([`Scale::falls_short`], `crate::density`'s "A stale scale").
+    pub fn scale(&self) -> Scale {
+        let scale = self.preferred.scale(self.info.scale);
+        // The configured size as the compositor sent it (0: not known),
+        // not `surface_size`, which reads this scale for a 0 axis.
+        let Surface::Configured { requested, .. } = &self.surface else {
+            return scale;
+        };
+        match self.info.device() {
+            Some(device) if scale.falls_short(*requested, device) => {
+                self.preferred.integer(self.info.scale)
+            }
+            _ => scale,
+        }
+    }
+
+    /// The full-size buffer for the surface now (an image's, or a color's
+    /// on the full-size path): its configured size at [`Output::scale`].
+    /// `None` while it has no size, or if that overflows. The one place an
+    /// image's buffer size is decided (`daemon::change::image_dims` reads
+    /// it; the draw reads the same [`Scale::buffer`] through `Drawn`).
+    pub fn full_buffer(&self) -> Option<Buffer> {
+        self.scale().buffer(self.surface_size()?)
+    }
+
+    /// `wp_fractional_scale_v1.preferred_scale` on the live surface.
+    /// Returns whether it changed (then the surface needs redrawing).
+    pub fn prefer_fractional(&mut self, v120: u32) -> bool {
+        let changed = self.preferred.set_fractional(v120);
+        self.rescaled(changed)
+    }
+
+    /// `wl_surface.preferred_buffer_scale` on the live surface. Returns
+    /// whether it changed.
+    pub fn prefer_buffer_scale(&mut self, factor: i32) -> bool {
+        let changed = self.preferred.set_buffer_scale(factor);
+        self.rescaled(changed)
+    }
+
+    /// A new scale is a new buffer size, so a new chance for a draw that
+    /// failed (as a new `configure` is). Returns `changed`.
+    fn rescaled(&mut self, changed: bool) -> bool {
+        if changed {
+            self.failed = false;
+        }
+        changed
     }
 
     /// The output as a message to stderr names it. The name comes from the
@@ -355,11 +419,15 @@ impl Output {
     /// properties become current.
     ///
     /// No surface change is needed: a configured surface's size fallback
-    /// ([`Output::surface_size`]) reads the new properties as they are.
-    /// Redrawing at a new scale is hidpi-fractional-scale.md.
+    /// ([`Output::surface_size`]) reads the new properties as they are. The
+    /// glue redraws a configured surface one round trip later (a new
+    /// `wl_output.scale` is a new buffer scale where the compositor sent no
+    /// better one).
     pub fn done(&mut self) {
+        let scale = self.info.scale;
         self.staged.apply(&mut self.info);
         self.done = true;
+        let _ = self.rescaled(self.info.scale != scale);
     }
 
     /// The settle callback: the output's identity is as known as it will
@@ -401,6 +469,15 @@ impl Output {
         };
         self.failed = false;
         Effect::Ack(serial)
+    }
+
+    /// The serial of the `configure` the live surface was last given, while
+    /// it is configured.
+    pub fn configured_serial(&self) -> Option<u32> {
+        match &self.surface {
+            Surface::Configured { serial, .. } => Some(*serial),
+            _ => None,
+        }
     }
 
     /// The glue replaced the live surface with a fresh one, committed with
@@ -445,11 +522,10 @@ impl Output {
         }
     }
 
-    /// What to do so the surface shows `wanted`, drawn at buffer scale
-    /// `scale` (see `paint::buffer_scale`). Only a configured surface can
-    /// be drawn on; the others show nothing and wait for their
-    /// `configure`.
-    pub fn plan(&self, wanted: Option<&Wallpaper>, scale: u32) -> Plan {
+    /// What to do so the surface shows `wanted`, drawn at `scale` (see
+    /// `paint::scale_for`). Only a configured surface can be drawn on; the
+    /// others show nothing and wait for their `configure`.
+    pub fn plan(&self, wanted: Option<&Wallpaper>, scale: Scale) -> Plan {
         let Surface::Configured { drawn, .. } = &self.surface else {
             return Plan::Nothing;
         };
@@ -481,7 +557,7 @@ impl Output {
     }
 
     /// Whether it shows `wanted` (at `scale`), for a waiting reply.
-    pub fn progress(&self, wanted: Option<&Wallpaper>, scale: u32) -> Progress {
+    pub fn progress(&self, wanted: Option<&Wallpaper>, scale: Scale) -> Progress {
         if self.failed {
             return Progress::Failed;
         }
@@ -531,15 +607,32 @@ impl Output {
     /// The output's size in logical pixels, as well as it is known: the
     /// configured surface's size once there is one (the surface covers the
     /// whole output, so the compositor's size for it is the output's, exact
-    /// at any scale), else [`Info::logical`], which undershoots at a
-    /// fractional scale.
+    /// at any scale), else [`Output::derived_logical`].
     pub fn logical(&self) -> Option<Size> {
-        self.surface_size().or_else(|| self.info.logical())
+        self.surface_size().or_else(|| self.derived_logical())
+    }
+
+    /// The logical size worked out from the output's properties
+    /// ([`Info::logical`]) at [`Output::scale`]: with the surface's
+    /// fractional scale once the compositor sent it, so 1600×1000 at 1.5 is
+    /// 1067×667, not `wl_output`'s 2 and 800×500. Within a pixel of the
+    /// compositor's own figure (they round differently).
+    ///
+    /// It sizes a surface only for a `configure` of 0 on an axis: a surface
+    /// anchored to all four edges gets its real size from the compositor,
+    /// and every compositor checked (scoot, sway) sends it.
+    ///
+    /// The compositor's scale as it said it, not [`Output::scale`], which
+    /// checks the fraction against the configured size and so reads this
+    /// for a 0 axis: the fraction is the best guess at the output's logical
+    /// size even where it is distrusted for drawing.
+    pub fn derived_logical(&self) -> Option<Size> {
+        self.info.logical(self.preferred.scale(self.info.scale))
     }
 
     /// The size to draw the surface at, in logical pixels: the configured
     /// size, with an axis of 0 taken from the output's logical size (see
-    /// [`Info::logical`]). `None` while not configured, or while a 0 axis
+    /// [`Output::derived_logical`]). `None` while not configured, or while a 0 axis
     /// has nothing to resolve against yet.
     pub fn surface_size(&self) -> Option<Size> {
         let Surface::Configured { requested, .. } = &self.surface else {
@@ -549,7 +642,7 @@ impl Output {
         if requested.width != 0 && requested.height != 0 {
             return Some(requested);
         }
-        let logical = self.info.logical()?;
+        let logical = self.derived_logical()?;
         Some(Size {
             width: if requested.width == 0 {
                 logical.width
@@ -627,6 +720,7 @@ impl<O> Outputs<O> {
                 closed_once: false,
                 stamp: 0,
                 failed: false,
+                preferred: Preferred::default(),
             },
             objects: objects(id),
         });

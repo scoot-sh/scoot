@@ -3,7 +3,7 @@
 use std::fmt;
 
 use crate::control::{Answer, ConnId, Handler};
-use crate::outputs::Outputs;
+use crate::outputs::{Outputs, Size};
 use crate::protocol::{
     self, OutputEntry, OutputList, PROTOCOL_VERSION, Reply, Request, Show, Shows, SurfaceEntry,
 };
@@ -162,6 +162,11 @@ impl<O> OutputList for Outputs<O> {
                 surface: SurfaceEntry {
                     state: output.surface().name(),
                     size: output.surface_size(),
+                    scale: output.surface_size().map(|_| output.scale()),
+                    pixels: output.full_buffer().map(|buffer| Size {
+                        width: buffer.dims.0,
+                        height: buffer.dims.1,
+                    }),
                 },
                 shows: output.shows().map(Shows),
             });
