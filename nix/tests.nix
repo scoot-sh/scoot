@@ -652,18 +652,20 @@ let
   # The flake's own outputs, when evaluated from flake.nix.
   _flakePins =
     lib.optionals withFlake [
+      (
+        assert allAssertionsHold hmFlake.config;
+        true
+      )
+    ]
+    # NixOS is Linux: on this check's Darwin run there is no scootbg to
+    # install, and no NixOS to install it on.
+    ++ lib.optionals (withFlake && isLinux) [
       # A flake NixOS consumer who only sets `enable`: scoot and scootbg,
       # the flake's own builds, and every assertion holds.
       (
         assert allAssertionsHold osFlake.config;
         true
       )
-      (
-        assert allAssertionsHold hmFlake.config;
-        true
-      )
-    ]
-    ++ lib.optionals (withFlake && isLinux) [
       (
         assert
           sorted osFlake.config.environment.systemPackages == sorted [
