@@ -1092,12 +1092,14 @@ fn constraints(backend: &Backend) -> BufferConstraints {
 /// Reads one output's framebuffer back once and writes it into every due
 /// frame on that output.
 ///
-/// One read-back per output: `copy_framebuffer` allocates and fills a
-/// fresh pixman image every call (confirmed in the pinned rev's
-/// `PixmanRenderer`), so doing it per session would cost a full extra copy of
-/// the screen for each client watching -- but sharing one read-back across
-/// outputs would hand a session another screen's pixels, so the sharing
-/// stops at the output boundary.
+/// One read-back per output: sharing one read-back across outputs would hand
+/// a session another screen's pixels, so the sharing stops at the output
+/// boundary. (Doing it per session would also cost a full extra copy of the
+/// screen for each client watching.) On pixman the read borrows the
+/// framebuffer image's own bits with no per-call allocation
+/// (`Backend::capture`); under GLES it still goes through Smithay's
+/// `copy_framebuffer`, whose per-call pixel-pack buffer the pinned rev
+/// offers no public way around -- see the capture-allocations record.
 fn deliver(
     backend: &mut Backend,
     sessions: &mut [Capture],
@@ -1118,9 +1120,10 @@ fn deliver(
     // every due frame rather than returning quietly.
     //
     // The write happens inside the callback rather than over a returned
-    // buffer: the pixels are a borrowed view into the renderer's own mapping,
-    // and copying them out first would cost a full extra copy of the screen
-    // before any client had been written to.
+    // buffer: the pixels are a borrowed view into renderer-owned memory
+    // (the framebuffer image's own bits on pixman, the mapping of Smithay's
+    // copy on GLES), and copying them out first would cost a full extra
+    // copy of the screen before any client had been written to.
     let outcome = backend.capture(|pixels| {
         write_due_captures(
             pixels,

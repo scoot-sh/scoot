@@ -61,7 +61,12 @@
 //! - **Bounded memory.** Each in-flight job holds a full frame of pixels
 //!   (~6.4 MiB at 1600x1000), so the worker queue is bounded by
 //!   [`MAX_IN_FLIGHT_SHOTS`]; past that a capture is refused with a retry
-//!   rather than queued without bound.
+//!   rather than queued without bound. And each job's pixels come from --
+//!   and return to -- their output's read-back pool
+//!   (`Backend::take_capture_buf` / `recycle_capture_buf`, at most
+//!   `render::CAPTURE_BUFS_KEPT` kept per output): a buffer an encode is done
+//!   with is the next capture's read-back target, so steady-state screenshotting
+//!   allocates nothing per capture on either thread.
 //! - **Panic isolation.** This workspace builds release with `panic = "abort"`,
 //!   under which `catch_unwind` cannot catch anything -- so the isolation is
 //!   structural instead: `encode_png` has no panic path to take (checked
@@ -126,8 +131,14 @@ pub struct RawCapture {
 }
 
 /// One capture on its way through the worker.
+///
+/// `bgra` is the read-back buffer this output's pool handed out
+/// (`Backend::take_capture_buf`): the worker owns it exclusively until it
+/// answers, and answers with it (see `ShotDone`), so the event loop gets it
+/// back instead of allocating the next capture fresh.
 struct ShotJob {
     conn: u64,
+    output: Option<OutputId>,
     width: i32,
     height: i32,
     bgra: Vec<u8>,
@@ -141,8 +152,17 @@ struct ShotJob {
 /// when framing itself failed (serde cannot fail on these shapes in
 /// practice); the message is then framed on the loop instead, where it is a
 /// few dozen bytes rather than megabytes.
+///
+/// `bgra` is the job's read-back buffer coming home: the worker is done with
+/// it, and `finish_shot` hands it back to `output`'s pool for the next
+/// capture. `output` is `None` only when there was no backend to return it
+/// to (unreachable through `start_screenshot`, which resolves one first);
+/// a removed output drops it instead, which is always safe -- the pool
+/// refills on demand.
 struct ShotDone {
     conn: u64,
+    output: Option<OutputId>,
+    bgra: Vec<u8>,
     result: Result<String, String>,
 }
 
@@ -292,7 +312,13 @@ impl State {
         let Some(mut backend) = self.take_backend(id) else {
             return Err(format!("output {} has no render target", id.0));
         };
-        let captured = read_back(&mut backend).map(|mut capture| {
+        // The read-back target comes from this output's own pool and goes
+        // back to it: with the worker (see `ShotDone`), on the read failing,
+        // or -- for every caller but `start_screenshot` -- dropped here, in
+        // which case the pool simply refills on demand. Either way the next
+        // capture reuses the memory instead of faulting it fresh.
+        let mut buf = backend.take_capture_buf();
+        let captured = read_back(&mut backend, &mut buf).map(|mut capture| {
             // After the read, with the backend still taken: the cursor's
             // region re-rendered to what was asked for, written over the
             // copy. `None` is the frame already matching (or a region that
@@ -303,6 +329,9 @@ impl State {
             }
             capture
         });
+        if captured.is_err() {
+            backend.recycle_capture_buf(buf);
+        }
         self.put_backend(id, backend);
         captured
     }
@@ -372,6 +401,7 @@ impl State {
         };
         let job = ShotJob {
             conn,
+            output: id,
             width: capture.width,
             height: capture.height,
             bgra: capture.bgra,
@@ -383,7 +413,8 @@ impl State {
         // accounting broke; refusing is safe either way. `Disconnected`
         // means the worker went away, so the encoder is dropped and the next
         // request spawns a fresh one -- this one is still just a refusal,
-        // never a hang.
+        // never a hang. Either way the job's buffer goes back to its
+        // output's pool: no worker will ever answer with it now.
         match self
             .screenshot_encoder
             .as_ref()
@@ -402,12 +433,16 @@ impl State {
                 });
                 ShotStart::Dispatched
             }
-            Err(TrySendError::Full(_)) => ShotStart::Refused(
-                "the screenshot encoder is busy; retry in a few milliseconds".to_string(),
-            ),
-            Err(TrySendError::Disconnected(_)) => {
+            Err(TrySendError::Full(job)) => {
+                recycle_unsent(job, &mut self.backends);
+                ShotStart::Refused(
+                    "the screenshot encoder is busy; retry in a few milliseconds".to_string(),
+                )
+            }
+            Err(TrySendError::Disconnected(job)) => {
                 tracing::warn!("the screenshot encoder went away; refusing the capture");
                 self.screenshot_encoder = None;
+                recycle_unsent(job, &mut self.backends);
                 ShotStart::Refused(
                     "the screenshot encoder is unavailable; retry in a few milliseconds"
                         .to_string(),
@@ -538,25 +573,32 @@ impl State {
     /// whatever is left waits in the entry's [`Outbound`] for
     /// [`State::settle_shots`]. A write error means the peer is gone, and the
     /// entry is dropped -- the work is discarded, cleanly.
+    ///
+    /// The job's read-back buffer is recycled first, whatever the reply does:
+    /// reuse does not depend on delivery, and an early return below must not
+    /// leak the pool's buffer with it.
     fn finish_shot(&mut self, done: ShotDone) {
-        let Some(index) = self
-            .pending_shots
-            .iter()
-            .position(|shot| shot.conn == done.conn)
-        else {
+        let ShotDone {
+            conn,
+            output,
+            bgra,
+            result,
+        } = done;
+        recycle_returned(&mut self.backends, output, bgra);
+        let Some(index) = self.pending_shots.iter().position(|shot| shot.conn == conn) else {
             // Unreachable by construction: an entry leaves `pending_shots`
             // only here and in `settle_shots`'s give-up, and each job
             // produces exactly one completion. Warn rather than panic all
             // the same -- a compositor must not abort over bookkeeping.
             tracing::warn!(
-                conn = done.conn,
+                conn = conn,
                 "a screenshot finished with no pending capture; dropping it"
             );
             return;
         };
         // Framed on the worker (see `ShotDone`); only the fallback -- a few
         // dozen bytes -- is ever encoded here.
-        let line = match done.result {
+        let line = match result {
             Ok(line) => line,
             Err(message) => match encode(&Response::error(&message)) {
                 Ok(line) => line,
@@ -706,26 +748,29 @@ impl State {
     }
 }
 
-fn read_back(backend: &mut Backend) -> Result<RawCapture, String> {
+fn read_back(backend: &mut Backend, buf: &mut Vec<u8>) -> Result<RawCapture, String> {
     let (width, height) = backend.size();
     if width <= 0 || height <= 0 {
         return Err(format!("no pixels to capture at {width}x{height}"));
     }
-    // Owned inside the callback: `Backend::capture` hands out a read-only
-    // view into the renderer's own mapping, not a buffer that can be sent to
-    // another thread. This copy is the one part of the read-back that cannot
-    // move off the event-loop thread with the encode.
+    // Into the caller's buffer, reusing its capacity (see
+    // `Backend::capture_into`): this copy off the event-loop thread's
+    // mapping is the one part of the read-back that cannot move to the
+    // encode worker with the encode.
     //
     // `CaptureError`'s `Display` is the renderer's own message, which is what
     // the IPC client is told -- the surrounding text at each call site already
     // says a capture is what failed.
-    let bgra = backend
-        .capture(<[u8]>::to_vec)
+    backend
+        .capture_into(buf)
         .map_err(|error| error.to_string())?;
     Ok(RawCapture {
         width,
         height,
-        bgra,
+        // The filled buffer travels with the capture from here: to the
+        // worker in `ShotJob`, and back to this output's pool with the
+        // encoded reply in `ShotDone`. What stays behind is an empty `Vec`.
+        bgra: std::mem::take(buf),
     })
 }
 
@@ -781,6 +826,36 @@ pub fn encode_png(width: i32, height: i32, bgra: &[u8]) -> Result<Screenshot, St
     })
 }
 
+/// Hands a capture buffer back to its output's pool, or drops it.
+///
+/// The single funnel for every buffer that comes home: a finished encode
+/// (`finish_shot`) and a job no worker will ever answer (`recycle_unsent`).
+/// A removed output drops its buffer instead -- always safe, the pool refills
+/// on demand -- and a delivered reply never depends on the recycle: it
+/// answers the connection, not the output.
+fn recycle_returned(
+    backends: &mut std::collections::HashMap<OutputId, Backend>,
+    output: Option<OutputId>,
+    bgra: Vec<u8>,
+) {
+    if let Some(id) = output {
+        if let Some(backend) = backends.get_mut(&id) {
+            backend.recycle_capture_buf(bgra);
+        }
+    }
+}
+
+/// Hands a job no worker will ever answer back to its output's pool.
+///
+/// The two `try_send` failures in `start_screenshot` (`Full`, which the
+/// bound makes unreachable, and `Disconnected`, which respawns the worker):
+/// either hands the job back with the send, so its buffer would otherwise be
+/// dropped after one use.
+fn recycle_unsent(job: ShotJob, backends: &mut std::collections::HashMap<OutputId, Backend>) {
+    let ShotJob { output, bgra, .. } = job;
+    recycle_returned(backends, output, bgra);
+}
+
 /// The worker thread's whole life: encode jobs in arrival order until there
 /// are no more to arrive.
 ///
@@ -790,9 +865,20 @@ pub fn encode_png(width: i32, height: i32, bgra: &[u8]) -> Result<Screenshot, St
 /// completion receiver went away first (same cause), which also ends it. A
 /// job that fails, or panics in a debug build, is an error reply for that
 /// capture, not a dead worker.
+///
+/// Every job answers with its read-back buffer, encoded or not: the worker
+/// owns it exclusively (nothing else touches it while a job is in flight),
+/// so handing it back is a move, never shared state.
 fn run_encoder(jobs: Receiver<ShotJob>, done: channel::Sender<ShotDone>) {
     for job in jobs {
-        let result = match catch_unwind(AssertUnwindSafe(|| frame_job(&job))) {
+        let ShotJob {
+            conn,
+            output,
+            width,
+            height,
+            bgra,
+        } = job;
+        let result = match catch_unwind(AssertUnwindSafe(|| frame_job(width, height, &bgra))) {
             Ok(result) => result,
             // Release-only note: with `panic = "abort"` this arm is dead --
             // the process is already gone -- and the isolation is
@@ -802,7 +888,9 @@ fn run_encoder(jobs: Receiver<ShotJob>, done: channel::Sender<ShotDone>) {
         };
         if done
             .send(ShotDone {
-                conn: job.conn,
+                conn,
+                output,
+                bgra,
                 result,
             })
             .is_err()
@@ -814,8 +902,8 @@ fn run_encoder(jobs: Receiver<ShotJob>, done: channel::Sender<ShotDone>) {
 
 /// Encodes one capture and frames its reply line, entirely on the worker.
 /// See `ShotDone` for why the framing lives here rather than on the loop.
-fn frame_job(job: &ShotJob) -> Result<String, String> {
-    let response = match encode_png(job.width, job.height, &job.bgra) {
+fn frame_job(width: i32, height: i32, bgra: &[u8]) -> Result<String, String> {
+    let response = match encode_png(width, height, bgra) {
         Ok(screenshot) => Response::Screenshot(screenshot),
         Err(message) => Response::error(message),
     };
@@ -825,6 +913,7 @@ fn frame_job(job: &ShotJob) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 
     /// The smallest capture that still exercises the real PNG path.
     fn raw_pixels() -> (i32, i32, Vec<u8>) {
@@ -901,5 +990,67 @@ mod tests {
         let mut pixels = vec![0u8; reader.output_buffer_size().expect("sized")];
         reader.next_frame(&mut pixels).expect("a frame");
         assert_eq!(pixels, vec![0x00, 0x00, 0xFF, 0xFF]);
+    }
+
+    /// A buffer whose output went away mid-encode is dropped, not kept --
+    /// and never filed under another output. What `finish_shot` (and
+    /// `recycle_unsent`) funnel through when the backend map no longer has
+    /// the job's output: `remove_output` drops the render target with it.
+    #[test]
+    fn a_buffer_for_a_removed_output_is_dropped_not_kept() {
+        use crate::cli::RendererKind;
+        use crate::compositor::render::ScanoutHandoff;
+
+        let output = Output::new(
+            "gone".to_string(),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: "scoot".into(),
+                model: "gone".into(),
+                serial_number: "0".into(),
+            },
+        );
+        output.change_current_state(
+            Some(Mode {
+                size: (16, 16).into(),
+                refresh: 60_000,
+            }),
+            Some(smithay::utils::Transform::Normal),
+            Some(smithay::output::Scale::Integer(1)),
+            Some((0, 0).into()),
+        );
+        let id = OutputId(7);
+        let mut backends = std::collections::HashMap::new();
+        backends.insert(
+            id,
+            Backend::new(
+                &output,
+                16,
+                16,
+                RendererKind::Pixman,
+                ScanoutHandoff::default(),
+                None,
+            )
+            .expect("a backend"),
+        );
+        // Home to a live output: kept.
+        recycle_returned(&mut backends, Some(id), vec![0u8; 8]);
+        assert_eq!(
+            backends
+                .get(&id)
+                .expect("a backend")
+                .capture_bufs_kept_for_test(),
+            1,
+            "a live output keeps its returned buffer"
+        );
+        // The output goes away with its render target (what `remove_output`
+        // does); a late encode's buffer is then dropped, and nothing is
+        // filed anywhere.
+        backends.remove(&id);
+        recycle_returned(&mut backends, Some(id), vec![0u8; 8]);
+        assert!(backends.is_empty(), "a removed output files nothing");
+        // And `None` -- no backend to return to -- drops too, never panics.
+        recycle_returned(&mut backends, None, vec![0u8; 8]);
     }
 }

@@ -1680,6 +1680,60 @@ fn a_client_that_disconnects_mid_encode_is_dropped_cleanly() {
 }
 
 #[test]
+fn a_finished_encode_returns_its_buffer_to_the_output_pool() {
+    // The worker half of the capture pools: an encode's input `Vec` comes
+    // home with its reply (`ShotDone`) and becomes the next capture's
+    // read-back target, instead of each screenshot faulting ~6.4 MiB fresh
+    // at 1600x1000. Pinned by pointer identity, not by byte-equality or
+    // capacity: a fresh allocation per capture would pass both of those
+    // while proving nothing about reuse.
+    //
+    // A second connection for the second capture: the per-connection
+    // ordering gate would refuse two captures this close together on one.
+    let mut harness = Harness::with_output(1600, 1000);
+    let id = harness
+        .state
+        .outputs
+        .primary_id()
+        .expect("a primary output");
+    let shot = request_line(&Request::Screenshot {
+        output: None,
+        cursor: None,
+    });
+    let mut first = harness.connect(None);
+    first.send(shot.as_bytes());
+    assert!(
+        matches!(first.expect_reply(&mut harness), Response::Screenshot(_)),
+        "the first capture failed"
+    );
+    let backend = harness.state.backends.get(&id).expect("a backend");
+    assert_eq!(
+        backend.capture_bufs_kept_for_test(),
+        1,
+        "the finished encode kept its buffer"
+    );
+    let ptrs = backend.capture_buf_ptrs_for_test();
+
+    let mut second = harness.connect(None);
+    second.send(shot.as_bytes());
+    assert!(
+        matches!(second.expect_reply(&mut harness), Response::Screenshot(_)),
+        "the second capture failed"
+    );
+    let backend = harness.state.backends.get(&id).expect("a backend");
+    assert_eq!(
+        backend.capture_bufs_kept_for_test(),
+        1,
+        "the pool holds one buffer, not one per capture"
+    );
+    assert_eq!(
+        backend.capture_buf_ptrs_for_test(),
+        ptrs,
+        "the second capture reused the first capture's allocation"
+    );
+}
+
+#[test]
 fn a_capture_mid_wait_does_not_move_the_idle_baseline() {
     // `wait-idle` watches `last_commit`, which only a client commit writes
     // -- the capture's synchronous render never touches it, and the encode

@@ -487,6 +487,8 @@ mod resize;
 
 mod arrange_once;
 
+mod capture_pool;
+
 mod capture_release;
 
 #[cfg(feature = "gpu-scanout")]

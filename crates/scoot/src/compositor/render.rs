@@ -204,7 +204,26 @@ pub struct Backend {
     /// at most two, so a capture stream re-renders its region into the same
     /// memory frame after frame.
     patch_pixels: Vec<Vec<u8>>,
+    /// Whole-frame read-back targets, kept for the next capture
+    /// ([`Backend::take_capture_buf`]): at most [`CAPTURE_BUFS_KEPT`], so an
+    /// agent polling screenshots reuses the same memory instead of faulting
+    /// fresh megabytes per capture. Full frames, never cursor regions (those
+    /// stay in `patch_pixels`): one pool per size class, so neither churns
+    /// the other.
+    capture_bufs: Vec<Vec<u8>>,
 }
+
+/// How many whole-frame buffers [`Backend`] keeps for reuse between captures.
+///
+/// Covers the global in-flight bound
+/// (`screenshot::MAX_IN_FLIGHT_SHOTS`): every accepted capture holds exactly
+/// one buffer from dispatch to its encode's return, so one output never needs
+/// more stashed than that bound, and anything beyond it is dropped rather
+/// than kept. Sized in buffers, not bytes: each one is a full frame at
+/// whatever size the output was when it was filled, and a resized output
+/// reuses the capacity (a `Vec` does not care what dimensions its bytes last
+/// held).
+pub(super) const CAPTURE_BUFS_KEPT: usize = 4;
 
 /// What a renderer can import, in the shape the `zwp_linux_dmabuf_v1`
 /// advertisement is derived from ([`Backend::dmabuf_import_set`]).
@@ -317,6 +336,7 @@ impl Backend {
                 size: (width, height),
                 cursor: CursorInFrame::default(),
                 patch_pixels: Vec::new(),
+                capture_bufs: Vec::new(),
             });
         }
         #[cfg(not(feature = "gpu-scanout"))]
@@ -333,6 +353,7 @@ impl Backend {
             size: (width, height),
             cursor: CursorInFrame::default(),
             patch_pixels: Vec::new(),
+            capture_bufs: Vec::new(),
         })
     }
 
@@ -516,15 +537,23 @@ impl Backend {
     /// borrowed view into the renderer's own mapping: `screencopy` writes
     /// them straight into each due client buffer with no intermediate copy,
     /// and only `screenshot` (which sends them to another thread) actually
-    /// owns them.
+    /// owns them (see [`Backend::capture_into`]).
+    ///
+    /// On pixman the view is the framebuffer image's own bits, read directly
+    /// rather than composited into a fresh image per call: a whole-image
+    /// `Src` composite is an identity copy, so the bytes are the same and
+    /// the per-capture allocation is gone. The image is the output's
+    /// persistent read-back target -- one per output, never per capture.
     pub(super) fn capture<U>(
         &mut self,
         use_pixels: impl FnOnce(&[u8]) -> U,
     ) -> Result<U, CaptureError> {
         let region: Rectangle<i32, Buffer> = Rectangle::from_size(self.size.into());
+        let size = self.size;
         match &mut self.pipeline {
             Pipeline::Pixman(cpu) => {
-                capture_with(&mut cpu.renderer, &mut cpu.image, region, use_pixels)
+                let (bits, _) = pixman::framebuffer_bits(&cpu.image, size)?;
+                Ok(use_pixels(bits))
             }
             // Both GLES arms free what the capture queued before returning,
             // success or not (see `gles::release_captured`): a capture of a
@@ -568,6 +597,109 @@ impl Backend {
                 read
             }
         }
+    }
+
+    /// Reads the whole framebuffer back into `out`, reusing its capacity.
+    ///
+    /// What IPC `screenshot` copies out of (it sends the bytes to another
+    /// thread, so a borrow will not do): the caller hands a buffer taken
+    /// with [`Backend::take_capture_buf`] and gets it back filled --
+    /// tightly packed little-endian BGRA rows, `width * height * 4` bytes --
+    /// plus the size those bytes hold. `out` is cleared first; when its
+    /// capacity already fits the frame (the second and every later capture
+    /// at the same size) nothing allocates and no fresh page is faulted.
+    ///
+    /// On pixman this copies the framebuffer image's own bits (see
+    /// [`Backend::capture`]); under GLES it still reads through Smithay's
+    /// `copy_framebuffer`, whose per-call pixel-pack buffer the pinned rev
+    /// offers no public way around -- the event-loop `Vec` is pooled, the
+    /// GL-side buffer is not (measured residual, see the capture-allocations
+    /// record). Either way the copy into `out` is the one full-frame memcpy
+    /// this path has always paid (it was `<[u8]>::to_vec`).
+    pub(super) fn capture_into(&mut self, out: &mut Vec<u8>) -> Result<(i32, i32), CaptureError> {
+        let size = self.size;
+        if let Pipeline::Pixman(cpu) = &mut self.pipeline {
+            let (bits, stride) = pixman::framebuffer_bits(&cpu.image, size)?;
+            let row = size.0 as usize * 4;
+            out.clear();
+            out.reserve(row * size.1 as usize);
+            for y in 0..size.1 as usize {
+                out.extend_from_slice(&bits[y * stride..y * stride + row]);
+            }
+            return Ok(size);
+        }
+        // Every other pipeline reads through Smithay's `copy_framebuffer`
+        // (see [`Backend::capture`]): the pixel-pack buffer stays per-call,
+        // and only the event-loop `Vec` is pooled here. `capture` drains the
+        // GL objects the read queued; the `Vec` comes back filled.
+        let filled = self.capture(|pixels| {
+            out.clear();
+            out.extend_from_slice(pixels);
+            pixels.len()
+        })?;
+        // `capture` hands out exactly one frame's bytes or fails, so a short
+        // read here would mean the renderer changed shape mid-call --
+        // refused rather than handed on half-filled.
+        let expected = size.0 as usize * size.1 as usize * 4;
+        if filled != expected {
+            return Err(CaptureError::new(
+                CaptureStage::Copy,
+                format!(
+                    "the framebuffer read back {filled} bytes for a {w}x{h} frame",
+                    w = size.0,
+                    h = size.1
+                ),
+            ));
+        }
+        Ok(size)
+    }
+
+    /// Takes a whole-frame buffer for the next capture: a kept one when the
+    /// pool has one, a fresh one otherwise. Hand it back with
+    /// [`Backend::recycle_capture_buf`] once its bytes are no longer needed
+    /// -- the encode worker's return trip, for an IPC screenshot -- so the
+    /// next capture reuses it.
+    ///
+    /// Any size fits any buffer: what matters is capacity, and `capture_into`
+    /// clears before filling. A buffer is never shared: `take` removes it,
+    /// and only its taker ever recycles it (the event loop is single-threaded
+    /// and the worker owns its `Vec` exclusively until it answers). Taken
+    /// buffers are always empty: `recycle_capture_buf` clears before keeping.
+    pub(super) fn take_capture_buf(&mut self) -> Vec<u8> {
+        let buf = self.capture_bufs.pop().unwrap_or_default();
+        debug_assert!(buf.is_empty(), "a kept capture buffer holds pixels");
+        buf
+    }
+
+    /// Hands a capture buffer back to the pool, keeping at most
+    /// [`CAPTURE_BUFS_KEPT`] -- anything beyond that is dropped rather than
+    /// kept, so the pool cannot grow without bound.
+    ///
+    /// Cleared before keeping, so the pool never holds onto frame contents
+    /// longer than the capture that filled them needed: a kept buffer is
+    /// capacity, not pixels.
+    pub(super) fn recycle_capture_buf(&mut self, mut buf: Vec<u8>) {
+        if self.capture_bufs.len() < CAPTURE_BUFS_KEPT {
+            buf.clear();
+            self.capture_bufs.push(buf);
+        }
+    }
+
+    /// How many whole-frame buffers this backend currently keeps for reuse.
+    /// Only a test asks: production answers "take" and "recycle", never a
+    /// count.
+    #[cfg(test)]
+    pub(super) fn capture_bufs_kept_for_test(&self) -> usize {
+        self.capture_bufs.len()
+    }
+
+    /// The allocations the pool currently keeps, as pointers. Only a test
+    /// asks: it pins that the *same* allocation serves consecutive captures
+    /// (a fresh allocation each time would pass every byte-equality check
+    /// while proving nothing about pooling).
+    #[cfg(test)]
+    pub(super) fn capture_buf_ptrs_for_test(&self) -> Vec<*const u8> {
+        self.capture_bufs.iter().map(Vec::as_ptr).collect()
     }
 
     /// Whether a capture served off this backend right now would read a
@@ -983,7 +1115,7 @@ pub(super) struct CaptureError {
 }
 
 impl CaptureError {
-    fn new(stage: CaptureStage, error: impl fmt::Display) -> Self {
+    pub(super) fn new(stage: CaptureStage, error: impl fmt::Display) -> Self {
         Self {
             stage,
             error: error.to_string(),
