@@ -114,3 +114,50 @@ fn many_x_windows_past_one_apps_bounds_keep_the_server() {
             .expect("the X server still answers");
     }
 }
+
+/// The live server connection is the one whose outstanding acquire waits
+/// are held to its own, scaled bound rather than one app's 64: 64 X windows
+/// committing GPU frames at once used to be enough to disconnect the server
+/// with every X window in the session. No GPU is needed to prove the
+/// wiring -- the bound is read off the connection, not off a wait -- and
+/// the arithmetic is `xwayland_budget/tests.rs`'s.
+#[test]
+fn the_server_gets_its_own_acquire_wait_bound() {
+    use crate::compositor::drm_syncobj::{MAX_ACQUIRE_WAITS_PER_CLIENT, max_acquire_waits_for};
+    use crate::compositor::xwayland_budget::acquire_waits_for;
+
+    let Some(mut live) = live("the_server_gets_its_own_acquire_wait_bound") else {
+        return;
+    };
+    let mut menu = Props::new(RED);
+    menu.override_redirect = true;
+    live.x.map(&menu);
+    eventually(&mut live.fixture, "the menu's surface", |fixture| {
+        fixture
+            .state
+            .x11_unmanaged
+            .iter()
+            .any(|window| window.wl_surface().is_some())
+    });
+    let server = live
+        .fixture
+        .state
+        .x11_unmanaged
+        .iter()
+        .find_map(|window| window.wl_surface())
+        .and_then(|surface| smithay::reexports::wayland_server::Resource::client(&surface))
+        .expect("the XWayland server's connection");
+    let bound = xwayland_fd_bound();
+    assert_eq!(max_acquire_waits_for(&server), acquire_waits_for(bound));
+    if bound > ONE_APP as u32 {
+        assert!(
+            max_acquire_waits_for(&server) > MAX_ACQUIRE_WAITS_PER_CLIENT,
+            "the server is held to one app's acquire waits on a {bound}-fd budget"
+        );
+    } else {
+        eprintln!(
+            "the_server_gets_its_own_acquire_wait_bound: this process's fd table gives the \
+             server one app's budget ({bound}), so its bound is one app's too"
+        );
+    }
+}

@@ -713,6 +713,8 @@ mod mapping;
 mod peer;
 #[cfg(feature = "xwayland")]
 mod press_after_crossing;
+#[cfg(feature = "xwayland")]
+mod refused_cost;
 #[cfg(all(feature = "xwayland", feature = "gpu-scanout"))]
 mod scanout;
 #[cfg(feature = "xwayland")]

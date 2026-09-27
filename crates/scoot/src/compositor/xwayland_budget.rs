@@ -28,13 +28,15 @@
 //! RSS, 35 fds of its own, unchanged): there was no XWayland limit to
 //! protect, only scoot's.
 //!
-//! Nor did scoot's per-X-client caps help: a window scoot refuses at the
-//! window manager (`toplevel_cap.rs`'s managed and unmanaged caps) is still
-//! a window the server allocates and commits buffers for -- measured, one X
-//! client mapping 240 menus had 128 drawn and 480 buffers held. Only the
-//! window manager may withhold `_XWAYLAND_ALLOW_COMMITS`, and that write
-//! lives inside Smithay's `X11Wm`
-//! (`docs/backlog/protocols/xwayland-refused-windows-still-commit.md`).
+//! Nor did scoot's per-X-client caps help with menus: an override-redirect
+//! window scoot refuses at the window manager (`toplevel_cap.rs`) is still
+//! one the server has allocated and committed buffers for before scoot
+//! hears of the map -- measured, one X client mapping 240 menus had 128
+//! drawn and 480 buffers held. Withholding `_XWAYLAND_ALLOW_COMMITS` from
+//! it was measured too and changes nothing (a refused *managed* window
+//! costs nothing to begin with: its frame is never mapped). See
+//! `xwayland/tests/refused_cost.rs` and
+//! `docs/backlog/protocols/xwayland-refused-windows-still-commit.md`.
 //!
 //! ## The number
 //!
@@ -70,6 +72,38 @@
 //! (`dispatch.rs`), and an unbounded server would let one runaway X client
 //! grow scoot's fd table until fd pressure refused everyone.
 //!
+//! ## Acquire waits
+//!
+//! The one per-client bound the fd budget does not replace is the count of
+//! commits waiting on unsignalled acquire points (`drm_syncobj/acquire.rs`,
+//! 64 per app, a disconnect past it). It exists only where explicit sync is
+//! offered (the `--tty` GPU tier), and there the server holds one wait per
+//! X window whose latest commit's acquire point has not signalled: XWayland
+//! posts a window's next frame only once the last one's frame callback has
+//! fired (`xwl_screen_post_damage`, "If we're waiting on a frame callback
+//! from the server, don't attach a new buffer", 24.1.13's
+//! `xwayland-screen.c`), and a blocked commit's callback waits with it. A
+//! window flipped by Present without vsync is paced by a `wl_display.sync`
+//! instead, so it can have a few (up to the images the X client's GPU
+//! driver swaps between). All of that is read from the XWayland source,
+//! not measured: this machine class has no GPU. So 64 was a bound on every
+//! X app's GPU windows together, and ~64 X windows committing GPU frames in
+//! the same instant would have disconnected every X app in the session.
+//!
+//! [`acquire_waits_for`] scales it with the fd budget, in an app's own
+//! ratio (64 waits to 512 fds): **512 waits on the raised table**, exactly
+//! 64 on a 1024-fd table (so, again, `fd_pressure.rs`'s arithmetic for that
+//! table holds unchanged), 156 on a 20000-fd one. Why not one per window
+//! the fd budget admits (2048): every wait is also a blocked transaction
+//! in the server's queue, which Smithay scans linearly on each of the
+//! server's commits (`TransactionQueue::take_ready`), so the bound is a
+//! bound on that scan too; 512 is a quarter of the windows the budget
+//! holds, all blocked at once. Each wait is an eventfd scoot opens: the
+//! server at every bound is 4096 + 512 fds on a 65536-fd table, still
+//! small next to the 65408 pressure line. The pressure grace (16) is
+//! unchanged, as the fd grace is: under fd pressure the server is a
+//! contributor like any client past it.
+//!
 //! ## Identity
 //!
 //! The server's connection is the one carrying Smithay's
@@ -79,6 +113,8 @@
 //! plane, timeline and buffer creation.
 
 use smithay::reexports::wayland_server::Client;
+
+use super::drm_syncobj::MAX_ACQUIRE_WAITS_PER_CLIENT;
 
 /// The smallest the server's bound gets: the ordinary per-client bound, so
 /// the server is never held tighter than an app.
@@ -93,6 +129,13 @@ pub(crate) const MAX: u32 = 4096;
 pub(crate) fn bound_for(soft: u64) -> u32 {
     // Clamped in u64 before narrowing, so the cast cannot truncate.
     (soft / 16).clamp(u64::from(MIN), u64::from(MAX)) as u32
+}
+
+/// The server's outstanding acquire-wait bound when its fd budget is
+/// `bound`: an app's ratio of waits to fds (64 to 512), so [`MIN`] gives
+/// exactly an app's 64 and [`MAX`] gives 512. See the module doc.
+pub(crate) const fn acquire_waits_for(bound: u32) -> u32 {
+    bound / (MIN / MAX_ACQUIRE_WAITS_PER_CLIENT)
 }
 
 /// The server's bound in this process: [`bound_for`] the soft limit

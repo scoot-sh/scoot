@@ -310,4 +310,11 @@ impl WlBuffers {
     pub(super) fn buffers_in_flight(&self) -> usize {
         self.live_per_client.values().sum::<u32>() as usize
     }
+
+    /// How many buffers `client` holds. Test-only, like
+    /// [`Self::buffers_in_flight`]; read by the XWayland suites.
+    #[cfg(all(test, feature = "xwayland"))]
+    pub(super) fn live_for(&self, client: &ClientId) -> u32 {
+        self.live_per_client.get(client).copied().unwrap_or(0)
+    }
 }

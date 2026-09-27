@@ -156,13 +156,19 @@ comparison and an atomic load, with no allocation.
 
 - A refused X window still costs the server its buffers, so one runaway X
   client can on its own push the server to its (now 8× larger) budget.
-  See the follow-up above; that fix is in the Smithay fork.
+  See the follow-up above. (Later the same day: withholding commits was
+  measured and does not help, and a refused *managed* window turned out
+  to cost nothing. Only override-redirect windows remain; see the
+  follow-up.)
 - The GPU-tier timeline path and the 64-per-client acquire-wait bound
   (`drm_syncobj/acquire.rs`, commits waiting on unsignalled acquire
   points, which XWayland would add across all its windows) are reasoned
   from source, not measured. The acquire-wait bound is unchanged. Measure
   it on the Asahi M2 or a GPU dev VM before deciding whether the server
-  needs its own bound there too.
+  needs its own bound there too. (Later the same day it got one, from the
+  XWayland source: one wait per X window committing a GPU frame, scaled
+  with the fd budget to 512 on the usual table. See `xwayland_budget.rs`.
+  Still reasoned, not measured on a GPU.)
 
 ---
 

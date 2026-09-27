@@ -9,6 +9,19 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-27 — X apps drawing with the GPU no longer all close together at ~64 windows
+
+- **With `--xwayland` on the `--tty` GPU tier, about 64 X windows drawing
+  with the GPU at the same moment no longer disconnect the X server.**
+  scoot holds a commit whose GPU work has not finished until it has, and
+  allowed any one Wayland client 64 such commits. The X server is one
+  client for every X window, and it holds about one per X window drawing
+  with the GPU. So 64 of them busy at once disconnected the X server and
+  closed every X app's windows. The X server's limit now scales with its
+  fd limit: 512 on the usual 65536 fd table, 64 where the hard fd limit is
+  1024. This comes from reading the XWayland source. It has not been
+  measured on a GPU.
+
 ### 2026-09-27 — X apps no longer all close together at ~256 X windows
 
 - **With `--xwayland`, the X server is no longer disconnected once about

@@ -18,7 +18,8 @@ top**, so it stays easy to review, rebase, and drop.
 
 ### `scoot-sh/smithay`
 
-- **Branch:** `scoot/xwayland-selection-dnd`, twenty-two commits on `0ff00983`.
+- **Branch:** `scoot/xwayland-selection-dnd`, twenty-two pinned commits on
+  `0ff00983`, plus an unpinned twenty-third, `fcf6f314` (see below).
   Its first, `43f50eb2`, is also the tip of `scoot/syncobj-timeline-drop`,
   which PR #233 pinned; that branch is kept as it was, and nothing pins it
   now. The XWayland commits, in order, each measured before it was written
@@ -236,6 +237,16 @@ top**, so it stays easy to review, rebase, and drop.
     clipboard and peer suites 51/51, three runs (X to Wayland drags,
     which start over their own window, included). See
     `docs/backlog/resolved/xwayland-same-client-quick-drag-done.md`.
+  - `fcf6f314` **(on the branch, not pinned)** adds a public
+    `X11Surface::set_commits_allowed`, so the window manager can withhold
+    `_XWAYLAND_ALLOW_COMMITS` from an X window it refuses. It was written
+    for `docs/backlog/protocols/xwayland-refused-windows-still-commit.md`
+    and measured in scoot against a local repin before anything was
+    pinned. It does not help: XWayland spends a refused override-redirect
+    window's two buffers before the window manager hears of the map (480
+    buffers either way for 240 menus, 128 drawn). scoot stays pinned at
+    `b16cd6a2`. This commit is the branch tip and nothing uses it, so drop
+    it at the next rebase unless a use turns up.
 - **Evidence:** `docs/backlog/resolved/syncobj-handle-leak-done.md`, and on the
   dev VM `~/evidence/sync/master-validation/`. Upstream master `79bbed5e1`
   (2026-09-22) was built and measured: it leaks 3.5–4.1 MB per test run,

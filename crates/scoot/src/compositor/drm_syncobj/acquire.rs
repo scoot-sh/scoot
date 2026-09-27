@@ -32,7 +32,9 @@
 //!   surface in it skips that surface.
 //! - **Outstanding waits are bounded per client**
 //!   ([`MAX_ACQUIRE_WAITS_PER_CLIENT`](super::MAX_ACQUIRE_WAITS_PER_CLIENT),
-//!   and a smaller grace while the fd table is pressured). Past it the client
+//!   the session's XWayland server its own scaled bound
+//!   ([`max_acquire_waits_for`]), and a smaller grace while the fd table is
+//!   pressured). Past it the client
 //!   is disconnected with `wl_display.no_memory`: the syncobj surface's own
 //!   error enum describes malformed requests, and none of them is this --
 //!   "the compositor will not hold more of your resources" is exactly what
@@ -75,7 +77,7 @@ use smithay::wayland::compositor::{
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::drm_syncobj::{DrmSyncPoint, DrmSyncPointBlocker, DrmSyncobjCachedState};
 
-use super::{MAX_ACQUIRE_WAITS_PER_CLIENT, PRESSURE_GRACE_ACQUIRE_WAITS};
+use super::{PRESSURE_GRACE_ACQUIRE_WAITS, max_acquire_waits_for};
 use crate::compositor::{State, no_memory};
 
 /// Outstanding acquire waits, per surface and per client.
@@ -227,15 +229,16 @@ pub(crate) fn pre_commit(state: &mut State, dh: &DisplayHandle, surface: &WlSurf
     let client_id = client.id();
     let waits = &mut state.drm_syncobj.waits;
     let live = waits.live_for(&client_id);
-    if live >= MAX_ACQUIRE_WAITS_PER_CLIENT
+    let max = max_acquire_waits_for(&client);
+    if live >= max
         || crate::compositor::dispatch::pressure_refusal(live, PRESSURE_GRACE_ACQUIRE_WAITS)
     {
         tracing::debug!(
             live,
-            max = MAX_ACQUIRE_WAITS_PER_CLIENT,
+            max,
             "disconnecting a client past its outstanding acquire-wait bound"
         );
-        refuse_wait(dh, &client, live);
+        refuse_wait(dh, &client, live, max);
         return;
     }
     let (blocker, source) = match acquire.generate_blocker() {
@@ -291,13 +294,13 @@ pub(crate) fn pre_commit(state: &mut State, dh: &DisplayHandle, surface: &WlSurf
 /// Disconnects `client` with `wl_display.error(no_memory)` for going past its
 /// acquire-wait bound. See the module doc for the choice of code, and
 /// [`no_memory::disconnect`] for how it is posted.
-fn refuse_wait(dh: &DisplayHandle, client: &Client, live: u32) {
+fn refuse_wait(dh: &DisplayHandle, client: &Client, live: u32, max: u32) {
     no_memory::disconnect(
         dh,
         client,
         format!(
             "explicit sync: this client already has {live} commits waiting on unsignalled \
-             acquire points (the bound is {MAX_ACQUIRE_WAITS_PER_CLIENT}, \
+             acquire points (the bound is {max}, \
              {PRESSURE_GRACE_ACQUIRE_WAITS} under file-descriptor pressure)"
         ),
     );

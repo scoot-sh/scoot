@@ -163,9 +163,17 @@ keep one; AGX shows that expectation cannot be assumed.
   ordinary windows alike, across every X application — got the X server
   disconnected, closing every X window in the session at once. Past its
   limit (about 2048 X windows) it still is: scoot logs `Xwayland
-  disconnected` with the reason, and X comes back only with a restart. A
-  window scoot refuses under the two per-X-client limits above still costs
-  the X server its buffers.
+  disconnected` with the reason, and X comes back only with a restart.
+  Where explicit sync is offered (the `--tty` GPU tier), its limit on
+  commits waiting for the GPU is scaled the same way: **512** with the
+  usual fd limit, 64 (an app's) where the hard fd limit is 1024, 156 on a
+  20000-fd table. It holds about one such commit per X window drawing
+  with the GPU, so before, about 64 X windows drawing at once could
+  disconnect every X app. A managed X window refused under the
+  per-X-client limit above costs the X server nothing. A refused
+  override-redirect window costs it what a drawn one does, 2 fds and 2
+  buffers, so one X app mapping menus past its limit still uses up the
+  server's.
 - **128 live `xdg_popup`s per client.** A client already holding 128 that
   opens one more is disconnected with `wl_display.error` `no_memory` ("at
   most 128 live xdg_popups per client"); closing or losing its popups
@@ -178,7 +186,7 @@ keep one; AGX shows that expectation cannot be assumed.
 Real clients are far below all of these: a `foot` window keeps 2 fds, a
 GPU client one per buffer it has allocated (a few per window), a Vulkan
 window 16 timelines. At every limit at once, one client can make scoot
-hold about 1600 fds, unused ones included (the XWayland server about 5200),
+hold about 1600 fds, unused ones included (the XWayland server about 5600),
 against the point (65408 of 65536) where scoot starts turning newcomers
 away. Many clients together
 still can reach it (see
@@ -1648,7 +1656,9 @@ What scoot does with the points:
   own errors, from Smithay.
 - **Bounds.** A client may have scoot hold **128** of its imported
   timelines and have **64** commits waiting on acquire points at once (each
-  is an eventfd). Timelines also count toward the client's
+  is an eventfd). The XWayland server's bounds are bigger, scaled with
+  scoot's fd table: 512 waiting commits with the usual limit (see
+  [Per-client limits](#per-client-limits-on-what-scoot-keeps)). Timelines also count toward the client's
   [512 fds](#per-client-limits-on-what-scoot-keeps), with its pools and
   planes. While the compositor's fd table is nearly full an import is
   refused once the client's fds of every kind are past 128 (see the same
