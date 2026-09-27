@@ -184,7 +184,11 @@ mod tests;
 
 /// Where an absolute move to `to` (from `from`) actually lands under pointer
 /// constraints. No heap: the confined arm carries the clamped point and the
-/// hit test behind it inline.
+/// hit test behind it inline -- which makes it as large as the pointer
+/// focus's X variant (see `pointer_focus.rs`), and deliberately unboxed
+/// for the same reason: a box would be a heap allocation per confined
+/// motion.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum AbsoluteTarget {
     /// No focus, no constraint on the focus surface, an inactive one, or one
     /// whose region does not contain the pointer's current position: move to

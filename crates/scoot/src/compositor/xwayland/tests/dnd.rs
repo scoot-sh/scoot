@@ -24,7 +24,7 @@ fn still_a_plain_press(state: &State) -> bool {
 
 /// Whether the seat's pointer is held by something other than the press
 /// grab -- the drag the window manager starts.
-fn taken_over(state: &State) -> bool {
+pub(super) fn taken_over(state: &State) -> bool {
     state
         .seat
         .get_pointer()
@@ -34,7 +34,7 @@ fn taken_over(state: &State) -> bool {
         .unwrap_or(false)
 }
 
-fn press_at(state: &mut State, rect: scoot_core::Rect) {
+pub(super) fn press_at(state: &mut State, rect: scoot_core::Rect) {
     let (x, y) = (
         f64::from(rect.x + rect.w / 2),
         f64::from(rect.y + rect.h / 2),

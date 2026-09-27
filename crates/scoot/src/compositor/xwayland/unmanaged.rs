@@ -31,6 +31,7 @@ use smithay::wayland::compositor::SurfaceData;
 use smithay::xwayland::X11Surface;
 
 use super::super::State;
+use super::super::pointer_focus::PointerFocus;
 use super::super::toplevel_cap::MAX_X11_UNMANAGED_PER_CLIENT;
 use super::focus::x_client_key;
 
@@ -123,20 +124,32 @@ impl State {
         }
     }
 
-    /// The override-redirect surface at `pos`, top-most first, the way
-    /// `window_under` answers for managed windows. Asks each window's
-    /// surface tree, so its input region is honoured. Allocation-free: this
-    /// is on the per-motion hit test, and with no override-redirect window
-    /// mapped -- nearly always -- it is an empty-`Vec` test.
+    /// The override-redirect window at `pos`, top-most first, the way
+    /// `window_under` answers for managed windows -- as the X pointer focus,
+    /// so a drag over a menu or tooltip reaches the window manager's XDND
+    /// side like one over any X window (see `pointer_focus.rs`). Asks each
+    /// window's surface tree, so its input region is honoured.
+    /// Allocation-free: this is on the per-motion hit test, and with no
+    /// override-redirect window mapped -- nearly always -- it is an
+    /// empty-`Vec` test; a hit costs the `X11Surface`'s reference-count
+    /// bumps.
     pub(in crate::compositor) fn x11_unmanaged_under(
         &self,
         pos: Point<f64, Logical>,
-    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+    ) -> Option<(PointerFocus, Point<f64, Logical>)> {
         self.x11_unmanaged.iter().rev().find_map(|window| {
             let location = window.last_configure().loc;
             window
                 .surface_under(pos - location.to_f64(), (0, 0), WindowSurfaceType::ALL)
-                .map(|(surface, point)| (surface, (point + location).to_f64()))
+                .map(|(surface, point)| {
+                    (
+                        PointerFocus::X11 {
+                            window: window.clone(),
+                            surface,
+                        },
+                        (point + location).to_f64(),
+                    )
+                })
         })
     }
 
