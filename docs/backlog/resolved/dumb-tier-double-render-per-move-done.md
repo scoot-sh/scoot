@@ -10,9 +10,11 @@ blocked: null
 
 RESOLVED 2026-09-27 (verdict-only PR, no code change). **Don't fix:
 there is no trailing render to fix.** On current main every pointer move
-schedules exactly one render — 275 renders traced across four live
-batteries, zero pairs under 2 ms apart (minimum inter-render gap 5.3 ms,
-screenshot-iteration-paced). The ticket's hypothesized present-skip /
+schedules exactly one render — 275 render starts across both session
+logs (32 + 243, including startup, cursor-blink, and screenshot-path
+renders; the table below counts the 121 move-attributed renders across
+five batteries), zero pairs under 2 ms apart (minimum inter-render gap
+5.3 ms, screenshot-iteration-paced). The ticket's hypothesized present-skip /
 vblank-retry cadence was measured directly and refuted as a pair source:
 `VBlank` arrives with `needs_render == false` at every one of 60+
 sampled completions, `present()` never skips in the move-only rigs, and
@@ -90,12 +92,22 @@ Batteries (all single-output; `screenshot --output 2` refused, one
 At #259 the implementer counted 9 (pre) / 18 (post) trailing Nones per
 20 same-position moves via the Smithay damage trace, and the reviewer
 corroborated pairs on both builds. That does not reproduce here across
-four batteries. No commit between #259 (`62f8f32`) and this measurement
-(`f943789`) touches render scheduling — the four render-path commits
-are arrange-hoisting (#267), layer-callback withholding (#279, no
-layers in rig), unplug-restore output add/remove, and a spelling pass —
-so a code change removing a real pair is unlikely; counting
-methodology (trace spans/events vs frames) or rig variance is likelier.
+five batteries. Units differ, which matters: those counts are per-move
+damage *outcomes*, while only the reviewer measured sub-2 ms
+*inter-render gaps* — both saw Nones, only one measured pairs. The
+desync mechanism itself is ruled out as a pair source: pre-fix, 20
+same-position moves produced 20 renders (11 incremental + 9
+full-repaint), i.e. one render per move with outcomes alternating at
+move pace — the desync has no synchronous second-render arm. No commit
+between #259 (`62f8f32`) and this measurement (`f943789`) touches
+render scheduling — the render-path commits are arrange-hoisting (#267,
+which moves `arrange()` within the existing tick and adds/removes no
+render), layer-callback withholding (#279, no layers in rig),
+unplug-restore output add/remove, a spelling pass, plus the Smithay
+repin `5b57532`→`74edbf3` (one functional delta: pixman `Repeat::Pad`
+texture sampling, scheduling-irrelevant) — so a code change removing a
+real pair is unlikely; counting methodology (trace spans/events vs
+frames) or rig variance is likelier.
 Re-verifying the old build was deliberately skipped: the verdict is
 invariant to it (no mechanism, no cost, nothing to fix on main either
 way). If a future rig reproduces pairs, reopen with the rig attached.

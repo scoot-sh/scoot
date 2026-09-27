@@ -13,7 +13,8 @@ RESOLVED 2026-09-26 (PR #259). `advance_generation` gated on
 early return — verified against pinned source); `buffers.rs` false doc
 corrected; RED regression test; census 9-full+11-incr → 0-full+20-incr.
 Reviewer reproduced counts byte-identically. Follow-up filed, not fixed:
-`core/dumb-tier-double-render-per-move.md` (every move renders twice).
+`resolved/dumb-tier-double-render-per-move-done.md` (measured don't-fix:
+no trailing render on current main).
 
 Found 2026-09-26 while investigating `multi-output-remainder.md` item 3
 (per-output render scheduling): that item's "~1pp no-damage pass" premise
