@@ -28,7 +28,9 @@ wayland-protocols = { version = "0.32", features = ["client", "staging", "unstab
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # poll(2), flock(2) and a non-blocking connect probe through raw syscalls, no `libc`
 # crate: the same `rustix` the Wayland crates already pull in (§9).
-rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net"] }
+# `process` for `getuid` (the state directory's owner check); another
+# crate in the tree enables it already, so it adds nothing.
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net", "process"] }
 # The control socket's line-framed JSON: +74 KB, already workspace
 # dependencies, and able to express versioned, tagged replies (§5).
 serde.workspace = true

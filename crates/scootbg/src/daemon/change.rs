@@ -161,6 +161,10 @@ impl Changes for Control<'_> {
         &self.state.outputs
     }
 
+    fn saving(&self) -> bool {
+        self.state.saved.saving()
+    }
+
     fn change(
         &mut self,
         conn: ConnId,
@@ -173,6 +177,7 @@ impl Changes for Control<'_> {
             choices,
             waiters,
             images,
+            saved,
             ..
         } = &mut *self.state;
         let targets = |entry: &Entry<Objects>| {
@@ -187,7 +192,8 @@ impl Changes for Control<'_> {
             Some(Show::Color(color)) => Some(Wallpaper::Color(color)),
             Some(Show::Image(request)) => {
                 // Nothing changes until it has decoded (`crate::jobs`): a
-                // trial, drawn for the outputs configured now.
+                // trial, drawn for the outputs it targets once none of them
+                // is about to be configured (`images::pump`).
                 let image = Arc::new(Image {
                     path: request.path.into_owned(),
                     look: crate::image::render::Look {
@@ -197,26 +203,18 @@ impl Changes for Control<'_> {
                     },
                     serial: generation,
                 });
-                let draw_for = outputs
-                    .iter()
-                    .filter(|entry| targets(entry))
-                    .filter_map(|entry| {
-                        Some(Target {
-                            output: entry.output.id(),
-                            dims: image_dims(&entry.output)?,
-                        })
-                    })
-                    .collect();
                 let trial = Trial {
                     conn,
                     output: output.map(str::to_owned),
                 };
                 return images
                     .jobs
-                    .trial(image, trial, draw_for)
+                    .trial(image, trial)
                     .map_err(|_| ChangeError::Busy);
             }
         };
+        // Always recorded: nothing is newer than a request made now.
+        saved.record(output, &choice, generation);
         choices.set(output, choice, generation);
         sweep(&mut images.jobs, choices, waiters);
         for entry in outputs.iter_mut().filter(|entry| targets(entry)) {

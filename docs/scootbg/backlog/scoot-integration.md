@@ -26,7 +26,7 @@ color = "#101014"
 ## The rule: whichever you changed last wins
 
 Stated once here, and the same way in the README and in
-[restore-state.md](restore-state.md):
+[restore-state-done.md](resolved/restore-state-done.md):
 
 - Edit `[wallpaper]` (and start or reload scoot): the config's wallpaper
   shows.
@@ -39,8 +39,10 @@ Stated once here, and the same way in the README and in
 `apply-config` belongs to this ticket: it moved here from the CLI ticket
 ([cli-and-ipc-done.md](resolved/cli-and-ipc-done.md#resolution)) when
 that ticket's other items landed, because it needs ticket 9's saved state
-([restore-state.md](restore-state.md)) for its fingerprint. Nothing of it
-exists yet; the CLI neither parses nor advertises it.
+([restore-state-done.md](resolved/restore-state-done.md)) for its
+fingerprint. That state now exists (see [below](#what-ticket-9-provides));
+`apply-config` itself does not yet: the CLI neither parses nor advertises
+it.
 
 Everything scoot does with scootbg goes through one command,
 `scootbg apply-config --profile NAME '<json>'`, where the JSON is the
@@ -95,6 +97,42 @@ may be a `scootbg set` pick) restores. The config did not change between
 the two runs that scoot saw, so this is still "unchanged", and it is
 documented rather than worked around.
 
+### What ticket 9 provides
+
+Ticket 9 ([restore-state-done.md](resolved/restore-state-done.md), and
+[the Restore section](../README.md#restore) for the user-facing rules)
+built the state this mechanism compares against, and left these hooks:
+
+- **The fingerprint has its line already.** The state file (version 1)
+  reads and keeps `fingerprint VALUE` (escaped like every field, at most
+  `state::format::MAX_FINGERPRINT`, 256 bytes: a hex hash fits) and
+  `profile NAME`; every save writes back the fingerprint it read, so a
+  `scootbg set` never loses it. `apply-config` needs no version bump: it
+  adds a setter on `state::Saved` (only it calls one) and saves as `set`
+  does.
+- **`--profile` exists** on `daemon`, checked by `state::Profile::parse`
+  (1 to 64 of `A-Z a-z 0-9 . _ -`, no leading `.`, no `..`);
+  `apply-config --profile` takes the same parser.
+- **Loading and showing are separate.** `daemon::restore::load` reads a
+  profile's file (every problem a warning, never fatal) and returns the
+  table to save into; `restore::apply(state, record, show)` fills it and,
+  when `show`, the daemon's choices. A daemon started by `apply-config`
+  loads without showing, compares fingerprints, then applies either the
+  section or the saved choices, rather than restore first and flash.
+- **Adopting a profile mid-life** is not the start-up path: by then the
+  outputs are configured, so after `apply` the daemon must `reconcile`
+  every output (start-up needs none: nothing is configured yet), and the
+  previous profile's writer should be flushed (`Saved::flush`) before
+  `state.saved` is replaced. The restored choices take new generations,
+  newer than every earlier request, which is right: adopting is the
+  newest event.
+- **`apply-config '{}'` with no daemon** writes the file itself:
+  `state::load`, the choices cleared and the fingerprint set, and
+  `state::saver::write_atomic` (public for this), synchronously, since
+  the process exits straight after.
+- A restore saves nothing, and `--no-restore` still reads the file, so
+  neither can erase a fingerprint.
+
 ## How scoot drives it
 
 - **Startup, and every reload, while `[wallpaper]` exists:** spawn
@@ -117,7 +155,7 @@ documented rather than worked around.
   a daemon only to clear; a later `scootbg daemon --profile scoot` shows
   nothing, as the config asked.
 - **The profile** names the state `apply-config` restores and records
-  (see [restore-state.md](restore-state.md)): scoot passes `scoot`, or
+  (see [restore-state-done.md](resolved/restore-state-done.md)): scoot passes `scoot`, or
   `scoot-nested` under `--nested`, so a nested session and its host keep
   separate state.
 - **Paths are resolved by scoot**, which owns its config's meaning: `~/`

@@ -2163,8 +2163,15 @@ medium priority — the effective top of what's actually open.
    ([record](docs/scootbg/backlog/resolved/hidpi-fractional-scale-done.md)):
    images drawn at real device pixels on fractionally scaled outputs
    (`wp_fractional_scale_v1` under a viewport), exact to the pixel on
-   scoot and sway, 44% fewer buffer bytes at 1.5. Restoring the wallpaper
-   at startup and scoot's `[wallpaper]` section are next.
+   scoot and sway, 44% fewer buffer bytes at 1.5. Item 8
+   ([record](docs/scootbg/backlog/resolved/memory-and-idle-done.md)): the
+   resource budget measured and published, outputs of one size sharing an
+   image's pixels. Item 9
+   ([record](docs/scootbg/backlog/resolved/restore-state-done.md)): every
+   `set` and `clear` saved per output and profile (`--profile`,
+   `--no-restore`) and restored at startup, and an image `set` sent as the
+   daemon starts decoded once instead of twice. scoot's `[wallpaper]`
+   section is next.
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 

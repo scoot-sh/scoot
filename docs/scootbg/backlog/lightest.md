@@ -106,7 +106,10 @@ on 1× 1080p and 36.7–36.8 MB / 19.4–19.6 MB on **2× 4K, where both
 outputs share one buffer's pixels**: the floor above is paid once for
 all outputs of one size showing one image, so a daemon with a buffer per
 output holds it twice (scootbg did until ticket 8: 69.2 MB RSS); with a
-color 3.6–3.7 MB / 2.0–2.1 MB. **Startup** 1.8–2.5 ms to the first
+color 3.6–3.7 MB / 2.0–2.1 MB (4.0 MB / 2.8–2.9 MB since ticket 9, once
+a save has touched 340–370 kB more of clean code pages: see
+[its record](resolved/restore-state-done.md#idle-and-memory)). **Startup** 1.8–2.5 ms to the first
 answer, 3.0–4.1 ms to a color on screen; an image `set` at start-up
-decodes twice (642–720 ms on 4K), which
-[restore-state.md](restore-state.md) is to fix and measure again.
+decoded twice (642–720 ms on 4K) until
+[ticket 9](resolved/restore-state-done.md#measurements): once now,
+450–476 ms, and 451–497 ms to a restored 4K JPEG on screen.

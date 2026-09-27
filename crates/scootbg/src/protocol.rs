@@ -397,6 +397,11 @@ pub struct OutputEntry<'a> {
     /// pixel.
     pub logical: Option<Size>,
     pub surface: SurfaceEntry,
+    /// The last attempt to draw what the output should show failed (the
+    /// daemon's stderr says why: an image that cannot be decoded, a buffer
+    /// too large): `shows` is then `null`, or what it showed before, not
+    /// what was asked. Cleared by the next request for it or a new size.
+    pub draw_failed: bool,
     /// What the output shows: `{"color":"#rrggbb"}`,
     /// `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
     /// or `null` for nothing (the compositor's own background, or no
@@ -479,6 +484,11 @@ pub enum Reply<'a> {
     Outputs {
         #[serde(serialize_with = "list")]
         outputs: &'a dyn OutputList,
+        /// Whether `set` and `clear` are saved for the next start
+        /// (`crate::state`): `false` when saving is off (no state
+        /// directory, or a state file that could not be read or is a newer
+        /// scootbg's; the daemon's stderr said why at start-up).
+        saving: bool,
     },
     Error {
         #[serde(serialize_with = "display")]

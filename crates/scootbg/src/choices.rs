@@ -16,10 +16,12 @@
 //! did; an older one then changes only what nothing newer has chosen
 //! ([`Choices::set`]).
 //!
-//! A named choice is only ever recorded for an output that is present when
-//! it is requested (the daemon refuses unknown names), so the table holds
-//! at most one entry per connector name the compositor has shown: bounded
-//! by the hardware, not by requests.
+//! A named choice is only ever requested for an output that is present
+//! (the daemon refuses unknown names), or restored from the state file
+//! (`crate::state`, at most `format::MAX_OUTPUTS` names, connected or
+//! not), so the table holds at most one entry per connector name the
+//! compositor has shown or the file names: bounded by the hardware and the
+//! file, not by requests.
 
 use crate::wallpaper::Wallpaper;
 
@@ -84,6 +86,27 @@ impl Choices {
         name.and_then(|name| self.named.iter().find(|(n, ..)| n == name))
             .map_or(&self.all.0, |(_, choice, _)| choice)
             .as_ref()
+    }
+
+    /// The choice for every output, if one was ever made (a `clear` of
+    /// every output is one: nothing).
+    pub fn every(&self) -> Option<&Choice> {
+        (self.all.1 > 0).then_some(&self.all.0)
+    }
+
+    /// The choices for single outputs, by name, with the generation each
+    /// was made at (larger: more recent), in the order the names were
+    /// first chosen.
+    pub fn named(&self) -> impl Iterator<Item = (&str, &Choice, u64)> {
+        self.named
+            .iter()
+            .map(|(name, choice, made)| (name.as_str(), choice, *made))
+    }
+
+    /// Drops the choice for `name`, as if none had been made: for the
+    /// saved table only (`crate::state`), when the file has no room for it.
+    pub fn forget(&mut self, name: &str) {
+        self.named.retain(|(n, ..)| n != name);
     }
 
     #[cfg(test)]

@@ -185,7 +185,7 @@ buffer); the docs, `set --help` and doc comments in the commit after.
 - **Beyond the ticket: the spare buffer**, a decision [ticket
   4](solid-color-done.md) handed to this one "measured".
 - **Startup is measured without restore**: restore is
-  [ticket 9](../restore-state.md). Measured instead: to the first
+  [ticket 9](restore-state-done.md). Measured instead: to the first
   answer, to a color on screen, and to a 4K image on screen, each asked
   for the moment the socket takes it. The image case found a double
   decode (below), left for ticket 9, whose restore is exactly that
@@ -208,7 +208,7 @@ buffer); the docs, `set --help` and doc comments in the commit after.
   `set` sent while starting, 1 for one sent after the `configure`, on
   both binaries. It costs 642–720 ms to the first image against about
   440 ms, and it is what a restore at login will do every time; recorded
-  in [restore-state.md](../restore-state.md). (rustix opens files with
+  in [restore-state-done.md](restore-state-done.md). (rustix opens files with
   `open(2)` on x86_64, not `openat`, which a first count missed.)
 - The pool object ids in a `WAYLAND_DEBUG` trace are reused once a pool
   is destroyed, so `tests/share.rs` counts buffers against the latest
@@ -414,7 +414,7 @@ binary was built from, with this commit's doc comments and help text).
 
 ### For the next tickets
 
-- [restore-state.md](../restore-state.md): **the double decode.** An
+- [restore-state-done.md](restore-state-done.md): **the double decode.** An
   image `set` before the outputs are configured (a restore at login)
   decodes the file twice, 650–720 ms to the first image on one 4K output
   against 420–490 ms once configured. Make it one decode, then measure

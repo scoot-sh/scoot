@@ -42,6 +42,7 @@ mod crash;
 mod images;
 mod listen;
 mod respond;
+mod restore;
 mod surfaces;
 mod wayland;
 mod worker;
@@ -57,6 +58,7 @@ use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
 use wayland_client::backend::WaylandError as BackendError;
 
+use crate::cli::DaemonOptions;
 use crate::control::{Claim, ClaimError, Server};
 use crate::paths::{self, PathError};
 use crate::print::warn;
@@ -117,21 +119,28 @@ impl fmt::Display for Error {
     }
 }
 
+/// How long the daemon waits on its way out for a state file write under
+/// way (`crate::state::saver`). A write is a few hundred bytes; only a
+/// stalled disk takes longer.
+const SAVE_GRACE: Duration = Duration::from_secs(2);
+
 /// Runs the daemon until it is told to stop or cannot go on.
-pub fn run() -> Exit {
-    match serve() {
+pub fn run(options: DaemonOptions) -> Exit {
+    match serve(options) {
         Ok(()) => Exit::Stopped,
         Err(error) => Exit::Failed(error),
     }
 }
 
-fn serve() -> Result<(), Error> {
+fn serve(options: DaemonOptions) -> Result<(), Error> {
     let paths = paths::from_env().map_err(Error::Paths)?;
     let mut claim = Claim::acquire(&paths).map_err(Error::Claim)?;
     let armed = crash::install(paths.socket.clone());
     let server = Server::new(claim.listener()).map_err(Error::Spare)?;
     let images = Images::new().map_err(Error::Worker)?;
-    let (wayland, missing) = Wayland::connect(images).map_err(Error::Wayland)?;
+    let (saved, record) = restore::load(options.profile);
+    let (mut wayland, missing) = Wayland::connect(images, saved).map_err(Error::Wayland)?;
+    restore::apply(&mut wayland.state, record, options.restore);
     for interface in missing {
         warn(format_args!(
             "scootbg: note: the compositor has no {interface}; \
@@ -147,6 +156,15 @@ fn serve() -> Result<(), Error> {
         revents: Vec::new(),
     };
     let result = daemon.run(&claim);
+    // Before the socket goes: a `kill` client, answered once it does, then
+    // finds the last change on disk.
+    if !daemon.wayland.state.saved.flush(SAVE_GRACE) {
+        warn(format_args!(
+            "scootbg: the state file was still being written after {} s; stopping \
+             without waiting for it",
+            SAVE_GRACE.as_secs()
+        ));
+    }
     // Socket and lock first, so a `kill` client that waits for its
     // connection to close finds the path free, and can start a new daemon,
     // once it does.

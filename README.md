@@ -327,11 +327,14 @@ are at the top of [docs/protocols.md](docs/protocols.md).
 
 `scootbg` is scoot's wallpaper daemon, a separate binary and package that
 works on any compositor with `wlr-layer-shell`. **It is early: it shows a
-solid color or an image (PNG, JPEG, WebP) on every output, or on one; it
-does not yet restore it at the next start.** What works today:
+solid color or an image (PNG, JPEG, WebP) on every output, or on one, and
+shows it again when the daemon next starts; scoot's `[wallpaper]` config
+section does not exist yet.** What works today:
 
 ```sh
 scootbg daemon                        # connect to $WAYLAND_DISPLAY and serve the control socket
+scootbg daemon --profile sway         # restore and save the `sway` profile's state instead
+scootbg daemon --no-restore           # start with nothing shown (the state is kept)
 scootbg set '#1e1e2e'                 # every output, including ones plugged in later
 scootbg set '#101014' --output DP-2   # one output, by connector name (as `query` lists them)
 scootbg set ~/Pictures/hills.jpg      # an image, covering every output (--mode fill)
@@ -428,7 +431,7 @@ without a viewporter a full-size buffer. A static color asks for no frame
 callbacks and wakes the daemon for nothing.
 
 Once on screen a wallpaper costs no CPU (no wakeups in a minute, measured)
-and one buffer per output at most: about 3.7 MB RSS with a color, 36.8 MB
+and one buffer per output at most: about 4.0 MB RSS with a color, 36.8 MB
 with an image on a 4K output, and the same 36.8 MB with two 4K outputs
 showing it. The measured budget is in
 [`docs/scootbg/README.md`](docs/scootbg/README.md#the-resource-budget).
@@ -441,8 +444,59 @@ the compositor goes away, removing its socket either way. A signal
 (SIGTERM, Ctrl-C) ends it on the spot and leaves the socket file; the other
 commands then say no daemon is running (exit 1), and the next
 `scootbg daemon` replaces the file. Every command exits 2 on a usage
-error (an unknown command or argument). The choices live in the daemon
-only for now: restoring them at the next start is a later item.
+error (an unknown command or argument, or a bad `--profile` name).
+
+**The wallpaper is restored at the next start.** Every `set` and `clear`
+is saved, per output (the choice for every output, and each one made with
+`--output NAME`), in a state file, `$XDG_STATE_HOME/scootbg/PROFILE`
+(`~/.local/state/scootbg/PROFILE` when `XDG_STATE_HOME` is unset or not
+absolute), and `scootbg daemon` shows it again when it starts:
+
+- **A profile, not a display, names the state.** `--profile NAME` picks
+  it (default `default`): 1 to 64 of `A-Z a-z 0-9 . _ -`, not starting
+  with `.` and without `..`. scoot binds the first free `wayland-N`, so
+  the display name is no session identity; give each session its own
+  profile (a sway autostart can pass `--profile sway`) and they never
+  restore each other's wallpaper. Two sessions sharing a profile share
+  its state, the last change winning.
+- **When it is saved:** a color or a `clear` as soon as the daemon has it,
+  an image once it has decoded (one that cannot be shown changes nothing,
+  so saves nothing). The file is written off the daemon's loop,
+  atomically (a fresh temporary file that never follows a symbolic link,
+  `fsync`, `rename`), private (0600, in a 0700 directory; a state
+  directory that already exists and is someone else's, or writable by
+  its group or others, is a warning at start-up); `scootbg kill` waits
+  for a write under way, and a signal leaves the old file or the new one, never half
+  of each.
+- **What survives:** a choice for an output that is not plugged in now
+  stays saved and comes back with it; `set` without `--output` replaces
+  every per-output choice, as it does on screen. A restore saves nothing.
+  At most 256 per-output choices are kept (and 256 KiB in all): past
+  that, the least recently set go first, with a warning.
+- **A saved image that is gone** (moved, deleted, on a disk not mounted
+  yet) is skipped with a warning on the daemon's stderr, and that output
+  shows the compositor's own background. The daemon starts all the same,
+  and the entry stays saved until a `set` or `clear` replaces it, so it
+  is restored once the file is back.
+- **`--no-restore`** starts with nothing shown. The state is still read,
+  and a `set` or `clear` then updates it as usual, keeping the rest.
+- **A state file it cannot use never stops the daemon.** A malformed line
+  (or one whose path is not UTF-8) is skipped with a warning and the rest
+  is used; a file that is not one (no `scootbg-state 1` first line, over
+  256 KiB) restores nothing and is replaced at the next save; a newer
+  scootbg's format (a later version) restores nothing and is never
+  written over; an unreadable one restores nothing, and nothing is saved
+  over it. In those two cases **saving is off until the daemon
+  restarts**: `set` still works on screen, stderr says at start-up which
+  file to remove or fix to save again, and `scootbg query` reports
+  `"saving":false`. The format is a documented, versioned line format
+  ([docs/scootbg/README.md](docs/scootbg/README.md#restore)).
+- **A restored image is decoded once**, when its outputs are configured:
+  about 450 ms to a 6000×4000 JPEG on screen on a 4K output, the same as a
+  `set` on a running daemon. So is an image `set` sent the moment the
+  daemon starts: it waits for the outputs' `configure` (bounded by a
+  round trip already sent) rather than decode once to check the file and
+  again to draw it.
 
 Outputs are tracked as they come and go: each gets one surface on the
 `background` layer (namespace `wallpaper`), covering the whole output,
@@ -455,7 +509,7 @@ simply waits. `scootbg query` answers, on one line (wrapped here):
  "logical":{"width":2560,"height":1440},
  "surface":{"state":"configured","size":{"width":2560,"height":1440},
             "scale":1.5,"pixels":{"width":3840,"height":2160}},
- "shows":{"color":"#1e1e2e"}}]}
+ "draw_failed":false,"shows":{"color":"#1e1e2e"}}],"saving":true}
 ```
 
 Every key is always present, `null` when not known yet. `mode` is in
@@ -477,15 +531,20 @@ are unaffected; it lasts until that output is unplugged and plugged back
 in, which makes it a new output). `shows` is what the output has on
 screen: `{"color":"#rrggbb"}` (lowercase),
 `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
-or `null` for nothing. New keys
+or `null` for nothing. `draw_failed` is `true` when the last attempt to
+draw what the output should show failed (an image that exists but cannot
+be decoded, a buffer too large; stderr says why), which tells that `null`
+apart from a `clear`; the next request for the output, or a new size,
+retries. `saving` (after the list) is `false` while `set` and `clear` are
+not saved for the next start (see above). New keys
 may be added; none changes meaning within protocol 1. If the daemon cannot
 accept clients (out of file descriptors, say), it keeps the wallpaper up,
 says so once on stderr, and retries every second rather than exit. The
 control protocol itself (one JSON object per line, for scripts that skip
 the CLI) is in [docs/scootbg/README.md](docs/scootbg/README.md#the-control-protocol).
-Restoring the wallpaper at the next start is the next item in
-[its backlog](docs/scootbg/backlog/README.md); scoot's `[wallpaper]` config
-section does not exist yet, so do not add one.
+scoot's `[wallpaper]` config section is the next item in
+[its backlog](docs/scootbg/backlog/README.md); it does not exist yet, so
+do not add one.
 
 ## Documentation
 
