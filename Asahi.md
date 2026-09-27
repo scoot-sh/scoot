@@ -2143,6 +2143,181 @@ fallback remains. It needs the only lit screen to be pullable, and the
 panel is not. The one product finding is UX, not correctness: adopted
 windows are hard to find (ticket above).
 
+## Test 13 — GPU-tier virtual-pull hotplug add + multi-head mode change (remote, no hands)
+
+Why: Test 12 proved the GPU-tier runtime add and multi-head mode change
+with physical hands at `87e1935`. This re-proves both at current `main`
+via the virtual-pull rig (DP-1 `force` + synthetic `udevadm trigger`,
+Test 11's recipe) — no hands needed — and keys the evidence to the new
+commit. Dumb-tier re-proof is out of scope (Test 11 owns it); eDP-1 was
+never forced; no box config was changed (standing scope).
+
+Built on the machine itself (native aarch64) from `main` at `206d0a3`
+(`git archive HEAD` shipped over ssh, extracted to `~/scoot-t13`; the
+tree holds PR #272's `shm-viewport-upscale-edge-fade-done.md`, so it is
+that commit), `cargo build -p scoot --features gpu-scanout` (debug) into
+its own target dir, build log at `~/fx/build-t13.log` (zero warnings,
+zero errors):
+
+| binary | path | sha256 |
+| --- | --- | --- |
+| `scoot` | `~/scoot-t13-target/debug/scoot` | `0321ea416bfe8097d065a38547d103387e9b4b6db6e99a1bcdd4716449d3379e` |
+
+`ldd` names `libgbm.so.1`, so the scanout tier is in. Machine: Apple M2
+(Mac14,2 / j413), NixOS 26.11, kernel 7.1.13 (fairydust), eDP-1
+(2560x1600, its only mode) + DP-1 (21 modes, monitor awake throughout
+both legs). Sessions on VT 2 against a private `seatd`
+(`~/fx/vt-run.sh` / `~/fx/vt-stop.sh`), config `[output] scale = 1.5`
+only (`~/fx/test.toml`), socket `/run/user/1000/scoot-t13.sock`,
+`RUST_LOG=info,scoot::compositor::tty=debug`, Mesa paths from
+`~/fx/mesa-env.sh` (`/run/opengl-driver` still absent). Scripts:
+`~/fx/t13-start.sh` / `t13-snap.sh` (outputs, windows, fd count,
+`wlr-randr`, one screenshot per output) / `t13-stop.sh`. Raw logs,
+snapshots, `wlr-randr` outputs and screenshots stay on the machine
+under `~/fx/t13-leg1/` and `~/fx/t13-leg2/`.
+
+Rig finding worth recording: a `force` write plus a synthetic trigger
+with **nothing running does not flip sysfs status** — `off` latched
+(read-back verified) but DP-1 stayed `connected`/21 modes through the
+trigger and 20 s of polling, and the session started afterwards drove
+DP-1 anyway (both heads `scanout="gpu"` at 01:58:02Z). The force only
+took effect once a *running* session's reconfigure re-probed the
+connector off the synthetic udev change (Test 11 never hit this because
+its session was already up when it forced off). So the trustworthy
+sequence is: session up first, then force + trigger. Every force value
+below was verified by read-back.
+
+### Leg 1 — GPU-tier remove then runtime add (virtual-pull)
+
+With the both-heads session running, `force=off` + trigger →
+`disconnected`/0 modes within ~2 s, and the compositor followed:
+
+```
+INFO scoot::compositor::tty::hotplug: drm: this connector went away connector=DP-1
+INFO scoot::compositor::tty::hotplug: drm: a display went away; removing its output output=2
+```
+
+`outputs` lists only eDP-1 id 1; `wlr-randr` lists only eDP-1; fds back
+to exactly 51 (Test 12's invariant holds: every remove returns to 51).
+
+Then `force=on` + trigger → `connected`/21 modes, and the GPU-tier add:
+
+```
+INFO egl{native="/dev/dri/card2" platform="PLATFORM_GBM_KHR" version=(1, 5)}:egl_context{ptr=105474095193680}:renderer_gles2: ...
+INFO scoot::compositor::tty::hotplug: drm: driving a newly connected display connector=DP-1 crtc=crtc::Handle(68) width=1920 height=1080 scanout="gpu"
+INFO scoot::compositor::tty::hotplug: drm: a display was connected; added an output for it connector=DP-1 output=3 width=1920 height=1080
+```
+
+A fresh EGL display and GLES renderer beside the live ones (new
+`egl_context` pointer), the head on CRTC 68 with `scanout="gpu"`, under
+a fresh id 3. `outputs` names eDP-1 id 1 + DP-1 id 3; fds 51 → 63
+(Test 12's add count exactly). `wlr-randr` afterwards names both heads:
+eDP-1 2560x1600 and DP-1 1920x1080, each preferred + current, DP-1 at
+position 1707,0, scale 1.5.
+
+Windows placeable, captures correct: `msg key super+shift+period`
+carried window 2 to output 3 (`output: 3`, `visible: true`, focused).
+Both heads' IPC screenshots were read by eye: eDP-1 shows the remaining
+foot with its ring, DP-1 shows the moved foot with the focused (blue)
+ring and the same shell content — correct layouts, no garbage
+(`~/fx/t13-leg1/3-window-on-dp1/out{1,3}.png`; sha256 `10d34633…` /
+`71eb4d28…`, changed from the pre-move pair as the window crossed).
+
+**Leg 1 result: pass.**
+
+### Leg 2 — multi-head mode change on the GPU tier, replug keeps it
+
+Session restarted with `--mode 1280x720` (DP-1 offers it, eDP-1 does not):
+
+```
+WARN scoot::compositor::tty::gpu: drm: connector offers no mode of the requested size; using its preferred mode connector=eDP-1 ...
+INFO scoot::compositor::tty: drm: driving this device path=/dev/dri/card2 connector=eDP-1 crtc=crtc::Handle(50) width=2560 height=1600 scanout="gpu"
+INFO scoot::compositor::tty: drm: driving this device path=/dev/dri/card2 connector=DP-1 crtc=crtc::Handle(68) width=1280 height=720 scanout="gpu"
+```
+
+`wlr-randr` — the client-visible `wl_output.mode` — lists DP-1 at
+1280x720 preferred + current beside eDP-1's native mode. The runtime
+refusal half, for the record: `wlr-randr --output DP-1 --mode 1920x1080`
+answers `unknown mode`, rc=1, and the session carries on undisturbed at
+1280x720 (read-only `wlr-output-management-v1` by design, `README.md`;
+no IPC mode path exists either). A foot carried to output 2 maps
+`visible: true`, focused, and renders correctly at the new mode.
+
+Then a virtual-pull replug at that mode: `force=off` + trigger →
+`disconnected`, output 2 removed; `force=on` + trigger → `connected`/21:
+
+```
+INFO drm_atomic:create_surface{crtc=crtc::Handle(68) mode=Mode { name: "1280x720", clock: 74250, ... }}
+INFO egl{native="/dev/dri/card2" platform="PLATFORM_GBM_KHR" version=(1, 5)}:egl_context{ptr=122183987775504}:renderer_gles2: ...
+INFO scoot::compositor::tty::hotplug: drm: driving a newly connected display connector=DP-1 crtc=crtc::Handle(68) width=1280 height=720 scanout="gpu"
+INFO scoot::compositor::tty::hotplug: drm: a display was connected; added an output for it connector=DP-1 output=3 width=1280 height=720
+INFO scoot::compositor::reconnect: a display came back; restored its workspaces connector=DP-1 output=3 windows=1
+```
+
+The hotplug-add path honours `--mode`: the returned head came back at
+1280x720, not its preferred 1920x1080, with window 2 restored to it
+(`visible: true`). `wlr-randr` confirms 1280x720 preferred + current;
+the screenshot shows the restored foot correct at that mode (read by
+eye, `~/fx/t13-leg2/2-replug-keeps-mode/out3.png`).
+
+**Leg 2 result: pass.**
+
+fd counts per phase, raw (`~/fx/t13-leg*/N-*/fds`):
+
+| session | start (both heads) | remove | add | window on DP-1 | replug cycle |
+| --- | --- | --- | --- | --- | --- |
+| leg 1 (preferred) | 66 | 51 | 63 | 63 | — |
+| leg 2 (`--mode`) | 66 | 51 | — | 66 | 63 (restored) |
+
+No jiffies/CPU sampled this run (functional legs only; Test 4 and the
+phase-E numbers stand).
+
+### Teardown and final box state
+
+`t13-stop.sh` after each session: active VT back to 1, nothing left
+running, `/run/seatd.sock` gone, the user's tty1/seat0 login untouched.
+No `ERROR` or panic lines in either session log; zero foot
+`unknown output` warnings in both. Then `sudo reboot` (remote-safe,
+same generation) to clear the sticky `force=on`, and re-verification:
+kernel 7.1.13, force `unspecified`, eDP-1 connected, no compositor
+running, no strays.
+
+One honest deviation, same as Test 11's: DP-1 reads `disconnected`/0
+modes after the final reboot — the monitor entered standby during the
+reboot window with no signal and dropped HPD for real (force
+`unspecified`, so no override is masking anything; that read-back is
+what distinguishes standby from residue). Both legs ran while the
+monitor was awake, so nothing above is affected — but a future DP-1 run
+needs a power-button press first.
+
+### Observations (not failures, not ticketed)
+
+- Smithay's `drm::surface::atomic: Failed to destroy old mode property
+  blob: No such file or directory (os error 2)` WARN fires on every
+  modeset (twice at startup, once per hotplug add), both sessions. Upstream
+  atomic-surface noise, pre-existing, harmless.
+- Gamma size is asymmetric: startup logs `crtc gamma size output=2
+  size=256`, while a hotplug-added head logs `crtc reports an unusable
+  gamma size; advertising 256 instead size=0`. Advertised 256 either way;
+  out of scope, recorded for the next reader.
+- The eDP-1 "offers no mode of the requested size" WARN logs once at
+  startup and again on every hotplug event (three times here: startup,
+  remove, add) — Test 12's cosmetic finding, reproduced exactly.
+  Harmless, still not ticketed.
+
+### Results, 2026-09-27 — both GPU-tier legs re-proven, no product change needed
+
+GPU-tier runtime add (fresh `DrmCompositor` + EGL context beside the
+live one, `scanout="gpu"`, fresh id, windows placeable, both captures
+correct) and multi-head `--mode` modeset that survives a virtual-pull
+replug all passed at `206d0a3`. Nothing failed, so there is no fix
+ticket and no product diff; this section is the proof ticket. Of the
+hardware-bound hotplug paths, only #48's `MoveTo` fallback remains (it
+needs the only lit screen to be pullable, and the panel is not). The
+per-output scale/mode surface is unchanged: still its own open ticket
+(`docs/backlog/core/per-output-scale-mode.md`, priority low) — this run
+asserts nothing about it beyond the `--mode` startup path above.
+
 ## Keys for the 2026-09-25 runs
 
 Built on the machine itself (native aarch64) from `main` at
