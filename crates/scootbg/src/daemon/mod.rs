@@ -104,7 +104,7 @@ pub fn run() -> Exit {
 fn serve() -> Result<(), Error> {
     let paths = paths::from_env().map_err(Error::Paths)?;
     let mut claim = Claim::acquire(&paths).map_err(Error::Claim)?;
-    crash::install(paths.socket.clone());
+    let armed = crash::install(paths.socket.clone());
     let server = Server::new(claim.listener()).map_err(Error::Spare)?;
     let (wayland, missing) = Wayland::connect().map_err(Error::Wayland)?;
     for interface in missing {
@@ -125,6 +125,9 @@ fn serve() -> Result<(), Error> {
     // Socket and lock first, so a `kill` client that waits for its
     // connection to close finds the path free, and can start a new daemon,
     // once it does.
+    // Disarm first: once `release` frees the lock another daemon may bind
+    // this path, and a panic in what follows must not remove its socket.
+    armed.disarm();
     claim.release();
     daemon.server.close_all();
     result

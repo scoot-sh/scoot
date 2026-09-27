@@ -236,7 +236,18 @@ Fixed before merge, each with a test:
   listener and the listener is always polled (above). Writing the
   `RLIMIT_NOFILE` test turned up a second bug: Linux's `accept` returns
   `EMFILE` before looking at the queue, so the server evicted the client
-  it had just admitted. Hence the zero-timeout poll.
+  it had just admitted. Hence the zero-timeout poll. That test first set
+  a fixed limit (`prlimit --nofile=7:7`) at spawn, which failed on the CI
+  runner (the daemon inherited more fds and hit the limit at start-up; its
+  clean exit 1 there was correct). It now lowers the running daemon's
+  limit to the fds it measurably holds (`prlimit --pid`), so it reaches
+  exhaustion however many fds the environment hands down, and it fails
+  rather than skips without `prlimit` under `SCOOTBG_REQUIRE_SCOOT`.
+- **Crash hook disarmed before release.** The panic hook used to stay
+  armed after `claim.release()`, so a panic during shutdown (closing
+  clients, dropping the Wayland connection), after a new daemon had
+  taken the lock and bound the path, would have removed the new daemon's
+  socket. It is disarmed first now, and removes at most once.
 - **Flaky tests.** Two connection tests bounded their waits by an
   iteration count, not the clock, and failed under a loaded `cargo test`.
 - **Broken stderr → abort.** Above, under Exit.
@@ -251,6 +262,24 @@ Fixed before merge, each with a test:
   (a stopped listener with a full backlog hung start-up); a line buffer
   never grows past 64 KiB + 1, below the allocator's threshold; the CI
   path split above; exit status 2 in the README.
+
+### Revisit in ticket 3
+
+Harmless while the daemon draws nothing, user-visible (a wallpaper that
+vanishes) once [outputs-and-layer-surfaces.md](../outputs-and-layer-surfaces.md)
+gives it surfaces:
+
+- **Exit 1 on transient resource errors.** An `accept` failing with
+  `ENFILE`, `ENOMEM` or `ENOBUFS` while there is nothing to free ends the
+  daemon (above), which is right for a daemon that only answers a socket
+  but would take the wallpaper with it. Weigh keeping the surfaces up
+  and only shedding the listener until a client closes, or a restart
+  path, against the spin and deafness this rule exists to prevent.
+- **Starvation at the fd limit.** A same-uid process flooding connects
+  while the daemon sits at its fd limit keeps evicting clients, so a
+  legitimate `scootbg` command can fail (fast, without a spin). Same uid
+  can already `kill` the daemon, so this is not a privilege problem, but
+  a wallpaper change lost to it would be visible.
 
 ### Left for later tickets
 
@@ -283,7 +312,7 @@ release profile, `cargo build --release -p scootbg`:
 | `-sys` crates | `linux-raw-sys`, and `wayland-sys` built with no features |
 | Idle RSS / PSS / heap, 3 s after start, 3 runs | 2,576 / 1,380 / 164, 2,580 / 1,384 / 164, 2,600 / 1,404 / 164 kB; 1 thread (with the signal thread, interleaved: 2,608–2,624 / 1,412–1,428 / 172–176 kB, 2 threads) |
 | Idle context switches, 3 × 30 s | 0, 0, 0 (with the signal thread: 0, 0, 0) |
-| After review, interleaved with the pre-review binary, 3 rounds | RSS 2,564 / 2,572 / 2,588 kB, PSS 1,368 / 1,376 / 1,392, heap 164, 1 thread, 7 fds, 0 switches and 0 ticks per 30 s (pre-review: 2,588 / 2,600 / 2,568, 1,392 / 1,404 / 1,372, 160–164; a tie); `query` round trip median 27.2 / 26.2 µs against 26.4 / 26.2 |
+| After review, interleaved with the pre-review binary, 3 rounds | RSS 2,564 / 2,572 / 2,588 kB, PSS 1,368 / 1,376 / 1,392, heap 164, 1 thread, 7 fds (stdio, lock, listener, spare, Wayland; 6 for a moment after an accept has spent the spare, until the next one retakes it), 0 switches and 0 ticks per 30 s (pre-review: 2,588 / 2,600 / 2,568, 1,392 / 1,404 / 1,372, 160–164; a tie); `query` round trip median 27.2 / 26.2 µs against 26.4 / 26.2 |
 | Idle CPU ticks, 3 × 30 s | 0, 0, 0 |
 | `query` round trip on one connection, 3 × 10,000 (with the signal thread; the request path is unchanged) | median 27.9 / 26.4 / 26.6 µs, p99 63.3 / 57.7 / 62.3 µs |
 | `scootbg query` as a command, 3 × 100 | 1,654 / 1,688 / 1,636 µs each, process start included |

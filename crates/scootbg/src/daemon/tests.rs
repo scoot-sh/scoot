@@ -99,3 +99,36 @@ fn the_crash_hook_recognises_stds_broken_stdio_panic() {
         "called `Option::unwrap()` on a `None` value"
     ));
 }
+
+/// The hook removes the socket only while armed, and at most once; after
+/// `disarm` (which the daemon calls before releasing its claim) a panic
+/// leaves the path alone, whoever has bound it since.
+#[test]
+fn the_crash_hook_removes_the_socket_only_while_armed() {
+    use super::crash::{Armed, remove_if_armed};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    let dir = std::env::temp_dir().join(format!("sbg-crash-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let socket = dir.join("s.sock");
+
+    // Armed: removed, and the hold is spent.
+    std::fs::write(&socket, b"").unwrap();
+    let armed = Armed::for_test(Arc::new(AtomicBool::new(true)));
+    remove_if_armed(&armed, &socket);
+    assert!(!socket.exists());
+    // A new daemon's socket at the same path afterwards survives a second
+    // panic of the old one.
+    std::fs::write(&socket, b"new").unwrap();
+    remove_if_armed(&armed, &socket);
+    assert!(socket.exists());
+
+    // Disarmed before any panic: never removed.
+    let disarmed = Armed::for_test(Arc::new(AtomicBool::new(true)));
+    disarmed.disarm();
+    remove_if_armed(&disarmed, &socket);
+    assert!(socket.exists());
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}

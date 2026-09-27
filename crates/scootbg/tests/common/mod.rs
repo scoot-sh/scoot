@@ -183,22 +183,6 @@ impl Session {
         self.start_daemon(command)
     }
 
-    /// `daemon`, run through `wrapper` (e.g. `prlimit --nofile=7:7 --`),
-    /// which must exec the daemon so the child is the daemon itself.
-    pub fn daemon_via(&self, wrapper: &[&str]) -> Child {
-        let (program, args) = wrapper.split_first().expect("a wrapper command");
-        let mut command = Command::new(program);
-        command
-            .args(args)
-            .arg(scootbg_bin())
-            .arg("daemon")
-            .env("XDG_RUNTIME_DIR", &self.scratch.0)
-            .env("WAYLAND_DISPLAY", &self.wayland_display)
-            .env_remove("WAYLAND_SOCKET")
-            .stdin(Stdio::null());
-        self.start_daemon(command)
-    }
-
     fn start_daemon(&self, mut command: Command) -> Child {
         let mut child = command
             .stdout(Stdio::piped())

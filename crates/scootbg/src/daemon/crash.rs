@@ -10,8 +10,8 @@
 //! (`wayland-backend/build.rs` builds `log_shim.c` with `cc`), which
 //! scootbg does not allow. So the hook:
 //!
-//! - removes the socket file on any panic, so no client connects to a
-//!   daemon that is going away;
+//! - removes the socket file on any panic while the daemon still owns it
+//!   (see [`Armed`]), so no client connects to a daemon that is going away;
 //! - for a "failed printing to stderr/stdout" panic, exits with status 1,
 //!   the status of any other lost connection, instead of aborting;
 //! - otherwise hands over to the default hook (which prints the panic if
@@ -21,18 +21,49 @@
 //! scootbg's own writes never panic (`output`); only dependencies' can.
 
 use std::panic::{self, PanicHookInfo};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Installs the hook for a daemon that owns `socket`.
-pub fn install(socket: PathBuf) {
+/// The hook's hold on the socket file: while armed, a panic removes it.
+/// Disarm before the claim is released: once the lock is free a new
+/// daemon may bind the same path, and a panic later in this one's
+/// shutdown (closing clients, dropping the Wayland connection) must not
+/// remove the new daemon's socket.
+#[derive(Debug, Clone)]
+pub struct Armed(Arc<AtomicBool>);
+
+impl Armed {
+    #[cfg(test)]
+    pub fn for_test(flag: Arc<AtomicBool>) -> Self {
+        Self(flag)
+    }
+
+    pub fn disarm(&self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Installs the hook for a daemon that owns `socket`, armed.
+pub fn install(socket: PathBuf) -> Armed {
+    let armed = Armed(Arc::new(AtomicBool::new(true)));
+    let hook_armed = armed.clone();
     let default = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
-        let _ = std::fs::remove_file(&socket);
+        remove_if_armed(&hook_armed, &socket);
         if is_broken_stdio(info) {
             std::process::exit(1);
         }
         default(info);
     }));
+    armed
+}
+
+/// Removes `socket` if the daemon still owns it, at most once.
+pub fn remove_if_armed(armed: &Armed, socket: &Path) {
+    if armed.0.swap(false, Ordering::SeqCst) {
+        let _ = std::fs::remove_file(socket);
+    }
 }
 
 /// Whether this is std's panic for a failed `print!`/`eprint!`

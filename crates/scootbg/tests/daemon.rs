@@ -368,12 +368,17 @@ fn a_double_kill_is_harmless() {
     assert!(!session.socket().exists());
 }
 
-/// Out of file descriptors, `kill` still gets through. Under
-/// `RLIMIT_NOFILE` 7 the idle daemon already holds all seven (stdio, lock,
-/// listener, its spare and the Wayland socket), so every accept fails with
-/// `EMFILE`: the first client is admitted on the spare's fd, each later
-/// one by closing the oldest client. The daemon neither goes deaf nor
-/// spins. Needs util-linux `prlimit`; skipped without it.
+/// Out of file descriptors, `kill` still gets through.
+///
+/// The daemon starts with its normal limit and is left to settle (serving,
+/// spare fd retaken); then its `RLIMIT_NOFILE` is lowered, at run time, to
+/// exactly the fds it holds, so every later accept fails with `EMFILE`
+/// however many fds it inherited (a CI runner hands children more than a
+/// developer shell; a fixed limit at spawn broke on one). The first client
+/// is admitted on the spare's fd, each later one by closing the oldest
+/// client. The daemon neither goes deaf nor spins. Needs util-linux
+/// `prlimit`: skipped without it, or a failure under
+/// `SCOOTBG_REQUIRE_SCOOT`.
 #[test]
 fn out_of_file_descriptors_kill_still_works() {
     let Some(session) = Session::start("nofile") else {
@@ -384,16 +389,32 @@ fn out_of_file_descriptors_kill_still_works() {
         .output()
         .is_err()
     {
+        // Same rule as the compositor itself: CI must not pass by skipping.
+        assert!(
+            std::env::var_os("SCOOTBG_REQUIRE_SCOOT").is_none(),
+            "SCOOTBG_REQUIRE_SCOOT is set but there is no prlimit (util-linux) on PATH"
+        );
         eprintln!("skipped -- no prlimit on PATH");
         return;
     }
-    let mut daemon = session.daemon_via(&["prlimit", "--nofile=7:7", "--"]);
-    let fds = std::fs::read_dir(format!("/proc/{}/fd", daemon.id()))
+    let mut daemon = session.daemon();
+    let pid = daemon.id();
+    // One more accept, so the spare the start-up probe spent is retaken
+    // and the count below includes it.
+    assert!(common::answers(&session.socket()));
+    let held = std::fs::read_dir(format!("/proc/{pid}/fd"))
         .unwrap()
         .count();
-    // 7 with the spare held; 6 when the start-up probe's connection took
-    // the spare's slot (it is retaken on the next accept).
-    assert!((6..=7).contains(&fds), "the daemon holds {fds} fds");
+    let limit = format!("--nofile={held}:{held}");
+    let lowered = std::process::Command::new("prlimit")
+        .args(["--pid", &pid.to_string(), &limit])
+        .output()
+        .unwrap();
+    assert!(
+        lowered.status.success(),
+        "prlimit --pid: {}",
+        stderr(&lowered)
+    );
 
     // Idle clients the daemon has to make room for, repeatedly.
     let idle: Vec<UnixStream> = (0..5)
@@ -403,26 +424,27 @@ fn out_of_file_descriptors_kill_still_works() {
         let query = session.run(&["query"]);
         assert!(query.status.success(), "{}", stderr(&query));
     }
-    // Busy-looping would show as CPU time; a few ticks of start-up at most.
-    let stat = std::fs::read_to_string(format!("/proc/{}/stat", daemon.id())).unwrap();
-    let fields: Vec<&str> = stat
-        .rsplit(')')
-        .next()
+    // The limit really bound: the daemon is at it, not below.
+    let now = std::fs::read_dir(format!("/proc/{pid}/fd"))
         .unwrap()
-        .split_whitespace()
-        .collect();
-    let ticks: u64 = fields[11].parse::<u64>().unwrap() + fields[12].parse::<u64>().unwrap();
+        .count();
+    assert!(now <= held, "{now} fds open against a limit of {held}");
+    // Busy-looping would show as CPU time.
+    let ticks = || {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+        let fields: Vec<&str> = stat
+            .rsplit(')')
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        fields[11].parse::<u64>().unwrap() + fields[12].parse::<u64>().unwrap()
+    };
+    let before = ticks();
     std::thread::sleep(Duration::from_millis(300));
-    let stat = std::fs::read_to_string(format!("/proc/{}/stat", daemon.id())).unwrap();
-    let fields: Vec<&str> = stat
-        .rsplit(')')
-        .next()
-        .unwrap()
-        .split_whitespace()
-        .collect();
-    let later: u64 = fields[11].parse::<u64>().unwrap() + fields[12].parse::<u64>().unwrap();
     assert_eq!(
-        later, ticks,
+        ticks(),
+        before,
         "the daemon used CPU while idle: it is spinning"
     );
 
