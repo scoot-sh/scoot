@@ -1,12 +1,20 @@
 ---
-title: "No per-client toplevel cap: floods or chains of 10k-100k toplevels stall arrange for milliseconds to tens of milliseconds"
-status: "open"
-area: "core"
-priority: "medium"
+title: "No per-client toplevel cap — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# No per-client toplevel cap
+# No per-client toplevel cap — RESOLVED
+
+RESOLVED 2026-09-26 (PR #251). 128 live `xdg_toplevel`s per client, the
+129th disconnected with `wl_display.no_memory` (protocols.md documents it
+alongside the sibling caps); float paths de-quadraticized
+(`parent_centre` single-query, `recentre_floating` one arrangement:
+chain-build ~60×, recentre ~300×, reviewer re-derived with own harness).
+Follow-up filed, not fixed: `core/xwayland-toplevel-cap.md` (X windows
+bypass the count).
 
 Filed from PR #243's review (floating windows PR 2), 2026-09-25. Not fixed
 there: it predates floating windows, and the fix is a policy (a cap and

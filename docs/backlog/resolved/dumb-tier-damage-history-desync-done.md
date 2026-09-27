@@ -1,12 +1,19 @@
 ---
-title: "Dumb-tier buffer age advances while Smithay freezes damage history on empty damage (cursor-driven full-repaint alternation)"
-status: "open"
-area: "core"
-priority: "medium"
+title: "Dumb-tier damage-history desync — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# Damage-history desync on the dumb tier
+# Damage-history desync on the dumb tier — RESOLVED
+
+RESOLVED 2026-09-26 (PR #259). `advance_generation` gated on
+`render_result.damage.is_some()` (exact correspondence with Smithay's
+early return — verified against pinned source); `buffers.rs` false doc
+corrected; RED regression test; census 9-full+11-incr → 0-full+20-incr.
+Reviewer reproduced counts byte-identically. Follow-up filed, not fixed:
+`core/dumb-tier-double-render-per-move.md` (every move renders twice).
 
 Found 2026-09-26 while investigating `multi-output-remainder.md` item 3
 (per-output render scheduling): that item's "~1pp no-damage pass" premise

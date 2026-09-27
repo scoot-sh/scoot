@@ -1,12 +1,19 @@
 ---
-title: "No per-client XWayland toplevel cap: X windows enter the core uncounted"
-status: "open"
-area: "core"
-priority: "low"
+title: "No per-client XWayland toplevel cap — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# No per-client XWayland toplevel cap
+# No per-client XWayland toplevel cap — RESOLVED
+
+RESOLVED 2026-09-26 (PR #257). `X11ToplevelCap`: same 128, window-id
+client-bits identity (no false unification with Wayland `ClientId`),
+refuse-the-map like the frame-extents precedent; release covers unmap,
+destroy, server-death sweep, extents withdrawal. xwayland suites
+1800/1800 re-run by reviewer. Follow-up filed, not fixed:
+`core/xwayland-unmanaged-pressure-cap.md` (override-redirect bypass).
 
 Filed 2026-09-26 from the per-client xdg-toplevel cap
 (`docs/backlog/core/per-client-toplevel-cap.md`). That cap counts only

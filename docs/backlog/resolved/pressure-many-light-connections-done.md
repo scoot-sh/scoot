@@ -1,12 +1,20 @@
 ---
-title: "Many connections each under their grace can still hold the fd table at pressure and shed scootctl"
-status: "open"
-area: "core"
-priority: "medium"
+title: "Many light connections hold the fd table at pressure — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# Connection-count residual in fd pressure
+# Connection-count residual in fd pressure — RESOLVED
+
+RESOLVED 2026-09-26 (PR #252). IPC accepts moved to a separate deeper
+line (`IPC_RESERVE_FDS` = 16 vs the 128 Wayland line), so `scootctl`
+stays served while Wayland newcomers shed (ipc.md corrected — it had
+stated the old shared line). Candidate 2 (heaviest-by-ledger) refuted
+with measurements: the ledger is blind to parked fds, so it would shed
+arbitrarily. Honest residual: a literally-full table still resets via
+EMFILE (nothing left to accept with).
 
 Filed 2026-09-24 from the PR #239 re-review. Serves **computer use** first:
 `scootctl` is the agent's control channel, and while the table sits at

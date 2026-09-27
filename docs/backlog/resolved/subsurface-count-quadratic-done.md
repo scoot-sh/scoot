@@ -1,12 +1,19 @@
 ---
-title: "Many desynchronized subsurfaces in one window stall the compositor roughly quadratically"
-status: "open"
-area: "core"
-priority: "medium"
+title: "Desync subsurface batch stalls — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# Subsurface commits cost in proportion to the whole tree
+# Subsurface commits cost in proportion to the whole tree — RESOLVED
+
+RESOLVED 2026-09-26 (PR #254). Per-commit `Window::on_commit` coalesced
+to one recompute per dirtied window at the dispatch flush (profile: 96%
+of batch time); desync 10000-batch 4.4 s → 58 ms, sync path provably
+untouched. `observe_frame` moved with the recompute (a mid-course stale
+bbox failure caught it). Residual on the open ticket: teardown looks
+superlinear on the untouched Smithay path.
 
 Filed 2026-09-23 while implementing the
 [subsurface depth bound](../resolved/subsurface-depth-bound-done.md), from a

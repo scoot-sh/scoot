@@ -1,12 +1,19 @@
 ---
-title: "Many popups open side by side stall the compositor roughly quadratically"
-status: "open"
-area: "core"
-priority: "medium"
+title: "Side-by-side popup flood stalls — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# Popup creation is roughly quadratic in the number of popups open
+# Popup creation is roughly quadratic in the number of popups open — RESOLVED
+
+RESOLVED 2026-09-26 (PR #253). 128 live `xdg_popup`s per client, 129th
+`no_memory` kill — cap chosen over a Smithay fork lookup change because
+the profile implicated all three scans locally (~90% the per-commit
+`find_popup` walk). Burst-128 ≈ 5 ms; refused 500/2000 in ~1/3 ms.
+Follow-up filed, not fixed: `core/popup-aggregate-pressure-cap.md`
+(N×128 multi-connection residual).
 
 Filed 2026-09-23 from the review of PR #226 (measured at `10e6b53`;
 pre-existing -- `main` and the PR measured the same). Not a crash: the
