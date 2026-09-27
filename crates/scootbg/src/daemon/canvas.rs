@@ -374,6 +374,9 @@ impl Canvas {
                     slot.attached();
                     self.put(index, slot);
                     self.current = Some(index);
+                    // Any other free buffer is now a spare (one kept across a
+                    // re-created surface, say): none is kept.
+                    self.drop_free_slots();
                 } else {
                     attached = false;
                 }
@@ -399,6 +402,9 @@ impl Canvas {
                         slot.attached();
                         self.put(index, slot);
                         self.current = Some(index);
+                        // Any other free buffer is now a spare (one kept across a
+                        // re-created surface, say): none is kept.
+                        self.drop_free_slots();
                         retired = self.pixel.take().map(|(old, _)| old);
                     }
                 } else {
@@ -426,6 +432,9 @@ impl Canvas {
                     slot.attached();
                     self.put(index, slot);
                     self.current = Some(index);
+                    // Any other free buffer is now a spare (one kept across a
+                    // re-created surface, say): none is kept.
+                    self.drop_free_slots();
                     retired = self.pixel.take().map(|(old, _)| old);
                 }
             }

@@ -434,3 +434,25 @@ binary was built from, with this commit's doc comments and help text).
   written: animate into buffers of the output's own, and share only the
   last frame.
 - [scoot-integration.md](../scoot-integration.md): nothing new.
+
+## Review of PR #287
+
+- **A spare buffer kept across a re-created surface.** Suppose the
+  compositor closed the surface mid-change, while the old buffer was
+  still held. Both releases then arrived with nothing current, and both
+  slots were kept. The retried surface showed the new image from its
+  kept slot, and the other free slot stayed until the next change: two
+  full-size buffers on one output (2 × 32.4 MB at 4K), against "one
+  buffer per output at most". Found by reading; no compositor here
+  closes a surface that way. Now every shm attach (color, kept image,
+  new image) drops any other free slot, as the single-pixel path already
+  did.
+- **`scootbg-mem`'s `tests/global.rs` failed once in CI** under
+  `cargo test` ("4 MiB written: RssAnon 6420 -> 8988 kB"). Its tests
+  share one process there, and a neighbour's frees landed inside
+  another's resident-memory measurement. It was reproduced 1 in 300 runs
+  under CPU load, and 0 in 600 once the file's tests were serialized by a
+  lock. This was a test-quality bug from ticket 6's test, not this
+  ticket's code.
+- **Docs.** The 2× 4K RSS now reads 36.8 MB everywhere. Ticket 10's
+  NixOS section now says scootbg is Linux-only, and what Darwin gets.

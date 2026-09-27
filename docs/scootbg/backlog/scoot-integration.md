@@ -203,6 +203,13 @@ who launches scoot from the greeter entry.
   NixOS module only guarantees the binary. `docs/nix.md` says so and
   shows the pairing next to the existing "complete session" example:
   home-manager `settings.wallpaper` plus NixOS `wallpaper.enable`.
+- **scootbg is Linux-only** (`flake.nix` exposes `packages.*.scootbg`
+  only where `isLinux`, and its `meta.platforms` is Linux). On Darwin the
+  home-manager wrapper already defaults `programs.scoot.package` to
+  `null`. `wallpaper.package` does the same there, and so does the
+  overlay: it provides `pkgs.scootbg` only on Linux. A Darwin config
+  that edits a `[wallpaper]` section for a Linux box must evaluate,
+  not fail on a missing attribute.
 - **An overlay:** `overlays.default` providing `pkgs.scoot`,
   `pkgs.scootctl` and `pkgs.scootbg`.
   - `docs/nix.md` currently says "there is no overlay", and that is why

@@ -3,6 +3,7 @@
 //! allocate through it.
 #![cfg(target_os = "linux")]
 
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
 
 use scootbg_mem::LargeAlloc;
@@ -10,6 +11,21 @@ use scootbg_mem::alloc::THRESHOLD;
 
 #[global_allocator]
 static GLOBAL: LargeAlloc = LargeAlloc;
+
+/// Held by every test here for its whole body. Two tests read this
+/// process's resident memory and a third churns it from eight threads, so
+/// under `cargo test`, which runs a file's tests concurrently in one
+/// process, a neighbour's frees landed inside another's measurement: CI saw
+/// "4 MiB written: RssAnon 6420 -> 8988 kB" (reproduced 1 in 300 runs
+/// under CPU load). nextest runs each test in its own process and never
+/// shared it. Serial here costs nothing: the file runs in under a second.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+/// Takes [`ONE_AT_A_TIME`]; a test that panicked while holding it has
+/// already failed on its own, so a poisoned lock is still taken.
+fn alone() -> MutexGuard<'static, ()> {
+    ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// A deterministic byte for index `i` of buffer `seed`.
 fn byte(seed: usize, i: usize) -> u8 {
@@ -23,6 +39,7 @@ fn byte(seed: usize, i: usize) -> u8 {
 /// shows as a crash or a wrong byte.
 #[test]
 fn threads_grow_and_shrink_across_the_threshold() {
+    let _alone = alone();
     let threads: Vec<_> = (0..8)
         .map(|t| {
             thread::spawn(move || {
@@ -57,6 +74,7 @@ fn threads_grow_and_shrink_across_the_threshold() {
 /// point: RSS rises by the block and falls again.
 #[test]
 fn freed_large_blocks_leave_rss() {
+    let _alone = alone();
     fn rss_anon_kb() -> u64 {
         let status = std::fs::read_to_string("/proc/self/status").expect("/proc/self/status");
         status
@@ -95,6 +113,7 @@ fn freed_large_blocks_leave_rss() {
 /// large the last free was.
 #[test]
 fn a_large_free_does_not_move_later_blocks_into_the_heap() {
+    let _alone = alone();
     let big = vec![1u8; 4 << 20];
     drop(big);
     let next = vec![2u8; 512 << 10];
@@ -106,11 +125,11 @@ fn a_large_free_does_not_move_later_blocks_into_the_heap() {
 }
 
 /// `zeroed_bytes` commits nothing until written: 256 MiB of zeros cost no
-/// resident memory until a page is touched, then that page. (Under
-/// `cargo test`'s shared process the other tests' churn is ~24 MiB at
-/// most, well inside the bounds.)
+/// resident memory until a page is touched, then that page. The other
+/// tests in this file never run beside it ([`ONE_AT_A_TIME`]).
 #[test]
 fn zeroed_bytes_are_committed_only_as_written() {
+    let _alone = alone();
     fn rss_anon_kb() -> u64 {
         let status = std::fs::read_to_string("/proc/self/status").expect("/proc/self/status");
         status

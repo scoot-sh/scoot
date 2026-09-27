@@ -66,7 +66,7 @@ full per-feature cycle.
    — RESOLVED 2026-09-27: the resource budget measured and published
    (idle, memory for 1× 1080p, 1× 4K and 2× 4K, startup); outputs of one
    size showing one image share its pixels (one memfd and pool, a
-   `wl_buffer` each: 2× 4K 69.2 → 36.7 MB RSS), and an output plugged in
+   `wl_buffer` each: 2× 4K 69.2 → 36.8 MB RSS), and an output plugged in
    later shares them with no decode; memfds closed once pooled; no spare
    buffer kept at rest; a surface the compositor never configures no
    longer holds up replies
