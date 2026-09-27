@@ -24,3 +24,14 @@ The resource budget is the feature. Targets to measure and publish in
 
 No `release` event handling tricks until measured: a static wallpaper
 commits once, so double buffering only matters for transitions.
+
+**A reply can be held up** (from [solid-color-done.md](resolved/solid-color-done.md)):
+an every-output `set` or `clear` waits for every output whose surface is
+live, so an output whose surface never gets its `configure`, or a stalled
+shm draw whose held buffer is never released, holds up the replies to
+that request and later every-output ones until it resolves. Bounded by the
+client's 30 s timeout (and the waiting lists by the connection limit), and
+not reached on scoot or sway, whose surfaces configure within a round trip
+and which release a buffer once the next is committed. If a compositor is
+found that does, a per-output bound on the wait (or leaving outputs that
+have never configured out of it) belongs here.

@@ -173,6 +173,47 @@ fn a_color_covers_every_output_exactly_on_scoot() {
         );
 
         assert_idle(daemon.id(), "with a color set");
+
+        // Viewport destination and opaque region persist: more color
+        // changes at the same size send neither again. A fresh surface
+        // (`clear`, then `set`) gets both once more, and so does a resize.
+        let n = count as usize;
+        ok(&session, &["set", BLUE]);
+        ok(&session, &["set", RED]);
+        assert_eq!(sent(&session, "create_u32_rgba_buffer").len(), 3 * n);
+        assert_eq!(sent(&session, ".set_opaque_region(").len(), n);
+        assert_eq!(sent(&session, ".set_destination(").len(), n);
+        ok(&session, &["clear"]);
+        ok(&session, &["set", BLUE]);
+        assert_eq!(sent(&session, ".set_opaque_region(").len(), 2 * n);
+        assert_eq!(sent(&session, ".set_destination(").len(), 2 * n);
+        for (id, name) in &ids {
+            session
+                .scoot_screenshot(*id)
+                .assert_all(rgb(BLUE), &format!("{name} after clear and set"));
+        }
+        std::fs::write(
+            session.runtime_dir().join("config.toml"),
+            "[output]\nscale = 2.0\n",
+        )
+        .unwrap();
+        let reloaded = session.scoot_ipc(r#"{"type":"reload"}"#);
+        assert_eq!(reloaded["type"], "reloaded", "{reloaded}");
+        session.query_until("resized to 800x500", |o| {
+            o.len() == n
+                && o.iter()
+                    .all(|o| o["surface"]["size"] == json!({"width": 800, "height": 500}))
+        });
+        ok(&session, &["set", BLUE]);
+        assert_eq!(sent(&session, ".set_destination(800, 500)").len(), n);
+        assert_eq!(sent(&session, ".add(0, 0, 800, 500)").len(), n);
+        assert_eq!(sent(&session, ".set_opaque_region(").len(), 3 * n);
+        for (id, name) in &ids {
+            session
+                .scoot_screenshot(*id)
+                .assert_all(rgb(BLUE), &format!("{name} after the resize"));
+        }
+
         assert_quiet_log(&session);
         assert!(session.run(&["kill"]).status.success());
         assert!(wait_exit(&mut daemon).success());

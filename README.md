@@ -347,7 +347,9 @@ name no output has right now is an error (exit 1) and changes nothing.
 shows the change and the compositor has processed it (a `wl_display.sync`
 round trip after the commits), so a screenshot taken straight after shows
 it. An output unplugged meanwhile is left out of that wait; one whose
-surface is not configured yet is waited for. They print nothing on
+surface is not configured yet is waited for; one scootbg has given up on
+(`gave-up` in `query`, said on stderr) is left out and shows nothing, and
+`set` still exits 0. They print nothing on
 success. Exit status: 0 done; 1 no daemon running, unknown output, or
 drawing failed (the daemon's stderr says why); 2 usage error, a malformed
 color included.

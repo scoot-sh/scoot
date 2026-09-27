@@ -90,6 +90,11 @@ pub struct LayerObjects {
     pub(super) surface: WlSurface,
     layer: ZwlrLayerSurfaceV1,
     pub(super) viewport: Option<WpViewport>,
+    /// The size (logical) and buffer scale this surface's persistent state
+    /// was last sent for: viewport destination, buffer scale and opaque
+    /// region are double-buffered and stay until changed, so a draw at the
+    /// same size sends none of them again. `None` for a fresh surface.
+    pub(super) sized: Option<(crate::outputs::Size, u32)>,
 }
 
 impl LayerObjects {
@@ -123,6 +128,7 @@ impl LayerObjects {
             surface,
             layer,
             viewport: None,
+            sized: None,
         }
     }
 

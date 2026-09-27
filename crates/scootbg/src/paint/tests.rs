@@ -36,6 +36,7 @@ fn forcing_only_picks_a_worse_path_that_is_possible() {
     }
 }
 
+#[cfg(debug_assertions)]
 #[test]
 fn path_names_round_trip() {
     for path in [Path::SinglePixel, Path::ViewportShm, Path::FullShm] {

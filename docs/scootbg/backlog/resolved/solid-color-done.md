@@ -113,7 +113,9 @@ there because nothing was drawn, belongs here.
     (`an_output_unplugged_during_a_set_still_gets_a_reply`, ten rounds).
   - *An output whose surface is not configured yet* (just plugged in,
     re-created after `clear` or a `closed`) is waited for: it will be
-    configured within a round trip or two. One that gave up is not.
+    configured within a round trip or two. One that gave up is not: it
+    shows nothing, `query` says `gave-up`, stderr said so when it happened,
+    and the reply is still `ok`.
   - *A draw that fails* (a buffer too large for `wl_shm`, out of memory)
     makes the reply an error, after the others are drawn, with the reason
     on stderr; it is not retried until the output is reconfigured or
@@ -291,6 +293,34 @@ on the final code by the suite and the stress run.
   the draw (a single-pixel draw resolves within the same turn); that case
   is the waiters' unit tests (an output gone from the list no longer holds
   a generation back).
+
+### Review of PR #278
+
+No blocking findings. Fixed:
+
+- **A release-only warning**: `Path::name` and `Path::from_name` are used
+  only by the debug knob, so `cargo build --release -p scootbg` warned they
+  were unused. They (and their test) are now `cfg(debug_assertions)`, and
+  CI's scootbg release build runs with `RUSTFLAGS="-D warnings"` so this
+  class fails CI (lint levels only; the size step measures that same
+  build).
+- **`set` returning overstated**: an output that gave up is left out of the
+  wait and shows nothing, while `set` exits 0. The README, `set --help`
+  and the protocol notes now say so.
+- **"An error reply changes nothing"** was contradicted by the next
+  sentence (a failed draw is an error after the other outputs changed);
+  reworded.
+- **Opaque region, viewport destination and buffer scale are sent only for
+  a new surface or a new size or scale** (`LayerObjects::sized`), not on
+  every draw: they are persistent double-buffered state, and the opaque
+  region cost a `wl_region` create and destroy per draw. Pinned in
+  `a_color_covers_every_output_exactly_on_scoot`: two more color changes
+  send neither again; `clear` then `set` sends each once more per output;
+  a resize to 800×500 sends `set_destination(800, 500)` and
+  `add(0, 0, 800, 500)` once per output, and every pixel stays exact.
+  With the check removed the test fails (`left: 3, right: 1`).
+- **A held-up reply** (an output that never configures, a buffer never
+  released) is recorded in [memory-and-idle.md](../memory-and-idle.md).
 
 ### Not verified, and why
 

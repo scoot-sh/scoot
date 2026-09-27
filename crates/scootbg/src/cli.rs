@@ -81,7 +81,9 @@ in. A name that no output has now is an error, and nothing is changed.
 Returns once every targeted output shows the color and the compositor has
 processed it, so a screenshot taken straight after shows it. An output
 unplugged meanwhile is left out of that wait; an output whose surface is
-not configured yet is waited for. Prints nothing on success.
+not configured yet is waited for; an output scootbg gave up on (`gave-up`
+in `scootbg query`, said on stderr) is left out, shows nothing, and does
+not change the exit status. Prints nothing on success.
 
 Exit status: 0 once shown; 1 when no daemon is running, the output is
 unknown, or drawing failed (the daemon's stderr says why); 2 for a usage

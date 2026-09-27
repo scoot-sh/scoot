@@ -4,8 +4,9 @@
 //! carries them out.
 //!
 //! Every draw is one batch: attach (only when the buffer changes), buffer
-//! scale or viewport destination, damage (the whole buffer), opaque region
-//! (the whole surface), commit. The surface's latest `configure` was acked when it
+//! scale or viewport destination and opaque region (the whole surface; all
+//! three only for a new surface or a new size or scale, as they persist),
+//! damage (the whole buffer), commit. The surface's latest `configure` was acked when it
 //! arrived, before any of this, so each commit carries it.
 //!
 //! ## Buffers
@@ -254,29 +255,35 @@ impl Canvas {
                     self.put(index, slot.attached());
                     self.current = Some(index);
                 }
-                if path == Path::FullShm {
-                    surface.set_buffer_scale(clamp(target.scale));
-                }
             }
         }
-        if path.uses_viewport() {
-            let viewporter = globals
-                .viewporter
-                .as_ref()
-                .ok_or(DrawError::Missing("wp_viewporter"))?;
-            let viewport = layer
-                .viewport
-                .get_or_insert_with(|| viewporter.get_viewport(&surface, qh, ()));
-            viewport.set_destination(clamp(target.size.width), clamp(target.size.height));
+        // Size-dependent state is persistent, so it is sent only for a new
+        // surface or a new size or scale (`LayerObjects::sized`).
+        let sized = (target.size, target.scale);
+        if layer.sized != Some(sized) {
+            if path == Path::FullShm {
+                surface.set_buffer_scale(clamp(target.scale));
+            }
+            if path.uses_viewport() {
+                let viewporter = globals
+                    .viewporter
+                    .as_ref()
+                    .ok_or(DrawError::Missing("wp_viewporter"))?;
+                let viewport = layer
+                    .viewport
+                    .get_or_insert_with(|| viewporter.get_viewport(&surface, qh, ()));
+                viewport.set_destination(clamp(target.size.width), clamp(target.size.height));
+            }
+            // Opaque everywhere: the compositor need draw nothing beneath it.
+            let region = globals.compositor.create_region(qh, ());
+            region.add(0, 0, clamp(target.size.width), clamp(target.size.height));
+            surface.set_opaque_region(Some(&region));
+            region.destroy();
+            layer.sized = Some(sized);
         }
         // All of it, every time: a draw is rare, and a new buffer scale or
         // viewport with the same buffer changes every pixel on screen too.
         surface.damage_buffer(0, 0, clamp(dims.0), clamp(dims.1));
-        // Opaque everywhere: the compositor need draw nothing beneath it.
-        let region = globals.compositor.create_region(qh, ());
-        region.add(0, 0, clamp(target.size.width), clamp(target.size.height));
-        surface.set_opaque_region(Some(&region));
-        region.destroy();
         surface.commit();
         if let Some(old) = retired {
             old.destroy();

@@ -131,13 +131,16 @@ anything wrong                                                -> {"type":"error"
   served meanwhile. Requests sent behind one on the same connection are
   answered after it, in order. An output unplugged before its commit is
   left out of the wait; an output whose surface is not configured yet is
-  waited for. A client that hangs up before its reply loses only the
+  waited for; an output scootbg gave up on (`gave-up` in `query`, said on
+  stderr) is left out and shows nothing, and the reply is still `ok`. A client that hangs up before its reply loses only the
   reply: the change still happens.
-- An error reply changes nothing: an unknown `output` name (the name must
-  belong to an output present now), a `color` that is not `#rrggbb`, a
-  `set` with no `color`. If drawing fails on an output (a buffer too large
-  for `wl_shm`, out of memory), the reply is an error too, after the others
-  were drawn, and the daemon's stderr says why.
+- A request refused outright changes nothing: an unknown `output` name
+  (the name must belong to an output present now), a `color` that is not
+  `#rrggbb`, a `set` with no `color`. A draw that fails on an output (a
+  buffer too large for `wl_shm`, out of memory) is different: the choice
+  is recorded and every other targeted output shows it; the reply is an
+  error once they have, and the daemon's stderr says which output failed
+  and why.
 - `query`'s `shows` is `{"color":"#rrggbb"}`, lowercase, or `null`. Every
   key of an entry is always present; keys may be added within protocol 1,
   none removed or changed.

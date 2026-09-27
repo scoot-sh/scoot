@@ -54,7 +54,9 @@ impl Path {
         }
     }
 
-    /// The name used in messages and by the debug knob.
+    /// The name the debug knob uses (`daemon::wayland`). Debug builds
+    /// only, like the knob: a release build has no use for it.
+    #[cfg(debug_assertions)]
     pub fn name(self) -> &'static str {
         match self {
             Self::SinglePixel => "single-pixel",
@@ -63,6 +65,7 @@ impl Path {
         }
     }
 
+    #[cfg(debug_assertions)]
     pub fn from_name(name: &str) -> Option<Self> {
         [Self::SinglePixel, Self::ViewportShm, Self::FullShm]
             .into_iter()
