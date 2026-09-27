@@ -40,7 +40,7 @@
 //! ring and rounded clip use the configured radius, so between the client's
 //! wider curve and the ring's tighter inner edge there is a crescent of
 //! background at every corner (see
-//! `docs/backlog/core/client-rounded-corners-vs-ring.md`).
+//! `docs/backlog/resolved/client-rounded-corners-vs-ring-done.md`).
 //!
 //! Matching the client's radius would need per-commit alpha measurement
 //! (costly and fragile) or per-toolkit guessing (guessing), so this module

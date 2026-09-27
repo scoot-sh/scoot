@@ -2,7 +2,7 @@
 //! `zxdg_toplevel_decoration_v1` object, the way GTK never does) rounds its
 //! own corners at a radius nothing on the wire reports, so the ring's
 //! tighter inner edge leaves a background crescent at every corner
-//! (`docs/backlog/core/client-rounded-corners-vs-ring.md`). The ring path
+//! (`docs/backlog/resolved/client-rounded-corners-vs-ring-done.md`). The ring path
 //! backs such a window with a solid rect in its own ring color, drawn
 //! directly under its drawn rect: the client's own alpha shapes the visible
 //! part, so the corners read as the ring hugging the client's curve.

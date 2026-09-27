@@ -8,7 +8,7 @@ blocked: null
 
 # Client-rounded corners vs the ring — DONE
 
-RESOLVED 2026-09-27 (PR TBD). Serves **daily-drive** (the look of every
+RESOLVED 2026-09-27 (PR #288). Serves **daily-drive** (the look of every
 GTK 4 / libadwaita dialog with `corner_radius` set).
 
 ## Verdict
