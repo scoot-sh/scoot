@@ -8,7 +8,7 @@ blocked: null
 
 # An unplugged monitor's windows seem to disappear — RESOLVED
 
-RESOLVED 2026-09-27 (branch `unplug-adopted-switch`; PR number below).
+RESOLVED 2026-09-27 (PR #277, branch `unplug-adopted-switch`).
 An unplug with focus on the removed monitor now switches the adopter to the
 adopted workspace holding the focused window, keeping focus; a replug
 restores both the returned monitor and the adopter's pre-adopt view, with
