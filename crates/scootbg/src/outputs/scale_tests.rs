@@ -133,9 +133,14 @@ fn the_fraction_makes_the_estimate_and_sizes_an_unsized_surface() {
     let _ = output.configure(1, 0, 0);
     assert_eq!(output.surface_size(), Some(size(1067, 667)));
     assert_eq!(output.full_buffer().map(|b| b.dims), Some((1601, 1001)));
-    // One axis given, the other worked out.
+    // One axis given, the other worked out with the fraction. A surface
+    // narrower than the output (1000 of 1067) cannot tell a stale fraction
+    // from a right one by the mode, so it is drawn at the integer scale:
+    // larger, scaled down, never stretched.
     let _ = output.configure(2, 1000, 0);
     assert_eq!(output.surface_size(), Some(size(1000, 667)));
+    assert_eq!(output.scale(), Scale::Integer(2));
+    assert_eq!(output.full_buffer().map(|b| b.dims), Some((2000, 1334)));
     // Rotated: the axes swap before dividing.
     output.stage_transform(super::Transform::Rotate90);
     output.done();
@@ -247,4 +252,84 @@ fn a_draw_asks_for_the_size_a_render_is_kept_for() {
             );
         }
     }
+}
+
+/// sway at 1.5 on 1600×1000 with a surface still holding the 1.25 it was
+/// made with: both round up to `wl_output`'s 2, so only the mode shows the
+/// fraction is stale. The integer scale is used (larger, scaled down)
+/// until the compositor sends the real one.
+#[test]
+fn a_fraction_short_of_the_mode_gives_way_to_the_integer() {
+    let mut outputs = Outputs::<()>::default();
+    let id = at_one_and_a_half(&mut outputs);
+    let output = &mut outputs.get_mut(id).unwrap().output;
+    assert!(output.prefer_fractional(150));
+    // Not configured: nothing to check against, the fraction stands.
+    assert_eq!(output.scale(), Scale::Fractional(150));
+    let _ = output.configure(1, 1066, 666);
+    assert_eq!(output.scale(), Scale::Integer(2));
+    assert_eq!(
+        output.full_buffer(),
+        Some(Buffer {
+            dims: (2132, 1332),
+            scale: 2
+        })
+    );
+    assert!(output.prefer_fractional(180));
+    assert_eq!(output.scale(), Scale::Fractional(180));
+    assert_eq!(output.full_buffer().map(|b| b.dims), Some((1599, 999)));
+    // Rotated: checked against the rotated mode.
+    output.stage_transform(super::Transform::Rotate90);
+    output.done();
+    let _ = output.configure(2, 666, 1066);
+    assert_eq!(output.scale(), Scale::Fractional(180));
+    let _ = output.configure(3, 666, 1066);
+    assert!(output.prefer_fractional(150));
+    assert_eq!(output.scale(), Scale::Integer(2));
+}
+
+/// A draw that failed is not retried in a loop, but a new scale is a new
+/// size, so a new chance, as a new `configure` is.
+#[test]
+fn a_new_scale_retries_a_failed_draw() {
+    let mut outputs = Outputs::<()>::default();
+    let id = at_one_and_a_half(&mut outputs);
+    let output = &mut outputs.get_mut(id).unwrap().output;
+    let _ = output.configure(1, 1067, 667);
+    let wanted = image();
+    output.draw_failed();
+    assert_eq!(output.plan(Some(&wanted), output.scale()), Plan::Nothing);
+    assert_eq!(
+        output.progress(Some(&wanted), output.scale()),
+        Progress::Failed
+    );
+    assert!(!output.prefer_fractional(0), "no change, still failed");
+    assert_eq!(
+        output.progress(Some(&wanted), output.scale()),
+        Progress::Failed
+    );
+    assert!(output.prefer_fractional(180));
+    assert!(matches!(
+        output.plan(Some(&wanted), output.scale()),
+        Plan::Show(_)
+    ));
+    output.draw_failed();
+    assert!(output.prefer_buffer_scale(3));
+    assert!(matches!(
+        output.plan(Some(&wanted), output.scale()),
+        Plan::Show(_)
+    ));
+    output.draw_failed();
+    // `wl_output.scale` too; a `done` that changes nothing does not.
+    output.done();
+    assert_eq!(
+        output.progress(Some(&wanted), output.scale()),
+        Progress::Failed
+    );
+    output.stage_scale(3);
+    output.done();
+    assert!(matches!(
+        output.plan(Some(&wanted), output.scale()),
+        Plan::Show(_)
+    ));
 }

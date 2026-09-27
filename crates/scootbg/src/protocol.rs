@@ -385,7 +385,7 @@ pub struct OutputEntry<'a> {
     /// The current mode, in device pixels.
     pub mode: Option<Size>,
     /// `wl_output`'s integer scale: a fractional scale rounded up. The
-    /// scale the wallpaper is drawn at is `surface.scale`.
+    /// scale an image is drawn at is `surface.scale`.
     pub scale: u32,
     /// `wl_output.transform`: `normal`, `90`, `180`, `270`, `flipped`,
     /// `flipped-90`, ... Rotations count counter-clockwise, as the
@@ -437,12 +437,15 @@ impl Serialize for Shows<'_> {
 /// the output is replugged).
 /// `size`, in logical pixels, is set only while `configured`, and even
 /// then `null` if the compositor left the size to scootbg before the
-/// output reported a mode. `scale` is the scale the surface is drawn at:
-/// `wp_fractional_scale_v1`'s (1.5, say) where the compositor sent one and
-/// has a viewporter, else `wl_surface.preferred_buffer_scale`, else
-/// `wl_output`'s; `pixels` is the size of a full-size buffer at it (an
-/// image's, in device pixels: 1601×1001 for scoot's 1067×667 at 1.5). Both
-/// `null` whenever `size` is.
+/// output reported a mode. `scale` is the scale a full-size buffer (an
+/// image, or a color on the full-size fallback) is drawn at on the surface
+/// (`Output::scale`): `wp_fractional_scale_v1`'s (1.5, say) where the
+/// compositor sent one and has a viewporter, unless it is found stale;
+/// else the larger of `wl_surface.preferred_buffer_scale` and
+/// `wl_output`'s. A color on a single-pixel or 1×1 buffer is drawn at 1
+/// whatever this says. `pixels` is the size of a full-size buffer at it (in
+/// device pixels: 1601×1001 for scoot's 1067×667 at 1.5). Both `null`
+/// whenever `size` is.
 #[derive(Debug, Serialize)]
 pub struct SurfaceEntry {
     pub state: &'static str,

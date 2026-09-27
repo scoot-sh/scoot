@@ -381,9 +381,13 @@ protocol says: 1601×1001 for scoot's 1067×667 surface at 1.5 on a
 1600×1000 output, which scoot draws one buffer pixel to one device pixel
 (the last column and row fall off the edge). An image the size of the
 output with `--mode center` comes out exact to the pixel. Without those
-protocols it is drawn at the integer scale (`wl_surface`'s preferred
-buffer scale, else `wl_output`'s) and the compositor scales it down: sharp,
-but larger than the output (2134×1334 there). A compositor scale that is
+protocols it is drawn at the integer scale (the larger of `wl_surface`'s
+preferred buffer scale and `wl_output`'s) and the compositor scales it
+down: sharp, but larger than the output (2134×1334 there). The same
+happens for a moment when the compositor has not yet told a surface its
+new scale (sway does not while nothing is shown on it): the image is on
+screen when `set` returns, drawn larger and scaled down, never stretched,
+and redrawn exact once the compositor sends the scale. A compositor scale that is
 not a multiple of 1/120 (1.33, say) cannot be drawn exactly by any client,
 since the protocol cannot say it.
 
@@ -448,10 +452,12 @@ device pixels. `scale` is `wl_output`'s integer scale (a fractional one
 rounded up), and `transform` is `wl_output`'s, counter-clockwise.
 `logical` is the output's size in logical pixels: exact once the surface is
 configured, before that worked out from the mode and the best scale known
-(within a pixel). `surface.scale` is the scale scootbg draws the surface at
-(`1.5` from `wp_fractional_scale_v1`, else an integer) and `surface.pixels`
-the size in device pixels an image is drawn at, both `null` until the
-surface is configured. `surface.state` is `waiting` (the
+(within a pixel). `surface.scale` is the scale an image, or a color on the
+full-size fallback, is drawn at on that surface (`1.5` from
+`wp_fractional_scale_v1`, else an integer; a color on a single-pixel or
+1×1 buffer is always drawn at 1) and `surface.pixels` the size in device
+pixels an image is drawn at, both `null` until the surface is
+configured. `surface.state` is `waiting` (the
 output has not reported itself yet), `pending`, `configured` (with `size`),
 `closed` (the compositor closed it; scootbg makes it again, once) or
 `gave-up` (closed a second time over the output's life: scootbg has

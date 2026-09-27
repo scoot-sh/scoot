@@ -56,7 +56,7 @@ Code at `c7c3132`; the docs came after it, with two comment-only fixes
 in `canvas.rs` and `wayland.rs` (the release binary is byte-identical,
 sha256 `ae084758…`, so every measurement here holds for both).
 
-- **The size, decided once** (`src/density.rs`, pure, 10 unit tests in
+- **The size, decided once** (`src/density.rs`, pure, 12 unit tests in
   `density/tests.rs`). `Scale` is `Integer(n)` or `Fractional(v120)`, and
   `Scale::buffer(size)` is the one place a full-size buffer's size is
   worked out: a fraction is the logical size times `v120 / 120` per side,
@@ -67,10 +67,12 @@ sha256 `ae084758…`, so every measurement here holds for both).
   `Drawn::buffer` (what the draw attaches) both read it; a unit test pins
   that they agree on every path and scale
   ([why that matters](#found-along-the-way)).
-- **Which scale** (`Preferred::scale`): `wp_fractional_scale_v1`'s
-  `preferred_scale`, else `wl_surface.preferred_buffer_scale` (v6), else
-  `wl_output.scale`; a surface scale *smaller* than `wl_output`'s is taken
-  as stale and the output's used ([departures](#departures-from-the-plan-and-why)).
+- **Which scale** (`Preferred::scale`, `Output::scale`):
+  `wp_fractional_scale_v1`'s `preferred_scale`, else the larger of
+  `wl_surface.preferred_buffer_scale` (v6) and `wl_output.scale`; a
+  surface scale that would draw the buffer *smaller* than the output
+  (below `wl_output`'s, or short of the mode) is taken as stale and the
+  integer used ([departures](#departures-from-the-plan-and-why)).
   The model (`outputs.rs`) keeps them per output, from the live surface's
   events only, across a surface re-created on the same output. A fraction
   of 0 or an integer below 1 is ignored.
@@ -103,8 +105,8 @@ sha256 `ae084758…`, so every measurement here holds for both).
   manager unbound, standing for a compositor without it; the forced
   `full-shm` path now also stands for one without a viewporter (no
   fractional-scale objects).
-- **Tests**: `tests/scale.rs` (new, 6 tests, added to CI's integration
-  job), `outputs/scale_tests.rs` (6), `density/tests.rs` (10), and the
+- **Tests**: `tests/scale.rs` (new, 7 tests, added to CI's integration
+  job), `outputs/scale_tests.rs` (8), `density/tests.rs` (12), and the
   paint, protocol and daemon tests updated.
   `tests/image.rs::a_new_scale_redraws_at_the_real_pixel_size` now runs
   with the knob, so it still covers the integer path and the re-attach.
@@ -134,15 +136,28 @@ sha256 `ae084758…`, so every measurement here holds for both).
 - **A stale scale gives way to the larger.** Not in the ticket. wlroots
   sends a surface `preferred_scale` and `preferred_buffer_scale` only
   while it is on screen, so after `output … scale 1.5` on sway a surface
-  showing nothing still says 1.0 while `wl_output` says 2 (trace below).
-  Both compositors send `wl_output.scale` as the fraction rounded up, so
-  when the surface's is smaller one of the two is stale, and which cannot
-  be told: the larger wins, which can make a buffer larger than needed
-  (scaled down, sharp) but never smaller (scaled up, a blur). A compositor
-  that says 1 on `wl_output` and 1.5 on the surface is followed. On sway
-  the first draw is then 1066×666 at buffer scale 2 (2132×1332), and once
-  on screen sway sends 180 and it is redrawn at 1599×999, exact:
-  one extra render, in that case only.
+  showing nothing (never set, or cleared) or fully covered keeps its old
+  scale (trace below). Two checks, both distrusting a scale only when it
+  would make the buffer *smaller* than the output (stretched, a blur);
+  a larger one is scaled down, sharp, and left alone:
+  - *against `wl_output.scale`*: both compositors send it as the fraction
+    rounded up, so a surface scale below it (1.0 against 2) is stale, or
+    it is; the larger wins. A compositor that says 1 on `wl_output` and
+    1.5 on the surface is followed;
+  - *against the mode* (added after review, see
+    [below](#review-of-pr-283)): a stale fraction that rounds up to the
+    same integer (1.25 against 1.5, both 2) passes the first check, so a
+    fraction whose buffer falls short of the output's mode by at least the
+    scale plus half a pixel (`Scale::falls_short`: sway's 1066-wide
+    surface at a stale 1.25 is 1333 for a 1600-pixel mode) gives way to
+    the integer scale. The unit tests show a fraction the compositor
+    really renders at never trips it, over the same 26,944 cases.
+
+  On sway either case draws 1066×666 at buffer scale 2 (2132×1332) first,
+  and once on screen sway sends 180 and it is redrawn at 1599×999, exact:
+  one extra render. So after a scale change made while nothing was shown,
+  a screenshot straight after `set` shows the image drawn larger and
+  scaled down, not yet device-exact.
 - **A configure's draw waits one round trip.** Not in the ticket. Neither
   compositor sends the `configure` last in a scale change: sway sends it
   before `wl_output.done`, scoot before the surface's `preferred_scale`
@@ -243,6 +258,65 @@ All on a Claude Code web container (x86_64, 4 CPUs), no dev VM; code at
   --option sandbox true` builds (its one warning: the tree is dirty with
   this record's own move), 1,492,704 B, linking the same three.
 
+### Review of PR #283
+
+No blocking findings. Fixed, in a commit after `a1bf622`:
+
+1. **A stale fraction that rounds up to the same integer slipped past
+   "the larger wins"** (reproduced by the reviewer on sway 1.12). At 1.25,
+   set a color, clear it (the new surface gets 150), `output … scale 1.5`
+   while cleared: `query` said scale 1.25, pixels 1333×833, and `set` of a
+   checker answered `ok` with that buffer stretched over 1599 device
+   pixels; only after mapping did sway send 180. The same holds for a
+   mapped wallpaper fully covered (wlroots suspends it). Fixed by the check
+   against the mode (above). The reviewer's script, run again against the
+   fix: after the scale change `query` says
+   `"scale":2,"pixels":{"width":2132,"height":1332}`, the buffer at the
+   reply is `2132, 1332`, and a second later `1599, 999`, with `query` at
+   `"scale":1.5`. The new sway test
+   `a_stale_fraction_that_rounds_alike_is_not_stretched_on_sway` fails on
+   `a1bf622` twice over: `query` says 1.25, and with that assertion taken
+   out, `a buffer stretched over the output: [(1333, 833)]`.
+   *Considered and not done:* re-creating an unmapped surface when a
+   `configure` changes its size (sway sends a new surface its scales at
+   creation). It would make the first draw exact on sway, but it does not
+   reach a covered, mapped wallpaper, it costs a surface and a round trip
+   per change on every compositor, and on one whose fraction persistently
+   disagrees with the mode it would have to be bounded against a loop.
+   Drawing larger until the compositor says otherwise is right everywhere.
+   *Why the mode check is sound:* the surface is anchored to all four
+   edges with exclusive zone -1, so it is the whole output; only a buffer
+   falling short counts, so scoot at 1.33 (1604 for 1600) keeps its
+   fraction; and a surface a compositor configured smaller than the output
+   degrades to the integer scale (larger, sharp), never to a stretch.
+2. `density.rs` named `tests/image.rs` for the snap screenshots; it is
+   `tests/scale.rs`.
+3. README, `docs/scootbg/README.md` and `SurfaceEntry` said the integer
+   scale was `preferred_buffer_scale` *else* `wl_output`'s; it is the
+   larger of the two.
+4. `surface.scale` was documented as the scale scootbg draws at; a color
+   on the single-pixel or 1×1 path is drawn at 1. It is now documented as
+   the scale an image, or a color on the full-size fallback, is drawn at.
+5. A failed draw stayed failed after a new scale that could make it
+   drawable (`failed` was cleared only by a request or a `configure`). A
+   changed `preferred_scale`, `preferred_buffer_scale` or `wl_output.scale`
+   now clears it (`Output::rescaled`); unit-tested.
+
+Mutation checks on the fixes: skipping the mode check fails
+`a_stale_fraction_that_rounds_alike_is_not_stretched_on_sway`,
+`a_fraction_short_of_the_mode_gives_way_to_the_integer` and
+`the_fraction_makes_the_estimate_and_sizes_an_unsized_surface`; not
+clearing `failed` on a new scale fails `a_new_scale_retries_a_failed_draw`.
+
+The covered variant of finding 1, reproduced by hand on sway 1.12 (not
+in the test suite: it needs a client to cover the output with). With an
+image on screen at 1.25, a fullscreen `foot` over it, then `output …
+scale 1.5`, sway sends the covered surface no scale (the trace has only
+the 150 from creation). `a1bf622` (release, sha256 `ae084758…`) then drew
+`1333, 833` and `query` said `"scale":1.25`; the fix draws `2132, 1332`
+with `"scale":2`. On uncovering, sway sends 180 and both redraw at
+`1599, 999`.
+
 ### Measurements
 
 The 6000×4000 JPEG of the earlier records, regenerated with the same
@@ -292,6 +366,14 @@ buffer while drawing the next):
 Idle after a `set` at 1.5 (after, 1600×1000), 30 s: 0 context switches,
 0 CPU ticks, 1 thread, `RssAnon` 484 kB. Binary (release, stripped):
 1,500,008 → 1,508,200 B (+8,192).
+
+After the review's fixes (release sha256 `cbaefb85…`, 1,512,296 B, +4,096
+more), the same end-to-end run, 3 `set`s each: 1600×1000 buffer
+6,410,404 B, reply 352.3, 358.1, 344.6 ms, CPU 340, 360, 330 ms, peak
+74,928, 81,356, 81,492 kB; 3840×2160 buffer 33,177,600 B, reply 425.4,
+454.6, 441.2 ms, CPU 420, 440, 430 ms, peak 88,032, 120,608, 120,592 kB.
+The same buffers, and the times within the runs' spread: the mode check
+is a few integer operations per draw decision.
 
 ### Not verified, and why
 

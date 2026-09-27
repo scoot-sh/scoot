@@ -503,6 +503,8 @@ fn fractional_scales_are_exact_on_sway() {
 /// and `wl_output` says 2. The larger wins: the first draw is 1066×666 at
 /// buffer scale 2 (sharp, scaled down; never 1066×666 pixels scaled up),
 /// and once on screen sway sends 1.5 and it is redrawn at 1599×999, exact.
+/// A stale fraction that rounds up to the same integer as the new one is
+/// `a_stale_fraction_that_rounds_alike_is_not_stretched_on_sway`.
 #[test]
 fn a_scale_gone_stale_while_unmapped_is_healed_on_sway() {
     let Some(session) = Session::sway("stale") else {
@@ -554,6 +556,98 @@ fn a_scale_gone_stale_while_unmapped_is_healed_on_sway() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(session.query()["outputs"][0]["surface"]["scale"], 1.5);
+    assert_idle(daemon.id(), "healed");
+    assert_quiet_log(&session);
+    kill(&session, &mut daemon);
+}
+
+/// The buffers the daemon gave the compositor, as `(width, height)`.
+fn buffers(session: &Session) -> Vec<(u32, u32)> {
+    sent(session, ".create_buffer(")
+        .iter()
+        .filter_map(|line| {
+            let args = line.split_once(".create_buffer(")?.1;
+            let mut parts = args.split(", ").skip(2);
+            Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+        })
+        .collect()
+}
+
+/// A stale fraction that rounds up to the same integer as the new one
+/// (1.25 and 1.5 are both `wl_output` scale 2), so "the larger wins" cannot
+/// see it: sway re-creates nothing while the wallpaper is cleared, and a
+/// cleared surface is not on screen, so it keeps the 150 it was made with
+/// after the output goes to 1.5. Its buffer (1066×666 at 1.25: 1333×833)
+/// would fall 267 pixels short of the 1600-pixel mode and be stretched over
+/// it. It is taken as stale instead: the image is drawn at the integer
+/// scale (larger, scaled down, never up), and redrawn at 1599×999, exact,
+/// once sway sends 180.
+#[test]
+fn a_stale_fraction_that_rounds_alike_is_not_stretched_on_sway() {
+    let Some(session) = Session::sway("stalefr") else {
+        return;
+    };
+    let mut daemon = session.daemon_logged(&[("WAYLAND_DEBUG", "client")]);
+    let name = configured(&session)["name"].as_str().unwrap().to_owned();
+    session.swaymsg(&[
+        "--",
+        "output",
+        &name,
+        "mode",
+        "--custom",
+        "1600x1000",
+        "scale",
+        "1.25",
+    ]);
+    session.query_until("1280x800", |o| {
+        o[0]["surface"]["size"] == json!({"width": 1280, "height": 800})
+    });
+    ok(&session, &["set", "#203040"]);
+    ok(&session, &["clear"]);
+    session.query_until("re-created at 1.25", |o| {
+        o[0]["surface"]["size"] == json!({"width": 1280, "height": 800})
+            && o[0]["surface"]["scale"] == 1.25
+    });
+    session.swaymsg(&["output", &name, "scale", "1.5"]);
+    let output = session
+        .query_until("1066x666", |o| {
+            o[0]["surface"]["size"] == json!({"width": 1066, "height": 666})
+        })
+        .remove(0);
+    assert_eq!(output["scale"], 2);
+    assert_ne!(output["surface"]["scale"], 1.25, "the stale 1.25 is used");
+    let image = session.runtime_dir().join("checker.png");
+    write_checker(&image, 1600, 1000);
+    ok(
+        &session,
+        &["set", image.to_str().unwrap(), "--mode", "center"],
+    );
+    // Whatever was drawn by the reply covers the output's pixels: never a
+    // buffer smaller than the 1599×999 sway draws the surface into.
+    let drawn = buffers(&session);
+    assert!(!drawn.is_empty());
+    assert!(
+        drawn.iter().all(|&(w, h)| w >= 1599 && h >= 999),
+        "a buffer stretched over the output: {drawn:?}"
+    );
+    let deadline = Instant::now() + PATIENCE;
+    while !buffers(&session).contains(&(1599, 999)) {
+        assert!(
+            Instant::now() < deadline,
+            "never redrawn at 1.5: {:?}",
+            buffers(&session)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let shot = session.screencopy(&name);
+        match sharp_checker(&shot, 1599, 999) {
+            Ok(()) => break,
+            Err(e) => assert!(Instant::now() < deadline, "healed at 1.5: {e}"),
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
     assert_idle(daemon.id(), "healed");
     assert_quiet_log(&session);
     kill(&session, &mut daemon);

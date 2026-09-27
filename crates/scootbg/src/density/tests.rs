@@ -274,3 +274,74 @@ fn a_stale_smaller_scale_gives_way_to_the_output() {
     assert!(integer.set_buffer_scale(2));
     assert_eq!(integer.scale(1), Scale::Integer(2));
 }
+
+/// A fraction the compositor really renders at never falls short of the
+/// mode, whichever way it rounded the logical size, on every mode, both
+/// orientations and every step; the same logical size read at any other
+/// step that would draw it 2 or more pixels short does.
+#[test]
+fn only_a_stale_fraction_falls_short_of_the_mode() {
+    let mut stale = 0;
+    for (w, h) in MODES {
+        for (width, height) in [(w, h), (h, w)] {
+            let device = size(width, height);
+            for v120 in steps() {
+                let scale = f64::from(v120) / f64::from(DENOMINATOR);
+                for logical in [
+                    size(
+                        (f64::from(width) / scale).ceil() as u32,
+                        (f64::from(height) / scale).ceil() as u32,
+                    ),
+                    size(
+                        (f64::from(width) / scale) as u32,
+                        (f64::from(height) / scale) as u32,
+                    ),
+                ] {
+                    assert!(
+                        !Scale::Fractional(v120).falls_short(logical, device),
+                        "{width}x{height} at {v120}/120: {logical:?}"
+                    );
+                    // A stale step below it, far enough to matter.
+                    for stale_v120 in (60..v120).step_by(7) {
+                        let drawn = Scale::Fractional(stale_v120).buffer(logical).unwrap();
+                        let short = drawn.dims.0 + 2 <= width.saturating_sub(stale_v120 / 120)
+                            || drawn.dims.1 + 2 <= height.saturating_sub(stale_v120 / 120);
+                        if short {
+                            assert!(
+                                Scale::Fractional(stale_v120).falls_short(logical, device),
+                                "{width}x{height} at {v120}/120 read as {stale_v120}"
+                            );
+                            stale += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(stale > 100_000, "{stale}");
+}
+
+#[test]
+fn falling_short_by_example() {
+    let mode = size(1600, 1000);
+    // The reviewer's case: sway's 1066×666 at 1.5, the stale 1.25 would be
+    // 1333×833.
+    assert!(Scale::Fractional(150).falls_short(size(1066, 666), mode));
+    assert!(!Scale::Fractional(180).falls_short(size(1066, 666), mode));
+    // scoot's 1067×667 at 1.5 overshoots by one: fine.
+    assert!(!Scale::Fractional(180).falls_short(size(1067, 667), mode));
+    // scoot at 1.33 says 160: 1203 × 4/3 = 1604 overshoots the mode, so it
+    // is kept (scaled down a little, as anything would be).
+    assert!(!Scale::Fractional(160).falls_short(size(1203, 752), mode));
+    // Short on one axis is enough; an axis of 0 is not checked.
+    assert!(Scale::Fractional(150).falls_short(size(1280, 666), mode));
+    assert!(!Scale::Fractional(150).falls_short(size(0, 0), mode));
+    assert!(Scale::Fractional(150).falls_short(size(0, 666), mode));
+    // Just inside and just outside the bound at 1.5 (1.5 + 0.5 = 2).
+    assert!(!Scale::Fractional(180).falls_short(size(1066, 666), size(1600, 1000)));
+    assert!(Scale::Fractional(180).falls_short(size(1066, 666), size(1601, 1000)));
+    // An integer never does; nothing overflows.
+    assert!(!Scale::Integer(1).falls_short(size(10, 10), mode));
+    assert!(!Scale::Fractional(480).falls_short(size(u32::MAX, u32::MAX), mode));
+    assert!(Scale::Fractional(60).falls_short(size(1, 1), size(u32::MAX, u32::MAX)));
+}

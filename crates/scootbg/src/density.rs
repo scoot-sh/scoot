@@ -20,19 +20,39 @@
 //!    compositor scales it down: sharp, but not device-exact, and more
 //!    pixels than the output has.
 //!
+//! Without a usable fraction, the integer scale is the larger of 2 and 3
+//! ([`Preferred::integer`]).
+//!
 //! ## A stale scale
 //!
 //! The surface's scales and `wl_output.scale` arrive separately, and can
 //! disagree for a while: sway sends a changed output's `wl_output.scale`
 //! at once, but wlroots re-sends a surface's `preferred_scale` and
 //! `preferred_buffer_scale` only while the surface is on screen, so one
-//! made (or cleared) before the change keeps the old values until it is
-//! mapped. Every compositor checked sends `wl_output.scale` as the
-//! fraction rounded up, so when the two disagree one of them is stale, and
-//! which cannot be known. The larger wins: a buffer drawn for more pixels
-//! than the output has is scaled down (sharp, only larger), where one drawn
-//! for fewer would be scaled up (a blur). The compositor's next event
-//! settles it and the surface is redrawn.
+//! showing nothing (cleared, or never set), or fully covered, keeps the
+//! old values until it is shown. A buffer drawn for more pixels than the
+//! output has is scaled down (sharp, only larger), where one drawn for
+//! fewer would be stretched (a blur), so a scale is distrusted only when it
+//! would make the buffer too small, in two ways:
+//!
+//! - **Against `wl_output.scale`.** Every compositor checked sends it as
+//!   the fraction rounded up, so a surface scale below it is stale, or it
+//!   is; which cannot be known, and the larger wins ([`Preferred::scale`]).
+//! - **Against the output's mode** ([`Scale::falls_short`]). 1.25 and 1.5
+//!   both round up to 2, so the check above cannot tell them apart; but the
+//!   surface covers the whole output, so its logical size times the right
+//!   fraction is the mode's size to within the rounding (a pixel or two,
+//!   see the tests), where a stale 1.25 on sway's 1066-wide surface at 1.5
+//!   gives 1333 for a 1600-pixel mode. A fraction that falls short like
+//!   that gives way to the integer scale.
+//!
+//! Either way the surface is drawn larger than needed, not stretched, until
+//! the compositor's next event settles it and the surface is redrawn: the
+//! wallpaper is on screen when `set` answers, but not device-exact until
+//! then. A compositor whose fraction always overshoots the mode (scoot at
+//! 1.33, `docs/backlog/core/fractional-scale-in-120ths.md`) keeps it: the
+//! buffer is scaled down a little either way, and the fraction's is the
+//! smaller one.
 //!
 //! ## Why the buffer is not snapped to the output's mode
 //!
@@ -53,7 +73,7 @@
 //! A 1601- or 1599-pixel buffer lands one to one on those; a 1600-pixel one
 //! would be stretched or squeezed by a pixel across the whole width, which
 //! is exactly the resampling blur this is here to avoid. So the protocol's
-//! rounding stands, and the screenshots in `tests/image.rs` hold it to
+//! rounding stands, and the screenshots in `tests/scale.rs` hold it to
 //! that on both compositors.
 
 #[cfg(test)]
@@ -108,6 +128,33 @@ impl Scale {
             Self::Integer(factor) => f64::from(factor),
             Self::Fractional(v120) => f64::from(v120) / f64::from(DENOMINATOR),
         }
+    }
+
+    /// Whether a buffer at this scale for a surface of `logical` pixels
+    /// (an axis of 0: not known, not checked) falls short of `device`, the
+    /// output's mode rotated as the output is, by more than the rounding
+    /// can explain: by at least the scale plus half a pixel on an axis.
+    /// A surface covering the whole output at the scale the compositor
+    /// renders at never does (a compositor that rounds the logical size
+    /// down, as wlroots does, falls short by less than that); a stale
+    /// fraction does. Never true for an integer scale: that is the
+    /// fallback, and is checked against `wl_output.scale` instead.
+    pub fn falls_short(self, logical: Size, device: Size) -> bool {
+        let Self::Fractional(v120) = self else {
+            return false;
+        };
+        let short = |length: u32, device: u32| {
+            if length == 0 {
+                return false;
+            }
+            let Some(drawn) = scaled_length(length, v120) else {
+                return false;
+            };
+            // `device − drawn ≥ v120/120 + 1/2`, in 120ths.
+            let deficit = u64::from(device.saturating_sub(drawn)) * u64::from(DENOMINATOR);
+            deficit >= u64::from(v120) + u64::from(DENOMINATOR / 2)
+        };
+        short(logical.width, device.width) || short(logical.height, device.height)
     }
 
     /// The logical size of an output whose mode, rotated as the output is,
@@ -200,17 +247,25 @@ pub struct Preferred {
 }
 
 impl Preferred {
-    /// The best scale known: the fractional one, else the surface's
-    /// integer one, else the output's (`wl_output.scale`). Where the
-    /// surface's disagrees with the output's by being smaller (a fraction
-    /// whose rounding up is below `wl_output.scale`, or a smaller integer),
-    /// it is taken as stale and the output's is used (see the module docs).
+    /// The best scale known: the fractional one, else the larger of the
+    /// surface's integer one and the output's (`wl_output.scale`). A
+    /// fraction whose rounding up is below `wl_output.scale` is taken as
+    /// stale and the integer used (see the module docs). The check against
+    /// the output's mode is [`Scale::falls_short`], which needs the
+    /// configured size (`Output::scale`).
     pub fn scale(&self, output_scale: u32) -> Scale {
-        let output_scale = output_scale.max(1);
         match self.fractional {
-            Some(v120) if v120.div_ceil(DENOMINATOR) >= output_scale => Scale::Fractional(v120),
-            _ => Scale::Integer(self.buffer_scale.unwrap_or(1).max(output_scale)),
+            Some(v120) if v120.div_ceil(DENOMINATOR) >= output_scale.max(1) => {
+                Scale::Fractional(v120)
+            }
+            _ => self.integer(output_scale),
         }
+    }
+
+    /// The integer scale: the larger of the surface's and the output's.
+    /// What a fraction found stale gives way to.
+    pub fn integer(&self, output_scale: u32) -> Scale {
+        Scale::Integer(self.buffer_scale.unwrap_or(1).max(output_scale.max(1)))
     }
 
     /// `preferred_scale`: a scale of 0 is a broken compositor, and ignored

@@ -107,9 +107,10 @@ other subcommand talks to it over its socket.
   the surface's logical size times the scale the compositor asks for,
   rounded as that protocol says, under a viewport (1601×1001 for scoot's
   1067×667 at 1.5 on a 1600×1000 output, which scoot draws one to one);
-  without them, the surface size times the integer scale
-  (`wl_surface.preferred_buffer_scale`, else `wl_output.scale`), which the
-  compositor scales down. The decoded image is dropped once drawn (an
+  without them, or for a moment while the compositor has not told the
+  surface its new scale, the surface size times the integer scale (the
+  larger of `wl_surface.preferred_buffer_scale` and `wl_output.scale`),
+  which the compositor scales down, never up. The decoded image is dropped once drawn (an
   output plugged in later reads the file again). EXIF orientation is
   applied as the pixels are packed, with no extra buffer. A file that
   cannot be shown (missing, not PNG/JPEG/WebP, over 16384×16384 pixels,
@@ -180,8 +181,10 @@ anything wrong                                                -> {"type":"error"
   memory) is different: the choice is recorded and every other targeted
   output shows it; the reply is an error once they have, and the daemon's
   stderr says which output failed and why.
-- `query`'s `surface.scale` is the scale an output's wallpaper is drawn
-  at (`1.5` from `wp_fractional_scale_v1`, else an integer) and
+- `query`'s `surface.scale` is the scale an image, or a color on the
+  full-size fallback, is drawn at on that output (`1.5` from
+  `wp_fractional_scale_v1`, else an integer; a color on a single-pixel or
+  1×1 buffer is drawn at 1 whatever it says) and
   `surface.pixels` the size of an image's buffer in device pixels, both
   `null` until the surface is configured; the top-level `scale` stays
   `wl_output`'s integer.

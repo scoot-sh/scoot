@@ -148,16 +148,21 @@ impl Info {
         if let Some(logical) = self.xdg_logical {
             return Some(logical);
         }
+        Some(scale.logical(self.device()?))
+    }
+
+    /// The current mode rotated as the output is: the output's size in
+    /// device pixels, the way its surfaces are laid out.
+    pub fn device(&self) -> Option<Size> {
         let mode = self.mode?;
-        let device = if self.transform.swaps_axes() {
+        Some(if self.transform.swaps_axes() {
             Size {
                 width: mode.height,
                 height: mode.width,
             }
         } else {
             mode
-        };
-        Some(scale.logical(device))
+        })
     }
 }
 
@@ -309,9 +314,24 @@ impl Output {
     }
 
     /// The scale to draw the surface at: the best the compositor said
-    /// ([`Preferred::scale`]), else `wl_output.scale`.
+    /// ([`Preferred::scale`]: a fraction, else the larger of the surface's
+    /// and `wl_output`'s integer scales); the integer scale
+    /// instead of a fraction that would draw the configured surface short
+    /// of the output's mode, which only a stale fraction does
+    /// ([`Scale::falls_short`], `crate::density`'s "A stale scale").
     pub fn scale(&self) -> Scale {
-        self.preferred.scale(self.info.scale)
+        let scale = self.preferred.scale(self.info.scale);
+        // The configured size as the compositor sent it (0: not known),
+        // not `surface_size`, which reads this scale for a 0 axis.
+        let Surface::Configured { requested, .. } = &self.surface else {
+            return scale;
+        };
+        match self.info.device() {
+            Some(device) if scale.falls_short(*requested, device) => {
+                self.preferred.integer(self.info.scale)
+            }
+            _ => scale,
+        }
     }
 
     /// The full-size buffer for the surface now (an image's, or a color's
@@ -326,13 +346,24 @@ impl Output {
     /// `wp_fractional_scale_v1.preferred_scale` on the live surface.
     /// Returns whether it changed (then the surface needs redrawing).
     pub fn prefer_fractional(&mut self, v120: u32) -> bool {
-        self.preferred.set_fractional(v120)
+        let changed = self.preferred.set_fractional(v120);
+        self.rescaled(changed)
     }
 
     /// `wl_surface.preferred_buffer_scale` on the live surface. Returns
     /// whether it changed.
     pub fn prefer_buffer_scale(&mut self, factor: i32) -> bool {
-        self.preferred.set_buffer_scale(factor)
+        let changed = self.preferred.set_buffer_scale(factor);
+        self.rescaled(changed)
+    }
+
+    /// A new scale is a new buffer size, so a new chance for a draw that
+    /// failed (as a new `configure` is). Returns `changed`.
+    fn rescaled(&mut self, changed: bool) -> bool {
+        if changed {
+            self.failed = false;
+        }
+        changed
     }
 
     /// The output as a message to stderr names it. The name comes from the
@@ -393,8 +424,10 @@ impl Output {
     /// `wl_output.scale` is a new buffer scale where the compositor sent no
     /// better one).
     pub fn done(&mut self) {
+        let scale = self.info.scale;
         self.staged.apply(&mut self.info);
         self.done = true;
+        let _ = self.rescaled(self.info.scale != scale);
     }
 
     /// The settle callback: the output's identity is as known as it will
@@ -588,8 +621,13 @@ impl Output {
     /// It sizes a surface only for a `configure` of 0 on an axis: a surface
     /// anchored to all four edges gets its real size from the compositor,
     /// and every compositor checked (scoot, sway) sends it.
+    ///
+    /// The compositor's scale as it said it, not [`Output::scale`], which
+    /// checks the fraction against the configured size and so reads this
+    /// for a 0 axis: the fraction is the best guess at the output's logical
+    /// size even where it is distrusted for drawing.
     pub fn derived_logical(&self) -> Option<Size> {
-        self.info.logical(self.scale())
+        self.info.logical(self.preferred.scale(self.info.scale))
     }
 
     /// The size to draw the surface at, in logical pixels: the configured
