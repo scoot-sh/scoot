@@ -177,6 +177,7 @@ use smithay::wayland::pointer_constraints::{
 };
 
 use super::State;
+use super::pointer_focus::PointerFocus;
 
 #[cfg(test)]
 mod tests;
@@ -197,7 +198,7 @@ pub(super) enum AbsoluteTarget {
     /// test (`under`) is what the absolute motion is delivered with.
     Clamped {
         point: Point<f64, Logical>,
-        under: (WlSurface, Point<f64, Logical>),
+        under: (PointerFocus, Point<f64, Logical>),
     },
 }
 
@@ -237,12 +238,15 @@ pub(super) enum AbsoluteTarget {
 pub(super) fn absolute_target(
     state: &State,
     pointer: &PointerHandle<State>,
-    focus: Option<&WlSurface>,
+    focus: Option<&PointerFocus>,
     from: Point<f64, Logical>,
     to: Point<f64, Logical>,
-    to_under: &Option<(WlSurface, Point<f64, Logical>)>,
+    to_under: &Option<(PointerFocus, Point<f64, Logical>)>,
 ) -> AbsoluteTarget {
-    let Some(focus) = focus else {
+    // A constraint is made on a `wl_surface`, and "staying on it" below
+    // means staying on that surface -- compared as surfaces, whatever kind
+    // of focus carries them.
+    let Some(focus) = focus.map(PointerFocus::surface) else {
         return AbsoluteTarget::Free;
     };
     // Phase one: what kind of active constraint, if any, is on the focus
@@ -278,10 +282,10 @@ pub(super) fn absolute_target(
     // hit test's, when the move stays on the focus surface, else a fresh one
     // at the current position (see the doc above for when each runs).
     let origin = match to_under {
-        Some((surface, origin)) if surface == focus => *origin,
+        Some((under, origin)) if under.surface() == focus => *origin,
         _ => match state
             .surface_under(from)
-            .filter(|(surface, _)| surface == focus)
+            .filter(|(under, _)| under.surface() == focus)
         {
             Some((_, origin)) => origin,
             // Focus without a hit: fail open (see above).
@@ -339,7 +343,7 @@ pub(super) fn absolute_target(
     let clamped = from + delta;
     match state
         .surface_under(clamped)
-        .filter(|(found, _)| found == focus)
+        .filter(|(found, _)| found.surface() == focus)
     {
         Some(under) => AbsoluteTarget::Clamped {
             point: clamped,
@@ -391,7 +395,7 @@ impl State {
         let Some(focus) = pointer.current_focus() else {
             return;
         };
-        with_pointer_constraint(&focus, &pointer, |constraint| {
+        with_pointer_constraint(focus.surface(), &pointer, |constraint| {
             if let Some(constraint) = constraint {
                 constraint.deactivate();
             }
@@ -407,7 +411,9 @@ impl PointerConstraintsHandler for State {
     /// pointer-leave, nothing re-arms it afterwards (see the module doc). The `with_pointer_constraint` lookup cannot miss: Smithay
     /// calls this because the constraint was just created.
     fn new_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
-        let focused = pointer.current_focus().as_ref() == Some(surface);
+        let focused = pointer
+            .current_focus()
+            .is_some_and(|focus| focus.surface() == surface);
         if focused {
             with_pointer_constraint(surface, pointer, |constraint| {
                 constraint.unwrap().activate();

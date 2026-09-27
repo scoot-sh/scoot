@@ -67,6 +67,7 @@ use super::nested::Host;
 use super::output_identity::OutputIdentity;
 use super::output_management::OutputManagement;
 use super::outputs::Outputs;
+use super::pointer_focus::PointerFocus;
 use super::popup::ActivePopupGrab;
 use super::reconnect::DisplacedOutput;
 use super::render::Backend;
@@ -1353,23 +1354,25 @@ impl State {
     pub fn surface_under(
         &self,
         pos: Point<f64, Logical>,
-    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+    ) -> Option<(PointerFocus, Point<f64, Logical>)> {
         // Before every other candidate, and returning whatever it finds --
         // including `None`. While the session is locked nothing but a lock
         // surface may be pointed at, so this is a replacement for the search
         // below, never a first entry in it (see `session_lock.rs`).
-        if self.session_lock.is_locked() {
-            return self.lock_surface_under(pos);
-        }
-        let above = self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos);
-        // Override-redirect X windows (menus, tooltips) sit between the top
-        // layers and the windows, as they are drawn (see
-        // `xwayland/unmanaged.rs`).
-        #[cfg(feature = "xwayland")]
-        let above = above.or_else(|| self.x11_unmanaged_under(pos));
-        above
-            .or_else(|| self.window_under(pos))
-            .or_else(|| self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos))
+        let found = if self.session_lock.is_locked() {
+            self.lock_surface_under(pos)
+        } else {
+            let above = self.layer_surface_under(&layer_shell::ABOVE_WINDOWS, pos);
+            // Override-redirect X windows (menus, tooltips) sit between the
+            // top layers and the windows, as they are drawn (see
+            // `xwayland/unmanaged.rs`).
+            #[cfg(feature = "xwayland")]
+            let above = above.or_else(|| self.x11_unmanaged_under(pos));
+            above
+                .or_else(|| self.window_under(pos))
+                .or_else(|| self.layer_surface_under(&layer_shell::BELOW_WINDOWS, pos))
+        };
+        found.map(|(surface, origin)| (PointerFocus::Surface(surface), origin))
     }
 
     /// The window surface at `pos`, ignoring layer surfaces entirely --

@@ -42,7 +42,11 @@ fn the_pointer_finds_a_bar_in_front_of_a_window() {
         .state
         .surface_under(over_bar)
         .expect("something under the pointer at the bar");
-    assert_ne!(found, window_surface, "the window swallowed a bar click");
+    assert_ne!(
+        found.surface(),
+        &window_surface,
+        "the window swallowed a bar click"
+    );
     assert!(
         fixture
             .state
@@ -64,7 +68,7 @@ fn the_pointer_finds_a_bar_in_front_of_a_window() {
         .state
         .surface_under(over_window)
         .expect("something under the pointer at the window");
-    assert_eq!(found, window_surface);
+    assert_eq!(found.surface(), &window_surface);
 }
 
 /// Clicking a bar must not activate the window behind it. The control half

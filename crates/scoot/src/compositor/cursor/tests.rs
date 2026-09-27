@@ -628,7 +628,7 @@ impl Fixture {
         let serial = SERIAL_COUNTER.next_serial();
         pointer.motion(
             &mut fixture.state,
-            Some((focus, (0.0, 0.0).into())),
+            Some((focus.into(), (0.0, 0.0).into())),
             &MotionEvent {
                 location: POINTER.into(),
                 serial,

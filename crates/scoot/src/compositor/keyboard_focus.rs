@@ -64,9 +64,10 @@ pub enum KeyboardFocus {
     /// The surface is captured when the focus is derived, and only a window
     /// that *has* one is ever focused (`State::window_keyboard_focus`; the
     /// association re-derives focus when it lands): that is what keeps the
-    /// conversion to the pointer's `WlSurface` focus below total -- Smithay's
-    /// popup grab requires one -- rather than a branch with nothing to
-    /// return for a window XWayland has not associated yet.
+    /// conversion to a `WlSurface` below total -- Smithay's popup grab hands
+    /// the pointer a focus built from one (`pointer_focus.rs`) -- rather
+    /// than a branch with nothing to return for a window XWayland has not
+    /// associated yet.
     #[cfg(feature = "xwayland")]
     X11 {
         window: X11Surface,
@@ -100,10 +101,12 @@ impl From<PopupKind> for KeyboardFocus {
     }
 }
 
-/// The pointer's focus is a plain `WlSurface` (an X window takes pointer
-/// input through its surface alone -- XWayland follows `wl_pointer.enter`,
-/// unlike the keyboard), and Smithay's popup grab converts a keyboard focus
-/// into one. Total by construction: every variant carries its surface.
+/// The surface a keyboard focus is delivered through. An X window takes
+/// pointer input through its surface alone -- XWayland follows
+/// `wl_pointer.enter`, unlike the keyboard -- and Smithay's popup grab
+/// converts a keyboard focus into a pointer one (`pointer_focus.rs`), which
+/// is built from this. Total by construction: every variant carries its
+/// surface.
 impl From<KeyboardFocus> for WlSurface {
     fn from(focus: KeyboardFocus) -> Self {
         match focus {

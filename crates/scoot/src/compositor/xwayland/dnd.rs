@@ -87,6 +87,7 @@ impl State {
         let Some((pressed, _)) = start.focus else {
             return refuse("the press landed on no surface");
         };
+        let pressed = pressed.surface();
         let Some(client) = pressed.client() else {
             return refuse("the pressed surface is gone");
         };
@@ -96,7 +97,7 @@ impl State {
         if !self.interaction_serials.contains(serial, &client.id()) {
             return refuse("its serial is not a recent button press delivered to an X window");
         }
-        let Some(window) = self.x11_window_with_surface(&pressed) else {
+        let Some(window) = self.x11_window_with_surface(pressed) else {
             return refuse("the pressed surface is no X window scoot knows");
         };
         if !same_x_client(window, owner) {

@@ -7,7 +7,6 @@ use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, Keysym, xk
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, MotionEvent, PointerHandle, RelativeMotionEvent,
 };
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial};
 use smithay::wayland::pointer_constraints::with_pointer_constraint;
 use smithay::wayland::seat::WaylandFocus;
@@ -16,6 +15,7 @@ use super::State;
 use super::keybindings::Bound;
 use super::layer_shell;
 use super::output_scale::logical_size;
+use super::pointer_focus::PointerFocus;
 use super::relative_pointer::{AbsoluteTarget, absolute_target};
 use super::tty::VtSwitchOutcome;
 use modifiers::{HeldKeys, KeyPlan, NamedKey, Untypable};
@@ -258,14 +258,14 @@ impl State {
     fn record_pointer_enter(
         &mut self,
         pointer: &PointerHandle<Self>,
-        focus: &Option<WlSurface>,
-        under: &Option<(WlSurface, Point<f64, Logical>)>,
+        focus: &Option<PointerFocus>,
+        under: &Option<(PointerFocus, Point<f64, Logical>)>,
         serial: Serial,
     ) -> bool {
         let entered = Self::pointer_entered(pointer, focus, under);
         if entered
-            && let Some((surface, _)) = &under
-            && let Some(client) = self.client_of(surface)
+            && let Some((entered, _)) = &under
+            && let Some(client) = self.client_of(entered.surface())
         {
             self.interaction_serials.record_focus(serial, client);
         }
@@ -287,13 +287,13 @@ impl State {
     fn engage_pending_constraint(
         &mut self,
         pointer: &PointerHandle<Self>,
-        under: &Option<(WlSurface, Point<f64, Logical>)>,
+        under: &Option<(PointerFocus, Point<f64, Logical>)>,
         location: Point<f64, Logical>,
     ) {
-        let Some((surface, origin)) = under else {
+        let Some((entered, origin)) = under else {
             return;
         };
-        with_pointer_constraint(surface, pointer, |constraint| {
+        with_pointer_constraint(entered.surface(), pointer, |constraint| {
             let Some(constraint) = constraint else {
                 return;
             };
@@ -318,7 +318,7 @@ impl State {
     fn move_pointer_to(
         &mut self,
         pointer: &PointerHandle<Self>,
-        under: Option<(WlSurface, Point<f64, Logical>)>,
+        under: Option<(PointerFocus, Point<f64, Logical>)>,
         location: Point<f64, Logical>,
         serial: Serial,
         time: InputTime,
@@ -358,8 +358,8 @@ impl State {
     /// already names `under` and the move is unobservable.
     fn pointer_entered(
         pointer: &PointerHandle<Self>,
-        focus: &Option<WlSurface>,
-        under: &Option<(WlSurface, Point<f64, Logical>)>,
+        focus: &Option<PointerFocus>,
+        under: &Option<(PointerFocus, Point<f64, Logical>)>,
     ) -> bool {
         if focus.as_ref() == under.as_ref().map(|(surface, _)| surface) {
             return false;
@@ -490,7 +490,7 @@ impl State {
         // legitimate half of that. See `interaction.rs`.
         if let Some(client) = pointer
             .current_focus()
-            .and_then(|surface| self.client_of(&surface))
+            .and_then(|focus| self.client_of(focus.surface()))
         {
             self.interaction_serials.record(serial, client);
         }

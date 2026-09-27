@@ -349,7 +349,7 @@ fn an_override_redirect_window_is_drawn_but_never_a_column() {
         .fixture
         .state
         .surface_under((45.0, 40.0).into())
-        .map(|(found, _)| found);
+        .map(|(found, _)| found.into_surface());
     assert_eq!(under_pointer, Some(surface), "the pointer does not find it");
     // A click on it focuses nothing new.
     let focus = live.fixture.state.focus;

@@ -581,10 +581,12 @@ impl State {
             return;
         };
         // ...and it must have gone to this client.
-        let pressed_here = start
-            .focus
-            .as_ref()
-            .is_some_and(|(pressed, _)| pressed.id().same_client_as(&surface.wl_surface().id()));
+        let pressed_here = start.focus.as_ref().is_some_and(|(pressed, _)| {
+            pressed
+                .surface()
+                .id()
+                .same_client_as(&surface.wl_surface().id())
+        });
         if !pressed_here {
             tracing::debug!(
                 "refusing an interactive move/resize: the held press went to another client"

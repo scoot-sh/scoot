@@ -119,7 +119,7 @@ fn the_lock_screen_covers_a_floating_window() {
         .get(&fixture.id(dialog))
         .and_then(smithay::desktop::Window::toplevel)
         .map(|toplevel| toplevel.wl_surface().clone());
-    assert!(under.map(|(surface, _)| surface) != dialog_surface);
+    assert!(under.map(|(focus, _)| focus.into_surface()) != dialog_surface);
 }
 
 /// A floating window that draws itself larger than its output (and ignores
