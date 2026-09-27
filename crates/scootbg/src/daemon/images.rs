@@ -14,7 +14,8 @@
 //! - it could not be decoded: its reply is the reason, and every output
 //!   keeps what it showed;
 //! - newer choices cover everything it asked for (it was superseded while
-//!   decoding): its reply is `ok`, and nothing changes;
+//!   decoding): nothing changes, and its reply is `ok` once what replaced
+//!   it is on screen, as for a superseded color;
 //! - otherwise it is recorded as the choice ([`Choices::set`], which keeps
 //!   any newer choice for a single output), the outputs it now applies to
 //!   are stamped with its generation and drawn, and its reply waits for
@@ -35,7 +36,6 @@ use crate::control::ConnId;
 use crate::jobs::{Jobs, Target};
 use crate::outputs::{Entry, Outputs};
 use crate::print::warn;
-use crate::waiters::Outcome;
 use crate::wallpaper::{Image, Wallpaper};
 
 pub struct Images {
@@ -147,13 +147,14 @@ pub fn land(state: &mut State, done: Done, qh: &QueueHandle<State>) {
     let output = trial.output.as_deref();
     let choice = Some(Wallpaper::Image(Arc::clone(&image)));
     if !choices.set(output, choice, generation) {
-        // Superseded while it decoded: what is shown is newer. `rendered`
-        // is dropped.
-        ready.push((trial.conn, Ready::Done(Outcome::Shown)));
+        // Superseded while it decoded: what is shown is newer, and
+        // `rendered` is dropped. Answered, as a superseded color is, once
+        // what replaced it is on screen.
+        waiters.push(trial.conn, generation);
         return;
     }
     // Older image requests this one covers need not be decoded at all.
-    sweep(&mut images.jobs, choices, ready);
+    sweep(&mut images.jobs, choices, waiters);
     let applies = |entry: &Entry<Objects>| {
         output.is_none_or(|name| entry.output.info().name.as_deref() == Some(name))
             && wants(choices, entry, &image)

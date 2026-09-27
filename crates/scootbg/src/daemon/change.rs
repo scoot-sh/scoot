@@ -18,7 +18,7 @@ use std::sync::Arc;
 use wayland_client::{Connection, QueueHandle};
 
 use super::canvas::Drew;
-use super::respond::{ChangeError, Changes, Ready};
+use super::respond::{ChangeError, Changes};
 use super::surfaces::{LayerObjects, Objects, RoundTrip};
 use super::wayland::{Globals, State};
 use crate::choices::{Choice, Choices};
@@ -28,7 +28,7 @@ use crate::outputs::{Entry, Output};
 use crate::paint::{self, Plan};
 use crate::print::warn;
 use crate::protocol::{OutputList, Show};
-use crate::waiters::{self, Outcome};
+use crate::waiters::{self, Waiters};
 use crate::wallpaper::{Image, Wallpaper};
 
 /// Makes `entry`'s surface show what `choices` says for it. Returns whether
@@ -43,6 +43,10 @@ pub fn reconcile(
 ) -> bool {
     let info = entry.output.info();
     let wanted = choices.for_output(info.name.as_deref());
+    // A render waiting for an image no longer wanted here is dropped now,
+    // whether or not anything can be drawn.
+    let serial = wanted.and_then(Wallpaper::image).map(|image| image.serial);
+    entry.objects.canvas.forget_ready_unless(serial);
     let scale = paint::buffer_scale(globals.path, wanted, info.scale);
     let id = entry.output.id();
     match entry.output.plan(wanted, scale) {
@@ -131,12 +135,14 @@ pub fn progress(state: &mut State, conn: &Connection, qh: &QueueHandle<State>) {
     }
 }
 
-/// Answers `ok` to every queued image request that newer choices have made
-/// moot: it would change nothing, so it is not decoded (`crate::jobs`).
-pub fn sweep(jobs: &mut Jobs<ConnId>, choices: &Choices, ready: &mut Vec<(ConnId, Ready)>) {
+/// Takes every queued image request that newer choices have made moot out
+/// of the queue: it would change nothing, so it is never decoded. Its
+/// reply waits at its own generation, as a superseded color's does, so it
+/// comes once what replaced it is on screen (`crate::waiters`).
+pub fn sweep(jobs: &mut Jobs<ConnId>, choices: &Choices, waiters: &mut Waiters<ConnId>) {
     jobs.sweep(
         |output, generation| choices.supersedes(output, generation),
-        |conn| ready.push((conn, Ready::Done(Outcome::Shown))),
+        |conn, generation| waiters.push(conn, generation),
     );
 }
 
@@ -163,7 +169,6 @@ impl Changes for Control<'_> {
             choices,
             waiters,
             images,
-            ready,
             ..
         } = &mut *self.state;
         let targets = |entry: &Entry<Objects>| {
@@ -209,7 +214,7 @@ impl Changes for Control<'_> {
             }
         };
         choices.set(output, choice, generation);
-        sweep(&mut images.jobs, choices, ready);
+        sweep(&mut images.jobs, choices, waiters);
         for entry in outputs.iter_mut().filter(|entry| targets(entry)) {
             entry.output.want(generation);
             reconcile(globals, choices, &mut images.jobs, entry, self.qh);

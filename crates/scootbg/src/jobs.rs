@@ -18,7 +18,8 @@
 //! **The worker runs one job at a time, newest first.** A burst of `set`s
 //! then shows the last one after one decode, not after all of them: when
 //! it succeeds, every older trial it covers is superseded (`Choices`) and
-//! answered without being decoded. If it fails, the next newest runs, so
+//! never decoded; its reply waits, like a superseded color's, until what
+//! replaced it is on screen. If it fails, the next newest runs, so
 //! the newest request that *can* be shown wins. A render carries the
 //! serial of its image, which is that image's request generation.
 //!
@@ -144,11 +145,12 @@ impl<C> Jobs<C> {
 
     /// Removes the trials that `superseded` (their output and serial) says
     /// newer choices have made moot, calling `answer` with each one's
-    /// connection. Not the running one: it is answered when it lands.
+    /// connection and serial. Not the running one: it is answered when it
+    /// lands.
     pub fn sweep(
         &mut self,
         superseded: impl Fn(Option<&str>, u64) -> bool,
-        mut answer: impl FnMut(C),
+        mut answer: impl FnMut(C, u64),
     ) {
         let mut index = 0;
         while index < self.queue.len() {
@@ -160,7 +162,7 @@ impl<C> Jobs<C> {
             if moot {
                 let job = self.queue.remove(index);
                 if let Some(trial) = job.trial {
-                    answer(trial.conn);
+                    answer(trial.conn, job.image.serial);
                 }
             } else {
                 index += 1;

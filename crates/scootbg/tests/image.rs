@@ -500,9 +500,15 @@ fn the_newest_set_wins() {
     };
     let color = |hex: &str| format!("{{\"protocol\":1,\"type\":\"set\",\"color\":\"{hex}\"}}\n");
 
+    // The older request is superseded: its `ok` comes once the newer
+    // choice is on screen, as a superseded color's does.
     let a = send(image(0));
     let b = send(color("#c03020"));
     assert_eq!(reply(a), json!({"type": "ok"}));
+    session.scoot_screenshot(id).assert_all(
+        rgb("#c03020"),
+        "on screen when the superseded image answers",
+    );
     assert_eq!(reply(b), json!({"type": "ok"}));
     session
         .scoot_screenshot(id)
@@ -517,9 +523,17 @@ fn the_newest_set_wins() {
         .scoot_screenshot(id)
         .assert_all(colors[1], "color then image");
 
+    // The first finds the worker idle and runs (and is shown); while it
+    // decodes the rest queue, the newest runs next, and the four it
+    // supersedes are never decoded and answer only once it is on screen.
     let burst: Vec<UnixStream> = (2..8).map(|i| send(image(i))).collect();
-    for stream in burst {
+    for (i, stream) in burst.into_iter().enumerate() {
         assert_eq!(reply(stream), json!({"type": "ok"}));
+        if i == 1 {
+            session
+                .scoot_screenshot(id)
+                .assert_all(colors[7], "on screen when the oldest of the burst answers");
+        }
     }
     session
         .scoot_screenshot(id)
@@ -749,6 +763,128 @@ fn a_new_scale_redraws_at_the_real_pixel_size() {
     assert_eq!(sent(&session, "create_pool(").len(), 2);
     check("scale 1.5");
     assert_idle(daemon.id(), "after the scale changes");
+    assert_quiet_log(&session);
+    kill(&session, &mut daemon);
+}
+
+fn status_kb(pid: u32, key: &str) -> u64 {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .unwrap()
+        .lines()
+        .find_map(|l| l.strip_prefix(key))
+        .and_then(|v| v.trim().trim_end_matches("kB").trim().parse().ok())
+        .unwrap()
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0_u32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// A PNG claiming 16384×16384 with `color` type whose data is one stored
+/// deflate block of 4 KiB of zeros, never finished: a few KB of file.
+fn header_only_png(color: u8) -> Vec<u8> {
+    let chunk = |kind: &[u8], data: &[u8]| {
+        let mut out = (data.len() as u32).to_be_bytes().to_vec();
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&crc32(&body).to_be_bytes());
+        out
+    };
+    let mut ihdr = 16384_u32.to_be_bytes().to_vec();
+    ihdr.extend_from_slice(&16384_u32.to_be_bytes());
+    ihdr.extend_from_slice(&[8, color, 0, 0, 0]);
+    let mut idat = vec![0x78, 0x01, 0x00, 0x00, 0x10, 0xff, 0xef];
+    idat.extend_from_slice(&[0; 4096]);
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend(chunk(b"IHDR", &ihdr));
+    png.extend(chunk(b"IDAT", &idat));
+    png.extend(chunk(b"IEND", &[]));
+    png
+}
+
+/// A lossless WebP of 16×16 with its header rewritten to 16383×16383 (the
+/// largest `image-webp` reads), the rest of the bitstream as it was.
+fn header_only_webp(alpha: bool) -> Vec<u8> {
+    let data: Vec<u8> = (0..16 * 16)
+        .flat_map(|i| [i as u8, 7, 200, if alpha { 128 } else { 255 }])
+        .collect();
+    let mut bytes = Vec::new();
+    let color = if alpha {
+        image_webp::ColorType::Rgba8
+    } else {
+        image_webp::ColorType::Rgb8
+    };
+    let pixels: Vec<u8> = if alpha {
+        data
+    } else {
+        data.chunks_exact(4)
+            .flat_map(|p| [p[0], p[1], p[2]])
+            .collect()
+    };
+    image_webp::WebPEncoder::new(&mut bytes)
+        .encode(&pixels, 16, 16, color)
+        .unwrap();
+    let at = bytes.windows(4).position(|w| w == b"VP8L").unwrap() + 8;
+    assert_eq!(bytes[at], 0x2f);
+    let header = u32::from_le_bytes(bytes[at + 1..at + 5].try_into().unwrap());
+    let header = (header & !((1 << 28) - 1)) | 16382 | (16382 << 14);
+    bytes[at + 1..at + 5].copy_from_slice(&header.to_le_bytes());
+    bytes
+}
+
+/// A file that claims a large size in budget but holds a few KB is
+/// refused without committing the size it claims: each raises the
+/// daemon's peak RSS by less than 16 MB (they used to raise it by 0.8 to
+/// 1.05 GB, the decoded buffer written in full before any data was read,
+/// and the JPEG was even shown, as 805 MB of grey).
+#[test]
+fn a_file_that_claims_a_large_size_costs_what_it_holds() {
+    let Some(session) = Session::start_with("liars", 1, "") else {
+        return;
+    };
+    let mut daemon = session.daemon_logged(&[]);
+    configured(&session, 1);
+    let pid = daemon.id();
+    let dir = session.runtime_dir();
+    let mut jpeg = QUADRANTS_JPEG.to_vec();
+    let sof = jpeg
+        .windows(2)
+        .position(|w| w[0] == 0xff && (w[1] == 0xc0 || w[1] == 0xc2))
+        .unwrap();
+    jpeg[sof + 5..sof + 9].copy_from_slice(&[0x40, 0x00, 0x40, 0x00]);
+    for (name, bytes) in [
+        ("rgb.png", header_only_png(2)),
+        ("rgba.png", header_only_png(6)),
+        ("grey.png", header_only_png(0)),
+        ("baseline.jpg", jpeg),
+        ("opaque.webp", header_only_webp(false)),
+        ("alpha.webp", header_only_webp(true)),
+    ] {
+        let file = dir.join(name);
+        std::fs::write(&file, &bytes).unwrap();
+        let before = status_kb(pid, "VmRSS:");
+        std::fs::write(format!("/proc/{pid}/clear_refs"), "5").unwrap();
+        let stderr = fails(&session, &["set", path_str(&file)]);
+        assert!(stderr.contains("truncated or corrupt"), "{name}: {stderr}");
+        let peak = status_kb(pid, "VmHWM:");
+        assert!(
+            peak < before + 16 * 1024,
+            "{name} ({} bytes): peak {peak} kB from {before} kB",
+            bytes.len()
+        );
+    }
     assert_quiet_log(&session);
     kill(&session, &mut daemon);
 }

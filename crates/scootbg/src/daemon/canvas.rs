@@ -261,6 +261,15 @@ impl Canvas {
         });
     }
 
+    /// Drops a rendered image waiting to go on screen unless it is of image
+    /// `serial`: once something else is wanted, it could never be shown, and
+    /// it is an output-sized buffer.
+    pub fn forget_ready_unless(&mut self, serial: Option<u64>) {
+        if self.ready.as_ref().map(|r| r.serial) != serial {
+            self.ready = None;
+        }
+    }
+
     /// Draws `target` on `layer`'s surface and commits, or reports why not.
     pub fn show(
         &mut self,
@@ -280,6 +289,11 @@ impl Canvas {
         let mut retired = None;
         // Whether this draw attaches a buffer.
         let mut attached = true;
+        // A rendered image waits only for a draw of that image: any other
+        // draw makes it moot (dropped at once, not at the next `clear`).
+        if !matches!(target.content, Wallpaper::Image(_)) {
+            self.ready = None;
+        }
         let on_screen = self.current.and_then(|i| self.slots.get(i)?.as_ref());
         match &target.content {
             Wallpaper::Color(color) if path == Path::SinglePixel => {
@@ -334,7 +348,9 @@ impl Canvas {
                 });
                 if unchanged {
                     attached = false;
+                    self.ready = None;
                 } else if let Some(index) = kept {
+                    self.ready = None;
                     if let Some(slot) = self.slots.get_mut(index).and_then(Option::take) {
                         surface.attach(Some(&slot.buffer), 0, 0);
                         self.put(index, slot.attached());
@@ -382,9 +398,17 @@ impl Canvas {
                 // with a newly attached buffer and would keep showing the
                 // old scale; attaching the buffer on screen again costs
                 // nothing and is right everywhere.
-                let current = self.current.and_then(|i| self.slots.get(i)?.as_ref());
-                if let Some(slot) = current {
+                //
+                // Attached again, the buffer is the compositor's again until
+                // its next release, even if it had been released (wlroots
+                // releases an shm buffer once uploaded): marked held, so no
+                // later draw writes into it meanwhile.
+                let current = self
+                    .current
+                    .and_then(|i| Some((i, self.slots.get_mut(i)?.take()?)));
+                if let Some((index, slot)) = current {
                     surface.attach(Some(&slot.buffer), 0, 0);
+                    self.put(index, slot.attached());
                 } else if let Some((buffer, _)) = &self.pixel {
                     surface.attach(Some(buffer), 0, 0);
                 }

@@ -63,22 +63,53 @@ impl std::fmt::Display for JobError {
     }
 }
 
+/// A thread starter: std's in the daemon, a failing one in tests.
+pub type Spawn = fn(Box<dyn FnOnce() + Send>) -> io::Result<()>;
+
+/// Starts `job` on a named thread, which ends with it.
+fn spawn_thread(job: Box<dyn FnOnce() + Send>) -> io::Result<()> {
+    std::thread::Builder::new()
+        .name("scootbg-decode".into())
+        .spawn(job)
+        .map(drop)
+}
+
+/// A result, and the ticket of the job it belongs to.
+type Message = (u64, Done);
+
 pub struct Worker {
     /// Readable once a result is waiting.
     wake: Arc<OwnedFd>,
-    results: Sender<Done>,
-    inbox: Receiver<Done>,
+    results: Sender<Message>,
+    inbox: Receiver<Message>,
+    spawn: Spawn,
+    /// The last job's ticket; each start takes a new one, never reused.
+    ticket: u64,
+    /// The ticket of the job whose result is awaited, while one is.
+    awaited: Option<u64>,
 }
 
 impl Worker {
     pub fn new() -> io::Result<Self> {
+        Self::with_spawn(spawn_thread)
+    }
+
+    pub fn with_spawn(spawn: Spawn) -> io::Result<Self> {
         let wake = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)?;
         let (results, inbox) = channel();
         Ok(Self {
             wake: Arc::new(wake),
             results,
             inbox,
+            spawn,
+            ticket: 0,
+            awaited: None,
         })
+    }
+
+    #[cfg(test)]
+    pub fn set_spawn(&mut self, spawn: Spawn) {
+        self.spawn = spawn;
     }
 
     /// The fd to poll for readability.
@@ -87,27 +118,45 @@ impl Worker {
     }
 
     /// Starts a thread decoding `image` and drawing it for `targets`.
-    pub fn start(&self, image: Arc<Image>, targets: Vec<Target>) -> Result<(), JobError> {
-        let guard = Guard {
-            results: self.results.clone(),
-            wake: Arc::clone(&self.wake),
-            sent: false,
-        };
-        std::thread::Builder::new()
-            .name("scootbg-decode".into())
-            .spawn(move || {
-                let mut guard = guard;
-                let done = work(&image, &targets);
-                // The source and every buffer not handed over are gone
-                // by here; what is sent is what the outputs keep.
-                guard.send(done);
-            })
-            .map(drop)
-            .map_err(JobError::Spawn)
+    ///
+    /// A thread that cannot be started sends nothing: its error is this
+    /// return value, the one place it is reported. (The guard that
+    /// reports a thread that died is made inside the thread, so a spawn
+    /// that never ran cannot leave a result behind.)
+    pub fn start(&mut self, image: Arc<Image>, targets: Vec<Target>) -> Result<(), JobError> {
+        // 2^64 jobs cannot happen; wrapping keeps it panic-free.
+        self.ticket = self.ticket.wrapping_add(1);
+        let ticket = self.ticket;
+        let results = self.results.clone();
+        let wake = Arc::clone(&self.wake);
+        let job = Box::new(move || {
+            let mut guard = Guard {
+                ticket,
+                results,
+                wake,
+                sent: false,
+            };
+            let done = work(&image, &targets);
+            // The source and every buffer not handed over are gone by
+            // here; what is sent is what the outputs keep.
+            guard.send(done);
+        });
+        match (self.spawn)(job) {
+            Ok(()) => {
+                self.awaited = Some(ticket);
+                Ok(())
+            }
+            Err(error) => {
+                self.awaited = None;
+                Err(JobError::Spawn(error))
+            }
+        }
     }
 
-    /// The finished job's result, if one is waiting. Resets the eventfd.
-    pub fn take(&self) -> Option<Done> {
+    /// The awaited job's result, if it has come. Resets the eventfd.
+    /// Anything else in the channel (which should never be there) is
+    /// discarded rather than taken for the awaited job's result.
+    pub fn take(&mut self) -> Option<Done> {
         let mut counter = [0; 8];
         match rustix::io::read(&*self.wake, &mut counter) {
             Ok(_) | Err(Errno::AGAIN) | Err(Errno::INTR) => {}
@@ -117,14 +166,27 @@ impl Worker {
         }
         // Empty (nothing finished) or disconnected (cannot be: this holds
         // a sender) alike: nothing to land.
-        self.inbox.try_recv().ok()
+        while let Ok((ticket, done)) = self.inbox.try_recv() {
+            if Some(ticket) == self.awaited {
+                self.awaited = None;
+                return Some(done);
+            }
+        }
+        None
+    }
+
+    #[cfg(test)]
+    pub fn inject(&self, ticket: u64, done: Done) {
+        let _ = self.results.send((ticket, done));
+        let _ = rustix::io::write(&*self.wake, &1_u64.to_ne_bytes());
     }
 }
 
 /// Sends the job's result exactly once: when asked, or when the thread
 /// unwinds without having sent it.
 struct Guard {
-    results: Sender<Done>,
+    ticket: u64,
+    results: Sender<Message>,
     wake: Arc<OwnedFd>,
     sent: bool,
 }
@@ -134,7 +196,7 @@ impl Guard {
         self.sent = true;
         // The receiver lives as long as the daemon's loop; if it is gone,
         // so is anyone to tell.
-        let _ = self.results.send(done);
+        let _ = self.results.send((self.ticket, done));
         // Adds 1 to the eventfd's counter: the loop wakes. A failure
         // (the counter at its maximum, which a pending read resets long
         // before) leaves the loop to find the result on its next wakeup.

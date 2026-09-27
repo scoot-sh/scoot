@@ -313,6 +313,14 @@ fn decompression_bombs_are_refused_from_the_header() {
         .unwrap();
     jpeg[sof + 5..sof + 9].copy_from_slice(&[0xff, 0xff, 0xff, 0xff]);
     assert!(matches!(decoded(&jpeg), Err(DecodeError::TooLarge { .. })));
+    // In the budget (16384×16384) but with the fixture's 312 bytes of
+    // data: refused from the header too, for holding less than such a
+    // JPEG can. (It used to decode as 805 MB of grey, and show.)
+    jpeg[sof + 5..sof + 9].copy_from_slice(&[0x40, 0x00, 0x40, 0x00]);
+    match decoded(&jpeg) {
+        Err(DecodeError::Corrupt(why)) => assert!(why.contains("16384x16384"), "{why}"),
+        other => panic!("{other:?}"),
+    }
     // Just past the budget, and at it, by the arithmetic alone.
     assert!(super::budget(16385, 16384).is_err());
     assert!(super::budget(u64::MAX, u64::MAX).is_err());
@@ -403,5 +411,26 @@ fn jpeg_with_data_after_its_end_decodes() {
         appended.extend_from_slice(samples::GRAY_JPEG);
         appended.extend(std::iter::repeat_n(0xff, 5000));
         assert_quadrants(&decoded(&appended).unwrap());
+    }
+}
+
+#[test]
+fn the_jpeg_size_bound_is_one_bit_per_block() {
+    use super::jpeg_min_len;
+    assert_eq!(jpeg_min_len(8, 8), 1);
+    assert_eq!(jpeg_min_len(1, 1), 1);
+    assert_eq!(jpeg_min_len(64, 8), 1);
+    assert_eq!(jpeg_min_len(72, 8), 2);
+    assert_eq!(jpeg_min_len(16384, 16384), 524_288);
+    assert_eq!(jpeg_min_len(6000, 4000), 46_875);
+    assert_eq!(jpeg_min_len(u32::MAX, u32::MAX), 1 << 55, "no overflow");
+    // Every fixture is well above it.
+    for bytes in [
+        samples::QUADRANTS_JPEG,
+        samples::PROGRESSIVE_JPEG,
+        samples::GRAY_JPEG,
+    ] {
+        let image = decoded(bytes).unwrap();
+        assert!(bytes.len() as u64 >= jpeg_min_len(image.width, image.height));
     }
 }

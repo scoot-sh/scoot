@@ -79,7 +79,8 @@ of an animated one), told apart by content, not by name. It is made
 absolute here, so a relative path means from this directory. A file whose
 name starts with '#' is given as './#name.png'. The file is read when the
 daemon gets the request (and again for an output plugged in later), not
-kept in memory. A JPEG's or WebP's EXIF orientation is applied.
+kept in memory. EXIF orientation is applied (a JPEG's, a WebP's, or a
+PNG's eXIf chunk).
 
     --mode MODE      how the image fits the output:
                        fill     cover it, cropping what overflows, centred
@@ -108,9 +109,10 @@ corrupt) is an error, and every output keeps what it showed. An output
 unplugged meanwhile is left out of that wait; an output whose surface is
 not configured yet is waited for; an output scootbg gave up on (`gave-up`
 in `scootbg query`, said on stderr) is left out, shows nothing, and does
-not change the exit status. When a newer `set` or `clear` has replaced the
-choice before this image was decoded, this one returns at once, with
-status 0, and the newer one is what shows. Prints nothing on success.
+not change the exit status. When a newer `set` or `clear` replaces the
+choice before this image is shown, this one changes nothing (it may never
+be decoded) and returns with status 0 once the newer one is shown, as a
+replaced color does. Prints nothing on success.
 
 Exit status: 0 once shown; 1 when no daemon is running, the output is
 unknown, the image cannot be shown, or drawing failed (the daemon's stderr

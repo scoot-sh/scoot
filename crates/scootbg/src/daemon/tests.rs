@@ -504,3 +504,48 @@ fn a_query_reply_reuses_the_output_buffer() {
         assert_eq!(out.as_ptr(), ptr, "the buffer was reallocated");
     }
 }
+
+/// A queued image request that a newer choice covers is taken out of the
+/// queue (never decoded) and its reply waits at its own generation, as a
+/// superseded color's does: it resolves once the outputs the newer choice
+/// stamped show it, not at once.
+#[test]
+fn a_superseded_image_request_waits_like_a_color() {
+    use std::sync::Arc;
+
+    use super::change::sweep;
+    use crate::choices::Choices;
+    use crate::image::render::Look;
+    use crate::jobs::{Jobs, Trial};
+    use crate::waiters::{Outcome, Progress, Waiters, outcome};
+    use crate::wallpaper::{Image, Wallpaper};
+
+    let conn = ConnId::for_test(5);
+    let mut jobs: Jobs<ConnId> = Jobs::default();
+    let image = Arc::new(Image {
+        path: "/a.png".into(),
+        look: Look {
+            mode: Mode::Fill,
+            fill: Color { r: 0, g: 0, b: 0 },
+            filter: Filter::Lanczos3,
+        },
+        serial: 1,
+    });
+    jobs.trial(image, Trial { conn, output: None }, vec![])
+        .unwrap();
+    // A color for every output, generation 2, recorded; its output (stamp
+    // 2) is still drawing.
+    let mut choices = Choices::default();
+    assert!(choices.set(None, Some(Wallpaper::Color(Color { r: 1, g: 2, b: 3 })), 2));
+    let mut waiters: Waiters<ConnId> = Waiters::with_capacity(4);
+    sweep(&mut jobs, &choices, &mut waiters);
+    assert_eq!(jobs.queued(), 0, "never decoded");
+    assert_eq!(waiters.counts(), (1, 0), "waiting, not answered");
+    let drawing = [(2, Progress::Waiting)];
+    assert_eq!(waiters.resolve(|g| outcome(g, drawing.into_iter())), None);
+    let shown = [(2, Progress::Done)];
+    let sync = waiters.resolve(|g| outcome(g, shown.into_iter())).unwrap();
+    let mut ready = Vec::new();
+    waiters.synced(sync, |conn, outcome| ready.push((conn, outcome)));
+    assert_eq!(ready, [(conn, Outcome::Shown)]);
+}

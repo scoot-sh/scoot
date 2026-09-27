@@ -7,9 +7,24 @@
 //!
 //! **Size first.** Every decoder's header is read, and the image refused
 //! past [`MAX_PIXELS`], before anything the size of the image is
-//! allocated: a few hundred bytes of PNG can claim to be 100000×100000.
-//! The pixel buffer itself is reserved fallibly, so an allocation the
-//! system refuses is an error reply, not an abort.
+//! allocated: a few hundred bytes of PNG can claim to be 100000×100000. A
+//! JPEG must also hold at least the data its size needs
+//! ([`jpeg_min_len`]).
+//!
+//! **What is fallible, and what is committed.** Only the pixel buffer
+//! allocated here (the decoded image, and the decoder's RGBA or grey
+//! before it becomes RGB) is fallible: the allocator refusing it is an
+//! error reply. It is also committed only as it is written
+//! (`scootbg_mem::zeroed`), so a file that claims a large size and holds
+//! little costs what it decodes, not what it claims. The decoders' own
+//! working memory is plain infallible `Vec`s, so a refusal there aborts
+//! the daemon: `zune-jpeg`'s row buffers and its progressive
+//! coefficients (the image's size again, as `i16`s), `png`'s row buffers,
+//! `image-webp`'s RGBA frame for an opaque lossless image (4 bytes a
+//! pixel) and its YUV planes for a lossy one. Their large ones are zeroed
+//! allocations, which the allocator commits lazily too: a header-only
+//! 16384×16384 file of each kind raises the daemon's peak by under 0.5 MB
+//! (measured in `docs/scootbg/backlog/resolved/images-decode-and-fit-done.md`).
 //!
 //! **Opening cannot hang.** The file is opened `O_NONBLOCK` and refused
 //! unless it is a regular file, so a FIFO or a device named by mistake
@@ -162,14 +177,12 @@ fn budget(width: u64, height: u64) -> Result<(u32, u32), DecodeError> {
     }
 }
 
-/// A zeroed buffer of `len` bytes, or an error if it cannot be had.
+/// A zeroed buffer of `len` bytes, or an error if it cannot be had. The
+/// pages are committed only as the decoder writes them
+/// (`scootbg_mem::zeroed`), so a file that claims a large size and holds
+/// little costs what it holds, not what it claims.
 fn buffer(len: usize) -> Result<Vec<u8>, DecodeError> {
-    let mut pixels = Vec::new();
-    pixels
-        .try_reserve_exact(len)
-        .map_err(|_| DecodeError::OutOfMemory(len))?;
-    pixels.resize(len, 0);
-    Ok(pixels)
+    scootbg_mem::zeroed_bytes(len).ok_or(DecodeError::OutOfMemory(len))
 }
 
 fn jpeg<R: BufRead + Seek>(mut reader: R) -> Result<Decoded, DecodeError> {
@@ -182,6 +195,10 @@ fn jpeg<R: BufRead + Seek>(mut reader: R) -> Result<Decoded, DecodeError> {
         .set_max_height(usize::from(u16::MAX))
         .set_strict_mode(true)
         .jpeg_set_out_colorspace(ColorSpace::RGB);
+    let file_len = reader
+        .seek(SeekFrom::End(0))
+        .and_then(|len| reader.seek(SeekFrom::Start(0)).map(|_| len))
+        .map_err(DecodeError::Unreadable)?;
     // By reference, so the reader is still there afterwards to check where
     // the decoder stopped.
     let mut decoder = zune_jpeg::JpegDecoder::new_with_options(&mut reader, options);
@@ -190,6 +207,13 @@ fn jpeg<R: BufRead + Seek>(mut reader: R) -> Result<Decoded, DecodeError> {
         .dimensions()
         .ok_or_else(|| DecodeError::Corrupt("no image size".into()))?;
     let (width, height) = budget(width as u64, height as u64)?;
+    if file_len < jpeg_min_len(width, height) {
+        return Err(DecodeError::Corrupt(format!(
+            "it claims {width}x{height} pixels, which takes at least {} bytes of JPEG, \
+             but the file is {file_len} bytes",
+            jpeg_min_len(width, height)
+        )));
+    }
     if decoder.output_colorspace() != Some(ColorSpace::RGB) {
         return Err(DecodeError::NotAnImage);
     }
@@ -217,6 +241,23 @@ fn jpeg<R: BufRead + Seek>(mut reader: R) -> Result<Decoded, DecodeError> {
         height,
         orientation,
     })
+}
+
+/// The fewest bytes a (Huffman-coded) JPEG of `width` × `height` can be.
+///
+/// Every 8×8 block of the full-resolution component codes its DC
+/// coefficient with a Huffman code, and a Huffman code is at least one
+/// bit, so the file holds at least ⌈w/8⌉·⌈h/8⌉ bits. Arithmetic-coded
+/// JPEGs (which could go below this) are not read by `zune-jpeg` at all.
+///
+/// It matters because `zune-jpeg` feeds zeros once the entropy-coded
+/// data reaches a marker: a few hundred bytes with a frame header claiming
+/// 16384×16384 and an end-of-image marker would otherwise "decode" into
+/// 805 MB of flat grey, every byte written, and be shown. Real files are
+/// far above the bound (a 6000×4000 photo: 7.9 MB against 47 KB).
+pub fn jpeg_min_len(width: u32, height: u32) -> u64 {
+    let blocks = u64::from(width.div_ceil(8)) * u64::from(height.div_ceil(8));
+    blocks.div_ceil(8)
 }
 
 /// Whether a JPEG decode stopped at its end-of-image marker (`FF D9`).

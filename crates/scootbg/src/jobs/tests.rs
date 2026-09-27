@@ -72,8 +72,11 @@ fn superseded_trials_are_answered_without_running() {
     // Running: 4. Suppose it lands and wins everything below 4.
     jobs.next(|_, _| true).unwrap();
     let mut answered = Vec::new();
-    jobs.sweep(|_, serial| serial < 4, |conn| answered.push(conn));
-    assert_eq!(answered, [10, 20]);
+    jobs.sweep(
+        |_, serial| serial < 4,
+        |conn, serial| answered.push((conn, serial)),
+    );
+    assert_eq!(answered, [(10, 1), (20, 2)]);
     assert_eq!(jobs.queued(), 0);
     // The running job is not swept: it is answered when it lands.
     assert!(jobs.is_running());
@@ -101,7 +104,10 @@ fn a_sweep_passes_each_trials_output() {
     )
     .unwrap();
     let mut answered = Vec::new();
-    jobs.sweep(|output, _| output == Some("B"), |conn| answered.push(conn));
+    jobs.sweep(
+        |output, _| output == Some("B"),
+        |conn, _| answered.push(conn),
+    );
     assert_eq!(answered, [2]);
     assert_eq!(jobs.queued(), 1);
 }
