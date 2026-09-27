@@ -19,6 +19,9 @@
 //! \"Smithay XDND proxy\"", the other two with "mapped the proxy back in
 //! between"), and pass at `b1ac3ca7`.
 //!
+//! `an_x_drag_over_a_window_that_remaps_keeps_the_proxy_away` pins the
+//! review fix on top, `7e18b661`: it fails at `b1ac3ca7`.
+//!
 //! `first_motion_race.rs` measures the timing half: that the window
 //! manager's unmap and the motion reach the source unordered.
 
@@ -177,6 +180,77 @@ fn crossing_never_maps_the_proxy(test: &str, same_client: bool) {
     assert!(
         !remapped,
         "crossing from one X window onto another mapped the proxy back in between"
+    );
+    live.fixture
+        .state
+        .pointer_button(PointerButton::Left, false);
+    live.drain();
+    assert!(
+        !grabbed(&live.fixture.state),
+        "the drag outlived the release"
+    );
+}
+
+/// The X window under an X drag is unmapped and mapped again between two
+/// motions (a dialog reopening, say): the drag's next motion finds the same
+/// window under a new `wl_surface`, a new focus, so the grab enters it
+/// before leaving the old one. The proxy must stay out of the way: in that
+/// order, leaving the old surface mapped the proxy back over the window the
+/// drag had just entered (review of `b1ac3ca7`), and the source found the
+/// proxy there until the drag left the window.
+///
+/// A managed window: an unmanaged one re-derives the pointer focus as it
+/// unmaps (`x11_unmanaged` removal), so the grab has left it by the time it
+/// maps again and the order never arises.
+#[test]
+fn an_x_drag_over_a_window_that_remaps_keeps_the_proxy_away() {
+    let Some(mut live) = live("an_x_drag_over_a_window_that_remaps_keeps_the_proxy_away") else {
+        return;
+    };
+    let source = live.x.map(&Props::new(RED));
+    let source = live.managed(source);
+    let from = live.placement(source);
+    let other = XClient::connect(live.display);
+    let (target_xid, to) = x_target(&mut live, &other, BLUE);
+    visible("drag source", &from);
+    visible("drop target", &to);
+
+    start_x_drag(&mut live, from.rect);
+    let over = centre(to.rect);
+    let under = move_and_look(&mut live, over);
+    assert_eq!(
+        under,
+        target_xid,
+        "over the target: {:?}",
+        live.x.name_of(under)
+    );
+
+    other.unmap(target_xid);
+    other
+        .conn
+        .map_window(target_xid)
+        .expect("a map request")
+        .check()
+        .expect("the X server accepted the map");
+    let again = live.managed(target_xid);
+    let to = live.placement(again);
+    #[allow(clippy::cast_possible_truncation)]
+    let still_under = to
+        .rect
+        .contains(scoot_core::Point::new(over.0 as i32 + 1, over.1 as i32));
+    assert!(
+        still_under,
+        "the window mapped back elsewhere ({:?}), so this does not test a remap in place",
+        to.rect
+    );
+
+    let under = move_and_look(&mut live, (over.0 + 1.0, over.1));
+    assert_eq!(
+        under,
+        target_xid,
+        "after the window mapped again the source found {:?} under the pointer, not the \
+         window",
+        live.x.name_of(under)
     );
     live.fixture
         .state

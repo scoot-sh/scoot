@@ -42,17 +42,18 @@ window layout OmniWM-style through the Accessibility API.
   verify claims about its behavior against the pinned source, not general
   Smithay knowledge; APIs and semantics shift across revs. **It is
   currently a scoot-sh fork** (`github.com/scoot-sh/smithay`, rev
-  `b1ac3ca7`, branch `scoot/xwayland-selection-dnd`): upstream's `0ff0098`
-  plus twenty commits — a `Drop` that stops every syncobj timeline import
+  `7e18b661`, branch `scoot/xwayland-selection-dnd`): upstream's `0ff0098`
+  plus twenty-one commits — a `Drop` that stops every syncobj timeline import
   leaking a kernel handle (see
   `docs/backlog/resolved/syncobj-handle-leak-done.md`), thirteen XWayland
   selection/drag commits for Phase 4, one pixman `Repeat::Pad`
-  upscale-edge fix, then five XDND commits (a proxy-remap flush, ending an
+  upscale-edge fix, then six XDND commits (a proxy-remap flush, ending an
   offer to an X target that refuses, dies or hangs without letting any X
   client end one, and entering another client's X window without waiting
-  for types) that let drops land on X windows (see `docs/forks.md`). Make
+  for types, and remapping the proxy only once the drag has left every X
+  window) that let drops land on X windows (see `docs/forks.md`). Make
   verify-against-source claims against the fork rev (its checkout is
-  `~/.cargo/git/checkouts/smithay-*/b1ac3ca`), and repin to upstream once
+  `~/.cargo/git/checkouts/smithay-*/7e18b66`), and repin to upstream once
   a Smithay rev carries the fixes (`docs/backlog/core/smithay-fork-repin.md`).
 - **Dependency fixes go in scoot-sh forks, never upstream from here.**
   (User, 2026-09-24: "Do not open upstream PR's. I would rather fork for now

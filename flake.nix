@@ -95,7 +95,7 @@
             # build loudly, printing the one it got -- it cannot drift out of
             # sync quietly. Nothing else in Cargo.lock comes from git.
             outputHashes = {
-              "smithay-0.7.0" = "sha256-etbGk/YMs23IHI1OJ+TpT6wJJp0SkVZlkSs2tZsH31M=";
+              "smithay-0.7.0" = "sha256-WsS20wBVwbC/ctDKp56T/E+7ZzFhCU/SD9Y7H/luja8=";
               "wayland-backend-0.3.17" = "sha256-cANItBOi9o+Jb1+u86thcBgdb6u0u2becgJoMI/v4T8=";
             };
           };

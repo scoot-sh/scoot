@@ -19,7 +19,10 @@ scoot has not cut a numbered release yet; entries are dated.
   now). A release sent together with that motion, with no pause (an agent
   pipelining `pointer move` and the release), still drops nothing in GTK
   apps: GTK decides it on the window the pointer was over before the
-  move. Let the move settle first.
+  move. Let the move settle first. Nor does a quick drag between two
+  windows of the *same* X app instance (most GTK apps run every window in
+  one process): that still needs a motion or two over the other window
+  before the release.
 
 ### 2026-09-27 — drag-and-drop with X apps works in every direction
 

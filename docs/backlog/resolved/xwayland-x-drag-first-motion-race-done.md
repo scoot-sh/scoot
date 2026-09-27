@@ -96,6 +96,40 @@ let the move settle before the release.
   window. Filed separately as
   [`xwayland-press-after-crossing-move-lost.md`](../protocols/xwayland-press-after-crossing-move-lost.md).
 
+**Independent review of `b1ac3ca7` (branch at `94008f4`): no blocking
+findings.** It re-ran the full set (workspace nextest 2443 passed;
+`--features xwayland` 1884 passed; the drag suites 84/84 six times;
+clippy, fmt and both smoke builds clean; the flake hash matched) and a
+live spot-check with GTK `mousepad` over X at HEAD: one-motion X to X
+**6/6**, X to Wayland **6/6**. Its findings:
+
+- **A window mapped again under an X drag got the proxy over it** --
+  fixed. The same window id under a new `wl_surface` is a new focus, so
+  the grab entered it before leaving the old surface, whose `leave` saw its
+  own window as the one hovered and mapped the proxy back. Fork `7e18b661`
+  counts X windows entered and not yet left instead. Pinned by
+  `first_motion.rs`'s `an_x_drag_over_a_window_that_remaps_keeps_the_proxy_away`
+  (a managed window; an override-redirect one re-derives the pointer focus
+  as it unmaps and never takes that order): fails 3 of 3 at `b1ac3ca7`,
+  passes 3 of 3 at `7e18b661`. With it, the seven drag suites 50/50 three
+  runs, `--features xwayland` nextest 1885 passed, 25 skipped.
+- **A quick drag between two windows of the same X app instance still
+  drops nothing** -- not fixed, not a regression: `enter_needs_metadata`
+  waits over every window of the drag owner's client, and single-instance
+  apps (mousepad by default, GApplication apps generally) run all their
+  windows on one X connection. Live at HEAD: direct **0/5**, five steps
+  first **4/4**. Filed as
+  [`xwayland-same-client-quick-drag.md`](../protocols/xwayland-same-client-quick-drag.md)
+  and documented in `docs/protocols.md` and the CHANGELOG.
+- `pointer_focus.rs`'s doc comment said `enter_needs_metadata` is asked
+  only on a focus change; it is also asked on each motion while the drag
+  has entered nothing yet -- corrected (the cost there is a lookup, no
+  allocation, off the idle-pointer path; no benchmark warranted).
+- `X11Surface::leave` logged a remap before checking whether it would
+  remap -- fixed in `7e18b661`.
+- The fork's own `anvil` does not forward `enter_needs_metadata`; it
+  matters only if this is ever offered upstream.
+
 ## History: the entry as filed and as worked
 
 Kept verbatim for its measurements. Its present tense ("not pushed",

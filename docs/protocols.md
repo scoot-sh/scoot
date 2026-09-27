@@ -707,7 +707,12 @@ One limit is GTK's own, on any X server: a release that arrives together
 with the motion that brings the pointer onto the target (an agent sending
 `pointer move` and the button release back to back, with no pause) is
 decided on the window the pointer was over *before* that motion, so it
-drops nothing. Let the move settle before the release.
+drops nothing. Let the move settle before the release. And the fix covers
+another X app's windows, not another window of the *same* app instance
+(most GTK apps run every window in one process): there the drag still
+waits for the app to say what it is dragging, so a release on the first
+motion onto that window drops nothing; a motion or two over it first works
+([`backlog/protocols/xwayland-same-client-quick-drag.md`](backlog/protocols/xwayland-same-client-quick-drag.md)).
 
 **Input methods: XIM is not provided.** X clients compose text through XIM
 (an X-side protocol an input-method daemon speaks as an X client); XWayland

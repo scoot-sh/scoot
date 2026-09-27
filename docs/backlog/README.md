@@ -828,7 +828,11 @@ scale/mode) into one hardware session.
   20/20 with scoot-sh/smithay `b1ac3ca7`). Its side finding is filed:
   [a press batched with a move onto another X window reached no X
   window](./protocols/xwayland-press-after-crossing-move-lost.md) (low;
-  harness only so far, not investigated).
+  harness only so far, not investigated). Its review fix is fork
+  `7e18b661` (an X window mapped again under an X drag got the proxy over
+  it); its known gap is filed: [a quick drag between two windows of the
+  same X app instance drops nothing](./protocols/xwayland-same-client-quick-drag.md)
+  (low; not a regression).
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes

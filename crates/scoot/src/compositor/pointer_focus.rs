@@ -489,8 +489,11 @@ impl DndFocus<State> for PointerFocus {
         }
     }
 
-    /// Asked only when the drag's focus changes, never per motion. An X
-    /// window answers for itself: a drag from X enters another client's
+    /// Asked when the drag's focus changes, and on each motion while the
+    /// drag has entered nothing yet (waiting for the source's types over
+    /// the source's own window or a Wayland surface) -- a lookup and no
+    /// allocation, off the idle-pointer path. An X window answers for
+    /// itself: a drag from X enters another client's
     /// window without waiting for types, which keeps the proxy out of the
     /// X source's way on the first motion onto it (see the fork's
     /// `X11Surface` impl). Everything else waits, as before.
