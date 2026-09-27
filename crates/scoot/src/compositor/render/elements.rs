@@ -10,7 +10,7 @@
 //! renderer in the type at all -- so what this module adds is the one enum
 //! that holds all three, and the gathering order between them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use scoot_core::{Arrangement, OutputId, Placement, Rect, WindowId};
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
@@ -23,8 +23,11 @@ use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
 use smithay::desktop::space::SpaceElement;
 use smithay::desktop::{LayerMap, PopupManager, Space, Window, layer_map_for_output};
 use smithay::output::Output;
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Scale};
+use smithay::wayland::alpha_modifier::AlphaModifierSurfaceCachedState;
+use smithay::wayland::compositor::with_states;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 
@@ -434,10 +437,15 @@ pub(super) fn map_ring<R: Renderer>(element: RingElement<R>) -> Elements<R> {
 /// Each ring surrounds what its window drew (`drawn.rs`), looked up in
 /// `windows` -- the same rect `window_elements` clips to, so the ring's inner
 /// edge and the content's edge are one rect on every path that draws them.
+///
+/// `decoration_bound` is the session's record of which windows negotiated
+/// server-side decorations (see `State::decoration_bound`): it feeds the CSD
+/// backdrop rule below.
 pub(super) fn ring_elements<R>(
     decorations: &mut Decorations,
     appearance: &Appearance,
     windows: &HashMap<WindowId, Window>,
+    decoration_bound: &HashSet<WindowId>,
     arrangement: Option<&Arrangement>,
     frame: &FrameContext,
     renderer: &mut R,
@@ -447,6 +455,62 @@ where
     R::TextureId: Texture + Send + Clone + 'static,
 {
     let drawn = |placement: &Placement| drawn_rect(placement.rect, windows.get(&placement.id));
+    // The CSD backdrop rule (see `decorations.rs`'s CSD section): a window
+    // gets a ring-colored backdrop under its drawn rect when it decorates
+    // itself, so its own rounded corners read as the ring. That is exactly
+    // the windows that did not negotiate server-side decorations: GTK never
+    // creates a `zxdg_toplevel_decoration_v1` object, while an SSD client
+    // (foot, mpv) does. Under `prefer_no_csd` a bound window is always told
+    // `ServerSide`, so bound-ness alone decides and this costs one set
+    // lookup per placement with no state lock; otherwise the mode last sent
+    // is read back. X windows have no toplevel and keep today's ring+clip,
+    // as do windows with nothing committed yet (a backdrop under no content
+    // would be a solid fill, not corner crescents) and windows with a
+    // window-wide `wp_alpha_modifier_v1` translucency (an opaque backdrop
+    // would tint every pixel, not just the corners -- pinned by
+    // `alpha_modifier`'s own suite, whose client never binds decorations).
+    let backdrop = |placement: &Placement| -> Option<Rect> {
+        if appearance.focus_ring_width <= 0 {
+            return None;
+        }
+        let window = windows.get(&placement.id)?;
+        let toplevel = window.toplevel()?;
+        if decoration_bound.contains(&placement.id) {
+            if appearance.prefer_no_csd {
+                return None;
+            }
+            let server_side = toplevel.with_pending_state(|state| state.decoration_mode)
+                == Some(Mode::ServerSide);
+            if server_side {
+                return None;
+            }
+        }
+        // A window-wide translucency (`wp_alpha_modifier_v1`) blends the
+        // whole window with whatever is beneath it: an opaque backdrop
+        // would tint every pixel, not just the corners, so translucent
+        // roots keep the old background corners. Read the root's own
+        // multiplier the way the occlusion pass does
+        // (`layer_shell/occlusion.rs`); a translucent subsurface under an
+        // opaque root still tints its own pixels against the backdrop
+        // rather than the background, which no signal distinguishes and no
+        // suite pins.
+        let alpha = with_states(toplevel.wl_surface(), |states| {
+            states
+                .cached_state
+                .get::<AlphaModifierSurfaceCachedState>()
+                .current()
+                .multiplier_f32()
+                .unwrap_or(1.0)
+        });
+        if alpha < 1.0 {
+            return None;
+        }
+        let committed = window.geometry().size;
+        if committed.w <= 0 || committed.h <= 0 {
+            return None;
+        }
+        Some(drawn(placement))
+    };
     let mut rings = Rings::none();
     // The floating pass only when something floats: the common frame pays
     // one flag read per placement for it, not a second ring walk.
@@ -462,6 +526,7 @@ where
                     frame.scale,
                     drawn,
                     renderer,
+                    backdrop,
                 )
                 .into_iter()
                 .map(map_ring)
@@ -479,6 +544,7 @@ where
                     drawn,
                     renderer,
                     &mut rings.spans,
+                    backdrop,
                 )
                 .into_iter()
                 .map(map_ring)
@@ -493,6 +559,7 @@ where
                     frame.bounds(),
                     frame.scale,
                     drawn,
+                    backdrop,
                 )
                 .into_iter()
                 .map(Elements::Decoration)
@@ -509,6 +576,7 @@ where
                     frame.scale,
                     drawn,
                     &mut rings.spans,
+                    backdrop,
                 )
                 .into_iter()
                 .map(Elements::Decoration)

@@ -752,6 +752,7 @@ where
         &mut state.decorations,
         &state.appearance,
         &state.windows,
+        &state.decoration_bound,
         arrangement.as_ref(),
         &frame,
         renderer,

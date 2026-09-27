@@ -576,6 +576,15 @@ impl XdgDecorationHandler for State {
             prefer_no_csd = self.appearance.prefer_no_csd,
             "zxdg_toplevel_decoration_v1 created"
         );
+        // The client negotiated decorations: record it while the toplevel
+        // is known (see `State::decoration_bound`). A client that never
+        // creates this object (GTK) draws client-side decorations, which
+        // the ring path treats as self-rounding. `id_of` misses only when
+        // the toplevel has no window -- refused by the toplevel cap -- and
+        // then there is nothing to render either.
+        if let Some(id) = self.id_of(toplevel.wl_surface()) {
+            self.decoration_bound.insert(id);
+        }
         if self.appearance.prefer_no_csd {
             toplevel.with_pending_state(|state| state.decoration_mode = Some(Mode::ServerSide));
         }

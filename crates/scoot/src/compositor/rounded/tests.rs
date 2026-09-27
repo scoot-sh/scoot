@@ -22,7 +22,7 @@ use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
 
-use scoot_core::Rect;
+use scoot_core::{Rect, WindowId};
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
@@ -31,6 +31,9 @@ use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1, wp_fractional_scale_v1,
 };
 use wayland_protocols::wp::viewporter::client::{wp_viewport, wp_viewporter};
+use wayland_protocols::xdg::decoration::zv1::client::{
+    zxdg_decoration_manager_v1, zxdg_toplevel_decoration_v1,
+};
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
@@ -41,6 +44,7 @@ use crate::compositor::rounded::{clip_rect, cut_width, physical_radius, ring_lay
 use crate::compositor::test_support::{Harness, assert_pixel, find_color, pixel, wait_for};
 
 mod committed;
+mod csd;
 
 /// The framebuffer these tests render into.
 const CANVAS: i32 = 400;
@@ -49,6 +53,11 @@ const CANVAS: i32 = 400;
 const WINDOW_BGRA: [u8; 4] = [0x00, 0x00, 0xFF, 0xFF];
 /// Pure green, opaque -- the popup color.
 const POPUP_BGRA: [u8; 4] = [0x00, 0xFF, 0x00, 0xFF];
+/// The self-rounded test client's own corner radius, in logical pixels (see
+/// `csd.rs`): past the configured 10, so the client's curve shapes the
+/// corner and scoot's clip cuts nothing the client has not already made
+/// transparent.
+const CLIENT_RADIUS: i32 = 12;
 /// Purple, opaque -- the wallpaper color. Distinct from the window, the
 /// popup, the ring and the background on purpose.
 const WALLPAPER_BGRA: [u8; 4] = [0x80, 0x00, 0x80, 0xFF];
@@ -59,12 +68,14 @@ type Fixture = Harness<Step, Ack>;
 #[derive(Debug)]
 enum Step {
     /// Map a toplevel drawing a solid `color` buffer sized to whatever the
-    /// compositor configures (like a real toolkit).
+    /// compositor configures (like a real toolkit). Negotiates
+    /// server-side decorations first, the way foot and mpv do.
     Window { color: [u8; 4] },
     /// Map a toplevel that draws `shrink` logical pixels short of what it
     /// was configured to, per axis -- a terminal rounding down to whole
     /// character cells (`foot`'s default `resize-by-cells`), a fixed-size
-    /// dialog, an older client.
+    /// dialog, an older client. Negotiates server-side decorations like
+    /// [`Step::Window`].
     ShortWindow { color: [u8; 4], shrink: (i32, i32) },
     /// Redraw the `window`-th toplevel (by creation order) `shrink` short
     /// of the size it last acked, with no new configure: a client whose
@@ -80,6 +91,22 @@ enum Step {
     /// state. This client binds `xdg_wm_base` at version 1, where those
     /// states do not exist.
     SawTiled,
+    /// Map a toplevel drawing a full-size buffer whose corners are
+    /// transparent past a client-side radius (a libadwaita dialog's shape
+    /// made exact): opaque `color` inside, transparent outside. `decorate`
+    /// creates a `zxdg_toplevel_decoration_v1` object for it first, the way
+    /// an SSD client (foot) does and GTK never does. Plain [`Step::Window`]
+    /// and [`Step::ShortWindow`] always negotiate (foot-shaped); only
+    /// `SelfRounded { decorate: false }` stays unbound (GTK-shaped).
+    SelfRounded { color: [u8; 4], decorate: bool },
+    /// Ask `ClientSide` on the mapped window's decoration object (needs a
+    /// prior `SelfRounded { decorate: true }`): the `prefer_no_csd = false`
+    /// half of the CSD rule.
+    RequestClientSide,
+    /// Map a toplevel and never commit a buffer to it: the ring path must
+    /// draw the hollow ring but no CSD backdrop (a fill under no content
+    /// would be a solid colored rect, not corner crescents).
+    Uncommitted,
 }
 
 #[derive(Debug)]
@@ -103,6 +130,9 @@ struct TestClient {
     layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     fractional_manager: Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1>,
     viewporter: Option<wp_viewporter::WpViewporter>,
+    decoration_manager: Option<zxdg_decoration_manager_v1::ZxdgDecorationManagerV1>,
+    /// The mapped window's decoration object, if `SelfRounded` made one.
+    decoration: Option<zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1>,
     /// `wp_fractional_scale_v1.preferred_scale`, converted from the
     /// protocol's 1/120ths to a plain factor. Fixed for the session, so one
     /// slot is enough no matter how many windows map.
@@ -153,6 +183,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             client.fractional_manager = Some(registry.bind(name, version.min(1), qh, ()));
         } else if interface == wp_viewporter::WpViewporter::interface().name {
             client.viewporter = Some(registry.bind(name, version.min(1), qh, ()));
+        } else if interface == zxdg_decoration_manager_v1::ZxdgDecorationManagerV1::interface().name
+        {
+            client.decoration_manager = Some(registry.bind(name, version.min(1), qh, ()));
         }
     }
 }
@@ -273,6 +306,8 @@ impl Dispatch<wp_fractional_scale_v1::WpFractionalScaleV1, ()> for TestClient {
 }
 
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(TestClient: ignore zxdg_decoration_manager_v1::ZxdgDecorationManagerV1);
+wayland_client::delegate_noop!(TestClient: ignore zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1);
 wayland_client::delegate_noop!(TestClient: ignore wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1);
 wayland_client::delegate_noop!(TestClient: ignore wp_viewporter::WpViewporter);
 wayland_client::delegate_noop!(TestClient: ignore wp_viewport::WpViewport);
@@ -332,6 +367,73 @@ fn draw_short(
     surface.commit();
 }
 
+/// A `w` x `h` `wl_buffer` with client-side rounded corners: opaque `color`
+/// inside `radius`, transparent outside -- a libadwaita dialog's shape made
+/// exact. The cut uses [`cut_width`] with the same pixel-center rule the
+/// compositor's own staircase uses, so the test's corners are the client's
+/// truth, not a copy of the compositor's math to agree with. `radius` is in
+/// buffer pixels; the caller scales the logical client radius.
+fn rounded_buffer(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    w: i32,
+    h: i32,
+    radius: i32,
+    color: [u8; 4],
+) -> wl_buffer::WlBuffer {
+    let stride = w * 4;
+    let len = (stride * h) as usize;
+    let fd = rustix::fs::memfd_create("scoot-csd-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    let mut bytes = Vec::with_capacity(len);
+    for y in 0..h {
+        let row = y.min(h - 1 - y);
+        let cut = if radius > 0 && row < radius {
+            cut_width(radius, row)
+        } else {
+            0
+        };
+        for x in 0..w {
+            if cut <= x && x < w - cut {
+                bytes.extend_from_slice(&color);
+            } else {
+                bytes.extend_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+    }
+    file.write_all(&bytes).expect("a filled pool file");
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, w, h, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    buffer
+}
+
+/// Commits one full-`size` frame with client-side rounded corners (see
+/// [`rounded_buffer`]), through the same viewport path [`draw_short`] uses.
+/// The client's radius is logical, like the size: both scale into the
+/// buffer.
+fn draw_rounded(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    surface: &wl_surface::WlSurface,
+    viewport: &wp_viewport::WpViewport,
+    preferred: f64,
+    size: (i32, i32),
+    color: [u8; 4],
+) {
+    viewport.set_destination(size.0, size.1);
+    let (bw, bh) = (
+        (f64::from(size.0) * preferred).round() as i32,
+        (f64::from(size.1) * preferred).round() as i32,
+    );
+    let radius = (f64::from(CLIENT_RADIUS) * preferred).round() as i32;
+    let buffer = rounded_buffer(shm, qh, bw, bh, radius, color);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage_buffer(0, 0, bw, bh);
+    surface.commit();
+}
+
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let mut queue = conn.new_event_queue();
@@ -365,11 +467,24 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
 
     while let Ok(step) = steps.recv() {
         match step {
-            Step::Window { color } | Step::ShortWindow { color, .. } => {
+            Step::Window { color }
+            | Step::ShortWindow { color, .. }
+            | Step::SelfRounded { color, .. } => {
                 let shrink = match step {
                     Step::ShortWindow { shrink, .. } => shrink,
                     _ => (0, 0),
                 };
+                // Every mapped toplevel negotiates decorations except the
+                // GTK-shaped one: plain windows are foot-shaped (bound), and
+                // only `SelfRounded { decorate: false }` stays unbound.
+                let decorate = !matches!(
+                    step,
+                    Step::SelfRounded {
+                        decorate: false,
+                        ..
+                    }
+                );
+                let self_rounded = matches!(step, Step::SelfRounded { .. });
                 let index = client.window_serials.len();
                 client.window_serials.push(None);
                 client.window_sizes.push(None);
@@ -385,6 +500,15 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceKind::Window(index));
                 let toplevel = xdg.get_toplevel(&qh, SurfaceKind::Window(index));
                 toplevel.set_title("rounded".into());
+                if decorate {
+                    // An SSD client negotiates decorations before its first
+                    // commit; GTK never reaches this call.
+                    let manager = client
+                        .decoration_manager
+                        .clone()
+                        .ok_or("no zxdg_decoration_manager_v1")?;
+                    client.decoration = Some(manager.get_toplevel_decoration(&toplevel, &qh, ()));
+                }
                 surface.commit();
                 // A real toolkit sizes its buffer to the configure: wait for
                 // one carrying a size, so the drawn window matches the
@@ -397,16 +521,20 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 })?;
                 xdg.ack_configure(serial);
                 let viewport = viewporter.get_viewport(&surface, &qh, ());
-                draw_short(
-                    &shm,
-                    &qh,
-                    &surface,
-                    &viewport,
-                    preferred,
-                    (w, h),
-                    shrink,
-                    color,
-                );
+                if self_rounded {
+                    draw_rounded(&shm, &qh, &surface, &viewport, preferred, (w, h), color);
+                } else {
+                    draw_short(
+                        &shm,
+                        &qh,
+                        &surface,
+                        &viewport,
+                        preferred,
+                        (w, h),
+                        shrink,
+                        color,
+                    );
+                }
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 toplevels.push((surface.clone(), viewport.clone(), (w, h)));
                 parent = Some(xdg.clone());
@@ -436,6 +564,29 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 acks.send(Ack::SawTiled(client.saw_tiled))
                     .map_err(|e| e.to_string())?;
+            }
+            Step::RequestClientSide => {
+                let decoration = client.decoration.clone().ok_or("no decoration object")?;
+                decoration.set_mode(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
+            }
+            Step::Uncommitted => {
+                let index = client.window_serials.len();
+                client.window_serials.push(None);
+                client.window_sizes.push(None);
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceKind::Window(index));
+                let toplevel = xdg.get_toplevel(&qh, SurfaceKind::Window(index));
+                toplevel.set_title("rounded".into());
+                // No buffer, ever: the window exists (the compositor
+                // registered it at `get_toplevel`) but has drawn nothing.
+                // Surface, role and toplevel stay alive on the client so the
+                // window is not a disconnect cleanup.
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                surfaces.push(surface);
+                roles.push(xdg);
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
             }
             Step::Popup { color, w, h } => {
                 let parent = parent.clone().ok_or("no parent window")?;
