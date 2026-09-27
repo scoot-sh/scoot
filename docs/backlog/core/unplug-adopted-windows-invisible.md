@@ -57,6 +57,13 @@ recoverable:
 
 "Findable with `Super+2` if you already know the design" does not meet this.
 
+**Accepted residual (the user's decision, 2026-09-26): a session with no
+bar.** There, the switch makes the removed monitor's focused work visible,
+but nothing on screen says the panel's own previous workspace went out of
+view (it stays one keystroke away, `Super+1`). A daily-drive setup runs a
+bar, and the bar shows the swap. A cue that scoot draws itself (a switch
+animation or a text label) is out of scope here.
+
 ## Design
 
 ### 1. Show the adopted work when focus was on the removed screen
@@ -72,8 +79,12 @@ snapshot and "focus stays where it was". The adopter would then be left
 looking at the now-empty slot, so restore should also return the adopter
 to its pre-adopt active workspace when the adopted one is still active.
 That makes it a change to `scoot-core` (`remove_output` +
-`restore_output`), so it needs the fuzz targets and tests that guard that
-crate. Two things to settle first:
+`restore_output`). There are no cargo-fuzz targets. Extend the randomized
+invariant test (`world/tests/invariants.rs`), which today sends
+`OutputRemoved` but never evicts or restores, to cover evict → switch →
+restore. Update `evicting_reports_the_adopter_and_adopts_without_moving_focus`,
+whose premise (focus on the removed output, from `two_workspace_world`)
+changes meaning under this design. Three things to settle first:
 
 - **Where focus lands on restore.** Today restore never steals focus
   (`restoring_moves_the_still_open_windows_back_in_order` pins
@@ -85,6 +96,21 @@ crate. Two things to settle first:
   `normalize` can shift it if the user's workspaces change in between, so
   store it relative to the adopted block (or verify it) rather than as a
   raw index.
+- **The switch itself can shift the adopted block and silently break
+  restore (reproduced in review of PR #271).** `normalize` keeps an empty
+  workspace while it is active. Suppose the adopter is sitting on an
+  empty, non-trailing workspace (the user closed its last window and has
+  not left it). That workspace survives `adopt`. Switching away from it
+  lets `normalize` drop it, and everything after it shifts down one,
+  including the adopted block. `restore_output` carries a window back only
+  when it sits at exactly `adopted_at + i`, so it restores nothing. The
+  review's scratch run: adopter `{count: 4, active: 1}` (ws1 empty and
+  active), `adopted_at = 3`, after the switch `{count: 4, active: 2}`, then
+  `restored 0`. The "previous view" to return to no longer exists either.
+  This happens with any switch that leaves an empty active workspace, not
+  just one implementation. Either record `adopted_at` and the previous view
+  *after* the switch's normalize, or define what "previous view" means when
+  it was an empty workspace that the switch dropped.
 
 The screen-saver case is the regression to measure against. A monitor that
 drops its connection in standby (Test 12 saw this) and comes back, while
@@ -102,22 +128,43 @@ make the rest legible, in order of cost:
   `compositor/ext_workspace.rs`, kept equal to `coordinates` on purpose),
   and the protocol carries no occupancy, so nothing says which workspaces
   came from DP-1. Candidate: name adopted workspaces by origin (e.g.
-  "2 DP-1") until restore or until the user empties them. That means
-  deliberately breaking the name == coordinates rule `describe` documents,
-  and re-sending `name` + `done` on adopt and restore. Evaluate against
-  what the common bars display and send before choosing, and keep the
-  default names unchanged for workspaces that were never adopted.
+  "2 DP-1") until restore or until the user empties them. The protocol
+  allows it: `name` is sent "whenever the name of the workspace changes",
+  and names need not be unique. The cost:
+  - It deliberately breaks the name == coordinates rule `describe`
+    documents.
+  - Handles are positional, so any renumbering in front of an adopted
+    workspace means re-sending `name` on every handle that shifted, not only
+    on adopt and restore. `diff::changes` over `Workspaces {count, active}`
+    cannot express a rename, so this needs a new snapshot shape and a rename
+    `Change`, followed by the manager's `done`.
+  - The origin tag must stay connector-agnostic in `scoot-core`. The core
+    holds an opaque origin id, and the shell maps it to "DP-1", as it does
+    for the `EvictedOutput` key.
+  - Define when a tag clears in two cases. After a partial restore,
+    windows moved by hand stay on the adopter, so their workspace must lose
+    the "DP-1" tag. After a chained unplug (three outputs: DP-2 adopts
+    DP-1's workspaces, then DP-2 goes too), decide whether the tag says
+    DP-1 or DP-2.
+
+  Evaluate against what the common bars display before choosing, and keep
+  the default names unchanged for workspaces that were never adopted.
 - **Agents and scripts, through IPC.** `windows` has no workspace field
   today, so an agent cannot tell where a window went either (Test 12 had
   to derive "workspace 2" from the code). Add `workspace` (and whether it
-  was adopted, from which connector) to `windows`. It is cheap, and it
-  serves computer use directly.
+  was adopted, from which connector) to `windows`. Make it **0-based**, to
+  match `focus-workspace-index`: the `ext_workspace.rs` module doc warns
+  about exactly this 1-based/0-based mismatch. It is cheap, and it serves
+  computer use directly.
 - **An IPC event for "output removed / restored"**: the adopter, the
   adopted workspace range, and the adopter's previous and new active
   workspace. With it, a user who wants a desktop notification wires
   `notify-send` to it, and an agent learns without polling. scoot-ipc has
   no event subscription yet, so this is its own, larger item. File it
-  separately rather than blocking this ticket on it.
+  separately rather than blocking this ticket on it. It fires on every
+  monitor standby too. That is fine for an event a consumer can filter or
+  debounce, and it is the difference from a notification pushed at the
+  user unconditionally.
 
 ### Not chosen
 
@@ -140,12 +187,16 @@ make the rest legible, in order of cost:
 - A replug restores both the returned monitor and the adopter's previous
   view.
 - A bar speaking `ext-workspace-v1` can show which of the panel's
-  workspaces came from the removed monitor, and that the panel's view
+  workspaces came from the removed monitor (by origin naming, or by the
+  alternative chosen after evaluating bars), and that the panel's view
   switched.
-- IPC `windows` reports each window's workspace.
-- Core tests pin the switch and restore cases, protocol tests pin the
-  workspace names across adopt and restore, and a live re-run
+- IPC `windows` reports each window's 0-based workspace.
+- Core tests pin the switch and restore cases, including the
+  empty-active-adopter state from the third settle-first item, and the
+  invariant test covers evict → switch → restore. Protocol tests pin the
+  workspace names across adopt, renumbering and restore. A live re-run
   (virtual-pull rig, or hands) shows it, including a standby
   drop-and-return that leaves the panel untouched.
 - README's multi-monitor text says what happens on unplug and how to get
-  back, and `docs/ipc.md` documents the new field.
+  back, `docs/configuration.md`'s unplug/restore paragraph is updated, and
+  `docs/ipc.md` documents the new field.
