@@ -70,3 +70,46 @@ without implementing the marking and the capture contract.
 
 Priority stays low: the case it serves (a video in a non-fullscreen
 window) is the rarer one.
+
+## Implementation exists, live proof blocked 2026-09-28
+
+PR `feat/overlay-window-candidates` implements all of the above (capture
+contract first, priority decision, marking, tranche steering). Dev-VM
+verification is green (workspace + `gpu-scanout` nextest, clippy, fmt,
+smoke, benchmarks). The live overlay leg is **blocked**: DP-1 is dark and
+nothing remote wakes it.
+
+- `drm_info` (2026-09-28, kernel 7.1.13): DP-1 `disconnected`, 0 modes,
+  empty EDID; eDP-1 `connected` (2560x1600). Force file reads
+  `unspecified` (pristine).
+- Tried, each verified by read-back: `echo on | sudo tee
+  /sys/kernel/debug/dri/2/DP-1/force` (latched `on`), three synthetic
+  `udevadm trigger --subsystem-match=drm --action=change` reprobes with
+  3-12 s waits (status stayed `disconnected`, modes 0), `dpms` (already
+  `On`; writing it is refused), `dmesg` (no link/HPD activity after any
+  trigger), and a `sudo reboot` (remote-safe; cleared the force latch back
+  to `unspecified`, but the boot-time probe did not wake the monitor
+  either). The monitor has been undriven for ~2 days (standby since
+  2026-09-26); it needs a power-button press. eDP-1 was not touched.
+- Ready for a hands run: `~/fx/overlay/` on the box holds the `gpu-scanout`
+  build of this branch (`overlay-scoot-gpu` ->
+  `/nix/store/4fzgsw8a6mzamsralm4qbabspl4bsn3b-scoot-gpu-0.1.0`,
+  `overlay-scootctl` -> `...-scootctl-0.1.0`; rebuilt after checkout, same
+  hash twice, so it carries this branch) and `t11.sh`, which fails loudly
+  unless DP-1 is `connected` with modes and otherwise runs the whole leg
+  (tiled foot to DP-1, pointer parked, debugfs snapshots, screenshots with
+  and without the cursor over the window).
+
+## Premise update 2026-09-28: two overlays per CRTC, not one
+
+The inventory above was recorded on kernel 7.1.5. On the 7.1.13
+fairydust kernel now running, each CRTC has **one primary, two overlays
+(zpos 1 and 2, fixed) and no cursor plane** (`drm_info`: CRTC 0/eDP-1
+planes 35/40/45, CRTC 1/DP-1 planes 53/58/63; overlay formats unchanged:
+`AR30 AR24 AB24 NV12 NV16 NV24 P010 P210` at `LINEAR`, no `X` fourccs).
+The implementation marks at most one window regardless, and Smithay offers
+the topmost compatible overlay first (front-to-back order), so a lone
+candidate takes zpos 2 (plane 63 on DP-1, 45 on eDP-1) -- expect that,
+not plane 40/58, in `dri/2/state`. The window-vs-cursor priority is
+unchanged by the second plane (the cursor is tried first by z-order), with
+room for both once the cursor can ride.

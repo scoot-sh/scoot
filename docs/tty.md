@@ -355,7 +355,7 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   cursor an overlay can carry is a client's cursor surface backed by a
   dma-buf. A cursor *plane* is different: Smithay copies the image into a
   buffer of its own there, which is how virtio's works. Candidate-marking is
-  [`backlog/resolved/gpu-overlay-window-candidates-done.md`](backlog/resolved/gpu-overlay-window-candidates-done.md).
+  [`backlog/core/gpu-overlay-window-candidates.md`](backlog/core/gpu-overlay-window-candidates.md).
   A capture (IPC screenshots, `ext-image-copy-capture-v1`) reads the
   primary plane's swapchain slot, which lacks a plane-assigned cursor --
   so every capture reconciles the cursor with what it asked for rather
@@ -587,14 +587,14 @@ The cursor plane is attempted
 where the CRTC exposes one (the dev VM's virtio-gpu does: one `Cursor` plane
 per `drm_info`) and silently not elsewhere; overlay planes ride along whole
 from the same inventory (virtio exposes none: `overlay_planes=0`) and fall
- back per frame the same way. A plane-assigned cursor is not in the
- swapchain slot captures read, so captures draw it back in when they ask for
- the pointer (see [Captures and the pointer](#captures-and-the-pointer)) --
- and neither is a window riding an overlay (at most one tiled window per
- output per frame is marked a scanout candidate). A capture of a frame
- that went direct forces one composite frame first, and a capture stream
- keeps the output composited, so captures stay correct throughout --
- watched working on the dev VM. Apple's `apple,dcp` (M2) exposes one
+back per frame the same way. A plane-assigned cursor is not in the
+swapchain slot captures read, so captures draw it back in when they ask for
+the pointer (see [Captures and the pointer](#captures-and-the-pointer)) --
+and neither is a window riding an overlay (at most one tiled window per
+output per frame is marked a scanout candidate). A capture of a frame
+that went direct forces one composite frame first, and a capture stream
+keeps the output composited, so captures stay correct throughout --
+watched working on the dev VM. Apple's `apple,dcp` (M2) exposes one
  primary, **one overlay on kernel 7.1.5 (two on 7.1.13, `Asahi.md` Test 14) and no
  cursor plane** (`cursor_planes=0 overlay_planes=1`). The overlay has a fixed zpos above the primary, takes
  `LINEAR` only, and takes alpha RGB and YUV formats but no `XR24`. The
