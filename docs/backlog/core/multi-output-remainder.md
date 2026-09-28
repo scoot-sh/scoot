@@ -167,7 +167,7 @@ unlike a quicker unplug that morning.
 ## G — New-window placement policy — LANDED 2026-09-21 (PR #208)
 
 Landed as specified: new windows file under the pointer's output
-(`shell.rs:32-42`), falling back to `primary_id()` — the milestone focus
+(`shell.rs:62-71`, `pointer_output().and_then(...).or_else(primary_id())`), — the milestone focus
 doctrine (`../roadmap/19-multi-output.md:21-25`); default output binds exist
 alongside (item H). What follows is the original spec, kept as the design
 record.
