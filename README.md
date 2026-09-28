@@ -50,108 +50,19 @@ inspired this project.
 
 ## Not yet
 
-- **Multi-output is missing per-output configuration.** `--tty` drives
-  every connected monitor at once, each its own output with its own
-  scrolling strip, framebuffer, lock surface, workspace group and gamma
-  control. New windows open on the output under the pointer, and
-  `Super+comma`/`Super+period` (with `Shift` to carry the focused window)
-  move between the first two outputs. Plugging a monitor in while the session runs adds
-  an output for it. Pulling one out removes its output and moves its
-  windows, as their own workspaces, onto a remaining screen after its own;
-  the last screen is never taken away. When the window you were working on
-  was on the monitor you pulled, that screen switches to its workspace with
-  your window still focused -- nothing vanishes, and `Super+1` (or
-  `Super+Ctrl+k`) takes you back to the screen's own previous workspace. A
-  bar shows the adopted workspaces with their monitor's name ("2 DP-1"), and
-  `scootctl windows` reports each window's workspace. What is
-  not there yet:
-  - **Per-output scale, mode and position.** One `[output] scale` applies
-    to every screen and `--mode WxH` to every connector that offers that
-    size. Screens sit side by side, left to right: in connector order at
-    startup, and a monitor plugged in later goes on the right.
-    `wlr-output-management` `apply`/`test` stay refused.
-  - **A replugged monitor comes back with its windows.** Its workspaces move
-    back from the screen they were adopted by -- the windows that are still
-    open and that were not moved by hand in between, in the same order with
-    the same active workspace -- and the adopting screen goes back to the
-    workspace it showed before, with the focused window following its own
-    window home; a standby cycle that drops the connection while you work
-    on the other screen leaves that screen exactly as it was. The default
-    `Super+period` binds follow it (they name the second screen, not output
-    id 2). A *different* monitor
-    on the same connector does not inherit them: identity is the connector
-    name plus the EDID make/model/serial where one can be read.
-- **XWayland is opt-in, and partial.** X11 applications run with
-  `--xwayland` (or `[xwayland] enabled`) in an `xwayland` build (`cargo
-  build --release --features xwayland`, with `Xwayland` on `PATH`; no flake
-  output ships it yet): their windows tile, dialogs float, fullscreen
-  works, and they take focus by themselves only when nothing is focused,
-  when they belong to the X app in use, or when scoot started them.
-  Running one extends full trust to it — an X11 client can read and cover
-  other windows by design ([protocols.md](docs/protocols.md#xwayland-opt-in)).
-  Copy and paste works between X and Wayland apps both ways (clipboard
-  and middle-click primary; `xclip`/`xsel` and `wl-copy`/`wl-paste` see
-  each other), but an X app reads or sets it only while an X window has
-  the keyboard. Drag-and-drop works in every direction: X to Wayland,
-  Wayland to X, X to another X app, and within one X app (moving selected
-  text, say); touch drags from X apps are refused
-  ([details](docs/protocols.md#clipboard-drag-and-drop-and-input-methods)).
-  Not there yet: X input methods (XIM).
-- **GPU scanout is opt-in.** With a real GPU it is worth trying: on an
-  Apple M2 under Asahi Linux it uses **4–5x less CPU** than the default under
-  load, puts the same pixels on screen, and costs 7–16 MB more memory
-  ([Asahi.md](Asahi.md), Test 4). Turn it on with a `gpu-scanout` build
-  (`nix build .#scoot-gpu`) and `scoot --tty --renderer gles`. There, a
-  fullscreen window can be shown straight from the app's own buffer, with
-  no compositing, when the display accepts that buffer. On an Apple M2 a
-  fullscreen mpv goes direct and scoot uses about 60% less CPU for it.
-  On a display with no cursor plane (Apple Silicon's has none) the drawn
-  pointer forces compositing, so nothing goes direct while the pointer is
-  visible. Even with it hidden, the app's buffer must be one the display
-  takes, in layout and in size ([Asahi.md](Asahi.md), Test 5). scoot also tells a fullscreen app which buffer layouts the
-  display can show that way, and Mesa's GL apps switch to one (Test 6).
-  While something records or streams the screen, scoot
-  composites as usual. Not there yet:
-  every other window is still composited. Under
-  `--headless` the GPU speedup does not apply: `gles` there still copies
-  every frame back to the CPU, and on a machine without a real GPU that
-  measured 18–31x *slower* than pixman. Under `--nested`, a `gpu-scanout`
-  build hands each frame to the host compositor as a GPU buffer, with no
-  copy back to the CPU, when the host composites on the same GPU (the
-  startup log says whether it does, and why not). On an Apple M2 that
-  halves the nested scoot's CPU, nested in niri as well as in scoot
-  ([Asahi.md](Asahi.md), Test 8).
-  pixman stays the default and the right choice without a GPU; details in
-  [docs/tty.md](docs/tty.md).
-- **GPU apps get their GPU's own buffer formats under `--renderer gles`** —
-  the layouts the GPU prefers and the YUV formats video decoders produce,
-  not only plain linear RGB. On an Apple M2 that is 54 formats, each
-  offered tiled, compressed and linear, and GL and Vulkan apps pick the
-  compressed layout ([Asahi.md](Asahi.md)'s Test 6).
-- **GPU apps that use explicit sync (NVIDIA's driver relies on it, Mesa's
-  Vulkan drivers use it where offered) are supported on the GPU tier**,
-  where the GPU device supports it: scoot waits for an app's GPU to finish
-  a frame before showing it, and tells the app when it may reuse a buffer.
-  It is offered only there, never under pixman or `--headless`/`--nested`.
-  Seen working with Mesa's Vulkan driver (`vkcube`) on an Apple M2; not
-  yet with NVIDIA ([Asahi.md](Asahi.md), Test 7).
-- **Config reload is live, except three restart fields.** `scootctl reload` (or `kill -HUP` on the
-  compositor) re-applies the layout (gap, column widths, default column
-  width), the output scale (except under `--nested`, where the host owns
-  it), the
-  appearance (including the cursor size, color and theme), the keybindings,
-  `[floating]` and the window rules (for windows that open afterwards),
-  and new `[autostart]` spawn entries (only entries the session has not seen
-  run; a reloaded non-`spawn` entry is refused by name, a spawn whose program
-  fails to start is refused by name and retried on the next reload, and a locked reload
-  defers new entries to the first unlocked one) live; the DRM device
-  (`[tty] gpu`), the renderer (`[renderer] backend`) and the XWayland knob
-  (`[xwayland] enabled`) take effect on
-  restart, and a reload refuses them
-  with a message naming that rather than silently ignoring them.
-- **No macOS adapter.** `scoot-core` is kept platform-independent so one can
-  exist, but nothing drives the Accessibility API yet. On macOS you get
-  `scootctl`, the remote-control client, only.
+- **Per-output configuration.** One scale and mode apply to every
+  monitor, screens line up left to right in connector order, and
+  `wlr-output-management` is read-only. Multi-monitor itself works:
+  [docs/tty.md](docs/tty.md#more-than-one-monitor).
+- **X input methods (XIM).** XWayland is opt-in (`--xwayland`) and
+  otherwise works, clipboard and drag-and-drop included.
+- **Direct scanout beyond fullscreen.** On the opt-in GPU tier, only a
+  fullscreen window can skip compositing. Under `--headless`, `gles` is
+  slower than pixman.
+- **Explicit sync on NVIDIA.** It's supported but only verified with Mesa.
+- **Live reload of three fields.** `[tty] gpu`, `[renderer] backend` and
+  `[xwayland] enabled` need a restart.
+- **A macOS adapter.** On macOS you get `scootctl` only.
 
 ## Install
 
