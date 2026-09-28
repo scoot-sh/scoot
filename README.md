@@ -26,10 +26,6 @@ scoot was built for two things:
   this way. Because the socket can type anything, it's private to your
   user. Reference: [docs/ipc.md](docs/ipc.md).
 
-
-It is real enough to use: **confirmed working on Apple Silicon under Asahi
-Linux, and daily-driven on `--tty`** (2026-09-18).
-
 If scoot doesn't fit what you need, you should absolutely check out
 [niri](https://github.com/niri-wm/niri). It's awesome, and it's what
 inspired this project.
