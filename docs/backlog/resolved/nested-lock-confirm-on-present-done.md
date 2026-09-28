@@ -8,7 +8,7 @@ blocked: null
 
 # `--nested`: confirm `locked` once the blanked frame reaches the host — RESOLVED
 
-RESOLVED 2026-09-28 (PR number filled in on create). `State::render`'s
+RESOLVED 2026-09-28 (PR #304). `State::render`'s
 nested tail no longer confirms on the draw: a drawn frame records through
 `State::note_nested_frame` (the `--tty` wait's own `await_vblank` with no
 flip to track, arming the same once-per-wait `LOCK_VBLANK_TIMEOUT`
