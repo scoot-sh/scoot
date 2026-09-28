@@ -78,6 +78,7 @@ mod window_commit;
 mod window_rules;
 mod wl_buffers;
 mod xwayland;
+mod xwayland_budget;
 
 /// The harness the real-`wayland-client` test suites share. Not a module of
 /// the compositor proper -- it exists only under `cfg(test)`.
@@ -304,9 +305,14 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
                     "XWayland server starting; X11 clients can connect once it is ready"
                 );
             }
-            Err(xwayland::StartError::Spawn(error)) => {
+            Err(error @ xwayland::StartError::Spawn(_)) => {
+                // The whole `StartError`, not just its io cause: a bare "No
+                // such file or directory" does not say *which* file, and the
+                // usual cause is a login whose `PATH` lacks the binary --
+                // hence the `PATH` searched, too (once, on this path only).
                 tracing::error!(
                     %error,
+                    path = %std::env::var_os("PATH").unwrap_or_default().to_string_lossy(),
                     "XWayland was requested but the server could not be started; \
                      continuing Wayland-only -- X11 applications will not run"
                 );

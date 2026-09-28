@@ -1,8 +1,8 @@
 ---
-title: "XWayland support (clears the Not-yet X11 bullet)"
-status: "open"
-area: "protocols"
-priority: "low"
+title: "XWayland support (clears the Not-yet X11 bullet) — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
@@ -423,8 +423,10 @@ unverified.
 chain is copyable before the app maps -- `_NET_STARTUP_ID` is readable from
 the moment a toolkit sets it on its leader, so a watching X client can map
 a window with a copy before the app's
-own window maps, within the token's 30 s, and take focus once; binding the redemption to the spawned process (ppid walk) is
-filed as [`xwayland-startup-id-race.md`](./xwayland-startup-id-race.md). (2)
+own window maps, within the token's 30 s, and take focus once; binding the redemption to the spawned process (ppid walk) was
+filed as [`xwayland-startup-id-race.md`](./xwayland-startup-id-race-done.md),
+RESOLVED 2026-09-27 for spawn tokens (a Wayland launcher's token keeps the
+race, documented). (2)
 The brief asked the lock to *dismiss* X menus; it hides them and refuses
 them input, but cannot close them: the WM cannot unmap an override-redirect
 window and GTK 3 keeps its context menu through the focus release (measured:
@@ -532,7 +534,7 @@ X app -- do not land: `DnDGrab` delivers to `SeatHandler::PointerFocus`,
 scoot's is a plain `WlSurface`, and XWayland binds no `wl_data_device`.
 Pre-existing (the gate only refuses), harmless (source intact after move
 drags, X input fine afterwards, measured), filed as
-[`xwayland-pointer-focus-x11-done.md`](../resolved/xwayland-pointer-focus-x11-done.md)
+[`xwayland-pointer-focus-x11-done.md`](./xwayland-pointer-focus-x11-done.md)
 -- since resolved: the pointer focus has an X arm and drops land in every
 direction (fork `6e6fe896` flushes the proxy remap X to X needs).
 
@@ -619,3 +621,85 @@ lock refusal is defence in depth -- under lock a press reaches only a lock
 surface, which the "Wayland surface" refusal already covers); live
 `xclip`/`xsel` ↔ `wl-copy`/`wl-paste` matrix (`live-clip-*.txt`) and the
 `mousepad` drag matrix (`live-dnd/`).
+
+## RESOLVED — Phases 5–7 (capture, packaging, docs), 2026-09-27
+
+Landed on branch `claude/scoot-backlog-issues-3rfkfv` (one PR with other
+XWayland items). An audit of what Phases 1–4 had already delivered came
+first; most of the docs half was done along the way.
+
+| Deliverable | Before this phase | Now |
+|---|---|---|
+| Capture pins: X window in IPC screenshot and screencopy, per output, blanked under lock | Missing. Only the render path was pinned (`tests/lock.rs` renders a frame and checks it); neither capture path had an X test | `xwayland/tests/capture.rs`, three live tests, below |
+| Xwayland in the dev VM's session `PATH` | Missing (live runs used `nix shell`) | `vm/configuration.nix` system profile: `xwayland`, `xeyes`, `xclock` (top-level names; the `xorg.` aliases are deprecated) |
+| Xwayland on `PATH` for `--tty` logins, NixOS module / home-manager | Missing: no package carried it | The package carries it (wrapper), so the NixOS module's `Exec=` and any login need nothing else; the modules are unchanged |
+| Flake output with the `xwayland` feature | Missing (README: "no flake output ships it yet") | `packages.scoot-xwayland`, `packages.scoot-gpu-xwayland` (Linux), `apps.scoot-xwayland` |
+| Absent-binary loud fallback | Done in code (Phase 1), but proven only where the machine lacks `Xwayland` -- never in CI or on the dev VM -- and the log line said only "No such file or directory" | Proven everywhere (below); the line names `` `Xwayland` must be on PATH `` and the `PATH` searched |
+| `docs/protocols.md` version rows + trust-model note | Done (Phase 1; clipboard reach added in Phase 4) | Plus a capture bullet |
+| README "Not yet" bullet | Partly: said "no flake output ships it yet", listed only XIM as missing | Names the package and every remaining gap |
+| Config + Nix docs for the knob | Config done; Nix docs had nothing | `docs/nix.md` "XWayland from the flake"; `configuration.md` names the package |
+| Smoke-test section | Done (Phase 1, feature-gated in Phases 2+3) | Plus a missing-binary section that hides `Xwayland` from `PATH` |
+| CI coverage of `--features xwayland` | Done: clippy, nextest and `cargo test` with a real Xwayland, live suites required (Phases 2+3) | Plus the smoke test run against the `xwayland` build |
+
+"What done looks like", checked item by item: nextest green in every
+flavour; `xwayland/tests/` on `Harness` covers map→tiled+listed,
+title/class arrival, close, activate/close via the wlr protocol, focus-steal
+refusals (fail-first), override-redirect non-column, lock blanking and input
+refusal, clipboard round trip, and now screenshot pixels; the live matrix
+(`--headless`/`--nested`/`--tty` with `xterm`, `xeyes`, `xclock`, GTK4
+`zenity`) is Phases 2+3's; the smoke section exists; the absent-binary
+fallback is proven.
+
+**Capture** (`compositor/xwayland/tests/capture.rs`, with an
+`ext-image-copy-capture-v1` client added to the peer in
+`tests/peer/capture.rs` that reads its own shm buffer back): a managed X
+window and an override-redirect menu are in both the IPC screenshot's
+pixels (`State::capture_pixels_for`, what `scoot msg screenshot` encodes)
+and a screen capture, each equal byte for byte to the framebuffer; on two
+outputs, output 2's X window and menu are in output 2's captures and in
+neither of output 1's; under the lock neither capture holds an X pixel.
+No new code was needed -- both paths read the composited framebuffer.
+Mutation checks: drawing override-redirect windows in the locked branch of
+`render/elements.rs` fails the lock test (at the menu assertion); dropping
+the output-origin offset for override-redirect windows fails the
+per-output test ("output 2's screenshot is missing its X menu").
+
+**Packaging.** `withXwayland` in `flake.nix` overrides the `scoot` (or
+`scoot-gpu`) derivation: `cargoBuildFeatures ++ [ "xwayland" ]`, and a
+`makeBinaryWrapper` wrapper that *appends* nixpkgs' `Xwayland` directory to
+`PATH` (an `Xwayland` already on the session's `PATH` wins; spawned children
+see that one extra directory, which holds only `Xwayland`). The existing
+packages' derivations are unchanged apart from `src`: `nix derivation show`
+of `scoot`, `scoot-gpu`, `scootctl`, `scootbg` at `52fb243` and after,
+`env` minus `src`/`out`, diff empty. `nix build .#scoot-xwayland` on
+x86_64-linux (5m24s cold in the web container): `bin/scoot` is the ELF
+wrapper (`--inherit-argv0 --suffix PATH : …-xwayland-24.1.13/bin`),
+`ldd bin/.scoot-wrapped` lists no libgbm, closure 344 MiB of which all but
+11.8 MiB (7 paths) is Xwayland's own; started under `env -i` with an empty
+directory as `PATH` and `--headless --xwayland` it logged `XWayland is
+ready`, and a spawned child saw `DISPLAY=:0` and
+`PATH=<empty dir>:…-xwayland-24.1.13/bin`. `scoot-gpu-xwayland` is
+evaluated (features `gpu-scanout`, `xwayland`), not built here. Not put in `vm/compositor-deps.nix`, as
+this entry first sketched: that list is link-time libraries feeding the
+package's `buildInputs` and the dev shell's `LIBRARY_PATH`, and the binary
+is a runtime executable -- it went into the VM's system packages instead,
+which is what a `--tty` login there reads. (sway's wlroots is built with
+`-Dxwayland=enabled` and takes the same `xwayland-24.1.13` as an input, so
+the VM closure most likely already held it.)
+
+**Fallback.** `a_missing_binary_falls_back_whatever_the_machine_has`
+re-runs the test binary with an empty directory as its whole `PATH` (not
+`set_var`, which would race every other test under `cargo test`), and the
+re-run asserts `StartError::Spawn` naming the binary, no display left behind,
+and a session that still spawns and dispatches. `scripts/smoke-test.sh`'s
+new section starts the real binary with every `PATH` directory holding an
+`Xwayland` dropped and asserts the loud line and a working Wayland-only
+session.
+
+Split out, each low: [`_NET_WM_MOVERESIZE`](../protocols/xwayland-net-wm-moveresize.md),
+[`_NET_WM_ICON`](../protocols/xwayland-net-wm-icon.md),
+[scale-aware X windows](../protocols/xwayland-scale-aware.md). Still open
+from earlier phases:
+[refused override-redirect windows still cost the server
+buffers](../protocols/xwayland-refused-windows-still-commit.md), its own
+entry. XIM stays unprovided (XWayland links no `text-input-v3`).

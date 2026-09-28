@@ -140,6 +140,15 @@ pub struct State {
     /// surface can (see `clicked_layer` and `layer_shell.rs`), and this stays
     /// pointing at the window focus will come back to when it doesn't.
     pub focus: Option<WindowId>,
+    /// Bumped (wrapping) whenever focus moves -- the focused *window*
+    /// (`State::set_focus`, and `remove_window` clearing it) or the seat's
+    /// keyboard focus (`SeatHandler::focus_changed` for every move to a
+    /// surface, whichever path set it, and `refresh_keyboard_focus` for a
+    /// move to nothing, which Smithay does not report). Only compared for
+    /// equality: the X focus gate's re-ask on a spawn's exit grants nothing
+    /// if focus moved since the window was refused (`xwayland/focus.rs`),
+    /// because the user has since done something that decided focus.
+    pub(super) focus_generation: u64,
     /// Which window covered each output, by output index, as of the last
     /// `apply()` -- `World::fullscreen_on` for every output, remembered only
     /// so `apply()` can tell when it changed (see
@@ -884,6 +893,13 @@ pub struct State {
     /// its zombie is collected, a zombie holds its pid against reuse, and an
     /// `ECHILD` (reaped elsewhere) forgets the entry rather than leaking it.
     pub spawned_children: HashSet<u32>,
+    /// The pids the current `reap_children` sweep dropped from
+    /// `spawned_children`, for the X focus gate's re-ask
+    /// (`State::x11_focus_for_exited_spawns`). Cleared and refilled by each
+    /// sweep, so it allocates only when more spawns exit in one sweep than
+    /// ever before.
+    #[cfg(feature = "xwayland")]
+    pub(super) reaped_spawns: Vec<u32>,
     /// The `[wallpaper]` section's side: the `scootbg apply-config` runs
     /// (one at a time, newest section wins, each reaped and its exit
     /// logged), the profile they use and the section a reload diffs
@@ -1094,6 +1110,7 @@ impl State {
             next_id: 0,
             decoration_bound: HashSet::new(),
             focus: None,
+            focus_generation: 0,
             fullscreen_covers: Vec::new(),
             floating_cover: 0,
             awaiting_map: Vec::new(),
@@ -1199,6 +1216,8 @@ impl State {
             interaction_serials: input::interaction::Recent::default(),
             keybindings,
             spawned_children: HashSet::new(),
+            #[cfg(feature = "xwayland")]
+            reaped_spawns: Vec::new(),
             wallpaper: Default::default(),
             suppressed_keys: HashSet::new(),
             held_keys: HashSet::new(),

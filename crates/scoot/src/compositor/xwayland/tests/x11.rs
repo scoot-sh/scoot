@@ -282,6 +282,12 @@ impl XClient {
         self.conn.flush().expect("the retitle hit the wire");
     }
 
+    /// Sets (or replaces) `window`'s `_NET_STARTUP_ID` after the fact.
+    pub(super) fn set_startup_id(&self, window: Window, startup_id: &str) {
+        self.string(window, self.atoms.startup_id, self.atoms.utf8, startup_id);
+        self.conn.flush().expect("the startup id hit the wire");
+    }
+
     /// Sends `_NET_ACTIVE_WINDOW` for `window` to the root, as a pager (or
     /// `xdotool windowactivate`) does: source indication 2, current time.
     pub(super) fn request_activation(&self, window: Window) {

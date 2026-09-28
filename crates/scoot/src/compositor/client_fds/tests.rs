@@ -7,8 +7,8 @@
 use std::collections::HashSet;
 use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};
 
-use smithay::reexports::wayland_server::Display;
 use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::{Client, Display};
 
 use super::liveness::{capture, proc_fd_path, still_held, timeline_fd_open};
 use super::{
@@ -48,6 +48,20 @@ fn two_clients() -> (Display<()>, ClientId, ClientId) {
     let a = client();
     let b = client();
     (display, a, b)
+}
+
+/// One client, as a handle: what [`ClientFds::admit_arrival`] takes (it
+/// picks the client's bounds from its data).
+fn one_client() -> (Display<()>, Client) {
+    struct Data;
+    impl smithay::reexports::wayland_server::backend::ClientData for Data {}
+    let display: Display<()> = Display::new().expect("a display");
+    let (server, _client) = std::os::unix::net::UnixStream::pair().expect("a socket pair");
+    let client = display
+        .handle()
+        .insert_client(server, std::sync::Arc::new(Data))
+        .expect("a client");
+    (display, client)
 }
 
 /// Admits and records `count` arrivals of `kind` for `client` on fd numbers
@@ -247,7 +261,8 @@ fn every_kind_counts_toward_one_total() {
         assert_eq!(
             ledger.admit(&a, kind, 1, LIMITS, |fd, _| live.contains(&fd), || false),
             Err(Refusal::Total {
-                held: MAX_FDS_PER_CLIENT
+                held: MAX_FDS_PER_CLIENT,
+                max: MAX_FDS_PER_CLIENT,
             }),
             "{kind:?} past the total"
         );
@@ -305,7 +320,8 @@ fn the_timeline_cap_does_not_bind_other_kinds() {
             || false
         ),
         Err(Refusal::Timelines {
-            held: LIMITS.timelines
+            held: LIMITS.timelines,
+            max: LIMITS.timelines,
         })
     );
     assert_eq!(ledger.held_by(&a), LIMITS.timelines + 64);
@@ -362,7 +378,8 @@ fn a_weighted_arrival_never_takes_the_weight_past_the_bound() {
     assert_eq!(
         ledger.admit(&a, Kind::Plane, 2, LIMITS, |_, _| true, || false),
         Err(Refusal::Total {
-            held: MAX_FDS_PER_CLIENT
+            held: MAX_FDS_PER_CLIENT,
+            max: MAX_FDS_PER_CLIENT,
         })
     );
 }
@@ -462,7 +479,13 @@ fn a_client_really_holding_the_timeline_cap_is_refused_at_it() {
     import_all(&mut ledger, &a, 1000, CAP, &live).expect("the cap itself is admitted");
     assert_eq!(ledger.timelines_held_by(&a), CAP);
     let refusal = admit_timeline(&mut ledger, &a, |fd| live.contains(&fd), || false);
-    assert_eq!(refusal, Err(Refusal::Timelines { held: CAP }));
+    assert_eq!(
+        refusal,
+        Err(Refusal::Timelines {
+            held: CAP,
+            max: CAP
+        })
+    );
 }
 
 /// Swapchain churn: imports whose timelines are gone by the time the cap is
@@ -502,7 +525,13 @@ fn a_client_within_the_margin_of_the_cap_is_refused_not_swept_per_import() {
         },
         || false,
     );
-    assert_eq!(refusal, Err(Refusal::Timelines { held: CAP - 1 }));
+    assert_eq!(
+        refusal,
+        Err(Refusal::Timelines {
+            held: CAP - 1,
+            max: CAP
+        })
+    );
     assert_eq!(checks, CAP, "one sweep, of the client's own records");
 }
 
@@ -942,7 +971,8 @@ fn sweep_cost() {
 #[ignore = "prints per-arrival timings for a human; asserts nothing"]
 fn arrival_cost() {
     const ROUNDS: u32 = 200_000;
-    let (_display, a, _) = two_clients();
+    let (_display, client) = one_client();
+    let a = client.id();
     let held: Vec<OwnedFd> = (0..40).map(|_| memfd("client-fds-held")).collect();
     let churned = memfd("client-fds-churned");
     for (label, kind) in [
@@ -956,7 +986,7 @@ fn arrival_cost() {
         let started = std::time::Instant::now();
         for _ in 0..ROUNDS {
             ledger
-                .admit_arrival(&a, churned.as_raw_fd(), kind, 1)
+                .admit_arrival(&client, churned.as_raw_fd(), kind, 1)
                 .expect("under every bound");
             ledger.record_arrival(&a, churned.as_fd(), kind, 1);
         }

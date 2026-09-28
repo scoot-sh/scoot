@@ -108,6 +108,25 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[XWayland Phases 5–7: capture pins, Nix packaging, docs -- ticket RESOLVED](docs/backlog/resolved/xwayland-support-done.md)**
+  (2026-09-27) -- the XWayland entry closes. Capture needed no new code and
+  is now pinned: a managed X window and an X menu are in the IPC screenshot
+  and the `ext-image-copy-capture-v1` capture byte for byte, per output, and
+  absent from both under the lock (`xwayland/tests/capture.rs`, each
+  assertion mutation-checked against a render change that breaks it). New
+  flake packages `scoot-xwayland` / `scoot-gpu-xwayland` (the `xwayland`
+  feature plus nixpkgs' `Xwayland` appended to `PATH` by a binary wrapper;
+  existing outputs' derivations unchanged but for `src`); the dev VM's
+  profile gains `Xwayland`, `xeyes`, `xclock`. The missing-binary fallback
+  now runs everywhere (a test re-running itself with an empty `PATH`, and a
+  smoke section with `Xwayland` filtered off `PATH`), and its log line names
+  the binary and the `PATH` searched -- it used to say only "No such file or
+  directory". CI runs the smoke test a second time against the `xwayland`
+  build. Three small follow-ups split out, all low:
+  [`_NET_WM_MOVERESIZE`](docs/backlog/protocols/xwayland-net-wm-moveresize.md),
+  [`_NET_WM_ICON`](docs/backlog/protocols/xwayland-net-wm-icon.md),
+  [scale-aware X windows](docs/backlog/protocols/xwayland-scale-aware.md).
+
 - **[Reactive popup re-constraining](docs/backlog/resolved/popup-reactive-reconstrain-done.md)**
   (2026-09-27, PR #295) — a `reactive` popup is re-constrained when its
   conditions change (column scroll, output resize, exclusive-zone edits),
@@ -131,7 +150,7 @@ each item's own file records why it landed when it did.
   Live Asahi replug unverified (runbook in the PR body), judged
   non-blocking; no debounce until flap timing is measured on hardware.
 
-- **[XWayland Phase 4: clipboard, primary selection, drags, input methods](docs/backlog/protocols/xwayland-support.md)**
+- **[XWayland Phase 4: clipboard, primary selection, drags, input methods](docs/backlog/resolved/xwayland-support-done.md)**
   (2026-09-25, PR #246) — the clipboard and primary selection cross between X and
   Wayland both ways (clipboard managers included), gated like Wayland's own
   rule with XWayland as the client: only while an X window holds the
@@ -155,7 +174,7 @@ each item's own file records why it landed when it did.
   target that dies or hangs before finishing no longer wedges X drags
   (fork `9515d7e5`);
   XIM not provided; an IM keyboard grab pre-empts X focus (tested).
-  Ticket stays OPEN for Phases 5–7.
+  Ticket stayed OPEN for Phases 5–7 (closed 2026-09-27, above).
 
 - **[Multi-output phase E: `--tty` drives every connected monitor](docs/roadmap/19-multi-output.md)**
   (2026-09-25) — E1: every connected connector with a mode gets a head
@@ -178,7 +197,7 @@ each item's own file records why it landed when it did.
   lock fallback is armed once and records only screens that drew their
   blank, and window leaves now precede the output's `global_remove`.
 
-- **[XWayland Phases 2+3: X windows in the layout, behind a focus gate](docs/backlog/protocols/xwayland-support.md)**
+- **[XWayland Phases 2+3: X windows in the layout, behind a focus gate](docs/backlog/resolved/xwayland-support-done.md)**
   (2026-09-25, PR #244) — with `--xwayland` in an `xwayland` build, X11
   windows map as columns (`WM_CLASS` class as app id, `_NET_WM_NAME` title,
   hints through the xdg clamp), float by the xdg rules (transients centred
@@ -683,7 +702,7 @@ each item's own file records why it landed when it did.
   rather than the one acked. Unblocks
   [scanout candidates](docs/backlog/resolved/gpu-scanout-candidates-done.md).
 
-- **[XWayland Phase 1 skeleton](docs/backlog/protocols/xwayland-support.md)**
+- **[XWayland Phase 1 skeleton](docs/backlog/resolved/xwayland-support-done.md)**
   (2026-09-22, PR #221) — opt-in `--xwayland`/`[xwayland]` (default off,
   own cargo feature): server spawn + abstract socket + READY ordering,
   handler impls (activation steal refused by default), loud Wayland-only
@@ -695,7 +714,7 @@ each item's own file records why it landed when it did.
   Remainder filed as [WM-failure
   pin](./docs/backlog/resolved/xwayland-phase1-wm-failure-pin-done.md) (resolved with Phases 2+3).
 
-- **[XWayland Phase 0 spike](docs/backlog/protocols/xwayland-support.md)**
+- **[XWayland Phase 0 spike](docs/backlog/resolved/xwayland-support-done.md)**
   (2026-09-22, PR #220, docs-only) — break-site inventory re-verified at
   the pinned rev (two ticket corrections: single `XWayland::spawn`, no
   `delegate_xwayland_shell!`), live measurements (READY ~70ms, 55MB RSS,

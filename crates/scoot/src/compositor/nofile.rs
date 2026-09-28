@@ -104,6 +104,14 @@ fn raised() -> Option<Limits> {
     RAISED.get().copied().flatten()
 }
 
+/// The soft limit this process runs with since [`raise`], without raising:
+/// `None` before the first [`raise`], or where it could not read the limit.
+/// One atomic load; the budget of the session's XWayland server
+/// (`xwayland_budget.rs`) reads it on every creation it bounds.
+pub(crate) fn soft() -> Option<u64> {
+    raised().map(|limits| limits.soft)
+}
+
 fn raise_once() -> Option<Limits> {
     let Some((soft, hard)) = get() else {
         tracing::warn!("cannot read RLIMIT_NOFILE; leaving the fd limit as it is");

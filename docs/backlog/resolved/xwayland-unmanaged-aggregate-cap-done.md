@@ -16,11 +16,22 @@ is linear at ~1.2 µs per window per pointer motion and ~0.4 µs per window
 per frame (debug builds — upper bounds; release is strictly faster on this
 straight-line lock-and-walk code), and the aggregate above ~250 windows is
 unreachable anyway because XWayland itself dies there first (filed
-separately: `docs/backlog/protocols/xwayland-server-death-many-unmanaged.md`).
+separately: `docs/backlog/resolved/xwayland-server-death-many-unmanaged-done.md`).
 By this project's own revealed bar — PR #260 left a 281 ms linear residual
 at 5120 popups as acceptable — a 0.27 ms worst case at the maximum reachable
 aggregate needs no fix. No README/protocols change: no user-facing behavior
 changed.
+
+**Correction (2026-09-27, same day):** "XWayland itself dies" was wrong.
+scoot was disconnecting the server, because it held it to one app's
+512-fd and 512-buffer bounds at 2 of each per X window. With its own
+budget (`xwayland_budget.rs`), the ~250 ceiling below is gone. It is now
+~2048 windows on the usual fd table. The per-window costs measured here
+are unaffected. The "unreachable above ~250" leg of the verdict is not.
+Extrapolating these debug figures linearly (not measured) gives ~2.5 ms
+per motion at 2048 windows, which is still inside PR #260's 281 ms bar. If
+it ever matters, the bbox pre-check in the residual below is the fix. See
+`docs/backlog/resolved/xwayland-server-death-many-unmanaged-done.md`.
 
 Filed 2026-09-26 from the PR #258 review. The per-X-client unmanaged cap
 (`xwayland-unmanaged-pressure-cap.md`, resolved by #258) bounds each
@@ -82,7 +93,7 @@ Three things fall out:
   whole draw list drains, the cap zeroes). Scoot itself survives cleanly —
   Wayland clients unaffected, no panic, orderly drain — but no scene with
   more than ~250 override-redirect windows exists to be slow in. Filed as
-  `docs/backlog/protocols/xwayland-server-death-many-unmanaged.md`; the
+  `docs/backlog/resolved/xwayland-server-death-many-unmanaged-done.md`; the
   exact count-vs-resource mechanism is XWayland's business, with one honest
   confound recorded there (the dev VM's disk was nearly full throughout).
 

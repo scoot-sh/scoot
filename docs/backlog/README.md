@@ -723,7 +723,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [mpv `--vo=gpu` intermittently black/striped under GLES](./resolved/gles-mpv-shm-black-done.md) — CLOSED WITHOUT CODE 2026-09-26: rate loops (N=20, both renderers) plus a pool-bytes-vs-screenshot proof show the dots and the black are states of mpv/Mesa's own shm present buffers on llvmpipe (pre-present, mid-render tile wavefront), displayed faithfully by both renderers; well-behaved GL shm clients (es2gears) and `mpv --vo=wlshm` are solid. Harness in `scripts/mpv-shm-rate/`.
 
 ### Found reviewing client fullscreen (2026-09-23)
-- [Flake: xwayland DISPLAY test read "" instead of unset](./testing/xwayland-display-env-flake.md) — low: seen once under GLES nextest.
+- [Flake: xwayland DISPLAY test read "" instead of unset](./resolved/xwayland-display-env-flake-duplicate.md) — CLOSED 2026-09-27 as a duplicate of the `read_marker` race (PR #284).
 - [Deep popup chains crash or freeze the compositor](./resolved/popup-depth-bound-done.md) — RESOLVED 2026-09-23 (PR #226): popup chains are capped at 64, and the ways an open chain could be re-parented deeper are refused (`already_constructed`, `not_the_topmost_popup`, a parent with no live role object); a layer surface may adopt only a fresh parentless popup; a surface made a popup again no longer has its same-flush child inserted under its dead tree node. Every chain and tree node is at most 64 deep.
 - [Windows bleed onto the neighbouring output](./resolved/windows-bleed-across-outputs-done.md) — RESOLVED 2026-09-23 (PR #224): a window is drawn and hit only on the output it is placed on (render gather, ring and both hit sites); popups go with their parent. Also fixed: the ring and rounded clip never drew right on outputs after the first (global coordinates).
 - [Popup constraint adjustment](./resolved/popup-constraint-adjustment-done.md) — RESOLVED 2026-09-23 (PR #225): popups are flipped/slid/resized into their output (a window's: usable area, whole output while it is fullscreen; a layer surface's: whole output), relative to the immediate parent, at the initial configure and on `reposition`. Also fixed: a popup whose parent chain loops back to itself froze the compositor; it is now refused.
@@ -800,8 +800,8 @@ scale/mode) into one hardware session.
   (`7388af13`, `9515d7e5`: a dead or hung X target no longer wedges X
   drags, the source hears a drop once; `d3a4cd73`: only a drag scoot lets
   start gives a pending drop up).
-- [XWayland support](./protocols/xwayland-support.md)
-  — OPEN, low: spike (PR #220), skeleton (PR #221) and mapping + focus gate
+- [XWayland support](./resolved/xwayland-support-done.md)
+  — RESOLVED 2026-09-27: spike (PR #220), skeleton (PR #221) and mapping + focus gate
   (Phases 2+3, PR #244) landed: X windows tile, dialogs float, rules
   match `WM_CLASS`, fullscreen both ways, override-redirect menus drawn
   unmanaged; an X window takes focus only when nothing is focused, the
@@ -817,25 +817,53 @@ scale/mode) into one hardware session.
   drag-and-drop works in every direction
   ([pointer focus X arm](./resolved/xwayland-pointer-focus-x11-done.md)),
   no XIM.
-  Remaining: capture pins/packaging (5–7). The [WM-failure
+  Phases 5–7 closed it: captures pinned (screenshot and screen capture
+  carry X windows per output, nothing under the lock), flake packages
+  `scoot-xwayland` / `scoot-gpu-xwayland` with `Xwayland` on `PATH`, the
+  missing-binary fallback proven everywhere with a log line that names the
+  binary. Split out, open and low:
+  [`_NET_WM_MOVERESIZE`](./protocols/xwayland-net-wm-moveresize.md),
+  [`_NET_WM_ICON`](./protocols/xwayland-net-wm-icon.md),
+  [scale-aware X windows](./protocols/xwayland-scale-aware.md). The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its
   rival-claimant recipe cannot work: XWayland admits no X client before the
-  WM attaches). Follow-up filed: [bind startup-id redemption to the spawned
-  process](./protocols/xwayland-startup-id-race.md) (low: a watching X
-  client can race a launched app to its `_NET_STARTUP_ID` within the
-  token's 30 s). [An X drag released on its first motion into an X
+  WM attaches). [Bind startup-id redemption to the spawned
+  process](./resolved/xwayland-startup-id-race-done.md) is RESOLVED
+  2026-09-27: while the spawned process runs, its token's startup id
+  redeems only for that process or a descendant (bounded `/proc` ppid
+  walk); once it has exited (a forwarder, a fork into the background) the
+  token keeps the unbound rule, like a Wayland launcher's -- both races
+  documented. [An X drag released on its first motion into an X
   window may drop on the proxy](./resolved/xwayland-x-drag-first-motion-race-done.md)
   is RESOLVED 2026-09-27 (reproduced live with GTK by two mechanisms -- a
   drag's first motion onto an X window before the source named its types,
   0/20 drops landed; a proxy flicker between two X windows, 18/20 landed -- both
-  20/20 with scoot-sh/smithay `b1ac3ca7`). Its side finding is filed:
-  [a press batched with a move onto another X window reached no X
-  window](./protocols/xwayland-press-after-crossing-move-lost.md) (low;
-  harness only so far, not investigated). Its review fix is fork
+  20/20 with scoot-sh/smithay `b1ac3ca7`). Its side finding, [a press batched with a move onto another X window
+  reached no X window](./resolved/xwayland-press-after-crossing-done.md),
+  is RESOLVED 2026-09-27: a product bug, not a harness one, and not about
+  batching -- XWayland applied the crossing move's relative delta again
+  after the `enter`, so every `scoot msg pointer click` onto the other of
+  two X apps was lost (0/40 live with `xev`, 40/40 after); scoot now
+  withholds the relative event on a move off an X window. Its review fix is fork
   `7e18b661` (an X window mapped again under an X drag got the proxy over
-  it); its known gap is filed: [a quick drag between two windows of the
-  same X app instance drops nothing](./protocols/xwayland-same-client-quick-drag.md)
-  (low; not a regression).
+  it); its known gap, [a quick drag between two windows of the
+  same X app instance dropping nothing](./resolved/xwayland-same-client-quick-drag-done.md),
+  is RESOLVED too (fork `b16cd6a2`).
+  [XWayland dying at ~250 X windows](./resolved/xwayland-server-death-many-unmanaged-done.md)
+  is RESOLVED 2026-09-27. It was scoot disconnecting the server: one
+  Wayland client for every X window, held to one app's 512 fds and 512
+  buffers at 2 of each per window, so it was killed at the 257th window
+  whichever X clients owned it. Fixed with the server's own budget, a
+  sixteenth of the fd table, 512..=4096 (300 windows over 3 X clients stay
+  up live; still refused at the budget). Its acquire-wait bound (GPU
+  tier) now scales with that budget too: 512 on the usual table, not one
+  app's 64. Follow-up, open and low: [a refused override-redirect X window
+  still costs the server its
+  buffers](./protocols/xwayland-refused-windows-still-commit.md).
+  Withholding `_XWAYLAND_ALLOW_COMMITS` was measured and does not help
+  (480 buffers either way): XWayland spends both buffers before scoot
+  hears of the map. A refused managed window costs nothing. A fix has to
+  unmap or destroy the refused window, which needs a design pass.
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes

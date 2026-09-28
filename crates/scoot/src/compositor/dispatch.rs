@@ -745,7 +745,7 @@ where
     let id = client.id();
     if let Err(refusal) = state
         .client_fds
-        .admit_arrival(&id, fd.as_raw_fd(), Kind::Pool, 1)
+        .admit_arrival(client, fd.as_raw_fd(), Kind::Pool, 1)
     {
         resource.post_error(
             wl_shm::Error::InvalidStride,
@@ -902,7 +902,7 @@ where
         if !state.wl_buffers.claim_buffer_creation(client) {
             return false;
         }
-        resource.post_error(wl_shm::Error::InvalidStride, too_many_buffers());
+        resource.post_error(wl_shm::Error::InvalidStride, too_many_buffers(client));
         return true;
     }
     if TypeId::of::<I::Request>() == TypeId::of::<zwp_linux_buffer_params_v1::Request>() {
@@ -924,7 +924,7 @@ where
         }
         resource.post_error(
             zwp_linux_buffer_params_v1::Error::InvalidWlBuffer,
-            too_many_buffers(),
+            too_many_buffers(client),
         );
         return true;
     }
@@ -939,9 +939,9 @@ where
         }
         // No `Error` enum exists on this interface (verified against the
         // protocol XML), so there is no code to name: 0 with a message that
-        // says what happened. Only a client already holding 512 live
-        // buffers ever sees it.
-        resource.post_error(0u32, too_many_buffers());
+        // says what happened. Only a client already at its live-buffer
+        // bound (512, or the XWayland server's budget) ever sees it.
+        resource.post_error(0u32, too_many_buffers(client));
         return true;
     }
     false
@@ -1470,9 +1470,9 @@ fn too_many_pools() -> String {
 /// only. One message for all three factories: the count is shared, so the
 /// bound that said no is the same whichever factory the client came
 /// through.
-fn too_many_buffers() -> String {
+fn too_many_buffers(client: &Client) -> String {
     format!(
         "wl_buffer refused: this client already holds the maximum of {} live buffers",
-        super::wl_buffers::MAX_BUFFERS_PER_CLIENT,
+        super::wl_buffers::max_buffers_for(client),
     )
 }

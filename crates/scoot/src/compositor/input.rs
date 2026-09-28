@@ -16,7 +16,7 @@ use super::keybindings::Bound;
 use super::layer_shell;
 use super::output_scale::logical_size;
 use super::pointer_focus::PointerFocus;
-use super::relative_pointer::{AbsoluteTarget, absolute_target};
+use super::relative_pointer::{AbsoluteTarget, absolute_target, leaves_an_x_window};
 use super::tty::VtSwitchOutcome;
 use modifiers::{HeldKeys, KeyPlan, NamedKey, Untypable};
 
@@ -94,7 +94,8 @@ impl State {
     /// same number there (see `relative_pointer.rs`).
     ///
     /// Relative motion is emitted against pre-move focus on every focused
-    /// move with a nonzero delta, *before* the absolute motion (Smithay
+    /// move with a nonzero delta -- except one that takes focus off an X
+    /// window (`leaves_an_x_window`) -- *before* the absolute motion (Smithay
     /// routes by the seat's current focus, so this order is what credits the
     /// surface the pointer is leaving; see `relative_pointer.rs`). It is --
     /// this is the point of the protocol -- unclipped: a move the output
@@ -148,7 +149,7 @@ impl State {
         // file a serial under a client that never received it, the exact
         // hole the client half of each entry exists to close.
         //
-        // Two guards, each load-bearing (see `record_pointer_enter`):
+        // Two guards, each load-bearing (see `focus_moves`):
         // - the focus must really move (`current_focus` read before `motion`
         //   below updates it). A redundant motion mints a serial but sends
         //   no `enter`.
@@ -191,11 +192,19 @@ impl State {
                 Point::from((0.0, 0.0)),
             ),
         };
+        // Read once, before anything is delivered: the relative event below
+        // and the `enter` record after the motion both ask it.
+        let moves = Self::focus_moves(&pointer, &focus, &target, &under);
         // Focus-gated, not lock-gated (see `relative_pointer.rs`): whoever
         // holds pointer focus gets the deltas, locked or not, and nobody
         // else does. Zero deltas stay silent -- a focus re-derivation at a
         // standstill is not motion, and the wire has enough of it already.
-        if focus.is_some() && (delta.x != 0.0 || delta.y != 0.0) {
+        // A move off an X window stays silent too: XWayland would apply the
+        // delta again after its next `enter` (see `leaves_an_x_window`).
+        if focus.is_some()
+            && (delta.x != 0.0 || delta.y != 0.0)
+            && !leaves_an_x_window(focus.as_ref(), moves)
+        {
             pointer.relative_motion(
                 self,
                 under.clone(),
@@ -208,7 +217,8 @@ impl State {
         }
         match target {
             AbsoluteTarget::Free => {
-                if self.record_pointer_enter(&pointer, &focus, &under, serial) {
+                let entered = under.as_ref().map(|(entered, _)| entered);
+                if self.record_pointer_enter(moves, entered, serial) {
                     // Focus just landed on a new surface: engage a
                     // still-inactive constraint waiting on it (see below).
                     // Gated on the enter, not run per move: activation is a
@@ -219,7 +229,7 @@ impl State {
                 self.move_pointer_to(&pointer, under, location, serial, time);
             }
             AbsoluteTarget::Clamped { point, under } => {
-                self.record_pointer_enter(&pointer, &focus, &Some(under.clone()), serial);
+                self.record_pointer_enter(moves, Some(&under.0), serial);
                 self.move_pointer_to(&pointer, Some(under), point, serial, time);
             }
             AbsoluteTarget::Held => {
@@ -248,28 +258,23 @@ impl State {
     /// motion at all. Answers whether focus moved, so the free arm knows
     /// whether a pending constraint wants engaging.
     ///
-    /// `focus` is the pre-move focus `move_absolute` already read, passed
-    /// in rather than re-read: nothing between that read and this call can
-    /// move seat focus (`current_location` and `absolute_target` are
-    /// read-only, and `relative_motion` routes by focus without setting
-    /// it), so the re-read the reviewer flagged observed exactly this
-    /// value. What remains read here is only the grab check, which has no
-    /// cheaper source.
+    /// `moves` is [`State::focus_moves`], read by `move_absolute` before
+    /// anything was delivered (afterwards the seat's focus already names
+    /// the surface entered and the move is unobservable); `entered` is the
+    /// surface the arm's motion is delivered to, `None` for bare desktop.
     fn record_pointer_enter(
         &mut self,
-        pointer: &PointerHandle<Self>,
-        focus: &Option<PointerFocus>,
-        under: &Option<(PointerFocus, Point<f64, Logical>)>,
+        moves: bool,
+        entered: Option<&PointerFocus>,
         serial: Serial,
     ) -> bool {
-        let entered = Self::pointer_entered(pointer, focus, under);
-        if entered
-            && let Some((entered, _)) = &under
+        if moves
+            && let Some(entered) = entered
             && let Some(client) = self.client_of(entered.surface())
         {
             self.interaction_serials.record_focus(serial, client);
         }
-        entered
+        moves
     }
 
     /// Activates a still-inactive lock or confinement on a newly entered
@@ -347,24 +352,37 @@ impl State {
         self.cursor_changed();
     }
 
-    /// Whether this motion will deliver a pointer `enter` to a client
-    /// surface: focus really moves somewhere, and no grab holds the pointer.
+    /// Whether the motion `target` resolves to moves pointer focus -- a
+    /// `leave` of `focus`, an `enter` of the surface the motion is delivered
+    /// to, or both -- with no grab holding the pointer.
     ///
-    /// Under a grab the recipient is the grab's own logic, not `under` -- a
-    /// popup grab confines the pointer to its own tree, an implicit button
-    /// grab confines it to the pressed surface -- so `under` names a client
-    /// that will never see this serial. `focus` is read by the caller
-    /// before [`PointerHandle::motion`] runs: afterwards the seat's focus
-    /// already names `under` and the move is unobservable.
-    fn pointer_entered(
+    /// The surface delivered to is the arm's: a held move delivers nothing,
+    /// so moves nothing; a clamped one is delivered to its own hit test
+    /// (always the focus surface); a free one to `under`. Under a grab the
+    /// recipient is the grab's own logic, not `under` -- a popup grab
+    /// confines the pointer to its own tree, an implicit button grab keeps
+    /// it on the pressed surface -- so a grabbed move counts as moving
+    /// nothing. `focus` is the pre-move focus, read before
+    /// [`PointerHandle::motion`] runs (nothing between that read and this
+    /// call can move seat focus: `current_location` and `absolute_target`
+    /// are read-only).
+    ///
+    /// Cost: one focus comparison per move (surface ids first, no lock);
+    /// the grab check's seat lock only when the comparison says focus
+    /// changes -- rare next to the hit test and socket write every move
+    /// already pays.
+    fn focus_moves(
         pointer: &PointerHandle<Self>,
         focus: &Option<PointerFocus>,
+        target: &AbsoluteTarget,
         under: &Option<(PointerFocus, Point<f64, Logical>)>,
     ) -> bool {
-        if focus.as_ref() == under.as_ref().map(|(surface, _)| surface) {
-            return false;
-        }
-        !pointer.is_grabbed()
+        let next = match target {
+            AbsoluteTarget::Held => return false,
+            AbsoluteTarget::Free => under.as_ref().map(|(next, _)| next),
+            AbsoluteTarget::Clamped { under, .. } => Some(&under.0),
+        };
+        focus.as_ref() != next && !pointer.is_grabbed()
     }
 
     /// Centres the pointer on the output, once, at startup.

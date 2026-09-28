@@ -46,7 +46,8 @@
 //!   ledger in `client_fds.rs` alongside the client's pool and plane fds),
 //!   and outstanding acquire waits ([`MAX_ACQUIRE_WAITS_PER_CLIENT`], each an
 //!   eventfd plus a queued transaction Smithay scans on every commit of that
-//!   client).
+//!   client; the XWayland server's is scaled with its fd budget,
+//!   [`max_acquire_waits_for`]).
 //!
 //! ## What is still Smithay's, and one thing upstream gets wrong
 //!
@@ -121,6 +122,10 @@ use super::client_fds::Kind;
 /// client. So a client never has more than 128 timeline fds held here. The
 /// timelines also count toward the client's 512-fd total
 /// (`client_fds::MAX_FDS_PER_CLIENT`), with its pools and planes.
+///
+/// Not the session's XWayland server: it imports a timeline per X window
+/// pixmap, so its timelines are bounded only by its own, larger fd total
+/// (`client_fds::limits_for`, `xwayland_budget.rs`).
 pub(crate) const MAX_TIMELINES_PER_CLIENT: u32 = 128;
 
 /// How many commits one client may have waiting on unsignalled acquire
@@ -135,7 +140,25 @@ pub(crate) const MAX_TIMELINES_PER_CLIENT: u32 = 128;
 /// cannot run more than its image count ahead -- so 64 is several busy
 /// surfaces each several frames behind. Past it the client is disconnected
 /// with `wl_display.no_memory` (see [`acquire`] for why that code).
+///
+/// Not the session's XWayland server: it waits once per X window committing
+/// a GPU frame, so its bound scales with its fd budget
+/// ([`max_acquire_waits_for`], `xwayland_budget.rs`: 512 on the table scoot
+/// raises to, this 64 on a 1024-fd one).
 pub(crate) const MAX_ACQUIRE_WAITS_PER_CLIENT: u32 = 64;
+
+/// How many commits `client` may have waiting on unsignalled acquire points:
+/// [`MAX_ACQUIRE_WAITS_PER_CLIENT`], or the session's XWayland server's own
+/// bound (`xwayland_budget::acquire_waits_for` its fd budget) -- one
+/// connection carrying every X client's windows. A downcast and an atomic
+/// load, run only for a commit that really waits.
+pub(crate) fn max_acquire_waits_for(client: &Client) -> u32 {
+    if super::xwayland_budget::is_server(client) {
+        super::xwayland_budget::acquire_waits_for(super::xwayland_budget::bound())
+    } else {
+        MAX_ACQUIRE_WAITS_PER_CLIENT
+    }
+}
 
 /// Outstanding acquire waits a client may hold before fd pressure starts
 /// disconnecting it on the next wait. 16 is a few surfaces a few frames
@@ -345,7 +368,7 @@ where
     let id = client.id();
     let refusal = match state
         .client_fds
-        .admit_arrival(&id, fd.as_raw_fd(), Kind::Timeline, 1)
+        .admit_arrival(client, fd.as_raw_fd(), Kind::Timeline, 1)
     {
         Ok(()) => {
             state

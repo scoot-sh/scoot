@@ -47,6 +47,9 @@
       # `scoot-gpu` is the same binary with the `gpu-scanout` build feature
       # (`--tty --renderer gles` scans out from the GPU instead of reading
       # back; needs OS EGL drivers -- see docs/nix.md);
+      # `scoot-xwayland` (and `scoot-gpu-xwayland`) add the `xwayland`
+      # build feature and nixpkgs' Xwayland on `PATH` (Linux only; X11 apps
+      # under `--xwayland` -- see below and docs/nix.md);
       # `scootctl` is the standalone remote-control client that drives a
       # compositor running elsewhere (a VM) over its socket. On Linux the
       # default is the compositor; on Darwin the compositor is cfg'd out of
@@ -95,7 +98,7 @@
             # build loudly, printing the one it got -- it cannot drift out of
             # sync quietly. Nothing else in Cargo.lock comes from git.
             outputHashes = {
-              "smithay-0.7.0" = "sha256-DynA9qi1JcwYfenpBJ5+B5TQp8uzl+i+pazqU4fify8=";
+              "smithay-0.7.0" = "sha256-OHjWem1VmztO8BByZOYZe+Ik4kI8yQ8I4KFKtDJQS3o=";
               "wayland-backend-0.3.17" = "sha256-cANItBOi9o+Jb1+u86thcBgdb6u0u2becgJoMI/v4T8=";
             };
           };
@@ -341,27 +344,86 @@
             };
           });
         }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+          let
+            # The opt-in XWayland tier as packages: the `xwayland` Cargo
+            # feature (off in the builds above, like gpu-scanout, because a
+            # whole X server is not free -- see docs/nix.md), plus the one
+            # runtime dependency it has. Smithay starts the server as
+            # `Command::new("Xwayland")`, a `PATH` lookup and nothing else,
+            # so a `--tty` login whose `PATH` lacks the binary would be a
+            # Wayland-only session (logged loudly, never a failure). The
+            # wrapper appends nixpkgs' Xwayland to `PATH` -- appends, so an
+            # Xwayland already on the session's `PATH` (NixOS
+            # `programs.xwayland.enable`) still wins -- which also means
+            # every program the session starts sees that directory at the
+            # end of its `PATH`: it holds `Xwayland` and nothing else.
+            #
+            # `makeBinaryWrapper`, not the shell `makeWrapper`: a small
+            # compiled `exec` (`--inherit-argv0`), so `scoot` stays an ELF
+            # binary and `scoot msg ...` pays no shell start. The runtime
+            # closure grows by Xwayland's own (Mesa for glamor among it:
+            # 344 MiB in all, measured on x86_64-linux, of which everything
+            # but 11.8 MiB is Xwayland's closure), which is why this is a
+            # separate package and never the default. `ldd` of
+            # `.scoot-wrapped` is the same audit as the unwrapped builds:
+            # the feature links nothing new (no libgbm).
+            #
+            # `cargoBuildFeatures` appended, so the gpu-scanout variant keeps
+            # its own (see `scoot-gpu` above for why it is this attr). Linux
+            # only: there is no X server, or compositor, on Darwin.
+            withXwayland =
+              base:
+              base.overrideAttrs (old: {
+                pname = "${old.pname}-xwayland";
+                cargoBuildFeatures = (old.cargoBuildFeatures or [ ]) ++ [ "xwayland" ];
+                nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.makeBinaryWrapper ];
+                postFixup = (old.postFixup or "") + ''
+                  wrapProgram $out/bin/scoot \
+                    --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.xwayland ]}
+                '';
+                meta = old.meta // {
+                  description =
+                    old.meta.description + " (xwayland build feature: --xwayland runs X11 apps; Xwayland on PATH)";
+                };
+              });
+          in
+          {
+            scoot-xwayland = withXwayland scoot;
+            scoot-gpu-xwayland = withXwayland self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;
+          }
+        )
       );
 
       # So `nix run . -- --headless -- foot` and `nix run . -- msg windows`
       # work, `nix run .#scootctl -- windows` runs the standalone client
-      # anywhere, and `nix run .#scoot-gpu -- --tty -- ...` runs the scanout
-      # build. Each `mainProgram` would resolve without the explicit
-      # naming; keeping it explicit rather than implied.
-      apps = forEach (pkgs: {
-        default = {
-          type = "app";
-          program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-        };
-        scootctl = {
-          type = "app";
-          program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scootctl;
-        };
-        scoot-gpu = {
-          type = "app";
-          program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;
-        };
-      });
+      # anywhere, `nix run .#scoot-gpu -- --tty -- ...` runs the scanout
+      # build and `nix run .#scoot-xwayland -- --headless --xwayland -- xterm`
+      # the XWayland one (Linux only). Each `mainProgram` would resolve
+      # without the explicit naming; keeping it explicit rather than implied.
+      apps = forEach (
+        pkgs:
+        {
+          default = {
+            type = "app";
+            program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          };
+          scootctl = {
+            type = "app";
+            program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scootctl;
+          };
+          scoot-gpu = {
+            type = "app";
+            program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-gpu;
+          };
+        }
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          scoot-xwayland = {
+            type = "app";
+            program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-xwayland;
+          };
+        }
+      );
 
       # The contents live in nix/dev-shell.nix, shared with devenv.nix, so
       # `nix develop` and `devenv shell` cannot drift apart. Beyond the

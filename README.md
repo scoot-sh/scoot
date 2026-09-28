@@ -164,7 +164,7 @@ scoot speaks the standard Wayland protocols, so the usual tools work.
 | Use an input method or on-screen keyboard | [yes](docs/protocols.md#input-methods-text-input-v3-input-method-v2) |
 | Use a drawing tablet | [pens, not pads](docs/protocols.md#drawing-tablets-tablet-v2) |
 | Change display modes from `wlr-randr` or Settings | [not yet: read-only](docs/protocols.md#display-information-wlr-output-management-v1) |
-| Run X11 apps | [yes, with `--xwayland`](docs/protocols.md#xwayland-opt-in) |
+| Run X11 apps | [yes, with `--xwayland`](docs/protocols.md#xwayland-opt-in) in an XWayland build ([`nix build .#scoot-xwayland`](docs/nix.md#xwayland-from-the-flake)) |
 | Drive it from a script or an agent | [yes](docs/ipc.md) |
 
 Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
@@ -173,7 +173,8 @@ Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
 
 - **Per-monitor settings.** Multiple monitors work, but they share one
   scale and resolution and line up left to right.
-- **X input methods (XIM)** for X11 apps.
+- **Some X11 extras.** X input methods (XIM), scaling X apps (they draw
+  at scale 1), an X app's own titlebar drag, and X window icons.
 - **A macOS version.** On a Mac you can build `scootctl`, to drive scoot
   in a Linux VM.
 

@@ -128,7 +128,7 @@ now lands, the X-origin gate is gone, and the fork fixes it describes as
 pending are pinned.
 
 Filed 2026-09-25 by XWayland Phase 4, PR #246 (see
-[`xwayland-support.md`](../protocols/xwayland-support.md)'s Phase 4 record). Serves
+[`xwayland-support-done.md`](./xwayland-support-done.md)'s Phase 4 record). Serves
 daily use: dragging a file into an X file manager, text into an X editor, or
 a tab within an X app are ordinary actions an X user hits before any
 X-to-Wayland drag.
