@@ -63,7 +63,8 @@ enum Step {
     UnsetFullscreen { window: usize },
     /// Destroy the `window`-th toplevel's objects outright.
     DestroyWindow { window: usize },
-    /// Take an `ext_session_lock_v1` and hold it.
+    /// Take an `ext_session_lock_v1`, wait for the compositor's `locked`
+    /// (an unlock before confirmation is a protocol error), and hold it.
     Lock,
     /// Release the held lock.
     Unlock,
@@ -89,6 +90,15 @@ struct TestClient {
     /// Per popup, by creation order: the `xdg_surface.configure` serials
     /// waiting to be acked.
     popup_configures: Vec<Vec<u32>>,
+    /// `locked` events seen, cumulative: what the Lock step waits for
+    /// before answering, since `unlock_and_destroy` is a protocol error on
+    /// a lock the compositor has not confirmed yet.
+    locked: u32,
+    /// ...and `finished`, which is how a refusal arrives. Never expected
+    /// here (nothing else locks), but waited on all the same: hanging to
+    /// `PATIENCE` on a refusal would say nothing, while the count tells
+    /// which of the two arrived.
+    finished: u32,
     lock: Option<ext_session_lock_v1::ExtSessionLockV1>,
 }
 
@@ -199,9 +209,28 @@ impl Dispatch<xdg_surface::XdgSurface, PIndex> for TestClient {
 wayland_client::delegate_noop!(
     TestClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1
 );
-wayland_client::delegate_noop!(
-    TestClient: ignore ext_session_lock_v1::ExtSessionLockV1
-);
+
+/// `locked`/`finished` are counted, not ignored: the Lock step waits for
+/// one of the two (the protocol: "the compositor must send either the
+/// locked or finished event"), so an unlock never races the confirmation
+/// -- unlocking an unconfirmed lock is `InvalidUnlock`, which kills the
+/// client and fails the test as a confusing disconnect under load.
+impl Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &ext_session_lock_v1::ExtSessionLockV1,
+        event: ext_session_lock_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            ext_session_lock_v1::Event::Locked => client.locked += 1,
+            ext_session_lock_v1::Event::Finished => client.finished += 1,
+            _ => {}
+        }
+    }
+}
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
@@ -412,13 +441,21 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
             }
             Step::Lock => {
+                let seen = client.locked + client.finished;
                 let manager = client
                     .lock_manager
                     .clone()
                     .ok_or("no ext_session_lock_manager_v1")?;
                 let lock = manager.lock(&qh, ());
                 client.lock = Some(lock);
-                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                // Exactly one of the two must arrive before anything may
+                // unlock: waiting (while dispatching, so the confirming
+                // blanked frame gets to present) is what keeps this step
+                // load-proof, where a bare round trip confirmed only when
+                // the tick happened to run inside it.
+                test_support::wait_for(&mut queue, &mut client, "locked or finished", |client| {
+                    (client.locked + client.finished > seen).then_some(())
+                })?;
             }
             Step::Unlock => {
                 let lock = client.lock.take().ok_or("no lock held")?;
@@ -747,6 +784,10 @@ fn unlocking_re_arms_over_a_cover() {
     let mut fixture = Fixture::hide_after();
     fixture.cover_output();
     fixture.run(Step::Lock);
+    assert!(
+        fixture.state.session_lock.is_locked(),
+        "the test really locked the session before unlocking it"
+    );
     fixture.run(Step::Unlock);
     assert!(
         !fixture.state.session_lock.is_locked(),
