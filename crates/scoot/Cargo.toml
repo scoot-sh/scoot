@@ -144,7 +144,7 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-four
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-five
 # commits, branch `scoot/xwayland-selection-dnd` (see `docs/forks.md` for
 # each one and why):
 #
@@ -216,13 +216,20 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   rendering at the old scale (a same-size buffer committed at scale 2
 #   drew its top-left quarter over the whole surface until a re-attach).
 #   Pinned by `compositor/output_scale/tests.rs`'s scale-only-commit test.
-#   Pinned here as `e7130254`, content-identical to `6ab8b4a2` (which
+#   Carried here as `e7130254`, content-identical to `6ab8b4a2` (which
 #   `main` pinned from its own branch `scoot/buffer-scale-without-new-buffer`
 #   on `7e18b661`).
 # - `fcf6f314` (between the two above) adds a public
 #   `X11Surface::set_commits_allowed`; scoot does not call it (measured not
 #   to help -- `docs/backlog/protocols/xwayland-refused-windows-still-commit.md`),
 #   so it is carried unused until the next rebase drops it.
+# - `035d447c` flushes `XSettings::update`'s `_XSETTINGS_SETTINGS` write.
+#   The window manager's event thread only reads, so the write sat in
+#   x11rb's buffer until an unrelated request flushed the connection, and
+#   an X app started right after XWayland was ready read no
+#   `Gdk/WindowScalingFactor` and drew at half size at output scale 2
+#   (`compositor/xwayland/tests/scale.rs`: 2 of 20 runs failed on
+#   `e7130254`, 20 of 20 pass on `035d447c`).
 #
 # Upstream status (checked 2026-09-25; the pixman hunk re-checked 2026-09-27,
 # the XDND commits 2026-09-27):
@@ -233,7 +240,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Verify claims about Smithay's behaviour against this fork rev.
 [target.'cfg(target_os = "linux")'.dependencies.smithay]
 git = "https://github.com/scoot-sh/smithay"
-rev = "e713025498add1154f14c2b2f0fa708ac6a908a3"
+rev = "035d447cdf6067f8db58a2964937034a2b9e760b"
 default-features = false
 # backend_drm/backend_libinput/backend_udev/backend_session_libseat are for
 # --tty: real DRM/KMS scanout, libinput device handling, and VT/session
