@@ -75,7 +75,7 @@ pub fn reconcile(
                         "scootbg: cannot draw on {}: {error}",
                         entry.output.label()
                     ));
-                    entry.output.draw_failed();
+                    entry.output.draw_failed(error.to_string());
                     false
                 }
             }

@@ -566,7 +566,7 @@ maps it); the extra fd is the worker's eventfd.
 - **Competitors**: lightest.md's run; scootbg's own numbers are above.
 - **Coverage-guided fuzzing** of decode + scale: not done; the
   deterministic truncation and corruption loops are unit tests
-  ([testing.md](../testing.md) keeps the `cargo fuzz` item).
+  ([testing-done.md](testing-done.md) keeps the `cargo fuzz` item).
 - **Infallible allocations outside our buffer.** Only the decoded pixel
   buffer is fallible. These are plain `Vec`s, and the allocator refusing
   one aborts the daemon:

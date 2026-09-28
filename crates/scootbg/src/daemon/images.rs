@@ -321,7 +321,7 @@ fn offer(
                         image.path,
                         entry.output.label()
                     ));
-                    entry.output.draw_failed();
+                    entry.output.draw_failed(message.clone());
                 }
             }
         }
@@ -336,5 +336,5 @@ fn failed(entry: &mut Entry<Objects>, image: &Image, error: &JobError) {
         image.path,
         entry.output.label()
     ));
-    entry.output.draw_failed();
+    entry.output.draw_failed(error.to_string());
 }

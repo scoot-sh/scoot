@@ -182,13 +182,13 @@ Prints the daemon's reply, one line of JSON with one entry per output:
 Each entry has the output's name, description, mode, scale, transform and
 logical size, its surface's state: waiting, pending, configured (with its
 size), closed or gave-up (until the output is replugged), whether drawing
-what it should show failed (draw_failed; the daemon's stderr says why),
-and what it shows: {\"color\":\"#rrggbb\"}, {\"image\":\"/path\",
-\"mode\":\"fill\",\"fill\":\"#rrggbb\",\"filter\":\"lanczos3\"}, or null
-for nothing. After the list, \"saving\" says whether changes are saved for
-the next start (see `scootbg daemon --help`), and \"profile\" whose state
-is restored and saved: the daemon's --profile, or the last one an
-`apply-config` made it adopt.
+what it should show failed (draw_failed) and why (draw_error, as the
+daemon's stderr says it), and what it shows: {\"color\":\"#rrggbb\"},
+{\"image\":\"/path\",\"mode\":\"fill\",\"fill\":\"#rrggbb\",
+\"filter\":\"lanczos3\"}, or null for nothing. After the list, \"saving\"
+says whether changes are saved for the next start (see `scootbg daemon
+--help`), and \"profile\" whose state is restored and saved: the
+daemon's --profile, or the last one an `apply-config` made it adopt.
 ";
 
 pub const VERSION_HELP: &str = "\

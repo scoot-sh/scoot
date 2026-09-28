@@ -28,6 +28,10 @@ mod bench;
 pub mod decode;
 pub mod exif;
 pub mod fit;
+/// The fuzz target's entry point, replayed over the committed corpus by a
+/// stable test; the fuzz crate (`crates/scootbg/fuzz`) compiles it itself.
+#[cfg(test)]
+pub mod fuzz;
 pub mod orientation;
 pub mod pack;
 pub mod render;

@@ -108,9 +108,9 @@ pub fn write_ready(out: &mut Vec<u8>, ready: &Ready) {
         Ready::Done(Outcome::Failed) => protocol::write_reply(
             out,
             &Reply::Error {
-                message: &"it could not be drawn on every output it was meant for \
-                           (the daemon's stderr says why); `scootbg query` shows what each \
-                           output shows",
+                message: &"it could not be drawn on every output it was meant for; \
+                           `scootbg query` shows what each output shows, and why a draw \
+                           failed (`draw_error`, also on the daemon's stderr)",
             },
         ),
         Ready::Refused(message) => protocol::write_reply(out, &Reply::Error { message }),
@@ -199,6 +199,7 @@ impl<O> OutputList for Outputs<O> {
                     }),
                 },
                 draw_failed: output.has_failed(),
+                draw_error: output.failure(),
                 shows: output.shows().map(Shows),
             });
         }

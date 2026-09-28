@@ -74,13 +74,15 @@
           # Verified to cover the build: no build.rs outside crates/, no
           # include_str!/include_bytes! of a root-level file, no
           # .cargo/config or toolchain file, and `license.workspace`
-          # is a string, not a file read.
+          # is a string, not a file read. scootbg's fuzz crate is left out:
+          # it is its own workspace (never built here), and its corpus
+          # changing must not rebuild the packages.
           src = pkgs.lib.fileset.toSource {
             root = ./.;
             fileset = pkgs.lib.fileset.unions [
               ./Cargo.toml
               ./Cargo.lock
-              ./crates
+              (pkgs.lib.fileset.difference ./crates ./crates/scootbg/fuzz)
             ];
           };
 

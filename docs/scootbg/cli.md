@@ -105,8 +105,9 @@ wins**: a `set` or `clear` sent while an earlier image is still decoding is
 never undone when that image finishes; the earlier `set` changes nothing
 and returns 0 once the newer one is on screen, as a replaced color's `set`
 does. Exit status: 0 done; 1 no daemon running,
-unknown output, image that cannot be shown, or drawing failed (the
-daemon's stderr says why); 2 usage error, a malformed color or an unknown
+unknown output, image that cannot be shown, or drawing failed
+(`scootbg query`'s `draw_error` says why, as the daemon's stderr does);
+2 usage error, a malformed color or an unknown
 `--mode`/`--filter` included.
 
 ## What it costs
@@ -254,8 +255,8 @@ simply waits. `scootbg query` answers, on one line (wrapped here):
  "logical":{"width":2560,"height":1440},
  "surface":{"state":"configured","size":{"width":2560,"height":1440},
             "scale":1.5,"pixels":{"width":3840,"height":2160}},
- "draw_failed":false,"shows":{"color":"#1e1e2e"}}],"saving":true,
- "profile":"default"}
+ "draw_failed":false,"draw_error":null,"shows":{"color":"#1e1e2e"}}],
+ "saving":true,"profile":"default"}
 ```
 
 Every key is always present, `null` when not known yet. `mode` is in
@@ -281,7 +282,10 @@ or `null` for nothing. `draw_failed` is `true` when the last attempt to
 draw what the output should show failed (an image that exists but cannot
 be decoded, a buffer too large; stderr says why), which tells that `null`
 apart from a `clear`; the next request for the output, or a new size,
-retries. `saving` (after the list) is `false` while `set` and `clear` are
+retries. `draw_error` says why while `draw_failed` is `true` (the error
+the daemon's stderr gives, such as `"no such file"` or `"shared memory:
+Cannot allocate memory (os error 12)"`), and is `null` otherwise; it is
+for a person or an agent to read, and its wording may change. `saving` (after the list) is `false` while `set` and `clear` are
 not saved for the next start (see [Restore](#restore)), and `profile` is the profile
 whose state is restored and saved. New keys
 may be added; none changes meaning within protocol 1. If the daemon cannot

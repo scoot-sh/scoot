@@ -101,7 +101,7 @@ but that is an estimate, not a measurement.
     `crates/scoot-ipc/` on scootbg's CI path (§5).
   - Weigh the release binary with `cargo build --release -p scootbg`,
     never `--workspace`, which unifies features.
-- **[testing.md](../testing.md): fuzz decode + scale ourselves.**
+- **[testing-done.md](testing-done.md): fuzz decode + scale ourselves.**
   `pic-scale-safe` has no upstream fuzzing. Its `forbid(unsafe_code)`
   turns a bug into a panic rather than memory corruption, and a panic
   aborts the daemon.

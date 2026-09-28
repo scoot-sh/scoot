@@ -484,6 +484,12 @@ fn a_restored_image_that_cannot_be_drawn_says_so() {
     session.query_until("the draw failed", |o| {
         o.len() == 1 && o[0]["draw_failed"] == true && o[0]["shows"].is_null()
     });
+    let why = session.query()["outputs"][0]["draw_error"].clone();
+    assert!(
+        why.as_str()
+            .is_some_and(|why| why.contains("truncated or corrupt")),
+        "draw_error: {why}"
+    );
     ok(&session, &["set", GREEN]);
     shows(&session, &[(names[0].as_str(), color(GREEN))]);
     assert_eq!(session.query()["outputs"][0]["draw_failed"], false);

@@ -297,7 +297,7 @@ fn a_new_scale_retries_a_failed_draw() {
     let output = &mut outputs.get_mut(id).unwrap().output;
     let _ = output.configure(1, 1067, 667);
     let wanted = image();
-    output.draw_failed();
+    output.draw_failed("a test".into());
     assert_eq!(output.plan(Some(&wanted), output.scale()), Plan::Nothing);
     assert_eq!(
         output.progress(Some(&wanted), output.scale()),
@@ -313,13 +313,13 @@ fn a_new_scale_retries_a_failed_draw() {
         output.plan(Some(&wanted), output.scale()),
         Plan::Show(_)
     ));
-    output.draw_failed();
+    output.draw_failed("a test".into());
     assert!(output.prefer_buffer_scale(3));
     assert!(matches!(
         output.plan(Some(&wanted), output.scale()),
         Plan::Show(_)
     ));
-    output.draw_failed();
+    output.draw_failed("a test".into());
     // `wl_output.scale` too; a `done` that changes nothing does not.
     output.done();
     assert_eq!(
