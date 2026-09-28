@@ -54,22 +54,65 @@ pub(super) fn live(test: &str) -> Option<Live> {
 /// [`live`] with its own `appearance` -- for the one suite that is about
 /// the ring and the rounded clip.
 pub(super) fn live_with(test: &str, appearance: Appearance) -> Option<Live> {
-    live_built(test, appearance, 1)
+    live_built(test, appearance, 1, Shape::default())
+}
+
+/// [`live`] on an output at `[output] scale = scale`: [`CANVAS`] physical
+/// pixels square, `CANVAS / scale` logical -- for the scale suite.
+pub(super) fn live_scaled(test: &str, scale: f64) -> Option<Live> {
+    live_built(
+        test,
+        appearance(),
+        1,
+        Shape {
+            scale,
+            ..Shape::default()
+        },
+    )
+}
+
+/// What a fixture's one output (or first of several) looks like, and --
+/// for the benchmark that compares X scales on one output scale only --
+/// the client scale XWayland is given in place of the one scoot derives.
+/// `extra` is more outputs, `(width, height)` in physical pixels, each
+/// added to the right of the last before XWayland starts -- for the suite
+/// about layouts too wide for X at their integer scale.
+pub(super) struct Shape {
+    pub(super) canvas: i32,
+    pub(super) scale: f64,
+    pub(super) client_scale: Option<f64>,
+    pub(super) extra: &'static [(i32, i32)],
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Self {
+            canvas: CANVAS,
+            scale: 1.0,
+            client_scale: None,
+            extra: &[],
+        }
+    }
+}
+
+/// [`live`] with its output shaped by `shape`.
+pub(super) fn live_shaped(test: &str, shape: Shape) -> Option<Live> {
+    live_built(test, appearance(), 1, shape)
 }
 
 /// [`live`] with `outputs` headless outputs side by side, each [`CANVAS`]
 /// square, all created before the peer connects (so its registry lists
 /// every one, in id order) -- for the per-output suites.
 pub(super) fn live_on(test: &str, outputs: i32) -> Option<Live> {
-    live_built(test, appearance(), outputs)
+    live_built(test, appearance(), outputs, Shape::default())
 }
 
-fn live_built(test: &str, appearance: Appearance, outputs: i32) -> Option<Live> {
+fn live_built(test: &str, appearance: Appearance, outputs: i32, shape: Shape) -> Option<Live> {
     if !xwayland_on_path() {
         eprintln!("{test}: skipped -- no Xwayland binary on PATH");
         return None;
     }
-    let mut fixture: Fixture = Harness::headless(appearance, CANVAS);
+    let mut fixture: Fixture = Harness::headless_scaled(appearance, shape.canvas, shape.scale);
     for index in 2..=outputs {
         crate::compositor::headless::add_output(
             &mut fixture.state,
@@ -79,9 +122,28 @@ fn live_built(test: &str, appearance: Appearance, outputs: i32) -> Option<Live> 
         )
         .expect("another headless output");
     }
+    for (index, &(width, height)) in shape.extra.iter().enumerate() {
+        crate::compositor::headless::add_output(
+            &mut fixture.state,
+            &format!("wide-{index}"),
+            width,
+            height,
+        )
+        .expect("another headless output");
+    }
     fixture.spawn(peer);
     let handle = fixture.state.loop_handle.clone();
     let display = super::super::start(handle, &mut fixture.state).expect("XWayland should start");
+    // Before the first dispatch, as `start` sets its own.
+    if let Some(client_scale) = shape.client_scale
+        && let Some(data) = fixture
+            .state
+            .xwayland_client
+            .as_ref()
+            .and_then(|client| client.get_data::<smithay::xwayland::XWaylandClientData>())
+    {
+        data.compositor_state.set_client_scale(client_scale);
+    }
     wait_until(&mut fixture, "XWayland READY", |fixture| {
         fixture.state.xwm.is_some()
     });

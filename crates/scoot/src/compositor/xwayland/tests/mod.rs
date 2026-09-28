@@ -67,6 +67,89 @@ fn x11_text_is_cut_at_the_first_nul() {
     assert_eq!(x11_text("x".repeat(MAX_X11_TEXT)).len(), MAX_X11_TEXT);
 }
 
+/// The X wire limits in logical pixels (see `manage::x_rect`): at X scale
+/// `s`, every clamped value times `s` is inside `INT16` (positions) and
+/// `1..=32767` (sizes), and the bound is the largest that is. Scale 1 is
+/// the limits themselves; a scale below 1 (unreachable: the X scale is at
+/// least 1) is treated as 1 rather than dividing by zero.
+#[cfg(feature = "xwayland")]
+#[test]
+fn x_wire_limits_shrink_by_the_x_scale() {
+    use super::manage::{x_dimension, x_rect};
+
+    for scale in [0, 1, 2, 3, 4] {
+        let s = scale.max(1);
+        let far = x_rect(i32::MAX, i32::MIN, i32::MAX, i32::MIN, scale);
+        let (x, y) = (far.loc.x * s, far.loc.y * s);
+        let w = far.size.w * s;
+        assert!(
+            x <= i32::from(i16::MAX) && x + s > i32::from(i16::MAX),
+            "{scale}: x {x}"
+        );
+        assert!(
+            y >= i32::from(i16::MIN) && y - s < i32::from(i16::MIN),
+            "{scale}: y {y}"
+        );
+        assert!(w <= 32_767 && w + s > 32_767, "{scale}: w {w}");
+        assert_eq!(far.size.h, 1, "{scale}: a size is at least 1");
+        assert_eq!(x_dimension(u32::MAX, scale) * s, w, "{scale}");
+        assert_eq!(x_dimension(0, scale), 1, "{scale}");
+        assert_eq!(x_dimension(100, scale), 100, "{scale}");
+        // Inside the limits, nothing moves.
+        let near = x_rect(-10, 20, 300, 400, scale);
+        assert_eq!(
+            (near.loc.x, near.loc.y, near.size.w, near.size.h),
+            (-10, 20, 300, 400)
+        );
+    }
+    assert_eq!(x_rect(i32::MAX, 0, 1, 1, 1).loc.x, i32::from(i16::MAX));
+    assert_eq!(x_rect(i32::MIN, 0, 1, 1, 2).loc.x, -16_384);
+}
+
+/// The scale X draws at, and what toolkits are told: `ceil` of the output
+/// scale (the `wl_output.scale` integer), never below 1, and the settings a
+/// GNOME settings daemon would publish for it.
+#[cfg(feature = "xwayland")]
+#[test]
+fn the_x_scale_is_the_integer_above_and_toolkits_hear_it() {
+    use smithay::xwayland::xwm::settings::Value;
+
+    use super::scale::{toolkit_settings, x_scale};
+    use crate::compositor::output_scale::integer_scale;
+
+    for (output, x) in [
+        (0.5, 1),
+        (1.0, 1),
+        (1.25, 2),
+        (1.5, 2),
+        (2.0, 2),
+        (2.5, 3),
+        (4.0, 4),
+    ] {
+        assert_eq!(x_scale(integer_scale(output)), x, "at {output}");
+    }
+    assert_eq!(x_scale(0), 1);
+    let integers = |scale| -> Vec<(String, i32)> {
+        toolkit_settings(scale)
+            .into_iter()
+            .map(|(name, value)| match value {
+                Value::Integer(value) => (name, value),
+                other => panic!("{name} is not an integer: {other:?}"),
+            })
+            .collect()
+    };
+    assert_eq!(
+        integers(2),
+        [
+            ("Gdk/WindowScalingFactor".to_owned(), 2),
+            ("Xft/DPI".to_owned(), 196_608),
+            ("Gdk/UnscaledDPI".to_owned(), 98_304),
+        ]
+    );
+    assert_eq!(integers(1)[1], ("Xft/DPI".to_owned(), 98_304));
+    assert_eq!(integers(4)[1], ("Xft/DPI".to_owned(), 393_216));
+}
+
 #[test]
 fn display_value_is_the_local_colon_form() {
     // What X clients expect for a local server (the spike measured
@@ -805,6 +888,10 @@ mod peer;
 mod press_after_crossing;
 #[cfg(feature = "xwayland")]
 mod refused_cost;
+#[cfg(feature = "xwayland")]
+mod scale;
+#[cfg(feature = "xwayland")]
+mod scale_fit;
 #[cfg(all(feature = "xwayland", feature = "gpu-scanout"))]
 mod scanout;
 #[cfg(feature = "xwayland")]

@@ -834,7 +834,11 @@ scale/mode) into one hardware session.
   (RESOLVED 2026-09-28: an X app's titlebar drag moves a floating X
   window; its cancel is [split out](./protocols/xwayland-net-wm-moveresize-cancel.md)),
   [`_NET_WM_ICON`](./protocols/xwayland-net-wm-icon.md),
-  [scale-aware X windows](./protocols/xwayland-scale-aware.md). The [WM-failure
+  [scale-aware X windows](./resolved/xwayland-scale-aware-done.md)
+  (RESOLVED 2026-09-28: X draws at `ceil(scale)`, toolkits told over
+  XSETTINGS, live across a reload; follow-up, low:
+  [choose sharp or light X apps at a fractional scale](./protocols/xwayland-fractional-scale-choice.md),
+  default sharp). The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its
   rival-claimant recipe cannot work: XWayland admits no X client before the
   WM attaches). [Bind startup-id redemption to the spawned

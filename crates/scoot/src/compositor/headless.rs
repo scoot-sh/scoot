@@ -260,6 +260,12 @@ pub fn add_output_with(
     // `resize_output`): without this, a manager bound before this output
     // existed would never hear about it.
     state.refresh_output_heads();
+    // A wider layout can outgrow X's coordinates at the X scale: re-chosen
+    // before `apply()` configures any X window (see `xwayland/scale.rs`).
+    // XWayland binds this output's global only at the next dispatch, so it
+    // binds it in the scale chosen here.
+    #[cfg(feature = "xwayland")]
+    state.refit_xwayland();
     // The core lays out against one more output now, and `apply()` is what
     // pushes that arrangement onto the windows; it ends in `request_render()`.
     state.apply();
@@ -294,6 +300,8 @@ pub(crate) fn add_output_without_backend(
     state
         .world
         .handle_event(CoreEvent::OutputAdded { id, area });
+    #[cfg(feature = "xwayland")]
+    state.refit_xwayland();
     state.restore_displaced(id);
     id
 }
@@ -1118,6 +1126,11 @@ impl State {
         // has nothing to repack (it sits at the origin), and its wire traffic
         // stays exactly what the resize alone sends.
         self.repack_outputs();
+        // The layout is final: the X scale for it (see `xwayland/scale.rs`),
+        // before anything below -- `refresh_layer_zone`'s `apply()` or the
+        // closing one -- configures an X window.
+        #[cfg(feature = "xwayland")]
+        self.refit_xwayland();
         // The logical rectangle the core and the `Space` both work in -- see
         // `output_scale.rs`'s `logical_size`, and `init`'s comment on why the
         // core must never be handed the physical size. At the output's own
@@ -1210,7 +1223,8 @@ impl State {
     /// backends). Lock surfaces are reconfigured to their output's new
     /// logical size and layer surfaces re-arranged against it, the same two
     /// steps a resize runs; output-management heads and capture constraints
-    /// are refreshed from the same sites. The caller runs `apply()` after,
+    /// are refreshed from the same sites, and the X scale re-chosen for the
+    /// new layout (`State::refit_xwayland`). The caller runs `apply()` after,
     /// which pushes the re-derived arrangement onto the windows and renders.
     ///
     /// A move crosses two stores that must agree: the Space-side location
@@ -1306,6 +1320,12 @@ impl State {
                 area: *area,
             });
         }
+        // The X scale for the new layout and the new integer (see
+        // `xwayland/scale.rs`): after the outputs are laid out, since the
+        // layout's logical extent bounds it too, and before
+        // `refresh_layer_zone` below can `apply()`.
+        #[cfg(feature = "xwayland")]
+        self.refit_xwayland();
         // The scale changed, so every output-management client is a scale, a
         // mode and a `done` behind; captures re-read sizes that did not move
         // (a no-op that keeps this path from drifting from the resize one);
@@ -1356,7 +1376,8 @@ impl State {
     /// by side, the session-lock wait forgets it (and confirms if it was the
     /// only screen still owing a blank), the pointer is brought back inside
     /// the desktop, and one refresh of heads, capture constraints, layer
-    /// zones and keyboard focus plus an `apply()` tells everyone the rest.
+    /// zones, keyboard focus and the X scale plus an `apply()` tells
+    /// everyone the rest.
     /// The `wlr-output-management` head is retired by that refresh.
     ///
     /// Cold: a hotplug path. A few small `Vec`s.
@@ -1497,6 +1518,12 @@ impl State {
             );
         }
         self.repack_outputs();
+        // A narrower layout may fit X at a higher X scale again (see
+        // `xwayland/scale.rs`): re-chosen now the layout is final, before
+        // `refresh_layer_zone` or the `apply()` below configures an X
+        // window.
+        #[cfg(feature = "xwayland")]
+        self.refit_xwayland();
         if self.session_lock.forget_output(id, self.outputs.len()) {
             tracing::debug!(
                 "session lock confirmed: the only output still owing a blank went away"

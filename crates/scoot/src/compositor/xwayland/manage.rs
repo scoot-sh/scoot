@@ -62,8 +62,12 @@
 //!   documents for xdg). `WM_NORMAL_HINTS` carries the minimum instead. A
 //!   floating X window's frames are reported, so the core places it at the
 //!   size it drew.
-//! - **Scale.** X clients draw at scale 1; at a fractional `[output]
-//!   scale` they are upscaled like any scale-unaware client.
+//! - **Scale.** Everything here is in logical pixels, as it is for an xdg
+//!   window: Smithay converts to and from the X server's pixels at the X
+//!   scale (`scale.rs`), including the `USPosition` a floating window keeps
+//!   -- X clients compute it in root X pixels, and Smithay hands it over
+//!   divided. The one place the scale shows is the X wire limits, which
+//!   are X pixels and so shrink in logical ones ([`x_limits`]).
 //!
 //! What is not honoured yet: `_NET_WM_ICON`; XIM is not provided.
 //! A client-side titlebar drag (`_NET_WM_MOVERESIZE`) is `moveresize.rs`'s.
@@ -80,9 +84,27 @@ use super::super::toplevel_cap::MAX_X11_TOPLEVELS_PER_CLIENT;
 use super::super::window_rules::{Decision, MapSignals};
 use super::focus::x_client_key;
 
-/// The largest window dimension an X server accepts. The wire field is a
-/// `CARD16`, but servers refuse anything past `SHRT_MAX` (`BadValue`).
+/// The largest window dimension an X server accepts, in X pixels. The wire
+/// field is a `CARD16`, but servers refuse anything past `SHRT_MAX`
+/// (`BadValue`). At an X scale above 1 (see `scale.rs`) Smithay multiplies
+/// every logical size by the scale on the way out, so the logical bound is
+/// this divided by it: see [`x_limits`].
 const X_MAX_SIZE: i32 = i16::MAX as i32;
+
+/// The `INT16` position range and the largest size, in logical pixels,
+/// that stay inside the X wire limits once Smithay multiplies them by the
+/// X `scale` (at least 1): `(lowest, highest, largest)`. Integer division
+/// truncates toward zero, so each bound times `scale` stays inside its X
+/// limit (`-32768 / 3 = -10922`, `* 3 = -32766`); at scale 1 they are the X
+/// limits themselves.
+fn x_limits(scale: i32) -> (i32, i32, i32) {
+    let scale = scale.max(1);
+    (
+        i32::from(i16::MIN) / scale,
+        i32::from(i16::MAX) / scale,
+        X_MAX_SIZE / scale,
+    )
+}
 
 /// The app id an X window is known by: its `WM_CLASS` *class* (the second
 /// string -- `XTerm` for `xterm`), falling back to the instance (the first)
@@ -156,30 +178,40 @@ pub(in crate::compositor) fn x11_text(mut text: String) -> String {
     text
 }
 
-/// A rectangle an X server will accept: position in `INT16`, size in
-/// `1..=`[`X_MAX_SIZE`]. Every configure scoot sends goes through this, so
-/// no layout rect -- a column scrolled far off screen, a client- or
+/// A logical rectangle an X server will accept at X `scale`: once
+/// multiplied by it, position in `INT16` and size in `1..=`[`X_MAX_SIZE`]
+/// (see [`x_limits`]). Every configure scoot sends goes through this, so no
+/// layout rect -- a column scrolled far off screen, a client- or
 /// config-derived size -- can wrap on the wire or draw a `BadValue`.
-fn x_rect(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Logical> {
-    let coordinate = |value: i32| value.clamp(i32::from(i16::MIN), i32::from(i16::MAX));
+pub(in crate::compositor) fn x_rect(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    scale: i32,
+) -> Rectangle<i32, Logical> {
+    let (lowest, highest, largest) = x_limits(scale);
+    let coordinate = |value: i32| value.clamp(lowest, highest);
     Rectangle::new(
         (coordinate(x), coordinate(y)).into(),
-        (w.clamp(1, X_MAX_SIZE), h.clamp(1, X_MAX_SIZE)).into(),
+        (w.clamp(1, largest), h.clamp(1, largest)).into(),
     )
 }
 
-/// A client-supplied dimension, as the core and the wire both need it.
-fn x_dimension(value: u32) -> i32 {
-    i32::try_from(value)
-        .unwrap_or(X_MAX_SIZE)
-        .clamp(1, X_MAX_SIZE)
+/// A client-supplied dimension -- logical already (Smithay divides a
+/// configure request by the X scale) -- as the core and the wire both need
+/// it at X `scale`.
+pub(in crate::compositor) fn x_dimension(value: u32, scale: i32) -> i32 {
+    let largest = x_limits(scale).2;
+    i32::try_from(value).unwrap_or(largest).clamp(1, largest)
 }
 
 /// The size an X window is right now: what it was last configured to, which
 /// for an X window is what it is (the server resizes synchronously).
-fn x11_size(window: &X11Surface) -> Size {
+fn x11_size(window: &X11Surface, scale: i32) -> Size {
+    let largest = x_limits(scale).2;
     let size = window.last_configure().size;
-    Size::new(size.w.clamp(1, X_MAX_SIZE), size.h.clamp(1, X_MAX_SIZE))
+    Size::new(size.w.clamp(1, largest), size.h.clamp(1, largest))
 }
 
 /// Whether Smithay can derive this window's geometry without overflowing.
@@ -310,7 +342,9 @@ impl State {
         self.open_window(id, focus);
         let decision = self.x11_map_decision(&window);
         if decision.float {
-            let size = decision.size.unwrap_or_else(|| x11_size(&window));
+            let size = decision
+                .size
+                .unwrap_or_else(|| x11_size(&window, self.x11_scale()));
             self.world.handle_event(Event::FloatingRequested {
                 id,
                 floating: true,
@@ -440,15 +474,17 @@ impl State {
         w: Option<u32>,
         h: Option<u32>,
     ) {
+        let scale = self.x11_scale();
+        let dimension = |value| x_dimension(value, scale);
         if let Some(id) = self.id_of_x11(window) {
             if (w.is_some() || h.is_some())
                 && self.world.is_floating(id)
                 && !self.world.is_fullscreen(id)
             {
-                let current = x11_size(window);
+                let current = x11_size(window, scale);
                 let size = Size::new(
-                    w.map_or(current.w, x_dimension),
-                    h.map_or(current.h, x_dimension),
+                    w.map_or(current.w, dimension),
+                    h.map_or(current.h, dimension),
                 );
                 // Directly on the core, like the map-time placement: the
                 // window's own doing. Clamped there to its hints and its
@@ -471,8 +507,9 @@ impl State {
         let rect = x_rect(
             x.unwrap_or(current.loc.x),
             y.unwrap_or(current.loc.y),
-            w.map_or(current.size.w, x_dimension),
-            h.map_or(current.size.h, x_dimension),
+            w.map_or(current.size.w, dimension),
+            h.map_or(current.size.h, dimension),
+            scale,
         );
         if let Err(error) = window.configure(rect) {
             tracing::debug!(id = window.window_id(), %error, "could not configure an unmapped X11 window");
@@ -592,6 +629,7 @@ impl State {
     /// of `apply()`, before the arrangement is read; a map lookup per X
     /// window, and a core event only in that rare case.
     pub(in crate::compositor) fn size_undrawn_x11_floats(&mut self) {
+        let scale = self.x11_scale();
         for (&id, window) in &self.windows {
             let Some(x11) = window.x11_surface() else {
                 continue;
@@ -599,7 +637,7 @@ impl State {
             if let Some((drawn, None)) = self.world.floating_size(id)
                 && drawn == Size::default()
             {
-                let size = x11_size(x11);
+                let size = x11_size(x11, scale);
                 self.world.handle_event(Event::FrameObserved {
                     id,
                     requested: Size::default(),
@@ -613,8 +651,15 @@ impl State {
 /// `apply()`'s X half for one placement: the fullscreen property always,
 /// and -- for a visible placement -- the configure, only when it differs
 /// from the one the window last had (so an `apply()` that moved nothing
-/// costs no X traffic).
-pub(in crate::compositor) fn configure_x11(window: &X11Surface, placement: &scoot_core::Placement) {
+/// costs no X traffic). `scale` is the X scale (`State::x11_scale`): the
+/// comparison is in logical pixels, where Smithay keeps `last_configure`,
+/// so a change that moves the X scale re-sends every configure itself (see
+/// `State::refit_xwayland`).
+pub(in crate::compositor) fn configure_x11(
+    window: &X11Surface,
+    placement: &scoot_core::Placement,
+    scale: i32,
+) {
     if let Err(error) = window.set_fullscreen(placement.fullscreen) {
         tracing::debug!(id = window.window_id(), %error, "could not set an X11 window's fullscreen state");
     }
@@ -624,7 +669,7 @@ pub(in crate::compositor) fn configure_x11(window: &X11Surface, placement: &scoo
     let size = placement
         .requested
         .unwrap_or(Size::new(placement.rect.w, placement.rect.h));
-    let rect = x_rect(placement.rect.x, placement.rect.y, size.w, size.h);
+    let rect = x_rect(placement.rect.x, placement.rect.y, size.w, size.h, scale);
     if window.last_configure() == rect {
         return;
     }

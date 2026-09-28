@@ -525,6 +525,21 @@ pub struct State {
     /// server.
     #[cfg(feature = "xwayland")]
     pub xwayland_grab: Option<xwayland::XWaylandKeyboardGrabState>,
+    /// XWayland's own Wayland client, from the spawn on: what its client
+    /// scale is set on, at the spawn and again when a reload moves the
+    /// scale (see `xwayland/scale.rs`). Left in place when the server dies
+    /// (setting a dead client's scale is harmless) and replaced by a restart.
+    #[cfg(feature = "xwayland")]
+    pub(in crate::compositor) xwayland_client: Option<smithay::reexports::wayland_server::Client>,
+    /// The scale X draws at -- XWayland's client scale -- and whether the
+    /// layout fits X's coordinates at it: `ceil([output] scale)`, or lower
+    /// where the whole layout would not fit X's 16-bit coordinates at that
+    /// (see `xwayland/scale.rs`). Chosen at the spawn and re-chosen by
+    /// `State::refit_xwayland` at every output-layout change; read on every
+    /// X configure through `State::x11_scale`. `XScale::UNSET` (1) until
+    /// the spawn.
+    #[cfg(feature = "xwayland")]
+    pub(in crate::compositor) x11_fit: xwayland::scale::XScale,
     /// The override-redirect X windows currently mapped -- menus, tooltips,
     /// drop-downs -- in mapping order, newest last (on top). Never in the
     /// core or the `Space`: they place themselves, and are drawn and
@@ -1175,6 +1190,10 @@ impl State {
             xdisplay: None,
             #[cfg(feature = "xwayland")]
             xwayland_grab: None,
+            #[cfg(feature = "xwayland")]
+            xwayland_client: None,
+            #[cfg(feature = "xwayland")]
+            x11_fit: xwayland::scale::XScale::UNSET,
             #[cfg(feature = "xwayland")]
             x11_unmanaged: Vec::new(),
             #[cfg(feature = "xwayland")]

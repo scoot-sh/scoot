@@ -137,7 +137,7 @@ each item's own file records why it landed when it did.
   build. Three small follow-ups split out, all low:
   [`_NET_WM_MOVERESIZE`](docs/backlog/resolved/xwayland-net-wm-moveresize-done.md) (since resolved),
   [`_NET_WM_ICON`](docs/backlog/protocols/xwayland-net-wm-icon.md),
-  [scale-aware X windows](docs/backlog/protocols/xwayland-scale-aware.md).
+  [scale-aware X windows](docs/backlog/resolved/xwayland-scale-aware-done.md) (since resolved).
 
 - **[Reactive popup re-constraining](docs/backlog/resolved/popup-reactive-reconstrain-done.md)**
   (2026-09-27, PR #295) — a `reactive` popup is re-constrained when its

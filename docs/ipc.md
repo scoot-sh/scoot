@@ -338,7 +338,11 @@ to report, because locking dismisses any open one and refuses new ones.
 logical * scale`, rounded down where a rectangle's edge lands mid-pixel (the
 logical size is `ceil(physical / scale)`, so a full-output `logical * scale`
 can overshoot by under one pixel). `outputs` reports each output's `scale`
-for exactly this.
+for exactly this. X windows (`--xwayland`) follow the same rule: their
+`rect` is logical and a click at a logical point lands on the X widget
+drawn there, whatever the scale -- the X server's own pixels (`ceil(scale)`
+per logical pixel, see [protocols.md](protocols.md#x-windows-in-the-layout))
+are never what an agent reads or sends.
 
 **A pointer lock freezes injected motion, and still answers `ok`.** While a
 client holds an active pointer lock (`zwp_pointer_constraints_v1` — a game or

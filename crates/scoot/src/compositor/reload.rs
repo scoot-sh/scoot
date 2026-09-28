@@ -428,6 +428,8 @@ impl State {
             ScaleReload::Apply => {
                 self.output_scale = fresh.scale;
                 self.integer_scale = integer_scale(fresh.scale);
+                // Re-chooses the X scale too, once the new layout is in
+                // place (see `xwayland/scale.rs`).
                 self.rescale_outputs(fresh.scale);
                 self.resend_output_scale();
                 report.applied.push(field::SCALE.to_owned());

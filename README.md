@@ -173,8 +173,7 @@ Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
 
 - **Per-monitor settings.** Multiple monitors work, but they share one
   scale and resolution and line up left to right.
-- **Some X11 extras.** X input methods (XIM), scaling X apps (they draw
-  at scale 1) and X window icons.
+- **Some X11 extras.** X input methods (XIM) and X window icons.
 - **A macOS version.** On a Mac you can build `scootctl`, to drive scoot
   in a Linux VM.
 
