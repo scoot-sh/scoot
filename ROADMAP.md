@@ -376,8 +376,9 @@ each item's own file records why it landed when it did.
   action to scoot's one); the doc says so row by row. Found on the way:
   [GLES captures keep a frame each while nothing redraws](docs/backlog/resolved/gles-capture-leaks-a-frame-per-shot-done.md)
   (high: 885 MB after 120 static-screen captures; fixed by PR #238, above) and
-  [a nested frame-rate shortfall](docs/backlog/core/nested-frame-rate-vs-client.md)
-  (low). The real-GPU and `--tty` half is `Asahi.md` Test 9, **run
+  [a nested frame-rate shortfall](docs/backlog/resolved/nested-frame-rate-vs-client-done.md)
+  (low; resolved 2026-09-28 as a measured don't-build: own-timer pacing,
+  client-limited, nothing to fix). The real-GPU and `--tty` half is `Asahi.md` Test 9, **run
   2026-09-25** on an Apple M2: there, scoot's GPU tier used the least total
   CPU of the three for relayout and pointer motion on the panel (relayout
   at 2.7% of a core against niri's 4.6–4.9%, pointer motion at 9.2–9.6%
