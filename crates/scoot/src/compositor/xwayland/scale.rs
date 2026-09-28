@@ -60,9 +60,12 @@
 //! The X server drawing at `S` only gives an X app `S` times the pixels;
 //! the app has to draw bigger in them, or it comes out `S` times smaller.
 //! Toolkits learn the scale from XSETTINGS -- what a GNOME session's
-//! settings daemon publishes, and what GTK 3/4, Qt 5/6 and Java read live
-//! from the window manager's `_XSETTINGS_S0` -- through Smithay's
-//! `X11Wm::set_xsettings`: [`toolkit_settings`]. Not environment variables:
+//! settings daemon publishes, read from the window manager's
+//! `_XSETTINGS_S0` (GTK measured to follow them live; Qt 6 and Java
+//! document reading them, unmeasured; Qt 5 takes only the font DPI unless
+//! the app enables high-DPI scaling) -- through Smithay's
+//! `X11Wm::set_xsettings`: [`toolkit_settings`]. An XSETTINGS daemon that
+//! takes `_XSETTINGS_S0` over replaces them. Not environment variables:
 //! `GDK_SCALE` pins GTK against the live setting (so a reload could never
 //! reach it), and `QT_SCALE_FACTOR` would scale a Qt app that runs on
 //! Wayland a second time -- `State::spawn` cannot know which a child is.
@@ -77,8 +80,9 @@
 //!
 //! # A scale-1 session is untouched
 //!
-//! At `S = 1` the client scale is set to the 1.0 it already was and no
-//! XSETTINGS entry is written: nothing an X client or toolkit reads
+//! At `S = 1` from startup the client scale is set to the 1.0 it already
+//! was and no XSETTINGS entry is written (a reload back to 1 does write
+//! them, at 1, so the old ones do not linger): nothing an X client or toolkit reads
 //! differs from the session before any of this existed (pinned:
 //! `tests/scale.rs`'s `a_scale_1_session_is_untouched`).
 //!
@@ -86,8 +90,8 @@
 //!
 //! [`State::rescale_xwayland`] sets the new client scale before the
 //! outputs are re-advertised (so XWayland resizes its X screen to the new
-//! X pixels), publishes the new toolkit settings -- GTK, Qt and Java
-//! rescale live off them -- and reconfigures every managed X window into
+//! X pixels), publishes the new toolkit settings -- GTK rescales live off
+//! them -- and reconfigures every managed X window into
 //! its new X pixels at its unchanged logical place. An app that read the
 //! scale once at startup keeps drawing at its old scale in the new pixels
 //! (smaller or bigger by the ratio) until it is restarted; its geometry is

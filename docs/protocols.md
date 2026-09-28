@@ -605,8 +605,16 @@ its startup id by another X client, below.)
   drawn at the integer above (2) and scaled down, like a Wayland client
   rendering at `ceil`. Toolkits are told the scale over XSETTINGS (the
   settings a GNOME session publishes: `Gdk/WindowScalingFactor`,
-  `Xft/DPI`, `Gdk/UnscaledDPI`), which GTK 3/4, Qt 5/6 and Java read --
-  so they draw at the right size, and follow a reload live. An X app that
+  `Xft/DPI`, `Gdk/UnscaledDPI`). GTK 3 is measured to draw at the right
+  size and follow a reload live. Qt 6 and Java document reading these
+  settings (Qt 6 takes `Xft/DPI` and its default high-DPI scaling turns
+  that into a device pixel ratio of 2 at scale 2) but neither is measured
+  here; Qt 5 gets scaled fonts only, unless the app turns on high-DPI
+  scaling itself. scoot's window manager owns the `_XSETTINGS_S0`
+  selection these are published on (it always has); an XSETTINGS daemon
+  the user runs (`xsettingsd`, `gsd-xsettings`) that takes the selection
+  over replaces them, and scoot's scale no longer reaches X apps -- set
+  the scale in that daemon instead. An X app that
   reads none of them (bare Xlib: `xterm`'s default bitmap fonts, `xclock`,
   Wine, Steam's own UI) draws at scale 1 in X pixels and comes out
   `ceil(scale)` times smaller: sharp but small, the trade-off every
@@ -617,8 +625,9 @@ its startup id by another X client, below.)
   -- and the X server gets them in X pixels: a `pointer click` at a logical
   point lands on the X widget drawn there, a dialog's `USPosition` (X
   pixels) is kept at the logical point it names, a drag's `XdndPosition` is
-  in X root pixels. At scale 1 (every headless, webtop and VM session)
-  nothing is set and nothing changes. **A reload** that moves `ceil(scale)`
+  in X root pixels. At the default scale 1 nothing is set and nothing
+  changes (a reload from a higher scale back to 1 does write the settings,
+  at 1, so the old ones do not linger). **A reload** that moves `ceil(scale)`
   re-tells the X server and the toolkits, and reconfigures every X window
   into the new X pixels at its unchanged logical place; an app that read
   the scale once at startup draws at its old scale until restarted (its
