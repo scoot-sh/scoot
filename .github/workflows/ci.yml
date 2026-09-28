@@ -520,6 +520,64 @@ jobs:
           # the next run's restore cannot predict.
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
+  # The GPU tier and XWayland together (`packages.scoot-gpu-xwayland`,
+  # `--features gpu-scanout,xwayland`): the Linux job builds each feature on
+  # its own, never both, so a break that only the pair shows -- Smithay's
+  # feature unification, a `cfg` that assumes one feature means the other is
+  # off -- would reach users of that package unseen. A separate job so it runs
+  # in parallel with `linux` and adds no wall-clock time (it is a fraction of
+  # that job's length), and only when the compositor could have changed.
+  # A compile-and-lint of every target, tests included, not a release build:
+  # the risk is the pair failing to compile, and `nix build` of the package
+  # is a full release build this does not repeat -- `nix eval` below checks
+  # the package still resolves with both features.
+  gpu-xwayland:
+    name: Linux (gpu-scanout + xwayland)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.scoot != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # Restore only, from the `linux` job's entries: every dependency but
+      # Smithay and scoot (which this feature pair rebuilds anyway) comes
+      # from there. Never saved -- a second cache line would push the repo
+      # past GitHub's 10 GB budget (see the `linux` job's save step).
+      - name: Restore the cargo cache (the linux job's, read-only)
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+          restore-keys: |
+            linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            linux-cargo-
+
+      - name: nix eval .#scoot-gpu-xwayland builds with both features
+        run: |
+          features=$(nix eval --raw .#packages.x86_64-linux.scoot-gpu-xwayland.cargoBuildFeatures --apply 'f: builtins.concatStringsSep " " f')
+          echo "cargoBuildFeatures: $features"
+          case " $features " in
+            *" gpu-scanout "*) ;;
+            *) echo "::error title=scoot-gpu-xwayland lost gpu-scanout::features: $features"; exit 1 ;;
+          esac
+          case " $features " in
+            *" xwayland "*) ;;
+            *) echo "::error title=scoot-gpu-xwayland lost xwayland::features: $features"; exit 1 ;;
+          esac
+
+      - name: cargo clippy -p scoot --all-targets --features gpu-scanout,xwayland
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo clippy -p scoot --all-targets --features gpu-scanout,xwayland -- -D warnings
+
   macos:
     # The compositor is Linux-only and the macOS package is `scootctl`, the
     # client that drives a compositor running elsewhere. Nobody builds
