@@ -600,13 +600,18 @@ be revisited.
   (2.0 fails like 1.5); real cause was `src: None` defaulting to logical
   size on physical-pixel strip buffers — explicit full-buffer `src` both
   strips, GLES fixed by the same change.
-- [dma-buf capture buffers for `ext-image-copy-capture-v1`](./protocols/screencopy-dmabuf-capture.md)
-  — filed out of milestone 6 stage 4, which was expected to cover it and
+- [dma-buf capture buffers for `ext-image-copy-capture-v1`](./resolved/screencopy-dmabuf-capture-done.md)
+  — RESOLVED 2026-09-28 (verdict-only, no code change): documented don't-build.
+  Filed out of milestone 6 stage 4, which was expected to cover it and
   should not have: importing a client's dma-buf and *rendering into* one are
-  different capabilities. Wants a write path that does not exist, the
-  renderer's `dmabuf_render_formats` rather than its import set, a `DrmNode`
-  the GPU-less target does not have, and a fix for the bound-target cache
-  eviction `dmabuf.rs` warns about. No measured client need yet.
+  different capabilities. All four blockers re-verified against current `main`
+  and the pinned fork rev `e7130254` (no write path in `deliver`, render vs
+  texture sets still differ, `DmabufConstraints` still needs a `DrmNode` the
+  GPU-less target lacks, the pixman cache-drain landmine still live) — and no
+  measured client need: `grim` captures into `wl_shm`, quickshell's
+  `ScreencopyView` captures into `wl_shm` off dmabuf-feedback readiness, and
+  the tree holds no other capture consumer. Reopen on a measured client need,
+  benchmarked against the shm path.
 - [README rewrite: helpful, concise, aimed at the user](./resolved/readme-rewrite-done.md)
   — RESOLVED 2026-09-20: the third item of this queue, worked as an audit +
   tightening pass rather than a rewrite (PR #132 had already given
@@ -668,7 +673,8 @@ optional GPU tier. pixman stays the default and GPU-free operation stays a
 hard requirement; this is "the GPU tier is complete and safe", not "GPU
 becomes the primary path". Work order: exporter → client fullscreen + format gate → candidates →
 capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
-`screencopy-dmabuf-capture` (above) stays gated on measured need.
+`screencopy-dmabuf-capture` (above) was gated on measured need, and closed
+2026-09-28 as a documented don't-build for lack of one.
 - [Widen the scanout framebuffer exporter](./resolved/gpu-direct-scanout-exporter-done.md) — RESOLVED 2026-09-22: `NodeFilter::All` (a `Node` filter is inert: client dma-bufs carry no node without v6 `set_sampling_device`); force/refusal halves pinned and watched firing live on the dev VM under an uncommitted `ANY`-bit experiment. Found the next gate instead of direct scanout: the swapchain format match.
 - [Primary-direct format gate](./resolved/gpu-primary-direct-format-gate-done.md) — RESOLVED 2026-09-23 (PR #228, with the candidates ticket's primary-plane half): a fullscreen window covering its output goes primary-direct, flags decided per frame (`ALLOW_SCANOUT | ANY` only for an eligible frame -- unlocked, covered, no capture stream, nothing translucent or rounded -- no primary bit on any other frame); a capture-streamed output stays composited (forcing per frame measured a net loss). Live on the dev VM at default config; ~50x less compositor CPU than llvmpipe compositing there.
 - [Honour client fullscreen](./resolved/client-fullscreen-done.md) — RESOLVED 2026-09-22: a per-window fullscreen state in `scoot-core` (covers the output while its column is focused, keeps its slot, restores exactly), wired to xdg `set_fullscreen`, the wlr request + state bit, IPC `toggle-fullscreen`/`set-fullscreen` and `Super+f`; the `top` layer is hidden from drawing, pointer and keyboard under it. Also fixed frame learning pairing a commit with the wrong configure.
