@@ -128,7 +128,7 @@ All captured on the dev VM (`ssh -p 2222 dev@localhost`), tree at branch
   target is still admittable per configure. Coalescing shrinks the
   window from per-pixel-step to per-frame; it does not bound the
   product. Honest, as the ticket asked.
-- **Multi-output** (`docs/backlog/core/multi-output.md`), **axis-guard
+- **Multi-output** (`docs/backlog/resolved/multi-output-superseded.md`), **axis-guard
   changes**, `screencopy-dmabuf-capture.md` (since resolved don't-build as
   `docs/backlog/resolved/screencopy-dmabuf-capture-done.md`): untouched.
 - **No README change**: internal perf fix, no new/changed config,

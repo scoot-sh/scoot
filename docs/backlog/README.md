@@ -523,22 +523,13 @@ at the user's direction. The `blocked:` field on each records that ordering;
 none of them is technically blocked, so the sequencing is a choice and can
 be revisited.
 
-- [Multi-output: more than one monitor at a time](./core/multi-output.md)
-  — **HIGH**, and almost certainly milestone-sized rather than
-  backlog-sized. `README.md`'s "Not yet" list leads with it. Its
-  [foundation](./resolved/multi-output-foundation-done.md) landed
-  2026-09-19: `State.output` is now an id-keyed collection, and `--headless
-  --outputs N` gives two virtual screens to test against, so what remains is
-  making the protocols correct across them. The scope is enumerated by
-  `outputs.rs`'s `Outputs::primary` doc (layer-shell wants four *different*
-  per-output behaviours, not one) and by `session-lock-per-output-done.md`,
-  which was resolved as single-output *pins* rather than as multi-output —
-  including that `locked` must wait for every output's blanked frame, which
-  is the security-relevant one. Promoted 2026-09-20 to **Milestone 19**
-  ([plan](../roadmap/19-multi-output.md), in progress, phases A–D
-  VM-testable, E hardware-gated) — this entry stays the detailed spec.
-  Phases A–F have landed (render, layer shell, lock, workspaces, moves),
-  E included (2026-09-25, `--tty` drives every connected monitor).
+- [Multi-output: more than one monitor at a time](./resolved/multi-output-superseded.md)
+  — SUPERSEDED 2026-09-28 (docs-only triage, no live gap): the original spec
+  is archived with a section-by-section landing map. The live tracker is
+  [Milestone 19](../roadmap/19-multi-output.md) (phases A–F done, E included
+  2026-09-25, `--tty` drives every connected monitor), and the one remaining
+  surface is the [remainder](./core/multi-output-remainder.md) below (open,
+  high: per-output scale/mode only).
 - [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
   — deliberately left out of milestone 19: design answered 2026-09-22
   (`[[outputs]]` config shape, per-output scale enumeration, apply/test
@@ -796,17 +787,20 @@ scale/mode) into one hardware session.
   0-based workspace, adoption and origin. Follow-up filed:
   [IPC output-removed/restored event](./ipc/output-removed-restored-event.md).
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
-  — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
-  + H (default `Super+comma/period` output binds) LANDED 2026-09-21
-  (PR #208). E1 (every connector driven at startup) + E2 (per-head
-  rendering, per-output lock waits, hotplug add/remove) LANDED 2026-09-25,
-  live on the Asahi M2 Air including a physical unplug and replug; the
-  GPU-tier runtime add and the multi-head mode change since proven there
-  (`Asahi.md` Tests 11–12), and
-  [reconnect restore](./resolved/output-reconnect-restore-done.md) is
-  resolved. Left: #48 `MoveTo` on hardware and the
-  [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
-  stays last.
+  — OPEN, **HIGH**: everything else in milestone 19's wake is landed and
+  proven. G (pointer-output placement) + H (default `Super+comma/period`
+  output binds) LANDED 2026-09-21 (PR #208). E1 (every connector driven at
+  startup) + E2 (per-head rendering, per-output lock waits, hotplug
+  add/remove) LANDED 2026-09-25, live on the Asahi M2 Air including a
+  physical unplug and replug; the GPU-tier runtime add and the multi-head
+  mode change proven there (`Asahi.md` Tests 11–12), Hold/Reconnected on
+  vkms 2026-09-26, and #48 `MoveTo` proven live on the dev VM 2026-09-28
+  ([record](./resolved/tty-hotplug-confirmation-done.md); the "Left: #48
+  `MoveTo`" this entry used to carry is closed). [Reconnect
+  restore](./resolved/output-reconnect-restore-done.md) resolved (PR #249);
+  per-output render scheduling parked as not-planned (~1 pp optimisation).
+  Left: the [per-output scale/mode](./core/per-output-scale-mode.md) entry,
+  which stays last.
 - [XWayland: drops onto X windows do not land](./resolved/xwayland-pointer-focus-x11-done.md)
   — RESOLVED (filed by XWayland Phase 4, PR #246). The pointer focus has
   an X arm, and with the fork's proxy-remap flush (`6e6fe896`) drops work
