@@ -167,9 +167,9 @@ pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
 /// profile's name (those cannot start with a dot), and never another
 /// write's: the pid alone is not enough, since two daemons of the same
 /// pid can share a profile (in two pid namespaces, or on two hosts with
-/// one network home), and one's remove-first below would take the other's
-/// file from under it, which would then rename this one's half-written
-/// file into place. The pid is there for whoever finds one left behind.
+/// one network home), and with one name the two writes' temporary files
+/// would be one file: one could rename the other's half-written file into
+/// place. The pid is there for whoever finds one left behind.
 /// It comes through `rustix`'s raw syscall rather than `std::process::id`,
 /// which calls libc's `getpid`: that one call alone kept another 64 KiB of
 /// libc's code resident in the idle daemon (the kernel maps a fault's
@@ -188,7 +188,7 @@ fn temp_path(file: &Path, unique: u64) -> PathBuf {
 /// kernel's `ENOSYS`, or a container's seccomp profile answering `EPERM`,
 /// as webtop-style sandboxes can), [`fallback_unique`] stands in: the name
 /// only needs to be unique, not secret (a guessed name is already handled
-/// by remove-first and `O_EXCL` below), so saving never stops for it.
+/// by `O_EXCL` below), so saving never stops for it.
 fn unique() -> u64 {
     let mut bytes = [0u8; 8];
     let mut filled = 0;
@@ -226,15 +226,15 @@ fn write_through(file: &Path, bytes: &[u8], unique: u64) -> io::Result<()> {
         .mode(0o700)
         .create(dir)?;
     let temp = temp_path(file, unique);
-    // Whatever is at this write's own name (in practice nothing: a
-    // symbolic link someone guessed it with) goes first; then `create_new`
-    // (`O_CREAT | O_EXCL`) makes a new file or fails. `O_EXCL` never
-    // follows a symbolic link, dangling or not, so the write can only land
-    // in a fresh 0600 file of ours, never in a file a link points at.
-    match fs::remove_file(&temp) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-        _ => {}
-    }
+    // `create_new` (`O_CREAT | O_EXCL`) makes a fresh 0600 file or fails.
+    // It never follows a symbolic link, dangling or not, and never takes a
+    // name something already holds: a link someone guessed the name with,
+    // or another writer that drew the same name (see `fallback_unique`).
+    // Either way only this write fails, loudly, and whatever holds the name
+    // is left alone. Nothing at the name is removed first: that would let
+    // two writers that drew one name each take the other's file away, and
+    // one rename the other's half-written file into place (review of PR
+    // #315).
     let written = (|| {
         let mut out = OpenOptions::new()
             .write(true)

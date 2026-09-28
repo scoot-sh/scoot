@@ -182,11 +182,12 @@ shows it again when it starts.
   first, and a restore keeps that order.
 - **Written off the loop, atomically:** a temporary file beside it
   (`.PROFILE.PID.RANDOM.tmp`, a name of that one write's own, 64 random
-  bits from `getrandom(2)`, so two daemons of the same pid sharing a
-  profile, in two pid namespaces or on two hosts with one network home,
-  never write through each other's; whatever is at that name is removed,
-  then the file is made with `O_CREAT | O_EXCL`, which never follows a
-  symbolic link),
+  bits from `getrandom(2)`, or the clock and a count where a sandbox
+  refuses it, so two daemons of the same pid sharing a profile, in two
+  pid namespaces or on two hosts with one network home, never write
+  through each other's; the file is made with `O_CREAT | O_EXCL`, which
+  never follows a symbolic link and never takes a name something already
+  holds: anything there fails that one write, loudly, and is left alone),
   `fsync`, `rename` over the old file, `fsync` of the directory; the file
   is 0600, a directory it makes 0700. The write
   runs on a thread started for it, which ends once nothing more waits

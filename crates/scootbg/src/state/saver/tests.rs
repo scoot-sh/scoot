@@ -111,15 +111,17 @@ fn a_failing_save_does_not_wedge() {
     assert!(saver.flush(Duration::from_secs(20)));
 }
 
-/// A symbolic link put at the temporary name is not followed: the file it
-/// points at is untouched, and the state file is a fresh private one.
-/// Dangling links too (`O_EXCL` would otherwise create their target).
+/// A symbolic link put at the temporary name is not followed: the write
+/// is refused (`O_EXCL`), the file it points at is untouched, and so is
+/// the state file. Dangling links too (`O_EXCL` would otherwise create
+/// their target).
 #[test]
 fn a_symlink_at_the_temporary_name_is_not_followed() {
     let scratch = Scratch::new("symlink");
     let dir = scratch.0.join("scootbg");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("default");
+    std::fs::write(&file, b"before\n").unwrap();
     // A name guessed right: `write_through` takes the one `write_atomic`
     // draws at random.
     let temp = temp_path(&file, 7);
@@ -127,40 +129,59 @@ fn a_symlink_at_the_temporary_name_is_not_followed() {
     std::fs::write(&victim, b"precious\n").unwrap();
     std::fs::set_permissions(&victim, std::fs::Permissions::from_mode(0o644)).unwrap();
     std::os::unix::fs::symlink(&victim, &temp).unwrap();
-    write_through(&file, b"state\n", 7).unwrap();
+    let refused = write_through(&file, b"state\n", 7).unwrap_err();
+    assert_eq!(refused.kind(), std::io::ErrorKind::AlreadyExists);
     assert_eq!(std::fs::read(&victim).unwrap(), b"precious\n", "untouched");
     assert_eq!(mode(&victim), 0o644);
-    let meta = std::fs::symlink_metadata(&file).unwrap();
-    assert!(meta.file_type().is_file(), "a regular file, not the link");
-    assert_eq!(mode(&file), 0o600);
-    assert_eq!(std::fs::read(&file).unwrap(), b"state\n");
-    assert!(std::fs::symlink_metadata(&temp).is_err(), "nothing left");
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        b"before\n",
+        "state file untouched"
+    );
+    assert!(
+        std::fs::symlink_metadata(&temp)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the link is left where it was"
+    );
 
+    std::fs::remove_file(&temp).unwrap();
     let nowhere = scratch.0.join("never-made");
     std::os::unix::fs::symlink(&nowhere, &temp).unwrap();
-    write_through(&file, b"again\n", 7).unwrap();
+    assert!(write_through(&file, b"again\n", 7).is_err());
     assert!(!nowhere.exists(), "a dangling link's target is not created");
-    assert_eq!(std::fs::read(&file).unwrap(), b"again\n");
+    assert_eq!(std::fs::read(&file).unwrap(), b"before\n");
+
+    // The next write draws its own name, and goes through.
+    write_atomic(&file, b"state\n").unwrap();
+    assert_eq!(mode(&file), 0o600);
+    assert_eq!(std::fs::read(&file).unwrap(), b"state\n");
 }
 
-/// A file already at a write's own temporary name is replaced, not
-/// appended to or refused.
+/// A file already at a write's own temporary name (a leftover, or another
+/// writer that drew the same name) refuses that write rather than being
+/// replaced or appended to, and is left as it is.
 #[test]
-fn a_leftover_temporary_file_is_replaced() {
+fn a_file_at_the_temporary_name_refuses_the_write() {
     let scratch = Scratch::new("leftover");
     std::fs::create_dir_all(&scratch.0).unwrap();
     let file = scratch.0.join("default");
     let temp = temp_path(&file, 7);
     std::fs::write(&temp, b"half a file from before, and longer").unwrap();
-    write_through(&file, b"whole\n", 7).unwrap();
-    assert_eq!(std::fs::read(&file).unwrap(), b"whole\n");
-    assert!(std::fs::symlink_metadata(&temp).is_err(), "nothing left");
+    let refused = write_through(&file, b"whole\n", 7).unwrap_err();
+    assert_eq!(refused.kind(), std::io::ErrorKind::AlreadyExists);
+    assert!(!file.exists(), "nothing renamed into place");
+    assert_eq!(
+        std::fs::read(&temp).unwrap(),
+        b"half a file from before, and longer"
+    );
 }
 
 /// Another writer's temporary file, even one of the same pid (a daemon
 /// in another pid namespace, or on another host sharing the home) is
-/// never touched: each write's name is its own, so one write's
-/// remove-first can never take another's file and leave it renaming a
+/// never touched: each write's name is its own, and nothing at a name is
+/// removed, so no write can take another's file and leave it renaming a
 /// half-written one into place (review of PR #315).
 #[test]
 fn another_writers_temporary_file_is_left_alone() {
