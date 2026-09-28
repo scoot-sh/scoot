@@ -123,7 +123,7 @@ each item's own file records why it landed when it did.
   the binary and the `PATH` searched -- it used to say only "No such file or
   directory". CI runs the smoke test a second time against the `xwayland`
   build. Three small follow-ups split out, all low:
-  [`_NET_WM_MOVERESIZE`](docs/backlog/protocols/xwayland-net-wm-moveresize.md),
+  [`_NET_WM_MOVERESIZE`](docs/backlog/resolved/xwayland-net-wm-moveresize-done.md) (since resolved),
   [`_NET_WM_ICON`](docs/backlog/protocols/xwayland-net-wm-icon.md),
   [scale-aware X windows](docs/backlog/protocols/xwayland-scale-aware.md).
 

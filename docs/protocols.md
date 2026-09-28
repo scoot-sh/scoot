@@ -352,9 +352,10 @@ Best effort, not a guarantee of one outstanding configure: any other
 relayout meanwhile (the client's own resized frame, say) also sends the
 newest size. The edge not being dragged stays put whatever size the client settles
 on (a terminal rounding to whole cells, say). The drag's last configure
-drops `resizing` and keeps the size. An X11 window's own titlebar drag
-(`_NET_WM_MOVERESIZE`) is not honoured yet; the modifier drag moves and
-resizes a floating X window like any other.
+drops `resizing` and keeps the size. An X11 window's own titlebar and
+border drags (`_NET_WM_MOVERESIZE`) follow the same rules, restated for X
+(see [XWayland](#xwayland-opt-in)); the modifier drag moves and resizes a
+floating X window like any other.
 
 ## Fullscreen
 
@@ -550,6 +551,30 @@ its startup id by another X client, below.)
   client to opt out of. X has no equivalent of xdg's tiled states, and
   scoot sets none (`_NET_WM_STATE_MAXIMIZED_*` would make clients change
   their chrome for a state they are not in).
+- **Titlebar and border drags** (`_NET_WM_MOVERESIZE`, what a GTK
+  headerbar, Chromium or Electron sends) move or resize a floating X
+  window, like [`xdg_toplevel.move`/`.resize`](#floating-windows): a tiled
+  or fullscreen X window's request is ignored and its press stays its own.
+  X requests carry no serial, so the rule is restated: the request is
+  honoured only while a button press is held -- the pointer's grab is the
+  plain press grab, not a menu's, a drag-and-drop's or another drag's --
+  and that press went to a window of the requesting window's own X client
+  (the client bits of the window ids, which the X server allocates). A
+  button the request names must be the held one (`0` names none). Nothing
+  while the session is locked. So a background X client cannot capture the
+  pointer: with no press held, or one on a Wayland window or another X
+  client's window, the request is refused (logged at debug). The drag ends
+  on the release, whenever the client asked: a request handled after the
+  release is refused, so a drag never sticks. An X window being resized is
+  told its new size when the drag ends, not during it. **Not honoured:**
+  keyboard moves and resizes (a window menu's "Move"; scoot has no keyboard
+  move mode -- move a floating window with the bindings or `scoot msg`),
+  and `_NET_WM_MOVERESIZE_CANCEL` (Smithay's window manager drops both, so
+  a client cannot end a drag early; the release does). **Known limit:** any
+  X client can send the request naming any window, so another X client
+  naming the very window the press is held on drags that window until the
+  release, as with
+  [an X drag's owner](#clipboard-drag-and-drop-and-input-methods).
 - **Closing** (`close`, a taskbar's close) sends `WM_DELETE_WINDOW`; a
   client that does not speak it has its window destroyed.
 - **The session lock** blanks X windows and their menus like every other
@@ -568,8 +593,7 @@ its startup id by another X client, below.)
   windows' contents through the X server (the trust model above), but never
   a Wayland window's.
 - **Not yet:** X clients draw at scale 1 (upscaled at a fractional
-  `[output] scale`), `_NET_WM_MOVERESIZE` (an X app's own titlebar drag) is
-  ignored, `_NET_WM_ICON` is not read, and XIM is not provided (see
+  `[output] scale`), `_NET_WM_ICON` is not read, and XIM is not provided (see
   [Clipboard, drag-and-drop and input methods](#clipboard-drag-and-drop-and-input-methods)).
 
 ### Focus: X windows ask, scoot decides

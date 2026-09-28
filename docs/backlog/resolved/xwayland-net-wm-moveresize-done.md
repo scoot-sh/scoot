@@ -1,12 +1,58 @@
 ---
-title: "XWayland: honour _NET_WM_MOVERESIZE (an X app's own titlebar drag)"
-status: "open"
-area: "protocols"
-priority: "low"
+title: "XWayland: honour _NET_WM_MOVERESIZE (an X app's own titlebar drag) — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# XWayland: honour `_NET_WM_MOVERESIZE`
+# XWayland: honour `_NET_WM_MOVERESIZE` — RESOLVED
+
+RESOLVED 2026-09-28 (branch `claude/scoot-backlog-issues-3rfkfv`). An X
+app's own titlebar or border drag moves or resizes a floating X window
+through the same floating grab an `xdg_toplevel.move` / `.resize` starts
+(`compositor/xwayland/moveresize.rs`), and a tiled or fullscreen X window's
+request is ignored as an xdg one is. The shape below held, with these
+differences:
+
+- **The gate is shared where it can be.** `floating/grab.rs` gained
+  `held_click` (the pointer's grab is Smithay's `ClickGrab`, under a serial
+  when the request has one) and `begin_client_drag` (the floating and
+  on-screen check, then the grab); `client_floating_drag` is now those two
+  plus its own same-client check. The X gate (`x11_moveresize_gate`) is a
+  pure function over the lock state and the held press, so the lock branch
+  -- which live input cannot isolate, since locking drops the press first
+  -- is tested on its own.
+- **The button check.** `data[3]` is mapped from XWayland's numbering
+  (1-3 left, middle, right; 4-7 scroll, never held; 8 up from `BTN_SIDE`)
+  and must be the held press's; `0` rides whichever is held (some toolkits
+  send none).
+- **`_NET_WM_MOVERESIZE_CANCEL` and the keyboard directions (9-11) are
+  not honoured: Smithay's window manager drops them before any handler
+  runs**, which the ticket noted. Keyboard moves are refused by design
+  (scoot has no keyboard move mode; bindings and `scoot msg` move a
+  floating window). Cancel would need a window-manager hook in the fork;
+  it is not needed to stop a drag sticking, because a request handled
+  after its release finds no click grab (the release reaches scoot before
+  XWayland, so no X client can act on a release scoot has not seen) and the
+  release ends a running drag. Split out:
+  [`_NET_WM_MOVERESIZE_CANCEL`](../protocols/xwayland-net-wm-moveresize-cancel.md).
+- **A known limit, pinned:** any X client can name any window in the
+  request, so a stranger naming the window the press is held on drags it
+  until the release -- the X drag-and-drop owner's limit (`dnd.rs`). No
+  pointer is captured without a press held on the named window's client.
+- **An X window's resize is configured when the drag ends**, not per
+  motion: `FloatingGrab` sends the `resizing` configure to xdg toplevels
+  only. The modifier drag has always resized X windows this way; the
+  window's outline in the layout follows the pointer and the X client is
+  told its size on release.
+
+Tests: `compositor/xwayland/tests/moveresize.rs` (16 live, with a real X
+client pressing through scoot), `compositor/xwayland/moveresize/tests.rs`
+(button and edge mapping). Fail-first and mutation records are in the PR.
+
+The original entry follows.
+
 
 Split out of [XWayland support](../resolved/xwayland-support-done.md) when
 its Phases 5–7 closed it (2026-09-27). Serves daily use, not computer use:

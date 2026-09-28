@@ -822,7 +822,9 @@ scale/mode) into one hardware session.
   `scoot-xwayland` / `scoot-gpu-xwayland` with `Xwayland` on `PATH`, the
   missing-binary fallback proven everywhere with a log line that names the
   binary. Split out, open and low:
-  [`_NET_WM_MOVERESIZE`](./protocols/xwayland-net-wm-moveresize.md),
+  [`_NET_WM_MOVERESIZE`](./resolved/xwayland-net-wm-moveresize-done.md)
+  (RESOLVED 2026-09-28: an X app's titlebar drag moves a floating X
+  window; its cancel is [split out](./protocols/xwayland-net-wm-moveresize-cancel.md)),
   [`_NET_WM_ICON`](./protocols/xwayland-net-wm-icon.md),
   [scale-aware X windows](./protocols/xwayland-scale-aware.md). The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its

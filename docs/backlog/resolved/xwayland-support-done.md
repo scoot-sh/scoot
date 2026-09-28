@@ -696,7 +696,7 @@ new section starts the real binary with every `PATH` directory holding an
 `Xwayland` dropped and asserts the loud line and a working Wayland-only
 session.
 
-Split out, each low: [`_NET_WM_MOVERESIZE`](../protocols/xwayland-net-wm-moveresize.md),
+Split out, each low: [`_NET_WM_MOVERESIZE`](xwayland-net-wm-moveresize-done.md) (resolved),
 [`_NET_WM_ICON`](../protocols/xwayland-net-wm-icon.md),
 [scale-aware X windows](../protocols/xwayland-scale-aware.md). Still open
 from earlier phases:
