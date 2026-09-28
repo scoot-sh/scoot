@@ -17,8 +17,8 @@
 //! ([`Saver::flush`]), so `scootbg kill` straight after a `set` keeps it.
 //! A signal kills the process where it stands: the rename is atomic, so
 //! the file is the old one or the new one, never half of each, and at
-//! worst a temporary file is left behind (named for the process, so it is
-//! never another daemon's).
+//! worst a temporary file is left behind (named for the one write, so it
+//! is never another's: [`temp_path`]).
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -159,42 +159,100 @@ pub fn exposed(dir: &Path) -> Option<String> {
 /// the old file or the new one, whole. The file is private (0600), its
 /// directory made private (0700) if it has to be made.
 pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_through(file, bytes, unique())
+}
+
+/// The temporary file [`write_atomic`] writes `file`'s next contents to,
+/// told apart from every other write's by `unique`. Hidden, so never a
+/// profile's name (those cannot start with a dot), and never another
+/// write's: the pid alone is not enough, since two daemons of the same
+/// pid can share a profile (in two pid namespaces, or on two hosts with
+/// one network home), and with one name the two writes' temporary files
+/// would be one file: one could rename the other's half-written file into
+/// place. The pid is there for whoever finds one left behind.
+/// It comes through `rustix`'s raw syscall rather than `std::process::id`,
+/// which calls libc's `getpid`: that one call alone kept another 64 KiB of
+/// libc's code resident in the idle daemon (the kernel maps a fault's
+/// neighbouring pages with it: docs/scootbg/backlog/idle-code-pages.md).
+fn temp_path(file: &Path, unique: u64) -> PathBuf {
     let dir = file.parent().unwrap_or(Path::new("/"));
     let name = file.file_name().unwrap_or_default().to_string_lossy();
+    let pid = rustix::process::getpid().as_raw_nonzero();
+    dir.join(format!(".{name}.{pid}.{unique:016x}.tmp"))
+}
+
+/// 64 bits for [`temp_path`] that no other write draws: random from the
+/// kernel (`getrandom(2)`, a raw syscall through `rustix`), which waits
+/// only while the kernel's pool is not yet initialized, early in boot,
+/// long before a wallpaper is saved. Where the kernel refuses it (an old
+/// kernel's `ENOSYS`, or a container's seccomp profile answering `EPERM`,
+/// as webtop-style sandboxes can), [`fallback_unique`] stands in: the name
+/// only needs to be unique, not secret (a guessed name is already handled
+/// by `O_EXCL` below), so saving never stops for it.
+fn unique() -> u64 {
+    let mut bytes = [0u8; 8];
+    let mut filled = 0;
+    while filled < bytes.len() {
+        match rustix::rand::getrandom(&mut bytes[filled..], rustix::rand::GetRandomFlags::empty()) {
+            Ok(read) => filled += read,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(_) => return fallback_unique(),
+        }
+    }
+    u64::from_ne_bytes(bytes)
+}
+
+/// Unique without the kernel's randomness: the wall clock's nanoseconds,
+/// mixed with a per-process count so two writes in one nanosecond differ.
+/// Two daemons of one pid would have to write in the same nanosecond to
+/// meet, and even then only this write fails (`O_EXCL`), loudly.
+fn fallback_unique() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos() as u64);
+    let count = COUNT.fetch_add(1, Ordering::Relaxed);
+    // A fixed odd multiplier spreads the count over the high bits, so the
+    // sum is not just the clock with a small offset.
+    nanos ^ count.wrapping_mul(0x9e37_79b9_7f4a_7c15)
+}
+
+/// [`write_atomic`] through the temporary file `unique` names.
+fn write_through(file: &Path, bytes: &[u8], unique: u64) -> io::Result<()> {
+    let dir = file.parent().unwrap_or(Path::new("/"));
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(dir)?;
-    // Hidden, and named for this process: never another daemon's (two
-    // sessions may share a profile), and never a profile's name (those
-    // cannot start with a dot).
-    let temp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
-    // Whatever is there (a file left by a killed daemon of the same pid,
-    // or a symbolic link someone put there) goes first; then `create_new`
-    // (`O_CREAT | O_EXCL`) makes a new file or fails. `O_EXCL` never
-    // follows a symbolic link, dangling or not, so the write can only land
-    // in a fresh 0600 file of ours, never in a file a link points at.
-    match fs::remove_file(&temp) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-        _ => {}
-    }
+    let temp = temp_path(file, unique);
+    // `create_new` (`O_CREAT | O_EXCL`) makes a fresh 0600 file or fails.
+    // It never follows a symbolic link, dangling or not, and never takes a
+    // name something already holds: a link someone guessed the name with,
+    // or another writer that drew the same name (see `fallback_unique`).
+    // Either way only this write fails, loudly, and whatever holds the name
+    // is left alone. Nothing at the name is removed first: that would let
+    // two writers that drew one name each take the other's file away, and
+    // one rename the other's half-written file into place (review of PR
+    // #315).
+    // A failed open made nothing, so there is nothing of ours to remove:
+    // whatever holds the name (another writer's file) is left alone,
+    // whatever the error was.
+    let mut out = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temp)?;
     let written = (|| {
-        let mut out = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temp)?;
         out.write_all(bytes)?;
         out.sync_all()?;
-        drop(out);
         fs::rename(&temp, file)
     })();
+    drop(out);
     if let Err(error) = written {
-        // Only a file this call made: after a failed `create_new` the name
-        // may be someone else's again.
-        if error.kind() != io::ErrorKind::AlreadyExists {
-            let _ = fs::remove_file(&temp);
-        }
+        // The file at `temp` is this call's own (it made it above), so it
+        // goes, whatever went wrong after.
+        let _ = fs::remove_file(&temp);
         return Err(error);
     }
     // The rename itself on disk. Best effort: some file systems refuse

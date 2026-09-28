@@ -132,8 +132,25 @@ fn shot(session: &Session, name: &str) -> Shot {
     session.scoot_screenshot(id)
 }
 
+/// Waits until `query` says all `count` outputs show `want`. For a daemon
+/// no reply waited for: one started other than by `apply-config` (a plain
+/// `scootbg daemon`, a `--serve` that took over), or a reply that comes at
+/// once (an error). Such a daemon draws a round trip after its surface is
+/// `configured`, and `query` truthfully says `configured` with `shows:
+/// null` in between, so waiting for `configured` alone is too early.
+/// Once `shows` says so the draw has gone to the compositor: the daemon
+/// flushes it before it next reads a request (unless the socket buffer is
+/// full, which this little traffic never fills; the screenshot's own
+/// `outputs` request to scoot, which comes after, is the other half).
+fn wait_all_show(session: &Session, count: usize, want: &Value, what: &str) {
+    session.query_until(what, |o| {
+        o.len() == count && o.iter().all(|o| o["shows"] == *want)
+    });
+}
+
 /// Both outputs show `hex`, by `query` and by screenshot, right after the
-/// command that returned: `apply-config` returns once it is on screen.
+/// command that returned (`apply-config` returns once it is on screen) or
+/// [`wait_all_show`].
 fn both_show(session: &Session, hex: &str, what: &str) {
     let (outputs, _) = showing(session);
     assert_eq!(outputs.len(), 2, "{what}: {outputs:?}");
@@ -389,7 +406,7 @@ fn an_autostart_daemon_adopts_the_profile() {
 
     // The autostart daemon binds first.
     let mut daemon = session.daemon();
-    configured_names(&session, 2);
+    wait_all_show(&session, 2, &color(YELLOW), "the default profile restored");
     both_show(&session, YELLOW, "the default profile, restored first");
     apply(&session, "scoot", &section(RED));
     both_show(&session, BLUE, "adopted scoot's profile: X");
@@ -507,6 +524,12 @@ fn a_missing_image_is_loud_and_the_rest_applies() {
         "{}",
         run.stderr
     );
+    // That reply came at once, without waiting for the rest to show.
+    session.query_until("the rest shown", |o| {
+        o.len() == 2
+            && o.iter()
+                .any(|o| o["name"] == *names[0] && o["shows"] == color(BLUE))
+    });
     shot(&session, &names[0]).assert_all(rgb(BLUE), "the rest is applied");
     assert_eq!(showing(&session).0[1].1, Value::Null);
     wait_for_state(&shared.0, "scoot", "later.png");
@@ -816,7 +839,7 @@ fn a_loser_whose_winner_never_serves_becomes_the_daemon() {
         assert!(Instant::now() < deadline, "it never became the daemon");
         std::thread::sleep(Duration::from_millis(10));
     }
-    configured_names(&session, 2);
+    wait_all_show(&session, 2, &color(RED), "the loser's section shown");
     both_show(&session, RED, "the loser's section");
     ok(&session, &["kill"]);
     assert!(wait_exit(&mut loser).success());

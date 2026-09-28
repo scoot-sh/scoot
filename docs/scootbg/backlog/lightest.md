@@ -14,6 +14,21 @@ applies to both. After v1, every PR that touches decoding, buffers or the
 event loop re-runs the benchmark and must not regress beyond the margin
 against the last published numbers.
 
+**The gate does not pass; its one failing class is waived for v1 (user,
+2026-09-28).** After the cheap levers, awww still holds 1.0–1.5 MiB less
+idle memory above the floor: 9 gated rows on each compositor. That
+memory is mostly clean program code the kernel can reclaim (scootbg's
+own, and `libc`'s): file-backed pages it can drop under pressure and read
+back on demand. The rest is anonymous memory: with an image about 0.24 MiB
+more, nearly all of it the decode thread's malloc arena. Every other row is a win
+or a tie. The user waived that class, and only that class, so v1 is not
+held for it; the rule above is otherwise unchanged, and a new loss on any
+other row would still hold v1. The one lever that would close the gap is
+a separate daemon binary, which has real packaging and process costs; it
+is post-v1 ([idle-code-pages.md](idle-code-pages.md)). After v1, every PR
+that touches decoding, buffers or the event loop still re-runs the
+benchmark and must not regress beyond the margin.
+
 ## What is measured
 
 On the same machine and outputs, published in `docs/scootbg/README.md`:
@@ -125,7 +140,7 @@ hyprpaper 0.8.4 ran on neither: on scoot it needs a DRM device, and this
 machine has none; on sway it binds `xdg_wm_base` v6 where sway has v5.
 `--tty` was not reachable.
 
-**This ticket stays open.** What is left:
+**The first run (2026-09-27) did not pass.** What it left:
 
 - **Idle memory above the floor, against awww: 9 losses on scoot.**
   - RSS above the floor: 1.1–1.6 MiB more than awww's (medians 3.85–4.49
@@ -137,11 +152,39 @@ machine has none; on sway it binds `xdg_wm_base` v6 where sway has v5.
     against 8.9 MiB.
   - They are mostly scootbg's own code: 0.86 MiB more of its `.text`
     and read-only data is resident, clean pages. The rest is `libc` code
-    (0.31 MiB) and a little anonymous memory. The daemon runs in a binary
+    (0.31 MiB then, about 0.25 MiB after the `getpid` lever) and a little
+    anonymous memory. The daemon runs in a binary
     whose `.text` is 1.23 MiB, holding the decoders and the CLI as well,
     while `awww-daemon`'s `.text` is 0.36 MiB.
   - Plan: [idle-code-pages.md](idle-code-pages.md).
 - The results on sway: [below](#on-sway).
+
+### Re-run of the idle rows (2026-09-28): still not passed, waived for v1
+
+After the attribution and the cheap levers of
+[idle-code-pages.md](idle-code-pages.md#levers-tried-2026-09-28), the idle
+rows ran again, 5 rounds, on headless scoot and sway, with `35f3a13`
+([scoot](../bench/2026-09-28-idle-scoot/table.md),
+[sway](../bench/2026-09-28-idle-sway/table.md)). The same 9 losses to awww
+on each; `compare` against the 2026-09-27 runs finds no regression.
+
+- **Kept:** one lever, `getpid` through `rustix`, 64 KiB of libc code
+  (inside the noise).
+- **Gap left, scoot**: RSS above the floor 1.06–1.10 MiB with a color,
+  1.45–1.52 MiB with an image; PSS 0.98–1.01 and 1.41–1.42 MiB.
+- **Gap left, sway**: RSS 1.09–1.10 and 1.41–1.47 MiB, PSS 0.98–0.99
+  and 1.35–1.44 MiB.
+- **Why**: the daemon runs 277 KiB of the 1,248 KiB of functions in its
+  binary, and the kernel's fault-around makes 1,048–1,200 KiB of it
+  resident, the decoders and std's backtrace code included. Removing that
+  code on stable is not possible for the backtrace (std's default panic
+  hook links it into every binary), and costs the image pipeline 20% for
+  `opt-level = "s"`.
+- **Decided (user, 2026-09-28)**: the class is waived for v1, and the
+  separate daemon binary, which a prototype showed ties awww on the color
+  rows, is post-v1
+  ([the later option](idle-code-pages.md#later-option-a-separate-daemon-binary)).
+  The page-out fallback stays the user's call, not a quiet fix.
 
 Won or tied everywhere else. The points where it is closest, or where the
 rule decided:
