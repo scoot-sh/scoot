@@ -42,7 +42,7 @@ draw and hold than the output has. A new scale re-renders from the file
 only when the buffer size changes (scale 2 with the mode doubled keeps
 it, and attaches it again: Smithay-based compositors read a new
 `set_buffer_scale` only with an attach, see
-[the compositor item](../../../backlog/core/buffer-scale-needs-a-new-buffer.md)).
+[the compositor item](../../../backlog/resolved/buffer-scale-without-new-buffer-done.md)).
 The size is decided in one place, `daemon::change::image_dims`, and the
 buffer is always the worker's full-size render, so drawing at a
 `wp_fractional_scale_v1` size is a change there plus a viewport
@@ -112,7 +112,7 @@ sha256 `ae084758…`, so every measurement here holds for both).
   with the knob, so it still covers the integer path and the re-attach.
 - **Filed for the compositor:**
   [fractional-scale-in-120ths-done.md](../../../backlog/resolved/fractional-scale-in-120ths-done.md)
-  (below; since resolved by PR #298); [buffer-scale-needs-a-new-buffer.md](../../../backlog/core/buffer-scale-needs-a-new-buffer.md)
+  (below; since resolved by PR #298); [buffer-scale-without-new-buffer-done.md](../../../backlog/resolved/buffer-scale-without-new-buffer-done.md)
   updated (scootbg meets it only without the fraction now).
 
 ### Departures from the plan, and why

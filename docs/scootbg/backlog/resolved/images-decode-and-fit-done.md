@@ -245,7 +245,7 @@ each, in docs-only commits.
   whenever it sends a new scale without a new buffer; the scale test
   fails without it. The full-size color path had the same latent bug,
   invisible with a flat color. Filed for the compositor as
-  [buffer-scale-needs-a-new-buffer.md](../../../backlog/core/buffer-scale-needs-a-new-buffer.md).
+  [buffer-scale-without-new-buffer-done.md](../../../backlog/resolved/buffer-scale-without-new-buffer-done.md).
 - **`zune-jpeg` decodes a JPEG cut inside its last row of MCUs
   "successfully"**, zero-padded, even in strict mode: it checks for
   running out of data only at the start of each MCU row

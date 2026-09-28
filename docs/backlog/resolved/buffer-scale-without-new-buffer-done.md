@@ -1,8 +1,8 @@
 ---
-title: "A new buffer scale is ignored until a new buffer is attached"
-status: "open"
-area: "core"
-priority: "low"
+title: "A new buffer scale is ignored until a new buffer is attached — RESOLVED (in scoot, via a Smithay fork)"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 

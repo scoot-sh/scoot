@@ -67,6 +67,7 @@ mod sighup;
 mod single_pixel_buffer;
 mod state;
 mod subsurface_depth;
+mod subsurface_role;
 mod tablet;
 mod toplevel_cap;
 mod toplevel_icon;

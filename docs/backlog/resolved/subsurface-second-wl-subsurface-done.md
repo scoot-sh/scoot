@@ -1,12 +1,24 @@
 ---
-title: "Smithay accepts a second wl_subsurface for a subsurface whose parent was destroyed"
-status: "open"
-area: "core"
-priority: "low"
+title: "Smithay accepts a second wl_subsurface for a subsurface whose parent was destroyed — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 ---
 
-# A second `wl_subsurface` for an orphaned subsurface is not `bad_surface`
+# A second `wl_subsurface` for an orphaned subsurface is not `bad_surface` — RESOLVED
+
+RESOLVED 2026-09-28 (PR #302). scoot tracks the live `wl_subsurface` per surface
+(`crates/scoot/src/compositor/subsurface_role.rs`) and refuses a second
+`get_subsurface` with `bad_surface` from a `dispatch.rs` guard, filed on
+link in `CompositorHandler::new_subsurface` and forgotten when the role
+object dies (downcast of the dead object's user data, via a new
+`UserData: 'static` bound on the blanket `Dispatch` impl) or the surface
+does. Three harness tests (`subsurface_depth/tests/second_subsurface.rs`):
+orphan re-attached shallow is `bad_surface` (fail-first: accepted before),
+proper detach-then-reattach admitted twice over in one flush, orphan
+detached-then-reattached admitted. No fork change; no behavior change for
+any legitimate client (none measured does this).
 
 Filed 2026-09-23 while implementing the
 [subsurface depth bound](../resolved/subsurface-depth-bound-done.md), from

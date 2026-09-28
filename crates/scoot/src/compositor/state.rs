@@ -76,6 +76,7 @@ use super::screenshot::{Encoder, PendingShot, ShotSink};
 use super::session_env;
 use super::session_lock::SessionLock;
 use super::shm_pools::ShmPools;
+use super::subsurface_role::LiveSubsurfaces;
 use super::tty::Tty;
 use super::wayland_accept::WaylandListener;
 use super::wl_buffers::WlBuffers;
@@ -752,6 +753,12 @@ pub struct State {
     /// mappings they keep, including after the object is destroyed, are
     /// `client_fds`' below.
     pub wl_buffers: WlBuffers,
+    /// Which surfaces currently hold a live `wl_subsurface` role object.
+    /// Filed in `CompositorHandler::new_subsurface` once the link exists,
+    /// forgotten in `dispatch.rs`'s destruction hooks when the role object
+    /// dies or the surface does -- see `subsurface_role.rs`, which owns the
+    /// exactness argument. What the second-`get_subsurface` guard reads.
+    pub(super) live_subsurfaces: LiveSubsurfaces,
     /// How many dma-buf plane fds each Wayland client has this compositor
     /// hold in `zwp_linux_buffer_params_v1` objects it has not created a
     /// buffer from. Counted at `add` before delegation, released when the
@@ -1188,6 +1195,7 @@ impl State {
             bind_budget: BindBudget::default(),
             shm_pools: ShmPools::default(),
             wl_buffers: WlBuffers::default(),
+            live_subsurfaces: LiveSubsurfaces::default(),
             pending_planes: Default::default(),
             toplevel_cap: Default::default(),
             #[cfg(feature = "xwayland")]

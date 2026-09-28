@@ -101,10 +101,15 @@ impl CompositorHandler for State {
     /// `surface` has just been made a subsurface of `parent`: records the
     /// subtree now hanging below each of `parent`'s ancestors, which is what
     /// the next `get_subsurface`'s depth check reads (see
-    /// `subsurface_depth.rs`). The check itself runs before Smithay links the
-    /// two, in `dispatch.rs`.
+    /// `subsurface_depth.rs`), and files the surface's fresh `wl_subsurface`,
+    /// which is what the next `get_subsurface`'s second-role check reads (see
+    /// `subsurface_role.rs`). The checks themselves run before Smithay links
+    /// the two, in `dispatch.rs`. This runs only for links Smithay actually
+    /// made, so a refused request can never file an entry for an object that
+    /// does not exist.
     fn new_subsurface(&mut self, surface: &WlSurface, parent: &WlSurface) {
         super::subsurface_depth::record_link(surface, parent);
+        self.live_subsurfaces.note_linked(surface);
     }
 
     fn commit(&mut self, surface: &WlSurface) {

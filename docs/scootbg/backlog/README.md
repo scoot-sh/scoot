@@ -93,7 +93,12 @@ full per-feature cycle.
     headless output
 11. [Lowest resource use of any wallpaper daemon](lightest.md) — the
     release gate: v1 ships only when no competitor beats scootbg beyond the
-    noise margin on any row both can do
+    noise margin on any row both can do. Measured 2026-09-27
+    (`scripts/scootbg-bench/`, on headless scoot and sway): **not passed**,
+    awww holds 1.0–1.6 MiB less idle memory above the floor; every other
+    row is a win or a tie
+    - [Idle memory above the floor: the daemon's resident code](idle-code-pages.md)
+      — the remaining loss, and its fix plan
 12. [Tests: unit, and end to end on headless scoot](testing.md) — grows with
     every item above, not batched at the end
 

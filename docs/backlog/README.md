@@ -694,7 +694,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Upscaled surfaces get a semi-transparent 1-px edge under pixman](./core/shm-viewport-upscale-edge-fade.md) — medium: Smithay's pixman renderer samples bilinear with `Repeat::None`, so every buffer-scale-1 window on a scaled output gets a faded 1-px edge (at scale 2, alpha ~0.75 along edges, ~0.56 at corners), and a 1×1 shm buffer viewported to the output is a full gradient. Fix: `Repeat::Pad`, as a scoot-sh/smithay fork commit. GLES and single-pixel buffers are unaffected.
 
 ### Found building scootbg's images (2026-09-27)
-- [A new buffer scale is ignored until a new buffer is attached](./core/buffer-scale-needs-a-new-buffer.md) — low: Smithay reads `set_buffer_scale`/`set_buffer_transform` only with a newly attached buffer, so a commit changing only the scale keeps the old one (reproduced on scoot; scootbg attaches again to work around it). Fix belongs in the scoot-sh/smithay fork.
+- [A new buffer scale is ignored until a new buffer is attached](./resolved/buffer-scale-without-new-buffer-done.md) — RESOLVED 2026-09-28 (PR #300): the fork applies a commit's cached `buffer_scale`/`buffer_transform` on every commit that has a buffer, not only on a new one (fork `6ab8b4a2`, `e7130254`'s content cherry-picked onto `7e18b661` on its own branch); pinned by `compositor/output_scale/tests.rs`'s scale-only-commit test (fails on the pre-fix fork, passes after).
 
 ### Found drawing scootbg at fractional scales (2026-09-27)
 - [A scale that is not a multiple of 1/120 cannot be drawn exactly by any client](./resolved/fractional-scale-in-120ths-done.md) — RESOLVED 2026-09-27 (PR #298): `[output] scale` resolves to the nearest 1/120 at the clamp (1.33 → 160/120), so rendering and every advertisement agree and a protocol-exact client buffer lands one to one.
@@ -734,7 +734,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 
 ### Found implementing the popup depth bound (2026-09-23)
 - [Deeply nested subsurfaces overflow the stack](./resolved/subsurface-depth-bound-done.md) — RESOLVED 2026-09-23 (PR #227): no surface is ever more than 64 subsurface levels below its tree's root. Checked in a `dispatch.rs` guard before Smithay links the surfaces or runs its recursive `is_ancestor`, against the new parent's depth *plus the height of the subtree being attached* (a per-surface bound, never lowered), since a subsurface can be re-attached after `wl_subsurface.destroy` or its parent's destruction and a role-less surface can be given children first. Refused as `wl_subcompositor.bad_parent`.
-- [Smithay accepts a second `wl_subsurface` for an orphaned subsurface](./core/subsurface-second-wl-subsurface.md) — low: the protocol's `bad_surface` is not raised once the parent `wl_surface` is destroyed; not a depth path.
+- [Smithay accepts a second `wl_subsurface` for an orphaned subsurface](./resolved/subsurface-second-wl-subsurface-done.md) — RESOLVED 2026-09-28 (PR #302): scoot tracks the live `wl_subsurface` per surface and refuses a second `get_subsurface` with `bad_surface`; filed on link, forgotten when the role object or the surface dies. A proper destroy-then-reattach still works, twice over in one flush. No fork change.
 - [Many desynchronized subsurfaces stall the compositor](./core/subsurface-count-quadratic.md) — medium, measured: `N` sibling desync subsurfaces in one window cost roughly quadratically to create (release: 10000 took 1.15 s, 30000 over 10 s). Pre-existing; breadth, not depth.
 - [Many side-by-side popups stall the compositor](./core/popup-count-quadratic.md) — medium, measured (review of #226): popup creation is roughly quadratic in the number open (1954 popups 0.73 s, 5104 5.4 s). Pre-existing.
 
@@ -762,11 +762,14 @@ scale/mode) into one hardware session.
   binds name the first/second screen. Live on the Asahi M2 Air since:
   virtual pull on the dumb tier (`Asahi.md` Test 11) and a real replug on
   the GPU tier (Test 12). No debounce until flap timing is measured.
-- [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./core/lock-vblank-bound-hardening.md)
-  — OPEN, low: `await_vblank`'s "late, never early" should say "within one
-  bound of the first blank drawn"; `stale_vblanks` entries should age out so
-  a driver that never delivers an owed vblank can't freeze a reused CRTC.
-  Filed from PR #247's round-2 review.
+- [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./resolved/lock-vblank-bound-hardening-done.md)
+  — RESOLVED 2026-09-28 (PR #303): `await_vblank`'s "late, never early" now
+  says the guarantee (no later than one bound after the first blank drew,
+  never before one has drawn; the two `headless.rs` comments that still
+  described the restarted bound corrected); `stale_vblanks` entries carry
+  push timestamps and age out past one second, pinned by six unit tests
+  including the ticket's synthetic-clock pin. Filed from PR #247's round-2
+  review.
 - [An unplugged monitor's windows seem to disappear](./resolved/unplug-adopted-windows-visible-done.md)
   — RESOLVED, medium (daily-drive, filed from `Asahi.md` Test 12): on unplug the
   monitor's workspaces are adopted as background workspaces of the focused
