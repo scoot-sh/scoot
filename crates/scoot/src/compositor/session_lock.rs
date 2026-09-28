@@ -1284,6 +1284,12 @@ impl SessionLockHandler for State {
         // same value this line sets. A client's `wl_pointer.set_cursor` in
         // answer to the enter is a later request, not a synchronous callback,
         // and by then only the lock client can send one.
+        // The lock screen keeps its pointer: hiding stops at the lock, and
+        // nothing arms behind it (`cursor_hide_eligible` refuses a locked
+        // session, and `note_pointer_activity` returns early there too).
+        // Before the cursor-status reset below, so its `cursor_changed`
+        // covers the reshown pointer's redraw as well.
+        self.disarm_cursor_hide();
         self.cursor.set_status(CursorImageStatus::default_named());
         // A cursor change like any other (see `State::cursor_changed`); the
         // transition below redraws the whole screen anyway.
@@ -1317,6 +1323,9 @@ impl SessionLockHandler for State {
         // drag that client is entitled to finish, and would protect nobody.
         self.refresh_keyboard_focus();
         self.refresh_pointer_focus();
+        // The cover may have survived the lock (a fullscreen window is
+        // still there at unlock): re-arm over it if the pointer is.
+        self.update_cursor_hide(Instant::now());
         self.request_render();
     }
 

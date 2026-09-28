@@ -208,8 +208,16 @@ impl State {
     }
 
     /// The pointer's position on `frame`'s output, in that output's logical
-    /// coordinates, or `None` without a pointer.
+    /// coordinates, or `None` without a pointer -- or with one hidden for
+    /// inactivity (`cursor_hide.rs`): hiding suppresses the gathering here,
+    /// so both the frame's cursor elements and the capture path's "where
+    /// the cursor sits now" (which reads through `cursor_elements_into`
+    /// below) see the same hidden pointer, while `Cursor::status` -- the
+    /// client's own image choice -- is untouched.
     fn cursor_location(&self, frame: &FrameContext) -> Option<Point<f64, Logical>> {
+        if self.cursor_idle_hidden {
+            return None;
+        }
         let mut location = self.seat.get_pointer()?.current_location();
         if let Some(geometry) = frame.geometry {
             location -= geometry.loc.to_f64();

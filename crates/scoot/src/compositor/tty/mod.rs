@@ -1464,10 +1464,16 @@ fn session_event(event: SessionEvent, _: &mut (), state: &mut State) {
     hotplug::apply(state, outcomes);
     if activated && state.tty.as_ref().is_some_and(Tty::is_active) {
         state.request_render();
+        // The cover may have survived the switch away: re-arm over it if
+        // the pointer is.
+        state.update_cursor_hide(Instant::now());
     }
     if paused {
         state.end_floating_grab();
         state.settle_floating_grab();
+        // Frozen screens show no motion: forget any armed hide, and show
+        // the pointer again for the switch back.
+        state.disarm_cursor_hide();
     }
 }
 

@@ -426,6 +426,25 @@ pub struct State {
     /// asks for the pointer, on every backend (see
     /// `render/capture_cursor.rs`).
     pub cursor: Cursor,
+    /// Whether the pointer is currently hidden for inactivity under a
+    /// covering fullscreen window (`[appearance] cursor_hide_after_ms` --
+    /// see `cursor_hide.rs`). Distinct from the client's own `Hidden`
+    /// status: `Cursor::status` is untouched, and this only suppresses the
+    /// gathering (`State::cursor_location`), so frames and captures read
+    /// the pointer as hidden while every image, hotspot and theme lookup
+    /// survives for the next motion.
+    pub(crate) cursor_idle_hidden: bool,
+    /// When the armed hide fires, or `None` when no hide is armed. Written
+    /// by `update_cursor_hide` (transitions) and `note_pointer_activity`
+    /// (an `Instant` store per motion, no allocation); read by the
+    /// one-shot timer, which re-arms itself past a pushed deadline rather
+    /// than being reinserted per motion.
+    pub(crate) cursor_hide_deadline: Option<Instant>,
+    /// Whether the one-shot hide timer is live. Mirrors the event source:
+    /// set on insert, cleared when it fires (whatever it answers) or when
+    /// the insert fails -- so a failed arm retries on the next transition
+    /// or motion instead of stranding a deadline nothing serves.
+    pub(crate) cursor_hide_timer_live: bool,
     /// Bumped whenever the pointer moves or the cursor's image changes, on
     /// every backend. The capture path's counterpart of `frame_serial` for
     /// the one thing a capture can show that no frame has to draw: under
@@ -1233,6 +1252,9 @@ impl State {
             frame_serial: 0,
             scene_dirty: true,
             cursor_serial: 0,
+            cursor_idle_hidden: false,
+            cursor_hide_deadline: None,
+            cursor_hide_timer_live: false,
             #[cfg(test)]
             frame_cursor_for_test: None,
             #[cfg(test)]

@@ -12,6 +12,7 @@ mod client_fds;
 pub(crate) mod config;
 mod content_type;
 mod cursor;
+mod cursor_hide;
 mod decorations;
 mod dispatch;
 mod dmabuf;

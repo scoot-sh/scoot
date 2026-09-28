@@ -373,6 +373,10 @@ impl State {
         if floating_moved || cover_moved {
             self.refresh_pointer_focus();
         }
+        // What covers an output may have changed (or the pointer's output
+        // may have): re-derive the cursor hide, which arms over a new cover
+        // and disarms off an old one. Cheap while the feature is off.
+        self.update_cursor_hide(std::time::Instant::now());
         // Last, once every placement above is published: a parent that moved
         // (or an output/usable area that changed) re-constrains the reactive
         // popups hanging off it -- see `popup_reconstrain.rs`. Here rather
