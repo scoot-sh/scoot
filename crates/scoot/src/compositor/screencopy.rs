@@ -207,7 +207,7 @@
 //! `DmabufConstraints` also requires a `DrmNode`, which the GPU-less
 //! containers scoot targets do not have, so the honest answer there would be
 //! `None` regardless. Filed as
-//! [its own item](../../../../docs/backlog/protocols/screencopy-dmabuf-capture.md),
+//! [its own item](../../../../docs/backlog/resolved/screencopy-dmabuf-capture-done.md),
 //! with its own write path and its own before/after numbers, rather than left
 //! as a line to flip here.
 //!
