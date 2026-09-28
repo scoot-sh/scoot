@@ -35,7 +35,8 @@ README/protocols change: no user-facing behavior changed.
   commit finds no timer running and its `request_render` →
   `ensure_ticking` starts a fresh 16 ms wait. Outcome per cycle: one
   full 16 ms wait plus render/present (~2 ms single-window, ~4 ms
-  four-window pixman at 1600x1000).
+  four-window pixman at 1600x1000 on the original build; ~2.5–2.7 ms
+  on current main per the new 4-window rounds).
 - Nested-side timestamps (new `WAYLAND_DEBUG=server` runs, current main
   `9794857` release) split the loop in two legs, stable across rounds:
   commit → scoot's `done` med 18.0–18.1 ms (the loop period: 16 ms wait
@@ -165,7 +166,7 @@ invoker first).
   `host-scoot-4win-benchorder-r{1,2,3}.log` (bench-order 4-window),
   `host-scoot-4win-refocus.log` + `nested-scoot-4win-refocus.log`
   (culling revival), `host-fe41921-4win.log` (old binary),
-  `host/nested-scoot-4win.log` + `host-scoot-4win-clean.log` (early
+  `nested-scoot-4win.log` + `host-scoot-4win-clean.log` (early
   anim-first silence runs), plus `nfr-run.sh` (the rig),
   `phase.pl`, `nested2.pl`, `host2.pl` (the analyses above).
   The `host-scoot-4win-revive*.log` files are 488-byte stubs from runs
