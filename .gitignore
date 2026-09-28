@@ -11,3 +11,4 @@ HANDOFF.md
 .devenv*
 devenv.local.nix
 devenv.local.yaml
+__pycache__/

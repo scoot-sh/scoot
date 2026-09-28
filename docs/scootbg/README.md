@@ -32,7 +32,10 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   competitors are `swaybg`, `awww`, `hyprpaper`, `wpaperd` and `wbg`, on
   the same machine, with the table published here. Every
   dependency has to justify its bytes. See
-  [`backlog/lightest.md`](backlog/lightest.md).
+  [`backlog/lightest.md`](backlog/lightest.md). **Measured, and not yet
+  passed**: awww holds 1.0–1.6 MiB less idle memory above the floor, and
+  every other row is a win or a tie
+  ([the comparison](#against-the-other-daemons)).
 - **Colors and images.** A solid color or a PNG, JPEG or WebP image per
   output, changed live with one command and restored at login. That is
   v1.
@@ -536,7 +539,7 @@ raw number, are in
 [images-decode-and-fit-done.md](backlog/resolved/images-decode-and-fit-done.md#measurements),
 [hidpi-fractional-scale-done.md](backlog/resolved/hidpi-fractional-scale-done.md#measurements)
 and [memory-and-idle-done.md](backlog/resolved/memory-and-idle-done.md#measurements).
-Not yet against competitors: that is [lightest.md](backlog/lightest.md).
+Against the competitors: [below](#against-the-other-daemons).
 
 | What | Result |
 |---|---|
@@ -548,6 +551,353 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 | PSS with a color, 2 outputs: single-pixel / 1×1 shm / full-size shm | 1,556–1,560 / 1,556–1,560 / 7,808 kB (14,060 kB once a change left a spare buffer per output, until ticket 8: no spare is kept now) |
 | `set`, request to reply, 10,000 changes ×3 | median 400–433 µs, p99 1.6 ms; no memory growth |
 | The same JPEG at scale 1.5 on 3840×2160: buffer, and request to reply ×3 | 33,177,600 B (was 58,982,400 B at `wl_output`'s 2); 420.0–434.4 ms (was 494.9–507.3 ms). On 1600×1000: 6,410,404 B (was 11,387,024 B) |
+
+## Against the other daemons
+
+**The release gate does not pass yet.** On headless scoot, awww beats
+scootbg on idle memory above the floor, by 1.1–1.6 MiB of RSS and
+1.0–1.5 MiB of PSS, with a color and with an image, on 1× 1080p and on 2× 4K, and
+so on the 1080p image's total with the floor (8.9 against 10.3 MiB).
+Those bytes are mostly scootbg's own code: its `.text` and read-only
+data hold 0.86 MiB more resident, clean pages than awww-daemon's. Most of
+the rest is `libc` code, 0.31 MiB, plus a little anonymous memory. The
+fix plan, shrinking the code, is in
+[idle-code-pages.md](backlog/idle-code-pages.md). On every
+other row both can do, scootbg wins or ties. Headless sway gives the same
+verdicts ([below](#on-sway)).
+
+Measured 2026-09-27 on a Claude Code web container (4 vCPUs, Intel Xeon
+@ 2.10 GHz, 16 GB, no GPU and no DRM device, kernel 6.18), against
+`scoot --headless` (release, `d8cb6dc`), by
+[`scripts/scootbg-bench/bench.py`](../../scripts/scootbg-bench/bench.py).
+Each cell is the median of 5 rounds with its range, `median [min–max]`.
+**Bold** marks a competitor that beats scootbg beyond the noise margin:
+lower by more than the larger of 5% of scootbg's median and the two
+sides' combined spread. "n/a" is a row the daemon cannot do (never a
+win), and "did not run" is a daemon that could not start here.
+`scootbg-bilinear` is scootbg with `--filter bilinear`, shown for
+context only and never gated (see the notes). The raw runs, versions,
+store paths and every file weighed are in
+[`bench/2026-09-27-scoot/`](bench/2026-09-27-scoot/), with sway's in
+[`bench/2026-09-27-sway/`](bench/2026-09-27-sway/).
+
+| Row | scootbg | scootbg-bilinear | awww | hyprpaper | swaybg | wbg | wpaperd |
+|---|---|---|---|---|---|---|---|
+| Size: stripped binaries + non-glibc `ldd` closure (bytes) | 1,866,680 | n/a | 9,080,536 | did not run | 13,459,384 | 13,303,784 | 15,287,664 |
+| Disk: installed with its non-glibc closure, plus what it writes (bytes) | 12,172,256 | n/a | 33,294,797 | did not run | 94,586,520 | 57,149,648 | 35,294,647 |
+| Idle RSS, 1× 1080p, image (MiB) *(not gated)* | 12.3 [12.2–12.3] | n/a | 10.8 [10.7–10.8] | did not run | 9.6 [9.5–9.8] | 15.1 [15.1–15.2] | 269.8 [269.5–269.9] |
+| Idle PSS, 1× 1080p, image (MiB) *(not gated)* | 6.3 [6.2–6.3] | n/a | 4.9 [4.9–4.9] | did not run | 5.2 [5.1–5.3] | 7.3 [7.2–7.3] | 254.5 [254.3–254.6] |
+| Idle floor (the buffers the compositor maps), 1× 1080p, image (MiB) *(not gated)* | 7.9 | n/a | 7.9 | did not run | 7.9 | 7.9 | 23.7 |
+| Idle RSS above the floor, 1× 1080p, image (MiB) | 4.4 [4.3–4.4] | n/a | **2.9 [2.8–2.9]** (beats scootbg) | did not run | 9.6 [9.5–9.8] | 7.2 [7.2–7.3] | 246.1 [245.8–246.1] |
+| Idle PSS above the floor, 1× 1080p, image (MiB) | 2.4 [2.3–2.4] | n/a | **1.0 [0.9–1.0]** (beats scootbg) | did not run | 5.2 [5.1–5.3] | 3.3 [3.2–3.4] | 242.7 [242.4–242.7] |
+| Idle total with the floor (PSS above it + the floor + compositor copies), 1× 1080p, image (MiB) | 10.3 [10.2–10.3] | n/a | **8.9 [8.8–8.9]** (beats scootbg) | did not run | 13.1 [13.0–13.2] | 11.2 [11.1–11.3] | 266.4 [266.1–266.5] |
+| Idle RSS, 2× 4K, image (MiB) *(not gated)* | 36.1 [36.1–36.2] | n/a | 66.2 [66.2–66.2] | did not run | 9.6 [9.5–9.6] | 70.4 [70.4–70.5] | 626.4 [625.7–626.6] |
+| Idle PSS, 2× 4K, image (MiB) *(not gated)* | 18.3 [18.2–18.3] | n/a | 32.6 [32.6–32.7] | did not run | 5.2 [5.1–5.2] | 34.9 [34.9–35.0] | 528.1 [527.3–528.2] |
+| Idle floor (the buffers the compositor maps), 2× 4K, image (MiB) *(not gated)* | 31.6 | n/a | 63.3 | did not run | 63.3 | 63.3 | 189.8 |
+| Idle RSS above the floor, 2× 4K, image (MiB) | 4.5 [4.4–4.5] | n/a | **2.9 [2.9–2.9]** (beats scootbg) | did not run | 9.6 [9.5–9.6] | 7.2 [7.1–7.2] | 436.5 [435.8–436.7] |
+| Idle PSS above the floor, 2× 4K, image (MiB) | 2.5 [2.4–2.5] | n/a | **1.0 [0.9–1.0]** (beats scootbg) | did not run | 5.2 [5.1–5.2] | 3.3 [3.2–3.3] | 433.2 [432.4–433.3] |
+| Idle total with the floor (PSS above it + the floor + compositor copies), 2× 4K, image (MiB) | 34.1 [34.0–34.1] | n/a | 64.3 [64.2–64.3] | did not run | 68.5 [68.4–68.5] | 66.6 [66.5–66.6] | 623.0 [622.3–623.2] |
+| Idle RSS, 1× 1080p, color (MiB) *(not gated)* | 3.8 [3.8–3.9] | n/a | 10.6 [10.5–10.6] | did not run | 7.4 [7.4–7.6] | n/a | n/a |
+| Idle PSS, 1× 1080p, color (MiB) *(not gated)* | 2.1 [2.0–2.1] | n/a | 5.0 [4.9–5.0] | did not run | 4.3 [4.3–4.4] | n/a | n/a |
+| Idle floor (the buffers the compositor maps), 1× 1080p, color (MiB) *(not gated)* | 0.0 | n/a | 7.9 | did not run | 0.0 | n/a | n/a |
+| Idle RSS above the floor, 1× 1080p, color (MiB) | 3.8 [3.8–3.9] | n/a | **2.7 [2.6–2.7]** (beats scootbg) | did not run | 7.4 [7.4–7.6] | n/a | n/a |
+| Idle PSS above the floor, 1× 1080p, color (MiB) | 2.1 [2.0–2.1] | n/a | **1.1 [1.0–1.1]** (beats scootbg) | did not run | 4.3 [4.3–4.4] | n/a | n/a |
+| Idle total with the floor (PSS above it + the floor + compositor copies), 1× 1080p, color (MiB) | 2.1 [2.0–2.1] | n/a | 9.0 [8.9–9.0] | did not run | 4.3 [4.3–4.4] | n/a | n/a |
+| Idle RSS, 2× 4K, color (MiB) *(not gated)* | 3.9 [3.8–3.9] | n/a | 66.0 [66.0–66.0] | did not run | 7.5 [7.4–7.6] | n/a | n/a |
+| Idle PSS, 2× 4K, color (MiB) *(not gated)* | 2.1 [2.0–2.1] | n/a | 32.7 [32.7–32.7] | did not run | 4.4 [4.3–4.4] | n/a | n/a |
+| Idle floor (the buffers the compositor maps), 2× 4K, color (MiB) *(not gated)* | 0.0 | n/a | 63.3 | did not run | 0.0 | n/a | n/a |
+| Idle RSS above the floor, 2× 4K, color (MiB) | 3.9 [3.8–3.9] | n/a | **2.7 [2.7–2.7]** (beats scootbg) | did not run | 7.5 [7.4–7.6] | n/a | n/a |
+| Idle PSS above the floor, 2× 4K, color (MiB) | 2.1 [2.0–2.1] | n/a | **1.0 [1.0–1.1]** (beats scootbg) | did not run | 4.4 [4.3–4.4] | n/a | n/a |
+| Idle total with the floor (PSS above it + the floor + compositor copies), 2× 4K, color (MiB) | 2.1 [2.0–2.1] | n/a | 64.3 [64.3–64.3] | did not run | 4.4 [4.3–4.4] | n/a | n/a |
+| Idle wakeups in 60 s, 1× 1080p, image | 0 | n/a | 0 | did not run | 0 | 0 | 125 [125–126] |
+| Idle wakeups in 60 s, 2× 4K, image | 0 | n/a | 0 | did not run | 0 | 0 | 160 [160–161] |
+| Idle wakeups in 60 s, 1× 1080p, color | 0 | n/a | 0 | did not run | 0 | n/a | n/a |
+| Idle wakeups in 60 s, 2× 4K, color | 0 | n/a | 0 | did not run | 0 | n/a | n/a |
+| Idle CPU in 60 s, 1× 1080p, image (ms) | 0.0 | n/a | 0.0 | did not run | 0.0 | 0.0 | 6.2 [5.8–6.6] |
+| Idle CPU in 60 s, 2× 4K, image (ms) | 0.0 | n/a | 0.0 | did not run | 0.0 | 0.0 | 7.4 [7.1–7.9] |
+| Idle CPU in 60 s, 1× 1080p, color (ms) | 0.0 | n/a | 0.0 | did not run | 0.0 | n/a | n/a |
+| Idle CPU in 60 s, 2× 4K, color (ms) | 0.0 | n/a | 0.0 | did not run | 0.0 | n/a | n/a |
+| Peak memory (RSS), JPEG at start-up, 1× 4K (MiB) *(not gated)* | 88.9 [88.8–89.2] | 88.5 [87.8–88.6] | 281.7 [281.7–282.1] | did not run | 169.3 [169.3–169.4] | 107.4 [107.3–107.5] | 420.1 [420.0–420.4] |
+| Peak memory (RSS), live change to the JPEG, 1× 4K (MiB) *(not gated)* | 121.1 [120.9–121.4] | 120.3 [119.7–120.9] | 313.9 [313.5–314.0] | did not run | n/a | n/a | 548.6 [548.2–549.6] |
+| Set: latency to the JPEG (ms) | 472 [447–702] | 382 [373–443] | 637 [610–700] | did not run | n/a | n/a | 702 [668–757] |
+| Set: CPU for the JPEG (ms) | 458 [437–683] | 369 [362–421] | 595 [564–643] | did not run | n/a | n/a | 844 [809–913] |
+| Set: latency to a color (ms) | 16.7 [13.9–25.4] | n/a | 51.9 [47.8–55.7] | did not run | n/a | n/a | n/a |
+| Set: CPU for a color (ms) | 4.3 [3.9–4.4] | n/a | 35.6 [34.1–36.4] | did not run | n/a | n/a | n/a |
+| Startup: to a color on screen (ms) | 22.2 [20.4–30.0] | n/a | 76.5 [70.9–86.3] | did not run | 25.0 [21.1–30.0] | n/a | n/a |
+| Startup: CPU, color (ms) | 5.8 [4.8–7.6] | n/a | 51.3 [48.5–65.9] | did not run | 6.2 [5.9–8.3] | n/a | n/a |
+| Startup: to the JPEG on screen (ms) | 469 [465–498] | 394 [380–405] | 657 [623–675] | did not run | 542 [533–575] | 447 [429–460] | 944 [914–1027] |
+| Startup: CPU, JPEG (ms) | 444 [443–462] | 367 [362–384] | 566 [560–602] | did not run | 523 [513–557] | 413 [402–436] | 1451 [1412–1550] |
+| Restore: to the JPEG on screen (ms) | 482 [449–522] | n/a | 630 [620–665] | did not run | n/a | n/a | n/a |
+| Restore: CPU, JPEG (ms) | 463 [432–484] | n/a | 584 [567–621] | did not run | n/a | n/a | n/a |
+| Restore: to a color on screen (ms) | 20.0 [11.9–23.8] | n/a | n/a | did not run | n/a | n/a | n/a |
+| Restore: CPU, color (ms) | 2.3 [2.3–3.4] | n/a | n/a | did not run | n/a | n/a | n/a |
+
+**Peak memory as PSS, the gated figure** (runs of 2026-09-28, `--only
+startup,set`, 5 rounds, harness `cfcc2cd`, the same binaries; the table
+above, from the first run, has peak as RSS, which counts a page once per
+process that maps it and so overcounts awww, whose client hands its
+pixels to the daemon in shared memory):
+
+| Row | scootbg | scootbg-bilinear | awww | hyprpaper | swaybg | wbg | wpaperd |
+|---|---|---|---|---|---|---|---|
+| scoot: JPEG at start-up, 1× 4K (MiB) | 84.7 [84.2–85.6] | 83.2 [82.6–84.4] | 278.9 [275.8–279.4] | did not run | 159.4 [153.6–165.8] | 106.0 [105.0–106.1] | 419.0 [418.8–419.1] |
+| scoot: live change to the JPEG, 1× 4K (MiB) | 101.3 [100.4–101.4] | 98.8 [98.5–101.4] | 294.9 [290.8–295.2] | did not run | n/a | n/a | 499.5 [499.4–499.6] |
+| sway: JPEG at start-up, 1× 4K (MiB) | 85.3 [84.2–85.4] | 84.6 [82.5–85.4] | 278.9 [278.4–279.1] | did not run | 160.1 [153.4–166.2] | 105.4 [104.1–105.6] | 418.7 [418.6–418.9] |
+| sway: live change to the JPEG, 1× 4K (MiB) | 116.7 [116.4–117.5] | 116.1 [114.6–116.3] | 310.7 [308.7–311.0] | did not run | n/a | n/a | 547.2 [546.6–548.2] |
+
+scootbg's is the lowest on every row, on both compositors. The live
+change reads lower on scoot than on sway because PSS splits the old
+buffer with the compositor that maps it. The same runs' Set and Startup
+rows agree with the first run's; the JPEG at start-up against wbg is
+again a tie by the rule (scoot 494 against 451 ms, CPU 475 against 426
+ms, inside a combined spread of 79 and 81 ms). They are in
+[`bench/2026-09-28-scoot-peak/`](bench/2026-09-28-scoot-peak/table.md)
+and [`bench/2026-09-28-sway-peak/`](bench/2026-09-28-sway-peak/table.md).
+
+### What ran, and what did not
+
+| Daemon | Version (nixpkgs at the flake's pin) | scoot `--headless` | sway 1.12 headless | `--tty` |
+|---|---|---|---|---|
+| scootbg | 0.1.0, `d8cb6dc` | runs | runs | not tried: no DRM device here |
+| awww (formerly swww; nixpkgs has `awww`, `swww` is an alias for it) | 0.12.1 | runs | runs | not tried |
+| swaybg | 1.2.2 | runs | runs | not tried |
+| wbg | 1.3.0 | runs | runs | not tried |
+| wpaperd | 1.3.0 | runs, on Mesa 26.2.2's software EGL (llvmpipe) | runs, likewise | not tried |
+| hyprpaper | 0.8.4 | **does not run**: hyprtoolkit asserts "Couldn't open a gbm fd" and aborts, since it needs a DRM render node and this machine has none | **does not run**: it binds `xdg_wm_base` version 6 where sway offers 5, a protocol error, and then exits "Missing protocols" | not tried |
+
+hyprpaper's live change is Hyprland-only in any case (its IPC turns off
+without `HYPRLAND_INSTANCE_SIGNATURE`), and it has no colors and no
+restore. Its Size and Disk are still weighed in the raw data (49,664,096 B
+and 164,946,832 B), but it has no row in the gate. `--tty` needs the dev
+VM, which this container cannot reach.
+
+### Which binaries, and what was corrected afterwards
+
+- **scootbg.** Every run row, and the Size row, is
+  `target/release/scootbg` with sha256 `39e2c361…6d95` (1,684,328 B),
+  built from `d8cb6dc` with a clean tree.
+  - It is not the `c2ea42c2…` binary first built from the same tree:
+    `cargo test --release -p scootbg`, run for scootbg's in-process stage
+    benchmark, rebuilt it before the runs.
+  - Both have the same `.text` and `.rodata` sizes.
+  - The Disk row weighs the nix package
+    `/nix/store/f1a28pbn…-scootbg-0.1.0`, built by `nix build .#scootbg`
+    from `d8cb6dc` (derivation `k1qcpb2p…`). Its binary has sha256
+    `0ac53ae2…904c9f` (1,656,544 B).
+- **The compositors.** scoot is `target/release/scoot`, sha256
+  `d84d06d0…`, from `d8cb6dc`. sway is nixpkgs' sway 1.12: the wrapper
+  `/nix/store/5ddkfdxn…-sway-1.12/bin/sway` execs
+  `/nix/store/cd7wsnw5…-sway-unwrapped-1.12/bin/sway`.
+- **Every file's path and hash** is in `meta.json`, under `exe`,
+  `binaries`, `store_binary`, `compositor_exe` and
+  `compositor_binaries`.
+- **Corrections, all listed under `corrections` in each `meta.json`.**
+  None changed a measured figure.
+  - scoot run: the harness had recorded `scootbg version`'s reply (which
+    asks a running daemon: "no scootbg daemon is running …") as scootbg's
+    version. It was replaced by hand with the same binary's `--version`,
+    "scootbg 0.1.0 (protocol 1)".
+  - sway run: the harness kept the first line of `sway --version`. With
+    no bus address set, nixpkgs' wrapper starts `dbus-run-session`, whose
+    error comes first, so that line was replaced with "sway version
+    1.12".
+  - Both runs: the binary provenance above was added after the run, from
+    the same content-addressed store paths and the same unchanged scoot
+    build.
+  - The harness now records these itself: versions parsed from the
+    version line, each process's real executable, and the harness's own
+    commit, status and file hashes.
+- **The harness each run used.** The scoot run used `scripts/scootbg-bench/`
+  as in `7e2b1e8`, but for the one line that ran `scootbg version`. The
+  sway run used it exactly as in `7e2b1e8`. It was uncommitted at the
+  time, so `tree_dirty`, which covers tracked files only, says false.
+
+### How each row is measured
+
+- **One observer for every daemon.** The compositor runs with
+  `WAYLAND_DEBUG=server`, which prints every request it receives with a
+  wall-clock time: wayland-rs in scoot, libwayland in sway. A **buffer
+  commit** is a `wl_surface.commit` after a non-null `wl_surface.attach`.
+  A timed row ends at the **last** buffer commit before the daemon goes
+  quiet: 1 s with no further commit, under 2 ms of CPU, and every client
+  exited. So a placeholder frame never counts as the wallpaper; the runs
+  also keep the first commit and the count.
+  - This is where the method departs from the ticket's wording ("to the
+    first committed buffer"), and why: taken literally, wpaperd's
+    placeholder would count. It commits at 187–256 ms, before its image,
+    and the image is up at 914–1,027 ms (4 buffer commits every run, on
+    both compositors). Every other daemon commits exactly once, so for
+    them the first and the last are the same commit.
+  - Each daemon uses its own
+  Wayland library (C, Rust, or Mesa's EGL over either), so timing them
+  inside the client would take a different clock hook per daemon, and
+  polling screenshots for a pixel would load the CPU it is timing.
+  Screenshots only confirm, after each run, that every output shows the
+  color (exactly) or the image.
+- **CPU** is a cgroup's. It holds the daemon, the clients run for it
+  (`scootbg set`, `awww img`, `wpaperctl`), and whatever the daemon spawns
+  itself (`awww-daemon` restores by running `sh -c 'awww img …'`), exited
+  processes included. It is in ns on cgroup v1 (`cpuacct`, here) and µs
+  on v2. Each process joins through a `/bin/sh` wrapper that writes its
+  pid to the group and then `exec`s the command, so the pid is the
+  command's and the harness never runs code between `fork` and `exec`.
+  The 2026-09-27 runs joined through `preexec_fn` instead, which is
+  unsafe beside a thread (the peak sampler). Nothing went wrong in them:
+  every process joined, and no run hung. The 2026-09-28 runs used the
+  wrapper. Their Set and Startup figures are within about 5% of the
+  earlier ones, but not proof of the same timing: those runs also sample
+  PSS every 10 ms (`smaps_rollup`, which takes the process's mmap lock)
+  while the timed rows run, and that sampler's overhead is not measured.
+  So the 2026-09-27 runs stay the timing evidence, the 2026-09-28 runs
+  the peak evidence; separating the two (or measuring the sampler) is
+  left for the next run of the harness.
+- **Size**: the stripped executables (`strip --strip-all` copies; awww and
+  wpaperd have a daemon and a client), plus their shared-library closure
+  as the binary's own loader resolves it (`ld.so --list`), less glibc's
+  own libraries. Libraries loaded with `dlopen` are left out of the row
+  but weighed in the raw data: gdk-pixbuf's loaders for swaybg, and for
+  wpaperd Mesa and LLVM, 230,257,248 B more.
+- **Disk**: the nix package's runtime closure, less glibc's closure, plus
+  what the daemon writes. scootbg writes its 88-byte state file, awww a
+  45-byte cache entry per output (the image's path and settings, not the
+  pixels), and wpaperd a 23-byte symbolic link naming the current
+  wallpaper. Mesa's shader cache (2,127,157 B, written because wpaperd
+  renders with GL) is recorded but not counted. scootbg's closure is
+  11.6 MiB because the nix build's binary refers to `gcc-15.3.0-lib`
+  (9.8 MiB), although it needs only `libgcc_s` from `gcc-15.3.0-libgcc`
+  (193 KiB).
+- **Idle memory**, 60 s after the wallpaper is up. Every daemon of a batch
+  runs at once, each with its own compositor, so all of them see the same
+  sharing of libraries, which PSS depends on.
+  - **The floor** is the output buffers, wherever they live. It is the
+    shared-memory files the compositor maps that it did not map before
+    the daemon started, weighed by allocated pages, resident or not.
+  - The per-process RSS and PSS rows are shown but not gated. They
+    mislead because swaybg unmaps its buffer once committed, so the
+    pixels live on only in the compositor and its RSS shows none of them.
+    On sway, the compositor had not even read that buffer yet: the pages
+    existed in no process's RSS.
+  - **Above the floor** is the daemon's RSS or PSS less its mappings of
+    those files; any other shared memory it keeps stays in.
+  - **Total** is PSS above the floor, plus the floor, plus any growth of
+    the compositor's anonymous memory (a copy of the pixels): the
+    wallpaper's whole cost, each page counted once.
+- **Idle wakeups** are the context switches of every thread in the next
+  60 s, from `/proc`; idle CPU is the cgroup's.
+- **Peak memory** is gated on PSS: the largest summed PSS of the
+  daemon's processes, sampled every 10 ms while it works. awww decodes in
+  its client and hands the pixels over in shared memory, and PSS counts
+  those pages once; a sum of RSS counts them in each process. A sample
+  can miss a spike shorter than its interval. The RSS figure is still
+  recorded, ungated: the larger of any one process's `VmHWM` and the
+  summed RSS sampled every 5 ms. The first runs (2026-09-27) recorded
+  only that one, so their peak rows are RSS. It is measured at start-up
+  with the JPEG, and for a live change from a 64×64 PNG already covering
+  the output.
+- **Set**: a live change from that PNG to the JPEG, then to `#1e1e2e`.
+  **Startup**: from `exec` of the daemon, with nothing saved. A daemon
+  that takes the wallpaper on its command line or in its config gets it
+  there; scootbg and awww get it from their client the moment their
+  socket listens. That is read from `/proc/net/unix`, because a probe
+  that connects and hangs up kills `awww-daemon` with SIGPIPE.
+  **Restore**: a daemon is set, stopped the way a user would (`scootbg
+  kill`, `awww kill`), then a new one is timed.
+- **Geometry**: the timed and peak rows on one 3840×2160 output; the idle
+  rows on 1× 1920×1080 and 2× 3840×2160. Scale 1.
+- **The image** is the 6000×4000 JPEG of tickets 6, 8 and 9: `magick
+  -seed 1 -size 6000x4000 plasma:fractal -attenuate 0.5 +noise Gaussian
+  -quality 92 -sampling-factor 4:2:0` (ImageMagick 7.1.2-29), 8,851,735
+  B, sha256 `301279ff…27a0`. The harness makes it if it is missing, and
+  refuses to run on a file with any other hash (another ImageMagick makes
+  other noise).
+
+### What each daemon was asked to do
+
+- **scootbg**: `set` with its defaults, `fill` and Lanczos3.
+- **awww**: `awww img --transition-type none`, with its defaults `crop` and
+  Lanczos3: the same work. Colors with `awww clear`. `--format` is left at
+  its default, ARGB, 4 bytes a pixel like scootbg's XRGB.
+- **swaybg**: `-m fill`, or `-c`.
+- **wbg**: `--stretch`, which in wbg covers and crops (the scale is the
+  larger of the two ratios); without it wbg letterboxes. It has no
+  colors.
+- **wpaperd**: `mode = "center"` (its cover-and-crop mode),
+  `transition-time = 0`, `initial-transition = false`; live change by
+  `wpaperctl set-wallpaper`. It has no colors, and it restores nothing:
+  after `set-wallpaper` and a restart, with the path a file or a
+  directory, and even when killed so its state link stays, it shows its
+  config's image.
+- **Restore** applies to scootbg and awww only, and to images only for
+  awww: a `clear` leaves awww's cache naming the last image, so it comes
+  back after a restart.
+
+### Notes on the results
+
+- **The closest row is the JPEG at start-up against wbg**, a tie by the
+  rule. wbg's medians are 22 ms and 31 ms of CPU lower than scootbg's
+  (447 against 469 ms; 413 against 444 ms), inside the combined spread.
+  wbg decodes with libjpeg-turbo (158–214 ms of CPU for this file with
+  `djpeg`, against 244–305 ms for zune-jpeg in scootbg's own stage
+  benchmark in the same session). It scales with pixman's
+  `PIXMAN_FILTER_BEST`, which pixman implements as bilinear. With the
+  same filter (`scootbg-bilinear`), scootbg takes 394 ms and 367 ms of
+  CPU. The default stays Lanczos3: a cheaper filter trades quality, and
+  that is the user's call, not a benchmark's.
+- **A reduced-size JPEG decode** (the ticket's idea for the peak row) is
+  not available: zune-jpeg 0.5.15 has no DCT scaling (its `idct_4x4` is
+  a fast path for sparse blocks). It would not apply here either: `fill`
+  onto 3840×2160 takes 6000×3375 of the source, only 1.56 times the
+  target. scootbg's peak is already the lowest: as PSS at start-up, 84.7
+  MiB against wbg's 106.0, swaybg's 159.4 and awww's 278.9 (as RSS, 88.9
+  against 107.4, 169.3 and 281.7).
+- **2× 4K**: scootbg's floor is one buffer (31.6 MiB) and every other
+  daemon's two. wpaperd's is three times that, since EGL keeps three
+  buffers per output.
+- **wpaperd** wakes 125–126 times a minute idle on 1× 1080p and 160–161
+  on 2× 4K on scoot, 126–127 and 165–168 on sway, and its numbers are
+  llvmpipe's. On a GPU its memory and CPU land elsewhere, partly in the
+  driver, so its column says little about a GPU desktop. It does say what
+  it costs where there is no GPU.
+
+### Running it
+
+```sh
+cargo build --release -p scoot -p scootbg
+nix build .#scootbg --out-link /tmp/scootbg-pkg   # for the Disk row
+devenv shell -- python3 scripts/scootbg-bench/bench.py run --out /tmp/bench \
+    --scootbg-store "$(readlink -f /tmp/scootbg-pkg)"             # scoot, 5 rounds, about 55 min
+devenv shell -- python3 scripts/scootbg-bench/bench.py run --out /tmp/bench-sway \
+    --compositor sway --sway "$(command -v sway)" --scootbg-store …
+python3 scripts/scootbg-bench/bench.py report /tmp/bench           # the table and the gate again
+python3 scripts/scootbg-bench/bench.py compare /tmp/bench docs/scootbg/bench/2026-09-27-scoot
+```
+
+- It needs root, or the right to make a cgroup (for CPU), and to read
+  other processes' `/proc/PID/map_files` (for the floor).
+- The competitors and Mesa come from the flake's pinned nixpkgs
+  (`nix build --inputs-from .`, sandboxed).
+- `--only startup,set,restore,idle` and `--daemons NAME,…` run a subset,
+  and `--rounds`, `--idle-secs` and `--window-secs` shorten it for a
+  quick check.
+- **`compare`** is the regression check the ticket asks of every later
+  change to decoding, buffers or the event loop. It measures scootbg now
+  against a published run by the same margin, and exits 1 on a
+  regression. Compare runs from the same machine only.
+- The harness's own tests: `python3 -m unittest discover -s
+  scripts/scootbg-bench`.
+
+### On sway
+
+The same run against headless sway 1.12 (wlroots, pixman renderer),
+[`bench/2026-09-27-sway/`](bench/2026-09-27-sway/table.md), gives the
+same verdicts: the same 9 losses to awww on idle memory above the floor
+(RSS 3.87–4.45 against 2.66–2.90 MiB, PSS 2.06–2.39 against 0.90–1.04
+MiB, the 1080p image's total 10.3 against 8.9 MiB), and a win or a tie on
+every other row. The JPEG at start-up against wbg is again a tie (475
+against 490 ms, 449 against 459 ms of CPU). The one difference is in the
+ungated per-process rows: sway had not yet read swaybg's buffer at the
+idle sample, so those pages show in no process's RSS, which is why the
+gated rows weigh the floor by allocated pages.
 
 ## Relation to scoot
 
