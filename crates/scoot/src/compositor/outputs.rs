@@ -34,7 +34,7 @@
 //! # What is *not* per-output yet
 //!
 //! This is the foundation, not the whole of multi-output (see
-//! `docs/backlog/core/multi-output.md`). Every output has a render target of
+//! `docs/backlog/resolved/multi-output-superseded.md`). Every output has a render target of
 //! its own (milestone 19, phase A), and the protocol sites went per-output
 //! phase by phase after that -- layer shell (B), session lock (C),
 //! workspaces, output management and the pointer clamp (D) -- so

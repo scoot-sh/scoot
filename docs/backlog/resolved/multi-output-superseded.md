@@ -1,12 +1,38 @@
 ---
-title: "Multi-output: more than one monitor at a time"
-status: "open"
-area: "core"
-priority: "high"
-blocked: "phases A–D landed; phase E (--tty multi-CRTC) needs real two-connector hardware"
+title: "Multi-output: more than one monitor at a time — SUPERSEDED"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
 ---
 
-# Multi-output: more than one monitor at a time
+# Multi-output: more than one monitor at a time — SUPERSEDED
+
+Superseded 2026-09-28 by a docs-only triage (no code gap found — any claim
+below with no home in the milestone/remainder records would have stayed
+open, and there is none). The live tracker is [Milestone 19](../roadmap/19-multi-output.md)
+(phases A–F done), and the one remaining surface is
+[multi-output-remainder](../core/multi-output-remainder.md) (open, high:
+the per-output scale/mode surface only). Two live trackers is how drift
+starts, so this original spec is archived here. Section-by-section landing
+map, with exact citations:
+
+| Original section | Where it landed |
+| --- | --- |
+| Live-tracker note + request (`:11-27`) | [Milestone 19](../roadmap/19-multi-output.md) (promoted 2026-09-20; `ROADMAP.md` milestone-19 row, phases A–F done) |
+| Foundation recap (`:29-48`) | [multi-output-foundation-done](./multi-output-foundation-done.md) (PR #150) + milestone 19 "What already landed" (`../roadmap/19-multi-output.md:7-15`) |
+| Layer shell (`:57-63`) | Milestone 19 Phase B, DONE 2026-09-21 (`../roadmap/19-multi-output.md:77-122`) |
+| Session lock (`:64-75`), incl. `locked` waiting for every output's blank | Milestone 19 Phase C, DONE 2026-09-21 (`../roadmap/19-multi-output.md:123-191`); the per-output vblank wait extended to `--tty` in Phase E (`../roadmap/19-multi-output.md:313-335`) |
+| `ext-workspace-v1` group per output (`:76-78`) | Milestone 19 Phase D, DONE 2026-09-21 (`../roadmap/19-multi-output.md:192-278`) |
+| Render loop, one target per output (`:79-83`) | Milestone 19 Phase A, DONE 2026-09-21 (`../roadmap/19-multi-output.md:40-76`); `screenshot --output N` un-refused, screencopy per output |
+| `wlr-output-management` `apply`/`test` (`:84-88`) | Explicitly not in the milestone (`../roadmap/19-multi-output.md:528-532`); standing refusal record [output-management-reconfiguration-done](./output-management-reconfiguration-done.md) — a decided no, not a gap |
+| `--tty` multi-connector (`:89-91`) | Milestone 19 Phase E, DONE 2026-09-25, E1 `b782b06` / E2 `2bd7d47` (`../roadmap/19-multi-output.md:279-426`); hotplug matrix [tty-hotplug-confirmation-done](./tty-hotplug-confirmation-done.md) (RESOLVED 2026-09-28); reconnect restore [output-reconnect-restore-done](./output-reconnect-restore-done.md) (PR #249) |
+| Q1: core vs compositor models outputs (`:95-99`) | Decided before Phase A (`../roadmap/19-multi-output.md:26-29`, no core redesign); the tripwire never fired (Phase D `../roadmap/19-multi-output.md:198`, Phase F `../roadmap/19-multi-output.md:442`) |
+| Q2: strip meaning across monitors (`:100-103`) | Decided: one strip per output (`../roadmap/19-multi-output.md:19-20`) |
+| Q3: focus across outputs (`:103-105`) | Decided: pointer picks the output, existing rule applies (`../roadmap/19-multi-output.md:21-25`); carried through Phase F's pointer rule (`../roadmap/19-multi-output.md:489-491`) |
+| Staging (`:107-113`) | Happened as staged: A–D VM-testable first, E hardware-gated (`ROADMAP.md` milestone-19 row) |
+
+Original spec, verbatim below (design questions kept for history):
 
 > **Live tracker: [Milestone 19](../roadmap/19-multi-output.md)** (promoted
 > 2026-09-20). Phases A (render/capture), B (layer shell), C (session

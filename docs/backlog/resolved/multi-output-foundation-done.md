@@ -119,7 +119,7 @@ surface torn down *implicitly*, by its client disconnecting rather than by a
 `destroy`, still leaks on a secondary output. That safety net exists for
 exactly the ordering the explicit path cannot cover, and it is the one place
 this item deliberately leaves single-output. It belongs with the rest of the
-per-output render walk in [multi-output](../core/multi-output.md); named here
+per-output render walk in [multi-output](../resolved/multi-output-superseded.md); named here
 so it is not mistaken for finished.
 
 **Refused rather than answered wrong.** One output is composited, so
@@ -129,7 +129,7 @@ primary output's pixels under another output's name. `screencopy` and
 against the primary one.
 
 Everything else stays single-output *in behaviour* and goes through
-`Outputs::primary`, which is what [multi-output](../core/multi-output.md)
+`Outputs::primary`, which is what [multi-output](../resolved/multi-output-superseded.md)
 picks up: layer-shell zones per output, `layer_hit`, `layer_keyboard_focus`,
 `render()`'s per-output pass, session lock (including `locked` waiting for
 every output's blanked frame), `ext-workspace` groups, output-management

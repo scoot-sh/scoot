@@ -53,13 +53,14 @@ physical DP-1 unplug and replug (17:59Z): output 2 removed, output 3 added
 on CRTC 68 with a modeset. The kernel reported the disconnect that time,
 unlike a quicker unplug that morning.
 
-**Follow-ups left here (why this file stays open):**
+**Follow-ups closed here (why this file stays open is item 3 below plus the scale/mode surface):**
 
-1. **The rest of the hotplug paths on hardware.** Unplug and replug are
-   confirmed on the dumb tier. Still unexecuted: a GPU-tier runtime add
-   (fresh `DrmCompositor` and EGL context beside a live one), the #48
-   `MoveTo` fallback (needs the only lit screen to be pullable), and a mode
-   change with several heads.
+1. **The rest of the hotplug paths on hardware — all proven, nothing open.**
+   Unplug and replug were confirmed on the dumb tier at E2 merge. The three
+   paths still unexecuted then are all proven live now (updates below), and
+   the full matrix is recorded in
+   [`tty-hotplug-confirmation-done.md`](../resolved/tty-hotplug-confirmation-done.md)
+   (RESOLVED 2026-09-28).
 
    **Update 2026-09-26 (dev VM, vkms `Virtual-3`, dumb tier): the
    Hold/Reconnected halves are now proven live; `MoveTo`, the GPU-tier
@@ -134,9 +135,18 @@ unlike a quicker unplug that morning.
    id. **Subsumed by that ticket's implementation** (positional default binds
    for the first/second screen plus workspace restore on identity match) —
    this follow-up needs no separate work.
-3. **Per-output render scheduling.** A render walks every output. With
-   damage on one screen the other costs a no-damage pass, about 1 pp of CPU
-   measured. This is an optimisation, not a correctness gap.
+3. **Per-output render scheduling — NOT PLANNED (optimisation, not a correctness gap).**
+   A render walks every output: with damage on one screen the other costs a
+   no-damage pass plus a frame-callback round, measured at ~1 pp of CPU with
+   the second screen idle (milestone 19 Phase E decided-record,
+   `../roadmap/19-multi-output.md:399-404`; Asahi jiffies 36.20% eDP-1-only
+   vs 35.20/35.67% single-output for the same workload). Per-output
+   scheduling would save only that pass and stays parked until a measurement
+   shows it matters — do not re-file it as a correctness gap. Adjacent and
+   already resolved, not this item:
+   [`arrange-per-output-per-frame`](../resolved/arrange-per-output-per-frame-done.md)
+   (RESOLVED 2026-09-26, PR #267: one arrange per frame, hoisted out of the
+   per-output walk).
 
 - One `DrmSurface`/CRTC per driven connector; render loop walks all TTY
   outputs like headless Phase A.
@@ -156,6 +166,12 @@ unlike a quicker unplug that morning.
 
 ## G — New-window placement policy — LANDED 2026-09-21 (PR #208)
 
+Landed as specified: new windows file under the pointer's output
+(`shell.rs:62-71`, `pointer_output().and_then(...).or_else(primary_id())`), the milestone focus
+doctrine (`../roadmap/19-multi-output.md:21-25`); default output binds exist
+alongside (item H). What follows is the original spec, kept as the design
+record.
+
 `shell.rs:32` files `WindowOpened` with `world.outputs().first()`;
 `output_of_window` falls back to primary
 (`foreign_toplevel_management.rs:317-331`). Recommended: **pointer's
@@ -165,6 +181,11 @@ Update the fallback comment and `outputs.rs:133-142` docs. Pins:
 IPC `output` field assertion.
 
 ## H — Default binds for FocusOutput / MoveFocusedWindowToOutput — LANDED 2026-09-21 (PR #208)
+
+Landed: `Super+comma`/`Super+period` (+ Shift for moves) name the
+first/second screen and resolve positionally at dispatch (ids are never
+reused; stability rule in `docs/configuration.md#moving-across-outputs`).
+What follows is the original spec, kept as the design record.
 
 Wire + grammar exist (`config.rs:758-759`, `cli.rs:43`, documented manual
 binds `configuration.md:443-462`); `Keybindings::default`
@@ -186,8 +207,13 @@ fallback, plug-second-while-running → added and session stays on panel.
 
 ## What done looks like
 
-E2 done (one-connector clause gone) + G done (first-output clause gone) +
-H done (no-defaults clause gone) + scale/mode entry done → the bullet
-leaves the README. Also refresh the stale body of `multi-output.md`
-(`:50-113` describes A–D as future) and the stale `cli.rs:181-193`
-"one render target" comment in passing.
+E2, G and H are done (above). The `cli.rs:181-193` "one render target"
+comment this section used to cite is already current — it describes
+per-output render targets (verified 2026-09-28, no edit needed) — and the
+stale `multi-output.md:50-113` body (A–D as future) is superseded by this
+triage (`../resolved/multi-output-superseded.md`, milestone 19
+authoritative). One thing left: the [scale/mode surface](./per-output-scale-mode.md).
+When it lands, the README "Not yet" bullet — already narrowed to
+**Per-monitor settings** ("Multiple monitors work, but they share one
+scale and resolution…", `README.md:174-175`, retitled past one-output in
+`../resolved/readme-rereview-done.md`) — clears.
