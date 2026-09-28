@@ -445,3 +445,13 @@ No blocking findings; the low ones, fixed in commits after `53669ac`:
    decision between accepting it, a probe, a scoot-sh fork of
    `pic-scale-safe` with a destination-slice entry point, and another
    scaler.
+
+Verified at `8d84be8` on the same container: `nextest` for scootbg and
+scootbg-mem (with scoot and sway required) 435 passed, 2 skipped;
+`cargo test` every suite ok (unit tests 333); clippy `-D warnings`, fmt,
+the release build (`-D warnings`, 1,684,328 bytes, unchanged), no `libc`
+crate, `cargo build --workspace`; the fuzz crate's clippy and fmt. The
+worker's stack is now set rather than defaulted, to the same 2 MiB, so
+the `set` row was run again (5 rounds) against the base run above:
+JPEG 633 ms against 698, color 17.1 against 23.4, peak PSS 101.6 against
+100.9 MiB, `compare` 0 regressions.
