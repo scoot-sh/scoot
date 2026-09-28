@@ -624,8 +624,10 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
    process's exit hands anyone focus. For these launches the race stays
    open to an X client that copies the id and *asks* with it before the
    app's window does, as it always was; and a window whose launched
-   process lingers more than a second after the window asked opens
-   unfocused, until it asks again. A client that sets no startup id
+   process lingers more than a second after the window asked, or whose
+   focus moved first, opens unfocused -- and the launch's token is spent
+   then, so no window that asks later (a copier) can take the focus
+   either. A client that sets no startup id
    (`xterm`) is matched by process alone: a process scoot spawned whose
    token is still live counts. **A live token a mapping window may redeem
    is spent whichever rule grants it focus** -- so a token cannot be left

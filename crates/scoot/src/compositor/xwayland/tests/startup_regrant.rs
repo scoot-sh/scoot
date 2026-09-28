@@ -17,7 +17,7 @@ use x11rb::protocol::xproto::Window as XWindow;
 
 use super::live::{Live, RED, live};
 use super::startup_exited::{end, named, spawn, wait_exited};
-use super::x11::{Props, eventually};
+use super::x11::{Props, XClient, eventually};
 use crate::compositor::xwayland::focus::REFUSAL_GRACE;
 
 /// Sets `token` as `xid`'s startup id after it mapped, and waits until the
@@ -151,7 +151,21 @@ fn a_stale_refusal_is_not_granted() {
         Some(id),
         "a refusal older than the grace was granted"
     );
-    assert!(live_token(&live, &token));
+    // The first asker's lapsed claim settles the token: spent, so a window
+    // that asks with a copied id after the app's window did cannot take it
+    // (as under the unbound rule, where the app's map spent it).
+    assert!(
+        !live_token(&live, &token),
+        "the token outlived the first asker's lapsed claim"
+    );
+    let copier = XClient::connect(live.display);
+    let copied = copier.map(&named(&token));
+    let copied = live.managed(copied);
+    assert_ne!(
+        live.fixture.state.focus,
+        Some(copied),
+        "a window asking after the app's window took the spawn's focus"
+    );
 }
 
 /// Focus moved after the refusal -- the user chose a window -- so the
@@ -184,7 +198,8 @@ fn a_focus_change_since_the_refusal_is_kept() {
         "the spawn's exit overrode a focus change made after the refusal"
     );
     assert_ne!(live.fixture.state.focus, Some(id));
-    assert!(live_token(&live, &token));
+    // The first asker settled the token: spent with no grant.
+    assert!(!live_token(&live, &token));
 }
 
 /// Two windows asked with the token and were refused: the first to ask

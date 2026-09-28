@@ -79,8 +79,8 @@
 //!        process is still running when its window maps. And one launch
 //!        shape is now refused where the unbound rule would have granted
 //!        it: a window whose spawn exits more than [`REFUSAL_GRACE`] after
-//!        the window asked, or after focus moved, stays unfocused until it
-//!        asks again.
+//!        the window asked, or after focus moved, stays unfocused, and the
+//!        token is spent at that exit so no later asker can take it.
 //!      - a **Wayland client's token** (a launcher's, minted from a real
 //!        click: it passed `activation.rs`'s serial gate) keeps the unbound
 //!        rule -- any window naming it redeems it. scoot never learns which
@@ -442,11 +442,13 @@ impl State {
     ///   user did in between decided focus;
     /// - its startup id (own, or its client leader's) still names the token.
     ///
-    /// Of several, the one refused first -- the first to ask -- is granted.
+    /// Of several, the one refused first -- the first to ask -- settles the
+    /// token: it is granted if its claim holds, and otherwise the token is
+    /// spent with no grant, so no later asker can take it.
     /// A focused window that was refused for the spawn (rule 1 or 3 then
     /// focused it) only spends the token, which would otherwise outlive the
-    /// spawn as copyable. Otherwise the token is left for the unbound rule
-    /// at a later map or request. Nothing happens without an XWM or while
+    /// spawn as copyable. With no refused asker at all the token is left for
+    /// the unbound rule at a later map or request (the first to ask then). Nothing happens without an XWM or while
     /// the session is locked, like every activation; the token then expires
     /// unspent. A grant moves focus, so later spawns in the same sweep find
     /// the generation changed and grant nothing: one sweep focuses at most
@@ -500,7 +502,11 @@ impl State {
             self.xdg_activation.remove_token(&token);
             return;
         }
-        let mut first: Option<(WindowId, Instant)> = None;
+        // The first window to ask with the token while the spawn ran, owed
+        // or not: as under the unbound rule, the first asker settles the
+        // token. If its claim has lapsed the token is spent with no grant,
+        // so a later asker (one that copied the id) cannot take it either.
+        let mut first: Option<(WindowId, Refusal)> = None;
         for (&id, window) in &self.windows {
             let Some(x11) = window.x11_surface() else {
                 continue;
@@ -508,16 +514,25 @@ impl State {
             let Some(refusal) = refused_for(self, x11) else {
                 continue;
             };
-            let owed = refusal.focus_generation == self.focus_generation
-                && now.saturating_duration_since(refusal.at) <= REFUSAL_GRACE;
-            if owed && first.is_none_or(|(_, at)| refusal.at < at) {
-                first = Some((id, refusal.at));
+            if first.is_none_or(|(_, earliest)| refusal.at < earliest.at) {
+                first = Some((id, refusal));
             }
         }
-        let Some((id, _)) = first else {
+        let Some((id, refusal)) = first else {
             return;
         };
         self.xdg_activation.remove_token(&token);
+        let owed = refusal.focus_generation == self.focus_generation
+            && now.saturating_duration_since(refusal.at) <= REFUSAL_GRACE;
+        if !owed {
+            tracing::debug!(
+                ?id,
+                pid,
+                "the first X11 window refused for an exited spawn's token no longer has a claim; \
+                 the token is spent with no grant"
+            );
+            return;
+        }
         tracing::debug!(
             ?id,
             pid,

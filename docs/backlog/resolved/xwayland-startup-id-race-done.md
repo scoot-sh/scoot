@@ -363,8 +363,13 @@ stands between it and a grant (mutation-checked).
   before the binding. One that only sets the property no longer wins.
 - **Narrower than the unbound rule in one shape**: a window that asked
   more than `REFUSAL_GRACE` before its spawn exits, or before focus moved,
-  is not granted at the exit and stays unfocused until it asks again --
-  where before the binding it would have been focused at map.
+  is not granted at the exit and stays unfocused -- where before the
+  binding it would have been focused at map. The token is spent at that
+  exit all the same (the first refused asker settles it, owed or not; the
+  third review of the batch found it had been left live, so a copier asking
+  *after* the app's window could take it -- fixed, and pinned by
+  `startup_regrant.rs`'s `a_stale_refusal_is_not_granted` and
+  `a_focus_change_since_the_refusal_is_kept`, both failing first).
 - A launched process that keeps running while a process it did not start
   maps the window (a client that waits on a server) is still refused;
   unmeasured whether any X app does this with a startup id.
