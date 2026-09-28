@@ -25,26 +25,30 @@ use crate::compositor::dmabuf::scanout::{FormatsKey, REVERT_HOLD, Steer};
 
 /// The `target_device` the tests' scanout tranche names: any value that is
 /// not the harness's `main_device`, so the two tranches are told apart.
-const DEVICE: libc::dev_t = 0xfeed;
+/// Shared with the overlay-feedback suite, which steers a different tranche
+/// to a different surface but names the same device.
+pub(super) const DEVICE: libc::dev_t = 0xfeed;
 
-/// `zwp_linux_dmabuf_feedback_v1.tranche_flags`' `scanout` bit.
-const SCANOUT: u32 = 1;
+/// `zwp_linux_dmabuf_feedback_v1.tranche_flags`' `scanout` bit. Shared with
+/// the overlay-feedback suite: both tranches carry the flag.
+pub(super) const SCANOUT: u32 = 1;
 
 /// One tranche, as the client saw it, with its indices resolved against the
-/// feedback's format table.
+/// feedback's format table. Shared with the overlay-feedback suite.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct SeenTranche {
-    target_device: Vec<u8>,
-    flags: u32,
-    formats: Vec<(u32, u64)>,
+    pub(super) target_device: Vec<u8>,
+    pub(super) flags: u32,
+    pub(super) formats: Vec<(u32, u64)>,
 }
 
-/// One complete (`done`-terminated) feedback, as the client saw it.
+/// One complete (`done`-terminated) feedback, as the client saw it. Shared
+/// with the overlay-feedback suite.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct SeenFeedback {
-    main_device: Vec<u8>,
-    table: Vec<(u32, u64)>,
-    tranches: Vec<SeenTranche>,
+    pub(super) main_device: Vec<u8>,
+    pub(super) table: Vec<(u32, u64)>,
+    pub(super) tranches: Vec<SeenTranche>,
 }
 
 /// Per toplevel: the feedback being received and every complete one.
@@ -155,7 +159,9 @@ fn read_table(fd: OwnedFd, size: u32) -> Vec<(u32, u64)> {
         .collect()
 }
 
-fn pair(code: Fourcc, modifier: Modifier) -> (u32, u64) {
+/// A `(fourcc, modifier)` pair as the wire carries it. Shared with the
+/// overlay-feedback suite.
+pub(super) fn pair(code: Fourcc, modifier: Modifier) -> (u32, u64) {
     (code as u32, modifier.into())
 }
 
@@ -181,11 +187,15 @@ fn useless_plane() -> FormatSet {
 }
 
 impl Fixture {
-    fn surface_feedback(&mut self, window: usize) {
+    /// Asks for surface feedback for the `window`-th toplevel. Shared with
+    /// the overlay-feedback suite.
+    pub(super) fn surface_feedback(&mut self, window: usize) {
         self.done(Step::SurfaceFeedback { window });
     }
 
-    fn feedbacks(&mut self, window: usize) -> Vec<SeenFeedback> {
+    /// Every complete feedback the `window`-th toplevel has received. Shared
+    /// with the overlay-feedback suite.
+    pub(super) fn feedbacks(&mut self, window: usize) -> Vec<SeenFeedback> {
         match self.run(Step::Feedbacks { window }) {
             Ack::Feedbacks(all) => all,
             _ => panic!("expected feedbacks"),

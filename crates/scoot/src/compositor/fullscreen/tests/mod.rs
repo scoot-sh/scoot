@@ -46,6 +46,10 @@ mod drawing;
 mod neighbours;
 mod occlusion;
 #[cfg(feature = "gpu-scanout")]
+mod overlay_feedback;
+#[cfg(feature = "gpu-scanout")]
+mod overlay_pick;
+#[cfg(feature = "gpu-scanout")]
 mod primary_direct;
 #[cfg(feature = "gpu-scanout")]
 mod scanout_feedback;

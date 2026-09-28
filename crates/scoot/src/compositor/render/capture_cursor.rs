@@ -764,6 +764,9 @@ where
         ring,
         arrangement.as_ref(),
         false,
+        // The capture re-render composites whole: nothing is marked, so no
+        // plane can take an element out of the region being drawn.
+        None,
         &mut pool.gathered,
     );
     let by = Point::from((-region.loc.x, -region.loc.y));

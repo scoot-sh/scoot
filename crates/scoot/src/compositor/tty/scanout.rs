@@ -58,7 +58,7 @@ use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags, PrimaryPlaneElement};
 use smithay::backend::drm::exporter::gbm::{GbmFramebufferExporter, NodeFilter};
 use smithay::backend::drm::{DrmDeviceFd, DrmSurface, PlaneInfo, Planes};
-use smithay::backend::renderer::element::{Id, RenderElement, UnderlyingStorage};
+use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::utils::Buffer as ClientBuffer;
 use smithay::backend::renderer::{Bind, Color32F, Renderer, Texture};
 use smithay::output::{Output, OutputModeSource};
@@ -192,18 +192,27 @@ type Compositor = DrmCompositor<GbmAllocator<DrmDeviceFd>, LayoutKeepingExporter
 ///
 /// # Overlay and cursor
 ///
-/// The overlay bit's reachable effect is deliberately narrow. Smithay's
-/// `try_assign_overlay_plane` only considers elements of kind
-/// `ScanoutCandidate` or `Cursor`, and this tree constructs neither for any
-/// window surface -- every surface element is built `Kind::Unspecified`
-/// (`render/elements.rs`, both call sites), only cursor elements are
-/// `Kind::Cursor`, and `Rounded` forwards its inner kind unchanged. So no
-/// window can ride an overlay plane until something is marked a scanout
-/// candidate (`docs/backlog/core/gpu-overlay-window-candidates.md`). What the bit
-/// does today is let the *cursor* ride an overlay where a CRTC has overlays
-/// but no cursor plane (the cursor plane is still tried first), which
-/// captures reconcile like any plane-assigned cursor (`render::scanout`,
-/// `render::capture_cursor`).
+/// The overlay bit's reachable effect covers windows as well as the cursor.
+/// Smithay's `try_assign_overlay_plane` only considers elements of kind
+/// `ScanoutCandidate` or `Cursor`: cursor elements always carry `Kind::Cursor`
+/// (`Cursor::element`), and at most one window per output per frame carries
+/// `Kind::ScanoutCandidate` -- the overlay-candidate pick
+/// (`render::overlay_candidate`), marked at gather time. So an overlay plane
+/// on this tier carries the cursor, or the picked window, or both (one per
+/// plane where the CRTC has two), and captures reconcile either
+/// (`render::scanout`, `render::capture_cursor`).
+///
+/// No scoot-side arbitration between the two: Smithay tries elements
+/// front-to-back, so the cursor (above) is offered the planes before a window
+/// below it, and a composited cursor overlapping the candidate refuses the
+/// ride through the overlap guard -- the cursor effectively wins ties, and a
+/// window rides once the pointer is hidden or parked off it (the same shape
+/// as primary-direct on a CRTC with no cursor plane). When the
+/// cursor-on-overlay work
+/// (`docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md`) lands,
+/// the cursor will take the topmost compatible plane by that same order and
+/// the window what is left; until then the cursor stays composited and only
+/// the window rides.
 ///
 /// Pinned below, with [`COMPOSITE_FLAGS`] and [`frame_flags`]'s three rows.
 const DIRECT_FLAGS: FrameFlags =
@@ -250,6 +259,28 @@ const fn composite_only(flags: FrameFlags) -> FrameFlags {
     )
 }
 
+/// Whether any element Smithay assigned to an overlay plane (`overlay`, off
+/// `DrmCompositor`'s per-frame result) is a window rather than a cursor:
+/// the capture contract's overlay arm (`ScanoutFrame::overlay_direct`).
+///
+/// Read off the frame's own element list by id, like `render_and_queue`'s
+/// `on_plane` closure reads the cursor record: only `Kind::Cursor` elements
+/// are cursors (`Cursor::element` builds every one), so anything else on an
+/// overlay is window pixels the swapchain slot does not hold. An id the list
+/// does not know counts as rode -- the safe direction: Smithay assigns only
+/// out of the list it was handed, so an unknown id would be its bug, and a
+/// missed mark serves a stale capture as current while a spare one costs a
+/// composite frame. Pure, so every row is pinnable without a DRM device.
+/// Allocation-free: at most two overlay planes meet a handful of elements.
+pub(crate) fn overlay_rode<E: Element>(overlay: &[&E], elements: &[E]) -> bool {
+    overlay.iter().any(|rode| {
+        elements
+            .iter()
+            .find(|element| element.id() == rode.id())
+            .is_none_or(|element| element.kind() != Kind::Cursor)
+    })
+}
+
 /// The capture fix's arming: one composite-only frame, bought by a capture
 /// that is about to read the swapchain slot.
 ///
@@ -283,6 +314,17 @@ impl ForceComposite {
     /// if the frame is eligible (see [`frame_flags`]).
     pub(crate) fn take_flags(&mut self, allow_primary_direct: bool) -> FrameFlags {
         frame_flags(std::mem::take(&mut self.armed), allow_primary_direct)
+    }
+
+    /// Whether the next frame that reaches the presenter must composite
+    /// whole. Read -- never taken -- by `render::draw_frame_scanout` *before*
+    /// gathering the frame, so the overlay-candidate mark can be suppressed
+    /// for exactly the frame this arming will composite: peeking here and
+    /// taking there is one frame, one thread, sequential, so the two cannot
+    /// disagree. See [`take_flags`](Self::take_flags) for the contract the
+    /// taking half keeps.
+    pub(crate) fn is_armed(&self) -> bool {
+        self.armed
     }
 }
 
@@ -344,10 +386,10 @@ impl ForceComposite {
 ///
 /// What the widening reaches, stated so nobody has to re-derive it: a
 /// covering fullscreen window's buffer on the primary plane (only on frames
-/// [`DIRECT_FLAGS`] is handed to), no window on
-/// an overlay (no element is `Kind::ScanoutCandidate`), and no change to the
-/// cursor plane (it renders into buffers of its own through its own
-/// exporter, `NodeFilter::None` inside Smithay). The one newly reachable
+/// [`DIRECT_FLAGS`] is handed to), the overlay-candidate window on an overlay
+/// plane (wherever it is marked -- either flag set carries the overlay bit),
+/// and no change to the cursor plane (it renders into buffers of its own
+/// through its own exporter, `NodeFilter::None` inside Smithay). The one newly reachable
 /// assignment is a *client cursor surface* whose buffer is a dma-buf riding
 /// an overlay plane where the cursor plane could not take it. The worse
 /// variant of that: where a CRTC has an overlay plane with a zpos *below*
@@ -399,6 +441,15 @@ pub(crate) struct ScanoutFrame {
     /// plane), and read by `render::draw_frame_scanout` right after this
     /// returns. An `Id` clone is a reference-count bump, not an allocation.
     pub(crate) primary_direct: Option<Id>,
+    /// Whether a window rode an overlay plane on this frame instead of being
+    /// composited into the swapchain slot -- `false` when the frame
+    /// composited (or went nowhere). The capture half of
+    /// [`primary_direct`](Self::primary_direct): the slot the recording
+    /// points at was not drawn into for that window's pixels, so the
+    /// recording owes the same `note_direct` mark. Read by
+    /// `render::draw_frame_scanout` right after this returns, beside the
+    /// primary arm.
+    pub(crate) overlay_direct: bool,
 }
 
 /// `DrmCompositor`, plus what is needed to rebuild it on a different CRTC and
@@ -477,13 +528,12 @@ pub(crate) struct ScanoutPresenter {
     /// cursor stays composited into the primary plane exactly as before this
     /// step. Read once at startup for the log line that says which it is.
     cursor_planes: usize,
-    /// How many KMS overlay planes the compositor may assign elements to.
-    /// Zero where the CRTC has none -- the graceful fallback, byte-identical
-    /// by construction: with no planes Smithay's overlay assignment exits
-    /// before touching anything. Read alongside `cursor_planes` for the same
-    /// startup log line. (Even where non-zero, no window element can be
-    /// assigned to one -- see [`DIRECT_FLAGS`]'s overlay section -- so this
-    /// count decides cursor-sized consequences only.)
+    /// How many KMS overlay planes elements may ride on. Zero where the CRTC
+    /// has none -- the graceful fallback, byte-identical by construction:
+    /// with no planes Smithay's overlay assignment exits before touching
+    /// anything. Read alongside `cursor_planes` for the same startup log
+    /// line, and read per frame by `render::draw_frame_scanout` to decide
+    /// whether any window may be marked a scanout candidate at all.
     overlay_planes: usize,
     /// The DRM device's hardware cursor size, as passed to
     /// [`ScanoutPresenter::new`]. Kept so a CRTC switch rebuilds the
@@ -524,6 +574,11 @@ pub(crate) struct ScanoutFormats<'a> {
     /// (`{fourcc, Invalid}` for every fourcc, plus the explicit modifiers
     /// `IN_FORMATS` names where the device has them).
     pub(crate) primary: &'a FormatSet,
+    /// Every overlay plane's own format list, in the surface's order. The
+    /// overlay tranche steers the overlay-candidate window toward a layout
+    /// any of them takes; empty where the CRTC has no overlay plane, which
+    /// builds no overlay tranche.
+    pub(crate) overlay: Vec<&'a FormatSet>,
     /// The client modifiers the exporter has refused on this device.
     pub(crate) lost: Vec<Modifier>,
     /// The DRM device the plane belongs to -- the tranche's
@@ -682,7 +737,10 @@ impl ScanoutPresenter {
     /// How many KMS overlay planes elements may ride on. Zero is the
     /// fallback -- everything stays composited -- and is read alongside
     /// [`cursor_planes`](Self::cursor_planes) for the same startup log line.
-    pub(super) fn overlay_planes(&self) -> usize {
+    /// `render::draw_frame_scanout` also reads it every frame to decide
+    /// whether any window may be marked a scanout candidate at all, hence
+    /// `pub(crate)`.
+    pub(crate) fn overlay_planes(&self) -> usize {
         self.overlay_planes
     }
 
@@ -710,6 +768,12 @@ impl ScanoutPresenter {
         let surface = self.compositor.surface();
         ScanoutFormats {
             primary: &surface.plane_info().formats,
+            overlay: surface
+                .planes()
+                .overlay
+                .iter()
+                .map(|plane| &plane.formats)
+                .collect(),
             lost: self.lost.modifiers(),
             device: surface.device_fd().dev_id().ok(),
         }
@@ -805,20 +869,23 @@ impl ScanoutPresenter {
                     flip: None,
                     damaged: false,
                     primary_direct: None,
+                    overlay_direct: false,
                 };
             }
         };
         let damaged = !result.is_empty;
         // The capture contract's branch: a damaged frame lives either in the
-        // swapchain slot (recorded for captures through `on_frame`) or on
-        // the primary plane direct (reported so the recording is marked, not
-        // left pointing at a slot this frame never drew into). An undamaged
-        // frame is neither -- the screen still shows the previous frame, and
-        // so must the recording.
+        // swapchain slot (recorded for captures through `on_frame`), on the
+        // primary plane direct, or -- for the window's pixels -- on an
+        // overlay plane (reported so the recording is marked, not left
+        // pointing at a slot this frame never drew those pixels into). An
+        // undamaged frame is none of these -- the screen still shows the
+        // previous frame, and so must the recording.
         let primary_direct = match &result.primary_element {
             PrimaryPlaneElement::Element(element) if damaged => Some(element.id().clone()),
             _ => None,
         };
+        let overlay_direct = damaged && overlay_rode(&result.overlay_elements, elements);
         if damaged && let PrimaryPlaneElement::Swapchain(element) = &result.primary_element {
             let (scale, size) = frame;
             // Which plane took an element, told apart because only an
@@ -873,6 +940,7 @@ impl ScanoutPresenter {
                 flip: None,
                 damaged: false,
                 primary_direct: None,
+                overlay_direct: false,
             };
         }
 
@@ -904,6 +972,7 @@ impl ScanoutPresenter {
                     flip: Some(flip),
                     damaged: true,
                     primary_direct,
+                    overlay_direct,
                 }
             }
             Err(error) => {
@@ -917,6 +986,7 @@ impl ScanoutPresenter {
                     flip: None,
                     damaged: true,
                     primary_direct,
+                    overlay_direct,
                 }
             }
         }
@@ -999,6 +1069,13 @@ impl ScanoutPresenter {
     /// pointer from a capture that wants it nor give one two.
     pub(crate) fn arm_force_composite(&mut self) {
         self.force_composite.arm();
+    }
+
+    /// Whether a forced composite frame is armed: the read half of
+    /// [`ForceComposite::is_armed`](ForceComposite::is_armed), for
+    /// `render::draw_frame_scanout`'s pre-gather overlay-candidate gate.
+    pub(crate) fn is_armed(&self) -> bool {
+        self.force_composite.is_armed()
     }
 
     /// Takes whether the swapchain's slots have been freed since the render
@@ -1462,5 +1539,84 @@ mod tests {
         assert_eq!(EXPORTER_FILTER, NodeFilter::All);
         assert!(EXPORTER_FILTER == unhinted);
         assert!(NodeFilter::None != unhinted);
+    }
+
+    /// A stand-in element: only id and kind are read by [`overlay_rode`].
+    struct Stub {
+        id: Id,
+        kind: Kind,
+    }
+
+    impl Stub {
+        fn cursor() -> Self {
+            Self {
+                id: Id::new(),
+                kind: Kind::Cursor,
+            }
+        }
+
+        fn window() -> Self {
+            Self {
+                id: Id::new(),
+                kind: Kind::Unspecified,
+            }
+        }
+
+        fn candidate() -> Self {
+            Self {
+                id: Id::new(),
+                kind: Kind::ScanoutCandidate,
+            }
+        }
+    }
+
+    impl Element for Stub {
+        fn id(&self) -> &Id {
+            &self.id
+        }
+
+        fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
+            Default::default()
+        }
+
+        fn src(&self) -> smithay::utils::Rectangle<f64, smithay::utils::Buffer> {
+            smithay::utils::Rectangle::from_size((1.0, 1.0).into())
+        }
+
+        fn geometry(
+            &self,
+            _scale: smithay::utils::Scale<f64>,
+        ) -> smithay::utils::Rectangle<i32, smithay::utils::Physical> {
+            smithay::utils::Rectangle::from_size((1, 1).into())
+        }
+
+        fn kind(&self) -> Kind {
+            self.kind
+        }
+    }
+
+    #[test]
+    fn a_window_on_an_overlay_marks_and_a_cursor_alone_does_not() {
+        // The capture contract's overlay arm: any non-cursor element Smithay
+        // assigned -- a marked candidate, or anything else that is not the
+        // cursor -- means window pixels the slot does not hold. A cursor on
+        // an overlay is reconciled by region re-render instead, so it must
+        // not mark (every cursor-plane frame would otherwise force a
+        // composite on the next screenshot).
+        let elements = [Stub::window(), Stub::candidate(), Stub::cursor()];
+        assert!(overlay_rode(&[&elements[0]], &elements));
+        assert!(overlay_rode(&[&elements[1]], &elements));
+        assert!(overlay_rode(&[&elements[1], &elements[2]], &elements));
+        assert!(!overlay_rode(&[&elements[2]], &elements));
+        assert!(!overlay_rode(&[], &elements));
+    }
+
+    #[test]
+    fn an_overlay_id_outside_the_frame_marks_the_safe_way() {
+        // Smithay assigns only out of the list it was handed, so this is its
+        // bug -- and a missed mark would serve a stale capture as current,
+        // while a spare one costs a composite frame.
+        let elements = [Stub::window()];
+        assert!(overlay_rode(&[&Stub::window()], &elements));
     }
 }

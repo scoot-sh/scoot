@@ -53,6 +53,8 @@ use std::time::Instant;
 use scoot_core::Arrangement;
 #[cfg(feature = "gpu-scanout")]
 use scoot_core::OutputId;
+#[cfg(feature = "gpu-scanout")]
+use scoot_core::WindowId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::{Format, Fourcc};
@@ -77,6 +79,8 @@ use pixman::PixmanBackend;
 mod capture_cursor;
 mod elements;
 mod gles;
+#[cfg(feature = "gpu-scanout")]
+mod overlay_candidate;
 mod pixman;
 #[cfg(feature = "gpu-scanout")]
 mod primary_direct;
@@ -1373,9 +1377,34 @@ fn draw_frame_scanout(
         captures,
         last_eligibility,
         judge_scratch,
+        overlay_pick,
         ..
     } = gpu;
     let clear_color = frame_clear_color(state, locked);
+    let output_id = state.outputs.id_of(output);
+    // The overlay-candidate mark for this frame's gather: last frame's pick,
+    // revalidated against the current arrangement, under current-frame gates
+    // (see `overlay_candidate`). Read before gathering -- the presenter peek
+    // below is immutable, so gathering after it cannot disturb what the frame
+    // later takes.
+    let covered = state.covered_by_fullscreen(output);
+    let streaming = output_id.is_some_and(|id| state.screencopy.streaming(id, Instant::now()));
+    let (force_armed, overlay_planes) = output_id
+        .and_then(|id| state.tty.as_ref()?.scanout(id))
+        .map_or((false, 0), |presenter| {
+            (presenter.is_armed(), presenter.overlay_planes())
+        });
+    let candidate = output_id.and_then(|id| {
+        overlay_pick.marking(
+            locked,
+            streaming,
+            force_armed,
+            covered,
+            overlay_planes,
+            arrangement,
+            id,
+        )
+    });
     let (elements, cursor_surface, direct) = scanout_frame_elements(
         state,
         renderer,
@@ -1384,10 +1413,10 @@ fn draw_frame_scanout(
         locked,
         arrangement,
         clear_color,
+        candidate,
         judge_scratch,
     );
     outcome.cursor_surface = cursor_surface;
-    let output_id = state.outputs.id_of(output);
     if direct != *last_eligibility {
         // debug!, and only on a change: this is the line that says a
         // session started or stopped going direct, and why -- once per
@@ -1425,14 +1454,17 @@ fn draw_frame_scanout(
         // moves (startup, a CRTC switch, a modifier the exporter newly
         // refused) -- one comparison on every other frame. Here because the
         // presenter is what knows the plane; steering is below, once the
-        // frame is out.
+        // frame is out. The overlay tranche rebuilds on the same key: the
+        // overlays ride the same plane set.
         if let Some(id) = output_id {
-            state.scanout_feedback.refresh(
-                id,
-                presenter.scanout_formats_key(),
-                state.dmabuf_default.as_ref(),
-                || presenter.scanout_formats(),
-            );
+            let key = presenter.scanout_formats_key();
+            let default = state.dmabuf_default.as_ref();
+            state
+                .scanout_feedback
+                .refresh(id, key, default, || presenter.scanout_formats());
+            state
+                .overlay_feedback
+                .refresh(id, key, default, || presenter.scanout_formats());
         }
         let drawn = presenter.render_and_queue(
             renderer,
@@ -1449,8 +1481,10 @@ fn draw_frame_scanout(
         // recording points at was never drawn into by this frame, so mark
         // it rather than leaving a stale composite readable as current. A
         // capture served off the mark forces a composite frame first (see
-        // `ensure_scanout_capture_current`).
-        if drawn.primary_direct.is_some() {
+        // `ensure_scanout_capture_current`). Either arm -- the primary plane
+        // or a window on an overlay plane -- owes the same mark: both leave
+        // pixels out of the slot a capture reads.
+        if drawn.primary_direct.is_some() || drawn.overlay_direct {
             captures.note_direct();
         }
         (drawn, presenter.take_retry_render())
@@ -1461,6 +1495,24 @@ fn draw_frame_scanout(
     // back once it is not (see `dmabuf/scanout.rs`). Sends only on a change.
     if let Some(id) = output_id {
         state.steer_scanout_feedback(id, direct.allowed(), Instant::now);
+    }
+    // The same for the window this frame marked an overlay candidate: it is
+    // steered toward a layout an overlay plane can take, so a client that
+    // follows the tranche can actually ride. `candidate` is what was marked,
+    // not next frame's pick -- the feedback describes buffers that may ride
+    // now. Sends only on a change, like the primary arm.
+    if let Some(id) = output_id {
+        state.steer_overlay_feedback(id, candidate, Instant::now);
+    }
+    // Next frame's overlay-candidate pick, from the list just drawn (see
+    // `overlay_candidate`): the shared refusals over the exact elements,
+    // then the first suitable window. Skipped where the CRTC has no overlay
+    // plane: there is nothing to ride, so there is nothing to pick -- the
+    // one comparison above, never the scans below.
+    if overlay_planes > 0 {
+        if let Some(id) = output_id {
+            overlay_pick.refresh(locked, covered, &elements, arrangement, &state.windows, id);
+        }
     }
 
     outcome.drew_a_frame = drawn.drew;
@@ -1490,8 +1542,11 @@ fn draw_frame_scanout(
 /// `arrangement` is the tick's shared layout (see [`draw_frame`]), not
 /// derived here: like the other bodies, this tier gathers once per output
 /// from the one arrangement.
+///
+/// `candidate` is the overlay-candidate window to mark (`None` in the
+/// harness: with no overlay plane there is nothing to ride).
 #[cfg(feature = "gpu-scanout")]
-// Eight: the tier's frame inputs, each a borrow the three callers already
+// Nine: the tier's frame inputs, each a borrow the two callers already
 // hold separately (`judge_scratch` is the per-output scratch reused across
 // frames); a struct bundling them would only be built to be taken apart here.
 #[allow(clippy::too_many_arguments)]
@@ -1503,6 +1558,7 @@ fn scanout_frame_elements<R>(
     locked: bool,
     arrangement: Option<&Arrangement>,
     clear_color: Color32F,
+    candidate: Option<WindowId>,
     judge_scratch: &mut primary_direct::JudgeScratch,
 ) -> (
     Vec<Elements<R>>,
@@ -1537,6 +1593,7 @@ where
         ring_elements,
         arrangement,
         draws_cursor,
+        candidate,
     );
     let tried_with = primary_direct::TriedWith {
         size: frame.size,
@@ -1581,6 +1638,7 @@ impl State {
                     locked,
                     arrangement.as_ref(),
                     clear_color,
+                    None,
                     &mut scratch,
                 )
                 .2
@@ -1594,6 +1652,7 @@ impl State {
                     locked,
                     arrangement.as_ref(),
                     clear_color,
+                    None,
                     &mut scratch,
                 )
                 .2
@@ -1636,6 +1695,7 @@ impl State {
             locked,
             arrangement.as_ref(),
             clear_color,
+            None,
             &mut scratch,
         );
         let tried_with = primary_direct::TriedWith {
@@ -1660,6 +1720,166 @@ impl State {
         drop(elements);
         self.put_backend(id, backend);
         (verdict, each)
+    }
+
+    /// What [`draw_frame_scanout`]'s overlay-candidate refresh would pick for
+    /// the primary output's next frame, judged over the list this headless
+    /// session gathers -- the harness side of the pick, with this session's
+    /// renderer instead of the tier's `GlesRenderer`. No overlay plane exists
+    /// here, so nothing is ever marked; what is pinned is which window the
+    /// tier would mark, and which frames refuse one.
+    pub(super) fn overlay_pick_now(&mut self) -> Option<WindowId> {
+        let (id, output) = self
+            .outputs
+            .at(0)
+            .expect("a headless harness has an output");
+        let mut backend = self.take_backend(id).expect("a render target");
+        let locked = self.session_lock.is_locked();
+        let size = backend.size;
+        let clear_color = frame_clear_color(self, locked);
+        let arrangement = (!locked).then(|| self.world.arrange());
+        let covered = self.covered_by_fullscreen(&output);
+        let output_id = self.outputs.id_of(&output);
+        let mut scratch = primary_direct::JudgeScratch::default();
+        // One arm per renderer: the gathered lists have different element
+        // types, so the refresh runs inside each arm rather than on a shared
+        // binding (the same shape as `primary_direct_now`'s verdict).
+        let pick = match &mut backend.pipeline {
+            Pipeline::Pixman(cpu) => {
+                let (elements, _, _) = scanout_frame_elements(
+                    self,
+                    &mut cpu.renderer,
+                    size,
+                    &output,
+                    locked,
+                    arrangement.as_ref(),
+                    clear_color,
+                    None,
+                    &mut scratch,
+                );
+                self.overlay_pick_refreshed(locked, covered, &elements, &arrangement, output_id)
+            }
+            Pipeline::Gles(gpu) => {
+                let (elements, _, _) = scanout_frame_elements(
+                    self,
+                    &mut gpu.renderer,
+                    size,
+                    &output,
+                    locked,
+                    arrangement.as_ref(),
+                    clear_color,
+                    None,
+                    &mut scratch,
+                );
+                self.overlay_pick_refreshed(locked, covered, &elements, &arrangement, output_id)
+            }
+            Pipeline::Scanout(_) => unreachable!("no test builds a scanout pipeline"),
+        };
+        self.put_backend(id, backend);
+        pick
+    }
+
+    /// [`OverlayPick::refresh`] plus the mark one frame later, over a list
+    /// the harness just gathered: what `draw_frame_scanout` would mark with
+    /// overlay planes available and no stream or force armed. Split out so
+    /// both renderer arms above share it without naming either's element
+    /// type twice.
+    fn overlay_pick_refreshed<R>(
+        &self,
+        locked: bool,
+        covered: bool,
+        elements: &[Elements<R>],
+        arrangement: &Option<Arrangement>,
+        output_id: Option<OutputId>,
+    ) -> Option<WindowId>
+    where
+        R: Renderer + ImportAll + ImportMem,
+        R::TextureId: Texture + 'static,
+    {
+        let mut pick = overlay_candidate::OverlayPick::default();
+        if let Some(output_id) = output_id {
+            pick.refresh(
+                locked,
+                covered,
+                elements,
+                arrangement.as_ref(),
+                &self.windows,
+                output_id,
+            );
+            return pick.marking(
+                locked,
+                false,
+                false,
+                covered,
+                usize::MAX,
+                arrangement.as_ref(),
+                output_id,
+            );
+        }
+        None
+    }
+
+    /// Times one frame's overlay-candidate work -- the gather the pick reads
+    /// excluded, like [`judge_cost`](Self::judge_cost): the shared refusal
+    /// scan plus the placement walk, `rounds` times over the primary output's
+    /// current list. Answers the pick and the mean time per call.
+    pub(super) fn overlay_pick_cost(
+        &mut self,
+        rounds: u32,
+    ) -> (Option<WindowId>, std::time::Duration) {
+        let (id, output) = self
+            .outputs
+            .at(0)
+            .expect("a headless harness has an output");
+        let mut backend = self.take_backend(id).expect("a render target");
+        let locked = self.session_lock.is_locked();
+        let size = backend.size;
+        let clear_color = frame_clear_color(self, locked);
+        let arrangement = (!locked).then(|| self.world.arrange());
+        let covered = self.covered_by_fullscreen(&output);
+        let output_id = self.outputs.id_of(&output).expect("a harness output");
+        let mut scratch = primary_direct::JudgeScratch::default();
+        let Pipeline::Pixman(cpu) = &mut backend.pipeline else {
+            unreachable!("the cost harness runs on pixman");
+        };
+        let (elements, _, _) = scanout_frame_elements(
+            self,
+            &mut cpu.renderer,
+            size,
+            &output,
+            locked,
+            arrangement.as_ref(),
+            clear_color,
+            None,
+            &mut scratch,
+        );
+        let started = std::time::Instant::now();
+        let mut pick = None;
+        for _ in 0..rounds {
+            let mut candidate = overlay_candidate::OverlayPick::default();
+            candidate.refresh(
+                locked,
+                covered,
+                &elements,
+                arrangement.as_ref(),
+                &self.windows,
+                output_id,
+            );
+            pick = candidate.marking(
+                locked,
+                false,
+                false,
+                covered,
+                usize::MAX,
+                arrangement.as_ref(),
+                output_id,
+            );
+            std::hint::black_box(pick);
+        }
+        let each = started.elapsed() / rounds.max(1);
+        drop(elements);
+        self.put_backend(id, backend);
+        (pick, each)
     }
 }
 
@@ -1725,6 +1945,9 @@ where
                 ring_elements,
                 arrangement,
                 draws_cursor,
+                // Pixman, offscreen GLES and the dumb tier have no overlay
+                // plane to ride: only the scanout tier marks candidates.
+                None,
             );
             outcome.cursor_surface = cursor_surface;
 

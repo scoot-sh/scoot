@@ -66,14 +66,16 @@
 //!
 //! What a capture can never be missing *without knowing it* is a window.
 //! Smithay's overlay assignment only considers elements of kind
-//! `ScanoutCandidate` or `Cursor`, and this tree builds every window, popup
-//! and layer-shell surface element as `Kind::Unspecified` (only cursor
-//! elements -- the compositor's own and a client's cursor surface -- are
-//! `Kind::Cursor`). So an overlay plane on this tier can carry at most a
-//! cursor -- never a toplevel -- and marking a window a scanout candidate
-//! is a separate semantic change, not part of this step. The one way a
-//! window could leave the swapchain slot is primary-direct, which is what
-//! the next section's mark covers.
+//! `ScanoutCandidate` or `Cursor`: cursor elements carry `Kind::Cursor`, and
+//! at most one window per output per frame carries `Kind::ScanoutCandidate`
+//! (the overlay-candidate pick, `render::overlay_candidate`). So an overlay
+//! plane on this tier carries at most the cursor and the picked window -- and
+//! a window riding one fires the same mark the next section's primary-direct
+//! arm does ([`Captures::note_direct`], from
+//! `tty/scanout.rs`'s `ScanoutFrame::overlay_direct`), with the same force
+//! behind it. Marking a window a scanout candidate is still a separate
+//! semantic change from the cursor step, but it is no longer an uncaptured
+//! one.
 //!
 //! # What a capture sees when the primary goes direct
 //!
@@ -188,6 +190,11 @@ pub(crate) struct ScanoutBackend {
     /// here -- per output, across frames -- so judging a frame allocates only
     /// while they grow.
     pub(super) judge_scratch: super::primary_direct::JudgeScratch,
+    /// The overlay-candidate pick for this output: the window the next frame
+    /// marks `Kind::ScanoutCandidate`, chosen by the last frame's element
+    /// list (`render::overlay_candidate`). Per output across frames, like
+    /// `judge_scratch`.
+    pub(super) overlay_pick: super::overlay_candidate::OverlayPick,
     /// What the capture path reuses between captures (see
     /// `capture_cursor::PatchPool`).
     pub(super) patch: super::capture_cursor::PatchPool<
@@ -207,14 +214,14 @@ pub(super) struct Captures {
     /// The dma-buf carrying the most recently rendered frame -- what a
     /// capture reads. `None` before the first frame.
     frame: Option<Dmabuf>,
-    /// Whether the last damaged frame went primary-direct instead of into
-    /// the swapchain slot. Set by [`note_direct`](Self::note_direct),
-    /// cleared by [`note_frame`](Self::note_frame) and
-    /// [`forget_slots`](Self::forget_slots). While set, `frame` still names
-    /// the last composite -- which is *not* what is on screen -- so a
-    /// capture served now must force a composite frame first (see
-    /// `State::ensure_scanout_capture_current`), and one that cannot must
-    /// fail loudly rather than serve the stale buffer (see
+    /// Whether the last damaged frame left the swapchain slot: primary-direct
+    /// or a window on an overlay plane, instead of into it. Set by
+    /// [`note_direct`](Self::note_direct), cleared by
+    /// [`note_frame`](Self::note_frame) and [`forget_slots`](Self::forget_slots).
+    /// While set, `frame` still names the last composite -- which is *not*
+    /// what is on screen -- so a capture served now must force a composite
+    /// frame first (see `State::ensure_scanout_capture_current`), and one
+    /// that cannot must fail loudly rather than serve the stale buffer (see
     /// `Backend::capture`).
     direct: bool,
     /// What `frame` holds of the cursor: the cursor elements that frame
@@ -272,6 +279,7 @@ impl ScanoutBackend {
             node: render_node(gbm),
             last_eligibility: super::primary_direct::PrimaryDirect::NotCovered,
             judge_scratch: Default::default(),
+            overlay_pick: Default::default(),
             patch: Default::default(),
         })
     }
@@ -431,16 +439,16 @@ impl Captures {
         }
     }
 
-    /// Marks the recording direct: the frame just drawn went to the primary
-    /// plane, not into the swapchain slot, so the recorded composite is no
-    /// longer current.
+    /// Marks the recording direct: the frame just drawn did not land whole
+    /// in the swapchain slot -- its primary went direct, or a window rode an
+    /// overlay plane -- so the recorded composite is no longer current.
     ///
     /// Called only for a frame that actually drew (see
-    /// `ScanoutFrame::primary_direct`): an undamaged frame left the previous
-    /// frame on screen, and must leave the mark alone with it. Keeps the
-    /// last composite in place -- a capture served before the forced
-    /// composite lands fails on the mark, it never reads the stale buffer
-    /// as current.
+    /// `ScanoutFrame::primary_direct` and `ScanoutFrame::overlay_direct`): an
+    /// undamaged frame left the previous frame on screen, and must leave the
+    /// mark alone with it. Keeps the last composite in place -- a capture
+    /// served before the forced composite lands fails on the mark, it never
+    /// reads the stale buffer as current.
     pub(super) fn note_direct(&mut self) {
         self.direct = true;
     }

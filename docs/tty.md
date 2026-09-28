@@ -341,16 +341,21 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   such cap (`UNIVERSAL_PLANES` exposes them), and virtio-gpu has none to
   expose anyway -- its inventory is one primary plus one cursor plane. On
   virtio the cursor then scans out live (pointer-tracked; captures draw it
-  back in when they ask for it). No window surface is ever an overlay candidate (every one is
-  built `Kind::Unspecified`), so an overlay plane carries at most a
-  cursor -- never a window. And at the pinned Smithay rev, scoot's own
+  back in when they ask for it). At most one tiled window per output per
+  frame may be marked an overlay candidate (every other surface element is
+  built `Kind::Unspecified`), so an overlay plane carries at most the cursor
+  and the picked window -- and a window riding one is absent from the
+  swapchain slot exactly like a primary-direct frame, so the same mark-and-force
+  capture contract covers it: a capture of such a frame forces one composite
+  frame first, which always composites whole (the mark is suppressed while a
+  force is armed). Scoot's own
   drawn cursor cannot reach an overlay on any hardware either. It is a
   memory buffer, and Smithay's exporter turns only Wayland buffers into
   framebuffers (`UnderlyingStorage::Memory` maps to `None`). So the only
   cursor an overlay can carry is a client's cursor surface backed by a
   dma-buf. A cursor *plane* is different: Smithay copies the image into a
   buffer of its own there, which is how virtio's works. Candidate-marking is
-  [`backlog/core/gpu-overlay-window-candidates.md`](backlog/core/gpu-overlay-window-candidates.md).
+  [`backlog/resolved/gpu-overlay-window-candidates-done.md`](backlog/resolved/gpu-overlay-window-candidates-done.md).
   A capture (IPC screenshots, `ext-image-copy-capture-v1`) reads the
   primary plane's swapchain slot, which lacks a plane-assigned cursor --
   so every capture reconciles the cursor with what it asked for rather
@@ -582,17 +587,17 @@ The cursor plane is attempted
 where the CRTC exposes one (the dev VM's virtio-gpu does: one `Cursor` plane
 per `drm_info`) and silently not elsewhere; overlay planes ride along whole
 from the same inventory (virtio exposes none: `overlay_planes=0`) and fall
-back per frame the same way. A plane-assigned cursor is not in the
-swapchain slot captures read, so captures draw it back in when they ask for
-the pointer (see [Captures and the pointer](#captures-and-the-pointer)) --
-and no window can ride an overlay yet (nothing is marked a scanout
-candidate). A capture of a frame
-that went direct forces one composite frame first, and a capture stream
-keeps the output composited, so captures stay correct throughout --
-watched working on the dev VM. Apple's `apple,dcp` (M2) exposes one
-primary, **one overlay on kernel 7.1.5 (two on 7.1.13, `Asahi.md` Test 14) and no
-cursor plane** (`cursor_planes=0 overlay_planes=1`). The overlay has a fixed zpos above the primary, takes
-`LINEAR` only, and takes alpha RGB and YUV formats but no `XR24`. The
+ back per frame the same way. A plane-assigned cursor is not in the
+ swapchain slot captures read, so captures draw it back in when they ask for
+ the pointer (see [Captures and the pointer](#captures-and-the-pointer)) --
+ and neither is a window riding an overlay (at most one tiled window per
+ output per frame is marked a scanout candidate). A capture of a frame
+ that went direct forces one composite frame first, and a capture stream
+ keeps the output composited, so captures stay correct throughout --
+ watched working on the dev VM. Apple's `apple,dcp` (M2) exposes one
+ primary, **one overlay on kernel 7.1.5 (two on 7.1.13, `Asahi.md` Test 14) and no
+ cursor plane** (`cursor_planes=0 overlay_planes=1`). The overlay has a fixed zpos above the primary, takes
+ `LINEAR` only, and takes alpha RGB and YUV formats but no `XR24`. The
 cursor never lands on it: scoot's drawn cursor is a memory buffer, which
 no overlay can take at this Smithay rev on any hardware (above). With no
 cursor plane either, the pointer on this panel is always composited
@@ -631,6 +636,7 @@ the capture path reconciles the two:
 | dumb (pixman) | always holds the cursor | nothing to do | cursor region re-rendered without it |
 | GPU scanout, cursor on the cursor plane | lacks it | cursor region re-rendered with it | nothing to do |
 | GPU scanout, cursor on an overlay plane | lacks it, and may hold a transparent hole there (an underlay) | re-rendered with it | re-rendered without it (fills the hole) |
+| GPU scanout, window on an overlay plane | lacks the window's pixels | forced composite first (the forced frame always composites whole, so the slot holds the window) | forced composite first (same) |
 | GPU scanout, plane refused this frame | holds it | nothing to do | re-rendered without it |
 | `--headless`, `--nested` | never holds it (no cursor on screen) | re-rendered with it | nothing to do |
 

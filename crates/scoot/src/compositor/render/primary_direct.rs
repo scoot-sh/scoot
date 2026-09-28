@@ -405,7 +405,11 @@ fn rule6(
 /// the first match; a covering window's tree is its root plus a handful of
 /// subsurfaces. No allocation: an `Id` from a surface is a reference-count
 /// bump.
-fn in_tree(root: &WlSurface, id: &Id) -> bool {
+///
+/// Shared with the overlay-candidate pick (`super::overlay_candidate`),
+/// which asks the same question about a tiled window's tree to confirm the
+/// pick actually drew this frame.
+pub(super) fn in_tree(root: &WlSurface, id: &Id) -> bool {
     let mut found = false;
     with_surface_tree_downward(
         root,
@@ -428,10 +432,17 @@ fn in_tree(root: &WlSurface, id: &Id) -> bool {
 /// [`judge`] that reads the frame list, split out so every combination is
 /// pinnable without building render elements.
 ///
+/// Shared with the overlay-candidate pick (`super::overlay_candidate`): a
+/// window on an overlay plane is absent from the swapchain slot exactly like
+/// a primary-direct frame, so the same two refusals -- a translucent element
+/// the plane would have to blend, a rounded one whose clipped corners the
+/// plane would lose -- gate both. One function, not two copies that could
+/// drift apart about what "clean" means.
+///
 /// A rounded element refuses before a translucent one only because the scan
 /// stops at the first refusal; which of the two a frame holding both
 /// reports is not a contract.
-fn judge_elements(elements: impl IntoIterator<Item = (bool, f32)>) -> PrimaryDirect {
+pub(super) fn judge_elements(elements: impl IntoIterator<Item = (bool, f32)>) -> PrimaryDirect {
     for (rounded, alpha) in elements {
         if rounded {
             return PrimaryDirect::Rounded;

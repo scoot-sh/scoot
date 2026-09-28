@@ -212,6 +212,13 @@ pub struct State {
     /// `DmabufHandler::new_surface_feedback`. Empty on every other tier.
     #[cfg(feature = "gpu-scanout")]
     pub(super) scanout_feedback: super::dmabuf::scanout::ScanoutFeedbacks,
+    /// Per output, which surface the GPU scanout tier is steering with an
+    /// overlay tranche and what that tranche is (`dmabuf/scanout.rs`): the
+    /// overlay-candidate window, steered toward a layout an overlay plane
+    /// takes. Written beside [`scanout_feedback`](Self::scanout_feedback),
+    /// read beside it. Empty on every other tier.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) overlay_feedback: super::dmabuf::scanout::OverlayFeedbacks,
     /// The layer surface a click gave keyboard focus to, if any -- the one
     /// piece of the layer-shell focus policy that cannot be re-derived from
     /// the layer map, because nothing else records that a click happened.
@@ -1173,6 +1180,8 @@ impl State {
             dmabuf_default: None,
             #[cfg(feature = "gpu-scanout")]
             scanout_feedback: Default::default(),
+            #[cfg(feature = "gpu-scanout")]
+            overlay_feedback: Default::default(),
             clicked_layer: None,
             keyboard_on_layer: false,
             layers_awaiting_neutralize: Vec::new(),

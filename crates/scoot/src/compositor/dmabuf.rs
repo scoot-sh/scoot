@@ -990,13 +990,20 @@ impl DmabufHandler for State {
     /// what `None` asks Smithay for. Smithay calls this once per surface, on
     /// its first `get_surface_feedback`; later requests share the surface's
     /// stored feedback.
+    ///
+    /// The overlay-candidate window is answered the same way, with the
+    /// overlay tranche: a surface is only ever one output's target of one
+    /// kind (the candidate is never the covering fullscreen window), so the
+    /// primary arm is asked first and the overlay arm second.
     #[cfg(feature = "gpu-scanout")]
     fn new_surface_feedback(
         &mut self,
         surface: &WlSurface,
         _global: &DmabufGlobal,
     ) -> Option<DmabufFeedback> {
-        self.scanout_feedback.for_new_surface(surface)
+        self.scanout_feedback
+            .for_new_surface(surface)
+            .or_else(|| self.overlay_feedback.for_new_surface(surface))
     }
 
     /// Imports the dmabuf into this session's active renderer, answering the
