@@ -92,10 +92,18 @@ fn every_look_draws_or_refuses_without_a_panic() {
     }
 }
 
-/// `name` → every version of it, for the packages of a `Cargo.lock`.
-fn locked(lockfile: &str) -> BTreeMap<String, BTreeSet<String>> {
-    let mut packages: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut name = None;
+/// One `[[package]]` of a `Cargo.lock`: its name, version, and its
+/// dependencies as written (`"name"`, or `"name version"` when the lock
+/// holds more than one version of it, maybe with a source after).
+struct Locked {
+    name: String,
+    version: String,
+    dependencies: Vec<String>,
+}
+
+fn parse_lock(lockfile: &str) -> Vec<Locked> {
+    let mut packages: Vec<Locked> = Vec::new();
+    let mut in_dependencies = false;
     for line in lockfile.lines() {
         let quoted = |key: &str| {
             line.strip_prefix(key)
@@ -104,51 +112,198 @@ fn locked(lockfile: &str) -> BTreeMap<String, BTreeSet<String>> {
                 .map(str::to_owned)
         };
         if line == "[[package]]" {
-            name = None;
-        } else if let Some(found) = quoted("name") {
-            name = Some(found);
-        } else if let (Some(version), Some(name)) = (quoted("version"), name.take()) {
-            packages.entry(name).or_default().insert(version);
+            packages.push(Locked {
+                name: String::new(),
+                version: String::new(),
+                dependencies: Vec::new(),
+            });
+            in_dependencies = false;
+            continue;
+        }
+        let Some(package) = packages.last_mut() else {
+            continue;
+        };
+        if line == "dependencies = [" {
+            in_dependencies = true;
+        } else if in_dependencies {
+            if line == "]" {
+                in_dependencies = false;
+            } else if let Some(entry) = line
+                .trim()
+                .strip_prefix('"')
+                .and_then(|rest| rest.strip_suffix("\","))
+            {
+                package.dependencies.push(entry.to_owned());
+            }
+        } else if let Some(name) = quoted("name") {
+            package.name = name;
+        } else if let Some(version) = quoted("version") {
+            package.version = version;
         }
     }
     packages
 }
 
-/// The fuzz crate has its own lockfile (it is not in the workspace), so
-/// nothing makes it follow a dependency bump in the workspace's: this
-/// does. Every version of a package both lock (the decoders, the scaler
-/// and what they pull in) must be one the workspace locks, or the fuzzer
-/// tests code the daemon does not run. On a failure, refresh it from the workspace's:
-/// `cp Cargo.lock crates/scootbg/fuzz/Cargo.lock`, then `cargo update
-/// --workspace` in `crates/scootbg/fuzz` (see its README).
-#[test]
-fn the_fuzz_lockfile_matches_the_workspace() {
-    let read = |path: &Path| {
-        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+/// A package in a lock, by name and version.
+type Node = (String, String);
+
+/// Every package reachable from `root` through the lock's dependency
+/// edges, `root` included, each with the packages it depends on. A
+/// dependency written without a version is the lock's only package of
+/// that name (Cargo writes the version whenever there are several).
+fn reachable(lock: &[Locked], root: &str) -> BTreeMap<Node, BTreeSet<Node>> {
+    let find = |entry: &str| -> &Locked {
+        let mut words = entry.split(' ');
+        let name = words.next().unwrap_or_default();
+        let version = words.next();
+        let mut found = lock
+            .iter()
+            .filter(|p| p.name == name && version.is_none_or(|v| p.version == v));
+        let package = found
+            .next()
+            .unwrap_or_else(|| panic!("the lock has no package for {entry:?}"));
+        assert!(found.next().is_none(), "{entry:?} is ambiguous in the lock");
+        package
     };
-    let workspace = locked(&read(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock"),
-    ));
-    let fuzz = locked(&read(&fuzz_dir().join("Cargo.lock")));
+    let node = |p: &Locked| (p.name.clone(), p.version.clone());
+    let mut graph: BTreeMap<Node, BTreeSet<Node>> = BTreeMap::new();
+    let mut queue = vec![find(root)];
+    while let Some(package) = queue.pop() {
+        if graph.contains_key(&node(package)) {
+            continue;
+        }
+        let dependencies: Vec<&Locked> = package
+            .dependencies
+            .iter()
+            .map(|entry| find(entry))
+            .collect();
+        graph.insert(
+            node(package),
+            dependencies.iter().map(|p| node(p)).collect(),
+        );
+        queue.extend(dependencies);
+    }
+    graph
+}
+
+/// The graphs scootbg and the fuzz crate each reach, from their locks.
+fn graphs(
+    fuzz_lock: &str,
+) -> (
+    BTreeMap<Node, BTreeSet<Node>>,
+    BTreeMap<Node, BTreeSet<Node>>,
+) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock");
+    let workspace =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    (
+        reachable(&parse_lock(&workspace), "scootbg"),
+        reachable(&parse_lock(fuzz_lock), "scootbg-fuzz"),
+    )
+}
+
+/// Where the fuzz crate's graph departs from scootbg's: a package both
+/// reach at a version scootbg does not use, or a package at the same
+/// version whose dependency resolves to another version (`png` taking
+/// the other `miniz_oxide`). Empty when the two agree.
+fn drift(fuzz_lock: &str) -> Vec<String> {
+    let (daemon, fuzz) = graphs(fuzz_lock);
     for name in [
         "zune-jpeg",
         "zune-core",
         "png",
         "image-webp",
         "pic-scale-safe",
+        "scootbg-mem",
     ] {
         assert!(
-            fuzz.contains_key(name),
-            "{name} is not in the fuzz lockfile"
+            fuzz.keys().any(|(n, _)| n == name),
+            "the fuzz crate does not reach {name}"
         );
     }
-    let differ: Vec<_> = fuzz
-        .iter()
-        .filter_map(|(name, versions)| {
-            let theirs = workspace.get(name)?;
-            (!versions.is_subset(theirs))
-                .then(|| format!("{name}: fuzz {versions:?}, workspace {theirs:?}"))
-        })
-        .collect();
+    let mut differ = Vec::new();
+    for (node, dependencies) in &fuzz {
+        let theirs: Vec<&String> = daemon
+            .keys()
+            .filter(|(n, _)| *n == node.0)
+            .map(|(_, v)| v)
+            .collect();
+        if theirs.is_empty() {
+            continue;
+        }
+        let Some(expected) = daemon.get(node) else {
+            differ.push(format!("{}: fuzz {}, scootbg {theirs:?}", node.0, node.1));
+            continue;
+        };
+        // Features may add or drop a dependency (`serde_derive`, `cc`'s
+        // `jobserver`); what may not differ is the version a dependency
+        // both have resolves to.
+        for (name, version) in dependencies {
+            if let Some((_, wanted)) = expected.iter().find(|(n, _)| n == name) {
+                if wanted != version {
+                    differ.push(format!(
+                        "{} {}: fuzz takes {name} {version}, scootbg {wanted}",
+                        node.0, node.1
+                    ));
+                }
+            }
+        }
+    }
+    differ
+}
+
+fn fuzz_lock() -> String {
+    let path = fuzz_dir().join("Cargo.lock");
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// The fuzz crate has its own lockfile (it is not in the workspace), so
+/// nothing makes it follow a dependency bump in the workspace's: this
+/// does. It follows the dependency edges of both locks, from `scootbg` in
+/// the workspace's and from `scootbg-fuzz` in its own, and every package
+/// both reach must be at a version scootbg itself resolves to, not merely
+/// one the workspace locks for someone else (it locks two `rustix` and
+/// two `miniz_oxide`). Otherwise the fuzzer tests code the daemon does
+/// not run. On a failure, refresh it from the workspace's: `cp Cargo.lock
+/// crates/scootbg/fuzz/Cargo.lock`, then `cargo update --workspace` in
+/// `crates/scootbg/fuzz` (see its README).
+#[test]
+fn the_fuzz_lockfile_matches_the_workspace() {
+    let differ = drift(&fuzz_lock());
     assert!(differ.is_empty(), "{differ:#?}");
+}
+
+/// The check is not vacuous. The workspace locks two `miniz_oxide`
+/// (scootbg reaches both: `png` takes 0.8.9 and `flate2` 0.9.1), so a
+/// fuzz lock whose `png` took 0.9.1 would pass a check by name and
+/// version alone; the edges catch it. So does a version of `rustix` the
+/// workspace locks only for another crate (0.38).
+#[test]
+fn a_dependency_scootbg_does_not_resolve_to_is_caught() {
+    let lock = fuzz_lock();
+    let edge = "\"fdeflate\",\n \"flate2\",\n \"miniz_oxide 0.8.9\",";
+    assert!(
+        lock.contains(edge),
+        "png's edges are not as this test expects"
+    );
+    let planted = lock.replace(edge, "\"fdeflate\",\n \"flate2\",\n \"miniz_oxide 0.9.1\",");
+    let differ = drift(&planted);
+    eprintln!("png planted: {differ:#?}");
+    assert!(
+        differ
+            .iter()
+            .any(|line| line.starts_with("png ") && line.contains("miniz_oxide")),
+        "{differ:#?}"
+    );
+
+    let rustix = "name = \"rustix\"\nversion = \"1.1.4\"";
+    assert!(lock.contains(rustix));
+    let differ = drift(&lock.replace(rustix, "name = \"rustix\"\nversion = \"0.38.44\""));
+    eprintln!("rustix planted: {differ:#?}");
+    assert!(
+        differ
+            .iter()
+            .any(|line| line.starts_with("rustix: fuzz 0.38.44")),
+        "{differ:#?}"
+    );
 }
