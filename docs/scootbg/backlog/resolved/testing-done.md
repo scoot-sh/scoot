@@ -573,3 +573,19 @@ if either is below what the daemon maps plus the buffer and twice the
 margin. Checked under `prlimit`: soft and hard 75,000,000 skips; soft
 75,000,000 with an unlimited hard limit skips; soft 400,000,000 runs and
 passes.
+
+### Verified where (the long-row fix)
+
+At `22c0c3d`, on the same container: `nextest` for scootbg and
+scootbg-mem (scoot and sway required) 441 passed, 2 skipped; `cargo
+test` every suite ok (unit tests 338, `draw_failed.rs` 2); clippy `-D
+warnings`, fmt, the release build (`-D warnings`, 1,684,328 bytes), no
+`libc` crate, `cargo build --workspace`, the fuzz crate's clippy and
+fmt: clean. The reviewer's reproduction on the release binary (a
+20,000,000×1 grey PNG of 19,511 bytes, 1920×1080 headless scoot): `fit`
+and `stretch` exit 1 with `cannot scale 20000000x1 pixels to 1920x1:
+scootbg scales no side longer than 65536 pixels (--mode fill, center or
+tile shows it)` on the daemon's stderr, the daemon alive, `fill` exit 0
+and shown. The `set` row, 5 rounds, against the base run: JPEG 642 ms
+against 698, color 18.7 against 23.4, peak PSS 101.6 against 100.9 MiB,
+`compare` 0 regressions.
