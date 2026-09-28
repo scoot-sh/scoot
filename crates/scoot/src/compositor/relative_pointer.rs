@@ -44,6 +44,23 @@
 //! teleport *onto* a surface from bare desktop accordingly reports nothing:
 //! nobody had focus when the motion began.
 //!
+//! **One exception: a move that takes focus off an X window reports nothing**
+//! ([`leaves_an_x_window`]). XWayland (24.1.13, `xwayland-input.c`) keeps a
+//! frame's relative delta pending until a `wl_pointer.frame` arrives with an
+//! X window focused, and its frame handler returns early while none is --
+//! without clearing what is pending. So a delta credited to the X window
+//! being left rides through the `leave` and is applied by the frame after the
+//! next `enter`, as a second copy of the move on top of the position that
+//! `enter` just set (`POINTER_RAWONLY` still moves the sprite, `dix/getevents.c`
+//! `fill_pointer_events`). Nothing corrects it until the next absolute motion:
+//! a hand on a mouse sends one at once, but an agent's `pointer click` onto
+//! the other of two X apps sent its press to wherever the displaced pointer
+//! had landed -- the screen edge, or a third window. Withholding the delta
+//! drops what XWayland would have handed its X clients as one raw
+//! (`XI_RawMotion`) crossing delta, the same delta a teleport *onto* a surface
+//! already does not report; Wayland clients keep the rule above, which is
+//! what they are owed (`docs/backlog/resolved/xwayland-press-after-crossing-done.md`).
+//!
 //! ## What "unaccelerated" means on each motion source
 //!
 //! Only one source in this stack ever accelerates: libinput, on the `--tty`
@@ -350,6 +367,25 @@ pub(super) fn absolute_target(
             under,
         },
         None => AbsoluteTarget::Held,
+    }
+}
+
+/// Whether a move's relative event is withheld: the move takes pointer
+/// focus off an X window (see the module doc's exception -- XWayland would
+/// apply the delta again after its next `enter`).
+///
+/// `moves` is whether the move moves pointer focus at all (`focus_moves` in
+/// `input.rs`: never under a grab, so a drag held on an X window keeps its
+/// deltas wherever it goes). One discriminant test on the motion path.
+pub(super) fn leaves_an_x_window(focus: Option<&PointerFocus>, moves: bool) -> bool {
+    #[cfg(feature = "xwayland")]
+    {
+        moves && matches!(focus, Some(PointerFocus::X11 { .. }))
+    }
+    #[cfg(not(feature = "xwayland"))]
+    {
+        let _ = (focus, moves);
+        false
     }
 }
 

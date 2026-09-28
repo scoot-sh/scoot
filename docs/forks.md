@@ -11,24 +11,23 @@ top**, so it stays easy to review, rebase, and drop.
 
 | Fork | Upstream | Based on | Carried commits | Pinned in scoot | Why |
 | --- | --- | --- | --- | --- | --- |
-| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/buffer-scale-without-new-buffer) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling; then `6e6fe896`: flush the XDND proxy's remap when a drag leaves an X window; then `7388af13` and `9515d7e5`: end a Wayland drop onto X once, and end an offer whose target is gone or never finishes; then `d3a4cd73`: only a real X drag gives up a pending drop onto X; then `b1ac3ca7`: an X drag enters another client's X window without waiting for types (Smithay's generic `input/dnd` gains a defaulted `DndFocus::enter_needs_metadata`); then `7e18b661`: remap the proxy only once the drag has left every X window; then `6ab8b4a2`: apply a commit's cached buffer scale and transform on every commit that has a buffer | **yes**, `crates/scoot/Cargo.toml` rev `6ab8b4a2` (the scale-without-new-buffer fix, content-identical to `e7130254` cherry-picked onto `7e18b661` on its own branch; `b1ac3ca7` and its review fix `7e18b661` were the X drag first-motion fix; `d3a4cd73` was the XWayland pointer-focus X arm; `74edbf32` was PR #272; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without `74edbf32`, every upscaled surface fades to a semi-transparent 1-px border under the default renderer; without `6e6fe896`, an X drag that crossed an X window cannot drop on a Wayland one, so drags from X could not be let onto X windows; without `9515d7e5`, a Wayland drop onto an X target that dies or hangs before finishing stops every later X drag until scoot restarts, and without `d3a4cd73` any X client can end such a drop in flight and keep the selection; without `b1ac3ca7`, a GTK or Qt drag released on its first motion onto another X app drops nothing, and without `7e18b661` an X window mapped again under an X drag has the proxy over it (see below). |
+| [`scoot-sh/smithay`](https://github.com/scoot-sh/smithay/tree/scoot/xwayland-selection-dnd) | [Smithay/smithay](https://github.com/Smithay/smithay) | `0ff00983` (master, 2026-09-09) | `43f50eb2`: a `Drop` for the imported syncobj timeline; then thirteen XWayland selection and drag commits, `35c335e0`..`5b575329` (see below); then `74edbf32`: clamp the pixman source image to its edge when scaling; then `6e6fe896`: flush the XDND proxy's remap when a drag leaves an X window; then `7388af13` and `9515d7e5`: end a Wayland drop onto X once, and end an offer whose target is gone or never finishes; then `d3a4cd73`: only a real X drag gives up a pending drop onto X; then `b1ac3ca7`: an X drag enters another client's X window without waiting for types (Smithay's generic `input/dnd` gains a defaulted `DndFocus::enter_needs_metadata`); then `7e18b661`: remap the proxy only once the drag has left every X window; then `b16cd6a2`: wait for types only over the window the drag started on; then `fcf6f314` (unused, see below); then `e7130254`: apply a commit's cached buffer scale and transform on every commit that has a buffer; then `035d447c`: flush XSETTINGS writes | **yes**, `crates/scoot/Cargo.toml` rev `035d447c` (the XSETTINGS flush for scale-aware X windows; `e7130254` was the buffer-scale fix, content-identical to `6ab8b4a2` which `main` pinned from `scoot/buffer-scale-without-new-buffer` before this branch's XWayland lane merged; the same-app quick drag; `7e18b661` was the X drag first-motion fix, `b1ac3ca7` and its review fix; `d3a4cd73` was the XWayland pointer-focus X arm; `74edbf32` was PR #272; `5b575329` was PR #246, XWayland Phase 4; `43f50eb2` since PR #233) | Without the first, every explicit-sync timeline import leaks a kernel syncobj handle until scoot exits (~24 MB/s from a looping client, unaccounted slab). Without the rest, large clipboard transfers between X and Wayland are cut to 64 KiB, a stuck X reader makes scoot buffer a whole Wayland selection, transfers either way pile up without bound or stall for good, and scoot cannot gate who serves a paste or starts a drag. Without `74edbf32`, every upscaled surface fades to a semi-transparent 1-px border under the default renderer; without `6e6fe896`, an X drag that crossed an X window cannot drop on a Wayland one, so drags from X could not be let onto X windows; without `9515d7e5`, a Wayland drop onto an X target that dies or hangs before finishing stops every later X drag until scoot restarts, and without `d3a4cd73` any X client can end such a drop in flight and keep the selection; without `b1ac3ca7`, a GTK or Qt drag released on its first motion onto another X app drops nothing, and without `7e18b661` an X window mapped again under an X drag has the proxy over it, and without `b16cd6a2` a quick drag between two windows of one X app instance drops nothing; without `e7130254`, a scale-only commit keeps rendering at the old buffer scale (see below); without `035d447c`, an X app started right after XWayland is ready can read no scale over XSETTINGS and draw at half size. |
 | [`scoot-sh/wayland-rs`](https://github.com/scoot-sh/wayland-rs/tree/scoot/server-fd-queue-cap-adaptive) | [Smithay/wayland-rs](https://github.com/Smithay/wayland-rs) | `72f7fe0d` (the wayland-backend 0.3.17 release, `v0.31.x` branch) | `a39311b8`: server side, disconnects a client leaving too many received fds unclaimed; `70f81e00`: sizes that cap at one eighth of the soft `RLIMIT_NOFILE`, 128..=1024 | **yes**, root `Cargo.toml` `[patch.crates-io]` rev `70f81e00` (PR #241) | wayland-backend queues fds a client sends with fd-less requests for the connection's life, so one idle client could fill scoot's fd table and shed every newcomer, `scootctl` included. |
 
 ## Per fork
 
 ### `scoot-sh/smithay`
 
-- **Branch:** `scoot/buffer-scale-without-new-buffer`, twenty-two commits on `0ff00983`.
+- **Branch:** `scoot/xwayland-selection-dnd`, twenty-five commits on
+  `0ff00983`, the tip `035d447c` pinned; `fcf6f314`, the twenty-third, is
+  carried unused (see below). `scoot/buffer-scale-without-new-buffer`
+  (`6ab8b4a2` on `7e18b661`) was pinned briefly by the buffer-scale PR
+  while this lane's XWayland commits were unmerged; nothing pins it now.
   Its first, `43f50eb2`, is also the tip of `scoot/syncobj-timeline-drop`,
   which PR #233 pinned; that branch is kept as it was, and nothing pins it
-  now. The XWayland line continues on `scoot/xwayland-selection-dnd`, where
-  `b16cd6a2` (an X drag waits for types only over the window it started on),
-  `fcf6f314` (let the window manager withhold a window's commits) and
-  `e7130254` (the scale fix this branch cherry-picks as `6ab8b4a2`) sit
-  unpinned by scoot, for the other lane's repin -- this lane must not carry
-  them. The XWayland commits, in order, each measured before it was written
+  now. The XWayland commits, in order, each measured before it was written
   (fail-first records on the dev VM, `~/evidence/xw4/`; see
-  `docs/backlog/protocols/xwayland-support.md`'s Phase 4 record):
+  `docs/backlog/resolved/xwayland-support-done.md`'s Phase 4 record):
   - `35c335e0` **pace incoming INCR transfers on the write.** An X
     selection larger than one chunk was read with `delete=true` and deleted
     again after the write; a prompt owner's next chunk landed between the
@@ -225,7 +224,32 @@ top**, so it stays easy to review, rebase, and drop.
     order.) The first_motion, drop, drop_end, dnd, xdnd, clipboard and peer
     suites 50/50, three runs; the full `--features xwayland` nextest run
     1885 passed, 25 skipped.
-  - `6ab8b4a2` **apply a commit's buffer scale and transform without a new
+  - `b16cd6a2` **wait for types only over the window the drag started
+    on.** `b1ac3ca7` waited over every window of the drag owner's X
+    client, and single-instance apps (mousepad by default, GApplication
+    apps generally) run every window on one X connection, so a quick drag
+    between two of their windows found the proxy over the second on its
+    first motion and dropped nothing (review of `b1ac3ca7`, live: 0/5; a
+    few motions first, 4/4). `XwmActiveDrag` now records the X window the
+    press or touch started on (from the grab's start focus) and the drag
+    waits only over it; with no X window there, the owner's whole client
+    waits, as before. Pinned by `first_motion.rs`'s
+    `an_x_drags_first_motion_onto_its_own_clients_other_window_finds_that_window`:
+    fails 3 of 3 at `7e18b661` ("found \"Smithay XDND proxy\""), passes
+    3 of 3 at `b16cd6a2`; the first_motion, drop, drop_end, dnd, xdnd,
+    clipboard and peer suites 51/51, three runs (X to Wayland drags,
+    which start over their own window, included). See
+    `docs/backlog/resolved/xwayland-same-client-quick-drag-done.md`.
+  - `fcf6f314` **(on the branch, not pinned)** adds a public
+    `X11Surface::set_commits_allowed`, so the window manager can withhold
+    `_XWAYLAND_ALLOW_COMMITS` from an X window it refuses. It was written
+    for `docs/backlog/protocols/xwayland-refused-windows-still-commit.md`
+    and measured in scoot against a local repin before anything was
+    pinned. It does not help: XWayland spends a refused override-redirect
+    window's two buffers before the window manager hears of the map (480
+    buffers either way for 240 menus, 128 drawn). scoot does not call it. Nothing uses it, so drop it at the next rebase
+    unless a use turns up.
+  - `e7130254` **apply a commit's buffer scale and transform without a new
     buffer.** `wl_surface.set_buffer_scale` and `set_buffer_transform` are
     double-buffered state that applies on the next commit with or without a
     new `attach`, but `RendererSurfaceState::update_buffer` read the cached
@@ -235,14 +259,31 @@ top**, so it stays easy to review, rebase, and drop.
     quarter over the whole surface until a re-attach). The cached values
     are now read on every commit that has a buffer; the surface view is
     already recomputed each commit, so it follows. Content-identical to
-    `e7130254`, cherry-picked onto `7e18b661` on this branch (applied
-    cleanly: it touches only `src/backend/renderer/utils/wayland.rs`). Pinned
+    `6ab8b4a2` (the same fix cherry-picked onto `7e18b661` on
+    `scoot/buffer-scale-without-new-buffer`, which `main` pinned first;
+    it touches only `src/backend/renderer/utils/wayland.rs`). Pinned
     in scoot by
     `compositor/output_scale/tests.rs`'s
     `a_scale_only_commit_rescales_the_surface` (fails on the pre-fix fork,
     passes after), plus the scale-back-to-1 leg covering several scales in
     a row. See
     `docs/backlog/resolved/buffer-scale-without-new-buffer-done.md`.
+  - `035d447c` **flush XSETTINGS writes.** `XSettings::update` wrote
+    `_XSETTINGS_SETTINGS` and never flushed. The window manager's event
+    thread only reads, so the write sat in x11rb's buffer until some
+    unrelated request flushed the connection, and a toolkit reading the
+    settings in between (one started right after XWayland was ready, or
+    any X client after a settings change while no X window needed a
+    configure) saw none of them. In scoot an X app at output scale 2 read
+    no `Gdk/WindowScalingFactor` and drew at half size:
+    `compositor/xwayland/tests/scale.rs` failed 2 runs in 20 on
+    `e7130254` and passed 20 in 20 against a path patch of exactly
+    `035d447c` (measured by the coordinating session), then 20 in 20
+    again with the rev pinned from git (`-E
+    'test(/xwayland::tests::scale::/)'`, 12 tests a run, 2026-09-28).
+    `update` now flushes, which covers `set_xsettings`,
+    `remove_xsettings` and `clear_xsettings`; it touches only
+    `src/xwayland/xwm/settings.rs`.
 - **Evidence:** `docs/backlog/resolved/syncobj-handle-leak-done.md`, and on the
   dev VM `~/evidence/sync/master-validation/`. Upstream master `79bbed5e1`
   (2026-09-22) was built and measured: it leaks 3.5–4.1 MB per test run,
@@ -259,11 +300,14 @@ top**, so it stays easy to review, rebase, and drop.
   `b1ac3ca7` (checked 2026-09-27, master `928d4a9b`): upstream's
   `DnDGrab` still delays every enter until the source has mime types
   ("delay until they have materialized"), and has no
-   `enter_needs_metadata`; `7e18b661` fixes fork-only code from
-   `b1ac3ca7`. `6ab8b4a2` (checked 2026-09-27, current master): upstream's
-   `update_buffer` still reads `buffer_scale`/`buffer_transform` only in
-   the `NewBuffer` arm. No issue
-   or PR exists. Nothing has been filed from here.
+  `enter_needs_metadata`; `7e18b661` fixes fork-only code from
+  `b1ac3ca7`, and `b16cd6a2` narrows it further. `e7130254` (as
+  `6ab8b4a2`, checked 2026-09-27, current master): upstream's
+  `update_buffer` still reads `buffer_scale`/`buffer_transform` only in
+  the `NewBuffer` arm. `035d447c` (checked 2026-09-28, master
+  `928d4a9b`): upstream's `XSettings::update` still returns after
+  `change_property8` without a flush. No issue
+  or PR exists. Nothing has been filed from here.
 - **Upstream policy note, for the maintainer's decision:** Smithay's
   `AI.md` asks contributors to disclose AI-generated code, discourages
   it, and asks for human-written issue and PR text. Its `DCO.md` requires
@@ -279,11 +323,13 @@ top**, so it stays easy to review, rebase, and drop.
   revs, pinning the no-change half); `compositor/xwayland/tests/drop.rs`
   fails without `6e6fe896` (two tests, "no window" where the proxy should
   be); `drop_end.rs` fails without `7388af13`, `9515d7e5` and `d3a4cd73`;
-   `first_motion.rs` fails without `b1ac3ca7` (its remap test without
-   `7e18b661`), and scoot does not compile
-   against a rev without `DndFocus::enter_needs_metadata`;
-   `compositor/output_scale/tests.rs`'s `a_scale_only_commit_rescales_the_surface`
-   fails without `6ab8b4a2` (the far pixel is still window fill).
+  `first_motion.rs` fails without `b1ac3ca7` (its remap test without
+  `7e18b661`, its same-client test without `b16cd6a2`), and scoot does not
+  compile against a rev without `DndFocus::enter_needs_metadata`;
+  `compositor/output_scale/tests.rs`'s `a_scale_only_commit_rescales_the_surface`
+  fails without `e7130254` (the far pixel is still window fill);
+  `compositor/xwayland/tests/scale.rs` fails intermittently without
+  `035d447c` (2 runs in 20: the X app reads no scale).
 
 ### `scoot-sh/wayland-rs`
 

@@ -79,3 +79,26 @@ Either one must keep captures correct (`capture_cursor.rs`). Verify on the
 Asahi machine with debugfs `dri/2/state` (plane 35 on the client's fb) and
 mpv's `presented` flags (`9` = `vsync | zero_copy`), using a client whose
 buffer qualifies.
+
+## Progress — option 1 shipped, ticket stays open
+
+Option 1 (hide the pointer after inactivity) is implemented, behind the
+opt-in `[appearance] cursor_hide_after_ms` (default `0` = never hides):
+while a fullscreen window covers the output the pointer is on, and the
+pointer is over that window itself, the compositor hides its pointer after
+the configured delay; the next motion, button or scroll shows it again and
+that frame composites. Hiding suppresses the cursor-element gathering
+(`State::cursor_location`), never the client's own cursor status, so a
+hidden cursor disturbs no plane assignment, a reshown one composites
+exactly one frame, and captures (IPC screenshots,
+`ext-image-copy-capture-v1`) read a hidden pointer as hidden. Never hides
+behind the session lock; keys do not reset the wait. Headless-verified
+(`compositor::cursor_hide::tests`: synthetic-clock hide, race, reshow
+pixels, disarm on un-fullscreen/close/workspace-switch/lock/VT-pause
+wiring, uncovered-output, zero-means-off); motion hot path +~14 ns/event
+with the feature on, nothing measurable with it off.
+
+Remaining: option 2 (cursor on the overlay plane, needs a Smithay-fork
+change per `docs/forks.md`) and the Asahi verification with plane 35 +
+mpv `presented` flags. This ticket keeps `status: "open"` until those
+land.

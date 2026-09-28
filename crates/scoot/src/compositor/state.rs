@@ -76,6 +76,7 @@ use super::screenshot::{Encoder, PendingShot, ShotSink};
 use super::session_env;
 use super::session_lock::SessionLock;
 use super::shm_pools::ShmPools;
+use super::subsurface_role::LiveSubsurfaces;
 use super::tty::Tty;
 use super::wayland_accept::WaylandListener;
 use super::wl_buffers::WlBuffers;
@@ -139,6 +140,15 @@ pub struct State {
     /// surface can (see `clicked_layer` and `layer_shell.rs`), and this stays
     /// pointing at the window focus will come back to when it doesn't.
     pub focus: Option<WindowId>,
+    /// Bumped (wrapping) whenever focus moves -- the focused *window*
+    /// (`State::set_focus`, and `remove_window` clearing it) or the seat's
+    /// keyboard focus (`SeatHandler::focus_changed` for every move to a
+    /// surface, whichever path set it, and `refresh_keyboard_focus` for a
+    /// move to nothing, which Smithay does not report). Only compared for
+    /// equality: the X focus gate's re-ask on a spawn's exit grants nothing
+    /// if focus moved since the window was refused (`xwayland/focus.rs`),
+    /// because the user has since done something that decided focus.
+    pub(super) focus_generation: u64,
     /// Which window covered each output, by output index, as of the last
     /// `apply()` -- `World::fullscreen_on` for every output, remembered only
     /// so `apply()` can tell when it changed (see
@@ -416,6 +426,25 @@ pub struct State {
     /// asks for the pointer, on every backend (see
     /// `render/capture_cursor.rs`).
     pub cursor: Cursor,
+    /// Whether the pointer is currently hidden for inactivity under a
+    /// covering fullscreen window (`[appearance] cursor_hide_after_ms` --
+    /// see `cursor_hide.rs`). Distinct from the client's own `Hidden`
+    /// status: `Cursor::status` is untouched, and this only suppresses the
+    /// gathering (`State::cursor_location`), so frames and captures read
+    /// the pointer as hidden while every image, hotspot and theme lookup
+    /// survives for the next motion.
+    pub(crate) cursor_idle_hidden: bool,
+    /// When the armed hide fires, or `None` when no hide is armed. Written
+    /// by `update_cursor_hide` (transitions) and `note_pointer_activity`
+    /// (an `Instant` store per motion, no allocation); read by the
+    /// one-shot timer, which re-arms itself past a pushed deadline rather
+    /// than being reinserted per motion.
+    pub(crate) cursor_hide_deadline: Option<Instant>,
+    /// Whether the one-shot hide timer is live. Mirrors the event source:
+    /// set on insert, cleared when it fires (whatever it answers) or when
+    /// the insert fails -- so a failed arm retries on the next transition
+    /// or motion instead of stranding a deadline nothing serves.
+    pub(crate) cursor_hide_timer_live: bool,
     /// Bumped whenever the pointer moves or the cursor's image changes, on
     /// every backend. The capture path's counterpart of `frame_serial` for
     /// the one thing a capture can show that no frame has to draw: under
@@ -496,6 +525,21 @@ pub struct State {
     /// server.
     #[cfg(feature = "xwayland")]
     pub xwayland_grab: Option<xwayland::XWaylandKeyboardGrabState>,
+    /// XWayland's own Wayland client, from the spawn on: what its client
+    /// scale is set on, at the spawn and again when a reload moves the
+    /// scale (see `xwayland/scale.rs`). Left in place when the server dies
+    /// (setting a dead client's scale is harmless) and replaced by a restart.
+    #[cfg(feature = "xwayland")]
+    pub(in crate::compositor) xwayland_client: Option<smithay::reexports::wayland_server::Client>,
+    /// The scale X draws at -- XWayland's client scale -- and whether the
+    /// layout fits X's coordinates at it: `ceil([output] scale)`, or lower
+    /// where the whole layout would not fit X's 16-bit coordinates at that
+    /// (see `xwayland/scale.rs`). Chosen at the spawn and re-chosen by
+    /// `State::refit_xwayland` at every output-layout change; read on every
+    /// X configure through `State::x11_scale`. `XScale::UNSET` (1) until
+    /// the spawn.
+    #[cfg(feature = "xwayland")]
+    pub(in crate::compositor) x11_fit: xwayland::scale::XScale,
     /// The override-redirect X windows currently mapped -- menus, tooltips,
     /// drop-downs -- in mapping order, newest last (on top). Never in the
     /// core or the `Space`: they place themselves, and are drawn and
@@ -743,6 +787,12 @@ pub struct State {
     /// mappings they keep, including after the object is destroyed, are
     /// `client_fds`' below.
     pub wl_buffers: WlBuffers,
+    /// Which surfaces currently hold a live `wl_subsurface` role object.
+    /// Filed in `CompositorHandler::new_subsurface` once the link exists,
+    /// forgotten in `dispatch.rs`'s destruction hooks when the role object
+    /// dies or the surface does -- see `subsurface_role.rs`, which owns the
+    /// exactness argument. What the second-`get_subsurface` guard reads.
+    pub(super) live_subsurfaces: LiveSubsurfaces,
     /// How many dma-buf plane fds each Wayland client has this compositor
     /// hold in `zwp_linux_buffer_params_v1` objects it has not created a
     /// buffer from. Counted at `add` before delegation, released when the
@@ -877,6 +927,13 @@ pub struct State {
     /// its zombie is collected, a zombie holds its pid against reuse, and an
     /// `ECHILD` (reaped elsewhere) forgets the entry rather than leaking it.
     pub spawned_children: HashSet<u32>,
+    /// The pids the current `reap_children` sweep dropped from
+    /// `spawned_children`, for the X focus gate's re-ask
+    /// (`State::x11_focus_for_exited_spawns`). Cleared and refilled by each
+    /// sweep, so it allocates only when more spawns exit in one sweep than
+    /// ever before.
+    #[cfg(feature = "xwayland")]
+    pub(super) reaped_spawns: Vec<u32>,
     /// The `[wallpaper]` section's side: the `scootbg apply-config` runs
     /// (one at a time, newest section wins, each reaped and its exit
     /// logged), the profile they use and the section a reload diffs
@@ -1087,6 +1144,7 @@ impl State {
             next_id: 0,
             decoration_bound: HashSet::new(),
             focus: None,
+            focus_generation: 0,
             fullscreen_covers: Vec::new(),
             floating_cover: 0,
             awaiting_map: Vec::new(),
@@ -1133,6 +1191,10 @@ impl State {
             #[cfg(feature = "xwayland")]
             xwayland_grab: None,
             #[cfg(feature = "xwayland")]
+            xwayland_client: None,
+            #[cfg(feature = "xwayland")]
+            x11_fit: xwayland::scale::XScale::UNSET,
+            #[cfg(feature = "xwayland")]
             x11_unmanaged: Vec::new(),
             #[cfg(feature = "xwayland")]
             x11_startup_carriers: HashMap::new(),
@@ -1171,6 +1233,7 @@ impl State {
             bind_budget: BindBudget::default(),
             shm_pools: ShmPools::default(),
             wl_buffers: WlBuffers::default(),
+            live_subsurfaces: LiveSubsurfaces::default(),
             pending_planes: Default::default(),
             toplevel_cap: Default::default(),
             #[cfg(feature = "xwayland")]
@@ -1191,6 +1254,8 @@ impl State {
             interaction_serials: input::interaction::Recent::default(),
             keybindings,
             spawned_children: HashSet::new(),
+            #[cfg(feature = "xwayland")]
+            reaped_spawns: Vec::new(),
             wallpaper: Default::default(),
             suppressed_keys: HashSet::new(),
             held_keys: HashSet::new(),
@@ -1206,6 +1271,9 @@ impl State {
             frame_serial: 0,
             scene_dirty: true,
             cursor_serial: 0,
+            cursor_idle_hidden: false,
+            cursor_hide_deadline: None,
+            cursor_hide_timer_live: false,
             #[cfg(test)]
             frame_cursor_for_test: None,
             #[cfg(test)]

@@ -36,8 +36,12 @@ in
     writableStoreUseTmpfs = false;
 
     diskSize = 32 * 1024; # writable root; cargo target dirs live here
-    memorySize = 4096;
-    cores = 4;
+    # 4 GiB was not enough: a single rustc building the scoot crate peaks at
+    # ~3.7 GiB anon RSS, and the guest has no swap, so the OOM killer took
+    # builds out repeatedly. Guest RAM costs the Mac about its size plus
+    # ~350 MiB of QEMU overhead (`footprint <qemu pid>`), not double.
+    memorySize = 16 * 1024;
+    cores = 6;
     graphics = true;
 
     forwardPorts = [
@@ -182,6 +186,19 @@ in
       sway
       cage
       foot
+      # `--xwayland`'s X server: Smithay starts it as a bare `Xwayland` from
+      # `PATH`, so a `--tty` login here needs it on the system profile or
+      # runs Wayland-only (logged loudly). Most likely no new closure: sway's
+      # wlroots is built with XWayland support, and so already references
+      # it. The two tiny X clients are what the `--features xwayland` live
+      # suites and scripts/smoke-test.sh's X-window half drive (procps's
+      # `pkill`, the third tool they require, is in every NixOS profile).
+      # Not in compositor-deps.nix: that list is link-time libraries, fed to
+      # the package's buildInputs and the dev shell's LIBRARY_PATH; this is
+      # a runtime executable.
+      xwayland
+      xeyes
+      xclock
       # Reads specific pixels out of a `scoot msg screenshot` PNG --
       # scripts/smoke-test.sh's decoration checks need this to confirm the
       # focus ring/background actually rendered the configured colors, not

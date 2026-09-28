@@ -260,6 +260,12 @@ pub fn add_output_with(
     // `resize_output`): without this, a manager bound before this output
     // existed would never hear about it.
     state.refresh_output_heads();
+    // A wider layout can outgrow X's coordinates at the X scale: re-chosen
+    // before `apply()` configures any X window (see `xwayland/scale.rs`).
+    // XWayland binds this output's global only at the next dispatch, so it
+    // binds it in the scale chosen here.
+    #[cfg(feature = "xwayland")]
+    state.refit_xwayland();
     // The core lays out against one more output now, and `apply()` is what
     // pushes that arrangement onto the windows; it ends in `request_render()`.
     state.apply();
@@ -294,6 +300,8 @@ pub(crate) fn add_output_without_backend(
     state
         .world
         .handle_event(CoreEvent::OutputAdded { id, area });
+    #[cfg(feature = "xwayland")]
+    state.refit_xwayland();
     state.restore_displaced(id);
     id
 }
@@ -640,19 +648,24 @@ impl State {
             // turn a renderer failure into an unrequested unlock (see
             // `session_lock.rs`).
             //
-            // Where there is a scanout to wait for (`--tty`), confirmation
-            // additionally waits for the vblank of the flip carrying the
-            // blanked frame (see `SessionLock::await_vblank`): the previous,
-            // possibly unlocked, frame can otherwise stay on scanout for up
-            // to one more vblank after `locked` has gone out. Headless and
-            // nested have no scanout, so the drawn frame *is* the shown one.
+            // Where there is something further to wait for, confirmation
+            // additionally waits for it. Under `--tty` that is the vblank of
+            // the flip carrying the blanked frame (see
+            // `SessionLock::await_vblank`): the previous, possibly unlocked,
+            // frame can otherwise stay on scanout for up to one more vblank
+            // after `locked` has gone out. Under `--nested` it is the host's
+            // commit of the frame (see `State::note_nested_frame`): a frame
+            // the host holds no buffer for is drawn but never shown, and the
+            // host keeps showing the last unlocked frame meanwhile. Only
+            // headless has neither, so only there is the drawn frame the
+            // shown one.
             //
             // Recorded per output, and confirmed only once every output's
             // blanked frame is in (see `SessionLock::note_blanked`): with
             // more than one screen, confirming on the first output's frame
             // would expose a live desktop on the ones that haven't blanked.
             // A second confirmation is a no-op, never an early unlock -- and
-            // with one output the record completes on the first drawn frame,
+            // with one output the record completes on the first shown frame,
             // exactly as before.
             if frame.drew_a_frame {
                 if self.session_lock.awaiting_blank() && self.tty.is_some() {
@@ -668,29 +681,26 @@ impl State {
                     let blocked = count > 1 && self.session_lock_output_blocks(&output);
                     let now = Instant::now();
                     if !blocked && self.session_lock.await_vblank(id, frame.blank_seq, now) {
-                        // This frame needs a timer watching the fallback
-                        // deadline: a newly armed wait has none yet, and a
-                        // freshly issued flip restarted the bound out from
-                        // under the previous one (see `await_vblank`). One
-                        // shot each, dropped when they fire: the vblank path
-                        // takes the wait first in the ordinary case, so a timer
-                        // only ever fires for a vblank that never came -- and a
-                        // stale one finds no wait and drops.
-                        if let Err(error) = self
-                            .loop_handle
-                            .insert_source(Timer::from_duration(LOCK_VBLANK_TIMEOUT), blank_timeout)
-                        {
-                            // error!, not warn!: without this timer a lock whose
-                            // vblank never arrives hangs its locker forever --
-                            // the one failure mode this wait exists to prevent.
-                            // The vblank path itself still works; only the
-                            // fallback is gone.
-                            tracing::error!(
-                                %error,
-                                "could not arm the session-lock vblank fallback timer; \
-                                 a lock whose vblank never arrives will hang its locker"
-                            );
-                        }
+                        self.arm_blank_fallback();
+                    }
+                } else if self.host.is_some() && self.session_lock.awaiting_blank() {
+                    // `--nested`: the drawn frame confirms only once the
+                    // host has it -- committed and flushed here, or handed
+                    // over from the owed-frame path without a fresh draw
+                    // (see `State::note_nested_handed_over`). A dropped or
+                    // owed frame records the draw and arms the fallback;
+                    // `locked` waits for the commit, the hand-over, a
+                    // re-render, or the bound. With no lock waiting this
+                    // does not run at all -- not even a clock read -- and
+                    // `note_nested_frame` itself re-checks anyway.
+                    if self.note_nested_frame(
+                        id,
+                        &output,
+                        count,
+                        frame.host_committed,
+                        Instant::now(),
+                    ) {
+                        self.arm_blank_fallback();
                     }
                 } else if !self.session_lock.awaiting_blank()
                     || self.session_lock.note_blanked(id, &output, count)
@@ -1116,6 +1126,11 @@ impl State {
         // has nothing to repack (it sits at the origin), and its wire traffic
         // stays exactly what the resize alone sends.
         self.repack_outputs();
+        // The layout is final: the X scale for it (see `xwayland/scale.rs`),
+        // before anything below -- `refresh_layer_zone`'s `apply()` or the
+        // closing one -- configures an X window.
+        #[cfg(feature = "xwayland")]
+        self.refit_xwayland();
         // The logical rectangle the core and the `Space` both work in -- see
         // `output_scale.rs`'s `logical_size`, and `init`'s comment on why the
         // core must never be handed the physical size. At the output's own
@@ -1208,7 +1223,8 @@ impl State {
     /// backends). Lock surfaces are reconfigured to their output's new
     /// logical size and layer surfaces re-arranged against it, the same two
     /// steps a resize runs; output-management heads and capture constraints
-    /// are refreshed from the same sites. The caller runs `apply()` after,
+    /// are refreshed from the same sites, and the X scale re-chosen for the
+    /// new layout (`State::refit_xwayland`). The caller runs `apply()` after,
     /// which pushes the re-derived arrangement onto the windows and renders.
     ///
     /// A move crosses two stores that must agree: the Space-side location
@@ -1304,6 +1320,12 @@ impl State {
                 area: *area,
             });
         }
+        // The X scale for the new layout and the new integer (see
+        // `xwayland/scale.rs`): after the outputs are laid out, since the
+        // layout's logical extent bounds it too, and before
+        // `refresh_layer_zone` below can `apply()`.
+        #[cfg(feature = "xwayland")]
+        self.refit_xwayland();
         // The scale changed, so every output-management client is a scale, a
         // mode and a `done` behind; captures re-read sizes that did not move
         // (a no-op that keeps this path from drifting from the resize one);
@@ -1354,7 +1376,8 @@ impl State {
     /// by side, the session-lock wait forgets it (and confirms if it was the
     /// only screen still owing a blank), the pointer is brought back inside
     /// the desktop, and one refresh of heads, capture constraints, layer
-    /// zones and keyboard focus plus an `apply()` tells everyone the rest.
+    /// zones, keyboard focus and the X scale plus an `apply()` tells
+    /// everyone the rest.
     /// The `wlr-output-management` head is retired by that refresh.
     ///
     /// Cold: a hotplug path. A few small `Vec`s.
@@ -1495,6 +1518,12 @@ impl State {
             );
         }
         self.repack_outputs();
+        // A narrower layout may fit X at a higher X scale again (see
+        // `xwayland/scale.rs`): re-chosen now the layout is final, before
+        // `refresh_layer_zone` or the `apply()` below configures an X
+        // window.
+        #[cfg(feature = "xwayland")]
+        self.refit_xwayland();
         if self.session_lock.forget_output(id, self.outputs.len()) {
             tracing::debug!(
                 "session lock confirmed: the only output still owing a blank went away"
@@ -1642,16 +1671,46 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
 }
 
 /// Fires [`LOCK_VBLANK_TIMEOUT`] after a blanked frame rendered under `--tty`
-/// without its vblank confirming the lock: the fallback half of the vblank
-/// wait (see `SessionLock::await_vblank`). One shot, always dropped -- a
-/// re-presented flip arms its own timer against its own restarted bound, so
-/// a timer only ever fires for a vblank that never came, and a stale one
-/// finds no live deadline and drops. `Instant::now()` rather than the
-/// timer's own timestamp, so the bound is measured against the same clock
-/// the wait was armed with.
+/// without its vblank confirming the lock, or under `--nested` without the
+/// host's commit confirming it: the fallback half of the wait (see
+/// `SessionLock::await_vblank`). One shot, always dropped -- only
+/// the frame that armed the deadline has a timer (re-presents while one is
+/// live arm nothing; a frame drawn after the fallback took an incomplete
+/// wait arms a fresh pair), so a timer only ever fires for a confirmation
+/// that never came, and a stale one finds no live deadline and drops.
+/// `Instant::now()` rather than the timer's own timestamp, so the bound is
+/// measured against the same clock the wait was armed with.
 fn blank_timeout(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -> TimeoutAction {
     state.note_blank_timeout(Instant::now());
     TimeoutAction::Drop
+}
+
+impl State {
+    /// Inserts the one-shot timer watching the session-lock wait's fallback
+    /// deadline: the `--tty` vblank wait's and the `--nested` host-commit
+    /// wait's shared timer (see `SessionLock::await_vblank`, which arms the
+    /// deadline once per wait and never extends it, so exactly the frame
+    /// that armed it calls this). One shot, dropped when it fires: the
+    /// confirming path takes the wait first in the ordinary case, so a timer
+    /// only ever fires for a confirmation that never came -- and a stale one
+    /// finds no wait and drops.
+    fn arm_blank_fallback(&mut self) {
+        if let Err(error) = self
+            .loop_handle
+            .insert_source(Timer::from_duration(LOCK_VBLANK_TIMEOUT), blank_timeout)
+        {
+            // error!, not warn!: without this timer a lock whose
+            // confirmation never arrives hangs its locker forever --
+            // the one failure mode this wait exists to prevent.
+            // The confirming path itself still works; only the
+            // fallback is gone.
+            tracing::error!(
+                %error,
+                "could not arm the session-lock fallback timer; \
+                 a lock whose confirmation never arrives will hang its locker"
+            );
+        }
+    }
 }
 
 /// Whether `render()` must skip this frame because no presenter can show

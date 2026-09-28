@@ -25,6 +25,10 @@
 //!   its own drag. A request while locked is ignored too, and so is one on
 //!   a touch serial: only the pointer's grab is checked (scoot has no touch
 //!   seat; a touch-started move would need its own `TouchGrab` path).
+//!   An X window's `_NET_WM_MOVERESIZE` comes in the same way
+//!   (`xwayland/moveresize.rs`): it has no serial, so [`held_click`] takes
+//!   whichever click grab is held, and the X gate checks the press went to
+//!   the requesting window's X client before [`State::begin_client_drag`].
 //!
 //! What the grab does per motion is the whole hot path, and it allocates
 //! nothing: it asks the core to move or resize the window
@@ -451,6 +455,37 @@ pub(in crate::compositor) fn requested_edges(edge: xdg_toplevel::ResizeEdge) -> 
     })
 }
 
+/// The button press a client's own drag request rides on, if one is still
+/// held: the pointer's grab must be Smithay's implicit click grab, which the
+/// press installed and which lasts exactly while a button is held -- under
+/// `serial`, when the request carries one (an xdg request does; an X one
+/// has none). Answers the grab's serial and its start data (where the press
+/// was, which button, and the surface it went to), for the caller to check
+/// the press was its client's.
+///
+/// The serial alone is not enough for an xdg request: `has_grab` compares
+/// serials only, and a popup grab is installed under whatever recent key,
+/// button or enter serial the client offered (`popup.rs`), with start data
+/// naming the client's own toplevel and no button -- a client could open a
+/// menu on a key serial and then "move" on it with no button held. Any
+/// other grab (a popup's, a drag-and-drop, a modifier drag) is refused the
+/// same way. One lock; the start data cloned only for a click grab (its
+/// focus is a reference count).
+pub(in crate::compositor) fn held_click(
+    pointer: &PointerHandle<State>,
+    serial: Option<Serial>,
+) -> Option<(Serial, GrabStartData<State>)> {
+    pointer
+        .with_grab(|grabbed, grab| {
+            serial
+                .is_none_or(|serial| serial == grabbed)
+                .then(|| grab.downcast_ref::<ClickGrab<State>>())
+                .flatten()
+                .map(|click| (grabbed, click.start_data().clone()))
+        })
+        .flatten()
+}
+
 /// The cursor shown while a drag lasts.
 fn drag_cursor(drag: Drag) -> CursorIcon {
     let Drag::Resize(edges) = drag else {
@@ -555,25 +590,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        // The press this request rides on must still be held: the pointer's
-        // grab must be Smithay's implicit click grab, installed by that very
-        // press, under this serial. The serial alone is not enough --
-        // `has_grab` compares serials only, and a popup grab is installed
-        // under whatever recent key, button or enter serial the client
-        // offered (`popup.rs`), with start data naming the client's own
-        // toplevel and no button: a client could open a menu on a key
-        // serial and then "move" on it with no button held. Any other grab
-        // (a popup's, a drag-and-drop, a modifier drag) is refused the same
-        // way. One lock, nothing cloned unless it is a click grab.
-        let Some(start) = pointer
-            .with_grab(|grabbed, grab| {
-                (grabbed == serial)
-                    .then(|| grab.downcast_ref::<ClickGrab<State>>())
-                    .flatten()
-                    .map(|click| click.start_data().clone())
-            })
-            .flatten()
-        else {
+        let Some((serial, start)) = held_click(&pointer, Some(serial)) else {
             tracing::debug!(
                 ?serial,
                 "refusing an interactive move/resize: no button press held with that serial"
@@ -596,6 +613,23 @@ impl State {
         let Some(id) = self.id_of(surface.wl_surface()) else {
             return;
         };
+        self.begin_client_drag(&pointer, id, &start, serial, edges);
+    }
+
+    /// Starts the drag a client asked for on window `id`, riding the held
+    /// press `start` (installed under `serial`) that its caller has already
+    /// checked is the requesting client's -- `client_floating_drag` for an
+    /// xdg toplevel, `x11_moveresize_request` for an X window. Only a
+    /// floating window on screen is dragged; a tiled or fullscreen one's
+    /// request is ignored, and its own press carries on.
+    pub(in crate::compositor) fn begin_client_drag(
+        &mut self,
+        pointer: &PointerHandle<Self>,
+        id: WindowId,
+        start: &GrabStartData<Self>,
+        serial: Serial,
+        edges: Option<Edges>,
+    ) {
         let Some(window) = self.windows.get(&id).cloned() else {
             return;
         };
@@ -610,7 +644,7 @@ impl State {
         }
         let drag = edges.map_or(Drag::Move, Drag::Resize);
         self.start_floating_grab(
-            &pointer,
+            pointer,
             FloatingGrabStart {
                 id,
                 window,

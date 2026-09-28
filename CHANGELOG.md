@@ -9,6 +9,132 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-28 — X apps are sharp on HiDPI screens
+
+- **At `[output] scale = 2`, X apps (with `--xwayland`) are drawn at the
+  screen's own resolution instead of blown up from scale 1.** Toolkits
+  are told the scale over XSETTINGS: GTK apps draw at the right size
+  (measured); Qt 6 and Java document reading those settings but are not
+  measured yet, and Qt 5 gets scaled fonts only unless the app turns on
+  its own high-DPI scaling. A fractional scale (1.5) draws X apps at 2 and
+  scales that down, so they are sharp there too, at 4x the buffer memory
+  of drawing them at 1. Changing the scale with `scoot msg reload` re-tells them
+  live (GTK apps redraw at the new size on the spot).
+- **An X app that reads no toolkit setting draws half-size at scale 2**
+  (bare Xlib apps such as `xterm` with its default bitmap font or
+  `xclock`, Wine, Steam's own UI): sharp but small. An app that reads only
+  the `Xft.dpi` X resource needs `xrdb -merge` with `Xft.dpi: 192`.
+- Clicks (`scoot msg pointer click` included), drags into and out of X
+  apps, X menus and dialogs that place themselves all land where they are
+  drawn at any scale. At the default scale 1 nothing changes
+  ([docs/protocols.md](docs/protocols.md#x-windows-in-the-layout)).
+- **A very wide multi-monitor layout draws X apps at a lower scale rather
+  than out of X's reach.** X coordinates stop at 32767 pixels, so when
+  the whole layout at `ceil(scale)` would be wider or taller than that
+  (eight 4K screens at 1.25), X apps draw at the largest scale that fits
+  -- 1 at worst -- and the log says so at info. It follows monitors
+  being plugged in, unplugged or changing mode, and reloads.
+
+### 2026-09-28 — X apps' own titlebars drag
+
+- **Dragging an X app's own titlebar moves the window** when it floats (a
+  dialog, or anything `[[window_rule]]` floats): GTK apps over X, Chromium
+  and Electron ask the compositor to move or resize them with
+  `_NET_WM_MOVERESIZE`, and scoot now does, exactly as it does for a
+  Wayland app's titlebar. A border drag resizes; the X app is told its new
+  size when you let go. A tiled X window's titlebar drag does nothing
+  special, like a Wayland one's.
+- Only while you hold a button on that app's own window: an X app cannot
+  start a drag with no button held, from a press on a Wayland window or on
+  another X app's window, or under the lock. Keyboard moves from a window
+  menu are not supported, and an X app cannot cancel a drag early; letting
+  go of the button always ends it
+  ([docs/protocols.md](docs/protocols.md#xwayland-opt-in)).
+
+### 2026-09-27 — X apps from Nix: `scoot-xwayland`
+
+- **`nix build .#scoot-xwayland`** (and `.#scoot-gpu-xwayland` for the GPU
+  tier) builds scoot with XWayland support and puts nixpkgs' `Xwayland` on
+  its `PATH`, so `--xwayland` (or `[xwayland] enabled`) runs X11 apps from
+  a `--tty` login or the NixOS module's session entry with nothing else
+  installed. Set `programs.scoot.package` to it in the NixOS or
+  home-manager module. An `Xwayland` already on your `PATH` still wins. The
+  default `scoot` package is unchanged: no XWayland, no X server in its
+  closure ([docs/nix.md](docs/nix.md#xwayland-from-the-flake)).
+- **A missing `Xwayland` now says which file was missing.** The startup
+  line read "could not be started ... No such file or directory"; it now
+  says `` `Xwayland` must be on PATH `` and logs the `PATH` it searched.
+  The session still starts, Wayland-only, as before.
+- Screenshots (`scoot msg screenshot`) and screen capture (`grim`) show X
+  windows and X menus on the output they are on, and nothing of them under
+  the lock. That was already so; it is now tested.
+
+### 2026-09-27 — X apps drawing with the GPU no longer all close together at ~64 windows
+
+- **With `--xwayland` on the `--tty` GPU tier, about 64 X windows drawing
+  with the GPU at the same moment no longer disconnect the X server.**
+  scoot holds a commit whose GPU work has not finished until it has, and
+  allowed any one Wayland client 64 such commits. The X server is one
+  client for every X window, and it holds about one per X window drawing
+  with the GPU. So 64 of them busy at once disconnected the X server and
+  closed every X app's windows. The X server's limit now scales with its
+  fd limit: 512 on the usual 65536 fd table, 64 where the hard fd limit is
+  1024. This comes from reading the XWayland source. It has not been
+  measured on a GPU.
+
+### 2026-09-27 — X apps no longer all close together at ~256 X windows
+
+- **With `--xwayland`, the X server is no longer disconnected once about
+  256 X windows are mapped.** That count covers menus, tooltips and
+  ordinary windows across every X app together. scoot held the X server,
+  which is one Wayland client for every X window, to the fd and buffer
+  limits meant for a single app (512). Each X window costs it 2 of each,
+  so the 257th window killed the server, and every X app's windows closed
+  at once. The server now gets its own limit: a sixteenth of scoot's fd
+  table, 4096 on the usual 65536 table (about 2048 X windows; about 1024
+  on the `--tty` GPU tier with explicit sync, where each X window drawing
+  with the GPU holds about 4 fds). A machine whose hard fd limit is 1024
+  keeps 512. Past that limit the X server is
+  still disconnected, and the log says why ([protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps)).
+
+### 2026-09-27 — a click just after crossing between two X windows lands
+
+- **With `--xwayland`, a click right after the pointer moves from one X
+  window onto another now reaches the window clicked.** Before, the X
+  pointer ended up off that window (by as far again as the move went)
+  until the next motion, so the press went to another window or to none:
+  every `scoot msg pointer click` onto the other of two X apps was lost
+  (0/40 live, two `xev` windows), and so was a `pointer move` followed by
+  a `pointer button`. With a mouse the next motion corrected it within a
+  few milliseconds, so a click there was off by at most one motion event.
+
+### 2026-09-27 — a quick drag between two windows of one X app lands
+
+- **With `--xwayland`, a quick drag between two windows of the same X app
+  now lands too** -- text between two `mousepad` windows, a file between
+  two windows of one file manager. Most GTK apps run every window in one
+  process, and the fix for quick drags between different X apps left
+  that case out (GTK `mousepad`: 0/5 landed).
+
+### 2026-09-27 — another X client cannot race an app scoot launched to focus
+
+- **With `--xwayland`, the startup id scoot hands an X app it launched
+  now works only for that app's own process while it runs** (or a process
+  it starts, so wrapper scripts still work). Before, any X client could
+  read the id off the app's first window, copy it onto a window of its
+  own, map first and take focus from the window you were typing into.
+  Once the process scoot started has exited -- a single-instance app
+  handing a second launch to its running instance, an app forking into
+  the background (`gvim` without `-f`, by its documentation) -- the
+  startup id works for any X window that asks for focus naming it, once,
+  as it always did, and the app's window that asked while that process
+  was still running takes focus when it exits -- if it asked less than a
+  second before and you have not moved focus since. Those launches can
+  still be raced by an X client that copies the id and asks first; one
+  that only copies it onto a window no longer wins anything. An X app a *Wayland launcher* started keeps the old behavior
+  too -- scoot cannot tell which process the launcher started -- see
+  [protocols.md](docs/protocols.md#focus-x-windows-ask-scoot-decides).
+
 ### 2026-09-27 — a `[wallpaper]` section in the config sets the wallpaper
 
 - **`[wallpaper]` in `config.toml` is all it takes.** Name an `image` (PNG,
@@ -49,10 +175,7 @@ scoot has not cut a numbered release yet; entries are dated.
   now). A release sent together with that motion, with no pause (an agent
   pipelining `pointer move` and the release), still drops nothing in GTK
   apps: GTK decides it on the window the pointer was over before the
-  move. Let the move settle first. Nor does a quick drag between two
-  windows of the *same* X app instance (most GTK apps run every window in
-  one process): that still needs a motion or two over the other window
-  before the release.
+  move. Let the move settle first.
 
 ### 2026-09-27 — drag-and-drop with X apps works in every direction
 

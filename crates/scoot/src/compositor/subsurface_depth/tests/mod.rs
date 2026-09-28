@@ -21,6 +21,7 @@ mod bench;
 mod bypass;
 mod depth;
 mod popup;
+mod second_subsurface;
 
 /// The most levels of subsurface below a tree's root --
 /// `subsurface_depth::MAX_SUBSURFACE_DEPTH`, spelled out so this file does

@@ -1,7 +1,8 @@
 # Milestone 19: multi-output (more than one monitor at a time)
 
-Promoted from `docs/backlog/core/multi-output.md` (still the detailed spec —
-read it first; this file is the staging plan, not a rewrite). The biggest
+Promoted from `docs/backlog/core/multi-output.md` (superseded 2026-09-28 —
+see `docs/backlog/resolved/multi-output-superseded.md` for the
+section-by-section landing map; this file is the authoritative record). The biggest
 user-facing gap scoot has; `README.md`'s "Not yet" list leads with it.
 
 ## What already landed

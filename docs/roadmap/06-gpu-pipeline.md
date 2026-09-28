@@ -835,8 +835,9 @@ first `wl_registry`.
   containers scoot targets do not have, and, under pixman, the bound-target
   cache eviction `dmabuf.rs`'s `schedule_cache_drain` warns about, which would
   have to be fixed in the same change. Filed as
-  [`docs/backlog/protocols/screencopy-dmabuf-capture.md`](../backlog/protocols/screencopy-dmabuf-capture.md)
-  rather than bundled.
+  [`docs/backlog/resolved/screencopy-dmabuf-capture-done.md`](../backlog/resolved/screencopy-dmabuf-capture-done.md)
+  rather than bundled (resolved 2026-09-28 as a documented don't-build:
+  no measured client need).
 - **The seven `dmabuf::tests` failures under `SCOOT_TEST_RENDERER=gles`**, which
   this stage was twice expected to fix and does not. They are the test
   allocator's `/dev/udmabuf` **provenance**, not format (see the stage-2

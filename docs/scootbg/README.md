@@ -97,8 +97,8 @@ scootbg daemon --profile sway                  # ... restoring and saving the `s
 
 Every command above works today (`set` also takes `--filter
 lanczos3|catmull-rom|bilinear|nearest`, and `daemon` `--no-restore`), and
-so does the `[wallpaper]` section. The root
-[README](../../README.md#scootbg-early) has the details (exit codes, what
+so does the `[wallpaper]` section. The
+[command reference](cli.md) has the details (exit codes, what
 `set` waits for). One binary: `daemon` runs the Wayland client, every
 other subcommand talks to it over its socket.
 

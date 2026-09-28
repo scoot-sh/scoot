@@ -1,6 +1,6 @@
 //! Tests for opt-in XWayland: the server (Phase 1), window mapping (Phase 2)
 //! and the focus gate (Phase 3) -- see `super`, and
-//! `docs/backlog/protocols/xwayland-support.md`.
+//! `docs/backlog/resolved/xwayland-support-done.md`.
 //!
 //! Two halves, split by what the machine provides:
 //!
@@ -65,6 +65,89 @@ fn x11_text_is_cut_at_the_first_nul() {
     assert!(cut.len() <= MAX_X11_TEXT && cut.len() > MAX_X11_TEXT - 3);
     assert!(cut.ends_with('\u{20ac}'));
     assert_eq!(x11_text("x".repeat(MAX_X11_TEXT)).len(), MAX_X11_TEXT);
+}
+
+/// The X wire limits in logical pixels (see `manage::x_rect`): at X scale
+/// `s`, every clamped value times `s` is inside `INT16` (positions) and
+/// `1..=32767` (sizes), and the bound is the largest that is. Scale 1 is
+/// the limits themselves; a scale below 1 (unreachable: the X scale is at
+/// least 1) is treated as 1 rather than dividing by zero.
+#[cfg(feature = "xwayland")]
+#[test]
+fn x_wire_limits_shrink_by_the_x_scale() {
+    use super::manage::{x_dimension, x_rect};
+
+    for scale in [0, 1, 2, 3, 4] {
+        let s = scale.max(1);
+        let far = x_rect(i32::MAX, i32::MIN, i32::MAX, i32::MIN, scale);
+        let (x, y) = (far.loc.x * s, far.loc.y * s);
+        let w = far.size.w * s;
+        assert!(
+            x <= i32::from(i16::MAX) && x + s > i32::from(i16::MAX),
+            "{scale}: x {x}"
+        );
+        assert!(
+            y >= i32::from(i16::MIN) && y - s < i32::from(i16::MIN),
+            "{scale}: y {y}"
+        );
+        assert!(w <= 32_767 && w + s > 32_767, "{scale}: w {w}");
+        assert_eq!(far.size.h, 1, "{scale}: a size is at least 1");
+        assert_eq!(x_dimension(u32::MAX, scale) * s, w, "{scale}");
+        assert_eq!(x_dimension(0, scale), 1, "{scale}");
+        assert_eq!(x_dimension(100, scale), 100, "{scale}");
+        // Inside the limits, nothing moves.
+        let near = x_rect(-10, 20, 300, 400, scale);
+        assert_eq!(
+            (near.loc.x, near.loc.y, near.size.w, near.size.h),
+            (-10, 20, 300, 400)
+        );
+    }
+    assert_eq!(x_rect(i32::MAX, 0, 1, 1, 1).loc.x, i32::from(i16::MAX));
+    assert_eq!(x_rect(i32::MIN, 0, 1, 1, 2).loc.x, -16_384);
+}
+
+/// The scale X draws at, and what toolkits are told: `ceil` of the output
+/// scale (the `wl_output.scale` integer), never below 1, and the settings a
+/// GNOME settings daemon would publish for it.
+#[cfg(feature = "xwayland")]
+#[test]
+fn the_x_scale_is_the_integer_above_and_toolkits_hear_it() {
+    use smithay::xwayland::xwm::settings::Value;
+
+    use super::scale::{toolkit_settings, x_scale};
+    use crate::compositor::output_scale::integer_scale;
+
+    for (output, x) in [
+        (0.5, 1),
+        (1.0, 1),
+        (1.25, 2),
+        (1.5, 2),
+        (2.0, 2),
+        (2.5, 3),
+        (4.0, 4),
+    ] {
+        assert_eq!(x_scale(integer_scale(output)), x, "at {output}");
+    }
+    assert_eq!(x_scale(0), 1);
+    let integers = |scale| -> Vec<(String, i32)> {
+        toolkit_settings(scale)
+            .into_iter()
+            .map(|(name, value)| match value {
+                Value::Integer(value) => (name, value),
+                other => panic!("{name} is not an integer: {other:?}"),
+            })
+            .collect()
+    };
+    assert_eq!(
+        integers(2),
+        [
+            ("Gdk/WindowScalingFactor".to_owned(), 2),
+            ("Xft/DPI".to_owned(), 196_608),
+            ("Gdk/UnscaledDPI".to_owned(), 98_304),
+        ]
+    );
+    assert_eq!(integers(1)[1], ("Xft/DPI".to_owned(), 98_304));
+    assert_eq!(integers(4)[1], ("Xft/DPI".to_owned(), 393_216));
 }
 
 #[test]
@@ -335,40 +418,17 @@ fn wait_until<S, A>(
 /// attempt fails loudly as a returned `Err` (never a panic) while the
 /// session keeps serving. One test, two branches: the machine's `PATH`
 /// picks which behaviour is correct here, and both are asserted, so this
-/// is coverage either way, not a skip.
+/// is coverage either way, not a skip. (Where the binary is present -- CI,
+/// the dev VM -- the missing-binary half still runs, in
+/// [`a_missing_binary_falls_back_whatever_the_machine_has`].)
 #[cfg(feature = "xwayland")]
 #[test]
 fn server_starts_or_falls_back_loudly() {
-    use super::StartError;
-
     if !xwayland_on_path() {
         eprintln!(
             "server_starts_or_falls_back_loudly: skipped live half -- no Xwayland binary on PATH"
         );
-        let mut fixture = Fixture::unstarted();
-        let handle = fixture.state.loop_handle.clone();
-        match super::start(handle, &mut fixture.state) {
-            Err(StartError::Spawn(error)) => {
-                let message = error.to_string();
-                assert!(
-                    message.to_lowercase().contains("not found")
-                        || message.to_lowercase().contains("no such file"),
-                    "the spawn failure should name the missing binary: {message}"
-                );
-                assert!(fixture.state.xdisplay.is_none());
-                assert!(fixture.state.xwm.is_none());
-            }
-            Err(error @ StartError::Insert(_)) => {
-                panic!("a missing binary must fail as Spawn, not as a loop error: {error}")
-            }
-            Ok(display) => {
-                panic!("starting XWayland with no binary on PATH unexpectedly worked: :{display}")
-            }
-        }
-        // The session underneath is unharmed: it still spawns and still
-        // dispatches (the Wayland-only half of the fallback contract).
-        assert!(fixture.state.spawn(&["true".to_owned()]));
-        fixture.settle();
+        assert_a_missing_binary_falls_back();
         return;
     }
     let mut fixture = Fixture::unstarted();
@@ -387,6 +447,115 @@ fn server_starts_or_falls_back_loudly() {
     // ... and the session underneath is a working compositor, not just a
     // process that did not crash: it still spawns.
     assert!(fixture.state.spawn(&["true".to_owned()]));
+}
+
+/// The missing-binary contract: `start` fails as [`StartError::Spawn`]
+/// naming the binary (never a panic, never a loop error), leaves no display
+/// behind for `State::spawn` to export, and the session underneath still
+/// spawns and dispatches -- the Wayland-only half. `compositor::run` turns
+/// that `Err` into its loud log line (`scripts/smoke-test.sh` asserts the
+/// line).
+#[cfg(feature = "xwayland")]
+fn assert_a_missing_binary_falls_back() {
+    use super::StartError;
+
+    let mut fixture = Fixture::unstarted();
+    let handle = fixture.state.loop_handle.clone();
+    match super::start(handle, &mut fixture.state) {
+        Err(error @ StartError::Spawn(_)) => {
+            let message = error.to_string();
+            assert!(
+                message.contains("`Xwayland` must be on PATH"),
+                "the failure should say what is missing and where: {message}"
+            );
+            let cause = std::error::Error::source(&error)
+                .map(ToString::to_string)
+                .unwrap_or_default()
+                .to_lowercase();
+            assert!(
+                cause.contains("not found") || cause.contains("no such file"),
+                "the spawn failure should be the missing binary: {cause}"
+            );
+            assert!(fixture.state.xdisplay.is_none());
+            assert!(fixture.state.xwm.is_none());
+            assert!(fixture.state.xwayland_grab.is_none());
+        }
+        Err(error @ StartError::Insert(_)) => {
+            panic!("a missing binary must fail as Spawn, not as a loop error: {error}")
+        }
+        Ok(display) => {
+            panic!("starting XWayland with no binary on PATH unexpectedly worked: :{display}")
+        }
+    }
+    // The session underneath is unharmed: it still spawns (by absolute
+    // path, since the `PATH` here may hold nothing at all: this test binary,
+    // listing no test) and still dispatches.
+    let exe = std::env::current_exe().expect("the test binary's path");
+    assert!(fixture.state.spawn(&[
+        exe.to_string_lossy().into_owned(),
+        "--list".to_owned(),
+        "--exact".to_owned(),
+        "no-such-test".to_owned(),
+    ]));
+    fixture.settle();
+}
+
+/// Set only on [`missing_binary_helper`]'s re-run, so the helper is a no-op
+/// anywhere else -- including a `cargo test -- --ignored` run.
+#[cfg(feature = "xwayland")]
+const MISSING_BINARY_ENV: &str = "SCOOT_TEST_XWAYLAND_MISSING";
+
+/// The helper's libtest name, for the re-run.
+#[cfg(feature = "xwayland")]
+const MISSING_BINARY_TEST: &str = "compositor::xwayland::tests::missing_binary_helper";
+
+/// The missing-binary fallback, on every machine: where CI and the dev VM
+/// have `Xwayland` on `PATH`, [`server_starts_or_falls_back_loudly`] only
+/// ever takes its live half, so the fallback -- the packaging's safety net
+/// for a `--tty` login whose `PATH` lacks the binary -- would otherwise
+/// never run anywhere automated. This test binary re-runs itself with an
+/// empty directory as its whole `PATH` (changing this process's own
+/// environment would race every other test in a `cargo test` process).
+#[cfg(feature = "xwayland")]
+#[test]
+fn a_missing_binary_falls_back_whatever_the_machine_has() {
+    let exe = std::env::current_exe().expect("the test binary's path");
+    let empty = std::env::temp_dir().join(format!("scoot-no-xwayland-{}", std::process::id()));
+    std::fs::create_dir_all(&empty).expect("an empty PATH directory");
+    let output = std::process::Command::new(&exe)
+        .args(["--exact", MISSING_BINARY_TEST, "--ignored", "--nocapture"])
+        .env("PATH", &empty)
+        .env(MISSING_BINARY_ENV, "1")
+        .env_remove(REQUIRE_XWAYLAND_ENV)
+        .output()
+        .expect("the test binary re-runs");
+    let _ = std::fs::remove_dir(&empty);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "the missing-binary fallback failed:\n{stdout}\n{stderr}"
+    );
+    // The helper really ran (a filter that matched nothing also exits 0).
+    assert!(
+        stdout.contains("1 passed"),
+        "the helper did not run:\n{stdout}\n{stderr}"
+    );
+}
+
+/// [`a_missing_binary_falls_back_whatever_the_machine_has`]'s re-run.
+#[cfg(feature = "xwayland")]
+#[test]
+#[ignore = "run by a_missing_binary_falls_back_whatever_the_machine_has, with an empty PATH"]
+fn missing_binary_helper() {
+    if std::env::var_os(MISSING_BINARY_ENV).is_none() {
+        return;
+    }
+    assert!(
+        !xwayland_on_path(),
+        "the re-run's PATH still holds Xwayland"
+    );
+    assert_a_missing_binary_falls_back();
 }
 
 /// Neither XWayland global becomes visible to an ordinary client once a
@@ -688,6 +857,8 @@ mod bench;
 #[cfg(feature = "xwayland")]
 mod cap;
 #[cfg(feature = "xwayland")]
+mod capture;
+#[cfg(feature = "xwayland")]
 mod clipboard;
 #[cfg(feature = "xwayland")]
 mod dnd;
@@ -710,9 +881,27 @@ mod lock;
 #[cfg(feature = "xwayland")]
 mod mapping;
 #[cfg(feature = "xwayland")]
+mod moveresize;
+#[cfg(feature = "xwayland")]
 mod peer;
+#[cfg(feature = "xwayland")]
+mod press_after_crossing;
+#[cfg(feature = "xwayland")]
+mod refused_cost;
+#[cfg(feature = "xwayland")]
+mod scale;
+#[cfg(feature = "xwayland")]
+mod scale_fit;
 #[cfg(all(feature = "xwayland", feature = "gpu-scanout"))]
 mod scanout;
+#[cfg(feature = "xwayland")]
+mod server_budget;
+#[cfg(feature = "xwayland")]
+mod startup_exited;
+#[cfg(feature = "xwayland")]
+mod startup_race;
+#[cfg(feature = "xwayland")]
+mod startup_regrant;
 #[cfg(feature = "xwayland")]
 mod unmanaged_cap;
 #[cfg(feature = "xwayland")]

@@ -108,12 +108,21 @@
 //! legitimate single clients are reasoned, not measured (nothing on the dev
 //! VM makes a dma-buf; see `dmabuf.rs`): a GPU browser with 20 windows at
 //! triple buffering plus a few shm pools is ~80-100; a video player keeping
-//! ~30 decoded two-plane frames is ~60 plus its swapchain; Xwayland, one
-//! client for every X window, gives each presented window pixmap its own
-//! pool or dma-buf, ~2-3 per mapped window; a Vulkan window adds 16
-//! timelines. 512 is several times all of those, and the same number the
-//! live-buffer cap already allowed as one-fd-per-buffer. It is generous on
-//! purpose, because hitting it disconnects the client.
+//! ~30 decoded two-plane frames is ~60 plus its swapchain; a Vulkan window
+//! adds 16 timelines. 512 is several times all of those, and the same number
+//! the live-buffer cap already allowed as one-fd-per-buffer. It is generous
+//! on purpose, because hitting it disconnects the client.
+//!
+//! **The session's XWayland server is not one app, and is not held to it**
+//! ([`limits_for`], `xwayland_budget.rs`). It is one client for every X
+//! window, each presented window pixmap its own pool or dma-buf: measured,
+//! 2 fds per mapped window, so this bound used to disconnect the server --
+//! and every X window in the session -- at the 257th X window, whichever X
+//! clients owned them (this doc once reasoned that 512 covered it, at "~2-3
+//! per mapped window", without asking how many windows). The server's
+//! total and timeline bounds are its own budget instead: a sixteenth of the
+//! fd table, 512..=4096, so exactly 512 on a 1024-fd table and every figure
+//! below holds for it there.
 //!
 //! [`PRESSURE_GRACE_FDS`] is **128**, what fd pressure (`fd_pressure.rs`)
 //! lets a client keep before it may refuse that client's next arrival.
@@ -187,6 +196,7 @@
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 
+use smithay::reexports::wayland_server::Client;
 use smithay::reexports::wayland_server::backend::ClientId;
 
 pub(crate) use liveness::Check;
@@ -198,7 +208,8 @@ mod tests;
 
 /// How many fds one client may have this process keep at once: shm pools,
 /// dma-buf planes and syncobj timelines together, each counted until it
-/// really closes. See the module doc for the number.
+/// really closes. See the module doc for the number. Every client but the
+/// session's XWayland server, which has its own budget ([`limits_for`]).
 ///
 /// An arrival that would take the client's weight past this bound sweeps
 /// its records first, and is refused unless the sweep leaves room for it
@@ -260,23 +271,48 @@ pub(crate) struct Limits {
     pub grace: u32,
 }
 
-/// The bounds production enforces.
+/// The bounds production enforces on every client but the session's own
+/// XWayland server (see [`limits_for`]).
 pub(crate) const LIMITS: Limits = Limits {
     total: MAX_FDS_PER_CLIENT,
     timelines: super::drm_syncobj::MAX_TIMELINES_PER_CLIENT,
     grace: PRESSURE_GRACE_FDS,
 };
 
+/// The bounds for the session's XWayland server when its budget is
+/// `bound` (`xwayland_budget::bound`): the total and the timelines both at
+/// the budget, the pressure grace unchanged -- under fd pressure the server
+/// is a contributor like any client past it. See `xwayland_budget.rs`.
+pub(crate) const fn xwayland_limits(bound: u32) -> Limits {
+    Limits {
+        total: bound,
+        timelines: bound,
+        grace: PRESSURE_GRACE_FDS,
+    }
+}
+
+/// The bounds `client`'s arrivals are held to: [`LIMITS`], or
+/// [`xwayland_limits`] for the session's XWayland server, which carries
+/// every X client's windows on one connection.
+pub(crate) fn limits_for(client: &Client) -> Limits {
+    if super::xwayland_budget::is_server(client) {
+        xwayland_limits(super::xwayland_budget::bound())
+    } else {
+        LIMITS
+    }
+}
+
 /// Why [`ClientFds::admit`] refused an arrival, with what the fresh sweep
 /// found the client still holding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Refusal {
-    /// At [`MAX_FDS_PER_CLIENT`], and a sweep could not free
+    /// At the client's total bound (`max`: [`MAX_FDS_PER_CLIENT`], or the
+    /// XWayland server's budget), and a sweep could not free
     /// [`SWEEP_MARGIN`]. `held` is every kind.
-    Total { held: u32 },
-    /// A timeline import at the timeline cap, and a sweep could not free
-    /// [`SWEEP_MARGIN`]. `held` is timelines only.
-    Timelines { held: u32 },
+    Total { held: u32, max: u32 },
+    /// A timeline import at the client's timeline bound (`max`), and a
+    /// sweep could not free [`SWEEP_MARGIN`]. `held` is timelines only.
+    Timelines { held: u32, max: u32 },
     /// Past [`PRESSURE_GRACE_FDS`] while the fd table is pressured. `held`
     /// is every kind.
     Pressure { held: u32 },
@@ -288,17 +324,16 @@ impl Refusal {
     /// fine: this runs only on the path that is about to disconnect a client.
     pub(crate) fn message(self, refused: &str) -> String {
         match self {
-            Refusal::Total { held } => format!(
+            Refusal::Total { held, max } => format!(
                 "{refused}: this compositor still holds {held} file descriptors for this client \
                  (the shm pools, dma-buf planes and syncobj timelines it handed over, counted \
                  until they close even after their objects are destroyed, and any copies the \
-                 renderer keeps of an imported plane), and the maximum is {MAX_FDS_PER_CLIENT}"
+                 renderer keeps of an imported plane), and the maximum is {max}"
             ),
-            Refusal::Timelines { held } => format!(
+            Refusal::Timelines { held, max } => format!(
                 "{refused}: this compositor still holds {held} of this client's imported \
                  timelines (live ones, and destroyed ones its sync points still reference), and \
-                 the maximum is {}",
-                super::drm_syncobj::MAX_TIMELINES_PER_CLIENT
+                 the maximum is {max}"
             ),
             Refusal::Pressure { held } => format!(
                 "{refused}: compositor-wide file-descriptor pressure, and this compositor still \
@@ -402,21 +437,27 @@ impl ClientFds {
 
     /// Decides an arrival of `kind` from `client` in production: forgets any
     /// record on `fd`'s number (it arrived again, so that one closed), then
-    /// [`Self::admit`]s against [`LIMITS`] with the real liveness checks and
-    /// the real fd table. Records nothing; the caller records the fd with
-    /// [`Self::record_arrival`] once every other bound on the request has
-    /// admitted it too.
+    /// [`Self::admit`]s against [`limits_for`] the client with the real
+    /// liveness checks and the real fd table. Records nothing; the caller
+    /// records the fd with [`Self::record_arrival`] once every other bound on
+    /// the request has admitted it too.
     pub(crate) fn admit_arrival(
         &mut self,
-        client: &ClientId,
+        client: &Client,
         fd: RawFd,
         kind: Kind,
         weight: u8,
     ) -> Result<(), Refusal> {
         self.fd_arrived(fd);
-        self.admit(client, kind, weight, LIMITS, liveness::still_held, || {
-            super::fd_pressure::table().is_some_and(|table| table.pressured())
-        })
+        let limits = limits_for(client);
+        self.admit(
+            &client.id(),
+            kind,
+            weight,
+            limits,
+            liveness::still_held,
+            || super::fd_pressure::table().is_some_and(|table| table.pressured()),
+        )
     }
 
     /// Records `fd`, just admitted from `client` as `kind` at `weight`, with
@@ -492,10 +533,16 @@ impl ClientFds {
             total = live;
             fresh = true;
             if total.saturating_add(extra) > limits.total.saturating_sub(SWEEP_MARGIN) {
-                return Err(Refusal::Total { held: total });
+                return Err(Refusal::Total {
+                    held: total,
+                    max: limits.total,
+                });
             }
             if kind == Kind::Timeline && timelines > limits.timelines.saturating_sub(SWEEP_MARGIN) {
-                return Err(Refusal::Timelines { held: timelines });
+                return Err(Refusal::Timelines {
+                    held: timelines,
+                    max: limits.timelines,
+                });
             }
         }
         if total.saturating_add(extra) > limits.grace && (fresh || self.sweep_due(client)) {

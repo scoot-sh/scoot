@@ -171,6 +171,7 @@ struct AppearanceConfig {
     cursor_size: Option<i32>,
     cursor_color: Option<String>,
     cursor_theme: Option<String>,
+    cursor_hide_after_ms: Option<u64>,
     prefer_no_csd: Option<bool>,
 }
 
@@ -224,6 +225,9 @@ impl AppearanceConfig {
             // "no override" would expect, and `Theme::load` would otherwise
             // search for a theme that cannot exist.
             cursor_theme: self.cursor_theme.filter(|name| !name.is_empty()),
+            cursor_hide_after_ms: self
+                .cursor_hide_after_ms
+                .unwrap_or(defaults.cursor_hide_after_ms),
             prefer_no_csd: self.prefer_no_csd.unwrap_or(defaults.prefer_no_csd),
         }
         .clamped(gap)
@@ -740,6 +744,14 @@ pub fn default_config_toml() -> String {
         "# Unset follows $XCURSOR_THEME, then \"default\"; name one here only to override that.\n",
     );
     out.push_str("# cursor_theme = \"Adwaita\"\n");
+    out.push_str("# Hide the pointer after this many milliseconds still over a\n");
+    out.push_str("# fullscreen window covering its output; 0 never hides. Lets\n");
+    out.push_str("# that window scan out directly on a display with no cursor\n");
+    out.push_str("# plane; the next motion, button or scroll shows it again.\n");
+    out.push_str(&format!(
+        "# cursor_hide_after_ms = {}\n",
+        appearance.cursor_hide_after_ms
+    ));
     out.push_str(&format!("# prefer_no_csd = {}\n", appearance.prefer_no_csd));
 
     out.push_str("\n[output]\n");
@@ -2332,6 +2344,7 @@ mod tests {
             [appearance]
             cursor_size = 48
             cursor_color = "#0080ff"
+            cursor_hide_after_ms = 3000
         "##,
         );
         let loaded = load_from(&path, true).expect("valid config");
@@ -2340,6 +2353,7 @@ mod tests {
             loaded.appearance.cursor_color,
             Color::new(0.0, 128.0 / 255.0, 1.0, 1.0)
         );
+        assert_eq!(loaded.appearance.cursor_hide_after_ms, 3_000);
         assert_eq!(
             loaded.appearance.focus_ring_active_color,
             Appearance::default().focus_ring_active_color
@@ -2347,6 +2361,37 @@ mod tests {
         assert_eq!(
             loaded.appearance.background_color,
             Appearance::default().background_color
+        );
+    }
+
+    /// Unset means off: the default session never hides its pointer
+    /// unasked.
+    #[test]
+    fn an_unset_cursor_hide_after_ms_is_zero() {
+        let (_dir, path) = write_temp("[layout]\ngap = 8\n");
+        let loaded = load_from(&path, true).expect("valid config");
+        assert_eq!(loaded.appearance.cursor_hide_after_ms, 0);
+    }
+
+    /// An explicit zero is the same off: it is the disabled value, not an
+    /// "immediate" one (which would flicker the pointer on every motion).
+    #[test]
+    fn a_zero_cursor_hide_after_ms_is_off() {
+        let (_dir, path) = write_temp("[appearance]\ncursor_hide_after_ms = 0\n");
+        let loaded = load_from(&path, true).expect("valid config");
+        assert_eq!(loaded.appearance.cursor_hide_after_ms, 0);
+    }
+
+    /// Past a day the delay clamps (with a warning): the deadline
+    /// arithmetic must never see a value that can overflow `Instant`.
+    #[test]
+    fn an_absurd_cursor_hide_after_ms_is_clamped_to_a_day() {
+        let (_dir, path) =
+            write_temp("[appearance]\ncursor_hide_after_ms = 18446744073709551615\n");
+        let loaded = load_from(&path, true).expect("a huge delay must not fail startup");
+        assert_eq!(
+            loaded.appearance.cursor_hide_after_ms,
+            Appearance::MAX_CURSOR_HIDE_AFTER_MS
         );
     }
 
@@ -3068,6 +3113,7 @@ mod tests {
             "cursor_size",
             "cursor_color",
             "cursor_theme",
+            "cursor_hide_after_ms",
             "prefer_no_csd",
         ] {
             assert!(

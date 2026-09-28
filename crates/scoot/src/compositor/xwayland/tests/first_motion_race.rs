@@ -219,9 +219,11 @@ fn one(
     case: Case,
 ) -> Outcome {
     let (sx, sy) = centre(from);
-    // The pointer arrives, and only then the press: with both in one batch
-    // XWayland lost the press when the pointer came from another X window
-    // (seen while writing this; not investigated).
+    // The pointer arrives, and only then the press, as a hand's would. (A
+    // press after a move from another X window once reached no X window,
+    // settled or not: XWayland applied the move's relative delta a second
+    // time after the enter. Fixed in `leaves_an_x_window`; pinned by
+    // `press_after_crossing.rs`.)
     live.fixture.state.pointer_move(sx, sy);
     live.drain();
     press_at(&mut live.fixture.state, from);

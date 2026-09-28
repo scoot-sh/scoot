@@ -334,6 +334,23 @@
 //! here, the link is never made, and `bad_parent` goes on the object the
 //! request was sent to.
 //!
+//! ## Why the second-subsurface guard exists
+//!
+//! [`reject_second_subsurface`] refuses a `get_subsurface` for a surface
+//! that already holds a live `wl_subsurface`, with the protocol's
+//! `bad_surface`. The pinned Smithay does not: `set_parent` refuses only a
+//! child that already has a *parent*, and destroying a parent `wl_surface`
+//! orphans its children with their role objects alive -- so a second
+//! `get_subsurface` for an orphaned subsurface is accepted, and destroying
+//! the older role object then detaches the surface from the newer parent
+//! (see `subsurface_role.rs` for the mechanism and the pinned-rev
+//! references). What is tracked is liveness, not linkage: after a proper
+//! `wl_subsurface.destroy` the surface may be made a subsurface again, and
+//! is -- every toolkit re-parents that way -- so the entry is forgotten when
+//! the role object dies and when the surface does, and the guard runs after
+//! the depth guard (a link that is both too deep and second still gets the
+//! `bad_parent` the depth suite pins).
+//!
 //! ## Why the hook exists
 //!
 //! Not a guard at all, and not a workaround for a Smithay bug: a callback
@@ -426,11 +443,12 @@ use smithay::reexports::wayland_protocols::xdg::toplevel_icon::v1::server::{
 use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{
-    wl_buffer, wl_shm, wl_shm_pool, wl_subcompositor, wl_surface,
+    wl_buffer, wl_shm, wl_shm_pool, wl_subcompositor, wl_subsurface, wl_surface,
 };
 use smithay::reexports::wayland_server::{
     Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
 };
+use smithay::wayland::compositor::SubsurfaceUserData;
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 
 use super::State;
@@ -480,6 +498,13 @@ where
     // in the tree; an interface that ever broke it would fail to compile
     // here rather than silently losing its dispatch.
     I::Request: 'static,
+    // Needed by the subsurface-role forget below, which downcasts the dead
+    // object's user data back to `SubsurfaceUserData` for its surface. Every
+    // user data is `'static` by construction -- wayland-server stores them as
+    // `Arc<dyn ObjectData>` -- so this holds for every interface in the tree
+    // the same way the request bound does; one that broke it would fail to
+    // compile here rather than silently losing its destruction hook.
+    UserData: 'static,
     UserData: Dispatch2<I, State>,
 {
     fn request(
@@ -500,6 +525,7 @@ where
             || reject_frozen_toplevel_icon_request(state, resource, &request)
             || reject_excess_capture_frame(state, client, resource, &request)
             || reject_too_deep_subsurface(resource, &request)
+            || reject_second_subsurface(state, resource, &request)
             || super::drm_syncobj::reject_excess_timeline(state, client, resource, &request)
         {
             return;
@@ -517,6 +543,8 @@ where
         forget_destroyed_capture_frame::<I>(state, &client, resource);
         forget_destroyed_shm_pool::<I>(state, &client, resource);
         forget_destroyed_buffer::<I>(state, &client, resource);
+        forget_destroyed_subsurface_role::<I, UserData>(state, resource, data);
+        forget_destroyed_surface_role::<I>(state, resource);
         drain_after_destroyed_surface::<I>(state);
         super::dmabuf::pending_planes::forget_destroyed::<I>(state, &client, resource);
         super::drm_syncobj::forget_destroyed::<I>(state, resource);
@@ -717,7 +745,7 @@ where
     let id = client.id();
     if let Err(refusal) = state
         .client_fds
-        .admit_arrival(&id, fd.as_raw_fd(), Kind::Pool, 1)
+        .admit_arrival(client, fd.as_raw_fd(), Kind::Pool, 1)
     {
         resource.post_error(
             wl_shm::Error::InvalidStride,
@@ -874,7 +902,7 @@ where
         if !state.wl_buffers.claim_buffer_creation(client) {
             return false;
         }
-        resource.post_error(wl_shm::Error::InvalidStride, too_many_buffers());
+        resource.post_error(wl_shm::Error::InvalidStride, too_many_buffers(client));
         return true;
     }
     if TypeId::of::<I::Request>() == TypeId::of::<zwp_linux_buffer_params_v1::Request>() {
@@ -896,7 +924,7 @@ where
         }
         resource.post_error(
             zwp_linux_buffer_params_v1::Error::InvalidWlBuffer,
-            too_many_buffers(),
+            too_many_buffers(client),
         );
         return true;
     }
@@ -911,9 +939,9 @@ where
         }
         // No `Error` enum exists on this interface (verified against the
         // protocol XML), so there is no code to name: 0 with a message that
-        // says what happened. Only a client already holding 512 live
-        // buffers ever sees it.
-        resource.post_error(0u32, too_many_buffers());
+        // says what happened. Only a client already at its live-buffer
+        // bound (512, or the XWayland server's budget) ever sees it.
+        resource.post_error(0u32, too_many_buffers(client));
         return true;
     }
     false
@@ -1261,6 +1289,105 @@ where
     super::subsurface_depth::reject_too_deep(resource, surface, parent)
 }
 
+/// Posts `wl_subcompositor.bad_surface` and returns `true` when `request` is
+/// a `get_subsurface` for a surface that already holds a live
+/// `wl_subsurface` -- the protocol's second-role refusal, which the pinned
+/// Smithay does not enforce once the first role's parent is gone. See the
+/// module doc's "Why the second-subsurface guard exists", and
+/// `subsurface_role.rs` for what is tracked and why the bookkeeping is
+/// exact.
+///
+/// Runs after the depth guard: a link that is both too deep and second gets
+/// the depth refusal, which the depth suite pins. A refused request never
+/// reaches Smithay, so no second role object is created.
+///
+/// Folds away for every interface other than `wl_subcompositor`, for the
+/// same monomorphization reason as the guards above -- this runs on every
+/// request of every interface.
+fn reject_second_subsurface<I>(state: &State, resource: &I, request: &I::Request) -> bool
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<wl_subcompositor::Request>() {
+        return false;
+    }
+    let Some(wl_subcompositor::Request::GetSubsurface { surface, .. }) =
+        (request as &dyn Any).downcast_ref::<wl_subcompositor::Request>()
+    else {
+        return false;
+    };
+    if !state.live_subsurfaces.has_live_role(surface) {
+        return false;
+    }
+    tracing::warn!(
+        client = ?surface.client().map(|client| client.id()),
+        "refusing a second wl_subsurface for a surface that already has one; \
+         disconnecting the client"
+    );
+    resource.post_error(wl_subcompositor::Error::BadSurface, second_subsurface());
+    true
+}
+
+/// Forgets the live `wl_subsurface` a dead role object belonged to, which is
+/// what keeps `reject_second_subsurface` exact across a proper
+/// `wl_subsurface.destroy`: without this, a surface made a subsurface again
+/// afterwards -- legal, and what every toolkit does -- would be refused as
+/// second. Fires for every role destruction, including disconnect cleanup
+/// and protocol-error kills (whose cleanup destroys every object), so no
+/// path leaves a stale entry behind.
+///
+/// Folds away for every interface other than `wl_subsurface`, which matters
+/// in the same way as the hooks above: this sits on the destruction path of
+/// every object of every interface.
+fn forget_destroyed_subsurface_role<I, UserData>(state: &mut State, _resource: &I, data: &UserData)
+where
+    I: Resource,
+    I::Request: 'static,
+    UserData: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<wl_subsurface::Request>() {
+        return;
+    }
+    // Unreachable in practice: request enums are generated one per
+    // interface, and the only user data ever paired with this one is
+    // Smithay's own `SubsurfaceUserData`. Fail open (keep the entry) rather
+    // than panic the compositor over bookkeeping.
+    let Some(role) = (data as &dyn Any).downcast_ref::<SubsurfaceUserData>() else {
+        return;
+    };
+    state.live_subsurfaces.forget(role.surface().id());
+}
+
+/// Forgets the live `wl_subsurface` of a destroyed surface, which is what
+/// keeps the tracking bounded: a surface destroyed while its role object
+/// lives on would otherwise leave an entry no role destruction ever removes
+/// (a create-subsurface-destroy-surface loop grows it without bound). A dead
+/// surface can never be re-subsurfaced, so dropping its entry reopens
+/// nothing -- and an orphaned child keeps its own entry, which is what keeps
+/// its second `get_subsurface` refused.
+///
+/// Folds away for every interface other than `wl_surface`.
+fn forget_destroyed_surface_role<I>(state: &mut State, resource: &I)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<wl_surface::Request>() {
+        return;
+    }
+    state.live_subsurfaces.forget(resource.id());
+}
+
+/// The message the second-`wl_subsurface` refusal carries. Allocating is
+/// fine here and nowhere else in this file's guards: this runs only on the
+/// path that has just disconnected a client, never on a served request.
+fn second_subsurface() -> String {
+    "bad_surface: this surface already has a wl_subsurface; destroy it before making the \
+     surface a subsurface again"
+        .to_owned()
+}
+
 /// Forgets one live capture frame when its protocol object dies, which is
 /// what keeps [`MAX_FRAMES_PER_CLIENT`](super::screencopy::MAX_FRAMES_PER_CLIENT)'s
 /// bookkeeping exact: every counted `create_frame` is paired with exactly one
@@ -1343,9 +1470,9 @@ fn too_many_pools() -> String {
 /// only. One message for all three factories: the count is shared, so the
 /// bound that said no is the same whichever factory the client came
 /// through.
-fn too_many_buffers() -> String {
+fn too_many_buffers(client: &Client) -> String {
     format!(
         "wl_buffer refused: this client already holds the maximum of {} live buffers",
-        super::wl_buffers::MAX_BUFFERS_PER_CLIENT,
+        super::wl_buffers::max_buffers_for(client),
     )
 }

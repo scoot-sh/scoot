@@ -101,10 +101,15 @@ impl CompositorHandler for State {
     /// `surface` has just been made a subsurface of `parent`: records the
     /// subtree now hanging below each of `parent`'s ancestors, which is what
     /// the next `get_subsurface`'s depth check reads (see
-    /// `subsurface_depth.rs`). The check itself runs before Smithay links the
-    /// two, in `dispatch.rs`.
+    /// `subsurface_depth.rs`), and files the surface's fresh `wl_subsurface`,
+    /// which is what the next `get_subsurface`'s second-role check reads (see
+    /// `subsurface_role.rs`). The checks themselves run before Smithay links
+    /// the two, in `dispatch.rs`. This runs only for links Smithay actually
+    /// made, so a refused request can never file an entry for an object that
+    /// does not exist.
     fn new_subsurface(&mut self, surface: &WlSurface, parent: &WlSurface) {
         super::subsurface_depth::record_link(surface, parent);
+        self.live_subsurfaces.note_linked(surface);
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -512,6 +517,11 @@ impl XdgShellHandler for State {
         if self.popups.track_popup(kind.clone()).is_ok() {
             self.popup_index.insert(&kind);
         }
+        // Deliberately no cursor-hide update here: at creation the popup
+        // has no buffer yet, so the hit test still finds the window
+        // beneath it. The armed deadline harmlessly survives the open --
+        // no hide can fire while the mapped popup covers the pointer, and
+        // a firing then only disarms, which `popup_destroyed` re-arms.
     }
 
     /// Closes the popup's record and refuses a destroy that leaves child
@@ -522,6 +532,11 @@ impl XdgShellHandler for State {
             &mut self.popup_count,
             &mut self.popup_index,
         );
+        // A dismiss under a still pointer changes what the pointer is over
+        // with no motion and no `apply()`: without this the cover would
+        // stay disarmed (a firing mid-popup cleared the deadline) until
+        // the next motion re-armed it.
+        self.update_cursor_hide(std::time::Instant::now());
     }
 
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
@@ -651,6 +666,11 @@ impl SeatHandler for State {
         seat: &Seat<Self>,
         focused: Option<&super::keyboard_focus::KeyboardFocus>,
     ) {
+        // Smithay calls this for every keyboard focus move to a surface,
+        // whoever set it (`refresh_keyboard_focus`, a popup grab, a grab's
+        // own `set_focus`), and never for an unchanged one. A move to
+        // nothing is not reported; `refresh_keyboard_focus` bumps for that.
+        self.focus_generation = self.focus_generation.wrapping_add(1);
         let handle = &self.display_handle;
         // The surface keys go to, whichever kind of window owns it: an X
         // window's is XWayland's own client, which is who the selection is

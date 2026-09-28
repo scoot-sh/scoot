@@ -234,7 +234,7 @@ where
     // again, so that fd was closed.
     let message = match state
         .client_fds
-        .admit_arrival(&id, fd.as_raw_fd(), Kind::Plane, weight)
+        .admit_arrival(client, fd.as_raw_fd(), Kind::Plane, weight)
     {
         Err(refusal) => refusal.message(REFUSED),
         Ok(()) => match state.pending_planes.try_claim(&id, resource.id()) {

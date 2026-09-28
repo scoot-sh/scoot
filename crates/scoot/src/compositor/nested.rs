@@ -508,6 +508,11 @@ impl Host {
                 height = size.1,
                 "nested: handed the owed frame to the host without redrawing it"
             );
+            // The host has the frame the render target holds -- which, if a
+            // lock has been waiting since that frame drew, is its blank
+            // (see `State::note_nested_handed_over` for the gate that keeps
+            // an owed frame from before the lock from confirming it).
+            state.note_nested_handed_over(id, &output);
             // Stamped only if nothing has changed since the frame was drawn.
             // The render tail draws a frame and takes its feedback in one
             // call; this runs later, from dispatch, and a client may have

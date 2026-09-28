@@ -1491,6 +1491,10 @@ fn draw_frame_scanout(
 /// derived here: like the other bodies, this tier gathers once per output
 /// from the one arrangement.
 #[cfg(feature = "gpu-scanout")]
+// Eight: the tier's frame inputs, each a borrow the three callers already
+// hold separately (`judge_scratch` is the per-output scratch reused across
+// frames); a struct bundling them would only be built to be taken apart here.
+#[allow(clippy::too_many_arguments)]
 fn scanout_frame_elements<R>(
     state: &mut State,
     renderer: &mut R,

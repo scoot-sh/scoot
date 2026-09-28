@@ -261,3 +261,50 @@ fn an_x_drag_over_a_window_that_remaps_keeps_the_proxy_away() {
         "the drag outlived the release"
     );
 }
+
+/// The drag's first motion onto another window of the *source's own* X
+/// client (two windows of one single-instance app, which run on one X
+/// connection) finds that window, not the proxy: the drag waits for the
+/// source's types only over the window it started on
+/// (`xwayland-same-client-quick-drag-done.md`). Fails at `7e18b661`, where
+/// every window of the owner's client waited.
+#[test]
+fn an_x_drags_first_motion_onto_its_own_clients_other_window_finds_that_window() {
+    let Some(mut live) =
+        live("an_x_drags_first_motion_onto_its_own_clients_other_window_finds_that_window")
+    else {
+        return;
+    };
+    let source = live.x.map(&Props::new(RED));
+    let source = live.managed(source);
+    let from = live.placement(source);
+    let target_xid = live.x.map(&Props::new(BLUE));
+    let target = live.managed(target_xid);
+    live.x.xdnd_aware(target_xid);
+    let to = live.placement(target);
+    visible("drag source", &from);
+    visible("drop target", &to);
+
+    press_at(&mut live.fixture.state, from.rect);
+    live.drain();
+    live.x.take_selection("XdndSelection");
+    live.drain();
+    assert!(taken_over(&live.fixture.state), "the X drag did not start");
+
+    let under = move_and_look(&mut live, centre(to.rect));
+    assert_eq!(
+        under,
+        target_xid,
+        "on the X drag's first motion onto its own client's other window the source found \
+         {:?} under the pointer, not that window",
+        live.x.name_of(under)
+    );
+    live.fixture
+        .state
+        .pointer_button(PointerButton::Left, false);
+    live.drain();
+    assert!(
+        !grabbed(&live.fixture.state),
+        "the drag outlived the release"
+    );
+}

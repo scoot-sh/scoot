@@ -369,7 +369,8 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
 - **A fullscreen window scans out directly (zero-copy).** When a fullscreen
   window covers the output and its app hands scoot a dma-buf the display
   can take, the primary plane shows that buffer itself: no compositing, no
-  copy. Which frames may try is decided per frame
+  copy. Only a fullscreen window does this so far: everything
+  else is composited. Which frames may try is decided per frame
   (`render/primary_direct.rs`): the session is unlocked, a fullscreen
   window covers the output, no capture client is streaming it, nothing
   in the frame is translucent (`wp_alpha_modifier_v1`) or a rounded window,
@@ -427,7 +428,14 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   goes direct still depends on its buffer: layout, format, and a size
   matching the mode. mpv's buffer qualified. vkcube's (tiled-compressed)
   and es2gears' (logical-size) did not
-  ([ticket](backlog/core/gpu-direct-blocked-by-composited-cursor.md)). The log line
+  ([ticket](backlog/core/gpu-direct-blocked-by-composited-cursor.md)). A
+  client that hides its own pointer (mpv's `--cursor-autohide`) recovers
+  the direct frames by itself; for one that doesn't,
+  `[appearance] cursor_hide_after_ms` (see
+  [configuration.md](configuration.md#appearance)) has the compositor hide
+  the pointer after that many milliseconds still over the covering window
+  -- `0` (the default) never hides. The next motion, button or scroll
+  shows it again, and that frame composites. The log line
   `scanout: primary-direct eligibility changed` (at `debug`) says when a
   session starts or stops being allowed to go direct, and why. A frame
   that did go direct tells that window's `wp_presentation` feedback

@@ -95,6 +95,12 @@
 //!   table minus [`RESERVE_FDS`]) comes down with the table while the
 //!   per-client bound does not, so on a 512-fd table (the smallest guarded,
 //!   [`MIN_TABLE_FDS`]) one connection can still reach it.
+//! - The session's XWayland server is the one connection with bigger
+//!   bounds (`xwayland_budget.rs`: a sixteenth of the table, 512..=4096 fds
+//!   and buffers, and an eighth of that in acquire waits, 64..=512): on a
+//!   1024-fd table exactly the 512 and 64 above, so this arithmetic covers
+//!   it unchanged; on the raised table at most 4096 + 512, under a fourteenth of
+//!   the 65408 line.
 //! - Two such connections do exceed the table, which is what the arrival
 //!   guards are for: the second is past its 128-fd grace long before the
 //!   line, and its next arrival there is refused.

@@ -327,7 +327,15 @@ falsify. Read `flexwm` there as `scoot`.
   Gamma LUT length re-read per CRTC, live control failed only on change.
   Four fail-first harness tests; the switch itself unverified live
   (single-CRTC dev VM), legacy blind-probe limit stated in the record.
-- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — medium: gh #48 closed 2026-09-27 on unit-test evidence (user decision); `MoveTo` (reachable by moving a lone monitor to another port, DRM half never run) to be proven live on the dev VM next; also the new-mode-list on the same connector (vkms `edid_override` tried 2026-09-26, inert on the dev VM's 6.18.50 — still needs a rig that changes a mode list), with before/after proof. Since multi-output phase E the `MoveTo` fallback applies only when no driven connector is left; with another screen lit an unplug removes an output instead (confirmed by a physical DP-1 replug on the Asahi M2 Air, 2026-09-25). The Hold/Reconnected halves of the neighbouring [multi-output remainder](./core/multi-output-remainder.md) follow-up 1 were proven live on vkms the same day.
+- [`--tty` hotplug follow-up: both unreproduced paths confirmed live](./resolved/tty-hotplug-confirmation-done.md)
+  — RESOLVED 2026-09-28: `NewMode` driven live both directions by QEMU Cocoa
+  resize/fullscreen with Zoom To Fit on (session follows the new preferred,
+  `wl_output.mode`/`done` reach clients); `MoveTo` driven live via
+  Virtual-1 force-off / Virtual-2 force-on (`retarget` refused in place,
+  `switch_crtc` moved to CRTC 44, modeset committed — session never black,
+  windows followed). Rig notes: virtio-gpu `force` latch leaves sysfs stale
+  for minutes (scoot's re-probe is authoritative), `unspecified` refused, a
+  natural force event needs the synthetic-trigger pairing.
 
 ### Core / config / rendering
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.
@@ -515,22 +523,13 @@ at the user's direction. The `blocked:` field on each records that ordering;
 none of them is technically blocked, so the sequencing is a choice and can
 be revisited.
 
-- [Multi-output: more than one monitor at a time](./core/multi-output.md)
-  — **HIGH**, and almost certainly milestone-sized rather than
-  backlog-sized. `README.md`'s "Not yet" list leads with it. Its
-  [foundation](./resolved/multi-output-foundation-done.md) landed
-  2026-09-19: `State.output` is now an id-keyed collection, and `--headless
-  --outputs N` gives two virtual screens to test against, so what remains is
-  making the protocols correct across them. The scope is enumerated by
-  `outputs.rs`'s `Outputs::primary` doc (layer-shell wants four *different*
-  per-output behaviours, not one) and by `session-lock-per-output-done.md`,
-  which was resolved as single-output *pins* rather than as multi-output —
-  including that `locked` must wait for every output's blanked frame, which
-  is the security-relevant one. Promoted 2026-09-20 to **Milestone 19**
-  ([plan](../roadmap/19-multi-output.md), in progress, phases A–D
-  VM-testable, E hardware-gated) — this entry stays the detailed spec.
-  Phases A–F have landed (render, layer shell, lock, workspaces, moves),
-  E included (2026-09-25, `--tty` drives every connected monitor).
+- [Multi-output: more than one monitor at a time](./resolved/multi-output-superseded.md)
+  — SUPERSEDED 2026-09-28 (docs-only triage, no live gap): the original spec
+  is archived with a section-by-section landing map. The live tracker is
+  [Milestone 19](../roadmap/19-multi-output.md) (phases A–F done, E included
+  2026-09-25, `--tty` drives every connected monitor), and the one remaining
+  surface is the [remainder](./core/multi-output-remainder.md) below (open,
+  high: per-output scale/mode only).
 - [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
   — deliberately left out of milestone 19: design answered 2026-09-22
   (`[[outputs]]` config shape, per-output scale enumeration, apply/test
@@ -600,13 +599,18 @@ be revisited.
   (2.0 fails like 1.5); real cause was `src: None` defaulting to logical
   size on physical-pixel strip buffers — explicit full-buffer `src` both
   strips, GLES fixed by the same change.
-- [dma-buf capture buffers for `ext-image-copy-capture-v1`](./protocols/screencopy-dmabuf-capture.md)
-  — filed out of milestone 6 stage 4, which was expected to cover it and
+- [dma-buf capture buffers for `ext-image-copy-capture-v1`](./resolved/screencopy-dmabuf-capture-done.md)
+  — RESOLVED 2026-09-28 (verdict-only, no code change): documented don't-build.
+  Filed out of milestone 6 stage 4, which was expected to cover it and
   should not have: importing a client's dma-buf and *rendering into* one are
-  different capabilities. Wants a write path that does not exist, the
-  renderer's `dmabuf_render_formats` rather than its import set, a `DrmNode`
-  the GPU-less target does not have, and a fix for the bound-target cache
-  eviction `dmabuf.rs` warns about. No measured client need yet.
+  different capabilities. All four blockers re-verified against current `main`
+  and the pinned fork rev `e7130254` (no write path in `deliver`, render vs
+  texture sets still differ, `DmabufConstraints` still needs a `DrmNode` the
+  GPU-less target lacks, the pixman cache-drain landmine still live) — and no
+  measured client need: `grim` captures into `wl_shm`, quickshell's
+  `ScreencopyView` captures into `wl_shm` off dmabuf-feedback readiness, and
+  the tree holds no other capture consumer. Reopen on a measured client need,
+  benchmarked against the shm path.
 - [README rewrite: helpful, concise, aimed at the user](./resolved/readme-rewrite-done.md)
   — RESOLVED 2026-09-20: the third item of this queue, worked as an audit +
   tightening pass rather than a rewrite (PR #132 had already given
@@ -668,7 +672,8 @@ optional GPU tier. pixman stays the default and GPU-free operation stays a
 hard requirement; this is "the GPU tier is complete and safe", not "GPU
 becomes the primary path". Work order: exporter → client fullscreen + format gate → candidates →
 capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
-`screencopy-dmabuf-capture` (above) stays gated on measured need.
+`screencopy-dmabuf-capture` (above) was gated on measured need, and closed
+2026-09-28 as a documented don't-build for lack of one.
 - [Widen the scanout framebuffer exporter](./resolved/gpu-direct-scanout-exporter-done.md) — RESOLVED 2026-09-22: `NodeFilter::All` (a `Node` filter is inert: client dma-bufs carry no node without v6 `set_sampling_device`); force/refusal halves pinned and watched firing live on the dev VM under an uncommitted `ANY`-bit experiment. Found the next gate instead of direct scanout: the swapchain format match.
 - [Primary-direct format gate](./resolved/gpu-primary-direct-format-gate-done.md) — RESOLVED 2026-09-23 (PR #228, with the candidates ticket's primary-plane half): a fullscreen window covering its output goes primary-direct, flags decided per frame (`ALLOW_SCANOUT | ANY` only for an eligible frame -- unlocked, covered, no capture stream, nothing translucent or rounded -- no primary bit on any other frame); a capture-streamed output stays composited (forcing per frame measured a net loss). Live on the dev VM at default config; ~50x less compositor CPU than llvmpipe compositing there.
 - [Honour client fullscreen](./resolved/client-fullscreen-done.md) — RESOLVED 2026-09-22: a per-window fullscreen state in `scoot-core` (covers the output while its column is focused, keeps its slot, restores exactly), wired to xdg `set_fullscreen`, the wlr request + state bit, IPC `toggle-fullscreen`/`set-fullscreen` and `Super+f`; the `top` layer is hidden from drawing, pointer and keyboard under it. Also fixed frame learning pairing a commit with the wrong configure.
@@ -719,11 +724,11 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [GLES tier advertises only LINEAR dma-bufs](./resolved/gles-dmabuf-full-formats-done.md) — RESOLVED 2026-09-23 (PR #229): under `gles` the feedback is the driver's own import set (every fourcc at every explicit modifier, external-only YUV included), `Invalid` never offered next to explicit layouts (an implicit YUV buffer draws the wrong color, measured), pixman byte-identical. On llvmpipe: 57 formats at `LINEAR`, `NV12`/`P010`/`YU12`/`YUYV` imported through `create_immed` and drawn correctly from dumb buffers. Real GPU: `Asahi.md` Test 6.
 - [Scanout-tranche feedback + `zero_copy` flag](./resolved/gpu-scanout-candidates-done.md) — RESOLVED 2026-09-23: see the GPU tier completion entry above. Dev VM: tranche `XR24`/`AR24` at `LINEAR`, sent/reverted live, `zero_copy` on exactly the frames Smithay scanned out directly. Real GPU (does a GL client reallocate into it and go direct): `Asahi.md` Test 6 Part C.
 - [Windows on overlay planes](./core/gpu-overlay-window-candidates.md) — low, **unblocked 2026-09-25**: Asahi's `apple,dcp` has one overlay (zpos 1, `LINEAR` only, alpha RGB + YUV formats, no `XR24`) and no cursor plane.
-- [A composited cursor blocks primary-direct](./core/gpu-direct-blocked-by-composited-cursor.md) — medium, found on Asahi 2026-09-25: with no cursor plane, a visible pointer denies every fullscreen window a primary attempt; mpv went direct once it hid its pointer (~60% less compositor CPU). A cursor on the overlay needs a Smithay-fork change.
+- [A composited cursor blocks primary-direct](./core/gpu-direct-blocked-by-composited-cursor.md) — medium, found on Asahi 2026-09-25: with no cursor plane, a visible pointer denies every fullscreen window a primary attempt; mpv went direct once it hid its pointer (~60% less compositor CPU). Option 1 shipped (opt-in `[appearance] cursor_hide_after_ms`, headless-verified); remaining: option 2 (a cursor on the overlay needs a Smithay-fork change) + Asahi verify with plane 35 + mpv `presented` flags.
 - [mpv `--vo=gpu` intermittently black/striped under GLES](./resolved/gles-mpv-shm-black-done.md) — CLOSED WITHOUT CODE 2026-09-26: rate loops (N=20, both renderers) plus a pool-bytes-vs-screenshot proof show the dots and the black are states of mpv/Mesa's own shm present buffers on llvmpipe (pre-present, mid-render tile wavefront), displayed faithfully by both renderers; well-behaved GL shm clients (es2gears) and `mpv --vo=wlshm` are solid. Harness in `scripts/mpv-shm-rate/`.
 
 ### Found reviewing client fullscreen (2026-09-23)
-- [Flake: xwayland DISPLAY test read "" instead of unset](./testing/xwayland-display-env-flake.md) — low: seen once under GLES nextest.
+- [Flake: xwayland DISPLAY test read "" instead of unset](./resolved/xwayland-display-env-flake-duplicate.md) — CLOSED 2026-09-27 as a duplicate of the `read_marker` race (PR #284).
 - [Deep popup chains crash or freeze the compositor](./resolved/popup-depth-bound-done.md) — RESOLVED 2026-09-23 (PR #226): popup chains are capped at 64, and the ways an open chain could be re-parented deeper are refused (`already_constructed`, `not_the_topmost_popup`, a parent with no live role object); a layer surface may adopt only a fresh parentless popup; a surface made a popup again no longer has its same-flush child inserted under its dead tree node. Every chain and tree node is at most 64 deep.
 - [Windows bleed onto the neighbouring output](./resolved/windows-bleed-across-outputs-done.md) — RESOLVED 2026-09-23 (PR #224): a window is drawn and hit only on the output it is placed on (render gather, ring and both hit sites); popups go with their parent. Also fixed: the ring and rounded clip never drew right on outputs after the first (global coordinates).
 - [Popup constraint adjustment](./resolved/popup-constraint-adjustment-done.md) — RESOLVED 2026-09-23 (PR #225): popups are flipped/slid/resized into their output (a window's: usable area, whole output while it is fullscreen; a layer surface's: whole output), relative to the immediate parent, at the initial configure and on `reposition`. Also fixed: a popup whose parent chain loops back to itself froze the compositor; it is now refused.
@@ -734,15 +739,15 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 
 ### Found implementing the popup depth bound (2026-09-23)
 - [Deeply nested subsurfaces overflow the stack](./resolved/subsurface-depth-bound-done.md) — RESOLVED 2026-09-23 (PR #227): no surface is ever more than 64 subsurface levels below its tree's root. Checked in a `dispatch.rs` guard before Smithay links the surfaces or runs its recursive `is_ancestor`, against the new parent's depth *plus the height of the subtree being attached* (a per-surface bound, never lowered), since a subsurface can be re-attached after `wl_subsurface.destroy` or its parent's destruction and a role-less surface can be given children first. Refused as `wl_subcompositor.bad_parent`.
-- [Smithay accepts a second `wl_subsurface` for an orphaned subsurface](./core/subsurface-second-wl-subsurface.md) — low: the protocol's `bad_surface` is not raised once the parent `wl_surface` is destroyed; not a depth path.
+- [Smithay accepts a second `wl_subsurface` for an orphaned subsurface](./resolved/subsurface-second-wl-subsurface-done.md) — RESOLVED 2026-09-28 (PR #302): scoot tracks the live `wl_subsurface` per surface and refuses a second `get_subsurface` with `bad_surface`; filed on link, forgotten when the role object or the surface dies. A proper destroy-then-reattach still works, twice over in one flush. No fork change.
 - [Many desynchronized subsurfaces stall the compositor](./core/subsurface-count-quadratic.md) — medium, measured: `N` sibling desync subsurfaces in one window cost roughly quadratically to create (release: 10000 took 1.15 s, 30000 over 10 s). Pre-existing; breadth, not depth.
 - [Many side-by-side popups stall the compositor](./core/popup-count-quadratic.md) — medium, measured (review of #226): popup creation is roughly quadratic in the number open (1954 popups 0.73 s, 5104 5.4 s). Pre-existing.
 
 ### Found reviewing nested dma-buf presentation (2026-09-24)
-- [`--nested` confirms a lock before the host shows it](./core/nested-lock-confirm-on-present.md) — low: `locked` goes out when the blanked frame is drawn, and a nested frame may be skipped or owed before the host has it (more often since PR #235); a fix needs a bounded wait like `--tty`'s.
+- [`--nested` confirms a lock before the host shows it](./resolved/nested-lock-confirm-on-present-done.md) — RESOLVED 2026-09-28 (PR #304): the nested tail confirms on the host's commit (`note_nested_frame` over `FrameOutcome::host_committed`), not the draw; dropped read-back and owed dma-buf frames wait for the owed hand-over (`note_nested_handed_over`, gated on a draw recorded for this lock), a re-render, or the shared one-second fallback. Eight unit tests, three behind `gpu-scanout`.
 
 ### Found by the niri A/B (2026-09-24)
-- [Nested scoot presents fewer frames than niri for a ~60 Hz client](./core/nested-frame-rate-vs-client.md) — low: 49.8 frames/s (pixman, 12% of a core) against niri's 54.1 for a `foot` printing every ~16 ms; looks like pacing, not cost. Not investigated.
+- [Nested scoot presents fewer frames than niri for a ~60 Hz client](./resolved/nested-frame-rate-vs-client-done.md) — RESOLVED 2026-09-28 (PR #308, verdict-only, no code change): own 16 ms timer rather than host callbacks; the done-gated client draws fewer frames on the longer loop — loop-paced, nothing cheap and safe to fix.
 
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
@@ -762,11 +767,14 @@ scale/mode) into one hardware session.
   binds name the first/second screen. Live on the Asahi M2 Air since:
   virtual pull on the dumb tier (`Asahi.md` Test 11) and a real replug on
   the GPU tier (Test 12). No debounce until flap timing is measured.
-- [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./core/lock-vblank-bound-hardening.md)
-  — OPEN, low: `await_vblank`'s "late, never early" should say "within one
-  bound of the first blank drawn"; `stale_vblanks` entries should age out so
-  a driver that never delivers an owed vblank can't freeze a reused CRTC.
-  Filed from PR #247's round-2 review.
+- [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./resolved/lock-vblank-bound-hardening-done.md)
+  — RESOLVED 2026-09-28 (PR #303): `await_vblank`'s "late, never early" now
+  says the guarantee (no later than one bound after the first blank drew,
+  never before one has drawn; the two `headless.rs` comments that still
+  described the restarted bound corrected); `stale_vblanks` entries carry
+  push timestamps and age out past one second, pinned by six unit tests
+  including the ticket's synthetic-clock pin. Filed from PR #247's round-2
+  review.
 - [An unplugged monitor's windows seem to disappear](./resolved/unplug-adopted-windows-visible-done.md)
   — RESOLVED, medium (daily-drive, filed from `Asahi.md` Test 12): on unplug the
   monitor's workspaces are adopted as background workspaces of the focused
@@ -779,17 +787,20 @@ scale/mode) into one hardware session.
   0-based workspace, adoption and origin. Follow-up filed:
   [IPC output-removed/restored event](./ipc/output-removed-restored-event.md).
 - [Multi-output remainder: --tty multi-CRTC, placement, default binds](./core/multi-output-remainder.md)
-  — OPEN, **HIGH**: milestone 19 phases E–I. G (pointer-output placement)
-  + H (default `Super+comma/period` output binds) LANDED 2026-09-21
-  (PR #208). E1 (every connector driven at startup) + E2 (per-head
-  rendering, per-output lock waits, hotplug add/remove) LANDED 2026-09-25,
-  live on the Asahi M2 Air including a physical unplug and replug; the
-  GPU-tier runtime add and the multi-head mode change since proven there
-  (`Asahi.md` Tests 11–12), and
-  [reconnect restore](./resolved/output-reconnect-restore-done.md) is
-  resolved. Left: #48 `MoveTo` on hardware and the
-  [per-output scale/mode](./core/per-output-scale-mode.md) entry, which
-  stays last.
+  — OPEN, **HIGH**: everything else in milestone 19's wake is landed and
+  proven. G (pointer-output placement) + H (default `Super+comma/period`
+  output binds) LANDED 2026-09-21 (PR #208). E1 (every connector driven at
+  startup) + E2 (per-head rendering, per-output lock waits, hotplug
+  add/remove) LANDED 2026-09-25, live on the Asahi M2 Air including a
+  physical unplug and replug; the GPU-tier runtime add and the multi-head
+  mode change proven there (`Asahi.md` Tests 11–12), Hold/Reconnected on
+  vkms 2026-09-26, and #48 `MoveTo` proven live on the dev VM 2026-09-28
+  ([record](./resolved/tty-hotplug-confirmation-done.md); the "Left: #48
+  `MoveTo`" this entry used to carry is closed). [Reconnect
+  restore](./resolved/output-reconnect-restore-done.md) resolved (PR #249);
+  per-output render scheduling parked as not-planned (~1 pp optimisation).
+  Left: the [per-output scale/mode](./core/per-output-scale-mode.md) entry,
+  which stays last.
 - [XWayland: drops onto X windows do not land](./resolved/xwayland-pointer-focus-x11-done.md)
   — RESOLVED (filed by XWayland Phase 4, PR #246). The pointer focus has
   an X arm, and with the fork's proxy-remap flush (`6e6fe896`) drops work
@@ -797,8 +808,8 @@ scale/mode) into one hardware session.
   (`7388af13`, `9515d7e5`: a dead or hung X target no longer wedges X
   drags, the source hears a drop once; `d3a4cd73`: only a drag scoot lets
   start gives a pending drop up).
-- [XWayland support](./protocols/xwayland-support.md)
-  — OPEN, low: spike (PR #220), skeleton (PR #221) and mapping + focus gate
+- [XWayland support](./resolved/xwayland-support-done.md)
+  — RESOLVED 2026-09-27: spike (PR #220), skeleton (PR #221) and mapping + focus gate
   (Phases 2+3, PR #244) landed: X windows tile, dialogs float, rules
   match `WM_CLASS`, fullscreen both ways, override-redirect menus drawn
   unmanaged; an X window takes focus only when nothing is focused, the
@@ -814,25 +825,59 @@ scale/mode) into one hardware session.
   drag-and-drop works in every direction
   ([pointer focus X arm](./resolved/xwayland-pointer-focus-x11-done.md)),
   no XIM.
-  Remaining: capture pins/packaging (5–7). The [WM-failure
+  Phases 5–7 closed it: captures pinned (screenshot and screen capture
+  carry X windows per output, nothing under the lock), flake packages
+  `scoot-xwayland` / `scoot-gpu-xwayland` with `Xwayland` on `PATH`, the
+  missing-binary fallback proven everywhere with a log line that names the
+  binary. Split out, open and low:
+  [`_NET_WM_MOVERESIZE`](./resolved/xwayland-net-wm-moveresize-done.md)
+  (RESOLVED 2026-09-28: an X app's titlebar drag moves a floating X
+  window; its cancel is [split out](./protocols/xwayland-net-wm-moveresize-cancel.md)),
+  [`_NET_WM_ICON`](./protocols/xwayland-net-wm-icon.md),
+  [scale-aware X windows](./resolved/xwayland-scale-aware-done.md)
+  (RESOLVED 2026-09-28: X draws at `ceil(scale)`, toolkits told over
+  XSETTINGS, live across a reload; follow-up, low:
+  [choose sharp or light X apps at a fractional scale](./protocols/xwayland-fractional-scale-choice.md),
+  default sharp). The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its
   rival-claimant recipe cannot work: XWayland admits no X client before the
-  WM attaches). Follow-up filed: [bind startup-id redemption to the spawned
-  process](./protocols/xwayland-startup-id-race.md) (low: a watching X
-  client can race a launched app to its `_NET_STARTUP_ID` within the
-  token's 30 s). [An X drag released on its first motion into an X
+  WM attaches). [Bind startup-id redemption to the spawned
+  process](./resolved/xwayland-startup-id-race-done.md) is RESOLVED
+  2026-09-27: while the spawned process runs, its token's startup id
+  redeems only for that process or a descendant (bounded `/proc` ppid
+  walk); once it has exited (a forwarder, a fork into the background) the
+  token keeps the unbound rule, like a Wayland launcher's -- both races
+  documented. [An X drag released on its first motion into an X
   window may drop on the proxy](./resolved/xwayland-x-drag-first-motion-race-done.md)
   is RESOLVED 2026-09-27 (reproduced live with GTK by two mechanisms -- a
   drag's first motion onto an X window before the source named its types,
   0/20 drops landed; a proxy flicker between two X windows, 18/20 landed -- both
-  20/20 with scoot-sh/smithay `b1ac3ca7`). Its side finding is filed:
-  [a press batched with a move onto another X window reached no X
-  window](./protocols/xwayland-press-after-crossing-move-lost.md) (low;
-  harness only so far, not investigated). Its review fix is fork
+  20/20 with scoot-sh/smithay `b1ac3ca7`). Its side finding, [a press batched with a move onto another X window
+  reached no X window](./resolved/xwayland-press-after-crossing-done.md),
+  is RESOLVED 2026-09-27: a product bug, not a harness one, and not about
+  batching -- XWayland applied the crossing move's relative delta again
+  after the `enter`, so every `scoot msg pointer click` onto the other of
+  two X apps was lost (0/40 live with `xev`, 40/40 after); scoot now
+  withholds the relative event on a move off an X window. Its review fix is fork
   `7e18b661` (an X window mapped again under an X drag got the proxy over
-  it); its known gap is filed: [a quick drag between two windows of the
-  same X app instance drops nothing](./protocols/xwayland-same-client-quick-drag.md)
-  (low; not a regression).
+  it); its known gap, [a quick drag between two windows of the
+  same X app instance dropping nothing](./resolved/xwayland-same-client-quick-drag-done.md),
+  is RESOLVED too (fork `b16cd6a2`).
+  [XWayland dying at ~250 X windows](./resolved/xwayland-server-death-many-unmanaged-done.md)
+  is RESOLVED 2026-09-27. It was scoot disconnecting the server: one
+  Wayland client for every X window, held to one app's 512 fds and 512
+  buffers at 2 of each per window, so it was killed at the 257th window
+  whichever X clients owned it. Fixed with the server's own budget, a
+  sixteenth of the fd table, 512..=4096 (300 windows over 3 X clients stay
+  up live; still refused at the budget). Its acquire-wait bound (GPU
+  tier) now scales with that budget too: 512 on the usual table, not one
+  app's 64. Follow-up, open and low: [a refused override-redirect X window
+  still costs the server its
+  buffers](./protocols/xwayland-refused-windows-still-commit.md).
+  Withholding `_XWAYLAND_ALLOW_COMMITS` was measured and does not help
+  (480 buffers either way): XWayland spends both buffers before scoot
+  hears of the map. A refused managed window costs nothing. A fix has to
+  unmap or destroy the refused window, which needs a design pass.
 - [GPU scanout: cursor + overlay planes](./resolved/gpu-scanout-planes-done.md)
   — RESOLVED 2026-09-22 (coordinator-filed, no gh issue): all three phase-2
   steps landed — cursor plane active where exposed (PR #216), overlay planes

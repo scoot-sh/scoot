@@ -105,6 +105,7 @@ impl State {
         self.close_wlr_toplevel(id);
         if self.focus == Some(id) {
             self.focus = None;
+            self.focus_generation = self.focus_generation.wrapping_add(1);
         }
         self.world.handle_event(Event::WindowClosed { id });
         self.apply();
@@ -311,7 +312,7 @@ impl State {
             // only where it is shown (see `xwayland/manage.rs`).
             #[cfg(feature = "xwayland")]
             if let Some(x11) = window.x11_surface() {
-                super::xwayland::manage::configure_x11(x11, placement);
+                super::xwayland::manage::configure_x11(x11, placement, self.x11_scale());
             }
             if placement.visible {
                 self.space
@@ -372,6 +373,10 @@ impl State {
         if floating_moved || cover_moved {
             self.refresh_pointer_focus();
         }
+        // What covers an output may have changed (or the pointer's output
+        // may have): re-derive the cursor hide, which arms over a new cover
+        // and disarms off an old one. Cheap while the feature is off.
+        self.update_cursor_hide(std::time::Instant::now());
         // Last, once every placement above is published: a parent that moved
         // (or an output/usable area that changed) re-constrains the reactive
         // popups hanging off it -- see `popup_reconstrain.rs`. Here rather
@@ -395,6 +400,7 @@ impl State {
     fn set_focus(&mut self, focus: Option<WindowId>) {
         if self.focus != focus {
             self.focus = focus;
+            self.focus_generation = self.focus_generation.wrapping_add(1);
             for (id, window) in &self.windows {
                 window.set_activated(Some(*id) == focus);
                 if let Some(toplevel) = window.toplevel() {
@@ -515,6 +521,11 @@ impl State {
             && let Some(client) = self.client_of(&entered)
         {
             self.interaction_serials.record_focus(serial, client);
+        }
+        // A move to a surface bumps `focus_generation` in `focus_changed`;
+        // a move to nothing is not reported there by Smithay, so here.
+        if surface.is_none() && keyboard.current_focus().is_some() {
+            self.focus_generation = self.focus_generation.wrapping_add(1);
         }
         keyboard.set_focus(self, surface, serial);
     }

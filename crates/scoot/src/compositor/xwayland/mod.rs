@@ -32,8 +32,14 @@
 //!   only while an X window holds the keyboard, and a Wayland paste is
 //!   served only by the X owner that crossed. `dnd.rs`: an X client starts
 //!   a drag only from a press on its own window. XIM is not provided.
+//! - **Scale** -- `scale.rs`: at `[output] scale` above 1 the X server
+//!   draws at `ceil(scale)` in its own pixels, toolkits are told so over
+//!   XSETTINGS, and a reload follows the scale.
+//! - **Titlebar drags** -- `moveresize.rs`: `_NET_WM_MOVERESIZE` moves or
+//!   resizes a floating X window on a press its own client holds, through
+//!   the same floating grab an `xdg_toplevel.move` starts.
 //! - **Phases 5–7** (capture pins, packaging) are not here yet: see
-//!   `docs/backlog/protocols/xwayland-support.md`.
+//!   `docs/backlog/resolved/xwayland-support-done.md`.
 //!
 //! `wm.rs` holds the Smithay handler impls, each a dispatch into the
 //! module that owns its policy.
@@ -98,8 +104,9 @@
 //!   refused), never silently wrong -- and retracting it would mean
 //!   `env_remove`ing a host `DISPLAY` the session does not own -- but it is
 //!   a known Phase-1 edge: restart the session. A `--tty` login without the
-//!   binary on `PATH` is the same shape (loud fallback), which is why the
-//!   packaging phase must put the binary on the session `PATH`.
+//!   binary on `PATH` is the same shape (loud fallback, naming the binary
+//!   and the `PATH` searched), which is why the flake's `scoot-xwayland`
+//!   packages append nixpkgs' `Xwayland` to `PATH` (see `docs/nix.md`).
 //! - **The session lock blanks X windows like every other window, and
 //!   refuses them input.** The X server keeps running under lock (it must
 //!   -- killing it would take every X client with it, and lock is not
@@ -139,11 +146,17 @@ use smithay::xwayland::{XWayland, XWaylandEvent};
 use super::State;
 
 #[cfg(feature = "xwayland")]
+mod ancestry;
+#[cfg(feature = "xwayland")]
 mod dnd;
 #[cfg(feature = "xwayland")]
 mod focus;
 #[cfg(feature = "xwayland")]
 pub(in crate::compositor) mod manage;
+#[cfg(feature = "xwayland")]
+mod moveresize;
+#[cfg(feature = "xwayland")]
+pub(in crate::compositor) mod scale;
 #[cfg(feature = "xwayland")]
 pub(in crate::compositor) mod selection;
 #[cfg(test)]
@@ -266,6 +279,13 @@ pub fn start(
     // below; stored so the very first spawned child already gates on it.
     let display = xwayland.display_number();
     state.xdisplay = Some(display);
+    // Before the first dispatch, so XWayland binds every global -- the
+    // outputs it sizes its X screen from above all -- at this scale (see
+    // `scale.rs`), chosen from the layout as it is now. Kept for a layout
+    // or scale change that moves it (`State::refit_xwayland`).
+    let x_scale = state.adopt_x11_scale();
+    scale::set_client_scale(&client, x_scale);
+    state.xwayland_client = Some(client.clone());
     // Alongside the spawn, not at `READY`: with no XWM there are no X
     // surfaces to grab for yet, but a 70ms registry gap would move the
     // global's appearance past a client that lists globals once at
@@ -341,6 +361,10 @@ fn attach_window_manager(
     match X11Wm::start_wm(loop_handle, display_handle, x11_socket, client) {
         Ok(wm) => {
             state.xwm = Some(wm);
+            // Before any X client is accepted: `start_wm` only returns
+            // once it owns `WM_S0`, and XWayland admits clients from then,
+            // but none is read until this dispatch returns.
+            state.publish_x11_scale();
             tracing::info!(
                 display = display_number,
                 "XWayland is ready; X11 clients can connect"
