@@ -136,11 +136,15 @@ build → test → bug bash → optimize → benchmark → independent review �
 full cycle. Split modules before they sprawl (tests in their own file), and
 run `nextest`, `clippy -D warnings` and `fmt --check` after each step.
 Beyond "does it work": actively look for bugs, not just the happy path;
-measure performance with real before/after numbers. **Update `README.md` in
-the same PR a feature lands, not later** — and more than the Status/Running
-sections: every new/changed config option, default keybinding, CLI flag, or
-IPC request/action a user or integrating agent would need to know. This
-project let the config file and keybinding reference go stale across several
+measure performance with real before/after numbers. **Update the docs in the same PR a feature lands, not later**: every
+new/changed config option, default keybinding, CLI flag, or IPC
+request/action a user or integrating agent would need to know. **README
+sections say what and why; flags and edge cases live in `docs/`**
+(user, 2026-09-28): the reference entry goes in the matching `docs/` file
+(`configuration.md`, `ipc.md`, `protocols.md`, `tty.md`,
+`scootbg/cli.md`, …), and `README.md` changes only when what scoot is or
+does changes (a new row in What works, a Not-yet item gone). This project
+let the config file and keybinding reference go stale across several
 merged PRs before anyone noticed; `scoot-implementer` and `scoot-reviewer`
 both call this out explicitly so it doesn't recur.
 

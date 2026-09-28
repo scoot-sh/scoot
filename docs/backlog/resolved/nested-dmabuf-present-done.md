@@ -93,11 +93,11 @@ answers to the ticket's questions are below.
     grow when every buffer it has is held (GBM out of memory, fds
     exhausted) falls back to read-back for good with one WARN: nothing
     else would ever hand the waiting frame over (review of PR #235).
-  - *Session lock* (not changed, filed): under `--nested` `locked` is
-    confirmed when the blanked frame is drawn, not when the host has it,
-    and owed frames make that gap more common. Gating it needs a bounded
-    wait like `--tty`'s, shared with the pixman path:
-    [nested-lock-confirm-on-present](../core/nested-lock-confirm-on-present.md).
+  - *Session lock* (fixed separately, not here): under `--nested` `locked`
+    used to be confirmed when the blanked frame was drawn, not when the
+    host had it, and owed frames made that gap more common. It now waits
+    for the host's commit with the same bounded shape as `--tty`'s wait:
+    [nested-lock-confirm-on-present](../resolved/nested-lock-confirm-on-present-done.md).
 
 ## Measured (dev VM, llvmpipe; release, LTO off, codegen-units 16)
 

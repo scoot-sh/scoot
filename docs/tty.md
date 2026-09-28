@@ -369,7 +369,8 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
 - **A fullscreen window scans out directly (zero-copy).** When a fullscreen
   window covers the output and its app hands scoot a dma-buf the display
   can take, the primary plane shows that buffer itself: no compositing, no
-  copy. Which frames may try is decided per frame
+  copy. Only a fullscreen window does this so far: everything
+  else is composited. Which frames may try is decided per frame
   (`render/primary_direct.rs`): the session is unlocked, a fullscreen
   window covers the output, no capture client is streaming it, nothing
   in the frame is translucent (`wp_alpha_modifier_v1`) or a rounded window,
