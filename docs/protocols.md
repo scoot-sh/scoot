@@ -1561,6 +1561,7 @@ when it is done reading the buffer. NVIDIA's driver effectively requires
 it, and Mesa's Vulkan WSI uses it where the compositor offers it and the
 driver supports it; without it a GPU
 client depends on implicit fencing, which not every driver provides.
+It has been verified with Mesa drivers only, not yet on NVIDIA.
 
 **Where it is offered.** Only on the GPU scanout tier (`--tty --renderer
 gles` in a `gpu-scanout` build), and only when a DRM device passes
