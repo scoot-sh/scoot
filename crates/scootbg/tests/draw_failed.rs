@@ -1,4 +1,5 @@
-//! A live `set` whose image decodes but cannot be drawn: the reply is an
+//! A live `set` whose image decodes but cannot be drawn (out of memory for
+//! its buffer; a side too long to scale): the reply is an
 //! error, `query` reports `draw_failed` with the reason (`draw_error`),
 //! the output keeps what it showed, the daemon lives, and the next `set`
 //! draws.
@@ -73,15 +74,21 @@ fn vm_size(pid: u32) -> u64 {
     kib * 1024
 }
 
-/// The hard address-space limit of `pid`, `None` for unlimited.
-fn hard_limit(pid: u32) -> Option<u64> {
+/// The soft and hard address-space limits of `pid`, `None` for unlimited.
+fn address_limits(pid: u32) -> (Option<u64>, Option<u64>) {
     let limits = std::fs::read_to_string(format!("/proc/{pid}/limits")).unwrap();
-    let hard = limits
+    let line = limits
         .lines()
         .find(|line| line.starts_with("Max address space"))
-        .and_then(|line| line.split_whitespace().nth(4))
         .unwrap_or_else(|| panic!("no address-space line in {limits}"));
-    (hard != "unlimited").then(|| hard.parse().unwrap())
+    // "Max address space  SOFT  HARD  bytes": the name is three words.
+    let mut words = line.split_whitespace().skip(3);
+    let mut limit = || {
+        let word = words.next().unwrap_or_else(|| panic!("{line}"));
+        (word != "unlimited").then(|| word.parse().unwrap())
+    };
+    let soft = limit();
+    (soft, limit())
 }
 
 /// Sets the soft address-space limit of `pid` (`None`: unlimited), the
@@ -147,19 +154,19 @@ fn a_live_set_that_cannot_be_drawn_says_why_in_query() {
 
     let pid = daemon.id();
     let limit = vm_size(pid) + MARGIN;
-    let hard = hard_limit(pid);
-    // The premise: the limit can be lowered to `limit`, and raised back
-    // far enough for the buffer to be drawn afterwards, without
-    // privilege. A hard limit below that (a `ulimit -v` or `LimitAS=` on
-    // the test run) leaves no room between what the daemon maps and the
-    // buffer, or none for the retry, so the test cannot say anything:
-    // skipped, loudly.
+    let (soft, hard) = address_limits(pid);
+    // The premise: the limit can be lowered to `limit`, and is back, once
+    // the guard restores the soft limit the daemon had, far enough for the
+    // buffer to be drawn afterwards, without privilege. A soft or hard
+    // limit below that (a `ulimit -v` or `LimitAS=` on the test run)
+    // leaves no room between what the daemon maps and the buffer, or none
+    // for the retry, so the test cannot say anything: skipped, loudly.
     let needed = limit + u64::from(WIDTH) * u64::from(HEIGHT) * 4 + MARGIN;
-    eprintln!("address space: limit {limit}, needed {needed}, hard {hard:?}");
-    if hard.is_some_and(|hard| hard < needed) {
+    eprintln!("address space: limit {limit}, needed {needed}, soft {soft:?}, hard {hard:?}");
+    if [soft, hard].into_iter().flatten().any(|cap| cap < needed) {
         eprintln!(
-            "skipped -- the hard address-space limit ({hard:?} bytes) is below what the \
-             daemon maps, the buffer and twice the margin ({needed} bytes)"
+            "skipped -- the address-space limit (soft {soft:?}, hard {hard:?} bytes) is below \
+             what the daemon maps, the buffer and twice the margin ({needed} bytes)"
         );
         let _ = session.run(&["kill"]);
         let _ = common::wait_exit(&mut daemon);
@@ -199,6 +206,64 @@ fn a_live_set_that_cannot_be_drawn_says_why_in_query() {
     assert_eq!(now["draw_failed"], false, "{now}");
     assert_eq!(now["draw_error"], Value::Null);
     assert_eq!(now["shows"]["mode"], "center");
+
+    let killed = session.run(&["kill"]);
+    assert!(killed.status.success(), "{killed:?}");
+    assert!(common::wait_exit(&mut daemon).success());
+}
+
+/// The image a review of PR #317 found aborting the daemon: a
+/// 20,000,000×1 grey PNG (about 20 KB), `--mode fit`. The scaler's `f32`
+/// weights index past their table on an axis longer than 2^24; scootbg now
+/// refuses any side past `MAX_SCALED_SIDE` before the scaler sees it. The
+/// `set` is an error naming the modes that do show it, `query` says why,
+/// the daemon lives, and `--mode fill` (which crops the long side away
+/// first) shows it.
+#[test]
+fn a_row_too_long_to_scale_is_a_draw_error_not_an_abort() {
+    let Some(session) = Session::start_sized("longrow", 1920, 1080) else {
+        return;
+    };
+    let wide = session.scratch.0.join("wide.png");
+    let mut file = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut file, 20_000_000, 1);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&vec![0x80; 20_000_000]).unwrap();
+        writer.finish().unwrap();
+    }
+    assert!(file.len() < 64 << 10, "{} bytes", file.len());
+    std::fs::write(&wide, file).unwrap();
+    let mut daemon = session.daemon_logged(&[]);
+    session.query_until("configured", |o| {
+        o.len() == 1 && o[0]["surface"]["state"] == "configured"
+    });
+    let set = |mode: &str| session.run(&["set", wide.to_str().unwrap(), "--mode", mode]);
+
+    for mode in ["fit", "stretch"] {
+        let failed = set(mode);
+        let stderr = String::from_utf8_lossy(&failed.stderr);
+        assert_eq!(failed.status.code(), Some(1), "{mode}: {stderr}");
+        let now = output(&session);
+        assert_eq!(now["draw_failed"], true, "{mode}: {now}");
+        let why = now["draw_error"].as_str().unwrap_or_default();
+        assert!(
+            why.contains("20000000x1") && why.contains("65536") && why.contains("fill"),
+            "{mode}: {why:?}"
+        );
+        assert!(
+            daemon.try_wait().unwrap().is_none(),
+            "{mode}: the daemon died"
+        );
+    }
+
+    let shown = set("fill");
+    assert!(shown.status.success(), "{shown:?}");
+    let now = output(&session);
+    assert_eq!(now["draw_failed"], false, "{now}");
+    assert_eq!(now["shows"]["mode"], "fill");
 
     let killed = session.run(&["kill"]);
     assert!(killed.status.success(), "{killed:?}");
