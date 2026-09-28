@@ -108,6 +108,18 @@ each item's own file records why it landed when it did.
 
 ## Recently shipped (since 2026-09-15)
 
+- **[`--tty` hotplug: both unreproduced paths confirmed live -- ticket RESOLVED](docs/backlog/resolved/tty-hotplug-confirmation-done.md)**
+  (2026-09-28, measurement only, no code) -- `NewMode` driven both
+  directions by QEMU Cocoa resize/fullscreen with Zoom To Fit on (the
+  unattributed 2026-09-27 probe signature reproduced and attributed; session
+  follows the new preferred, `wl_output.mode`/`done` reach clients).
+  `MoveTo` driven by Virtual-1 force-off / Virtual-2 force-on plus
+  synthetic triggers: the in-place `set_pending` refused on CRTC 37 and the
+  never-run `switch_crtc` fallback moved the session to CRTC 44 with a
+  committed modeset -- never black, windows followed. Card0 rig deltas
+  recorded (stale sysfs for minutes, `unspecified` refused, natural force
+  events need the synthetic pairing).
+
 - **[XWayland Phases 5–7: capture pins, Nix packaging, docs -- ticket RESOLVED](docs/backlog/resolved/xwayland-support-done.md)**
   (2026-09-27) -- the XWayland entry closes. Capture needed no new code and
   is now pinned: a managed X window and an X menu are in the IPC screenshot
