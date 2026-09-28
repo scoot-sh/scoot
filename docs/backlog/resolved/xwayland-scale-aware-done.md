@@ -299,3 +299,8 @@ above). Hermetic: `x_wire_limits_shrink_by_the_x_scale`,
 - Per-output scale ([`per-output-scale-mode`](../core/per-output-scale-mode.md))
   would make this a per-screen problem X cannot express: one X server has
   one client scale.
+
+**Follow-up (2026-09-28, with the user):** the memory cost of drawing X at
+`ceil(scale)` at a fractional scale is documented (`docs/configuration.md`,
+`[output] scale`), and an option to choose it is filed, defaulting to sharp:
+[`xwayland-fractional-scale-choice.md`](../protocols/xwayland-fractional-scale-choice.md).
