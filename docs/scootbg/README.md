@@ -560,11 +560,13 @@ scootbg on idle memory above the floor, by 1.1–1.6 MiB of RSS and
 so on the 1080p image's total with the floor (8.9 against 10.3 MiB).
 Those bytes are mostly scootbg's own code: its `.text` and read-only
 data hold 0.86 MiB more resident, clean pages than awww-daemon's. Most of
-the rest is `libc` code, 0.31 MiB, plus a little anonymous memory. The
-fix plan, shrinking the code, is in
-[idle-code-pages.md](backlog/idle-code-pages.md). On every
-other row both can do, scootbg wins or ties. Headless sway gives the same
-verdicts ([below](#on-sway)).
+the rest is `libc` code, 0.31 MiB, plus a little anonymous memory. On
+every other row both can do, scootbg wins or ties. Headless sway gives
+the same verdicts ([below](#on-sway)). A re-run of the idle rows on
+2026-09-28, after attributing the resident pages and trying the cheap
+levers, gives the same 9 losses ([below](#idle-rows-re-run-2026-09-28));
+[idle-code-pages.md](backlog/idle-code-pages.md) has where the pages are,
+what was tried, and what is left.
 
 Measured 2026-09-27 on a Claude Code web container (4 vCPUs, Intel Xeon
 @ 2.10 GHz, 16 GB, no GPU and no DRM device, kernel 6.18), against
@@ -653,6 +655,34 @@ again a tie by the rule (scoot 494 against 451 ms, CPU 475 against 426
 ms, inside a combined spread of 79 and 81 ms). They are in
 [`bench/2026-09-28-scoot-peak/`](bench/2026-09-28-scoot-peak/table.md)
 and [`bench/2026-09-28-sway-peak/`](bench/2026-09-28-sway-peak/table.md).
+
+### Idle rows re-run (2026-09-28)
+
+The idle rows only, 5 rounds, every daemon, the harness as in
+`35f3a13`, scootbg `9b3d8526…` built from `35f3a13` with a clean tree
+(its one change: the state file's temporary name through `rustix`'s
+`getpid`, 64 KiB less of libc's code resident), scoot `19909bbd…` from the
+same tree. Above the floor, MiB:
+
+| Row | scoot: scootbg | scoot: awww | sway: scootbg | sway: awww |
+|---|---|---|---|---|
+| RSS, 1× 1080p, color | 3.77 [3.75–3.86] | **2.71 [2.66–2.74]** | 3.77 [3.74–3.77] | **2.67 [2.65–2.72]** |
+| PSS, 1× 1080p, color | 2.02 [2.02–2.08] | **1.04 [0.99–1.06]** | 2.00 [2.00–2.03] | **1.02 [0.99–1.04]** |
+| RSS, 2× 4K, color | 3.79 [3.74–3.82] | **2.69 [2.65–2.74]** | 3.79 [3.74–3.86] | **2.69 [2.65–2.72]** |
+| PSS, 2× 4K, color | 2.05 [2.00–2.06] | **1.04 [1.00–1.07]** | 2.03 [1.99–2.09] | **1.04 [0.99–1.05]** |
+| RSS, 1× 1080p, image | 4.29 [4.23–4.32] | **2.84 [2.82–2.92]** | 4.30 [4.27–4.34] | **2.90 [2.82–2.94]** |
+| PSS, 1× 1080p, image | 2.34 [2.29–2.35] | **0.93 [0.92–1.01]** | 2.31 [2.27–2.36] | **0.96 [0.90–0.98]** |
+| RSS, 2× 4K, image | 4.40 [4.34–4.46] | **2.88 [2.86–2.94]** | 4.37 [4.34–4.41] | **2.90 [2.82–2.91]** |
+| PSS, 2× 4K, image | 2.40 [2.38–2.48] | **0.99 [0.96–1.00]** | 2.39 [2.37–2.44] | **0.95 [0.93–0.97]** |
+
+The 1080p image's total with the floor is 10.25 against 8.84 MiB on scoot
+and 10.23 against 8.88 on sway, a loss too. **Bold**, as above: awww beats
+scootbg beyond the margin.
+
+The same 9 losses to awww on each compositor. `compare` against the
+2026-09-27 runs: no regression, and no change beyond the margin. The runs
+are in [`bench/2026-09-28-idle-scoot/`](bench/2026-09-28-idle-scoot/table.md)
+and [`bench/2026-09-28-idle-sway/`](bench/2026-09-28-idle-sway/table.md).
 
 ### What ran, and what did not
 

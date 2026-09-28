@@ -68,45 +68,208 @@ except the anonymous part. Idle with a color on headless scoot
   anonymous memory. After an image `set`, file-backed RSS is 3,744 KiB
   against 3,732 KiB for a color: the decoders' code adds nothing that
   stays. Anonymous memory is 468 against 220 KiB. So this lever is worth
-  about 0.24 MiB with an image and nothing with a color.
+  about 0.24 MiB with an image and nothing with a color. (The attribution
+  below finds that anonymous excess is the decode thread's glibc malloc
+  arena, and that the decoders' code is resident with a color too, which
+  only a binary without it avoids.)
 - **Less code in the daemon's process** reaches the resident `.text`,
   which is the gap. A separate, smaller daemon binary is the lever at the
   limit of this: it keeps the CLI, the client half, the decoders and the
   scaler out of the long-lived process's mapping altogether. Short of
   that, the same code can be made smaller or kept together.
 
-## The plan, in order
+## Attribution (2026-09-28)
 
-1. **Attribute the resident pages.** Read the idle daemon's
-   `/proc/PID/pagemap` for its text mapping, and map the resident pages
-   to functions with a release build with `strip = false` and the same
-   layout. That says which code the loop and its start-up actually run,
-   and what fault-around adds around it.
-2. **Shrink what the daemon runs**, each candidate measured on this
-   table before it is chosen:
-   - hand-written JSON for the control protocol instead of `serde_json`,
-     which cost +74 KB when it was chosen (§5 of
-     [dependencies-done.md](resolved/dependencies-done.md));
-   - `std::fmt` on the loop's paths;
-   - `opt-level = "s"` per package (`[profile.release.package.NAME]`) for
-     the cold crates: `serde_json`, the CLI and the client half. §7 of
-     dependencies-done.md measured `"s"` only for every crate at once
-     (−0.9% on the whole binary, 17% larger on the base, the pipeline
-     about 7% slower). Per cold crate is untried, and keeps the decoders
-     and the scaler at 3.
-3. **A separate daemon binary**, if 1 and 2 leave a gap: `scootbg daemon`
-   execs a small `scootbg-daemon` that links only the loop, and the
-   decoding and scaling run in a short-lived process or thread of the
-   big binary. This touches packaging (the Nix package and modules, the
-   `apply-config` spawn path), so it is its own design pass.
-4. **Keep the hot code together** so fault-around maps fewer windows,
-   with a linker symbol-ordering file. It depends on the toolchain and is
-   fragile across builds, so it needs a CI check that it still applies.
+**Method.** A release build of `286cb1d` with symbols
+(`CARGO_PROFILE_RELEASE_STRIP=false`, in its own `CARGO_TARGET_DIR`): the
+same `.text` (1,290,335 B) and layout as the published `39e2c361…`. The
+daemon ran on headless scoot (`d84d06d0…`), 1× 1920×1080, and was set to
+`#1e1e2e` or to the 6000×4000 JPEG, then left idle. Two readings:
 
-**The target** is awww's idle figures above the floor on the same
-machine: RSS at or under 2.7 MiB and PSS at or under 1.0 MiB with a
-color. Check it with `scripts/scootbg-bench/bench.py run --only idle`,
-then `compare` against the published run.
+- **Resident**: `/proc/PID/pagemap` for the binary's mappings, each
+  present page mapped to the functions it holds (`nm -S`), by crate.
+- **Executed**: the same run under callgrind (valgrind 3.27.1 from the
+  flake's nixpkgs), start-up, the `set`, the idle loop, a `query` and a
+  color `set`, every function with a cost counted whole.
+
+Function bytes by crate group, KiB (the binary holds 1,248 KiB of
+functions):
+
+| Group | In the binary | Color: resident | Color: executed | Image: resident | Image: executed |
+|---|---|---|---|---|---|
+| decoders and scaler (zune-jpeg, image-webp, png, fdeflate, pic-scale-safe, …) | 398 | 277 | 0 | 336 | 82 |
+| core, std, alloc | 287 | 261 | 45 | 287 | 53 |
+| scootbg's own | 269 | 269 | 154 | 269 | 194 |
+| std's backtrace and symbolization (gimli, addr2line, rustc-demangle, miniz_oxide) | 122 | 113 | 0 | 122 | 0 |
+| Wayland (wayland-client, -backend, -protocols, smallvec) | 102 | 102 | 70 | 102 | 73 |
+| serde, serde_json | 30 | 30 | 6 | 30 | 6 |
+| other | 40 | 18 | 2 | 39 | 4 |
+| **total** | **1,248** | **1,070** | **277** | **1,184** | **411** |
+
+- **What runs is small; what is resident is nearly all of it.** With a
+  color, start-up, the loop, a `query` and a `set` run 277 KiB of
+  functions, while 1,048–1,080 KiB of `.text` is resident (262–270 of
+  316 pages, over runs). With an image, 411 KiB run and 1,200 KiB (300
+  pages) are resident. A `query` adds 64 KiB, a color `set` after it
+  nothing.
+- **Fault-around is the rest.** The pages holding executed functions,
+  widened to the kernel's 64 KiB fault-around windows, cover 1,144 KiB of
+  `.text`: the executed code touches nearly every window of the binary,
+  because the linker interleaves the crates. 277 KiB of decoder and scaler
+  code is resident with a color, never run.
+- **The backtrace machinery is resident and never runs**: 113 KiB with a
+  color, 122 KiB with an image, 0 KiB executed. It is not the panic hook
+  of ticket 2 (`daemon::crash`) that links it: std's `default_hook`, which
+  `rust_panic_with_hook` calls whenever no hook is set, is linked into
+  every binary that can panic, `panic = "abort"` or not. Checked with a
+  trivial binary under this workspace's release profile: 233 KiB of
+  functions, 174 KiB of them backtrace code, and the same with a custom
+  hook that never calls the default one (`default_hook` still linked).
+- **libc: 320 KiB more than awww's, three causes.** Mapped per call site
+  through callgrind's list of libc functions run, against awww-daemon's:
+  - std's start-up guard for the main thread, `pthread_getattr_np`, which
+    reads `/proc/self/maps` with `fopen`, `getline` and `sscanf` (two
+    64 KiB windows; awww-daemon runs none of these, and it cannot be
+    skipped from safe Rust);
+  - the saver thread's exit (`__libc_thread_freeres`, the resolver's and
+    RPC's per-thread cleanup: two windows, 128 KiB);
+  - `std::process::id` (libc's `getpid`, 64 KiB window) for the state
+    file's temporary name.
+  With saving turned off, libc's resident code is 1,144 KiB against
+  1,336 (measured with the prototype below, whose calls into libc are the
+  daemon's).
+- **With an image, anonymous memory is 248 KiB more** (468 against 220):
+  a 436 KiB mapping holding 232 KiB resident, the glibc malloc arena the
+  decode thread's small allocations made, which glibc keeps for the next
+  thread. (Blocks of 128 KiB and more are `scootbg-mem`'s own mappings and
+  go back to the kernel.) The decode thread's cached stack is 24 KiB.
+
+## Levers tried (2026-09-28)
+
+Each measured before it was kept. Residency with `pagemap` as above;
+timings with the `image::bench` stage benchmark on the 6000×4000 JPEG,
+`fill` at 3840×2160.
+
+| Lever | Before | After | Kept? |
+|---|---|---|---|
+| Remove std's backtrace code, stable toolchain | 122 KiB linked, 113–122 resident | not possible on stable | no |
+| `opt-level = "s"` for `serde_json` | `.text` 1,290,335 B | 1,287,663 B (−2.6 KiB) | no |
+| `opt-level = "s"` for wayland-client, -backend, -protocols, -protocols-wlr | 1,290,335 B | 1,345,567 B (+54 KiB) | no |
+| `opt-level = "s"` for `scootbg` itself (the root crate) | 1,290,335 B; `render()` 450–517 ms | 969,919 B, 116 KiB less resident with a color, 252 KiB with an image; `render()` 550–586 ms | no |
+| The state file's temporary name through `rustix::process::getpid` | libc code 1,336 KiB resident | 1,272 KiB (three runs each, every time) | **yes** |
+
+- **The backtrace code.** On stable there is no way to leave std's
+  `default_hook`, and with it the symbolizer, out of a binary that can
+  panic (above). The way that exists is nightly-only: `-Zbuild-std` with
+  std's `panic_immediate_abort` feature. Not tried: the toolchain stays
+  stable.
+- **Per-package `opt-level`.** The crates cold for the daemon that are not
+  also hot for its images are few: `serde_json` and the Wayland crates,
+  and scoot uses every one of them too (its IPC, its client and server
+  sides), so a workspace override changes scoot's release build as well.
+  They did not help anyway: `"s"` saves 2.6 KiB on `serde_json` and costs
+  54 KiB on the Wayland crates, since fat LTO re-optimizes everything at
+  the root crate's level. The root crate's own level is what counts:
+  `"s"` for `scootbg` takes 313 KiB off `.text`, but it is also the image
+  pipeline's crate, and `render()` then runs about 20% slower (three
+  runs each, five renders a run: 460, 450, 517 ms at 3 against 582, 550,
+  586 at `"s"`). That would lose the JPEG start-up row to wbg, a tie today
+  at 4.7%. `"z"` for the root: 25% slower. Hence no.
+- **`getpid`.** One call site; the same value. It takes one 64 KiB libc
+  window off every idle row that has saved anything, that is, all of them.
+- **Measured, not kept, and why:**
+  - *A saver thread that stays* (parked on its condition variable instead
+    of exiting) takes libc's two thread-exit windows off: libc code 1,272
+    → 1,144 KiB with a color. But an image's decode thread exits the same
+    way, so the image rows keep them, and it changes the daemon's idle
+    thread count from one to two. Worth it only together with the split
+    below, where no decode thread is left.
+  - *Lazy binding* would keep libm's pages (256 + 88 KiB, the scaler's
+    `sinf`, resolved at start-up under `-z now`) out of the color rows,
+    but gives up full RELRO, a hardening default, and needs `RUSTFLAGS`.
+    Not tried.
+
+## Where it stands (2026-09-28)
+
+The gate's idle rows, 5 rounds, re-run with `35f3a13`
+([`bench/2026-09-28-idle-scoot/`](../bench/2026-09-28-idle-scoot/table.md)
+and [`bench/2026-09-28-idle-sway/`](../bench/2026-09-28-idle-sway/table.md)).
+Medians and ranges above the floor, MiB, on headless scoot:
+
+| Row | scootbg before (2026-09-27) | scootbg now | awww now | Gap now |
+|---|---|---|---|---|
+| RSS, 1× 1080p, color | 3.85 [3.81–3.90] | 3.77 [3.75–3.86] | 2.71 [2.66–2.74] | 1.06 |
+| PSS, 1× 1080p, color | 2.07 [2.01–2.09] | 2.02 [2.02–2.08] | 1.04 [0.99–1.06] | 0.98 |
+| RSS, 2× 4K, color | 3.87 [3.80–3.93] | 3.79 [3.74–3.82] | 2.69 [2.65–2.74] | 1.10 |
+| PSS, 2× 4K, color | 2.07 [2.02–2.10] | 2.05 [2.00–2.06] | 1.04 [1.00–1.07] | 1.01 |
+| RSS, 1× 1080p, image | 4.38 [4.31–4.41] | 4.29 [4.23–4.32] | 2.84 [2.82–2.92] | 1.45 |
+| PSS, 1× 1080p, image | 2.35 [2.28–2.39] | 2.34 [2.29–2.35] | 0.93 [0.92–1.01] | 1.42 |
+| RSS, 2× 4K, image | 4.49 [4.44–4.53] | 4.40 [4.34–4.46] | 2.88 [2.86–2.94] | 1.52 |
+| PSS, 2× 4K, image | 2.47 [2.39–2.50] | 2.40 [2.38–2.48] | 0.99 [0.96–1.00] | 1.41 |
+
+On headless sway, the same rows: color RSS 3.77 and 3.79 against awww's
+2.67 and 2.69 (gap 1.10, 1.09), PSS 2.00 and 2.03 against 1.02 and 1.04
+(0.98, 0.99); image RSS 4.30 and 4.37 against 2.90 and 2.90 (1.41, 1.47),
+PSS 2.31 and 2.39 against 0.96 and 0.95 (1.35, 1.44). Before
+(2026-09-27): color RSS 3.88 and 3.87, PSS 2.06 and 2.09; image RSS 4.38
+and 4.45, PSS 2.34 and 2.39.
+
+**Not closed.** The same 9 losses on each compositor. `compare` against
+the 2026-09-27 run finds no regression and no change beyond the margin:
+the kept lever is 64 KiB, inside the noise. What is left is the whole
+gap, and the attribution says where it is: the daemon runs 277 KiB of a
+binary holding 1,248 KiB of functions, and fault-around makes most of the
+rest resident whatever the daemon runs.
+
+## Later option: a separate daemon binary
+
+Recorded here for the user's decision; not started (the scope of
+2026-09-28 was the attribution and the cheap levers).
+
+**What was measured.** A prototype, never committed: the daemon's code in
+its own crate and binary, the decoders stubbed out (so image rows could
+not be run), plus the `getpid` lever and a saver thread that stays. Run
+with the harness's own idle scenario (`scenarios.idle`, 3 rounds, 60 s
+idle, a 5 s wakeup window, scootbg and awww in one batch) on headless
+scoot, medians above the floor, MiB:
+
+| Row | Current binary | Prototype | awww, in the prototype's batch |
+|---|---|---|---|
+| RSS, 1× 1080p, color | 3.85 [3.84–3.86] | 2.59 [2.58–2.60] | 2.71 [2.68–2.71] |
+| PSS, 1× 1080p, color | 2.24 [2.23–2.25] | 1.27 [1.26–1.28] | 1.25 [1.24–1.25] |
+| RSS, 2× 4K, color | 3.83 [3.82–3.85] | 2.58 [2.57–2.59] | 2.67 [2.66–2.72] |
+| PSS, 2× 4K, color | 2.22 [2.19–2.24] | 1.27 [1.25–1.28] | 1.25 [1.19–1.26] |
+
+("Current binary" is the published `39e2c361…`, run the same way.) That
+is a tie on PSS and a tie or better on RSS, for colors. (PSS reads
+higher than in the full batch, which shares the libraries among more
+processes.) The same prototype without the two libc levers: 2.82 RSS and
+1.46 PSS on 1080p, a PSS loss.
+
+**What it takes**, as the prototype found:
+
+- **Its own package.** The daemon's `.text` is 466 KiB only when its root
+  crate *and* its code are built at `opt-level = "z"`: fat LTO optimizes
+  at the root crate's level (root at 3 with the code at `"z"`: about
+  540 KiB; everything at 3: 658 KiB). The decoders cannot share that
+  package: the image pipeline, even built at 3 in a crate of its own, runs
+  25% slower under a `"z"` root (440–452 against 546–601 ms, three runs of
+  five).
+  So `scootbg-daemon` is a second package, and `scootbg`'s integration
+  tests need it built (`-p scootbg-daemon`, or `--workspace`), which
+  changes the documented test commands, CI and the Nix package.
+- **The decoders in a worker process**: the daemon runs `scootbg` per
+  image job, which sends the drawn buffers back as sealed memfds over a
+  socket (`SCM_RIGHTS`, safe `rustix`), and the daemon hands them to the
+  compositor without mapping them (no new `unsafe`). The spawn costs the
+  daemon 8 KiB of code and one 64 KiB libc window; with an image the
+  margin would be thin, not measured.
+- **User-visible**: the daemon's process is `scootbg-daemon` (`pkill
+  scootbg` still matches it; `pkill -x scootbg` would not); `scootbg
+  daemon` execs it and `apply-config` starts it, found beside `scootbg`.
+- **Beyond that**: `serde_json` out of the daemon (hand-written JSON, a
+  few tens of KiB) would widen the margin; the Wayland crates stay at 3,
+  since scoot shares them.
 
 ## The fallback that is the user's call
 

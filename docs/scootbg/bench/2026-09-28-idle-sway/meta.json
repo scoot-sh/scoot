@@ -1,0 +1,2004 @@
+{
+ "date": "2026-09-28 03:49:48 UTC",
+ "machine": {
+  "kernel": "6.18.44-fc-v37",
+  "cpus": 4,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "memory_kb": 16481980,
+  "loadavg_start": [
+   0.0869140625,
+   0.04150390625,
+   0.08935546875
+  ],
+  "loadavg_end": [
+   0.3017578125,
+   0.1875,
+   0.150390625
+  ]
+ },
+ "compositor": "sway",
+ "compositor_version": "sway version 1.12",
+ "scoot_binary": {
+  "path": "/home/user/scoot/target/release/scoot",
+  "realpath": "/home/user/scoot/target/release/scoot",
+  "sha256": "19909bbdd0bfc62c87c60ec1b4889ebaebead66cb6dbd92fb9a4ba4ef9a69cc0"
+ },
+ "compositor_binaries": {
+  "scoot": {
+   "path": "/home/user/scoot/target/release/scoot",
+   "realpath": "/home/user/scoot/target/release/scoot",
+   "sha256": "19909bbdd0bfc62c87c60ec1b4889ebaebead66cb6dbd92fb9a4ba4ef9a69cc0"
+  },
+  "sway": {
+   "path": "/nix/store/5ddkfdxnq991rfzn2f6n5w1kd6dvaqp3-sway-1.12/bin/sway",
+   "realpath": "/nix/store/5ddkfdxnq991rfzn2f6n5w1kd6dvaqp3-sway-1.12/bin/sway",
+   "sha256": "f675671ae4812afa7bdf110c49b12623c6e9a7f66f54a8268f0dbf848283d2d6"
+  },
+  "grim": {
+   "path": "/nix/store/j46b9y2gj3dyw2mma1hl2wcbz3b6llws-grim-1.5.0/bin/grim",
+   "realpath": "/nix/store/j46b9y2gj3dyw2mma1hl2wcbz3b6llws-grim-1.5.0/bin/grim",
+   "sha256": "6152f0ccdfd2a4bb977f89f9295b8bbe81f9e0510e34ebd1762cdeddf8d85613"
+  }
+ },
+ "harness": {
+  "commit": "35f3a13f6970201036594304b516342ef6d5dacb",
+  "status": "",
+  "files": {
+   "bench.py": "00cf373a54795a39bafeba532b156232d139048ba89d5b0e92245ba3893448d5",
+   "commits.py": "67017f872a3024fc73caf6144c57170e1635ddbc0c08d56d775ffb031ac09099",
+   "daemons.py": "5cc32191899d14430059cef162f5c67f0b18b5ad3c381ba05045a84ba056c239",
+   "procs.py": "f150c2a75ad4d0a5719e9fcb5c59d818045a587ee1bb80117ea17aa59be9d68f",
+   "report.py": "7abe381e3399327419f274c401815d3a808adeadbf92ad25a49ae148a7b0d05c",
+   "runner.py": "1a628b930f009ff9da18154e7ab6d1bacc47b16cf066796584bf61563cbf7e47",
+   "scenarios.py": "5bf30d3d20d0bd44ee768a8b06f9d675abe3db0edb6469f2a65d7f8bad5074bc",
+   "session.py": "977a1c3b779e0424b3f8f62ddbc4ccbbdfa6cb7bf46dda81dc49f9376cd47f83",
+   "size.py": "c889f4d402961e71300e710f213879baf481ed2f5db43d65dd27866133a69e51",
+   "test_bench.py": "4ec0fbde692cdc953895f656f570d3371471e8002d9f6260ef9694af5f7d03af"
+  }
+ },
+ "commit": "35f3a13f6970201036594304b516342ef6d5dacb",
+ "tree_dirty": false,
+ "mesa": {
+  "store": "/nix/store/ppphyhp48gzdji3q9q945gmamy4rrj3f-mesa-26.2.2",
+  "version": "26.2.2"
+ },
+ "rounds": 5,
+ "idle_secs": 60.0,
+ "window_secs": 60.0,
+ "daemons": {
+  "scootbg": {
+   "version": "scootbg 0.1.0 (protocol 1)",
+   "binary": "/home/user/scoot/target/release/scootbg",
+   "sha256": "9b3d852684132995ef80b1289c772ceeb3d72da40511dad4577769d5581f2575",
+   "store": "/nix/store/2q2ingkq667ypmxcrypfjzawcy34bksy-scootbg-0.1.0",
+   "store_binary": {
+    "path": "/nix/store/2q2ingkq667ypmxcrypfjzawcy34bksy-scootbg-0.1.0/bin/scootbg",
+    "realpath": "/nix/store/2q2ingkq667ypmxcrypfjzawcy34bksy-scootbg-0.1.0/bin/scootbg",
+    "sha256": "152d3b8728d43fe8fcc78efd54f04c3a107a050eba21f6a9984bdcc203bb6974"
+   },
+   "needs_egl": false,
+   "informational": false,
+   "ran": true,
+   "exe": {
+    "path": "/home/user/scoot/target/release/scootbg",
+    "realpath": "/home/user/scoot/target/release/scootbg",
+    "sha256": "9b3d852684132995ef80b1289c772ceeb3d72da40511dad4577769d5581f2575"
+   },
+   "static": {
+    "binaries_bytes": 1684328,
+    "ldd_libraries_bytes": 182352,
+    "size_bytes": 1866680,
+    "runtime_only_bytes": 0,
+    "files": [
+     [
+      "/home/user/scoot/target/release/scootbg",
+      1684328,
+      "binary"
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc/lib/libgcc_s.so.1",
+      182352,
+      "ldd"
+     ]
+    ],
+    "package_bytes": 1660640,
+    "closure_bytes": 12176264,
+    "closure_paths": [
+     [
+      "/nix/store/0vqb1mcas5j8dv6bhbrshinlgsg6bvgi-gcc-15.3.0-lib",
+      10317392
+     ],
+     [
+      "/nix/store/2q2ingkq667ypmxcrypfjzawcy34bksy-scootbg-0.1.0",
+      1661120
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc",
+      197752
+     ]
+    ],
+    "disk_bytes": 12176264
+   }
+  },
+  "scootbg-bilinear": {
+   "version": "scootbg 0.1.0 (protocol 1)",
+   "binary": "/home/user/scoot/target/release/scootbg",
+   "sha256": "9b3d852684132995ef80b1289c772ceeb3d72da40511dad4577769d5581f2575",
+   "store": "/nix/store/2q2ingkq667ypmxcrypfjzawcy34bksy-scootbg-0.1.0",
+   "store_binary": {
+    "path": "/nix/store/2q2ingkq667ypmxcrypfjzawcy34bksy-scootbg-0.1.0/bin/scootbg",
+    "realpath": "/nix/store/2q2ingkq667ypmxcrypfjzawcy34bksy-scootbg-0.1.0/bin/scootbg",
+    "sha256": "152d3b8728d43fe8fcc78efd54f04c3a107a050eba21f6a9984bdcc203bb6974"
+   },
+   "needs_egl": false,
+   "informational": true,
+   "ran": true,
+   "exe": {
+    "path": "/home/user/scoot/target/release/scootbg",
+    "realpath": "/home/user/scoot/target/release/scootbg",
+    "sha256": "9b3d852684132995ef80b1289c772ceeb3d72da40511dad4577769d5581f2575"
+   }
+  },
+  "awww": {
+   "version": "0.12.1",
+   "store": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1",
+   "nix_attr": "awww",
+   "binaries": [
+    {
+     "path": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-daemon-wrapped",
+     "realpath": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-daemon-wrapped",
+     "sha256": "242ab918ff2a002e8c0d7be72c2939f8c2dcdd4c0d96cdc1d61c7e868d6d233a"
+    },
+    {
+     "path": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-wrapped",
+     "realpath": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-wrapped",
+     "sha256": "e6d783939e617a1997a17609ea0f8673181f555373969ff933be046189e3416f"
+    }
+   ],
+   "needs_egl": false,
+   "informational": false,
+   "ran": true,
+   "exe": {
+    "path": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-daemon-wrapped",
+    "realpath": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-daemon-wrapped",
+    "sha256": "242ab918ff2a002e8c0d7be72c2939f8c2dcdd4c0d96cdc1d61c7e868d6d233a"
+   },
+   "static": {
+    "binaries_bytes": 8646344,
+    "ldd_libraries_bytes": 434192,
+    "size_bytes": 9080536,
+    "runtime_only_bytes": 0,
+    "files": [
+     [
+      "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-daemon-wrapped",
+      500888,
+      "binary"
+     ],
+     [
+      "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-wrapped",
+      8145456,
+      "binary"
+     ],
+     [
+      "/nix/store/23q1ns1s025b401ixc1fz89rfpf2a2c6-lz4-1.10.0-lib/lib/liblz4.so.1.10.0",
+      251840,
+      "ldd"
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc/lib/libgcc_s.so.1",
+      182352,
+      "ldd"
+     ]
+    ],
+    "package_bytes": 9665533,
+    "closure_bytes": 33294752,
+    "closure_paths": [
+     [
+      "/nix/store/0vqb1mcas5j8dv6bhbrshinlgsg6bvgi-gcc-15.3.0-lib",
+      10317392
+     ],
+     [
+      "/nix/store/23q1ns1s025b401ixc1fz89rfpf2a2c6-lz4-1.10.0-lib",
+      262160
+     ],
+     [
+      "/nix/store/4hlgp6r4j5p6b2b9sxw01cba0x3fjxd6-systemd-minimal-libs-261.2",
+      4453096
+     ],
+     [
+      "/nix/store/5xym1gmpk8kxl2vvfaaxja52qap9g49l-util-linux-minimal-2.42.2-login",
+      98336
+     ],
+     [
+      "/nix/store/9ipfvwnqp1q8ijnmi5sxvlx9r8w34lw3-bash-5.3p15",
+      1856848
+     ],
+     [
+      "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1",
+      9670592
+     ],
+     [
+      "/nix/store/pfww4nv3wkgpyk1jvqqpz6ymxgj7cbbh-libxcrypt-4.5.2",
+      144384
+     ],
+     [
+      "/nix/store/symzmzrb5qzcwz9mpsrcppwq0r90mq5w-procps-4.0.7",
+      2423632
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc",
+      197752
+     ],
+     [
+      "/nix/store/zz125vwahb637g5ckl046ll8fcqmc8pk-ncurses-6.6",
+      3870560
+     ]
+    ],
+    "disk_bytes": 33294752
+   }
+  },
+  "hyprpaper": {
+   "version": "0.8.4",
+   "store": "/nix/store/gki150fq2gx6751cqjc9ylc2636h2hax-hyprpaper-0.8.4",
+   "nix_attr": "hyprpaper",
+   "binaries": [
+    {
+     "path": "/nix/store/gki150fq2gx6751cqjc9ylc2636h2hax-hyprpaper-0.8.4/bin/hyprpaper",
+     "realpath": "/nix/store/gki150fq2gx6751cqjc9ylc2636h2hax-hyprpaper-0.8.4/bin/hyprpaper",
+     "sha256": "50dde84bd67945ed01d4cc08c988660bc0cbb2ef70c6ea58bfe8d1a24556acd9"
+    }
+   ],
+   "needs_egl": true,
+   "informational": false,
+   "ran": false,
+   "did_not_run": "hyprpaper exited (0) before its wallpaper was up\n\u001b[1;32mDEBUG \u001b[0m]: Welcome to hyprpaper!\nbuilt from commit v0.8.4 ()\nwl_registry#2: error 0: invalid version for global xdg_wm_base (11): expected at most 5, got 6\n\u001b[1;31mERR \u001b[0mfrom hyprtoolkit ]: Wayland platform cannot start: Missing protocols",
+   "static": {
+    "binaries_bytes": 558136,
+    "ldd_libraries_bytes": 49105960,
+    "size_bytes": 49664096,
+    "runtime_only_bytes": 0,
+    "files": [
+     [
+      "/nix/store/gki150fq2gx6751cqjc9ylc2636h2hax-hyprpaper-0.8.4/bin/hyprpaper",
+      558136,
+      "binary"
+     ],
+     [
+      "/nix/store/0hglvgwr3b7h2hhypvif689yslqsjhlp-hyprutils-0.14.1/lib/libhyprutils.so.0.14.1",
+      538832,
+      "ldd"
+     ],
+     [
+      "/nix/store/17xmg38m60inc59az3frp540ccrwn2r8-util-linux-minimal-2.42.2-lib/lib/libblkid.so.1.1.0",
+      404504,
+      "ldd"
+     ],
+     [
+      "/nix/store/17xmg38m60inc59az3frp540ccrwn2r8-util-linux-minimal-2.42.2-lib/lib/libmount.so.1.1.0",
+      523000,
+      "ldd"
+     ],
+     [
+      "/nix/store/2gkqj0v0msfcagwf5ix199rf1lnwf2a1-expat-2.8.3/lib/libexpat.so.1.12.3",
+      190400,
+      "ldd"
+     ],
+     [
+      "/nix/store/31gqpwmcy48xfqbd2m1h6hjh4y8fw5sv-libwacom-2.20.0/lib/libwacom.so.9.0.0",
+      67600,
+      "ldd"
+     ],
+     [
+      "/nix/store/3vlnkr6z7hh86rrn087df45s4cfjxy65-libx11-1.8.13/lib/libX11.so.6.4.0",
+      1374552,
+      "ldd"
+     ],
+     [
+      "/nix/store/48mby3a310a38chigwfxd1fxpcn465iw-libdatrie-2019-12-20-lib/lib/libdatrie.so.1.3.5",
+      34760,
+      "ldd"
+     ],
+     [
+      "/nix/store/4hlgp6r4j5p6b2b9sxw01cba0x3fjxd6-systemd-minimal-libs-261.2/lib/libsystemd.so.0.44.0",
+      2222264,
+      "ldd"
+     ],
+     [
+      "/nix/store/4hlgp6r4j5p6b2b9sxw01cba0x3fjxd6-systemd-minimal-libs-261.2/lib/libudev.so.1.7.14",
+      1658448,
+      "ldd"
+     ],
+     [
+      "/nix/store/5qg70j0rzbxqlxlzrq87k4ksgzdwrwr6-libdrm-2.4.134/lib/libdrm.so.2.134.0",
+      100288,
+      "ldd"
+     ],
+     [
+      "/nix/store/65582sxlfkllmxwp1l4dwbsfzymzyxry-pango-1.57.1/lib/libpango-1.0.so.0.5701.0",
+      470680,
+      "ldd"
+     ],
+     [
+      "/nix/store/65582sxlfkllmxwp1l4dwbsfzymzyxry-pango-1.57.1/lib/libpangocairo-1.0.so.0.5701.0",
+      75768,
+      "ldd"
+     ],
+     [
+      "/nix/store/65582sxlfkllmxwp1l4dwbsfzymzyxry-pango-1.57.1/lib/libpangoft2-1.0.so.0.5701.0",
+      116672,
+      "ldd"
+     ],
+     [
+      "/nix/store/7r6rbqyi0pqzyjps1yfg6s3k56mpli1k-mesa-libgbm-26.1.3/lib/libgbm.so.1.0.0",
+      22440,
+      "ldd"
+     ],
+     [
+      "/nix/store/88rpjhka2v8d01frjnsl6chvlv9lnvjc-libselinux-3.10/lib/libselinux.so.1",
+      211192,
+      "ldd"
+     ],
+     [
+      "/nix/store/8kmh5aaiadz1vfv1nal7vf3x41b2l92j-pixman-0.46.4/lib/libpixman-1.so.0.46.4",
+      759928,
+      "ldd"
+     ],
+     [
+      "/nix/store/8ycs9ymrnjsa4qm7xzj0mcv8lww73zy5-aquamarine-0.15.0/lib/libaquamarine.so.0.15.0",
+      1556560,
+      "ldd"
+     ],
+     [
+      "/nix/store/9g3536ribbggd4swm4bwk8sknsddfl3j-libxml2-2.15.3/lib/libxml2.so.16.1.3",
+      1334184,
+      "ldd"
+     ],
+     [
+      "/nix/store/9mlc8y3ykj14p4nwadw93g4s8zgw4skn-gdk-pixbuf-2.44.7/lib/libgdk_pixbuf-2.0.so.0.4400.7",
+      190592,
+      "ldd"
+     ],
+     [
+      "/nix/store/9prflf4bwfhj2ig7b9kchjgpmknv4k34-libjxl-0.12.0/lib/libjxl.so.0.12.0",
+      5953568,
+      "ldd"
+     ],
+     [
+      "/nix/store/9prflf4bwfhj2ig7b9kchjgpmknv4k34-libjxl-0.12.0/lib/libjxl_cms.so.0.12.0",
+      104472,
+      "ldd"
+     ],
+     [
+      "/nix/store/9prflf4bwfhj2ig7b9kchjgpmknv4k34-libjxl-0.12.0/lib/libjxl_threads.so.0.12.0",
+      22544,
+      "ldd"
+     ],
+     [
+      "/nix/store/9rrrpdv2wqvsdm2ipm5q893hnhn410x5-iniparser-4.2.6/lib/libiniparser.so.4.2.6",
+      26496,
+      "ldd"
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3/lib/libgio-2.0.so.0.8800.3",
+      2183728,
+      "ldd"
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3/lib/libglib-2.0.so.0.8800.3",
+      1448360,
+      "ldd"
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3/lib/libgmodule-2.0.so.0.8800.3",
+      22528,
+      "ldd"
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3/lib/libgobject-2.0.so.0.8800.3",
+      409584,
+      "ldd"
+     ],
+     [
+      "/nix/store/avkwd1sfvr31c5ffd06qj0grvyp9pb2w-libxrender-0.9.12/lib/libXrender.so.1.3.0",
+      47240,
+      "ldd"
+     ],
+     [
+      "/nix/store/b5srcmnr8b5d3gfyfs3hnr871cw5r6hz-hyprgraphics-0.5.1/lib/libhyprgraphics.so.0.5.1",
+      252016,
+      "ldd"
+     ],
+     [
+      "/nix/store/bn8sa8p2ss2y03iwsyy5w6nlzmfd9avg-harfbuzz-13.2.1/lib/libharfbuzz.so.0.61321.0",
+      1462264,
+      "ldd"
+     ],
+     [
+      "/nix/store/bwaay526pyr0wf3wksskivgxzriyrmld-libwebp-1.6.0/lib/libsharpyuv.so.0.1.2",
+      30600,
+      "ldd"
+     ],
+     [
+      "/nix/store/bwaay526pyr0wf3wksskivgxzriyrmld-libwebp-1.6.0/lib/libwebp.so.7.2.0",
+      723080,
+      "ldd"
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib/lib/libbrotlicommon.so.1.2.0",
+      141248,
+      "ldd"
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib/lib/libbrotlidec.so.1.2.0",
+      55160,
+      "ldd"
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib/lib/libbrotlienc.so.1.2.0",
+      768472,
+      "ldd"
+     ],
+     [
+      "/nix/store/c6mgy63s5y1353152dp2s2jaig026j3h-readline-8.3p3/lib/libreadline.so.8.3",
+      388088,
+      "ldd"
+     ],
+     [
+      "/nix/store/cj9443b6ljpw3pzxa3x3ck7vrig9kkc0-pcre2-10.47/lib/libpcre2-8.so.0.15.0",
+      710960,
+      "ldd"
+     ],
+     [
+      "/nix/store/d3f7r44z2px98z479jgf7qdwqn96jgf6-libpng-apng-1.6.58/lib/libpng16.so.16.58.0",
+      247824,
+      "ldd"
+     ],
+     [
+      "/nix/store/d3n2cs7qbbhk6zyfmfkpcf6rmwam9k5h-lcms2-2.19.1/lib/liblcms2.so.2.0.19",
+      435288,
+      "ldd"
+     ],
+     [
+      "/nix/store/dczkv6755chri9gsvacxvqpz9nn2dwld-freetype-2.14.3/lib/libfreetype.so.6.20.6",
+      944064,
+      "ldd"
+     ],
+     [
+      "/nix/store/f6dwfsb4acd9j6w5zn2wnd6h0xp7g66b-gcc-16.2.0-lib/lib/libstdc++.so.6.0.36",
+      2845344,
+      "ldd"
+     ],
+     [
+      "/nix/store/fnwi54n3m48apqgfl6dskyc5zd2bxjp8-fribidi-1.0.16/lib/libfribidi.so.0.4.0",
+      129048,
+      "ldd"
+     ],
+     [
+      "/nix/store/gkb9jhxirg79jv66m4yc2pkvn5za9glm-libxdmcp-1.1.5/lib/libXdmcp.so.6.0.0",
+      26488,
+      "ldd"
+     ],
+     [
+      "/nix/store/gp7lq22jam3lg45fb21f5n9ix6bamygw-hyprlang-0.6.8/lib/libhyprlang.so.0.6.8",
+      305272,
+      "ldd"
+     ],
+     [
+      "/nix/store/haz6abmiclbh3azv6pgf5siapvy0hwpp-lua-5.4.7/lib/liblua.so.5.4.7",
+      292800,
+      "ldd"
+     ],
+     [
+      "/nix/store/hb0hj3g9q4j8krlvvkjhsjlp5zrylyli-libevdev-1.13.6/lib/libevdev.so.2.3.0",
+      120904,
+      "ldd"
+     ],
+     [
+      "/nix/store/imkw2kilahmpk5c2n0img67wq8ij717v-cairo-1.18.4/lib/libcairo-gobject.so.2.11804.4",
+      42872,
+      "ldd"
+     ],
+     [
+      "/nix/store/imkw2kilahmpk5c2n0img67wq8ij717v-cairo-1.18.4/lib/libcairo.so.2.11804.4",
+      1469240,
+      "ldd"
+     ],
+     [
+      "/nix/store/iv0yvsywa1v35xzdkqz9wdzhg7vshpdd-fontconfig-2.18.2-lib/lib/libfontconfig.so.1.16.1",
+      489416,
+      "ldd"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-render.so.0.0.0",
+      59352,
+      "ldd"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-shm.so.0.0.0",
+      14296,
+      "ldd"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb.so.1.1.0",
+      178168,
+      "ldd"
+     ],
+     [
+      "/nix/store/jyi49s6rj18mbnx043hvybd96b4dsvpp-hyprtoolkit-0.5.4/lib/libhyprtoolkit.so.0.5.4",
+      1778816,
+      "ldd"
+     ],
+     [
+      "/nix/store/kcxkmyisz384sfvd0535l9554j5vqfsn-libinput-1.31.3/lib/libinput.so.10.13.0",
+      486320,
+      "ldd"
+     ],
+     [
+      "/nix/store/l1fjl92acmmvcny3npkzg66gy5zmykw7-libthai-0.1.30/lib/libthai.so.0.3.2",
+      48192,
+      "ldd"
+     ],
+     [
+      "/nix/store/l3p6y554mkxi4vipnnp8809kxj0g1lyv-zlib-1.3.2/lib/libz.so.1.3.2",
+      120848,
+      "ldd"
+     ],
+     [
+      "/nix/store/l5jr25rp7i6pmd3ia0yg8mzlxkg2kh1r-hyprwire-0.3.1/lib/libhyprwire.so.0.3.1",
+      432256,
+      "ldd"
+     ],
+     [
+      "/nix/store/m51xyp95w4gnhcbncz6xi0x5519m293i-libxext-1.3.7/lib/libXext.so.6.4.0",
+      81040,
+      "ldd"
+     ],
+     [
+      "/nix/store/n85m9i06xz4hybyn7pj6z2q9hpr0908r-libgudev-238/lib/libgudev-1.0.so.0.3.0",
+      51136,
+      "ldd"
+     ],
+     [
+      "/nix/store/nc95dy5ln9slqmw1s151mk30ks5f6na6-libjpeg-turbo-3.1.4.1/lib/libjpeg.so.62.4.0",
+      841736,
+      "ldd"
+     ],
+     [
+      "/nix/store/pzzhfsqwm0y9l32b62gfbsk6sr1xh27q-mtdev-1.1.7/lib/libmtdev.so.1.0.0",
+      22392,
+      "ldd"
+     ],
+     [
+      "/nix/store/qdzn5piljhvzcjwxkxfyi0bc0m215wdb-libxau-1.0.12/lib/libXau.so.6.0.0",
+      18296,
+      "ldd"
+     ],
+     [
+      "/nix/store/r3k50gmygh9r5jbdz2a402aszav2zd7d-graphite2-1.3.15/lib/libgraphite2.so.3.3.1",
+      169920,
+      "ldd"
+     ],
+     [
+      "/nix/store/rarvfpm927fcbd6b9p0crg09w9r3ywb3-libglvnd-1.7.0/lib/libEGL.so.1.1.0",
+      88048,
+      "ldd"
+     ],
+     [
+      "/nix/store/rarvfpm927fcbd6b9p0crg09w9r3ywb3-libglvnd-1.7.0/lib/libGLESv2.so.2.1.0",
+      71696,
+      "ldd"
+     ],
+     [
+      "/nix/store/rarvfpm927fcbd6b9p0crg09w9r3ywb3-libglvnd-1.7.0/lib/libGLdispatch.so.0.0.0",
+      723032,
+      "ldd"
+     ],
+     [
+      "/nix/store/rarvfpm927fcbd6b9p0crg09w9r3ywb3-libglvnd-1.7.0/lib/libOpenGL.so.0.0.0",
+      182288,
+      "ldd"
+     ],
+     [
+      "/nix/store/rcwvn48vi65zr4jzgk0rp3y7czfd1a9m-seatd-0.9.3/lib/libseat.so.1",
+      75816,
+      "ldd"
+     ],
+     [
+      "/nix/store/rk1a1a0wws40a6vz9r8qbmvcfnkirzx5-gcc-16.2.0-libgcc/lib/libgcc_s.so.1",
+      186448,
+      "ldd"
+     ],
+     [
+      "/nix/store/rvnndr8z6j9ybgc7bfbrvbhylyf3wi5j-libdisplay-info-0.4.0/lib/libdisplay-info.so.0.4.0",
+      235384,
+      "ldd"
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0/lib/libwayland-client.so.0.26.0",
+      84856,
+      "ldd"
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0/lib/libwayland-cursor.so.0.26.0",
+      35360,
+      "ldd"
+     ],
+     [
+      "/nix/store/wb232z007b8qynidq89lli8lb2c4q0r4-libffi-3.8.0/lib/libffi.so.8.5.0",
+      84056,
+      "ldd"
+     ],
+     [
+      "/nix/store/wry9fp6v17rykg7dyhafxw4a057938jp-dav1d-1.5.3/lib/libdav1d.so.7.0.0",
+      1767304,
+      "ldd"
+     ],
+     [
+      "/nix/store/xz5xsq0nihfs15fbknz5w0yblg04760q-bzip2-1.0.8/lib/libbz2.so.1.0.8",
+      82904,
+      "ldd"
+     ],
+     [
+      "/nix/store/yk95z4hjlzdk418px0fc797qszccfj5p-libxkbcommon-1.13.2/lib/libxkbcommon.so.0.13.2",
+      391320,
+      "ldd"
+     ],
+     [
+      "/nix/store/ykrpgmrrdm7w22dykziy6l61ic6i1d3w-file-5.48/lib/libmagic.so.1.0.0",
+      186640,
+      "ldd"
+     ],
+     [
+      "/nix/store/ynkfnhpgkwrql2mhdkggpxj1yhpdhwc9-librsvg-2.62.3/lib/librsvg-2.so.2.62.3",
+      6153432,
+      "ldd"
+     ],
+     [
+      "/nix/store/zz125vwahb637g5ckl046ll8fcqmc8pk-ncurses-6.6/lib/libncursesw.so.6.6",
+      502976,
+      "ldd"
+     ]
+    ],
+    "package_bytes": 707911,
+    "closure_bytes": 164946832,
+    "closure_paths": [
+     [
+      "/nix/store/00s8a1232vhvgg7jdslifsnqzkl8wxj1-libdrm-2.4.134-bin",
+      550792
+     ],
+     [
+      "/nix/store/0hglvgwr3b7h2hhypvif689yslqsjhlp-hyprutils-0.14.1",
+      626752
+     ],
+     [
+      "/nix/store/0vqb1mcas5j8dv6bhbrshinlgsg6bvgi-gcc-15.3.0-lib",
+      10317392
+     ],
+     [
+      "/nix/store/17xmg38m60inc59az3frp540ccrwn2r8-util-linux-minimal-2.42.2-lib",
+      2100440
+     ],
+     [
+      "/nix/store/2f0xdvgl9csjsc2yhnfpgm6qyzcypwxl-libdeflate-1.25",
+      469632
+     ],
+     [
+      "/nix/store/2gkqj0v0msfcagwf5ix199rf1lnwf2a1-expat-2.8.3",
+      322464
+     ],
+     [
+      "/nix/store/31gqpwmcy48xfqbd2m1h6hjh4y8fw5sv-libwacom-2.20.0",
+      1782096
+     ],
+     [
+      "/nix/store/3rynmgnsaz28k69zs2gfqwqnz0ayps5c-lerc-4.2.0",
+      845416
+     ],
+     [
+      "/nix/store/3vlnkr6z7hh86rrn087df45s4cfjxy65-libx11-1.8.13",
+      2700240
+     ],
+     [
+      "/nix/store/48mby3a310a38chigwfxd1fxpcn465iw-libdatrie-2019-12-20-lib",
+      43240
+     ],
+     [
+      "/nix/store/4hlgp6r4j5p6b2b9sxw01cba0x3fjxd6-systemd-minimal-libs-261.2",
+      4453096
+     ],
+     [
+      "/nix/store/4vij9dvkfsdglc3mng0ib3fflam2j9k9-xkeyboard-config-2.48",
+      10828808
+     ],
+     [
+      "/nix/store/5qg70j0rzbxqlxlzrq87k4ksgzdwrwr6-libdrm-2.4.134",
+      637752
+     ],
+     [
+      "/nix/store/5xym1gmpk8kxl2vvfaaxja52qap9g49l-util-linux-minimal-2.42.2-login",
+      98336
+     ],
+     [
+      "/nix/store/65582sxlfkllmxwp1l4dwbsfzymzyxry-pango-1.57.1",
+      939376
+     ],
+     [
+      "/nix/store/66fky3kgvwffycw067rb7yih282ibzzs-libtiff-4.7.2",
+      766176
+     ],
+     [
+      "/nix/store/71437l93dh58b1r4z1kai3337if73i8x-hwdata-0.410",
+      10514376
+     ],
+     [
+      "/nix/store/7r6rbqyi0pqzyjps1yfg6s3k56mpli1k-mesa-libgbm-26.1.3",
+      59648
+     ],
+     [
+      "/nix/store/88rpjhka2v8d01frjnsl6chvlv9lnvjc-libselinux-3.10",
+      708368
+     ],
+     [
+      "/nix/store/8kmh5aaiadz1vfv1nal7vf3x41b2l92j-pixman-0.46.4",
+      878864
+     ],
+     [
+      "/nix/store/8ycs9ymrnjsa4qm7xzj0mcv8lww73zy5-aquamarine-0.15.0",
+      1843904
+     ],
+     [
+      "/nix/store/9g3536ribbggd4swm4bwk8sknsddfl3j-libxml2-2.15.3",
+      1460416
+     ],
+     [
+      "/nix/store/9ipfvwnqp1q8ijnmi5sxvlx9r8w34lw3-bash-5.3p15",
+      1856848
+     ],
+     [
+      "/nix/store/9mlc8y3ykj14p4nwadw93g4s8zgw4skn-gdk-pixbuf-2.44.7",
+      2992192
+     ],
+     [
+      "/nix/store/9prflf4bwfhj2ig7b9kchjgpmknv4k34-libjxl-0.12.0",
+      7264672
+     ],
+     [
+      "/nix/store/9rrrpdv2wqvsdm2ipm5q893hnhn410x5-iniparser-4.2.6",
+      94520
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3",
+      16119128
+     ],
+     [
+      "/nix/store/avkwd1sfvr31c5ffd06qj0grvyp9pb2w-libxrender-0.9.12",
+      54504
+     ],
+     [
+      "/nix/store/b5srcmnr8b5d3gfyfs3hnr871cw5r6hz-hyprgraphics-0.5.1",
+      295768
+     ],
+     [
+      "/nix/store/bdwsskqikgdlq94xqh5dvyd8263w995g-xz-5.8.3",
+      857952
+     ],
+     [
+      "/nix/store/bn8sa8p2ss2y03iwsyy5w6nlzmfd9avg-harfbuzz-13.2.1",
+      3896464
+     ],
+     [
+      "/nix/store/bwaay526pyr0wf3wksskivgxzriyrmld-libwebp-1.6.0",
+      1768368
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib",
+      984976
+     ],
+     [
+      "/nix/store/c6mgy63s5y1353152dp2s2jaig026j3h-readline-8.3p3",
+      506392
+     ],
+     [
+      "/nix/store/cj9443b6ljpw3pzxa3x3ck7vrig9kkc0-pcre2-10.47",
+      2070936
+     ],
+     [
+      "/nix/store/d3f7r44z2px98z479jgf7qdwqn96jgf6-libpng-apng-1.6.58",
+      275792
+     ],
+     [
+      "/nix/store/d3n2cs7qbbhk6zyfmfkpcf6rmwam9k5h-lcms2-2.19.1",
+      496480
+     ],
+     [
+      "/nix/store/dczkv6755chri9gsvacxvqpz9nn2dwld-freetype-2.14.3",
+      2264808
+     ],
+     [
+      "/nix/store/f6dwfsb4acd9j6w5zn2wnd6h0xp7g66b-gcc-16.2.0-lib",
+      10956832
+     ],
+     [
+      "/nix/store/fnwi54n3m48apqgfl6dskyc5zd2bxjp8-fribidi-1.0.16",
+      166400
+     ],
+     [
+      "/nix/store/gg5b91g46ygd5vhw88413skmcspz21nh-giflib-6.1.3",
+      487320
+     ],
+     [
+      "/nix/store/gkb9jhxirg79jv66m4yc2pkvn5za9glm-libxdmcp-1.1.5",
+      31912
+     ],
+     [
+      "/nix/store/gki150fq2gx6751cqjc9ylc2636h2hax-hyprpaper-0.8.4",
+      709648
+     ],
+     [
+      "/nix/store/gp7lq22jam3lg45fb21f5n9ix6bamygw-hyprlang-0.6.8",
+      350248
+     ],
+     [
+      "/nix/store/haz6abmiclbh3azv6pgf5siapvy0hwpp-lua-5.4.7",
+      1478232
+     ],
+     [
+      "/nix/store/hb0hj3g9q4j8krlvvkjhsjlp5zrylyli-libevdev-1.13.6",
+      292152
+     ],
+     [
+      "/nix/store/imkw2kilahmpk5c2n0img67wq8ij717v-cairo-1.18.4",
+      2171680
+     ],
+     [
+      "/nix/store/iv0yvsywa1v35xzdkqz9wdzhg7vshpdd-fontconfig-2.18.2-lib",
+      582360
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0",
+      1449264
+     ],
+     [
+      "/nix/store/jyi49s6rj18mbnx043hvybd96b4dsvpp-hyprtoolkit-0.5.4",
+      2306832
+     ],
+     [
+      "/nix/store/kcxkmyisz384sfvd0535l9554j5vqfsn-libinput-1.31.3",
+      753920
+     ],
+     [
+      "/nix/store/l1fjl92acmmvcny3npkzg66gy5zmykw7-libthai-0.1.30",
+      652312
+     ],
+     [
+      "/nix/store/l3p6y554mkxi4vipnnp8809kxj0g1lyv-zlib-1.3.2",
+      132608
+     ],
+     [
+      "/nix/store/l5jr25rp7i6pmd3ia0yg8mzlxkg2kh1r-hyprwire-0.3.1",
+      993560
+     ],
+     [
+      "/nix/store/m51xyp95w4gnhcbncz6xi0x5519m293i-libxext-1.3.7",
+      95944
+     ],
+     [
+      "/nix/store/n85m9i06xz4hybyn7pj6z2q9hpr0908r-libgudev-238",
+      75024
+     ],
+     [
+      "/nix/store/nc95dy5ln9slqmw1s151mk30ks5f6na6-libjpeg-turbo-3.1.4.1",
+      2057824
+     ],
+     [
+      "/nix/store/p3s3wkz0s0xkgxnrn7x99w1bl6hd8283-libdrm-2.4.134-dev",
+      838008
+     ],
+     [
+      "/nix/store/pfww4nv3wkgpyk1jvqqpz6ymxgj7cbbh-libxcrypt-4.5.2",
+      144384
+     ],
+     [
+      "/nix/store/pzzhfsqwm0y9l32b62gfbsk6sr1xh27q-mtdev-1.1.7",
+      59896
+     ],
+     [
+      "/nix/store/qdbcjg7j3rxr1bvh1qhldk5aqjz7vlx6-fontconfig-2.18.2",
+      1298528
+     ],
+     [
+      "/nix/store/qdz612hkm62xikmm4b4wkcj8pc7y9lm9-libpciaccess-0.19",
+      176112
+     ],
+     [
+      "/nix/store/qdzn5piljhvzcjwxkxfyi0bc0m215wdb-libxau-1.0.12",
+      27792
+     ],
+     [
+      "/nix/store/r3k50gmygh9r5jbdz2a402aszav2zd7d-graphite2-1.3.15",
+      233464
+     ],
+     [
+      "/nix/store/rarvfpm927fcbd6b9p0crg09w9r3ywb3-libglvnd-1.7.0",
+      2620480
+     ],
+     [
+      "/nix/store/rcwvn48vi65zr4jzgk0rp3y7czfd1a9m-seatd-0.9.3",
+      89152
+     ],
+     [
+      "/nix/store/rfc4532vl951yraz9dwcj1lahpm7r6sk-lzo-2.10",
+      163496
+     ],
+     [
+      "/nix/store/rk1a1a0wws40a6vz9r8qbmvcfnkirzx5-gcc-16.2.0-libgcc",
+      202344
+     ],
+     [
+      "/nix/store/rvnndr8z6j9ybgc7bfbrvbhylyf3wi5j-libdisplay-info-0.4.0",
+      448520
+     ],
+     [
+      "/nix/store/s17x7bnrq6yxyq7bczn6z0vqscz3dj42-zlib-1.3.2-static",
+      152912
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0",
+      274840
+     ],
+     [
+      "/nix/store/wb232z007b8qynidq89lli8lb2c4q0r4-libffi-3.8.0",
+      95792
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc",
+      197752
+     ],
+     [
+      "/nix/store/wry9fp6v17rykg7dyhafxw4a057938jp-dav1d-1.5.3",
+      2642136
+     ],
+     [
+      "/nix/store/xcwclh5qgw2x6qc39x6ixara06xczzlw-zstd-1.5.7",
+      1202224
+     ],
+     [
+      "/nix/store/xz5xsq0nihfs15fbknz5w0yblg04760q-bzip2-1.0.8",
+      88952
+     ],
+     [
+      "/nix/store/yk95z4hjlzdk418px0fc797qszccfj5p-libxkbcommon-1.13.2",
+      1113832
+     ],
+     [
+      "/nix/store/ykrpgmrrdm7w22dykziy6l61ic6i1d3w-file-5.48",
+      11036360
+     ],
+     [
+      "/nix/store/ynkfnhpgkwrql2mhdkggpxj1yhpdhwc9-librsvg-2.62.3",
+      16562744
+     ],
+     [
+      "/nix/store/za163pxnk1r2n8rrajqby7qiv5ha38cb-libxft-2.3.9",
+      154624
+     ],
+     [
+      "/nix/store/zqhby0xidpi0xsafsbl4l7dc72imqqq6-dejavu-fonts-minimal-2.37",
+      760472
+     ],
+     [
+      "/nix/store/zz125vwahb637g5ckl046ll8fcqmc8pk-ncurses-6.6",
+      3870560
+     ]
+    ],
+    "disk_bytes": 164946832
+   }
+  },
+  "swaybg": {
+   "version": "1.2.2",
+   "store": "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2",
+   "nix_attr": "swaybg",
+   "binaries": [
+    {
+     "path": "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2/bin/.swaybg-wrapped",
+     "realpath": "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2/bin/.swaybg-wrapped",
+     "sha256": "9ce86aafefd688183e1c4f04a80ca1f64e3a1f4c4467aca16008bef8fe7b322b"
+    }
+   ],
+   "needs_egl": false,
+   "informational": false,
+   "ran": true,
+   "exe": {
+    "path": "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2/bin/.swaybg-wrapped",
+    "realpath": "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2/bin/.swaybg-wrapped",
+    "sha256": "9ce86aafefd688183e1c4f04a80ca1f64e3a1f4c4467aca16008bef8fe7b322b"
+   },
+   "static": {
+    "binaries_bytes": 43824,
+    "ldd_libraries_bytes": 13415560,
+    "size_bytes": 13459384,
+    "runtime_only_bytes": 0,
+    "files": [
+     [
+      "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2/bin/.swaybg-wrapped",
+      43824,
+      "binary"
+     ],
+     [
+      "/nix/store/17xmg38m60inc59az3frp540ccrwn2r8-util-linux-minimal-2.42.2-lib/lib/libblkid.so.1.1.0",
+      404504,
+      "ldd"
+     ],
+     [
+      "/nix/store/17xmg38m60inc59az3frp540ccrwn2r8-util-linux-minimal-2.42.2-lib/lib/libmount.so.1.1.0",
+      523000,
+      "ldd"
+     ],
+     [
+      "/nix/store/2gkqj0v0msfcagwf5ix199rf1lnwf2a1-expat-2.8.3/lib/libexpat.so.1.12.3",
+      190400,
+      "ldd"
+     ],
+     [
+      "/nix/store/3vlnkr6z7hh86rrn087df45s4cfjxy65-libx11-1.8.13/lib/libX11.so.6.4.0",
+      1374552,
+      "ldd"
+     ],
+     [
+      "/nix/store/88rpjhka2v8d01frjnsl6chvlv9lnvjc-libselinux-3.10/lib/libselinux.so.1",
+      211192,
+      "ldd"
+     ],
+     [
+      "/nix/store/8kmh5aaiadz1vfv1nal7vf3x41b2l92j-pixman-0.46.4/lib/libpixman-1.so.0.46.4",
+      759928,
+      "ldd"
+     ],
+     [
+      "/nix/store/9mlc8y3ykj14p4nwadw93g4s8zgw4skn-gdk-pixbuf-2.44.7/lib/libgdk_pixbuf-2.0.so.0.4400.7",
+      190592,
+      "ldd"
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3/lib/libgio-2.0.so.0.8800.3",
+      2183728,
+      "ldd"
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3/lib/libglib-2.0.so.0.8800.3",
+      1448360,
+      "ldd"
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3/lib/libgmodule-2.0.so.0.8800.3",
+      22528,
+      "ldd"
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3/lib/libgobject-2.0.so.0.8800.3",
+      409584,
+      "ldd"
+     ],
+     [
+      "/nix/store/avkwd1sfvr31c5ffd06qj0grvyp9pb2w-libxrender-0.9.12/lib/libXrender.so.1.3.0",
+      47240,
+      "ldd"
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib/lib/libbrotlicommon.so.1.2.0",
+      141248,
+      "ldd"
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib/lib/libbrotlidec.so.1.2.0",
+      55160,
+      "ldd"
+     ],
+     [
+      "/nix/store/cj9443b6ljpw3pzxa3x3ck7vrig9kkc0-pcre2-10.47/lib/libpcre2-8.so.0.15.0",
+      710960,
+      "ldd"
+     ],
+     [
+      "/nix/store/d3f7r44z2px98z479jgf7qdwqn96jgf6-libpng-apng-1.6.58/lib/libpng16.so.16.58.0",
+      247824,
+      "ldd"
+     ],
+     [
+      "/nix/store/dczkv6755chri9gsvacxvqpz9nn2dwld-freetype-2.14.3/lib/libfreetype.so.6.20.6",
+      944064,
+      "ldd"
+     ],
+     [
+      "/nix/store/gkb9jhxirg79jv66m4yc2pkvn5za9glm-libxdmcp-1.1.5/lib/libXdmcp.so.6.0.0",
+      26488,
+      "ldd"
+     ],
+     [
+      "/nix/store/imkw2kilahmpk5c2n0img67wq8ij717v-cairo-1.18.4/lib/libcairo.so.2.11804.4",
+      1469240,
+      "ldd"
+     ],
+     [
+      "/nix/store/iv0yvsywa1v35xzdkqz9wdzhg7vshpdd-fontconfig-2.18.2-lib/lib/libfontconfig.so.1.16.1",
+      489416,
+      "ldd"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-render.so.0.0.0",
+      59352,
+      "ldd"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-shm.so.0.0.0",
+      14296,
+      "ldd"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb.so.1.1.0",
+      178168,
+      "ldd"
+     ],
+     [
+      "/nix/store/l3p6y554mkxi4vipnnp8809kxj0g1lyv-zlib-1.3.2/lib/libz.so.1.3.2",
+      120848,
+      "ldd"
+     ],
+     [
+      "/nix/store/m51xyp95w4gnhcbncz6xi0x5519m293i-libxext-1.3.7/lib/libXext.so.6.4.0",
+      81040,
+      "ldd"
+     ],
+     [
+      "/nix/store/nc95dy5ln9slqmw1s151mk30ks5f6na6-libjpeg-turbo-3.1.4.1/lib/libjpeg.so.62.4.0",
+      841736,
+      "ldd"
+     ],
+     [
+      "/nix/store/qdzn5piljhvzcjwxkxfyi0bc0m215wdb-libxau-1.0.12/lib/libXau.so.6.0.0",
+      18296,
+      "ldd"
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0/lib/libwayland-client.so.0.26.0",
+      84856,
+      "ldd"
+     ],
+     [
+      "/nix/store/wb232z007b8qynidq89lli8lb2c4q0r4-libffi-3.8.0/lib/libffi.so.8.5.0",
+      84056,
+      "ldd"
+     ],
+     [
+      "/nix/store/xz5xsq0nihfs15fbknz5w0yblg04760q-bzip2-1.0.8/lib/libbz2.so.1.0.8",
+      82904,
+      "ldd"
+     ]
+    ],
+    "package_bytes": 69566,
+    "closure_bytes": 94586520,
+    "closure_paths": [
+     [
+      "/nix/store/0vqb1mcas5j8dv6bhbrshinlgsg6bvgi-gcc-15.3.0-lib",
+      10317392
+     ],
+     [
+      "/nix/store/17xmg38m60inc59az3frp540ccrwn2r8-util-linux-minimal-2.42.2-lib",
+      2100440
+     ],
+     [
+      "/nix/store/2f0xdvgl9csjsc2yhnfpgm6qyzcypwxl-libdeflate-1.25",
+      469632
+     ],
+     [
+      "/nix/store/2gkqj0v0msfcagwf5ix199rf1lnwf2a1-expat-2.8.3",
+      322464
+     ],
+     [
+      "/nix/store/3rynmgnsaz28k69zs2gfqwqnz0ayps5c-lerc-4.2.0",
+      845416
+     ],
+     [
+      "/nix/store/3vlnkr6z7hh86rrn087df45s4cfjxy65-libx11-1.8.13",
+      2700240
+     ],
+     [
+      "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2",
+      70968
+     ],
+     [
+      "/nix/store/48mby3a310a38chigwfxd1fxpcn465iw-libdatrie-2019-12-20-lib",
+      43240
+     ],
+     [
+      "/nix/store/65582sxlfkllmxwp1l4dwbsfzymzyxry-pango-1.57.1",
+      939376
+     ],
+     [
+      "/nix/store/66fky3kgvwffycw067rb7yih282ibzzs-libtiff-4.7.2",
+      766176
+     ],
+     [
+      "/nix/store/6bi0c07q7xrmz8jzws6lh58yv1zzxs3k-webp-pixbuf-loader-0.2.7",
+      40104
+     ],
+     [
+      "/nix/store/88rpjhka2v8d01frjnsl6chvlv9lnvjc-libselinux-3.10",
+      708368
+     ],
+     [
+      "/nix/store/8kmh5aaiadz1vfv1nal7vf3x41b2l92j-pixman-0.46.4",
+      878864
+     ],
+     [
+      "/nix/store/9g3536ribbggd4swm4bwk8sknsddfl3j-libxml2-2.15.3",
+      1460416
+     ],
+     [
+      "/nix/store/9ipfvwnqp1q8ijnmi5sxvlx9r8w34lw3-bash-5.3p15",
+      1856848
+     ],
+     [
+      "/nix/store/9mlc8y3ykj14p4nwadw93g4s8zgw4skn-gdk-pixbuf-2.44.7",
+      2992192
+     ],
+     [
+      "/nix/store/9prflf4bwfhj2ig7b9kchjgpmknv4k34-libjxl-0.12.0",
+      7264672
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3",
+      16119128
+     ],
+     [
+      "/nix/store/avkwd1sfvr31c5ffd06qj0grvyp9pb2w-libxrender-0.9.12",
+      54504
+     ],
+     [
+      "/nix/store/bdwsskqikgdlq94xqh5dvyd8263w995g-xz-5.8.3",
+      857952
+     ],
+     [
+      "/nix/store/bn8sa8p2ss2y03iwsyy5w6nlzmfd9avg-harfbuzz-13.2.1",
+      3896464
+     ],
+     [
+      "/nix/store/bwaay526pyr0wf3wksskivgxzriyrmld-libwebp-1.6.0",
+      1768368
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib",
+      984976
+     ],
+     [
+      "/nix/store/cj9443b6ljpw3pzxa3x3ck7vrig9kkc0-pcre2-10.47",
+      2070936
+     ],
+     [
+      "/nix/store/d1paxi4liflbk1k3wxk3671if6sdjcv2-dconf-0.49.0-lib",
+      332304
+     ],
+     [
+      "/nix/store/d3f7r44z2px98z479jgf7qdwqn96jgf6-libpng-apng-1.6.58",
+      275792
+     ],
+     [
+      "/nix/store/d3n2cs7qbbhk6zyfmfkpcf6rmwam9k5h-lcms2-2.19.1",
+      496480
+     ],
+     [
+      "/nix/store/dczkv6755chri9gsvacxvqpz9nn2dwld-freetype-2.14.3",
+      2264808
+     ],
+     [
+      "/nix/store/fnwi54n3m48apqgfl6dskyc5zd2bxjp8-fribidi-1.0.16",
+      166400
+     ],
+     [
+      "/nix/store/gg5b91g46ygd5vhw88413skmcspz21nh-giflib-6.1.3",
+      487320
+     ],
+     [
+      "/nix/store/gkb9jhxirg79jv66m4yc2pkvn5za9glm-libxdmcp-1.1.5",
+      31912
+     ],
+     [
+      "/nix/store/imkw2kilahmpk5c2n0img67wq8ij717v-cairo-1.18.4",
+      2171680
+     ],
+     [
+      "/nix/store/iv0yvsywa1v35xzdkqz9wdzhg7vshpdd-fontconfig-2.18.2-lib",
+      582360
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0",
+      1449264
+     ],
+     [
+      "/nix/store/l1fjl92acmmvcny3npkzg66gy5zmykw7-libthai-0.1.30",
+      652312
+     ],
+     [
+      "/nix/store/l3p6y554mkxi4vipnnp8809kxj0g1lyv-zlib-1.3.2",
+      132608
+     ],
+     [
+      "/nix/store/m51xyp95w4gnhcbncz6xi0x5519m293i-libxext-1.3.7",
+      95944
+     ],
+     [
+      "/nix/store/nc95dy5ln9slqmw1s151mk30ks5f6na6-libjpeg-turbo-3.1.4.1",
+      2057824
+     ],
+     [
+      "/nix/store/p5m6lryjf4k4w19p8j4dp3sazksh5j81-gdk-pixbuf-loaders.cache",
+      4648
+     ],
+     [
+      "/nix/store/qdbcjg7j3rxr1bvh1qhldk5aqjz7vlx6-fontconfig-2.18.2",
+      1298528
+     ],
+     [
+      "/nix/store/qdzn5piljhvzcjwxkxfyi0bc0m215wdb-libxau-1.0.12",
+      27792
+     ],
+     [
+      "/nix/store/r3k50gmygh9r5jbdz2a402aszav2zd7d-graphite2-1.3.15",
+      233464
+     ],
+     [
+      "/nix/store/rfc4532vl951yraz9dwcj1lahpm7r6sk-lzo-2.10",
+      163496
+     ],
+     [
+      "/nix/store/s17x7bnrq6yxyq7bczn6z0vqscz3dj42-zlib-1.3.2-static",
+      152912
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0",
+      274840
+     ],
+     [
+      "/nix/store/wb232z007b8qynidq89lli8lb2c4q0r4-libffi-3.8.0",
+      95792
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc",
+      197752
+     ],
+     [
+      "/nix/store/wry9fp6v17rykg7dyhafxw4a057938jp-dav1d-1.5.3",
+      2642136
+     ],
+     [
+      "/nix/store/xcwclh5qgw2x6qc39x6ixara06xczzlw-zstd-1.5.7",
+      1202224
+     ],
+     [
+      "/nix/store/xz5xsq0nihfs15fbknz5w0yblg04760q-bzip2-1.0.8",
+      88952
+     ],
+     [
+      "/nix/store/ynkfnhpgkwrql2mhdkggpxj1yhpdhwc9-librsvg-2.62.3",
+      16562744
+     ],
+     [
+      "/nix/store/za163pxnk1r2n8rrajqby7qiv5ha38cb-libxft-2.3.9",
+      154624
+     ],
+     [
+      "/nix/store/zqhby0xidpi0xsafsbl4l7dc72imqqq6-dejavu-fonts-minimal-2.37",
+      760472
+     ]
+    ],
+    "disk_bytes": 94586520
+   }
+  },
+  "wbg": {
+   "version": "1.3.0",
+   "store": "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0",
+   "nix_attr": "wbg",
+   "binaries": [
+    {
+     "path": "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0/bin/wbg",
+     "realpath": "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0/bin/wbg",
+     "sha256": "11909bf3b65d0fd59fd2c64448803907022d287351a6c0b5575b4999277e9318"
+    }
+   ],
+   "needs_egl": false,
+   "informational": false,
+   "ran": true,
+   "exe": {
+    "path": "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0/bin/wbg",
+    "realpath": "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0/bin/wbg",
+    "sha256": "11909bf3b65d0fd59fd2c64448803907022d287351a6c0b5575b4999277e9318"
+   },
+   "static": {
+    "binaries_bytes": 135904,
+    "ldd_libraries_bytes": 13167880,
+    "size_bytes": 13303784,
+    "runtime_only_bytes": 0,
+    "files": [
+     [
+      "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0/bin/wbg",
+      135904,
+      "binary"
+     ],
+     [
+      "/nix/store/0vqb1mcas5j8dv6bhbrshinlgsg6bvgi-gcc-15.3.0-lib/lib/libstdc++.so.6.0.34",
+      2611848,
+      "ldd"
+     ],
+     [
+      "/nix/store/8kmh5aaiadz1vfv1nal7vf3x41b2l92j-pixman-0.46.4/lib/libpixman-1.so.0.46.4",
+      759928,
+      "ldd"
+     ],
+     [
+      "/nix/store/9prflf4bwfhj2ig7b9kchjgpmknv4k34-libjxl-0.12.0/lib/libjxl.so.0.12.0",
+      5953568,
+      "ldd"
+     ],
+     [
+      "/nix/store/9prflf4bwfhj2ig7b9kchjgpmknv4k34-libjxl-0.12.0/lib/libjxl_cms.so.0.12.0",
+      104472,
+      "ldd"
+     ],
+     [
+      "/nix/store/9prflf4bwfhj2ig7b9kchjgpmknv4k34-libjxl-0.12.0/lib/libjxl_threads.so.0.12.0",
+      22544,
+      "ldd"
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib/lib/libbrotlicommon.so.1.2.0",
+      141248,
+      "ldd"
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib/lib/libbrotlidec.so.1.2.0",
+      55160,
+      "ldd"
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib/lib/libbrotlienc.so.1.2.0",
+      768472,
+      "ldd"
+     ],
+     [
+      "/nix/store/d3f7r44z2px98z479jgf7qdwqn96jgf6-libpng-apng-1.6.58/lib/libpng16.so.16.58.0",
+      247824,
+      "ldd"
+     ],
+     [
+      "/nix/store/d3n2cs7qbbhk6zyfmfkpcf6rmwam9k5h-lcms2-2.19.1/lib/liblcms2.so.2.0.19",
+      435288,
+      "ldd"
+     ],
+     [
+      "/nix/store/dd1b6nsyiaix25q3qfhxxvvnmskqiy4s-libwebp-1.6.0/lib/libsharpyuv.so.0.1.2",
+      30600,
+      "ldd"
+     ],
+     [
+      "/nix/store/dd1b6nsyiaix25q3qfhxxvvnmskqiy4s-libwebp-1.6.0/lib/libwebp.so.7.2.0",
+      723080,
+      "ldd"
+     ],
+     [
+      "/nix/store/l3p6y554mkxi4vipnnp8809kxj0g1lyv-zlib-1.3.2/lib/libz.so.1.3.2",
+      120848,
+      "ldd"
+     ],
+     [
+      "/nix/store/nc95dy5ln9slqmw1s151mk30ks5f6na6-libjpeg-turbo-3.1.4.1/lib/libjpeg.so.62.4.0",
+      841736,
+      "ldd"
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0/lib/libwayland-client.so.0.26.0",
+      84856,
+      "ldd"
+     ],
+     [
+      "/nix/store/wb232z007b8qynidq89lli8lb2c4q0r4-libffi-3.8.0/lib/libffi.so.8.5.0",
+      84056,
+      "ldd"
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc/lib/libgcc_s.so.1",
+      182352,
+      "ldd"
+     ]
+    ],
+    "package_bytes": 149208,
+    "closure_bytes": 57149648,
+    "closure_paths": [
+     [
+      "/nix/store/0vqb1mcas5j8dv6bhbrshinlgsg6bvgi-gcc-15.3.0-lib",
+      10317392
+     ],
+     [
+      "/nix/store/17xmg38m60inc59az3frp540ccrwn2r8-util-linux-minimal-2.42.2-lib",
+      2100440
+     ],
+     [
+      "/nix/store/2f0xdvgl9csjsc2yhnfpgm6qyzcypwxl-libdeflate-1.25",
+      469632
+     ],
+     [
+      "/nix/store/3rynmgnsaz28k69zs2gfqwqnz0ayps5c-lerc-4.2.0",
+      845416
+     ],
+     [
+      "/nix/store/66fky3kgvwffycw067rb7yih282ibzzs-libtiff-4.7.2",
+      766176
+     ],
+     [
+      "/nix/store/88rpjhka2v8d01frjnsl6chvlv9lnvjc-libselinux-3.10",
+      708368
+     ],
+     [
+      "/nix/store/8kmh5aaiadz1vfv1nal7vf3x41b2l92j-pixman-0.46.4",
+      878864
+     ],
+     [
+      "/nix/store/9ipfvwnqp1q8ijnmi5sxvlx9r8w34lw3-bash-5.3p15",
+      1856848
+     ],
+     [
+      "/nix/store/9mlc8y3ykj14p4nwadw93g4s8zgw4skn-gdk-pixbuf-2.44.7",
+      2992192
+     ],
+     [
+      "/nix/store/9prflf4bwfhj2ig7b9kchjgpmknv4k34-libjxl-0.12.0",
+      7264672
+     ],
+     [
+      "/nix/store/a3hr0l5skscvbkcr7kz3nhi4linz1p71-glib-2.88.3",
+      16119128
+     ],
+     [
+      "/nix/store/bdwsskqikgdlq94xqh5dvyd8263w995g-xz-5.8.3",
+      857952
+     ],
+     [
+      "/nix/store/bwaay526pyr0wf3wksskivgxzriyrmld-libwebp-1.6.0",
+      1768368
+     ],
+     [
+      "/nix/store/c56x66gbj3qwv3g7dhadcfiq408q2hay-brotli-1.2.0-lib",
+      984976
+     ],
+     [
+      "/nix/store/cj9443b6ljpw3pzxa3x3ck7vrig9kkc0-pcre2-10.47",
+      2070936
+     ],
+     [
+      "/nix/store/d3f7r44z2px98z479jgf7qdwqn96jgf6-libpng-apng-1.6.58",
+      275792
+     ],
+     [
+      "/nix/store/d3n2cs7qbbhk6zyfmfkpcf6rmwam9k5h-lcms2-2.19.1",
+      496480
+     ],
+     [
+      "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0",
+      149688
+     ],
+     [
+      "/nix/store/dd1b6nsyiaix25q3qfhxxvvnmskqiy4s-libwebp-1.6.0",
+      1777968
+     ],
+     [
+      "/nix/store/gg5b91g46ygd5vhw88413skmcspz21nh-giflib-6.1.3",
+      487320
+     ],
+     [
+      "/nix/store/l3p6y554mkxi4vipnnp8809kxj0g1lyv-zlib-1.3.2",
+      132608
+     ],
+     [
+      "/nix/store/nc95dy5ln9slqmw1s151mk30ks5f6na6-libjpeg-turbo-3.1.4.1",
+      2057824
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0",
+      274840
+     ],
+     [
+      "/nix/store/wb232z007b8qynidq89lli8lb2c4q0r4-libffi-3.8.0",
+      95792
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc",
+      197752
+     ],
+     [
+      "/nix/store/xcwclh5qgw2x6qc39x6ixara06xczzlw-zstd-1.5.7",
+      1202224
+     ]
+    ],
+    "disk_bytes": 57149648
+   }
+  },
+  "wpaperd": {
+   "version": "1.3.0",
+   "store": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0",
+   "nix_attr": "wpaperd",
+   "binaries": [
+    {
+     "path": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperd",
+     "realpath": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperd",
+     "sha256": "a93e37c492a6de74e0b8e731c166bb55f181cb74a03ea8af9168980d8df7c6ca"
+    },
+    {
+     "path": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperctl",
+     "realpath": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperctl",
+     "sha256": "379fb812c01cc59d0d36126ccf8862580050544c45565d87f5ad2120b8cf079f"
+    }
+   ],
+   "needs_egl": true,
+   "informational": false,
+   "ran": true,
+   "exe": {
+    "path": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperd",
+    "realpath": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperd",
+    "sha256": "a93e37c492a6de74e0b8e731c166bb55f181cb74a03ea8af9168980d8df7c6ca"
+   },
+   "static": {
+    "binaries_bytes": 8786744,
+    "ldd_libraries_bytes": 6500920,
+    "size_bytes": 15287664,
+    "runtime_only_bytes": 230257248,
+    "files": [
+     [
+      "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperd",
+      7748872,
+      "binary"
+     ],
+     [
+      "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperctl",
+      1037872,
+      "binary"
+     ],
+     [
+      "/nix/store/0vqb1mcas5j8dv6bhbrshinlgsg6bvgi-gcc-15.3.0-lib/lib/libstdc++.so.6.0.34",
+      2611848,
+      "ldd"
+     ],
+     [
+      "/nix/store/aw2cplndjs2z6sxb7kma7k25aars90wx-jemalloc-5.3.1/lib/libjemalloc.so.2",
+      945216,
+      "ldd"
+     ],
+     [
+      "/nix/store/rarvfpm927fcbd6b9p0crg09w9r3ywb3-libglvnd-1.7.0/lib/libEGL.so.1.1.0",
+      88048,
+      "ldd"
+     ],
+     [
+      "/nix/store/rarvfpm927fcbd6b9p0crg09w9r3ywb3-libglvnd-1.7.0/lib/libGLdispatch.so.0.0.0",
+      723032,
+      "ldd"
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0/lib/libwayland-client.so.0.26.0",
+      84856,
+      "ldd"
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0/lib/libwayland-egl.so.1.26.0",
+      14208,
+      "ldd"
+     ],
+     [
+      "/nix/store/wb232z007b8qynidq89lli8lb2c4q0r4-libffi-3.8.0/lib/libffi.so.8.5.0",
+      84056,
+      "ldd"
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc/lib/libgcc_s.so.1",
+      182352,
+      "ldd"
+     ],
+     [
+      "/nix/store/wry9fp6v17rykg7dyhafxw4a057938jp-dav1d-1.5.3/lib/libdav1d.so.7.0.0",
+      1767304,
+      "ldd"
+     ],
+     [
+      "/nix/store/2gkqj0v0msfcagwf5ix199rf1lnwf2a1-expat-2.8.3/lib/libexpat.so.1.12.3",
+      190400,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/3cfcygkbamw4b9snazj1xl4x5snhf62c-elfutils-0.195/lib/libelf-0.195.so",
+      121000,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/3vlnkr6z7hh86rrn087df45s4cfjxy65-libx11-1.8.13/lib/libX11-xcb.so.1.0.0",
+      14056,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/3vlnkr6z7hh86rrn087df45s4cfjxy65-libx11-1.8.13/lib/libX11.so.6.4.0",
+      1374552,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/5qg70j0rzbxqlxlzrq87k4ksgzdwrwr6-libdrm-2.4.134/lib/libdrm.so.2.134.0",
+      100288,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/5qg70j0rzbxqlxlzrq87k4ksgzdwrwr6-libdrm-2.4.134/lib/libdrm_amdgpu.so.1.134.0",
+      51064,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/5qg70j0rzbxqlxlzrq87k4ksgzdwrwr6-libdrm-2.4.134/lib/libdrm_intel.so.1.134.0",
+      159040,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/7r6rbqyi0pqzyjps1yfg6s3k56mpli1k-mesa-libgbm-26.1.3/lib/libgbm.so.1.0.0",
+      22440,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/9g3536ribbggd4swm4bwk8sknsddfl3j-libxml2-2.15.3/lib/libxml2.so.16.1.3",
+      1334184,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/bdwsskqikgdlq94xqh5dvyd8263w995g-xz-5.8.3/lib/liblzma.so.5.8.3",
+      202952,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/fs6ingdw7raizv9byqk5cl4nvh8f40w4-llvm-21.1.8-lib/lib/libLLVM.so.21.1",
+      167773368,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/gkb9jhxirg79jv66m4yc2pkvn5za9glm-libxdmcp-1.1.5/lib/libXdmcp.so.6.0.0",
+      26488,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-dri3.so.0.1.0",
+      22488,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-present.so.0.0.0",
+      18392,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-randr.so.0.1.0",
+      71640,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-shm.so.0.0.0",
+      14296,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-sync.so.1.0.0",
+      34776,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb-xfixes.so.0.0.0",
+      38872,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0/lib/libxcb.so.1.1.0",
+      178168,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/l3p6y554mkxi4vipnnp8809kxj0g1lyv-zlib-1.3.2/lib/libz.so.1.3.2",
+      120848,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/n4hapkgxwv4rfs0ar9zjkl9i8cf39cnb-lm-sensors-3.6.2/lib/libsensors.so.5.0.0",
+      67568,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/ppphyhp48gzdji3q9q945gmamy4rrj3f-mesa-26.2.2/lib/libEGL_mesa.so.0.0.0",
+      437384,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/ppphyhp48gzdji3q9q945gmamy4rrj3f-mesa-26.2.2/lib/libgallium-26.2.2.so",
+      56751904,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/qdz612hkm62xikmm4b4wkcj8pc7y9lm9-libpciaccess-0.19/lib/libpciaccess.so.0.11.1",
+      145344,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/qdzn5piljhvzcjwxkxfyi0bc0m215wdb-libxau-1.0.12/lib/libXau.so.6.0.0",
+      18296,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/qlagp5jfymn4mnmqq938cyc4fwcwim7z-libxshmfence-1.3.3/lib/libxshmfence.so.1.0.0",
+      14200,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/xcwclh5qgw2x6qc39x6ixara06xczzlw-zstd-1.5.7/lib/libzstd.so.1.5.7",
+      870336,
+      "runtime-only"
+     ],
+     [
+      "/nix/store/xz5xsq0nihfs15fbknz5w0yblg04760q-bzip2-1.0.8/lib/libbz2.so.1.0.8",
+      82904,
+      "runtime-only"
+     ]
+    ],
+    "package_bytes": 11725662,
+    "closure_bytes": 35294624,
+    "closure_paths": [
+     [
+      "/nix/store/0vqb1mcas5j8dv6bhbrshinlgsg6bvgi-gcc-15.3.0-lib",
+      10317392
+     ],
+     [
+      "/nix/store/3vlnkr6z7hh86rrn087df45s4cfjxy65-libx11-1.8.13",
+      2700240
+     ],
+     [
+      "/nix/store/9ipfvwnqp1q8ijnmi5sxvlx9r8w34lw3-bash-5.3p15",
+      1856848
+     ],
+     [
+      "/nix/store/aw2cplndjs2z6sxb7kma7k25aars90wx-jemalloc-5.3.1",
+      1253984
+     ],
+     [
+      "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0",
+      11730248
+     ],
+     [
+      "/nix/store/gkb9jhxirg79jv66m4yc2pkvn5za9glm-libxdmcp-1.1.5",
+      31912
+     ],
+     [
+      "/nix/store/j5ml0bwadkmxc6185ilixlw85ywagxgv-libxcb-1.17.0",
+      1449264
+     ],
+     [
+      "/nix/store/m51xyp95w4gnhcbncz6xi0x5519m293i-libxext-1.3.7",
+      95944
+     ],
+     [
+      "/nix/store/qdzn5piljhvzcjwxkxfyi0bc0m215wdb-libxau-1.0.12",
+      27792
+     ],
+     [
+      "/nix/store/rarvfpm927fcbd6b9p0crg09w9r3ywb3-libglvnd-1.7.0",
+      2620480
+     ],
+     [
+      "/nix/store/vjcwhp0milwa1jqy1inpjxrsh8hjrgwc-wayland-1.26.0",
+      274840
+     ],
+     [
+      "/nix/store/wb232z007b8qynidq89lli8lb2c4q0r4-libffi-3.8.0",
+      95792
+     ],
+     [
+      "/nix/store/wi6kaycsa2479qrxv9xy6yg3q5ggfs6j-gcc-15.3.0-libgcc",
+      197752
+     ],
+     [
+      "/nix/store/wry9fp6v17rykg7dyhafxw4a057938jp-dav1d-1.5.3",
+      2642136
+     ]
+    ],
+    "disk_bytes": 35294624
+   }
+  }
+ },
+ "supports": {
+  "scootbg": {
+   "startup:image": true,
+   "startup:color": true,
+   "set:image": true,
+   "set:color": true,
+   "restore:image": true,
+   "restore:color": true,
+   "idle:image": true,
+   "idle:color": true
+  },
+  "scootbg-bilinear": {
+   "startup:image": true,
+   "startup:color": false,
+   "set:image": true,
+   "set:color": false,
+   "restore:image": false,
+   "restore:color": false,
+   "idle:image": false,
+   "idle:color": false
+  },
+  "awww": {
+   "startup:image": true,
+   "startup:color": true,
+   "set:image": true,
+   "set:color": true,
+   "restore:image": true,
+   "restore:color": false,
+   "idle:image": true,
+   "idle:color": true
+  },
+  "hyprpaper": {
+   "startup:image": true,
+   "startup:color": false,
+   "set:image": false,
+   "set:color": false,
+   "restore:image": false,
+   "restore:color": false,
+   "idle:image": true,
+   "idle:color": false
+  },
+  "swaybg": {
+   "startup:image": true,
+   "startup:color": true,
+   "set:image": false,
+   "set:color": false,
+   "restore:image": false,
+   "restore:color": false,
+   "idle:image": true,
+   "idle:color": true
+  },
+  "wbg": {
+   "startup:image": true,
+   "startup:color": false,
+   "set:image": false,
+   "set:color": false,
+   "restore:image": false,
+   "restore:color": false,
+   "idle:image": true,
+   "idle:color": false
+  },
+  "wpaperd": {
+   "startup:image": true,
+   "startup:color": false,
+   "set:image": true,
+   "set:color": false,
+   "restore:image": false,
+   "restore:color": false,
+   "idle:image": true,
+   "idle:color": false
+  }
+ },
+ "images": {
+  "jpeg": {
+   "path": "/tmp/sbb-images/big.jpg",
+   "bytes": 8851735,
+   "sha256": "301279ffb3d4c8e39aecac039e596eb4795829293e47670468247bc747f027a0",
+   "recipe": "magick -seed 1 -size 6000x4000 plasma:fractal -attenuate 0.5 +noise Gaussian -quality 92 -sampling-factor 4:2:0",
+   "expected_sha256": "301279ffb3d4c8e39aecac039e596eb4795829293e47670468247bc747f027a0"
+  },
+  "first": {
+   "path": "/tmp/sbb-images/first.png",
+   "what": "64x64 solid #c83232 PNG, the wallpaper a live change replaces"
+  }
+ },
+ "compositor_exe": {
+  "path": "/nix/store/cd7wsnw5hg865plavffxbnzy3dd3lam7-sway-unwrapped-1.12/bin/sway",
+  "realpath": "/nix/store/cd7wsnw5hg865plavffxbnzy3dd3lam7-sway-unwrapped-1.12/bin/sway",
+  "sha256": "3a3e7d51b92e62396327e3f464e91278d06589d265879a527263ec744b3d9379"
+ }
+}

@@ -143,6 +143,32 @@ machine has none; on sway it binds `xdg_wm_base` v6 where sway has v5.
   - Plan: [idle-code-pages.md](idle-code-pages.md).
 - The results on sway: [below](#on-sway).
 
+### Re-run of the idle rows (2026-09-28): still not passed
+
+After the attribution and the cheap levers of
+[idle-code-pages.md](idle-code-pages.md#levers-tried-2026-09-28), the idle
+rows ran again, 5 rounds, on headless scoot and sway, with `35f3a13`
+([scoot](../bench/2026-09-28-idle-scoot/table.md),
+[sway](../bench/2026-09-28-idle-sway/table.md)). The same 9 losses to awww
+on each; `compare` against the 2026-09-27 runs finds no regression.
+
+- **Kept:** one lever, `getpid` through `rustix`, 64 KiB of libc code
+  (inside the noise).
+- **Gap left, scoot**: RSS above the floor 1.06–1.10 MiB with a color,
+  1.45–1.52 MiB with an image; PSS 0.98–1.01 and 1.41–1.42 MiB.
+- **Gap left, sway**: RSS 1.09–1.10 and 1.41–1.47 MiB, PSS 0.98–0.99
+  and 1.35–1.44 MiB.
+- **Why**: the daemon runs 277 KiB of the 1,248 KiB of functions in its
+  binary, and the kernel's fault-around makes 1,048–1,200 KiB of it
+  resident, the decoders and std's backtrace code included. Removing that
+  code on stable is not possible for the backtrace (std's default panic
+  hook links it into every binary), and costs the image pipeline 20% for
+  `opt-level = "s"`.
+- **Next**, the user's decision: the separate daemon binary, which a
+  prototype showed ties awww on the color rows
+  ([the later option](idle-code-pages.md#later-option-a-separate-daemon-binary)),
+  or the page-out fallback.
+
 Won or tied everywhere else. The points where it is closest, or where the
 rule decided:
 
