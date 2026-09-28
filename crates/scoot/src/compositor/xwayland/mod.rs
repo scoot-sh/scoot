@@ -32,6 +32,9 @@
 //!   only while an X window holds the keyboard, and a Wayland paste is
 //!   served only by the X owner that crossed. `dnd.rs`: an X client starts
 //!   a drag only from a press on its own window. XIM is not provided.
+//! - **Titlebar drags** -- `moveresize.rs`: `_NET_WM_MOVERESIZE` moves or
+//!   resizes a floating X window on a press its own client holds, through
+//!   the same floating grab an `xdg_toplevel.move` starts.
 //! - **Phases 5–7** (capture pins, packaging) are not here yet: see
 //!   `docs/backlog/resolved/xwayland-support-done.md`.
 //!
@@ -147,6 +150,8 @@ mod dnd;
 mod focus;
 #[cfg(feature = "xwayland")]
 pub(in crate::compositor) mod manage;
+#[cfg(feature = "xwayland")]
+mod moveresize;
 #[cfg(feature = "xwayland")]
 pub(in crate::compositor) mod selection;
 #[cfg(test)]

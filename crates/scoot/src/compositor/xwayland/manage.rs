@@ -65,9 +65,8 @@
 //! - **Scale.** X clients draw at scale 1; at a fractional `[output]
 //!   scale` they are upscaled like any scale-unaware client.
 //!
-//! What is not honoured yet: `_NET_WM_MOVERESIZE` (a client-side titlebar
-//! drag -- the modifier drag works), `_NET_WM_ICON`, and the X halves of the
-//! clipboard, drag-and-drop and XIM (Phase 4).
+//! What is not honoured yet: `_NET_WM_ICON`; XIM is not provided.
+//! A client-side titlebar drag (`_NET_WM_MOVERESIZE`) is `moveresize.rs`'s.
 
 use scoot_core::{Action, Edges, Event, Rect, Size, SizeHints, WindowId, WindowInfo};
 use smithay::desktop::Window;

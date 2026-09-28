@@ -9,6 +9,22 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-28 — X apps' own titlebars drag
+
+- **Dragging an X app's own titlebar moves the window** when it floats (a
+  dialog, or anything `[[window_rule]]` floats): GTK apps over X, Chromium
+  and Electron ask the compositor to move or resize them with
+  `_NET_WM_MOVERESIZE`, and scoot now does, exactly as it does for a
+  Wayland app's titlebar. A border drag resizes; the X app is told its new
+  size when you let go. A tiled X window's titlebar drag does nothing
+  special, like a Wayland one's.
+- Only while you hold a button on that app's own window: an X app cannot
+  start a drag with no button held, from a press on a Wayland window or on
+  another X app's window, or under the lock. Keyboard moves from a window
+  menu are not supported, and an X app cannot cancel a drag early; letting
+  go of the button always ends it
+  ([docs/protocols.md](docs/protocols.md#xwayland-opt-in)).
+
 ### 2026-09-27 — X apps from Nix: `scoot-xwayland`
 
 - **`nix build .#scoot-xwayland`** (and `.#scoot-gpu-xwayland` for the GPU

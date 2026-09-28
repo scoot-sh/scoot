@@ -798,6 +798,8 @@ mod lock;
 #[cfg(feature = "xwayland")]
 mod mapping;
 #[cfg(feature = "xwayland")]
+mod moveresize;
+#[cfg(feature = "xwayland")]
 mod peer;
 #[cfg(feature = "xwayland")]
 mod press_after_crossing;

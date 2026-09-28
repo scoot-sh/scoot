@@ -138,6 +138,8 @@ impl XwmHandler for State {
         self.x11_fullscreen_request(&window, false);
     }
 
+    /// `_NET_WM_MOVERESIZE` with an edge: an X app's own border drag, under
+    /// the same rules as an xdg one -- see `moveresize.rs`.
     fn resize_request(
         &mut self,
         _xwm: XwmId,
@@ -145,23 +147,17 @@ impl XwmHandler for State {
         button: u32,
         resize_edge: ResizeEdge,
     ) {
-        // `_NET_WM_MOVERESIZE`: not honoured yet (see the module doc). The
-        // modifier drag (`[floating] modifier`) moves and resizes a floating
-        // X window like any other.
-        tracing::debug!(
-            id = window.window_id(),
+        self.x11_moveresize_request(
+            &window,
             button,
-            ?resize_edge,
-            "X11 resize request refused (client-initiated moves and resizes are not honoured yet)"
+            Some(super::moveresize::x11_edges(resize_edge)),
         );
     }
 
+    /// `_NET_WM_MOVERESIZE`'s move: an X app's own titlebar drag -- see
+    /// `moveresize.rs`.
     fn move_request(&mut self, _xwm: XwmId, window: X11Surface, button: u32) {
-        tracing::debug!(
-            id = window.window_id(),
-            button,
-            "X11 move request refused (client-initiated moves and resizes are not honoured yet)"
-        );
+        self.x11_moveresize_request(&window, button, None);
     }
 
     /// `_NET_ACTIVE_WINDOW`: a request through the focus gate, never a

@@ -27,9 +27,9 @@ mod modifiers;
 mod tests;
 
 // Linux input event codes, which is what Wayland carries.
-const BTN_LEFT: u32 = 0x110;
-const BTN_RIGHT: u32 = 0x111;
-const BTN_MIDDLE: u32 = 0x112;
+pub(super) const BTN_LEFT: u32 = 0x110;
+pub(super) const BTN_RIGHT: u32 = 0x111;
+pub(super) const BTN_MIDDLE: u32 = 0x112;
 
 /// Every injected-input entry point needs the seat's keyboard, both to send
 /// keys and to read the keymap. `State::new` always adds one and nothing

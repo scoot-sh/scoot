@@ -503,3 +503,117 @@ impl XClient {
         owner
     }
 }
+
+/// `_NET_WM_MOVERESIZE`'s directions (EWMH): the eight resize edges run
+/// clockwise from top-left (0-7), then these.
+pub(super) const MOVERESIZE_MOVE: u32 = 8;
+pub(super) const MOVERESIZE_SIZE_KEYBOARD: u32 = 9;
+pub(super) const MOVERESIZE_MOVE_KEYBOARD: u32 = 10;
+pub(super) const MOVERESIZE_CANCEL: u32 = 11;
+/// Bottom-right, the corner a GTK window's resize grip sends.
+pub(super) const MOVERESIZE_SIZE_BOTTOMRIGHT: u32 = 4;
+
+impl XClient {
+    /// Sends `_NET_WM_MOVERESIZE` for `window` to the root, as a toolkit's
+    /// client-side titlebar does once a press on it passes the drag
+    /// threshold: from root position (`x`, `y`), `direction` (see the
+    /// `MOVERESIZE_*` constants), `button` the X button held (0: unnamed),
+    /// source indication 1 (an application). Any client may send it naming
+    /// any window: the window manager learns only the window.
+    pub(super) fn request_moveresize(
+        &self,
+        window: Window,
+        (x, y): (i32, i32),
+        direction: u32,
+        button: u32,
+    ) {
+        let atom = self.atom("_NET_WM_MOVERESIZE");
+        // The wire carries the root coordinates as CARD32s; a negative one
+        // is its two's complement, as Xlib would send it.
+        let event =
+            ClientMessageEvent::new(32, window, atom, [x as u32, y as u32, direction, button, 1]);
+        self.conn
+            .send_event(
+                false,
+                self.root,
+                EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+                event,
+            )
+            .expect("a send request");
+        self.conn.flush().expect("the request hit the wire");
+    }
+
+    /// What a toolkit does first on a titlebar press it hands to the window
+    /// manager (EWMH asks for it): gives up its pointer grab -- here the
+    /// implicit one the X server took for it with the press.
+    pub(super) fn ungrab_pointer(&self) {
+        self.conn
+            .ungrab_pointer(x11rb::CURRENT_TIME)
+            .expect("an ungrab request")
+            .check()
+            .expect("the X server ungrabbed the pointer");
+    }
+
+    /// Adds button presses and releases to what `window` selects (on top of
+    /// [`XClient::map`]'s mask), so a test can read what reached it.
+    pub(super) fn select_buttons(&self, window: Window) {
+        use x11rb::protocol::xproto::ChangeWindowAttributesAux;
+        self.conn
+            .change_window_attributes(
+                window,
+                &ChangeWindowAttributesAux::new().event_mask(
+                    EventMask::KEY_PRESS
+                        | EventMask::FOCUS_CHANGE
+                        | EventMask::STRUCTURE_NOTIFY
+                        | EventMask::BUTTON_PRESS
+                        | EventMask::BUTTON_RELEASE,
+                ),
+            )
+            .expect("an attributes request")
+            .check()
+            .expect("the X server took the event mask");
+    }
+
+    /// Which buttons the X server believes are held right now.
+    pub(super) fn buttons_down(&self) -> u16 {
+        use x11rb::protocol::xproto::KeyButMask;
+        let mask = self
+            .conn
+            .query_pointer(self.root)
+            .expect("a query request")
+            .reply()
+            .expect("the pointer")
+            .mask;
+        u16::from(mask)
+            & u16::from(
+                KeyButMask::BUTTON1
+                    | KeyButMask::BUTTON2
+                    | KeyButMask::BUTTON3
+                    | KeyButMask::BUTTON4
+                    | KeyButMask::BUTTON5,
+            )
+    }
+
+    /// Where the X server has `window`, in root coordinates, and its size:
+    /// what the client computes its dialogs' positions from.
+    pub(super) fn root_geometry(&self, window: Window) -> (i32, i32, u32, u32) {
+        let geometry = self
+            .conn
+            .get_geometry(window)
+            .expect("a geometry request")
+            .reply()
+            .expect("the geometry");
+        let at = self
+            .conn
+            .translate_coordinates(window, self.root, 0, 0)
+            .expect("a translate request")
+            .reply()
+            .expect("the translation");
+        (
+            i32::from(at.dst_x),
+            i32::from(at.dst_y),
+            u32::from(geometry.width),
+            u32::from(geometry.height),
+        )
+    }
+}
