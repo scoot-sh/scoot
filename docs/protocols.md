@@ -598,8 +598,33 @@ its startup id by another X client, below.)
   X-side capture to opt out of, either: an X *client* can still read other X
   windows' contents through the X server (the trust model above), but never
   a Wayland window's.
-- **Not yet:** X clients draw at scale 1 (upscaled at a fractional
-  `[output] scale`), `_NET_WM_ICON` is not read, and XIM is not provided (see
+- **Scaled outputs.** At an `[output] scale` above 1 the X server draws at
+  `ceil(scale)` -- its X screen, and every X window, has that many X
+  pixels per logical pixel -- so at an integer scale an X app is drawn one
+  X pixel per physical pixel, sharp, and at a fractional one (1.5) it is
+  drawn at the integer above (2) and scaled down, like a Wayland client
+  rendering at `ceil`. Toolkits are told the scale over XSETTINGS (the
+  settings a GNOME session publishes: `Gdk/WindowScalingFactor`,
+  `Xft/DPI`, `Gdk/UnscaledDPI`), which GTK 3/4, Qt 5/6 and Java read --
+  so they draw at the right size, and follow a reload live. An X app that
+  reads none of them (bare Xlib: `xterm`'s default bitmap fonts, `xclock`,
+  Wine, Steam's own UI) draws at scale 1 in X pixels and comes out
+  `ceil(scale)` times smaller: sharp but small, the trade-off every
+  compositor that draws X natively makes. The `Xft.dpi` X resource is not
+  written; an app that reads only that takes `xrdb -merge` (`Xft.dpi:
+  192` at scale 2). Coordinates stay logical everywhere scoot speaks them
+  -- `scoot msg windows`, `pointer click`, window rules, floating positions
+  -- and the X server gets them in X pixels: a `pointer click` at a logical
+  point lands on the X widget drawn there, a dialog's `USPosition` (X
+  pixels) is kept at the logical point it names, a drag's `XdndPosition` is
+  in X root pixels. At scale 1 (every headless, webtop and VM session)
+  nothing is set and nothing changes. **A reload** that moves `ceil(scale)`
+  re-tells the X server and the toolkits, and reconfigures every X window
+  into the new X pixels at its unchanged logical place; an app that read
+  the scale once at startup draws at its old scale until restarted (its
+  size is still right, its contents smaller or larger), and an X menu open
+  across the reload is drawn offset until it moves or closes.
+- **Not yet:** `_NET_WM_ICON` is not read, and XIM is not provided (see
   [Clipboard, drag-and-drop and input methods](#clipboard-drag-and-drop-and-input-methods)).
 
 ### Focus: X windows ask, scoot decides
@@ -2155,6 +2180,9 @@ Real limits rather than polish:
   (re-advertised on `wl_output`, re-sent to every live surface, geometry
   recomputed), and there is no per-output setting.
   Changing it per output means waiting on per-output configuration.
+- **X apps** (with `--xwayland`) draw at `ceil(scale)` and are scaled to
+  the output like a client rendering at the `wl_output.scale` integer --
+  see [XWayland](#x-windows-in-the-layout).
 - **`--nested` is scale-1 only.** The host compositor owns the scale of the
   window scoot is drawn inside, so a non-1.0 `scale` there would double-count
   it; scoot logs a warning and uses `1.0`.

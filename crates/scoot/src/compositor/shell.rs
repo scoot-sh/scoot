@@ -312,7 +312,7 @@ impl State {
             // only where it is shown (see `xwayland/manage.rs`).
             #[cfg(feature = "xwayland")]
             if let Some(x11) = window.x11_surface() {
-                super::xwayland::manage::configure_x11(x11, placement);
+                super::xwayland::manage::configure_x11(x11, placement, self.x11_scale());
             }
             if placement.visible {
                 self.space

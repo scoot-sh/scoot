@@ -117,3 +117,106 @@ fn x11_hot_path_cost() {
     }
     measure(&mut x, "three X windows");
 }
+
+/// What drawing X at an integer scale costs at a fractional output scale
+/// -- the decision `scale.rs`'s module doc records. One floating X window,
+/// 400x300 logical, on a 1200-square output at `[output] scale = 1.5`,
+/// with the X side at client scale 1 (the X server drawing at the logical
+/// size and the renderer scaling it up: every session before `scale.rs`),
+/// 1.5 (the exact scale, drawn one to one) and 2 (`ceil`, what scoot does:
+/// twice the logical size, scaled down). Each frame nudges the window one logical pixel
+/// in the `Space` and back, so the whole window is re-composited every
+/// frame -- the worst case, a window scrolling or animating under the
+/// pointer -- with no X traffic in the timed span. Printed with the
+/// buffer's own size: the X server's pixmap and the shared-memory buffer
+/// each hold that many pixels, four bytes each.
+///
+/// ```text
+/// cargo test --release -p scoot --features xwayland --bin scoot x11_scaled_composite_cost -- --ignored --nocapture --test-threads=1
+/// ```
+#[test]
+#[ignore = "prints per-frame timings for a human; asserts nothing"]
+fn x11_scaled_composite_cost() {
+    use smithay::backend::renderer::utils::with_renderer_surface_state;
+    use smithay::wayland::seat::WaylandFocus;
+
+    use super::live::{Shape, live_shaped};
+
+    const CANVAS: i32 = 1200;
+    const SCENE_FRAMES: u32 = 200;
+    let mut rows = Vec::new();
+    for client_scale in [1.0, 1.5, 2.0] {
+        let Some(mut live) = live_shaped(
+            "x11_scaled_composite_cost",
+            Shape {
+                canvas: CANVAS,
+                scale: 1.5,
+                client_scale: Some(client_scale),
+            },
+        ) else {
+            return;
+        };
+        let mut props = Props::new(RED);
+        props.dialog = true;
+        let xid = live.x.map(&props);
+        let id = live.managed(xid);
+        let _ = live
+            .fixture
+            .state
+            .world
+            .handle_action(scoot_core::Action::ResizeFloating {
+                id,
+                size: scoot_core::Size::new(400, 300),
+                edges: scoot_core::Edges::BOTTOM_RIGHT,
+            });
+        let _ = live
+            .fixture
+            .state
+            .world
+            .handle_action(scoot_core::Action::MoveFloating { id, x: 50, y: 50 });
+        live.fixture.state.apply();
+        super::x11::eventually(&mut live.fixture, "the window at 400x300", |fixture| {
+            fixture
+                .state
+                .window(id)
+                .and_then(smithay::desktop::Window::x11_surface)
+                .is_some_and(|x11| {
+                    x11.wl_surface().is_some()
+                        && x11.last_configure().size == (400, 300).into()
+                        && x11.bbox().size == x11.last_configure().size
+                })
+        });
+        live.drain();
+        let window = live.fixture.state.windows[&id].clone();
+        let logical = window.x11_surface().expect("an X window").bbox().size;
+        let buffer = window
+            .wl_surface()
+            .and_then(|surface| {
+                with_renderer_surface_state(&surface, |state| state.buffer_size()).flatten()
+            })
+            .expect("a committed buffer");
+        let frame = time(&mut live, "frame", SCENE_FRAMES, |live| {
+            for i in 0..SCENE_FRAMES {
+                let x = 50 + i32::try_from(i % 2).expect("0 or 1");
+                live.fixture
+                    .state
+                    .space
+                    .map_element(window.clone(), (x, 50), false);
+                live.fixture.state.request_render();
+                live.fixture.state.render();
+            }
+        });
+        rows.push(format!(
+            "X at client scale {client_scale}: {}x{} logical, buffer {}x{} ({} KiB); {frame}",
+            logical.w,
+            logical.h,
+            buffer.w,
+            buffer.h,
+            buffer.w * buffer.h * 4 / 1024
+        ));
+    }
+    println!("one floating X window at [output] scale = 1.5, re-composited every frame:");
+    for row in rows {
+        println!("  {row}");
+    }
+}

@@ -698,7 +698,7 @@ session.
 
 Split out, each low: [`_NET_WM_MOVERESIZE`](xwayland-net-wm-moveresize-done.md) (resolved),
 [`_NET_WM_ICON`](../protocols/xwayland-net-wm-icon.md),
-[scale-aware X windows](../protocols/xwayland-scale-aware.md). Still open
+[scale-aware X windows](xwayland-scale-aware-done.md) (resolved). Still open
 from earlier phases:
 [refused override-redirect windows still cost the server
 buffers](../protocols/xwayland-refused-windows-still-commit.md), its own

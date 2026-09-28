@@ -9,6 +9,23 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-28 — X apps are sharp on HiDPI screens
+
+- **At `[output] scale = 2`, X apps (with `--xwayland`) are drawn at the
+  screen's own resolution instead of blown up from scale 1.** GTK, Qt and
+  Java apps are told the scale and draw at the right size; a fractional
+  scale (1.5) draws them at 2 and scales that down, so they are sharp
+  there too. Changing the scale with `scoot msg reload` re-tells them
+  live (GTK apps redraw at the new size on the spot).
+- **An X app that reads no toolkit setting draws half-size at scale 2**
+  (bare Xlib apps such as `xterm` with its default bitmap font or
+  `xclock`, Wine, Steam's own UI): sharp but small. An app that reads only
+  the `Xft.dpi` X resource needs `xrdb -merge` with `Xft.dpi: 192`.
+- Clicks (`scoot msg pointer click` included), drags into and out of X
+  apps, X menus and dialogs that place themselves all land where they are
+  drawn at any scale. At scale 1 (headless, webtop, VMs) nothing changes
+  ([docs/protocols.md](docs/protocols.md#x-windows-in-the-layout)).
+
 ### 2026-09-28 — X apps' own titlebars drag
 
 - **Dragging an X app's own titlebar moves the window** when it floats (a
