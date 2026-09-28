@@ -48,7 +48,7 @@ use crate::color::Color;
 use crate::image::decode::decode;
 use crate::image::orientation::Orientation;
 use crate::image::render::{Look, render_each};
-use crate::image::{Filter, Mode};
+use crate::image::{DECODE_STACK, Filter, Mode};
 
 #[cfg(test)]
 mod tests;
@@ -56,9 +56,10 @@ mod tests;
 /// Bytes before the file.
 pub const HEADER: usize = 19;
 
-/// The largest buffer drawn, in pixels (4 MiB of `XRGB8888`): a
-/// throughput cap of the harness's, not a guard (see the module docs).
-pub const MAX_FUZZ_PIXELS: u64 = 1 << 20;
+/// The largest buffer drawn, in pixels (16 MiB of `XRGB8888`, so 1080p
+/// and 1440p outputs are drawn): a throughput cap of the harness's, not a
+/// guard (see the module docs).
+pub const MAX_FUZZ_PIXELS: u64 = 1 << 22;
 
 /// A buffer side from its two header bytes: the value itself (0 to 65532,
 /// all but the top of a DRM mode's range), or, for the top three values,
@@ -75,11 +76,28 @@ pub fn side(value: u16) -> u32 {
 }
 
 /// Runs `data` (see the module docs for its layout) through decode and
-/// [`render_each`], as the daemon's worker does for one job. Panics only
-/// on a finding: a panic from the path itself, or a drawn buffer that is
-/// not the size asked for, or a size `wl_shm` cannot take that was drawn
-/// anyway.
+/// [`render_each`], as the daemon's worker does for one job, on a thread
+/// with the worker's stack ([`DECODE_STACK`]) rather than the caller's
+/// (libFuzzer's main thread has 8 MiB): an input that overflows the
+/// daemon's stack overflows here too. Panics only on a finding: a panic
+/// from the path itself, or a drawn buffer that is not the size asked
+/// for, or a size `wl_shm` cannot take that was drawn anyway.
 pub fn whole_path(data: &[u8]) {
+    let outcome = std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name("scootbg-decode".into())
+            .stack_size(DECODE_STACK)
+            .spawn_scoped(scope, || one_job(data))
+            .expect("the harness cannot start its decoding thread")
+            .join()
+    });
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// [`whole_path`]'s body, on the decoding thread.
+fn one_job(data: &[u8]) {
     let Some((header, file)) = data.split_first_chunk::<HEADER>() else {
         return;
     };

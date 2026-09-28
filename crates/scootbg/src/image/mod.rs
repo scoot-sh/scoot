@@ -42,6 +42,12 @@ pub mod scale;
 #[cfg(test)]
 pub mod samples;
 
+/// The stack of the thread that decodes and draws an image
+/// (`daemon::worker`): 2 MiB, std's default, named so the fuzz target
+/// (`fuzz`) runs its input on a thread of the same size, and an input that
+/// needs more stack than the daemon has fails there too, not only here.
+pub const DECODE_STACK: usize = 2 << 20;
+
 /// How an image is fitted to an output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {

@@ -39,8 +39,9 @@ test = false
 doc = false
 bench = false
 
-# The daemon's release settings where they change behaviour: `panic =
-# "abort"` is what cargo-fuzz uses anyway (a panic is a crash), and full
-# optimisation is what ships. Symbols, for readable crash stacks.
+# Only symbols, for readable crash stacks. The workspace's release profile
+# (fat LTO, one codegen unit, `panic = "abort"`, stripped) does not apply
+# to this workspace, and none of what it sets changes what the code does:
+# cargo-fuzz aborts on a panic anyway, and builds with full optimisation.
 [profile.release]
 debug = 1

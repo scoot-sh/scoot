@@ -29,6 +29,7 @@ use rustix::event::{EventfdFlags, eventfd};
 use rustix::io::Errno;
 use scootbg_mem::ShmBuffer;
 
+use crate::image::DECODE_STACK;
 use crate::image::decode::{DecodeError, decode_file};
 use crate::image::render::render_each;
 use crate::jobs::Target;
@@ -67,10 +68,13 @@ impl std::fmt::Display for JobError {
 /// A thread starter: std's in the daemon, a failing one in tests.
 pub type Spawn = fn(Box<dyn FnOnce() + Send>) -> io::Result<()>;
 
-/// Starts `job` on a named thread, which ends with it.
+/// Starts `job` on a named thread, which ends with it. Its stack is
+/// [`DECODE_STACK`], set rather than left to std (whose default
+/// `RUST_MIN_STACK` could change), so the fuzz target runs on the same.
 fn spawn_thread(job: Box<dyn FnOnce() + Send>) -> io::Result<()> {
     std::thread::Builder::new()
         .name("scootbg-decode".into())
+        .stack_size(DECODE_STACK)
         .spawn(job)
         .map(drop)
 }
