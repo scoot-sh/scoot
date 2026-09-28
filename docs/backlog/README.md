@@ -327,7 +327,15 @@ falsify. Read `flexwm` there as `scoot`.
   Gamma LUT length re-read per CRTC, live control failed only on change.
   Four fail-first harness tests; the switch itself unverified live
   (single-CRTC dev VM), legacy blind-probe limit stated in the record.
-- [`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware](./core/tty-hotplug-confirmation.md) — medium: gh #48 closed 2026-09-27 on unit-test evidence (user decision); `MoveTo` (reachable by moving a lone monitor to another port, DRM half never run) to be proven live on the dev VM next; also the new-mode-list on the same connector (vkms `edid_override` tried 2026-09-26, inert on the dev VM's 6.18.50 — still needs a rig that changes a mode list), with before/after proof. Since multi-output phase E the `MoveTo` fallback applies only when no driven connector is left; with another screen lit an unplug removes an output instead (confirmed by a physical DP-1 replug on the Asahi M2 Air, 2026-09-25). The Hold/Reconnected halves of the neighbouring [multi-output remainder](./core/multi-output-remainder.md) follow-up 1 were proven live on vkms the same day.
+- [`--tty` hotplug follow-up: both unreproduced paths confirmed live](./resolved/tty-hotplug-confirmation-done.md)
+  — RESOLVED 2026-09-28: `NewMode` driven live both directions by QEMU Cocoa
+  resize/fullscreen with Zoom To Fit on (session follows the new preferred,
+  `wl_output.mode`/`done` reach clients); `MoveTo` driven live via
+  Virtual-1 force-off / Virtual-2 force-on (`retarget` refused in place,
+  `switch_crtc` moved to CRTC 44, modeset committed — session never black,
+  windows followed). Rig notes: virtio-gpu `force` latch leaves sysfs stale
+  for minutes (scoot's re-probe is authoritative), `unspecified` refused, a
+  natural force event needs the synthetic-trigger pairing.
 
 ### Core / config / rendering
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.

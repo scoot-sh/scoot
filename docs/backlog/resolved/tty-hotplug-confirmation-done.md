@@ -1,12 +1,21 @@
 ---
-title: "`--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware"
-status: "open"
-area: "core"
-priority: "medium"
-blocked: "gh #48 closed 2026-09-27 on unit-test evidence (user decision); MoveTo live proof next on the dev VM once idle (Virtual-1 off / Virtual-2 on); path 1 needs a rig that changes a mode list"
+title: "`--tty` hotplug follow-up: both unreproduced paths confirmed live — RESOLVED."
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
 ---
 
-# `--tty` hotplug follow-up: confirm the two unreproduced paths on real hardware
+# `--tty` hotplug follow-up: both unreproduced paths confirmed live — RESOLVED.
+
+Resolved 2026-09-28 by live measurement on the dev VM (QEMU `virtio-gpu-pci`,
+Cocoa display, kernel 6.18.50; card0 `Virtual-1` connected / `Virtual-2`
+disconnected, `max_outputs=2`). Both paths #48 left open are now proven on
+real hardware paths, with the exact commands, log lines and screenshots
+below — not a paraphrase. No code changed: the session ran `/var/cargo-target/debug/scoot`
+built from `87bb36469` (tree clean, `md5 cd677c76fde2617e964f9249020859ea`).
+
+## The entry as filed
 
 Filed as gh issue #48 (2026-09-16 — read it for the full shape, not a
 plan). PR #51 landed the `--tty` hotplug following (udev monitor,
@@ -151,4 +160,105 @@ through debugfs `force`, each paired with a synthetic
 `udevadm trigger --subsystem-match=drm --action=change` (the vkms runbook
 in `multi-output-remainder.md`), may drive `MoveTo`, including its DRM
 half, live on the existing rig. Run it only on an otherwise idle VM.
+
+## Resolution 2026-09-28: both paths confirmed live on the dev VM
+
+One `--tty` session (dumb tier, `foot -a proofwin` as the single client),
+driven entirely from the idle dev VM over `ssh -p 2222 dev@localhost` plus
+QEMU Cocoa window operations from the Mac side. Seat check first: no scoot
+processes, load 0.02, logind sessions idle 8h, last `~/evidence` activity
+~4h earlier; active VT `tty1` throughout (`/sys/class/tty/tty0/active`;
+`fgconsole` has no console fd over ssh). All evidence on the VM under
+`~/evidence/hotplug-confirm-20260928/` (`poll.log`: 0.5 s sysfs
+status+modes samples; `udev.log`: `stdbuf -o0 udevadm monitor
+--subsystem-match=drm`; `scoot-tty.log`: the session; six IPC screenshots).
+
+### Path 1 (`NewMode`) — CONFIRMED, both directions
+
+The unattributed lead is attributed: **QEMU Cocoa resize and fullscreen
+with View → Zoom To Fit ON change card0-Virtual-1's mode list with a
+`change` event.** Zoom To Fit was OFF (no `AXMenuItemMarkChar`), and a
+resize with it off changed nothing (guest list steady, no uevent). After
+enabling it (`click menu item "Zoom To Fit"`, mark `✓`):
+
+- 08:02:35 UTC: window 800x528 → 893x586 (aspect-locked). KERNEL+UDEV
+  `change` on card0 at 29975.059; sysfs list flipped `1600x1000`-first/26 →
+  `1440x900`-first/8 between poll samples 08:02:36.14 and 08:02:36.65;
+  modetest preferred 1600x1000 → 1786x1116 (= window content 893x558 @2x).
+  This is the prior probe's 02:31:55 signature exactly — someone resized the
+  QEMU window with Zoom To Fit on.
+- A windowed resize to a non-16:10 size is refused by QEMU (window stayed
+  893x586, no event); Enter Fullscreen instead drove the live proof.
+
+Live, session up on Virtual-1 at 1786x1116 (`before.png`, foot `proofwin`
+open, `wlr-randr`: `1786x1116 preferred, current`):
+
+- 08:09:24 fullscreen on → `Device changed: #57856` 08:09:25.49 →
+  `drm: display reconfigured; mode-setting onto it connector=Virtual-1
+  width=3456 height=2170` → `drm: modeset (full commit)` 41 ms later.
+  IPC `outputs`: 3456x2170; foot re-laid-out to 1710x2146;
+  `after-fullscreen.png` 3456x2170 (viewed: terminal, ring, cursor).
+  `wlr-randr` then listed 1786x1116 *and* 3456x2170 preferred+current —
+  `wl_output.mode`/`done` reached clients.
+- 08:10:15 fullscreen off → `Device changed` 08:10:16.84 →
+  `reconfigured; mode-setting onto it connector=Virtual-1 width=1778
+  height=1116` → `modeset (full commit)`. modetest preferred 1778x1116;
+  `wlr-randr` three modes, 1778x1116 preferred+current;
+  `after-exit-fullscreen.png` 1778x1116.
+
+### Path 2 (`MoveTo`, incl. the never-run DRM half) — CONFIRMED
+
+Rig notes for the next run (virtio-gpu card0 differs from the vkms
+runbook): both `force` files exist but `echo unspecified > force` fails
+with `Invalid argument` (same as vkms — restore means explicit `on`/`off`,
+functionally pristine here); and **sysfs `status`/`modetest` reads go stale
+for minutes after a force write** (V1 read `connected` for 30 polls after
+`force=off` latched; V2 read `disconnected` for 3+ min after `force=on`) —
+scoot's uevent-driven re-probe is the authoritative read, never the first
+sysfs poll. A `force` write on virtio-gpu emits a natural `change` event of
+its own (30435.45 after the V1-off write), but that one produced **no
+session log line at all** (seen by `udevadm`, never `Device changed`;
+mechanism unconfirmed) — the synthetic trigger pairing stays required.
+
+- 08:11:00 `echo off > .../Virtual-1/force` (V2 still off); trigger
+  08:13:26 → two `Device changed` (#57984 renderD128, #57856 card0) →
+  `drm: nothing is connected to this device any more; holding the last
+  frame. The session keeps running -- plug a display back in and scoot
+  mode-sets onto it.` Session answered `version`; `hold.png` 1778x1116,
+  `cmp`-identical to `after-exit-fullscreen.png`.
+- 08:14:08 `echo on > .../Virtual-2/force`; trigger 08:17:36 →
+  `Device changed` x2 → `retarget`'s `set_pending` connector-change branch
+  refused on the live CRTC 37 (`drm: could not move the surface onto the
+  new connector in either order; staying on the current one`) → the
+  `switch_crtc` fallback built on CRTC 44 and probed green (`create_surface
+  crtc=44 mode=1024x768 ... connectors=[45]`) →
+  `drm: display reconfigured onto a different crtc; mode-setting onto it
+  connector=Virtual-2 crtc=crtc::Handle(44) width=1024 height=768` →
+  `drm: modeset (full commit)` 20 ms later (`Setting new mode: "1024x768"`).
+- Post-move health: session alive; single output kept (id 1, still named
+  `Virtual-1` — the documented stale-name behaviour), now 1024x768; foot
+  still output 1 / workspace 0 / focused, resized to 494x744 (windows
+  followed); `wlr-randr` four modes with 1024x768 preferred+current;
+  `after-moveto.png` 1024x768 (viewed: terminal, ring, cursor — never
+  black). No crash, no client kill: the realistic worst case from the
+  ticket (black screen, session alive) did not occur — both tiers of the
+  DRM half ran and the modeset committed.
+
+Restore (bonus designed-path coverage): V1 `force=on` + trigger 08:20:39
+→ `driving a newly connected display` / `added an output for it
+connector=Virtual-1 output=2` on CRTC 37 at 1776x1116 (phase-E add), then a
+natural event 1 s later → `NewMode` on the V2 head to 5120x2160 (forced-on
+default list head). V2 `force=off` + trigger 08:21:08 → `this connector
+went away` / `removing its output output=1`; foot `adopted=true` on output
+2 at 870x1092; `final.png` 1776x1116 (viewed). Session stopped after;
+nothing running, no DRM clients, VT still `tty1`, connectors back to
+connected/disconnected, forces explicit `on`/`off`. Mac side restored:
+window 834,184 800x528, Zoom To Fit off; guest list back to
+1600x1000-first/9.
+
+Nothing stays open: path 1's `NewMode` and path 2's `MoveTo` (decision in
+`hotplug/heads.rs`, DRM half in `retarget`/`set_pending`/`switch_crtc`)
+have all run live. The `hotplug/tests.rs` `switch_crtc`-unverified note and
+`resolved/tty-drm-hotplug-done.md`'s `NewConnector`-never-ran record are
+superseded by this run (a runtime add also ran live at 08:20:39).
 

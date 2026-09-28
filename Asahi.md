@@ -22,7 +22,7 @@ are under [Keys for the 2026-09-25 runs](#keys-for-the-2026-09-25-runs).
 | --- | --- | --- | --- |
 | [Ghostty fails at `scale = 1.5`](docs/backlog/resolved/ghostty-fails-at-1-5-done.md) | high → none | no | **RESOLVED, not reproducible** (2026-09-18) |
 | [Does `--gpu` actually fix this machine](docs/backlog/resolved/tty-gpu-config-key-done.md) — the residual on a resolved entry | — | yes | **closed**: not needed, the search works (2026-09-18) |
-| Issue #48's unconfirmed connector fallback, and multi-output phase E | — | yes | **mostly answered** (2026-09-25): both monitors driven at once on both tiers, lock and VT verified live, and a physical DP-1 unplug/replug removed and re-added its output; #48's fallback onto a *different* connector was never run (the panel can't be unplugged), and #48 was closed on unit-test evidence on 2026-09-27 ([ticket](docs/backlog/core/tty-hotplug-confirmation.md)); the GPU-tier runtime add was answered by Test 12 |
+| Issue #48's unconfirmed connector fallback, and multi-output phase E | — | yes | **answered** (2026-09-25 + 2026-09-28): both monitors driven at once on both tiers, lock and VT verified live, and a physical DP-1 unplug/replug removed and re-added its output; #48 was closed on unit-test evidence on 2026-09-27, and its fallback onto a *different* connector has since run live on the dev VM (Virtual-1 force-off / Virtual-2 force-on: `switch_crtc` to a new CRTC, modeset committed — [record](docs/backlog/resolved/tty-hotplug-confirmation-done.md)); the GPU-tier runtime add was answered by Test 12 |
 | [Test 4: CPU vs GPU on a real GPU](docs/backlog/resolved/gpu-vs-cpu-measured-done.md) | high → none | yes | **ANSWERED** (2026-09-21): scanout comes up on the split topology and costs 4–5x less CPU |
 | [Test 5: a fullscreen video scanned out directly](docs/backlog/resolved/gpu-primary-direct-format-gate-done.md) | medium | yes | **ANSWERED** (2026-09-25): mpv goes direct (~60% less compositor CPU) once it hides its pointer; `apple,dcp` has no cursor plane, so a visible pointer rules out any primary attempt ([ticket](docs/backlog/core/gpu-direct-blocked-by-composited-cursor.md)); planes: 1 primary, 1 overlay, 0 cursor |
 | [Test 6: what the GLES tier advertises, and what GPU clients do with it](docs/backlog/resolved/gles-dmabuf-full-formats-done.md) (Part C: [the scanout tranche](docs/backlog/resolved/gpu-scanout-candidates-done.md)) | high | partly | **ANSWERED** (2026-09-25): 162 pairs (54 formats x tiled-compressed/tiled/`LINEAR`); clients pick compressed and Mesa follows the scanout tranche to `LINEAR`; mpv `dmabuf-wayland` cannot run (no hardware decoder: AVD firmware missing) |
@@ -367,8 +367,10 @@ otherwise). Test 2 cleared both conditions on 2026-09-18.
 > one to test — don't start a second `--tty` instance, it will be refused.
 
 Issue #48 was the last open issue in the repo (closed 2026-09-27 on unit-test
-evidence; the two unrun paths below are tracked in
-`docs/backlog/core/tty-hotplug-confirmation.md`). PR #51 implemented DRM hotplug
+evidence; the two unrun paths below were tracked in the hotplug-confirmation
+backlog entry and both have since run live
+on the dev VM — see
+`docs/backlog/resolved/tty-hotplug-confirmation-done.md`). PR #51 implemented DRM hotplug
 and deliberately said `Refs #48`, not `Closes`: two of its four code paths
 have never run on real hardware, because nothing in a QEMU/virtio-gpu VM can
 change a connector's mode list at runtime (EDID override, off/detect cycles

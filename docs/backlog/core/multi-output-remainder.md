@@ -3,7 +3,7 @@ title: "Multi-output remainder: --tty multi-CRTC, placement policy, default bind
 status: "open"
 area: "core"
 priority: "high"
-blocked: "E1/E2 landed and ran on hardware (a physical DP-1 replug on the Asahi M2 Air, 2026-09-25; GPU-tier runtime add and multi-head mode change proven there 2026-09-26, Asahi.md Tests 11-12); left: #48 MoveTo on hardware, the scale/mode surface (its own entry)"
+blocked: "E1/E2 landed and ran on hardware (a physical DP-1 replug on the Asahi M2 Air, 2026-09-25; GPU-tier runtime add and multi-head mode change proven there 2026-09-26, Asahi.md Tests 11-12); #48 MoveTo proven live on the dev VM 2026-09-28 (Virtual-1 force-off / Virtual-2 force-on, switch_crtc to CRTC 44 — see tty-hotplug-confirmation-done.md); left: the scale/mode surface (its own entry)"
 ---
 
 # Multi-output remainder: --tty multi-CRTC, placement policy, default binds
@@ -113,6 +113,19 @@ unlike a quicker unplug that morning.
    1280x720 beside eDP-1's native mode, and a replug in that session came
    back at 1280x720. `MoveTo` still needs the only lit screen to be
    pullable, and the Asahi panel is not.
+   **Update 2026-09-28 (dev VM card0, dumb tier): `MoveTo` is proven live;
+   nothing in this follow-up stays open on its account.**
+   `Virtual-1 force=off` + synthetic trigger → Hold (last frame held,
+   `hold.png` byte-identical); `Virtual-2 force=on` + trigger → `MoveTo`
+   with the full DRM half (`set_pending` refused on CRTC 37, `switch_crtc`
+   to CRTC 44, modeset committed, session never black). Full record:
+   [`tty-hotplug-confirmation-done.md`](../resolved/tty-hotplug-confirmation-done.md).
+   Card0 rig deltas vs the vkms runbook above: `force` writes emit a
+   natural `change` event of their own, but it produced no session log line
+   — keep pairing every write with a synthetic trigger; sysfs `status` and
+   `modetest` stay stale for minutes after a write (scoot's re-probe is the
+   authoritative read); `echo unspecified > force` fails with
+   `Invalid argument`, so restore means explicit `on`/`off`.
 2. **Reconnect restore and output ids on replug.** Now its own ticket,
    [output-reconnect-restore](../resolved/output-reconnect-restore-done.md)
    (RESOLVED 2026-09-25, PR #249): match a
