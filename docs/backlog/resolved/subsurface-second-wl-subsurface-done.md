@@ -8,7 +8,7 @@ blocked: null
 
 # A second `wl_subsurface` for an orphaned subsurface is not `bad_surface` — RESOLVED
 
-RESOLVED 2026-09-28. scoot tracks the live `wl_subsurface` per surface
+RESOLVED 2026-09-28 (PR #302). scoot tracks the live `wl_subsurface` per surface
 (`crates/scoot/src/compositor/subsurface_role.rs`) and refuses a second
 `get_subsurface` with `bad_surface` from a `dispatch.rs` guard, filed on
 link in `CompositorHandler::new_subsurface` and forgotten when the role
