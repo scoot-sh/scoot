@@ -24,7 +24,9 @@ the cancel is not delivered and that the release still ends the drag.
 
 Nothing sticks without it. A request handled after its release is refused
 (no click grab is held), and the release always reaches scoot's grab
-first, so a client cannot see a release scoot has not. The cancel would only
+first, so a client cannot see a release scoot has not (bar a request still
+queued across a release and a new press in the same client, which rides the
+new press and ends with its release). The cancel would only
 let a client end a drag while the button is still held.
 
 ## Shape of the fix

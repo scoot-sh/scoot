@@ -25,11 +25,14 @@
 //! So a background X client cannot capture the pointer: with no press
 //! held, or one held on a Wayland window or on another X client's window,
 //! the request is refused (logged at debug) and nothing happens. A request
-//! handled after its button was released finds no click grab either --
-//! and it can only arrive that way round, since the release reaches scoot
-//! before XWayland: an X client cannot have seen a release scoot has not.
-//! That is also why the drag never sticks. Its release comes to scoot's
-//! grab, which ends there, as every floating drag does.
+//! handled after its button was released finds no click grab either: the
+//! release reaches scoot before XWayland, so an X client cannot have seen a
+//! release scoot has not. One exception, not prevented: a request carries no
+//! serial, so one still queued when the user releases and presses again in
+//! the same X client within one stalled loop iteration rides the new press
+//! (as a drag, ended by that press's release). The drag never sticks: its
+//! release comes to scoot's grab, which ends there, as every floating drag
+//! does.
 //!
 //! **XWayland's own grab.** The press also gave the X client an implicit X
 //! pointer grab, which EWMH has it release before asking. scoot's grab
@@ -59,7 +62,8 @@
 //!
 //! **A known limit.** Any X client can send `_NET_WM_MOVERESIZE` naming any
 //! window, and the window manager learns only the window, never who sent
-//! it. So a stranger naming the very window the press is held on passes the
+//! it. So a stranger naming any window of the X client the press is held on
+//! -- the pressed window or another of that client's -- passes the
 //! same-client check, and that window is dragged until the release. X11
 //! gives no way to close that -- the same limit as an X drag-and-drop's
 //! owner (`dnd.rs`) -- and it cannot reach past the press: no pointer is

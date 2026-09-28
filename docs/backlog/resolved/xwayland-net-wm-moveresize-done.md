@@ -35,11 +35,15 @@ differences:
   it is not needed to stop a drag sticking, because a request handled
   after its release finds no click grab (the release reaches scoot before
   XWayland, so no X client can act on a release scoot has not seen) and the
-  release ends a running drag. Split out:
+  release ends a running drag. Not prevented: a request still queued when
+  the user releases and presses again in the same X client within one
+  stalled loop iteration rides the new press (no serial to tell them apart;
+  review of the PR, reasoned, not reproduced). Split out:
   [`_NET_WM_MOVERESIZE_CANCEL`](../protocols/xwayland-net-wm-moveresize-cancel.md).
 - **A known limit, pinned:** any X client can name any window in the
-  request, so a stranger naming the window the press is held on drags it
-  until the release -- the X drag-and-drop owner's limit (`dnd.rs`). No
+  request, so a stranger naming any window of the X client the press is
+  held on (the pressed window or another of that client's) drags it until
+  the release -- the X drag-and-drop owner's limit (`dnd.rs`). No
   pointer is captured without a press held on the named window's client.
 - **An X window's resize is configured when the drag ends**, not per
   motion: `FloatingGrab` sends the `resizing` configure to xdg toplevels
@@ -49,7 +53,15 @@ differences:
 
 Tests: `compositor/xwayland/tests/moveresize.rs` (16 live, with a real X
 client pressing through scoot), `compositor/xwayland/moveresize/tests.rs`
-(button and edge mapping). Fail-first and mutation records are in the PR.
+(button and edge mapping). Fail-first: at the old no-op handlers 6 of 16
+fail (every test expecting a drag); each refusal branch mutation-checked
+(lock, non-X press, other client, other button, other grab each fail their
+own test). Live: GTK3 over X (`GDK_BACKEND=x11`), a `_NET_WM_WINDOW_TYPE_DIALOG`
+window floated (`reason=Dialog`) and two headerbar drags moved it
+(670,397 -> 570,447 -> 470,497, no X button left held) -- the review's run;
+the implementer's first live run had gone through GTK's Wayland backend.
+The button in a request is compared without the X server's pointer mapping
+(an in-X `xmodmap` button remap makes titlebar drags refuse, safely).
 
 The original entry follows.
 

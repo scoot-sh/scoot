@@ -564,16 +564,22 @@ its startup id by another X client, below.)
   while the session is locked. So a background X client cannot capture the
   pointer: with no press held, or one on a Wayland window or another X
   client's window, the request is refused (logged at debug). The drag ends
-  on the release, whenever the client asked: a request handled after the
-  release is refused, so a drag never sticks. An X window being resized is
-  told its new size when the drag ends, not during it. **Not honoured:**
+  on the release, so a drag never sticks: a request handled once no button
+  is held is refused. (A request carries no serial, so one still queued
+  when the user releases and presses again in the same app within a stalled
+  frame could ride the new press; the release still ends it.) An X window
+  being resized is told its new size when the drag ends, not on every
+  motion. A button the request names is matched without the X server's
+  pointer mapping, so after an in-X remap (`xmodmap -e "pointer = 3 2 1"`)
+  titlebar drags are refused rather than misattributed; remap buttons in
+  scoot's libinput config instead. **Not honoured:**
   keyboard moves and resizes (a window menu's "Move"; scoot has no keyboard
   move mode -- move a floating window with the bindings or `scoot msg`),
   and `_NET_WM_MOVERESIZE_CANCEL` (Smithay's window manager drops both, so
   a client cannot end a drag early; the release does). **Known limit:** any
   X client can send the request naming any window, so another X client
-  naming the very window the press is held on drags that window until the
-  release, as with
+  naming any window of the X client the press is held on (that window or
+  another of the same app's) drags it until the release, as with
   [an X drag's owner](#clipboard-drag-and-drop-and-input-methods).
 - **Closing** (`close`, a taskbar's close) sends `WM_DELETE_WINDOW`; a
   client that does not speak it has its window destroyed.
