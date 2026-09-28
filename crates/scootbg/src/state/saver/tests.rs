@@ -2,7 +2,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use super::{Saver, write_atomic};
+use super::{Saver, temp_path, write_atomic, write_through};
 
 struct Scratch(PathBuf);
 
@@ -120,12 +120,14 @@ fn a_symlink_at_the_temporary_name_is_not_followed() {
     let dir = scratch.0.join("scootbg");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("default");
-    let temp = dir.join(format!(".default.{}.tmp", std::process::id()));
+    // A name guessed right: `write_through` takes the one `write_atomic`
+    // draws at random.
+    let temp = temp_path(&file, 7);
     let victim = scratch.0.join("victim");
     std::fs::write(&victim, b"precious\n").unwrap();
     std::fs::set_permissions(&victim, std::fs::Permissions::from_mode(0o644)).unwrap();
     std::os::unix::fs::symlink(&victim, &temp).unwrap();
-    write_atomic(&file, b"state\n").unwrap();
+    write_through(&file, b"state\n", 7).unwrap();
     assert_eq!(std::fs::read(&victim).unwrap(), b"precious\n", "untouched");
     assert_eq!(mode(&victim), 0o644);
     let meta = std::fs::symlink_metadata(&file).unwrap();
@@ -136,24 +138,61 @@ fn a_symlink_at_the_temporary_name_is_not_followed() {
 
     let nowhere = scratch.0.join("never-made");
     std::os::unix::fs::symlink(&nowhere, &temp).unwrap();
-    write_atomic(&file, b"again\n").unwrap();
+    write_through(&file, b"again\n", 7).unwrap();
     assert!(!nowhere.exists(), "a dangling link's target is not created");
     assert_eq!(std::fs::read(&file).unwrap(), b"again\n");
 }
 
-/// A temporary file left behind (a daemon of the same pid killed
-/// mid-write) is replaced, not appended to or refused.
+/// A file already at a write's own temporary name is replaced, not
+/// appended to or refused.
 #[test]
 fn a_leftover_temporary_file_is_replaced() {
     let scratch = Scratch::new("leftover");
     std::fs::create_dir_all(&scratch.0).unwrap();
     let file = scratch.0.join("default");
-    let temp = scratch
-        .0
-        .join(format!(".default.{}.tmp", std::process::id()));
+    let temp = temp_path(&file, 7);
     std::fs::write(&temp, b"half a file from before, and longer").unwrap();
-    write_atomic(&file, b"whole\n").unwrap();
+    write_through(&file, b"whole\n", 7).unwrap();
     assert_eq!(std::fs::read(&file).unwrap(), b"whole\n");
+    assert!(std::fs::symlink_metadata(&temp).is_err(), "nothing left");
+}
+
+/// Another writer's temporary file, even one of the same pid (a daemon
+/// in another pid namespace, or on another host sharing the home) is
+/// never touched: each write's name is its own, so one write's
+/// remove-first can never take another's file and leave it renaming a
+/// half-written one into place (review of PR #315).
+#[test]
+fn another_writers_temporary_file_is_left_alone() {
+    let scratch = Scratch::new("other");
+    std::fs::create_dir_all(&scratch.0).unwrap();
+    let file = scratch.0.join("default");
+    let pid = rustix::process::getpid().as_raw_nonzero();
+    // The name every write of this pid used before, and one drawn like
+    // `write_atomic`'s.
+    let others = [
+        scratch.0.join(format!(".default.{pid}.tmp")),
+        temp_path(&file, super::unique().unwrap()),
+    ];
+    for other in &others {
+        std::fs::write(other, b"another writer, mid-write").unwrap();
+    }
+    for _ in 0..100 {
+        write_atomic(&file, b"ours\n").unwrap();
+    }
+    assert_eq!(std::fs::read(&file).unwrap(), b"ours\n");
+    for other in &others {
+        assert_eq!(
+            std::fs::read(other).unwrap(),
+            b"another writer, mid-write",
+            "{other:?}"
+        );
+    }
+    // Two writes never draw the same name.
+    assert_ne!(
+        temp_path(&file, super::unique().unwrap()),
+        temp_path(&file, super::unique().unwrap())
+    );
 }
 
 #[test]

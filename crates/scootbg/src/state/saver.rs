@@ -17,8 +17,8 @@
 //! ([`Saver::flush`]), so `scootbg kill` straight after a `set` keeps it.
 //! A signal kills the process where it stands: the rename is atomic, so
 //! the file is the old one or the new one, never half of each, and at
-//! worst a temporary file is left behind (named for the process, so it is
-//! never another daemon's).
+//! worst a temporary file is left behind (named for the one write, so it
+//! is never another's: [`temp_path`]).
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -159,23 +159,54 @@ pub fn exposed(dir: &Path) -> Option<String> {
 /// the old file or the new one, whole. The file is private (0600), its
 /// directory made private (0700) if it has to be made.
 pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_through(file, bytes, unique()?)
+}
+
+/// The temporary file [`write_atomic`] writes `file`'s next contents to,
+/// told apart from every other write's by `unique`. Hidden, so never a
+/// profile's name (those cannot start with a dot), and never another
+/// write's: the pid alone is not enough, since two daemons of the same
+/// pid can share a profile (in two pid namespaces, or on two hosts with
+/// one network home), and one's remove-first below would take the other's
+/// file from under it, which would then rename this one's half-written
+/// file into place. The pid is there for whoever finds one left behind.
+/// It comes through `rustix`'s raw syscall rather than `std::process::id`,
+/// which calls libc's `getpid`: that one call alone kept another 64 KiB of
+/// libc's code resident in the idle daemon (the kernel maps a fault's
+/// neighbouring pages with it: docs/scootbg/backlog/idle-code-pages.md).
+fn temp_path(file: &Path, unique: u64) -> PathBuf {
     let dir = file.parent().unwrap_or(Path::new("/"));
     let name = file.file_name().unwrap_or_default().to_string_lossy();
+    let pid = rustix::process::getpid().as_raw_nonzero();
+    dir.join(format!(".{name}.{pid}.{unique:016x}.tmp"))
+}
+
+/// 64 random bits from the kernel (`getrandom(2)`, a raw syscall through
+/// `rustix`), for [`temp_path`]. It waits only while the kernel's pool is
+/// not yet initialized, early in boot, long before a wallpaper is saved.
+fn unique() -> io::Result<u64> {
+    let mut bytes = [0u8; 8];
+    let mut filled = 0;
+    while filled < bytes.len() {
+        match rustix::rand::getrandom(&mut bytes[filled..], rustix::rand::GetRandomFlags::empty()) {
+            Ok(read) => filled += read,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(u64::from_ne_bytes(bytes))
+}
+
+/// [`write_atomic`] through the temporary file `unique` names.
+fn write_through(file: &Path, bytes: &[u8], unique: u64) -> io::Result<()> {
+    let dir = file.parent().unwrap_or(Path::new("/"));
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(dir)?;
-    // Hidden, and named for this process: never another daemon's (two
-    // sessions may share a profile), and never a profile's name (those
-    // cannot start with a dot). The pid through `rustix`'s raw syscall
-    // rather than `std::process::id`, which calls libc's `getpid`: that one
-    // call alone kept another 64 KiB of libc's code resident in the idle
-    // daemon (the kernel maps a fault's neighbouring pages with it:
-    // docs/scootbg/backlog/idle-code-pages.md).
-    let pid = rustix::process::getpid().as_raw_nonzero();
-    let temp = dir.join(format!(".{name}.{pid}.tmp"));
-    // Whatever is there (a file left by a killed daemon of the same pid,
-    // or a symbolic link someone put there) goes first; then `create_new`
+    let temp = temp_path(file, unique);
+    // Whatever is at this write's own name (in practice nothing: a
+    // symbolic link someone guessed it with) goes first; then `create_new`
     // (`O_CREAT | O_EXCL`) makes a new file or fails. `O_EXCL` never
     // follows a symbolic link, dangling or not, so the write can only land
     // in a fresh 0600 file of ours, never in a file a link points at.
