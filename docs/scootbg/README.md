@@ -16,9 +16,12 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
 > or one (`--output NAME`), and `scootbg clear`, drawn at each output's
 > real device pixels, fractional scales included; `query` reports what
 > each output shows, and `version` and `kill` work. **The wallpaper is
-> restored at the next start**, per profile ([below](#restore)). Not yet:
-> scoot's `[wallpaper]` section, the next item in
-> [`backlog/`](backlog/README.md). These docs stay here.
+> restored at the next start**, per profile ([below](#restore)).
+> **In scoot, a `[wallpaper]` section is all it takes**: scoot runs
+> `scootbg apply-config` with it at start-up and on every reload
+> ([below](#apply-config-scoots-wallpaper-section); the section itself is
+> in [scoot's configuration reference](../configuration.md#wallpaper)),
+> and the Nix modules install scootbg for it.
 
 ## What it is for
 
@@ -58,14 +61,15 @@ per-frame budget.
 
 ## How it will work
 
-In scoot, the whole setup is to be one config section. **This is planned,
-not working:** no scoot release accepts `[wallpaper]` yet, and scoot's
-config rejects unknown sections by ignoring the *whole* file, keybindings
-and layout included. Do not add it until the
-[integration item](backlog/scoot-integration.md) lands.
+In scoot, the whole setup is one config section (every key, and what
+happens when scootbg is missing, in
+[scoot's configuration reference](../configuration.md#wallpaper)). scoot
+runs `scootbg apply-config` with it
+([below](#apply-config-scoots-wallpaper-section)): no autostart entry, no
+session script.
 
 ```toml
-# ~/.config/scoot/config.toml  (planned; see above)
+# ~/.config/scoot/config.toml
 [wallpaper]
 image = "~/Pictures/hills.jpg"   # or: color = "#1e1e2e"
 mode = "fill"                    # fill | fit | stretch | center | tile
@@ -88,8 +92,8 @@ scootbg daemon --profile sway                  # ... restoring and saving the `s
 ```
 
 Every command above works today (`set` also takes `--filter
-lanczos3|catmull-rom|bilinear|nearest`, and `daemon` `--no-restore`); what
-does not yet is the `[wallpaper]` section. The root
+lanczos3|catmull-rom|bilinear|nearest`, and `daemon` `--no-restore`), and
+so does the `[wallpaper]` section. The root
 [README](../../README.md#scootbg-early) has the details (exit codes, what
 `set` waits for). One binary: `daemon` runs the Wayland client, every
 other subcommand talks to it over its socket.
@@ -212,10 +216,10 @@ output HDMI-A-1 clear
   key and its fields, single spaces between. `all` and `output NAME` take
   `clear`, `color #rrggbb`, or `image PATH MODE FILL FILTER` (a path is
   absolute). `profile` names the profile the file belongs to (the file
-  name is the authority; a mismatch is a warning). `fingerprint` is
-  reserved for scoot's `[wallpaper]` section
-  ([scoot-integration.md](backlog/scoot-integration.md)): only
-  `apply-config` will write it, and every other save keeps it as read.
+  name is the authority; a mismatch is a warning). `fingerprint` is the
+  fingerprint of the last `[wallpaper]` section `apply-config` applied for
+  this profile ([below](#apply-config-scoots-wallpaper-section)): only
+  `apply-config` writes it, and every other save keeps it as read.
 - **Fields are escaped:** `%`, space and every ASCII control byte (newline
   and tab included) are written `%XX`, so any path or connector name
   round-trips exactly, `#` and spaces included. Other bytes, UTF-8
@@ -240,6 +244,163 @@ output HDMI-A-1 clear
   bumps the version. `profile` and `fingerprint` are read and kept from
   version 1 on, so the scoot integration writes them with no bump.
 
+## `apply-config`: scoot's `[wallpaper]` section
+
+`scootbg apply-config [--profile NAME] JSON` is the one command scoot runs
+(at start-up and on every reload while its config has a `[wallpaper]`
+section, and with `{}` on the reload that removes it; see
+[scoot's side](../configuration.md#wallpaper)).
+You rarely run it yourself, but anything that owns a config can: it is
+how a config, rather than a person, sets the wallpaper.
+
+```sh
+scootbg apply-config --profile scoot '{"image":"/home/me/hills.jpg","mode":"fill",
+  "output":{"DP-2":{"color":"#101014"}}}'
+scootbg apply-config --profile scoot '{}'     # the section is gone: clear
+```
+
+**The JSON** is the section, one object, `{}` when there is none:
+
+| Key | |
+|---|---|
+| `image` | an absolute path (scoot resolves `~/` and relative paths against its config file first) |
+| `color` | `#rrggbb`; `image` or `color`, never both; neither is nothing (the compositor's own background) |
+| `mode`, `fill`, `filter` | with an `image` only, as `scootbg set` takes them: `fill`/`fit`/`stretch`/`center`/`tile`, `#rrggbb`, `lanczos3`/`catmull-rom`/`bilinear`/`nearest` |
+| `output` | per-output tables by connector name, each with the five keys above and nothing else; an empty table is nothing on that output |
+| `command` | scoot's (where to find `scootbg`): accepted, ignored, and never part of the fingerprint |
+
+- **Each table stands alone**, as a `scootbg set` does: an output's own
+  `image` does not take the top level's `mode`.
+- **Strict.** Refused, as a usage error (exit 2) that starts and changes
+  nothing, so a typo is never a setting silently not applied: an unknown
+  key at either level, a key given twice, `null` or a value of the wrong
+  type, an array where an object belongs, a relative path, a path with a
+  NUL byte or over 4095 bytes, a malformed color, an unknown mode or
+  filter, an empty output name, more than 256 outputs, more than 63 KiB
+  (64,512 bytes) of JSON, JSON that is not UTF-8.
+
+**Whichever you changed last wins.** The section is applied only when it
+changed since the last `apply-config` for that profile:
+
+- **The fingerprint** is SHA-256, in lowercase hex, of a canonical
+  encoding of the section: compact JSON, keys in byte order at both levels,
+  strings as given (a color's case included) and escaped as `serde_json`
+  escapes them, `command` left out, every other key present in the input
+  present in it. The sender's key order never matters (scoot's per-output
+  tables come from a hash map); a change to any value does, and so does
+  writing out a default (`mode = "fill"`), since the section is compared
+  as written. It is kept in the profile's state file
+  ([Restore](#restore)), which only `apply-config` writes it to.
+- **Different** (or never applied): the section is applied like a `set`
+  of everything (the top level for every output, replacing every
+  per-output choice, then each output's table) and its fingerprint
+  recorded in the same write. **The same:** what shows stays, so a
+  `scootbg set` made since keeps showing, across restarts and unchanged
+  reloads, until the section itself changes.
+
+| Sequence | Result |
+|---|---|
+| section A, `set X`, restart | A unchanged, so X is restored |
+| section A, reload with B, `set X`, restart | B unchanged since its reload, so X |
+| section A, reload with B, restart | B shows |
+| section removed by reload, later re-added as A | `{}` was recorded at removal, so A differs and shows |
+| no daemon yet, section added by reload | `apply-config` starts the daemon |
+| an `[autostart]` entry also starts `scootbg daemon` | whichever binds first, the daemon ends up on scoot's profile, so a `set X` from a previous boot is restored either way |
+
+One order it cannot see: the section removed *while scoot is not
+running* and re-added unchanged before the next start. No `{}` was ever
+applied, so the old fingerprint matches and the last saved state (a
+`scootbg set` pick, say) restores. Every row, and this one, is an end-to-end
+test on headless scoot (`crates/scootbg/tests/config.rs`).
+
+**The profile.** A running daemon **adopts** the profile of each
+`apply-config` it gets: from then on it restores and saves that profile's
+state, whatever `--profile` it started with (it says so on stderr); the
+state file of a profile adopted again while its last save is still being
+written is read once that write is done (waited for up to 2 s), and one
+file never has two writers. So an
+`[autostart]` `scootbg daemon` that won the race still ends up on scoot's
+profile; on adopting, it shows that profile's saved state if the section
+is unchanged, the section if not. A request made before the adoption (an
+image `set` still decoding) never lands in the new profile.
+
+**Starting the daemon.** With none answering on the socket:
+
+- **A non-empty section:** `apply-config` starts one, the same binary
+  (its path while that is still the running file, so `ps`, `pgrep` and
+  `pkill` see `scootbg`; `/proc/self/exe` itself if the path now names
+  another file or none, an upgrade meanwhile, so a different build never
+  runs; the path alone without `/proc`) as
+  `apply-config --serve` (internal, not for use by
+  hand), with stdin and stdout on `/dev/null`, **stderr where
+  `apply-config`'s goes** (scoot's log), and `/` as its working directory.
+  It calls `setsid(2)` first: a session and process group of its own, no
+  controlling terminal, so a signal to the caller's process group (a
+  terminal's hang-up or Ctrl-C, a supervisor or `timeout(1)` stopping the
+  job) does not reach it; `apply-config` exits without waiting for it, so
+  it is reparented and nothing is left for the caller to reap. It still
+  ends with the compositor, whose connection it loses. It starts **from
+  the section**: it reads the profile's state without showing it,
+  compares fingerprints, and shows the section or the saved state, never
+  one and then the other. `apply-config` then sends it the section as
+  usual (unchanged by then, so only the reply is new).
+- **An empty section** (`{}`, or only `command`): no daemon is started.
+  The clear and the fingerprint are written to the profile's state file
+  (unless recorded already), holding the display's lock meanwhile, so a
+  `scootbg daemon --profile NAME` started later shows nothing, as the
+  config asked. A state file that cannot be read, or is a newer scootbg's,
+  is not written over: exit 1. (A `scootbg daemon` started in the same
+  few milliseconds as that write finds the lock held and exits with
+  "already running".)
+- **Races** are settled by the lock: two `apply-config`s at once (or one
+  and a `scootbg daemon`) make exactly one daemon; a started one that loses
+  forwards its section to the winner, as `apply-config` itself does, so the
+  config's values are never dropped; if the winner goes away without
+  serving (a `{}` being recorded, a daemon that fails before binding), the
+  loser tries once more to be the daemon itself. A daemon that is starting
+  (its lock taken, its socket bound, its loop not yet serving) is waited
+  for: tries every 1 ms for the first 50 ms, then every 15 ms, 5 s in all.
+- **Stderr and pipes.** Because the daemon writes where `apply-config`'s
+  stderr goes, a caller that reads that stderr to its end through a pipe
+  waits for the daemon too: send it to a file or a log.
+
+**Another build.** `apply-config` sends a `version` request first, on the
+same connection. A daemon of another version, same protocol: a warning on
+stderr, and the section is sent all the same. A daemon speaking another
+protocol, or one older than `apply-config` (it answers `unknown request`):
+an error naming both builds, exit 1, and what to do (`scootbg kill`, then
+reload). A daemon is never restarted behind your back.
+
+**The reply** comes once every output shows what it should and the
+compositor has processed it, as for `set`; `apply-config` prints nothing on
+success. An image in the section that is not a file is reported at once
+(exit 1, which one on which output); the rest of the section is applied,
+and the choice stays saved. **Every `apply-config` reports it until the
+file is back**, the unchanged ones included (so the first one after a
+cold start does too), and the first one after the file is back shows it:
+an image the section chose that is still saved as the section's choice
+there, but not showing, is checked with one `stat` and put back, at the
+generation it was chosen at. **A `set` made since always stands**: a
+`set` or `clear` for that output, or for every output, replaced the saved
+choice, so the entry is no longer the section's and is neither put back
+nor reported (and putting back at the old generation can never undo a
+newer request still decoding).
+
+**Exit status:** 0 applied, or unchanged, and on screen (or `{}` recorded
+with no daemon); 1 no daemon could be started or reached within 5 s, no
+reply within 30 s, the daemon closed the connection before answering
+(`scootbg kill`, a crash), a daemon from another protocol or too old, an
+image in the section that is not a file, drawing failed, or the state file
+could not be written; 2 a usage error, a refused section included.
+
+**Timing** (release build, `scoot --headless --outputs 2`, a color, two
+runs; [the record](backlog/resolved/scoot-integration-done.md#review-of-pr-293)):
+from running `apply-config` with no daemon to the section on screen,
+medians 6.90 and 5.61 ms (4.85–10.54; a plain `scootbg daemon` then
+`set`: 4.27 and 4.01 ms); unchanged on a running daemon 1.96 and 1.86 ms;
+changed 2.55 and 2.31 ms (a `set`: 2.39 and 2.34 ms); recording `{}` with
+no daemon 2.52 and 2.37 ms. scoot never waits on it: it spawns it.
+
 ## The control protocol
 
 Every command but `daemon` is one request on the daemon's socket,
@@ -255,11 +416,23 @@ object per line each way, each request naming the protocol it speaks.
                                                               -> {"type":"ok"}
 {"protocol":1,"type":"clear"}                                 -> {"type":"ok"}
 {"protocol":1,"type":"clear","output":"DP-1"}                 -> {"type":"ok"}
-{"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...],"saving":true}
+{"protocol":1,"type":"query"}                                 -> {"type":"outputs","outputs":[...],"saving":true,"profile":"default"}
 {"protocol":1,"type":"version"}                               -> {"type":"version","protocol":1,"version":"..."}
 {"protocol":1,"type":"kill"}                                  -> {"type":"ok"}
+{"protocol":1,"type":"apply-config","profile":"scoot","config":{"color":"#1e1e2e"}}
+                                                              -> {"type":"ok"}
 anything wrong                                                -> {"type":"error","message":"..."}
 ```
+
+- **`apply-config` is additive to protocol 1**: a request type added, no
+  existing one changed. A daemon that predates it answers `unknown request
+  `apply-config``, which the `apply-config` command reports as such (see
+  [above](#apply-config-scoots-wallpaper-section)). `profile` (a profile
+  name) and `config` (the section, validated strictly, as above) are both
+  required; on any other request they stay ignored unknown fields. It
+  answers like a `set`, once every output shows what it should, or at once
+  with an error when an image in the section is not a file (the rest is
+  applied).
 
 - `set` and `clear` answer once every targeted output shows the change and
   a `wl_display.sync` sent after the commits has come back, so the
@@ -320,7 +493,9 @@ anything wrong                                                -> {"type":"error"
   `shows` of `null` from a failure is told apart from a `clear`; the
   next request for it, or a new size, retries. The top-level `saving` is
   `false` while changes are not saved for the next start
-  ([Restore](#restore)).
+  ([Restore](#restore)), and `profile` is the profile whose state is
+  restored and saved: the daemon's `--profile`, or the last one an
+  `apply-config` made it adopt.
 - **An image `set` sent before its outputs are configured** (as the
   daemon starts) waits to be decoded until none of the outputs it targets
   is about to be configured, bounded by a round trip the daemon has
@@ -348,6 +523,7 @@ The image is a 6000×4000 JPEG, `fill`.
 | to the image on one 4K output, likewise | 450–476 ms, one decode (714–820 ms for the build before ticket 9 in the same runs, two decodes; a `set` once the output is configured takes 437–468 ms) |
 | **to a restored image** on one 4K output (the state file names the JPEG) | 451–497 ms to the first `query` that reports it shown: one decode ([restore-state-done.md](backlog/resolved/restore-state-done.md#measurements)) |
 | Saving a choice | 23–33 µs on the loop, medians (build the text, hand it over); the atomic write on a thread of its own, medians 334–455 µs, worst 1.0–54.5 ms per 200, on ext4 |
+| **`apply-config`**, a color on 2× 1600×1000: with no daemon (it starts one) / unchanged / changed, to on screen | medians 5.61–6.90 / 1.86–1.96 / 2.31–2.55 ms over two runs (a `set` 2.34–2.39 ms; `daemon` then `set` from cold 4.01–4.27 ms); the daemon it starts idles like any other: 0 context switches and 0 CPU ticks in 30 s, 1 thread, 8 fds, RSS 3,968 kB ([record](backlog/resolved/scoot-integration-done.md#review-of-pr-293)) |
 | File descriptors | 8 whatever is shown: a buffer's memfd is closed once the compositor has it |
 
 ## Measured so far
@@ -364,7 +540,7 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 | What | Result |
 |---|---|
-| Stripped binary | 1,569,640 B with images and restore (1,557,352 B at ticket 9 before its review fixes, 1,516,392 B before ticket 9, 1,500,008 B at ticket 6; 783,072 B with colors only then); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
+| Stripped binary | 1,684,328 B with `apply-config` (+114,688 B: by symbol, spawning a process through `std::process` about 27 KB, the strict section parse about 23 KB, the client half about 20 KB; 8,192 B of it the fixes from its review); 1,569,640 B with images and restore (1,557,352 B at ticket 9 before its review fixes, 1,516,392 B before ticket 9, 1,500,008 B at ticket 6; 783,072 B with colors only then); links only `libc.so.6`, `libm.so.6` and `libgcc_s.so.1` |
 | `set` of a 6000×4000 JPEG onto a 3840×2160 output, request to reply, ×3 | 397.0–433.6 ms, 390–420 ms of CPU (PNG 408.1–417.6 ms; WebP 1,218.0–1,289.4 ms); peak RSS 120.5–120.6 MB with the previous wallpaper still mapped (88.0 MB for a first set; PNG 120.4–120.6 MB; WebP 142.0–142.1 MB) |
 | After it, idle 30 s | 1 thread, heap 372–568 kB, one 32.4 MB buffer; 0 context switches, 0 CPU |
 | A few hundred bytes claiming 16384×16384 (PNG, JPEG, WebP) | refused in under 1 ms; peak RSS within 72 kB of before |
@@ -377,20 +553,27 @@ Not yet against competitors: that is [lightest.md](backlog/lightest.md).
 
 - **scoot drives scootbg, never the reverse.** At startup and on each
   reload, while `[wallpaper]` exists, scoot spawns one command,
-  `scootbg apply-config`, with the section's values. It starts the daemon
-  if none is running, otherwise hands the values over, and changes the
-  wallpaper only if the section itself changed. scoot never waits on it
-  from its event loop. scoot depends only on scootbg's CLI,
+  `scootbg apply-config`, with the section's values
+  ([above](#apply-config-scoots-wallpaper-section)), one run at a time.
+  It starts the daemon if none is running, otherwise hands the values
+  over, and changes the wallpaper only if the section itself changed.
+  scoot never waits on it from its event loop: the run is reaped, and its
+  exit status logged, when it ends. scoot depends only on scootbg's CLI,
   not its crate, and scootbg knows nothing about scoot's config, so each
   stays usable without the other. See
-  [`backlog/scoot-integration.md`](backlog/scoot-integration.md).
+  [scoot's configuration reference](../configuration.md#wallpaper) and
+  [the item's record](backlog/resolved/scoot-integration-done.md).
 - **Config versus `scootbg set`: whichever you changed last wins.** Edit
   `[wallpaper]` and the config's wallpaper shows. Run `scootbg set` after
   that and your choice shows, across restarts and unrelated reloads, until
   you next change `[wallpaper]` itself.
-- **Packaging.** `scootbg` is its own package, like `scootctl`. scoot runs
-  it from `PATH` (or `[wallpaper] command`), and the home-manager module
-  installs it and points scoot at it when `[wallpaper]` is set.
+- **Packaging.** `scootbg` is its own package, like `scootctl`
+  (`packages.<system>.scootbg`, Linux only, and `pkgs.scootbg` from the
+  flake's overlay). scoot runs it from `PATH` (or `[wallpaper] command`).
+  The home-manager module installs it and points `command` at it whenever
+  its settings have a `wallpaper` table; the NixOS module installs it
+  system-wide whenever `programs.scoot.enable` is on
+  (`programs.scoot.wallpaper.enable`). See [docs/nix.md](../nix.md).
 - scoot's `[appearance] background_color` stays: it is the frame clear
   color, what shows with no wallpaper client at all. scootbg draws over it
   on the background layer.

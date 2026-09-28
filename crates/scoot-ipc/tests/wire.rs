@@ -2,8 +2,9 @@
 //! `PROTOCOL_VERSION` bump.
 
 use scoot_ipc::{
-    Action, Horizontal, OutputSnapshot, PROTOCOL_VERSION, PointerButton, Rect, Request, Response,
-    SCREENSHOT_CURSOR_DEFAULT, Screenshot, WindowSnapshot, decode, encode,
+    Action, EventKind, Horizontal, OutputRemoved, OutputRestored, OutputSnapshot, PROTOCOL_VERSION,
+    PointerButton, Rect, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, WindowSnapshot,
+    decode, encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -15,8 +16,26 @@ fn unit_requests_are_just_a_type() {
     assert_eq!(json_of(&Request::Windows), json!({ "type": "windows" }));
     assert_eq!(json_of(&Request::Reload), json!({ "type": "reload" }));
     assert_eq!(
+        json_of(&Request::Subscribe {
+            events: vec![EventKind::Output]
+        }),
+        json!({ "type": "subscribe", "events": ["output"] })
+    );
+    assert_eq!(
         decode::<Request>(&encode(&Request::Reload).unwrap()).unwrap(),
         Request::Reload
+    );
+    assert_eq!(
+        decode::<Request>(
+            &encode(&Request::Subscribe {
+                events: vec![EventKind::Output]
+            })
+            .unwrap()
+        )
+        .unwrap(),
+        Request::Subscribe {
+            events: vec![EventKind::Output]
+        }
     );
 }
 
@@ -394,13 +413,14 @@ fn a_reload_report_round_trips_with_both_lists() {
 
 /// The Phase 4-6 record: the refusal *strings* moved (restart wording, the
 /// autostart spawn delta) while the reply *shape* did not -- so this still
-/// decodes as the same two string lists, and `PROTOCOL_VERSION` stays 3.
+/// decodes as the same two string lists. (The protocol is at 4 now for the
+/// event subscription below; these strings are still payload, not wire.)
 /// Strings are payload, not wire format: an older client parses this reply
 /// exactly as it parsed the old strings.
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 3,
+        PROTOCOL_VERSION, 4,
         "no new reply variant or field shipped with the reload completion"
     );
     let response = Response::Reloaded {
@@ -465,6 +485,9 @@ fn every_request_round_trips_on_one_line() {
         Request::WaitIdle {
             quiet_ms: 200,
             timeout_ms: 5000,
+        },
+        Request::Subscribe {
+            events: vec![EventKind::Output],
         },
     ];
     for request in requests {
@@ -709,5 +732,156 @@ fn a_window_snapshot_carries_its_workspace_and_adoption_on_the_wire() {
     assert_eq!(
         decode::<WindowSnapshot>(&encode(&new).unwrap()).unwrap(),
         new
+    );
+}
+
+/// The subscription handshake: the request names kinds, the reply echoes
+/// them, and both travel as snake_case tags.
+#[test]
+fn a_subscribe_names_its_kinds_and_the_reply_echoes_them() {
+    let request = Request::Subscribe {
+        events: vec![EventKind::Output],
+    };
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "subscribe", "events": ["output"] })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+
+    let response = Response::Subscribed {
+        events: vec![EventKind::Output],
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({ "type": "subscribed", "events": ["output"] })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+/// An unknown event kind is rejected like an unknown request type: a decode
+/// error the server answers with an ordinary `Error` while it keeps
+/// serving -- never a kill, never a silent misroute. This is the
+/// adversarial half of the subscription contract: a client naming a kind
+/// from the future meets an error, and an older server meets a newer
+/// subscriber the same way.
+#[test]
+fn unknown_event_kinds_are_rejected_like_unknown_request_types() {
+    assert!(
+        decode::<Request>(r#"{"type":"subscribe","events":["hypothetical_future_kind"]}"#).is_err()
+    );
+    assert!(
+        decode::<Request>(r#"{"type":"subscribe","events":["output","hypothetical_future_kind"]}"#)
+            .is_err()
+    );
+    // ...while the same shape with a known kind decodes.
+    assert_eq!(
+        decode::<Request>(r#"{"type":"subscribe","events":["output"]}"#).unwrap(),
+        Request::Subscribe {
+            events: vec![EventKind::Output]
+        }
+    );
+}
+
+/// The removal payload on the wire: the adopter, the adopted range, and the
+/// adopter's previous and new active workspace, in the 0-based indices IPC
+/// speaks, with the origin connector name.
+#[test]
+fn an_output_removed_event_round_trips_with_the_adoption() {
+    let event = OutputRemoved {
+        output: 2,
+        name: "DP-1".into(),
+        adopter: Some(1),
+        adopted_start: 2,
+        adopted_count: 2,
+        adopter_prev_active: Some(0),
+        adopter_active: Some(2),
+        origin: Some("DP-1".into()),
+    };
+    let response = Response::OutputRemoved(event.clone());
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "output_removed",
+            "output": 2,
+            "name": "DP-1",
+            "adopter": 1,
+            "adopted_start": 2,
+            "adopted_count": 2,
+            "adopter_prev_active": 0,
+            "adopter_active": 2,
+            "origin": "DP-1",
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+    assert_eq!(event.origin.as_deref(), Some("DP-1"));
+}
+
+/// The restore payload: the same adoption record the removal filed, plus
+/// how many still-open windows actually moved back.
+#[test]
+fn an_output_restored_event_round_trips_with_what_moved() {
+    let response = Response::OutputRestored(OutputRestored {
+        output: 3,
+        name: "DP-1".into(),
+        adopter: Some(1),
+        adopted_start: 2,
+        adopted_count: 2,
+        adopter_prev_active: Some(2),
+        adopter_active: Some(0),
+        origin: Some("DP-1".into()),
+        moved: 3,
+    });
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "output_restored",
+            "output": 3,
+            "name": "DP-1",
+            "adopter": 1,
+            "adopted_start": 2,
+            "adopted_count": 2,
+            "adopter_prev_active": 2,
+            "adopter_active": 0,
+            "origin": "DP-1",
+            "moved": 3,
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+/// A removal with no adopter and a restore against a gone one still have a
+/// shape: explicit nulls, not missing fields. New variants, new clients --
+/// nothing here decodes asymmetrically against an older server, because an
+/// older server never sends them.
+#[test]
+fn adoption_events_name_a_missing_adopter_explicitly() {
+    let removed: Response = decode(
+        r#"{"type":"output_removed","output":2,"name":"DP-1","adopter":null,"adopted_start":0,"adopted_count":0,"adopter_prev_active":null,"adopter_active":null,"origin":null}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        removed,
+        Response::OutputRemoved(OutputRemoved {
+            output: 2,
+            name: "DP-1".into(),
+            adopter: None,
+            adopted_start: 0,
+            adopted_count: 0,
+            adopter_prev_active: None,
+            adopter_active: None,
+            origin: None,
+        })
     );
 }

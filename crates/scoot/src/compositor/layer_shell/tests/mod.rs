@@ -38,6 +38,9 @@ use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, WEnum};
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1, ext_session_lock_v1,
 };
+use wayland_protocols::xdg::shell::client::xdg_positioner::{
+    Anchor, ConstraintAdjustment, Gravity,
+};
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
@@ -293,6 +296,22 @@ enum Step {
     /// nests. How the serial-gate tests reproduce a menubar hover-switch
     /// exactly.
     ReplacePopup { color: [u8; 4], serial: u32 },
+    /// Map a `reactive` popup whose `SlideX` answer depends on where the
+    /// output's right edge is: anchored `anchor_x` (in the parent window's
+    /// geometry coordinates) and growing right, so resizing the output
+    /// re-slides it. How the re-constrain tests open a menu whose geometry
+    /// provably moves -- the plain [`Step::MapPopup`] positioner asks for no
+    /// adjustment, so nothing ever could. Shares the grab, configure and
+    /// mapping half with it; see [`map_popup`].
+    MapReactivePopup {
+        parent: PopupParent,
+        color: [u8; 4],
+        grab: Option<GrabSource>,
+        /// The anchor's x, 1x1 at `(anchor_x, 0)`: the test computes it
+        /// from the window's rect and the usable area, which only the
+        /// server side knows.
+        anchor_x: i32,
+    },
     /// Report how many `xdg_surface.configure` events the mapped popup has
     /// received in total -- the compositor must send exactly one (later
     /// commits stay quiet, as a non-reactive positioner requires).
@@ -839,6 +858,33 @@ fn destroy_popup(popups: &mut Vec<PopupEntry>) -> Result<(), String> {
     Ok(())
 }
 
+/// What positioner a [`Step::MapPopup`] builds: the plain one asks for no
+/// adjustment anywhere, so its geometry can never move under it -- which is
+/// why the re-constrain tests map [`Step::MapReactivePopup`] instead.
+struct PopupLayout {
+    size: (i32, i32),
+    anchor_rect: (i32, i32, i32, i32),
+    anchor: Anchor,
+    gravity: Gravity,
+    adjust: ConstraintAdjustment,
+    reactive: bool,
+}
+
+impl PopupLayout {
+    /// The positioner [`Step::MapPopup`] always built: 50 square at the
+    /// parent's top-left corner, asking for nothing.
+    fn plain() -> Self {
+        Self {
+            size: (50, 50),
+            anchor_rect: (0, 0, 10, 10),
+            anchor: Anchor::None,
+            gravity: Gravity::None,
+            adjust: ConstraintAdjustment::empty(),
+            reactive: false,
+        }
+    }
+}
+
 /// Creates an `xdg_popup` on `parent` and drives it through configure, ack,
 /// attach and a frame request, reporting whether the compositor ever
 /// configured it.
@@ -872,6 +918,7 @@ fn map_popup(
     parent: PopupParent,
     color: [u8; 4],
     grab: Option<u32>,
+    layout: PopupLayout,
 ) -> Result<Ack, String> {
     let surface = compositor.create_surface(qh, ());
     let index = client.window_serials.len();
@@ -879,10 +926,15 @@ fn map_popup(
     client.window_configures.push(0);
     let xdg = wm_base.get_xdg_surface(&surface, qh, SurfaceIndex(index));
     let positioner = wm_base.create_positioner(qh, ());
-    // Both are required before `get_popup`, or the compositor
-    // rightly answers with `invalid_positioner`.
-    positioner.set_size(50, 50);
-    positioner.set_anchor_rect(0, 0, 10, 10);
+    positioner.set_size(layout.size.0, layout.size.1);
+    let (x, y, w, h) = layout.anchor_rect;
+    positioner.set_anchor_rect(x, y, w, h);
+    positioner.set_anchor(layout.anchor);
+    positioner.set_gravity(layout.gravity);
+    positioner.set_constraint_adjustment(layout.adjust);
+    if layout.reactive {
+        positioner.set_reactive();
+    }
     // A layer-parented popup names *no* xdg parent here and gets
     // one from `zwlr_layer_surface_v1.get_popup` instead, which
     // is how the two protocols are specified to meet.
@@ -1211,6 +1263,47 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     *parent,
                     *color,
                     serial,
+                    PopupLayout::plain(),
+                )?;
+            }
+            Step::MapReactivePopup {
+                parent,
+                color,
+                grab,
+                anchor_x,
+            } => {
+                let serial = grab
+                    .map(|source| match source {
+                        GrabSource::Key => client.last_key_serial.ok_or(
+                            "a grab needs an input serial; press a key into this client first",
+                        ),
+                        GrabSource::Serial(serial) => Ok(serial),
+                    })
+                    .transpose()?;
+                outcome = map_popup(
+                    &mut queue,
+                    &mut client,
+                    &qh,
+                    &compositor,
+                    &shm,
+                    &wm_base,
+                    &seat,
+                    &layers,
+                    &toplevels,
+                    &mut popups,
+                    &mut popup_surfaces,
+                    &mut frames,
+                    *parent,
+                    *color,
+                    serial,
+                    PopupLayout {
+                        size: (50, 50),
+                        anchor_rect: (*anchor_x, 0, 1, 1),
+                        anchor: Anchor::TopLeft,
+                        gravity: Gravity::BottomRight,
+                        adjust: ConstraintAdjustment::SlideX,
+                        reactive: true,
+                    },
                 )?;
             }
             Step::ReplacePopup { color, serial } => {
@@ -1231,6 +1324,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     PopupParent::Window,
                     *color,
                     Some(*serial),
+                    PopupLayout::plain(),
                 )?;
             }
             Step::DestroyPopup => {

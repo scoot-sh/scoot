@@ -332,6 +332,11 @@ pub struct State {
     /// origins workspaces still carry -- so a chained adoption's earlier
     /// origin keeps its name while any workspace still names it.
     pub(super) origin_names: HashMap<u64, String>,
+    /// Connections subscribed to IPC events, filed by connection id -- see
+    /// `ipc/events.rs`. Written by `Request::Subscribe` (which dedicates
+    /// the connection), by the hotplug emitters, and by the accept loop
+    /// when a connection leaves; drained on the frame tick.
+    pub(super) subscribers: Vec<super::ipc::Subscriber>,
     /// The output scale resolved from `[output] scale` (see
     /// `output_scale.rs`), set at startup and re-applied live by a config
     /// reload (see `reload.rs`) -- except under `--nested`, where it stays
@@ -872,6 +877,12 @@ pub struct State {
     /// its zombie is collected, a zombie holds its pid against reuse, and an
     /// `ECHILD` (reaped elsewhere) forgets the entry rather than leaking it.
     pub spawned_children: HashSet<u32>,
+    /// The `[wallpaper]` section's side: the `scootbg apply-config` runs
+    /// (one at a time, newest section wins, each reaped and its exit
+    /// logged), the profile they use and the section a reload diffs
+    /// against. See `wallpaper.rs`. Its pids are tracked there, not in
+    /// `spawned_children`, because the reaper keeps their exit statuses.
+    pub wallpaper: super::wallpaper::Wallpaper,
     /// Keycodes currently held that a keybinding intercepted on press, so
     /// their matching release is intercepted too instead of forwarded to
     /// whatever the focused client becomes in between. See `input::key`.
@@ -1102,6 +1113,7 @@ impl State {
             output_identities: HashMap::new(),
             displaced: HashMap::new(),
             origin_names: HashMap::new(),
+            subscribers: Vec::new(),
             output_scale: scale,
             integer_scale: super::output_scale::integer_scale(scale),
             renderer,
@@ -1179,6 +1191,7 @@ impl State {
             interaction_serials: input::interaction::Recent::default(),
             keybindings,
             spawned_children: HashSet::new(),
+            wallpaper: Default::default(),
             suppressed_keys: HashSet::new(),
             held_keys: HashSet::new(),
             // true without going through request_render(), so nothing has
@@ -1457,8 +1470,74 @@ impl State {
         let Some((program, args)) = command.split_first() else {
             return true;
         };
+        let mut child = self.session_command(program.as_ref());
+        child.args(args);
+        let token = self.mint_spawn_token(program);
+        if let Some(token) = &token {
+            child.env(State::ACTIVATION_TOKEN_ENV, token.as_str());
+        }
+        // While XWayland is live, the same token again as the X toolkits'
+        // startup id -- the chain the X focus gate redeems (see
+        // `xwayland/focus.rs`). `session_command` removed any inherited one:
+        // it is a receipt for someone else's action. Only while live, so a
+        // session without XWayland spawns exactly as it always has.
+        if self.xdisplay.is_some()
+            && let Some(token) = &token
+        {
+            child.env(State::STARTUP_ID_ENV, token.as_str());
+        }
+        match child.spawn() {
+            Ok(child) => {
+                // The other half of that chain, for X clients that set no
+                // startup id at all: which process this token was minted
+                // for, so an X window whose client is this process (as the
+                // X server reports it) can be matched to it.
+                #[cfg(feature = "xwayland")]
+                if self.xdisplay.is_some()
+                    && let Some(data) = token
+                        .as_ref()
+                        .and_then(|token| self.xdg_activation.data_for_token(token))
+                {
+                    let pid = child.id();
+                    data.user_data
+                        .insert_if_missing_threadsafe(|| super::xwayland::SpawnedPid(pid));
+                }
+                // Tracked for the SIGCHLD drain, which reaps exactly these
+                // pids and nothing else (see `child_reaper.rs`). Inserted
+                // synchronously here, before the child can possibly exit and
+                // before any drain can run -- both this and the drain live on
+                // the loop thread -- so no reap is lost and none is doubled.
+                self.spawned_children.insert(child.id());
+                tracing::info!(?command, "spawned");
+                true
+            }
+            Err(error) => {
+                // The child never started, so nothing will ever redeem this:
+                // pull it back out rather than occupying a slot until the
+                // sweep finds it.
+                if let Some(token) = token {
+                    self.xdg_activation.remove_token(&token);
+                }
+                tracing::warn!(?command, %error, "could not spawn");
+                false
+            }
+        }
+    }
+
+    /// A `Command` for `program` with the session's environment: what every
+    /// child of the compositor gets, [`State::spawn`]'s and the
+    /// `[wallpaper]` section's `scootbg apply-config` alike (see
+    /// `wallpaper.rs`), less the per-spawn activation token only `spawn`
+    /// mints. Standard streams are inherited; every descriptor scoot opens
+    /// is close-on-exec (see `docs/backlog/resolved/spawn-fd-cloexec-audit-done.md`),
+    /// so a child gets stdio and nothing else of scoot's.
+    ///
+    /// `WAYLAND_DISPLAY` and the IPC socket path, the session-identity
+    /// environment, the live cursor theme and, while XWayland is live,
+    /// `DISPLAY`; an inherited activation token or startup id is removed.
+    pub(super) fn session_command(&self, program: &std::ffi::OsStr) -> Command {
         let mut child = Command::new(program);
-        child.args(args).env("WAYLAND_DISPLAY", &self.socket_name);
+        child.env("WAYLAND_DISPLAY", &self.socket_name);
         // The soft fd limit this process was started with, not the raised
         // one: a child using `select()` cannot watch an fd past 1023 (see
         // `nofile.rs`).
@@ -1509,60 +1588,15 @@ impl State {
         // Removed rather than overwritten: the compositor itself may have been
         // started with one (a launcher client, a nested session), and that
         // token is a receipt for someone else's user action -- handing it to
-        // this child would let it spend an interaction it was never given.
+        // a child would let it spend an interaction it was never given.
+        // `spawn` sets a fresh one of its own on top.
         child.env_remove(State::ACTIVATION_TOKEN_ENV);
-        let token = self.mint_spawn_token(program);
-        if let Some(token) = &token {
-            child.env(State::ACTIVATION_TOKEN_ENV, token.as_str());
-        }
-        // While XWayland is live, the same token again as the X toolkits'
-        // startup id -- the chain the X focus gate redeems (see
-        // `xwayland/focus.rs`). Removed first for the same reason as above:
-        // an inherited one is a receipt for someone else's action. Only
-        // while live, so a session without XWayland spawns exactly as it
-        // always has.
+        // The X toolkits' startup id, likewise someone else's receipt, while
+        // our XWayland is live (see `spawn` for the one it sets instead).
         if self.xdisplay.is_some() {
             child.env_remove(State::STARTUP_ID_ENV);
-            if let Some(token) = &token {
-                child.env(State::STARTUP_ID_ENV, token.as_str());
-            }
         }
-        match child.spawn() {
-            Ok(child) => {
-                // The other half of that chain, for X clients that set no
-                // startup id at all: which process this token was minted
-                // for, so an X window whose client is this process (as the
-                // X server reports it) can be matched to it.
-                #[cfg(feature = "xwayland")]
-                if self.xdisplay.is_some()
-                    && let Some(data) = token
-                        .as_ref()
-                        .and_then(|token| self.xdg_activation.data_for_token(token))
-                {
-                    let pid = child.id();
-                    data.user_data
-                        .insert_if_missing_threadsafe(|| super::xwayland::SpawnedPid(pid));
-                }
-                // Tracked for the SIGCHLD drain, which reaps exactly these
-                // pids and nothing else (see `child_reaper.rs`). Inserted
-                // synchronously here, before the child can possibly exit and
-                // before any drain can run -- both this and the drain live on
-                // the loop thread -- so no reap is lost and none is doubled.
-                self.spawned_children.insert(child.id());
-                tracing::info!(?command, "spawned");
-                true
-            }
-            Err(error) => {
-                // The child never started, so nothing will ever redeem this:
-                // pull it back out rather than occupying a slot until the
-                // sweep finds it.
-                if let Some(token) = token {
-                    self.xdg_activation.remove_token(&token);
-                }
-                tracing::warn!(?command, %error, "could not spawn");
-                false
-            }
-        }
+        child
     }
 }
 

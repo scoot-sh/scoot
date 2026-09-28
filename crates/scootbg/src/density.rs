@@ -50,7 +50,8 @@
 //! the compositor's next event settles it and the surface is redrawn: the
 //! wallpaper is on screen when `set` answers, but not device-exact until
 //! then. A compositor whose fraction always overshoots the mode (scoot at
-//! 1.33, `docs/backlog/core/fractional-scale-in-120ths.md`) keeps it: the
+//! 1.33 before it resolved its scale to 120ths,
+//! `docs/backlog/resolved/fractional-scale-in-120ths-done.md`) keeps it: the
 //! buffer is scaled down a little either way, and the fraction's is the
 //! smaller one.
 //!

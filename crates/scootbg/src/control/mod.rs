@@ -51,7 +51,7 @@ use std::os::unix::net::UnixListener;
 use rustix::event::PollFlags;
 use rustix::io::Errno;
 
-pub use claim::{Claim, ClaimError};
+pub use claim::{Claim, ClaimError, lock_if_free};
 pub use conn::{Answer, Conn, ConnId, Handler, Status};
 
 /// Clients served at once. `scootbg` commands are one request each, so

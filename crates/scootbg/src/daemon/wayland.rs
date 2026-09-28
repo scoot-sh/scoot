@@ -147,6 +147,12 @@ pub struct State {
     pub ready: Vec<(ConnId, Ready)>,
     /// What is saved for the next start (`crate::state`), and where.
     pub saved: Saved,
+    /// The profiles `apply-config` made the daemon leave
+    /// (`daemon::config`) whose writers may still be finishing a save,
+    /// waited for on the way out, as for `saved`. Only busy ones are kept
+    /// (an idle one has nothing to lose), so this holds at most one per
+    /// write under way.
+    pub retired: Vec<Saved>,
 }
 
 pub struct Wayland {
@@ -217,6 +223,7 @@ impl Wayland {
             images,
             ready: Vec::with_capacity(WAITERS + MAX_TRIALS),
             saved,
+            retired: Vec::new(),
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {

@@ -79,7 +79,18 @@ full per-feature cycle.
    `apply-config` fingerprint is reserved; an image `set` sent as the
    daemon starts, and a restore, decode once (714–820 → 450–476 ms to a
    4K image on screen; a restored one 451–497 ms)
-10. [Seamless in scoot: a `[wallpaper]` config section](scoot-integration.md)
+10. [**Seamless in scoot: a `[wallpaper]` config section**](resolved/scoot-integration-done.md)
+    — RESOLVED 2026-09-27: part A, `scootbg apply-config --profile NAME
+    JSON` (strict JSON schema, SHA-256 fingerprint over a canonical
+    encoding, profile adoption, a detached daemon started race-safely,
+    `{}` recorded with no daemon); part B, scoot's `[wallpaper]` section
+    (read leniently so a mistake costs only the wallpaper, paths resolved,
+    only the written keys sent), spawned at startup and on every reload,
+    one run at a time with the newest section winning, a 40 s bound and
+    a failed section retried, exit statuses logged; the NixOS and
+    home-manager `programs.scoot.wallpaper.*` options and
+    `overlays.default`; the smoke test checks a wallpaper pixel on each
+    headless output
 11. [Lowest resource use of any wallpaper daemon](lightest.md) — the
     release gate: v1 ships only when no competitor beats scootbg beyond the
     noise margin on any row both can do

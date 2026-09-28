@@ -50,18 +50,63 @@ in
   options.programs.scoot = {
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";
 
-    # Same null-default shape as the home-manager module (see its
-    # comment): no overlay means no `pkgs.scoot` to default to, and the
-    # flake wrapper (`nixosModules.scoot` in `flake.nix`) fills this
-    # with the flake's own build via `mkDefault`.
+    # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
+    # applied, else null: nothing is guessed, since a `scoot` from anywhere
+    # else would silently install someone else's build. The flake wrapper
+    # (`nixosModules.scoot` in `flake.nix`) fills this with the flake's own
+    # build via `mkDefault` either way.
     package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = null;
+      default = pkgs.scoot or null;
+      defaultText = lib.literalExpression "pkgs.scoot or null";
       example = lib.literalExpression "inputs.scoot.packages.\${pkgs.system}.scoot";
       description = ''
         The scoot package to install system-wide and to launch from
         the login-screen session entry.
       '';
+    };
+
+    # scootbg, the wallpaper daemon a `[wallpaper]` config section runs.
+    # The config file itself is per-user (the home-manager module); this
+    # only guarantees the binary, on the system PATH, where the default
+    # `[wallpaper] command = "scootbg"` finds it -- for any user, and for a
+    # session the greeter starts.
+    wallpaper = {
+      # On whenever scoot is and there is a scootbg to install: a ~1.7 MB
+      # binary that does nothing until a config asks for a wallpaper, so
+      # installing it changes nothing -- unlike the login entry, which
+      # stays opt-in. With no package (a direct-module user without the
+      # flake's overlay) it stays off rather than failing evaluation, so
+      # upgrading breaks nobody; `true` set explicitly with no package is
+      # the loud assertion below. `false` opts out (another wallpaper
+      # daemon, say).
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = cfg.enable && cfg.wallpaper.package != null;
+        defaultText = lib.literalExpression "config.programs.scoot.enable && config.programs.scoot.wallpaper.package != null";
+        description = ''
+          Install `programs.scoot.wallpaper.package` system-wide, so a
+          `[wallpaper]` section in a user's scoot config finds `scootbg`
+          on PATH. On by default whenever `programs.scoot.enable` is and a
+          package is available (the flake's modules and overlay provide
+          one); setting it to `true` with no package fails evaluation.
+        '';
+      };
+
+      # `pkgs.scootbg` with the flake's overlay, else null; the flake
+      # wrapper injects the flake's own build (the same revision as
+      # `package`, so the `apply-config` scoot speaks is the one scootbg
+      # understands). A direct-module user who enables this with neither
+      # gets the assertion below at eval, not a session with no wallpaper.
+      package = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default = pkgs.scootbg or null;
+        defaultText = lib.literalExpression "pkgs.scootbg or null";
+        example = lib.literalExpression "inputs.scoot.packages.\${pkgs.system}.scootbg";
+        description = ''
+          The scootbg package to install when `wallpaper.enable` is set.
+        '';
+      };
     };
 
     session = {
@@ -129,57 +174,82 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    assertions = [
-      {
-        # Loud at eval, not a broken `.desktop` at login: `Exec=` with
-        # a null package would interpolate to nothing and greet
-        # whoever picks the entry with a greeter error.
-        assertion = cfg.package != null;
-        message = ''
-          programs.scoot.enable is set but programs.scoot.package is null.
-          Flake consumers get the flake's own build by default through the
-          nixosModules wrapper -- this fires only for direct-module use:
-          set programs.scoot.package explicitly.
-        '';
-      }
-      {
-        assertion = cfg.session.enable -> cfg.package != null;
-        message = ''
-          programs.scoot.session.enable needs programs.scoot.package:
-          a session entry with no binary to launch would fail at the login screen.
-        '';
-      }
-      {
-        # Loud at eval, not an empty `Exec=` at login: an explicitly
-        # empty or whitespace-only command would render a .desktop with
-        # nothing (or blanks) to launch. (`builtins.match` returns null
-        # on no match, so the second disjunct is false exactly for
-        # empty/blank strings.)
-        # (The default null is the empty case that matters -- bare
-        # `--tty`, byte-identical to before -- and never reaches here.)
-        assertion =
-          cfg.session.command == null || builtins.match "^[[:space:]]*$" cfg.session.command == null;
-        message = ''
-          programs.scoot.session.command is set but empty or blank:
-          either leave it null for the default bare
-          `<package>/bin/scoot --tty` entry, or set the full Exec=
-          command line to run.
-        '';
-      }
-    ];
+  config = lib.mkMerge [
+    (lib.mkIf cfg.wallpaper.enable {
+      assertions = [
+        {
+          # Loud at eval, not a `[wallpaper]` that logs "scootbg was not
+          # found" at every login. Reachable only by setting `enable = true`
+          # explicitly: the default is off without a package.
+          assertion = cfg.wallpaper.package != null;
+          message = ''
+            programs.scoot.wallpaper.enable is set to true but
+            programs.scoot.wallpaper.package is null. Flake consumers get
+            the flake's own scootbg through the nixosModules wrapper, and
+            the flake's overlay provides pkgs.scootbg -- this fires only
+            for direct-module use without either: set
+            programs.scoot.wallpaper.package, apply the overlay, or leave
+            programs.scoot.wallpaper.enable at its default.
+          '';
+        }
+      ];
+      # The `!= null` guard keeps a null out of the list, so the failure is
+      # the assertion's message rather than a type error.
+      environment.systemPackages = lib.optional (cfg.wallpaper.package != null) cfg.wallpaper.package;
+    })
+    (lib.mkIf cfg.enable {
+      assertions = [
+        {
+          # Loud at eval, not a broken `.desktop` at login: `Exec=` with
+          # a null package would interpolate to nothing and greet
+          # whoever picks the entry with a greeter error.
+          assertion = cfg.package != null;
+          message = ''
+            programs.scoot.enable is set but programs.scoot.package is null.
+            Flake consumers get the flake's own build by default through the
+            nixosModules wrapper, and the flake's overlay provides pkgs.scoot
+            -- this fires only for direct-module use without either: set
+            programs.scoot.package explicitly.
+          '';
+        }
+        {
+          assertion = cfg.session.enable -> cfg.package != null;
+          message = ''
+            programs.scoot.session.enable needs programs.scoot.package:
+            a session entry with no binary to launch would fail at the login screen.
+          '';
+        }
+        {
+          # Loud at eval, not an empty `Exec=` at login: an explicitly
+          # empty or whitespace-only command would render a .desktop with
+          # nothing (or blanks) to launch. (`builtins.match` returns null
+          # on no match, so the second disjunct is false exactly for
+          # empty/blank strings.)
+          # (The default null is the empty case that matters -- bare
+          # `--tty`, byte-identical to before -- and never reaches here.)
+          assertion =
+            cfg.session.command == null || builtins.match "^[[:space:]]*$" cfg.session.command == null;
+          message = ''
+            programs.scoot.session.command is set but empty or blank:
+            either leave it null for the default bare
+            `<package>/bin/scoot --tty` entry, or set the full Exec=
+            command line to run.
+          '';
+        }
+      ];
 
-    environment.systemPackages = lib.optional (cfg.package != null) cfg.package;
+      environment.systemPackages = lib.optional (cfg.package != null) cfg.package;
 
-    # The `cfg.package != null` conjunct is load-bearing, not redundant
-    # with the assertions above: `sessionPackage` interpolates
-    # `cfg.package` into `Exec=`, and a null there fails while
-    # evaluating the config value itself -- before `assertions` are
-    # checked -- with a bare "cannot coerce null to a string". The
-    # conjunct keeps the null out of the interpolation so the failure
-    # surfaces as the helpful assertion message instead.
-    services.displayManager.sessionPackages = lib.optional (
-      cfg.session.enable && cfg.package != null
-    ) sessionPackage;
-  };
+      # The `cfg.package != null` conjunct is load-bearing, not redundant
+      # with the assertions above: `sessionPackage` interpolates
+      # `cfg.package` into `Exec=`, and a null there fails while
+      # evaluating the config value itself -- before `assertions` are
+      # checked -- with a bare "cannot coerce null to a string". The
+      # conjunct keeps the null out of the interpolation so the failure
+      # surfaces as the helpful assertion message instead.
+      services.displayManager.sessionPackages = lib.optional (
+        cfg.session.enable && cfg.package != null
+      ) sessionPackage;
+    })
+  ];
 }

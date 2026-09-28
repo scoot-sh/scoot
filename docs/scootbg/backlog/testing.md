@@ -20,7 +20,7 @@ blocked: null
   output, on scoot through its screenshot request and on sway through a
   wlr-screencopy client in the harness); images add the fit-mode points.
 - The precedence rule end to end: every order in
-  [scoot-integration.md](scoot-integration.md)'s table, plus a config
+  [scoot-integration-done.md](resolved/scoot-integration-done.md)'s table, plus a config
   with two per-output overrides and a changed `command` across a restart,
   where the `scootbg set` pick must survive.
 - Hotplug on the headless backend if scoot can add and remove virtual

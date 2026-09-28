@@ -83,6 +83,12 @@ jobs:
   #   either side                          -> the scootbg-on-scoot
   #                                           integration job
   #
+  # scripts/smoke-test.sh runs scootbg too (its [wallpaper] section, with
+  # SMOKE_REQUIRE_SCOOTBG=1 in the Linux job), but a scootbg-only change
+  # does not run that job. The pair is still checked on such a change:
+  # the integration job's tests/scoot_config.rs has scoot itself spawn
+  # `apply-config` from a [wallpaper] section, as the smoke test does.
+  #
   # Directory prefixes carry their trailing slash: `crates/scoot*` would
   # also match `crates/scootbg`, and `crates/scootbg/` does not match
   # `crates/scootbg-mem/`, which is why both are listed.
@@ -255,11 +261,14 @@ jobs:
       - name: Build the default compositor, and assert it links no GPU stack
         shell: nix develop --command bash -euo pipefail {0}
         run: |
-          cargo build -p scoot -p scootctl
+          cargo build -p scoot -p scootctl -p scootbg
           # Kept aside before the gpu-scanout step below overwrites
           # `target/debug/scoot`: the smoke test must run the default build.
+          # scootbg too: the smoke test's [wallpaper] section runs it
+          # (it links no GPU stack either way; its own job checks that).
           cp target/debug/scoot "$RUNNER_TEMP/scoot-default"
           cp target/debug/scootctl "$RUNNER_TEMP/scootctl-default"
+          cp target/debug/scootbg "$RUNNER_TEMP/scootbg-default"
 
           echo "--- ldd target/debug/scoot ---"
           ldd target/debug/scoot
@@ -363,6 +372,11 @@ jobs:
         env:
           SCOOT: ${{ runner.temp }}/scoot-default
           SCOOTCTL: ${{ runner.temp }}/scootctl-default
+          # The [wallpaper] section's end-to-end check runs this scootbg, and
+          # REQUIRE turns "no scootbg, skipped" into a failure, so this step
+          # cannot go green by skipping it.
+          SCOOTBG: ${{ runner.temp }}/scootbg-default
+          SMOKE_REQUIRE_SCOOTBG: "1"
           # Keeps every socket, log and screenshot under RUNNER_TEMP: the
           # script's unprefixed defaults live in `/run/user/<uid>`, which a
           # runner does not have.
@@ -467,6 +481,11 @@ jobs:
         env:
           SCOOT: ${{ runner.temp }}/scoot-xwayland
           SCOOTCTL: ${{ runner.temp }}/scootctl-xwayland
+          # The default build's scootbg, kept aside above: the daemon has no
+          # xwayland feature and talks to scoot only over Wayland, so the
+          # [wallpaper] section runs here too rather than skipping.
+          SCOOTBG: ${{ runner.temp }}/scootbg-default
+          SMOKE_REQUIRE_SCOOTBG: "1"
           SMOKE_PREFIX: ${{ runner.temp }}/smoke-xwayland
         shell: nix shell --inputs-from . nixpkgs#foot nixpkgs#jq nixpkgs#imagemagick nixpkgs#wayland-utils nixpkgs#xwayland nixpkgs#xorg.xeyes --command bash -euo pipefail {0}
         run: |
@@ -670,7 +689,11 @@ jobs:
   # tests/scale.rs at fractional scales, and tests/share.rs for outputs
   # of one size sharing an image's pixels: scoot's own screenshots, and
   # sway's through a wlr-screencopy client in the test), and the last
-  # wallpaper restored across a daemon restart (tests/restore.rs).
+  # wallpaper restored across a daemon restart (tests/restore.rs), and
+  # `apply-config`, scoot's one command, through the precedence table of
+  # docs/scootbg/backlog/resolved/scoot-integration-done.md (tests/config.rs),
+  # and scoot's own `[wallpaper]` section driving it (tests/scoot_config.rs:
+  # scoot spawns `apply-config` at start-up and on each reload).
   # Runs when either side changes, since each can break the other's
   # end-to-end run.
   # `SCOOTBG_REQUIRE_SCOOT` and `SCOOTBG_REQUIRE_SWAY` turn the tests'
@@ -733,5 +756,5 @@ jobs:
           SCOOTBG_REQUIRE_SCOOT: "1"
           SCOOTBG_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --no-fail-fast
-          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore
+          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --test config --test scoot_config --no-fail-fast
+          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --test config --test scoot_config

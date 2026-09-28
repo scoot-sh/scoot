@@ -14,7 +14,7 @@ original ticket follows unchanged.
 
 Requests for v1: `set`, `clear`, `query`, `kill`, `version`, and
 `apply-config`, the one command a compositor's config drives scootbg
-through (see [scoot-integration.md](scoot-integration.md)): it takes the
+through (see [scoot-integration-done.md](scoot-integration-done.md)): it takes the
 whole section as JSON, starts the daemon when none answers, and only
 changes the wallpaper when the section itself changed.
 
@@ -32,7 +32,7 @@ changes the wallpaper when the section itself changed.
   *and* a `wl_display.sync` round trip after the commit has come back, so
   the compositor has processed the commit before the reply and a script can
   take a screenshot straight after. Never called synchronously from inside
-  the compositor: see [scoot-integration.md](scoot-integration.md).
+  the compositor: see [scoot-integration-done.md](scoot-integration-done.md).
 - A file whose name starts with `#` is given as `./#name.png`; the README
   says so.
 - `--help` for every subcommand; the README's command list is updated in
@@ -69,4 +69,4 @@ Nothing is left here. Each item, and where it went:
 | `set` replies after the commits and a `wl_display.sync` round trip, without blocking the loop | ticket 4 (`crates/scootbg/src/waiters.rs`); images reuse it once decoded (ticket 6) |
 | The `./#name.png` note | ticket 6, in `scootbg set --help`, the root README and [docs/scootbg/README.md](../../README.md) |
 | `--help` for every subcommand; the README's command list | tickets 2, 4 and 6, each in its own PR |
-| **`apply-config`** | **moved to [scoot-integration.md](../scoot-integration.md) (ticket 10).** It exists to carry scoot's `[wallpaper]` section, and its "only changes the wallpaper when the section itself changed" needs the saved state and fingerprint of [restore-state-done.md](restore-state-done.md) (ticket 9), so it lands with the integration, not before. The CLI does not parse or advertise it until then. |
+| **`apply-config`** | **moved to [scoot-integration-done.md](scoot-integration-done.md) (ticket 10).** It exists to carry scoot's `[wallpaper]` section, and its "only changes the wallpaper when the section itself changed" needs the saved state and fingerprint of [restore-state-done.md](restore-state-done.md) (ticket 9), so it lands with the integration, not before. The CLI does not parse or advertise it until then. |

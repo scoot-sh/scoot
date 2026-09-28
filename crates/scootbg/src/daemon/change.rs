@@ -165,6 +165,19 @@ impl Changes for Control<'_> {
         self.state.saved.saving()
     }
 
+    fn profile(&self) -> &str {
+        self.state.saved.profile().as_str()
+    }
+
+    fn apply_config(
+        &mut self,
+        conn: ConnId,
+        profile: crate::state::Profile,
+        section: &crate::section::Section,
+    ) -> Result<(), String> {
+        super::config::apply(self.state, self.qh, conn, profile, section)
+    }
+
     fn change(
         &mut self,
         conn: ConnId,

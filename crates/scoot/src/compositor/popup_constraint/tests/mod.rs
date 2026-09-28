@@ -42,6 +42,7 @@ use crate::compositor::test_support::{self, Harness, wait_for};
 mod adversarial;
 mod layer;
 mod pure;
+mod reactive;
 mod window;
 
 use xdg_positioner::{Anchor, ConstraintAdjustment as Adjust, Gravity};
@@ -75,6 +76,7 @@ struct Spec {
     gravity: Gravity,
     offset: (i32, i32),
     adjust: Adjust,
+    reactive: bool,
 }
 
 impl Spec {
@@ -89,11 +91,22 @@ impl Spec {
             gravity: Gravity::BottomRight,
             offset: (0, 0),
             adjust: Adjust::empty(),
+            reactive: false,
         }
     }
 
     fn adjust(self, adjust: Adjust) -> Self {
         Self { adjust, ..self }
+    }
+
+    /// Asks for re-constraining when the conditions change
+    /// (`xdg_positioner.set_reactive`, v3): without it the compositor must
+    /// never re-configure the popup (see `reactive.rs`).
+    fn reactive(self) -> Self {
+        Self {
+            reactive: true,
+            ..self
+        }
     }
 }
 
@@ -149,6 +162,27 @@ enum Step {
         spec: Spec,
         token: u32,
     },
+    /// Wait for popup `popup`'s next configure past `seen` total, then ack
+    /// and commit it (no new buffer: the ack is what moves the committed
+    /// state). Answers with the geometry it carried. How the reactive tests
+    /// observe a re-constrain.
+    AwaitPopupConfigure { popup: usize, seen: u32 },
+    /// `xdg_popup.reposition` like [`Step::Reposition`], but neither acked
+    /// nor committed: the new positioner stays in flight. Answers with the
+    /// geometry the configure carried. How the reposition-race test leaves
+    /// a reposition unacked while the parent moves.
+    RepositionWithoutAck {
+        popup: usize,
+        spec: Spec,
+        token: u32,
+    },
+    /// Ack popup `popup`'s latest configure and commit (no new buffer),
+    /// moving the committed state. Answers `Done`.
+    AckPopup { popup: usize },
+    /// Report how many `xdg_popup.configure` events popup `popup` has been
+    /// sent in total. How the reactive tests tell "re-configured" apart
+    /// from "stayed quiet".
+    ReportPopupConfigures { popup: usize },
 }
 
 /// A popup's configured geometry: `(x, y, width, height)`, relative to its
@@ -160,6 +194,7 @@ enum Ack {
     Done,
     Popup(Geometry),
     Repositioned { geometry: Geometry, token: u32 },
+    PopupCount(u32),
 }
 
 /// Which object an event belongs to.
@@ -175,6 +210,9 @@ struct PopupRecord {
     geometry: Option<Geometry>,
     serial: Option<u32>,
     token: Option<u32>,
+    /// Every `xdg_popup.configure` received, including the first: a
+    /// re-constrained popup's count grows, a quiet one's stays at one.
+    configures: u32,
 }
 
 #[derive(Default)]
@@ -284,7 +322,10 @@ impl Dispatch<xdg_popup::XdgPopup, Role> for TestClient {
                 y,
                 width,
                 height,
-            } => record.geometry = Some((x, y, width, height)),
+            } => {
+                record.geometry = Some((x, y, width, height));
+                record.configures += 1;
+            }
             xdg_popup::Event::Repositioned { token } => record.token = Some(token),
             _ => {}
         }
@@ -396,6 +437,9 @@ fn positioner(
     positioner.set_gravity(spec.gravity);
     positioner.set_offset(spec.offset.0, spec.offset.1);
     positioner.set_constraint_adjustment(spec.adjust);
+    if spec.reactive {
+        positioner.set_reactive();
+    }
     positioner
 }
 
@@ -698,6 +742,60 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Repositioned { geometry, token }
             }
+            Step::AwaitPopupConfigure { popup, seen } => {
+                let target = made.popups.get(popup).ok_or("no such popup")?;
+                let (serial, geometry) =
+                    wait_for(&mut queue, &mut client, "a popup re-configure", |client| {
+                        let record = client.popups.get(popup)?;
+                        if record.configures > seen {
+                            record.serial.zip(record.geometry)
+                        } else {
+                            None
+                        }
+                    })?;
+                // No new buffer: the ack plus commit is what moves the
+                // committed state the next re-constrain reads.
+                target.xdg.ack_configure(serial);
+                target.surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Popup(geometry)
+            }
+            Step::ReportPopupConfigures { popup } => {
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                let count = client.popups.get(popup).ok_or("no such popup")?.configures;
+                Ack::PopupCount(count)
+            }
+            Step::RepositionWithoutAck { popup, spec, token } => {
+                let record = client.popups.get_mut(popup).ok_or("no such popup")?;
+                record.serial = None;
+                record.geometry = None;
+                record.token = None;
+                let target = made.popups.get(popup).ok_or("no such popup")?;
+                let positioner = positioner(&wm_base, &qh, spec);
+                target.popup.reposition(&positioner, token);
+                positioner.destroy();
+                let (serial, geometry, echoed) =
+                    wait_for(&mut queue, &mut client, "a reposition", |client| {
+                        let record = client.popups.get(popup)?;
+                        Some((record.serial?, record.geometry?, record.token?))
+                    })?;
+                assert_eq!(echoed, token, "the repositioned event echoes the token");
+                let _ = serial;
+                Ack::Popup(geometry)
+            }
+            Step::AckPopup { popup } => {
+                let target = made.popups.get(popup).ok_or("no such popup")?;
+                let serial = client
+                    .popups
+                    .get(popup)
+                    .ok_or("no such popup")?
+                    .serial
+                    .ok_or("no configure to ack")?;
+                target.xdg.ack_configure(serial);
+                target.surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
         };
         acks.send(ack).map_err(|e| e.to_string())?;
     }
@@ -766,6 +864,32 @@ impl Fixture {
         match self.run(Step::Popup { parent, spec }) {
             Ack::Popup(geometry) => geometry,
             other => panic!("expected a popup configure, got {other:?}"),
+        }
+    }
+
+    /// Waits for popup `popup`'s next configure past `seen` total, acks it,
+    /// and hands back the geometry it carried.
+    fn await_popup(&mut self, popup: usize, seen: u32) -> Geometry {
+        match self.run(Step::AwaitPopupConfigure { popup, seen }) {
+            Ack::Popup(geometry) => geometry,
+            other => panic!("expected a popup re-configure, got {other:?}"),
+        }
+    }
+
+    /// How many configures popup `popup` has been sent in total.
+    fn popup_count(&mut self, popup: usize) -> u32 {
+        match self.run(Step::ReportPopupConfigures { popup }) {
+            Ack::PopupCount(count) => count,
+            other => panic!("expected a popup configure count, got {other:?}"),
+        }
+    }
+
+    /// Repositions popup `popup` without acking, and hands back the geometry
+    /// the answering configure carried.
+    fn reposition_without_ack(&mut self, popup: usize, spec: Spec, token: u32) -> Geometry {
+        match self.run(Step::RepositionWithoutAck { popup, spec, token }) {
+            Ack::Popup(geometry) => geometry,
+            other => panic!("expected a reposition configure, got {other:?}"),
         }
     }
 

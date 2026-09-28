@@ -61,6 +61,7 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
 
 use super::State;
+use super::wallpaper::Waited;
 
 /// The write side of the wake eventfd the `SIGCHLD` handler writes to, or
 /// `-1` when no reaper is installed yet.
@@ -258,22 +259,31 @@ impl State {
     /// The empty-set fast path matters: every `SIGCHLD` in the process wakes
     /// the loop, including exits of children scoot never started (a test
     /// binary's own forks), and the common case is nothing tracked.
+    ///
+    /// The `[wallpaper]` section's `scootbg apply-config` runs are tracked
+    /// apart (`State::wallpaper`), because their exit statuses are logged
+    /// and decide what runs next; they are reaped here too, through the same
+    /// [`wait`], so one `SIGCHLD` path serves every child.
     pub(crate) fn reap_children(&mut self) {
-        if self.spawned_children.is_empty() {
-            return;
+        if !self.spawned_children.is_empty() {
+            self.spawned_children
+                .retain(|&pid| wait(pid) == Waited::Running);
         }
-        self.spawned_children.retain(|&pid| !reaped(pid));
+        if !self.wallpaper.is_idle() {
+            self.reap_wallpaper();
+        }
     }
 }
 
-/// Whether `pid` -- a child [`State::spawn`](super::State::spawn) tracked --
-/// is gone from the process table: reaped it just now, or already reaped
-/// elsewhere (`ECHILD`, which drops the entry rather than leaking it).
+/// Reaps `pid` -- a tracked child -- if it has exited, without blocking.
 ///
-/// `true` means "stop tracking". Only ever called with tracked pids, never
-/// `-1`: reaping anything would steal the children the unit-test binary
-/// forks for itself (see the module doc).
-fn reaped(pid: u32) -> bool {
+/// [`Waited::Running`] means "keep tracking"; either other answer means it
+/// is gone from the process table: reaped just now (with its status), or
+/// already reaped elsewhere (`ECHILD`, which drops the entry rather than
+/// leaking it). Only ever called with tracked pids, never `-1`: reaping
+/// anything would steal the children the unit-test binary forks for itself
+/// (see the module doc).
+pub(super) fn wait(pid: u32) -> Waited {
     let mut status = 0;
     loop {
         // SAFETY: `waitpid` with a positive pid and `WNOHANG` never blocks
@@ -281,10 +291,10 @@ fn reaped(pid: u32) -> bool {
         let reaped = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
         if reaped > 0 {
             tracing::debug!(pid, status, "reaped a spawned child");
-            return true;
+            return Waited::Exited(status);
         }
         if reaped == 0 {
-            return false;
+            return Waited::Running;
         }
         let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
         if errno == libc::EINTR {
@@ -295,12 +305,12 @@ fn reaped(pid: u32) -> bool {
             // was never our child): holding the pid would leak the entry,
             // and retrying would spin, so forget it.
             tracing::debug!(pid, "tracked child already reaped elsewhere; forgetting it");
-            return true;
+            return Waited::Gone;
         }
         // Any other errno (`EINVAL` is impossible for a positive pid):
         // keep tracking and retry on the next wakeup rather than leak a
         // zombie by forgetting a child that is still ours.
         tracing::warn!(pid, %errno, "could not reap a spawned child; retrying on the next SIGCHLD");
-        return false;
+        return Waited::Running;
     }
 }

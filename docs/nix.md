@@ -6,6 +6,8 @@
 - [XWayland from the flake](#xwayland-from-the-flake)
 - [Home-manager module](#home-manager-module)
 - [NixOS module](#nixos-module)
+- [The wallpaper: scootbg](#the-wallpaper-scootbg)
+- [The overlay](#the-overlay)
 - [Migrating from a hand-rolled packaging](#migrating-from-a-hand-rolled-packaging)
 - [Settings failure modes](#settings-failure-modes)
 - [Reference: live defaults](#reference-live-defaults)
@@ -40,11 +42,15 @@ feature (see [GPU tiers](#gpu-tiers-from-the-flake) below),
 the `xwayland` build feature and the X server on `PATH` (Linux only; see
 [XWayland](#xwayland-from-the-flake) below),
 `packages.<system>.scootctl` the standalone
-remote-control client, and `packages.<system>.default` is whichever is
+remote-control client, `packages.<system>.scootbg` the wallpaper daemon
+(Linux only; see [The wallpaper](#the-wallpaper-scootbg)), and
+`packages.<system>.default` is whichever is
 honest on that system (see [Platform notes](#platform-notes)). `apps`
-mirrors them (`nix run . -- ...`, `nix run .#scootctl -- ...`,
+mirrors four of them (`nix run . -- ...`, `nix run .#scootctl -- ...`,
 `nix run .#scoot-gpu -- --tty -- ...`,
-`nix run .#scoot-xwayland -- --headless --xwayland -- xterm`).
+`nix run .#scoot-xwayland -- --headless --xwayland -- xterm`). The same
+packages are also `pkgs.scoot`, `pkgs.scootctl` and `pkgs.scootbg` through
+[the overlay](#the-overlay).
 
 ## Platform notes
 
@@ -60,6 +66,9 @@ The modules below follow the same split: the home-manager module
 manages the config file on any system (useful on macOS too, to keep the
 config you deploy to a Linux box next to the machine that edits it),
 while the NixOS module's session entry only means anything on NixOS.
+scootbg, the wallpaper daemon, is Linux-only: there is no macOS
+`scootbg` package, and on macOS a `[wallpaper]` section in the
+home-manager settings renders as written and installs nothing.
 
 ## GPU tiers from the flake
 
@@ -173,6 +182,8 @@ programs.scoot = {
 | `configFile` | `"scoot/config.toml"` | Where the rendered TOML lands, relative to `$XDG_CONFIG_HOME`. Keep the default unless you pass the same path via `--config` wherever you launch scoot. |
 | `sessionScript` | `null` | Startup script text, written executable beside the rendered config at `<dirOf configFile>/session.sh` (`scoot/session.sh` with the default `configFile`). Launch it with `scoot -- ~/.config/scoot/session.sh` for the default (or `~/.config/<that path>` after a `configFile` override), or exec it from your greetd/startwm entry — on NixOS, that launch line goes in the NixOS module's `session.command` (see below), which is what makes the greeter entry run this script instead of a bare compositor. `null` writes no file. |
 | `portals.enable` | `true` | Install `scoot-portals.conf` to the per-user xdg-desktop-portal lookup path (`~/.config/xdg-desktop-portal/`), so ScreenCast/Screenshot resolve to the `wlr` backend inside a scoot session. Inert outside one (nothing reads it until `XDG_CURRENT_DESKTOP=scoot`). Turn off if you manage portal backends some other way. |
+| `wallpaper.enable` | `settings ? wallpaper` | Install `wallpaper.package` and set `settings.wallpaper.command` to its store path (a `command` you set yourself wins). On whenever `settings` has a `wallpaper` table; `false` leaves both alone, so `[wallpaper]` runs `scootbg` from `PATH`. See [The wallpaper](#the-wallpaper-scootbg). |
+| `wallpaper.package` | flake's own `scootbg` (Linux), `null` (macOS) | The scootbg to install. `null` installs nothing and sets no `command`. |
 
 The example above renders byte-for-byte to:
 
@@ -229,6 +240,8 @@ programs.scoot = {
 |---|---|---|
 | `enable` | `false` | Install `package` system-wide. |
 | `package` | flake's own `scoot` build | The binary to install and to launch from the session entry. Set it to `scoot-xwayland` for X11 apps (see [XWayland](#xwayland-from-the-flake)). |
+| `wallpaper.enable` | `enable` and a package available | Install `wallpaper.package` system-wide, so a user's `[wallpaper]` section finds `scootbg` on `PATH` (any user, and a session the greeter starts). On with `enable` whenever there is a package (the flake's modules and overlay provide one), off otherwise; `false` opts out (another wallpaper daemon). |
+| `wallpaper.package` | flake's own `scootbg` build | The scootbg to install. Setting `wallpaper.enable = true` with no package (direct module use without the overlay) is an eval error naming this option; leaving it at its default is not. |
 | `session.enable` | `false` | Add a scoot entry to the display-manager/greetd session menu. |
 | `session.command` | `null` | Full `Exec=` line for the session entry. `null` renders the bare `<package>/bin/scoot --tty` (existing configs unchanged). Set it to run something inside the session — usually `<package>/bin/scoot --tty -- <command>`, e.g. the home-manager `sessionScript` output (`/home/alice/.config/scoot/session.sh` for a user `alice` with defaults), or a wrapper script path that launches scoot itself (logging, environment setup). |
 
@@ -294,11 +307,96 @@ expansion), and it is the default `<dirOf configFile>/session.sh` — a
 `configFile` override moves both halves, so keep them paired.
 
 The config file itself is per-user, so it stays in the home-manager
-module above — the NixOS module owns the binary and the login entry,
-nothing else. (Direct-module users, not via this flake: set
-`programs.scoot.package` explicitly on both sides; there is no overlay,
-so no `pkgs.scoot` exists to default to, and the NixOS module fails
-loudly at eval instead of writing a session entry with no binary.)
+module above — the NixOS module owns the binaries and the login entry,
+nothing else. (Direct-module users, importing `nix/modules/*.nix` rather
+than the flake's modules: apply [the overlay](#the-overlay), and
+`package` and `wallpaper.package` default to its `pkgs.scoot` and
+`pkgs.scootbg`; without it, set `package` explicitly — the NixOS module
+fails loudly at eval, naming the option, rather than writing a session
+entry with no binary — and `wallpaper.package` too if you want scootbg:
+without one, `wallpaper.enable` defaults to off, and only an explicit
+`wallpaper.enable = true` with no package fails at eval.)
+
+## The wallpaper: scootbg
+
+A `[wallpaper]` section in scoot's config (see
+[configuration.md](configuration.md#wallpaper)) runs `scootbg`, the
+wallpaper daemon, which is its own package. With either module, turning
+scoot on is enough: nothing else to install, no path to write.
+
+- **NixOS** installs `scootbg` system-wide whenever `programs.scoot.enable`
+  is on (`programs.scoot.wallpaper.enable` follows it whenever a package
+  is available, which the flake's modules and overlay provide; set it to
+  `false` to opt out). The default `[wallpaper] command = "scootbg"` finds it on
+  `PATH`, for every user and for a session the greeter starts, with or
+  without home-manager. Installing it changes nothing until a config asks
+  for a wallpaper, which is why it is on by default while the login
+  entry stays opt-in.
+- **home-manager** installs it whenever `settings` has a `wallpaper`
+  table, and renders `command` as the package's store path, so the
+  section works whatever is on `PATH`. The path changes with every
+  upgrade, and that is harmless: scootbg leaves `command` out of the
+  fingerprint that decides whether the section changed, so an upgrade
+  never re-applies the section over a `scootbg set` pick.
+- **One pinned pair.** Both modules default to the scoot and scootbg of
+  the same flake revision, so the `apply-config` scoot speaks is the one
+  the installed scootbg understands. Pin one without the other and a
+  mismatch is reported in scoot's log (`apply-config` names both builds),
+  never silently ignored.
+- **Linux only.** On macOS `wallpaper.package` is `null`: the section is
+  rendered as written (for the Linux box it deploys to) and nothing is
+  installed.
+
+The two together, next to the complete session above:
+
+```nix
+# Home configuration:
+programs.scoot = {
+  enable = true;
+  settings.wallpaper = {
+    image = "~/Pictures/hills.jpg";   # resolved against HOME by scoot
+    mode = "fill";
+    output."DP-2".color = "#101014";
+  };
+};
+
+# System configuration (scootbg is installed by `enable` alone;
+# the line below only says so):
+programs.scoot = {
+  enable = true;
+  # wallpaper.enable = true;   # the default: follows `enable`
+};
+```
+
+Either half alone works too: home-manager alone installs scootbg into the
+user profile and points `command` at it; NixOS alone puts it on the
+system `PATH` for a hand-written config.
+
+No NixOS VM test boots a session to look at the wallpaper: CI proves the
+same path end to end without one (`scripts/smoke-test.sh` and
+`crates/scootbg/tests/scoot_config.rs` start a real scoot whose
+`[wallpaper]` section runs scootbg, and check the pixels on each output),
+and the module's own part, the package on `PATH` and the `command` it
+renders, is pinned by the evaluation checks in `nix/tests.nix`. A
+`nixosTest` would add a full NixOS system build and a VM boot to every
+CI run for no path those do not already cover.
+
+## The overlay
+
+`overlays.default` adds `pkgs.scoot`, `pkgs.scootctl` and, on Linux,
+`pkgs.scootbg`:
+
+```nix
+nixpkgs.overlays = [ inputs.scoot.overlays.default ];
+```
+
+They are the flake's own builds, the same derivations as
+`packages.<system>.*`, not rebuilt against your nixpkgs: scoot and scootbg
+stay one pinned pair, and nothing is built twice. With the overlay applied,
+the modules' `package` and `wallpaper.package` default to these, which is
+what makes the pure modules (`nix/modules/home.nix`, `nix/modules/nixos.nix`)
+usable without the flake's wrappers. On macOS the overlay adds `scoot`
+and `scootctl` (the client) and no `scootbg`.
 
 ## Migrating from a hand-rolled packaging
 
@@ -320,7 +418,8 @@ silent at build time:
   defaults where scoot looks.
 - **The module split**: `homeModules.scoot` (the legacy spelling
   `homeManagerModules.scoot` still resolves) owns the config file;
-  `nixosModules.scoot` owns the binary and the login-screen entry. A
+  `nixosModules.scoot` owns the binaries (scoot, and scootbg for
+  `[wallpaper]`) and the login-screen entry. A
   hand-rolled `xdg.configFile` next to the module manages a file scoot
   never reads — keep the module's and delete the hand-rolled one.
 

@@ -912,9 +912,11 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   A popup that asked for no adjustment on an axis is left exactly where it
   asked to be on that axis, and cut if that is off the screen — the
   protocol's rule. The fit is applied when the menu opens and on
-  `xdg_popup.reposition`. It is not redone afterwards: a `reactive` popup
-  whose window scrolls while it is open keeps its position (tracked in
-  [`docs/backlog/core/popup-reactive-reconstrain.md`](backlog/core/popup-reactive-reconstrain.md)).
+  `xdg_popup.reposition`, and redone afterwards for a `reactive` popup: when
+  its window scrolls, its output is resized, or a bar's exclusive zone
+  changes, it is re-fitted and told with a fresh configure pair (a
+  non-reactive popup is never re-configured — the protocol forbids it; see
+  [`docs/backlog/resolved/popup-reactive-reconstrain-done.md`](backlog/resolved/popup-reactive-reconstrain-done.md)).
 - **Popups nest at most 64 deep, and cannot loop.** A menu, its submenu,
   that submenu's submenu and so on may go 64 levels deep — real menus stop
   at a handful — and a 65th is refused. That holds for how scoot itself
@@ -2075,12 +2077,16 @@ advertised three ways, matching what clients actually support:
   an output gets it automatically (re-sent on bind and whenever the output's
   state changes). A scale of `1.5` is advertised as `2` here, which is what a
   client that only understands integer scaling should draw at.
-- **`wp_fractional_scale_v1`** — the exact fractional value. A client that
+- **`wp_fractional_scale_v1`** — the configured value resolved to the
+  nearest 1/120th, the finest the protocol can express (`preferred_scale`
+  is a count of 120ths, so `1.33` arrives as 160). A client that
   creates a `wp_fractional_scale_v1` for one of its surfaces is sent
-  `preferred_scale` (`1.5`, not `2`), and can render a larger buffer and let
+  that `preferred_scale` (`1.5`, not `2`), and can render a larger buffer and let
   the compositor scale it down. The `wp_viewporter` global is advertised
   alongside it, because that is the protocol a client uses to submit such a
-  buffer — without it, a fractional client has no way to render.
+  buffer — without it, a fractional client has no way to render. Rendering
+  uses the same resolved value, so a buffer sized for the announced scale
+  lands one to one.
 - **`wl_surface.preferred_buffer_scale`** (needs client `wl_compositor` v6) —
   the integer preference that accompanies the fractional value, sent with the
   default `preferred_buffer_transform` (`normal`). It is a separate event on

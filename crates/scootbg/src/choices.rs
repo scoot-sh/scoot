@@ -103,6 +103,41 @@ impl Choices {
             .map(|(name, choice, made)| (name.as_str(), choice, *made))
     }
 
+    /// The choice made exactly for `output` (every output when `None`), not
+    /// what an output of that name falls back to: `None` when none was made
+    /// there.
+    pub fn exact(&self, output: Option<&str>) -> Option<&Choice> {
+        match output {
+            None => self.every(),
+            Some(name) => self
+                .named
+                .iter()
+                .find(|(n, ..)| n == name)
+                .map(|(_, choice, _)| choice),
+        }
+    }
+
+    /// Replaces the value of the choice made exactly for `output`, keeping
+    /// its generation, so it is as new as it was and no newer: for putting
+    /// back an image `apply-config` chose but could not show then
+    /// (`daemon::config`). Returns whether there was such a choice.
+    pub fn fill(&mut self, output: Option<&str>, choice: Choice) -> bool {
+        match output {
+            None if self.all.1 > 0 => {
+                self.all.0 = choice;
+                true
+            }
+            None => false,
+            Some(name) => match self.named.iter_mut().find(|(n, ..)| n == name) {
+                Some((_, slot, _)) => {
+                    *slot = choice;
+                    true
+                }
+                None => false,
+            },
+        }
+    }
+
     /// Drops the choice for `name`, as if none had been made: for the
     /// saved table only (`crate::state`), when the file has no room for it.
     pub fn forget(&mut self, name: &str) {

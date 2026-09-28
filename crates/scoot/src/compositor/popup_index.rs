@@ -116,6 +116,21 @@ impl PopupIndex {
         self.live.remove(&surface.id());
     }
 
+    /// Whether any popup is filed. The re-constrain pass
+    /// (`popup_reconstrain.rs`) reads this first, so an ordinary `apply()`
+    /// with no menu open pays one length check, never a walk.
+    pub(super) fn is_empty(&self) -> bool {
+        self.live.is_empty()
+    }
+
+    /// Every filed popup. The caller clones each handle out, the same clone
+    /// `get` performs per hit, so iterating is one map walk plus a cheap
+    /// handle clone per live popup -- and only the re-constrain pass reads
+    /// it, behind [`PopupIndex::is_empty`].
+    pub(super) fn iter(&self) -> impl Iterator<Item = PopupKind> + '_ {
+        self.live.values().cloned()
+    }
+
     /// How many popups are filed. Test-only: the drift pin beside the
     /// per-client count's own.
     #[cfg(test)]

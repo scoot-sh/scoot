@@ -13,6 +13,7 @@ works with `scoot msg` in its place, byte for byte.
 - [Actions](#actions)
 - [`type` vs `key`](#type-vs-key)
 - [What the replies carry](#what-the-replies-carry)
+- [Events](#events)
 - [Rules an agent needs](#rules-an-agent-needs)
 - [What the socket refuses](#what-the-socket-refuses)
 - [Resource bounds](#resource-bounds)
@@ -55,6 +56,7 @@ compositor running in a VM.
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |
+| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output` today; naming none is refused — bare `scootctl subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). |
 
 ```sh
 scootctl windows
@@ -63,6 +65,7 @@ scootctl reload
 scootctl screenshot --out /tmp/shot.png
 scootctl type "hello"
 scootctl wait-idle --quiet-ms 200
+scootctl subscribe
 ```
 
 ## Actions
@@ -199,14 +202,91 @@ unknown request tag is a decode error the server answers and keeps serving.
 
 `applied` names the fields re-applied live (including `autostart.commands`
 when new spawn entries started -- a spawn entry that fails to start is
-refused by name instead, and stays pending for the next reload), `refused` the ones that
+refused by name instead, and stays pending for the next reload -- and
+`wallpaper` / `wallpaper.command` when the `[wallpaper]` section or its
+`command` changed: handed to scootbg, whose outcome is in the compositor
+log, not in this reply), `refused` the ones that
 differed but cannot be (each with its reason: the two restart fields, a
-non-`spawn` autostart entry by name, a locked-skipped autostart delta, or
-an unusable `[[window_rule]]` by its position in the file). Both name only
+non-`spawn` autostart entry by name, a locked-skipped autostart delta,
+an unusable `[[window_rule]]` by its position in the file, or a
+`[wallpaper]` section with a problem, named -- an unknown key inside
+`[wallpaper]` is this refusal, not an `error`). Both name only
 fields that *differed*: two empty lists together mean the reload changed
-nothing it was asked to -- except an unusable window rule, which is refused
-on every reload that finds it, since it is never in effect. A reload that could not load or validate the file answers
+nothing it was asked to -- except an unusable window rule and a
+`[wallpaper]` section with a problem, each refused on every reload that
+finds it, since neither is ever in effect. A reload that could not load or validate the file answers
 `error` with the running config untouched (`scootctl` exits non-zero).
+
+## Events
+
+A connection that wants push notifications subscribes instead of polling.
+`subscribe` names the event kinds it wants (`output` today — the only kind;
+naming none is refused, and bare `scootctl subscribe` sends `output`); the reply echoes the subscription; and
+afterwards that connection carries events until the session ends:
+
+```sh
+$ scootctl subscribe
+{"type":"subscribed","events":["output"]}
+{"type":"output_removed","output":2,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":0,"adopter_active":2,"origin":"DP-1"}
+{"type":"output_restored","output":3,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":2,"adopter_active":0,"origin":"DP-1","moved":3}
+```
+
+`scootctl subscribe` prints the answer, then one compact JSON object per
+line per event, until killed or the connection ends — so a desktop
+notification is one pipe away (`scootctl subscribe | ... notify-send`), and
+an agent learns about a monitor leaving without polling `windows`. It exits
+0 at a clean end of stream; re-run to resubscribe.
+
+Three rules, matching the request/reply contract beside them:
+
+- **A subscribed connection serves no further requests.** After the
+  `subscribed` answer it carries events only; any other request on it is
+  refused with an error naming the rule. Open another connection for
+  requests — they pipeline, so one is enough for any number of them.
+- **Filtering is by kind, not by field.** The server sends every event of
+  the subscribed kinds, and the client filters or debounces further
+  itself. In particular both payloads below fire on every monitor standby
+  too (a routine unplug to scoot) — that is accepted, and it is the
+  difference from a notification pushed at the user unconditionally, which
+  is why scoot still draws and sends nothing itself.
+- **The same socket and the same credentials.** There is no second channel:
+  a subscriber connects to the same `0600`, same-user control socket every
+  other client uses.
+
+**`output_removed`** — an output was removed and its workspaces adopted:
+
+| Field | Meaning |
+| --- | --- |
+| `output` | The removed output's id, as `outputs` reported it. |
+| `name` | Its connector name (`DP-1` under `--tty`, `headless-2` otherwise) — the identity a later restore matches on. |
+| `adopter` | The output that adopted its workspaces, or `null` when none did. |
+| `adopted_start` / `adopted_count` | The adopted block on the adopter: the 0-based workspace index it starts at, in the post-removal list, and how many workspaces it holds (0 when the removed output held no windows). |
+| `adopter_prev_active` / `adopter_active` | The adopter's active workspace before and after the removal, 0-based — where it was already looking, or the adopted workspace the switch moved it to when focus was on the removed output. `null` with no live adopter to read off. |
+| `origin` | Which connector the adopted workspaces are tagged as coming from (`DP-1`) — what bars show and what `windows` reports each adopted window adopted from. `null` when nothing was adopted. |
+
+**`output_restored`** — an output came back under a matching identity (note
+the fresh `output` id: ids are stable for the session, not across unplug
+cycles). The adoption fields describe the record this restore consumed, as
+the removal filed it; `moved` says how many still-open windows actually
+went back — windows moved by hand or closed in between stay where they
+are. `adopter_prev_active` / `adopter_active` are the adopter's view before
+the restore and after it returns to its pre-adopt view (`null` when the
+adopter itself is gone, e.g. a chained unplug whose middle monitor never
+returned — then nothing moved either).
+
+A subscriber that stops reading is disconnected rather than buffered
+without bound: past the same 1 MiB queued-reply bound a connection
+observes, or with no byte leaving for the same 10-second stall window, the
+compositor shuts the connection down and drops the subscription. Output
+removal never waits for a subscriber. A client that disconnects itself
+leaves no record behind.
+
+Versioning: the subscription is IPC protocol 4 — the `subscribed`,
+`output_removed` and `output_restored` tags under one bump. A client that
+never sends `subscribe` never receives any of them. An unknown event kind
+in a `subscribe` is answered with an ordinary `error` like any unknown
+request tag, so an older server meets a newer subscriber with an error,
+not a kill.
 
 ## Rules an agent needs
 

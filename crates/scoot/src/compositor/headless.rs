@@ -1427,7 +1427,30 @@ impl State {
         // snapshot files nothing: an output that held no windows has nothing
         // to come back to. A second removal under the same identity
         // overwrites the first -- the latest state wins.
+        //
+        // The adopter's active workspace before the evict below, for the
+        // output-removed event: the core records the pre-adopt view
+        // relative to the adopted block, while the event reports it as the
+        // 0-based index IPC speaks. Read off every live output -- the
+        // adopter is one of them, chosen by the core -- on this cold path
+        // only, never per frame.
+        let prev_active: Vec<(OutputId, usize)> = self
+            .world
+            .outputs()
+            .into_iter()
+            .filter_map(|(known, _)| {
+                self.world
+                    .workspaces(known)
+                    .map(|work| (known, work.active))
+            })
+            .collect();
+        let name = identity.name.clone();
+        let mut removed: Option<scoot_ipc::OutputRemoved> = None;
         if let Some(evicted) = self.world.evict_output(id) {
+            let adopted_by = evicted.adopted_by;
+            let adopted_at = evicted.adopted_at;
+            let adopted_count = evicted.snapshot.workspaces.len();
+            let origin = evicted.origin;
             if !evicted.snapshot.workspaces.is_empty() {
                 if let Some(origin) = evicted.origin {
                     // The connector name the adopted workspaces are tagged
@@ -1440,6 +1463,26 @@ impl State {
                 }
                 self.displaced.insert(identity, DisplacedOutput { evicted });
             }
+            // The event fires on every removal with an adopter -- including
+            // an empty one (`adopted_count` 0, `origin` None) and every
+            // standby cycle. A consumer that only cares about moved windows
+            // filters on the count; scoot itself draws and sends nothing.
+            // Built here, where the origin name is filed, and emitted after
+            // the `apply()` below, so a client reading on arrival sees the
+            // layout this describes.
+            removed = adopted_by.map(|adopter| scoot_ipc::OutputRemoved {
+                output: id.0,
+                name: name.clone(),
+                adopter: Some(adopter.0),
+                adopted_start: adopted_at,
+                adopted_count,
+                adopter_prev_active: prev_active
+                    .iter()
+                    .find(|(known, _)| *known == adopter)
+                    .map(|(_, active)| *active),
+                adopter_active: self.world.workspaces(adopter).map(|work| work.active),
+                origin: origin.and_then(|origin| self.origin_names.get(&origin).cloned()),
+            });
         } else {
             // Unreachable: the output was in `State::outputs` (checked at
             // the top), and every output there is filed with the core at
@@ -1465,6 +1508,9 @@ impl State {
         self.refresh_keyboard_focus();
         self.settle_floating_grab();
         self.apply();
+        if let Some(event) = removed {
+            self.emit_output_removed(event);
+        }
         true
     }
 
@@ -1582,7 +1628,12 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
     state.service_captures();
     state.settle_idle_waiters();
     state.settle_shots();
-    if state.needs_render || !state.pending_idle.is_empty() || state.shots_draining() {
+    state.settle_subscribers();
+    if state.needs_render
+        || !state.pending_idle.is_empty()
+        || state.shots_draining()
+        || state.subscribers_draining()
+    {
         TimeoutAction::ToDuration(FRAME_INTERVAL)
     } else {
         state.timer_armed = false;
