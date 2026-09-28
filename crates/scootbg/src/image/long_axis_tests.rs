@@ -188,3 +188,26 @@ fn the_fuzz_entry_point_survives_the_reviews_input() {
         }
     }
 }
+
+/// The refusal's hint names only modes that can show the image: when the
+/// output itself is the long side, `fill` scales to it too, so only the
+/// modes that scale nothing are named.
+#[test]
+fn the_hint_names_only_modes_that_show_it() {
+    let long_image = ScaleError::TooLong {
+        from: (100_000, 10),
+        to: (1920, 1080),
+    }
+    .to_string();
+    assert!(long_image.contains("fill usually does"), "{long_image}");
+    let long_output = ScaleError::TooLong {
+        from: (10, 10),
+        to: (70_000, 1),
+    }
+    .to_string();
+    assert!(
+        long_output.contains("center or tile shows it)"),
+        "{long_output}"
+    );
+    assert!(!long_output.contains("fill"), "{long_output}");
+}

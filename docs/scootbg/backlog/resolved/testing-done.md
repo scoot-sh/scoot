@@ -502,7 +502,9 @@ side of the source (after `fill`'s crop) or of the target longer than
 that, with `ScaleError::TooLong`, before `pic-scale-safe` is called: the
 `set` fails cleanly and `query`'s `draw_error` says
 `cannot scale 20000000x1 pixels to 1920x1: scootbg scales no side longer
-than 65536 pixels (--mode fill, center or tile shows it)`.
+than 65536 pixels (--mode fill, center or tile shows it)` (reworded
+after review: "(--mode center or tile shows it, and fill usually does)",
+and only "center or tile" when the output itself is the long side).
 
 - **Why that bound.** It sits 256 times below the precision cliff, and
   it caps the weights at about 36 × 65536 bytes, 2.4 MB an axis, whatever

@@ -19,7 +19,10 @@ scoot has not cut a numbered release yet; entries are dated.
 - **An image with a side longer than 65536 pixels no longer ends
   scootbg** when set with `--mode fit` or `stretch` (a 20,000,000×1 PNG
   of 20 KB did, inside the scaler): the `set` fails with a message
-  naming the modes that show it (`fill`, `center`, `tile`).
+  naming the modes that show it (`center`, `tile`, and usually `fill`).
+  This is also a change for images with a side from 65,537 to about 16.7
+  million pixels, such as a 100,000×1,000 panorama: they drew in `fit`
+  and `stretch` before, and are now refused there.
 
 ### 2026-09-28 — X apps are sharp on HiDPI screens
 

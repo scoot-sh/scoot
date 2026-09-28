@@ -66,12 +66,25 @@ impl fmt::Display for ScaleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => write!(f, "cannot scale to or from an empty image"),
-            Self::TooLong { from, to } => write!(
-                f,
-                "cannot scale {}x{} pixels to {}x{}: scootbg scales no side longer than \
-                 {MAX_SCALED_SIDE} pixels (--mode fill, center or tile shows it)",
-                from.0, from.1, to.0, to.1
-            ),
+            Self::TooLong { from, to } => {
+                // The hint holds only for an image too long to scale to a
+                // target that is not: `fill` crops the long side first
+                // (unless the output's aspect keeps the crop too long).
+                // For a target that is too long, only modes that scale
+                // nothing show it.
+                let target_too_long = to.0 > MAX_SCALED_SIDE || to.1 > MAX_SCALED_SIDE;
+                let hint = if target_too_long {
+                    "--mode center or tile shows it"
+                } else {
+                    "--mode center or tile shows it, and fill usually does"
+                };
+                write!(
+                    f,
+                    "cannot scale {}x{} pixels to {}x{}: scootbg scales no side longer than \
+                     {MAX_SCALED_SIDE} pixels ({hint})",
+                    from.0, from.1, to.0, to.1
+                )
+            }
             Self::Size => write!(f, "image size out of range for scaling"),
             Self::Scaler(why) => write!(f, "scaling failed: {why}"),
         }
