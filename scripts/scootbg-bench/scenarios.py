@@ -10,6 +10,11 @@ import subprocess
 import time
 
 import procs
+
+# What a scenario records as a failed row rather than aborting the run: a
+# daemon or compositor that fails, hangs past a timeout, or cannot be
+# spawned.
+FAILURES = (RuntimeError, OSError, subprocess.TimeoutExpired)
 from daemons import COLOR, Wall
 from runner import Run
 from session import Session
@@ -87,14 +92,19 @@ def verify_screen(ctx, sess, wall, outputs):
 
 
 def _peak_record(sampler, run):
+    """``peak_pss_kb``, the gated figure: the largest summed PSS of the
+    daemon's processes sampled while it worked. ``peak_kb``, kept for
+    comparison with runs before PSS was sampled: the larger of the sampled
+    summed RSS and any one process's ``VmHWM`` (RSS, so shared pages count
+    once per process that maps them)."""
     exact = {c.popen.pid: c.maxrss_kb for c in run.clients if c.status is not None}
     if run.alive():
         exact[run.proc.pid] = procs.status(run.proc.pid).get("VmHWM", 0)
     peak, per = procs.combined_peak(sampler, exact)
     daemon_hwm = per.get(run.proc.pid, 0) if run.proc else 0
     clients = sum(c.maxrss_kb for c in run.clients if c.status is not None)
-    return {"peak_kb": peak, "daemon_hwm_kb": daemon_hwm, "clients_maxrss_kb": clients,
-            "sampled_sum_kb": sampler.max_sum_kb}
+    return {"peak_kb": peak, "peak_pss_kb": sampler.max_pss_kb, "daemon_hwm_kb": daemon_hwm,
+            "clients_maxrss_kb": clients, "sampled_sum_kb": sampler.max_sum_kb}
 
 
 def check(ctx, daemon):
@@ -105,13 +115,16 @@ def check(ctx, daemon):
         run = Run(sess, daemon, "check", ctx.egl_env)
         try:
             wall = ctx.wall("image")
+            rec["compositor_exe"] = sess.exe
             t0 = run.start(wall)
             rec.update(run.settle(t0, 1, timeout=30))
+            # The daemon's real executable, past nixpkgs' launchers.
+            rec["daemon_exe"] = os.path.realpath(f"/proc/{run.proc.pid}/exe")
             rec["screen_ok"] = verify_screen(ctx, sess, wall, 1)
             rec["ok"] = rec["screen_ok"] is not False
             if not rec["ok"]:
                 rec["error"] = "committed a buffer, but the screen does not show the image"
-        except RuntimeError as e:
+        except FAILURES as e:
             rec["ok"] = False
             rec["error"] = str(e)
         finally:
@@ -137,7 +150,7 @@ def startup(ctx, daemon, kind, round_no):
             rec["threads"] = procs.status(run.proc.pid).get("Threads")
             rec["screen_ok"] = verify_screen(ctx, sess, wall, 1)
             rec["ok"] = rec["screen_ok"] is not False
-        except RuntimeError as e:
+        except FAILURES as e:
             rec["ok"] = False
             rec["error"] = str(e)
         finally:
@@ -180,7 +193,7 @@ def live_set(ctx, daemon, round_no):
                     rec.update(_peak_record(sampler, run))
                     rec["screen_ok"] = verify_screen(ctx, sess, wall, 1)
                     rec["ok"] = rec["screen_ok"] is not False
-                except RuntimeError as e:
+                except FAILURES as e:
                     rec["ok"] = False
                     rec["error"] = str(e)
                 finally:
@@ -192,7 +205,7 @@ def live_set(ctx, daemon, round_no):
             rec_disk.update(sess.disk_written())
             rec_disk["ok"] = True
             out.append(rec_disk)
-        except RuntimeError as e:
+        except FAILURES as e:
             rec = _base(ctx, daemon, "set", "setup", UHD, round_no)
             rec.update(ok=False, error=str(e))
             out.append(rec)
@@ -225,7 +238,7 @@ def restore(ctx, daemon, kind, round_no):
             rec["cpu_ms"] = run.group.usage_ns() / 1e6
             rec["screen_ok"] = verify_screen(ctx, sess, wall, 1)
             rec["ok"] = rec["screen_ok"] is not False
-        except (RuntimeError, subprocess.TimeoutExpired) as e:
+        except FAILURES as e:
             rec["ok"] = False
             rec["error"] = str(e)
         finally:
@@ -276,12 +289,19 @@ def idle(ctx, daemons, geometry, kind, round_no, idle_s=60.0, window_s=60.0):
         for d, sess in sessions:
             run = Run(sess, d, "idle", ctx.egl_env)
             live.append((d, sess, run, None))
-            live[-1] = (d, sess, run, run.start(ctx.wall(kind)))
+            try:
+                live[-1] = (d, sess, run, run.start(ctx.wall(kind)))
+            except FAILURES as e:
+                rec = _base(ctx, d, "idle", kind, geometry, round_no)
+                rec.update(ok=False, error=f"start: {e}")
+                out.append(rec)
         up = {}
         for d, sess, run, t0 in live:
+            if t0 is None:
+                continue
             try:
                 up[d.name] = run.settle(t0, geometry[2], timeout=120)
-            except RuntimeError as e:
+            except FAILURES as e:
                 rec = _base(ctx, d, "idle", kind, geometry, round_no)
                 rec.update(ok=False, error=str(e))
                 out.append(rec)

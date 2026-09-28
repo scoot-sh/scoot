@@ -31,6 +31,8 @@ import hashlib
 import json
 import os
 import platform
+import re
+import signal
 import shutil
 import struct
 import subprocess
@@ -83,6 +85,20 @@ def write_png(path, width, height, rgb):
         f.write(chunk(b"IEND", b""))
 
 
+def check_image(path, expected=JPEG_SHA256):
+    """Refuses a test JPEG that is not the recorded one: every published
+    figure is for that file, so another would compare nothing."""
+    got = sha256(path)
+    if got != expected:
+        raise ValueError(
+            f"{path} has sha256 {got}, not the recorded {expected}: it was not made by "
+            f"`magick {' '.join(JPEG_RECIPE)}` with ImageMagick 7.1.2-29 (another "
+            "ImageMagick makes other noise). Remove it and run in the dev shell, whose "
+            "ImageMagick is that one."
+        )
+    return got
+
+
 def images(directory, magick):
     os.makedirs(directory, exist_ok=True)
     jpeg = os.path.join(directory, "big.jpg")
@@ -90,6 +106,10 @@ def images(directory, magick):
         if not magick:
             sys.exit("no ImageMagick (`magick`) to make the test JPEG: run in the dev shell")
         subprocess.run([magick, *JPEG_RECIPE, jpeg], check=True)
+    try:
+        check_image(jpeg)
+    except ValueError as e:
+        sys.exit(f"bench: {e}")
     first = os.path.join(directory, "first.png")
     if not os.path.exists(first):
         write_png(first, 64, 64, (200, 50, 50))
@@ -118,6 +138,40 @@ def run_text(argv):
         return (r.stdout + r.stderr).strip().splitlines()[0] if (r.stdout + r.stderr).strip() else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""
+
+
+def version_of(argv, pattern):
+    """The version line from ``argv --version``, found by ``pattern``, not
+    just its first line: nixpkgs' sway wrapper starts `dbus-run-session`
+    when no bus is set, and dbus prints a warning first."""
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"unknown ({e})"
+    for line in (r.stdout + "\n" + r.stderr).splitlines():
+        if re.search(pattern, line):
+            return line.strip()
+    return "unknown: " + (r.stdout + r.stderr).strip()[:200]
+
+
+def provenance(path):
+    """Where a binary really is, and what it is."""
+    real = os.path.realpath(path)
+    return {"path": path, "realpath": real, "sha256": sha256(real)}
+
+
+HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def harness_state():
+    """The harness's own state: its commit, whether its directory differs
+    from it (untracked files included), and every file's hash."""
+    files = sorted(n for n in os.listdir(HARNESS_DIR) if n.endswith(".py"))
+    return {
+        "commit": git("rev-parse", "HEAD"),
+        "status": git("status", "--porcelain", "--untracked-files=all", "--", HARNESS_DIR),
+        "files": {n: sha256(os.path.join(HARNESS_DIR, n)) for n in files},
+    }
 
 
 def git(*args):
@@ -153,9 +207,11 @@ def cmd_run(a):
         "date": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "machine": machine(),
         "compositor": a.compositor,
-        "compositor_version": run_text([bins["sway"], "--version"]) if a.compositor == "sway"
-        else run_text([bins["scoot"], "--version"]),
-        "scoot_binary": {"path": bins["scoot"], "sha256": sha256(bins["scoot"])},
+        "compositor_version": version_of([bins["sway"], "--version"], r"^sway version ")
+        if a.compositor == "sway" else version_of([bins["scoot"], "--version"], r"^scoot "),
+        "scoot_binary": provenance(bins["scoot"]),
+        "compositor_binaries": {k: provenance(v) for k, v in bins.items() if k != "scootbg"},
+        "harness": harness_state(),
         "commit": git("rev-parse", "HEAD"),
         "tree_dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
         "mesa": {"store": mesa, "version": mesa_version},
@@ -170,13 +226,17 @@ def cmd_run(a):
             continue
         if issubclass(cls, D.Scootbg):
             d = cls(bins={"scootbg": bins["scootbg"]})
-            entry = {"version": run_text([bins["scootbg"], "--version"]),
+            entry = {"version": version_of([bins["scootbg"], "--version"], r"^scootbg "),
                      "binary": bins["scootbg"], "sha256": sha256(bins["scootbg"]),
                      "store": a.scootbg_store}
+            if a.scootbg_store:
+                entry["store_binary"] = provenance(os.path.join(a.scootbg_store, "bin", "scootbg"))
         else:
             store, version = D.nix_resolve(cls.nix_attr, REPO)
             d = cls(store=store)
             entry = {"version": version, "store": store, "nix_attr": cls.nix_attr}
+        if not issubclass(cls, D.Scootbg):
+            entry["binaries"] = [provenance(b) for b in d.elf_binaries()]
         entry["needs_egl"] = d.needs_egl
         entry["informational"] = d.informational
         meta["daemons"][d.name] = entry
@@ -212,15 +272,37 @@ def cmd_run(a):
                 if not r.get("ok") and r.get("error"):
                     print("    " + r["error"].replace("\n", "\n    "), flush=True)
 
+    def guarded(scenario, ctx, *args, **kwargs):
+        """A scenario that fails outside its own handling (a compositor that
+        will not start, a cgroup that cannot be made) is a failed row, not
+        the end of the run."""
+        try:
+            return scenario(ctx, *args, **kwargs)
+        except (SystemExit, KeyboardInterrupt):
+            raise
+        except Exception as e:  # noqa: BLE001 -- recorded, not swallowed
+            target = args[0]
+            names = [d.name for d in target] if isinstance(target, list) else [target.name]
+            return [{
+                "row": scenario.__name__, "variant": " ".join(str(x) for x in args[1:3]),
+                "geometry": "", "daemon": n, "compositor": ctx.compositor, "round": -1,
+                "time": time.strftime("%Y-%m-%dT%H:%M:%S"), "ok": False,
+                "error": f"{type(e).__name__}: {e}",
+            } for n in names]
+
     save_meta()
     only = set(a.only.split(",")) if a.only else set(ROWS)
 
     # 1. Does each daemon run here at all?
     ran = []
     for d in roster:
-        recs = scenarios.check(ctx, d)
+        recs = guarded(scenarios.check, ctx, d)
         record(recs)
         meta["daemons"][d.name]["ran"] = recs[0]["ok"]
+        if recs[0].get("daemon_exe"):
+            meta["daemons"][d.name]["exe"] = provenance(recs[0]["daemon_exe"])
+        if recs[0].get("compositor_exe") and "compositor_exe" not in meta:
+            meta["compositor_exe"] = provenance(recs[0]["compositor_exe"])
         if not recs[0]["ok"]:
             meta["daemons"][d.name]["did_not_run"] = recs[0].get("error", "")
         else:
@@ -233,21 +315,21 @@ def cmd_run(a):
         order = ran[k:] + ran[:k]
         for d in order:
             if "startup" in only:
-                record(scenarios.startup(ctx, d, "color", rnd))
-                record(scenarios.startup(ctx, d, "image", rnd))
+                record(guarded(scenarios.startup, ctx, d, "color", rnd))
+                record(guarded(scenarios.startup, ctx, d, "image", rnd))
             if "set" in only:
-                record(scenarios.live_set(ctx, d, rnd))
+                record(guarded(scenarios.live_set, ctx, d, rnd))
             if "restore" in only:
-                record(scenarios.restore(ctx, d, "image", rnd))
-                record(scenarios.restore(ctx, d, "color", rnd))
+                record(guarded(scenarios.restore, ctx, d, "image", rnd))
+                record(guarded(scenarios.restore, ctx, d, "color", rnd))
 
     # 3. The idle rows: a batch of every daemon at once per setup.
     if "idle" in only:
         for rnd in range(1, a.rounds + 1):
             for geometry in ((1920, 1080, 1), (3840, 2160, 2)):
                 for kind in ("image", "color"):
-                    record(scenarios.idle(ctx, ran, geometry, kind, rnd,
-                                          idle_s=a.idle_secs, window_s=a.window_secs))
+                    record(guarded(scenarios.idle, ctx, ran, geometry, kind, rnd,
+                                   idle_s=a.idle_secs, window_s=a.window_secs))
 
     # 4. The static rows.
     with open(runs_path) as f:
@@ -293,7 +375,15 @@ def cmd_run(a):
     print(text)
 
 
+def _terminate(signum, _frame):
+    # Unwinds like Ctrl-C, so every session's and run's `finally` stops its
+    # compositor and daemon and removes its cgroup.
+    raise KeyboardInterrupt(f"signal {signum}")
+
+
 def main():
+    signal.signal(signal.SIGTERM, _terminate)
+    signal.signal(signal.SIGHUP, _terminate)
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")

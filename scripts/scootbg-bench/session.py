@@ -69,6 +69,7 @@ class Session:
             os.mkdir(os.path.join(self.dir, sub))
         self.trace_path = os.path.join(self.dir, "trace.log")
         self.proc = None
+        self.exe = None
         self.display = None
         self.ipc = None
         self.trace = Trace(self.trace_path)
@@ -140,6 +141,8 @@ class Session:
                 self.ipc = os.path.join(self.dir, ipc[0]) if ipc else None
             if wayland and self.ipc and _is_socket(self.ipc):
                 self.display = sorted(wayland)[0]
+                # What actually runs, past any wrapper that execs it.
+                self.exe = os.path.realpath(f"/proc/{self.proc.pid}/exe")
                 return self
             time.sleep(0.02)
         raise RuntimeError(f"{self.kind} did not come up in {PATIENCE} s:\n{self.log_tail()}")

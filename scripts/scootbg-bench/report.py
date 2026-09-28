@@ -15,7 +15,10 @@ import statistics
 
 REFERENCE = "scootbg"
 
-# (label, row, variant, geometry, metric, unit, gated). Memory is kept in
+# (label, row, variant, geometry, metric, unit, gated). Peak memory is
+# gated on the sampled PSS of the daemon's processes (see
+# ``procs.PeakSampler``); runs before 2026-09-28 recorded only the RSS
+# figure, which is shown, ungated. Memory is kept in
 # kB in the runs and shown in MiB. The idle rows with the floor as one
 # process sees it (raw RSS and PSS) are shown but not gated: a daemon that
 # unmaps its buffer once committed (swaybg) keeps the pixels alive in the
@@ -54,8 +57,10 @@ ROWS = [
     ('Idle CPU in 60 s, 2× 4K, image', 'idle', 'image', '2x3840x2160', 'window_cpu_ms', 'ms', True),
     ('Idle CPU in 60 s, 1× 1080p, color', 'idle', 'color', '1x1920x1080', 'window_cpu_ms', 'ms', True),
     ('Idle CPU in 60 s, 2× 4K, color', 'idle', 'color', '2x3840x2160', 'window_cpu_ms', 'ms', True),
-    ('Peak memory, JPEG at start-up, 1× 4K', 'startup', 'image', '1x3840x2160', 'peak_kb', 'MiB', True),
-    ('Peak memory, live change to the JPEG, 1× 4K', 'set', 'image', '1x3840x2160', 'peak_kb', 'MiB', True),
+    ('Peak memory (PSS), JPEG at start-up, 1× 4K', 'startup', 'image', '1x3840x2160', 'peak_pss_kb', 'MiB', True),
+    ('Peak memory (PSS), live change to the JPEG, 1× 4K', 'set', 'image', '1x3840x2160', 'peak_pss_kb', 'MiB', True),
+    ('Peak memory (RSS), JPEG at start-up, 1× 4K', 'startup', 'image', '1x3840x2160', 'peak_kb', 'MiB', False),
+    ('Peak memory (RSS), live change to the JPEG, 1× 4K', 'set', 'image', '1x3840x2160', 'peak_kb', 'MiB', False),
     ('Set: latency to the JPEG', 'set', 'image', '1x3840x2160', 'latency_ms', 'ms', True),
     ('Set: CPU for the JPEG', 'set', 'image', '1x3840x2160', 'cpu_ms', 'ms', True),
     ('Set: latency to a color', 'set', 'color', '1x3840x2160', 'latency_ms', 'ms', True),
@@ -82,12 +87,20 @@ def load(results_dir):
     return meta, runs
 
 
-def verdict(ref, other):
+# The smallest difference that can count, per unit, whatever 5% of a median
+# is: 5% of scootbg's 0 wakeups is 0, and one wakeup (or 0.1 ms of CPU)
+# against none is noise, not a loss.
+ABSOLUTE_FLOOR = {"": 1.0, "ms": 0.1, "MiB": 0.01, "B": 1.0}
+
+
+def verdict(ref, other, unit=""):
     """``"beaten"`` when ``other`` (lower is better) beats ``ref`` beyond
-    the margin, ``"win"`` the other way, else ``"tie"``; with the margin."""
+    the margin, ``"win"`` the other way, else ``"tie"``; with the margin:
+    the largest of 5% of ``ref``'s median, the two sides' combined spread,
+    and the unit's absolute floor."""
     mr, mo = statistics.median(ref), statistics.median(other)
     spread = (max(ref) - min(ref)) + (max(other) - min(other))
-    margin = max(0.05 * abs(mr), spread)
+    margin = max(0.05 * abs(mr), spread, ABSOLUTE_FLOOR.get(unit, 0.0))
     if mr - mo > margin:
         return "beaten", margin
     if mo - mr > margin:
@@ -162,7 +175,7 @@ def build(meta, runs):
             text = cell(vals[n], unit)
             informational = meta["daemons"][n].get("informational")
             if n != REFERENCE and ref and gated and not informational:
-                v, margin = verdict(ref, vals[n])
+                v, margin = verdict(ref, vals[n], unit)
                 if v == "beaten":
                     text = f"**{text}** (beats scootbg)"
                     losses.append((label, n, statistics.median(ref), statistics.median(vals[n]), margin))
@@ -182,6 +195,8 @@ def build(meta, runs):
         vals = {
             n: series(runs, n, row, variant, geometry, metric, scale) for n in daemons
         }
+        if not any(vals.values()):
+            continue  # a metric this run did not record (an older run)
         supported = meta["supports"]
 
         def applies(n, row=row, variant=variant):
@@ -227,14 +242,14 @@ def compare(results_dir, baseline_dir):
         base = series(bruns, REFERENCE, row, variant, geometry, metric, scale)
         if not now or not base:
             continue
-        v, _ = verdict(base, now)
+        v, _ = verdict(base, now, unit)
         word = {"beaten": "better", "win": "**REGRESSED**", "tie": "same"}[v]
         regressions += v == "win"
         out.append(f"| {label} | {cell(base, unit)} | {cell(now, unit)} | {word} |")
     for label, vals, unit in static_rows(meta):
         bvals = {lbl: v for lbl, v, _unit in static_rows(bmeta)}.get(label, {})
         if REFERENCE in vals and REFERENCE in bvals:
-            v, _ = verdict(bvals[REFERENCE], vals[REFERENCE])
+            v, _ = verdict(bvals[REFERENCE], vals[REFERENCE], unit)
             word = {"beaten": "better", "win": "**REGRESSED**", "tie": "same"}[v]
             regressions += v == "win"
             out.append(f"| {label} | {cell(bvals[REFERENCE], unit)} | {cell(vals[REFERENCE], unit)} | {word} |")

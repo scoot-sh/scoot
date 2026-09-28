@@ -71,12 +71,11 @@ class Run:
         argv = self.daemon.daemon_argv(self.sess, wall)
         log = open(self.log_path, "ab")
         self.proc = subprocess.Popen(
-            argv,
+            self.group.wrap(argv),
             env=self.env,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=log,
-            preexec_fn=self.group.join(),
         )
         log.close()
         return self.proc
@@ -84,12 +83,11 @@ class Run:
     def client(self, argv):
         log = open(self.log_path, "ab")
         popen = subprocess.Popen(
-            argv,
+            self.group.wrap(argv),
             env=self.env,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=log,
-            preexec_fn=self.group.join(),
         )
         log.close()
         c = Client(popen)

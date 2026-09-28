@@ -8,7 +8,11 @@ import tempfile
 import time
 import unittest
 
+import subprocess
+
+import bench
 import commits
+import procs
 import report
 
 
@@ -95,6 +99,50 @@ class Gate(unittest.TestCase):
     def test_zeroes_tie(self):
         self.assertEqual(report.verdict([0, 0, 0], [0, 0, 0])[0], "tie")
 
+    def test_an_absolute_floor_where_scootbg_is_zero(self):
+        # 5% of 0 is 0: without a floor, one wakeup would be a loss.
+        self.assertEqual(report.verdict([0, 0, 0], [1, 1, 1], "")[0], "tie")
+        self.assertEqual(report.verdict([0, 0, 0], [2, 2, 2], "")[0], "win")
+        self.assertEqual(report.verdict([0.0, 0.0], [0.05, 0.05], "ms")[0], "tie")
+        self.assertEqual(report.verdict([0.0, 0.0], [0.5, 0.5], "ms")[0], "win")
+
+
+class Image(unittest.TestCase):
+    def test_the_recorded_hash_is_enforced(self):
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(b"not the benchmark jpeg")
+            path = f.name
+        try:
+            with self.assertRaisesRegex(ValueError, "not the recorded"):
+                bench.check_image(path)
+            self.assertEqual(bench.check_image(path, bench.sha256(path)), bench.sha256(path))
+        finally:
+            os.unlink(path)
+
+
+class Wrapper(unittest.TestCase):
+    def test_the_command_keeps_the_pid_that_joined(self):
+        with tempfile.NamedTemporaryFile("w", delete=False) as f:
+            procs_file = f.name
+        try:
+            group = procs.CpuGroup.__new__(procs.CpuGroup)
+            group._procs = procs_file
+            p = subprocess.Popen(group.wrap(["sh", "-c", "echo $$"]), stdout=subprocess.PIPE, text=True)
+            out, _ = p.communicate(timeout=10)
+            with open(procs_file) as f:
+                joined = int(f.read())
+            self.assertEqual(joined, p.pid)
+            self.assertEqual(int(out), p.pid)  # exec: the command is that process
+        finally:
+            os.unlink(procs_file)
+
+    def test_a_failed_join_runs_nothing(self):
+        group = procs.CpuGroup.__new__(procs.CpuGroup)
+        group._procs = "/nonexistent-dir/cgroup.procs"
+        r = subprocess.run(group.wrap(["echo", "ran"]), capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("ran", r.stdout)
+
 
 class Table(unittest.TestCase):
     def test_na_did_not_run_informational_and_losses(self):
@@ -117,6 +165,8 @@ class Table(unittest.TestCase):
             for name, v in (("scootbg", s), ("scootbg-bilinear", b), ("rival", r)):
                 runs.append({"ok": True, "daemon": name, "row": "set", "variant": "image",
                              "geometry": "1x3840x2160", "latency_ms": v, "round": rnd})
+        runs.append({"ok": True, "daemon": "scootbg", "row": "set", "variant": "color",
+                     "geometry": "1x3840x2160", "latency_ms": 5, "round": 0})
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "meta.json"), "w") as f:
                 json.dump(meta, f)
@@ -135,6 +185,8 @@ class Table(unittest.TestCase):
         size = next(line for line in text.splitlines() if line.startswith("| Size"))
         self.assertIn("beats scootbg", size)
         self.assertIn("LOSS: Set: latency to the JPEG: rival", text)
+        # No run recorded peak PSS here: the row is left out, not all n/a.
+        self.assertNotIn("Peak memory (PSS)", text)
 
 
 if __name__ == "__main__":

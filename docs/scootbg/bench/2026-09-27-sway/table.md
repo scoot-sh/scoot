@@ -34,8 +34,8 @@
 | Idle CPU in 60 s, 2× 4K, image (ms) | 0.0 | n/a | 0.0 | did not run | 0.0 | 0.0 | 7.6 [7.5–7.9] |
 | Idle CPU in 60 s, 1× 1080p, color (ms) | 0.0 | n/a | 0.0 | did not run | 0.0 | n/a | n/a |
 | Idle CPU in 60 s, 2× 4K, color (ms) | 0.0 | n/a | 0.0 | did not run | 0.0 | n/a | n/a |
-| Peak memory, JPEG at start-up, 1× 4K (MiB) | 89.1 [88.8–89.5] | 88.8 [87.5–89.0] | 282.0 [281.9–282.2] | did not run | 169.4 [169.3–169.5] | 107.4 [107.2–107.5] | 420.8 [420.8–420.9] |
-| Peak memory, live change to the JPEG, 1× 4K (MiB) | 121.0 [121.0–121.2] | 120.6 [120.2–121.1] | 313.8 [313.6–314.0] | did not run | n/a | n/a | 549.2 [548.7–550.5] |
+| Peak memory (RSS), JPEG at start-up, 1× 4K (MiB) *(not gated)* | 89.1 [88.8–89.5] | 88.8 [87.5–89.0] | 282.0 [281.9–282.2] | did not run | 169.4 [169.3–169.5] | 107.4 [107.2–107.5] | 420.8 [420.8–420.9] |
+| Peak memory (RSS), live change to the JPEG, 1× 4K (MiB) *(not gated)* | 121.0 [121.0–121.2] | 120.6 [120.2–121.1] | 313.8 [313.6–314.0] | did not run | n/a | n/a | 549.2 [548.7–550.5] |
 | Set: latency to the JPEG (ms) | 464 [452–493] | 388 [359–419] | 624 [611–633] | did not run | n/a | n/a | 697 [669–721] |
 | Set: CPU for the JPEG (ms) | 452 [442–484] | 376 [353–392] | 572 [565–587] | did not run | n/a | n/a | 862 [849–898] |
 | Set: latency to a color (ms) | 17.2 [14.3–27.1] | n/a | 62.1 [59.2–67.4] | did not run | n/a | n/a | n/a |
@@ -49,7 +49,7 @@
 | Restore: to a color on screen (ms) | 15.8 [11.8–25.0] | n/a | n/a | did not run | n/a | n/a | n/a |
 | Restore: CPU, color (ms) | 2.3 [2.2–2.4] | n/a | n/a | did not run | n/a | n/a | n/a |
 
-Gate: 9 loss(es), 56 win(s), 29 tie(s) for scootbg.
+Gate: 9 loss(es), 50 win(s), 29 tie(s) for scootbg.
 - LOSS: Idle RSS above the floor, 1× 1080p, image: awww 2.90 against scootbg 4.38 (margin 0.22)
 - LOSS: Idle PSS above the floor, 1× 1080p, image: awww 0.96 against scootbg 2.34 (margin 0.15)
 - LOSS: Idle total with the floor (PSS above it + the floor + compositor copies), 1× 1080p, image: awww 8.88 against scootbg 10.26 (margin 0.51)

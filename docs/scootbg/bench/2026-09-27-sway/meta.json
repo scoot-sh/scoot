@@ -17,7 +17,7 @@
   ]
  },
  "compositor": "sway",
- "compositor_version": "dbus[31575]: Failed to start message bus: Failed to open \"/etc/dbus-1/session.conf\": No such file or directory",
+ "compositor_version": "sway version 1.12",
  "scoot_binary": {
   "path": "/home/user/scoot/target/release/scoot",
   "sha256": "d84d06d00ade978619d2aa69335b4449ebf05f06fdc276bfb6eae895a75741a7"
@@ -83,6 +83,16 @@
     "written_after": "after-start-image",
     "mesa_shader_cache_bytes": 0,
     "disk_bytes": 12172256
+   },
+   "exe": {
+    "path": "/home/user/scoot/target/release/scootbg",
+    "realpath": "/home/user/scoot/target/release/scootbg",
+    "sha256": "39e2c36150ed1fd3da8bd50346077b3250aa4d1ed372447244116fa9cb516d95"
+   },
+   "store_binary": {
+    "path": "/nix/store/f1a28pbn2rm06i1gx1q81i2avnnxc7m0-scootbg-0.1.0/bin/scootbg",
+    "realpath": "/nix/store/f1a28pbn2rm06i1gx1q81i2avnnxc7m0-scootbg-0.1.0/bin/scootbg",
+    "sha256": "0ac53ae2c647173f6701b66933a726b56403a2ecf748180821a4181048204c9f"
    }
   },
   "scootbg-bilinear": {
@@ -182,7 +192,24 @@
     "written_after": "after-start-image",
     "mesa_shader_cache_bytes": 0,
     "disk_bytes": 33294797
-   }
+   },
+   "exe": {
+    "path": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-daemon-wrapped",
+    "realpath": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-daemon-wrapped",
+    "sha256": "242ab918ff2a002e8c0d7be72c2939f8c2dcdd4c0d96cdc1d61c7e868d6d233a"
+   },
+   "binaries": [
+    {
+     "path": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-daemon-wrapped",
+     "realpath": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-daemon-wrapped",
+     "sha256": "242ab918ff2a002e8c0d7be72c2939f8c2dcdd4c0d96cdc1d61c7e868d6d233a"
+    },
+    {
+     "path": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-wrapped",
+     "realpath": "/nix/store/hvq31xwdxfqf25zjdcyqk2vra4cq3hyg-awww-0.12.1/bin/.awww-wrapped",
+     "sha256": "e6d783939e617a1997a17609ea0f8673181f555373969ff933be046189e3416f"
+    }
+   ]
   },
   "hyprpaper": {
    "version": "0.8.4",
@@ -932,7 +959,19 @@
      ]
     ],
     "disk_bytes": 164946832
-   }
+   },
+   "exe": {
+    "path": "/nix/store/gki150fq2gx6751cqjc9ylc2636h2hax-hyprpaper-0.8.4/bin/hyprpaper",
+    "realpath": "/nix/store/gki150fq2gx6751cqjc9ylc2636h2hax-hyprpaper-0.8.4/bin/hyprpaper",
+    "sha256": "50dde84bd67945ed01d4cc08c988660bc0cbb2ef70c6ea58bfe8d1a24556acd9"
+   },
+   "binaries": [
+    {
+     "path": "/nix/store/gki150fq2gx6751cqjc9ylc2636h2hax-hyprpaper-0.8.4/bin/hyprpaper",
+     "realpath": "/nix/store/gki150fq2gx6751cqjc9ylc2636h2hax-hyprpaper-0.8.4/bin/hyprpaper",
+     "sha256": "50dde84bd67945ed01d4cc08c988660bc0cbb2ef70c6ea58bfe8d1a24556acd9"
+    }
+   ]
   },
   "swaybg": {
    "version": "1.2.2",
@@ -1324,7 +1363,19 @@
     "written_after": "after-start-color",
     "mesa_shader_cache_bytes": 0,
     "disk_bytes": 94586520
-   }
+   },
+   "exe": {
+    "path": "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2/bin/.swaybg-wrapped",
+    "realpath": "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2/bin/.swaybg-wrapped",
+    "sha256": "9ce86aafefd688183e1c4f04a80ca1f64e3a1f4c4467aca16008bef8fe7b322b"
+   },
+   "binaries": [
+    {
+     "path": "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2/bin/.swaybg-wrapped",
+     "realpath": "/nix/store/48cq0jyhgydcphrgcjisilza7ssxygkd-swaybg-1.2.2/bin/.swaybg-wrapped",
+     "sha256": "9ce86aafefd688183e1c4f04a80ca1f64e3a1f4c4467aca16008bef8fe7b322b"
+    }
+   ]
   },
   "wbg": {
    "version": "1.3.0",
@@ -1543,7 +1594,19 @@
     "written_after": "after-start-image",
     "mesa_shader_cache_bytes": 0,
     "disk_bytes": 57149648
-   }
+   },
+   "exe": {
+    "path": "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0/bin/wbg",
+    "realpath": "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0/bin/wbg",
+    "sha256": "11909bf3b65d0fd59fd2c64448803907022d287351a6c0b5575b4999277e9318"
+   },
+   "binaries": [
+    {
+     "path": "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0/bin/wbg",
+     "realpath": "/nix/store/d65vx2cpz7afjmx3874fda9r45hknaiy-wbg-1.3.0/bin/wbg",
+     "sha256": "11909bf3b65d0fd59fd2c64448803907022d287351a6c0b5575b4999277e9318"
+    }
+   ]
   },
   "wpaperd": {
    "version": "1.3.0",
@@ -1824,7 +1887,24 @@
     "written_after": "after-set",
     "mesa_shader_cache_bytes": 2130524,
     "disk_bytes": 35294647
-   }
+   },
+   "exe": {
+    "path": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperd",
+    "realpath": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperd",
+    "sha256": "a93e37c492a6de74e0b8e731c166bb55f181cb74a03ea8af9168980d8df7c6ca"
+   },
+   "binaries": [
+    {
+     "path": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperd",
+     "realpath": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperd",
+     "sha256": "a93e37c492a6de74e0b8e731c166bb55f181cb74a03ea8af9168980d8df7c6ca"
+    },
+    {
+     "path": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperctl",
+     "realpath": "/nix/store/dawaijf2if2x8bjj5f2257vb19qn86x1-wpaperd-1.3.0/bin/wpaperctl",
+     "sha256": "379fb812c01cc59d0d36126ccf8862580050544c45565d87f5ad2120b8cf079f"
+    }
+   ]
   }
  },
  "supports": {
@@ -1911,5 +1991,55 @@
    "path": "/tmp/sbb-images/first.png",
    "what": "64x64 solid #c83232 PNG, the wallpaper a live change replaces"
   }
- }
+ },
+ "compositor_binaries": {
+  "scoot": {
+   "path": "/home/user/scoot/target/release/scoot",
+   "realpath": "/home/user/scoot/target/release/scoot",
+   "sha256": "d84d06d00ade978619d2aa69335b4449ebf05f06fdc276bfb6eae895a75741a7"
+  },
+  "sway": {
+   "path": "/nix/store/5ddkfdxnq991rfzn2f6n5w1kd6dvaqp3-sway-1.12/bin/sway",
+   "realpath": "/nix/store/5ddkfdxnq991rfzn2f6n5w1kd6dvaqp3-sway-1.12/bin/sway",
+   "sha256": "f675671ae4812afa7bdf110c49b12623c6e9a7f66f54a8268f0dbf848283d2d6"
+  },
+  "grim": {
+   "path": "/nix/store/j46b9y2gj3dyw2mma1hl2wcbz3b6llws-grim-1.5.0/bin/grim",
+   "realpath": "/nix/store/j46b9y2gj3dyw2mma1hl2wcbz3b6llws-grim-1.5.0/bin/grim",
+   "sha256": "6152f0ccdfd2a4bb977f89f9295b8bbe81f9e0510e34ebd1762cdeddf8d85613"
+  }
+ },
+ "compositor_exe": {
+  "path": "/nix/store/cd7wsnw5hg865plavffxbnzy3dd3lam7-sway-unwrapped-1.12/bin/sway",
+  "realpath": "/nix/store/cd7wsnw5hg865plavffxbnzy3dd3lam7-sway-unwrapped-1.12/bin/sway",
+  "sha256": "3a3e7d51b92e62396327e3f464e91278d06589d265879a527263ec744b3d9379"
+ },
+ "corrections": [
+  {
+   "date": "2026-09-28",
+   "what": "`compositor_version` corrected by hand after the run",
+   "was": "dbus[31575]: Failed to start message bus: Failed to open \"/etc/dbus-1/session.conf\": No such file or directory",
+   "why": "the harness kept the first line of `sway --version`, and nixpkgs' sway wrapper, with no bus address set, starts dbus-run-session, whose error came first. Replaced with the version line of the same binary's `--version`: 'sway version 1.12'. The harness now searches for the version line. The run itself set a bus address, so sway ran directly (compositor_exe)."
+  },
+  {
+   "date": "2026-09-28",
+   "what": "added after the run: `daemons.*.exe`, `daemons.*.binaries`, `daemons.scootbg.store_binary`, `compositor_exe`, `compositor_binaries`",
+   "why": "review of PR #301: the run recorded store paths, not the binaries themselves. Computed afterwards from the same content-addressed store paths and the same target/release/scoot (sha256 unchanged, checked), so they describe what ran."
+  },
+  {
+   "date": "2026-09-28",
+   "what": "which scootbg binary each figure is from",
+   "why": "every run row, and the Size row, is target/release/scootbg with sha256 39e2c36150ed1fd3da8bd50346077b3250aa4d1ed372447244116fa9cb516d95 (1,684,328 B), built from d8cb6dc with a clean tree. It is not the c2ea42c2... binary first built from the same tree: a `cargo test --release -p scootbg` run for the in-process stage benchmark rebuilt target/release/scootbg before these runs. The Disk row is the nix package /nix/store/f1a28pbn2rm06i1gx1q81i2avnnxc7m0-scootbg-0.1.0 (derivation /nix/store/k1qcpb2p50i8pdjgxpiqk1a3an9953hy-scootbg-0.1.0.drv, built by `nix build .#scootbg` from d8cb6dc), whose binary has sha256 0ac53ae2c647173f6701b66933a726b56403a2ecf748180821a4181048204c9f (1,656,544 B)."
+  },
+  {
+   "date": "2026-09-28",
+   "what": "peak memory",
+   "why": "the published peak figures (`peak_kb`) are RSS: the larger of the summed RSS of the daemon's processes, sampled every 5 ms, and any one process's VmHWM. Later runs also record `peak_pss_kb`, which the gate uses."
+  },
+  {
+   "date": "2026-09-28",
+   "what": "harness state",
+   "why": "this run used the scripts/scootbg-bench/ of commit 7e2b1e8 exactly; the scripts were uncommitted at the time, so `tree_dirty` (tracked files only) says false."
+  }
+ ]
 }

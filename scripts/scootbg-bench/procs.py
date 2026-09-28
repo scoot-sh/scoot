@@ -4,14 +4,21 @@ CPU is a cgroup's: every process of one daemon run (the daemon, the
 clients the harness runs for it, and anything the daemon spawns itself,
 such as awww-daemon's ``sh -c 'awww img ...'`` on restore) joins one
 accounting group before it execs, and the group's counter keeps the time
-of processes that have already exited. Nanosecond resolution, against
-``/proc``'s 10 ms ticks.
+of processes that have already exited: nanoseconds on cgroup v1
+(``cpuacct.usage``), microseconds on v2 (``cpu.stat`` ``usage_usec``),
+against ``/proc``'s 10 ms ticks. A process joins through a ``/bin/sh``
+wrapper that writes its own pid to ``cgroup.procs`` and then ``exec``s the
+command (``CpuGroup.wrap``), so the pid the harness holds is the command's,
+and nothing runs between ``fork`` and ``exec`` in the harness's own
+(threaded) process: ``preexec_fn`` is unsafe with threads, and the peak
+sampler is one.
 
 Memory is per process, from ``/proc``: ``VmHWM`` (reset with
 ``clear_refs``) for peaks, ``smaps_rollup`` and ``status`` at rest.
 """
 
 import os
+import sys
 import threading
 import time
 
@@ -39,15 +46,12 @@ class CpuGroup:
         os.mkdir(self.path)
         self._procs = os.path.join(self.path, "cgroup.procs")
 
-    def join(self):
-        """For ``preexec_fn``: moves the forked child into the group."""
-        procs = self._procs
-
-        def _join():
-            with open(procs, "w") as f:
-                f.write(str(os.getpid()))
-
-        return _join
+    def wrap(self, argv):
+        """``argv`` run so that it joins the group before it starts: the
+        shell writes its pid (which ``exec`` keeps) and execs the command.
+        The shell's few hundred µs after joining are charged to the group,
+        the same for every daemon."""
+        return ["/bin/sh", "-c", 'echo $$ > "$0" && exec "$@"', self._procs, *argv]
 
     def usage_ns(self):
         if self.v2:
@@ -68,7 +72,9 @@ class CpuGroup:
             return []
 
     def close(self):
-        """Kills whatever is left in the group and removes it."""
+        """Kills whatever is left in the group and removes it; says so on
+        stderr, and returns False, if it cannot be removed (a leaked
+        group would keep counting nothing, but it is litter)."""
         for _ in range(100):
             left = self.pids()
             if not left:
@@ -81,8 +87,12 @@ class CpuGroup:
             time.sleep(0.02)
         try:
             os.rmdir(self.path)
-        except OSError:
-            pass
+        except FileNotFoundError:
+            return True
+        except OSError as e:
+            print(f"bench: cannot remove cgroup {self.path}: {e}", file=sys.stderr)
+            return False
+        return True
 
 
 def status(pid):
@@ -194,16 +204,21 @@ def memory_at_rest(pid):
 
 
 class PeakSampler:
-    """Samples the summed RSS of every process in a group every
-    ``interval`` s, for a daemon whose work spans processes (awww decodes
-    in its client). One process's ``VmHWM`` is exact; the sampled sum can
-    miss a spike shorter than the interval, so a run's peak is reported as
-    the larger of the two (see ``combined_peak``)."""
+    """Samples the processes of a group while a daemon works: the summed
+    RSS every ``interval`` s, and the summed PSS every ``pss_every``-th
+    sample (``smaps_rollup`` walks the page tables, so it is read less
+    often). PSS is the figure the gate uses: awww decodes in its client and
+    hands the pixels over in shared memory, and a sum of RSS counts those
+    pages once per process that maps them, where PSS counts them once in
+    all. A sample can miss a spike shorter than its interval; one process's
+    ``VmHWM`` is exact but is RSS, so it is reported beside, not mixed in."""
 
-    def __init__(self, group, interval=0.005):
+    def __init__(self, group, interval=0.005, pss_every=2):
         self.group = group
         self.interval = interval
+        self.pss_every = pss_every
         self.max_sum_kb = 0
+        self.max_pss_kb = 0
         self.hwm_kb = {}  # pid -> last VmHWM seen
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -213,19 +228,27 @@ class PeakSampler:
         return self
 
     def _run(self):
+        n = 0
         while not self._stop.is_set():
-            total = 0
-            for pid in self.group.pids():
+            total = pss = 0
+            pids = self.group.pids()
+            for pid in pids:
                 total += rss_kb(pid)
                 hwm = status(pid).get("VmHWM")
                 if hwm:
                     self.hwm_kb[pid] = max(self.hwm_kb.get(pid, 0), hwm)
+            if n % self.pss_every == 0:
+                for pid in pids:
+                    pss += smaps_rollup(pid).get("Pss", 0)
+                self.max_pss_kb = max(self.max_pss_kb, pss)
+            n += 1
             self.max_sum_kb = max(self.max_sum_kb, total)
             self._stop.wait(self.interval)
 
     def stop(self):
         self._stop.set()
-        self._thread.join()
+        if self._thread.is_alive():
+            self._thread.join()
 
 
 def combined_peak(sampler, exact_hwm):
