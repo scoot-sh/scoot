@@ -252,6 +252,13 @@ pub struct Appearance {
     /// `cursor/shapes.rs`, exactly as they do on a machine with no themes at
     /// all.
     pub cursor_theme: Option<String>,
+    /// How long the pointer sits still over a covering fullscreen window
+    /// before the compositor hides it, in milliseconds
+    /// (`[appearance] cursor_hide_after_ms`, default 0 = never: opt-in, so
+    /// no session hides its pointer unasked). What lets a fullscreen window
+    /// go primary-direct on a CRTC with no cursor plane -- see
+    /// `cursor_hide.rs`. Re-applied live by `scootctl reload`.
+    pub cursor_hide_after_ms: u64,
     /// Whether to answer a client's `zxdg_toplevel_decoration_v1` request
     /// with `ServerSide` -- see `handlers.rs`'s `XdgDecorationHandler` impl.
     /// niri's own default is `true`; this project uses the same default for
@@ -285,12 +292,25 @@ impl Default for Appearance {
             // the machine does, rather than overriding the user's desktop
             // from a compositor default.
             cursor_theme: None,
+            cursor_hide_after_ms: 0,
             prefer_no_csd: true,
         }
     }
 }
 
 impl Appearance {
+    /// The largest [`cursor_hide_after_ms`](Self::cursor_hide_after_ms) a
+    /// config may ask for: one day.
+    ///
+    /// A hide delay past a day is a typo or a probe, not a preference -- and
+    /// without a cap the deadline arithmetic (`Instant + Duration`) can
+    /// overflow `Instant`'s range outright (already at ~292 million years
+    /// for the `u64` milliseconds this field carries, long before anything a
+    /// config could plausibly spell), which panics and takes every client's
+    /// unsaved state down with the compositor. A day still hides eventually
+    /// rather than never, so the clamp changes no sane session's behavior.
+    pub const MAX_CURSOR_HIDE_AFTER_MS: u64 = 86_400_000;
+
     /// The smallest [`cursor_size`](Self::cursor_size) a config may ask for.
     ///
     /// `cursor.rs`'s shape is a triangle whose 1px outline takes the left
@@ -377,6 +397,14 @@ impl Appearance {
                 "cursor_size is out of range; clamping"
             );
             self.cursor_size = cursor_size;
+        }
+        if self.cursor_hide_after_ms > Self::MAX_CURSOR_HIDE_AFTER_MS {
+            tracing::warn!(
+                configured = self.cursor_hide_after_ms,
+                max = Self::MAX_CURSOR_HIDE_AFTER_MS,
+                "cursor_hide_after_ms is out of range; clamping"
+            );
+            self.cursor_hide_after_ms = Self::MAX_CURSOR_HIDE_AFTER_MS;
         }
         self
     }

@@ -636,6 +636,35 @@ fn a_cursor_reload_redraws_where_frames_draw_the_cursor() {
 }
 
 #[test]
+fn a_hide_delay_reload_applies_live_and_re_arms() {
+    // The delay is not placement and rebuilds nothing: it only moves the
+    // deadline the cursor-hide timer serves. Applying it reports under its
+    // own name, stores the live value (so a second reload stays silent),
+    // and re-derives the hide without a re-arrange.
+    let mut fixture = Fixture::with_config("");
+    assert_eq!(fixture.state.appearance.cursor_hide_after_ms, 0);
+    fixture.rewrite(
+        r##"
+        [appearance]
+        cursor_hide_after_ms = 1500
+        "##,
+    );
+    let response = fixture.reload();
+    assert_eq!(applied(&response), &[field::CURSOR_HIDE.to_owned()]);
+    assert!(
+        refused(&response).is_empty(),
+        "nothing here should refuse: {response:?}"
+    );
+    assert_eq!(fixture.state.appearance.cursor_hide_after_ms, 1_500);
+    fixture.state.needs_render = false;
+    let second = fixture.reload();
+    assert!(
+        applied(&second).is_empty() && refused(&second).is_empty(),
+        "the second reload changed nothing it was asked to -- and says so: {second:?}"
+    );
+}
+
+#[test]
 fn a_second_reload_after_a_cursor_change_reports_nothing() {
     // The snapshot rule for the cursor triple (Phase 0): the first reload
     // writes `State::appearance` alongside the rebuild, so the second diffs

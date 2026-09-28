@@ -66,6 +66,7 @@ pub(super) struct KeyOutcome {
 impl State {
     pub fn pointer_move(&mut self, x: f64, y: f64) {
         self.announce_activity();
+        self.note_pointer_activity();
         self.pointer_move_quietly(x, y);
     }
 
@@ -462,6 +463,7 @@ impl State {
     /// avoid.
     pub fn pointer_move_relative(&mut self, dx: f64, dy: f64, dx_unaccel: f64, dy_unaccel: f64) {
         self.announce_activity();
+        self.note_pointer_activity();
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -481,6 +483,7 @@ impl State {
 
     pub fn pointer_button(&mut self, button: PointerButton, pressed: bool) {
         self.announce_activity();
+        self.note_pointer_activity();
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -542,6 +545,7 @@ impl State {
 
     pub fn scroll(&mut self, dx: f64, dy: f64) {
         self.announce_activity();
+        self.note_pointer_activity();
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };

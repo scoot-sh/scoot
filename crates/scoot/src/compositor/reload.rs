@@ -157,6 +157,7 @@ mod field {
     pub const CURSOR_SIZE: &str = "appearance.cursor_size";
     pub const CURSOR_COLOR: &str = "appearance.cursor_color";
     pub const CURSOR_THEME: &str = "appearance.cursor_theme";
+    pub const CURSOR_HIDE: &str = "appearance.cursor_hide_after_ms";
     pub const PREFER_NO_CSD: &str = "appearance.prefer_no_csd";
     pub const SCALE: &str = "output.scale";
     pub const GPU: &str = "tty.gpu";
@@ -383,10 +384,23 @@ impl State {
         // arithmetic. `clamped` warns on its own when it changes anything.
         // (The cursor size needs no second clamp here: `rebuild` applies
         // the same bound at the allocation, and the stored value is the
-        // load-clamped one both sides agree on.)
+        // load-clamped one both sides agree on. The hide delay's bound --
+        // the one-day cap in `Appearance::clamped`, which every load and
+        // reload runs through -- likewise already holds on `fresh`.)
         if appearance_changed {
             let gap = self.world.config().gap;
             self.appearance = self.appearance.clone().clamped(gap);
+        }
+        // The hide delay is not placement and rebuilds nothing: it only
+        // moves the deadline the cursor-hide timer serves. Re-timed here
+        // rather than left to the next `apply()`, so disabling -- or
+        // shortening or lengthening -- the delay takes effect on this
+        // reload: `update_cursor_hide` would leave an armed deadline
+        // computed under the old delay in place.
+        if appearance.cursor_hide_after_ms != live.cursor_hide_after_ms {
+            self.appearance.cursor_hide_after_ms = appearance.cursor_hide_after_ms;
+            report.applied.push(field::CURSOR_HIDE.to_owned());
+            self.retime_cursor_hide(std::time::Instant::now());
         }
     }
 
