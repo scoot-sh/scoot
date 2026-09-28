@@ -50,21 +50,37 @@
 //!        query -- is refused: the binding fails closed. A refused window
 //!        leaves the token live for the process it belongs to.
 //!      - a spawn token **whose spawn has exited** without redeeming it
-//!        keeps the unbound rule: any window naming it redeems it, once,
-//!        within its lifetime. Two ordinary launch shapes end there: a
-//!        single-instance app whose second launch forwards to the running
-//!        instance and exits (GApplication, `KDBusService`), and an app
-//!        that forks into the background and lets the spawn exit (`gvim`
-//!        without `-f`). Either way the window comes from a process the
-//!        spawn is not an ancestor of, and binding it would open that
-//!        window unfocused behind whatever the user was typing into. A
-//!        window refused while the spawn ran is re-asked for once the
-//!        `SIGCHLD` drain reaps it ([`State::x11_focus_for_exited_spawns`]):
-//!        a forwarder was measured to exit a few milliseconds *after* the
-//!        running instance maps. So the race stays open for these launches,
-//!        as before the binding -- a watching X client can win one such
-//!        launch's focus, once, within the token's 30 s -- and closed for
-//!        every launch whose process is still running when its window maps.
+//!        keeps the unbound rule: any window that asks (maps, or sends
+//!        `_NET_ACTIVE_WINDOW`) naming it redeems it, once, within its
+//!        lifetime. Two ordinary launch shapes end there: a single-instance
+//!        app whose second launch forwards to the running instance and
+//!        exits (GApplication, `KDBusService`), and an app that forks into
+//!        the background and lets the spawn exit (`gvim` without `-f`).
+//!        Either way the window comes from a process the spawn is not an
+//!        ancestor of, and binding it would open that window unfocused
+//!        behind whatever the user was typing into.
+//!
+//!        A forwarder was measured to exit a few milliseconds *after* the
+//!        running instance's window maps, so the spawn's reap re-asks
+//!        ([`State::x11_focus_for_exited_spawns`]) -- narrowly: only for a
+//!        window that asked naming the token *while that spawn ran* and was
+//!        refused for it ([`RefusedSpawn`]), within [`REFUSAL_GRACE`] before
+//!        the reap, with focus unmoved since; of several, the first to ask.
+//!        A window that merely carries the id and never asked, or asked for
+//!        another spawn, gets nothing from an exit, and no other child's
+//!        exit re-asks for anything.
+//!
+//!        What stays open for these launches: an X client that copies the
+//!        id and *asks* with it before the app's window does -- while the
+//!        spawn runs (both refused; the first asker wins at the exit) or
+//!        after it has exited -- takes that launch's focus, once, within
+//!        the token's 30 s, as it could before the binding. Closed: a
+//!        client that only sets the property, and every launch whose
+//!        process is still running when its window maps. And one launch
+//!        shape is now refused where the unbound rule would have granted
+//!        it: a window whose spawn exits more than [`REFUSAL_GRACE`] after
+//!        the window asked, or after focus moved, stays unfocused until it
+//!        asks again.
 //!      - a **Wayland client's token** (a launcher's, minted from a real
 //!        click: it passed `activation.rs`'s serial gate) keeps the unbound
 //!        rule -- any window naming it redeems it. scoot never learns which
@@ -127,7 +143,7 @@
 //! from a Wayland window, or from a different X application, by asking --
 //! except with a Wayland launcher's token, or the token of a spawn that
 //! exited before its app redeemed it, which it can race the launched app to
-//! (rule 2's binding says why those stay unbound).
+//! by asking first (rule 2's binding says why those stay unbound).
 //!
 //! Nor does it defend against the same user's own processes: any same-uid
 //! process can read a spawned child's token out of `/proc/<pid>/environ`,
@@ -135,7 +151,8 @@
 //! project's same-uid trust boundary, and applies to every activation
 //! token, X or not.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use scoot_core::{Action, WindowId};
 use smithay::wayland::xdg_activation::{XdgActivationToken, XdgActivationTokenData};
@@ -158,17 +175,61 @@ pub(in crate::compositor) struct SpawnedPid(pub u32);
 #[derive(Clone, Copy, Debug)]
 struct ClientPid(Option<u32>);
 
-/// The spawn an X window's process was last found not to descend from, kept
-/// on the surface so a client spamming `_NET_ACTIVE_WINDOW` with a copied
-/// startup id costs one `/proc` walk, not one per request. Only a refusal is
-/// kept: a process never gains an ancestor (an orphan is reparented to init
-/// or a subreaper already above it), and a spawn that is reaped fails the
-/// tracking check first -- so a cached "no" stays true for as long as it is
-/// consulted. (A subreaper spawn can shorten an orphaned descendant's chain
-/// back under the depth bound; the cache then keeps refusing, which is the
-/// closed side to fail on.) Zero is no pid, so it doubles as "none yet".
+/// The spawn an X window's process was first found not to descend from, when
+/// the window asked for focus with its token (on map, or by
+/// `_NET_ACTIVE_WINDOW`), kept on the surface. Two readers:
+///
+/// - the binding's cache: a client spamming `_NET_ACTIVE_WINDOW` with a
+///   copied startup id costs one `/proc` walk, not one per request. Only a
+///   refusal is kept: a process never gains an ancestor (an orphan is
+///   reparented to init or a subreaper already above it), and a spawn that
+///   is reaped fails the tracking check first -- so a cached "no" stays true
+///   for as long as it is consulted. (A subreaper spawn can shorten an
+///   orphaned descendant's chain back under the depth bound; the cache then
+///   keeps refusing, which is the closed side to fail on.)
+/// - the re-ask on the spawn's exit ([`State::x11_focus_for_exited_spawns`]):
+///   only a window that asked while the spawn ran is owed anything when it
+///   exits, and only if it asked moments before ([`REFUSAL_GRACE`]) and
+///   focus has not moved since (`State::focus_generation`).
+///
+/// A later refusal against the same spawn leaves the record alone (the
+/// cache answers first), so `at` is when the window first asked.
 #[derive(Debug)]
-struct RefusedSpawn(AtomicU32);
+struct RefusedSpawn(Mutex<Refusal>);
+
+#[derive(Clone, Copy, Debug)]
+struct Refusal {
+    /// The spawn the window's process does not descend from.
+    pid: u32,
+    /// When the window was first refused against it.
+    at: Instant,
+    /// `State::focus_generation` at that moment.
+    focus_generation: u64,
+}
+
+impl RefusedSpawn {
+    /// The record, if any. The lock is never held across anything else, so
+    /// it cannot deadlock; a poisoned one still holds a whole `Copy` value.
+    fn get(window: &X11Surface) -> Option<Refusal> {
+        let refused = window.user_data().get::<RefusedSpawn>()?;
+        Some(*refused.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    fn set(window: &X11Surface, refusal: Refusal) {
+        let refused = window
+            .user_data()
+            .get_or_insert_threadsafe(|| RefusedSpawn(Mutex::new(refusal)));
+        *refused.0.lock().unwrap_or_else(PoisonError::into_inner) = refusal;
+    }
+}
+
+/// How recently a window must have been refused for a spawn's exit to grant
+/// it focus. The forwarder this exists for (GTK `mousepad`'s second launch)
+/// was measured reaped 8 ms after the running instance's window mapped; a
+/// second leaves two orders of magnitude for a loaded machine's scheduling,
+/// and is short enough that an ask cannot be cashed in long after the user
+/// has moved on -- which `State::focus_generation` covers within it.
+pub(in crate::compositor) const REFUSAL_GRACE: Duration = Duration::from_secs(1);
 
 impl State {
     /// Whether a newly mapped X window takes focus (the module doc's gate).
@@ -272,7 +333,10 @@ impl State {
     /// that spawn or descends from it. The cheap checks run first: the X
     /// round trip (once per window, cached) and the `/proc` walk only while
     /// the spawn runs, and at most once per window and spawn when the
-    /// answer is no ([`RefusedSpawn`]).
+    /// answer is no ([`RefusedSpawn`], which also records the refusal for
+    /// the re-ask on the spawn's exit). Every caller is a window asking for
+    /// focus -- a map or `_NET_ACTIVE_WINDOW` -- which is what makes a
+    /// recorded refusal an ask.
     fn startup_id_bound_to(&self, data: &XdgActivationTokenData, window: &X11Surface) -> bool {
         let Some(&SpawnedPid(spawned)) = data.user_data.get::<SpawnedPid>() else {
             return data.client_id.is_some();
@@ -290,19 +354,19 @@ impl State {
         let Some(pid) = client_pid(window) else {
             return false;
         };
-        let user_data = window.user_data();
-        if user_data
-            .get::<RefusedSpawn>()
-            .is_some_and(|refused| refused.0.load(Ordering::Relaxed) == spawned)
-        {
+        if RefusedSpawn::get(window).is_some_and(|refused| refused.pid == spawned) {
             return false;
         }
         let bound = descends_from(pid, spawned);
         if !bound {
-            user_data
-                .get_or_insert_threadsafe(|| RefusedSpawn(AtomicU32::new(0)))
-                .0
-                .store(spawned, Ordering::Relaxed);
+            RefusedSpawn::set(
+                window,
+                Refusal {
+                    pid: spawned,
+                    at: Instant::now(),
+                    focus_generation: self.focus_generation,
+                },
+            );
         }
         bound
     }
@@ -359,89 +423,109 @@ impl State {
         true
     }
 
-    /// Re-asks, for the X window that named it, the token of a spawn that
-    /// has just been reaped without redeeming it (the module doc's
-    /// binding: a window refused while the spawn ran is owed the unbound
-    /// rule once the spawn exits). Called by the `SIGCHLD` drain after it
-    /// reaped a spawned child. A forwarder was measured to exit after the
+    /// Re-asks, for a window refused while it ran, the token of each spawn
+    /// the current `SIGCHLD` sweep has just reaped (`State::reaped_spawns`)
+    /// without redeeming it. A forwarder was measured to exit after the
     /// running instance's window mapped (GTK `mousepad`'s second launch:
     /// reaped 8 ms after the map), so a decision made only at map time
     /// would refuse a window naming the forwarded id for good.
     ///
-    /// Of the managed X windows naming such a token, the first mapped (the
-    /// lowest id) gets it -- the one the unbound rule would have granted had
-    /// the spawn already exited. A focused one only spends it. Nothing is
-    /// granted while the session is locked, like every activation; the token
-    /// then expires unspent.
+    /// Narrow on purpose -- a window is granted the reaped spawn's token only
+    /// if all of these hold:
+    /// - it **asked** for focus (mapped, or sent `_NET_ACTIVE_WINDOW`) with
+    ///   that token while the spawn ran, and was refused for it
+    ///   ([`RefusedSpawn`] names this spawn's pid): a window that only
+    ///   carries the startup id, or was refused for another spawn, is owed
+    ///   nothing;
+    /// - it did so within [`REFUSAL_GRACE`] before the reap;
+    /// - focus has not moved since (`State::focus_generation`): whatever the
+    ///   user did in between decided focus;
+    /// - its startup id (own, or its client leader's) still names the token.
     ///
-    /// Costs one pass over the token table (bounded by its cap) per reap,
-    /// and returns there unless a fresh token outlived its spawn; only then
-    /// is each managed X window's startup id read. Each round spends a
-    /// token, so the loop ends.
+    /// Of several, the one refused first -- the first to ask -- is granted.
+    /// A focused window that was refused for the spawn (rule 1 or 3 then
+    /// focused it) only spends the token, which would otherwise outlive the
+    /// spawn as copyable. Otherwise the token is left for the unbound rule
+    /// at a later map or request. Nothing happens without an XWM or while
+    /// the session is locked, like every activation; the token then expires
+    /// unspent. A grant moves focus, so later spawns in the same sweep find
+    /// the generation changed and grant nothing: one sweep focuses at most
+    /// one window.
+    ///
+    /// Costs one pass over the token table (bounded by its cap) per reaped
+    /// spawn, and a pass over the windows only when that spawn's token is
+    /// still live; a window's startup id is read only once its refusal
+    /// matches. Allocation-free but for that read and the token handle.
     pub(in crate::compositor) fn x11_focus_for_exited_spawns(&mut self) {
-        loop {
+        let now = Instant::now();
+        let mut next = 0;
+        // Indexed, not iterated: granting focus needs `&mut self`. Nothing
+        // below touches `reaped_spawns`, and `get` stays in range anyway.
+        while let Some(&pid) = self.reaped_spawns.get(next) {
+            next += 1;
             if self.xwm.is_none() || self.session_lock.is_locked() {
                 return;
             }
-            let orphaned = self
-                .xdg_activation
-                .tokens()
-                .any(|(_, data)| self.outlived_its_spawn(data));
-            if !orphaned {
-                return;
-            }
-            let Some((id, token)) = self.first_window_owed_an_exited_spawns_token() else {
-                return;
-            };
-            self.xdg_activation.remove_token(&token);
-            if self.focus == Some(id) {
-                continue;
-            }
-            tracing::debug!(
-                ?id,
-                "X11 window redeemed the startup id of a spawn that has exited"
-            );
-            // As `x11_activation_request` does before its own `act`.
-            self.clicked_layer = None;
-            self.act(Action::FocusWindowId(id));
+            self.x11_focus_for_exited_spawn(pid, now);
         }
     }
 
-    /// The managed X window with the lowest id whose startup id (its own,
-    /// or its client leader's) names a fresh token of a spawn no longer
-    /// tracked, and that token.
-    fn first_window_owed_an_exited_spawns_token(&self) -> Option<(WindowId, XdgActivationToken)> {
-        let mut first: Option<(WindowId, XdgActivationToken)> = None;
+    /// [`State::x11_focus_for_exited_spawns`] for one reaped spawn `pid`.
+    fn x11_focus_for_exited_spawn(&mut self, pid: u32, now: Instant) {
+        let Some(token) = self
+            .xdg_activation
+            .tokens()
+            .find(|(_, data)| {
+                data.timestamp.elapsed() < TOKEN_LIFETIME
+                    && data.user_data.get::<SpawnedPid>() == Some(&SpawnedPid(pid))
+            })
+            .map(|(token, _)| token.clone())
+        else {
+            return;
+        };
+        let refused_for = |state: &State, x11: &X11Surface| {
+            let refusal = RefusedSpawn::get(x11).filter(|refusal| refusal.pid == pid)?;
+            let names = x11
+                .startup_id()
+                .or_else(|| state.leader_startup_id(x11))
+                .is_some_and(|startup| startup == token.as_str());
+            names.then_some(refusal)
+        };
+        if let Some(focused) = self
+            .focus
+            .and_then(|id| self.windows.get(&id))
+            .and_then(|window| window.x11_surface())
+            && refused_for(self, focused).is_some()
+        {
+            self.xdg_activation.remove_token(&token);
+            return;
+        }
+        let mut first: Option<(WindowId, Instant)> = None;
         for (&id, window) in &self.windows {
-            if first.as_ref().is_some_and(|(best, _)| *best < id) {
-                continue;
-            }
             let Some(x11) = window.x11_surface() else {
                 continue;
             };
-            let Some(startup) = x11.startup_id().or_else(|| self.leader_startup_id(x11)) else {
+            let Some(refusal) = refused_for(self, x11) else {
                 continue;
             };
-            let token = XdgActivationToken::from(startup);
-            if self
-                .xdg_activation
-                .data_for_token(&token)
-                .is_some_and(|data| self.outlived_its_spawn(data))
-            {
-                first = Some((id, token));
+            let owed = refusal.focus_generation == self.focus_generation
+                && now.saturating_duration_since(refusal.at) <= REFUSAL_GRACE;
+            if owed && first.is_none_or(|(_, at)| refusal.at < at) {
+                first = Some((id, refusal.at));
             }
         }
-        first
-    }
-
-    /// Whether `data` is a fresh token of a spawn scoot no longer tracks:
-    /// one that exited without redeeming it.
-    fn outlived_its_spawn(&self, data: &XdgActivationTokenData) -> bool {
-        data.timestamp.elapsed() < TOKEN_LIFETIME
-            && data
-                .user_data
-                .get::<SpawnedPid>()
-                .is_some_and(|&SpawnedPid(pid)| !self.spawned_children.contains(&pid))
+        let Some((id, _)) = first else {
+            return;
+        };
+        self.xdg_activation.remove_token(&token);
+        tracing::debug!(
+            ?id,
+            pid,
+            "X11 window refused while its spawn ran redeemed the spawn's token on its exit"
+        );
+        // As `x11_activation_request` does before its own `act`.
+        self.clicked_layer = None;
+        self.act(Action::FocusWindowId(id));
     }
 }
 

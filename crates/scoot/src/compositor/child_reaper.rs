@@ -266,20 +266,30 @@ impl State {
     /// [`wait`], so one `SIGCHLD` path serves every child.
     ///
     /// With XWayland, a sweep that forgot a spawn then hands its unspent
-    /// token to an X window that named it while it ran
-    /// (`State::x11_focus_for_exited_spawns`).
+    /// token to an X window refused for it moments before
+    /// (`State::x11_focus_for_exited_spawns`), and to no other: the pids it
+    /// forgot are recorded in `State::reaped_spawns`, so an unrelated
+    /// child's exit re-asks for nothing.
     pub(crate) fn reap_children(&mut self) {
         if !self.spawned_children.is_empty() {
             #[cfg(feature = "xwayland")]
-            let tracked = self.spawned_children.len();
+            {
+                let reaped = &mut self.reaped_spawns;
+                reaped.clear();
+                self.spawned_children.retain(|&pid| {
+                    let running = wait(pid) == Waited::Running;
+                    if !running {
+                        reaped.push(pid);
+                    }
+                    running
+                });
+                if !self.reaped_spawns.is_empty() {
+                    self.x11_focus_for_exited_spawns();
+                }
+            }
+            #[cfg(not(feature = "xwayland"))]
             self.spawned_children
                 .retain(|&pid| wait(pid) == Waited::Running);
-            // A spawn gone without redeeming its token owes an X window
-            // that named it the unbound rule (`xwayland/focus.rs`).
-            #[cfg(feature = "xwayland")]
-            if self.spawned_children.len() != tracked {
-                self.x11_focus_for_exited_spawns();
-            }
         }
         if !self.wallpaper.is_idle() {
             self.reap_wallpaper();

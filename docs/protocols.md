@@ -606,18 +606,26 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
    for the app. When the server cannot say which process a window belongs
    to, the startup id is refused. **Once the process scoot started has
    exited** without its token being redeemed, the startup id redeems for
-   any X window naming it, once, within the token's 30 seconds -- the rule
-   from before the binding. That is where two ordinary launches end up: a
+   any X window that asks (maps, or sends `_NET_ACTIVE_WINDOW`) naming it,
+   once, within the token's 30 seconds -- the rule from before the
+   binding. That is where two ordinary launches end up: a
    single-instance app whose second launch hands over to the running
    instance and exits (GApplication, `KDBusService`), and an app that forks
    itself into the background and lets the process scoot started exit
    (`gvim` does by default, per its documentation; unmeasured here). Their
    window comes from a process that is not a descendant of the one scoot
    started, so binding them would open it without focus behind whatever you
-   were typing into. A window refused while that process still ran takes
-   focus when it exits (a forwarder was measured to exit a few milliseconds
-   after the running instance's window mapped). For these launches the race
-   stays open, as it always was. A client that sets no startup id
+   were typing into. A window that asked with the id while that process
+   still ran, and was refused, takes focus when it exits (a forwarder was
+   measured to exit a few milliseconds after the running instance's window
+   mapped) -- if it asked less than a second before the exit and focus has
+   not moved since; of several, the first to ask. A window that only
+   carries the id and never asked gets nothing from the exit, and no other
+   process's exit hands anyone focus. For these launches the race stays
+   open to an X client that copies the id and *asks* with it before the
+   app's window does, as it always was; and a window whose launched
+   process lingers more than a second after the window asked opens
+   unfocused, until it asks again. A client that sets no startup id
    (`xterm`) is matched by process alone: a process scoot spawned whose
    token is still live counts. **A live token a mapping window may redeem
    is spent whichever rule grants it focus** -- so a token cannot be left

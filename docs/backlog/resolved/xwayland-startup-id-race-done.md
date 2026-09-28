@@ -13,8 +13,11 @@ the spawn runs (tracked, unreaped), a startup id naming its token redeems
 only for a window whose X client process -- by X-Resource pid -- is the
 spawn or descends from it within 8 `/proc/<pid>/stat` parent links. Once
 the spawn has exited without redeeming it, the token keeps the unbound
-rule it always had (review follow-up, below): **the race stays open for
-launches whose process exits before its app takes focus** -- forwarders
+rule it always had for a window that asks (review follow-up, below), and
+a window refused while it ran is re-asked for at its exit only if it asked
+within a second before and focus has not moved (review round 2): **the
+race stays open for launches whose process exits before its app takes
+focus**, to an X client that copies the id and asks first -- forwarders
 to a running instance, forks into the background. The resolution record
 is at the end; the entry as filed follows unchanged.
 
@@ -207,10 +210,9 @@ instance over D-Bus and exits, and the window that maps comes from the
 running instance, which is not the spawn's descendant. The `gvim` fork
 above is the same shape. Decision (coordinating session): while the
 spawn is a live tracked child the binding holds; once it has exited, its
-token falls back to the unbound rule -- any X window naming it redeems it,
-once, within its 30 s. Never worse than before the binding for those
-launches; the race stays closed for every launch whose process is still
-running when its window maps.
+token falls back to the unbound rule -- any X window that asks naming it
+redeems it, once, within its 30 s. The re-ask on the spawn's exit was
+first written too broadly and narrowed by the next review round (below).
 
 ### What changed
 
@@ -221,9 +223,10 @@ running when its window maps.
 - `focus.rs`, `State::x11_focus_for_exited_spawns`, called by the `SIGCHLD`
   drain (`child_reaper.rs`) whenever it reaped a spawned child: of the
   managed X windows whose startup id (own or leader's) names a fresh token
-  of a spawn no longer tracked, the lowest id (first mapped -- whom the
-  unbound rule would have granted) takes focus and spends the token; a
-  focused one only spends it; nothing is granted under the lock. Needed
+  of a spawn no longer tracked, the lowest id takes focus and spends the
+  token; a focused one only spends it; nothing is granted under the lock.
+  (Superseded by review round 2, below: this granted windows that never
+  asked, on any child's reap.) Needed
   because the forwarder was measured to exit *after* the running
   instance's window maps (below), so a map-time decision alone would still
   refuse it. Costs one pass over the token table per reap, and a pass over
@@ -309,11 +312,59 @@ first launch focuses by process. The fallback matters for toolkits that
 do put the forwarded id on a window scoot sees; none was available here
 to measure.
 
+### Review round 2: the re-ask on exit, narrowed
+
+Review (X1) found the re-ask above handed an orphaned token to *any*
+managed X window whose current startup id named it, lowest id first,
+after *any* spawned child's reap -- never checking that the window had
+asked. So an X client that only set `_NET_STARTUP_ID` on an old window
+beat the forwarded window that asked (worse than before the binding,
+where a property that never asks wins nothing), and an unrelated child's
+exit (a volume key's spawn) could move focus. Now:
+
+- `child_reaper.rs`: the sweep records the pids it drops in
+  `State::reaped_spawns` (a `Vec` cleared and refilled in place: no
+  allocation in steady state), and the re-ask runs only for those.
+- `focus.rs`: `RefusedSpawn` records, beside the pid, the instant of the
+  window's first refusal against that spawn and `State::focus_generation`
+  then. It is written only from `startup_id_bound_to`, whose only callers
+  are a map and `_NET_ACTIVE_WINDOW` -- so a record is an ask. On a
+  reaped spawn's live token, a window is granted only if its record names
+  that pid, the refusal is at most `REFUSAL_GRACE` (1 s; the measured
+  forwarder gap is 8 ms) before the reap, focus has not moved since, and
+  its startup id (own or leader's) still names the token; of several, the
+  earliest refusal wins. A focused window with such a record only spends
+  the token (rule 1 or 3 focused it at map; left live, the token would be
+  copyable). With no candidate the token is left for the unbound rule.
+  Nothing runs without an XWM or under the lock.
+- `State::focus_generation` (new, wrapping `u64`) is bumped at every focus
+  change: `set_focus` when the focused window changes, `remove_window`
+  when it clears the focused window, `SeatHandler::focus_changed` (Smithay
+  calls it for every keyboard focus move to a surface, whoever made it),
+  and `refresh_keyboard_focus` for a move to no surface, which Smithay
+  does not report.
+
+Tests: `xwayland/tests/startup_regrant.rs` (new) -- a passive window
+carrying the id is not granted while the asker is; a spawn exit with no
+asker grants nothing and leaves the token; an unrelated child's exit
+grants nothing; a refusal older than the grace is not granted; a focus
+change after the refusal is kept; of two askers the earlier refusal wins
+over the lower id; a refused-but-focused window's token is spent. The
+lock test now maps its window after locking, so only the lock guard
+stands between it and a grant (mutation-checked).
+
 ### What remains open
 
 - **The race, for launches whose process exits before its app takes
-  focus**: a watching X client can copy the id and win that launch's
-  focus, once, within the token's 30 s -- exactly as before the binding.
+  focus**: an X client that copies the id and *asks* with it (maps, or
+  sends `_NET_ACTIVE_WINDOW`) before the app's window does -- while the
+  spawn runs, where the first refused asker wins at the exit, or after it
+  exited -- wins that launch's focus, once, within the token's 30 s, as
+  before the binding. One that only sets the property no longer wins.
+- **Narrower than the unbound rule in one shape**: a window that asked
+  more than `REFUSAL_GRACE` before its spawn exits, or before focus moved,
+  is not granted at the exit and stays unfocused until it asks again --
+  where before the binding it would have been focused at map.
 - A launched process that keeps running while a process it did not start
   maps the window (a client that waits on a server) is still refused;
   unmeasured whether any X app does this with a startup id.

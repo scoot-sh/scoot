@@ -84,9 +84,12 @@ scoot has not cut a numbered release yet; entries are dated.
   Once the process scoot started has exited -- a single-instance app
   handing a second launch to its running instance, an app forking into
   the background (`gvim` without `-f`, by its documentation) -- the
-  startup id works for any X window naming it, once, as it always did,
-  so those launches get focus exactly as before (and can still be
-  raced). An X app a *Wayland launcher* started keeps the old behavior
+  startup id works for any X window that asks for focus naming it, once,
+  as it always did, and the app's window that asked while that process
+  was still running takes focus when it exits -- if it asked less than a
+  second before and you have not moved focus since. Those launches can
+  still be raced by an X client that copies the id and asks first; one
+  that only copies it onto a window no longer wins anything. An X app a *Wayland launcher* started keeps the old behavior
   too -- scoot cannot tell which process the launcher started -- see
   [protocols.md](docs/protocols.md#focus-x-windows-ask-scoot-decides).
 

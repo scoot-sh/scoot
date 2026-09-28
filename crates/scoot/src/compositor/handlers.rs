@@ -651,6 +651,11 @@ impl SeatHandler for State {
         seat: &Seat<Self>,
         focused: Option<&super::keyboard_focus::KeyboardFocus>,
     ) {
+        // Smithay calls this for every keyboard focus move to a surface,
+        // whoever set it (`refresh_keyboard_focus`, a popup grab, a grab's
+        // own `set_focus`), and never for an unchanged one. A move to
+        // nothing is not reported; `refresh_keyboard_focus` bumps for that.
+        self.focus_generation = self.focus_generation.wrapping_add(1);
         let handle = &self.display_handle;
         // The surface keys go to, whichever kind of window owns it: an X
         // window's is XWayland's own client, which is who the selection is

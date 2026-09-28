@@ -105,6 +105,7 @@ impl State {
         self.close_wlr_toplevel(id);
         if self.focus == Some(id) {
             self.focus = None;
+            self.focus_generation = self.focus_generation.wrapping_add(1);
         }
         self.world.handle_event(Event::WindowClosed { id });
         self.apply();
@@ -395,6 +396,7 @@ impl State {
     fn set_focus(&mut self, focus: Option<WindowId>) {
         if self.focus != focus {
             self.focus = focus;
+            self.focus_generation = self.focus_generation.wrapping_add(1);
             for (id, window) in &self.windows {
                 window.set_activated(Some(*id) == focus);
                 if let Some(toplevel) = window.toplevel() {
@@ -515,6 +517,11 @@ impl State {
             && let Some(client) = self.client_of(&entered)
         {
             self.interaction_serials.record_focus(serial, client);
+        }
+        // A move to a surface bumps `focus_generation` in `focus_changed`;
+        // a move to nothing is not reported there by Smithay, so here.
+        if surface.is_none() && keyboard.current_focus().is_some() {
+            self.focus_generation = self.focus_generation.wrapping_add(1);
         }
         keyboard.set_focus(self, surface, serial);
     }

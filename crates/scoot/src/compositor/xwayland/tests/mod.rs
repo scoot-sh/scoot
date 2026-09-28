@@ -812,6 +812,8 @@ mod startup_exited;
 #[cfg(feature = "xwayland")]
 mod startup_race;
 #[cfg(feature = "xwayland")]
+mod startup_regrant;
+#[cfg(feature = "xwayland")]
 mod unmanaged_cap;
 #[cfg(feature = "xwayland")]
 mod x11;
