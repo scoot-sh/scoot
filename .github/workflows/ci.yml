@@ -67,7 +67,7 @@ jobs:
   #
   #   crates/scoot/, crates/scoot-core/, crates/scoot-ipc/,
   #   crates/scootctl/, scripts/smoke-test.sh, vm/compositor-deps.nix
-  #                                        -> scoot=true  (Linux, macOS)
+  #                        -> scoot=true  (Linux, Linux-features, macOS)
   #   crates/scootbg/, crates/scootbg-mem/ -> scootbg=true (scootbg job)
   #     except their Cargo.toml             -> both, because flake.nix
   #     reads crates/scootbg/Cargo.toml (`nix flake check`) and the macOS
@@ -157,9 +157,10 @@ jobs:
     # (empty output) still runs this one instead of skipping it green.
     if: ${{ !cancelled() && needs.changes.outputs.scoot != 'false' }}
     runs-on: ubuntu-latest
-    # 90, not 60, since the xwayland step (last) rebuilds Smithay a third
-    # time and runs the whole scoot suite again under that feature.
-    timeout-minutes: 90
+    # 60: this job builds Smithay once (the default features) and runs the
+    # default suites and smoke. The gpu-scanout and xwayland rebuilds -- the
+    # reason this used to be 90 -- now run in parallel in `linux-features`.
+    timeout-minutes: 60
     env:
       CARGO_TERM_COLOR: always
 
@@ -262,10 +263,11 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: |
           cargo build -p scoot -p scootctl -p scootbg
-          # Kept aside before the gpu-scanout step below overwrites
-          # `target/debug/scoot`: the smoke test must run the default build.
-          # scootbg too: the smoke test's [wallpaper] section runs it
-          # (it links no GPU stack either way; its own job checks that).
+          # Kept aside: the smoke test below must run this default build, and
+          # `linux-features` builds its own feature binaries from the same
+          # restored cache rather than overwriting these. scootbg too: the
+          # smoke test's [wallpaper] section runs it (it links no GPU stack
+          # either way; its own job checks that).
           cp target/debug/scoot "$RUNNER_TEMP/scoot-default"
           cp target/debug/scootctl "$RUNNER_TEMP/scootctl-default"
           cp target/debug/scootbg "$RUNNER_TEMP/scootbg-default"
@@ -336,7 +338,12 @@ jobs:
           # --no-fail-fast, unlike the local loop: CI's job is to report every
           # failure in one run. Without it a single early failure hides the
           # rest -- run 35453015885 stopped with 333 tests unrun.
-          cargo nextest run --workspace --no-fail-fast
+          # Scoped to the compositor side: scootbg's own suites live in the
+          # `scootbg` job and its live-compositor runs in
+          # `scootbg-integration`, so running them here too only repeats that
+          # work (this job still builds scootbg for the smoke test's
+          # [wallpaper] section below).
+          cargo nextest run -p scoot -p scoot-core -p scoot-ipc -p scootctl --no-fail-fast
 
       # NOT a duplicate of the nextest run above -- do not delete it as one.
       # nextest runs every test in its own process, so it structurally cannot
@@ -352,7 +359,8 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
           export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
-          cargo test --workspace
+          # Same scope as the nextest step above, for the same reason.
+          cargo test -p scoot -p scoot-core -p scoot-ipc -p scootctl
 
       # End to end over IPC: starts the compositor, spawns a terminal in it,
       # types into that terminal, reads the characters back out of the shell,
@@ -399,104 +407,24 @@ jobs:
           echo "ok: no loadable libEGL here -- this run is the GPU-free path"
           scripts/smoke-test.sh
 
-      # The other half of the GPU-free requirement: the opt-in tier still has
-      # to build (nothing else builds it, so it can rot silently), and the
-      # negative assertion above is only meaningful if a build that *should*
-      # link libgbm actually does. Without this positive control, an `ldd`
-      # aimed at the wrong binary, or a feature that quietly stopped pulling
-      # `smithay/backend_gbm`, would leave the no-GPU check passing while
-      # testing nothing.
-      #
-      # Last, deliberately: `--features` changes the unification, so this
-      # rebuilds Smithay and `scoot` and leaves a GPU-linked binary at
-      # `target/debug/scoot`. The smoke test above must run the default one.
-      - name: Build --features gpu-scanout, and assert that one does link libgbm
-        shell: nix develop --command bash -euo pipefail {0}
+      # Measure, then prune, before the save below. `gh cache list` put the
+      # `linux-cargo-` entries at 7.15 GiB each (2026-09-28): a debug `target/`
+      # holding one Smithay build per feature set -- the default one here,
+      # plus gpu-scanout and xwayland when they still ran in this same job --
+      # on top of incremental artifacts no future run reuses (every run builds
+      # different code, so incremental output costs restore/save bytes without
+      # ever saving build time). The feature rebuilds now run in
+      # `linux-features`, which restores this same cache and never saves, so
+      # they no longer inflate what is stored; what is left to trim here is
+      # `target/debug/incremental`. The `du` lines keep the next measurement
+      # in the log. Same run condition as the save: this must also run when
+      # the tests fail, or a red main would save unpruned.
+      - name: Measure and prune the cargo cache before saving
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         run: |
-          cargo build -p scoot --features gpu-scanout
-          echo "--- ldd target/debug/scoot (--features gpu-scanout) ---"
-          ldd target/debug/scoot
-          if ! ldd target/debug/scoot | awk '{ print $1 }' | grep -qEi '^libgbm'; then
-            echo "::error title=The gpu-scanout build does not link libgbm::either the feature no longer pulls smithay/backend_gbm, or this checked the wrong binary -- which would make the default build's no-GPU assertion vacuous."
-            exit 1
-          fi
-          echo "ok: --features gpu-scanout links libgbm, so the libgbm half of the default build's assertion is a real one"
-          echo "note: libEGL/libGLESv2 are dlopen'd by renderer_gl and never appear in ldd for either build, so"
-          echo "      those clauses are belt-and-braces against a future static link, not live checks. What"
-          echo "      actually guards the GPU-free path is the smoke test below, which runs with no loadable EGL."
-
-      # The opt-in XWayland tier (`--features xwayland`): nothing else here
-      # builds it, and its live suites -- window mapping, the focus gate
-      # (focus-steal refusals, token spending), the lock's blanking and input
-      # refusal -- are security regression tests that must run somewhere
-      # automated. They drive a real `Xwayland` server, so one is put on
-      # PATH (plus xclock/xeyes, which two suites use for a second X client
-      # process, and procps for `pkill`), pinned like the smoke tools through this repo's
-      # `flake.lock`. `SCOOT_REQUIRE_XWAYLAND` turns every live test's quiet
-      # "skipped -- no Xwayland (or xclock/xeyes/pkill) on PATH" into a failure, so a PATH
-      # regression here cannot leave the security suites green by skipping
-      # (see `compositor/xwayland/tests/mod.rs`'s `xwayland_on_path`).
-      #
-      # Last among the builds, like gpu-scanout above and for the same
-      # reason: the feature changes Smithay's unification and rebuilds it.
-      # The GLES tests in the full suite need the same software EGL as the
-      # default test steps.
-      - name: --features xwayland -- clippy, nextest and cargo test, live suites required
-        shell: nix develop --command bash -euo pipefail {0}
-        run: |
-          # procps too: the dead-server test kills the server with `pkill`,
-          # and the host's pkill loads the host glibc against the Nix
-          # libraries `LD_LIBRARY_PATH` names below (run 36144028882 died on
-          # `GLIBC_ABI_GNU2_TLS not found`). A Nix pkill agrees with them.
-          x=$(nix build --inputs-from . nixpkgs#xwayland nixpkgs#xclock nixpkgs#xeyes nixpkgs#procps --no-link --print-out-paths)
-          for path in $x; do export PATH="$path/bin:$PATH"; done
-          command -v Xwayland pkill
-          pkill --version
-          export SCOOT_REQUIRE_XWAYLAND=1
-          export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
-          export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
-          cargo clippy -p scoot --all-targets --features xwayland -- -D warnings
-          cargo nextest run -p scoot --features xwayland --no-fail-fast
-          cargo test -p scoot --features xwayland
-          # The binary for the smoke run below. Only the `scoot` crate itself
-          # compiles here: the tests above built every dependency with the
-          # same features and profile.
-          cargo build -p scoot -p scootctl --features scoot/xwayland
-          cp target/debug/scoot "$RUNNER_TEMP/scoot-xwayland"
-          cp target/debug/scootctl "$RUNNER_TEMP/scootctl-xwayland"
-
-      # The smoke run above tests the default build, where both xwayland
-      # sections can only report "this build has no xwayland feature". This
-      # runs the whole script against the xwayland build with `Xwayland` and
-      # `xeyes` on PATH, so the real binary's `--xwayland` path is exercised
-      # end to end: the server reaching READY from `compositor::run`,
-      # `DISPLAY` reaching a spawned child, an X window listed and closed over
-      # IPC -- and, with the binary hidden from PATH, the loud Wayland-only
-      # fallback a `--tty` login without Xwayland gets. The ~10 s the script
-      # takes, plus the `scoot` crate's rebuild above (the dependencies are
-      # already built), is the whole cost. No GPU-free assertion here: that is
-      # the default build's run above, and `Xwayland` itself links Mesa.
-      - name: scripts/smoke-test.sh (--headless, --features xwayland, Xwayland on PATH)
-        timeout-minutes: 15
-        env:
-          SCOOT: ${{ runner.temp }}/scoot-xwayland
-          SCOOTCTL: ${{ runner.temp }}/scootctl-xwayland
-          # The default build's scootbg, kept aside above: the daemon has no
-          # xwayland feature and talks to scoot only over Wayland, so the
-          # [wallpaper] section runs here too rather than skipping.
-          SCOOTBG: ${{ runner.temp }}/scootbg-default
-          SMOKE_REQUIRE_SCOOTBG: "1"
-          SMOKE_PREFIX: ${{ runner.temp }}/smoke-xwayland
-        shell: nix shell --inputs-from . nixpkgs#foot nixpkgs#jq nixpkgs#imagemagick nixpkgs#wayland-utils nixpkgs#xwayland nixpkgs#xeyes --command bash -euo pipefail {0}
-        run: |
-          command -v Xwayland xeyes
-          scripts/smoke-test.sh
-          # Both xwayland sections must have run their real branches, not
-          # skipped: a green run that only said "no xwayland feature" here
-          # would prove nothing about this build.
-          log="$RUNNER_TEMP/smoke-xwayland-xwayland.log"
-          grep -q "XWayland is ready" "$log"
-          grep -q "Xwayland. must be on PATH" "$RUNNER_TEMP/smoke-xwayland-nox.log"
+          du -sh target ~/.cargo/registry ~/.cargo/git 2>/dev/null || true
+          rm -rf target/debug/incremental target/release/incremental
+          du -sh target 2>/dev/null || true
 
       - name: Save the cargo cache
         # Not `always()`, which also fires on cancellation -- and
@@ -520,9 +448,187 @@ jobs:
           # the next run's restore cannot predict.
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
+  # The opt-in feature tiers, split out of `linux` so the two jobs run in
+  # parallel: the gpu-scanout positive-control build, and the xwayland tier
+  # (clippy, both test runners with the live suites required, and the
+  # xwayland smoke run). Same `needs: changes` + scoot gate as `linux`, and
+  # the same `linux-cargo-` key prefix -- these *are* the `linux` job's
+  # entries, restored read-only. This job saves nothing, so the repo keeps a
+  # single `linux-cargo-` cache line (see the `linux` job's save step for why
+  # only one line can exist under the 10 GB budget).
+  linux-features:
+    name: "Linux (features: gpu-scanout, xwayland)"
+    needs: changes
+    # Fail open: only an explicit `false` skips, so a failed `changes` job
+    # (empty output) still runs this one instead of skipping it green.
+    if: ${{ !cancelled() && needs.changes.outputs.scoot != 'false' }}
+    runs-on: ubuntu-latest
+    # Two Smithay rebuilds (one per feature set) plus both suites under
+    # xwayland and a smoke run -- less than the 90 this cost inside `linux`
+    # with three rebuilds, more than the default-only half left there.
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # As in `linux`: the suites bind real sockets, and a runner has no
+      # `/run/user/<uid>`.
+      - name: Create XDG_RUNTIME_DIR
+        run: |
+          mkdir -p -m 700 "$RUNNER_TEMP/xdg"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
+
+      # Restore-only, from the `linux` job's entries: every dependency but
+      # Smithay and scoot (which each feature set rebuilds anyway) comes
+      # from there. Never saved -- a second cache line would push the repo
+      # past GitHub's 10 GB budget (see the `linux` job's save step).
+      - name: Restore the cargo cache (the linux job's, read-only)
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+          restore-keys: |
+            linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            linux-cargo-
+
+      # Same software EGL as the `linux` test steps: the xwayland suite run
+      # below includes the GLES tests, which fail rather than skip where EGL
+      # is missing (see the `linux` job's note). The smoke step at the end
+      # deliberately keeps running with no loadable EGL, as there.
+      - name: Resolve a software EGL for the GLES tests
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          mesa=$(nix build --inputs-from . nixpkgs#mesa --no-link --print-out-paths | head -1)
+          test -e "$mesa/share/glvnd/egl_vendor.d/50_mesa.json"
+          {
+            echo "CI_EGL_LIBRARY_PATH=$LIBRARY_PATH:$mesa/lib"
+            echo "CI_EGL_VENDOR_DIRS=$mesa/share/glvnd/egl_vendor.d"
+          } >>"$GITHUB_ENV"
+
+      # The other half of the GPU-free requirement: the opt-in tier still has
+      # to build (nothing else builds it, so it can rot silently), and the
+      # default build's negative assertion in `linux` is only meaningful if a
+      # build that *should* link libgbm actually does. Without this positive
+      # control, an `ldd` aimed at the wrong binary, or a feature that quietly
+      # stopped pulling `smithay/backend_gbm`, would leave the no-GPU check
+      # passing while testing nothing.
+      #
+      # First of the two feature builds: `--features` changes the
+      # unification, so this rebuilds Smithay and `scoot`. The xwayland build
+      # below rebuilds them again, so `target/debug/scoot` ends as that one;
+      # neither escapes except through the kept-aside copies (the default
+      # build's smoke run lives in `linux` and uses that job's copies).
+      - name: Build --features gpu-scanout, and assert that one does link libgbm
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          cargo build -p scoot --features gpu-scanout
+          echo "--- ldd target/debug/scoot (--features gpu-scanout) ---"
+          ldd target/debug/scoot
+          if ! ldd target/debug/scoot | awk '{ print $1 }' | grep -qEi '^libgbm'; then
+            echo "::error title=The gpu-scanout build does not link libgbm::either the feature no longer pulls smithay/backend_gbm, or this checked the wrong binary -- which would make the default build's no-GPU assertion vacuous."
+            exit 1
+          fi
+          echo "ok: --features gpu-scanout links libgbm, so the libgbm half of the default build's assertion is a real one"
+          echo "note: libEGL/libGLESv2 are dlopen'd by renderer_gl and never appear in ldd for either build, so"
+          echo "      those clauses are belt-and-braces against a future static link, not live checks. What"
+          echo "      actually guards the GPU-free path is the default build's smoke test in linux, which runs with no loadable EGL."
+
+      # The opt-in XWayland tier (`--features xwayland`): nothing else here
+      # builds it, and its live suites -- window mapping, the focus gate
+      # (focus-steal refusals, token spending), the lock's blanking and input
+      # refusal -- are security regression tests that must run somewhere
+      # automated. They drive a real `Xwayland` server, so one is put on
+      # PATH (plus xclock/xeyes, which two suites use for a second X client
+      # process, and procps for `pkill`), pinned like the smoke tools through this repo's
+      # `flake.lock`. `SCOOT_REQUIRE_XWAYLAND` turns every live test's quiet
+      # "skipped -- no Xwayland (or xclock/xeyes/pkill) on PATH" into a failure, so a PATH
+      # regression here cannot leave the security suites green by skipping
+      # (see `compositor/xwayland/tests/mod.rs`'s `xwayland_on_path`).
+      #
+      # Second of the two feature builds, after gpu-scanout above and for the
+      # same reason: the feature changes Smithay's unification and rebuilds
+      # it. The GLES tests in the suite need the same software EGL as the
+      # default test steps in `linux`.
+      - name: --features xwayland -- clippy, nextest and cargo test, live suites required
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          # procps too: the dead-server test kills the server with `pkill`,
+          # and the host's pkill loads the host glibc against the Nix
+          # libraries `LD_LIBRARY_PATH` names below (run 36144028882 died on
+          # `GLIBC_ABI_GNU2_TLS not found`). A Nix pkill agrees with them.
+          x=$(nix build --inputs-from . nixpkgs#xwayland nixpkgs#xclock nixpkgs#xeyes nixpkgs#procps --no-link --print-out-paths)
+          for path in $x; do export PATH="$path/bin:$PATH"; done
+          command -v Xwayland pkill
+          pkill --version
+          export SCOOT_REQUIRE_XWAYLAND=1
+          export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
+          export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
+          cargo clippy -p scoot --all-targets --features xwayland -- -D warnings
+          cargo nextest run -p scoot --features xwayland --no-fail-fast
+          cargo test -p scoot --features xwayland
+          # The binary for the smoke run below. Only the `scoot` crate itself
+          # compiles here: the tests above built every dependency with the
+          # same features and profile.
+          cargo build -p scoot -p scootctl --features scoot/xwayland
+          cp target/debug/scoot "$RUNNER_TEMP/scoot-xwayland"
+          cp target/debug/scootctl "$RUNNER_TEMP/scootctl-xwayland"
+          # scootbg separately, without features: the daemon has no xwayland
+          # feature and talks to scoot only over Wayland, so the smoke run's
+          # [wallpaper] section uses this rather than skipping. Built here --
+          # not copied from `linux` -- because jobs share nothing but the
+          # cargo cache.
+          cargo build -p scootbg
+          cp target/debug/scootbg "$RUNNER_TEMP/scootbg-features"
+
+      # The default build's smoke run lives in `linux`, where both xwayland
+      # sections can only report "this build has no xwayland feature". This
+      # runs the whole script against the xwayland build with `Xwayland` and
+      # `xeyes` on PATH, so the real binary's `--xwayland` path is exercised
+      # end to end: the server reaching READY from `compositor::run`,
+      # `DISPLAY` reaching a spawned child, an X window listed and closed over
+      # IPC -- and, with the binary hidden from PATH, the loud Wayland-only
+      # fallback a `--tty` login without Xwayland gets. The ~10 s the script
+      # takes, plus the `scoot` crate's rebuild above (the dependencies are
+      # already built), is the whole cost. No GPU-free assertion here: that is
+      # the default build's run in `linux`, and `Xwayland` itself links Mesa.
+      - name: scripts/smoke-test.sh (--headless, --features xwayland, Xwayland on PATH)
+        timeout-minutes: 15
+        env:
+          SCOOT: ${{ runner.temp }}/scoot-xwayland
+          SCOOTCTL: ${{ runner.temp }}/scootctl-xwayland
+          # The scootbg built above, without features: the daemon has no
+          # xwayland feature and talks to scoot only over Wayland, so the
+          # [wallpaper] section runs here too rather than skipping.
+          SCOOTBG: ${{ runner.temp }}/scootbg-features
+          SMOKE_REQUIRE_SCOOTBG: "1"
+          SMOKE_PREFIX: ${{ runner.temp }}/smoke-xwayland
+        shell: nix shell --inputs-from . nixpkgs#foot nixpkgs#jq nixpkgs#imagemagick nixpkgs#wayland-utils nixpkgs#xwayland nixpkgs#xeyes --command bash -euo pipefail {0}
+        run: |
+          command -v Xwayland xeyes
+          scripts/smoke-test.sh
+          # Both xwayland sections must have run their real branches, not
+          # skipped: a green run that only said "no xwayland feature" here
+          # would prove nothing about this build.
+          log="$RUNNER_TEMP/smoke-xwayland-xwayland.log"
+          grep -q "XWayland is ready" "$log"
+          grep -q "Xwayland. must be on PATH" "$RUNNER_TEMP/smoke-xwayland-nox.log"
+
+      # No save step, deliberately: see the job header. This job's `target/`
+      # holds feature-rebuilt Smithay that the default build cannot reuse, so
+      # saving it would only buy a second multi-gigabyte cache line.
+
   # The GPU tier and XWayland together (`packages.scoot-gpu-xwayland`,
-  # `--features gpu-scanout,xwayland`): the Linux job builds each feature on
-  # its own, never both, so a break that only the pair shows -- Smithay's
+  # `--features gpu-scanout,xwayland`): the Linux jobs build each feature on
+  # its own (`linux` the default, `linux-features` each opt-in tier), never
+  # both, so a break that only the pair shows -- Smithay's
   # feature unification, a `cfg` that assumes one feature means the other is
   # off -- would reach users of that package unseen. A separate job so it runs
   # in parallel with `linux` and adds no wall-clock time (it is a fraction of
@@ -751,7 +857,8 @@ jobs:
   # `apply-config`, scoot's one command, through the precedence table of
   # docs/scootbg/backlog/resolved/scoot-integration-done.md (tests/config.rs),
   # and scoot's own `[wallpaper]` section driving it (tests/scoot_config.rs:
-  # scoot spawns `apply-config` at start-up and on each reload).
+  # scoot spawns `apply-config` at start-up and on each reload), and failed
+  # draws explaining themselves in `query` (tests/draw_failed.rs).
   # Runs when either side changes, since each can break the other's
   # end-to-end run.
   # `SCOOTBG_REQUIRE_SCOOT` and `SCOOTBG_REQUIRE_SWAY` turn the tests'
@@ -814,5 +921,5 @@ jobs:
           SCOOTBG_REQUIRE_SCOOT: "1"
           SCOOTBG_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --test config --test scoot_config --no-fail-fast
-          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --test config --test scoot_config
+          cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --test config --test scoot_config --test draw_failed --no-fail-fast
+          cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --test config --test scoot_config --test draw_failed
