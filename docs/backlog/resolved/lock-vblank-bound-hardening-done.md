@@ -1,12 +1,35 @@
 ---
-title: "Lock-confirm bound wording, and aging out stale dumb-tier vblanks"
-status: "open"
-area: "core"
-priority: "low"
-blocked: "none"
+title: "Lock-confirm bound wording, and aging out stale dumb-tier vblanks — RESOLVED"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
 ---
 
-# Lock-confirm bound wording, and aging out stale dumb-tier vblanks
+# Lock-confirm bound wording, and aging out stale dumb-tier vblanks — RESOLVED
+
+RESOLVED 2026-09-28 (PR #NNN). Half 1: `await_vblank`'s doc now says what
+the code guarantees since #247 -- the fallback confirms no later than one
+bound after the first blank drew, and never before a blank has drawn (the
+deadline is armed once per wait and never extended, verified at every site
+that arms or uses it: `await_vblank`, `confirm_on_vblank`,
+`poll_blank_timeout`, `cancel_blank_wait`, `note_blank_timeout`, and the
+render-tail timer). The two `headless.rs` comments that still described the
+pre-#247 restarted bound (the render-tail timer note and `blank_timeout`'s
+doc) are corrected to match. No behaviour change. Half 2:
+`Tty::stale_vblanks` is a timestamped `StaleVblanks` list
+(`crates/scoot/src/compositor/tty/stale_vblanks.rs`): each entry is stamped
+at push in `hotplug.rs`, and `on_vblank` (taking the vblank's arrival
+`Instant`, the same explicit-timestamp idiom as `await_vblank`'s `now`)
+drops entries older than one second before matching, so a driver that never
+delivers the owed vblank can't freeze a reused CRTC. Pinned by six unit
+tests including the ticket's pin (stale entry, synthetic clock past the
+age, vblank for a new head on that CRTC settles), the exact-age boundary,
+mixed ages, the unchanged prompt-arrival path, and VT-switch/error
+clearing. The GPU tier needed nothing: `DrmCompositor`'s queue is private
+and the residual is still documented in `scanout.rs` (verified, untouched).
+No benchmark owed: the age-out runs on the vblank-arrival path over a list
+that is empty in steady state, one timestamp compare per entry otherwise.
 
 Filed 2026-09-25 from the round-2 review of PR #247 (milestone 19 phase E).
 Neither item blocked that merge. Both are hardening: one is a doc

@@ -50,6 +50,8 @@ mod heads;
 #[cfg(test)]
 mod tests;
 
+use std::time::Instant;
+
 use scoot_core::OutputId;
 use smithay::backend::drm::{DrmDevice, DrmSurface};
 use smithay::backend::udev::{UdevDevices, UdevEvent};
@@ -537,7 +539,8 @@ impl Tty {
         for index in remove.into_iter().rev() {
             let head = self.heads.remove(index);
             if head.presenter.flip_in_flight() {
-                self.stale_vblanks.push(head.presenter.crtc());
+                self.stale_vblanks
+                    .push(head.presenter.crtc(), Instant::now());
             }
             tracing::info!(connector = %head.name, "drm: this connector went away");
             if let Some(id) = head.output {
