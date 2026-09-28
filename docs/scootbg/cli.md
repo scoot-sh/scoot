@@ -280,13 +280,14 @@ screen: `{"color":"#rrggbb"}` (lowercase),
 `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
 or `null` for nothing. `draw_failed` is `true` when the last attempt to
 draw what the output should show failed (an image that exists but cannot
-be decoded, a buffer too large; stderr says why), which tells that `null`
-apart from a `clear`; the next request for the output, or a new size,
-retries. `draw_error` says why while `draw_failed` is `true` (the error
-the daemon's stderr gives, such as `"no such file"` or `"shared memory:
+be decoded, a buffer too large), which tells that `null` apart from a
+`clear`; the next request for the output, or a new size, retries.
+`draw_error` says why while `draw_failed` is `true` (the error the
+daemon's stderr gives, such as `"no such file"` or `"shared memory:
 Cannot allocate memory (os error 12)"`), and is `null` otherwise; it is
-for a person or an agent to read, and its wording may change. `saving` (after the list) is `false` while `set` and `clear` are
-not saved for the next start (see [Restore](#restore)), and `profile` is the profile
+for a person or an agent to read, and its wording may change. `saving`
+(after the list) is `false` while `set` and `clear` are not saved for
+the next start (see [Restore](#restore)), and `profile` is the profile
 whose state is restored and saved. New keys
 may be added; none changes meaning within protocol 1. If the daemon cannot
 accept clients (out of file descriptors, say), it keeps the wallpaper up,

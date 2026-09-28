@@ -116,6 +116,10 @@ full per-feature cycle.
     scoot recorded as a gap (covered on sway). The suites keep growing
     with every later milestone: [testing.md](../testing.md) says where
     each kind of test lives
+    - [The scaler's output allocation aborts the daemon when memory is refused](scaler-oom-abort.md)
+      — open, medium, waiting on a user decision: `pic-scale-safe`'s
+      infallible output `Vec` ends the daemon under `RLIMIT_AS` or strict
+      overcommit; accept, probe, fork the scaler, or switch scalers
 
 ## Milestone 2: motion
 

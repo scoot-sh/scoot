@@ -11,10 +11,14 @@ The entry point and the input layout are in
 [`src/image/fuzz.rs`](../src/image/fuzz.rs). scootbg is a binary with no
 library, so [`fuzz_targets/whole.rs`](fuzz_targets/whole.rs) compiles
 its image modules by `#[path]`, unchanged, with the daemon's allocator.
-The guards are the daemon's own (the pixel budget at decode, `wl_shm`'s
-size limit before a buffer exists); the one limit of the harness's own is
-a throughput cap, `MAX_FUZZ_PIXELS`, that skips buffers `wl_shm` would
-take but are over a megapixel.
+Each input runs on a thread with the daemon's decoding stack
+(`image::DECODE_STACK`, 2 MiB, shared with `daemon::worker`), not
+libFuzzer's 8 MiB main thread, so an input that overflows the daemon's
+stack overflows here too. The guards are the daemon's own (the pixel
+budget at decode, `wl_shm`'s size limit before a buffer exists); the one
+limit of the harness's own is a throughput cap, `MAX_FUZZ_PIXELS`, that
+skips buffers `wl_shm` would take but are over 2^22 pixels (4
+megapixels: 1080p and 1440p are in).
 
 This crate is its own workspace, with its own `Cargo.lock`: it is never
 built by `cargo build --workspace`, nextest, clippy or the flake, and
@@ -73,10 +77,13 @@ covers them without nightly or cargo-fuzz.
 ## Keeping it in step
 
 `Cargo.lock` here started as a copy of the workspace's. The stable test
-`image::fuzz::tests::the_fuzz_lockfile_matches_the_workspace` fails when a
-package both lock (the decoders, the scaler, what they pull in) is at a
-version the workspace does not lock, so a dependency bump cannot leave the
-fuzzer on code the daemon no longer runs. To refresh it:
+`image::fuzz::tests::the_fuzz_lockfile_matches_the_workspace` follows the
+dependency edges of both locks, from `scootbg` and from `scootbg-fuzz`,
+and fails when a package both reach is at a version scootbg does not
+resolve to, or depends on another version of something than scootbg's
+copy does (the workspace locks two `miniz_oxide` and two `rustix`, so a
+check by name alone would pass the wrong one). So a dependency bump cannot
+leave the fuzzer on code the daemon no longer runs. To refresh it:
 
 ```sh
 cp Cargo.lock crates/scootbg/fuzz/Cargo.lock

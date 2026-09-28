@@ -90,8 +90,9 @@ map of where each kind of test lives.
   - **The guards are the daemon's.** The pixel budget (`MAX_PIXELS`,
     2^28) at decode and `wl_shm`'s `int32` limit before a buffer exists,
     both unchanged; the harness adds only a throughput cap, skipping sizes
-    `wl_shm` would take that are over 2^20 pixels, so runs are spent on
-    paths and not on writing memory.
+    `wl_shm` would take that are over 2^22 pixels (2^20 in the runs
+    below; raised in review), so runs are spent on paths and not on
+    writing memory.
   - **Compiled by `#[path]`.** scootbg is a binary, so the target compiles
     `src/color.rs`, `src/image/mod.rs` and `src/image/fuzz.rs` into its
     own crate, unchanged, with the daemon's allocator (`LargeAlloc`, so a
@@ -280,7 +281,8 @@ found nothing there either.
   the documented class (the scaler's and decoders' working memory is
   infallible; [ticket 6](images-decode-and-fit-done.md)), not new, but
   it is why the test uses `center`, and why the out-of-memory case the
-  daemon survives is the buffer and not the scaler.
+  daemon survives is the buffer and not the scaler. Now its own backlog
+  item, waiting on a decision: [scaler-oom-abort.md](../scaler-oom-abort.md).
 
 ### For the next tickets
 
@@ -375,3 +377,71 @@ On the container above, for the tree committed with this record.
 - **CI itself**, including that the scootbg job's replay test runs from
   a fresh checkout (it needs `regressions/whole/.gitkeep`, which is
   committed): first exercised by this branch's CI run.
+
+## Review of PR #317
+
+No blocking findings; the low ones, fixed in commits after `53669ac`:
+
+1. **The fuzzer ran inputs on a bigger stack than the daemon.** libFuzzer
+   calls the target on its 8 MiB main thread; the daemon decodes on a
+   `std::thread` with std's 2 MiB default. An input needing 2–8 MiB of
+   stack would kill the daemon and pass the fuzzer. Now one constant,
+   `image::DECODE_STACK` (2 MiB), sets the worker's stack explicitly
+   (`Builder::stack_size`, so `RUST_MIN_STACK` no longer changes it) and
+   `image::fuzz::whole_path` runs each input on a scoped thread of that
+   size, re-raising its panic. The whole corpus of both runs above (4068
+   inputs) replayed through the new harness (`-runs=0`, the 2^22 cap):
+   no crash, no overflow.
+2. **The lockfile check compared against the whole workspace lock**, not
+   scootbg's graph: the workspace locks two `miniz_oxide` (0.8.9 for
+   `png`, 0.9.1 for `flate2`, and scootbg reaches both) and two `rustix`,
+   so a fuzz lock whose `png` took the other `miniz_oxide` would have
+   passed. It now follows the dependency edges of both locks, from
+   `scootbg` and from `scootbg-fuzz`: every package both reach must be at
+   a version scootbg reaches, and a dependency both copies have must
+   resolve to the same version (features may add or drop one, which is
+   why `cc`'s `jobserver` and `serde`'s `serde_derive` do not count).
+   `a_dependency_scootbg_does_not_resolve_to_is_caught` plants both:
+   `png` → `miniz_oxide 0.9.1` gives `png 0.18.1: fuzz takes miniz_oxide
+   0.9.1, scootbg 0.8.9`; `rustix` at 0.38.44 gives `rustix: fuzz
+   0.38.44, scootbg ["1.1.4"]` and `scootbg-mem 0.1.0: fuzz takes rustix
+   0.38.44, scootbg 1.1.4`.
+3. **`tests/draw_failed.rs`:**
+   - the lowered limit is a `Drop` guard, so a panic still lifts it;
+   - a premise probe: a finite hard `RLIMIT_AS` below what the daemon
+     maps, the 33 MB buffer and twice the margin (so both the failure
+     and the retry after it fit) skips with a message. Checked by
+     running the test binary under `prlimit --as=H:H`: at 75,000,000 it
+     prints `skipped -- …` and passes; unlimited and 400,000,000 run and
+     pass. Below about 70 MB the harness itself cannot start scoot and
+     fails there, before the test's premise; at 90 MB the retry's
+     `set` loses its connection to the daemon. The compositor inherits
+     the same limit from the test run, and most likely cannot map the
+     33 MB buffer (not traced): run by hand with only the daemon under a
+     90 MB hard limit, the same steps pass. A whole-run `ulimit -v` that
+     small is outside what this test can speak for;
+   - the glibc arena premise, in the module docs, checked once by
+     `strace -f -e trace=mmap,munmap,clone3` on the test's steps (a
+     3840×2160 headless scoot, the debug daemon, VmSize 76,236 kB): the
+     state saver thread of the color `set` reserves its arena before the
+     limit (`mmap(NULL, 134217728, PROT_NONE, …)`, trimmed to 64 MiB);
+     under the limit, the decoding thread reuses that free arena and a
+     cached stack, and its one large call is the buffer's `mmap(NULL,
+     33177600, …, MAP_SHARED, 9, 0) = -1 ENOMEM`. Under a finite hard
+     limit, where no arena could ever be reserved, the trace shows the
+     reservation failing again and again and glibc sharing the main
+     arena instead: the `set` after that succeeded.
+4. **Nits:** the fuzz crate's `[profile.release]` comment now says it
+   sets only `debug = 1` and that nothing it leaves out changes
+   behaviour; `cli.md`'s query paragraph lost the "stderr says why"
+   parenthetical that `draw_error` makes redundant, rewrapped.
+5. **`MAX_FUZZ_PIXELS` raised to 2^22**, so 1080p and 1440p outputs are
+   drawn. Two-minute check, `-fork=3` from the seed corpus alone, fresh
+   scratch corpus each: at 2^20, 981,268 executions, `cov` 3577, `ft`
+   9185; at 2^22, 610,189 executions, `cov` 3690, `ft` 9987. A third
+   fewer runs for more coverage in the same time: kept.
+6. **The scaler's abort** is its own backlog item,
+   [scaler-oom-abort.md](../scaler-oom-abort.md), open and waiting on a
+   decision between accepting it, a probe, a scoot-sh fork of
+   `pic-scale-safe` with a destination-slice entry point, and another
+   scaler.
