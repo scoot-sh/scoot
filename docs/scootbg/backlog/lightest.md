@@ -113,3 +113,62 @@ answer, 3.0–4.1 ms to a color on screen; an image `set` at start-up
 decoded twice (642–720 ms on 4K) until
 [ticket 9](resolved/restore-state-done.md#measurements): once now,
 450–476 ms, and 451–497 ms to a restored 4K JPEG on screen.
+
+## Measured: the first comparison (2026-09-27) — the gate does not pass
+
+The benchmark exists and has run: `scripts/scootbg-bench/bench.py`, all
+rows, 5 rounds, on headless scoot and on headless sway, with the table,
+the method, the versions and every raw run in
+[the comparison](../README.md#against-the-other-daemons). swaybg 1.2.2,
+awww 0.12.1, wbg 1.3.0 and wpaperd 1.3.0 ran on both compositors.
+hyprpaper 0.8.4 ran on neither: on scoot it needs a DRM device, and this
+machine has none; on sway it binds `xdg_wm_base` v6 where sway has v5.
+`--tty` was not reachable.
+
+**This ticket stays open.** What is left:
+
+- **Idle memory above the floor, against awww: 9 losses on scoot.**
+  - RSS above the floor: 1.1–1.6 MiB more than awww's (medians 3.85–4.49
+    against 2.72–2.89 MiB).
+  - PSS above the floor: 1.0–1.5 MiB more (2.07–2.47 against 0.96–1.05
+    MiB).
+  - Both with a color and with an image, on 1× 1080p and 2× 4K.
+  - The same bytes make the 1080p image's total with the floor 10.3
+    against 8.9 MiB.
+  - They are scootbg's own code, resident and clean: the daemon runs in
+    the same 1.26 MiB binary as the decoders and the CLI, while
+    `awww-daemon` is a 372 KiB one.
+  - Plan: [idle-code-pages.md](idle-code-pages.md).
+- The results on sway: [below](#on-sway).
+
+Won or tied everywhere else. The points where it is closest, or where the
+rule decided:
+
+- **The JPEG at start-up against wbg: a tie.** wbg's medians are 4.7% and
+  7.0% lower (447 against 469 ms; 413 against 444 ms of CPU), inside the
+  combined spread (64 and 53 ms). wbg uses a C decoder and a bilinear
+  filter; with the same filter, scootbg takes 394 ms. If later runs make
+  this a loss, it is the next item: zune-jpeg against libjpeg-turbo, and
+  Lanczos3 against bilinear, the second being a quality choice for the
+  user.
+- **Size and peak**, the rows this ticket expected to need fixes, are
+  clear wins, so neither was touched:
+  - Size is 1,866,680 B against awww's 9,080,536 B, the smallest of the
+    others. Ticket 10's 106 KB were not trimmed.
+  - Peak at start-up is 88.9 MiB against wbg's 107.4, the lowest of the
+    others. A reduced-size JPEG decode is not available in zune-jpeg
+    0.5.15, and would not apply to a 1.56× fill.
+- **Idle wakeups and CPU**: 0 for scootbg, awww, swaybg and wbg (ties);
+  wpaperd wakes 125–161 times a minute.
+- **Disk**: scootbg's nix closure carries `gcc-15.3.0-lib` (10.3 MB), for
+  one library of 198 kB in `gcc-15.3.0-libgcc`. It still wins (12.2 MB
+  against awww's 33.3 MB), but this is the cheapest byte to take off
+  when Disk matters.
+
+### On sway
+
+Headless sway 1.12 gives the same verdicts
+([table](../bench/2026-09-27-sway/table.md)): the same 9 idle losses to
+awww (RSS above the floor 3.87–4.45 against 2.66–2.90 MiB, PSS 2.06–2.39
+against 0.90–1.04 MiB, the 1080p image's total 10.3 against 8.9 MiB),
+and the JPEG at start-up against wbg again a tie (475 against 490 ms).

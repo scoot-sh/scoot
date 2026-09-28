@@ -2185,7 +2185,14 @@ medium priority — the effective top of what's actually open.
    `scootbg apply-config` (part A), then scoot's `[wallpaper]` section,
    spawned at startup and on every reload, one run at a time, bounded and
    retried, and the Nix modules and overlay that install scootbg for it
-   (part B).
+   (part B). Item 11, the release gate, is measured but open: a
+   re-runnable benchmark against swaybg, awww, wbg and wpaperd
+   (`scripts/scootbg-bench/`; hyprpaper 0.8.4 runs on neither headless
+   compositor), published in
+   [the comparison](docs/scootbg/README.md#against-the-other-daemons).
+   scootbg wins or ties every row except idle memory above the floor,
+   where awww holds 1.0–1.6 MiB less
+   ([plan](docs/scootbg/backlog/idle-code-pages.md)).
 
 ## Shell enablement (DMS / Noctalia probes, 2026-09-14)
 
