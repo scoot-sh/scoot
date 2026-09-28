@@ -739,7 +739,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [Many side-by-side popups stall the compositor](./core/popup-count-quadratic.md) — medium, measured (review of #226): popup creation is roughly quadratic in the number open (1954 popups 0.73 s, 5104 5.4 s). Pre-existing.
 
 ### Found reviewing nested dma-buf presentation (2026-09-24)
-- [`--nested` confirms a lock before the host shows it](./core/nested-lock-confirm-on-present.md) — low: `locked` goes out when the blanked frame is drawn, and a nested frame may be skipped or owed before the host has it (more often since PR #235); a fix needs a bounded wait like `--tty`'s.
+- [`--nested` confirms a lock before the host shows it](./resolved/nested-lock-confirm-on-present-done.md) — RESOLVED 2026-09-28 (PR number filled in on create): the nested tail confirms on the host's commit (`note_nested_frame` over `FrameOutcome::host_committed`), not the draw; dropped read-back and owed dma-buf frames wait for the owed hand-over (`note_nested_handed_over`, gated on a draw recorded for this lock), a re-render, or the shared one-second fallback. Eight unit tests, three behind `gpu-scanout`.
 
 ### Found by the niri A/B (2026-09-24)
 - [Nested scoot presents fewer frames than niri for a ~60 Hz client](./core/nested-frame-rate-vs-client.md) — low: 49.8 frames/s (pixman, 12% of a core) against niri's 54.1 for a `foot` printing every ~16 ms; looks like pacing, not cost. Not investigated.

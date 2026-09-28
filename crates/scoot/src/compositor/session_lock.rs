@@ -400,8 +400,10 @@ pub struct SessionLock {
     /// written only on frames drawn while a lock awaits confirmation.
     blank_flips: Vec<(OutputId, u64)>,
     /// The outputs that have *rendered* a blanked frame for the pending lock
-    /// under `--tty` -- every output [`SessionLock::await_vblank`] was
-    /// called for, whether or not a flip carrying it was issued. What the
+    /// -- every output [`SessionLock::await_vblank`] was
+    /// called for, whether or not anything carrying it was issued (a `--tty`
+    /// flip, or a `--nested` host commit -- the latter records with no flip
+    /// and confirms separately). What the
     /// fallback deadline may record in place of a vblank that never came
     /// ([`State::note_blank_timeout`]): the timeout stands in for a missing
     /// *completion*, never for a frame that was never drawn -- an output
@@ -646,13 +648,17 @@ impl SessionLock {
     }
 
     /// A blanked frame was rendered for output `id` under the pending lock
-    /// but, under `--tty`, that output's confirmation must wait for scanout
-    /// rather than going out now.
+    /// but that output's confirmation must wait rather than going out now:
+    /// under `--tty` for the scanout carrying it, under `--nested` for the
+    /// host's commit of it.
     ///
     /// `issued` is the flip carrying it -- [`Tty::present`](super::tty::Tty)'s
-    /// return for that output -- or `None` when the frame never reached the
-    /// presenter at all: the session is inactive, the size disagrees, a
-    /// previous flip is still in flight, or nothing was damaged. A tracked
+    /// return for that output -- or `None` when the frame never reached a
+    /// presenter at all (`--tty`: the session is inactive, the size
+    /// disagrees, a previous flip is still in flight, or nothing was
+    /// damaged; `--nested`: always -- the host's commit is reported
+    /// separately through [`FrameOutcome::host_committed`], and this call
+    /// only records the draw). A tracked
     /// flip records its number against the output in
     /// [`SessionLock::blank_flips`]; a skipped frame leaves whatever is there
     /// (the still-in-flight flip already carries the blank pixels, or nothing
@@ -687,8 +693,10 @@ impl SessionLock {
     /// A flip on an output already recorded blanked is not waited on: that
     /// screen's blank is already on scanout.
     ///
-    /// Only `--tty` calls this -- headless and nested confirm on render, as
-    /// before. No allocation past the first record per output per lock, on a
+    /// Called by `--tty` with the flip `present` issued, and by `--nested`
+    /// with `None` (the commit it waits for arrives separately -- see
+    /// [`State::note_nested_frame`] -- it only records the draw here). No
+    /// allocation past the first record per output per lock, on a
     /// path that runs only while a lock awaits confirmation.
     pub(super) fn await_vblank(&mut self, id: OutputId, issued: Option<u64>, now: Instant) -> bool {
         if !self.drawn.contains(&id) {
@@ -1685,9 +1693,11 @@ impl State {
     ///
     /// Called from `headless.rs::render` after a frame whose blanks complete
     /// the set (see [`SessionLock::note_blanked`]) -- but only where there is
-    /// no scanout to wait for. `--headless`/`--nested` have none, and the
-    /// framebuffer a screenshot reads *is* this frame, so this is exact
-    /// there. Under `--tty` the render loop calls
+    /// nothing further to wait for. `--headless` has none: the framebuffer a
+    /// screenshot reads *is* this frame, so this is exact there. `--nested`
+    /// waits for the host's commit instead ([`State::note_nested_frame`],
+    /// plus [`State::note_nested_handed_over`] for an owed dma-buf frame),
+    /// and under `--tty` the render loop calls
     /// [`SessionLock::await_vblank`] instead (see it for which flip is
     /// tracked and what bounds the wait), and confirmation arrives through
     /// [`State::note_flip_completed`] (the flip's vblank) or
@@ -1766,6 +1776,104 @@ impl State {
             .confirm_on_vblank(id, completed, blocked, expected)
         {
             tracing::debug!("session lock confirmed: every output's blanked frame reached scanout");
+            self.confirm_lock();
+        }
+    }
+
+    /// A `--nested` frame drew while a lock was pending: record the draw and
+    /// arm the fallback, and confirm only if the host already has the frame.
+    ///
+    /// `--headless` confirms on the draw because the drawn frame *is* the
+    /// shown one; `--nested` cannot, because the drawn frame is not always
+    /// the shown one. A read-back frame is dropped when the host holds both
+    /// `wl_shm` buffers (and on every other refusal in
+    /// [`Host::present`](super::nested::Host):
+    /// unconfigured, size mismatch, no pool, a refused flush), and a dma-buf
+    /// frame is owed whenever no host buffer is usable
+    /// ([`Host::present_dmabuf`](super::nested::Host): every resize's first frame, sometimes its
+    /// second; a refused flush commits nothing either). Confirming on the
+    /// draw would hand the locker `locked` up to a host round trip -- or,
+    /// with a host that stops releasing buffers while hidden, arbitrarily
+    /// long -- before the host shows the blank, while it keeps showing the
+    /// last unlocked frame.
+    ///
+    /// So the draw only records, and `locked` waits for `host_committed`:
+    /// the frame the host committed and flushed. A dropped or owed frame
+    /// waits for the owed hand-over ([`State::note_nested_handed_over`]), a
+    /// re-render (every skip that can resolve re-arms one: `present_skipped`
+    /// on release, `retry_render` after a dma-buf fallback), or the fallback
+    /// ([`State::note_blank_timeout`]) -- the same bounded shape as `--tty`'s
+    /// wait, over the host round trip instead of a vblank. The paths that
+    /// re-arm nothing (a pool that cannot be built, a refused flush, an
+    /// unconfigured surface) are still bounded by the fallback, whose
+    /// deadline this arms: no blanked frame waits forever, modulo nothing.
+    ///
+    /// The wait itself reuses [`SessionLock::await_vblank`] with no flip to
+    /// track: that records `drawn` (what lets the fallback confirm later)
+    /// and arms [`LOCK_VBLANK_TIMEOUT`] once per wait, never extended --
+    /// exactly the `--tty` idiom, including the shared one-shot timer (see
+    /// `headless.rs`'s `arm_blank_fallback`), not a second one. A frame the
+    /// host committed at once confirms with no wait armed at all: there is
+    /// nothing to bound then, and no stale timer to drop later.
+    ///
+    /// Returns whether the caller should arm the fallback timer: yes exactly
+    /// when this call armed the deadline. Costs one `Option` check per frame
+    /// while no lock waits, and no allocation on any path (see
+    /// [`SessionLock::note_blanked`]).
+    pub(super) fn note_nested_frame(
+        &mut self,
+        id: OutputId,
+        output: &Output,
+        expected: usize,
+        host_committed: bool,
+        now: Instant,
+    ) -> bool {
+        if !self.session_lock.awaiting_blank() {
+            return false;
+        }
+        if expected > 1 && self.session_lock_output_blocks(output) {
+            return false;
+        }
+        if host_committed {
+            if self.session_lock.note_blanked(id, output, expected) {
+                tracing::debug!("session lock confirmed: the host has the blanked frame");
+                self.confirm_lock();
+            }
+            return false;
+        }
+        self.session_lock.await_vblank(id, None, now)
+    }
+
+    /// A `--nested` dma-buf frame owed from an earlier draw just reached the
+    /// host without a fresh draw
+    /// ([`Host::hand_over_owed_frame`](super::nested::Host)): confirm
+    /// the pending lock if that frame was its blank.
+    ///
+    /// Gated on the draw having been recorded for this lock (see
+    /// [`SessionLock::drawn`], written by [`State::note_nested_frame`]): an
+    /// owed frame left over from before the lock -- unlocked pixels still in
+    /// the render target when the lock raced the hand-over -- must not
+    /// confirm it. The lock's own render is already pending then (`lock`
+    /// re-arms it through `lock_transition`), and its committed frame
+    /// confirms through [`State::note_nested_frame`].
+    ///
+    /// Never arms the fallback: the draw that made this frame owed armed it
+    /// already, or there was no blanked draw at all (the gate above) and
+    /// there is nothing to bound.
+    ///
+    /// Only the dma-buf presentation path owes frames (see `gpu.rs`), so
+    /// this lives behind the same `gpu-scanout` feature as its only caller.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn note_nested_handed_over(&mut self, id: OutputId, output: &Output) {
+        if !self.session_lock.awaiting_blank() {
+            return;
+        }
+        if !self.session_lock.drawn.contains(&id) {
+            return;
+        }
+        let expected = self.outputs.len();
+        if self.session_lock.note_blanked(id, output, expected) {
+            tracing::debug!("session lock confirmed: the host has the owed blanked frame");
             self.confirm_lock();
         }
     }
