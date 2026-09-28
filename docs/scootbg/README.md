@@ -744,7 +744,13 @@ VM, which this container cannot reach.
   The 2026-09-27 runs joined through `preexec_fn` instead, which is
   unsafe beside a thread (the peak sampler). Nothing went wrong in them:
   every process joined, and no run hung. The 2026-09-28 runs used the
-  wrapper, and their Set and Startup figures agree with the earlier ones.
+  wrapper. Their Set and Startup figures are within about 5% of the
+  earlier ones, but not proof of the same timing: those runs also sample
+  PSS every 10 ms (`smaps_rollup`, which takes the process's mmap lock)
+  while the timed rows run, and that sampler's overhead is not measured.
+  So the 2026-09-27 runs stay the timing evidence, the 2026-09-28 runs
+  the peak evidence; separating the two (or measuring the sampler) is
+  left for the next run of the harness.
 - **Size**: the stripped executables (`strip --strip-all` copies; awww and
   wpaperd have a daemon and a client), plus their shared-library closure
   as the binary's own loader resolves it (`ld.so --list`), less glibc's

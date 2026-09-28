@@ -46,8 +46,9 @@ except the anonymous part. Idle with a color on headless scoot
     scootbg's `.text` resident against awww's 312, `libc` code 1,336
     against 1,016 KiB, and `[heap]` 36 against 4 KiB: the same picture.
 - **Why so much of scootbg's code is resident.** awww splits its work in
-  two: `awww-daemon` only holds buffers and talks Wayland, and its whole
-  `.text` (380,856 B) is resident. The decoding and scaling run in the
+  two: `awww-daemon` only holds buffers and talks Wayland, and almost all
+  of its `.text` (380,856 B) is resident (312 of 376 KiB, measured in
+  review). The decoding and scaling run in the
   `awww` client, which exits. scootbg is one binary, whose `.text`
   (1,290,335 B, 1.23 MiB) holds the CLI, the client, the decoders and the
   scaler. On the color path alone, which runs no decoder, 1,044 KiB of it

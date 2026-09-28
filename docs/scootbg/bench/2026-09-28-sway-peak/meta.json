@@ -1902,6 +1902,12 @@
    "what": "`compositor_version` corrected by hand after the run",
    "was": "unknown: dbus[24763]: Failed to start message bus: Failed to open \"/etc/dbus-1/session.conf\": No such file or directory\ndbus-run-session: EOF reading address from bus daemon",
    "why": "the harness (cfcc2cd) searched `sway --version` for the version line, but ran it with no bus address, so nixpkgs' wrapper started dbus-run-session, which failed before sway printed anything. Replaced with the same binary's version line when asked with a bus address set, as the session starts it: 'sway version 1.12'. The harness now does that. No measured figure changed."
+  },
+  {
+   "date": "2026-09-28",
+   "what": "`tree_dirty` is true for this run",
+   "was": "no note",
+   "why": "the harness directory was clean (`harness` records it: commit cfcc2cd, empty status, every file's hash); the dirty files were docs being edited alongside the run, which no measurement reads. Recorded here so the flag is not left unexplained."
   }
  ]
 }

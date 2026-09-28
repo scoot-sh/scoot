@@ -381,7 +381,12 @@ def cmd_run(a):
 
 def _terminate(signum, _frame):
     # Unwinds like Ctrl-C, so every session's and run's `finally` stops its
-    # compositor and daemon and removes its cgroup.
+    # compositor and daemon and removes its cgroup. Later signals are
+    # ignored: a second one (Ctrl-C twice, or a supervisor signalling the
+    # whole group) would otherwise land inside that `finally` and skip the
+    # rest of the cleanup.
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, signal.SIG_IGN)
     raise KeyboardInterrupt(f"signal {signum}")
 
 
