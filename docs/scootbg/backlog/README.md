@@ -97,10 +97,13 @@ full per-feature cycle.
     (`scripts/scootbg-bench/`, on headless scoot and sway): **not passed**,
     awww holds 1.0–1.6 MiB less idle memory above the floor; every other
     row is a win or a tie. Re-run 2026-09-28 after the attribution and the
-    cheap levers: still not passed (1.0–1.5 MiB)
+    cheap levers: still not passed (1.0–1.5 MiB). **That one loss is
+    accepted for v1** (user, 2026-09-28): it is clean program code the
+    kernel can reclaim, and closing it needs a separate daemon binary,
+    which moves to after v1. Every other row is a win or a tie
     - [Idle memory above the floor: the daemon's resident code](idle-code-pages.md)
-      — the remaining loss: where the pages are, the levers tried, and the
-      separate daemon binary as the later option
+      — the remaining loss, accepted for v1: where the pages are, the
+      levers tried, and the separate daemon binary as the post-v1 option
 12. [Tests: unit, and end to end on headless scoot](testing.md) — grows with
     every item above, not batched at the end
 

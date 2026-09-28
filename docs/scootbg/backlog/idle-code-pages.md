@@ -2,7 +2,7 @@
 title: "Idle memory above the floor: the daemon's resident code"
 status: "open"
 area: "scootbg"
-priority: "high"
+priority: "low"
 blocked: null
 ---
 
@@ -15,6 +15,11 @@ image, on 1× 1080p and on 2× 4K, on scoot and on sway alike. On 1× 1080p
 with an image, the same bytes also make awww's total with the floor lower
 (8.9 against 10.3 MiB). The figures are in
 [the comparison](../README.md#against-the-other-daemons).
+
+**Accepted for v1 (user, 2026-09-28).** The cheap levers are done and
+the gap remains (1.0–1.5 MiB). The user accepted it for v1 rather than
+split the binary now, so this item is post-v1. The separate daemon binary
+below is the lever to reach for then.
 
 **The direction, chosen by the user: shrink the code.** No new `unsafe`
 and no paging out; see the last section for the one fallback that stays

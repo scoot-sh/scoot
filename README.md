@@ -458,7 +458,8 @@ and so is [the comparison](docs/scootbg/README.md#against-the-other-daemons)
 with swaybg, awww, wbg and wpaperd on one machine. It is not yet the
 lightest on every row: awww holds 1.0–1.5 MiB less idle memory above the
 output buffers (re-measured 2026-09-28), mostly scootbg's code pages that
-the kernel maps around the little of it the idle daemon runs.
+the kernel maps around the little of it the idle daemon runs. That one
+gap is accepted for v1; every other row is a win or a tie.
 `scripts/scootbg-bench/bench.py` re-runs the comparison.
 
 One daemon per display: its socket is

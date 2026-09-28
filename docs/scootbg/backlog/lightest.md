@@ -14,6 +14,17 @@ applies to both. After v1, every PR that touches decoding, buffers or the
 event loop re-runs the benchmark and must not regress beyond the margin
 against the last published numbers.
 
+**v1 decision (user, 2026-09-28): the one remaining loss is accepted for
+v1.** After the cheap levers, awww still holds 1.0–1.5 MiB less idle
+memory above the floor. That memory is mostly scootbg's own program code:
+clean, file-backed pages the kernel can drop under pressure and read back
+on demand. Every other row is a win or a tie. So v1 is not held for it.
+The one lever that would close it is a separate daemon binary, which has
+real packaging and process costs; it moves to after v1
+([idle-code-pages.md](idle-code-pages.md)). The rest of this gate stands
+unchanged. After v1, every PR that touches decoding, buffers or the event
+loop still re-runs the benchmark and must not regress beyond the margin.
+
 ## What is measured
 
 On the same machine and outputs, published in `docs/scootbg/README.md`:

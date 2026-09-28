@@ -554,7 +554,11 @@ Against the competitors: [below](#against-the-other-daemons).
 
 ## Against the other daemons
 
-**The release gate does not pass yet.** On headless scoot, awww beats
+**The release gate passes for v1 with one accepted exception.** The
+user accepted the idle-memory gap below for v1 (2026-09-28): it is clean
+program code the kernel can reclaim, and the lever that would close it,
+a separate daemon binary, moves to after v1
+([idle-code-pages.md](backlog/idle-code-pages.md)). On headless scoot, awww beats
 scootbg on idle memory above the floor, by 1.1–1.6 MiB of RSS and
 1.0–1.5 MiB of PSS, with a color and with an image, on 1× 1080p and on 2× 4K, and
 so on the 1080p image's total with the floor (8.9 against 10.3 MiB).
