@@ -23,9 +23,9 @@ On the same machine and outputs, published in `docs/scootbg/README.md`:
 | Size | the stripped binary plus its non-libc shared-library closure (`ldd`), so a small C binary linking cairo and gdk-pixbuf is weighed with them |
 | Idle memory | RSS and PSS one minute after the wallpaper is up, for 1× 1080p and 2× 4K, reported both with and without the output-sized buffer (see the floor) |
 | Idle wakeups | wakeups and CPU time over 60 s with a static wallpaper (target: zero) |
-| Peak memory | the high-water mark while decoding and scaling a 6000×4000 JPEG |
+| Peak memory | the high-water mark while decoding and scaling a 6000×4000 JPEG, as the summed PSS of the daemon's processes (a client that decodes, as awww's does, included; shared pages counted once) |
 | Set | CPU time and latency for one live change to that JPEG, and to a color |
-| Startup | daemon start to first committed buffer, for a color and an image |
+| Startup | daemon start to the committed buffer that puts the wallpaper up, for a color and an image: the **last** buffer commit before the daemon goes quiet, so a placeholder committed first (wpaperd commits one 187–256 ms after start, its image at 914–1,027 ms) does not count as the wallpaper. Every other daemon commits once, so first and last are the same commit. (Written "first committed buffer" until the first run showed the placeholder.) |
 | Restore | startup with the last wallpaper restored |
 | Disk | installed size, plus any cache it writes |
 
@@ -135,9 +135,11 @@ machine has none; on sway it binds `xdg_wm_base` v6 where sway has v5.
   - Both with a color and with an image, on 1× 1080p and 2× 4K.
   - The same bytes make the 1080p image's total with the floor 10.3
     against 8.9 MiB.
-  - They are scootbg's own code, resident and clean: the daemon runs in
-    the same 1.26 MiB binary as the decoders and the CLI, while
-    `awww-daemon` is a 372 KiB one.
+  - They are mostly scootbg's own code: 0.86 MiB more of its `.text`
+    and read-only data is resident, clean pages. The rest is `libc` code
+    (0.31 MiB) and a little anonymous memory. The daemon runs in a binary
+    whose `.text` is 1.23 MiB, holding the decoders and the CLI as well,
+    while `awww-daemon`'s `.text` is 0.36 MiB.
   - Plan: [idle-code-pages.md](idle-code-pages.md).
 - The results on sway: [below](#on-sway).
 
@@ -155,14 +157,16 @@ rule decided:
   clear wins, so neither was touched:
   - Size is 1,866,680 B against awww's 9,080,536 B, the smallest of the
     others. Ticket 10's 106 KB were not trimmed.
-  - Peak at start-up is 88.9 MiB against wbg's 107.4, the lowest of the
-    others. A reduced-size JPEG decode is not available in zune-jpeg
+  - Peak at start-up, as PSS (the gated figure, 2026-09-28 runs), is
+    84.7 MiB against wbg's 106.0, the lowest of the others (as RSS, 88.9
+    against 107.4). A reduced-size JPEG decode is not available in zune-jpeg
     0.5.15, and would not apply to a 1.56× fill.
 - **Idle wakeups and CPU**: 0 for scootbg, awww, swaybg and wbg (ties);
-  wpaperd wakes 125–161 times a minute.
-- **Disk**: scootbg's nix closure carries `gcc-15.3.0-lib` (10.3 MB), for
-  one library of 198 kB in `gcc-15.3.0-libgcc`. It still wins (12.2 MB
-  against awww's 33.3 MB), but this is the cheapest byte to take off
+  wpaperd wakes 125–126 times a minute on 1× 1080p and 160–161 on 2×
+  4K on scoot, 126–127 and 165–168 on sway.
+- **Disk**: scootbg's nix closure carries `gcc-15.3.0-lib` (9.8 MiB), for
+  one library of 193 KiB in `gcc-15.3.0-libgcc`. It still wins (11.6 MiB
+  against awww's 31.8 MiB), but this is the cheapest byte to take off
   when Disk matters.
 
 ### On sway

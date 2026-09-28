@@ -140,12 +140,15 @@ def run_text(argv):
         return ""
 
 
-def version_of(argv, pattern):
+def version_of(argv, pattern, env=None):
     """The version line from ``argv --version``, found by ``pattern``, not
-    just its first line: nixpkgs' sway wrapper starts `dbus-run-session`
-    when no bus is set, and dbus prints a warning first."""
+    just its first line. nixpkgs' sway wrapper starts `dbus-run-session`
+    when no bus address is set, which may print first or fail outright, so
+    sway is asked with an address set (``env``), as the session starts
+    it."""
     try:
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=30,
+                           env=dict(os.environ, **(env or {})))
     except (OSError, subprocess.TimeoutExpired) as e:
         return f"unknown ({e})"
     for line in (r.stdout + "\n" + r.stderr).splitlines():
@@ -207,7 +210,8 @@ def cmd_run(a):
         "date": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "machine": machine(),
         "compositor": a.compositor,
-        "compositor_version": version_of([bins["sway"], "--version"], r"^sway version ")
+        "compositor_version": version_of([bins["sway"], "--version"], r"^sway version ",
+                     {"DBUS_SESSION_BUS_ADDRESS": "unix:path=/nonexistent/no-bus"})
         if a.compositor == "sway" else version_of([bins["scoot"], "--version"], r"^scoot "),
         "scoot_binary": provenance(bins["scoot"]),
         "compositor_binaries": {k: provenance(v) for k, v in bins.items() if k != "scootbg"},

@@ -456,7 +456,7 @@ showing it. The measured budget is in
 [`docs/scootbg/README.md`](docs/scootbg/README.md#the-resource-budget),
 and so is [the comparison](docs/scootbg/README.md#against-the-other-daemons)
 with swaybg, awww, wbg and wpaperd on one machine. It is not yet the
-lightest on every row: awww holds about 1 MiB less idle memory above the
+lightest on every row: awww holds 1.0–1.6 MiB less idle memory above the
 output buffers. `scripts/scootbg-bench/bench.py` re-runs the comparison.
 
 One daemon per display: its socket is
