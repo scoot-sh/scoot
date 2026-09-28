@@ -826,9 +826,11 @@ scale/mode) into one hardware session.
   rival-claimant recipe cannot work: XWayland admits no X client before the
   WM attaches). [Bind startup-id redemption to the spawned
   process](./resolved/xwayland-startup-id-race-done.md) is RESOLVED
-  2026-09-27: a spawn token's startup id redeems only for the spawned
-  process or a descendant (bounded `/proc` ppid walk); a Wayland
-  launcher's token keeps the unbound rule, its race documented. [An X drag released on its first motion into an X
+  2026-09-27: while the spawned process runs, its token's startup id
+  redeems only for that process or a descendant (bounded `/proc` ppid
+  walk); once it has exited (a forwarder, a fork into the background) the
+  token keeps the unbound rule, like a Wayland launcher's -- both races
+  documented. [An X drag released on its first motion into an X
   window may drop on the proxy](./resolved/xwayland-x-drag-first-motion-race-done.md)
   is RESOLVED 2026-09-27 (reproduced live with GTK by two mechanisms -- a
   drag's first motion onto an X window before the source named its types,

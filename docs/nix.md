@@ -123,6 +123,13 @@ closure grows by Xwayland's own (it links Mesa for its GL acceleration;
 which is why it is its own package and never the default: the default
 `scoot` stays the GPU-free, X-free build.
 
+One visible side effect of the wrapper: `bin/scoot` execs the real binary
+as `bin/.scoot-wrapped`, so the running compositor's process name (`comm`,
+what `pgrep -x`, `pidof`, `top` and `ps -o comm` show) is `.scoot-wrapped`,
+not `scoot`. `pgrep -x scoot` finds nothing under these two packages; use
+`pgrep -x .scoot-wrapped` there. `scripts/niri-ab/sample.sh session`
+accepts both names.
+
 The package is only half of it: XWayland still starts only when asked, by
 `--xwayland` or `[xwayland] enabled` (`programs.scoot.settings.xwayland.enabled
 = true` in the home-manager module). The NixOS module needs nothing extra

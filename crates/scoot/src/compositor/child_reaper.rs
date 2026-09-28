@@ -264,10 +264,22 @@ impl State {
     /// apart (`State::wallpaper`), because their exit statuses are logged
     /// and decide what runs next; they are reaped here too, through the same
     /// [`wait`], so one `SIGCHLD` path serves every child.
+    ///
+    /// With XWayland, a sweep that forgot a spawn then hands its unspent
+    /// token to an X window that named it while it ran
+    /// (`State::x11_focus_for_exited_spawns`).
     pub(crate) fn reap_children(&mut self) {
         if !self.spawned_children.is_empty() {
+            #[cfg(feature = "xwayland")]
+            let tracked = self.spawned_children.len();
             self.spawned_children
                 .retain(|&pid| wait(pid) == Waited::Running);
+            // A spawn gone without redeeming its token owes an X window
+            // that named it the unbound rule (`xwayland/focus.rs`).
+            #[cfg(feature = "xwayland")]
+            if self.spawned_children.len() != tracked {
+                self.x11_focus_for_exited_spawns();
+            }
         }
         if !self.wallpaper.is_idle() {
             self.reap_wallpaper();

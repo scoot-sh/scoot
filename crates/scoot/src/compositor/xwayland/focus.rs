@@ -39,19 +39,32 @@
 //!      and take focus with the launch's token. What the id may redeem
 //!      therefore depends on who the token was minted for:
 //!      - a **spawn token** (it carries the [`SpawnedPid`] `State::spawn`
-//!        records while XWayland is live) redeems only for a window whose
-//!        X client process -- by X-Resource pid, below -- is that spawn or
-//!        descends from it within [`MAX_ANCESTRY_DEPTH`](super::ancestry::MAX_ANCESTRY_DEPTH) parent links of
-//!        `/proc/<pid>/stat` (see `ancestry.rs`), and only while the spawn
-//!        is tracked and unreaped, so its pid cannot have been reused. So
-//!        an app behind a wrapper (`sh -c`, measured) or a launcher shim
-//!        still redeems it; `flatpak run` should too, if its `bwrap` chain
-//!        fits the bound (unverified). An unknown pid -- a failed or refused
-//!        X-Resource query -- is refused: the binding fails closed. A
-//!        refused window leaves the token live for the process it belongs
-//!        to. The cost: an app that forks into the background and lets the
-//!        spawn exit is reparented away from it, so its startup id redeems
-//!        nothing and it maps unfocused while another window has focus.
+//!        records while XWayland is live), **while the spawn runs** (tracked
+//!        and unreaped, so its pid cannot have been reused), redeems only
+//!        for a window whose X client process -- by X-Resource pid, below
+//!        -- is that spawn or descends from it within [`MAX_ANCESTRY_DEPTH`](super::ancestry::MAX_ANCESTRY_DEPTH) parent links of
+//!        `/proc/<pid>/stat` (see `ancestry.rs`). So an app behind a
+//!        wrapper (`sh -c`, measured) or a launcher shim still redeems it;
+//!        `flatpak run` should too, if its `bwrap` chain fits the bound
+//!        (unverified). An unknown pid -- a failed or refused X-Resource
+//!        query -- is refused: the binding fails closed. A refused window
+//!        leaves the token live for the process it belongs to.
+//!      - a spawn token **whose spawn has exited** without redeeming it
+//!        keeps the unbound rule: any window naming it redeems it, once,
+//!        within its lifetime. Two ordinary launch shapes end there: a
+//!        single-instance app whose second launch forwards to the running
+//!        instance and exits (GApplication, `KDBusService`), and an app
+//!        that forks into the background and lets the spawn exit (`gvim`
+//!        without `-f`). Either way the window comes from a process the
+//!        spawn is not an ancestor of, and binding it would open that
+//!        window unfocused behind whatever the user was typing into. A
+//!        window refused while the spawn ran is re-asked for once the
+//!        `SIGCHLD` drain reaps it ([`State::x11_focus_for_exited_spawns`]):
+//!        a forwarder was measured to exit a few milliseconds *after* the
+//!        running instance maps. So the race stays open for these launches,
+//!        as before the binding -- a watching X client can win one such
+//!        launch's focus, once, within the token's 30 s -- and closed for
+//!        every launch whose process is still running when its window maps.
 //!      - a **Wayland client's token** (a launcher's, minted from a real
 //!        click: it passed `activation.rs`'s serial gate) keeps the unbound
 //!        rule -- any window naming it redeems it. scoot never learns which
@@ -112,8 +125,9 @@
 //! and why running XWayland extends full trust to every X client (see
 //! `docs/protocols.md`). What the gate stops is an X client taking focus
 //! from a Wayland window, or from a different X application, by asking --
-//! except with a Wayland launcher's token, which it can race the launched
-//! app to (rule 2's binding says why that one stays unbound).
+//! except with a Wayland launcher's token, or the token of a spawn that
+//! exited before its app redeemed it, which it can race the launched app to
+//! (rule 2's binding says why those stay unbound).
 //!
 //! Nor does it defend against the same user's own processes: any same-uid
 //! process can read a spawned child's token out of `/proc/<pid>/environ`,
@@ -123,7 +137,7 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use scoot_core::Action;
+use scoot_core::{Action, WindowId};
 use smithay::wayland::xdg_activation::{XdgActivationToken, XdgActivationTokenData};
 use smithay::xwayland::X11Surface;
 
@@ -252,20 +266,26 @@ impl State {
     }
 
     /// Whether `window` may redeem a live token its startup id names (the
-    /// module doc's binding): the X-Resource pid of its client is the
-    /// token's [`SpawnedPid`] or descends from it, and that spawn is still
-    /// tracked; or the token is a Wayland client's, which keeps the unbound
-    /// rule. The cheap checks run first: the X round trip (once per window,
-    /// cached) and the `/proc` walk only when a spawn token is in play, and
-    /// at most once per window and spawn when the answer is no
-    /// ([`RefusedSpawn`]).
+    /// module doc's binding): the token is a spawn's whose process has
+    /// exited, or a Wayland client's -- both keep the unbound rule -- or it
+    /// is a running spawn's and the X-Resource pid of `window`'s client is
+    /// that spawn or descends from it. The cheap checks run first: the X
+    /// round trip (once per window, cached) and the `/proc` walk only while
+    /// the spawn runs, and at most once per window and spawn when the
+    /// answer is no ([`RefusedSpawn`]).
     fn startup_id_bound_to(&self, data: &XdgActivationTokenData, window: &X11Surface) -> bool {
         let Some(&SpawnedPid(spawned)) = data.user_data.get::<SpawnedPid>() else {
             return data.client_id.is_some();
         };
-        // Tracked, so not reaped, so its pid is not someone else's yet.
+        // Reaped: the spawn exited without its token being redeemed (a
+        // forwarder, a fork into the background), so no process tree can
+        // tie the app to it any more -- the unbound rule, as for a
+        // launcher's token. Checked before the refusal cache, which a
+        // refusal while the spawn ran left keyed to its pid. And only a
+        // tracked spawn is walked from: its pid cannot be reused while
+        // it is unreaped.
         if !self.spawned_children.contains(&spawned) {
-            return false;
+            return true;
         }
         let Some(pid) = client_pid(window) else {
             return false;
@@ -337,6 +357,91 @@ impl State {
             "X11 window redeemed its spawn's token by process"
         );
         true
+    }
+
+    /// Re-asks, for the X window that named it, the token of a spawn that
+    /// has just been reaped without redeeming it (the module doc's
+    /// binding: a window refused while the spawn ran is owed the unbound
+    /// rule once the spawn exits). Called by the `SIGCHLD` drain after it
+    /// reaped a spawned child. A forwarder was measured to exit after the
+    /// running instance's window mapped (GTK `mousepad`'s second launch:
+    /// reaped 8 ms after the map), so a decision made only at map time
+    /// would refuse a window naming the forwarded id for good.
+    ///
+    /// Of the managed X windows naming such a token, the first mapped (the
+    /// lowest id) gets it -- the one the unbound rule would have granted had
+    /// the spawn already exited. A focused one only spends it. Nothing is
+    /// granted while the session is locked, like every activation; the token
+    /// then expires unspent.
+    ///
+    /// Costs one pass over the token table (bounded by its cap) per reap,
+    /// and returns there unless a fresh token outlived its spawn; only then
+    /// is each managed X window's startup id read. Each round spends a
+    /// token, so the loop ends.
+    pub(in crate::compositor) fn x11_focus_for_exited_spawns(&mut self) {
+        loop {
+            if self.xwm.is_none() || self.session_lock.is_locked() {
+                return;
+            }
+            let orphaned = self
+                .xdg_activation
+                .tokens()
+                .any(|(_, data)| self.outlived_its_spawn(data));
+            if !orphaned {
+                return;
+            }
+            let Some((id, token)) = self.first_window_owed_an_exited_spawns_token() else {
+                return;
+            };
+            self.xdg_activation.remove_token(&token);
+            if self.focus == Some(id) {
+                continue;
+            }
+            tracing::debug!(
+                ?id,
+                "X11 window redeemed the startup id of a spawn that has exited"
+            );
+            // As `x11_activation_request` does before its own `act`.
+            self.clicked_layer = None;
+            self.act(Action::FocusWindowId(id));
+        }
+    }
+
+    /// The managed X window with the lowest id whose startup id (its own,
+    /// or its client leader's) names a fresh token of a spawn no longer
+    /// tracked, and that token.
+    fn first_window_owed_an_exited_spawns_token(&self) -> Option<(WindowId, XdgActivationToken)> {
+        let mut first: Option<(WindowId, XdgActivationToken)> = None;
+        for (&id, window) in &self.windows {
+            if first.as_ref().is_some_and(|(best, _)| *best < id) {
+                continue;
+            }
+            let Some(x11) = window.x11_surface() else {
+                continue;
+            };
+            let Some(startup) = x11.startup_id().or_else(|| self.leader_startup_id(x11)) else {
+                continue;
+            };
+            let token = XdgActivationToken::from(startup);
+            if self
+                .xdg_activation
+                .data_for_token(&token)
+                .is_some_and(|data| self.outlived_its_spawn(data))
+            {
+                first = Some((id, token));
+            }
+        }
+        first
+    }
+
+    /// Whether `data` is a fresh token of a spawn scoot no longer tracks:
+    /// one that exited without redeeming it.
+    fn outlived_its_spawn(&self, data: &XdgActivationTokenData) -> bool {
+        data.timestamp.elapsed() < TOKEN_LIFETIME
+            && data
+                .user_data
+                .get::<SpawnedPid>()
+                .is_some_and(|&SpawnedPid(pid)| !self.spawned_children.contains(&pid))
     }
 }
 

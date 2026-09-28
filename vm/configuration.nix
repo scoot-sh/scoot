@@ -193,8 +193,8 @@ in
       # the package's buildInputs and the dev shell's LIBRARY_PATH; this is
       # a runtime executable.
       xwayland
-      xorg.xeyes
-      xorg.xclock
+      xeyes
+      xclock
       # Reads specific pixels out of a `scoot msg screenshot` PNG --
       # scripts/smoke-test.sh's decoration checks need this to confirm the
       # focus ring/background actually rendered the configured colors, not

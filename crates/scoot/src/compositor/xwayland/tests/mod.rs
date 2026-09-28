@@ -808,6 +808,8 @@ mod scanout;
 #[cfg(feature = "xwayland")]
 mod server_budget;
 #[cfg(feature = "xwayland")]
+mod startup_exited;
+#[cfg(feature = "xwayland")]
 mod startup_race;
 #[cfg(feature = "xwayland")]
 mod unmanaged_cap;

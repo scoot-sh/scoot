@@ -631,7 +631,7 @@ first; most of the docs half was done along the way.
 | Deliverable | Before this phase | Now |
 |---|---|---|
 | Capture pins: X window in IPC screenshot and screencopy, per output, blanked under lock | Missing. Only the render path was pinned (`tests/lock.rs` renders a frame and checks it); neither capture path had an X test | `xwayland/tests/capture.rs`, three live tests, below |
-| Xwayland in the dev VM's session `PATH` | Missing (live runs used `nix shell`) | `vm/configuration.nix` system profile: `xwayland`, `xorg.xeyes`, `xorg.xclock` |
+| Xwayland in the dev VM's session `PATH` | Missing (live runs used `nix shell`) | `vm/configuration.nix` system profile: `xwayland`, `xeyes`, `xclock` (top-level names; the `xorg.` aliases are deprecated) |
 | Xwayland on `PATH` for `--tty` logins, NixOS module / home-manager | Missing: no package carried it | The package carries it (wrapper), so the NixOS module's `Exec=` and any login need nothing else; the modules are unchanged |
 | Flake output with the `xwayland` feature | Missing (README: "no flake output ships it yet") | `packages.scoot-xwayland`, `packages.scoot-gpu-xwayland` (Linux), `apps.scoot-xwayland` |
 | Absent-binary loud fallback | Done in code (Phase 1), but proven only where the machine lacks `Xwayland` -- never in CI or on the dev VM -- and the log line said only "No such file or directory" | Proven everywhere (below); the line names `` `Xwayland` must be on PATH `` and the `PATH` searched |

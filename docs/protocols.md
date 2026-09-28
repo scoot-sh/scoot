@@ -162,7 +162,9 @@ keep one; AGX shows that expectation cannot be assumed.
   20000-fd table). Before, the 257th mapped X window — menus, tooltips and
   ordinary windows alike, across every X application — got the X server
   disconnected, closing every X window in the session at once. Past its
-  limit (about 2048 X windows) it still is: scoot logs `Xwayland
+  limit (about 2048 X windows with shared-memory buffers; about 1024 on
+  the `--tty` GPU tier with explicit sync, where each X window drawing with
+  the GPU holds about 4 fds) it still is: scoot logs `Xwayland
   disconnected` with the reason, and X comes back only with a restart.
   Where explicit sync is offered (the `--tty` GPU tier), its limit on
   commits waiting for the GPU is scaled the same way: **512** with the
@@ -501,9 +503,11 @@ an X window only while scoot has focused one, and the X server's own input
 focus is set by scoot, never left to "whatever is under the pointer"),
 anything drawn under the session lock, the Wayland clipboard or primary
 selection while no X window is focused (below), and -- through the focus gate below
--- the keyboard focus of a Wayland window by asking. (One exception: an X
-app a *Wayland launcher* started can be raced to its startup id by another
-X client, below.)
+-- the keyboard focus of a Wayland window by asking. (Two exceptions: an X
+app a *Wayland launcher* started, and one whose launched process exits
+before its window takes focus -- a single-instance app forwarding to its
+running instance, an app forking into the background -- can be raced to
+its startup id by another X client, below.)
 
 ### X windows in the layout
 
@@ -600,11 +604,20 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
    id -- it is readable by every X client from the moment a toolkit sets
    it, before the app's first window maps -- is refused and the token left
    for the app. When the server cannot say which process a window belongs
-   to, the startup id is refused. The cost: an app that forks itself into
-   the background and lets the process scoot started exit (`gvim` does by
-   default, per its documentation; `gvim -f` does not -- unmeasured here)
-   is no longer that process's descendant, so it maps without focus while
-   another window has it; a click focuses it. A client that sets no startup id
+   to, the startup id is refused. **Once the process scoot started has
+   exited** without its token being redeemed, the startup id redeems for
+   any X window naming it, once, within the token's 30 seconds -- the rule
+   from before the binding. That is where two ordinary launches end up: a
+   single-instance app whose second launch hands over to the running
+   instance and exits (GApplication, `KDBusService`), and an app that forks
+   itself into the background and lets the process scoot started exit
+   (`gvim` does by default, per its documentation; unmeasured here). Their
+   window comes from a process that is not a descendant of the one scoot
+   started, so binding them would open it without focus behind whatever you
+   were typing into. A window refused while that process still ran takes
+   focus when it exits (a forwarder was measured to exit a few milliseconds
+   after the running instance's window mapped). For these launches the race
+   stays open, as it always was. A client that sets no startup id
    (`xterm`) is matched by process alone: a process scoot spawned whose
    token is still live counts. **A live token a mapping window may redeem
    is spent whichever rule grants it focus** -- so a token cannot be left

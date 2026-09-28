@@ -7,7 +7,9 @@
 #   scripts/niri-ab/sample.sh PID|session SECS [LABEL] [-- COMMAND...]
 #
 # `session` means the compositor this is running inside: the nearest
-# ancestor process named `scoot` or `niri`, or else the niri that
+# ancestor process named `scoot` (or `.scoot-wrapped`, the name the flake's
+# `scoot-xwayland` wrapper execs it under -- docs/nix.md) or `niri`, or else
+# the niri that
 # `$NIRI_SOCKET` names. Use it when running from a terminal in the session
 # under test. On a machine whose own desktop is
 # scoot, `pgrep -x scoot` would find two, and the wrong one is the live
@@ -35,7 +37,7 @@ if [ "$PID" = session ]; then
     while [ "$p" -gt 1 ]; do
         # Fields after the last ')': a comm may itself contain spaces.
         p=$(sed 's/.*) //' "/proc/$p/stat" | awk '{print $2}')
-        case $(cat "/proc/$p/comm" 2>/dev/null) in scoot | niri) PID=$p; break ;; esac
+        case $(cat "/proc/$p/comm" 2>/dev/null) in scoot | .scoot-wrapped | niri) PID=$p; break ;; esac
     done
     # niri double-forks what it spawns, so nothing it started has it as an
     # ancestor. Its socket name carries its pid instead:

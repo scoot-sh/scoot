@@ -90,7 +90,10 @@ inspired this project.
   windows tile, dialogs float, fullscreen
   works, and they take focus by themselves only when nothing is focused,
   when they belong to the X app in use, or when scoot started them (that
-  app's own process, so another X client cannot race it to the launch).
+  app's own process while it runs, so another X client cannot race it to
+  the launch; an app that hands over to a running instance or forks into
+  the background, letting that process exit, keeps the older, raceable
+  rule).
   Running one extends full trust to it — an X11 client can read and cover
   other windows by design ([protocols.md](docs/protocols.md#xwayland-opt-in)).
   Copy and paste works between X and Wayland apps both ways (clipboard

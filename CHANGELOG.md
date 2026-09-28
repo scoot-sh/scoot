@@ -49,8 +49,10 @@ scoot has not cut a numbered release yet; entries are dated.
   limits meant for a single app (512). Each X window costs it 2 of each,
   so the 257th window killed the server, and every X app's windows closed
   at once. The server now gets its own limit: a sixteenth of scoot's fd
-  table, 4096 on the usual 65536 table (about 2048 X windows). A machine
-  whose hard fd limit is 1024 keeps 512. Past that limit the X server is
+  table, 4096 on the usual 65536 table (about 2048 X windows; about 1024
+  on the `--tty` GPU tier with explicit sync, where each X window drawing
+  with the GPU holds about 4 fds). A machine whose hard fd limit is 1024
+  keeps 512. Past that limit the X server is
   still disconnected, and the log says why ([protocols.md](docs/protocols.md#per-client-limits-on-what-scoot-keeps)).
 
 ### 2026-09-27 — a click just after crossing between two X windows lands
@@ -75,15 +77,17 @@ scoot has not cut a numbered release yet; entries are dated.
 ### 2026-09-27 — another X client cannot race an app scoot launched to focus
 
 - **With `--xwayland`, the startup id scoot hands an X app it launched
-  now works only for that app's own process** (or a process it starts,
-  so wrapper scripts still work). Before, any X client could read the id
-  off the app's first window, copy it onto a window of its own, map first
-  and take focus from the window you were typing into. The one change you
-  might notice: an X app that forks itself into the background and exits
-  the process scoot started (`gvim` without `-f`, by its documentation)
-  now opens without focus if another window has it; click it. An X app a
-  *Wayland launcher* started keeps the old behavior -- scoot cannot tell
-  which process the launcher started -- see
+  now works only for that app's own process while it runs** (or a process
+  it starts, so wrapper scripts still work). Before, any X client could
+  read the id off the app's first window, copy it onto a window of its
+  own, map first and take focus from the window you were typing into.
+  Once the process scoot started has exited -- a single-instance app
+  handing a second launch to its running instance, an app forking into
+  the background (`gvim` without `-f`, by its documentation) -- the
+  startup id works for any X window naming it, once, as it always did,
+  so those launches get focus exactly as before (and can still be
+  raced). An X app a *Wayland launcher* started keeps the old behavior
+  too -- scoot cannot tell which process the launcher started -- see
   [protocols.md](docs/protocols.md#focus-x-windows-ask-scoot-decides).
 
 ### 2026-09-27 — a `[wallpaper]` section in the config sets the wallpaper

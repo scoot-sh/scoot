@@ -448,7 +448,7 @@ jobs:
           # and the host's pkill loads the host glibc against the Nix
           # libraries `LD_LIBRARY_PATH` names below (run 36144028882 died on
           # `GLIBC_ABI_GNU2_TLS not found`). A Nix pkill agrees with them.
-          x=$(nix build --inputs-from . nixpkgs#xwayland nixpkgs#xorg.xclock nixpkgs#xorg.xeyes nixpkgs#procps --no-link --print-out-paths)
+          x=$(nix build --inputs-from . nixpkgs#xwayland nixpkgs#xclock nixpkgs#xeyes nixpkgs#procps --no-link --print-out-paths)
           for path in $x; do export PATH="$path/bin:$PATH"; done
           command -v Xwayland pkill
           pkill --version
@@ -487,7 +487,7 @@ jobs:
           SCOOTBG: ${{ runner.temp }}/scootbg-default
           SMOKE_REQUIRE_SCOOTBG: "1"
           SMOKE_PREFIX: ${{ runner.temp }}/smoke-xwayland
-        shell: nix shell --inputs-from . nixpkgs#foot nixpkgs#jq nixpkgs#imagemagick nixpkgs#wayland-utils nixpkgs#xwayland nixpkgs#xorg.xeyes --command bash -euo pipefail {0}
+        shell: nix shell --inputs-from . nixpkgs#foot nixpkgs#jq nixpkgs#imagemagick nixpkgs#wayland-utils nixpkgs#xwayland nixpkgs#xeyes --command bash -euo pipefail {0}
         run: |
           command -v Xwayland xeyes
           scripts/smoke-test.sh

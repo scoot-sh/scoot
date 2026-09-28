@@ -2,8 +2,9 @@
 //! client leader at startup, well before its first window maps, and every X
 //! client can read it. A background X client that copies the id onto a
 //! window of its own and maps first must not redeem the launch's token --
-//! the redemption is bound to the process the token was minted for (see
-//! `focus.rs`, rule 2).
+//! the redemption is bound to the process the token was minted for, while
+//! that process runs (see `focus.rs`, rule 2; `startup_exited.rs` for what
+//! a token is owed once it has exited).
 //!
 //! The launched application here is real: this test binary re-run, through
 //! `State::spawn` and an `sh -c` wrapper, as [`launched_app`] -- so its token
@@ -224,38 +225,6 @@ fn launched_app() {
     props.group_leader = Some(leader);
     x.map(&props);
     while x.conn.wait_for_event().is_ok() {}
-}
-
-/// A spawn token whose spawn is no longer tracked -- reaped, so its pid may
-/// already be someone else's -- redeems for no startup id, and is left
-/// alone.
-#[test]
-fn a_reaped_spawns_startup_id_is_refused() {
-    let Some(mut live) = live("a_reaped_spawns_startup_id_is_refused") else {
-        return;
-    };
-    let wayland = live.map_peer("wayland");
-    let token = live.launch_token();
-    live.fixture
-        .state
-        .spawned_children
-        .remove(&std::os::unix::process::parent_id());
-    let mut props = Props::new(RED);
-    props.startup_id = Some(token.as_str().to_owned());
-    let xid = live.x.map(&props);
-    live.managed(xid);
-    assert_eq!(
-        live.fixture.state.focus,
-        Some(wayland),
-        "a reaped spawn's startup id took focus"
-    );
-    assert!(
-        live.fixture
-            .state
-            .xdg_activation
-            .data_for_token(&token)
-            .is_some()
-    );
 }
 
 /// A token scoot minted with no spawn recorded -- as for a spawn while
