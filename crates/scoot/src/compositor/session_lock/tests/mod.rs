@@ -66,6 +66,7 @@ mod ime_popup;
 mod input;
 mod lifecycle;
 mod multi_output;
+mod nested_confirm;
 mod per_output;
 mod teardown;
 mod tty_multi_output;
