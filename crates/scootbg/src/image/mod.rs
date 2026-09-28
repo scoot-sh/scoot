@@ -37,6 +37,10 @@ pub mod pack;
 pub mod render;
 pub mod scale;
 
+/// Images with one very long side (`scale::MAX_SCALED_SIDE`).
+#[cfg(test)]
+mod long_axis_tests;
+
 /// Test images made in code (PNG, WebP) or from the tiny committed JPEG
 /// fixtures, shared by the image tests.
 #[cfg(test)]
