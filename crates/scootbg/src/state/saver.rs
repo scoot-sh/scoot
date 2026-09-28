@@ -167,8 +167,13 @@ pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
         .create(dir)?;
     // Hidden, and named for this process: never another daemon's (two
     // sessions may share a profile), and never a profile's name (those
-    // cannot start with a dot).
-    let temp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    // cannot start with a dot). The pid through `rustix`'s raw syscall
+    // rather than `std::process::id`, which calls libc's `getpid`: that one
+    // call alone kept another 64 KiB of libc's code resident in the idle
+    // daemon (the kernel maps a fault's neighbouring pages with it:
+    // docs/scootbg/backlog/idle-code-pages.md).
+    let pid = rustix::process::getpid().as_raw_nonzero();
+    let temp = dir.join(format!(".{name}.{pid}.tmp"));
     // Whatever is there (a file left by a killed daemon of the same pid,
     // or a symbolic link someone put there) goes first; then `create_new`
     // (`O_CREAT | O_EXCL`) makes a new file or fails. `O_EXCL` never
