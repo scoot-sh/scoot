@@ -249,8 +249,8 @@ Restore (bonus designed-path coverage): V1 `force=on` + trigger 08:20:39
 connector=Virtual-1 output=2` on CRTC 37 at 1776x1116 (phase-E add), then a
 natural event 1 s later → `NewMode` on the V2 head to 5120x2160 (forced-on
 default list head). V2 `force=off` + trigger 08:21:08 → `this connector
-went away` / `removing its output output=1`; foot `adopted=true` on output
-2 at 870x1092; `final.png` 1776x1116 (viewed). Session stopped after;
+went away` / `removing its output output=1`; foot stayed on the restored
+output (`final.png` 1776x1116, viewed: terminal, ring, cursor). Session stopped after;
 nothing running, no DRM clients, VT still `tty1`, connectors back to
 connected/disconnected, forces explicit `on`/`off`. Mac side restored:
 window 834,184 800x528, Zoom To Fit off; guest list back to

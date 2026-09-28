@@ -14,8 +14,10 @@
 //! DRM device, only a headless [`State`](crate::compositor::State), and it is
 //! where the switch meets everything downstream (the render target via
 //! `resize_output`, `wl_output` clients, and `zwlr_gamma_control_v1`). The
-//! surface rebuild itself (`switch_crtc`) needs a multi-CRTC device no
-//! hardware here has, and stays stated-as-unverified like the ticket.
+//! surface rebuild itself (`switch_crtc`) needs a multi-CRTC device, so no
+//! unit test reaches it; it ran live on the dev VM 2026-09-28 (CRTC 37
+//! refused the move onto Virtual-2, CRTC 44 took it and mode-set — see
+//! `docs/backlog/resolved/tty-hotplug-confirmation-done.md`).
 //!
 //! Connector handles are real ones, built from the `NonZeroU32` the kernel
 //! identifies a connector by, because that is exactly what

@@ -92,14 +92,15 @@ current one twice.
 
 ## What is still not covered
 
-- **`Plan::NewMode` and `Plan::NewConnector` have never run on real
-  hardware.** Nothing in the QEMU/virtio-gpu dev VM can change a connector's
-  mode list at runtime (EDID override is ignored by the driver, the mode
-  list is stable across forced re-probes, and the host size is a fixed point
-  that follows whatever flexwm mode-sets), and it has one connector. Both
-  need confirmation on the hardware that filed the issue: the vfkit window
-  resize, and a two-connector laptop unplug. Issue #48 is therefore
-  referenced, not closed, by PR #51.
+- **`Plan::NewMode` ran live on the dev VM 2026-09-28, both directions**
+  (QEMU Cocoa fullscreen on/off with Zoom To Fit on — the rescale-capable
+  rig this note said did not exist), and a runtime plug ran live there too
+  (`driving a newly connected display`, output 2 added on CRTC 37); see
+  [`tty-hotplug-confirmation-done.md`](./tty-hotplug-confirmation-done.md).
+  `Plan::NewConnector` as a *decision* stays unit-pinned (it maps to `Keep`
+  in `heads.rs`'s multi-output planning). The "one connector" premise is
+  also stale: card0 now exposes Virtual-1 and Virtual-2 (`max_outputs=2`).
+  Issue #48 is therefore referenced, not closed, by PR #51.
 - **Connector switching is limited to the CRTC chosen at startup** — see
   [`./tty-connector-switch-crtc-done.md`](./tty-connector-switch-crtc-done.md)
   (since resolved by PR #112: `retarget` falls through to a CRTC switch).
