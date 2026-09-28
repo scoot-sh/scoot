@@ -9,6 +9,7 @@
 //! clock through `update_cursor_hide` / `note_cursor_hide_timeout` rather
 //! than sleeping for the configured delay.
 
+use std::fs;
 use std::io::Write;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
@@ -17,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use scoot_core::Action;
 use scoot_ipc::PointerButton;
+use smithay::backend::input::{TabletToolCapabilities, TabletToolDescriptor, TabletToolType};
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
@@ -24,7 +26,10 @@ use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1, ext_session_lock_v1,
 };
-use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
+use wayland_protocols::xdg::shell::client::{
+    xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
+};
+use xdg_positioner::{Anchor, Gravity};
 
 use crate::compositor::decorations::Appearance;
 use crate::compositor::test_support::{self, Harness};
@@ -62,6 +67,10 @@ enum Step {
     Lock,
     /// Release the held lock.
     Unlock,
+    /// Open an `xdg_popup` on the `window`-th toplevel, over the pointer.
+    MakePopup { window: usize },
+    /// Destroy the popup again.
+    DestroyPopup,
 }
 
 enum Ack {
@@ -77,10 +86,17 @@ struct TestClient {
     pending: Vec<(i32, i32)>,
     configures: Vec<Vec<(u32, i32, i32)>>,
     acked: Vec<Option<u32>>,
+    /// Per popup, by creation order: the `xdg_surface.configure` serials
+    /// waiting to be acked.
+    popup_configures: Vec<Vec<u32>>,
     lock: Option<ext_session_lock_v1::ExtSessionLockV1>,
 }
 
 struct Index(usize);
+
+/// Userdata for popup `xdg_surface`s: their configures are tracked
+/// separately from the toplevels', which carry sizes alongside.
+struct PIndex(usize);
 
 impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
     fn event(
@@ -163,6 +179,23 @@ impl Dispatch<xdg_surface::XdgSurface, Index> for TestClient {
     }
 }
 
+impl Dispatch<xdg_surface::XdgSurface, PIndex> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &xdg_surface::XdgSurface,
+        event: xdg_surface::Event,
+        index: &PIndex,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_surface::Event::Configure { serial } = event
+            && let Some(seen) = client.popup_configures.get_mut(index.0)
+        {
+            seen.push(serial);
+        }
+    }
+}
+
 wayland_client::delegate_noop!(
     TestClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1
 );
@@ -174,12 +207,75 @@ wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
+wayland_client::delegate_noop!(TestClient: ignore xdg_positioner::XdgPositioner);
+
+/// Popup events are all server-to-client notices the script never acts on
+/// (configures arrive on the popup's `xdg_surface`, acked there; the
+/// destroy is scripted, not announced).
+impl Dispatch<xdg_popup::XdgPopup, PIndex> for TestClient {
+    fn event(
+        _: &mut Self,
+        _: &xdg_popup::XdgPopup,
+        _: xdg_popup::Event,
+        _: &PIndex,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
 
 /// One toplevel the script made.
 struct Toplevel {
     surface: wl_surface::WlSurface,
     xdg: xdg_surface::XdgSurface,
     toplevel: xdg_toplevel::XdgToplevel,
+}
+
+/// One popup the script made: held for the run, since dropping its
+/// objects dismisses it.
+struct PopupParts {
+    surface: wl_surface::WlSurface,
+    xdg: xdg_surface::XdgSurface,
+    popup: xdg_popup::XdgPopup,
+}
+
+fn wait_for_popup_configure(
+    queue: &mut EventQueue<TestClient>,
+    client: &mut TestClient,
+    index: usize,
+    seen: usize,
+) -> Result<u32, String> {
+    test_support::wait_for(queue, client, "a popup configure", |client| {
+        let all = client.popup_configures.get(index)?;
+        (all.len() > seen).then(|| all.last().copied()).flatten()
+    })
+}
+
+/// Ack the popup's configure and draw it solid, so it maps and takes the
+/// hit test where it lands.
+fn draw_popup(
+    qh: &QueueHandle<TestClient>,
+    shm: &wl_shm::WlShm,
+    surface: &wl_surface::WlSurface,
+    xdg: &xdg_surface::XdgSurface,
+    serial: u32,
+) -> Result<(), String> {
+    xdg.ack_configure(serial);
+    let (width, height) = (40, 40);
+    let stride = width * 4;
+    let len = (stride * height) as usize;
+    let fd = rustix::fs::memfd_create("scoot-cursor-hide-popup", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    let pixels: Vec<u8> = WINDOW_BGRA.iter().copied().cycle().take(len).collect();
+    file.write_all(&pixels).expect("a filled pool file");
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage(0, 0, width, height);
+    surface.commit();
+    Ok(())
 }
 
 fn wait_for_configure(
@@ -242,6 +338,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
 
     let mut windows: Vec<Toplevel> = Vec::new();
+    let mut popups: Vec<PopupParts> = Vec::new();
     while let Ok(step) = steps.recv() {
         match step {
             Step::MapWindow => {
@@ -326,6 +423,37 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::Unlock => {
                 let lock = client.lock.take().ok_or("no lock held")?;
                 lock.unlock_and_destroy();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+            }
+            Step::MakePopup { window } => {
+                let index = popups.len();
+                client.popup_configures.push(Vec::new());
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, PIndex(index));
+                // A 40x40 menu at (80, 80) in the parent's geometry,
+                // growing right and down over the parked pointer (100, 100).
+                let positioner = wm_base.create_positioner(&qh, ());
+                positioner.set_size(40, 40);
+                positioner.set_anchor_rect(80, 80, 1, 1);
+                positioner.set_anchor(Anchor::TopLeft);
+                positioner.set_gravity(Gravity::BottomRight);
+                let popup =
+                    xdg.get_popup(Some(&windows[window].xdg), &positioner, &qh, PIndex(index));
+                surface.commit();
+                let serial = wait_for_popup_configure(&mut queue, &mut client, index, 0)?;
+                draw_popup(&qh, &shm, &surface, &xdg, serial)?;
+                popups.push(PopupParts {
+                    surface,
+                    xdg,
+                    popup,
+                });
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+            }
+            Step::DestroyPopup => {
+                let popup = popups.pop().ok_or("no popup open")?;
+                popup.popup.destroy();
+                popup.xdg.destroy();
+                popup.surface.destroy();
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
             }
         }
@@ -658,4 +786,152 @@ fn a_zero_timeout_is_a_disabled_feature() {
         !fixture.state.cursor_hide_timer_live,
         "motion inserts no timer while off"
     );
+}
+
+/// The pen every barrel-button test drives. It never enters proximity,
+/// so the tool half stays silent and the test witnesses only the
+/// activity reset.
+fn pen() -> TabletToolDescriptor {
+    TabletToolDescriptor {
+        tool_type: TabletToolType::Pen,
+        hardware_serial: 42,
+        hardware_id_wacom: 0,
+        capabilities: TabletToolCapabilities::PRESSURE,
+    }
+}
+
+#[test]
+fn barrel_button_reshows() {
+    let mut fixture = Fixture::hide_after();
+    fixture.cover_output();
+    fixture.hide_at(Instant::now());
+    assert!(fixture.hidden());
+    fixture.state.tablet_button(&pen(), 0, true);
+    assert!(!fixture.hidden(), "a barrel press shows the pointer again");
+    fixture.hide_at(Instant::now());
+    fixture.state.tablet_button(&pen(), 0, false);
+    assert!(
+        !fixture.hidden(),
+        "a barrel release shows the pointer again"
+    );
+}
+
+#[test]
+fn retime_shortens_an_armed_delay() {
+    let mut fixture = Fixture::hide_after();
+    fixture.cover_output();
+    let t0 = Instant::now();
+    fixture.state.update_cursor_hide(t0);
+    // Already armed by the parking motion's own activity reset, under the
+    // configured delay; `update` does not move an armed deadline.
+    assert!(
+        fixture.state.cursor_hide_deadline.is_some(),
+        "armed over the cover"
+    );
+    // Lengthening first, so the shorten below proves the armed deadline
+    // moves rather than the test arming fresh.
+    fixture.state.appearance.cursor_hide_after_ms = 10_000;
+    fixture.state.retime_cursor_hide(t0);
+    assert_eq!(
+        fixture.state.cursor_hide_deadline,
+        Some(t0 + Duration::from_secs(10)),
+        "lengthening pushes the armed deadline out"
+    );
+    fixture.state.appearance.cursor_hide_after_ms = 1_000;
+    fixture.state.retime_cursor_hide(t0);
+    assert_eq!(
+        fixture.state.cursor_hide_deadline,
+        Some(t0 + Duration::from_secs(1)),
+        "shortening pulls the armed deadline in"
+    );
+    fixture
+        .state
+        .note_cursor_hide_timeout(t0 + Duration::from_secs(1));
+    assert!(fixture.hidden(), "the shortened delay hides");
+}
+
+#[test]
+fn retime_to_zero_disarms() {
+    let mut fixture = Fixture::hide_after();
+    fixture.cover_output();
+    let t0 = Instant::now();
+    fixture.state.update_cursor_hide(t0);
+    assert!(fixture.state.cursor_hide_deadline.is_some());
+    fixture.state.appearance.cursor_hide_after_ms = 0;
+    fixture.state.retime_cursor_hide(t0);
+    assert!(
+        fixture.state.cursor_hide_deadline.is_none(),
+        "disabling clears the armed deadline"
+    );
+    assert!(!fixture.hidden());
+}
+
+#[test]
+fn reload_shortens_an_armed_delay() {
+    // The reviewer's asked case end to end: armed under a 10 s file delay,
+    // reloaded to 1 s, the hide fires about a second after the reload --
+    // not ten seconds after the arm.
+    let mut fixture = Fixture::hide_after();
+    fixture.cover_output();
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[appearance]\ncursor_hide_after_ms = 10000\n").expect("a config file");
+    fixture.state.config_path = Some(path.clone());
+    fixture.state.reload();
+    assert_eq!(
+        fixture.state.appearance.cursor_hide_after_ms, 10_000,
+        "the reload applied the long delay"
+    );
+    assert!(
+        fixture.state.cursor_hide_deadline.is_some(),
+        "the reload armed under the long delay"
+    );
+    fs::write(&path, "[appearance]\ncursor_hide_after_ms = 1000\n").expect("a config file");
+    let pre = Instant::now();
+    fixture.state.reload();
+    let post = Instant::now();
+    assert_eq!(
+        fixture.state.appearance.cursor_hide_after_ms, 1_000,
+        "the reload applied the short delay"
+    );
+    let deadline = fixture
+        .state
+        .cursor_hide_deadline
+        .expect("still armed after the reload");
+    assert!(
+        deadline >= pre + Duration::from_secs(1) && deadline <= post + Duration::from_secs(1),
+        "the armed deadline moved to about a second after the reload, not ten after the arm: {deadline:?}"
+    );
+    fixture
+        .state
+        .note_cursor_hide_timeout(post + Duration::from_secs(1));
+    assert!(fixture.hidden(), "the shortened delay hides");
+}
+
+#[test]
+fn popup_dismiss_re_arms_after_a_mid_popup_firing() {
+    // The open→dismiss gap with zero pointer motion: armed, a menu opens
+    // over the pointer, the timer fires mid-menu (disarming without
+    // hiding), the menu is dismissed -- and the cover hides on schedule
+    // again instead of staying disarmed until the next motion.
+    let mut fixture = Fixture::hide_after();
+    fixture.cover_output();
+    let t0 = Instant::now();
+    fixture.state.update_cursor_hide(t0);
+    fixture.run(Step::MakePopup { window: 0 });
+    assert!(!fixture.hidden(), "nothing hides while the menu is up");
+    fixture.state.note_cursor_hide_timeout(t0 + TIMEOUT);
+    assert!(!fixture.hidden(), "a mid-menu firing hides nothing");
+    assert!(
+        fixture.state.cursor_hide_deadline.is_none(),
+        "but it does disarm"
+    );
+    fixture.run(Step::DestroyPopup);
+    assert!(
+        fixture.state.cursor_hide_deadline.is_some(),
+        "dismiss re-arms over the cover with no motion"
+    );
+    let t1 = Instant::now();
+    fixture.state.note_cursor_hide_timeout(t1 + TIMEOUT);
+    assert!(fixture.hidden(), "the re-armed delay hides");
 }

@@ -260,6 +260,11 @@ impl State {
     /// proximity there is no focus to hold it.
     pub fn tablet_button(&mut self, tool: &TabletToolDescriptor, button: u32, pressed: bool) {
         self.announce_activity();
+        // A barrel press is pointer activity like a mouse button: it shows
+        // a hidden pointer again and pushes the hide deadline out. (The
+        // tool's own delivery below stays pointer-unsynthesized -- this
+        // only touches the compositor's own inactivity hide.)
+        self.note_pointer_activity();
         let serial = SERIAL_COUNTER.next_serial();
         let time = InputTime::from_millis(self.millis());
         if let Some(handle) = self.tool(tool) {

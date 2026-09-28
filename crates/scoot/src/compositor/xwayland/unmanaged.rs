@@ -82,6 +82,11 @@ impl State {
         // in `unmap_x11_unmanaged` on every path the window can leave by
         // short of the server's death, which drains the whole count.
         self.x11_unmanaged_cap.claim(x_client, xid);
+        // Deliberately no cursor-hide update here: the armed deadline
+        // harmlessly survives the open -- no hide can fire while the menu
+        // covers the pointer, and a firing then only disarms, which the
+        // unmap path below re-arms. (Re-arming fresh at open instead would
+        // wrongly extend the wait past a quickly-dismissed menu.)
         self.request_render();
     }
 
@@ -102,6 +107,9 @@ impl State {
             // destroy after an unmap frees nothing twice.
             self.x11_unmanaged_cap.release(&xid);
             self.refresh_pointer_focus();
+            // The mirror of the map path above: the cover may be eligible
+            // for the cursor hide again.
+            self.update_cursor_hide(std::time::Instant::now());
             self.request_render();
         }
     }

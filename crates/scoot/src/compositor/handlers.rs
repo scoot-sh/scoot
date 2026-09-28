@@ -517,6 +517,11 @@ impl XdgShellHandler for State {
         if self.popups.track_popup(kind.clone()).is_ok() {
             self.popup_index.insert(&kind);
         }
+        // Deliberately no cursor-hide update here: at creation the popup
+        // has no buffer yet, so the hit test still finds the window
+        // beneath it. The armed deadline harmlessly survives the open --
+        // no hide can fire while the mapped popup covers the pointer, and
+        // a firing then only disarms, which `popup_destroyed` re-arms.
     }
 
     /// Closes the popup's record and refuses a destroy that leaves child
@@ -527,6 +532,11 @@ impl XdgShellHandler for State {
             &mut self.popup_count,
             &mut self.popup_index,
         );
+        // A dismiss under a still pointer changes what the pointer is over
+        // with no motion and no `apply()`: without this the cover would
+        // stay disarmed (a firing mid-popup cleared the deadline) until
+        // the next motion re-armed it.
+        self.update_cursor_hide(std::time::Instant::now());
     }
 
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {

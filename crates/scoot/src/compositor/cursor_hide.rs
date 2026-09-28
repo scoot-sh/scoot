@@ -58,9 +58,12 @@
 //! firing that still sees its own deadline past hides.
 //!
 //! Disarm paths all funnel through `update_cursor_hide` (called from
-//! `apply()`, so workspace switches, closes and un-fullscreens are one
-//! call site) or `disarm_cursor_hide` (lock, VT pause). Unlock and VT
-//! reactivation re-evaluate through `update_cursor_hide`.
+//! `apply()` -- so workspace switches, closes and un-fullscreens are one
+//! call site -- and from popup/X-menu dismiss, which change what the
+//! pointer is over with no motion and no `apply()`), from
+//! `retime_cursor_hide` (config reloads), or from `disarm_cursor_hide`
+//! (lock, VT pause). Unlock and VT reactivation re-evaluate through
+//! `update_cursor_hide`.
 
 use std::time::{Duration, Instant};
 
@@ -131,9 +134,10 @@ impl State {
 
     /// Re-derives the hide state after anything that may have changed what
     /// covers an output: `apply()` (workspace switches, closes,
-    /// un-fullscreens, output changes), unlock, VT reactivation, and
-    /// config reloads. Takes `now` explicitly so tests drive a synthetic
-    /// clock instead of sleeping for the delay.
+    /// un-fullscreens, output changes), popup and override-redirect-menu
+    /// dismiss (which change what the pointer is over with no motion),
+    /// unlock, VT reactivation, and config reloads. Takes `now` explicitly
+    /// so tests drive a synthetic clock instead of sleeping for the delay.
     ///
     /// Cheap when the feature is off (one integer compare): `apply()` calls
     /// this unconditionally.
@@ -175,6 +179,24 @@ impl State {
         }
         self.cursor_hide_deadline = Some(Instant::now() + self.cursor_hide_delay());
         self.arm_cursor_hide_timer();
+    }
+
+    /// Re-derives the hide state after the configured delay itself changed
+    /// (config reload): unlike `update_cursor_hide`, an armed deadline
+    /// computed under the old delay is stale, so an eligible, still-visible
+    /// session is re-timed to `now +` the new delay -- shortening pulls the
+    /// hide in, lengthening pushes it out, disabling disarms. A hidden
+    /// session stays hidden (a delay change is not activity), and an
+    /// ineligible one disarms exactly as in `update_cursor_hide`.
+    pub(super) fn retime_cursor_hide(&mut self, now: Instant) {
+        if !self.cursor_hide_eligible() {
+            self.disarm_cursor_hide();
+            return;
+        }
+        if !self.cursor_idle_hidden {
+            self.cursor_hide_deadline = Some(now + self.cursor_hide_delay());
+            self.arm_cursor_hide_timer();
+        }
     }
 
     /// Forgets any armed deadline and shows the pointer again: the lock and
