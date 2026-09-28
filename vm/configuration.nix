@@ -36,8 +36,12 @@ in
     writableStoreUseTmpfs = false;
 
     diskSize = 32 * 1024; # writable root; cargo target dirs live here
-    memorySize = 4096;
-    cores = 4;
+    # 4 GiB was not enough: a single rustc building the scoot crate peaks at
+    # ~3.7 GiB anon RSS, and the guest has no swap, so the OOM killer took
+    # builds out repeatedly. Guest RAM costs the Mac about its size plus
+    # ~350 MiB of QEMU overhead (`footprint <qemu pid>`), not double.
+    memorySize = 16 * 1024;
+    cores = 6;
     graphics = true;
 
     forwardPorts = [
