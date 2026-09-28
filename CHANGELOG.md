@@ -16,6 +16,10 @@ scoot has not cut a numbered release yet; entries are dated.
   memory: Cannot allocate memory (os error 12)"`), or `null` while
   `draw_failed` is `false`. A `set` that could not be drawn says to look
   there ([docs/scootbg/cli.md](docs/scootbg/cli.md#query)).
+- **An image with a side longer than 65536 pixels no longer ends
+  scootbg** when set with `--mode fit` or `stretch` (a 20,000,000×1 PNG
+  of 20 KB did, inside the scaler): the `set` fails with a message
+  naming the modes that show it (`fill`, `center`, `tile`).
 
 ### 2026-09-28 — X apps are sharp on HiDPI screens
 

@@ -57,6 +57,11 @@ memory (32.4 MB at 4K, however many outputs show it). An output plugged
 in later shares the pixels of an output of its size already showing the
 image, with no decode; otherwise it, like a new scale that needs a new
 size, reads the file again. Images over 16384×16384 pixels are refused.
+An image is also not scaled along a side longer than 65536 pixels (the
+scaler's limit, far past any screen): a 20,000,000×1 strip set with
+`fit` or `stretch` is a drawing error, reported by `set` and by
+`query`'s `draw_error`, while `fill` (which crops the long side away
+first), `center` and `tile` show it.
 
 ## Scale
 

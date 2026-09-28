@@ -37,6 +37,28 @@ fallible, and `query` reports `draw_failed` with
 `draw_error: "shared memory: Cannot allocate memory (os error 12)"`
 (`crates/scootbg/tests/draw_failed.rs`).
 
+### The weight tables, too
+
+The output is not the scaler's only large allocation. For each scaled
+axis `generate_weights` (`src/compute_weights.rs`) allocates
+`kernel_size × out_size` `f32`s, the kernel spanning `2 × support × in /
+out` source pixels when shrinking (`support` 3 for Lanczos3, 2 for
+Catmull-Rom) and `2 × support` when growing, and
+`numerical_approximation_i16` copies them as `i16`: about 36 bytes per
+pixel of the axis's longer side for Lanczos3, committed as they are
+written, all infallible `Vec`s. Before ticket 12's review that was
+unbounded (a 16.7-million-pixel row cost about 600 MB of weights for 50
+MB of RGB, and past 2^24 the weights panicked outright); since
+`scale::MAX_SCALED_SIDE` (65536) refuses longer sides, they are at most
+about 2.4 MB an axis. They matter to the options:
+
+- **(c), the fork, does not make them fallible.** A destination-slice
+  entry point moves the output into scootbg's fallible buffer; the
+  weights stay the scaler's own `Vec`s. At the bound's 2.4 MB an axis
+  that is a small, bounded remainder, but it is not zero.
+- **(b)'s probe must budget them**, output + both axes' weights
+  (+ the row scratch), not the output alone.
+
 ## How much it matters
 
 - **Rare on a default desktop.** Overcommit is heuristic (mode 0), so a

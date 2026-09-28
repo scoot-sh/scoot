@@ -220,8 +220,11 @@ and the seed corpus second, and wrote artifacts outside the tree.
 | `-a` (debug assertions: overflow checks in every crate) | 1200 s | ≈ 1.0 h | 4,495,577 | 4567 | 15868 | 2954 | 0 | 0 | 0 | 1 |
 
 (`cov` counts instrumented edges, so the two builds' numbers are not
-comparable: `-a` adds the overflow checks' own.) **No crash, no panic, no
-out-of-memory, in either run.** Line coverage of scootbg's image path
+comparable: `-a` adds the overflow checks' own.) No crash, no panic, no
+out-of-memory, in either run. **That was not the same as none existing:**
+review found a panic both runs could not reach (a 20,000,000×1 PNG,
+`--mode fit`; [below](#review-of-pr-317-the-long-row)), because an input
+of at most 8 KB cannot describe a row that long. Line coverage of scootbg's image path
 over the release run's corpus, measured apart with an
 `-Cinstrument-coverage` build of the same target and `llvm-cov` 21.1.8:
 83.9% of the lines in `color.rs` and `image/` (926 lines, 149 missed),
@@ -440,7 +443,7 @@ No blocking findings; the low ones, fixed in commits after `53669ac`:
    scratch corpus each: at 2^20, 981,268 executions, `cov` 3577, `ft`
    9185; at 2^22, 610,189 executions, `cov` 3690, `ft` 9987. A third
    fewer runs for more coverage in the same time: kept.
-6. **The scaler's abort** is its own backlog item,
+6. **The scaler's out-of-memory abort** is its own backlog item,
    [scaler-oom-abort.md](../scaler-oom-abort.md), open and waiting on a
    decision between accepting it, a probe, a scoot-sh fork of
    `pic-scale-safe` with a destination-slice entry point, and another
@@ -455,3 +458,118 @@ worker's stack is now set rather than defaulted, to the same 2 MiB, so
 the `set` row was run again (5 rounds) against the base run above:
 JPEG 633 ms against 698, color 17.1 against 23.4, peak PSS 101.6 against
 100.9 MiB, `compare` 0 regressions.
+
+## Review of PR #317: the long row
+
+A blocking finding, after the fixes above; reproduced end to end by the
+reviewer on the release daemon, and found **by reading
+`pic-scale-safe`'s source**, not by the fuzzer.
+
+- **The panic.** A 20,000,000×1 grey PNG (about 20 KB) `set` with
+  `--mode fit` on a 1920×1080 output ended the release daemon (exit 134):
+  `index out of bounds: the len is 62500 but the index is 62500` at
+  `pic-scale-safe` 0.1.12 `src/compute_weights.rs:141:30`, in
+  `generate_weights::<f32>`, from `resize_fixed_point` ←
+  `resize_rgb8` ← scootbg's `image/scale.rs`. The weights place each
+  tap in `f32`, which stops holding every integer past 2^24: the end of
+  a tap's window rounds one past `start + kernel_size`, and the loop
+  writes past the kernel's table. The reviewer's sweep: a scaled axis of
+  16,777,216 is clean, 17 and 20 million panic; Lanczos3 and Catmull-Rom
+  only (bilinear and nearest take other paths); `fit` and `stretch`
+  (`fill` crops the long side away first, `center` and `tile` scale
+  nothing); 1920×1080 and 2560×1440 targets panic where 1600×1000 and
+  1366×768 happen not to; 1×20M likewise. PNG is the route: a JPEG side
+  stops at 65535, and a WebP canvas at 2^24 exactly. Reproduced here
+  before the fix, at 17,000,000×1 (16,592 bytes of PNG), in a debug
+  test: `index out of bounds: the len is 53125 but the index is 53125`,
+  same line.
+- **Why the fuzzer missed it.** Both runs used `-max_len=8192`. A flat
+  PNG row compresses about 1000:1, so 8 KB describes at most about 8
+  million pixels, half the cliff, and no seed had a long row to mutate.
+  The coverage figures above could not show it either: the line that
+  panics runs for every Lanczos scale.
+- **The weights' memory, found with it.** `generate_weights` allocates
+  `kernel_size × out_size` `f32`s, where the kernel spans `2 × support ×
+  in / out` source pixels when shrinking, plus an `i16` copy
+  (`numerical_approximation_i16`): about 36 bytes per source pixel of
+  each scaled axis for Lanczos3, committed and infallible. A 16.7M×1 row
+  cost about 600 MB of weights for 50 MB of RGB.
+
+### The fix: refuse a side longer than 65536 before the scaler
+
+`image::scale::MAX_SCALED_SIDE` = 65536. `scale::scale` refuses any
+side of the source (after `fill`'s crop) or of the target longer than
+that, with `ScaleError::TooLong`, before `pic-scale-safe` is called: the
+`set` fails cleanly and `query`'s `draw_error` says
+`cannot scale 20000000x1 pixels to 1920x1: scootbg scales no side longer
+than 65536 pixels (--mode fill, center or tile shows it)`.
+
+- **Why that bound.** It sits 256 times below the precision cliff, and
+  it caps the weights at about 36 × 65536 bytes, 2.4 MB an axis, whatever
+  the image. No wallpaper reaches it: it is eight 8K screens side by
+  side, and a JPEG cannot (its sides stop at 65535). It is documented
+  beside the pixel budget (`decode::MAX_PIXELS` bounds the image; this
+  bounds each side the scaler sees), in `scale.rs`.
+- **Why refuse rather than shrink first with `Nearest`.** Such an image
+  is not one anyone has as a wallpaper; the refusal is a clear error that
+  names the modes that do show it; and a pre-shrink would be a second
+  full-size copy and a second path through the scaler to keep correct
+  for a case no one meets.
+- **Every mode and filter, one place.** The check is in `scale::scale`,
+  the one call into the scaler, on both sides and both axes, whatever the
+  filter: `fit` and `stretch` hit it with the image's own side; `fill`
+  only after its crop, so a long image still shows in `fill` unless the
+  output's aspect makes the crop itself too long; `center` and `tile`
+  never scale. The target side is checked too: a compositor asking for a
+  surface wider than 65536 would otherwise size the weights by it.
+
+### Tests
+
+- `src/image/long_axis_tests.rs` (stable, its own file):
+  - `a_side_past_the_precision_cliff_is_refused_not_a_panic`: a
+    17,000,000×1 grey PNG built in code (16.6 KB) through the real decode
+    and render, and a 1×17,000,000 image (made in its decoded form: a PNG
+    that tall is 17 million row filters, too slow for a debug build), on
+    1920×1080: `fit` and `stretch` refused with every filter, `fill`,
+    `center` and `tile` drawn.
+  - `the_bound_is_exact_on_either_side_of_the_scaler`: 65536 scales and
+    65537 is refused, on the source and on the target, wide and tall,
+    every filter.
+  - `a_sweep_of_long_sides_draws_or_refuses`: 32768, 65536, 65537, 2^20,
+    2^24 − 1, 2^24, 2^24 + 1 and 20,000,000 wide, decoded and rendered
+    with `fit` and Lanczos3 on 2560×1440.
+  - `the_refusal_names_the_side_and_the_modes_that_work`.
+  - `the_fuzz_entry_point_survives_the_reviews_input`: the 20,000,000×1
+    PNG through `image::fuzz::whole_path`, `fit` and `stretch`, Lanczos3
+    and Catmull-Rom, 1920×1080 and 2560×1440.
+- `tests/draw_failed.rs`,
+  `a_row_too_long_to_scale_is_a_draw_error_not_an_abort`: on a
+  1920×1080 headless scoot, the 20,000,000×1 PNG `set` with `fit` and
+  with `stretch` exits 1, `query` says `draw_failed` with the `draw_error`
+  above, the daemon lives, and `--mode fill` then shows it.
+- The fuzz target: `regressions/whole/pr317-17m-row-fit` (the finding,
+  16.6 KB, replayed by the stable corpus test) and two seeds past the
+  bound, a 100,000×1 row and a 1×100,000 column; the README's run
+  command now passes `-max_len=65536` and the regressions directory.
+
+### The fuzz run after the fix
+
+`-fork=3 -max_len=65536 -timeout=30 -rss_limit_mb=4096`, 1121 s (about
+56 min of CPU), from the seed corpus, `regressions/whole` and the 4068
+inputs of the first two runs (2844 after libFuzzer's merge), a fresh
+scratch corpus first; sources hashed at the start match the ones
+committed. 1,912,667 executions, `cov` 4657, `ft` 16631, corpus 3090:
+**no crash, no timeout, no out-of-memory, no slow unit.** Of the 247
+inputs it added, 72 are PNGs and 31 of those claim a side past 65536
+within the pixel budget (the longest 33,554,433×1 in 87 bytes, the rest
+around the 100,000-pixel seeds), so the refusal is being reached.
+
+### The reviewer's nit in `draw_failed.rs`
+
+The premise probe checked only the hard limit; an inherited soft limit
+below what the test needs would have been restored by the guard and
+failed the retry. It now reads both from `/proc/PID/limits` and skips
+if either is below what the daemon maps plus the buffer and twice the
+margin. Checked under `prlimit`: soft and hard 75,000,000 skips; soft
+75,000,000 with an unlimited hard limit skips; soft 400,000,000 runs and
+passes.

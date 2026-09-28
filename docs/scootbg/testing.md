@@ -35,7 +35,8 @@ command gives it locally.
   (`density`); state-file round trips and hostile state files (`state`);
   request parsing and replies (`protocol`); every decoder cut at every
   length and corrupted at random, and the scaler over every small shape
-  (`image/decode`, `image/scale`); the daemon's reply logic over a fake
+  (`image/decode`, `image/scale`); images with a side too long to scale
+  (`image/long_axis_tests.rs`); the daemon's reply logic over a fake
   compositor (`daemon`).
 - **The allocator and the `wl_shm` buffer** (`crates/scootbg-mem`):
   allocations across the 128 KiB threshold both ways, `alloc_zeroed` on
@@ -49,7 +50,8 @@ command gives it locally.
   clients (`daemon.rs`), restore (`restore.rs`), `apply-config` and the
   precedence of a `set` over scoot's `[wallpaper]` section (`config.rs`,
   `scoot_config.rs`), and a live `set` that decodes but cannot be drawn
-  (`draw_failed.rs`: `query`'s `draw_failed` and `draw_error`).
+  (`draw_failed.rs`: out of memory for the buffer, and a side too long to
+  scale; `query`'s `draw_failed` and `draw_error`).
 - **Fuzzing**: a `cargo fuzz` target over the whole image path, decode,
   crop, scale and pack, on the stable toolchain. How to run it, and what
   to do with a crash: [`crates/scootbg/fuzz/README.md`](../../crates/scootbg/fuzz/README.md).
