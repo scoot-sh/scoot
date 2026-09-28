@@ -32,9 +32,10 @@ compositor with `wlr-layer-shell-v1` (sway, niri, Hyprland, river, labwc).
   competitors are `swaybg`, `awww`, `hyprpaper`, `wpaperd` and `wbg`, on
   the same machine, with the table published here. Every
   dependency has to justify its bytes. See
-  [`backlog/lightest.md`](backlog/lightest.md). **Measured, and not yet
-  passed**: awww holds 1.0–1.6 MiB less idle memory above the floor, and
-  every other row is a win or a tie
+  [`backlog/lightest.md`](backlog/lightest.md). **Measured, and it does
+  not pass**: its one failing class, idle memory above the floor (9 rows
+  on each compositor, where awww holds 1.0–1.5 MiB less), is waived for
+  v1 by the user (2026-09-28); every other row is a win or a tie
   ([the comparison](#against-the-other-daemons)).
 - **Colors and images.** A solid color or a PNG, JPEG or WebP image per
   output, changed live with one command and restored at login. That is
@@ -180,8 +181,12 @@ shows it again when it starts.
   with a warning, so the newest always survive. They are written oldest
   first, and a restore keeps that order.
 - **Written off the loop, atomically:** a temporary file beside it
-  (`.PROFILE.PID.tmp`: whatever is at that name is removed, then the file
-  is made with `O_CREAT | O_EXCL`, which never follows a symbolic link),
+  (`.PROFILE.PID.RANDOM.tmp`, a name of that one write's own, 64 random
+  bits from `getrandom(2)`, so two daemons of the same pid sharing a
+  profile, in two pid namespaces or on two hosts with one network home,
+  never write through each other's; whatever is at that name is removed,
+  then the file is made with `O_CREAT | O_EXCL`, which never follows a
+  symbolic link),
   `fsync`, `rename` over the old file, `fsync` of the directory; the file
   is 0600, a directory it makes 0700. The write
   runs on a thread started for it, which ends once nothing more waits
@@ -554,23 +559,28 @@ Against the competitors: [below](#against-the-other-daemons).
 
 ## Against the other daemons
 
-**The release gate passes for v1 with one accepted exception.** The
-user accepted the idle-memory gap below for v1 (2026-09-28): it is clean
-program code the kernel can reclaim, and the lever that would close it,
-a separate daemon binary, moves to after v1
-([idle-code-pages.md](backlog/idle-code-pages.md)). On headless scoot, awww beats
-scootbg on idle memory above the floor, by 1.1–1.6 MiB of RSS and
-1.0–1.5 MiB of PSS, with a color and with an image, on 1× 1080p and on 2× 4K, and
-so on the 1080p image's total with the floor (8.9 against 10.3 MiB).
-Those bytes are mostly scootbg's own code: its `.text` and read-only
-data hold 0.86 MiB more resident, clean pages than awww-daemon's. Most of
-the rest is `libc` code, 0.31 MiB, plus a little anonymous memory. On
-every other row both can do, scootbg wins or ties. Headless sway gives
-the same verdicts ([below](#on-sway)). A re-run of the idle rows on
-2026-09-28, after attributing the resident pages and trying the cheap
-levers, gives the same 9 losses ([below](#idle-rows-re-run-2026-09-28));
+**The release gate does not pass.** Its one failing class, idle memory
+above the floor (9 rows on each compositor), is waived for v1 by the
+user (2026-09-28); the lever that would close it, a separate daemon
+binary, is post-v1 ([idle-code-pages.md](backlog/idle-code-pages.md)).
+On headless scoot, in the re-run of the idle rows on 2026-09-28
+([below](#idle-rows-re-run-2026-09-28)), after attributing the resident
+pages and trying the cheap levers, awww beats scootbg on idle memory
+above the floor by 1.1–1.5 MiB of RSS and 1.0–1.4 MiB of PSS, with a
+color and with an image, on 1× 1080p and on 2× 4K, and so on the 1080p
+image's total with the floor (8.84 against 10.25 MiB). Headless sway
+gives the same verdicts. Those bytes are mostly clean program code the
+kernel can reclaim: scootbg's `.text` and read-only data hold 0.86 MiB
+more resident, clean pages than awww-daemon's, and `libc` code about
+0.25 MiB more (0.31 MiB on 2026-09-27, before the `getpid` lever). The
+rest is anonymous memory, which the kernel cannot drop: a little with a
+color, and with an image about 0.24 MiB more, nearly all of it the
+decode thread's malloc arena. On every other row both can do, scootbg wins or ties, on scoot
+and on sway ([below](#on-sway)).
 [idle-code-pages.md](backlog/idle-code-pages.md) has where the pages are,
-what was tried, and what is left.
+what was tried, and what is left. The full table below is the first
+run, of 2026-09-27, which gave the same 9 losses (by 1.1–1.6 MiB of RSS
+and 1.0–1.5 MiB of PSS).
 
 Measured 2026-09-27 on a Claude Code web container (4 vCPUs, Intel Xeon
 @ 2.10 GHz, 16 GB, no GPU and no DRM device, kernel 6.18), against
@@ -666,18 +676,19 @@ The idle rows only, 5 rounds, every daemon, the harness as in
 `35f3a13`, scootbg `9b3d8526…` built from `35f3a13` with a clean tree
 (its one change: the state file's temporary name through `rustix`'s
 `getpid`, 64 KiB less of libc's code resident), scoot `19909bbd…` from the
-same tree. Above the floor, MiB:
+same tree. Above the floor, MiB (the raw KiB of `runs.jsonl` over 1,024,
+rounded to two places):
 
 | Row | scoot: scootbg | scoot: awww | sway: scootbg | sway: awww |
 |---|---|---|---|---|
-| RSS, 1× 1080p, color | 3.77 [3.75–3.86] | **2.71 [2.66–2.74]** | 3.77 [3.74–3.77] | **2.67 [2.65–2.72]** |
+| RSS, 1× 1080p, color | 3.77 [3.75–3.86] | **2.71 [2.66–2.74]** | 3.77 [3.74–3.77] | **2.67 [2.65–2.71]** |
 | PSS, 1× 1080p, color | 2.02 [2.02–2.08] | **1.04 [0.99–1.06]** | 2.00 [2.00–2.03] | **1.02 [0.99–1.04]** |
-| RSS, 2× 4K, color | 3.79 [3.74–3.82] | **2.69 [2.65–2.74]** | 3.79 [3.74–3.86] | **2.69 [2.65–2.72]** |
+| RSS, 2× 4K, color | 3.79 [3.74–3.82] | **2.69 [2.65–2.74]** | 3.79 [3.74–3.86] | **2.69 [2.64–2.72]** |
 | PSS, 2× 4K, color | 2.05 [2.00–2.06] | **1.04 [1.00–1.07]** | 2.03 [1.99–2.09] | **1.04 [0.99–1.05]** |
-| RSS, 1× 1080p, image | 4.29 [4.23–4.32] | **2.84 [2.82–2.92]** | 4.30 [4.27–4.34] | **2.90 [2.82–2.94]** |
+| RSS, 1× 1080p, image | 4.29 [4.23–4.32] | **2.84 [2.82–2.92]** | 4.30 [4.27–4.34] | **2.89 [2.82–2.94]** |
 | PSS, 1× 1080p, image | 2.34 [2.29–2.35] | **0.93 [0.92–1.01]** | 2.31 [2.27–2.36] | **0.96 [0.90–0.98]** |
-| RSS, 2× 4K, image | 4.40 [4.34–4.46] | **2.88 [2.86–2.94]** | 4.37 [4.34–4.41] | **2.90 [2.82–2.91]** |
-| PSS, 2× 4K, image | 2.40 [2.38–2.48] | **0.99 [0.96–1.00]** | 2.39 [2.37–2.44] | **0.95 [0.93–0.97]** |
+| RSS, 2× 4K, image | 4.39 [4.34–4.46] | **2.88 [2.86–2.94]** | 4.37 [4.34–4.41] | **2.90 [2.82–2.91]** |
+| PSS, 2× 4K, image | 2.40 [2.38–2.48] | **0.99 [0.96–1.00]** | 2.39 [2.37–2.44] | **0.95 [0.92–0.97]** |
 
 The 1080p image's total with the floor is 10.25 against 8.84 MiB on scoot
 and 10.23 against 8.88 on sway, a loss too. **Bold**, as above: awww beats

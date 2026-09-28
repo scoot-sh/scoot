@@ -8,18 +8,22 @@ blocked: null
 
 # Idle memory above the floor: the daemon's resident code
 
-A loss on the release gate ([ticket 11](lightest.md)). Idle, above the
-floor, `awww-daemon` holds 1.1–1.6 MiB less RSS than scootbg and 1.0–1.5
-MiB less PSS (medians of 5 rounds). That holds with a color and with an
-image, on 1× 1080p and on 2× 4K, on scoot and on sway alike. On 1× 1080p
-with an image, the same bytes also make awww's total with the floor lower
-(8.9 against 10.3 MiB). The figures are in
+The release gate's one failing class ([ticket 11](lightest.md)). Idle,
+above the floor, `awww-daemon` holds 1.1–1.5 MiB less RSS than scootbg
+and 1.0–1.4 MiB less PSS (medians of 5 rounds, re-run 2026-09-28; 1.1–1.6
+and 1.0–1.5 MiB in the first run, 2026-09-27). That holds with a color
+and with an image, on 1× 1080p and on 2× 4K, on scoot and on sway alike:
+9 gated rows on each compositor. On 1× 1080p with an image, the same
+bytes also make awww's total with the floor lower (8.84 against 10.25
+MiB on scoot). The figures are in
 [the comparison](../README.md#against-the-other-daemons).
 
-**Accepted for v1 (user, 2026-09-28).** The cheap levers are done and
-the gap remains (1.0–1.5 MiB). The user accepted it for v1 rather than
-split the binary now, so this item is post-v1. The separate daemon binary
-below is the lever to reach for then.
+**Waived for v1 (user, 2026-09-28).** The gate does not pass: the cheap
+levers are done and the gap remains (1.0–1.5 MiB). The user waived this
+class for v1 rather than split the binary now, so this item is post-v1.
+The separate daemon binary below is the lever to reach for then. The
+bytes are mostly clean program code the kernel can reclaim; the rest is
+anonymous memory (below).
 
 **The direction, chosen by the user: shrink the code.** No new `unsafe`
 and no paging out; see the last section for the one fallback that stays
@@ -199,24 +203,27 @@ timings with the `image::bench` stage benchmark on the 6000×4000 JPEG,
 The gate's idle rows, 5 rounds, re-run with `35f3a13`
 ([`bench/2026-09-28-idle-scoot/`](../bench/2026-09-28-idle-scoot/table.md)
 and [`bench/2026-09-28-idle-sway/`](../bench/2026-09-28-idle-sway/table.md)).
-Medians and ranges above the floor, MiB, on headless scoot:
+Medians and ranges above the floor, MiB, on headless scoot (the raw KiB
+over 1,024, rounded to two places; each gap from the unrounded medians,
+so it can differ by 0.01 from the difference of the columns: 4,500 −
+2,948 KiB is 1.52 MiB):
 
 | Row | scootbg before (2026-09-27) | scootbg now | awww now | Gap now |
 |---|---|---|---|---|
-| RSS, 1× 1080p, color | 3.85 [3.81–3.90] | 3.77 [3.75–3.86] | 2.71 [2.66–2.74] | 1.06 |
+| RSS, 1× 1080p, color | 3.85 [3.81–3.89] | 3.77 [3.75–3.86] | 2.71 [2.66–2.74] | 1.06 |
 | PSS, 1× 1080p, color | 2.07 [2.01–2.09] | 2.02 [2.02–2.08] | 1.04 [0.99–1.06] | 0.98 |
 | RSS, 2× 4K, color | 3.87 [3.80–3.93] | 3.79 [3.74–3.82] | 2.69 [2.65–2.74] | 1.10 |
 | PSS, 2× 4K, color | 2.07 [2.02–2.10] | 2.05 [2.00–2.06] | 1.04 [1.00–1.07] | 1.01 |
 | RSS, 1× 1080p, image | 4.38 [4.31–4.41] | 4.29 [4.23–4.32] | 2.84 [2.82–2.92] | 1.45 |
 | PSS, 1× 1080p, image | 2.35 [2.28–2.39] | 2.34 [2.29–2.35] | 0.93 [0.92–1.01] | 1.42 |
-| RSS, 2× 4K, image | 4.49 [4.44–4.53] | 4.40 [4.34–4.46] | 2.88 [2.86–2.94] | 1.52 |
+| RSS, 2× 4K, image | 4.49 [4.44–4.53] | 4.39 [4.34–4.46] | 2.88 [2.86–2.94] | 1.52 |
 | PSS, 2× 4K, image | 2.47 [2.39–2.50] | 2.40 [2.38–2.48] | 0.99 [0.96–1.00] | 1.41 |
 
 On headless sway, the same rows: color RSS 3.77 and 3.79 against awww's
 2.67 and 2.69 (gap 1.10, 1.09), PSS 2.00 and 2.03 against 1.02 and 1.04
-(0.98, 0.99); image RSS 4.30 and 4.37 against 2.90 and 2.90 (1.41, 1.47),
+(0.98, 0.99); image RSS 4.30 and 4.37 against 2.89 and 2.90 (1.41, 1.47),
 PSS 2.31 and 2.39 against 0.96 and 0.95 (1.35, 1.44). Before
-(2026-09-27): color RSS 3.88 and 3.87, PSS 2.06 and 2.09; image RSS 4.38
+(2026-09-27): color RSS 3.88 and 3.87, PSS 2.06 and 2.08; image RSS 4.38
 and 4.45, PSS 2.34 and 2.39.
 
 **Not closed.** The same 9 losses on each compositor. `compare` against
@@ -228,8 +235,9 @@ rest resident whatever the daemon runs.
 
 ## Later option: a separate daemon binary
 
-Recorded here for the user's decision; not started (the scope of
-2026-09-28 was the attribution and the cheap levers).
+Post-v1: the user waived the gap for v1 rather than take this on now
+(2026-09-28). Not started (the scope of 2026-09-28 was the attribution
+and the cheap levers).
 
 **What was measured.** A prototype, never committed: the daemon's code in
 its own crate and binary, the decoders stubbed out (so image rows could

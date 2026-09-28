@@ -455,11 +455,13 @@ with an image on a 4K output, and the same 36.8 MB with two 4K outputs
 showing it. The measured budget is in
 [`docs/scootbg/README.md`](docs/scootbg/README.md#the-resource-budget),
 and so is [the comparison](docs/scootbg/README.md#against-the-other-daemons)
-with swaybg, awww, wbg and wpaperd on one machine. It is not yet the
-lightest on every row: awww holds 1.0–1.5 MiB less idle memory above the
-output buffers (re-measured 2026-09-28), mostly scootbg's code pages that
-the kernel maps around the little of it the idle daemon runs. That one
-gap is accepted for v1; every other row is a win or a tie.
+with swaybg, awww, wbg and wpaperd on one machine. It is not the lightest
+on every row, so its release gate does not pass: awww holds 1.0–1.5 MiB
+less idle memory above the output buffers (re-measured 2026-09-28), mostly
+scootbg's clean program code that the kernel maps around the little of it
+the idle daemon runs, and can reclaim. That one failing class (9 rows on
+each compositor) is waived for v1 by the user (2026-09-28); every other
+row is a win or a tie.
 `scripts/scootbg-bench/bench.py` re-runs the comparison.
 
 One daemon per display: its socket is
