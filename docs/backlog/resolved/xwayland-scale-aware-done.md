@@ -10,7 +10,9 @@ blocked: null
 
 RESOLVED 2026-09-28 (branch `claude/scoot-backlog-issues-3rfkfv`). Split out
 of [XWayland support](xwayland-support-done.md). At an `[output] scale`
-above 1 the X server draws at `ceil(scale)` in its own pixels, toolkits are
+above 1 the X server draws at `ceil(scale)` in its own pixels (lower where
+the whole layout would not fit X's 16-bit coordinates at that: see
+[The layout bound](#the-layout-bound)), toolkits are
 told that scale over XSETTINGS, and a reload follows the scale
 (`compositor/xwayland/scale.rs`; its module doc is the reference). The
 shape the entry proposed held, with the differences below. One fork
@@ -95,9 +97,11 @@ fractional scale. Chose (b):
 
 ## Runtime scale changes
 
-`[output] scale` reloads live. `State::rescale_xwayland` runs before the
-outputs are re-advertised (so XWayland resizes its X screen to the new X
-pixels): it sets the new client scale, re-publishes the toolkit settings
+`[output] scale` reloads live. `State::refit_xwayland` (at first
+`rescale_xwayland`, which ran before the outputs were re-advertised; now
+after, see [The layout bound](#the-layout-bound) below) sets the new
+client scale, re-advertises the outputs to XWayland in it, re-publishes
+the toolkit settings
 (at 1 too, so the old ones do not linger), and re-sends every managed X
 window the configure it last had -- the same logical rectangle, in the new
 X pixels (`configure_x11`'s logical-equality skip would otherwise leave
@@ -118,6 +122,96 @@ position is in the old logical pixels, so it is drawn (and hit) offset
 until it moves or closes. Nothing crashes: a reload before `READY` sets
 only the client scale (`READY` publishes the settings from the scale then);
 after the server died, the settings write fails into a warning.
+
+## The layout bound
+
+Found after `829c368` landed, and a regression from it: X at
+`ceil(scale)` multiplies the whole layout into X pixels, and X
+coordinates are 16-bit. Measured on `829c368`/`f64ce64`
+(`target/debug/scoot --headless --width 3840 --height 2160 --outputs 8
+--xwayland` at `[output] scale = 1.25`, 24576 logical pixels wide): the X
+screen was 49152 X pixels wide; an `xclock` scoot placed at logical x
+21516 sat at X 32766 (`manage.rs`'s wire clamp pins logical x at 16383
+at scale 2); `QueryPointer` over it answered root x -16385 and no child.
+Drawing and Wayland-side input were right, but everything X does in root
+coordinates (a menu or tooltip it places, `XdndPosition`, `USPosition`)
+was wrong past X pixel 32767. At X scale 1 (before `829c368`) that layout
+fit.
+
+**Fix:** the X scale is the largest integer from 1 up to `ceil(scale)` at
+which the union of every output's logical rectangle fits: right and
+bottom edges times it at most 32767 (not the `CARD16` 65535 of the wire:
+XWayland keeps the screen size in the server's `ScreenRec`, whose width
+and height are `short` -- 24.1.13's `update_screen_size` assigns it
+straight in), left and top (a negative origin) times it at least -32768
+(`scale.rs`'s `fit_x_scale`). A layout that fits at its integer keeps it;
+one that does not even at 1 keeps 1, the limit X always had, with a
+warning. The choice is stored (`State::x11_fit`), so the per-configure
+reads stay a field read, and is re-made by one function,
+`State::refit_xwayland`, called at every site that changes the output
+layout once the layout is final and before its `apply()`:
+`headless::add_output_with` (startup's extra outputs are before the
+spawn; a `--tty` hotplug), `State::remove_output` (an unplug),
+`State::resize_output_of` (a `--tty` mode change, `--nested`'s host
+resize through `resize_output`), the scale reload (inside
+`rescale_outputs`, once the outputs are laid out at the new scale, since
+the new layout's extent bounds it too), and the test-only
+`add_output_without_backend`. In the three that repack or re-lay out, it
+runs right after the layout is final, before `refresh_layer_zone` can
+`apply()`. `init_named` (the first output)
+runs before XWayland can exist, and the spawn chooses from the layout as
+it is then (`State::adopt_x11_scale`). `wlr-output-management` applies
+nothing (every configuration is refused), so it moves no output. When
+the choice moves, `refit_xwayland` sets the client scale, re-advertises
+every output (`change_current_state` with nothing changed: Smithay
+re-sends an instance exactly what its client scale moved, so XWayland
+gets new `xdg_output` sizes and positions and resizes its X screen;
+other clients get a bare `wl_output.done`), re-publishes XSETTINGS and
+re-sends every X window its configure re-clamped. The layout change
+itself went out a moment earlier in the old client scale, so XWayland
+briefly sizes its screen for that before the re-send (both queued in the
+same dispatch). Logged at info once per change when X draws below the
+integer, with the scale, the integer and the layout's size.
+
+After the fix, same command and probe (`xscreen.py`, a raw X11 client),
+working tree on `f64ce64`:
+
+```
+INFO ... X draws below the output scale's integer: the layout at that scale would be wider or taller than X can address (32767 pixels) scale=1 ceiling=2 width=24576 height=1728
+X root 0x7a screen 24576 x 1728 mm 6502 x 457
+mapped child 0x200008 x 21516 y 12 w 1518 h 1704
+QueryPointer root 22000 800 child 0x200008
+```
+
+and reloaded to `scale = 2.0` (15360 logical, 30720 at 2: fits, so X
+returns to 2): `screen 30720 x 2160`, the window at X `26904` (logical
+13452), `QueryPointer root 27800 800 child 0x200008` with the pointer at
+logical (13900, 400).
+
+Tests, `compositor/xwayland/tests/scale_fit.rs` (live at scale 2 on
+8192-pixel-wide outputs, 4096 logical, so every X size is exact). All
+four live ones fail on `f64ce64`:
+
+- `a_layout_too_wide_for_x_at_its_integer_draws_x_at_1` (five wide
+  outputs, 20680 logical): `(X scale, X screen, XSETTINGS)` was
+  `(2, (41360, 400), (Some(2), ..))`, want `(1, (20680, 200), (None, ..))`;
+  then a window on the far output at X == logical, and `QueryPointer`
+  naming it.
+- `a_hotplug_across_the_bound_moves_the_x_scale_both_ways` (three wide
+  outputs fit at 2; a fourth plugged in, then removed): X screen
+  `(33168, 400)` after the plug, want `(16584, 200)`, and the window at
+  `(24, 24, 164, 352)`, want `(12, 12, 82, 176)`; logged once.
+- `a_resize_across_the_bound_moves_the_x_scale_both_ways` (the primary
+  grown to 8192: 16384 logical, exactly 32768 at 2, one past): X screen
+  `(32768, 400)`, want `(16384, 200)`.
+- `a_reload_across_the_bound_moves_the_x_scale_both_ways` (2 → 1.5 keeps
+  the integer 2 but grows the layout to 16653): the window stayed at
+  `(24, 24, 232, 486)`, want `(12, 12, 116, 243)`.
+
+Hermetic: `the_x_scale_is_the_largest_that_fits_x_coordinates` (edges
+32767/32768 right and bottom, -32768/-32769 left and top, a ceiling below
+1, stepping down one at a time, `i32` extremes, and the rectangle union);
+new, so it could not compile on `f64ce64`.
 
 ## Coordinate audit (pinned fork `e7130254`)
 

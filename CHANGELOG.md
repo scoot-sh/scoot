@@ -28,6 +28,12 @@ scoot has not cut a numbered release yet; entries are dated.
   apps, X menus and dialogs that place themselves all land where they are
   drawn at any scale. At the default scale 1 nothing changes
   ([docs/protocols.md](docs/protocols.md#x-windows-in-the-layout)).
+- **A very wide multi-monitor layout draws X apps at a lower scale rather
+  than out of X's reach.** X coordinates stop at 32767 pixels, so when
+  the whole layout at `ceil(scale)` would be wider or taller than that
+  (eight 4K screens at 1.25), X apps draw at the largest scale that fits
+  -- 1 at worst -- and the log says so at info. It follows monitors
+  being plugged in, unplugged or changing mode, and reloads.
 
 ### 2026-09-28 — X apps' own titlebars drag
 

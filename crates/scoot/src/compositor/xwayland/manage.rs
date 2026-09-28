@@ -653,8 +653,8 @@ impl State {
 /// from the one the window last had (so an `apply()` that moved nothing
 /// costs no X traffic). `scale` is the X scale (`State::x11_scale`): the
 /// comparison is in logical pixels, where Smithay keeps `last_configure`,
-/// so a reload that moves the scale re-sends every configure itself (see
-/// `State::rescale_xwayland`).
+/// so a change that moves the X scale re-sends every configure itself (see
+/// `State::refit_xwayland`).
 pub(in crate::compositor) fn configure_x11(
     window: &X11Surface,
     placement: &scoot_core::Placement,

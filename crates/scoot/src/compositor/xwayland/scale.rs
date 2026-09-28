@@ -36,7 +36,7 @@
 //! before the first dispatch, so every global it binds -- the outputs above
 //! all -- is bound at the right scale from the start. (Setting it at `READY`
 //! instead, as Smithay's anvil does, is too late: XWayland has sized its X
-//! screen from the outputs by then, and nothing re-sends them.)
+//! screen from the outputs by then, and would have to be re-sent them.)
 //!
 //! # Which scale: `ceil([output] scale)`
 //!
@@ -54,6 +54,30 @@
 //! positions (every conversion rounds, and a toolkit would still draw at
 //! 1 or 2), and `floor` is the old blur at every scale below 2. Below 1
 //! the integer is 1 -- X at scale 1, as before.
+//!
+//! # The bound: the whole layout in X's coordinates
+//!
+//! The X screen is the layout times `S`, and X speaks 16-bit coordinates:
+//! positions are `INT16`, and XWayland keeps the screen size in the
+//! server's signed-`short` width and height. A layout wider than 32767 X
+//! pixels leaves every X window past that edge unaddressable -- the wire
+//! clamp in `manage.rs` pins it at the edge in X while scoot draws it where
+//! it is placed, `QueryPointer` over it answers a wrapped root position and
+//! no window, and whatever X does in root coordinates there (a menu or
+//! tooltip it places, an XDND position, `USPosition`) lands wrong. Eight
+//! 3840-pixel outputs at 1.25 are 24576 logical pixels: 49152 X pixels at
+//! 2 (measured, before this bound existed).
+//!
+//! So `S` is the largest integer from 1 up to `ceil([output] scale)` at
+//! which the whole layout fits -- every output's logical right and bottom
+//! edge times `S` at most 32767, its left and top (an origin can be
+//! negative) times `S` at least -32768: [`fit_x_scale`]. A layout that fits
+//! at its integer is unaffected; a huge one draws X at the largest scale
+//! that fits (blurrier, the way X at 1 was, but addressable), logged at
+//! info once per change. One that does not fit even at 1 keeps 1 -- the
+//! limit X always had -- with a warning. The layout moves at runtime, so
+//! [`State::refit_xwayland`] re-chooses at every change to it: an output
+//! added, removed or resized, and a reload of the scale.
 //!
 //! # Telling toolkits: XSETTINGS
 //!
@@ -81,27 +105,38 @@
 //! # A scale-1 session is untouched
 //!
 //! At `S = 1` from startup the client scale is set to the 1.0 it already
-//! was and no XSETTINGS entry is written (a reload back to 1 does write
-//! them, at 1, so the old ones do not linger): nothing an X client or toolkit reads
-//! differs from the session before any of this existed (pinned:
-//! `tests/scale.rs`'s `a_scale_1_session_is_untouched`).
+//! was and no XSETTINGS entry is written (a change back to 1 does write
+//! them, at 1, so the old ones do not linger): nothing an X client or
+//! toolkit reads differs from the session before any of this existed
+//! (pinned: `tests/scale.rs`'s `a_scale_1_session_is_untouched`). The same
+//! holds for a session whose layout bounds `S` to 1 from startup. A change
+//! that leaves `S` where it was sends X nothing.
 //!
-//! # A reload that moves `S`
+//! # A change that moves `S`
 //!
-//! [`State::rescale_xwayland`] sets the new client scale before the
-//! outputs are re-advertised (so XWayland resizes its X screen to the new
-//! X pixels), publishes the new toolkit settings -- GTK rescales live off
-//! them -- and reconfigures every managed X window into
-//! its new X pixels at its unchanged logical place. An app that read the
-//! scale once at startup keeps drawing at its old scale in the new pixels
-//! (smaller or bigger by the ratio) until it is restarted; its geometry is
-//! right either way. An override-redirect window (a menu, a tooltip) open
-//! across the reload cannot be configured by a window manager: Smithay
-//! recorded its position in the old logical pixels, so it is drawn and hit
-//! there, offset, until it next moves itself or closes -- menus close on
-//! the next click anyway.
+//! [`State::refit_xwayland`] runs once the new layout is in place: it sets
+//! the new client scale, re-advertises every output (`change_current_state`
+//! with nothing changed, which Smithay turns into a re-send of exactly what
+//! the client scale moved -- to XWayland's `xdg_output`s their logical
+//! size and position, to its `wl_output`s the scale -- so XWayland resizes
+//! its X screen to the new X pixels; every other client gets a bare
+//! `wl_output.done`), publishes the new toolkit settings -- GTK rescales
+//! live off them -- and reconfigures every managed X window into its new X
+//! pixels at its unchanged logical place. The layout change itself was
+//! advertised a moment before in the old client scale, so XWayland briefly
+//! holds a screen sized for that (both are queued in the same dispatch, and
+//! it settles on the second); an X client that reads the screen size in
+//! that instant reads the first. An app that read the scale once at
+//! startup keeps drawing at its old scale in the new pixels (smaller or
+//! bigger by the ratio) until it is restarted; its geometry is right
+//! either way. An override-redirect
+//! window (a menu, a tooltip) open across the change cannot be configured
+//! by a window manager: Smithay recorded its position in the old logical
+//! pixels, so it is drawn and hit there, offset, until it next moves
+//! itself or closes -- menus close on the next click anyway.
 
 use smithay::reexports::wayland_server::Client;
+use smithay::utils::{Logical, Rectangle};
 use smithay::xwayland::XWaylandClientData;
 use smithay::xwayland::xwm::settings::Value;
 
@@ -114,13 +149,106 @@ const BASE_DPI: i32 = 96;
 /// XSETTINGS carries DPI in 1024ths of a dot per inch.
 const DPI_UNIT: i32 = 1024;
 
-/// The scale X draws at for an output whose `wl_output.scale` integer is
-/// `integer_scale`: that integer, never below 1. `integer_scale` is
-/// `ceil([output] scale)` and the configured scale is at least 0.5, so it
-/// is already at least 1; the floor is what makes that true by
-/// construction rather than by the config clamp's range.
+/// The scale X would draw at for an output whose `wl_output.scale` integer
+/// is `integer_scale`, before the layout's bound ([`fit_x_scale`]): that
+/// integer, never below 1. `integer_scale` is `ceil([output] scale)` and
+/// the configured scale is at least 0.5, so it is already at least 1; the
+/// floor is what makes that true by construction rather than by the config
+/// clamp's range.
 pub(in crate::compositor) fn x_scale(integer_scale: i32) -> i32 {
     integer_scale.max(1)
+}
+
+/// The largest right or bottom edge the X screen can have, in X pixels:
+/// XWayland keeps the screen's size in the X server's `ScreenRec`, whose
+/// width and height are signed 16-bit (`short`), so an edge past this
+/// wraps negative there, whatever the `CARD16` the wire carries.
+const X_MAX_EDGE: i64 = i16::MAX as i64;
+
+/// The lowest X coordinate: `INT16`'s floor, what an output at a negative
+/// logical origin must stay above once scaled.
+const X_MIN_COORDINATE: i64 = i16::MIN as i64;
+
+/// The union of every output's logical rectangle: `left`/`top` inclusive,
+/// `right`/`bottom` exclusive (the edge, as a size is).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::compositor) struct Bounds {
+    pub(in crate::compositor) left: i32,
+    pub(in crate::compositor) top: i32,
+    pub(in crate::compositor) right: i32,
+    pub(in crate::compositor) bottom: i32,
+}
+
+impl Bounds {
+    /// The union of `rects`, or `None` when there are none. Saturating: a
+    /// rectangle reaching past `i32` bounds at `i32::MAX`, which fits no X
+    /// scale, rather than wrapping into one that seems to.
+    pub(in crate::compositor) fn of(
+        rects: impl IntoIterator<Item = Rectangle<i32, Logical>>,
+    ) -> Option<Self> {
+        rects.into_iter().fold(None, |union: Option<Self>, rect| {
+            let next = Self {
+                left: rect.loc.x,
+                top: rect.loc.y,
+                right: rect.loc.x.saturating_add(rect.size.w),
+                bottom: rect.loc.y.saturating_add(rect.size.h),
+            };
+            Some(union.map_or(next, |union| Self {
+                left: union.left.min(next.left),
+                top: union.top.min(next.top),
+                right: union.right.max(next.right),
+                bottom: union.bottom.max(next.bottom),
+            }))
+        })
+    }
+
+    /// Whether every coordinate inside, times `scale`, is one X can
+    /// address. In `i64`, where any `i32` times any `i32` fits.
+    fn fit(self, scale: i32) -> bool {
+        let scale = i64::from(scale);
+        i64::from(self.left) * scale >= X_MIN_COORDINATE
+            && i64::from(self.top) * scale >= X_MIN_COORDINATE
+            && i64::from(self.right) * scale <= X_MAX_EDGE
+            && i64::from(self.bottom) * scale <= X_MAX_EDGE
+    }
+}
+
+/// The scale X draws at, and whether the layout fits X's coordinates at
+/// it: see the module doc's "The bound".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::compositor) struct XScale {
+    pub(in crate::compositor) scale: i32,
+    pub(in crate::compositor) fits: bool,
+}
+
+impl XScale {
+    /// Before XWayland is spawned, and what a session without it keeps.
+    pub(in crate::compositor) const UNSET: Self = Self {
+        scale: 1,
+        fits: true,
+    };
+}
+
+/// The largest integer in `1..=x_scale(integer_scale)` at which the layout
+/// `bounds` fits X's coordinates (see [`Bounds::fit`]), or 1, marked as
+/// not fitting, where not even 1 does -- the limit X had before any of
+/// this. No outputs (`None`) bound nothing. At most four checks: the
+/// ceiling is at most `ceil(MAX_SCALE)`.
+pub(in crate::compositor) fn fit_x_scale(integer_scale: i32, bounds: Option<Bounds>) -> XScale {
+    let ceiling = x_scale(integer_scale);
+    let Some(bounds) = bounds else {
+        return XScale {
+            scale: ceiling,
+            fits: true,
+        };
+    };
+    (1..=ceiling).rev().find(|&scale| bounds.fit(scale)).map_or(
+        XScale {
+            scale: 1,
+            fits: false,
+        },
+        |scale| XScale { scale, fits: true },
+    )
 }
 
 /// The XSETTINGS that tell toolkits to draw at `scale`, as GNOME's settings
@@ -154,9 +282,35 @@ pub(in crate::compositor) fn set_client_scale(client: &Client, scale: i32) {
 }
 
 impl State {
-    /// The scale the X server draws at: see the module doc.
+    /// The scale the X server draws at: see the module doc. A field read,
+    /// not a computation: `apply()` reads it once per X window it
+    /// configures.
     pub(in crate::compositor) fn x11_scale(&self) -> i32 {
-        x_scale(self.integer_scale)
+        self.x11_fit.scale
+    }
+
+    /// The X scale the current layout and `[output] scale` call for: see
+    /// the module doc. One pass over the outputs, no allocation.
+    fn chosen_x11_scale(&self) -> XScale {
+        fit_x_scale(self.integer_scale, self.layout_bounds())
+    }
+
+    /// The union of every output's logical rectangle, as the `Space` lays
+    /// them out -- the rectangles `xdg_output` advertises to XWayland.
+    fn layout_bounds(&self) -> Option<Bounds> {
+        Bounds::of(
+            self.outputs
+                .iter()
+                .filter_map(|output| self.space.output_geometry(output)),
+        )
+    }
+
+    /// Chooses the X scale for a server about to be spawned, records it and
+    /// logs a bound: what `xwayland::start` sets the client scale to.
+    pub(super) fn adopt_x11_scale(&mut self) -> i32 {
+        self.x11_fit = self.chosen_x11_scale();
+        self.log_x11_bound();
+        self.x11_fit.scale
     }
 
     /// Tells the X server's toolkits the scale, once its window manager is
@@ -169,20 +323,44 @@ impl State {
         }
     }
 
-    /// A reload moved `[output] scale`, and `integer_scale` with it, from
-    /// `before`: follow it on the X side, if the X scale moved. Runs before
-    /// the outputs are re-advertised (see the module doc), on the cold reload
-    /// path: one walk of the windows, one XSETTINGS write, one configure per
+    /// The outputs or `[output] scale` changed -- an output added, removed
+    /// or resized, a reload of the scale: re-choose the X scale for the
+    /// layout as it now is (see the module doc), and follow it on the X side
+    /// if it moved. Every site that changes the output layout calls this
+    /// once the layout is final and before its `apply()`. Cold: when the X
+    /// scale holds, one pass over the outputs and a compare; when it moves,
+    /// one output re-send each, one XSETTINGS write and one configure per
     /// managed X window.
-    pub(in crate::compositor) fn rescale_xwayland(&mut self, before: i32) {
-        let scale = self.x11_scale();
-        if x_scale(before) == scale {
+    pub(in crate::compositor) fn refit_xwayland(&mut self) {
+        if self.xwayland_client.is_none() {
+            // Never spawned: `start` chooses from the layout then.
+            return;
+        }
+        let chosen = self.chosen_x11_scale();
+        let before = self.x11_fit;
+        if chosen == before {
+            return;
+        }
+        self.x11_fit = chosen;
+        self.log_x11_bound();
+        let scale = chosen.scale;
+        if scale == before.scale {
+            // Only whether the layout fits at 1 moved: logged, nothing to
+            // send.
             return;
         }
         let Some(client) = self.xwayland_client.as_ref() else {
             return;
         };
         set_client_scale(client, scale);
+        // Every output re-advertised to XWayland in the new client scale,
+        // so it resizes its X screen: with nothing changed, Smithay sends
+        // an instance only what its client scale moved -- `xdg_output`'s
+        // logical size and position and `wl_output.scale` to XWayland's,
+        // a bare `wl_output.done` to everyone else's.
+        for output in self.outputs.iter() {
+            output.change_current_state(None, None, None, None);
+        }
         if self.xwm.is_none() {
             // Not `READY` yet (or the window manager never attached): the
             // client scale is all there is to follow, and `READY` publishes
@@ -196,7 +374,7 @@ impl State {
         // logical rectangle, now in the new X pixels. Through the wire clamp
         // again, at the new scale: the rectangle was clamped for the old one,
         // and a column scrolled far off screen that fit `INT16` at 1 would
-        // not at 2. `apply()` after the reload moves any whose logical place
+        // not at 2. The caller's `apply()` moves any whose logical place
         // changed as well.
         for window in self.windows.values() {
             let Some(x11) = window.x11_surface() else {
@@ -207,6 +385,39 @@ impl State {
             if let Err(error) = x11.configure(rect) {
                 tracing::debug!(id = x11.window_id(), %error, "could not rescale an X11 window");
             }
+        }
+    }
+
+    /// Says why X draws below the output scale's integer, when it does: at
+    /// info when the layout fits at a lower one, a warning when it does not
+    /// fit even at 1. Called only when the choice changes, so once per
+    /// change.
+    fn log_x11_bound(&self) {
+        let XScale { scale, fits } = self.x11_fit;
+        let ceiling = x_scale(self.integer_scale);
+        let (width, height) = self.layout_bounds().map_or((0, 0), |bounds| {
+            (
+                bounds.right.saturating_sub(bounds.left),
+                bounds.bottom.saturating_sub(bounds.top),
+            )
+        });
+        if !fits {
+            tracing::warn!(
+                width,
+                height,
+                "the output layout is wider or taller than X can address \
+                 (32767 pixels) even at X scale 1: X windows beyond it are \
+                 placed at the edge, and X menus and drags there misplace"
+            );
+        } else if scale < ceiling {
+            tracing::info!(
+                scale,
+                ceiling,
+                width,
+                height,
+                "X draws below the output scale's integer: the layout at that \
+                 scale would be wider or taller than X can address (32767 pixels)"
+            );
         }
     }
 

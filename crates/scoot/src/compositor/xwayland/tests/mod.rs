@@ -890,6 +890,8 @@ mod press_after_crossing;
 mod refused_cost;
 #[cfg(feature = "xwayland")]
 mod scale;
+#[cfg(feature = "xwayland")]
+mod scale_fit;
 #[cfg(all(feature = "xwayland", feature = "gpu-scanout"))]
 mod scanout;
 #[cfg(feature = "xwayland")]

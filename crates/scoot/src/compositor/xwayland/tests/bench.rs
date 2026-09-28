@@ -152,6 +152,7 @@ fn x11_scaled_composite_cost() {
                 canvas: CANVAS,
                 scale: 1.5,
                 client_scale: Some(client_scale),
+                ..Shape::default()
             },
         ) else {
             return;

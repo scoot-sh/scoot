@@ -603,8 +603,18 @@ its startup id by another X client, below.)
   pixels per logical pixel -- so at an integer scale an X app is drawn one
   X pixel per physical pixel, sharp, and at a fractional one (1.5) it is
   drawn at the integer above (2) and scaled down, like a Wayland client
-  rendering at `ceil`. Toolkits are told the scale over XSETTINGS (the
-  settings a GNOME session publishes: `Gdk/WindowScalingFactor`,
+  rendering at `ceil`. That holds while the whole output layout fits X's
+  coordinates at that scale: X positions are 16-bit (32767 at most), so
+  when the layout times `ceil(scale)` would be wider or taller than 32767
+  X pixels (eight 3840-pixel outputs at 1.25 would be 49152 at 2) the X
+  server draws at the largest integer scale at which it fits instead -- 1
+  at worst, blurrier but with every X window addressable -- and says so
+  at info in the log; one that does not fit even at 1 stays at 1, the
+  limit X always had, with a warning. The choice follows the layout: an
+  output added, removed or resized and a reload re-choose it, with
+  everything below re-told when it moves. Toolkits are told the scale
+  over XSETTINGS (the settings a GNOME session publishes:
+  `Gdk/WindowScalingFactor`,
   `Xft/DPI`, `Gdk/UnscaledDPI`). GTK 3 is measured to draw at the right
   size and follow a reload live. Qt 6 and Java document reading these
   settings (Qt 6 takes `Xft/DPI` and its default high-DPI scaling turns
@@ -627,12 +637,13 @@ its startup id by another X client, below.)
   pixels) is kept at the logical point it names, a drag's `XdndPosition` is
   in X root pixels. At the default scale 1 nothing is set and nothing
   changes (a reload from a higher scale back to 1 does write the settings,
-  at 1, so the old ones do not linger). **A reload** that moves `ceil(scale)`
-  re-tells the X server and the toolkits, and reconfigures every X window
-  into the new X pixels at its unchanged logical place; an app that read
-  the scale once at startup draws at its old scale until restarted (its
+  at 1, so the old ones do not linger). **A reload or output change**
+  that moves the X scale re-tells the X server and the toolkits, and
+  reconfigures every X window into the new X pixels at its unchanged
+  logical place; an app that read the scale once at startup draws at its
+  old scale until restarted (its
   size is still right, its contents smaller or larger), and an X menu open
-  across the reload is drawn offset until it moves or closes.
+  across the change is drawn offset until it moves or closes.
 - **Not yet:** `_NET_WM_ICON` is not read, and XIM is not provided (see
   [Clipboard, drag-and-drop and input methods](#clipboard-drag-and-drop-and-input-methods)).
 

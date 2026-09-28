@@ -31,13 +31,13 @@ use super::xdnd::{Inbox, PROXY_NAME, XDND_VERSION, packed};
 use crate::compositor::test_support::pixel;
 
 /// The X server's view of `xid`'s window: root position and size.
-fn x_rect(live: &Live, xid: XWindow) -> (i32, i32, i32, i32) {
+pub(super) fn x_rect(live: &Live, xid: XWindow) -> (i32, i32, i32, i32) {
     let (x, y, w, h) = live.x.root_geometry(xid);
     (x, y, w as i32, h as i32)
 }
 
 /// `rect` in X pixels at X scale `scale`.
-fn scaled(rect: Rect, scale: i32) -> (i32, i32, i32, i32) {
+pub(super) fn scaled(rect: Rect, scale: i32) -> (i32, i32, i32, i32) {
     (
         rect.x * scale,
         rect.y * scale,
@@ -47,7 +47,7 @@ fn scaled(rect: Rect, scale: i32) -> (i32, i32, i32, i32) {
 }
 
 /// The size of the X screen, as a client reads it off the root window.
-fn x_screen(x: &XClient) -> (u16, u16) {
+pub(super) fn x_screen(x: &XClient) -> (u16, u16) {
     let geometry = x
         .conn
         .get_geometry(x.root)
@@ -122,7 +122,7 @@ fn setting(settings: &[(String, i32)], name: &str) -> Option<i32> {
 
 /// The XSETTINGS a toolkit reads the scale from: `(window scaling factor,
 /// Xft DPI, unscaled DPI)`, each `None` where unset.
-fn toolkit_scale(x: &XClient) -> (Option<i32>, Option<i32>, Option<i32>) {
+pub(super) fn toolkit_scale(x: &XClient) -> (Option<i32>, Option<i32>, Option<i32>) {
     let settings = xsettings(x);
     (
         setting(&settings, "Gdk/WindowScalingFactor"),
@@ -134,7 +134,7 @@ fn toolkit_scale(x: &XClient) -> (Option<i32>, Option<i32>, Option<i32>) {
 /// Maps a managed X window of `RED` and waits until the X server has it at
 /// the size scoot placed it at, in X pixels at `scale`: the configure has
 /// landed, not just been sent.
-fn managed_at(live: &mut Live, scale: i32) -> (XWindow, WindowId, Placement) {
+pub(super) fn managed_at(live: &mut Live, scale: i32) -> (XWindow, WindowId, Placement) {
     let xid = live.x.map(&Props::new(RED));
     let id = live.managed(xid);
     let placement = live.placement(id);

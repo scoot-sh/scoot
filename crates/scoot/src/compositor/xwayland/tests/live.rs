@@ -74,10 +74,14 @@ pub(super) fn live_scaled(test: &str, scale: f64) -> Option<Live> {
 /// What a fixture's one output (or first of several) looks like, and --
 /// for the benchmark that compares X scales on one output scale only --
 /// the client scale XWayland is given in place of the one scoot derives.
+/// `extra` is more outputs, `(width, height)` in physical pixels, each
+/// added to the right of the last before XWayland starts -- for the suite
+/// about layouts too wide for X at their integer scale.
 pub(super) struct Shape {
     pub(super) canvas: i32,
     pub(super) scale: f64,
     pub(super) client_scale: Option<f64>,
+    pub(super) extra: &'static [(i32, i32)],
 }
 
 impl Default for Shape {
@@ -86,6 +90,7 @@ impl Default for Shape {
             canvas: CANVAS,
             scale: 1.0,
             client_scale: None,
+            extra: &[],
         }
     }
 }
@@ -114,6 +119,15 @@ fn live_built(test: &str, appearance: Appearance, outputs: i32, shape: Shape) ->
             &format!("{}-{index}", crate::compositor::headless::OUTPUT_NAME),
             CANVAS,
             CANVAS,
+        )
+        .expect("another headless output");
+    }
+    for (index, &(width, height)) in shape.extra.iter().enumerate() {
+        crate::compositor::headless::add_output(
+            &mut fixture.state,
+            &format!("wide-{index}"),
+            width,
+            height,
         )
         .expect("another headless output");
     }

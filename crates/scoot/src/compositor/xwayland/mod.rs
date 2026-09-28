@@ -281,8 +281,10 @@ pub fn start(
     state.xdisplay = Some(display);
     // Before the first dispatch, so XWayland binds every global -- the
     // outputs it sizes its X screen from above all -- at this scale (see
-    // `scale.rs`). Kept for a reload that moves the scale.
-    scale::set_client_scale(&client, state.x11_scale());
+    // `scale.rs`), chosen from the layout as it is now. Kept for a layout
+    // or scale change that moves it (`State::refit_xwayland`).
+    let x_scale = state.adopt_x11_scale();
+    scale::set_client_scale(&client, x_scale);
     state.xwayland_client = Some(client.clone());
     // Alongside the spawn, not at `READY`: with no XWM there are no X
     // surfaces to grab for yet, but a 70ms registry gap would move the

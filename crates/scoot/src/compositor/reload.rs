@@ -412,15 +412,10 @@ impl State {
                 ));
             }
             ScaleReload::Apply => {
-                #[cfg(feature = "xwayland")]
-                let before = self.integer_scale;
                 self.output_scale = fresh.scale;
                 self.integer_scale = integer_scale(fresh.scale);
-                // Before the outputs are re-advertised: XWayland sizes its
-                // X screen from them, in the client scale set here (see
-                // `xwayland/scale.rs`).
-                #[cfg(feature = "xwayland")]
-                self.rescale_xwayland(before);
+                // Re-chooses the X scale too, once the new layout is in
+                // place (see `xwayland/scale.rs`).
                 self.rescale_outputs(fresh.scale);
                 self.resend_output_scale();
                 report.applied.push(field::SCALE.to_owned());
