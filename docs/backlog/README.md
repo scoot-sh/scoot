@@ -742,7 +742,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 - [`--nested` confirms a lock before the host shows it](./resolved/nested-lock-confirm-on-present-done.md) — RESOLVED 2026-09-28 (PR #304): the nested tail confirms on the host's commit (`note_nested_frame` over `FrameOutcome::host_committed`), not the draw; dropped read-back and owed dma-buf frames wait for the owed hand-over (`note_nested_handed_over`, gated on a draw recorded for this lock), a re-render, or the shared one-second fallback. Eight unit tests, three behind `gpu-scanout`.
 
 ### Found by the niri A/B (2026-09-24)
-- [Nested scoot presents fewer frames than niri for a ~60 Hz client](./resolved/nested-frame-rate-vs-client-done.md) — RESOLVED 2026-09-28 (PR #308, verdict-only, no code change): own 16 ms timer rather than host callbacks, client-limited at ~54 commits/s — both present 1:1 under equal load; nothing cheap and safe to fix.
+- [Nested scoot presents fewer frames than niri for a ~60 Hz client](./resolved/nested-frame-rate-vs-client-done.md) — RESOLVED 2026-09-28 (PR #308, verdict-only, no code change): own 16 ms timer rather than host callbacks; the done-gated client draws fewer frames on the longer loop — loop-paced, nothing cheap and safe to fix.
 
 ### Meta
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.

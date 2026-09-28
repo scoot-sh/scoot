@@ -412,8 +412,8 @@ and the X11 client libraries. Its runtime closure in the Nix store is 738 MB.
   pacing rather than cost. Since resolved as a measured don't-build
   ([record](backlog/resolved/nested-frame-rate-vs-client-done.md)):
   scoot paces `--nested` off its own 16 ms timer rather than host frame
-  callbacks, and the client itself only produces ~54 commits/s — under
-  equal load both present 1:1.
+  callbacks, and the done-gated client draws fewer frames on the longer
+  loop — loop-paced, nothing cheap and safe to fix.
 - **A harness artifact was caught and fixed.** A first full run had niri-off
   reading its config from the VM's 9p mount of this checkout. niri watches
   its config file, and on 9p that cost it about 55 extra wakeups a second at
