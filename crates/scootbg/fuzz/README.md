@@ -35,10 +35,20 @@ only; it is not in the dev shell. From the repository root:
 devenv shell -- nix shell --inputs-from . nixpkgs#cargo-fuzz --command bash -c '
   cd crates/scootbg &&
   mkdir -p /tmp/scootbg-corpus &&
-  cargo fuzz run -s none whole /tmp/scootbg-corpus fuzz/corpus/whole -- \
-    -max_len=8192 -timeout=30 -rss_limit_mb=4096 -max_total_time=600'
+  cargo fuzz run -s none whole /tmp/scootbg-corpus fuzz/corpus/whole \
+    fuzz/regressions/whole -- \
+    -max_len=65536 -timeout=30 -rss_limit_mb=4096 -max_total_time=600'
 ```
 
+- **`-max_len=65536`**, not libFuzzer's default (4096) or the 8192 the
+  first runs used: a flat PNG row compresses about 1000:1, so 8 KB of
+  input cannot describe a row longer than about 8 million pixels, and the
+  scaler's `f32` precision gives out at 2^24 (16.8 million). A review
+  found a 20,000,000×1 PNG of 20 KB aborting the daemon there, out of the
+  fuzzer's reach
+  ([testing-done.md](../../../docs/scootbg/backlog/resolved/testing-done.md#review-of-pr-317-the-long-row)).
+  `fuzz/regressions/whole` is passed as a corpus directory too, so its
+  inputs are mutated as well as replayed.
 - **Give it a scratch corpus first.** libFuzzer writes what it finds
   into the first directory; `fuzz/corpus/whole` is the committed seed
   corpus and should stay a few KB. To keep a new input worth having,
@@ -96,13 +106,16 @@ to compile, which is the signal to add it to `fuzz_targets/whole.rs`.
 
 ## The seed corpus
 
-`corpus/whole/` holds 21 inputs, 6.4 KB in all, each the 19-byte header
+`corpus/whole/` holds 23 inputs, 6.9 KB in all, each the 19-byte header
 ([`src/image/fuzz.rs`](../src/image/fuzz.rs) documents it) and a small
 file: the three JPEG fixtures in `tests/fixtures/`; JPEGs at 4:2:0 and
 4:2:2, progressive, with a big-endian and a little-endian EXIF
 orientation, CMYK, and one claiming 16384×16384; PNGs at 16-bit RGBA,
 16-bit grey interlaced, palette with transparency, grey + alpha, 1×1,
-and one claiming 16384×16384; lossless, lossy, lossy-with-alpha and
-animated WebPs. They were made with ImageMagick 7.1.2 (the EXIF blocks
-spliced in by hand), and span every mode, filter and orientation, and
-sizes at and past `wl_shm`'s limit.
+one claiming 16384×16384, a 100,000×1 row and a 1×100,000 column (both
+past the scaler's side limit, `scale::MAX_SCALED_SIDE`); lossless,
+lossy, lossy-with-alpha and animated WebPs. They were made with
+ImageMagick 7.1.2 (the EXIF blocks spliced in by hand) and, for the long
+sides, Python's `zlib`, and span every mode, filter and orientation, and
+sizes at and past `wl_shm`'s limit. `regressions/whole/` holds the one
+past crash: a 17,000,000×1 grey PNG with `fit` (16.6 KB).
