@@ -451,7 +451,7 @@ fn query_reports_each_output_and_its_surface() {
         let _ = first.prefer_fractional(180);
         let _ = first.configure(7, 1707, 960);
         // A draw that failed shows as such.
-        first.draw_failed();
+        first.draw_failed("shared memory: out of it".into());
     }
     {
         let second = &mut outputs.get_mut(b).unwrap().output;
@@ -484,6 +484,7 @@ fn query_reports_each_output_and_its_surface() {
                     "pixels": {"width": 2561, "height": 1440},
                 },
                 "draw_failed": true,
+                "draw_error": "shared memory: out of it",
                 "shows": null,
             },
             {
@@ -495,6 +496,7 @@ fn query_reports_each_output_and_its_surface() {
                 "logical": null,
                 "surface": {"state": "gave-up", "size": null, "scale": null, "pixels": null},
                 "draw_failed": false,
+                "draw_error": null,
                 "shows": null,
             },
             {
@@ -506,6 +508,7 @@ fn query_reports_each_output_and_its_surface() {
                 "logical": null,
                 "surface": {"state": "waiting", "size": null, "scale": null, "pixels": null},
                 "draw_failed": false,
+                "draw_error": null,
                 "shows": null,
             },
         ], "saving": true, "profile": "default"})

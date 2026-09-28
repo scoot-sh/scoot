@@ -12,3 +12,12 @@ HANDOFF.md
 devenv.local.nix
 devenv.local.yaml
 __pycache__/
+
+# libFuzzer drops reproducers in its working directory when a `-fork` run
+# ignores its `-artifact_prefix` (crates/scootbg/fuzz/README.md): a crash
+# worth keeping is copied to fuzz/regressions/ by hand, never committed
+# from here.
+/crates/scootbg/crash-*
+/crates/scootbg/oom-*
+/crates/scootbg/timeout-*
+/crates/scootbg/slow-unit-*

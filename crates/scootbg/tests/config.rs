@@ -498,6 +498,56 @@ fn per_output_tables_and_images() {
     shot(&session, &names[1]).assert_all(background, "an empty table: nothing");
 }
 
+/// The precedence rule with every output overridden and a new `command`
+/// across a restart (a package upgrade between two sessions): the section
+/// is otherwise the same, so the `set` made in the first session is what
+/// the second restores, on both outputs, over both of their tables.
+#[test]
+fn a_set_survives_two_overrides_and_a_new_command_across_a_restart() {
+    let shared = Scratch::new("ac-cmd");
+    let Some(session) = start("ac-cmd", &shared) else {
+        return;
+    };
+    let names = scoot_names(&session);
+    let section = |command: &str| {
+        json!({
+            "command": command,
+            "color": RED,
+            "output": {
+                names[0].clone(): { "color": GREEN },
+                names[1].clone(): { "color": YELLOW },
+            },
+        })
+        .to_string()
+    };
+    apply(
+        &session,
+        "scoot",
+        &section("/nix/store/one-scootbg/bin/scootbg"),
+    );
+    configured_names(&session, 2);
+    let (outputs, _) = showing(&session);
+    let want = [
+        (names[0].clone(), color(GREEN)),
+        (names[1].clone(), color(YELLOW)),
+    ];
+    let mut outputs = outputs;
+    outputs.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(outputs, want, "each output's own table");
+    ok(&session, &["set", BLUE]);
+    both_show(&session, BLUE, "the set over both tables");
+
+    let session = restart(session, "ac-cmd2");
+    assert_eq!(scoot_names(&session), names, "the same outputs");
+    apply(
+        &session,
+        "scoot",
+        &section("/nix/store/two-scootbg/bin/scootbg"),
+    );
+    configured_names(&session, 2);
+    both_show(&session, BLUE, "restored, a new command being no change");
+}
+
 /// An image in the section that is not there: the rest is applied, the
 /// reply says which, the exit status is 1, and the choice stays saved, so
 /// it shows once the file is back (and the section is unchanged, so no

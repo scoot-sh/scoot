@@ -29,8 +29,9 @@ use rustix::event::{EventfdFlags, eventfd};
 use rustix::io::Errno;
 use scootbg_mem::ShmBuffer;
 
+use crate::image::DECODE_STACK;
 use crate::image::decode::{DecodeError, decode_file};
-use crate::image::render::{Source, render};
+use crate::image::render::render_each;
 use crate::jobs::Target;
 use crate::wallpaper::Image;
 
@@ -67,10 +68,13 @@ impl std::fmt::Display for JobError {
 /// A thread starter: std's in the daemon, a failing one in tests.
 pub type Spawn = fn(Box<dyn FnOnce() + Send>) -> io::Result<()>;
 
-/// Starts `job` on a named thread, which ends with it.
+/// Starts `job` on a named thread, which ends with it. Its stack is
+/// [`DECODE_STACK`], set rather than left to std (whose default
+/// `RUST_MIN_STACK` could change), so the fuzz target runs on the same.
 fn spawn_thread(job: Box<dyn FnOnce() + Send>) -> io::Result<()> {
     std::thread::Builder::new()
         .name("scootbg-decode".into())
+        .stack_size(DECODE_STACK)
         .spawn(job)
         .map(drop)
 }
@@ -226,19 +230,8 @@ pub fn work(image: &Image, targets: &[Target]) -> Done {
         }
     }
     let mut out = Vec::with_capacity(sizes.len());
-    let mut source = Some(decoded);
-    let last = sizes.len().saturating_sub(1);
-    for (index, &dims) in sizes.iter().enumerate() {
-        let drawn = match (index == last, source.as_ref()) {
-            (true, _) => source
-                .take()
-                .map(|decoded| render(Source::Owned(decoded), image.look, dims)),
-            (false, Some(decoded)) => Some(render(Source::Borrowed(decoded), image.look, dims)),
-            (false, None) => None,
-        };
-        if let Some(drawn) = drawn {
-            out.push((dims, drawn.map_err(|error| error.to_string())));
-        }
-    }
+    render_each(decoded, image.look, &sizes, |dims, drawn| {
+        out.push((dims, drawn.map_err(|error| error.to_string())));
+    });
     Ok(out)
 }

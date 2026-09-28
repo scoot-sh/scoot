@@ -1,0 +1,47 @@
+# The `cargo fuzz` target over scootbg's whole image path. Test tooling
+# only: never part of the shipped binary, and never a member of the
+# repository's workspace (the `[workspace]` table below makes this its
+# own), so `cargo build --workspace`, nextest, clippy and the flake's
+# builds never compile it. How to run it: README.md here.
+[package]
+name = "scootbg-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+# scootbg is a binary crate, so the target compiles scootbg's own image
+# modules by `#[path]` (fuzz_targets/whole.rs) and needs what they use.
+# Cargo.lock here started as a copy of the workspace's and must keep the
+# same versions of everything they reach, which scootbg's stable test
+# `image::fuzz::tests::the_fuzz_lockfile_matches_the_workspace` checks.
+[dependencies]
+libfuzzer-sys = "0.4"
+scootbg-mem = { path = "../../scootbg-mem" }
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+serde = "1"
+zune-jpeg = "0.5"
+zune-core = "0.5"
+png = "0.18"
+image-webp = "0.2"
+pic-scale-safe = "0.1"
+
+[[bin]]
+name = "whole"
+path = "fuzz_targets/whole.rs"
+test = false
+doc = false
+bench = false
+
+# Only symbols, for readable crash stacks. The workspace's release profile
+# (fat LTO, one codegen unit, `panic = "abort"`, stripped) does not apply
+# to this workspace, and none of what it sets changes what the code does:
+# cargo-fuzz aborts on a panic anyway, and builds with full optimisation.
+[profile.release]
+debug = 1

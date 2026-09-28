@@ -566,7 +566,7 @@ maps it); the extra fd is the worker's eventfd.
 - **Competitors**: lightest.md's run; scootbg's own numbers are above.
 - **Coverage-guided fuzzing** of decode + scale: not done; the
   deterministic truncation and corruption loops are unit tests
-  ([testing.md](../testing.md) keeps the `cargo fuzz` item).
+  ([testing-done.md](testing-done.md) keeps the `cargo fuzz` item).
 - **Infallible allocations outside our buffer.** Only the decoded pixel
   buffer is fallible. These are plain `Vec`s, and the allocator refusing
   one aborts the daemon:
@@ -579,7 +579,15 @@ maps it); the extra fd is the worker's eventfd.
     before copying out RGB (4 bytes a pixel), and a lossy image's YUV
     planes (1.5 bytes a pixel) and alpha plane;
   - `pic-scale-safe`: its output (the target's size in RGB), after the
-    target is checked against `wl_shm`'s limit;
+    target is checked against `wl_shm`'s limit; and its filter weights,
+    `kernel × out` `f32`s plus an `i16` copy per scaled axis, about 36
+    bytes a pixel of the axis's longer side for Lanczos3, all committed.
+    Added after ticket 12's review: for a 16.7-million-pixel row that was
+    about 600 MB of weights against 50 MB of RGB, and past 2^24 pixels on
+    an axis the weights' `f32` positions panicked the daemon. Every side
+    the scaler sees is now at most `scale::MAX_SCALED_SIDE` (65536), so
+    the weights are at most about 2.4 MB an axis
+    ([testing-done.md](testing-done.md#review-of-pr-317-the-long-row));
   - scootbg's own crop copy for a second size (`try_reserve_exact`, so
     that one is fallible) and the copies for same-size outputs (an shm
     buffer each, fallible).

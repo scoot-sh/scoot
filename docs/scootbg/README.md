@@ -498,9 +498,10 @@ anything wrong                                                -> {"type":"error"
   for one output is kept by its name, across unplugging it, and across a
   daemon restart ([Restore](#restore)).
 - `query`'s `draw_failed` (per output) is `true` when the last attempt to
-  draw what that output should show failed (stderr says why), so a
-  `shows` of `null` from a failure is told apart from a `clear`; the
-  next request for it, or a new size, retries. The top-level `saving` is
+  draw what that output should show failed, so a `shows` of `null` from
+  a failure is told apart from a `clear`; the next request for it, or a
+  new size, retries. `draw_error` says why (as stderr does), `null`
+  otherwise: text to read, not to match. The top-level `saving` is
   `false` while changes are not saved for the next start
   ([Restore](#restore)), and `profile` is the profile whose state is
   restored and saved: the daemon's `--profile`, or the last one an
@@ -1037,7 +1038,9 @@ safety are not traded against each other:
 - **Dependencies are weighed on safety as well as weight:** how much
   `unsafe` they carry and what for, whether they are fuzzed upstream, and
   their RustSec record. Where a dependency is not fuzzed upstream,
-  scootbg fuzzes the path through it.
+  scootbg fuzzes the path through it: a `cargo fuzz` target over decode,
+  crop, scale and pack, on the stable toolchain
+  ([testing.md](testing.md)).
 
 The audit behind these rules, and the one measured cost they carry (CPU
 per change from the safe scaler), is in

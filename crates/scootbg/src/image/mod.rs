@@ -28,15 +28,29 @@ mod bench;
 pub mod decode;
 pub mod exif;
 pub mod fit;
+/// The fuzz target's entry point, replayed over the committed corpus by a
+/// stable test; the fuzz crate (`crates/scootbg/fuzz`) compiles it itself.
+#[cfg(test)]
+pub mod fuzz;
 pub mod orientation;
 pub mod pack;
 pub mod render;
 pub mod scale;
 
+/// Images with one very long side (`scale::MAX_SCALED_SIDE`).
+#[cfg(test)]
+mod long_axis_tests;
+
 /// Test images made in code (PNG, WebP) or from the tiny committed JPEG
 /// fixtures, shared by the image tests.
 #[cfg(test)]
 pub mod samples;
+
+/// The stack of the thread that decodes and draws an image
+/// (`daemon::worker`): 2 MiB, std's default, named so the fuzz target
+/// (`fuzz`) runs its input on a thread of the same size, and an input that
+/// needs more stack than the daemon has fails there too, not only here.
+pub const DECODE_STACK: usize = 2 << 20;
 
 /// How an image is fitted to an output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

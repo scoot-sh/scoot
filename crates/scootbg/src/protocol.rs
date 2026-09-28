@@ -421,7 +421,7 @@ fn show<'a>(
 ///  "logical":{"width":1920,"height":1080},
 ///  "surface":{"state":"configured","size":{"width":1920,"height":1080},
 ///             "scale":2,"pixels":{"width":3840,"height":2160}},
-///  "shows":null}
+///  "draw_failed":false,"draw_error":null,"shows":null}
 /// ```
 ///
 /// Every key is always present, `null` when not known (yet). New keys may
@@ -451,6 +451,12 @@ pub struct OutputEntry<'a> {
     /// too large): `shows` is then `null`, or what it showed before, not
     /// what was asked. Cleared by the next request for it or a new size.
     pub draw_failed: bool,
+    /// Why, while `draw_failed`: the error stderr gives after "cannot draw
+    /// ... on OUTPUT: " (such as "no such file", or "shared memory: Cannot
+    /// allocate memory (os error 12)"). `null` otherwise. For a person or
+    /// an agent to read, not to match: the wording is not part of the
+    /// protocol.
+    pub draw_error: Option<&'a str>,
     /// What the output shows: `{"color":"#rrggbb"}`,
     /// `{"image":"/abs/path","mode":"fill","fill":"#rrggbb","filter":"lanczos3"}`,
     /// or `null` for nothing (the compositor's own background, or no

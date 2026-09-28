@@ -287,10 +287,11 @@ pub struct Output {
     /// The generation of the last `set` or `clear` that targeted this
     /// output, 0 before any (see `crate::waiters`).
     stamp: u64,
-    /// Drawing what it should show failed; not retried until a new
-    /// request targets it or the compositor reconfigures it, so a failure
-    /// (a buffer too large for `wl_shm`, out of memory) cannot loop.
-    failed: bool,
+    /// Why drawing what it should show failed, if it did (`query`'s
+    /// `draw_error`); not retried until a new request targets it or the
+    /// compositor reconfigures it, so a failure (a buffer too large for
+    /// `wl_shm`, out of memory) cannot loop.
+    failed: Option<String>,
     /// The scales the compositor asked the wallpaper surface to be drawn
     /// at (`wp_fractional_scale_v1`, `wl_surface.preferred_buffer_scale`),
     /// from the live surface's events only (the glue drops a stale
@@ -373,7 +374,7 @@ impl Output {
     /// failed (as a new `configure` is). Returns `changed`.
     fn rescaled(&mut self, changed: bool) -> bool {
         if changed {
-            self.failed = false;
+            self.failed = None;
         }
         changed
     }
@@ -509,7 +510,7 @@ impl Output {
             requested: Size { width, height },
             drawn,
         };
-        self.failed = false;
+        self.failed = None;
         Effect::Ack(serial)
     }
 
@@ -565,7 +566,7 @@ impl Output {
     /// the output, so the stamp only ever grows.
     pub fn want(&mut self, stamp: u64) {
         self.stamp = self.stamp.max(stamp);
-        self.failed = false;
+        self.failed = None;
     }
 
     /// The generation of the last request that targeted it.
@@ -580,14 +581,20 @@ impl Output {
         }
     }
 
-    /// Drawing failed; see the field.
-    pub fn draw_failed(&mut self) {
-        self.failed = true;
+    /// Drawing failed, for the reason `why` (said on stderr too); see the
+    /// field.
+    pub fn draw_failed(&mut self, why: String) {
+        self.failed = Some(why);
     }
 
     /// Whether the last draw failed and has not been retried yet.
     pub fn has_failed(&self) -> bool {
-        self.failed
+        self.failed.is_some()
+    }
+
+    /// Why the last draw failed, while [`Output::has_failed`].
+    pub fn failure(&self) -> Option<&str> {
+        self.failed.as_deref()
     }
 
     /// What is on screen: what the configured surface was last committed
@@ -606,7 +613,7 @@ impl Output {
         let Surface::Configured { drawn, .. } = &self.surface else {
             return Plan::Nothing;
         };
-        if self.failed {
+        if self.failed.is_some() {
             return Plan::Nothing;
         }
         let Some(content) = wanted else {
@@ -635,7 +642,7 @@ impl Output {
 
     /// Whether it shows `wanted` (at `scale`), for a waiting reply.
     pub fn progress(&self, wanted: Option<&Wallpaper>, scale: Scale) -> Progress {
-        if self.failed {
+        if self.failed.is_some() {
             return Progress::Failed;
         }
         let shown = match &self.surface {
@@ -800,7 +807,7 @@ impl<O> Outputs<O> {
                 surface: Surface::Waiting,
                 closed_once: false,
                 stamp: 0,
-                failed: false,
+                failed: None,
                 preferred: Preferred::default(),
                 creation: 0,
                 late: false,

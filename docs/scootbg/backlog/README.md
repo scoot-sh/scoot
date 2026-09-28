@@ -106,8 +106,20 @@ full per-feature cycle.
     - [Idle memory above the floor: the daemon's resident code](idle-code-pages.md)
       — the failing class, waived for v1: where the pages are, the levers
       tried, and the separate daemon binary as the post-v1 option
-12. [Tests: unit, and end to end on headless scoot](testing.md) — grows with
-    every item above, not batched at the end
+12. [**Tests: unit, and end to end on headless scoot**](resolved/testing-done.md)
+    — RESOLVED 2026-09-28: a `cargo fuzz` target over decode, crop,
+    scale and pack on the stable toolchain (no sanitizer), its seed
+    corpus and past crashes replayed by an ordinary test; a live `set`
+    that cannot be drawn checked end to end, with `query`'s new
+    `draw_error` saying why; the precedence rule across a restart with
+    two per-output overrides and a new `command`; hotplug on headless
+    scoot recorded as a gap (covered on sway). The suites keep growing
+    with every later milestone: [testing.md](../testing.md) says where
+    each kind of test lives
+    - [The scaler's output allocation aborts the daemon when memory is refused](scaler-oom-abort.md)
+      — open, medium, waiting on a user decision: `pic-scale-safe`'s
+      infallible output `Vec` ends the daemon under `RLIMIT_AS` or strict
+      overcommit; accept, probe, fork the scaler, or switch scalers
 
 ## Milestone 2: motion
 

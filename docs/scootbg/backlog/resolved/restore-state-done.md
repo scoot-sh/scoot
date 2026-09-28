@@ -365,7 +365,7 @@ after it adds this record, the numbers, and help-text wording).
   (450–476 ms early `set`, 451–497 ms restore, on 4K). A color-only daemon
   is 340–370 kB larger in RSS after its first save (clean code pages, not
   heap); the binary is 40,960 B larger.
-- **Observability, [testing.md](../testing.md):** a restored image that
+- **Observability, [testing-done.md](testing-done.md):** a restored image that
   exists but will not decode used to show `shows: null` in `query`, the
   same as a `clear`. Review of PR #290 added `draw_failed` (below), which
   tells the two apart; `query` still does not say *why* (stderr does), and
@@ -439,7 +439,7 @@ behavior, and stays).
    failure path. End to end: a restored PNG corrupted since reads
    `draw_failed: true, shows: null`, and a `set` clears it. What is left
    (no reason in `query`; no end-to-end check for a live `set`'s failed
-   draw) is in [testing.md](../testing.md) and "For the next tickets".
+   draw) is in [testing-done.md](testing-done.md) and "For the next tickets".
 5. **Help text:** `scootbg daemon --help` now says the `~/.local/state`
    fallback applies when `XDG_STATE_HOME` is unset, empty or relative, as
    the code and docs do, and describes the saving-off case; `scootbg

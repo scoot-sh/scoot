@@ -218,7 +218,12 @@ fn a_failed_draw_is_not_retried_until_something_changes() {
     let red = Some(color("#c03020"));
     let output = &mut outputs.get_mut(id).unwrap().output;
     let _ = output.configure(3, 1600, 1000);
-    output.draw_failed();
+    output.draw_failed("a test".into());
+    assert_eq!(
+        output.failure(),
+        Some("a test"),
+        "the reason is kept for query"
+    );
     assert_eq!(
         output.plan(red.as_ref(), Scale::Integer(1)),
         Plan::Nothing,
@@ -231,13 +236,15 @@ fn a_failed_draw_is_not_retried_until_something_changes() {
     // A new request is a new chance.
     output.want(7);
     assert_eq!(output.stamp(), 7);
+    assert_eq!(output.failure(), None, "and cleared with the flag");
     assert_eq!(
         output.progress(red.as_ref(), Scale::Integer(1)),
         Progress::Waiting
     );
-    output.draw_failed();
+    output.draw_failed("a test".into());
     // So is a new configure.
     let _ = output.configure(4, 800, 500);
+    assert_eq!(output.failure(), None);
     assert_eq!(
         output.plan(red.as_ref(), Scale::Integer(1)),
         Plan::Show(drawn("#c03020", 800, 500, 1))
@@ -403,7 +410,7 @@ fn a_surface_not_configured_a_round_trip_after_it_was_made_holds_up_no_reply() {
         Progress::Waiting
     );
     assert!(output.unanswered(third));
-    output.draw_failed();
+    output.draw_failed("a test".into());
     assert_eq!(
         output.progress(red.as_ref(), Scale::Integer(1)),
         Progress::Failed

@@ -103,6 +103,17 @@ impl Session {
     /// Starts `scoot --headless --outputs N` with `config` as its config
     /// file; `None` as for [`Session::start`].
     pub fn start_with(tag: &str, outputs: u32, config: &str) -> Option<Self> {
+        Self::launch(tag, outputs, config, None)
+    }
+
+    /// One `scoot --headless` output of `width` × `height` (`--width`,
+    /// `--height`) rather than scoot's default size; `None` as for
+    /// [`Session::start`].
+    pub fn start_sized(tag: &str, width: u32, height: u32) -> Option<Self> {
+        Self::launch(tag, 1, "", Some((width, height)))
+    }
+
+    fn launch(tag: &str, outputs: u32, config: &str, size: Option<(u32, u32)>) -> Option<Self> {
         let Some(scoot) = scoot_bin() else {
             if std::env::var_os("SCOOTBG_REQUIRE_SCOOT").is_some() {
                 panic!(
@@ -122,8 +133,18 @@ impl Session {
         fs::write(&config_path, config).unwrap();
         let config = config_path;
         let log = fs::File::create(scratch.0.join("compositor.log")).unwrap();
-        let compositor = Command::new(&scoot)
-            .args(["--headless", "--outputs", &outputs.to_string(), "--socket"])
+        let mut compositor = Command::new(&scoot);
+        compositor.args(["--headless", "--outputs", &outputs.to_string()]);
+        if let Some((width, height)) = size {
+            compositor.args([
+                "--width",
+                &width.to_string(),
+                "--height",
+                &height.to_string(),
+            ]);
+        }
+        let compositor = compositor
+            .arg("--socket")
             .arg(scratch.0.join("scoot.sock"))
             .arg("--config")
             .arg(&config)

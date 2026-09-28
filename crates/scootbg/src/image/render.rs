@@ -164,6 +164,27 @@ pub fn render(source: Source<'_>, look: Look, dims: (u32, u32)) -> Result<ShmBuf
     Ok(buffer)
 }
 
+/// Renders `image` once for each of `sizes` (distinct, in order), handing
+/// each result to `each`. Every size but the last borrows the image (a
+/// crop is a copy); the last takes it, so it is cropped in place and
+/// dropped before that buffer is allocated. The daemon's worker draws a
+/// job through this, and so does the fuzz target (`super::fuzz`), so what
+/// is fuzzed is what the daemon runs.
+pub fn render_each(
+    image: Decoded,
+    look: Look,
+    sizes: &[(u32, u32)],
+    mut each: impl FnMut((u32, u32), Result<ShmBuffer, RenderError>),
+) {
+    let Some((&last, rest)) = sizes.split_last() else {
+        return;
+    };
+    for &dims in rest {
+        each(dims, render(Source::Borrowed(&image), look, dims));
+    }
+    each(last, render(Source::Owned(image), look, last));
+}
+
 /// Cuts `rgb`, a `width` × `height` image, down to `crop` in place, and
 /// gives the rest back to the allocator.
 pub fn crop_in_place(

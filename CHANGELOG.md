@@ -9,6 +9,21 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-28 — scootbg says why a wallpaper could not be drawn
+
+- **`scootbg query` gives the reason a draw failed**: each output's new
+  `draw_error` is what the daemon's stderr says (`"no such file"`, `"shared
+  memory: Cannot allocate memory (os error 12)"`), or `null` while
+  `draw_failed` is `false`. A `set` that could not be drawn says to look
+  there ([docs/scootbg/cli.md](docs/scootbg/cli.md#query)).
+- **An image with a side longer than 65536 pixels no longer ends
+  scootbg** when set with `--mode fit` or `stretch` (a 20,000,000×1 PNG
+  of 20 KB did, inside the scaler): the `set` fails with a message
+  naming the modes that show it (`center`, `tile`, and usually `fill`).
+  This is also a change for images with a side from 65,537 to about 16.7
+  million pixels, such as a 100,000×1,000 panorama: they drew in `fit`
+  and `stretch` before, and are now refused there.
+
 ### 2026-09-28 — X apps are sharp on HiDPI screens
 
 - **At `[output] scale = 2`, X apps (with `--xwayland`) are drawn at the

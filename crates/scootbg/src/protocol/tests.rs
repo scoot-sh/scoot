@@ -331,6 +331,7 @@ fn output_entries_have_a_fixed_shape() {
             }),
         },
         draw_failed: false,
+        draw_error: None,
         shows: Some(super::Shows(&color)),
     };
     let unknown = OutputEntry {
@@ -347,6 +348,7 @@ fn output_entries_have_a_fixed_shape() {
             pixels: None,
         },
         draw_failed: true,
+        draw_error: Some("a \"reason\"\nover two lines"),
         shows: None,
     };
     let line = reply_string(&Reply::Outputs {
@@ -373,6 +375,7 @@ fn output_entries_have_a_fixed_shape() {
                     "pixels": {"width": 1620, "height": 2880},
                 },
                 "draw_failed": false,
+                "draw_error": null,
                 "shows": {"color": "#c03020"},
             },
             {
@@ -384,6 +387,7 @@ fn output_entries_have_a_fixed_shape() {
                 "logical": null,
                 "surface": {"state": "waiting", "size": null, "scale": null, "pixels": null},
                 "draw_failed": true,
+                "draw_error": "a \"reason\"\nover two lines",
                 "shows": null,
             },
         ], "saving": false, "profile": "scoot"})
