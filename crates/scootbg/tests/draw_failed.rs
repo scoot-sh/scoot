@@ -15,6 +15,23 @@
 //! This is the out-of-memory case the ticket names; a buffer too large for
 //! `wl_shm` itself needs an output of over 536 million pixels, which no
 //! headless compositor here can be asked for without allocating it too.
+//!
+//! **The premise, and why the margin holds the decoding thread.** Small
+//! allocations go to glibc's `malloc` (`scootbg-mem`'s allocator maps only
+//! blocks of 128 KiB and up), and glibc gives a new thread an arena of its
+//! own: 128 MiB of address space reserved (`PROT_NONE`) and trimmed to 64.
+//! By the time the limit is lowered, the color `set` has already run the
+//! state saver on a thread, which made that arena, and it stays in the
+//! address space (counted in `VmSize`) on glibc's free list; the decoding
+//! thread takes it from there, and its 2 MiB stack from glibc's stack
+//! cache, so neither needs new address space. Had no free arena existed,
+//! glibc's reservation would fail under the limit and it would fall back
+//! to sharing an existing arena (`reused_arena`), not fail the `malloc`.
+//! Checked once by `strace -f -e trace=mmap,munmap,clone3` on this test's
+//! steps (docs/scootbg/backlog/resolved/testing-done.md): the saver
+//! thread's `mmap(NULL, 134217728, PROT_NONE, ...)` before the limit; after
+//! it, the decoding thread's only large call is the buffer's
+//! `mmap(NULL, 33177600, ..., MAP_SHARED, ...) = -1 ENOMEM`.
 #![cfg(target_os = "linux")]
 
 mod common;
@@ -56,26 +73,53 @@ fn vm_size(pid: u32) -> u64 {
     kib * 1024
 }
 
-/// Sets the soft address-space limit of `pid` (`None`: unlimited),
-/// leaving the hard one as it was. Returns the soft limit it had.
-fn limit_address_space(pid: u32, soft: Option<u64>) -> Option<u64> {
-    let hard = std::fs::read_to_string(format!("/proc/{pid}/limits"))
-        .unwrap()
+/// The hard address-space limit of `pid`, `None` for unlimited.
+fn hard_limit(pid: u32) -> Option<u64> {
+    let limits = std::fs::read_to_string(format!("/proc/{pid}/limits")).unwrap();
+    let hard = limits
         .lines()
         .find(|line| line.starts_with("Max address space"))
-        .and_then(|line| line.split_whitespace().nth(4).map(str::to_owned))
-        .unwrap();
-    let maximum = (hard != "unlimited").then(|| hard.parse().unwrap());
+        .and_then(|line| line.split_whitespace().nth(4))
+        .unwrap_or_else(|| panic!("no address-space line in {limits}"));
+    (hard != "unlimited").then(|| hard.parse().unwrap())
+}
+
+/// Sets the soft address-space limit of `pid` (`None`: unlimited), the
+/// hard one kept at `hard`. Returns the soft limit it had.
+fn set_soft_limit(pid: u32, soft: Option<u64>, hard: Option<u64>) -> std::io::Result<Option<u64>> {
     let old = prlimit(
         Pid::from_raw(i32::try_from(pid).unwrap()),
         Resource::As,
         Rlimit {
             current: soft,
-            maximum,
+            maximum: hard,
         },
-    )
-    .unwrap();
-    old.current
+    )?;
+    Ok(old.current)
+}
+
+/// The daemon's soft address-space limit, lowered while this lives and
+/// put back on drop, so a failed assertion (a panic) still leaves a daemon
+/// that can be stopped and a limit that does not outlive the test.
+struct Lowered {
+    pid: u32,
+    old: Option<u64>,
+    hard: Option<u64>,
+}
+
+impl Lowered {
+    fn new(pid: u32, soft: u64, hard: Option<u64>) -> Self {
+        let old = set_soft_limit(pid, Some(soft), hard).unwrap();
+        Self { pid, old, hard }
+    }
+}
+
+impl Drop for Lowered {
+    fn drop(&mut self) {
+        // The daemon may be gone (the failure being tested killed it):
+        // nothing to restore then.
+        let _ = set_soft_limit(self.pid, self.old, self.hard);
+    }
 }
 
 fn output(session: &Session) -> Value {
@@ -103,11 +147,29 @@ fn a_live_set_that_cannot_be_drawn_says_why_in_query() {
 
     let pid = daemon.id();
     let limit = vm_size(pid) + MARGIN;
-    let old = limit_address_space(pid, Some(limit));
+    let hard = hard_limit(pid);
+    // The premise: the limit can be lowered to `limit`, and raised back
+    // far enough for the buffer to be drawn afterwards, without
+    // privilege. A hard limit below that (a `ulimit -v` or `LimitAS=` on
+    // the test run) leaves no room between what the daemon maps and the
+    // buffer, or none for the retry, so the test cannot say anything:
+    // skipped, loudly.
+    let needed = limit + u64::from(WIDTH) * u64::from(HEIGHT) * 4 + MARGIN;
+    eprintln!("address space: limit {limit}, needed {needed}, hard {hard:?}");
+    if hard.is_some_and(|hard| hard < needed) {
+        eprintln!(
+            "skipped -- the hard address-space limit ({hard:?} bytes) is below what the \
+             daemon maps, the buffer and twice the margin ({needed} bytes)"
+        );
+        let _ = session.run(&["kill"]);
+        let _ = common::wait_exit(&mut daemon);
+        return;
+    }
+    let lowered = Lowered::new(pid, limit, hard);
     let failed = set(&[picture.to_str().unwrap(), "--mode", "center"]);
-    // Lifted before anything is asserted, so a failure below leaves a
-    // daemon that can still be stopped cleanly.
-    limit_address_space(pid, old);
+    // Lifted before anything is asserted (and on a panic, by the guard),
+    // so a failure below leaves a daemon that can still be stopped.
+    drop(lowered);
     let stderr = String::from_utf8_lossy(&failed.stderr);
     assert_eq!(failed.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("could not be drawn"), "{stderr}");
