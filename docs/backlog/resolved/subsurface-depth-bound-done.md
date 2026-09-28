@@ -78,8 +78,10 @@ below its tree's root, so every Smithay walk over a surface tree
 `resend_scale_tree` recurses at most 65 levels.
 
 **Not covered, and filed:** [Smithay accepts a second `wl_subsurface`
-for an orphaned subsurface](../core/subsurface-second-wl-subsurface.md) --
-low; not a depth path (the link goes through the guard like any other).
+for an orphaned subsurface](../resolved/subsurface-second-wl-subsurface-done.md) --
+resolved 2026-09-28: scoot tracks the live role object per surface and
+refuses with `bad_surface`; not a depth path (the link goes through the
+guard like any other).
 [Many desynchronized subsurfaces in one window stall roughly
 quadratically](../core/subsurface-count-quadratic.md) -- medium,
 measured: many subsurfaces *side by side*, not deep, which this bound does

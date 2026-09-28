@@ -41,8 +41,8 @@
 //! be made a subsurface again, under a different parent, with all of its
 //! own subsurfaces still attached -- and after its parent `wl_surface` is
 //! destroyed the pinned Smithay lets it too, though the protocol says a
-//! surface whose `wl_subsurface` is still alive is `bad_surface` (filed:
-//! `docs/backlog/core/subsurface-second-wl-subsurface.md`). And a surface
+//! surface whose `wl_subsurface` is still alive is `bad_surface` (resolved:
+//! `docs/backlog/resolved/subsurface-second-wl-subsurface-done.md`). And a surface
 //! with no role at all can be given subsurfaces before it is made one
 //! itself. A cap on the new parent's depth alone is
 //! bypassed by building a tree bottom-up, a capped piece at a time, each
