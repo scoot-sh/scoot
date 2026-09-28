@@ -170,3 +170,13 @@ compute the answer once.
 - No test asserts the X side of the grab exception (that a drag held on an
   X window keeps sending raw deltas): the test `x11rb` has no XInput2
   feature, so only the one-off wire capture above shows it.
+
+**Considered, not done (review of the XWayland batch, 2026-09-28).**
+Dropping the crossing move's relative delta is one way to keep XWayland
+from applying it after the `enter`. The review suggested another that keeps
+the raw delta for X consumers: send `pointer.frame()` to the X window right
+after its `relative_motion` and before the `leave`, so XWayland's frame
+handler consumes the pending delta while that window still has the pointer.
+Not taken: the loss today is one crossing delta per move off an X window,
+and the extra frame changes the event grouping every Wayland client on that
+path sees. Revisit if an X game or 3D app is measured to miss it.
