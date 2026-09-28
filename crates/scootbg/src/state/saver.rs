@@ -235,23 +235,24 @@ fn write_through(file: &Path, bytes: &[u8], unique: u64) -> io::Result<()> {
     // two writers that drew one name each take the other's file away, and
     // one rename the other's half-written file into place (review of PR
     // #315).
+    // A failed open made nothing, so there is nothing of ours to remove:
+    // whatever holds the name (another writer's file) is left alone,
+    // whatever the error was.
+    let mut out = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temp)?;
     let written = (|| {
-        let mut out = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temp)?;
         out.write_all(bytes)?;
         out.sync_all()?;
-        drop(out);
         fs::rename(&temp, file)
     })();
+    drop(out);
     if let Err(error) = written {
-        // Only a file this call made: after a failed `create_new` the name
-        // may be someone else's again.
-        if error.kind() != io::ErrorKind::AlreadyExists {
-            let _ = fs::remove_file(&temp);
-        }
+        // The file at `temp` is this call's own (it made it above), so it
+        // goes, whatever went wrong after.
+        let _ = fs::remove_file(&temp);
         return Err(error);
     }
     // The rename itself on disk. Best effort: some file systems refuse
