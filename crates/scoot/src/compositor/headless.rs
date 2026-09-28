@@ -669,13 +669,14 @@ impl State {
                     let now = Instant::now();
                     if !blocked && self.session_lock.await_vblank(id, frame.blank_seq, now) {
                         // This frame needs a timer watching the fallback
-                        // deadline: a newly armed wait has none yet, and a
-                        // freshly issued flip restarted the bound out from
-                        // under the previous one (see `await_vblank`). One
-                        // shot each, dropped when they fire: the vblank path
-                        // takes the wait first in the ordinary case, so a timer
-                        // only ever fires for a vblank that never came -- and a
-                        // stale one finds no wait and drops.
+                        // deadline: a newly armed wait has none yet (the
+                        // deadline is armed once per wait and never extended,
+                        // see `await_vblank`, so exactly the frame that armed
+                        // it inserts the timer). One shot, dropped when it
+                        // fires: the vblank path takes the wait first in the
+                        // ordinary case, so a timer only ever fires for a
+                        // vblank that never came -- and a stale one finds no
+                        // wait and drops.
                         if let Err(error) = self
                             .loop_handle
                             .insert_source(Timer::from_duration(LOCK_VBLANK_TIMEOUT), blank_timeout)
@@ -1643,12 +1644,13 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
 
 /// Fires [`LOCK_VBLANK_TIMEOUT`] after a blanked frame rendered under `--tty`
 /// without its vblank confirming the lock: the fallback half of the vblank
-/// wait (see `SessionLock::await_vblank`). One shot, always dropped -- a
-/// re-presented flip arms its own timer against its own restarted bound, so
-/// a timer only ever fires for a vblank that never came, and a stale one
-/// finds no live deadline and drops. `Instant::now()` rather than the
-/// timer's own timestamp, so the bound is measured against the same clock
-/// the wait was armed with.
+/// wait (see `SessionLock::await_vblank`). One shot, always dropped -- only
+/// the frame that armed the deadline has a timer (re-presents while one is
+/// live arm nothing; a frame drawn after the fallback took an incomplete
+/// wait arms a fresh pair), so a timer only ever fires for a vblank that
+/// never came, and a stale one finds no live deadline and drops.
+/// `Instant::now()` rather than the timer's own timestamp, so the bound is
+/// measured against the same clock the wait was armed with.
 fn blank_timeout(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -> TimeoutAction {
     state.note_blank_timeout(Instant::now());
     TimeoutAction::Drop

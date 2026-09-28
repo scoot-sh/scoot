@@ -679,7 +679,8 @@ impl SessionLock {
     /// whatever happens after. The cost is that a blank re-presented after a
     /// discard (VT switch, hotplug modeset) may confirm by the fallback up to
     /// one bound after the *first* one drew rather than on its own vblank --
-    /// late, never early, for a frame that has drawn. A wait the fallback
+    /// no later than one bound after the first blank drew, and never before
+    /// a blank has drawn. A wait the fallback
     /// took without completing the set (see [`State::note_blank_timeout`])
     /// leaves no deadline, so the next blanked frame arms a fresh one.
     ///

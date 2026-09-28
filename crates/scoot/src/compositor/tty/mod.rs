@@ -47,6 +47,7 @@ mod present_retry;
 mod presenter;
 #[cfg(feature = "gpu-scanout")]
 pub(super) mod scanout;
+mod stale_vblanks;
 
 pub(crate) use self::gpu::{ExplicitGpu, resolve};
 /// For `render::scanout`'s capture-sequence tests, which drive the capture
@@ -57,6 +58,7 @@ pub(crate) use self::scanout::ForceComposite;
 
 use std::error::Error;
 use std::path::Path;
+use std::time::Instant;
 
 use scoot_ipc::PointerButton;
 use smithay::backend::drm::{
@@ -90,6 +92,7 @@ use self::buffers::BufferPool;
 use self::dumb::DumbPresenter;
 use self::head::Head;
 use self::presenter::Presenter;
+use self::stale_vblanks::StaleVblanks;
 use super::State;
 use super::render::ScanoutHandoff;
 use crate::cli::RendererKind;
@@ -128,22 +131,25 @@ pub struct Tty {
     /// two really are comparable and not merely both called "device id".
     device_id: libc::dev_t,
     /// CRTCs whose previous head was dropped by a hotplug with a flip still
-    /// in flight, one entry per completion still owed to that dead head.
-    /// Written only in `hotplug.rs`'s head removal (and only when the
-    /// presenter is certain an event is owed -- see
-    /// `Presenter::flip_in_flight`); consumed by [`Tty::on_vblank`], which
-    /// drops the first `VBlank` on such a CRTC instead of settling whichever
-    /// head now drives it. Without this, one uevent that removes a head and
-    /// builds another on the same CRTC lets the old flip's late event settle
-    /// the new head's first commit early -- an `EBUSY`-refused flip at best,
-    /// and a session-lock wait confirmed by a flip that never carried the
-    /// blank at worst. Surface `Drop`'s blocking commit means the owed event
-    /// is already queued on the DRM fd by the time the new head exists, so
-    /// it is the next one read for that CRTC. Cleared on a device-wide
+    /// in flight, one entry per completion still owed to that dead head,
+    /// each stamped with when it became owed. Written only in `hotplug.rs`'s
+    /// head removal (and only when the presenter is certain an event is owed
+    /// -- see `Presenter::flip_in_flight`); consumed by [`Tty::on_vblank`],
+    /// which drops the first `VBlank` on such a CRTC instead of settling
+    /// whichever head now drives it. Without this, one uevent that removes a
+    /// head and builds another on the same CRTC lets the old flip's late
+    /// event settle the new head's first commit early -- an `EBUSY`-refused
+    /// flip at best, and a session-lock wait confirmed by a flip that never
+    /// carried the blank at worst. Surface `Drop`'s blocking commit means
+    /// the owed event is already queued on the DRM fd by the time the new
+    /// head exists, so it is the next one read for that CRTC. Entries older
+    /// than about one second are dropped rather than eaten (see
+    /// `stale_vblanks.rs`): a driver that never delivers the owed event
+    /// must not freeze a reused CRTC. Cleared on a device-wide
     /// `DrmEvent::Error` and on reactivation, where no completion can be
     /// relied on any more: leaving an entry to eat a real vblank would
     /// freeze that screen, the worse of the two mistakes.
-    stale_vblanks: Vec<crtc::Handle>,
+    stale_vblanks: StaleVblanks,
     /// `--mode WxH`, exactly as the user gave it, kept so a hotplug can
     /// re-run the same choice startup made rather than silently demoting
     /// the flag to a startup-only preference. `None` means each connector's
@@ -337,7 +343,7 @@ pub fn init(
         session,
         drm,
         heads,
-        stale_vblanks: Vec::new(),
+        stale_vblanks: StaleVblanks::new(),
         device_id,
         requested_mode: mode,
         nothing_connected: false,
@@ -1236,11 +1242,18 @@ impl Tty {
     /// for a flip the scanout bookkeeping has since discarded). It is what
     /// the session-lock vblank wait matches on for *that* output (see
     /// `session_lock.rs`): numbers are per head, so only the pair confirms.
-    fn on_vblank(&mut self, crtc: crtc::Handle) -> Option<(OutputId, bool, Option<u64>)> {
-        if let Some(stale) = self.stale_vblanks.iter().position(|&dead| dead == crtc) {
+    ///
+    /// `now` is the vblank's arrival time, for aging out stale entries whose
+    /// owed event a driver never delivered (see `stale_vblanks.rs`) -- the
+    /// same explicit-timestamp idiom as `SessionLock::await_vblank`'s.
+    fn on_vblank(
+        &mut self,
+        crtc: crtc::Handle,
+        now: Instant,
+    ) -> Option<(OutputId, bool, Option<u64>)> {
+        if self.stale_vblanks.eat_stale(crtc, now) {
             // The completion a hotplug-dropped head was still owed: not the
             // current head's (see `stale_vblanks`).
-            self.stale_vblanks.swap_remove(stale);
             return None;
         }
         let head = self
@@ -1464,7 +1477,7 @@ fn drm_event(event: DrmEvent, _: &mut Option<DrmEventMetadata>, state: &mut Stat
     };
     match event {
         DrmEvent::VBlank(crtc) => {
-            let Some((id, needs_render, completed)) = tty.on_vblank(crtc) else {
+            let Some((id, needs_render, completed)) = tty.on_vblank(crtc, Instant::now()) else {
                 // No head drives this CRTC any more (a hotplug tore it down
                 // with a flip still out): nothing to settle, nothing owed.
                 return;

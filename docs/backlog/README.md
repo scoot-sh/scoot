@@ -762,11 +762,14 @@ scale/mode) into one hardware session.
   binds name the first/second screen. Live on the Asahi M2 Air since:
   virtual pull on the dumb tier (`Asahi.md` Test 11) and a real replug on
   the GPU tier (Test 12). No debounce until flap timing is measured.
-- [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./core/lock-vblank-bound-hardening.md)
-  — OPEN, low: `await_vblank`'s "late, never early" should say "within one
-  bound of the first blank drawn"; `stale_vblanks` entries should age out so
-  a driver that never delivers an owed vblank can't freeze a reused CRTC.
-  Filed from PR #247's round-2 review.
+- [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./resolved/lock-vblank-bound-hardening-done.md)
+  — RESOLVED 2026-09-28 (PR #303): `await_vblank`'s "late, never early" now
+  says the guarantee (no later than one bound after the first blank drew,
+  never before one has drawn; the two `headless.rs` comments that still
+  described the restarted bound corrected); `stale_vblanks` entries carry
+  push timestamps and age out past one second, pinned by six unit tests
+  including the ticket's synthetic-clock pin. Filed from PR #247's round-2
+  review.
 - [An unplugged monitor's windows seem to disappear](./resolved/unplug-adopted-windows-visible-done.md)
   — RESOLVED, medium (daily-drive, filed from `Asahi.md` Test 12): on unplug the
   monitor's workspaces are adopted as background workspaces of the focused
