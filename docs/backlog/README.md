@@ -763,7 +763,7 @@ scale/mode) into one hardware session.
   virtual pull on the dumb tier (`Asahi.md` Test 11) and a real replug on
   the GPU tier (Test 12). No debounce until flap timing is measured.
 - [Lock-confirm bound wording, and aging out stale dumb-tier vblanks](./resolved/lock-vblank-bound-hardening-done.md)
-  — RESOLVED 2026-09-28 (PR #NNN): `await_vblank`'s "late, never early" now
+  — RESOLVED 2026-09-28 (PR #303): `await_vblank`'s "late, never early" now
   says the guarantee (no later than one bound after the first blank drew,
   never before one has drawn; the two `headless.rs` comments that still
   described the restarted bound corrected); `stale_vblanks` entries carry

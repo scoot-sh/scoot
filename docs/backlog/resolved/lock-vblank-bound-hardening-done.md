@@ -8,7 +8,7 @@ blocked: null
 
 # Lock-confirm bound wording, and aging out stale dumb-tier vblanks — RESOLVED
 
-RESOLVED 2026-09-28 (PR #NNN). Half 1: `await_vblank`'s doc now says what
+RESOLVED 2026-09-28 (PR #303). Half 1: `await_vblank`'s doc now says what
 the code guarantees since #247 -- the fallback confirms no later than one
 bound after the first blank drew, and never before a blank has drawn (the
 deadline is armed once per wait and never extended, verified at every site
