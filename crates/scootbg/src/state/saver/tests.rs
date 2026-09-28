@@ -172,7 +172,7 @@ fn another_writers_temporary_file_is_left_alone() {
     // `write_atomic`'s.
     let others = [
         scratch.0.join(format!(".default.{pid}.tmp")),
-        temp_path(&file, super::unique().unwrap()),
+        temp_path(&file, super::unique()),
     ];
     for other in &others {
         std::fs::write(other, b"another writer, mid-write").unwrap();
@@ -190,8 +190,8 @@ fn another_writers_temporary_file_is_left_alone() {
     }
     // Two writes never draw the same name.
     assert_ne!(
-        temp_path(&file, super::unique().unwrap()),
-        temp_path(&file, super::unique().unwrap())
+        temp_path(&file, super::unique()),
+        temp_path(&file, super::unique())
     );
 }
 
@@ -218,4 +218,17 @@ fn a_directory_open_to_others_is_noticed() {
         );
     }
     assert_eq!(super::exposed(&scratch.0.join("missing")), None);
+}
+
+/// Where the kernel refuses `getrandom`, the stand-in still names every
+/// write differently, so saving goes on (a seccomp'd container).
+#[test]
+fn the_fallback_never_repeats_a_name() {
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..10_000 {
+        assert!(
+            seen.insert(super::fallback_unique()),
+            "a repeated fallback name"
+        );
+    }
 }

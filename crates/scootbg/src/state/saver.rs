@@ -159,7 +159,7 @@ pub fn exposed(dir: &Path) -> Option<String> {
 /// the old file or the new one, whole. The file is private (0600), its
 /// directory made private (0700) if it has to be made.
 pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
-    write_through(file, bytes, unique()?)
+    write_through(file, bytes, unique())
 }
 
 /// The temporary file [`write_atomic`] writes `file`'s next contents to,
@@ -181,20 +181,41 @@ fn temp_path(file: &Path, unique: u64) -> PathBuf {
     dir.join(format!(".{name}.{pid}.{unique:016x}.tmp"))
 }
 
-/// 64 random bits from the kernel (`getrandom(2)`, a raw syscall through
-/// `rustix`), for [`temp_path`]. It waits only while the kernel's pool is
-/// not yet initialized, early in boot, long before a wallpaper is saved.
-fn unique() -> io::Result<u64> {
+/// 64 bits for [`temp_path`] that no other write draws: random from the
+/// kernel (`getrandom(2)`, a raw syscall through `rustix`), which waits
+/// only while the kernel's pool is not yet initialized, early in boot,
+/// long before a wallpaper is saved. Where the kernel refuses it (an old
+/// kernel's `ENOSYS`, or a container's seccomp profile answering `EPERM`,
+/// as webtop-style sandboxes can), [`fallback_unique`] stands in: the name
+/// only needs to be unique, not secret (a guessed name is already handled
+/// by remove-first and `O_EXCL` below), so saving never stops for it.
+fn unique() -> u64 {
     let mut bytes = [0u8; 8];
     let mut filled = 0;
     while filled < bytes.len() {
         match rustix::rand::getrandom(&mut bytes[filled..], rustix::rand::GetRandomFlags::empty()) {
             Ok(read) => filled += read,
             Err(rustix::io::Errno::INTR) => {}
-            Err(error) => return Err(error.into()),
+            Err(_) => return fallback_unique(),
         }
     }
-    Ok(u64::from_ne_bytes(bytes))
+    u64::from_ne_bytes(bytes)
+}
+
+/// Unique without the kernel's randomness: the wall clock's nanoseconds,
+/// mixed with a per-process count so two writes in one nanosecond differ.
+/// Two daemons of one pid would have to write in the same nanosecond to
+/// meet, and even then only this write fails (`O_EXCL`), loudly.
+fn fallback_unique() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos() as u64);
+    let count = COUNT.fetch_add(1, Ordering::Relaxed);
+    // A fixed odd multiplier spreads the count over the high bits, so the
+    // sum is not just the clock with a small offset.
+    nanos ^ count.wrapping_mul(0x9e37_79b9_7f4a_7c15)
 }
 
 /// [`write_atomic`] through the temporary file `unique` names.

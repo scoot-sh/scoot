@@ -139,7 +139,9 @@ fn shot(session: &Session, name: &str) -> Shot {
 /// `configured`, and `query` truthfully says `configured` with `shows:
 /// null` in between, so waiting for `configured` alone is too early.
 /// Once `shows` says so the draw has gone to the compositor: the daemon
-/// flushes it before it next reads a request.
+/// flushes it before it next reads a request (unless the socket buffer is
+/// full, which this little traffic never fills; the screenshot's own
+/// `outputs` request to scoot, which comes after, is the other half).
 fn wait_all_show(session: &Session, count: usize, want: &Value, what: &str) {
     session.query_until(what, |o| {
         o.len() == count && o.iter().all(|o| o["shows"] == *want)
