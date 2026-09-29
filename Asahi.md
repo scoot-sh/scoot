@@ -2366,7 +2366,7 @@ exist. Backlight `apple-panel-bl` (`type=platform`, `scale=linear`):
 `brightness`, `actual_brightness`, `max_brightness=509`, `bl_power`.
 
 Facts a module must handle: at `status=Full` the SMC reports `capacity=100`
-while `charge_now/charge_full` is 3702000/3840000 (96.4%), so trust
+while `charge_now/charge_full` is about 96% (3702000/3840000 on the first read, 3697000/3843000 on a later one), so trust
 `capacity`, not a ratio. `time_to_empty_now`/`time_to_full_now` read 0 when
 not applicable. `actual_brightness` differs from `brightness` by rounding
 (wrote 120, `actual` 119; wrote 90, `actual` 91).
@@ -2397,7 +2397,7 @@ systemd's save/restore unit is pulled in on every change.
 
 | question | answer | evidence |
 | --- | --- | --- |
-| battery attributes | listed above | `t14-power` sysfs dump |
+| battery attributes | listed above | interactive sysfs read, not archived (re-read 2026-09-29: `capacity=100`, `charge_now/charge_full` 3697000/3843000) |
 | battery uevents on capacity change | **not observed** (AC, Full) | 0 `power_supply` uevents / 300 s |
 | uevents on voltage/temp jitter | none | `t14-poll.log` vs `t14-udev.log` |
 | backlight write emits change uevent | **yes, 1 per write** | 3 writes, 3 KERNEL + 3 UDEV |
@@ -2461,7 +2461,9 @@ as expected; their numbers are not in the table above.
 
 **What a reader should take from it.** The compositor-side hide works on
 this hardware as the ticket's option 1 intended: motion re-shows the
-pointer and that frame composites (plane 35 back on scoot's `AR24` fb), and
+pointer and the output composites for the whole delay (plane 35 back on
+scoot's `AR24` fb; direct attempts stopped for 1.035 s in
+`t14-trace-hide.log`, the measured return latency), and
 it returns to the client fb once the pointer has sat still for the delay
 (the debugfs read 3 s after motion showed the direct fb again). Not
 measured: mpv's `presented` flags (no `WAYLAND_DEBUG` trace was taken this

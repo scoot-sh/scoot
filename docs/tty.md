@@ -584,8 +584,8 @@ candidate). A capture of a frame
 that went direct forces one composite frame first, and a capture stream
 keeps the output composited, so captures stay correct throughout --
 watched working on the dev VM. Apple's `apple,dcp` (M2) exposes one
-primary, **one overlay and no cursor plane** (`cursor_planes=0
-overlay_planes=1`). The overlay has a fixed zpos above the primary, takes
+primary, **one overlay on kernel 7.1.5 (two on 7.1.13, `Asahi.md` Test 14) and no
+cursor plane** (`cursor_planes=0 overlay_planes=1`). The overlay has a fixed zpos above the primary, takes
 `LINEAR` only, and takes alpha RGB and YUV formats but no `XR24`. The
 cursor never lands on it: scoot's drawn cursor is a memory buffer, which
 no overlay can take at this Smithay rev on any hardware (above). With no
