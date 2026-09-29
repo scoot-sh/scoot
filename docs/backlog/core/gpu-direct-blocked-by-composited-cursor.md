@@ -90,7 +90,7 @@ the configured delay; the next motion, button or scroll shows it again and
 that frame composites. Hiding suppresses the cursor-element gathering
 (`State::cursor_location`), never the client's own cursor status, so a
 hidden cursor disturbs no plane assignment, a reshown one composites
-exactly one frame, and captures (IPC screenshots,
+until the pointer hides again (headless: one frame; on Asahi the whole delay, Test 14), and captures (IPC screenshots,
 `ext-image-copy-capture-v1`) read a hidden pointer as hidden. Never hides
 behind the session lock; keys do not reset the wait. Headless-verified
 (`compositor::cursor_hide::tests`: synthetic-clock hide, race, reshow
@@ -98,7 +98,21 @@ pixels, disarm on un-fullscreen/close/workspace-switch/lock/VT-pause
 wiring, uncovered-output, zero-means-off); motion hot path +~14 ns/event
 with the feature on, nothing measurable with it off.
 
-Remaining: option 2 (cursor on the overlay plane, needs a Smithay-fork
-change per `docs/forks.md`) and the Asahi verification with plane 35 +
-mpv `presented` flags. This ticket keeps `status: "open"` until those
-land.
+**Asahi plane assignment verified 2026-09-29 (`Asahi.md`, Test 14, `main` at
+`b3f087b43`).** With `cursor_hide_after_ms = 1000` and mpv left showing its
+own pointer, fullscreen mpv reached plane 35 on its own `XR30 2561x1601`
+fb after the pointer sat still (1036 `testing direct scan-out`, all on
+plane 35, all assigned); one pointer motion put scoot's `AR24` swapchain
+back for the whole `cursor_hide_after_ms` delay (direct attempts stopped for
+1.035 s in the trace, about 31 frames) before the client fb returned. Unset: no primary
+attempt at all, plane 35 stayed on `AR24`. Compositor CPU: 13-14 against
+29-33 jiffies per 10 s (1080p30 clip, two rounds each), 21 against 37-40 for
+a 60 fps 2560x1600 clip. mpv `presented` flags were not captured, so
+`zero_copy` feedback under the hide is still unverified.
+
+Remaining: `presented`/`zero_copy` under the hide (needs a `WAYLAND_DEBUG`
+run); option 2 (cursor on the overlay plane, needs a Smithay-fork
+change per `docs/forks.md`); this Asahi kernel (7.1.13) now exposes **two**
+overlays per CRTC, so it need not compete with window overlays there (the option-2 text
+above that says it competes for the one overlay predates this). This ticket
+keeps `status: "open"` until those land.

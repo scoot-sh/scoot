@@ -23,6 +23,16 @@ changes are silent, the fallback is a slow timer (order of a minute) that runs
 **only while discharging** and stops when charging or full, with the
 wakeup rate published.
 
+**Measured 2026-09-29 (Asahi.md, Test 14), partly.** The M2 exposes
+`macsmc-battery` (`capacity`, `status`, `present`, `energy_*`, `charge_*`,
+`voltage_now`, `temp`, `time_to_*`, `charge_behaviour`) and `macsmc-ac`
+(`online`). On AC at `Full` for 300 s it fired **zero** `power_supply`
+uevents even though `voltage_now` and `temp` moved, so jitter is silent.
+Whether capacity steps while discharging, or plug/unplug, emit uevents is
+**still open**: it needs someone to unplug the machine. At `Full` the SMC
+reports `capacity=100` while `charge_now/charge_full` is 96%, so use
+`capacity`.
+
 ## What to build
 
 - Percentage from `capacity`, state from `status` (charging, discharging,

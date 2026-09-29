@@ -2324,6 +2324,173 @@ per-output scale/mode surface is unchanged: still its own open ticket
 (`docs/backlog/core/per-output-scale-mode.md`, priority low) — this run
 asserts nothing about it beyond the `--mode` startup path above.
 
+## Test 14 — battery/backlight uevents, and `cursor_hide_after_ms` on real hardware
+
+Run 2026-09-29 on the Apple M2 (Mac14,2 / j413), NixOS 26.11, kernel
+7.1.13 (fairydust), on the box's AC adapter, with DP-1 (1920x1080, awake, 21
+modes) and eDP-1 both connected. Scoot is `main` at `b3f087b43`, built on
+the machine (`git archive` shipped over ssh to `~/scoot-res`, `cargo build
+--release -p scoot -p scootctl --features scoot/gpu-scanout` into
+`~/scoot-res-target`, log `~/fx/build-res.log`). `ldd` names `libgbm.so.1`,
+so the scanout tier is in.
+
+| binary | sha256 |
+| --- | --- |
+| `release/scoot` | `4b76421fd3701041b8ce587cbac28a283db2704717400d128ca31a3486fef389` |
+| `release/scootctl` | `f8a3e36a6a94f46a5b7c3158c96181fc674c788f55bc8924f93faed783aeff69` |
+
+Raw logs are on the box, `~/fx/t14-*` (`t14-power.sh`, `t14-udev.log`,
+`t14-poll.log`, `t14-cursor.sh`, `t14-all.sh`, per-run `.txt`/`.log`/
+`-kms-*.txt`, `t14-drm_info.txt`).
+
+### Part A — power_supply and backlight uevents (read-only)
+
+Script `~/fx/t14-power.sh`: `udevadm monitor -k -u -p
+--subsystem-match=power_supply --subsystem-match=backlight` for 300 s, a
+sysfs poll every 10 s, and three backlight writes as root in the middle
+(`107 -> 120 -> 90 -> 107`; the original, 107, was restored and re-read at
+the end of the whole test).
+
+**Attributes.** `macsmc-battery` (`type=Battery`, model `bq40z651`, at
+`/sys/devices/platform/soc/23e400000.smc/macsmc-power/`): `capacity`
+(0-100), `capacity_level`, `status` (`Full` seen), `present`, `health`,
+`charge_now/full/full_design`, `energy_now/full/full_design` (µWh),
+`voltage_now/min/max(+design)`, `current_now`, `power_now`, `temp`
+(tenths of °C), `cycle_count`, `time_to_empty_now`, `time_to_full_now`,
+`charge_behaviour` (`[auto] inhibit-charge`),
+`charge_control_{start,end}_threshold`, `charge_term_current`,
+`constant_charge_{current_max,voltage}`, `scope=System`, manufacture date,
+serial. `macsmc-ac` (`type=Mains`): `online`, `input_power_limit`. Three
+`tps6598x-source-psy-0-00{38,3a,3f}` supplies (one per USB-C port) also
+exist. Backlight `apple-panel-bl` (`type=platform`, `scale=linear`):
+`brightness`, `actual_brightness`, `max_brightness=509`, `bl_power`.
+
+Facts a module must handle: at `status=Full` the SMC reports `capacity=100`
+while `charge_now/charge_full` is about 96% (3702000/3840000 on the first read, 3697000/3843000 on a later one), so trust
+`capacity`, not a ratio. `time_to_empty_now`/`time_to_full_now` read 0 when
+not applicable. `actual_brightness` differs from `brightness` by rounding
+(wrote 120, `actual` 119; wrote 90, `actual` 91).
+
+**Do battery uevents fire on capacity change? Not answered.** The box was
+on AC at `Full` the whole time and I could not unplug it. Over 300 s
+(30 polls) `capacity`, `status`, `energy_now`, `charge_now`,
+`current_now` and `power_now` never changed; only `voltage_now` (12786-12788 mV)
+and `temp` (219-224) moved. **Zero `power_supply` uevents fired** in 300 s,
+so *temperature and voltage jitter does not produce uevents*. Whether a
+capacity step while discharging or a plug/unplug does could not be
+observed here. The battery-module ticket's fallback (a slow timer, only
+while discharging) stays the plan until someone can observe a discharge.
+Plug/unplug (`macsmc-ac` `online`) is likewise unobserved.
+
+**Do backlight writes emit uevents? Yes, one each.** Three sysfs writes as
+root gave exactly three `KERNEL ... change ... (backlight)` events
+(`SOURCE=sysfs`, `ACTION=change`, no `POWER_SUPPLY_*`-style value in the
+properties, so the new level must be re-read from sysfs) and three matching
+`UDEV` events, ~50 ms after the kernel ones. A consumer therefore does not
+need to poll or to be the writer, for writes that go through sysfs (the path
+logind's `SetBrightness` also takes). What was not observed: a change
+made by the hardware/firmware itself (a brightness key handled by the SMC;
+none was pressed), and inotify on the `brightness` file (no `inotifywait`
+on the box; not tried). Side effect worth knowing: the change uevent carries
+`SYSTEMD_WANTS=systemd-backlight@backlight:apple-panel-bl.service`, so
+systemd's save/restore unit is pulled in on every change.
+
+| question | answer | evidence |
+| --- | --- | --- |
+| battery attributes | listed above | interactive sysfs read, not archived (re-read 2026-09-29: `capacity=100`, `charge_now/charge_full` 3697000/3843000) |
+| battery uevents on capacity change | **not observed** (AC, Full) | 0 `power_supply` uevents / 300 s |
+| uevents on voltage/temp jitter | none | `t14-poll.log` vs `t14-udev.log` |
+| backlight write emits change uevent | **yes, 1 per write** | 3 writes, 3 KERNEL + 3 UDEV |
+| brightness restored | 107 (read back) | `final: brightness=107 actual=107` |
+
+### Part B — does `cursor_hide_after_ms` unblock primary-direct (Test 5's trap)?
+
+Scripts `~/fx/t14-cursor.sh` (one session) and `~/fx/t14-all.sh`.
+VT 2, private seatd (`~/fx/vt-run.sh`), `scoot --tty --renderer gles`,
+Mesa 26.2.2 env (`~/fx/mesa-env.sh`), config `[output] scale = 1.5` (unset)
+or the same plus `[appearance] cursor_hide_after_ms = 1000` (set,
+`~/fx/test-hide.toml`). mpv `--fs --cursor-autohide=no --vo=gpu
+--gpu-context=wayland --hwdec=no --loop`, so **mpv keeps showing a pointer
+and only scoot's hide can remove it** (Test 5 had mpv hide its own). Per
+session: `scootctl pointer move 400 300`, `420 320`, idle, debugfs `dri/2/state`
+(plane 35), two 10 s jiffies samples of the compositor
+(`/proc/PID/stat` utime+stime, info logging), then one more pointer move,
+debugfs 0.3 s later, 3 s idle, debugfs, one more sample. Two outputs are up
+this time (eDP-1 2560x1600 id 1, DP-1 1920x1080 id 2); mpv went fullscreen
+on eDP-1 (window `rect` 1707x1067, `output` 1).
+
+**Plane inventory changed since Test 5.** `drm_info` on `card2`, CRTC 0:
+the primary (35) plus **two** overlays (40, 45; fixed zpos 1 and 2, `LINEAR`
+only, `AR30 AR24 AB24 NV12 NV16 NV24 P010 P210`, no opaque `X` formats),
+still no cursor plane. Scoot logs `overlay_planes=2 cursor_planes=0` (Test 5
+saw one overlay, on kernel 7.1.5). This kernel gives Test 5's overlay
+question more room; see Part C.
+
+**Result: pass.** With it set, mpv's fullscreen buffer goes direct with
+the pointer still "shown" to the client; with it unset, it never does.
+
+| run | clip | option | plane 35 idle (after pointer left alone) | 0.3 s after a motion | 3 s idle again | jiffies / 10 s (idle samples) |
+| --- | --- | --- | --- | --- | --- | --- |
+| clip-hide-r1 | 1080p30 `clip.mkv` | set | `XR30 2561x1601`, client fb, `crtc-pos 2561x1601+0+0` | `AR24 2560x1600` (scoot swapchain, composited) | `XR30 2561x1601` (direct) | 14, 13, 13 |
+| clip-nohide-r1 | same | unset | `AR24 2560x1600` | `AR24` | `AR24` | 30, 32, 33 |
+| clip-hide-r2 | same | set | `XR30 2561x1601` | `AR24` | `XR30 2561x1601` | 14, 14, 14 |
+| clip-nohide-r2 | same | unset | `AR24 2560x1600` | `AR24` | `AR24` | 30, 31, 29 |
+| hide-a (`t14-hide-a`) | 60 fps 2560x1600 `clip-panel.mkv` | set | `XR30 2561x1601` | `AR24` | `XR30 2561x1601` | 21, 21, 21 |
+| panel-nohide | same | unset | `AR24 2560x1600` | `AR24` | `AR24` | 37, 37, 40 |
+
+Compositor CPU with the option set is 13-14
+jiffies against 29-33 with it unset for the 1080p30 clip (**about 55%
+lower**), and 21 against 37-40 for the 60 fps panel-resolution clip
+(**about 45% lower**). Test 5's direct figure for the 1080p30 clip was
+10-11 with mpv hiding its own pointer; the 13-14 here is on a different
+kernel with a second output and another Mesa, so do not compare the two
+runs' absolute numbers.
+
+**Trace evidence.** Two `RUST_LOG=info,scoot=debug,smithay::backend::drm::compositor=trace`
+sessions (`t14-trace-hide`, `t14-trace-nohide`), same script and clip:
+
+- set: 1036 `testing direct scan-out` lines, **all on `plane::Handle(35)`**,
+  1036 `successfully assigned element`, 2 `test failed` (startup),
+  `eligibility changed NotCovered -> NothingOpaqueCovers -> Eligible`
+  (71 ms apart) and back to `NotCovered` when mpv closed.
+- unset: **0** `testing direct scan-out` lines, `Eligible` reached once,
+  nothing attempted on the primary. That is Test 5's trap, unchanged.
+
+The trace runs cost more CPU (20 / 36 jiffies) than the info-level ones,
+as expected; their numbers are not in the table above.
+
+**What a reader should take from it.** The compositor-side hide works on
+this hardware as the ticket's option 1 intended: motion re-shows the
+pointer and the output composites for the whole delay (plane 35 back on
+scoot's `AR24` fb; direct attempts stopped for 1.035 s in
+`t14-trace-hide.log`, the measured return latency), and
+it returns to the client fb once the pointer has sat still for the delay
+(the debugfs read 3 s after motion showed the direct fb again). Not
+measured: mpv's `presented` flags (no `WAYLAND_DEBUG` trace was taken this
+time, so the `vsync | zero_copy` cross-check of Test 5 is missing; the
+debugfs fb is the evidence), a photo of the panel, and any client other
+than mpv. Option 2 (cursor on an overlay) is untouched by this.
+
+### Part C — overlay window candidates: nothing measurable without implementing
+
+No window is marked `Kind::ScanoutCandidate`, so no window can ride an
+overlay; the only thing a measurement could touch is the plane inventory,
+which is now recorded (Part B: two overlays, `LINEAR`, no `X` formats).
+Implementing it needs: the `ScanoutCandidate` marking, the capture
+contract (`Captures::note_direct` for overlays), a per-surface tranche
+steering a client to `LINEAR` in an overlay format, and a purpose-built
+`AR24` `LINEAR` client (nothing seen on this machine qualifies). The new
+two-overlay inventory means the cursor-on-overlay and window-on-overlay
+options no longer have to fight for a single plane on this kernel, which
+is worth recording on both tickets.
+
+### State left behind
+
+`fgconsole` 1, no `scoot`/`seatd`/`mpv` processes, `/run/seatd.sock` gone,
+DP-1 `connected` with 21 modes and `enabled`, brightness 107. DP-1 was never
+forced and eDP-1 was never touched beyond a normal `--tty` session; no
+`nh os switch`, no reboot, no config change on the box.
+
 ## Keys for the 2026-09-25 runs
 
 Built on the machine itself (native aarch64) from `main` at
