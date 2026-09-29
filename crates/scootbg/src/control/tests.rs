@@ -458,15 +458,26 @@ fn accept_errors_are_classified_so_none_can_spin() {
 /// A listener that has stopped accepting (a `SIGSTOP`ped holder) with its
 /// backlog full: a blocking `connect` probe would wait forever. The probe
 /// is non-blocking, so the claim refuses at once instead of hanging.
+///
+/// The listener is made with a backlog of 1, not through `UnixListener::bind`:
+/// std listens with a backlog the kernel caps at `net.core.somaxconn`
+/// (4096 by default), and filling that takes one fd per queued connection
+/// -- over 4096 fds, past the soft `RLIMIT_NOFILE` of 1024 a plain login
+/// shell has, so the test died of `EMFILE` before the backlog filled and
+/// passed only where the limit was raised (a `nix develop` shell's is
+/// 524288). With a backlog of 1 it fills after two connections everywhere.
 #[test]
 fn a_live_socket_with_a_full_backlog_is_refused_without_hanging() {
     use rustix::net::{
-        AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with,
+        AddressFamily, SocketAddrUnix, SocketFlags, SocketType, bind, connect, listen, socket,
+        socket_with,
     };
     let scratch = Scratch::new("backlog");
     let paths = scratch.paths();
-    let _stopped = UnixListener::bind(&paths.socket).unwrap();
     let address = SocketAddrUnix::new(&paths.socket).unwrap();
+    let _stopped = socket(AddressFamily::UNIX, SocketType::STREAM, None).unwrap();
+    bind(&_stopped, &address).unwrap();
+    listen(&_stopped, 1).unwrap();
     let mut held = Vec::new();
     let full = loop {
         let fd = socket_with(
@@ -481,7 +492,7 @@ fn a_live_socket_with_a_full_backlog_is_refused_without_hanging() {
             Err(rustix::io::Errno::AGAIN) => break true,
             Err(errno) => panic!("unexpected {errno:?}"),
         }
-        assert!(held.len() < 100_000, "the backlog never filled");
+        assert!(held.len() < 64, "the backlog never filled");
     };
     assert!(full);
     let started = std::time::Instant::now();
