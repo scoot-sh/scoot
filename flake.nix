@@ -540,9 +540,8 @@
       # `pkgs.scoot`, `pkgs.scootctl` and (Linux only, where they build)
       # `pkgs.scootbg` and `pkgs.scootbar`: this flake's own builds, the
       # same derivations as `packages`, so an overlay user runs exactly
-      # what the flake ships --
-      # scoot and scootbg from one revision, the `apply-config` pair
-      # matched -- and builds nothing twice. Not rebuilt against the
+      # what the flake ships -- scoot and scootbg from one revision, the
+      # `apply-config` pair matched -- and builds nothing twice. Not rebuilt against the
       # consumer's nixpkgs (`final.rustPlatform`): that would tie the
       # build to whatever Rust their nixpkgs carries (this workspace needs
       # edition 2024) and split the pinned pair. With it applied, the

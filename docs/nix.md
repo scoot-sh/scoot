@@ -400,8 +400,9 @@ CI run for no path those do not already cover.
 `packages.<system>.scootbar` is [scootbar](scootbar/README.md), the status
 bar, alone: one binary, linking nothing beyond glibc and libgcc_s, and
 **no font in its closure**. Its installed closure is one of the bar's
-measured rows ([the resource ratchet](scootbar/backlog/lightest.md)), and a
-bundled font would be most of it. It takes its font from `--font`, or from
+measured rows ([the resource ratchet](scootbar/backlog/lightest.md)), and
+the font is the user's to choose: even the one face the bar looks for first,
+DejaVu Sans, is 742 KiB, nearly the size of the bar's own 826 KiB binary. It takes its font from `--font`, or from
 the first of a short list of well-known files
 ([cli.md](scootbar/cli.md#fonts)), and with neither it refuses to start,
 saying how to give one. On NixOS those files are usually absent, so name

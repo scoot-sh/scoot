@@ -35,9 +35,10 @@
 # - scootbar (docs/scootbar/backlog/resolved/nix-package-done.md): the
 #   overlay provides `pkgs.scootbar` on Linux, the flake's own build, and
 #   no `scootbar-demo`; on Darwin neither the overlay nor `packages` has
-#   one; its Cargo features reach the build through `.override`; and the
-#   demo is a separate derivation running the bare bar, so the font it
-#   adds is never in `scootbar`'s closure.
+#   one; its Cargo features reach the build through `.override`; the
+#   demo is a separate derivation running the bare bar; and no input of
+#   `scootbar` names a font (its built closure is checked by
+#   .github/workflows/nix-build.yml).
 {
   lib,
   pkgs,
@@ -769,7 +770,7 @@ let
       )
       # One binary named for the bar in each, and the demo runs the bare
       # build (it is a wrapper, not a second compile) with the font as a
-      # separate store path: `scootbar` itself references no font.
+      # separate store path; no input of `scootbar` names a font.
       (
         assert lib.getExe built.scootbar == "${built.scootbar}/bin/scootbar";
         true
