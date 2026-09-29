@@ -20,12 +20,20 @@ need icons, and window titles need more than Latin.
 2. **Built-in bitmaps or small path icons** compiled in for the built-in
    modules (mute, wifi bars, battery levels). Theme-independent and sharp at
    any scale if drawn as vectors; costs binary size per icon.
+   The same mechanism can take a user's own icon as **SVG path data**
+   (`path = "M12 2 ..."`, one or a few `d` strings, not a file): a small
+   hand-written path parser and the bar's own anti-aliased coverage fill,
+   tinted from a theme token. Sharp at any scale and it follows Stylix, which
+   is what people actually want from SVG.
 3. **A PNG file path in config** (`image = "/path/launcher.png"`), for a
    button that should just be a picture. Decoded once at load with the
    `png` crate scootbg already carries, scaled to the icon size at the output's
    real scale, held as a premultiplied bitmap and dropped at reload. Behind a
-   Cargo feature so the smallest build has no decoder. No SVG: rasterizing it
-   is a heavy dependency for a bar.
+   Cargo feature so the smallest build has no decoder. **No SVG files in the
+   bar**: a renderer such as `resvg` is a large dependency and an untrusted-markup
+   parser for a job path data does more cheaply (spike its size to confirm before
+   ruling it out for good). A full-color SVG is converted to PNG ahead of time:
+   the Nix module can do it in a derivation, so the bar loads only the PNG.
 4. **Icon-theme lookup** (`.desktop` and themed names, needed for tray and
    window icons): loads and decodes files, which is the heavy path. Only if
    the [tray](tray.md) or window icons force it.
