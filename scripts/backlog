@@ -529,7 +529,7 @@ def cmd_claim(a):
         return {claim_file(key): json.dumps(rec, indent=2, sort_keys=True) + "\n"}, removes, (e, rec, bool(mine))
 
     try:
-        commit, res = publish(mutate, lambda r: f"chore(backlog): claim {r[0].slug} ({r[1]['agent']}) [skip ci]")
+        commit, res = publish(mutate, lambda r: f"chore(backlog): claim {r[0].slug} ({r[1]['agent']})")
     except NothingReady:
         print("backlog: nothing ready (open, unblocked, unclaimed on main) matches", file=sys.stderr)
         return 3
@@ -568,7 +568,7 @@ def cmd_release(a):
         return {}, [path], key
 
     try:
-        commit, key = publish(mutate, lambda k: f"chore(backlog): release {Path(k).stem} [skip ci]")
+        commit, key = publish(mutate, lambda k: f"chore(backlog): release {Path(k).stem}")
     except Refused as r:
         print(f"backlog: {r.entry.rel()} is {claim_label(r.rec)}; pass its --token (or --force)",
               file=sys.stderr)
@@ -601,7 +601,7 @@ def cmd_claims(a):
     if a.prune and any(st != "live" for _, _, _, st in rows):
         try:
             publish(lambda v: ({}, v.dead_claims(), None) if v.dead_claims() else None,
-                    lambda _: "chore(backlog): prune dead claims [skip ci]")
+                    lambda _: "chore(backlog): prune dead claims")
         except Unreachable as err:
             return fail(err)
         pruned = [p for _, p, _, st in rows if st != "live"]

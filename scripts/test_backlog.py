@@ -123,7 +123,7 @@ class ClaimTests(Base):
         self.assertRegex(stored["claimed"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         log = sh("git", "log", "-1", "--format=%s", "main", cwd=self.w.origin).stdout
         self.assertIn("claim a (alice)", log)
-        self.assertIn("[skip ci]", log)
+        self.assertNotIn("skip ci", log)  # docs pushes are ignored by a path filter, not a token
         self.assertEqual(self.a.head(), head)  # the checked-out branch did not move
         self.assertEqual(self.a.git("branch", "--show-current").stdout, branch)
         self.assertEqual(self.a.git("status", "--porcelain").stdout, "")  # working tree clean
