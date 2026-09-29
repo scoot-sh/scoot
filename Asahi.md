@@ -2700,21 +2700,28 @@ reboot, and no config change on the box. The only new files are the
 
 ## Test 16 — per-output scale and mode (`[[outputs]]`) on eDP-1 + DP-1
 
-Run 2026-09-29, 16:06–16:09 UTC, on the same Apple M2 (Mac14,2 / j413),
+Run 2026-09-29, 16:06–16:20 UTC, on the same Apple M2 (Mac14,2 / j413),
 NixOS 26.11.20260914.efe6f07, kernel 7.1.13 (fairydust), DP-1 (1920x1080
 preferred, 21 modes) and eDP-1 (2560x1600, 1 mode) both connected. This
 is the hardware gate `docs/backlog/core/per-output-scale-mode.md` was
 blocked on (now `docs/backlog/resolved/per-output-scale-mode-done.md`).
 
-**Build.** Branch `per-output-scale-mode` at `e4a2b668f`. The later
-commit that records this test touches only `Asahi.md` and `docs/`. It was built on the machine
-from an rsync of that tree with `cargo build --release -p scoot -p
-scootctl --features gpu-scanout`, into `~/scoot-pos-hw-target`:
+**Build.** Branch `per-output-scale-mode` at `71c4a957a`, the last
+commit that touches code. Every later commit touches only `Asahi.md` and
+`docs/`. It was built on the machine from an rsync of that tree with
+`cargo build --release -p scoot -p scootctl --features gpu-scanout`, into
+`~/scoot-pos-hw-target`:
 
 ```
-b6d2e3059e6a56c72d50cbad0c16058784da00bf8b6daeaf9f0bab26a53aa5f2  release/scoot
+a0d9edba44e4ec0464b709d93aa3aa14cb82b4f74fa50cc676a3e6081e9fa2c6  release/scoot
 f8a3e36a6a94f46a5b7c3158c96181fc674c788f55bc8924f93faed783aeff69  release/scootctl
 ```
+
+The quoted output below is from sessions `entries-r2` and `control-r2`
+at that SHA. Both sessions were first run at `e4a2b668f` (scoot
+`b6d2e305…`, kept as `~/fx/t16/*-e4a2b668f`), and every line read the
+same. The only code between the two is `71c4a957a`, which tells a
+tablet tool's cursor surface a scale; no tablet was attached here.
 
 **Recipe.** `~/fx/t16.sh TAG CONFIG [full|control]` runs one session:
 `~/fx/vt-run.sh` on VT 2 with a private seatd, `scoot --tty --renderer
@@ -2723,11 +2730,11 @@ gles` (the GPU tier), the Mesa env from `~/fx/mesa-env.sh`, and
 directory, so reloads edit the copy and never `~/.config/scoot`. Clients
 are `foot -e sleep 900` under `WAYLAND_DEBUG=1`, started from ssh into
 the session. `~/fx/t15-state.sh` ran before and after each session.
-Raw output is in `~/fx/t16/{entries-r1,control-r1}.txt`; logs, traces,
+Raw output is in `~/fx/t16/{entries-r2,control-r2}.txt`; logs, traces,
 `outputs.json`, `wlr-randr.txt`, `wayland-info.txt` and every screenshot
 are in `~/fx/t16/<tag>/`.
 
-The config for `entries-r1`:
+The config for `entries-r2`:
 
 ```toml
 [output]
@@ -2775,10 +2782,10 @@ is sent for it. Then `focus-window-id 1` + `move-window-to-output 2`,
 and back again:
 
 ```
-[16:06:58.129168] wp_fractional_scale_v1#33.preferred_scale(120)   # carried to DP-1
-[16:06:58.130956] wl_surface#3.preferred_buffer_scale(1)
-[16:07:00.156847] wp_fractional_scale_v1#33.preferred_scale(240)   # and back to eDP-1
-[16:07:00.158491] wl_surface#3.preferred_buffer_scale(2)
+[16:20:03.418547] wp_fractional_scale_v1#33.preferred_scale(120)   # carried to DP-1
+[16:20:03.420371] wl_surface#3.preferred_buffer_scale(1)
+[16:20:05.443465] wp_fractional_scale_v1#33.preferred_scale(240)   # and back to eDP-1
+[16:20:05.445045] wl_surface#3.preferred_buffer_scale(2)
 ```
 
 Screenshots, read by eye: `a-out1.png` (2560x1600) shows foot 1 at 2x on
@@ -2854,7 +2861,7 @@ drew. **Pass.**
 ### Control — no `[[outputs]]` entries
 
 The same recipe with `~/fx/test.toml` (`[output] scale = 1.5` only),
-session `control-r1`. This is Test 11/12's layout exactly: eDP-1 at
+session `control-r2`. This is Test 11/12's layout exactly: eDP-1 at
 `1707x1067, scale 1.5` and DP-1 at `x 1707, 1280x720, scale 1.5` from
 its preferred 1920x1080. Both `wl_output` `scale: 2`. Both foots were
 told `preferred_scale(180)` / `preferred_buffer_scale(2)`. Carrying one
