@@ -24,6 +24,10 @@
 //! reading and the arm, which the spike's loop missed.
 
 pub mod format;
+// The fuzz targets' checks, compiled here only for the test that replays
+// their corpus (`crates/scootbar/fuzz` compiles the file itself).
+#[cfg(test)]
+mod fuzz;
 pub mod timer;
 pub mod tzif;
 pub mod zone;
