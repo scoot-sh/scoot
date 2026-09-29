@@ -1,12 +1,22 @@
 //! The module test harness: drives one module the way the daemon's loop
-//! does (its sources polled, each ready one handed to `on_ready`) and reads
-//! its view, with no compositor. Every module's tests go through it.
+//! does and reads its view, with no compositor. Two ways in:
+//!
+//! - **Real events** ([`Harness::wait`]): the module's sources polled, each
+//!   ready one handed to `on_ready`, as the loop does.
+//! - **Fake events** ([`Harness::deliver`]): any events on any source the
+//!   module added, handed over without polling, for what the kernel sends
+//!   rarely or at a bad time (a wake with nothing to read, `POLLERR`,
+//!   `POLLHUP`).
+//!
+//! Either way the test asserts on the returned [`Update`] and the [`View`].
+//! Every module's tests go through it, and a module in the registry
+//! without them fails `modules::tests::every_registered_module_has_harness_tests`.
 
 use std::time::Duration;
 
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 
-use super::{Module, OutputView, Sources, Update, View};
+use super::{Init, Module, OutputView, Settings, Sources, Spec, Update, View};
 
 pub struct Harness {
     module: Box<dyn Module>,
@@ -15,6 +25,25 @@ pub struct Harness {
 impl Harness {
     pub fn new(module: Box<dyn Module>) -> Self {
         Self { module }
+    }
+
+    /// The registry's module `spec`, started with `settings` as the bar
+    /// starts it; `Err` with its reason when it is unavailable.
+    pub fn start(spec: &Spec, settings: &Settings) -> Result<Self, String> {
+        match (spec.init)(settings) {
+            Init::Available(module) => Ok(Self::new(module)),
+            Init::Unavailable(why) => Err(why),
+        }
+    }
+
+    /// A fake event: `events` on the module's source `source`, handed to
+    /// `on_ready` as the loop hands a ready one, without polling. The loop
+    /// only hands over sources the module added this turn, so `source`
+    /// must be below [`Harness::source_count`].
+    pub fn deliver(&mut self, source: usize, events: PollFlags) -> Update {
+        let added = self.source_count();
+        assert!(source < added, "source {source}: the module added {added}");
+        self.module.on_ready(source, events)
     }
 
     /// The module's view for an unnamed output.
