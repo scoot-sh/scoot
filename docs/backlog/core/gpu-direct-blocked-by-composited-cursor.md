@@ -87,7 +87,7 @@ opt-in `[appearance] cursor_hide_after_ms` (default `0` = never hides):
 while a fullscreen window covers the output the pointer is on, and the
 pointer is over that window itself, the compositor hides its pointer after
 the configured delay; the next motion, button or scroll shows it again and
-that frame composites. Hiding suppresses the cursor-element gathering
+the output composites until it hides again (Test 15). Hiding suppresses the cursor-element gathering
 (`State::cursor_location`), never the client's own cursor status, so a
 hidden cursor disturbs no plane assignment, a reshown one composites
 until the pointer hides again (headless: one frame; on Asahi the whole delay, Test 14), and captures (IPC screenshots,

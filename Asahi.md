@@ -2681,10 +2681,10 @@ ANSI stripped), `TAG-mpv.trace`, `TAG-mpv.log`, `TAG-kms-{B,C,D}.txt`,
 
 ### State left behind
 
-`t15-state.sh` after the last session (10:40:38 local):
+`t15-state.sh` after the last session (the last recorded entry, 10:40:09 local):
 
 ```
-state 10:40:38: fgconsole=1 seatd.sock=gone
+state 10:40:09: fgconsole=1 seatd.sock=gone
 no scoot/seatd/mpv/niri/ydotoold processes
 card2-DP-1 connected enabled modes=21
 card2-eDP-1 connected enabled modes=1
