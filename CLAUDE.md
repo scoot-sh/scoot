@@ -67,6 +67,13 @@ window layout OmniWM-style through the Accessibility API.
   issues or comments on any dependency. A fork is one upstream commit plus
   the fewest carried commits, pinned by rev, and listed in
   [`docs/forks.md`](docs/forks.md) in the same PR that adds or changes it.
+  **A fork is the last resort, and the PR that adds one or carries another
+  commit must say so with evidence:** the scoot-side alternatives considered (a
+  handler or wrapper in scoot, an in-tree copy of the module, a workaround at
+  another layer) and why each was rejected, in the `docs/forks.md` entry. A
+  hard constraint (state private to the dependency, a hook that runs where scoot
+  cannot) is checked against the pinned fork's source, not asserted. "The fork
+  was simpler" is not a reason.
 - Prefer CPU-friendly rendering and damage-limited redraws throughout.
 - **"Compositor," not "window manager," in anything user-facing** (`README.md`,
   crate descriptions, `--help` text). Wayland has no separate window-manager

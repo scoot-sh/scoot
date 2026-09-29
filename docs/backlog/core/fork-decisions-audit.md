@@ -62,11 +62,12 @@ verify-against-fork rule) counted at the time?
   and a verdict on whether it needs re-examining) in `docs/forks.md`.
 - Every class 2 or 3 item added to the priority list of
   [fork-changes-in-scoot](fork-changes-in-scoot.md).
-- **A process fix**: `docs/forks.md` and the fork rule in `CLAUDE.md` gain a
-  requirement that any new fork or carried commit states the scoot-side alternatives
-  considered and why each was rejected, so the next fork cannot skip it.
+- **A process fix** (**done 2026-09-29**): `docs/forks.md` and the fork rule in
+  `CLAUDE.md` now require that any new fork or carried commit states the scoot-side
+  alternatives considered and why each was rejected, so the next fork cannot skip it.
+  What is left is holding the existing entries to it.
 
 ## Done when
 
-Every carried commit group has a classified record, the gaps are queued in the
-investigation, and the process rule is in place.
+Every carried commit group has a classified record and the gaps are queued in the
+investigation (the process rule is already in place).
