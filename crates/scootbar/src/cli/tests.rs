@@ -1,25 +1,32 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
-use super::{Command, DAEMON_HELP, Error, Topic, USAGE, parse, version_string};
+use super::{Command, DAEMON_HELP, Error, ModulesError, Topic, USAGE, parse, version_string};
 use crate::bar::{Bar, Edge, MAX_HEIGHT, Margin, MarginError};
 use crate::color::{Color, ColorError};
+use crate::config::{Config, MAX_FONT_SIZE};
+use crate::layout::{Layout, MAX_GAP};
 
 fn run(args: &[&str]) -> Result<Command, Error> {
     parse(args.iter().map(OsString::from))
 }
 
-fn daemon(args: &[&str]) -> Bar {
+fn config(args: &[&str]) -> Config {
     let mut all = vec!["daemon"];
     all.extend_from_slice(args);
     match run(&all) {
-        Ok(Command::Daemon(bar)) => bar,
+        Ok(Command::Daemon(config)) => *config,
         other => panic!("{args:?}: {other:?}"),
     }
 }
 
+fn daemon(args: &[&str]) -> Bar {
+    config(args).bar
+}
+
 #[test]
 fn plain_daemon_is_the_default_bar() {
+    assert_eq!(config(&[]), Config::default());
     assert_eq!(daemon(&[]), Bar::default());
 }
 
@@ -34,32 +41,13 @@ fn every_flag_takes_its_value_either_way() {
             bottom: 8,
             left: 4,
         },
-        background: Color {
-            r: 0x10,
-            g: 0x20,
-            b: 0x30,
-        },
     };
     assert_eq!(
-        daemon(&[
-            "--edge",
-            "bottom",
-            "--height",
-            "40",
-            "--margin",
-            "8,4",
-            "--background",
-            "#102030"
-        ]),
+        daemon(&["--edge", "bottom", "--height", "40", "--margin", "8,4",]),
         bar
     );
     assert_eq!(
-        daemon(&[
-            "--background=#102030",
-            "--margin=8,4",
-            "--height=40",
-            "--edge=bottom"
-        ]),
+        daemon(&["--margin=8,4", "--height=40", "--edge=bottom"]),
         bar
     );
 }
@@ -76,7 +64,7 @@ fn help_and_version() {
     assert_eq!(run(&["-V"]), Ok(Command::Version));
     assert!(version_string().starts_with("scootbar "));
     assert!(USAGE.contains("scootbar daemon"));
-    for flag in ["--edge", "--height", "--margin", "--background"] {
+    for flag in super::FLAGS {
         assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
     }
 }
@@ -163,6 +151,7 @@ fn bad_values_say_what_they_take() {
     assert_eq!(
         run(&["daemon", "--background", "1e1e2e"]),
         Err(Error::Color {
+            flag: "--background",
             value: "1e1e2e".into(),
             error: ColorError
         })
@@ -183,4 +172,159 @@ fn non_utf8_arguments_are_errors_not_panics() {
         parse([OsString::from("daemon"), OsString::from("--height"), bad]),
         Err(Error::Height(_))
     ));
+}
+
+#[test]
+fn colors_and_text() {
+    let config = config(&[
+        "--background",
+        "#102030",
+        "--foreground=#AABBCC",
+        "--font",
+        "/some/font.ttf",
+        "--font-size",
+        "20",
+    ]);
+    assert_eq!(
+        config.theme.background,
+        Color {
+            r: 0x10,
+            g: 0x20,
+            b: 0x30
+        }
+    );
+    assert_eq!(
+        config.theme.foreground,
+        Color {
+            r: 0xaa,
+            g: 0xbb,
+            b: 0xcc
+        }
+    );
+    assert_eq!(
+        config.font.as_deref(),
+        Some(std::path::Path::new("/some/font.ttf"))
+    );
+    assert_eq!(config.font_size, 20);
+    assert!(matches!(
+        run(&["daemon", "--foreground", "red"]),
+        Err(Error::Color {
+            flag: "--foreground",
+            ..
+        })
+    ));
+    for bad in ["0", &(MAX_FONT_SIZE + 1).to_string(), "1.5", "+3", ""] {
+        assert_eq!(
+            run(&["daemon", "--font-size", bad]),
+            Err(Error::FontSize(bad.to_owned()))
+        );
+    }
+    assert_eq!(config_font_size_max(), MAX_FONT_SIZE);
+}
+
+fn config_font_size_max() -> u32 {
+    config(&["--font-size", &MAX_FONT_SIZE.to_string()]).font_size
+}
+
+/// A font path is any bytes: a file name need not be UTF-8.
+#[test]
+fn a_font_path_need_not_be_utf8() {
+    let raw = OsString::from_vec(vec![b'/', 0xff]);
+    let parsed = parse([
+        OsString::from("daemon"),
+        OsString::from("--font"),
+        raw.clone(),
+    ]);
+    match parsed {
+        Ok(Command::Daemon(config)) => {
+            assert_eq!(config.font.unwrap().into_os_string(), raw);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_layout_is_what_is_listed() {
+    // The default: the clock in the center.
+    let default = config(&[]).layout;
+    assert_eq!(default, Layout::default());
+    #[cfg(feature = "clock")]
+    assert_eq!(default.center, ["clock"]);
+    #[cfg(feature = "clock")]
+    {
+        // Any section given sets the whole layout.
+        let right = config(&["--right", "clock"]).layout;
+        assert_eq!(right.right, ["clock"]);
+        assert!(right.center.is_empty() && right.left.is_empty());
+        // Empty is no modules at all.
+        assert!(config(&["--center", ""]).layout.is_empty());
+        assert_eq!(
+            run(&["daemon", "--left", "clock", "--right", "clock"]),
+            Err(Error::Modules {
+                flag: "--right",
+                error: ModulesError::Twice("clock")
+            })
+        );
+        assert_eq!(
+            run(&["daemon", "--center", "clock,clock"]),
+            Err(Error::Modules {
+                flag: "--center",
+                error: ModulesError::Twice("clock")
+            })
+        );
+    }
+    let unknown = run(&["daemon", "--left", "battery"]);
+    assert_eq!(
+        unknown,
+        Err(Error::Modules {
+            flag: "--left",
+            error: ModulesError::Unknown("battery".into())
+        })
+    );
+    let message = unknown.unwrap_err().to_string();
+    assert!(message.contains("no module `battery`"), "{message}");
+    assert!(matches!(
+        run(&["daemon", "--left", "clock,"]),
+        Err(Error::Modules { .. })
+    ));
+}
+
+#[test]
+fn padding_and_spacing() {
+    let layout = config(&["--padding", "0", "--spacing", "12"]).layout;
+    assert_eq!((layout.padding, layout.spacing), (0, 12));
+    assert_eq!(
+        run(&["daemon", "--padding", &(MAX_GAP + 1).to_string()]),
+        Err(Error::Gap {
+            flag: "--padding",
+            value: (MAX_GAP + 1).to_string()
+        })
+    );
+    assert!(matches!(
+        run(&["daemon", "--spacing", "-1"]),
+        Err(Error::Gap {
+            flag: "--spacing",
+            ..
+        })
+    ));
+}
+
+#[cfg(feature = "clock")]
+#[test]
+fn the_clock_format_is_checked_when_read() {
+    use crate::modules::clock::format::{Error as FormatError, Format};
+    let clock = config(&["--clock-format", "%H:%M"]).modules.clock;
+    assert_eq!(clock.format, Format::parse("%H:%M").unwrap());
+    assert_eq!(
+        run(&["daemon", "--clock-format", "%Q"]),
+        Err(Error::ClockFormat {
+            value: "%Q".into(),
+            error: FormatError::Unknown('Q')
+        })
+    );
+    let message = run(&["daemon", "--clock-format", "a\nb"])
+        .unwrap_err()
+        .to_string();
+    assert!(message.contains("control character"), "{message}");
+    assert!(message.contains("\\n"), "the newline is escaped: {message}");
 }

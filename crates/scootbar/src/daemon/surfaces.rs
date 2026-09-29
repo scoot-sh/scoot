@@ -43,6 +43,7 @@ use super::wayland::{Globals, State};
 use crate::bar::Bar;
 use crate::outputs::{Effect, Entry, OutputId, Rotation, Size};
 use crate::print::warn;
+use crate::render::Scene;
 
 /// The newest `wl_output` scootbar knows (v4 adds `name`). Older outputs
 /// are still bound.
@@ -59,6 +60,8 @@ pub struct Objects {
     pub(super) layer: Option<LayerObjects>,
     /// The buffers drawn on the surface; emptied with it.
     pub(super) canvas: Canvas,
+    /// The modules as this output shows them.
+    pub(super) scene: Scene,
 }
 
 impl Objects {
@@ -195,10 +198,12 @@ impl State {
             return;
         }
         let version = version.min(OUTPUT_VERSION);
+        let modules = &self.content.modules;
         let id = self.outputs.add(name, |id| Objects {
             output: registry.bind::<WlOutput, _, _>(name, version, qh, id),
             layer: None,
-            canvas: Canvas::default(),
+            canvas: Canvas::new(modules.len()),
+            scene: Scene::new(modules),
         });
         // After the bind, so its callback comes after every event it caused.
         conn.display().sync(qh, RoundTrip::Settle(id));

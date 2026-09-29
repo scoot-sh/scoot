@@ -1,5 +1,5 @@
-//! What the bar is, independent of any output: its edge, height, margins
-//! and color, from the command line (there is no config file yet), and the
+//! What the bar is, independent of any output: its edge, height and
+//! margins, from the command line (there is no config file yet), and the
 //! layer-surface requests they turn into. Pure, so every rule is a unit
 //! test.
 //!
@@ -22,8 +22,6 @@
 
 use std::fmt;
 
-use crate::color::Color;
-
 #[cfg(test)]
 mod tests;
 
@@ -35,12 +33,6 @@ pub const DEFAULT_HEIGHT: u32 = 28;
 pub const MAX_HEIGHT: u32 = 1024;
 /// The largest margin `--margin` takes on a side, for the same reason.
 pub const MAX_MARGIN: u32 = 1024;
-/// The bar's color when `--background` is not given.
-pub const DEFAULT_BACKGROUND: Color = Color {
-    r: 0x1e,
-    g: 0x1e,
-    b: 0x2e,
-};
 
 /// The output edge the bar is anchored to. Vertical bars are not in the
 /// first version (`docs/scootbar/backlog/visibility-and-layering.md`).
@@ -145,7 +137,7 @@ impl Margin {
 
 /// Digits only: no sign, no spaces, no `+`, not empty. `u32::from_str`
 /// takes a leading `+`, which a margin has no use for.
-fn parse_whole(text: &str) -> Option<u32> {
+pub fn parse_whole(text: &str) -> Option<u32> {
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
@@ -164,7 +156,6 @@ pub struct Bar {
     /// Logical pixels, 1 to [`MAX_HEIGHT`].
     pub height: u32,
     pub margin: Margin,
-    pub background: Color,
 }
 
 impl Default for Bar {
@@ -173,7 +164,6 @@ impl Default for Bar {
             edge: Edge::Top,
             height: DEFAULT_HEIGHT,
             margin: Margin::default(),
-            background: DEFAULT_BACKGROUND,
         }
     }
 }

@@ -36,6 +36,7 @@ use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 
+use super::Content;
 use super::surfaces::Objects;
 use crate::bar::Bar;
 use crate::outputs::Outputs;
@@ -88,6 +89,8 @@ pub struct State {
     pub globals: Globals,
     pub outputs: Outputs<Objects>,
     pub bar: Bar,
+    /// What the bars show: the modules, the font and the style.
+    pub content: Content,
 }
 
 pub struct Wayland {
@@ -101,7 +104,7 @@ impl Wayland {
     /// Connects through `WAYLAND_DISPLAY`/`WAYLAND_SOCKET`, lists the
     /// globals (one round trip), binds them, and binds each output. Also
     /// returns the optional globals the compositor lacks, to say so.
-    pub fn connect(bar: Bar) -> Result<(Self, Vec<&'static str>), WaylandError> {
+    pub fn connect(bar: Bar, content: Content) -> Result<(Self, Vec<&'static str>), WaylandError> {
         let conn = Connection::connect_to_env().map_err(WaylandError::Connect)?;
         let (list, queue) = registry_queue_init::<State>(&conn).map_err(WaylandError::Registry)?;
         let qh = queue.handle();
@@ -152,6 +155,7 @@ impl Wayland {
             },
             outputs: Outputs::default(),
             bar,
+            content,
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {

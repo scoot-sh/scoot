@@ -9,6 +9,22 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-29 — scootbar shows a clock
+
+- **`scootbar daemon` now shows the time**, centered on the bar by
+  default, as `3:07 pm`; `--clock-format '%H:%M'` makes it `15:07`, and the
+  format takes a small `strftime` subset (names in English, no locale). It
+  follows `$TZ` or `/etc/localtime`, a zone change within the minute,
+  and clock steps and resumes from suspend at once, and wakes once a
+  minute (once a second with seconds shown).
+- **It needs a font now**: `--font PATH` (a `.ttf` or `.otf`), or the first
+  of a few well-known files (DejaVu Sans, Noto Sans) it finds; with none
+  it refuses to start and says how to give one. `--font-size`,
+  `--foreground`, `--padding`, `--spacing`, and `--left`, `--center` and
+  `--right` for where modules go are new too; `--center ''` gives the old
+  solid bar, which needs no font
+  ([docs/scootbar/cli.md](docs/scootbar/cli.md)).
+
 ### 2026-09-29 — scootbar's first step: a bar on every output
 
 - **`scootbar daemon`** puts a solid bar along the top (or `--edge

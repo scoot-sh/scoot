@@ -50,7 +50,7 @@ Resolved 2026-09-29. What landed:
 - **No `--font` yet.** The skeleton draws no text, and the entry's own
   refusal rule ("with no usable font the bar refuses to start") would
   refuse a bar that needs no font; the font mapping decision is
-  [module-api-and-clock](../module-api-and-clock.md)'s by M0's note. The
+  [module-api-and-clock](module-api-and-clock-done.md)'s by M0's note. The
   flag, its well-known-directory fallback and the refusal land with the
   clock.
 - **Runtime hotplug is tested on sway, not scoot.** scoot's headless

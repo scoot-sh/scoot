@@ -2,13 +2,16 @@
 //!
 //! One binary. `scootbar daemon` connects to the compositor and gives every
 //! output a bar, a `top`-layer surface along one edge that reserves its
-//! space. The skeleton draws a solid bar and nothing else; the plan and the
+//! space, showing modules (`modules`: the clock, so far). The plan and the
 //! decisions behind it are in `docs/scootbar/`.
 //!
-//! No `unsafe` here: the one mapping it needs, the `wl_shm` buffer, is
-//! `scootbg-mem`'s.
+//! No `unsafe` here: the two mappings it needs, the `wl_shm` buffer and a
+//! font on a read-only mount, are `scootbg-mem`'s.
 
 #![forbid(unsafe_code)]
+// A build with no module (`--no-default-features`) keeps the module
+// machinery with nothing to drive it; the default build checks it all.
+#![cfg_attr(not(feature = "clock"), allow(dead_code))]
 
 #[cfg(target_os = "linux")]
 mod bar;
@@ -17,15 +20,31 @@ mod cli;
 #[cfg(target_os = "linux")]
 mod color;
 #[cfg(target_os = "linux")]
+mod config;
+#[cfg(target_os = "linux")]
 mod daemon;
 #[cfg(target_os = "linux")]
 mod density;
+#[cfg(target_os = "linux")]
+mod font;
+#[cfg(target_os = "linux")]
+mod layout;
+#[cfg(target_os = "linux")]
+mod modules;
 #[cfg(target_os = "linux")]
 mod outputs;
 #[cfg(target_os = "linux")]
 mod paint;
 #[cfg(target_os = "linux")]
 mod print;
+#[cfg(target_os = "linux")]
+mod render;
+#[cfg(all(target_os = "linux", test))]
+mod testfont;
+#[cfg(target_os = "linux")]
+mod text;
+#[cfg(target_os = "linux")]
+mod theme;
 
 use std::process::ExitCode;
 
@@ -47,8 +66,8 @@ fn main() -> ExitCode {
     let printed = match command {
         cli::Command::Help(topic) => print::print(topic.text()),
         cli::Command::Version => print::print(&format!("{}\n", cli::version_string())),
-        cli::Command::Daemon(bar) => {
-            return match daemon::run(bar) {
+        cli::Command::Daemon(config) => {
+            return match daemon::run(*config) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     warn(format_args!("scootbar: {error}"));

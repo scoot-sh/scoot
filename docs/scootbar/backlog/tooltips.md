@@ -13,7 +13,7 @@ Filed 2026-09-29. Serves **daily-drive**: the full window title, the battery
 time, the SSID behind an icon.
 
 A module's `View` already carries an optional `tooltip` string
-([module API](module-api-and-clock.md)). Showing it is a popup without a grab,
+([module API](resolved/module-api-and-clock-done.md)). Showing it is a popup without a grab,
 anchored under the module, shown after a delay and dismissed on leave.
 
 ## Cost discipline

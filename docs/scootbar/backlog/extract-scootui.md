@@ -43,7 +43,16 @@ refactored), so these are two copies to fold into one when this lands:
 | `src/print.rs`, `src/color.rs` | the same | Panic-free printing; `#rrggbb` parsing. |
 | `tests/common/` | `tests/common/` | The headless scoot and sway harness and the screenshot reader. |
 
-`scootbg-mem` is already shared (scootbar depends on it for its buffers).
+The [clock](resolved/module-api-and-clock-done.md) added scootbar's pure
+drawing, all of it `scootui`'s likely core, with no copy in scootbg:
+`src/paint.rs` (the canvas: span fills, coverage blending), `src/text.rs`
+(the bounded glyph cache and one line of text), `src/layout.rs` (the
+three sections), `src/theme.rs` (the color tokens and state classes) and
+`src/render.rs` (views to pixels with per-module repaint and damage), plus
+the seven-segment test font `src/testfont.rs` that pixel tests read back.
+
+`scootbg-mem` is already shared (scootbar depends on it for its buffers,
+and since the clock for mapping a font that lies on a read-only mount).
 Its memfds are named `scootbg-wallpaper`, which is how scootbar's show in
 `/proc/PID/maps`; a name parameter belongs with the extraction.
 

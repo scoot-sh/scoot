@@ -202,7 +202,7 @@ It's early. More in [docs/scootbg/README.md](docs/scootbg/README.md).
 | [nix.md](docs/nix.md) | the flake and the NixOS and home-manager modules |
 | [benchmarks.md](docs/benchmarks.md) | measured CPU and memory, next to niri |
 | [scootbg/](docs/scootbg/README.md) | the wallpaper daemon |
-| [scootbar/](docs/scootbar/README.md) | the status bar (early: a solid bar so far) |
+| [scootbar/](docs/scootbar/README.md) | the status bar (early: a clock so far) |
 | [development.md](docs/development.md) | building, testing and contributing |
 
 What changed is in [CHANGELOG.md](CHANGELOG.md), and what's next in

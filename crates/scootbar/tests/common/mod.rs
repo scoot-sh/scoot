@@ -19,6 +19,13 @@
 
 mod shots;
 
+/// The seven-segment test font (`src/testfont.rs`), built in code: the
+/// bar draws with it here, and the tests read the time back off
+/// screenshots.
+#[rustfmt::skip]
+#[path = "../../src/testfont.rs"]
+pub mod testfont;
+
 #[allow(unused_imports)] // Only the binaries that check pixels use it.
 pub use shots::{Shot, rgb};
 
@@ -323,6 +330,11 @@ impl Session {
     /// Starts `scootbar daemon ARGS`, its stderr in [`Session::bar_log`].
     /// It has no socket to answer on: tests wait for what it did to show
     /// in the compositor.
+    ///
+    /// Always with `--font` the test font (so no test depends on the
+    /// machine's fonts), and, unless `args` places modules itself, with
+    /// none (`--center=`): a solid bar, whose geometry the tests check
+    /// pixel by pixel. The clock's tests place it.
     pub fn bar(&self, args: &[&str]) -> Child {
         self.bar_with_env(args, &[])
     }
@@ -331,14 +343,32 @@ impl Session {
     /// trace in [`Session::bar_log`]).
     pub fn bar_with_env(&self, args: &[&str], env: &[(&str, &str)]) -> Child {
         let log = fs::File::create(self.bar_log()).unwrap();
-        self.scootbar()
-            .arg("daemon")
+        let placed = args.iter().any(|arg| {
+            ["--left", "--center", "--right"]
+                .iter()
+                .any(|flag| arg.starts_with(flag))
+        });
+        let mut command = self.scootbar();
+        command.arg("daemon").arg("--font").arg(self.font());
+        if !placed {
+            command.arg("--center=");
+        }
+        command
             .args(args)
             .envs(env.iter().copied())
             .stdout(Stdio::null())
             .stderr(log)
             .spawn()
             .unwrap()
+    }
+
+    /// The test font, written into the scratch directory on first use.
+    pub fn font(&self) -> PathBuf {
+        let path = self.scratch.0.join("seven.ttf");
+        if !path.is_file() {
+            fs::write(&path, testfont::build()).unwrap();
+        }
+        path
     }
 
     pub fn bar_log(&self) -> PathBuf {

@@ -3,7 +3,7 @@ title: "Config file, control socket and reload: `scootbar msg`, `query` for agen
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "module-api-and-clock"
+blocked: null
 milestone: "M3"
 ---
 

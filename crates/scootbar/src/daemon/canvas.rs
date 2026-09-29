@@ -15,8 +15,10 @@
 //! size's memory. The memfd is closed as soon as its pool exists (the
 //! compositor has its own copy, the mapping keeps the memory).
 //!
-//! A buffer already holding the wanted frame is attached again as it is,
-//! without repainting (a scale flipped back and forth).
+//! Each buffer keeps a [`Record`] of what its pixels show, so a redraw
+//! paints only what differs from it (`crate::render::paint`): after one
+//! module changed, only that module's span, even in a buffer that missed a
+//! draw while the compositor held it.
 //!
 //! ## One draw
 //!
@@ -25,9 +27,9 @@
 //! they persist), damage, commit. With a viewporter every buffer, at any
 //! scale, is attached at buffer scale 1 and sized by the viewport's
 //! destination (the surface's logical size); without one, the scale is an
-//! integer and goes to `set_buffer_scale`. Damage is the whole buffer: the
-//! bar is one color, so any change changes every pixel. Per-module damage
-//! arrives with the modules.
+//! integer and goes to `set_buffer_scale`. **Damage is only what changed**
+//! from what the surface shows (`crate::render::damage`): a new size, scale
+//! or layout damages the whole bar, a module's new view only its span.
 
 use std::fmt;
 
@@ -39,12 +41,14 @@ use wayland_client::protocol::wl_surface::WlSurface;
 
 use scootbg_mem::{ShmBuffer, ShmError};
 
+use super::Content;
 use super::surfaces::LayerObjects;
 use super::wayland::{Globals, State};
-use crate::color::Color;
 use crate::density::Scale;
+use crate::modules::OutputView;
 use crate::outputs::{Frame, OutputId};
-use crate::paint;
+use crate::paint::{self, Span};
+use crate::render::{self, Record, Scene};
 
 #[cfg(test)]
 mod tests;
@@ -84,13 +88,15 @@ pub enum Drew {
     Stalled,
 }
 
-/// One buffer: its memory, the pool over it, and the `wl_buffer`.
+/// One buffer: its memory, the pool over it, the `wl_buffer`, and what its
+/// pixels show.
 #[derive(Debug)]
 struct Slot {
     shm: ShmBuffer,
     pool: WlShmPool,
     buffer: WlBuffer,
     state: SlotState,
+    record: Record,
 }
 
 /// What [`pick`] needs to know about a slot.
@@ -99,7 +105,8 @@ pub struct SlotState {
     pub dims: (u32, u32),
     /// Attached and not released since: the compositor may be reading.
     pub held: bool,
-    /// What its pixels show, once painted.
+    /// The frame its pixels were last painted at (their [`Record`] has the
+    /// rest).
     pub painted: Option<Frame>,
 }
 
@@ -126,6 +133,7 @@ impl Slot {
         qh: &QueueHandle<State>,
         id: OutputId,
         dims: (u32, u32),
+        modules: usize,
     ) -> Result<Self, ShmError> {
         let mut shm = ShmBuffer::new(dims.0, dims.1)?;
         let geometry = shm.geometry();
@@ -157,6 +165,7 @@ impl Slot {
                 held: false,
                 painted: None,
             },
+            record: Record::new(modules),
         })
     }
 
@@ -171,16 +180,38 @@ impl Slot {
 }
 
 /// One output's buffers.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Canvas {
     slots: [Option<Slot>; SLOTS],
     /// The buffer size of the last draw: a released buffer of another size
     /// is dropped.
     current: Option<(u32, u32)>,
+    /// What the surface shows (its last commit), for damage.
+    shown: Record,
+    /// The spans to damage, reused draw to draw.
+    damage: Vec<Span>,
+    /// How many modules the bar has: each record's length.
+    modules: usize,
 }
 
 impl Canvas {
-    /// Destroys every buffer (the surface is gone, or going).
+    pub fn new(modules: usize) -> Self {
+        Self {
+            slots: [None, None],
+            current: None,
+            shown: Record::new(modules),
+            damage: Vec::with_capacity(modules),
+            modules,
+        }
+    }
+
+    /// What the surface shows.
+    pub fn shown(&self) -> &Record {
+        &self.shown
+    }
+
+    /// Destroys every buffer (the surface is gone, or going), and forgets
+    /// what it showed.
     pub fn clear(&mut self) {
         for slot in &mut self.slots {
             if let Some(slot) = slot.take() {
@@ -188,6 +219,7 @@ impl Canvas {
             }
         }
         self.current = None;
+        self.shown.reset();
     }
 
     /// `wl_buffer.release` for `buffer`: its slot may be written again, or
@@ -211,7 +243,8 @@ impl Canvas {
         }
     }
 
-    /// Draws `frame` in `color` on `layer`'s surface and commits it.
+    /// Draws `scene` at `frame` on `layer`'s surface and commits it.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         globals: &Globals,
@@ -219,7 +252,9 @@ impl Canvas {
         id: OutputId,
         layer: &mut LayerObjects,
         frame: Frame,
-        color: Color,
+        scene: &mut Scene,
+        output: &OutputView<'_>,
+        content: &mut Content,
     ) -> Result<Drew, DrawError> {
         // Without a viewport the buffer must be the logical size times an
         // integer (`set_buffer_scale`; anything else is a protocol error).
@@ -250,14 +285,30 @@ impl Canvas {
         let slot = match entry {
             Some(slot) => slot,
             None => {
-                let fresh = Slot::new(globals, qh, id, dims).map_err(DrawError::Shm)?;
+                let fresh =
+                    Slot::new(globals, qh, id, dims, self.modules).map_err(DrawError::Shm)?;
                 entry.insert(fresh)
             }
         };
-        if slot.state.painted != Some(frame) {
-            paint::fill(slot.shm.pixels_mut(), color);
-            slot.state.painted = Some(frame);
-        }
+        let Content {
+            modules,
+            text,
+            style,
+        } = content;
+        scene.update(modules, output, text.as_ref(), style, scale, dims.0);
+        let Some(mut canvas) = paint::Canvas::new(slot.shm.pixels_mut(), dims.0, dims.1) else {
+            // The buffer was made at `dims`; this cannot happen.
+            return Err(DrawError::TooLarge(frame));
+        };
+        render::paint(
+            &mut canvas,
+            &mut slot.record,
+            scene,
+            text.as_mut(),
+            style,
+            frame,
+        );
+        slot.state.painted = Some(frame);
 
         let surface = &layer.surface;
         surface.attach(Some(&slot.buffer), 0, 0);
@@ -279,7 +330,13 @@ impl Canvas {
             region.destroy();
             layer.opaque = Some(frame.size);
         }
-        surface.damage_buffer(0, 0, logical(dims.0), logical(dims.1));
+        if render::damage(&mut self.shown, scene, frame, &mut self.damage) {
+            surface.damage_buffer(0, 0, logical(dims.0), logical(dims.1));
+        } else {
+            for span in &self.damage {
+                surface.damage_buffer(logical(span.x), 0, logical(span.width), logical(dims.1));
+            }
+        }
         surface.commit();
         slot.state.held = true;
         self.current = Some(dims);
