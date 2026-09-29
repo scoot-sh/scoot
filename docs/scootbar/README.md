@@ -32,7 +32,11 @@ VM), each bar configured to show a clock (`%a %d %b %H:%M`) and, where it
 can, the workspaces, with two windows on two workspaces. The method, the
 raw runs and the configs are in the record's
 [§4](backlog/resolved/dependencies-done.md#4-baselines); treat times as
-noisy and memory as close to exact. scootbar's own column arrives with M1.
+noisy. RSS and heap are close to exact; PSS is not, because it divides shared
+pages among whatever else maps them (sway and other store processes co-ran in
+these runs), so the ratchet's primary memory rows are RSS and heap. "Wakeups"
+are voluntary context switches, which a blocking syscall inside a wake
+inflates on a busy machine. scootbar's own column arrives with M1.
 
 What each shows: Waybar and ashell show the workspaces on both compositors;
 yambar and ironbar show only the clock on scoot (neither speaks
