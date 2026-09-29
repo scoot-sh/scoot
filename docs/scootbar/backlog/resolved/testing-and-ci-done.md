@@ -330,13 +330,16 @@ The independent review of #329 found gaps, fixed on
 `fix/testing-and-ci-followups` rather than filed. The record above is left
 as it was; what changed:
 
-- **`scootbar-macos` is gone.** The bar never runs on a Mac (the user,
-  2026-09-29: "The bar will never run on Mac."), so a job of its own for
-  the stub checked nothing anyone uses. The stub stays, as scootbg's does:
-  the `macos` job's `cargo check --workspace --all-targets` compiles every
-  crate, and that job runs on compositor changes and on `main`. Its
-  `--no-default-features` check went with it; the `scootbar` job's clippy
-  of the smallest build covers that build on Linux.
+- **`scootbar-macos` is gone, and so is the stub it checked.** The bar
+  never runs on a Mac (the user, 2026-09-29: "The bar will never run on
+  Mac."), and neither does scootbg ("Scootbg only needs Linux too. Scoot
+  is there because it'll eventually have scoot for Mac"). Both crates, and
+  scootbg-mem, lost their non-Linux stubs and `cfg(target_os = "linux")`
+  gates; off Linux each stops the build with "runs on Linux only", and the
+  `macos` job's `cargo check` excludes them. Only `scoot` keeps its stub.
+  The macOS job's `--no-default-features` check went with it; the
+  `scootbar` job's clippy and tests of the smallest build cover that build
+  on Linux.
 - **The module contract reaches every module.** CI now runs the unit tests
   of every feature set it clippies (every module, none, each alone), so a
   module outside `default` is held to the contract; a module unavailable

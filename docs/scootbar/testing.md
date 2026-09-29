@@ -201,11 +201,9 @@ the change reaches it too (the crate's `Cargo.toml` does):
 | `scootbar` | `fmt --check`; the benchmark harness's unit tests; clippy `-D warnings` on the default build, `--no-default-features`, and each module alone (the modules read from `Cargo.toml`, so a new one joins with no workflow change); `cargo nextest run` and `cargo test` of the default build (both: `CLAUDE.md` says why), then `cargo nextest run` of the unit tests with every module, with none, and with each alone; no `libc` crate, and an `ldd` check that the release binary links only libc, libm and libgcc_s (no libEGL, libgbm or libwayland); both fuzz targets for a fixed budget, 1,000,000 runs of `format` and 5,000,000 of `tzif` from seed 1 (about 35 s), a finding's input printed in base64, after `cargo fetch --locked` of the fuzz workspace (cargo-fuzz has no `--locked`), so a stale `fuzz/Cargo.lock` fails |
 | `scootbar-integration` | the integration tests on headless scoot and sway, with `SCOOTBAR_REQUIRE_SCOOT` and `SCOOTBAR_REQUIRE_SWAY` so a missing compositor fails instead of skipping; also on a compositor-only change |
 
-The bar never runs on a Mac, and no job builds it for one on its own.
-Off Linux it compiles to a stub that says it runs on Linux only, as
-scootbg does, because the `macos` job's `cargo check --workspace
---all-targets` compiles every crate; that check runs on a compositor
-change and on every push to `main`, not on a bar-only one.
+The bar never runs on a Mac, and does not build there (neither does
+scootbg): the `macos` job's `cargo check` leaves both out, with
+scootbg-mem, and no change to them alone starts it.
 
 `nix-build.yml` builds `.#scootbar` on `main` only
 ([nix-package](backlog/resolved/nix-package-done.md)).
