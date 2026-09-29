@@ -30,11 +30,17 @@ devenv shell -- cargo fmt --check -p scootbar
 | `SCOOTBAR_BLESS` | rewrites the [snapshots](#snapshots) the tests compare instead of comparing them |
 
 The Cargo-feature matrix, as CI runs it: the default build, the smallest
-(every module left out), and each module alone:
+(every module left out), every module at once, and each module alone,
+each clippied and its unit tests run. The module contract below walks the
+registry of the build it is compiled in, so a module left out of
+`default` is held to it only by these:
 
 ```sh
 devenv shell -- cargo clippy -p scootbar --no-default-features --all-targets -- -D warnings
 devenv shell -- cargo clippy -p scootbar --no-default-features --features clock --all-targets -- -D warnings
+devenv shell -- cargo nextest run -p scootbar --bin scootbar --all-features
+devenv shell -- cargo nextest run -p scootbar --bin scootbar --no-default-features
+devenv shell -- cargo nextest run -p scootbar --bin scootbar --no-default-features --features clock
 ```
 
 No test needs a font or time-zone data on the machine: the text tests draw
@@ -73,10 +79,27 @@ pinned nixpkgs' tzdata).
   and a trivial second module (a pipe counter, in `modules/tests.rs`)
   written against the contract to show what adding one takes. **Every
   module in the registry is held to two tests with no new code**
-  (`modules/tests.rs`): it survives every event the loop can hand it on
-  each of its sources and still fills a bounded view (or, unavailable,
-  says why), and it has a `modules/<id>/tests.rs` that drives it through
-  the harness, so a module added without harness tests fails.
+  (`modules/tests.rs`), in every build CI tests (see the feature matrix
+  above):
+  - *The contract*: started as the bar starts it, it survives every event
+    the loop can hand it on each of its sources, and before and after each
+    it fills a view with no control character and nothing cut at the
+    view's bound (`MAX_TEXT`: the bound is for untrusted text, so a
+    module's own output cut there is a bug). Unavailable, it must say why.
+    The registry's modules together poll no more fds than the loop has for
+    them (`MAX_POLL`, less the Wayland connection's), since a layout
+    places each once.
+  - *Stand-ins*: a module unavailable on the test machine (a battery
+    module where there is no battery) would otherwise skip all of that, so
+    it fails the contract unless its registry line has a `stand_in`
+    (`Spec::stand_in`, compiled in tests only): the module started as if
+    its probe had found what it looks for, a fake device or a fixture.
+    The contract then drives the stand-in too, on every machine. A module
+    available anywhere tests run (the clock: a `timerfd`) needs none.
+  - *Harness tests*: it has a `modules/<id>/tests.rs` whose code calls the
+    harness (`Harness::new(` or `Harness::start(`; comments and string
+    literals are skipped, so a mention is not a call), so a module added
+    without harness tests fails.
 - **The clock**: the TZif reader against `zdump` at every transition from
   1900 to 2100 of twelve zones picked for their oddities (half-hour and
   45-minute offsets, a 30-minute DST shift, southern summers, Dublin's
@@ -175,9 +198,14 @@ the change reaches it too (the crate's `Cargo.toml` does):
 
 | Job | What it runs |
 |---|---|
-| `scootbar` | `fmt --check`; the benchmark harness's unit tests; clippy `-D warnings` on the default build, `--no-default-features`, and each module alone (the modules read from `Cargo.toml`, so a new one joins with no workflow change); `cargo nextest run` and `cargo test` (both: `CLAUDE.md` says why); no `libc` crate, and an `ldd` check that the release binary links only libc, libm and libgcc_s (no libEGL, libgbm or libwayland); both fuzz targets for a fixed budget, 1,000,000 runs of `format` and 5,000,000 of `tzif` from seed 1 (about 35 s), a finding's input printed in base64 |
+| `scootbar` | `fmt --check`; the benchmark harness's unit tests; clippy `-D warnings` on the default build, `--no-default-features`, and each module alone (the modules read from `Cargo.toml`, so a new one joins with no workflow change); `cargo nextest run` and `cargo test` of the default build (both: `CLAUDE.md` says why), then `cargo nextest run` of the unit tests with every module, with none, and with each alone; no `libc` crate, and an `ldd` check that the release binary links only libc, libm and libgcc_s (no libEGL, libgbm or libwayland); both fuzz targets for a fixed budget, 1,000,000 runs of `format` and 5,000,000 of `tzif` from seed 1 (about 35 s), a finding's input printed in base64, after `cargo fetch --locked` of the fuzz workspace (cargo-fuzz has no `--locked`), so a stale `fuzz/Cargo.lock` fails |
 | `scootbar-integration` | the integration tests on headless scoot and sway, with `SCOOTBAR_REQUIRE_SCOOT` and `SCOOTBAR_REQUIRE_SWAY` so a missing compositor fails instead of skipping; also on a compositor-only change |
-| `scootbar-macos` | `cargo check -p scootbar --all-targets` of the macOS stub, with and without modules, when the bar changed and the compositor did not (the `macos` job's workspace check covers every other case) |
+
+The bar never runs on a Mac, and no job builds it for one on its own.
+Off Linux it compiles to a stub that says it runs on Linux only, as
+scootbg does, because the `macos` job's `cargo check --workspace
+--all-targets` compiles every crate; that check runs on a compositor
+change and on every push to `main`, not on a bar-only one.
 
 `nix-build.yml` builds `.#scootbar` on `main` only
 ([nix-package](backlog/resolved/nix-package-done.md)).
@@ -195,8 +223,8 @@ devenv shell -- cargo build --release -p scootbar
 devenv shell -- cargo build -p scoot -p scootctl     # any profile
 devenv shell -- python3 scripts/scootbar-bench/bench.py run --out /tmp/sbar \
   --scoot target/debug/scoot --scootctl target/debug/scootctl
-python3 scripts/scootbar-bench/bench.py report /tmp/sbar            # tables and gate 2
-python3 scripts/scootbar-bench/bench.py compare /tmp/sbar /tmp/old  # gate 1, exit 1 on a regression
+python3 scripts/scootbar-bench/bench.py report /tmp/sbar            # tables and rule 2, exit 1 on a loss
+python3 scripts/scootbar-bench/bench.py compare /tmp/sbar /tmp/old  # rule 1, exit 1 on a regression
 python3 -m unittest discover -s scripts/scootbar-bench -p 'test_*.py'
 ```
 
@@ -239,10 +267,12 @@ updates. Competitors come from the pinned nixpkgs.
 - scootbar's own lines of Rust and direct dependencies, reported.
 
 **The gates** use scootbg's noise rule (a side wins only by more than the
-largest of 5%, the two sides' combined spread, and the unit's floor):
-`report` lists every row on which a competitor beats scootbar (rule 2),
-and `compare` every row on which scootbar is worse than an earlier run
-(rule 1). Each milestone's run is kept in [`bench/`](bench/README.md),
+largest of 5%, the two sides' combined spread, and the unit's floor), and
+each exits 1 when its rule fails: `report` lists every gated row on which
+a competitor beats scootbar (rule 2), and every gated row a competitor has
+and scootbar does not (its runs failed, or it was not run), since a gate
+that cannot be judged has not been passed; `compare` lists every row on
+which scootbar is worse than an earlier run (rule 1). Each milestone's run is kept in [`bench/`](bench/README.md),
 never overwritten; M1's, `bench/m1-clock`, is the baseline the next one
 compares against, and its table is in the [README](README.md#m1-like-for-like-by-the-benchmark-script).
 

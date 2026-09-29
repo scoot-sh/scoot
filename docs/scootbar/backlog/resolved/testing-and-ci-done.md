@@ -323,3 +323,32 @@ requests and on `main`, and no pull request was opened from this branch,
 so none of it has run on GitHub: in particular `scootbar-macos` on a real
 Mac and the fuzz step on a runner; real hardware of any kind; the
 opt-in clock-step test (still [a follow-up](../m1-review-followups.md)).
+
+### Follow-ups, 2026-09-29
+
+The independent review of #329 found gaps, fixed on
+`fix/testing-and-ci-followups` rather than filed. The record above is left
+as it was; what changed:
+
+- **`scootbar-macos` is gone.** The bar never runs on a Mac (the user,
+  2026-09-29: "The bar will never run on Mac."), so a job of its own for
+  the stub checked nothing anyone uses. The stub stays, as scootbg's does:
+  the `macos` job's `cargo check --workspace --all-targets` compiles every
+  crate, and that job runs on compositor changes and on `main`. Its
+  `--no-default-features` check went with it; the `scootbar` job's clippy
+  of the smallest build covers that build on Linux.
+- **The module contract reaches every module.** CI now runs the unit tests
+  of every feature set it clippies (every module, none, each alone), so a
+  module outside `default` is held to the contract; a module unavailable
+  on the test machine fails it unless its registry line has a `stand_in`
+  the contract drives instead; the harness-tests check reads code, not
+  comments or strings; the vacuous `len() <= MAX_TEXT` asserts became a
+  check that nothing was cut at the bound; and the registry's sources are
+  held to the loop's real capacity (`MAX_POLL`, shared with the daemon),
+  not a separate 8.
+- **`bench.py report` exits 1** when rule 2 fails (a competitor ahead, or
+  a gated row with no scootbar value), as the docs above said it gated.
+- **The fuzz step checks its lock file** (`cargo fetch --locked`; cargo-fuzz
+  has no `--locked` of its own), so a stale `fuzz/Cargo.lock` fails.
+
+How to run it: [testing.md](../../testing.md).
