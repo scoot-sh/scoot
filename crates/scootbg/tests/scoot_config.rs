@@ -6,7 +6,6 @@
 //!
 //! In the scootbg integration CI job, which runs when either crate changes:
 //! a change to either side that breaks the pair fails here.
-#![cfg(target_os = "linux")]
 
 mod common;
 

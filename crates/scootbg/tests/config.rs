@@ -10,7 +10,6 @@
 //! adopting profiles, the `{}` path with no daemon, validation, a daemon
 //! from another build (a fake one, on the socket), and a daemon killed
 //! mid-apply.
-#![cfg(target_os = "linux")]
 
 mod common;
 

@@ -28,6 +28,9 @@ and runs them for a fixed budget: 1,000,000 runs of `format` and
 `regressions/` (about 35 s). Building them is what keeps the `#[path]`
 includes from rotting: a change that compiles in scootbar but not here
 fails there. A finding's input is printed in base64 in the job's log.
+Before building, the step runs `cargo fetch --locked` on this workspace
+(cargo-fuzz has no `--locked` to pass on), so a `Cargo.lock` that no
+longer matches `Cargo.toml` fails the job instead of being rewritten.
 **On every `cargo test`**, scootbar's
 `modules::clock::fuzz::tests` replay the seed corpus and every file in
 `regressions/` through the same checks on the stable toolchain, and the

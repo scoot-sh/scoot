@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 
-use super::{Init, Module, OutputView, Settings, Sources, Spec, Update, View};
+use super::{Init, MAX_POLL, Module, OutputView, Settings, Sources, Spec, Update, View};
 
 pub struct Harness {
     module: Box<dyn Module>,
@@ -57,13 +57,14 @@ impl Harness {
         view
     }
 
-    /// How many sources the module asks the loop to poll.
+    /// How many sources the module asks the loop to poll, counted up to
+    /// [`MAX_POLL`]: one past what the loop has for all the modules
+    /// together, so a module over that shows.
     pub fn source_count(&self) -> usize {
         let placeholder = rustix::fs::CWD;
-        let mut fds: Vec<PollFd<'_>> = (0..16)
-            .map(|_| PollFd::from_borrowed_fd(placeholder, PollFlags::empty()))
-            .collect();
-        let mut owners = vec![(0, 0); 16];
+        let mut fds: [PollFd<'_>; MAX_POLL] =
+            std::array::from_fn(|_| PollFd::from_borrowed_fd(placeholder, PollFlags::empty()));
+        let mut owners = [(0, 0); MAX_POLL];
         let mut len = 0;
         let mut sources = Sources::new(&mut fds, &mut owners, &mut len, 0);
         self.module.sources(&mut sources);
@@ -75,10 +76,9 @@ impl Harness {
     /// otherwise `Changed` if any hand-over changed the view.
     pub fn wait(&mut self, timeout: Duration) -> Option<Update> {
         let placeholder = rustix::fs::CWD;
-        let mut fds: Vec<PollFd<'_>> = (0..16)
-            .map(|_| PollFd::from_borrowed_fd(placeholder, PollFlags::empty()))
-            .collect();
-        let mut owners = vec![(0, 0); 16];
+        let mut fds: [PollFd<'_>; MAX_POLL] =
+            std::array::from_fn(|_| PollFd::from_borrowed_fd(placeholder, PollFlags::empty()));
+        let mut owners = [(0, 0); MAX_POLL];
         let mut len = 0;
         let mut sources = Sources::new(&mut fds, &mut owners, &mut len, 0);
         self.module.sources(&mut sources);
@@ -91,7 +91,6 @@ impl Harness {
             return None;
         }
         let revents: Vec<PollFlags> = fds[..len].iter().map(PollFd::revents).collect();
-        drop(fds);
         let mut update = Update::Unchanged;
         for (flags, &(_, source)) in revents.iter().zip(&owners) {
             if !flags.is_empty() && self.module.on_ready(source, *flags) == Update::Changed {

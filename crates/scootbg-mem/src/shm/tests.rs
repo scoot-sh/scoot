@@ -102,12 +102,23 @@ fn closing_the_fd_keeps_the_pages_and_frees_the_descriptor() {
         std::os::fd::AsRawFd::as_raw_fd(&buffer.fd().unwrap())
     );
     assert!(std::fs::symlink_metadata(&ours).is_ok());
+    let memfd = fstat(buffer.fd().unwrap()).unwrap();
     buffer.close_fd();
     assert!(buffer.fd().is_none());
-    assert!(
-        std::fs::symlink_metadata(&ours).is_err(),
-        "the memfd is still open"
-    );
+    // Compare the file, not the number: tests share this process's fd
+    // table, so a neighbour can open something that reuses the number
+    // we just freed. That is a different file; only the memfd itself
+    // still being open at that path is a failure.
+    match std::fs::metadata(&ours) {
+        Err(_) => {}
+        Ok(now) => {
+            use std::os::unix::fs::MetadataExt;
+            assert!(
+                now.dev() != memfd.st_dev as u64 || now.ino() != memfd.st_ino as u64,
+                "the memfd is still open"
+            );
+        }
+    }
     // Our mapping still holds the pages, and writes through it reach
     // the compositor's copy of the file.
     assert!(buffer.pixels_mut().iter().all(|&b| b == 7));

@@ -9,6 +9,10 @@ python3 scripts/scootbar-bench/bench.py report docs/scootbar/bench/m1-clock
 python3 scripts/scootbar-bench/bench.py compare /tmp/new-run docs/scootbar/bench/m1-clock
 ```
 
+`report` is the ratchet's rule 2 (no competitor ahead) and `compare` its
+rule 1 (no regression against the baseline); each exits 1 when its rule
+fails.
+
 A directory per run: `meta.json` (the machine, commit, versions, store
 paths, settings and the static rows), `runs.jsonl` (every raw run) and
 `table.md` (what `report` printed). Never overwritten; a new milestone adds

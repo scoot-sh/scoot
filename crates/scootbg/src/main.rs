@@ -8,64 +8,39 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(target_os = "linux")]
 mod apply;
-#[cfg(target_os = "linux")]
 mod choices;
-#[cfg(target_os = "linux")]
 mod cli;
-#[cfg(target_os = "linux")]
 mod client;
-#[cfg(target_os = "linux")]
 mod color;
-#[cfg(target_os = "linux")]
 mod control;
-#[cfg(target_os = "linux")]
 mod daemon;
-#[cfg(target_os = "linux")]
 mod density;
-#[cfg(target_os = "linux")]
 mod framing;
-#[cfg(target_os = "linux")]
 mod image;
-#[cfg(target_os = "linux")]
 mod jobs;
-#[cfg(target_os = "linux")]
 mod outputs;
-#[cfg(target_os = "linux")]
 mod paint;
-#[cfg(target_os = "linux")]
 mod paths;
-#[cfg(target_os = "linux")]
 mod print;
-#[cfg(target_os = "linux")]
 mod protocol;
-#[cfg(target_os = "linux")]
 mod section;
-#[cfg(target_os = "linux")]
 mod sha256;
-#[cfg(target_os = "linux")]
 mod share;
-#[cfg(target_os = "linux")]
 mod state;
-#[cfg(target_os = "linux")]
 mod waiters;
-#[cfg(target_os = "linux")]
 mod wallpaper;
 
 use std::process::ExitCode;
 
 /// Blocks of 128 KiB and more are their own mappings, so a decode's heap
 /// goes back to the kernel (dependencies-done.md §6b).
-#[cfg(target_os = "linux")]
 #[global_allocator]
 static ALLOCATOR: scootbg_mem::LargeAlloc = scootbg_mem::LargeAlloc;
 
 /// Exit status for a usage error, as for most Unix tools.
-#[cfg(target_os = "linux")]
 const USAGE_ERROR: u8 = 2;
 
-#[cfg(target_os = "linux")]
 fn main() -> ExitCode {
     use print::warn;
 
@@ -116,12 +91,4 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn main() -> ExitCode {
-    use std::io::Write;
-    // Not `eprintln!`, which panics if stderr is a closed pipe.
-    let _ = writeln!(std::io::stderr(), "scootbg: runs on Linux only");
-    ExitCode::FAILURE
 }

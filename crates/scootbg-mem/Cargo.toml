@@ -7,14 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
-# Linux only, like the daemon it serves: on any other target the crate is
-# empty (see `src/lib.rs`), so `cargo check --workspace` still passes there.
+# Linux only, like the daemons it serves (`src/lib.rs` says so on any
+# other target; the macOS CI job leaves it out).
 #
 # `rustix` with its `linux_raw` backend (the default on Linux): raw syscalls,
 # no `libc` crate and no C. `mm` for the allocator's and the shm buffer's
 # mappings, `fs` for the sealed memfd. Decided in
 # docs/scootbg/backlog/resolved/dependencies-done.md (§6b, §9, §11).
-[target.'cfg(target_os = "linux")'.dependencies]
+[dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "mm", "fs"] }
 
 [lints.rust]

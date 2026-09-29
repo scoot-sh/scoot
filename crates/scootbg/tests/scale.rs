@@ -4,7 +4,6 @@
 //! the buffer lands one pixel to one device pixel. Any resampling by the
 //! compositor (a buffer larger than the output scaled down, or one a pixel
 //! off stretched) turns the checker grey.
-#![cfg(target_os = "linux")]
 
 mod common;
 

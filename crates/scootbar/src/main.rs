@@ -13,48 +13,31 @@
 // machinery with nothing to drive it; the default build checks it all.
 #![cfg_attr(not(feature = "clock"), allow(dead_code))]
 
-#[cfg(target_os = "linux")]
 mod bar;
-#[cfg(target_os = "linux")]
 mod cli;
-#[cfg(target_os = "linux")]
 mod color;
-#[cfg(target_os = "linux")]
 mod config;
-#[cfg(target_os = "linux")]
 mod daemon;
-#[cfg(target_os = "linux")]
 mod density;
-#[cfg(target_os = "linux")]
 mod font;
-#[cfg(target_os = "linux")]
 mod layout;
-#[cfg(target_os = "linux")]
 mod modules;
-#[cfg(target_os = "linux")]
 mod outputs;
-#[cfg(target_os = "linux")]
 mod paint;
-#[cfg(target_os = "linux")]
 mod print;
-#[cfg(target_os = "linux")]
 mod render;
-#[cfg(all(target_os = "linux", test))]
+#[cfg(test)]
 mod snapshots;
-#[cfg(all(target_os = "linux", test))]
+#[cfg(test)]
 mod testfont;
-#[cfg(target_os = "linux")]
 mod text;
-#[cfg(target_os = "linux")]
 mod theme;
 
 use std::process::ExitCode;
 
 /// Exit status for a usage error, as for most Unix tools.
-#[cfg(target_os = "linux")]
 const USAGE_ERROR: u8 = 2;
 
-#[cfg(target_os = "linux")]
 fn main() -> ExitCode {
     use print::warn;
 
@@ -85,12 +68,4 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn main() -> ExitCode {
-    use std::io::Write;
-    // Not `eprintln!`, which panics if stderr is a closed pipe.
-    let _ = writeln!(std::io::stderr(), "scootbar: runs on Linux only");
-    ExitCode::FAILURE
 }

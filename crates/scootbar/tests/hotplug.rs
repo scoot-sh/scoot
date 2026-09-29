@@ -7,7 +7,6 @@
 //!
 //! Skipped without sway (see `common`); `SCOOTBAR_REQUIRE_SWAY` makes that a
 //! failure.
-#![cfg(target_os = "linux")]
 
 mod common;
 

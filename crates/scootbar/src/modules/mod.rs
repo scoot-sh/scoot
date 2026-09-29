@@ -33,7 +33,10 @@
 //!
 //! One file in this directory, one line in [`REGISTRY`], one Cargo feature
 //! in `Cargo.toml` (so a build can leave it out), and tests through
-//! [`harness`]. Pointer input (`on_input`) arrives with
+//! [`harness`] in `<id>/tests.rs`. A module whose `init` probes for
+//! something a test machine may lack (a battery, a backlight) also gives
+//! its registry line a [`Spec::stand_in`], so the contract test in
+//! `tests.rs` exercises it everywhere. Pointer input (`on_input`) arrives with
 //! `docs/scootbar/backlog/pointer-and-interactions.md`, as a method with a
 //! default, so no module written before it changes.
 
@@ -87,7 +90,19 @@ pub enum Update {
 pub struct Spec {
     pub id: &'static str,
     pub init: fn(&Settings) -> Init,
+    /// Tests only: the module started as if `init`'s probe had found what
+    /// it looks for (a fake device, a fixture), so the contract test in
+    /// `tests.rs` drives its events and view on a machine without it.
+    /// `None` when `init` is available on any machine the tests run on
+    /// (the clock needs only a `timerfd`); the contract test fails a
+    /// module that comes up unavailable there without one.
+    #[cfg(test)]
+    pub stand_in: Option<StandIn>,
 }
+
+/// Tests only: how a [`Spec::stand_in`] starts its module.
+#[cfg(test)]
+pub type StandIn = fn(&Settings) -> Box<dyn Module>;
 
 /// Every module this build has, one line each.
 pub const REGISTRY: &[Spec] = &[
@@ -95,6 +110,8 @@ pub const REGISTRY: &[Spec] = &[
     Spec {
         id: clock::ID,
         init: clock::init,
+        #[cfg(test)]
+        stand_in: None,
     },
 ];
 
@@ -181,6 +198,19 @@ pub enum Class {
 /// boundary. Bounds what an untrusted string (a window title) can cost.
 pub const MAX_TEXT: usize = 256;
 
+/// The most fds the bar's loop polls in one turn (`crate::daemon`): the
+/// Wayland connection and every placed module's sources, in fixed arrays
+/// on its stack.
+pub const MAX_POLL: usize = 64;
+
+/// What the modules share of [`MAX_POLL`]: all of it but the Wayland
+/// connection's fd. A layout places a module at most once, so while the
+/// registry's modules together add no more than this, every source of
+/// every layout is polled; `tests.rs` checks that sum. (The loop needs no
+/// name for it: the modules fill its array from index 1 to the end.)
+#[cfg(test)]
+pub const MAX_SOURCES: usize = MAX_POLL - 1;
+
 /// A module's declarative output for one output. Reused: the bar clears
 /// and refills the same one, so its strings allocate once, at most
 /// [`MAX_TEXT`] bytes each.
@@ -194,8 +224,8 @@ pub struct View {
 
 impl View {
     pub fn clear(&mut self) {
-        self.text.0.clear();
-        self.tooltip.0.clear();
+        self.text.clear();
+        self.tooltip.clear();
         self.icon = None;
         self.class = Class::Normal;
     }
@@ -245,13 +275,31 @@ impl View {
     pub fn is_empty(&self) -> bool {
         self.text.0.is_empty() && self.icon.is_none()
     }
+
+    /// Tests only: whether a write to the text or the tooltip was cut at
+    /// [`MAX_TEXT`] since the last clear. The length alone cannot tell: a
+    /// cut view is never longer than the bound either.
+    #[cfg(test)]
+    pub fn was_cut(&self) -> bool {
+        self.text.1 || self.tooltip.1
+    }
 }
 
 /// A string that stops growing at [`MAX_TEXT`] bytes: a write past it is
 /// cut at the last character that fits, and reports an error so a
-/// formatter stops there.
+/// formatter stops there. In tests, it also remembers being cut.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct Bounded(String);
+struct Bounded(String, #[cfg(test)] bool);
+
+impl Bounded {
+    fn clear(&mut self) {
+        self.0.clear();
+        #[cfg(test)]
+        {
+            self.1 = false;
+        }
+    }
+}
 
 impl Write for Bounded {
     fn write_str(&mut self, s: &str) -> fmt::Result {
@@ -265,6 +313,10 @@ impl Write for Bounded {
             cut -= 1;
         }
         self.0.push_str(s.get(..cut).unwrap_or(""));
+        #[cfg(test)]
+        {
+            self.1 = true;
+        }
         Err(fmt::Error)
     }
 }
@@ -299,9 +351,10 @@ impl<'s, 'fd> Sources<'s, 'fd> {
         }
     }
 
-    /// Polls `fd` for `events`. Past the loop's capacity (`MAX_POLL` fds in
-    /// all, far more than the registry's modules add) the fd is not polled,
-    /// and this returns `false`.
+    /// Polls `fd` for `events`. Past the loop's capacity ([`MAX_POLL`] less
+    /// the Wayland connection's fd, for all the modules, which the
+    /// registry's together stay within) the fd is not polled, and this
+    /// returns `false`.
     pub fn add(&mut self, fd: BorrowedFd<'fd>, events: PollFlags) -> bool {
         let index = *self.len;
         let source = self.next;

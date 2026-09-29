@@ -5,13 +5,16 @@ The noise rule is scootbg's (``scripts/scootbg-bench/report.py``,
 ``verdict``): lower is better; one side beats the other when its median
 is lower by more than the largest of 5% of the reference's median, the two
 sides' combined spread (max − min), and the unit's absolute floor; else a
-tie, and a tie does not block. The two gates are the ratchet's
-(docs/scootbar/backlog/lightest.md):
+tie, and a tie does not block. The two gates are the ratchet's rules
+(docs/scootbar/backlog/lightest.md, numbered as there), and ``bench.py``
+exits 1 when either fails:
 
-1. ``report``: **no competitor beats scootbar** at the milestone's scope,
-   on any gated row both have.
-2. ``compare``: **no row of scootbar regresses** against an earlier run
+1. ``compare``: **no row of scootbar regresses** against an earlier run
    (the last milestone's).
+2. ``report``: **no competitor beats scootbar** at the milestone's scope,
+   on any gated row both have. A gated row a competitor has and scootbar
+   lacks (its runs failed, or it was not run) fails it too: a gate that
+   cannot be judged has not been passed.
 
 Rows the ratchet does not gate are shown, marked so: the bare executable
 (size is judged with what it links, as ruled), threads and the switching
@@ -74,10 +77,10 @@ def _scale(unit):
 
 def table(meta, runs, compositor):
     """One compositor's table, and the gate's findings:
-    ``(text, losses, ties)``."""
+    ``(text, losses, ties, unjudged)``."""
     bars = list(meta["bars"])
     lines = ["| Row | " + " | ".join(bars) + " |", "|---|" + "---|" * len(bars)]
-    losses, ties = [], []
+    losses, ties, unjudged = [], [], []
 
     def emit(label, vals, unit, gated):
         ref = vals.get(REFERENCE)
@@ -88,6 +91,8 @@ def table(meta, runs, compositor):
                              else "n/a")
                 continue
             text = scootbg_report.cell(vals[name], unit)
+            if name != REFERENCE and not ref and gated:
+                unjudged.append((compositor, label, name))
             if name != REFERENCE and ref and gated:
                 verdict, margin = scootbg_report.verdict(ref, vals[name], unit)
                 if verdict == "beaten":
@@ -109,7 +114,7 @@ def table(meta, runs, compositor):
         vals = {n: series(runs, compositor, n, row, metric, _scale(unit)) for n in bars}
         if any(vals.values()):
             emit(label, vals, unit, gated)
-    return "\n".join(lines), losses, ties
+    return "\n".join(lines), losses, ties, unjudged
 
 
 def failures(runs):
@@ -117,12 +122,21 @@ def failures(runs):
 
 
 def render(results_dir):
+    """The tables and rule 2's verdict, as ``report`` prints them."""
+    return gate(results_dir)[0]
+
+
+def gate(results_dir):
+    """The tables, and how many findings fail rule 2 (a competitor ahead,
+    or a gated row scootbar has no value for): ``(text, failed)``."""
     meta, runs = load(results_dir)
     out = []
     all_losses = []
+    all_unjudged = []
     for compositor in meta["compositors"]:
-        text, losses, ties = table(meta, runs, compositor)
+        text, losses, ties, unjudged = table(meta, runs, compositor)
         all_losses += losses
+        all_unjudged += unjudged
         out += [f"**On {compositor}** ({meta['compositor_versions'].get(compositor, '')})", "", text, ""]
         for _, label, name in ties:
             out.append(f"- tie: {label}: {name}")
@@ -141,13 +155,18 @@ def render(results_dir):
     for compositor, label, name, ref, other, margin in all_losses:
         out.append(f"- LOSS on {compositor}: {label}: {name} {other:.2f} against "
                    f"scootbar {ref:.2f} (margin {margin:.2f})")
+    if all_unjudged:
+        out.append(f"Not judged, so not passed: {len(all_unjudged)} gated row(s) with no "
+                   "scootbar value.")
+    for compositor, label, name in all_unjudged:
+        out.append(f"- NO SCOOTBAR VALUE on {compositor}: {label}: {name} has one")
     bad = failures(runs)
     if bad:
         out += ["", f"{len(bad)} failed run(s):"]
         for r in bad:
             first = (r.get("error") or "").splitlines()[:1]
             out.append(f"- {r['compositor']} {r['bar']} {r['row']} round {r['round']}: {first}")
-    return "\n".join(out)
+    return "\n".join(out), len(all_losses) + len(all_unjudged)
 
 
 def compare(results_dir, baseline_dir):

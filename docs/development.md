@@ -7,9 +7,24 @@ change is held to are in [`CLAUDE.md`](../CLAUDE.md).
 
 ```sh
 nix develop                     # every dependency, on Linux or macOS
-cargo test --workspace          # the compositor only compiles on Linux
-cargo nextest run --workspace   # one process per test -- the required runner
+cargo test --workspace          # Linux only: a Mac needs the excludes below
+cargo nextest run --workspace   # Linux only; one process per test -- the required runner
 ```
+
+On a Mac, leave out the crates that only run on Linux, the wallpaper
+daemon and the bar (a build of either stops at scootbg-mem's "run on
+Linux only"):
+
+```sh
+cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --all-targets
+```
+
+That is what the macOS CI job runs: the compositor crate with its Linux
+halves cfg'd out (a Mac version is planned), `scootctl`, `scoot-ipc` and
+`scoot-core`. The same applies to anything else that walks the whole
+workspace on a Mac: rust-analyzer's `check.overrideCommand` (or its
+`cargo.extraArgs`) takes the same `--exclude` flags, and so does
+`cargo doc --workspace`; `cargo metadata` is unaffected.
 
 On Linux the shell also carries what `scripts/smoke-test.sh` drives (`foot`,
 `jq`, ImageMagick, `wayland-info`), sets `$XDG_RUNTIME_DIR` when the box has
@@ -61,9 +76,10 @@ Every pull request runs `.github/workflows/ci.yml`. It checks:
 - `nix fmt` over all tracked `.nix` files, and `nix flake check -L` (the
   Linux and macOS jobs each cover their own systems' outputs, modules and
   checks);
-- a macOS `cargo check --workspace --all-targets` (on a Mac that is the
-  `scootctl` client plus the compositor crate with its Linux halves
-  cfg'd out).
+- a macOS `cargo check` of the workspace less scootbg, scootbg-mem and
+  scootbar (above): the `scootctl` client plus the compositor crate with
+  its Linux halves cfg'd out. It runs on a change to those crates or to
+  shared files, not on a scootbg- or scootbar-only one.
 
 Build and test steps run through `nix develop` (the smoke test's own
 tools come via `nix shell` pinned to the same lockfile), so the flake

@@ -261,8 +261,8 @@ one gap below the bar, as they sit one gap from each other.
   two bars, each reserving its own space. A control socket, and with it a
   refusal of a second daemon, comes with
   [config-cli-and-reload](backlog/config-cli-and-reload.md).
-- **Not Linux:** the binary builds everywhere but runs on Linux only; on
-  any other system it says so and exits with status 1.
+- **Linux only:** it does not build on any other system (the build stops
+  with "scootbg-mem, scootbg and scootbar run on Linux only").
 
 ## Exit status
 

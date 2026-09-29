@@ -342,3 +342,15 @@ release profile, `cargo build --release -p scootbg`:
 
 The prototype in the dependency record (§1, prototype A) idled at 2,500
 kB RSS and 164 kB heap with no socket or allocator wrapper.
+
+### Note, 2026-09-29: no stub off Linux
+
+The **Nix** bullet above records a stub `main` off Linux and an empty
+`scootbg-mem`, kept so `cargo check --workspace` passed on a Mac. Both are
+gone (`fix/testing-and-ci-followups`, after the review of #329): scootbg
+never runs on a Mac (the user, 2026-09-29: "Scootbg only needs Linux
+too"), so off Linux `scootbg-mem` stops the build with a
+`compile_error!`, and the macOS CI job runs `cargo check --workspace
+--exclude scootbar --exclude scootbg --exclude scootbg-mem --all-targets`
+([docs/development.md](../../../development.md)). The record above is left
+as it was.

@@ -27,10 +27,12 @@ rule (``report.py``). What is scootbar's own: the bars and their configs
 ``run`` writes ``DIR/meta.json`` (machine, commit, versions, store paths,
 the settings, the static rows) and ``DIR/runs.jsonl`` (every raw run, one
 JSON object per line, appended as it finishes), then ``DIR/table.md``.
-``report`` re-renders the tables and the competitor gate; ``compare``
-checks scootbar against an earlier results directory (the last
-milestone's), which is the ratchet's other gate, and exits 1 on a
-regression. The method is in docs/scootbar/testing.md.
+``report`` re-renders the tables and the competitor gate (the ratchet's
+rule 2), and exits 1 when a competitor beats scootbar on a gated row or a
+gated row has no scootbar value to judge; ``compare`` checks scootbar
+against an earlier results directory (the last milestone's), the
+ratchet's rule 1, and exits 1 on a regression. The method is in
+docs/scootbar/testing.md.
 """
 
 import argparse
@@ -274,7 +276,9 @@ def main():
             p.error("--rounds, --idle-secs and --switch-hz must be positive, --switches not negative")
         cmd_run(a)
     elif a.cmd == "report":
-        print(tables.render(a.dir))
+        text, failed = tables.gate(a.dir)
+        print(text)
+        sys.exit(1 if failed else 0)
     else:
         text, regressions = tables.compare(a.dir, a.baseline)
         print(text)

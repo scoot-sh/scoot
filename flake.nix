@@ -275,9 +275,8 @@
           # one binary in `$out/bin`. Pure Rust on the `linux_raw` rustix
           # backend, so, like the client, nothing to probe or link beyond
           # what std links (docs/scootbg/backlog/resolved/dependencies-done.md
-          # §9). Linux only: it is a Wayland client, and on other systems
-          # the crate builds a stub that says so, so no Darwin package is
-          # offered.
+          # §9). Linux only: it is a Wayland client that never runs on a
+          # Mac, and does not build there, so no Darwin package is offered.
           scootbg = pkgs.rustPlatform.buildRustPackage {
             pname = "scootbg";
             inherit version src cargoLock;
