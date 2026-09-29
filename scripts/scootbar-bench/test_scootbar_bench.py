@@ -7,6 +7,7 @@ nix needed:
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -172,6 +173,45 @@ class Gates(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             write(d, *results(scootbar_rss_kb=1024, rival_rss_kb=4096))
             self.assertIn("0 loss(es)", tables.render(d))
+
+    def test_the_gate_counts_a_loss_and_a_pass_is_zero(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, *results(scootbar_rss_kb=4096, rival_rss_kb=1024))
+            text, failed = tables.gate(d)
+            self.assertEqual(failed, 1, text)
+            write(d, *results(scootbar_rss_kb=1024, rival_rss_kb=4096))
+            text, failed = tables.gate(d)
+            self.assertEqual(failed, 0, text)
+            self.assertNotIn("Not judged", text)
+
+    def test_a_gated_row_scootbar_has_no_value_for_fails_the_gate(self):
+        meta, runs = results(scootbar_rss_kb=1024, rival_rss_kb=4096)
+        for r in runs:
+            if r["bar"] == "scootbar" and r["row"] == "idle":
+                r.update(ok=False, error="no first frame")
+        with tempfile.TemporaryDirectory() as d:
+            write(d, meta, runs)
+            text, failed = tables.gate(d)
+        # Idle RSS and idle wakeups: the rival has both, scootbar neither.
+        # Threads is not gated, and the broken bar did not run at all.
+        self.assertEqual(failed, 2, text)
+        self.assertIn("0 loss(es)", text)
+        self.assertIn("- NO SCOOTBAR VALUE on scoot: Idle RSS: rival has one", text)
+        self.assertNotIn("Threads: rival", text)
+
+    def test_report_exits_1_when_the_gate_fails(self):
+        bench = os.path.join(HERE, "bench.py")
+        with tempfile.TemporaryDirectory() as d:
+            write(d, *results(scootbar_rss_kb=4096, rival_rss_kb=1024))
+            lost = subprocess.run([sys.executable, bench, "report", d],
+                                  capture_output=True, text=True)
+            write(d, *results(scootbar_rss_kb=1024, rival_rss_kb=4096))
+            passed = subprocess.run([sys.executable, bench, "report", d],
+                                    capture_output=True, text=True)
+        self.assertEqual(lost.returncode, 1, lost.stderr)
+        self.assertIn("LOSS on scoot: Idle RSS: rival", lost.stdout)
+        self.assertEqual(passed.returncode, 0, passed.stderr)
+        self.assertIn("0 loss(es)", passed.stdout)
 
     def test_compare_finds_a_regression_and_ignores_noise(self):
         with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as now:
