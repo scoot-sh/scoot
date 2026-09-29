@@ -64,9 +64,9 @@ DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}$")
 
 
 class Entry:
-    def __init__(self, path):
+    def __init__(self, path, text=None):
         self.path = path
-        self.text = path.read_text()
+        self.text = path.read_text() if text is None else text
         self.fields = {}
         m = re.match(r"---\n(.*?)\n---\n", self.text, re.S)
         self.has_frontmatter = bool(m)
@@ -161,22 +161,52 @@ def rank(e):
 
 
 # ---- claims ---------------------------------------------------------------
+#
+# A claim is a small tracked file on the remote main branch (CLAIMS_DIR), pushed
+# as its own commit BEFORE work starts, so every clone and machine sees it, and
+# checked against a fresh fetch of main BEFORE picking a ticket up. The push is
+# the lock: a rejected push means main moved, so the claim is re-evaluated
+# against the new main and retried. The commit is built with git plumbing on
+# top of the fetched main and never touches the working tree or the checked-out
+# branch. The gitignored file in the git directory only remembers this clone's
+# own claims (their uuids).
 
 CLAIM_TTL_HOURS = float(os.environ.get("BACKLOG_CLAIM_TTL_HOURS", "24"))
+REMOTE = os.environ.get("BACKLOG_REMOTE", "origin")
+BRANCH = os.environ.get("BACKLOG_CLAIM_BRANCH", "main")
+CLAIMS_DIR = "docs/backlog/claims"
+PUSH_TRIES = int(os.environ.get("BACKLOG_PUSH_TRIES", "12"))
 
 
-def claims_path():
-    """Where claims live: the git common directory (shared by every worktree of
-    this clone, and never tracked), or BACKLOG_CLAIMS_FILE."""
-    env = os.environ.get("BACKLOG_CLAIMS_FILE")
-    if env:
-        return Path(env)
-    r = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--git-common-dir"],
-                       capture_output=True, text=True)
-    if r.returncode == 0 and r.stdout.strip():
-        common = Path(r.stdout.strip())
-        return (common if common.is_absolute() else ROOT / common).resolve() / "backlog-claims.json"
-    return ROOT / ".backlog-claims.json"  # not a git checkout: gitignore it yourself
+class Unreachable(Exception):
+    """Could not fetch or push the claim branch."""
+
+
+class Refused(Exception):
+    def __init__(self, entry, rec):
+        self.entry, self.rec = entry, rec
+
+
+class NothingReady(Exception):
+    pass
+
+
+class Named:
+    """Stands in for an entry whose file is gone (an orphaned claim)."""
+
+    def __init__(self, key):
+        self.key = key
+
+    def rel(self):
+        return self.key
+
+
+def git(*args, env=None, input=None, check=True):
+    r = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True,
+                       env=env, input=input)
+    if check and r.returncode != 0:
+        raise Unreachable(f"git {' '.join(args[:2])}: {r.stderr.strip() or r.stdout.strip()}")
+    return r
 
 
 def now_utc():
@@ -208,20 +238,157 @@ def human_age(hours):
     return f"{hours / 24:.0f}d"
 
 
-def read_claims():
-    """A snapshot for read-only commands; a missing or unreadable file is empty."""
-    try:
-        return json.loads(claims_path().read_text()).get("claims", {})
-    except (OSError, ValueError):
+def claim_label(rec):
+    tag = "claimed" if is_live(rec) else "stale claim"
+    return f"{tag}: {rec.get('agent', '?')} {human_age(age_hours(rec))} ago"
+
+
+def claim_file(entry_rel):
+    """docs/scootbar/backlog/x.md -> docs/backlog/claims/scootbar__backlog__x.json"""
+    stem = entry_rel[len("docs/"):] if entry_rel.startswith("docs/") else entry_rel
+    return f"{CLAIMS_DIR}/{stem.removesuffix('.md').replace('/', '__')}.json"
+
+
+# -- reading a commit's tree without checking it out --
+
+def read_blobs(sha, paths):
+    if not paths:
         return {}
+    r = subprocess.run(["git", "-C", str(ROOT), "cat-file", "--batch"],
+                       input="".join(f"{sha}:{p}\n" for p in paths).encode(), capture_output=True)
+    out, i, res = r.stdout, 0, {}
+    for p in paths:
+        j = out.index(b"\n", i)
+        head = out[i:j].split()
+        if head[-1] == b"missing":
+            res[p], i = None, j + 1
+            continue
+        size = int(head[2])
+        res[p] = out[j + 1:j + 1 + size].decode()
+        i = j + 1 + size + 1
+    return res
 
 
-class Claims:
-    """The claims file under an exclusive lock, so a swarm's read-modify-write
-    cycles never interleave. Use as a context manager, call save() to write."""
+class TreeView:
+    """The backlog as it is at one commit: open entries and claim files."""
+
+    def __init__(self, sha, with_entries=True):
+        self.sha = sha
+        self.with_entries = with_entries
+        listing = git("ls-tree", "-r", "--name-only", sha, "--", "docs/backlog",
+                      "docs/scootbg/backlog", "docs/scootbar/backlog").stdout.splitlines()
+        open_dirs = {str(d.relative_to(ROOT)) for d in BACKLOGS.values()}
+        epaths = [p for p in listing if with_entries and p.endswith(".md")
+                  and os.path.dirname(p) in open_dirs and os.path.basename(p) != "README.md"]
+        cpaths = [p for p in listing if os.path.dirname(p) == CLAIMS_DIR and p.endswith(".json")]
+        blobs = read_blobs(sha, epaths + cpaths)
+        self.entries = [Entry(ROOT / p, text=blobs[p]) for p in epaths if blobs[p] is not None]
+        self.claims = {}  # entry rel path -> (claim file path, record)
+        for p in cpaths:
+            try:
+                rec = json.loads(blobs[p])
+                self.claims[rec["entry"]] = (p, rec)
+            except (TypeError, ValueError, KeyError):
+                continue  # not ours to interpret; leave it alone
+
+    def dead_claims(self):
+        """Claim files nobody needs: expired, or for an entry no longer open here."""
+        open_paths = {str(e.rel()) for e in self.entries}
+        return [path for key, (path, rec) in self.claims.items()
+                if not is_live(rec) or (self.with_entries and key not in open_paths)]
+
+
+def fetch_main():
+    r = git("fetch", "--quiet", REMOTE, f"refs/heads/{BRANCH}", check=False)
+    if r.returncode != 0:
+        raise Unreachable(f"cannot fetch {REMOTE}/{BRANCH}: {r.stderr.strip()}")
+    return git("rev-parse", "FETCH_HEAD").stdout.strip()
+
+
+def cached_main():
+    r = git("rev-parse", "--verify", "--quiet", f"refs/remotes/{REMOTE}/{BRANCH}", check=False)
+    return r.stdout.strip() or None
+
+
+def main_claims(fetch=False):
+    """entry rel path -> record, as of the fetched (or last fetched) main."""
+    try:
+        sha = fetch_main() if fetch else cached_main()
+    except Unreachable as err:
+        print(f"note: {err}; showing the last fetched claims", file=sys.stderr)
+        sha = cached_main()
+    return {k: rec for k, (_, rec) in TreeView(sha, with_entries=False).claims.items()} if sha else {}
+
+
+def build_commit(base, adds, removes, message):
+    """A commit on top of `base` with those files added and removed, made with
+    a scratch index: the working tree and the checked-out branch are untouched."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        env = {**os.environ, "GIT_INDEX_FILE": os.path.join(d, "index")}
+        if git("var", "GIT_COMMITTER_IDENT", check=False).returncode != 0:
+            env.update(GIT_AUTHOR_NAME="scoot-backlog", GIT_AUTHOR_EMAIL="backlog@scoot.invalid",
+                       GIT_COMMITTER_NAME="scoot-backlog", GIT_COMMITTER_EMAIL="backlog@scoot.invalid")
+        git("read-tree", base, env=env)
+        for path, text in adds.items():
+            oid = git("hash-object", "-w", "--stdin", input=text, env=env).stdout.strip()
+            git("update-index", "--add", "--cacheinfo", f"100644,{oid},{path}", env=env)
+        for path in removes:
+            git("update-index", "--force-remove", path, env=env)
+        tree = git("write-tree", env=env).stdout.strip()
+        return git("commit-tree", tree, "-p", base, "-m", message, env=env).stdout.strip()
+
+
+def publish(mutate, message):
+    """Fetch main, ask `mutate(view)` for (adds, removes, result) against that
+    fresh view, commit it on top and push. A rejected push means main moved:
+    fetch again and re-decide (someone may have taken the ticket meanwhile).
+    `mutate` returns None for "nothing to change", or raises Refused/NothingReady."""
+    import random
+    import time
+    last = ""
+    for attempt in range(PUSH_TRIES):
+        base = fetch_main()
+        out = mutate(TreeView(base))
+        if out is None:
+            return None, None
+        adds, removes, result = out
+        commit = build_commit(base, adds, removes, message(result))
+        r = git("push", "--quiet", REMOTE, f"{commit}:refs/heads/{BRANCH}", check=False)
+        if r.returncode == 0:
+            return commit, result
+        last = r.stderr.strip()
+        if any(t in last for t in ("[rejected]", "non-fast-forward", "fetch first",
+                                   "cannot lock ref", "failed to update ref")):
+            time.sleep(random.uniform(0.05, 0.3) * (attempt + 1))
+            continue
+        raise Unreachable(f"could not push the claim to {REMOTE}/{BRANCH}: {last}\n"
+                          "claims live on main, so this needs push access to it")
+    raise Unreachable(f"gave up after {PUSH_TRIES} pushes; {REMOTE}/{BRANCH} kept moving: {last}")
+
+
+# -- this worktree's own record of what it claimed (gitignored: it is in .git) --
+
+def local_path():
+    env = os.environ.get("BACKLOG_CLAIMS_FILE")
+    if env:
+        return Path(env)
+    # The per-worktree git dir, not the shared one: agents in different worktrees
+    # of one clone must not mistake each other's claims for their own.
+    r = git("rev-parse", "--git-dir", check=False)
+    if r.returncode == 0 and r.stdout.strip():
+        gd = Path(r.stdout.strip())
+        return (gd if gd.is_absolute() else ROOT / gd).resolve() / "backlog-claims.json"
+    return ROOT / ".backlog-claims.json"
+
+
+class Local:
+    """{entry rel path: {uuid, agent, claimed, ...}} for claims made from this
+    clone, under a lock so agents sharing the clone do not interleave writes."""
 
     def __enter__(self):
-        self.path = claims_path()
+        import fcntl
+        self.path = local_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = open(str(self.path) + ".lock", "a")
         fcntl.flock(self.lock, fcntl.LOCK_EX)
@@ -230,7 +397,7 @@ class Claims:
             if not isinstance(self.data.get("claims"), dict):
                 raise ValueError("no claims table")
         except FileNotFoundError:
-            self.data = {"version": 1, "claims": {}}
+            self.data = {"version": 2, "claims": {}}
         except ValueError as err:
             self.__exit__()
             sys.exit(f"backlog: {self.path} is unreadable ({err}); fix or delete it")
@@ -246,13 +413,22 @@ class Claims:
         os.replace(tmp, self.path)
 
     def __exit__(self, *exc):
+        import fcntl
         fcntl.flock(self.lock, fcntl.LOCK_UN)
         self.lock.close()
 
 
-def claim_label(rec):
-    tag = "claimed" if is_live(rec) else "stale claim"
-    return f"{tag}: {rec.get('agent', '?')} {human_age(age_hours(rec))} ago"
+def my_uuid(key):
+    try:
+        return json.loads(local_path().read_text())["claims"].get(key, {}).get("uuid")
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def forget(key):
+    with Local() as c:
+        if c.claims.pop(key, None):
+            c.save()
 
 
 def milestone_rank(e):
@@ -265,15 +441,11 @@ def milestone_rank(e):
     return int(digits) if digits else 97
 
 
-def ready_rank(e):
-    return (milestone_rank(e), rank(e))
-
-
-def select_next(claims, a):
-    """The top open, unblocked, unclaimed (or stale-claimed) entry, or None."""
+def select_next(view, a):
+    """The top open, unblocked, unclaimed (or stale-claimed) entry on main, or None."""
     wanted = ("open", "research") if a.research else ("open",)
     pool = []
-    for e in entries():
+    for e in view.entries:
         if e.get("status") not in wanted or e.get("blocked"):
             continue
         if a.area and e.get("area") != a.area:
@@ -282,101 +454,155 @@ def select_next(claims, a):
             continue
         if a.priority and e.get("priority") != a.priority:
             continue
-        rec = claims.get(str(e.rel()))
-        if rec and is_live(rec):
+        held = view.claims.get(str(e.rel()))
+        if held and is_live(held[1]):
             continue
         pool.append(e)
-    pool.sort(key=ready_rank)
+    pool.sort(key=lambda e: (milestone_rank(e), rank(e)))
     return pool[0] if pool else None
 
 
-def emit_claim(e, rec, a, verb):
+def match_entry(entries_, name):
+    hits = [e for e in entries_ if name in (e.slug, str(e.rel()))] or \
+           [e for e in entries_ if name in e.slug]
+    if len(hits) > 1:
+        sys.exit("backlog: ambiguous, matches:\n  " + "\n  ".join(str(e.rel()) for e in hits))
+    return hits[0] if hits else None
+
+
+def emit_claim(e, rec, commit, a, verb):
     if a.json:
         print(json.dumps({"entry": str(e.rel()), "slug": e.slug, "title": e.get("title"),
                           "area": e.get("area"), "priority": e.get("priority"),
-                          "milestone": e.get("milestone"), **rec}))
+                          "milestone": e.get("milestone"), "commit": commit, **rec}))
     else:
-        print(f"{verb} {e.rel()}\nuuid:    {rec['uuid']}\nagent:   {rec['agent']}\n"
-              f"claimed: {rec['claimed']}\nttl:     {rec['ttl_hours']}h (renew or it goes stale)")
+        print(f"{verb} {e.rel()} (pushed {commit[:8]} to {REMOTE}/{BRANCH})\n"
+              f"uuid:    {rec['uuid']}\nagent:   {rec['agent']}\nclaimed: {rec['claimed']}\n"
+              f"ttl:     {rec['ttl_hours']}h (renew or it goes stale)")
+
+
+def fail(err):
+    print(f"backlog: {err}", file=sys.stderr)
+    return 4
 
 
 def cmd_claim(a):
     if bool(a.name) == bool(a.next):
         sys.exit("backlog: give a ticket, or --next, not both and not neither")
     agent = a.agent or os.environ.get("BACKLOG_AGENT") or os.environ.get("USER") or "agent"
-    with Claims() as c:
+
+    def mutate(view):
         if a.next:
-            e = select_next(c.claims, a)
+            e = select_next(view, a)
             if e is None:
-                print("backlog: nothing ready (open, unblocked, unclaimed) matches", file=sys.stderr)
-                return 3
+                raise NothingReady
         else:
-            e = find(a.name)
-            if e.get("status") == "resolved":
-                sys.exit(f"backlog: {e.rel()} is resolved")
+            e = match_entry(view.entries, a.name)
+            if e is None:
+                local = find(a.name)
+                sys.exit(f"backlog: {local.rel()} is not an open entry on {REMOTE}/{BRANCH}"
+                         + (" (it is resolved)" if local.get("status") == "resolved" else
+                            "; push it to main first, claims are made against main"))
             if e.get("blocked"):
                 print(f"note: {e.rel()} is marked blocked: {e.get('blocked')}", file=sys.stderr)
         key = str(e.rel())
-        cur = c.claims.get(key)
-        if cur and is_live(cur) and not a.force and a.token != cur["uuid"]:
-            print(f"backlog: {key} is {claim_label(cur)} "
-                  f"(uuid {cur['uuid'][:8]}, expires in "
-                  f"{human_age(cur.get('ttl_hours', CLAIM_TTL_HOURS) - age_hours(cur))}); "
-                  "pass --token to renew your own, or --force to take it", file=sys.stderr)
-            return 2
-        now = now_utc()
-        rec = {"uuid": cur["uuid"] if cur and a.token == cur["uuid"] else str(uuid.uuid4()),
-               "agent": agent, "claimed": stamp(now), "ttl_hours": CLAIM_TTL_HOURS if a.ttl is None else a.ttl,
-               "cwd": str(Path.cwd())}
-        c.claims[key] = rec
+        held = view.claims.get(key)
+        mine = held and (a.token == held[1]["uuid"] or my_uuid(key) == held[1]["uuid"])
+        if held and is_live(held[1]) and not mine and not a.force:
+            raise Refused(e, held[1])
+        rec = {"uuid": held[1]["uuid"] if mine else str(uuid.uuid4()), "agent": agent,
+               "entry": key, "claimed": stamp(now_utc()), "cwd": str(Path.cwd()),
+               "ttl_hours": CLAIM_TTL_HOURS if a.ttl is None else a.ttl}
+        removes = [p for p in view.dead_claims() if p != claim_file(key)]
+        return {claim_file(key): json.dumps(rec, indent=2, sort_keys=True) + "\n"}, removes, (e, rec, bool(mine))
+
+    try:
+        commit, res = publish(mutate, lambda r: f"backlog: claim {r[0].slug} ({r[1]['agent']}) [skip ci]")
+    except NothingReady:
+        print("backlog: nothing ready (open, unblocked, unclaimed on main) matches", file=sys.stderr)
+        return 3
+    except Refused as r:
+        rec = r.rec
+        print(f"backlog: {r.entry.rel()} is {claim_label(rec)} (uuid {rec['uuid'][:8]}, expires in "
+              f"{human_age(rec.get('ttl_hours', CLAIM_TTL_HOURS) - age_hours(rec))}); pass --token "
+              "to renew your own, or --force to take it", file=sys.stderr)
+        return 2
+    except Unreachable as err:
+        return fail(err)
+    e, rec, renewed = res
+    with Local() as c:
+        c.claims[str(e.rel())] = rec
         c.save()
-    emit_claim(e, rec, a, "renewed" if cur and a.token == cur.get("uuid") else "claimed")
+    emit_claim(e, rec, commit, a, "renewed" if renewed else "claimed")
 
 
 def cmd_renew(a):
-    e = find(a.name)
-    with Claims() as c:
-        rec = c.claims.get(str(e.rel()))
-        if not rec or rec["uuid"] != a.token:
-            sys.exit(f"backlog: no claim on {e.rel()} with that uuid")
-        rec["renewed"] = stamp(now_utc())
-        c.save()
-    print(f"renewed {e.rel()} ({rec['agent']}, ttl {rec.get('ttl_hours', CLAIM_TTL_HOURS)}h)")
+    return cmd_claim(argparse.Namespace(
+        name=a.name, next=False, agent=a.agent, ttl=None, token=a.token, force=False, json=False,
+        research=False, area=None, milestone=None, priority=None))
 
 
 def cmd_release(a):
-    e = find(a.name)
-    with Claims() as c:
-        rec = c.claims.get(str(e.rel()))
-        if not rec:
-            print(f"{e.rel()} is not claimed")
-            return 0
-        if rec["uuid"] != a.token and not a.force:
-            sys.exit(f"backlog: {e.rel()} is {claim_label(rec)}; pass its --token, or --force")
-        del c.claims[str(e.rel())]
-        c.save()
-    print(f"released {e.rel()}")
+    def mutate(view):
+        hits = [(k, p, r) for k, (p, r) in view.claims.items()
+                if a.name in (Path(k).stem, k) or a.name in Path(k).stem]
+        if len(hits) > 1 and not any(Path(k).stem == a.name or k == a.name for k, _, _ in hits):
+            sys.exit("backlog: ambiguous claims:\n  " + "\n  ".join(k for k, _, _ in hits))
+        if not hits:
+            return None
+        key, path, rec = next((h for h in hits if Path(h[0]).stem == a.name or h[0] == a.name), hits[0])
+        if not a.force and (a.token or my_uuid(key)) != rec["uuid"]:
+            raise Refused(Named(key), rec)
+        return {}, [path], key
+
+    try:
+        commit, key = publish(mutate, lambda k: f"backlog: release {Path(k).stem} [skip ci]")
+    except Refused as r:
+        print(f"backlog: {r.entry.rel()} is {claim_label(r.rec)}; pass its --token (or --force)",
+              file=sys.stderr)
+        return 2
+    except Unreachable as err:
+        return fail(err)
+    if key is None:
+        print(f"{a.name} is not claimed on {REMOTE}/{BRANCH}")
+        return 0
+    forget(key)
+    print(f"released {key} (pushed {commit[:8]})")
 
 
 def cmd_claims(a):
+    try:
+        sha = None if a.no_fetch else fetch_main()
+    except Unreachable as err:
+        return fail(err)
+    sha = sha or cached_main()
+    if not sha:
+        print("no claims (nothing fetched from main yet)")
+        return 0
+    view = TreeView(sha)
+    open_paths = {str(e.rel()) for e in view.entries}
     rows = []
-    with Claims() as c:
-        for key, rec in sorted(c.claims.items(), key=lambda kv: -age_hours(kv[1])):
-            orphan = not (ROOT / key).exists()
-            stale = not is_live(rec)
-            if a.prune and (orphan or stale):
-                del c.claims[key]
-                rows.append((key, rec, "pruned"))
-                continue
-            rows.append((key, rec, "orphan" if orphan else "stale" if stale else "live"))
-        if a.prune:
-            c.save()
+    for key, (path, rec) in sorted(view.claims.items(), key=lambda kv: -age_hours(kv[1][1])):
+        state = "orphan" if key not in open_paths else "live" if is_live(rec) else "stale"
+        rows.append((key, path, rec, state))
+    pruned = []
+    if a.prune and any(st != "live" for _, _, _, st in rows):
+        try:
+            publish(lambda v: ({}, v.dead_claims(), None) if v.dead_claims() else None,
+                    lambda _: "backlog: prune dead claims [skip ci]")
+        except Unreachable as err:
+            return fail(err)
+        pruned = [p for _, p, _, st in rows if st != "live"]
     if a.json:
-        print(json.dumps([{"entry": k, "state": st, **r} for k, r, st in rows]))
-        return
-    for key, rec, st in rows:
-        print(f"{st:7} {human_age(age_hours(rec)):>4}  {rec['agent']:<14} {rec['uuid'][:8]}  {key}")
-    print(f"\n{len(rows)} claims ({claims_path()})", file=sys.stderr)
+        print(json.dumps([{"entry": k, "state": s, "mine": my_uuid(k) == r["uuid"], **r}
+                          for k, _, r, s in rows]))
+        return 0
+    for key, path, rec, state in rows:
+        mark = "pruned" if path in pruned else state
+        me = " (mine)" if my_uuid(key) == rec["uuid"] else ""
+        print(f"{mark:7} {human_age(age_hours(rec)):>4}  {rec['agent']:<14} {rec['uuid'][:8]}  {key}{me}")
+    print(f"\n{len(rows)} claims on {REMOTE}/{BRANCH} @ {sha[:8]}", file=sys.stderr)
+    return 0
 
 
 def unblock_dependents(slug):
@@ -404,7 +630,7 @@ def unblock_dependents(slug):
 def cmd_list(a):
     rows = []
     git_dates = git_resolved_dates() if (a.all or a.resolved) else {}
-    claims = read_claims()
+    claims = main_claims(fetch=a.fetch)
     for e in entries(include_resolved=a.all or a.resolved):
         rec = claims.get(str(e.rel()))
         live = bool(rec and is_live(rec))
@@ -460,7 +686,7 @@ def cmd_list(a):
 def cmd_show(a):
     e = find(a.name)
     print(f"# {e.rel()}")
-    rec = read_claims().get(str(e.rel()))
+    rec = main_claims().get(str(e.rel()))
     if rec:
         print(f"# {claim_label(rec)} (uuid {rec['uuid'][:8]}, since {rec['claimed']})")
     if e.get("status") == "resolved":
@@ -578,8 +804,8 @@ def cmd_resolve(a):
     day = a.date or datetime.date.today().isoformat()
     validate("resolved", day)
     key = str(e.rel())
-    rec = read_claims().get(key)
-    if rec and is_live(rec) and rec["uuid"] != a.token and not a.force:
+    rec = main_claims(fetch=True).get(key)
+    if rec and is_live(rec) and rec["uuid"] not in (a.token, my_uuid(key)) and not a.force:
         sys.exit(f"backlog: {key} is {claim_label(rec)}; resolve it with that claim's "
                  "--token (or --force)")
     set_fields(e, {"status": "resolved", "area": "resolved",
@@ -589,10 +815,7 @@ def cmd_resolve(a):
     RESOLVED[area].mkdir(exist_ok=True)
     git_mv(e.path, dst)
     print(f"archived {e.rel()} -> {dst.relative_to(ROOT)}")
-    with Claims() as c:
-        if c.claims.pop(key, None):
-            c.save()
-            print("released its claim")
+    forget(key)
     for other, rest in unblock_dependents(e.slug):
         print(f"unblocked {other.rel()}" if not rest else
               f"{other.rel()} no longer waits on {e.slug}; still: {rest}")
@@ -660,6 +883,8 @@ def main():
                    help="open, unblocked and not claimed: what a swarm can pick up")
     p.add_argument("--unclaimed", action="store_true", help="no live claim on it")
     p.add_argument("--claimed", action="store_true", help="has a claim (live or stale)")
+    p.add_argument("--fetch", action="store_true",
+                   help="fetch origin/main first so claims are current (default: the last fetch)")
     p.add_argument("--grep", metavar="REGEX", help="match anywhere in the file")
     p.set_defaults(fn=cmd_list)
 
@@ -699,24 +924,26 @@ def main():
     p.add_argument("--ttl", type=float, metavar="HOURS",
                    help=f"hours until the claim goes stale (default {CLAIM_TTL_HOURS:g}, "
                         "$BACKLOG_CLAIM_TTL_HOURS)")
-    p.add_argument("--token", help="your own claim's uuid, to renew it")
+    p.add_argument("--token", help="your own claim's uuid, to renew it (default: this clone's record)")
     p.add_argument("--force", action="store_true", help="take a live claim from someone else")
     p.add_argument("--json", action="store_true", help="machine-readable result")
     p.set_defaults(fn=cmd_claim)
 
-    p = sub.add_parser("renew", help="keep a claim alive: renew SLUG --token UUID")
+    p = sub.add_parser("renew", help="keep your claim alive (re-pushes it): renew SLUG [--token UUID]")
     p.add_argument("name")
-    p.add_argument("--token", required=True)
+    p.add_argument("--token", help="default: the uuid this clone recorded")
+    p.add_argument("--agent")
     p.set_defaults(fn=cmd_renew)
 
-    p = sub.add_parser("release", help="give a claim up: release SLUG --token UUID")
+    p = sub.add_parser("release", help="give a claim up (pushes the removal): release SLUG [--token UUID]")
     p.add_argument("name")
-    p.add_argument("--token")
+    p.add_argument("--token", help="default: the uuid this clone recorded")
     p.add_argument("--force", action="store_true", help="release someone else's claim")
     p.set_defaults(fn=cmd_release)
 
-    p = sub.add_parser("claims", help="list claims (live, stale, orphaned); --prune drops the dead ones")
-    p.add_argument("--prune", action="store_true")
+    p = sub.add_parser("claims", help="list claims on main (live, stale, orphaned); --prune drops the dead ones")
+    p.add_argument("--prune", action="store_true", help="push a commit removing stale and orphaned claims")
+    p.add_argument("--no-fetch", action="store_true", help="read the last fetch instead of fetching")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_claims)
 

@@ -19,6 +19,7 @@ scripts/backlog list --unblocked --priority high
 scripts/backlog list --blocked               # what waits on something
 scripts/backlog list --area scootbar --milestone M1
 scripts/backlog list --area scootbg          # core | ipc | protocols | testing | packaging | scootbg | scootbar
+scripts/backlog list --fetch --ready         # refresh from main first; without --fetch, claims are as of your last fetch
 scripts/backlog list --claimed               # who holds what, and for how long
 scripts/backlog list --grep 'ext-workspace'  # match anywhere in the file
 scripts/backlog list --all                   # include the resolved archive
@@ -30,34 +31,52 @@ the case for an item should say which it serves.
 
 ## Claim before you work (agent swarms)
 
-Several agents can work the backlog at once without colliding. **Claim a ticket
-before starting it**; a claim records a uuid, your name and the date.
+Several agents, in any clones or on any machines, can work the backlog at once
+without colliding. **Claim a ticket before you start it**: the claim is pushed
+to `main`, so everyone sees it, and it is checked against a fresh fetch of
+`main` before anything is picked up.
 
 ```sh
-scripts/backlog claim --next --agent NAME --json        # the top ready ticket, claimed atomically
+scripts/backlog claim --next --agent NAME --json        # fetch main, pick the top ready ticket, push the claim
 scripts/backlog claim --next --area scootbar --milestone M1 --agent NAME --json
 scripts/backlog claim SLUG --agent NAME                 # or a specific one
-scripts/backlog renew SLUG --token UUID                 # long job: keep it alive
-scripts/backlog release SLUG --token UUID               # giving up: free it
-scripts/backlog claims [--prune]                        # all claims; --prune drops stale and orphaned ones
+scripts/backlog renew SLUG                              # long job: re-push it so it stays live
+scripts/backlog release SLUG                            # giving up: push its removal
+scripts/backlog claims [--prune]                        # every claim on main; --prune drops dead ones
 ```
 
+- **What a claim is**: a small file, `docs/backlog/claims/<area>__backlog__<slug>.json`,
+  added to `main` in its own commit (`backlog: claim <slug> (<agent>) [skip ci]`)
+  holding a uuid, your name and the date. The commit is built with git
+  plumbing on top of the fetched `main`: **it never touches your working tree
+  or your checked-out branch.** The push is the lock, so if two agents race,
+  exactly one push wins and the other re-checks and is refused (or moves to the
+  next ticket with `--next`).
+- **The check happens against `main`, not your checkout**: readiness (open,
+  unblocked) and other agents' claims are read from a fresh fetch, so a stale
+  checkout cannot double-claim, and a ticket unblocked by a merge you have not
+  pulled yet is still seen as ready.
+- **Only entries that are on `main`** can be claimed; push a new entry first.
 - **`--next` picks** the top open, unblocked, unclaimed entry: lowest milestone
   first (`M0`, `M1`, ...; entries with none last), then priority. Research
   entries only with `--research`.
-- **Exit codes**: `0` claimed; `2` refused (someone holds it; say who and for how
-  long); `3` nothing ready. On `3`, stop, or widen the filters. Never `--force`
-  a live claim unless the user said to.
-- **Keep the uuid** from the output (`--json` gives it). It is your proof of
-  ownership: `renew`, `release` and `resolve` take it as `--token`.
+- **Exit codes**: `0` claimed; `2` refused (someone holds it; says who and for
+  how long); `3` nothing ready; `4` could not fetch or push (no network, or
+  `main` is protected against direct pushes: claims need push access to it). On
+  `3`, stop or widen the filters. Never `--force` a live claim unless the user
+  said to.
+- **The uuid** is in the output (`--json`), and is also kept in a **gitignored
+  local record** in this worktree's git directory (`.git/backlog-claims.json`,
+  per worktree, never committed), which is how `renew`, `release` and `resolve`
+  know a claim is yours without `--token`. Pass `--token UUID` from another
+  worktree or clone.
 - **A claim expires** after 24 hours (`--ttl HOURS`, or
   `BACKLOG_CLAIM_TTL_HOURS`), so a crashed agent does not hold a ticket forever;
-  a stale claim can be taken by the next `claim`.
-- **Where claims live**: `.git/backlog-claims.json`, in the git common directory.
-  Every worktree of one clone shares it, and git never tracks it, so it cannot
-  be committed by accident. **Separate clones (or machines) do not see each
-  other's claims**; across clones, coordinate by another route (a GitHub issue
-  assignee, a claim branch).
+  a stale claim can simply be claimed again. Claims on tickets that are already
+  resolved, and stale ones, are swept out by the next claim commit
+  (`claims --prune` does it on demand).
+- **Overrides**: `BACKLOG_REMOTE` (default `origin`) and `BACKLOG_CLAIM_BRANCH`
+  (default `main`).
 - **A claim is advisory, not a lock on files.** Two tickets can still touch the
   same files. Follow `CLAUDE.md`: each concurrent agent works in its **own git
   worktree** with its **own `CARGO_TARGET_DIR`**, and does not run
@@ -65,9 +84,10 @@ scripts/backlog claims [--prune]                        # all claims; --prune dr
 
 A swarm loop, per agent: `claim --next` → read the entry (`show SLUG --full`) →
 worktree and branch → implement through the full cycle → review → PR → after it
-merges, `resolve SLUG --token UUID`. Resolving releases the claim and
-**unblocks the entries that were waiting on it**, so the next `--next` sees
-them. If you stop without finishing, `release` it.
+merges, `resolve SLUG` (in a follow-up or the PR; it stamps the date and
+unblocks whatever waited on it). The claim on a resolved ticket goes dead by
+itself and is swept, so there is nothing to release. If you stop without
+finishing, `release` it.
 
 ## File
 
@@ -103,11 +123,12 @@ scripts/backlog resolve SLUG [--token UUID]
 
 Sets `status: resolved`, clears priority and blocked, **stamps
 `resolved: "YYYY-MM-DD"`** (today; `--date` if it landed on another day), moves
-the file to `resolved/<slug>-done.md` (`git mv` when tracked), releases its
-claim, and removes the slug from every other entry's `blocked` (clearing the
+the file to `resolved/<slug>-done.md` (`git mv` when tracked), forgets its
+local claim record, and removes the slug from every other entry's `blocked` (clearing the
 field when nothing else was there; prose is left alone and reported). Always
 resolve through the script so the date is stamped. It refuses someone else's
-live claim unless you pass that claim's `--token` (or `--force`).
+live claim (checked against a fresh fetch of `main`) unless you pass that claim's
+`--token` (or `--force`).
 
 It does **not** write the resolution: add what landed, the evidence and the PR
 to the entry's prose, then fix every link the move broke
