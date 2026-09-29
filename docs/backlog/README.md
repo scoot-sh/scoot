@@ -547,6 +547,7 @@ be revisited.
   surface is the [remainder](./core/multi-output-remainder.md) below (open,
   high: per-output scale/mode only).
 - [Cycle outputs left and right, wrapping](./core/output-cycle-binds.md) — medium, filed 2026-09-29: `Super+,` / `Super+.` reach only screens 1 and 2 today, as absolute positions
+- [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
 - [A real maximize](./core/maximize.md) — medium, filed 2026-09-29: fill the usable area with the bar visible, distinct from fullscreen; today no state exists and `set_maximized` does nothing

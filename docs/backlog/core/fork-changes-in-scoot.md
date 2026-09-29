@@ -14,6 +14,9 @@ carried commit is one to rebase on each Smithay bump, one more thing
 one more reason [the repin](smithay-fork-repin.md) is blocked. This is an
 **investigation**, not a decision to move anything.
 
+Start from [the decision audit](fork-decisions-audit.md): it classifies how well
+each fork's alternatives were recorded, and whatever it finds thin goes first here.
+
 ## What is carried (`docs/forks.md` is the source of truth)
 
 `scoot-sh/smithay` (25 commits on upstream `0ff00983`, tip `035d447c`) and
