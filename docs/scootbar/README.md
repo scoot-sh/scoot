@@ -11,8 +11,10 @@ composable shell.
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
 > [module API and clock](backlog/resolved/module-api-and-clock-done.md),
 > and its [Nix package](backlog/resolved/nix-package-done.md), which
-> ships M1's `nix run`: a clock you can run in one command. M1 closes
-> with its testing and CI ticket. M0, the
+> ships M1's `nix run`: a clock you can run in one command. Its
+> [testing and CI](backlog/resolved/testing-and-ci-done.md) closes M1:
+> snapshot, harness and fuzz layers, a CI path of the bar's own, and the
+> benchmark script ([testing.md](testing.md)). M0, the
 > measuring milestone, is done: the competitor baselines below, and the
 > font rasterizer and clock choices, recorded in
 > [the dependency record](backlog/resolved/dependencies-done.md). The

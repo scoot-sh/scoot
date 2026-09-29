@@ -22,7 +22,9 @@ megapixels: 1080p and 1440p are in).
 
 This crate is its own workspace, with its own `Cargo.lock`: it is never
 built by `cargo build --workspace`, nextest, clippy or the flake, and
-nothing here reaches the shipped binary.
+nothing here reaches the shipped binary. CI's `scootbg` job runs `cargo
+check` of it on every scootbg change (no fuzzing), so a refactor of the
+image modules cannot break its `#[path]` includes unseen.
 
 ## Running it
 

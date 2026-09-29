@@ -45,6 +45,10 @@ real CPU or memory is off by default or cut.
 - **Shape**: bar radius, module padding and spacing, optional separators,
   the active-workspace pill's radius and inset. Corners are analytic
   coverage, no supersampling; edge pixels cached, not recomputed per frame.
+  The rounded rectangle lands with **snapshot tests** at 1x and a
+  fractional scale (a scene in `crates/scootbar/src/snapshots/tests.rs`;
+  [testing](../testing.md#snapshots)): [testing-and-ci](resolved/testing-and-ci-done.md)
+  asked for them, but the canvas had no rounded shape to snapshot yet.
 - **Opacity**: bar background alpha in the ARGB buffer (premultiplied). No
   blur, no gradients, no shadows.
 - **State classes** (`normal`, `warn`, `urgent`, `muted`, hover) map to color

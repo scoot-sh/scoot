@@ -35,6 +35,11 @@ includes silently. scootbg's fuzz crate is the same. Add a cheap
 `cargo check` of both fuzz crates to the path-filtered jobs (no fuzzing, just
 compiling), so the includes cannot rot.
 
+**Done** by [testing-and-ci](resolved/testing-and-ci-done.md): the scootbar
+job builds and runs both of scootbar's targets for a fixed budget, and the
+scootbg job runs `cargo check` of its fuzz crate. The record shows a change
+that compiles in scootbar and fails only there.
+
 ## 4. "A warm tick allocates nothing" is read, not measured
 
 The reviewer verified it from the code. Pin it with a counting-allocator test
