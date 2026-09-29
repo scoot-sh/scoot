@@ -58,7 +58,56 @@ Resolved 2026-09-29. What landed:
   says the same); everything else in the Tests section runs on headless
   scoot, the window placement beside a margin included.
 
-EVIDENCE_PLACEHOLDER
+## Evidence
+
+At `62181e6` (the code as merged, docs aside), in a Claude Code web container
+(4 vCPU Xeon, Linux 6.18.44, the devenv shell's glibc 2.42), the same machine
+as M0's baselines.
+
+**Checks** (`CARGO_TARGET_DIR=/tmp/sb-skel-target`, `devenv shell --`):
+`cargo fmt --check -p scootbar` clean; `cargo clippy -p scootbar
+--all-targets -- -D warnings` clean; with `SCOOTBAR_REQUIRE_SCOOT=1
+SCOOTBAR_REQUIRE_SWAY=1 SCOOTBAR_TEST_SWAY=<sway 1.12 from the pinned
+nixpkgs>`, `cargo nextest run -p scootbar`: 71 passed, 0 skipped;
+`cargo test -p scootbar`: 58 unit, 9 on scoot, 4 on sway, all passed.
+
+**Benchmark**: M0's harness (`docs/scootbar/spikes/m0/bench/bar-bench.py`,
+only its scratch log path changed) over the release binary (602,832 bytes,
+stripped), `scoot --headless --outputs 1 --width 1920 --height 1080` (debug
+build of the same tree, pixman) and headless sway 1.12 (pixman, 1920×1080),
+each with two `foot` windows on two workspaces; 5 startups, then a fixed
+30 s settle, a 300 s idle window and 240 workspace switches in 60 s:
+
+```
+=== scootbar 62181e681bffd57435224f388f23c9aa969a94a4 (tree clean: 0 changed crate files); binary 602832 bytes
+=== scoot start 2026-09-29T05:23:32Z
+startup_ms=[7.1, 8.5, 15.2, 7.2, 7.2]
+procs=1 names=['scootbar'] threads=1
+idle window_s=300.0 vol=0 nonvol=0 wakeups_per_min=0.00 cpu_ms=0.00 ticks=0
+mem rss_kb=2756 pss_kb=1069 anon_kb=168 hwm_kb=2756
+switch n=240 window_s=60.0 vol=0 cpu_ms=0.00 ticks=0 rss_kb=2756 hwm_kb=2756
+=== sway start 2026-09-29T05:30:09Z
+startup_ms=[6.9, 7.0, 8.7, 9.5, 7.0]
+procs=1 names=['scootbar'] threads=1
+idle window_s=300.0 vol=0 nonvol=0 wakeups_per_min=0.00 cpu_ms=0.00 ticks=0
+mem rss_kb=2768 pss_kb=1081 anon_kb=176 hwm_kb=2768
+switch n=240 window_s=60.0 vol=0 cpu_ms=0.00 ticks=0 rss_kb=2768 hwm_kb=2768
+```
+
+Against M0's baselines ([the table](../../README.md#baselines)), yambar, the
+leanest, idles at 13.9 MiB RSS, 1.8 MiB heap and 2.6–4 wakeups a minute, with
+a 21–29 ms first frame. The skeleton does less than any of them (no text), so
+this is a floor, not the M1 comparison.
+
+**Not measured or not verified:** real hardware (no `--tty` or dev VM run:
+the bar is a plain Wayland client, and every run here is headless and
+pixman); a compositor that `closed`s a bar on a live output (the retry path
+is unit-tested on the model only); the Nix closure (no package yet,
+[nix-package](../nix-package.md)); an earlier run at `d7384ad` gave the same
+scoot numbers (0 wakeups, 2,764 KiB RSS) but its sway phase was void (sway
+could not bind its IPC socket under the long scratch path), so the whole
+run was repeated at `62181e6`.
+
 
 The entry as filed:
 

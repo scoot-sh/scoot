@@ -5,12 +5,19 @@ the lightest bar that is still beautiful and configurable. It starts as a
 clock, gains workspaces, and grows by modules, one small daemon of a
 composable shell.
 
-> **Status: not built yet.** M0, the measuring milestone, is done: the
-> competitor baselines below, and the two choices the first milestone
-> needs (the font rasterizer and the clock), recorded with their numbers in
-> [the dependency record](backlog/resolved/dependencies-done.md). M1, a
-> clock you can `nix run`, is next. The plan, milestone by milestone, is
-> the [backlog](backlog/README.md).
+> **Status: early.** `scootbar daemon` puts a solid bar on every output,
+> reserving its space, across outputs coming and going; the flags are in
+> [cli.md](cli.md). That is M1's first step, the
+> [skeleton](backlog/resolved/skeleton-layer-surface-done.md); the clock,
+> the module API and the Nix package complete M1, a clock you can
+> `nix run`. M0, the measuring milestone, is done: the competitor
+> baselines below, and the font rasterizer and clock choices, recorded in
+> [the dependency record](backlog/resolved/dependencies-done.md). The
+> plan, milestone by milestone, is the [backlog](backlog/README.md).
+
+```sh
+scootbar daemon --height 28 --background '#1e1e2e' &
+```
 
 ## What it is for
 
@@ -71,6 +78,28 @@ yambar and ironbar show only the clock on scoot (neither speaks
 | CPU, 240 workspace switches in 60 s | 153.5 ms | 399.0 ms | 268.7 ms | 311.3 ms |
 | Startup to first frame (median of 5) | 20.7 ms | 132.4 ms | 111.7 ms | 25.3 ms |
 | Binary, closure, threads | as on scoot (4 threads for yambar, its `i3` module's) | as on scoot | as on scoot | as on scoot |
+
+**scootbar's skeleton** (M1's first step: a solid bar, no clock, no
+workspaces, so not yet a like-for-like column), measured the same way on
+the same machine the same day, release build at `62181e6`:
+
+| | on scoot | on sway |
+|---|---|---|
+| Idle RSS | 2.7 MiB | 2.7 MiB |
+| Idle PSS | 1.0 MiB | 1.1 MiB |
+| Idle heap (`RssAnon`) | 0.16 MiB | 0.17 MiB |
+| Peak memory (`VmHWM`) | 2.7 MiB | 2.7 MiB |
+| Idle wakeups per minute | **0** | **0** |
+| Idle CPU, 300 s window | 0.00 ms | 0.00 ms |
+| CPU, 240 workspace switches in 60 s | 0.00 ms (no workspaces shown) | 0.00 ms (no workspaces shown) |
+| Startup to first frame (median of 5) | 7.2 ms | 7.0 ms |
+| Binary | 603 KB (links only glibc and libgcc_s) | as on scoot |
+| Threads | 1 | 1 |
+
+The raw runs are in the
+[skeleton's record](backlog/resolved/skeleton-layer-surface-done.md#evidence).
+The clock will add text (the font rasterizer, M0's +115 KB) and one wakeup a
+minute; the M1 column replaces this one.
 
 How the rows were taken, in short (the full method is in the record):
 

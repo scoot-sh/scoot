@@ -565,6 +565,34 @@ The hand-rolled TZif reader has no `unsafe`, and the spike's mapping of the
 font file is the only `unsafe` the choices need (one `mmap`, one
 `slice::from_raw_parts`).
 
+## 7. The Wayland client (the skeleton)
+
+Added by [skeleton-layer-surface](skeleton-layer-surface-done.md). The
+skeleton picks no new dependency: every crate it uses is already in the
+workspace for scootbg, chosen there by measurement (plain `wayland-client`
+over `smithay-client-toolkit`,
+[scootbg's record](../../../scootbg/backlog/resolved/dependencies-done.md)
+§1), with its licences checked there (§8):
+
+| Crate | For | Licence |
+|---|---|---|
+| `wayland-client` 0.31, its pure-Rust backend (no libwayland) | the connection | MIT |
+| `wayland-protocols` 0.32 (`client`, `staging`) | `wp_viewporter`, `wp_fractional_scale_v1` | MIT |
+| `wayland-protocols-wlr` 0.3 (`client`) | `zwlr_layer_shell_v1` | MIT |
+| `rustix` 1 (`std`, `event`) | `poll(2)`, with no `libc` crate | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| `scootbg-mem` (in the tree) | the sealed-memfd `wl_shm` buffer, so scootbar itself is `#![forbid(unsafe_code)]` | MIT |
+
+`cargo tree -p scootbar -e normal --prefix none` lists 32 lines and no
+`libc` crate, and the release binary links only glibc and libgcc_s (`ldd`;
+CI asserts both). The stripped release binary is **602,832 bytes** at
+`d7384ad` and `62181e6`, against the M0 spike clock's 398,032 with no Wayland code at
+all, so the Wayland client, the three protocol crates and the draw path
+are about 200 KB. yambar's 407,296 is smaller, but it links
+`libwayland-client`, `pixman` and `fcft` dynamically (its closure row
+carries them); scootbar links none, so its binary is the whole of it. The
+font rasterizer (+115 KB, §1) and the TZif reader (+8 KB, §3) join with the
+clock.
+
 ## Not measured, and why
 
 - **Suspend and resume** (§2b): no safe suspend here, and the dev VM was not

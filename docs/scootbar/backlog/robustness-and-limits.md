@@ -3,7 +3,7 @@ title: "Robustness and resource limits: hostile input, failing children, a dying
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "skeleton-layer-surface"
+blocked: null
 milestone: "ongoing"
 ---
 

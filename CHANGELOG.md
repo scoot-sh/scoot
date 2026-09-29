@@ -9,6 +9,17 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-29 — scootbar's first step: a bar on every output
+
+- **`scootbar daemon`** puts a solid bar along the top (or `--edge
+  bottom`) of every output, on scoot or another compositor with
+  `wlr-layer-shell` (checked on sway), reserving its space so windows are arranged beside
+  it, and follows outputs as they are plugged in and out. Height, margins
+  and color are flags (`--height`, `--margin`, `--background`); there is
+  no config file and no clock yet. It draws at each output's real pixels
+  at fractional scales and wakes zero times a minute when idle
+  ([docs/scootbar/cli.md](docs/scootbar/cli.md)).
+
 ### 2026-09-28 — scootbg says why a wallpaper could not be drawn
 
 - **`scootbg query` gives the reason a draw failed**: each output's new

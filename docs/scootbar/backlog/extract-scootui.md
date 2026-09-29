@@ -27,6 +27,26 @@ than guesswork.
 - **Line-framed JSON socket framing**, once a third daemon needs it (scootbg,
   scootbar, scootnotify).
 
+## What is duplicated today
+
+The [skeleton](resolved/skeleton-layer-surface-done.md) reused scootbg's
+per-output lifecycle by porting it, not by sharing it (scootbg was not
+refactored), so these are two copies to fold into one when this lands:
+
+| scootbar | scootbg | What |
+|---|---|---|
+| `src/outputs.rs` | `src/outputs.rs` | The pure per-output model: staged `wl_output` properties, the settle round trip, the surface states (`closed` retried once, then given up), ids never reused. scootbar's is trimmed (no wallpaper choices, no waiting replies, no `xdg_output`) and adds the draw plan. |
+| `src/density.rs` | `src/density.rs` | Scale arithmetic: `Preferred`, `Scale`, `scaled_length`. scootbar's leaves out `falls_short` (it rests on a surface covering the whole output). |
+| `src/daemon/surfaces.rs` | `src/daemon/surfaces.rs` | The Wayland glue for the model: object lifetimes, stale-event filtering by id and live object, `release` on removal. |
+| `src/daemon/canvas.rs` | `src/daemon/canvas.rs`, `src/share.rs` | The shm pool: `scootbg-mem` buffers, the fd closed once pooled, never written while held. scootbar's is a per-output double buffer; scootbg's shares pixels across outputs. |
+| `src/daemon/mod.rs` | `src/daemon/mod.rs` | The `poll` loop's Wayland half (prepare-read, the exit on a hang-up with nothing left to read, flush with `POLLOUT`). |
+| `src/print.rs`, `src/color.rs` | the same | Panic-free printing; `#rrggbb` parsing. |
+| `tests/common/` | `tests/common/` | The headless scoot and sway harness and the screenshot reader. |
+
+`scootbg-mem` is already shared (scootbar depends on it for its buffers).
+Its memfds are named `scootbg-wallpaper`, which is how scootbar's show in
+`/proc/PID/maps`; a name parameter belongs with the extraction.
+
 ## Guard rails
 
 scootbg has a release gate. Touching it means re-running its benchmark and
