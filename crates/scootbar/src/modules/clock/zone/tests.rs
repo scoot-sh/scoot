@@ -200,3 +200,19 @@ fn utc_needs_no_zone_data_and_no_warning() {
     );
     assert!(names_utc(b"Etc/Zulu") && !names_utc(b"UTC0") && !names_utc(b"Etc/"));
 }
+
+/// A POSIX `TZ` naming summer time but no rule, with no zone file for it,
+/// is read with glibc's default US rules, not as UTC, and silently: what
+/// `date` shows with an empty `TZDIR`.
+#[test]
+fn a_ruleless_dst_name_is_read_with_the_default_rules() {
+    let scratch = Scratch::new("ruleless");
+    let empty = scratch.0.to_str().unwrap();
+    let loaded = load(&resolve(Some("EST5EDT"), Some(empty)));
+    assert!(loaded.problem.is_none(), "{:?}", loaded.problem);
+    // 2026-07-01 12:00 UTC is 08:00 EDT; 2026-01-01 12:00 UTC is 07:00 EST.
+    assert_eq!(loaded.tz.at(1_782_907_200).abbr.as_str(), "EDT");
+    assert_eq!(loaded.tz.at(1_782_907_200).offset, -4 * 3600);
+    assert_eq!(loaded.tz.at(1_767_268_800).abbr.as_str(), "EST");
+    assert_eq!(loaded.tz.at(1_767_268_800).offset, -5 * 3600);
+}

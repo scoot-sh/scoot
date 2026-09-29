@@ -13,6 +13,9 @@
 //! - [`file`]: a file mapped read-only for the process's life, only where
 //!   it is a root-owned, unwritable file on a read-only mount (scootbar's font;
 //!   scootbg does not use it).
+//! - [`count`]: a counting global allocator for tests that pin an
+//!   allocation-free path (scootbar's warm tick), forwarding everything to
+//!   the system allocator.
 //!
 //! Every `unsafe` block carries a `// SAFETY:` argument and holds exactly
 //! one unsafe operation (clippy's `undocumented_unsafe_blocks` and
@@ -34,10 +37,12 @@ compile_error!(
 );
 
 pub mod alloc;
+pub mod count;
 pub mod file;
 pub mod shm;
 pub mod zeroed;
 
 pub use alloc::LargeAlloc;
+pub use count::{CountingAlloc, count_allocations};
 pub use shm::{ShmBuffer, ShmError};
 pub use zeroed::zeroed_bytes;

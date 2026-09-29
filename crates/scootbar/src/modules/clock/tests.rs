@@ -118,6 +118,102 @@ fn the_default_setting_is_the_twelve_hour_clock() {
     assert_eq!(Settings::default().format, Format::default());
 }
 
+/// A warm tick allocates nothing: the clock refreshed past its first
+/// strings, then a tick's glyphs drawn from a hot cache, with the counting
+/// allocator armed. Any allocation on this path (a `format!`, a growing
+/// `Vec`) fails this; the allocator's own tests show it counts.
+#[test]
+fn a_warm_tick_allocates_nothing() {
+    use std::fmt::Write as _;
+
+    use ab_glyph::{FontArc, FontVec};
+
+    use scootbg_mem::count_allocations;
+
+    use crate::density::Scale;
+    use crate::layout::Section;
+    use crate::modules::{OutputView, Placed, Sources, View};
+    use crate::outputs::{Frame, Size};
+    use crate::paint::Canvas;
+    use crate::render::{self, Record, Scene, Style};
+    use crate::testfont;
+    use crate::text::Text;
+    use crate::theme::Theme;
+
+    /// A module showing a fixed line, as the clock's view looks after a
+    /// tick that kept its width.
+    struct Still(String);
+
+    impl Module for Still {
+        fn sources<'fd>(&'fd self, _: &mut Sources<'_, 'fd>) {}
+
+        fn on_ready(&mut self, _: usize, _: PollFlags) -> Update {
+            Update::Changed
+        }
+
+        fn view(&self, _: &OutputView<'_>, view: &mut View) {
+            let _ = view.text_mut().write_str(&self.0);
+        }
+    }
+
+    const WIDTH: u32 = 600;
+    const HEIGHT: u32 = 60;
+
+    let mut clock = clock("%H:%M", Tz::utc());
+    let font = FontArc::new(FontVec::try_from_vec(testfont::build()).unwrap());
+    let mut text = Text::new(font);
+    let style = Style {
+        theme: Theme::default(),
+        font_size: 50,
+        padding: 10,
+        spacing: 0,
+    };
+    let scale = Scale::Integer(1);
+    let frame = Frame {
+        size: Size {
+            width: WIDTH,
+            height: HEIGHT,
+        },
+        scale,
+    };
+    let output = OutputView { name: None };
+    let mut placed = vec![Placed {
+        section: Section::Left,
+        module: Box::new(Still("3:07".to_owned())),
+        revision: 0,
+    }];
+    let mut scene = Scene::new(&placed);
+    let mut record = Record::new(1);
+    let mut shown = Record::new(1);
+    let mut damage_spans = Vec::new();
+    let mut pixels = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
+    // One turn of the loop, as `daemon` runs it: refresh, measure, paint,
+    // damage. Warmed until every string and the glyph cache hold what a
+    // tick shows; the measured turn then changes nothing new.
+    let mut turn = |placed: &mut Vec<Placed>| {
+        let _ = clock.refresh();
+        placed[0].revision += 1;
+        scene.update(placed, &output, Some(&text), &style, scale, WIDTH);
+        let mut canvas = Canvas::new(&mut pixels, WIDTH, HEIGHT).unwrap();
+        render::paint(
+            &mut canvas,
+            &mut record,
+            &scene,
+            placed,
+            Some(&mut text),
+            &style,
+            frame,
+            &output,
+        );
+        let _ = render::damage(&mut shown, &scene, frame, &mut damage_spans);
+    };
+    for _ in 0..3 {
+        turn(&mut placed);
+    }
+    let (_, allocations) = count_allocations(|| turn(&mut placed));
+    assert_eq!(allocations, 0, "a warm tick allocated");
+}
+
 /// The real timer: a clock showing seconds is readable within about a
 /// second, reports a change, and is armed for the next second after it.
 #[test]

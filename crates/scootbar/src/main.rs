@@ -33,6 +33,13 @@ mod testfont;
 mod text;
 mod theme;
 
+// Tests pinning the warm tick allocates nothing count heap allocations
+// through this (scootbg_mem::count), forwarding everything else to the
+// system allocator. Test-only: the shipped binary uses the default.
+#[cfg(test)]
+#[global_allocator]
+static COUNTING_ALLOC: scootbg_mem::CountingAlloc = scootbg_mem::CountingAlloc;
+
 use std::process::ExitCode;
 
 /// Exit status for a usage error, as for most Unix tools.

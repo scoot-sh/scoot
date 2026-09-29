@@ -192,18 +192,30 @@ fn a_scale_change_redraws_at_the_new_scale() {
 }
 
 #[test]
-fn a_failed_draw_is_not_retried_until_the_frame_changes() {
+fn a_failed_draw_is_retried_a_few_times_then_quiet_until_the_frame_changes() {
     let (mut outputs, id) = configured(1920, 28);
     let bar = Bar::default();
     let output = output(&mut outputs, id);
     let want = frame(1920, 28, Scale::Integer(1));
-    output.draw_failed(want);
-    // Never drawn, so there is nothing to commit either.
+    // The first failure is said; the retries stay quiet.
+    assert!(output.draw_failed(want));
+    // A later turn tries the same frame again: a clock tick that changed
+    // the text (`stale`), or anything else (never shown). The clock
+    // recovers as soon as a retry goes through.
+    assert_eq!(output.plan(&bar, true), Plan::Draw(want));
+    assert!(!output.draw_failed(want));
+    assert_eq!(output.plan(&bar, false), Plan::Draw(want));
+    assert!(!output.draw_failed(want));
+    // Past the bound (three retries, mirroring scoot's present-skip
+    // retry): quiet, even for a tick that changed the text. Capping the
+    // bound at 0 makes the `Draw` assertions above fail.
+    assert!(!output.draw_failed(want));
+    assert_eq!(output.plan(&bar, true), Plan::Nothing);
     assert_eq!(output.plan(&bar, false), Plan::Nothing);
-    // A new configure is a new chance.
+    // A new configure is a new chance, with its own streak.
     assert_eq!(output.configure(6, 1920, 28), Effect::Ack(6));
     assert_eq!(output.plan(&bar, false), Plan::Draw(want));
-    output.draw_failed(want);
+    assert!(output.draw_failed(want));
     // So is a new scale.
     output.stage_scale(2);
     output.done();
@@ -214,7 +226,22 @@ fn a_failed_draw_is_not_retried_until_the_frame_changes() {
 }
 
 #[test]
-fn a_failed_redraw_still_commits_the_ack_on_a_mapped_surface() {
+fn a_shown_draw_after_failures_recovers_the_clock() {
+    let (mut outputs, id) = configured(1920, 28);
+    let bar = Bar::default();
+    let output = output(&mut outputs, id);
+    let want = frame(1920, 28, Scale::Integer(1));
+    // Tick one's draw refused under fd pressure; tick two's retry shows.
+    assert!(output.draw_failed(want));
+    assert_eq!(output.plan(&bar, true), Plan::Draw(want));
+    output.drew(want);
+    // Drawn: nothing more until something changes. No frozen clock.
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
+    assert_eq!(output.plan(&bar, true), Plan::Draw(want));
+}
+
+#[test]
+fn a_failed_redraw_retries_first_then_commits_the_ack_once_quiet() {
     let (mut outputs, id) = configured(1920, 28);
     let bar = Bar::default();
     let output = output(&mut outputs, id);
@@ -222,7 +249,14 @@ fn a_failed_redraw_still_commits_the_ack_on_a_mapped_surface() {
     assert_eq!(output.configure(6, 3000, 28), Effect::Ack(6));
     let want = frame(3000, 28, Scale::Integer(1));
     assert_eq!(output.plan(&bar, false), Plan::Draw(want));
-    output.draw_failed(want);
+    // The first failures retry the new frame; past the bound it goes
+    // quiet, but the acked `configure` still needs its commit on the
+    // mapped surface.
+    assert!(output.draw_failed(want));
+    assert_eq!(output.plan(&bar, false), Plan::Draw(want));
+    for _ in 0..3 {
+        output.draw_failed(want);
+    }
     assert_eq!(output.plan(&bar, false), Plan::Commit);
     output.committed();
     assert_eq!(output.plan(&bar, false), Plan::Nothing);

@@ -121,8 +121,10 @@ subset. The default, `%-I:%M %P`, is a 12-hour clock with no leading zero:
   such as `Europe/London`, looked up under `$TZDIR` or
   `/usr/share/zoneinfo`; an absolute path, with or without a leading `:`;
   or a POSIX rule such as `EST5EDT,M3.2.0,M11.1.0`), else `/etc/localtime`.
-  An empty `$TZ` is UTC. A zone that cannot be read is shown as UTC, with
-  one line on stderr saying why; the bar still starts.
+  An empty `$TZ` is UTC. A POSIX value naming summer time but no dates
+  (`TZ=EST5EDT`) takes glibc's default US rules, as `date` does. A zone
+  that cannot be read is shown as UTC, with one line on stderr saying
+  why; the bar still starts.
 - **A new zone shows at the next tick**: `/etc/localtime` (or the file `$TZ`
   names) is checked once each wake, so `timedatectl set-timezone` takes
   effect within the minute. A zone file that disappears keeps the zone last
@@ -278,8 +280,8 @@ one gap below the bar, as they sit one gap from each other.
   way no window has room: this is a value to avoid, not a layout.
 - **No flag value can make a buffer overflow**: the bounds keep every size
   far from it. A buffer too large for `wl_shm` (a compositor asking for an
-  absurd surface) is refused with a message, not drawn, and not retried
-  until the size or scale changes.
+  absurd surface) is refused with a message; the draw is tried a few more
+  times, then not again until the size or scale changes.
 - **The compositor going away** (it exits, crashes, or sends a protocol
   error) ends the daemon with exit status 1 and one line on stderr saying
   why. There is no reconnect; your session's autostart starts it again with

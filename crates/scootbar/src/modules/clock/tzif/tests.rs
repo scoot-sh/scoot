@@ -174,6 +174,55 @@ fn at(tz: &Tz, year: i64, month: u32, day: u32, hour: i64, minute: i64) -> Local
 }
 
 #[test]
+fn a_dst_name_with_no_rule_takes_glibcs_default_us_rules() {
+    // What `TZ=EST5EDT` means with no zoneinfo installed: `date` shows
+    // the same summer time as the explicit `EST5EDT,M3.2.0,M11.1.0`.
+    let bare = posix("EST5EDT");
+    assert_eq!(bare, posix("EST5EDT,M3.2.0,M11.1.0"));
+    // 2026: summer from 8 March 07:00 UTC to 1 November 06:00 UTC.
+    assert_eq!(at(&bare, 2026, 3, 8, 6, 59).abbr.as_str(), "EST");
+    assert_eq!(at(&bare, 2026, 3, 8, 7, 0).abbr.as_str(), "EDT");
+    assert_eq!(at(&bare, 2026, 7, 1, 12, 0).offset, -4 * 3600);
+    assert_eq!(at(&bare, 2026, 11, 1, 5, 59).offset, -4 * 3600);
+    assert_eq!(at(&bare, 2026, 11, 1, 6, 0).offset, -5 * 3600);
+}
+
+/// A TZif footer with no rule is still not guessed: zic never writes one,
+/// so the last transition's type stays in force (here EST all year), while
+/// `TZ` without a zone file takes the default rules (the test above).
+#[test]
+fn a_ruleless_footer_is_not_guessed() {
+    let tz = Tz::parse(&with_footer(b"EST5EDT")).unwrap();
+    assert_eq!(at(&tz, 2026, 7, 1, 12, 0).abbr.as_str(), "EST");
+    assert_eq!(at(&tz, 2026, 7, 1, 12, 0).offset, -5 * 3600);
+}
+
+/// A version-2 TZif file whose footer is `footer`: empty v1 section, no
+/// transitions, one standard-time type, then the footer line.
+fn with_footer(footer: &[u8]) -> Vec<u8> {
+    let mut file = Vec::new();
+    // The v1 section, empty: its counts are all zero, so no bytes follow.
+    file.extend_from_slice(b"TZif2");
+    file.extend_from_slice(&[0; 15]);
+    for _ in 0..6 {
+        file.extend_from_slice(&0u32.to_be_bytes());
+    }
+    // The v2 section: no transitions, one type, four abbreviation bytes.
+    file.extend_from_slice(b"TZif2");
+    file.extend_from_slice(&[0; 15]);
+    for count in [0u32, 0, 0, 0, 1, 4] {
+        file.extend_from_slice(&count.to_be_bytes());
+    }
+    file.extend_from_slice(&(-5 * 3600i32).to_be_bytes());
+    file.extend_from_slice(&[0, 0]);
+    file.extend_from_slice(b"EST\0");
+    file.push(b'\n');
+    file.extend_from_slice(footer);
+    file.push(b'\n');
+    file
+}
+
+#[test]
 fn a_posix_string_alone_is_a_zone() {
     let new_york = posix("EST5EDT,M3.2.0,M11.1.0");
     // 2026: DST from 8 March 07:00 UTC to 1 November 06:00 UTC.
@@ -231,7 +280,6 @@ fn malformed_posix_strings_are_refused() {
         "",
         "AB",
         "ABC",
-        "EST5EDT",
         "EST5EDT,M3.2.0",
         "EST5EDT,M13.2.0,M11.1.0",
         "EST5EDT,M3.0.0,M11.1.0",

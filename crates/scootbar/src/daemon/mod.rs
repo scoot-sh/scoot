@@ -274,11 +274,12 @@ fn draw(state: &mut State, qh: &wayland_client::QueueHandle<State>) {
                     // again then.
                     Ok(Drew::Stalled) => {}
                     Err(error) => {
-                        warn(format_args!(
-                            "scootbar: cannot draw the bar on {}: {error}",
-                            entry.output.label()
-                        ));
-                        entry.output.draw_failed(frame);
+                        if entry.output.draw_failed(frame) {
+                            warn(format_args!(
+                                "scootbar: cannot draw the bar on {}: {error}",
+                                entry.output.label()
+                            ));
+                        }
                     }
                 }
             }
