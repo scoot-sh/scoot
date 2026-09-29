@@ -16,7 +16,7 @@ frontmatter line it names.
 scripts/backlog list                         # everything open, high priority first
 scripts/backlog list --unblocked --priority high
 scripts/backlog list --blocked               # what waits on something
-scripts/backlog list --area scootbg          # core | ipc | protocols | testing | scootbg | scootbar
+scripts/backlog list --area scootbg          # core | ipc | protocols | testing | packaging | scootbg | scootbar
 scripts/backlog list --grep 'ext-workspace'  # match anywhere in the file
 scripts/backlog list --all                   # include the resolved archive
 scripts/backlog show workspace-snapshot      # slug, unique substring or path; --full for all

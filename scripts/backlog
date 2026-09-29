@@ -30,16 +30,19 @@ BACKLOGS = {  # area -> directory holding its open entries
     "ipc": ROOT / "docs/backlog/ipc",
     "protocols": ROOT / "docs/backlog/protocols",
     "testing": ROOT / "docs/backlog/testing",
+    "packaging": ROOT / "docs/backlog/packaging",
     "scootbg": ROOT / "docs/scootbg/backlog",
     "scootbar": ROOT / "docs/scootbar/backlog",
 }
 RESOLVED = {  # where an area's resolved entries are archived
-    **{a: ROOT / "docs/backlog/resolved" for a in ("core", "ipc", "protocols", "testing")},
+    **{a: ROOT / "docs/backlog/resolved"
+       for a in ("core", "ipc", "protocols", "testing", "packaging")},
     "scootbg": ROOT / "docs/scootbg/backlog/resolved",
     "scootbar": ROOT / "docs/scootbar/backlog/resolved",
 }
 INDEXES = {  # area -> the README that must link each of its open entries
-    **{a: ROOT / "docs/backlog/README.md" for a in ("core", "ipc", "protocols", "testing")},
+    **{a: ROOT / "docs/backlog/README.md"
+       for a in ("core", "ipc", "protocols", "testing", "packaging")},
     "scootbg": ROOT / "docs/scootbg/backlog/README.md",
     "scootbar": ROOT / "docs/scootbar/backlog/README.md",
 }
