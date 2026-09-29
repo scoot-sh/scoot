@@ -435,7 +435,9 @@ running with no GPU at all is a hard requirement here, not a fallback tier.
   [configuration.md](configuration.md#appearance)) has the compositor hide
   the pointer after that many milliseconds still over the covering window
   -- `0` (the default) never hides. The next motion, button or scroll
-  shows it again, and that frame composites. The log line
+  shows it again; on a display with no cursor plane, frames then composite
+  until it has sat still for the delay again (about the delay plus one frame
+  on Asahi, [Test 15](../Asahi.md)). The log line
   `scanout: primary-direct eligibility changed` (at `debug`) says when a
   session starts or stops being allowed to go direct, and why. A frame
   that did go direct tells that window's `wp_presentation` feedback

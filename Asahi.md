@@ -2468,8 +2468,9 @@ it returns to the client fb once the pointer has sat still for the delay
 (the debugfs read 3 s after motion showed the direct fb again). Not
 measured: mpv's `presented` flags (no `WAYLAND_DEBUG` trace was taken this
 time, so the `vsync | zero_copy` cross-check of Test 5 is missing; the
-debugfs fb is the evidence), a photo of the panel, and any client other
-than mpv. Option 2 (cursor on an overlay) is untouched by this.
+debugfs fb is the evidence; Test 15 took that trace), a photo of the
+panel, and any client other than mpv. Option 2 (cursor on an overlay) is
+untouched by this.
 
 ### Part C — overlay window candidates: nothing measurable without implementing
 
@@ -2490,6 +2491,212 @@ is worth recording on both tickets.
 DP-1 `connected` with 21 modes and `enabled`, brightness 107. DP-1 was never
 forced and eDP-1 was never touched beyond a normal `--tty` session; no
 `nh os switch`, no reboot, no config change on the box.
+
+## Test 15 — `zero_copy` in mpv's `presented` flags under `cursor_hide_after_ms`
+
+Run 2026-09-29, 14:37-14:40 UTC, on the same Apple M2 (Mac14,2 / j413),
+NixOS 26.11, kernel 7.1.13 (fairydust), Mesa 26.2.2, mpv 0.41.0, DP-1
+(1920x1080, 21 modes) and eDP-1 both connected. Test 14 left one question
+open: does the client see `zero_copy` when scoot's hide lets its buffer go
+direct? This test answers it with a `WAYLAND_DEBUG=1` trace of mpv.
+
+**Build: Test 14's binary, reused.** The docs commit this lands in sits on
+`main` at `474ad20fa`. `git diff b3f087b43..474ad20fa -- crates/scoot
+crates/scoot-core crates/scoot-ipc Cargo.toml Cargo.lock` is empty, so
+the compositor is Test 14's build. It was not rebuilt. The sha256s were
+re-read on the box before and after the runs, and match Test 14's table:
+
+```
+4b76421fd3701041b8ce587cbac28a283db2704717400d128ca31a3486fef389  /home/steve/scoot-res-target/release/scoot
+f8a3e36a6a94f46a5b7c3158c96181fc674c788f55bc8924f93faed783aeff69  /home/steve/scoot-res-target/release/scootctl
+```
+
+**Recipe.** `~/fx/t15-zc.sh TAG CFG` runs one session and `~/fx/t15-all.sh`
+runs four, alternating: `t15-hide-r1`, `t15-nohide-r1`, `t15-hide-r2`,
+`t15-nohide-r2`. `~/fx/t15-state.sh` checks the box before the first
+session and after each one: `fgconsole`, seatd socket, leftover processes,
+DP-1/eDP-1 status and mode count, `loginctl`. Each session:
+
+- Start scoot the way Test 14 did: `~/fx/vt-run.sh` on VT 2 with a private
+  seatd, `scoot --tty --renderer gles --config CFG`, the Mesa env from
+  `~/fx/mesa-env.sh` and libglvnd on `LD_LIBRARY_PATH`. Log at
+  `RUST_LOG=info,scoot=debug,smithay::backend::drm::compositor=trace`.
+- CFG is `~/fx/test.toml` (`[output] scale = 1.5`, called "unset" below) or
+  `~/fx/test-hide.toml` (the same plus `[appearance] cursor_hide_after_ms =
+  1000`, called "set").
+- Run `WAYLAND_DEBUG=1 mpv --fs --cursor-autohide=no --vo=gpu
+  --gpu-context=wayland --hwdec=no --loop --really-quiet
+  --log-file=… ~/fx/clip.mkv 2> TAG-mpv.trace`. The clip is the 1080p30
+  one. mpv never hides its own pointer.
+- Phase **A**: 4 s after launch, with no pointer motion yet.
+- Phase **B**: `scootctl pointer move 400 300`, then `420 320` (mpv's first
+  pointer focus), 3 s settle, a 10 s window, and debugfs `dri/2/state` in
+  the middle of that window.
+- Phase **C**: 32 moves 0.25 s apart, so the pointer never sits still for
+  the 1 s delay. Debugfs is read after the 16th move.
+- Phase **D**: 3 s settle, a 10 s window, debugfs in the middle.
+- Quit mpv, then `~/fx/vt-stop.sh`.
+- Every phase boundary writes a `MARK` line to `TAG.txt`: local and UTC
+  time, plus the line counts of the mpv trace and the scoot log at that
+  instant. `~/fx/t15-analyze.sh TAG` (output in `TAG-analysis.txt`) splits
+  both files at those counts. It then counts the last argument of each
+  `wp_presentation_feedback….presented(` line against the scoot log's
+  `testing direct scan-out` and `successfully assigned element … to
+  plane::Handle(35)` lines. The flags are those Test 6 used: `9` is
+  `vsync | zero_copy`, `1` is `vsync` only.
+- Jiffies were not sampled. Trace logging plus `WAYLAND_DEBUG` distorts
+  CPU, and Test 14 has the CPU numbers.
+
+**Result: pass.** With the option set, mpv is told `zero_copy` on every
+frame its buffer went direct, and on no other frame. With it unset, it is
+never told `zero_copy`. Over whole sessions:
+
+| session | option | `presented` flags `9` | flags `1` | scoot `successfully assigned … plane::Handle(35)` | `discarded` | other flag values |
+| --- | --- | --- | --- | --- | --- | --- |
+| t15-hide-r1 | set | 733 | 422 | 733 | 0 | none |
+| t15-nohide-r1 | unset | 0 | 1156 | 0 | 0 | none |
+| t15-hide-r2 | set | 732 | 422 | 732 | 0 | none |
+| t15-nohide-r2 | unset | 0 | 1158 | 0 | 0 | none |
+
+The number of `9` frames equals the number of primary-plane assignments in
+both set sessions. There were no `test failed` lines, and no direct attempt
+on any plane other than 35. Per phase, from `t15-hide-r1-analysis.txt`
+(r2 matches to within a frame; nohide r1/r2 show `flags1` only, in every
+phase, with `direct-tests=0 assigned-35=0`):
+
+```
+A-startup              trace     0-1915  log    75-1137  | presented: 112×flags1                  discarded: 0   | scoot: direct-tests=0 assigned-35=0 test-failed=0
+B-motion+delay         trace  1915-3358  log  1137-2056  | presented: 42×flags1 60×flags9        discarded: 0   | scoot: direct-tests=61 assigned-35=60 test-failed=0
+B-idle                 trace  3358-7581  log  2056-4772  | presented: 302×flags9                  discarded: 0   | scoot: direct-tests=301 assigned-35=302 test-failed=0
+C-motion               trace  7581-11086 log  4772-6986  | presented: 245×flags1                  discarded: 0   | scoot: direct-tests=0 assigned-35=0 test-failed=0
+C-to-D                 trace 11086-12350 log  6986-7795  | presented: 23×flags1 67×flags9        discarded: 0   | scoot: direct-tests=67 assigned-35=67 test-failed=0
+D-idle                 trace 12350-16573 log  7795-10513 | presented: 302×flags9                  discarded: 0   | scoot: direct-tests=302 assigned-35=302 test-failed=0
+tail                   trace 16573-16652 log 10513-10541 | presented: 2×flags9                    discarded: 0   | scoot: direct-tests=2 assigned-35=2 test-failed=0
+```
+
+(The 61/60 and 301/302 splits are a single frame whose test and assign
+lines fall on opposite sides of a boundary. The totals are equal.)
+
+Runs of consecutive flag values, with the event times from the trace
+(UTC; this box's libwayland stamps wall-clock time):
+
+| session | runs |
+| --- | --- |
+| t15-hide-r1 | `1` x154 (20.968-26.074), `9` x362 (26.104-38.138), `1` x268 (38.171-47.089), `9` x371 (47.108-59.443) |
+| t15-hide-r2 | `1` x155 (46.717-51.854), `9` x361 (51.888-03.887), `1` x267 (03.921-12.808), `9` x371 (12.841-25.160) |
+| t15-nohide-r1 | `1` x1156 (whole session) |
+| t15-nohide-r2 | `1` x1158 (whole session) |
+
+- **Hide → `zero_copy`, in the very frame it goes direct.** In r1, the
+  last motion was sent at 14:37:25.094 (the `B-last-motion` mark). Scoot's
+  first `successfully assigned … to plane::Handle(35)` is at
+  `14:37:26.103546Z`, and mpv's first `9` is at 26.103994, 1.010 s after
+  the motion. That is the 1000 ms delay plus the frame in flight. The
+  handover, as mpv saw it:
+
+  ```
+  [14:37:26.074200] {Default Queue} wp_presentation_feedback#50.presented(0, 120166, 559087913, 16666667, 0, 158, 1)
+  [14:37:26.103994] {Default Queue} wp_presentation_feedback#50.presented(0, 120166, 588895198, 16666667, 0, 159, 9)
+  ```
+
+  The second phase (D) behaves the same way. r1's last C motion is about
+  14:37:46.09, and its first `9` is 47.108. In r2 the gaps are 1.018 s
+  (50.870 to 51.888) and about 1.0 s.
+- **Shown → no `zero_copy`, within a frame or two of the motion.** In r1,
+  C's first move went out right after 14:37:38.149 and the last `9` was
+  38.138. From 38.171 on, every frame is `1`, and stays so across all 32
+  moves:
+
+  ```
+  [14:37:38.137704] {Default Queue} wp_presentation_feedback#50.presented(0, 120178, 622609205, 16666667, 0, 520, 9)
+  [14:37:38.171353] {Default Queue} wp_presentation_feedback#50.presented(0, 120178, 656216861, 16666667, 0, 521, 1)
+  ```
+
+  In C, scoot logs no direct attempt at all (`direct-tests=0`). That is
+  Test 5's trap, now caused by scoot's own shown pointer.
+- **Debugfs agrees.** Plane 35 in the B and D snapshots of both set
+  sessions shows `format=XR30`, `size=2561x1601`, `modifier=0x0`,
+  `crtc-pos=2561x1601+0+0`: mpv's buffer. The C snapshot shows `AR24
+  2560x1600`, scoot's swapchain. All six snapshots from the unset
+  sessions show `AR24 2560x1600`.
+- **Phase A (no motion yet) composited in all four sessions: 112-115 `1`,
+  no direct attempt.** mpv had no pointer focus then. Its first
+  `wl_pointer.enter` comes with the first `scootctl pointer move`. Where
+  the pointer sat before that, and whether it was drawn, was not recorded.
+  This fits the hide arming only once the pointer is over the covering
+  window, but it proves nothing either way. It does not count toward the
+  result.
+
+**The hide was scoot's, not mpv's.** None of the four traces contains a
+`set_cursor(`. mpv 0.41 binds `wp_cursor_shape_manager_v1` and sets its
+pointer once, on enter, and never clears it:
+
+```
+[14:37:24.689057] {Default Queue} wl_pointer#8.enter(14, wl_surface#5, 400.00000000, 300.00000000)
+[14:37:24.689069] {Default Queue}  -> wp_cursor_shape_device_v1#45.set_shape(14, 1)
+```
+
+Each of the four traces has exactly one `set_shape(`, one
+`wl_pointer.enter`, no `leave`, and 33 `wl_pointer.motion` (1 in B, 32 in
+C). Nothing else touches the cursor until the `destroy` at exit. So the client
+asked for a visible arrow the whole time, and every `9` above comes from
+the compositor-side hide.
+
+**The buffer qualified in every session.** mpv's first buffer was the
+tiled-size `836x1043`, `APPLE_GPU_TILED_COMPRESSED`
+(`add(…, 3344, 201326592, 2)`). In three sessions (both hide runs and
+nohide-r1), one fullscreen `2561x1601` compressed buffer was also created
+before `tranche_flags(1)` arrived. In nohide-r2 the tranche arrived first.
+From `tranche_flags(1)` on, every buffer in every session was `LINEAR`
+`XR30` (`808669784`) at 2561x1601. From r1:
+
+```
+[14:37:20.967706]   -> zwp_linux_buffer_params_v1#54.add(fd 20, 0, 0, 10244, 201326592, 2)
+[14:37:20.967711]   -> zwp_linux_buffer_params_v1#54.create_immed(new id wl_buffer#51, 2561, 1601, 808669784, 0)
+[14:37:20.968248]  zwp_linux_dmabuf_feedback_v1#47.tranche_flags(1)
+[14:37:20.986838]   -> zwp_linux_buffer_params_v1#55.add(fd 21, 0, 0, 10368, 0, 0)
+[14:37:20.986845]   -> zwp_linux_buffer_params_v1#55.create_immed(new id wl_buffer#56, 2561, 1601, 808669784, 0)
+```
+
+That is Test 6's steering, unchanged. The buffer count did differ by option.
+Each set session created five `LINEAR` 2561x1601 buffers, and each unset
+session three. The two extra in each set session came about 50-65 ms into
+each direct phase (r1: 14:37:26.154 and 14:37:47.172). Presumably mpv's EGL
+swapchain grows while the display holds a buffer for scanout. The extra
+buffers did not affect the flags, and no session sent a `discarded`.
+
+**What this does not show.** Only one client was tested, mpv, at one
+delay (1000 ms), at scale 1.5, on eDP-1. Also not tested: button and
+scroll reshows (only motion was driven) and a photo of the panel. The
+`zero_copy` flag is scoot's own report of Smithay's plane assignment
+(`presentation_time.rs`, "`zero_copy`"), and debugfs is the kernel's view
+of the same commit. Neither reads photons. What the test does establish
+is that the two agree frame for frame, and that the client receives
+exactly that answer.
+
+Raw files are on the box under `~/fx/t15-*`: the scripts, and per session
+`TAG.txt` (marks, windows JSON, debugfs extract), `TAG.log` (scoot trace,
+ANSI stripped), `TAG-mpv.trace`, `TAG-mpv.log`, `TAG-kms-{B,C,D}.txt`,
+`TAG-analysis.txt`, and `t15-state.log`.
+
+### State left behind
+
+`t15-state.sh` after the last session (the last recorded entry, 10:40:09 local):
+
+```
+state 10:40:09: fgconsole=1 seatd.sock=gone
+no scoot/seatd/mpv/niri/ydotoold processes
+card2-DP-1 connected enabled modes=21
+card2-eDP-1 connected enabled modes=1
+```
+
+The same four lines were recorded after each of the four sessions.
+`loginctl` then listed only the tty1 seat session, the user manager,
+session 26 (it predates this test) and the ssh session reading the
+state. The `runuser` session each run opens was gone. Brightness was 107.
+DP-1 stayed on and was never forced. There was no `nh os switch`, no
+reboot, and no config change on the box. The only new files are the
+`~/fx/t15-*` scripts and outputs.
 
 ## Keys for the 2026-09-25 runs
 
