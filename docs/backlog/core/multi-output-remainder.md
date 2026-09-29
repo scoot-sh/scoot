@@ -3,7 +3,7 @@ title: "Multi-output remainder: --tty multi-CRTC, placement policy, default bind
 status: "open"
 area: "core"
 priority: "high"
-blocked: "E1/E2 landed and ran on hardware (a physical DP-1 replug on the Asahi M2 Air, 2026-09-25; GPU-tier runtime add and multi-head mode change proven there 2026-09-26, Asahi.md Tests 11-12); #48 MoveTo proven live on the dev VM 2026-09-28 (Virtual-1 force-off / Virtual-2 force-on, switch_crtc to CRTC 44 — see tty-hotplug-confirmation-done.md); left: the scale/mode surface (its own entry)"
+blocked: "E1/E2 landed and ran on hardware (a physical DP-1 replug on the Asahi M2 Air, 2026-09-25; GPU-tier runtime add and multi-head mode change proven there 2026-09-26, Asahi.md Tests 11-12); #48 MoveTo proven live on the dev VM 2026-09-28 (Virtual-1 force-off / Virtual-2 force-on, switch_crtc to CRTC 44 — see tty-hotplug-confirmation-done.md); the scale/mode surface landed 2026-09-29 (per-output-scale-mode-done.md); left: position and a live mode change (output-position-and-live-mode)"
 ---
 
 # Multi-output remainder: --tty multi-CRTC, placement policy, default binds
@@ -12,8 +12,10 @@ Milestone 19 ([plan](../roadmap/19-multi-output.md)) landed phases A–D + F
 (render/capture, layer shell, lock, workspaces/output-management/pointer,
 cross-output moves). This entry tracks everything left before the README
 "Not yet: multi-output is partial" bullet clears. The per-output
-scale/mode surface is its own entry
-([per-output-scale-mode](./per-output-scale-mode.md)) and stays last.
+scale/mode surface was its own entry
+([per-output-scale-mode](../resolved/per-output-scale-mode-done.md)) and
+landed last (2026-09-29); what it left out -- position, a live mode change
+-- is [output-position-and-live-mode](./output-position-and-live-mode.md).
 
 ## E1 — TTY multi-CRTC enumeration + output registration — DONE 2026-09-25 (`b782b06`)
 
@@ -212,7 +214,10 @@ comment this section used to cite is already current — it describes
 per-output render targets (verified 2026-09-28, no edit needed) — and the
 stale `multi-output.md:50-113` body (A–D as future) is superseded by this
 triage (`../resolved/multi-output-superseded.md`, milestone 19
-authoritative). One thing left: the [scale/mode surface](./per-output-scale-mode.md).
+authoritative). The [scale/mode surface](../resolved/per-output-scale-mode-done.md)
+landed 2026-09-29; left: [position and a live mode
+change](./output-position-and-live-mode.md), and the README bullet is
+narrowed to **Monitor placement** accordingly.
 When it lands, the README "Not yet" bullet — already narrowed to
 **Per-monitor settings** ("Multiple monitors work, but they share one
 scale and resolution…", `README.md:174-175`, retitled past one-output in

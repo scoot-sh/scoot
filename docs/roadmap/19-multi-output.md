@@ -530,4 +530,6 @@ smoke. Phase E additionally needs the Asahi runbook treatment.
 
 `wlr-output-management` `apply`/`test` becoming real (refusal stands as
 documented — multi-output makes it *possible*, not *required*); named
-workspaces; per-output scale/mode configuration surface.
+workspaces; per-output scale/mode configuration surface (landed after
+the milestone, 2026-09-29: [`[[outputs]]`](../configuration.md#outputs),
+see `../backlog/resolved/per-output-scale-mode-done.md`).

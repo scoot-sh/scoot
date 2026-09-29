@@ -38,11 +38,19 @@
 //! instead, as Smithay's anvil does, is too late: XWayland has sized its X
 //! screen from the outputs by then, and would have to be re-sent them.)
 //!
-//! # Which scale: `ceil([output] scale)`
+//! # Which scale: `ceil([output] scale)`, the largest over the outputs
 //!
 //! X toolkits scale only by integers (GTK's window scale, Qt's and Java's
 //! device ratio off it), so `S` is an integer, and it is the one scoot
-//! already advertises on `wl_output.scale`: [`State::integer_scale`]. At an
+//! already advertises on `wl_output.scale` -- the largest one, when
+//! `[[outputs]]` gives outputs different scales. The X server has one
+//! scale for every X window on every output, so outputs that disagree
+//! cannot all be matched; the largest keeps X apps sharp on the densest
+//! screen and has the renderer scale them down on the others (the same
+//! down-only direction a fractional scale already takes, below), where the
+//! smallest would blur them on the dense one. With every output at one
+//! scale -- every session without `[[outputs]]` -- that is simply its
+//! integer, exactly what it was. At an
 //! integer output scale the X server draws at exactly the output's
 //! resolution -- one X pixel per physical pixel, sharp. At a fractional one
 //! (1.5) X draws at the integer above (2) and the renderer scales it down
@@ -289,10 +297,25 @@ impl State {
         self.x11_fit.scale
     }
 
-    /// The X scale the current layout and `[output] scale` call for: see
-    /// the module doc. One pass over the outputs, no allocation.
+    /// The X scale the current layout and the outputs' scales call for:
+    /// see the module doc. Two passes over the outputs, no allocation. With
+    /// no output at all (a bare harness) the session default's integer
+    /// stands in, as the one scale an output would be created at.
     fn chosen_x11_scale(&self) -> XScale {
-        fit_x_scale(self.integer_scale, self.layout_bounds())
+        fit_x_scale(self.outputs_integer_scale(), self.layout_bounds())
+    }
+
+    /// The largest `wl_output.scale` integer over the outputs -- what X
+    /// draws at before the layout's bound (see the module doc). With no
+    /// output at all (a bare harness) the session default's integer stands
+    /// in, as the one scale an output would be created at. One pass, no
+    /// allocation.
+    fn outputs_integer_scale(&self) -> i32 {
+        self.outputs
+            .iter()
+            .map(|output| output.current_scale().integer_scale())
+            .max()
+            .unwrap_or_else(|| super::super::output_scale::integer_scale(self.default_scale))
     }
 
     /// The union of every output's logical rectangle, as the `Space` lays
@@ -394,7 +417,7 @@ impl State {
     /// change.
     fn log_x11_bound(&self) {
         let XScale { scale, fits } = self.x11_fit;
-        let ceiling = x_scale(self.integer_scale);
+        let ceiling = x_scale(self.outputs_integer_scale());
         let (width, height) = self.layout_bounds().map_or((0, 0), |bounds| {
             (
                 bounds.right.saturating_sub(bounds.left),

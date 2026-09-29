@@ -77,9 +77,18 @@ impl InputMethodHandler for State {
     /// activation and this call -- so it is logged rather than unwrapped
     /// (anvil unwraps; a panic here takes every client's session with it).
     fn new_popup(&mut self, surface: PopupSurface) {
+        // Drawn beside the text field it composes for, so at that surface's
+        // scale (see `output_scale.rs`). Read before `track_popup` takes the
+        // popup by value.
+        let tell = surface
+            .get_parent()
+            .map(|parent| (surface.wl_surface().clone(), parent.surface.clone()));
         if let Err(error) = self.popups.track_popup(PopupKind::from(surface)) {
             tracing::warn!(%error, "could not track an input-method popup");
             return;
+        }
+        if let Some((popup, parent)) = tell {
+            super::output_scale::inherit_scale(&popup, &parent);
         }
         // Nothing commits on this path -- the popup's surface may have had
         // its buffer for a while and simply moved to a new parent -- so the

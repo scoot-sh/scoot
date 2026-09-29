@@ -231,7 +231,17 @@ fn a_reload_across_the_bound_moves_the_x_scale_both_ways() {
             format!("{response:?}").contains("output.scale"),
             "the reload did not apply the scale: {response:?}"
         );
-        assert_eq!(live.fixture.state.integer_scale, 2, "{what}");
+        assert_eq!(
+            live.fixture
+                .state
+                .outputs
+                .primary()
+                .expect("an output")
+                .current_scale()
+                .integer_scale(),
+            2,
+            "{what}"
+        );
         // The X screen in X pixels at 1.5 is what Smithay's `xdg_output`
         // rounding makes of the fractional sizes; its bound is what
         // matters here, and the window's geometry, which is exact.

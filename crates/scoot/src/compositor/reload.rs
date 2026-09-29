@@ -32,14 +32,25 @@
 //!   placement), so no `apply()` runs.
 //!   `XCURSOR_THEME`/`XCURSOR_SIZE` for future children follow from the same
 //!   rebuild -- see `State::spawn`, which exports the live theme per child.
-//! - `[output] scale`: re-advertised to every output (bound `wl_output`
-//!   clients hear the new integer through the same `set_mode` startup uses)
-//!   and re-sent to every live surface (the fractional `preferred_scale`
-//!   plus its integer companion, walked over every window, layer, lock and
-//!   cursor tree), then re-laid-out: every logical geometry is recomputed
-//!   and filed with the core, the arrangement recomputed and the screen
-//!   redrawn. Under `--nested` a non-1.0 value refuses -- the host owns the
-//!   scale there -- rather than applying.
+//! - `[output] scale` and each `[[outputs]]` entry's `scale`: every output's
+//!   scale is re-decided (its entry's, else the default -- see
+//!   `output_config.rs`), re-advertised to every output whose scale moved
+//!   (bound `wl_output` clients hear the new integer through the same
+//!   `set_mode` startup uses) and re-sent to every live surface (the
+//!   fractional `preferred_scale` plus its integer companion, each told its
+//!   own output's scale, walked over every window, layer, lock and cursor
+//!   tree), then re-laid-out: every logical geometry is recomputed and filed
+//!   with the core, the arrangement recomputed and the screen redrawn.
+//!   Reported per field -- `output.scale` for the default and
+//!   `outputs.<name>.scale` for an entry -- even when the output it names is
+//!   not connected (the value is stored, and applies when it is). Under
+//!   `--nested` any change refuses -- the host owns the scale there --
+//!   rather than applying.
+//! - `[[outputs]]` `mode`: refused by name (`outputs.<name>.mode`), pending a
+//!   restart. Applying it live would be a modeset on a driven head, which
+//!   no reload does (see `output_config.rs`); the session keeps the mode it
+//!   started with, and that is also the mode a replugged monitor comes back
+//!   at.
 //! - `[binds]`: rebuilt from defaults plus the file (see
 //!   [`keybindings_for`](super::config::keybindings_for)), with the `--tty`
 //!   `Ctrl+Alt+F1..F12` recovery bindings layered on last when this session
@@ -136,7 +147,7 @@ use scoot_ipc::Response;
 
 use super::State;
 use super::config::{self, LoadedConfig};
-use super::output_scale::integer_scale;
+use super::output_config::EntriesDiff;
 use super::wallpaper::Reloaded;
 
 #[cfg(test)]
@@ -160,6 +171,9 @@ mod field {
     pub const CURSOR_HIDE: &str = "appearance.cursor_hide_after_ms";
     pub const PREFER_NO_CSD: &str = "appearance.prefer_no_csd";
     pub const SCALE: &str = "output.scale";
+    /// `outputs.<name>.scale` / `outputs.<name>.mode`: per output, so the
+    /// name is built from the entry (see `output_field`).
+    pub const OUTPUTS: &str = "outputs";
     pub const GPU: &str = "tty.gpu";
     pub const BACKEND: &str = "renderer.backend";
     pub const XWAYLAND: &str = "xwayland.enabled";
@@ -231,7 +245,7 @@ impl State {
         let mut report = Report::default();
         self.apply_layout_reload(fresh, &mut report);
         self.apply_appearance_reload(fresh, &mut report);
-        self.apply_scale_reload(fresh, &mut report);
+        self.apply_output_reload(fresh, &mut report);
         self.apply_device_reload(fresh, &mut report);
         self.apply_autostart_reload(fresh, &mut report);
         self.apply_floating_reload(fresh, &mut report);
@@ -247,13 +261,13 @@ impl State {
             name == field::GAP
                 || name == field::COLUMN_WIDTHS
                 || name == field::DEFAULT_COLUMN_WIDTH
-                || name == field::SCALE
                 || name == field::RING_WIDTH
                 || name == field::RING_ACTIVE
                 || name == field::RING_INACTIVE
                 || name == field::BACKGROUND
                 || name == field::CORNER_RADIUS
-        }) {
+        }) || report.rescaled
+        {
             self.apply();
         }
         // A rebuilt cursor is a cursor change like any other: a redraw where
@@ -404,36 +418,53 @@ impl State {
         }
     }
 
-    /// `[output] scale`: re-advertised to every output and re-sent to every
-    /// live surface, then re-laid-out (see `rescale_outputs` and
-    /// `resend_output_scale`). Compared against the live
-    /// `State::output_scale`, and that field -- plus its precomputed integer
-    /// -- is exactly what is stored, so a second reload agrees silently.
-    /// `fresh.scale` is already load-clamped (including the non-finite
-    /// fallback), so an out-of-range value applies as its clamped self,
+    /// `[output] scale` and `[[outputs]]`: every output's scale re-decided
+    /// and re-applied live, a changed entry mode refused (see the module
+    /// doc). Compared against the live [`State::default_scale`] and
+    /// [`State::output_entries`], and what is stored is exactly what was
+    /// compared (with the live modes kept), so a second reload agrees
+    /// silently. `fresh` is already load-clamped (including the non-finite
+    /// fallbacks), so an out-of-range value applies as its clamped self,
     /// never as a refusal.
     ///
-    /// Under `--nested` a differing value refuses instead: the host owns the
+    /// The outputs are re-laid-out only when an output's scale actually
+    /// moves: a changed entry for a monitor that is not connected, or a
+    /// default every connected output overrides, is stored and reported
+    /// without re-announcing anything.
+    ///
+    /// Under `--nested` every difference refuses instead: the host owns the
     /// scale there (`compositor::run` forced the live value to 1.0 with a
-    /// warning), so any difference is a non-1.0 ask by construction.
-    fn apply_scale_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
-        match scale_reload(fresh.scale, self.output_scale, self.host.is_some()) {
-            ScaleReload::Agree => {}
-            ScaleReload::RefuseNested => {
-                report.refused.push(refused(
-                    field::SCALE,
-                    "refused under --nested: the host compositor owns the window's scale",
-                ));
-            }
-            ScaleReload::Apply => {
-                self.output_scale = fresh.scale;
-                self.integer_scale = integer_scale(fresh.scale);
-                // Re-chooses the X scale too, once the new layout is in
-                // place (see `xwayland/scale.rs`).
-                self.rescale_outputs(fresh.scale);
-                self.resend_output_scale();
-                report.applied.push(field::SCALE.to_owned());
-            }
+    /// warning and ignored every entry), so nothing is stored.
+    fn apply_output_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        let nested = self.host.is_some();
+        let default = scale_reload(fresh.scale, self.default_scale, nested);
+        let entries = self.output_entries.diff(&fresh.outputs);
+        report
+            .refused
+            .extend(output_refusals(&default, &entries, nested));
+        if nested {
+            return;
+        }
+        if default == ScaleReload::Agree && entries.scales.is_empty() {
+            return;
+        }
+        self.default_scale = fresh.scale;
+        self.output_entries = fresh.outputs.with_modes_of(&self.output_entries);
+        if default == ScaleReload::Apply {
+            report.applied.push(field::SCALE.to_owned());
+        }
+        for name in &entries.scales {
+            report.applied.push(output_field(name, "scale"));
+        }
+        let moved = self.outputs.iter().any(|output| {
+            self.configured_scale(&output.name()) != super::output_scale::scale_of(output)
+        });
+        if moved {
+            // Re-chooses the X scale too, once the new layout is in place
+            // (see `xwayland/scale.rs`).
+            self.rescale_outputs();
+            self.resend_output_scale();
+            report.rescaled = true;
         }
     }
 
@@ -443,7 +474,7 @@ impl State {
     /// carries one) and refuses when it differs -- see the module doc for
     /// why none applies live.
     /// (`[output] scale` used to refuse here too; it applies live now,
-    /// through `apply_scale_reload` above. `[autostart]` runs its spawn
+    /// through `apply_output_reload` above. `[autostart]` runs its spawn
     /// delta instead, through `apply_autostart_reload` below.)
     fn apply_device_reload(&self, fresh: &LoadedConfig, report: &mut Report) {
         if fresh.gpu != self.startup_gpu {
@@ -630,10 +661,56 @@ impl State {
 struct Report {
     applied: Vec<String>,
     refused: Vec<String>,
+    /// Whether an output's scale actually moved, so the arrangement must be
+    /// re-derived: not the same question as "a scale field applied", which
+    /// can store a value no connected output runs at.
+    rescaled: bool,
 }
 
-/// What a reloaded `[output] scale` does: applies live, agrees silently, or
-/// refuses under `--nested`.
+/// What a reload of `[output] scale` and `[[outputs]]` refuses, in reply
+/// order: under `--nested` every difference (the host owns the one window's
+/// size and scale); elsewhere only each changed entry `mode` (a reload does
+/// not modeset -- see `output_config.rs`). Pure, so both halves pin without a
+/// host connection, which no test harness can fake.
+fn output_refusals(default: &ScaleReload, entries: &EntriesDiff, nested: bool) -> Vec<String> {
+    let mut refusals = Vec::new();
+    if nested {
+        if *default == ScaleReload::RefuseNested {
+            refusals.push(refused(
+                field::SCALE,
+                "refused under --nested: the host compositor owns the window's scale",
+            ));
+        }
+        for (name, key) in entries
+            .scales
+            .iter()
+            .map(|name| (name, "scale"))
+            .chain(entries.modes.iter().map(|name| (name, "mode")))
+        {
+            refusals.push(refused(
+                &output_field(name, key),
+                "refused under --nested: the host compositor owns the window's size and scale",
+            ));
+        }
+    } else {
+        for name in &entries.modes {
+            refusals.push(refused(
+                &output_field(name, "mode"),
+                "takes effect on restart: a reload does not modeset a running output; \
+                 kept the mode the session started with",
+            ));
+        }
+    }
+    refusals
+}
+
+/// The reply name for one `[[outputs]]` entry's `key`: `outputs.DP-1.scale`.
+fn output_field(name: &str, key: &str) -> String {
+    format!("{}.{name}.{key}", field::OUTPUTS)
+}
+
+/// What a reloaded `[output] scale` (the session default) does: applies
+/// live, agrees silently, or refuses under `--nested`.
 #[derive(Debug, PartialEq, Eq)]
 enum ScaleReload {
     /// The file and the session agree: silent in both lists.

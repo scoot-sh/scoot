@@ -64,6 +64,7 @@ use super::ipc::PendingIdle;
 use super::keybindings::Keybindings;
 use super::layer_shell;
 use super::nested::Host;
+use super::output_config::OutputEntries;
 use super::output_identity::OutputIdentity;
 use super::output_management::OutputManagement;
 use super::outputs::Outputs;
@@ -347,29 +348,43 @@ pub struct State {
     /// the connection), by the hotplug emitters, and by the accept loop
     /// when a connection leaves; drained on the frame tick.
     pub(super) subscribers: Vec<super::ipc::Subscriber>,
-    /// The output scale resolved from `[output] scale` (see
+    /// The session-default output scale, resolved from `[output] scale` (see
     /// `output_scale.rs`), set at startup and re-applied live by a config
     /// reload (see `reload.rs`) -- except under `--nested`, where it stays
-    /// the forced 1.0. Read by `headless`'s `set_mode` (which applies it to
-    /// the `Output`), by the `wp_fractional_scale_v1` handler (which
-    /// advertises it per surface), and by `ipc.rs` (which reports it to an
-    /// agent that must convert between logical rects and physical screenshot
-    /// pixels). It is *not* the source the input clamp reads: that goes
-    /// through `output_scale::logical_size`, which derives the logical
-    /// extent from the `Output` itself, so a site handling input can never
-    /// disagree with what the `Space` laid out. `compositor::run` forces
-    /// this to 1.0 under `--nested`, where the host compositor owns the
-    /// scale.
-    pub output_scale: f64,
-    /// The integer form of [`Self::output_scale`] -- `ceil(output_scale)`, the
-    /// value sent on `wl_surface.preferred_buffer_scale` and the same one
-    /// Smithay advertises on `wl_output.scale` (see `output_scale.rs`'s
-    /// `integer_scale`). Recomputed alongside `output_scale` wherever that
-    /// moves (construction, config reload), never anywhere else, so the two
-    /// can never disagree: it is read on every surface commit
-    /// (`CompositorHandler::commit`) and on every fractional-scale bind
-    /// without recomputing the `ceil` on those hot paths.
-    pub integer_scale: i32,
+    /// the forced 1.0.
+    ///
+    /// **Not the scale of any particular output.** An output with an
+    /// `[[outputs]]` entry of its own runs at that entry's scale instead
+    /// (see [`Self::output_entries`]), so the one place an output's scale
+    /// lives is the `Output` itself (`current_scale()`, set through
+    /// `headless`'s `set_mode`), and every reader that means "the scale this
+    /// surface or rectangle is on" resolves an output and reads it there
+    /// (`output_scale::scale_of`). This value is read only to *decide* an
+    /// output's scale: when an output is created (`headless`'s
+    /// `create_output`, via [`State::configured_scale`]), when a reload
+    /// re-decides every output's (`rescale_outputs`), and by the reload
+    /// diff itself. Renamed from `output_scale` when outputs stopped sharing
+    /// one scale, so no reader of the old single-scale meaning survived
+    /// unexamined.
+    pub default_scale: f64,
+    /// The `[[outputs]]` entries this session runs with (see
+    /// `output_config.rs`): per-output scale (applied through
+    /// [`State::configured_scale`], and re-applied live by a reload) and
+    /// per-output mode (read at startup, and by `--tty` through
+    /// `Tty::modes` on every re-probe; a reload refuses a changed mode, so
+    /// the modes here stay the ones the session started with). Empty under
+    /// `--nested`, which ignores every entry, and for a file with none.
+    pub output_entries: OutputEntries,
+    /// Whether the outputs currently run at more than one scale -- only
+    /// ever true with `[[outputs]]` entries. Gates `apply()`'s per-window
+    /// scale refresh (`output_scale.rs`'s `refresh_window_scales`): while
+    /// every output agrees, a window changing outputs cannot change the
+    /// scale it should be told, so the walk is skipped outright and a
+    /// session without entries pays one `bool` read per `apply()`.
+    /// Recomputed by `State::note_output_scales` wherever the set of
+    /// outputs or their scales changes (an output added or removed, a
+    /// reload's rescale), and nowhere else.
+    pub mixed_scales: bool,
     /// Which renderer [`Self::backends`]' entries composite with, resolved once from
     /// `--renderer`/`[renderer] backend` (see `render::resolve`) and fixed
     /// for the process's lifetime. Kept here rather than read back off the
@@ -1172,8 +1187,9 @@ impl State {
             displaced: HashMap::new(),
             origin_names: HashMap::new(),
             subscribers: Vec::new(),
-            output_scale: scale,
-            integer_scale: super::output_scale::integer_scale(scale),
+            default_scale: scale,
+            output_entries: OutputEntries::default(),
+            mixed_scales: false,
             renderer,
             backends: HashMap::new(),
             host: None,

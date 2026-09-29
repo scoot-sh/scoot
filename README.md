@@ -161,6 +161,7 @@ scoot speaks the standard Wayland protocols, so the usual tools work.
 | Use a clipboard manager or middle-click paste | [yes](docs/protocols.md#clipboard-and-primary-selection) |
 | Use a night light | [yes](docs/protocols.md#night-light-wlr-gamma-control-v1) |
 | Use a HiDPI screen, fractional scaling included | [yes](docs/protocols.md#output-scaling) |
+| Give each monitor its own scale and resolution | [yes, in the config file](docs/configuration.md#outputs) |
 | Use an input method or on-screen keyboard | [yes](docs/protocols.md#input-methods-text-input-v3-input-method-v2) |
 | Use a drawing tablet | [pens, not pads](docs/protocols.md#drawing-tablets-tablet-v2) |
 | Change display modes from `wlr-randr` or Settings | [not yet: read-only](docs/protocols.md#display-information-wlr-output-management-v1) |
@@ -171,8 +172,8 @@ Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
 
 ## Not yet
 
-- **Per-monitor settings.** Multiple monitors work, but they share one
-  scale and resolution and line up left to right.
+- **Monitor placement.** Each monitor has its own scale and resolution,
+  but they line up left to right, and there is no position setting yet.
 - **Some X11 extras.** X input methods (XIM) and X window icons.
 - **A macOS version.** On a Mac you can build `scootctl`, to drive scoot
   in a Linux VM.

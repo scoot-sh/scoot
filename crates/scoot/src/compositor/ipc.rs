@@ -774,7 +774,15 @@ impl State {
                     .map(|output| output.name())
                     .unwrap_or_default(),
                 rect: wire(area),
-                scale: self.output_scale,
+                // This output's own scale -- outputs need not share one
+                // (`[[outputs]]`), and an agent converting this output's
+                // logical `rect` into its screenshot's physical pixels needs
+                // exactly this one. 1.0 for an id this side does not have,
+                // the same unreachable case the name covers.
+                scale: self
+                    .outputs
+                    .get(id)
+                    .map_or(1.0, super::output_scale::scale_of),
                 // Unknown output (not in the core's list) reports no
                 // usable area rather than a wrong one: an all-zero
                 // `usable` is the documented "predates the field"

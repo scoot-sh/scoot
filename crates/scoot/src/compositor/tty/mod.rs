@@ -94,6 +94,7 @@ use self::head::Head;
 use self::presenter::Presenter;
 use self::stale_vblanks::StaleVblanks;
 use super::State;
+use super::output_config::ModeRequests;
 use super::render::ScanoutHandoff;
 use crate::cli::RendererKind;
 
@@ -150,12 +151,17 @@ pub struct Tty {
     /// relied on any more: leaving an entry to eat a real vblank would
     /// freeze that screen, the worse of the two mistakes.
     stale_vblanks: StaleVblanks,
-    /// `--mode WxH`, exactly as the user gave it, kept so a hotplug can
-    /// re-run the same choice startup made rather than silently demoting
-    /// the flag to a startup-only preference. `None` means each connector's
-    /// preferred mode wins, at startup and at every re-probe alike. Applies
-    /// to every connector independently (see `gpu::find_all`).
-    requested_mode: Option<(u16, u16)>,
+    /// `--mode WxH` and every `[[outputs]]` entry's `mode`, exactly as the
+    /// session started with them, kept so a hotplug -- and a VT switch back,
+    /// and any unrelated uevent -- re-runs the same choice startup made
+    /// rather than silently demoting either to a startup-only preference: a
+    /// re-probe that forgot an entry's mode would plan `NewMode` and
+    /// re-modeset that monitor back to `--mode` or its preferred mode. A
+    /// connector with neither takes its preferred mode, at startup and at
+    /// every re-probe alike. Applies to every connector independently, by
+    /// name (see `gpu::find_all`). Never changed after startup: a reload
+    /// refuses a changed mode (see `output_config.rs`).
+    modes: ModeRequests,
     /// Whether the last probe of this device found *nothing* `Connected`.
     ///
     /// Only that. Not "the session is paused" ([`session_paused`](Self::session_paused))
@@ -257,7 +263,9 @@ pub struct StartupHead {
 /// means try every device on the seat, best guess first, until one works;
 /// `Some` means try exactly that one. See `gpu.rs` for the ordering and for
 /// what "works" means. `mode` is `--mode WxH`, applied to each connector of
-/// whichever device is chosen; see `gpu::connector_mode` for the fallback
+/// whichever device is chosen that has no `[[outputs]]` entry `mode` of its
+/// own (`State::output_entries`, which must be set before this runs); see
+/// `gpu::connector_mode` for the fallback
 /// when a connector has no mode of that size.
 ///
 /// The GPU scanout tier gets its renderers to `headless::init_named`/
@@ -285,8 +293,11 @@ pub fn init(
     // and what each of them said, not just that something went wrong.
     let candidates = gpu::candidates(&seat_name, gpu)?;
     let wanted = state.renderer;
+    // `--mode` as the default, and each `[[outputs]]` entry's mode for its
+    // own connector -- the entries `compositor::run` stored before this.
+    let modes = ModeRequests::new(mode, &state.output_entries);
     let (path, device) = gpu::first_usable(candidates, |path| {
-        open_device(&mut session, path, mode, wanted)
+        open_device(&mut session, path, &modes, wanted)
     })
     .map_err(|failures| gpu::unusable_device_error(&seat_name, gpu, &failures))?;
     let Device {
@@ -345,7 +356,7 @@ pub fn init(
         heads,
         stale_vblanks: StaleVblanks::new(),
         device_id,
-        requested_mode: mode,
+        modes,
         nothing_connected: false,
         libinput: libinput_context,
         active: true,
@@ -610,7 +621,7 @@ struct Device {
 fn open_device(
     session: &mut LibSeatSession,
     path: &Path,
-    requested: Option<(u16, u16)>,
+    requested: &ModeRequests,
     wanted: RendererKind,
 ) -> Result<Device, gpu::Rejection> {
     // `gpu::open` goes through `Session::open`, never a bare

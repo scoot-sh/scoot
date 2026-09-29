@@ -375,14 +375,18 @@ fn renderer(what: &'static str, value: Option<String>) -> Result<RendererKind, E
 /// so the comparison in `tty::gpu` is exact rather than converted.
 fn mode(what: &'static str, value: Option<String>) -> Result<(u16, u16), Error> {
     let value = value.ok_or(Error::Missing("a WxH size after --mode"))?;
-    let invalid = || Error::Invalid {
-        what,
-        value: value.clone(),
-    };
-    let (width, height) = value.split_once('x').ok_or_else(invalid)?;
+    parse_mode(&value).ok_or(Error::Invalid { what, value })
+}
+
+/// The pure half of [`mode`]: `--mode`'s value, and an `[[outputs]]` entry's
+/// `mode` (see `compositor::output_config`), so the flag and the file accept
+/// exactly the same spellings. Each axis is a positive `u16`, so a parsed
+/// size is never past [`MAX_OUTPUT_DIMENSION`]. `None` for anything else.
+pub(crate) fn parse_mode(value: &str) -> Option<(u16, u16)> {
+    let (width, height) = value.split_once('x')?;
     match (width.parse::<u16>(), height.parse::<u16>()) {
-        (Ok(width), Ok(height)) if width > 0 && height > 0 => Ok((width, height)),
-        _ => Err(invalid()),
+        (Ok(width), Ok(height)) if width > 0 && height > 0 => Some((width, height)),
+        _ => None,
     }
 }
 

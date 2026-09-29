@@ -318,3 +318,36 @@ fn a_relative_fling_across_the_seam_enters_the_second_outputs_bar() {
         "the flung pointer entered the second output's bar, with no click and no focus loss"
     );
 }
+
+/// With the outputs at different scales (`[[outputs]]`), a bar is told its
+/// own output's scale when it is admitted -- not the pointer's output's,
+/// which is all `new_surface` knew (the pointer is on output 1 here, while
+/// the first bar is on output 2: the bar-per-output-at-login shape) -- and
+/// its zone is measured in its own output's logical pixels.
+#[test]
+fn a_bar_is_told_its_own_outputs_scale() {
+    let mut fixture = Harness::headless(appearance(), CANVAS);
+    fixture.state.output_entries = crate::compositor::output_config::OutputEntries::from_toml(
+        "[[outputs]]\nname = \"headless-2\"\nscale = 2.0\n",
+    );
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    fixture.spawn(run_client);
+    map_bar(&mut fixture, 0, Some(SECOND), 24);
+    map_bar(&mut fixture, 1, Some(0), 24);
+
+    let told = |id: u64| -> Vec<Option<f64>> {
+        let output = fixture.state.outputs.get(OutputId(id)).expect("the output");
+        smithay::desktop::layer_map_for_output(output)
+            .layers()
+            .map(|layer| crate::compositor::output_scale::told_scale(layer.wl_surface()))
+            .collect()
+    };
+    assert_eq!(told(2), [Some(2.0)], "the bar on the 2x output");
+    assert_eq!(told(1), [Some(1.0)], "the bar on the 1x output");
+    assert_eq!(
+        usable(&fixture, 2),
+        Rect::new(CANVAS, 24, CANVAS / 2, CANVAS / 2 - 24),
+        "output 2's zone, in its own logical pixels"
+    );
+}

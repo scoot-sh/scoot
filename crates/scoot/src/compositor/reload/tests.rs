@@ -26,12 +26,13 @@ use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1, ext_session_lock_v1,
 };
 
-use super::{ScaleReload, autostart_delta, field, scale_reload};
+use super::{ScaleReload, autostart_delta, field, output_refusals, scale_reload};
 use crate::cli::RendererKind;
 use crate::compositor::config;
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::headless;
 use crate::compositor::keybindings::{Bound, Keybindings, Modifiers};
+use crate::compositor::output_config::EntriesDiff;
 use crate::compositor::state::State;
 use crate::compositor::test_support::{
     Harness, assert_marker_never_appears, locker, marker_path, test_renderer, touch_entry,
@@ -239,8 +240,17 @@ fn reload_applies_column_widths_scale_and_refuses_restart_fields() {
     assert_eq!(fixture.state.world.config().gap, 12);
     assert_eq!(fixture.state.world.config().column_widths, vec![0.25, 0.75]);
     assert_eq!(fixture.state.world.config().default_column_width, 0);
-    assert_eq!(fixture.state.output_scale, 2.0);
-    assert_eq!(fixture.state.integer_scale, 2);
+    assert_eq!(fixture.state.default_scale, 2.0);
+    assert_eq!(
+        fixture
+            .state
+            .outputs
+            .primary()
+            .expect("an output")
+            .current_scale()
+            .integer_scale(),
+        2
+    );
     assert!(
         fixture.state.needs_render,
         "a width change reloaded without requesting a render"
@@ -310,8 +320,17 @@ fn reload_applies_output_scale_and_halves_the_logical_geometry() {
         refused(&response).is_empty(),
         "nothing here should refuse: {response:?}"
     );
-    assert_eq!(fixture.state.output_scale, 2.0);
-    assert_eq!(fixture.state.integer_scale, 2);
+    assert_eq!(fixture.state.default_scale, 2.0);
+    assert_eq!(
+        fixture
+            .state
+            .outputs
+            .primary()
+            .expect("an output")
+            .current_scale()
+            .integer_scale(),
+        2
+    );
     let output = fixture
         .state
         .outputs
@@ -395,10 +414,19 @@ fn an_out_of_range_scale_applies_as_its_clamped_self() {
         "clamping is not a refusal: {response:?}"
     );
     assert_eq!(
-        fixture.state.output_scale,
+        fixture.state.default_scale,
         crate::compositor::output_scale::MAX_SCALE
     );
-    assert_eq!(fixture.state.integer_scale, 4);
+    assert_eq!(
+        fixture
+            .state
+            .outputs
+            .primary()
+            .expect("an output")
+            .current_scale()
+            .integer_scale(),
+        4
+    );
 }
 
 #[test]
@@ -412,7 +440,7 @@ fn a_non_finite_scale_falls_back_to_one_silently() {
         applied(&response).is_empty() && refused(&response).is_empty(),
         "a non-finite scale agreeing with the live 1.0 says nothing: {response:?}"
     );
-    assert_eq!(fixture.state.output_scale, 1.0);
+    assert_eq!(fixture.state.default_scale, 1.0);
 }
 
 #[test]
@@ -434,8 +462,17 @@ fn scale_reloads_round_trip_through_fractional_and_back() {
             &[field::SCALE.to_owned()],
             "each rescale should apply: {response:?}"
         );
-        assert_eq!(fixture.state.output_scale, scale);
-        assert_eq!(fixture.state.integer_scale, integer);
+        assert_eq!(fixture.state.default_scale, scale);
+        assert_eq!(
+            fixture
+                .state
+                .outputs
+                .primary()
+                .expect("an output")
+                .current_scale()
+                .integer_scale(),
+            integer
+        );
     }
     fixture.state.needs_render = false;
     let settled = fixture.reload();
@@ -548,6 +585,48 @@ fn scale_reload_decides_apply_agree_and_nested_refusal() {
     assert_eq!(scale_reload(2.0, 2.0, false), ScaleReload::Agree);
     assert_eq!(scale_reload(2.0, 1.0, true), ScaleReload::RefuseNested);
     assert_eq!(scale_reload(1.0, 1.0, true), ScaleReload::Agree);
+}
+
+#[test]
+fn output_refusals_refuse_everything_nested_and_only_modes_elsewhere() {
+    let entries = EntriesDiff {
+        scales: vec!["DP-1".to_owned()],
+        modes: vec!["DP-1".to_owned(), "eDP-1".to_owned()],
+    };
+    let nested = output_refusals(&ScaleReload::RefuseNested, &entries, true);
+    let names: Vec<&str> = nested
+        .iter()
+        .map(|refusal| refusal.split(' ').next().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "output.scale",
+            "outputs.DP-1.scale",
+            "outputs.DP-1.mode",
+            "outputs.eDP-1.mode"
+        ]
+    );
+    assert!(
+        nested.iter().all(|refusal| refusal.contains("--nested")),
+        "{nested:?}"
+    );
+
+    // Elsewhere a scale applies and only the modes refuse, pending restart.
+    let tty = output_refusals(&ScaleReload::Apply, &entries, false);
+    assert_eq!(
+        tty,
+        [
+            "outputs.DP-1.mode (takes effect on restart: a reload does not modeset a running \
+             output; kept the mode the session started with)",
+            "outputs.eDP-1.mode (takes effect on restart: a reload does not modeset a running \
+             output; kept the mode the session started with)",
+        ]
+    );
+    // Nothing changed, nothing refused, on either.
+    let none = EntriesDiff::default();
+    assert!(output_refusals(&ScaleReload::Agree, &none, true).is_empty());
+    assert!(output_refusals(&ScaleReload::Agree, &none, false).is_empty());
 }
 
 #[test]

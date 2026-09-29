@@ -49,7 +49,7 @@ use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::xwayland::XWaylandClientData;
 
 use super::State;
-use super::output_scale::send_preferred_buffer_scale;
+use super::output_scale::{inherit_scale, tell_scale};
 use super::popup_parent::Admission;
 use super::render::Backend;
 use super::state::ClientState;
@@ -77,22 +77,28 @@ impl CompositorHandler for State {
             .compositor_state
     }
 
-    /// A new `wl_surface` exists: tell it the integer `preferred_buffer_scale`.
+    /// A new `wl_surface` exists: tell it a scale -- the integer
+    /// `preferred_buffer_scale` now, and the fractional one recorded for
+    /// whenever it creates a `wp_fractional_scale_v1` (see
+    /// `output_scale::tell_scale`).
     ///
     /// This is the bind-time call site. Smithay runs `new_surface` for every
     /// surface `wl_compositor.create_surface` makes (subsurfaces included), and
     /// this always fires before any commit -- a per-commit call would be a
-    /// no-op cache hit on the hot path, not defence in depth. A config reload
-    /// re-sends the same value to every live surface at once (see
-    /// `output_scale.rs`'s `resend_output_scale`), so the two can never
-    /// disagree. See `send_preferred_buffer_scale`'s doc.
+    /// no-op cache hit on the hot path, not defence in depth. The surface has
+    /// no role yet, so it is told the pointer's output's scale, where a new
+    /// window opens; its role corrects that where the role names another
+    /// output (see `output_scale.rs`'s module doc), and a config reload
+    /// re-sends to every live surface at once (`resend_output_scale`). With
+    /// every output at one scale -- every session without `[[outputs]]` --
+    /// all of those agree, exactly as the single session-wide scale did.
     ///
     /// Also where the explicit-sync acquire hook is installed, only while
     /// that global exists (see `drm_syncobj/acquire.rs`): every other session
     /// adds nothing to the commit path. The global is decided before the
     /// event loop starts, so no surface predates it.
     fn new_surface(&mut self, surface: &WlSurface) {
-        send_preferred_buffer_scale(surface, self.integer_scale);
+        tell_scale(surface, self.pointer_scale());
         if self.drm_syncobj.active() {
             add_pre_commit_hook::<Self, _>(surface, super::drm_syncobj::acquire::pre_commit);
         }
@@ -107,9 +113,14 @@ impl CompositorHandler for State {
     /// the two, in `dispatch.rs`. This runs only for links Smithay actually
     /// made, so a refused request can never file an entry for an object that
     /// does not exist.
+    ///
+    /// Also where a subsurface takes its parent's scale (see
+    /// `output_scale.rs`): it is drawn wherever its parent is, while its
+    /// `new_surface` guess was only the pointer's output.
     fn new_subsurface(&mut self, surface: &WlSurface, parent: &WlSurface) {
         super::subsurface_depth::record_link(surface, parent);
         self.live_subsurfaces.note_linked(surface);
+        inherit_scale(surface, parent);
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -517,6 +528,14 @@ impl XdgShellHandler for State {
         if self.popups.track_popup(kind.clone()).is_ok() {
             self.popup_index.insert(&kind);
         }
+        // Drawn with its parent, so rendered at its parent's scale (see
+        // `output_scale.rs`). A popup created parentless -- one a layer
+        // surface adopts later -- takes its scale at the adoption instead.
+        if let smithay::desktop::PopupKind::Xdg(popup) = &kind
+            && let Some(parent) = popup.get_parent_surface()
+        {
+            inherit_scale(popup.wl_surface(), &parent);
+        }
         // Deliberately no cursor-hide update here: at creation the popup
         // has no buffer yet, so the hit test still finds the window
         // beneath it. The armed deadline harmlessly survives the open --
@@ -651,6 +670,13 @@ impl SeatHandler for State {
         _seat: &Seat<Self>,
         image: smithay::input::pointer::CursorImageStatus,
     ) {
+        // A client cursor surface is drawn under the pointer, so it takes
+        // the pointer's output's scale (see `output_scale.rs`). Once per
+        // `set_cursor` -- which follows every pointer `enter` -- never per
+        // motion; Smithay's caches keep a repeat silent on the wire.
+        if let smithay::input::pointer::CursorImageStatus::Surface(surface) = &image {
+            tell_scale(surface, self.pointer_scale());
+        }
         self.cursor.set_status(image);
         // Only `--tty` ever draws a cursor element into a frame (see
         // `cursor.rs`'s module doc), so only it needs a redraw when the

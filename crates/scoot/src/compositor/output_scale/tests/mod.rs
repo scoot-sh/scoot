@@ -37,6 +37,8 @@ use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_ba
 
 use super::*;
 
+mod per_output;
+
 fn output_at(physical: (i32, i32), scale: Scale) -> Output {
     let output = Output::new(
         "test".to_string(),
@@ -410,6 +412,10 @@ enum Ack {
         preferred_scale: Option<f64>,
         preferred_buffer_scale: Option<i32>,
         output_scale: Option<i32>,
+        /// How many `preferred_scale` and `preferred_buffer_scale` events
+        /// arrived so far, across every surface: what "told nothing more"
+        /// is measured by.
+        events: (u32, u32),
     },
     Done,
 }
@@ -438,6 +444,9 @@ struct TestClient {
     /// Smithay's per-surface cache: committing repeatedly at a fixed scale
     /// emits once, not once per commit.
     preferred_buffer_scale_events: u32,
+    /// How many `wp_fractional_scale_v1.preferred_scale` events arrived,
+    /// across every fractional object.
+    preferred_scale_events: u32,
     /// `wl_output.scale`, the integer a client that doesn't speak
     /// fractional-scale is told.
     output_scale: Option<i32>,
@@ -523,6 +532,7 @@ impl Dispatch<wp_fractional_scale_v1::WpFractionalScaleV1, ()> for TestClient {
         if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
             // The protocol carries the scale as 1/120ths.
             client.preferred_scale = Some(f64::from(scale) / 120.0);
+            client.preferred_scale_events += 1;
         }
     }
 }
@@ -716,6 +726,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     preferred_scale: client.preferred_scale,
                     preferred_buffer_scale: client.preferred_buffer_scale,
                     output_scale: client.output_scale,
+                    events: (
+                        client.preferred_scale_events,
+                        client.preferred_buffer_scale_events,
+                    ),
                 };
             }
             Step::MapWindow {
@@ -797,6 +811,15 @@ struct Fixture {
 
 impl Fixture {
     fn new(scale: f64) -> Self {
+        Self::with_outputs(scale, "", &[])
+    }
+
+    /// [`Fixture::new`] with `[[outputs]]` entries (`entries`, as TOML) in
+    /// force from before the first output exists, and one more headless
+    /// output per name in `extra`, each `CANVAS` square and created -- like
+    /// the first -- before the client connects, so the client's registry
+    /// sees every output from the start.
+    fn with_outputs(scale: f64, entries: &str, extra: &[&str]) -> Self {
         let mut event_loop: EventLoop<'static, State> =
             EventLoop::try_new().expect("an event loop");
         let display: Display<State> = Display::new().expect("a wayland display");
@@ -810,7 +833,12 @@ impl Fixture {
             crate::compositor::test_support::test_renderer(),
         )
         .expect("a compositor state with a wayland socket");
+        state.output_entries = crate::compositor::output_config::OutputEntries::from_toml(entries);
         crate::compositor::headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+        for name in extra {
+            crate::compositor::headless::add_output(&mut state, name, CANVAS, CANVAS)
+                .expect("another headless output");
+        }
 
         let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
         state
@@ -936,6 +964,17 @@ impl Drop for Fixture {
         if let Some(handle) = self.client.take()
             && !std::thread::panicking()
         {
+            // Served until the client thread ends: one that never ran a step
+            // is still in its first registry round trip, which only this
+            // side's dispatch can answer. Bounded, so a wedged client fails
+            // the test run's timeout rather than hanging it forever.
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !handle.is_finished() && Instant::now() < deadline {
+                let _ = self
+                    .event_loop
+                    .dispatch(Some(Duration::from_millis(5)), &mut self.state);
+                let _ = self.state.display_handle.flush_clients();
+            }
             let _ = handle.join();
         }
     }
@@ -1137,6 +1176,7 @@ fn a_reload_rescales_what_a_live_client_sees() {
         preferred_scale,
         preferred_buffer_scale,
         output_scale,
+        ..
     } = fixture.run(Step::ReportScales)
     else {
         panic!("the report step must send the cached scales");
@@ -1165,8 +1205,17 @@ fn a_reload_rescales_what_a_live_client_sees() {
         refused.is_empty(),
         "nothing here should refuse: {refused:?}"
     );
-    assert_eq!(fixture.state.output_scale, 2.0);
-    assert_eq!(fixture.state.integer_scale, 2);
+    assert_eq!(fixture.state.default_scale, 2.0);
+    assert_eq!(
+        fixture
+            .state
+            .outputs
+            .primary()
+            .expect("an output")
+            .current_scale()
+            .integer_scale(),
+        2
+    );
 
     // The pre-existing surface hears the new scale without re-binding: the
     // fractional value, the integer companion (whose cache moved off its
@@ -1175,6 +1224,7 @@ fn a_reload_rescales_what_a_live_client_sees() {
         preferred_scale,
         preferred_buffer_scale,
         output_scale,
+        ..
     } = fixture.run(Step::ReportScales)
     else {
         panic!("the report step must send the cached scales");
@@ -1245,8 +1295,17 @@ fn a_protocol_exact_buffer_lands_one_to_one_at_1_33() {
     // Through the same funnel production uses: config load resolves before
     // `State::new` ever sees the value.
     let mut fixture = Fixture::new(clamp_scale(1.33));
-    assert_eq!(fixture.state.output_scale, 160.0 / 120.0);
-    assert_eq!(fixture.state.integer_scale, 2);
+    assert_eq!(fixture.state.default_scale, 160.0 / 120.0);
+    assert_eq!(
+        fixture
+            .state
+            .outputs
+            .primary()
+            .expect("an output")
+            .current_scale()
+            .integer_scale(),
+        2
+    );
 
     // The live client hears exactly that value: the same f64 the session
     // renders at, not 1.33 rounded on the wire.
@@ -1289,7 +1348,7 @@ fn a_protocol_exact_buffer_lands_one_to_one_at_1_33() {
     });
     let pixels = fixture.render();
     let rect = fixture.window_rect();
-    let scale = fixture.state.output_scale;
+    let scale = fixture.state.default_scale;
     let origin = (
         (rect.x as f64 * scale) as i32,
         (rect.y as f64 * scale) as i32,
@@ -1327,13 +1386,23 @@ fn a_reload_applies_1_33_as_160_over_120_and_settles() {
         refused.is_empty(),
         "nothing here should refuse: {refused:?}"
     );
-    assert_eq!(fixture.state.output_scale, 160.0 / 120.0);
-    assert_eq!(fixture.state.integer_scale, 2);
+    assert_eq!(fixture.state.default_scale, 160.0 / 120.0);
+    assert_eq!(
+        fixture
+            .state
+            .outputs
+            .primary()
+            .expect("an output")
+            .current_scale()
+            .integer_scale(),
+        2
+    );
 
     let Ack::Scales {
         preferred_scale,
         preferred_buffer_scale,
         output_scale,
+        ..
     } = fixture.run(Step::ReportScales)
     else {
         panic!("the report step must send the cached scales");

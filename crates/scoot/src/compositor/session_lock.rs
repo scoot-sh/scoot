@@ -844,16 +844,22 @@ impl SessionLock {
             .filter(move |surface| is_current(owner, surface))
     }
 
-    /// Every current lock surface's `wl_surface`, cloned, for the config
-    /// reload's scale re-send (see `output_scale.rs`'s
-    /// `resend_output_scale`): the one reader outside this module's own
+    /// Every current lock surface's `wl_surface`, cloned, with the output it
+    /// was admitted for, for the config reload's scale re-send (see
+    /// `output_scale.rs`'s `resend_output_scale`, which tells each surface
+    /// its own output's scale): the one reader outside this module's own
     /// render/focus paths, asking the same "which surfaces count" question
-    /// through [`SessionLock::current`] rather than the weaker ones. Empty
+    /// through [`SessionLock::current`] rather than the weaker ones. A
+    /// current surface with no recorded output (none reachable: admission
+    /// records both together) is left out rather than told a guess. Empty
     /// while unlocked. Allocates one small `Vec`, on the cold reload path
     /// only.
-    pub(super) fn live_surfaces(&self) -> Vec<WlSurface> {
+    pub(super) fn live_surfaces(&self) -> Vec<(WlSurface, Output)> {
         self.current()
-            .map(|surface| surface.wl_surface().clone())
+            .filter_map(|surface| {
+                let output = self.surface_outputs.get(&surface.wl_surface().id())?;
+                Some((surface.wl_surface().clone(), output.clone()))
+            })
             .collect()
     }
 
@@ -1385,6 +1391,15 @@ impl SessionLockHandler for State {
         }
         let size = logical_size(&output);
         configure(&surface, size);
+        // Its own output's scale, now that its output is known: until here it
+        // had only `new_surface`'s guess (the pointer's output), which is a
+        // different screen whenever the pointer is not on this one. Before
+        // the first buffer -- the configure above is not acked yet -- so the
+        // first frame it draws is already at the right scale.
+        super::output_scale::tell_scale(
+            surface.wl_surface(),
+            super::output_scale::scale_of(&output),
+        );
         self.session_lock
             .surface_outputs
             .insert(surface.wl_surface().id(), output);

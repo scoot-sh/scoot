@@ -39,6 +39,7 @@ mod nested_dispatch;
 mod no_memory;
 pub(crate) mod nofile;
 mod output_clip;
+mod output_config;
 mod output_identity;
 mod output_management;
 mod output_scale;
@@ -130,6 +131,22 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     } else {
         loaded.scale
     };
+    // `[[outputs]]` entries, for the same reason and more: under `--nested`
+    // the one output is named `headless` like `--headless`'s first, so an
+    // entry for it would otherwise quietly apply to a window whose size and
+    // scale the host owns. One warning per entry, naming it.
+    let output_entries = if options.nested {
+        for entry in loaded.outputs.iter() {
+            tracing::warn!(
+                output = %entry.name,
+                "[[outputs]] entries are ignored under --nested (the host compositor owns \
+                 the window's size and scale)"
+            );
+        }
+        output_config::OutputEntries::default()
+    } else {
+        loaded.outputs.clone()
+    };
 
     // Resolved before `State::new` for the same reason the config is: the
     // renderer is fixed for the process's life, and `State` carries it so a
@@ -170,6 +187,9 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // Which windows float when they map: what a reload diffs against too.
     state.floating_rules = loaded.floating.clone();
     state.floating_modifier = loaded.floating_modifier;
+    // Before any output exists: `headless::create_output` decides each
+    // output's scale from these by name, the primary's included.
+    state.output_entries = output_entries;
 
     // `--tty` picks its own size from the connector's preferred mode (or
     // the `--mode` the user named) -- there's no host to negotiate a size
@@ -211,9 +231,12 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         if options.mode.is_some() {
             tracing::warn!("--mode picks the display mode for --tty; ignoring it on this backend");
         }
+        // An `[[outputs]]` entry's mode beats `--width`/`--height` for the
+        // output it names (see `output_config.rs`); `--nested` has none.
+        let (width, height) = headless_size(&state, headless::OUTPUT_NAME, &options);
         vec![tty::StartupHead {
-            width: options.width,
-            height: options.height,
+            width,
+            height,
             name: headless::OUTPUT_NAME.to_owned(),
             identity: output_identity::OutputIdentity::named(headless::OUTPUT_NAME),
             scanout: render::ScanoutHandoff::default(),
@@ -282,7 +305,8 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     } else {
         for index in 2..=options.outputs {
             let name = format!("{output_name}-{index}");
-            headless::add_output(&mut state, &name, options.width, options.height)?;
+            let (width, height) = headless_size(&state, &name, &options);
+            headless::add_output(&mut state, &name, width, height)?;
         }
     }
 
@@ -509,6 +533,19 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
 /// is that client's problem -- wayland-backend already swallows the per-client
 /// error internally (`flush(None)` does `let _ = client.flush()` per client and
 /// returns `Ok`), so there is nothing actionable left to propagate.
+/// The size a `--headless`/`--nested` output named `name` is created at:
+/// its `[[outputs]]` entry's `mode` when it has one, else `--width` by
+/// `--height`. A parsed mode is two positive `u16`s, so it is always inside
+/// the `1..=MAX_OUTPUT_DIMENSION` range the flags are held to.
+fn headless_size(state: &State, name: &str, options: &CompositorOptions) -> (i32, i32) {
+    state
+        .output_entries
+        .mode_for(name)
+        .map_or((options.width, options.height), |(width, height)| {
+            (i32::from(width), i32::from(height))
+        })
+}
+
 fn post_dispatch(state: &mut State) {
     let _ = state.display_handle.flush_clients();
 }

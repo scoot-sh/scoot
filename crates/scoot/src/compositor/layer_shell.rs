@@ -259,6 +259,15 @@ impl WlrLayerShellHandler for State {
             // compositor takes every client's session with it.
             tracing::warn!(%error, "could not map a layer surface");
         }
+        // Its own output's scale, now that its output is known: until here
+        // it had only `new_surface`'s guess, the pointer's output -- and a
+        // bar started per output at login is exactly the surface whose
+        // output the pointer is not on. Before the first configure, so the
+        // first buffer is drawn at the right scale.
+        super::output_scale::tell_scale(
+            layer_surface.wl_surface(),
+            super::output_scale::scale_of(&output),
+        );
         // Nothing is drawn yet -- there is no buffer -- but `map_layer` has
         // already arranged, and an arrangement is what the first configure
         // will be built from.
@@ -270,8 +279,13 @@ impl WlrLayerShellHandler for State {
     /// tracked it, and a second `track_popup` would put a second node for it
     /// in the layer's tree. A popup that already had a parent, or was
     /// already configured, is refused: see `popup_parent::check_adoption`.
-    fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
+    ///
+    /// An adopted popup takes the layer surface's scale (see
+    /// `output_scale.rs`): created parentless, it had only `new_surface`'s
+    /// guess until now.
+    fn new_popup(&mut self, parent: WlrLayerSurface, popup: PopupSurface) {
         super::popup_parent::check_adoption(&popup);
+        super::output_scale::inherit_scale(popup.wl_surface(), parent.wl_surface());
     }
 
     /// The client destroyed its layer surface, or disconnected.

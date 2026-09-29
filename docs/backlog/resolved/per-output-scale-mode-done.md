@@ -1,12 +1,69 @@
 ---
 title: "Per-output scale/mode configuration surface (after milestone 19)"
-status: "open"
-area: "core"
-priority: "low"
-blocked: "two-connector hardware to verify against — do not build blind"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
+resolved: "2026-09-29"
 ---
 
 # Per-output scale/mode configuration surface (after milestone 19)
+
+## Resolution (2026-09-29)
+
+Built to the decided design below, once the gate was met (the Asahi M2 Air
+drives eDP-1 plus a live DP-1). User-facing reference:
+[`[[outputs]]`](../../configuration.md#outputs). What landed, and the
+calls the spec left open or that the tree changed:
+
+- **Config.** `[[outputs]]` tables with `name` (required), `scale`, `mode =
+  "WxH"` (`output_config.rs`). The spec's illustrative `match` became
+  `name`, and its `width`/`height` + `mode` became one `mode` key parsed by
+  `--mode`'s own parser: under `--tty` it picks the connector mode, under
+  `--headless` it is the output's size. An entry beats the session-wide
+  flag for its own output (documented as the one inversion of scoot's
+  flag-beats-file rule). `--nested` ignores every entry.
+- **The `match` precedence, closed by measurement:** name only, no
+  positional fallback. `Asahi.md` Tests 11-13 unplugged and replugged DP-1
+  three ways; it came back as `DP-1` each time, under a fresh output id
+  and a new place in creation order. The name is the stable key, the
+  position is not.
+- **One source of truth for an output's scale:** the `Output` itself.
+  `State::output_scale` became `State::default_scale` (renamed so the
+  compiler listed every reader; each was re-resolved per output) and
+  `State::integer_scale` was removed. The spec's re-examination list, item
+  by item: (1) `create_output` decides each output's scale by name, for
+  startup, `--outputs N` and hotplug alike; (2)/(3) the straddle question
+  is answered as *the output the core places the window on* -- the same
+  answer the wlr foreign-toplevel `output_enter` gives -- re-told from
+  `apply()` whenever it changes, with popups and subsurfaces inheriting
+  their parent's at role time and a role-less surface told the pointer's
+  output's; (4) the IPC snapshot reports each output's own scale; (5) the
+  reload re-send tells each root its own output's scale; (6) the cursor
+  surface takes the pointer's output's scale at every `set_cursor` (not
+  per motion -- the documented gap is a cursor crossing the seam inside
+  one surface); (7) unchanged, as predicted; (8) `--nested` unchanged.
+- **Reload:** each output's scale is re-decided and re-applied live
+  (`output.scale` / `outputs.<name>.scale`); a changed `mode` is refused by
+  name pending a restart -- a live modeset on a driven head was never
+  proven on hardware, and is the
+  [follow-up](../core/output-position-and-live-mode.md) with position.
+- **`--tty` re-probes keep the entry modes:** `Tty::requested_mode`
+  became `Tty::modes` (`ModeRequests`), consulted by name at startup and at
+  every re-probe (hotplug, VT switch back), so no uevent re-modesets a
+  monitor back to `--mode` or its preferred mode.
+- **XWayland:** X draws at the largest `wl_output.scale` integer among the
+  outputs.
+- **Cost:** a session without entries pays one `bool` read per `apply()`
+  for the per-window refresh (gated on the outputs disagreeing); apply
+  benchmark on the Asahi box, release, 8 real client windows: main
+  1.185-1.196 µs, branch 1.196-1.200 µs median per call, overlapping; with
+  two scales in play (the walk on) 1.366-1.372 µs. No render or input path
+  changed.
+- **`apply`/`test`** stay refused, per section 3 below.
+
+Hardware proof: `Asahi.md` Test 16. PR: see the commit that archived this
+file.
 
 Left open deliberately through milestone 19 phases A–D + F (see
 `../roadmap/19-multi-output.md`, "Explicitly not in this milestone"):

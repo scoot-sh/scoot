@@ -3,7 +3,7 @@
 - [Command-line flags](#command-line-flags)
 - [The config file](#the-config-file)
 - [Reloading the config](#reloading-the-config)
-- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[xwayland]`](#xwayland) · [`[autostart]`](#autostart) · [`[floating]`](#floating) · [`[[window_rule]]`](#window_rule) · [`[wallpaper]`](#wallpaper) · [`[binds]`](#binds)
+- [`[layout]`](#layout) · [`[appearance]`](#appearance) · [`[output]`](#output) · [`[[outputs]]`](#outputs) · [`[renderer]`](#renderer) · [`[tty]`](#tty) · [`[xwayland]`](#xwayland) · [`[autostart]`](#autostart) · [`[floating]`](#floating) · [`[[window_rule]]`](#window_rule) · [`[wallpaper]`](#wallpaper) · [`[binds]`](#binds)
 - [Default keybindings](#default-keybindings)
 - [Example `config.toml`](#example-configtoml)
 
@@ -29,11 +29,11 @@ duplicated here.
 | `--headless` | No display at all. Renders into a framebuffer that `scootctl screenshot` reads. |
 | `--nested` | Runs as a window inside an existing compositor. The session follows that window's size: resize it and the desktop inside resizes with it, for the life of the session. If the host cannot be followed to a new size (it could not be allocated), scoot logs it, stays at the size it was, and keeps running — the host letterboxes the difference. |
 | `--tty` | A real DRM/KMS + libseat + libinput session — see [tty.md](tty.md). |
-| `--width N`, `--height N` | The `--headless`/`--nested` output size, 1–65535 per axis (default 1600x1000) — whatever DRM itself can report for a mode (`drm_mode_modeinfo` stores each axis in a `u16`), with room to spare past any real display. Anything else is a startup error naming the flag and the expected range (``invalid --width: `70000` (expected 1-65535)``), not a silently different size. Under `--nested` it is only the size scoot *asks* for: the host's first configure decides what the window comes up at, and every later one moves it. Under `--headless` it is the size for the whole session. |
+| `--width N`, `--height N` | The `--headless`/`--nested` output size, 1–65535 per axis (default 1600x1000) — whatever DRM itself can report for a mode (`drm_mode_modeinfo` stores each axis in a `u16`), with room to spare past any real display. Anything else is a startup error naming the flag and the expected range (``invalid --width: `70000` (expected 1-65535)``), not a silently different size. Under `--nested` it is only the size scoot *asks* for: the host's first configure decides what the window comes up at, and every later one moves it. Under `--headless` it is the size for the whole session. An [`[[outputs]]`](#outputs) entry's `mode` overrides it for the output it names. |
 | `--outputs N` | How many outputs `--headless` creates, 1–8 (default 1). Each is `--width` by `--height` and sits immediately right of the last, so two 1280-wide outputs at scale 1 cover x 0–1279 and 1280–2559. Out of range is a startup error naming the range, like `--width`. `--headless` only: `--nested` presents one window in its host and `--tty` drives one CRTC, so both warn and ignore it. See [More than one output](#more-than-one-output) for what a second output does and does not do yet. |
 | `--renderer pixman\|gles` | Which renderer composites each frame. Config-file form: `[renderer] backend`. See [tty.md](tty.md#which-renderer-draws-the-frames). |
 | `--gpu PATH` | Which DRM device `--tty` drives. Config-file form: `[tty] gpu`. Ignored with a warning outside `--tty`. See [tty.md](tty.md#which-drm-device---tty-drives). |
-| `--mode WxH` | Which connector mode `--tty` picks. Ignored with a warning outside `--tty`. |
+| `--mode WxH` | Which connector mode `--tty` picks. Ignored with a warning outside `--tty`. An [`[[outputs]]`](#outputs) entry's `mode` overrides it for the connector it names. |
 | `--xwayland` | Run an XWayland server inside the session, so X11-only applications get a `DISPLAY` to connect to. Config-file form: `[xwayland] enabled` (either one turns it on). Opt-in and off by default — the server costs a whole extra process (~55 MB RSS idle, ~87 MB with a few X clients) plus a `Xwayland` binary on `PATH`, and any X client can keylog/snoop by design (see [protocols.md](protocols.md#xwayland-opt-in)). Needs an `xwayland` build; without one it warns and the session runs Wayland-only. X windows map into the layout like any other (dialogs float, `[[window_rule]]`s match their `WM_CLASS` class), and take focus by themselves only when nothing is focused, when they belong to the focused X app, or when scoot started them. |
 | `--socket PATH` | Where the IPC control socket lives, overriding `$SCOOT_SOCKET` and the default `$XDG_RUNTIME_DIR/scoot.sock`. See [ipc.md](ipc.md#the-socket). |
 | `--config PATH` | Load this TOML file instead of searching the default paths. |
@@ -145,7 +145,13 @@ What a second output **is**, today:
   with the second output's own pixels, a screen capture of it (`grim -o
   headless-2`) reads its own framebuffer, a gamma control names it
   specifically, and its layer surfaces get frame callbacks at its own
-  cadence. Each output is `--width` by `--height`, like the first;
+  cadence. Each output is `--width` by `--height`, like the first, unless an
+  [`[[outputs]]`](#outputs) entry gives it a `mode` of its own;
+- its own scale, when an [`[[outputs]]`](#outputs) entry gives it one: its
+  `wl_output.scale`, its logical size (a 1600x1000 output at 2 is 800x500
+  logical pixels, and the next output starts at its right edge), and the
+  scale every surface on it is told, windows included -- a window carried
+  to an output at another scale is re-told that output's scale;
 - its own session-lock surface: a locker puts one surface up per output,
   each configured to its own output's size, each drawn onto its own screen,
   with the keyboard on the pointer's output's surface -- and `locked` waits
@@ -169,16 +175,17 @@ when a monitor is plugged in or pulled out
 (see [tty.md](tty.md#more-than-one-monitor)).
 
 What it is **not**, yet, is tracked in
-`docs/backlog/core/multi-output-remainder.md` and
-`docs/backlog/core/per-output-scale-mode.md`:
+`docs/backlog/core/multi-output-remainder.md`:
 
 - new windows open on the output under the pointer (falling back to the
   first output when the pointer is over no output); moving one across
   outputs, and focusing another output from the keyboard, is bound by
   default for the first two screens (see [Moving across
   outputs](#moving-across-outputs)) — positions 2 and up stay manual;
-- no per-output mode/scale/position configuration surface:
-  `wlr-output-management` `apply`/`test` stay refused;
+- no position setting: outputs line up left to right. Scale and mode are
+  set per output in the file ([`[[outputs]]`](#outputs)), not from
+  `wlr-randr` or a settings app -- `wlr-output-management` `apply`/`test`
+  stay refused;
 
 A menu left open while its window scrolls, or while an output changes, is
 re-fitted to the new position when it asked `reactive`, and told with a
@@ -272,13 +279,15 @@ other path (`> wherever`). (On a machine with no
 **Most settings are read once at startup; most can be reloaded live.**
 `scootctl reload` (see [Reloading the config](#reloading-the-config))
 re-reads this same file and re-applies the layout (gap, column widths and
-the default column width), the output scale, the appearance (including
+the default column width), the output scale (the default and each
+`[[outputs]]` entry's), the appearance (including
 the cursor size, color and theme), the
 keybindings, `[floating]` and the `[[window_rule]]`s (for windows that map
 after the reload), new `[autostart]` spawn entries, and `[wallpaper]`
 (handed to scootbg again). Only `[tty] gpu`,
-`[renderer] backend` and `[xwayland] enabled` need a restart, and a reload
-refuses them with a message naming that rather than silently ignoring them.
+`[renderer] backend`, `[xwayland] enabled` and an `[[outputs]]` entry's
+`mode` need a restart, and a reload refuses them with a message naming
+that rather than silently ignoring them.
 
 ### Failure semantics
 
@@ -344,11 +353,16 @@ nothing — only the compositor installs the handler.
 (the arrangement is recomputed and the screen
 redrawn; a shorter width list clamps live columns onto the nearest
 surviving entry, and new windows take the reloaded default), the `[output] scale`
-(the new integer is re-advertised on `wl_output`, the fractional value and
-its integer companion are re-sent to every live surface, the logical
-geometry is recomputed and the arrangement re-derived -- clients that
-cached the scale may lag until they re-read the events; under `--nested` a
-non-1.0 value is refused, since the host owns the scale), the `[appearance]` focus-ring width and colors, the background
+and each [`[[outputs]]`](#outputs) entry's `scale` (every output's scale is
+re-decided -- its entry's, else the default -- and each output whose scale
+moved re-advertises its new integer on `wl_output`; the fractional value and
+its integer companion are re-sent to every live surface, each at its own
+output's scale; the logical geometry is recomputed and the arrangement
+re-derived -- clients that cached the scale may lag until they re-read the
+events. Reported as `output.scale` for the default and
+`outputs.<name>.scale` for an entry, including one for a monitor that is
+not plugged in, which is stored and applies when it is. Under `--nested`
+any change is refused, since the host owns the scale), the `[appearance]` focus-ring width and colors, the background
 color, `corner_radius`, `prefer_no_csd`, and the cursor `cursor_size`,
 `cursor_color`, `cursor_theme` (the fallback bitmaps are rebuilt, the
 theme reloaded, and the screen redrawn without re-arranging -- cursor
@@ -378,8 +392,11 @@ problem -- see [`[wallpaper]`](#wallpaper)).
 **Refused, explicitly, pending a restart:**
 `[tty] gpu` (the session already
 drives its device), `[renderer] backend` (the live renderer holds client
-textures) and `[xwayland] enabled` (the X server starts once at startup, or
-never) -- all three take effect on restart, and each refusal says so.
+textures), `[xwayland] enabled` (the X server starts once at startup, or
+never) and an `[[outputs]]` entry's `mode` (`outputs.<name>.mode`: a reload
+does not modeset a running monitor; the session keeps the mode it started
+with, which is also the mode that monitor comes back at when replugged) --
+all four take effect on restart, and each refusal says so.
 
 The reply says which was which:
 
@@ -390,12 +407,13 @@ The reply says which was which:
 
 Both lists name only fields that *differed* — a field the file and the
 session agree on appears in neither, so two empty lists together mean "the
-reload changed nothing it was asked to". Two exceptions are refused on
-every reload that finds them, changed or not, because neither is ever in
+reload changed nothing it was asked to". Three exceptions are refused on
+every reload that finds them, changed or not, because none is ever in
 effect, so each always differs from what the file asks for: an unusable
-`[[window_rule]]`, and a `[wallpaper]` section with a problem (an unknown
+`[[window_rule]]`, a `[wallpaper]` section with a problem (an unknown
 key or a value of the wrong type inside it, a path that cannot be
-resolved). A reload that cannot load or validate the file at all
+resolved), and an `[[outputs]]` `mode` that differs from the one the
+session started with. A reload that cannot load or validate the file at all
 (unreadable, malformed TOML, an unknown field anywhere but inside
 `[wallpaper]`, a value nested absurdly deep) answers an `error` instead,
 keeps the running config untouched, and logs — never defaults, never a
@@ -478,7 +496,61 @@ pure white *is* exactly representable.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` renders identically to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see [protocols.md](protocols.md#output-scaling)). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; the clamped value is then resolved to the nearest multiple of 1/120 (so `1.33` becomes `160/120`), silently when the value was already in range, the finest scale `wp_fractional_scale_v1` can express — rendering and every advertisement agree on that one value, so a client buffer sized for the announced scale lands one to one. Re-applied live by `scootctl reload` (see [Reloading the config](#reloading-the-config)). With `--xwayland`, X apps draw at `ceil(scale)` when the whole output layout fits X's 32767-pixel coordinate limit at that scale, else at the largest integer scale at which it fits (1 at worst; logged at info when it drops), and toolkits are told it over XSETTINGS, live across a reload or an output being added, removed or resized (see [`[xwayland]`](#xwayland)). At a fractional scale that costs memory, which matters most on pixman/no-GPU machines: each X window's buffers are 4x what they were before X apps followed the scale (a window filling a 1920x1080 output at 1.25 is 1536x864 logical, drawn at 2 into a 3072x1728 buffer of ≈21 MB, held twice -- the X server's pixmap and the shared-memory buffer -- for ≈42 MB, against ≈10.6 MB when X drew at 1); the per-frame composite cost measured flat. `--nested` ignores a non-1.0 value with a warning at startup and refuses it on reload, since the host owns the scale of the window scoot draws inside. |
+| `scale` | float | `1.0` | Output scale advertised to clients and rendered at. `1.0` renders identically to no setting at all; anything else advertises `ceil(scale)` on `wl_output` and `wl_surface.preferred_buffer_scale`, and the exact value through `wp_fractional_scale_v1`/`wp_viewporter` (see [protocols.md](protocols.md#output-scaling)). Clamped into `0.5..=4.0` with a warning, and a non-finite value falls back to `1.0`; the clamped value is then resolved to the nearest multiple of 1/120 (so `1.33` becomes `160/120`), silently when the value was already in range, the finest scale `wp_fractional_scale_v1` can express — rendering and every advertisement agree on that one value, so a client buffer sized for the announced scale lands one to one. Re-applied live by `scootctl reload` (see [Reloading the config](#reloading-the-config)). The default for every output: an [`[[outputs]]`](#outputs) entry sets one output's own. With `--xwayland`, X apps draw at `ceil(scale)` when the whole output layout fits X's 32767-pixel coordinate limit at that scale, else at the largest integer scale at which it fits (1 at worst; logged at info when it drops), and toolkits are told it over XSETTINGS, live across a reload or an output being added, removed or resized (see [`[xwayland]`](#xwayland)). At a fractional scale that costs memory, which matters most on pixman/no-GPU machines: each X window's buffers are 4x what they were before X apps followed the scale (a window filling a 1920x1080 output at 1.25 is 1536x864 logical, drawn at 2 into a 3072x1728 buffer of ≈21 MB, held twice -- the X server's pixmap and the shared-memory buffer -- for ≈42 MB, against ≈10.6 MB when X drew at 1); the per-frame composite cost measured flat. `--nested` ignores a non-1.0 value with a warning at startup and refuses it on reload, since the host owns the scale of the window scoot draws inside. |
+
+## `[[outputs]]`
+
+Per-output overrides of `[output] scale` -- and of `--mode` under `--tty`,
+or `--width`/`--height` under `--headless` -- one table per output, each
+matched by the name `scootctl outputs` lists (`eDP-1`, `DP-1`, `HDMI-A-1`
+under `--tty`; `headless`, `headless-2`, ... under `--headless`). An output
+without an entry, and every output of a file without any, runs at the
+defaults exactly as before.
+
+```toml
+[output]
+scale = 1.5            # every output without an entry of its own
+
+[[outputs]]
+name = "eDP-1"         # the laptop panel
+scale = 2.0
+
+[[outputs]]
+name = "DP-1"          # an external monitor
+scale = 1.0
+mode = "1920x1080"
+```
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `name` | string | required | The output this entry is for, matched exactly (case included) against its connector name. The name only, never the position: a monitor unplugged and plugged back in returns under the same connector name but a new output id and possibly a new place in the order. An entry for a monitor that is not connected waits for it and applies when it is plugged in. |
+| `scale` | float | `[output] scale` | This output's scale, resolved exactly like `[output] scale` (clamped into `0.5..=4.0` with a warning, then to the nearest 1/120). A value that is not a finite number is ignored with a warning and the output keeps `[output] scale`. Re-applied live by `scootctl reload`. |
+| `mode` | `"WxH"` | `--mode`, or `--width`/`--height` | Under `--tty`, which connector mode to drive -- the same choice `--mode` makes, per connector, falling back to the connector's preferred mode with a warning when it offers no mode of that size. Under `--headless`, that output's size. Beats `--mode`/`--width`/`--height` for this output (the flag is the default for every output; the entry names one). Read at startup and whenever the monitor is plugged in, not on reload: a reload refuses a changed `mode` by name. A value that is not `WxH` with both sides 1-65535 is ignored with a warning. |
+
+An entry with an empty `name`, a second entry for a name already seen (the
+first wins), and an entry left with nothing to set are skipped with a
+warning; an unknown key inside an entry (a misspelt `scale`) is an unknown
+field like any other, and the whole file falls back to defaults at startup
+(a reload refuses it). `--nested` ignores every entry with a warning, since
+the host compositor owns the window's size and scale.
+
+**Which scale a surface is told.** A window is told the scale of the output
+it is placed on -- its workspace's output -- and re-told when it moves to an
+output at another scale (a move, an unplugged monitor's windows adopted,
+a replug restoring them). A floating window straddling two outputs follows
+the one it is placed on, not whichever holds more of it. Its popups and
+subsurfaces follow it. A bar or other layer surface is told its own
+output's scale, a lock surface its own output's, and a client's cursor
+surface the scale of the output under the pointer, re-told each time the
+client sets it (a pointer crossing between two outputs inside one window
+keeps the old scale on its cursor surface until the client next sets it). A
+surface with no role yet is told the scale of the output under the pointer,
+where a new window opens. See
+[protocols.md](protocols.md#output-scaling).
+
+With `--xwayland`, X apps draw at the largest `wl_output.scale` integer
+among the outputs (X has one scale for every screen), and the renderer
+scales them down on the others -- see [`[xwayland]`](#xwayland).
 
 ## `[renderer]`
 
@@ -496,7 +568,7 @@ pure white *is* exactly representable.)
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `enabled` | boolean | `false` | Whether to run an XWayland server inside the session, so X11-only applications get a `DISPLAY` to connect to — the config-file form of `--xwayland`, and either one turns it on (a flag can only say yes, so the two are OR-ed). Off unless asked: the server is a whole extra process (~55 MB RSS idle, ~87 MB with a few X clients) plus a hard `PATH` dependency on the `Xwayland` binary, and any X client can keylog/snoop by design (see [protocols.md](protocols.md#xwayland-opt-in)). Needs an `xwayland` Cargo-feature build -- from Nix, `packages.scoot-xwayland` (or `scoot-gpu-xwayland`), which also puts `Xwayland` on the compositor's `PATH` (see [nix.md](nix.md#xwayland-from-the-flake)); without the feature the knob parses but warns and the session runs Wayland-only. A missing binary at startup is the same shape: a loud log line naming `` `Xwayland` must be on PATH `` and the `PATH` searched, then a Wayland-only session, never a crash. Takes effect on restart — a reload refuses changes with a message naming that. `DISPLAY` is exported to spawned children (add it to the `dbus-update-activation-environment` line in your session script alongside `WAYLAND_DISPLAY` if anything D-Bus activated needs X), and so is each child's activation token as `DESKTOP_STARTUP_ID`, which is how an X app scoot started takes focus when it maps. X windows are columns (their own position ignored), dialogs and transients float, and `[[window_rule]]` `match_app_id` matches an X window's `WM_CLASS` class — see [protocols.md](protocols.md#xwayland-opt-in) for the whole policy and the trust model. The clipboard and primary selection cross between X and Wayland apps both ways, but X apps read or set them only while an X window has the keyboard (never while locked); drag-and-drop works in every direction (X to Wayland, Wayland to X, X to X, within one X app), and XIM is not provided — see [protocols.md](protocols.md#clipboard-drag-and-drop-and-input-methods). At an [`[output] scale`](#output) above 1 the X server draws at `ceil(scale)` (sharp at 2, scaled down from 2 at 1.5) -- or, when the whole layout at that scale would be wider or taller than X's 32767-pixel limit, at the largest integer scale at which it fits -- and tells toolkits the scale over XSETTINGS, re-told on a reload or when an output change moves it (GTK measured; Qt 6 and Java documented to read it but unmeasured; Qt 5 gets scaled fonts only unless the app enables high-DPI scaling); an X app that reads no toolkit setting (bare Xlib, Wine) comes out that many times smaller, and one that reads only the `Xft.dpi` resource needs `xrdb -merge` — see [protocols.md](protocols.md#x-windows-in-the-layout). |
+| `enabled` | boolean | `false` | Whether to run an XWayland server inside the session, so X11-only applications get a `DISPLAY` to connect to — the config-file form of `--xwayland`, and either one turns it on (a flag can only say yes, so the two are OR-ed). Off unless asked: the server is a whole extra process (~55 MB RSS idle, ~87 MB with a few X clients) plus a hard `PATH` dependency on the `Xwayland` binary, and any X client can keylog/snoop by design (see [protocols.md](protocols.md#xwayland-opt-in)). Needs an `xwayland` Cargo-feature build -- from Nix, `packages.scoot-xwayland` (or `scoot-gpu-xwayland`), which also puts `Xwayland` on the compositor's `PATH` (see [nix.md](nix.md#xwayland-from-the-flake)); without the feature the knob parses but warns and the session runs Wayland-only. A missing binary at startup is the same shape: a loud log line naming `` `Xwayland` must be on PATH `` and the `PATH` searched, then a Wayland-only session, never a crash. Takes effect on restart — a reload refuses changes with a message naming that. `DISPLAY` is exported to spawned children (add it to the `dbus-update-activation-environment` line in your session script alongside `WAYLAND_DISPLAY` if anything D-Bus activated needs X), and so is each child's activation token as `DESKTOP_STARTUP_ID`, which is how an X app scoot started takes focus when it maps. X windows are columns (their own position ignored), dialogs and transients float, and `[[window_rule]]` `match_app_id` matches an X window's `WM_CLASS` class — see [protocols.md](protocols.md#xwayland-opt-in) for the whole policy and the trust model. The clipboard and primary selection cross between X and Wayland apps both ways, but X apps read or set them only while an X window has the keyboard (never while locked); drag-and-drop works in every direction (X to Wayland, Wayland to X, X to X, within one X app), and XIM is not provided — see [protocols.md](protocols.md#clipboard-drag-and-drop-and-input-methods). At an [`[output] scale`](#output) above 1 the X server draws at `ceil(scale)` (sharp at 2, scaled down from 2 at 1.5) -- the largest such integer among the outputs when [`[[outputs]]`](#outputs) gives them different scales, scaled down on the others -- or, when the whole layout at that scale would be wider or taller than X's 32767-pixel limit, at the largest integer scale at which it fits -- and tells toolkits the scale over XSETTINGS, re-told on a reload or when an output change moves it (GTK measured; Qt 6 and Java documented to read it but unmeasured; Qt 5 gets scaled fonts only unless the app enables high-DPI scaling); an X app that reads no toolkit setting (bare Xlib, Wine) comes out that many times smaller, and one that reads only the `Xft.dpi` resource needs `xrdb -merge` — see [protocols.md](protocols.md#x-windows-in-the-layout). |
 
 ## `[binds]`
 
@@ -1022,6 +1094,16 @@ prefer_no_csd = true
 # 1.0 is correct for a non-HiDPI display; raise it (e.g. 2.0) on a HiDPI
 # panel, or text and widgets render far too small.
 scale = 1.0
+
+# A HiDPI laptop panel beside an ordinary monitor: each its own scale, by
+# the connector name `scootctl outputs` lists.
+# [[outputs]]
+# name = "eDP-1"
+# scale = 2.0
+#
+# [[outputs]]
+# name = "DP-1"
+# mode = "1920x1080"
 
 # [renderer]
 # Unset means "pixman", the CPU renderer -- the right answer on a GPU-less

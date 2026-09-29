@@ -651,7 +651,7 @@ impl Fixture {
         let elements =
             self.state
                 .cursor
-                .element(&mut renderer, POINTER.into(), self.state.output_scale);
+                .element(&mut renderer, POINTER.into(), self.state.default_scale);
         let count = elements.len();
         let mut framebuffer = renderer.bind(&mut image).expect("a framebuffer");
         let mut damage = OutputDamageTracker::new((CANVAS, CANVAS), 1.0, Transform::Normal);

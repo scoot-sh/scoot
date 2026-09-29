@@ -124,6 +124,7 @@ pub fn init_named(
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
+    state.note_output_scales();
     // Name-only: the connector-less backends (and every test) identify by
     // name alone. `--tty` upgrades this to the full connector identity once
     // it knows it (`State::note_output_identity`); the primary is the first
@@ -244,6 +245,10 @@ pub fn add_output_with(
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
     state.backends.insert(id, backend);
+    // An output at a scale no other runs at starts `apply()`'s per-window
+    // scale refresh -- which the `apply()` below, and the restore after it,
+    // then use to tell any window moved onto it (see `output_scale.rs`).
+    state.note_output_scales();
     // Name-only, like the primary above (`--tty` upgrades it after). Then
     // the restore: an output added under an identity a removed output filed
     // gets that output's still-open windows back (`State::restore_displaced`
@@ -291,6 +296,7 @@ pub(crate) fn add_output_without_backend(
     let output = create_output(state, name, width, height, (0, 0));
     let area = logical_area(state, &output, width, height);
     let id = state.outputs.add(output);
+    state.note_output_scales();
     // Name-only, like the other add paths, and the restore: a harness output
     // added under a removed output's name gets its windows back the same way
     // a hotplugged monitor does.
@@ -335,13 +341,13 @@ fn create_output(
     output
         .user_data()
         .insert_if_missing(|| OutputGlobal(global));
-    set_mode(
-        &output,
-        width,
-        height,
-        Some(position.into()),
-        state.output_scale,
-    );
+    // Its own configured scale -- its `[[outputs]]` entry's, else the
+    // session default -- decided here, by name, for every output ever
+    // created: startup's, `--headless --outputs N`'s and a `--tty` monitor
+    // plugged in later alike. From here on the `Output` itself carries it
+    // (see `output_scale.rs`).
+    let scale = state.configured_scale(name);
+    set_mode(&output, width, height, Some(position.into()), scale);
     state.space.map_output(&output, position);
     output
 }
@@ -990,7 +996,11 @@ impl State {
         // target (which was not torn down), so the restore cannot fail the
         // way rebuilding at the old size could.
         let previous = output.current_mode();
-        set_mode(&output, width, height, None, self.output_scale);
+        // A mode change, not a scale change: the output keeps the scale it
+        // runs at, which is its own (see `output_scale.rs`), not the session
+        // default. Read once, so the restore below puts back exactly this.
+        let scale = super::output_scale::scale_of(&output);
+        set_mode(&output, width, height, None, scale);
         // The GPU scanout tier is resized, never rebuilt. Its `DrmCompositor`
         // tracks this same `Output` (see `Tty::track_output`), so `set_mode`
         // above has already moved its damage tracker onto the new mode, and
@@ -1075,13 +1085,7 @@ impl State {
                 // never-resized-before case, which cannot reach here:
                 // `init_named` sets one before any caller exists.
                 if let Some(previous) = previous {
-                    set_mode(
-                        &output,
-                        previous.size.w,
-                        previous.size.h,
-                        None,
-                        self.output_scale,
-                    );
+                    set_mode(&output, previous.size.w, previous.size.h, None, scale);
                     // ...and the size that never rendered is taken back
                     // out of `Output::modes`, so a client binding later
                     // never hears about it and the next
@@ -1205,9 +1209,12 @@ impl State {
         true
     }
 
-    /// Re-applies a new output scale to every output, after
-    /// [`State::output_scale`](super::State::output_scale) has already been
-    /// updated to it.
+    /// Re-applies each output's configured scale (see
+    /// [`State::configured_scale`](super::State::configured_scale)), after
+    /// [`State::default_scale`](super::State::default_scale) and
+    /// [`State::output_entries`](super::State::output_entries) have already
+    /// been updated -- each output to its own, which need not be the same
+    /// scale as its neighbour's.
     ///
     /// Each output keeps its physical mode -- only the advertised scale
     /// moves, through the same `set_mode` startup uses, so bound `wl_output`
@@ -1244,7 +1251,7 @@ impl State {
     /// element's geometry at the current scale, so each moved element
     /// damages both its old and its new region on the first post-rescale
     /// frame by construction.
-    pub(super) fn rescale_outputs(&mut self, scale: f64) {
+    pub(super) fn rescale_outputs(&mut self) {
         // Walked by index with cloned outputs, like the render loop: the
         // steps below take `&mut State`, which no borrow of `self.outputs`
         // can outlive. An `Output` clone is an `Arc` bump, no allocation
@@ -1266,6 +1273,7 @@ impl State {
                 tracing::warn!("could not rescale: the output has no mode yet");
                 continue;
             };
+            let scale = self.configured_scale(&output.name());
             let position = Point::<i32, Logical>::from((x, 0));
             // `None` where the output already sits there, so nothing
             // re-announces an identical geometry: a single-output session
@@ -1335,6 +1343,10 @@ impl State {
         self.refresh_capture_constraints();
         self.refresh_layer_zone();
         self.settle_floating_grab();
+        // Whether `apply()` re-tells windows that change outputs from here
+        // on. The caller re-tells every surface now (`resend_output_scale`),
+        // so no window is left told a scale from before.
+        self.note_output_scales();
     }
 
     /// Takes output `id` away while the session runs -- a `--tty` connector
@@ -1441,6 +1453,11 @@ impl State {
         let identity = self.take_output_identity(id);
         self.backends.remove(&id);
         self.outputs.remove(id);
+        // Whether the outputs still disagree on a scale without this one:
+        // if they stopped, `apply()` stops re-telling windows that change
+        // outputs, so the windows this output leaves behind are re-told
+        // below instead (see `output_scale.rs`).
+        let was_mixed = self.note_output_scales();
         retire_global(self, &output);
         // The core adopts the removed output's workspaces onto the focused
         // output and reports what left (`evict_output`, the `OutputRemoved`
@@ -1537,6 +1554,13 @@ impl State {
         self.refresh_keyboard_focus();
         self.settle_floating_grab();
         self.apply();
+        // The adopted windows are placed now. With the outputs still at
+        // several scales, the `apply()` above told each one its adopter's
+        // scale; with one scale left, it no longer looks, so every surface
+        // is re-told here. Cold, and only when scales stopped mixing.
+        if was_mixed && !self.mixed_scales {
+            self.resend_output_scale();
+        }
         if let Some(event) = removed {
             self.emit_output_removed(event);
         }

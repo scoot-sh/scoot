@@ -69,6 +69,7 @@ use crate::cli::RendererKind;
 use super::decorations::{Appearance, Color};
 use super::input::keysym_named;
 use super::keybindings::{Bound, Keybindings, Modifiers};
+use super::output_config::{OutputEntries, OutputEntryConfig};
 use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale, clamp_scale_range};
 use super::wallpaper::{WallpaperConfig, WallpaperSetting};
 use super::window_rules::{
@@ -364,6 +365,10 @@ struct FileConfig {
     appearance: Option<AppearanceConfig>,
     #[serde(default)]
     output: Option<OutputConfig>,
+    /// `[[outputs]]`, an array of tables: a scale and a mode per output,
+    /// by name (see `output_config.rs`).
+    #[serde(default)]
+    outputs: Vec<OutputEntryConfig>,
     #[serde(default)]
     renderer: Option<RendererConfig>,
     #[serde(default)]
@@ -393,8 +398,15 @@ pub struct LoadedConfig {
     pub config: Config,
     pub keybindings: Keybindings,
     pub appearance: Appearance,
-    /// The resolved `[output] scale`, already clamped (or the default 1.0).
+    /// The resolved `[output] scale`, already clamped (or the default 1.0):
+    /// the session default every output without an `[[outputs]]` entry of
+    /// its own runs at.
     pub scale: f64,
+    /// The usable `[[outputs]]` entries (see `output_config.rs`): a scale
+    /// and a mode per output name, overriding `scale` (and `--mode`,
+    /// `--width`/`--height`) for that output alone. Empty for a file with
+    /// none, which leaves every output at the session default.
+    pub outputs: OutputEntries,
     /// The `[tty] gpu` device path, when the file names one. `None` (the
     /// normal case) means the automatic search picks; `Some` means drive
     /// exactly that device, the way `--gpu PATH` does -- including its
@@ -462,6 +474,7 @@ impl LoadedConfig {
             keybindings: Keybindings::default(),
             appearance: Appearance::default(),
             scale: 1.0,
+            outputs: OutputEntries::default(),
             gpu: None,
             renderer: None,
             xwayland: false,
@@ -496,6 +509,7 @@ impl LoadedConfig {
             .unwrap_or_default()
             .into_appearance(Config::clamp_gap(config.gap));
         let scale = file.output.unwrap_or_default().into_scale();
+        let outputs = OutputEntries::resolve(file.outputs);
         let gpu = file.tty.and_then(|tty| tty.gpu);
         let renderer = file.renderer.unwrap_or_default().into_kind();
         let xwayland = file.xwayland.unwrap_or_default().enabled.unwrap_or(false);
@@ -525,6 +539,7 @@ impl LoadedConfig {
             keybindings,
             appearance,
             scale,
+            outputs,
             gpu,
             renderer,
             xwayland,
@@ -757,6 +772,16 @@ pub fn default_config_toml() -> String {
     out.push_str("\n[output]\n");
     out.push_str("# Output scale advertised to clients and rendered at.\n");
     out.push_str("# scale = 1.0\n");
+
+    out.push_str(
+        "\n# Per-output overrides of [output] scale (and of --mode, or --width/--height\n\
+         # under --headless), one table per output, matched by the name\n\
+         # `scootctl outputs` lists. Scale re-applies on reload; mode on restart.\n\
+         # [[outputs]]\n\
+         # name = \"eDP-1\"\n\
+         # scale = 2.0\n\
+         # mode = \"2560x1600\"\n",
+    );
 
     out.push_str("\n[renderer]\n");
     out.push_str(
@@ -2544,6 +2569,42 @@ mod tests {
         assert!(toml::from_str::<FileConfig>(toml).is_err());
     }
 
+    /// `[output]` and `[[outputs]]` side by side: the default, and one
+    /// output's own scale and mode (see `output_config.rs`).
+    #[test]
+    fn outputs_entries_load_beside_the_default_scale() {
+        let file: FileConfig = toml::from_str(
+            "[output]\nscale = 1.5\n\n\
+             [[outputs]]\nname = \"eDP-1\"\nscale = 2.0\n\n\
+             [[outputs]]\nname = \"DP-1\"\nmode = \"1280x720\"\n",
+        )
+        .expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.scale, 1.5);
+        assert_eq!(loaded.outputs.scale_for("eDP-1", loaded.scale), 2.0);
+        assert_eq!(loaded.outputs.scale_for("DP-1", loaded.scale), 1.5);
+        assert_eq!(loaded.outputs.mode_for("DP-1"), Some((1280, 720)));
+        assert_eq!(loaded.outputs.scale_for("HDMI-A-1", loaded.scale), 1.5);
+    }
+
+    /// No `[[outputs]]` at all is no entries -- the session every output
+    /// runs at the default in.
+    #[test]
+    fn a_missing_outputs_array_means_no_entries() {
+        let file: FileConfig = toml::from_str("[output]\nscale = 2\n").expect("valid toml");
+        assert!(LoadedConfig::from_file(file).outputs.is_empty());
+    }
+
+    /// An unknown key inside an entry is an unknown field like any other:
+    /// the whole file fails to parse (startup then runs on defaults, and a
+    /// reload refuses with an error) -- so a misspelt `scale` can never
+    /// quietly leave a screen at the wrong size.
+    #[test]
+    fn deny_unknown_fields_rejects_an_outputs_entry_typo() {
+        let toml = "[[outputs]]\nname = \"eDP-1\"\nscael = 2\n";
+        assert!(toml::from_str::<FileConfig>(toml).is_err());
+    }
+
     /// The same graceful-degradation rule every other config field follows:
     /// an out-of-range scale is clamped with a warning, never a startup
     /// failure -- on `--tty` a refused config would be a hard lockout.
@@ -3051,6 +3112,30 @@ mod tests {
             loaded.skipped_rules.is_empty(),
             "{:?}",
             loaded.skipped_rules
+        );
+    }
+
+    /// The emitted `[[outputs]]` example is commented out for the same
+    /// reason; uncommented, it must be one usable entry with both keys.
+    #[test]
+    fn the_emitted_outputs_example_is_one_usable_entry_uncommented() {
+        let emitted = default_config_toml();
+        let example: String = emitted
+            .lines()
+            .skip_while(|line| line.trim() != "# [[outputs]]")
+            .take_while(|line| line.trim() != "[renderer]")
+            .filter_map(|line| line.trim().strip_prefix("# "))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let file: FileConfig = toml::from_str(&example)
+            .unwrap_or_else(|error| panic!("the example does not parse ({error}):\n{example}"));
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.outputs.iter().count(), 1, "{example}");
+        assert_eq!(loaded.outputs.scale_for("eDP-1", 1.0), 2.0, "{example}");
+        assert_eq!(
+            loaded.outputs.mode_for("eDP-1"),
+            Some((2560, 1600)),
+            "{example}"
         );
     }
 
