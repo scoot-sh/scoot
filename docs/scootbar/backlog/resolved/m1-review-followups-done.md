@@ -1,10 +1,11 @@
 ---
 title: "M1 review follow-ups: a clock that retries a failed draw, and four hardening gaps"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M2"
+resolved: "2026-09-29"
 ---
 
 # M1 review follow-ups

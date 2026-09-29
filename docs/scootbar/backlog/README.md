@@ -89,7 +89,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 
 ### M2 — Workspaces: the first bar you can live with
 - [Workspaces module](resolved/workspaces-module-done.md) (high): `ext-workspace-v1`, click to switch — RESOLVED 2026-09-29
-- [M1 review follow-ups](m1-review-followups.md) (medium): a clock that retries a failed draw, and four hardening gaps (the fuzz crate's CI build done)
+- [M1 review follow-ups](resolved/m1-review-followups-done.md) (medium): a clock that retries a failed draw, and four hardening gaps (the fuzz crate's CI build done) — RESOLVED 2026-09-29
 
 ### M3 — Configurable
 - [Config file, control socket and reload](config-cli-and-reload.md) (medium): `scootbar msg`, `query`

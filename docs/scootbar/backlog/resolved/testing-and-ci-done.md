@@ -119,7 +119,7 @@ of it: [testing.md](../../testing.md).
 - **Docs**: [testing.md](../../testing.md) (snapshots, the harness, fuzzing
   in CI, the CI jobs, the benchmark), both fuzz READMEs,
   [appearance](../appearance.md) (the rounded-rectangle snapshots),
-  [the M1 follow-ups](../m1-review-followups.md) (item 3 done), and the
+  [the M1 follow-ups](m1-review-followups-done.md) (item 3 done), and the
   README's status line and baselines.
 
 ### From the M1 review follow-ups
@@ -322,7 +322,7 @@ waits until no client has committed for half a second
 requests and on `main`, and no pull request was opened from this branch,
 so none of it has run on GitHub: in particular `scootbar-macos` on a real
 Mac and the fuzz step on a runner; real hardware of any kind; the
-opt-in clock-step test (still [a follow-up](../m1-review-followups.md)).
+opt-in clock-step test (still [a follow-up](m1-review-followups-done.md)).
 
 ### Follow-ups, 2026-09-29
 
