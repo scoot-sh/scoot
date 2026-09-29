@@ -46,6 +46,11 @@ cancel-on-clock-set, so suspend, NTP steps and DST are handled without
 polling; timezone from `/etc/localtime`. Format string from a flag (a config key
 later), with a small documented set of specifiers.
 
+**Default is 12-hour with am/pm** (user, 2026-09-29: "I prefer 12hr clocks too
+am/pm as the default"), e.g. `3:07 pm`, no leading zero on the hour. 24-hour is
+one format-string change away, and the specifier set must cover both (`%I`/`%p`
+and `%H`). It is a default, not a locale lookup: no locale database is read.
+
 ## First frame first
 
 Paint the bar and the clock before anything else is initialized. A module whose
