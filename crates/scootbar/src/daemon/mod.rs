@@ -40,19 +40,13 @@ use wayland_client::backend::WaylandError as BackendError;
 
 use crate::config::Config;
 use crate::font;
-use crate::modules::{self, OutputView, Placed, Sources};
+use crate::modules::{self, MAX_POLL, OutputView, Placed, Sources};
 use crate::outputs::Plan;
 use crate::print::warn;
 use crate::render::{Scene, Style};
 use crate::text::Text;
 use canvas::Drew;
 use wayland::{State, Wayland, WaylandError};
-
-/// The most fds polled in one turn: the Wayland connection and every
-/// module's sources. The registry's modules add one each, so this is far
-/// more than a layout of [`crate::layout::MAX_MODULES`] can use; past it a
-/// source is not polled (`Sources::add` says so).
-const MAX_POLL: usize = 64;
 
 /// What the bars show.
 pub struct Content {
