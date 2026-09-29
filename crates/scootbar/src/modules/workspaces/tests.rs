@@ -158,6 +158,54 @@ fn a_batch_without_done_never_redraws() {
 }
 
 #[test]
+fn a_removed_workspace_is_not_redrawn_nor_clicked_before_its_done() {
+    let (mut harness, link) = started();
+    commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
+    assert_eq!(harness.dispatch(), Update::Changed);
+    assert_eq!(harness.view_on(Some("DP-1")).text(), "1 2");
+    // `Removed` for workspace 1, with no `done` after it: the staged
+    // half of what `on_workspace_removed` does, hand-rolled (the event
+    // method takes a proxy, which no compositor-free test can fabricate;
+    // the integration suite drives the real path, and its click test
+    // passes through the guarded send on every run).
+    {
+        let mut shared = link.0.borrow_mut();
+        let group = &mut shared.groups[0];
+        group.staged.swap(0, group.staged_len - 1);
+        group.staged_len -= 1;
+    }
+    // The divergence the click guard reads: committed still shows both,
+    // staged no longer holds workspace 1.
+    {
+        let shared = link.0.borrow();
+        let group = &shared.groups[0];
+        assert_eq!(group.committed_len, 2);
+        assert_eq!(group.staged_len, 1);
+        assert!(group.committed[..2].iter().any(|ws| ws.number == 1));
+        assert!(group.staged[..1].iter().all(|ws| ws.number != 1));
+    }
+    // No redraw: the batch is not whole, and the drawn view still shows
+    // both workspaces.
+    assert_eq!(harness.dispatch(), Update::Unchanged);
+    assert_eq!(harness.view_on(Some("DP-1")).text(), "1 2");
+    // A press on the removed pill sends nothing. (Without a manager no
+    // request could go out in any case; what this pins alongside the
+    // above is that the press path stays quiet while the batch is open.)
+    let font = text();
+    let view = harness.view_on(Some("DP-1"));
+    let (start, end) = item_span(&font, "1 2", EM, i64::from(PAD), 0).unwrap();
+    let ctx = ClickCtx {
+        output: DP1,
+        x: (start + end) / 2,
+        view: &view,
+        text: &font,
+        em: EM,
+        padding: PAD,
+    };
+    assert_eq!(harness.click(&ctx), Update::Unchanged);
+}
+
+#[test]
 fn finished_mid_batch_is_never_half_drawn() {
     let (mut harness, link) = started();
     commit(&link, "DP-1", &[(1, 1, true)]);

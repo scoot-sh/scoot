@@ -690,6 +690,21 @@ impl Module for Workspaces {
         let Some(handle) = ws.handle.clone() else {
             return Update::Unchanged;
         };
+        // `Removed` sweeps the handle from staged at once but from
+        // committed only at the next `done`: the pill is still drawn
+        // meanwhile, and a press landing on it (or a button queued ahead
+        // of the `done` in the same dispatch) must not `activate` a
+        // destroyed handle — a protocol error, which would kill the bar.
+        // Past a `done` staged and committed agree as sets (committed is
+        // staged sorted, so the check is membership, never position), and
+        // the other staged mutations keep every committed handle staged,
+        // so steady-state clicks are unchanged.
+        if !group.staged[..group.staged_len]
+            .iter()
+            .any(|staged| staged.handle.as_ref() == Some(&handle))
+        {
+            return Update::Unchanged;
+        }
         drop(shared);
         handle.activate();
         manager.commit();
