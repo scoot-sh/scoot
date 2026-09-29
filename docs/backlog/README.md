@@ -269,6 +269,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [`ext-workspace-v1` `urgent` state bit](./protocols/ext-workspace-urgent-state.md) — low, filed 2026-09-29 (scootbar planning); needs a policy decision first, since an xdg-activation request always focuses today
 - [Smaller/general protocol gaps (bundled)](./protocols/protocol-gaps-general.md)
 - [Niche protocol gaps (bundled)](./protocols/protocol-gaps-niche.md)
+- [A layer surface's exclusive zone can take a whole output](./protocols/layer-zone-swallows-output.md)
 
 ### IPC / computer use
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
