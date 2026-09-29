@@ -102,7 +102,10 @@ jobs:
   # the integration job's tests/scoot_config.rs has scoot itself spawn
   # `apply-config` from a [wallpaper] section, as the smoke test does.
   #
-  #   crates/scootbar/                     -> scootbar=true (scootbar job)
+  #   crates/scootbar/, scripts/scootbar-bench/
+  #                                        -> scootbar=true (scootbar job,
+  #                                           and scootbar-macos when
+  #                                           scoot is false)
   #     except its Cargo.toml               -> scoot too, for the macOS
   #     job's `cargo check --workspace`, as scootbg's
   #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
@@ -182,6 +185,11 @@ jobs:
                   scoot=true
                   scootbar=true ;;
                 crates/scootbar/*)
+                  scootbar=true ;;
+                # scootbar's benchmark harness; its unit tests run in the
+                # scootbar job. It imports scootbg's runner, whose own
+                # changes fall to the catch-all below and run everything.
+                scripts/scootbar-bench/*)
                   scootbar=true ;;
                 *)
                   scoot=true
@@ -861,6 +869,15 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo clippy -p scootbg -p scootbg-mem --all-targets -- -D warnings
 
+      # The fuzz crate (crates/scootbg/fuzz) is its own workspace, so no
+      # other step compiles it, and it builds the image modules by
+      # `#[path]`: a refactor there can break it silently. Compiled only,
+      # not fuzzed (its README runs that, for minutes, by hand); its corpus
+      # and past crashes are replayed on stable by `cargo test` above.
+      - name: cargo check of the fuzz crate
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo check --manifest-path crates/scootbg/fuzz/Cargo.toml --target-dir target/scootbg-fuzz --locked
+
       # Both runners, for the reason the Linux job gives: nextest isolates
       # each test in its own process, `cargo test` shares one.
       - name: cargo nextest and cargo test
@@ -1026,15 +1043,31 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo fmt --check -p scootbar
 
+      # The benchmark harness's own logic (configs, the gates, the
+      # arithmetic): the standard library only, no compositor or bar.
+      - name: Benchmark harness tests
+        run: python3 -m unittest discover -s scripts/scootbar-bench -p 'test_*.py'
+
       # scootbar is `#![forbid(unsafe_code)]`, which rustc enforces; its
       # two mappings (the shm buffer, a font on a read-only mount) are
-      # scootbg-mem's, checked in the scootbg job. The second run is the
-      # smallest build, every module left out, which must stay buildable.
-      - name: cargo clippy
+      # scootbg-mem's, checked in the scootbg job. The Cargo-feature matrix:
+      # the default build, the smallest (every module left out), which must
+      # stay buildable, and each module alone, so no module leans on
+      # another's code. The modules are read from the manifest (every
+      # feature but `default` is one: crates/scootbar/Cargo.toml says so),
+      # so a new one joins the matrix with no change here.
+      - name: cargo clippy, every feature set
         shell: nix develop --command bash -euo pipefail {0}
         run: |
           cargo clippy -p scootbar --all-targets -- -D warnings
           cargo clippy -p scootbar --no-default-features --all-targets -- -D warnings
+          modules=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "scootbar") | .features | keys[] | select(. != "default")')
+          [ -n "$modules" ] || { echo "::error title=no scootbar modules::cargo metadata listed no features"; exit 1; }
+          for module in $modules; do
+            echo "--- $module alone"
+            cargo clippy -p scootbar --no-default-features --features "$module" --all-targets -- -D warnings
+          done
 
       # Both runners, for the reason the Linux job gives.
       - name: cargo nextest and cargo test
@@ -1066,6 +1099,42 @@ jobs:
           fi
           echo "ok: links only what std links"
 
+      # The fuzz targets (crates/scootbar/fuzz, its own workspace, which no
+      # step above compiles) for a fixed budget: a fixed number of runs from
+      # a fixed seed, so a run is the same run every time, from the seed
+      # corpus and every past finding (`regressions/`). Compiling them is
+      # half the point: they build scootbar's parsers by `#[path]`, so a
+      # refactor that breaks those includes fails here, not on the next
+      # person to fuzz. The stable tests replay the same files through the
+      # same checks in every run above; this is what mutates them. Stable
+      # toolchain, no sanitizer (`-s none`), as the fuzz README runs it;
+      # cargo-fuzz from the pinned nixpkgs. A finding prints its input in
+      # base64, since the runner's disk is gone after the job.
+      - name: Fuzz targets, a fixed budget
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          fuzz=$(nix build --inputs-from . nixpkgs#cargo-fuzz --no-link --print-out-paths)
+          export PATH="$fuzz/bin:$PATH"
+          scratch="$RUNNER_TEMP/scootbar-fuzz"
+          mkdir -p "$scratch/format" "$scratch/tzif" "$scratch/artifacts"
+          cd crates/scootbar
+          run() {
+            local target=$1; shift
+            if ! cargo fuzz run -s none --target-dir "$GITHUB_WORKSPACE/target/scootbar-fuzz" "$target" \
+                "$scratch/$target" "fuzz/corpus/$target" "fuzz/regressions/$target" -- \
+                -seed=1 -timeout=10 -artifact_prefix="$scratch/artifacts/" "$@"; then
+              for found in "$scratch"/artifacts/*; do
+                [ -f "$found" ] || continue
+                echo "::error title=scootbar fuzz finding ($target)::$(basename "$found")"
+                echo "$(basename "$found"), base64:"
+                base64 -w0 "$found"; echo
+              done
+              return 1
+            fi
+          }
+          run format -runs=1000000 -max_len=512
+          run tzif -runs=5000000 -max_len=70000
+
       - name: Save the cargo cache
         # Same condition as the Linux job's save; see the comment there.
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
@@ -1077,6 +1146,37 @@ jobs:
             ~/.cargo/git/db
             target
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  # scootbar's macOS build: a stub binary that says it runs on Linux only
+  # (crates/scootbar/src/main.rs), and its tests cfg'd out. The `macos`
+  # job's `cargo check --workspace --all-targets` covers it on any PR that
+  # touches the compositor and on every push to main; this job is for the
+  # PR that touches only the bar, which skips that one. So it runs only when
+  # the bar changed and the compositor did not. Fail open all the same: a
+  # failed classification leaves `scoot` empty, which skips this job but
+  # runs the `macos` one, and that covers the stub.
+  scootbar-macos:
+    name: scootbar on macOS (the stub)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.scootbar != 'false' && needs.changes.outputs.scoot == 'false' }}
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # No cargo cache: off Linux every dependency of scootbar is cfg'd
+      # out, so this compiles the crate alone. Both ends of the feature
+      # matrix, since the stub must not care which modules were chosen.
+      - name: cargo check
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          cargo check -p scootbar --all-targets
+          cargo check -p scootbar --no-default-features --all-targets
 
   # scootbar against a live `scoot --headless` (crates/scootbar/tests/bar.rs:
   # a bar per output, its zone and margins, pixels at fractional scales and
