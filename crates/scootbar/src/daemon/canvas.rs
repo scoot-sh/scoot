@@ -42,6 +42,7 @@ use scootbg_mem::{ShmBuffer, ShmError};
 use super::surfaces::LayerObjects;
 use super::wayland::{Globals, State};
 use crate::color::Color;
+use crate::density::Scale;
 use crate::outputs::{Frame, OutputId};
 use crate::paint;
 
@@ -220,10 +221,16 @@ impl Canvas {
         frame: Frame,
         color: Color,
     ) -> Result<Drew, DrawError> {
-        let dims = frame
-            .scale
-            .buffer(frame.size)
-            .ok_or(DrawError::TooLarge(frame))?;
+        // Without a viewport the buffer must be the logical size times an
+        // integer (`set_buffer_scale`; anything else is a protocol error).
+        // A fraction cannot reach here without one (the fractional-scale
+        // manager is bound only with a viewporter), and this makes it so
+        // by construction all the same.
+        let scale = match layer.viewport {
+            Some(_) => frame.scale,
+            None => Scale::Integer(frame.scale.integer()),
+        };
+        let dims = scale.buffer(frame.size).ok_or(DrawError::TooLarge(frame))?;
         let Some(index) = pick(
             self.slots.iter().map(|s| s.as_ref().map(|s| s.state)),
             frame,
@@ -242,7 +249,10 @@ impl Canvas {
         }
         let slot = match entry {
             Some(slot) => slot,
-            None => entry.insert(Slot::new(globals, qh, id, dims).map_err(DrawError::Shm)?),
+            None => {
+                let fresh = Slot::new(globals, qh, id, dims).map_err(DrawError::Shm)?;
+                entry.insert(fresh)
+            }
         };
         if slot.state.painted != Some(frame) {
             paint::fill(slot.shm.pixels_mut(), color);
@@ -254,12 +264,13 @@ impl Canvas {
         match &layer.viewport {
             Some(viewport) => {
                 if layer.destination != Some(frame.size) {
-                    viewport.set_destination(logical(frame.size.width), logical(frame.size.height));
+                    let (width, height) = (frame.size.width, frame.size.height);
+                    viewport.set_destination(logical(width), logical(height));
                     layer.destination = Some(frame.size);
                 }
                 set_buffer_scale(surface, &mut layer.buffer_scale, 1);
             }
-            None => set_buffer_scale(surface, &mut layer.buffer_scale, frame.scale.integer()),
+            None => set_buffer_scale(surface, &mut layer.buffer_scale, scale.integer()),
         }
         if layer.opaque != Some(frame.size) {
             let region = globals.compositor.create_region(qh, ());

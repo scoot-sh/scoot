@@ -224,7 +224,7 @@ pub struct Output {
     /// the new surface's own events replace them.
     preferred: Preferred,
     /// A `configure` was acked and the surface not committed since.
-    unacked: bool,
+    ack_uncommitted: bool,
     /// What the live surface was last committed with; `None` while nothing
     /// is attached. Gone with the surface.
     shown: Option<Frame>,
@@ -327,7 +327,7 @@ impl Output {
     /// `configure`.
     fn made(&mut self) {
         self.surface = Surface::Pending;
-        self.unacked = false;
+        self.ack_uncommitted = false;
         self.shown = None;
         self.failed = None;
     }
@@ -343,7 +343,7 @@ impl Output {
         self.surface = Surface::Configured {
             requested: Size { width, height },
         };
-        self.unacked = true;
+        self.ack_uncommitted = true;
         self.failed = None;
         Effect::Ack(serial)
     }
@@ -354,7 +354,7 @@ impl Output {
             return Effect::None;
         }
         self.shown = None;
-        self.unacked = false;
+        self.ack_uncommitted = false;
         if self.closed_once {
             self.surface = Surface::GaveUp;
             Effect::DestroyAndGiveUp
@@ -410,7 +410,7 @@ impl Output {
         // The same pixels, or a draw that failed at this frame: an acked
         // `configure` still needs a commit to take effect, on a surface
         // that is mapped (an unmapped one has nothing to apply it to).
-        if self.unacked && self.shown.is_some() {
+        if self.ack_uncommitted && self.shown.is_some() {
             Plan::Commit
         } else {
             Plan::Nothing
@@ -421,14 +421,14 @@ impl Output {
     pub fn drew(&mut self, frame: Frame) {
         if self.surface.is_live() {
             self.shown = Some(frame);
-            self.unacked = false;
+            self.ack_uncommitted = false;
             self.failed = None;
         }
     }
 
     /// The surface was committed as it was ([`Plan::Commit`]).
     pub fn committed(&mut self) {
-        self.unacked = false;
+        self.ack_uncommitted = false;
     }
 
     /// Drawing `frame` failed; see the field.
@@ -498,7 +498,7 @@ impl<O> Outputs<O> {
                 surface: Surface::Waiting,
                 closed_once: false,
                 preferred: Preferred::default(),
-                unacked: false,
+                ack_uncommitted: false,
                 shown: None,
                 failed: None,
             },

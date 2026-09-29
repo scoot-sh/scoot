@@ -195,3 +195,28 @@ fn a_hotplug_storm_leaves_one_bar_per_output_and_no_leak() {
         session.bar_stderr()
     );
 }
+
+#[test]
+fn sway_reserves_the_margin_on_the_bars_edge_too() {
+    let Some(session) = Session::sway("margin", 1) else {
+        return;
+    };
+    let mut bar = Reaper(session.bar(&["--background", BAR, "--height", "20", "--margin", "8,4"]));
+    // As on scoot (tests/bar.rs): the zone is the bar plus its edge's
+    // margin, which the protocol says the compositor adds.
+    // (The zone is reserved from the buffer-less first commit, so the
+    // pixels are waited for as well.)
+    let (usable, shot) = session.wait_for(&mut bar.0, "the zone reserved and drawn", |session| {
+        let (name, usable) = session
+            .sway_usable()
+            .into_iter()
+            .find(|(_, usable)| usable["y"].as_i64() == Some(28))?;
+        let shot = session.screencopy(&name);
+        (shot.at(4, 8) == rgb(BAR)).then_some((usable, shot))
+    });
+    assert_eq!(shot.at(4, 8), rgb(BAR), "the bar's corner");
+    assert_ne!(shot.at(3, 8), rgb(BAR), "the left margin");
+    assert_ne!(shot.at(4, 7), rgb(BAR), "the top margin");
+    assert_ne!(shot.at(4, 28), rgb(BAR), "below the bar");
+    assert_eq!(usable["height"].as_i64(), Some(i64::from(shot.height) - 28));
+}

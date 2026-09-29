@@ -13,6 +13,15 @@
 //! Without the two optional ones the bar is drawn at the integer scale
 //! (`wl_output.scale`, the fraction rounded up) and the compositor scales it
 //! down: sharp, only not device-exact.
+//!
+//! ## Forcing the fallback (debug builds only)
+//!
+//! scoot and sway both have a viewporter, so the fallback is tested by
+//! pretending otherwise: a **debug build** reads
+//! `SCOOTBAR_DEBUG_NO_VIEWPORTER` (any value) and leaves `wp_viewporter`
+//! and `wp_fractional_scale_manager_v1` unbound. A release build reads
+//! nothing: the code is compiled out, so the shipped binary has no hidden
+//! knob (scootbg's `SCOOTBG_DEBUG_PATH` is the precedent).
 
 use std::fmt;
 
@@ -122,7 +131,12 @@ impl Wayland {
             })?;
 
         let mut missing = Vec::new();
-        let viewporter: Option<WpViewporter> = optional(&mut missing, list.bind(&qh, 1..=1, ()));
+        let viewporter: Option<WpViewporter> = if no_viewporter() {
+            missing.push(WpViewporter::interface().name);
+            None
+        } else {
+            optional(&mut missing, list.bind(&qh, 1..=1, ()))
+        };
         let fractional_scale = if viewporter.is_some() {
             optional(&mut missing, list.bind(&qh, 1..=1, ()))
         } else {
@@ -162,6 +176,24 @@ impl Wayland {
             missing,
         ))
     }
+}
+
+/// `SCOOTBAR_DEBUG_NO_VIEWPORTER` in a debug build (see the module docs).
+#[cfg(debug_assertions)]
+fn no_viewporter() -> bool {
+    let set = std::env::var_os("SCOOTBAR_DEBUG_NO_VIEWPORTER").is_some();
+    if set {
+        crate::print::warn(format_args!(
+            "scootbar: debug: SCOOTBAR_DEBUG_NO_VIEWPORTER leaves wp_viewporter unbound"
+        ));
+    }
+    set
+}
+
+/// A release build has no knob.
+#[cfg(not(debug_assertions))]
+fn no_viewporter() -> bool {
+    false
 }
 
 /// An optional global: `None`, with its name noted, when absent or too

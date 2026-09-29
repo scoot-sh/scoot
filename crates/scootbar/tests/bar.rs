@@ -235,6 +235,46 @@ fn a_fractional_scale_is_drawn_at_device_pixels_and_follows_a_change() {
 }
 
 #[test]
+fn without_a_viewporter_it_draws_at_the_integer_scale() {
+    // The knob exists in debug builds only (`daemon::wayland`).
+    if !cfg!(debug_assertions) {
+        eprintln!("skipped -- SCOOTBAR_DEBUG_NO_VIEWPORTER needs a debug build");
+        return;
+    }
+    let Some(session) = Session::scoot("noviewport", 1, "[output]\nscale = 1.5\n") else {
+        return;
+    };
+    let mut bar = Reaper(session.bar_with_env(
+        &["--background", BAR],
+        &[
+            ("WAYLAND_DEBUG", "1"),
+            ("SCOOTBAR_DEBUG_NO_VIEWPORTER", "1"),
+        ],
+    ));
+    // Drawn at 2 (1.5 rounded up), 1067 × 28 logical as 2134 × 56, with
+    // `set_buffer_scale(2)`; scoot scales it down to the same 42 rows.
+    let shot = session.wait_for(&mut bar.0, "42 rows", |session| {
+        let shot = session.scoot_screenshot(1);
+        (device_height(&shot) == 42).then_some(shot)
+    });
+    assert_rows(&shot, 0..42, 0..shot.width, rgb(BAR), "the bar");
+    let trace = session.bar_stderr();
+    assert_eq!(
+        common::created_buffers(&trace).last(),
+        Some(&(2134, 56)),
+        "{trace}"
+    );
+    assert!(trace.contains("set_buffer_scale(2)"), "{trace}");
+    // Advertised in the registry dump, but never bound: no object.
+    assert!(!trace.contains("wp_viewporter@"), "{trace}");
+    assert!(!trace.contains("wp_viewport@"), "{trace}");
+    assert!(
+        trace.contains("the compositor has no wp_viewporter"),
+        "{trace}"
+    );
+}
+
+#[test]
 fn idle_it_makes_no_wakeups() {
     let Some(session) = Session::scoot("idle", 2, "") else {
         return;
