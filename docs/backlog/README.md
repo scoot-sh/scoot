@@ -545,17 +545,21 @@ be revisited.
   [Milestone 19](../roadmap/19-multi-output.md) (phases A–F done, E included
   2026-09-25, `--tty` drives every connected monitor), and the one remaining
   surface is the [remainder](./core/multi-output-remainder.md) below (open,
-  high: per-output scale/mode only).
+  high: its scale/mode surface landed 2026-09-29; position and a live mode
+  change are the [follow-up](./core/output-position-and-live-mode.md)).
 - [Cycle outputs left and right, wrapping](./core/output-cycle-binds.md) — medium, filed 2026-09-29: `Super+,` / `Super+.` reach only screens 1 and 2 today, as absolute positions
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
 - [A real maximize](./core/maximize.md) — medium, filed 2026-09-29: fill the usable area with the bar visible, distinct from fullscreen; today no state exists and `set_maximized` does nothing
-- [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
-  — deliberately left out of milestone 19: design answered 2026-09-22
-  (`[[outputs]]` config shape, per-output scale enumeration, apply/test
-  follows config) and build-ready as a spec — still needs two-connector
-  hardware to verify against. Do not build blind.
+- [Per-output scale/mode configuration surface](./resolved/per-output-scale-mode-done.md)
+  — RESOLVED 2026-09-29: `[[outputs]]` entries by output name set each
+  output's scale (live on reload) and mode (startup and replug), proven on
+  the Asahi M2 Air's eDP-1 + DP-1 (`Asahi.md` Test 16). `apply`/`test` stay
+  refused.
+- [Per-output position, and a live mode change on reload](./core/output-position-and-live-mode.md)
+  — low, filed 2026-09-29: outputs still pack left to right, and a reload
+  refuses a changed `mode` pending a restart
 - [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./resolved/workspace-index-keybindings-done.md)
   — RESOLVED 2026-09-20: `Super+1`..`9` focuses and `Super+Shift+1`..`9`
   carries-and-follows (new `MoveWindowToWorkspaceIndex` core/IPC/config
@@ -820,8 +824,9 @@ scale/mode) into one hardware session.
   `MoveTo`" this entry used to carry is closed). [Reconnect
   restore](./resolved/output-reconnect-restore-done.md) resolved (PR #249);
   per-output render scheduling parked as not-planned (~1 pp optimisation).
-  Left: the [per-output scale/mode](./core/per-output-scale-mode.md) entry,
-  which stays last.
+  The [per-output scale/mode](./resolved/per-output-scale-mode-done.md)
+  entry landed 2026-09-29; left: [position and a live mode
+  change](./core/output-position-and-live-mode.md).
 - [XWayland: drops onto X windows do not land](./resolved/xwayland-pointer-focus-x11-done.md)
   — RESOLVED (filed by XWayland Phase 4, PR #246). The pointer focus has
   an X arm, and with the fork's proxy-remap flush (`6e6fe896`) drops work

@@ -582,3 +582,59 @@ fn a_surface_arriving_after_confirm_needs_no_second_confirmation() {
     );
     assert_whole_screen_is(&second, LOCK2_BGRA, "output 2 shows the late surface");
 }
+
+/// With the outputs at different scales (`[[outputs]]`), each lock surface
+/// is configured to its own output's logical size and told its own output's
+/// scale at admission -- before its first buffer, so the locker draws the
+/// right number of pixels on each screen from the first frame. The pointer
+/// is on output 1 throughout, so output 2's surface had only output 1's
+/// scale from `new_surface` until its admission corrected it.
+#[test]
+fn lock_surfaces_are_told_their_own_outputs_scale() {
+    let mut fixture = Harness::headless(appearance(), CANVAS);
+    fixture.state.output_entries = crate::compositor::output_config::OutputEntries::from_toml(
+        "[[outputs]]\nname = \"headless-2\"\nscale = 2.0\n",
+    );
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    fixture.connect();
+    fixture.run(Step::Lock);
+    fixture.run(Step::LockSurfaceOn {
+        lock: 0,
+        output: 0,
+        color: None,
+    });
+    fixture.run(Step::LockSurfaceOn {
+        lock: 0,
+        output: SECOND,
+        color: None,
+    });
+
+    assert_eq!(
+        configured_sizes(&fixture.report()),
+        vec![
+            Some((CANVAS as u32, CANVAS as u32)),
+            Some(((CANVAS / 2) as u32, (CANVAS / 2) as u32)),
+        ],
+        "each surface is configured to its own output's logical size"
+    );
+    let told: Vec<(String, Option<f64>)> = fixture
+        .state
+        .session_lock
+        .live_surfaces()
+        .iter()
+        .map(|(surface, output)| {
+            (
+                output.name(),
+                crate::compositor::output_scale::told_scale(surface),
+            )
+        })
+        .collect();
+    assert_eq!(
+        told,
+        [
+            ("headless".to_owned(), Some(1.0)),
+            ("headless-2".to_owned(), Some(2.0)),
+        ]
+    );
+}

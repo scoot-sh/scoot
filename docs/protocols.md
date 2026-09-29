@@ -1346,12 +1346,16 @@ protocol on top of it. This is the wlr protocol rather than an `ext-` one
 only because no `ext-` successor exists yet.
 
 **It is read-only. `apply` and `test` always answer `failed`.** scoot's
-outputs are fixed for the life of the process — created at startup, never
-moved, disabled or rescaled by a client — so there is nothing a
-configuration could change; a configuration that reported `succeeded` and
-changed nothing would give you a Display page whose buttons appear to work.
-`wlr-randr --output <name> --pos 100,100` prints `failed to apply
-configuration` and exits non-zero.
+outputs are never moved, disabled, rescaled or re-moded by a client; each
+output's scale and mode come from the config file
+([`[[outputs]]`](configuration.md#outputs)), whose scales a `scootctl
+reload` re-applies -- so there is nothing a configuration could change; a
+configuration that reported `succeeded` and changed nothing would give you
+a Display page whose buttons appear to work. `wlr-randr --output <name>
+--pos 100,100` (or `--scale 2`) prints `failed to apply configuration` and
+exits non-zero. The heads do report each output's own scale and mode, so a
+config file with per-output entries reads back correctly through
+`wlr-randr`.
 
 - **One `zwlr_output_head_v1` per output**, each carrying its own `name` (the
   same one `wl_output` reports — a DRM connector name like `HDMI-A-1` under
@@ -2169,7 +2173,10 @@ text field while an IME is active there.
 
 A HiDPI panel needs the compositor to tell clients to render at a scale
 greater than 1, or everything comes out physically tiny. `[output] scale`
-sets that scale; see [configuration.md](configuration.md#output). It is
+sets that scale for every output, and an
+[`[[outputs]]`](configuration.md#outputs) entry sets one output's own (a
+HiDPI laptop panel beside an ordinary monitor); see
+[configuration.md](configuration.md#output). Each output's scale is
 advertised three ways, matching what clients actually support:
 
 - **`wl_output.scale`** — the integer `ceil(scale)`. Every client that binds
@@ -2196,16 +2203,27 @@ advertised three ways, matching what clients actually support:
 
 Real limits rather than polish:
 
-- **Session-wide.** `scootctl reload` re-applies the scale live
-  (re-advertised on `wl_output`, re-sent to every live surface, geometry
-  recomputed), and there is no per-output setting.
-  Changing it per output means waiting on per-output configuration.
-- **X apps** (with `--xwayland`) draw at `ceil(scale)` and are scaled to
-  the output like a client rendering at the `wl_output.scale` integer --
-  see [XWayland](#x-windows-in-the-layout).
+- **Per output, one answer per surface.** `scootctl reload` re-applies
+  every output's scale live (re-advertised on `wl_output` where it moved,
+  re-sent to every live surface, geometry recomputed). A surface is told
+  one scale -- the scale of the output it belongs to, not of every output
+  it overlaps: a window the output it is placed on (its workspace's; a
+  floating window straddling two outputs follows that one), re-told when
+  it moves to another; its popups and subsurfaces the same; a layer or
+  lock surface its own output's; a cursor surface the pointer's output's,
+  re-told each time the client sets it; a surface with no role yet the
+  pointer's output's. The `wl_surface.enter` a window gets names that same
+  output (see [More than one output](configuration.md#more-than-one-output)),
+  so a client choosing its buffer scale from the outputs it has entered
+  reaches the same answer.
+- **X apps** (with `--xwayland`) draw at `ceil(scale)` -- the largest
+  among the outputs, when they differ, since X has one scale for every
+  screen -- and are scaled to each output like a client rendering at the
+  `wl_output.scale` integer -- see [XWayland](#x-windows-in-the-layout).
 - **`--nested` is scale-1 only.** The host compositor owns the scale of the
   window scoot is drawn inside, so a non-1.0 `scale` there would double-count
-  it; scoot logs a warning and uses `1.0`.
+  it; scoot logs a warning and uses `1.0`, and ignores every `[[outputs]]`
+  entry the same way.
 - **Screenshots are physical pixels; layout coordinates are logical** — see
   [ipc.md](ipc.md#rules-an-agent-needs).
 

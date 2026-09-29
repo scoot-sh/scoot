@@ -174,9 +174,10 @@ impl State {
     /// output its bounding box crosses, so a column scrolled part-way off
     /// its output (or a fullscreen window its column is focused away from)
     /// is announced on the neighbour too. Harmless while every output shares
-    /// one scale; once per-output scale lands a client picks its buffer
-    /// scale from the outputs it has entered, and would pick the
-    /// neighbour's. Nothing else in the compositor reads
+    /// one scale; with `[[outputs]]` scales that differ, a client that picks
+    /// its buffer scale from the outputs it has entered would pick the
+    /// neighbour's, disagreeing with the scale it is told (the placed
+    /// output's -- see `output_scale.rs`). Nothing else in the compositor reads
     /// `Space::outputs_for_element` -- drawing gathers its own elements and
     /// hit-testing filters by [`placed_on`] -- so `refresh`'s map is only
     /// ever this membership, and this is the one place that owns it.

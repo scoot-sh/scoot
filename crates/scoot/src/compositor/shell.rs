@@ -354,6 +354,14 @@ impl State {
         // told sends `output_leave` + `output_enter` for exactly the windows
         // that changed screens -- and nothing for the ones that didn't.
         self.refresh_wlr_output_membership(&arrangement);
+        // ...and the scale a window is told, from the same arrangement: a
+        // window that changed outputs is re-told its new output's scale (see
+        // `output_scale.rs`). Only while the outputs disagree on a scale --
+        // one `bool` read otherwise, which is every session without
+        // `[[outputs]]` entries.
+        if self.mixed_scales {
+            self.refresh_window_scales(&arrangement);
+        }
         // ...and its `fullscreen` state bit, from the same arrangement: every
         // way a window's fullscreen can change (its own request, a taskbar,
         // the bind, a move or focus change that ends it) ends in this call.

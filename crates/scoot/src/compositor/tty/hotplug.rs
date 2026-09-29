@@ -386,7 +386,9 @@ impl Tty {
                 return Vec::new();
             }
         };
-        let requested = self.requested_mode;
+        // The same requests startup used, per connector by name: a re-probe
+        // that dropped an `[[outputs]]` mode would re-modeset that monitor.
+        let requested = &self.modes;
         let driven: Vec<Option<gpu::Connected>> = self
             .heads
             .iter()

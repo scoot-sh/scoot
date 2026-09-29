@@ -296,7 +296,7 @@ above). Hermetic: `x_wire_limits_shrink_by_the_x_scale`,
 
 - The `Xft.dpi` X resource (see above): an app that reads only that takes
   `xrdb -merge` from the user.
-- Per-output scale ([`per-output-scale-mode`](../core/per-output-scale-mode.md))
+- Per-output scale ([`per-output-scale-mode`](per-output-scale-mode-done.md))
   would make this a per-screen problem X cannot express: one X server has
   one client scale.
 

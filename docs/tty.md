@@ -124,13 +124,17 @@ drm: driving this device path=/dev/dri/card2 connector=DP-1 crtc=crtc::Handle(68
 ```
 
 - **Layout.** Outputs sit side by side, left to right, each as wide as its
-  mode at the shared `[output] scale`: in the kernel's connector order at
+  mode at its own scale (`[output] scale`, or its `[[outputs]]` entry's): in the kernel's connector order at
   startup, and in the order they were added after that (a monitor plugged
   in later goes on the right; the others close the gap when one is
   removed).
   The first is the primary: the pointer starts there, and windows open on
-  whichever output the pointer is over. There is no per-output scale, mode or
-  position setting yet.
+  whichever output the pointer is over. Each monitor can have its own
+  scale and mode, set by connector name in
+  [`[[outputs]]`](configuration.md#outputs) -- an entry's `mode` beats
+  `--mode` for that connector, and is re-chosen the same way on a replug,
+  a VT switch back and every other re-probe -- but there is no position
+  setting yet.
 - **CRTCs.** Each connector is matched to a CRTC its encoders can reach,
   read from `possible_crtcs` rather than tried in order. That matters on SoC
   display controllers: Apple's DCP wires `eDP-1` to one CRTC and `DP-1` to

@@ -53,6 +53,7 @@ use smithay::reexports::drm::control::{
 };
 use smithay::reexports::rustix::fs::OFlags;
 
+use crate::compositor::output_config::ModeRequests;
 use crate::compositor::output_identity::{EdidIdentity, parse_edid};
 
 /// A device that has been opened through the session and proven to have a
@@ -371,7 +372,7 @@ pub fn first_usable<T>(
 pub fn open(
     session: &mut LibSeatSession,
     path: &Path,
-    requested: Option<(u16, u16)>,
+    requested: &ModeRequests,
 ) -> Result<OpenGpu, Rejection> {
     // No `OFlags::CLOEXEC`: the pinned Smithay's `LibSeatSession::open`
     // takes `_flags` and never reads it (`backend/session/libseat.rs` at the
@@ -408,7 +409,7 @@ pub fn open(
 
 /// Reads KMS state through a borrowed fd -- see this module's doc for why
 /// the check happens before anything takes ownership of it.
-fn probe(fd: BorrowedFd<'_>, requested: Option<(u16, u16)>) -> Result<Vec<Connected>, String> {
+fn probe(fd: BorrowedFd<'_>, requested: &ModeRequests) -> Result<Vec<Connected>, String> {
     let device = Probe(fd);
     // The wording stops at what the kernel actually said, and says nothing
     // about *why*: the errno varies with the cause (`ENOTSUP` from a driver
@@ -517,11 +518,12 @@ pub(super) enum Freshness {
 }
 
 /// Every `Connected` connector with at least one mode, in the kernel's own
-/// connector order, each with its mode: the one whose size is `requested`
-/// (`--mode WxH`) if that connector lists one, else its `PREFERRED`-flagged
-/// one if any, else its first. `--mode` applies to each connector
-/// independently -- a panel that does not offer the size keeps its own
-/// preferred mode while a monitor that does takes it.
+/// connector order, each with its mode: the one whose size `requested`
+/// names for that connector (its `[[outputs]]` entry's `mode`, else `--mode
+/// WxH`) if the connector lists one, else its `PREFERRED`-flagged one if
+/// any, else its first. The request applies to each connector independently
+/// -- a panel that does not offer the size keeps its own preferred mode
+/// while a monitor that does takes it.
 ///
 /// Generic over the device so the same search runs on a [`Probe`] at
 /// startup and on the live `DrmDevice` when a hotplug event asks what the
@@ -536,7 +538,7 @@ pub(super) enum Freshness {
 pub(super) fn find_all(
     device: &impl ControlDevice,
     resources: &ResourceHandles,
-    requested: Option<(u16, u16)>,
+    requested: &ModeRequests,
     freshness: Freshness,
 ) -> Vec<Connected> {
     search_all(resources.connectors().iter().copied(), |conn| {
@@ -577,7 +579,7 @@ pub(super) fn connector_mode(
     device: &impl ControlDevice,
     resources: &ResourceHandles,
     conn: connector::Handle,
-    requested: Option<(u16, u16)>,
+    requested: &ModeRequests,
     freshness: Freshness,
 ) -> Option<Connected> {
     let info = device
@@ -591,6 +593,9 @@ pub(super) fn connector_mode(
     // uses in sysfs (`/sys/class/drm/card0-HDMI-A-1`) and every
     // wlroots/Smithay compositor uses for `wl_output.name`.
     let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
+    // By name, so the same connector gets the same answer at startup and at
+    // every re-probe after it (see `ModeRequests`).
+    let requested = requested.for_output(&name);
     let requested_mode = requested.and_then(|size| modes.iter().find(|mode| mode.size() == size));
     if let (Some((width, height)), None, false) = (requested, requested_mode, modes.is_empty()) {
         // warn!, not debug!: the size on screen is about to disagree

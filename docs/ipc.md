@@ -47,7 +47,7 @@ compositor running in a VM.
 | `outputs` | Every output's name, rectangle, usable rectangle and scale. |
 | `windows` | Every window: id, app id, title, icon, output, workspace, adoption, focus, popup grab. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
-| `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale, appearance, keybindings, new autostart spawn entries) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
+| `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, appearance, keybindings, new autostart spawn entries; an entry's `mode` is refused as `outputs.<name>.mode`, pending a restart) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
 | `screenshot [--output ID] [--out FILE] [--no-cursor]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it always means the first output (id 1). The pointer is drawn in unless `--no-cursor` — see [The pointer in a screenshot](#the-pointer-in-a-screenshot). |
 | `pointer move X Y` | Move the pointer to logical coordinates. |
 | `pointer click X Y [left\|right\|middle]` | Move, then press and release. |
@@ -155,7 +155,7 @@ for its modifier only when no key on the layout can hold it.
 | `name` | `HDMI-A-1`, `eDP-1`, … under `--tty` — the DRM connector name; `headless`, `headless-2`, … otherwise. |
 | `rect` | The output's full rectangle, in logical pixels. "How big is the screen." |
 | `usable` | The full output minus whatever a bar reserved at its edges (layer-shell exclusive zones) — where windows actually go. "Where can a window be." |
-| `scale` | The output scale; `rect` and `usable` are logical, screenshots are physical. |
+| `scale` | This output's own scale -- outputs need not share one (see [`[[outputs]]`](configuration.md#outputs)); `rect` and `usable` are logical, screenshots are physical. |
 
 **`windows`**, one entry per window, in layout order:
 
@@ -338,7 +338,10 @@ to report, because locking dismisses any open one and refuses new ones.
 logical * scale`, rounded down where a rectangle's edge lands mid-pixel (the
 logical size is `ceil(physical / scale)`, so a full-output `logical * scale`
 can overshoot by under one pixel). `outputs` reports each output's `scale`
-for exactly this. X windows (`--xwayland`) follow the same rule: their
+for exactly this -- and it is per output: with [`[[outputs]]`](configuration.md#outputs)
+entries two screens can run at different scales, so convert a window's
+rectangle with the scale of the output the window is on (its `output`),
+never with the first output's. X windows (`--xwayland`) follow the same rule: their
 `rect` is logical and a click at a logical point lands on the X widget
 drawn there, whatever the scale -- the X server's own pixels (`ceil(scale)`
 per logical pixel, see [protocols.md](protocols.md#x-windows-in-the-layout))
