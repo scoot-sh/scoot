@@ -7,9 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 
 # Linux only, as scootbg: it never runs on a Mac, and does not build there
-# (`scootbg-mem` says so; the macOS CI job leaves it out). The Wayland crates, `rustix` and
-# `scootbg-mem` are already in the workspace for scootbg, chosen there by
-# measurement (docs/scootbg/backlog/resolved/dependencies-done.md);
+# (`scootbg-mem` says so; the macOS CI job leaves it out). The Wayland
+# crates, `rustix` and `scootbg-mem` are already in the workspace for
+# scootbg, chosen there by measurement (docs/scootbg/backlog/resolved/dependencies-done.md);
 # `ab_glyph` is scootbar's own, chosen in its record,
 # docs/scootbar/backlog/resolved/dependencies-done.md (§1).
 
