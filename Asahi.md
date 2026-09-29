@@ -2698,6 +2698,188 @@ DP-1 stayed on and was never forced. There was no `nh os switch`, no
 reboot, and no config change on the box. The only new files are the
 `~/fx/t15-*` scripts and outputs.
 
+## Test 16 — per-output scale and mode (`[[outputs]]`) on eDP-1 + DP-1
+
+Run 2026-09-29, 16:06–16:09 UTC, on the same Apple M2 (Mac14,2 / j413),
+NixOS 26.11.20260914.efe6f07, kernel 7.1.13 (fairydust), DP-1 (1920x1080
+preferred, 21 modes) and eDP-1 (2560x1600, 1 mode) both connected. This
+is the hardware gate `docs/backlog/core/per-output-scale-mode.md` was
+blocked on (now `docs/backlog/resolved/per-output-scale-mode-done.md`).
+
+**Build.** Branch `per-output-scale-mode` at `e4a2b668f`. The later
+commit that records this test touches only `Asahi.md` and `docs/`. It was built on the machine
+from an rsync of that tree with `cargo build --release -p scoot -p
+scootctl --features gpu-scanout`, into `~/scoot-pos-hw-target`:
+
+```
+b6d2e3059e6a56c72d50cbad0c16058784da00bf8b6daeaf9f0bab26a53aa5f2  release/scoot
+f8a3e36a6a94f46a5b7c3158c96181fc674c788f55bc8924f93faed783aeff69  release/scootctl
+```
+
+**Recipe.** `~/fx/t16.sh TAG CONFIG [full|control]` runs one session:
+`~/fx/vt-run.sh` on VT 2 with a private seatd, `scoot --tty --renderer
+gles` (the GPU tier), the Mesa env from `~/fx/mesa-env.sh`, and
+`RUST_LOG=info,scoot=debug`. The config is copied to the session's own
+directory, so reloads edit the copy and never `~/.config/scoot`. Clients
+are `foot -e sleep 900` under `WAYLAND_DEBUG=1`, started from ssh into
+the session. `~/fx/t15-state.sh` ran before and after each session.
+Raw output is in `~/fx/t16/{entries-r1,control-r1}.txt`; logs, traces,
+`outputs.json`, `wlr-randr.txt`, `wayland-info.txt` and every screenshot
+are in `~/fx/t16/<tag>/`.
+
+The config for `entries-r1`:
+
+```toml
+[output]
+scale = 1.5
+
+[[outputs]]
+name = "eDP-1"
+scale = 2.0
+
+[[outputs]]
+name = "DP-1"
+scale = 1.0
+mode = "1280x720"
+```
+
+### Leg 1 — each output at its own scale and mode
+
+```
+drm: driving this device path=/dev/dri/card2 connector=eDP-1 crtc=crtc::Handle(50) width=2560 height=1600 scanout="gpu"
+drm: driving this device path=/dev/dri/card2 connector=DP-1 crtc=crtc::Handle(68) width=1280 height=720 scanout="gpu"
+```
+
+With no `--mode`, the entry picked DP-1's 1280x720. `scootctl outputs`
+reported eDP-1 as `x 0, 1280x800, scale 2.0` and DP-1 as `x 1280,
+1280x720, scale 1.0`. `wlr-randr` agreed: eDP-1 2560x1600 at position
+0,0 with `Scale: 2.000000`, and DP-1 1280x720 at 1280,0 with `Scale:
+1.000000`. So did `wayland-info`: `wl_output` `scale: 2` for eDP-1 and
+`scale: 1` for DP-1, and `xdg_output` logical 1280x800 at 0,0 and
+1280x720 at 1280,0. **Pass.**
+
+### Leg 2 — a client is told each output's scale, and re-told when it moves
+
+With the pointer at the primary's centre, the first foot opened on
+eDP-1 and was told:
+
+```
+wl_surface#3.preferred_buffer_scale(2)
+wp_fractional_scale_v1#33.preferred_scale(240)
+```
+
+Then `scootctl pointer move 1920 360` put the pointer on DP-1, and a
+second foot opened there (`"output": 2`). It was told
+`preferred_scale(120)` only, since 1 is the integer default and nothing
+is sent for it. Then `focus-window-id 1` + `move-window-to-output 2`,
+and back again:
+
+```
+[16:06:58.129168] wp_fractional_scale_v1#33.preferred_scale(120)   # carried to DP-1
+[16:06:58.130956] wl_surface#3.preferred_buffer_scale(1)
+[16:07:00.156847] wp_fractional_scale_v1#33.preferred_scale(240)   # and back to eDP-1
+[16:07:00.158491] wl_surface#3.preferred_buffer_scale(2)
+```
+
+Screenshots, read by eye: `a-out1.png` (2560x1600) shows foot 1 at 2x on
+eDP-1: a half-width column of 1280 physical pixels and a 2x text cursor.
+`b-out2.png` (1280x720) shows both foots on DP-1 at 1x, each with the
+same 1x text cursor, so the carried window re-rendered at its new
+scale. **Pass.**
+
+### Leg 3 — a VT switch keeps the entry's mode
+
+`sudo chvt 1; sleep 2; sudo chvt 2`:
+
+```
+session paused; drm master released
+session activated
+drm: hotplug changed nothing this head is driving connector=eDP-1
+drm: hotplug changed nothing this head is driving connector=DP-1
+Setting new mode: "2560x1600"
+Setting new mode: "1280x720"
+```
+
+The re-probe on reactivation planned `Keep` for both heads. Nothing
+re-modeset DP-1 back to its preferred 1920x1080. The two `Setting new
+mode` lines are the usual full modeset on reactivation, each at the mode
+the head already had. The debugfs `dri/2/state` read afterwards shows
+`crtc[68] mode: "1280x720"` and `crtc[50] mode: "2560x1600"`, and
+`outputs` is unchanged. **Pass.** This is the `Tty::modes` path: the
+`--tty` re-probe resolves each connector's requested mode by name.
+
+### Leg 4 — reload: one output rescaled live, a mode change refused
+
+The copy's DP-1 `scale` was edited from 1.0 to 1.5, then `scootctl
+reload`:
+
+```
+{"type":"reloaded","applied":["outputs.DP-1.scale"],"refused":[]}
+```
+
+`outputs` now showed DP-1 at `x 1280, 854x480, scale 1.5`, and eDP-1
+unchanged at 1280x800, scale 2.0. Foot 2, on DP-1, was re-told
+`preferred_scale(180)` and `preferred_buffer_scale(2)`. Its usable width
+read 853, one short of the 854 `rect`. That happens on `main` too, with
+a single default-scale reload, so it is filed as
+[`usable-area-shrinks-after-rescale`](docs/backlog/core/usable-area-shrinks-after-rescale.md)
+and not counted here. Then DP-1's `mode` was edited to 1920x1080:
+
+```
+{"type":"reloaded","applied":[],"refused":["outputs.DP-1.mode (takes effect on restart: a reload does not modeset a running output; kept the mode the session started with)"]}
+```
+
+DP-1 stayed at 1280x720. **Pass.**
+
+### Leg 5 — `wlr-output-management` stays read-only
+
+`wlr-randr --output DP-1 --scale 2` printed `failed to apply
+configuration`, rc=1, and `outputs` was unchanged. **Pass.**
+
+### Leg 6 — the lock covers both screens, each at its own scale
+
+`swaylock -c 7a1fa0`:
+
+```
+locking the session
+session lock confirmed: every output's blanked frame reached scanout
+```
+
+`lock-out1.png` (2560x1600) and `lock-out2.png` (1280x720) are both
+solid swaylock purple, read by eye. `swaylock.log` has no error and no
+`dimensions_mismatch`, so each surface's configured size (eDP-1 1280x800
+logical at 2, DP-1 854x480 at 1.5 by then) matched the buffer swaylock
+drew. **Pass.**
+
+### Control — no `[[outputs]]` entries
+
+The same recipe with `~/fx/test.toml` (`[output] scale = 1.5` only),
+session `control-r1`. This is Test 11/12's layout exactly: eDP-1 at
+`1707x1067, scale 1.5` and DP-1 at `x 1707, 1280x720, scale 1.5` from
+its preferred 1920x1080. Both `wl_output` `scale: 2`. Both foots were
+told `preferred_scale(180)` / `preferred_buffer_scale(2)`. Carrying one
+across and back sent **nothing** more, which is the gated per-window
+refresh never running when every output agrees. **Pass.**
+
+### State left behind
+
+`t15-state.sh` after both sessions: `fgconsole=1`, `/run/seatd.sock`
+gone, no scoot/seatd/mpv/niri/ydotoold, DP-1 `connected enabled
+modes=21`, eDP-1 `connected enabled modes=1`. `ERROR` lines: 0 in both
+logs. DP-1 stayed on the whole time. No `force` override was written,
+and there was no reboot and no `nh os switch`. Brightness read 107
+before and was not touched. `swaylock` was realised back into the store
+with `nix-store -r` of the path `lock-live.sh` names; no system change.
+New files are `~/fx/t16*`, `~/scoot-pos*` and the `~/scoot-pos*-target`
+build directories.
+
+**Not run here:** a hotplug add picking up an entry. That needs a
+replug, and the force rig is off-limits for this run. The headless suite
+pins it (`a_window_moved_onto_a_hotplugged_output_hears_its_scale`,
+`a_reload_of_an_absent_outputs_entry_stores_it_and_moves_nothing`), and
+`create_output` is the one path for startup, `--outputs N` and hotplug
+alike. The pixman (dumb) tier was also not run: the GPU tier only.
+
 ## Keys for the 2026-09-25 runs
 
 Built on the machine itself (native aarch64) from `main` at
