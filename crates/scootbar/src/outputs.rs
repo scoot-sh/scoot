@@ -39,7 +39,9 @@
 //! and only then. A `configure` that changes nothing still needs a commit,
 //! so the ack takes effect ([`Plan::Commit`]). Many events in one read (a scale change
 //! arrives as several) are one plan, since the loop asks after dispatching
-//! them all.
+//! them all. A draw that failed is tried again on later turns, a few
+//! consecutive times, then not again until the frame changes
+//! ([`Output::draw_failed`]).
 //!
 //! ## Ids
 //!
@@ -204,6 +206,22 @@ pub enum Plan {
     Draw(Frame),
 }
 
+/// Consecutive failed draws at one frame that each earn another try before
+/// the output goes quiet until the frame changes: mirrors scoot's own
+/// present-skip retry (`crates/scoot/src/compositor/tty/present_retry.rs`),
+/// whose transient case is the same (a refused buffer under momentary
+/// pressure, usually cleared by the next tick). Three retries cover a
+/// couple of still-pressured turns with one to spare; anything drawn again
+/// resets the streak.
+const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
+/// A frame a draw failed at, and how many consecutive draws failed there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Failed {
+    frame: Frame,
+    consecutive: u32,
+}
+
 /// One output, as scootbar sees it.
 #[derive(Debug)]
 pub struct Output {
@@ -228,10 +246,12 @@ pub struct Output {
     /// What the live surface was last committed with; `None` while nothing
     /// is attached. Gone with the surface.
     shown: Option<Frame>,
-    /// A draw at this frame failed (said once on stderr); not tried again
-    /// until the frame changes, so a failure (a buffer too large for
-    /// `wl_shm`, out of memory) cannot loop.
-    failed: Option<Frame>,
+    /// Draws at this frame that failed, and how many in a row: said once
+    /// on stderr per streak, retried on later turns up to
+    /// [`MAX_CONSECUTIVE_FAILURES`], then not again until the frame
+    /// changes, so a persistent failure (a buffer too large for `wl_shm`,
+    /// out of memory) cannot loop.
+    failed: Option<Failed>,
 }
 
 impl Output {
@@ -414,7 +434,7 @@ impl Output {
             size,
             scale: self.scale(),
         };
-        if (self.shown != Some(want) || stale) && self.failed != Some(want) {
+        if (self.shown != Some(want) || stale) && !self.given_up(want) {
             return Plan::Draw(want);
         }
         // The same pixels, or a draw that failed at this frame: an acked
@@ -427,7 +447,8 @@ impl Output {
         }
     }
 
-    /// The surface was committed with `frame` attached.
+    /// The surface was committed with `frame` attached. A shown draw ends
+    /// any failure streak.
     pub fn drew(&mut self, frame: Frame) {
         if self.surface.is_live() {
             self.shown = Some(frame);
@@ -436,14 +457,29 @@ impl Output {
         }
     }
 
+    /// Whether draws at `want` gave up: failed there past
+    /// [`MAX_CONSECUTIVE_FAILURES`], so this frame is not tried again
+    /// until it changes.
+    fn given_up(&self, want: Frame) -> bool {
+        matches!(self.failed, Some(failed)
+            if failed.frame == want && failed.consecutive > MAX_CONSECUTIVE_FAILURES)
+    }
+
     /// The surface was committed as it was ([`Plan::Commit`]).
     pub fn committed(&mut self) {
         self.ack_uncommitted = false;
     }
 
-    /// Drawing `frame` failed; see the field.
-    pub fn draw_failed(&mut self, frame: Frame) {
-        self.failed = Some(frame);
+    /// Drawing `frame` failed; see the field. Returns whether this starts
+    /// a new streak: only then is it said on stderr, so retries stay
+    /// quiet. A failure at another frame starts its own streak.
+    pub fn draw_failed(&mut self, frame: Frame) -> bool {
+        let consecutive = match self.failed {
+            Some(failed) if failed.frame == frame => failed.consecutive.saturating_add(1),
+            _ => 1,
+        };
+        self.failed = Some(Failed { frame, consecutive });
+        consecutive == 1
     }
 }
 

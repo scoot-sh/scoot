@@ -277,9 +277,21 @@ impl Tz {
     }
 
     /// A zone from a POSIX TZ string alone (`TZ=EST5EDT,M3.2.0,M11.1.0`),
-    /// as glibc reads `TZ` when it names no zone file.
+    /// as glibc reads `TZ` when it names no zone file. A string naming
+    /// summer time but no rule (`TZ=EST5EDT`) takes glibc's default US
+    /// rules (March's second Sunday to November's first, at 02:00), as
+    /// `date` shows with no zoneinfo installed; anything else unparsable
+    /// is refused.
     pub fn posix(text: &[u8]) -> Result<Self, Error> {
-        let rule = parse_rule(text)?;
+        let rule = parse_rule(text).or_else(|error| {
+            if error == "summer time without a rule" {
+                let mut defaulted = text.to_vec();
+                defaulted.extend_from_slice(b",M3.2.0,M11.1.0");
+                parse_rule(&defaulted)
+            } else {
+                Err(error)
+            }
+        })?;
         Ok(Self {
             times: Vec::new(),
             index: Vec::new(),
@@ -387,8 +399,10 @@ fn parse_rule(text: &[u8]) -> Result<Rule, Error> {
         dst: true,
         abbr: Abbr::new(dst_name),
     };
-    // Summer time with no rule: zic never writes one, and POSIX leaves the
-    // dates to the implementation; refused rather than guessed.
+    // Summer time with no rule: zic never writes one in a footer, and
+    // POSIX leaves the dates to the implementation, so a footer is refused
+    // rather than guessed; [`Tz::posix`] retries those with glibc's
+    // default US rules, which is what `TZ` without a zone file means.
     p = p.strip_prefix(b",").ok_or("summer time without a rule")?;
     let (start, start_time) = date_time(&mut p)?;
     p = p.strip_prefix(b",").ok_or("missing end rule")?;

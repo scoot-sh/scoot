@@ -56,8 +56,9 @@ mod tests;
 /// Buffers per output: one on screen, one to draw the next frame in.
 pub const SLOTS: usize = 2;
 
-/// Why a draw failed. Said once on stderr; the model does not retry the
-/// same frame.
+/// Why a draw failed. Said once on stderr per streak; the model retries
+/// the same frame a few times, then waits for a new one
+/// ([`crate::outputs::Output::draw_failed`]).
 #[derive(Debug)]
 pub enum DrawError {
     /// The buffer's size overflows (a compositor asking for an absurd
