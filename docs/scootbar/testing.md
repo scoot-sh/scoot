@@ -242,9 +242,9 @@ updates. Competitors come from the pinned nixpkgs.
 largest of 5%, the two sides' combined spread, and the unit's floor):
 `report` lists every row on which a competitor beats scootbar (rule 2),
 and `compare` every row on which scootbar is worse than an earlier run
-(rule 1). The first run, M1's, is in
-[testing-and-ci's record](backlog/resolved/testing-and-ci-done.md#evidence);
-later milestones compare against it.
+(rule 1). Each milestone's run is kept in [`bench/`](bench/README.md),
+never overwritten; M1's, `bench/m1-clock`, is the baseline the next one
+compares against, and its table is in the [README](README.md#m1-like-for-like-by-the-benchmark-script).
 
 ## Not covered
 
