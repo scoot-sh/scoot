@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "pointer-and-interactions"
+milestone: "M4"
 ---
 
 # `exec`, `push` and `button` modules
@@ -26,6 +27,17 @@ The escape hatches that keep the built-in module set small.
 scootbar's own JSON shape, deliberately not Waybar's; document it and version
 it. Both get the standard interaction keys. A module with neither output nor
 push yet shows nothing (or a configured placeholder), not an error.
+
+## Streaming, not polling
+
+Interval-polled scripts are a leading source of leaks and CPU burn in other bars
+(Waybar #5303, #4987). The design answer is the stdout stream above: a script that
+can wait for an event prints when it has one. Many scripts cannot, so decide whether
+to offer `interval = N` (the bar re-runs the command every N seconds) as a
+convenience: if yes, **off by default, a documented floor (no sub-second), one
+shared timer, one run in flight per module, and the cost said plainly in the docs**;
+if no, say so and show the recipe (`while sleep N; do ...; done`), which moves the
+choice, and the cost, into the user's script.
 
 ## Limits and safety
 

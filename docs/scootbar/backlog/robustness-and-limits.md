@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "skeleton-layer-surface"
+milestone: "ongoing"
 ---
 
 # Robustness and resource limits
@@ -29,6 +30,26 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
 - **Module count and layout**: a configured list has a maximum; a layout wider
   than the output clips deliberately, not by overflow (saturating arithmetic on
   every client-controlled size).
+
+## Where other bars actually break
+
+From the research (2026-09-29; the sources are GitHub issues, and the report
+notes it could not reach Reddit or Hacker News), the failures that recur are
+**not** one-frame costs but lifecycle ones. Each gets a named test:
+
+- **Suspend/resume and DPMS wake**: infinite loops and 100% CPU after resume,
+  segfaults on wake (Waybar #4393, #1019). Test: suspend cycle with a dead fd in
+  the poll set; assert idle CPU returns to zero.
+- **Output hotplug**: crashes on HDMI disconnect, modules that stop updating
+  after hotplug (Waybar #2808, #4823). Test: repeated add/remove with the module
+  set running; assert every module still updates.
+- **Memory growth over days**: leaks with only two modules enabled (Waybar #5186),
+  runaway growth in a privacy module (#3981). Test: a multi-day soak in the
+  [ratchet](lightest.md), and no per-event allocation on the hot path.
+- **Busy loops from polled scripts** (Waybar #5303, #4987): see the streaming
+  rule in [exec-push-button-modules](exec-push-button-modules.md).
+- **Tray failures** (the largest single group): see [tray](tray.md).
+- **Zero outputs** and a compositor restart mid-session.
 
 ## Failure of the world around it
 

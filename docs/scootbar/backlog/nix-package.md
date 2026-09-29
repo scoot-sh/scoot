@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "high"
 blocked: "skeleton-layer-surface"
+milestone: "M1"
 ---
 
 # Nix package

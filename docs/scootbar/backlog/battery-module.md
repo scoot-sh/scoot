@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "module-api-and-clock, icons-and-fonts"
+milestone: "M5"
 ---
 
 # Battery module

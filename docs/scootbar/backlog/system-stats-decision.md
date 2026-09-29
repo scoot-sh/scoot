@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: null
+milestone: "ongoing"
 ---
 
 # Decision: no built-in system-stats modules in v1

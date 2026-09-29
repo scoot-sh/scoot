@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "config-cli-and-reload"
+milestone: "ongoing"
 ---
 
 # Seamless in scoot

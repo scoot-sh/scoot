@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "module-api-and-clock"
+milestone: "M3"
 ---
 
 # Appearance

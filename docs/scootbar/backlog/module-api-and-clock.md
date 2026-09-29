@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "high"
 blocked: "skeleton-layer-surface"
+milestone: "M1"
 ---
 
 # Module API, layout, theme tokens and the clock
@@ -44,6 +45,13 @@ Absolute realtime timerfd on the next minute (second, if configured) with
 cancel-on-clock-set, so suspend, NTP steps and DST are handled without
 polling; timezone from `/etc/localtime`. Format string from config, with a
 small documented set of specifiers.
+
+## First frame first
+
+Paint the bar and the clock before anything else is initialized. A module whose
+`init` is slow (a bus connection, a scan) must never block the loop or delay the
+first frame; it joins when ready. Slow startup is a recurring bar complaint
+(Waybar #1093), and a bar that shows up late is not the lightest one.
 
 ## Tests
 

@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "extract-scootui"
+milestone: "M7"
 ---
 
 # `scootlaunch`

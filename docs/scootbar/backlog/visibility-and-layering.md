@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "skeleton-layer-surface"
+milestone: "M3"
 ---
 
 # Visibility and layering

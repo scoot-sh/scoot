@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "module-api-and-clock, pointer-and-interactions; writing needs dbus-client or a udev rule"
+milestone: "M5"
 ---
 
 # Brightness module

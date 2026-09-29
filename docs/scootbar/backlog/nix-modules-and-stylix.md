@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "nix-package, config-cli-and-reload"
+milestone: "M3"
 ---
 
 # Nix modules with Stylix defaults
@@ -23,6 +24,16 @@ Filed 2026-09-29. Serves **daily-drive**.
   the semantic color tokens from its base16 colors and the font from its font
   (a file path, since scootbar does no font discovery); otherwise fall back to
   the plain defaults. Explicit user values always win.
+- **Precedence, written down and tested**: an explicit user value beats Stylix,
+  which beats the module's plain defaults. The commonest Nix complaint about other
+  bars is a Stylix default that silently overrides the user's own styling (Waybar
+  #3748, and the documented `mkAfter` workaround); scootbar has tokens, not CSS, so
+  the rule is simple, but it must hold and be pinned by an eval test.
+- **Freeform `settings`** rendered to the config file, so a new option never needs
+  a module change first; typed options only for the few that need them.
+- Fonts and icon files the bar needs must be reachable from its environment
+  (a path, not an ambient font search), and the user unit orders after the
+  graphical session and before tray-hosting apps where it can.
 - A native `stylix.targets.scootbar` is an upstream change and stays the
   maintainer's decision (`CLAUDE.md`); nothing here opens one.
 - Checks: the module evaluates on both systems, the rendered file parses with

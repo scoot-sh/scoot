@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "dbus-client"
+milestone: "M6"
 ---
 
 # Media module

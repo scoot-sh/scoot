@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "module-api-and-clock, pointer-and-interactions"
+milestone: "ongoing"
 ---
 
 # Data-source modules
@@ -17,12 +18,13 @@ Filed 2026-09-29; split into one entry per module 2026-09-29. Serves
 - [network](network-module.md)
 - [brightness](brightness-module.md)
 - [media (MPRIS)](media-module.md)
+- [bluetooth](bluetooth-module.md)
 - [system tray](tray.md)
 
 **Not built in, by decision**: CPU, memory, temperature and disk
-([system-stats-decision](system-stats-decision.md)). **Not yet filed**: keyboard
-layout, which no standard protocol carries; it needs a scoot IPC event first
-(file it in the compositor's backlog when wanted).
+([system-stats-decision](system-stats-decision.md)). **Keyboard layout**, the most
+requested module of all, is blocked on scoot: no standard protocol carries it, so
+it needs [an IPC event](../../backlog/ipc/keyboard-layout-event.md) first.
 
 ## Rules for every module
 

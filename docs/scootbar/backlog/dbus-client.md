@@ -3,7 +3,8 @@ title: "A shared D-Bus client for the shell"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "the D-Bus spike in baselines-and-spikes decides zbus vs a hand-rolled client"
+blocked: "its own spike, first thing in this entry: zbus vs a hand-rolled client"
+milestone: "M6"
 ---
 
 # A shared D-Bus client
@@ -15,6 +16,14 @@ Notifications (`org.freedesktop.Notifications`), the system tray
 (StatusNotifierItem), NetworkManager or iwd, logind and UPower all need D-Bus.
 Building it once, in its own small crate, is cheaper than each consumer
 pulling `zbus` and its async runtime.
+
+## The spike, first
+
+`zbus`, libdbus bindings and a hand-rolled minimal client (auth EXTERNAL,
+`Hello`, `RequestName`, method calls, signal match rules). Measure a process that
+owns a name and receives a signal: idle RSS, binary size, wakeups. This spike moved
+here from [baselines-and-spikes](baselines-and-spikes.md) so it is decided when the
+first consumer needs it, not before.
 
 ## What to do
 

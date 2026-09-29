@@ -10,6 +10,7 @@ Every entry is one markdown file with a small frontmatter block:
     priority: "low"       # high | medium | low | research | null
     blocked: null         # or a string saying what it waits on
     resolved: "2026-09-29"  # added by `resolve`; absent on open (and older) entries
+    milestone: "M2"         # optional; which shippable step it belongs to
     ---
 
 Stdlib only. Run `scripts/backlog --help`. Edits change only the frontmatter
@@ -49,7 +50,7 @@ INDEXES = {  # area -> the README that must link each of its open entries
 STATUSES = ("open", "research", "resolved")
 PRIORITIES = ("high", "medium", "low", "research")
 KEYS = ("title", "status", "area", "priority", "blocked")  # required
-OPTIONAL_KEYS = ("resolved",)  # a YYYY-MM-DD, stamped when the entry is resolved
+OPTIONAL_KEYS = ("resolved", "milestone")  # resolved: YYYY-MM-DD stamped on resolve; milestone: e.g. "M2", "ongoing"
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}$")
 
 
@@ -169,6 +170,8 @@ def cmd_list(a):
             continue
         if a.unblocked and e.get("blocked"):
             continue
+        if a.milestone and e.get("milestone") != a.milestone:
+            continue
         if a.grep and not re.search(a.grep, e.text, re.I):
             continue
         rows.append(e)
@@ -180,7 +183,8 @@ def cmd_list(a):
         title = (e.get("title") or "").strip()
         if len(title) > 70:
             title = title[:69] + "…"
-        flag = " [blocked]" if e.get("blocked") else ""
+        flag = (" [blocked]" if e.get("blocked") else "") + \
+               (f" ({e.get('milestone')})" if e.get("milestone") else "")
         if e.get("status") == "resolved":
             d, src = resolved_date(e, git_dates)
             when = f"{d}{'' if src == 'stamped' else ' (git)'}" if d else "date unknown"
@@ -231,6 +235,8 @@ def set_fields(e, updates):
 def validate(key, value):
     if key not in KEYS + OPTIONAL_KEYS:
         sys.exit(f"backlog: unknown field {key!r} (fields: {', '.join(KEYS + OPTIONAL_KEYS)})")
+    if key == "milestone" and not value.strip():
+        sys.exit("backlog: milestone must not be empty (use null to clear)")
     if key == "resolved" and not DATE_RE.match(value):
         sys.exit("backlog: resolved must be a date, YYYY-MM-DD")
     if key == "status" and value not in STATUSES:
@@ -373,6 +379,7 @@ def main():
     p.add_argument("--priority", choices=PRIORITIES)
     p.add_argument("--blocked", action="store_true", help="only entries waiting on something")
     p.add_argument("--unblocked", action="store_true", help="only entries nothing waits on")
+    p.add_argument("--milestone", metavar="M", help="only entries in this milestone (e.g. M2)")
     p.add_argument("--grep", metavar="REGEX", help="match anywhere in the file")
     p.set_defaults(fn=cmd_list)
 

@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "dbus-client and extract-scootui"
+milestone: "M7"
 ---
 
 # `scootnotify`

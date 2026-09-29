@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "data-source-modules (volume and network give it a real consumer)"
+milestone: "M6"
 ---
 
 # Popups

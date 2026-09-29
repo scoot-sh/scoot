@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "module-api-and-clock, pointer-and-interactions, icons-and-fonts"
+milestone: "M5"
 ---
 
 # Network module

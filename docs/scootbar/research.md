@@ -1,0 +1,65 @@
+# What people want from a status bar: research notes (2026-09-29)
+
+Gathered by a research agent from public GitHub issues and a few web searches, to
+inform [scootbar's backlog](backlog/README.md). **Treat it as leads, not gospel**: the
+agent could not reach Reddit, Hacker News or lobste.rs, saw Nix Discourse only as
+titles, and found no measured RAM or wakeup benchmarks for any bar. Issue numbers and
+counts are as it reported them on 2026-09-29 and were not independently re-checked;
+verify one before citing it. The backlog entries that lean on this say so.
+
+
+Method: GitHub search (comment/reaction counts via API, counts as of 2026-09-29), targeted page fetches, web search. NOT reachable / not verified: Reddit, HN, lobste.rs, Nix Discourse threads beyond titles, any measured RAM/wakeup benchmarks. Anything from those is marked unverified. Counts are GitHub "comments" and reactions.
+
+## 1. Ranked complaints/needs
+
+1. **Workspace module fragility and compositor-specific behavior** (compositor-specific / config). Waybar's workspace modules are its largest bug cluster.
+   - Evidence: Alexays/Waybar #2271 "Hyprland/workspaces improvements" (83 comments), #2475 "hyprland/workspaces do not work" (57), #2557 window-rewrite issues (39), #5198 buttons unclickable on Hyprland >= 0.55 with traditional config (20), #5147 (15), #4592 persistent workspaces not shown (16), #762 taskbar all_workspaces (29, open). Search returned 152 workspace-related issues.
+   - Confidence: high.
+   - Implication: bind to ext-workspace-v1 only (compositor-neutral) so compositor version bumps don't break it; make it the most-tested module.
+2. **Persistent/fixed workspaces** (missing feature). #1629 "Persistent workspaces": 44 comments, 47 heart reactions, the most-reacted feature request in Waybar's set I sampled. Quote: current behavior "just hurts ricing and usability on anything other than sway". Confidence: high. Implication: show a configured set of workspaces even when empty, per-output; needs a protocol-independent config (ext-workspace only lists existing workspaces, so the bar must synthesize placeholders; unverified how compositors expose empty ones).
+3. **Tray / StatusNotifier unreliability** (tray). Very large issue cluster, 144 tray-matching issues.
+   - Evidence: #21 libappindicator tray (58 comments), #3468 tray vanishes after uptime, "No such object path '/StatusNotifierWatcher'" (22; fixed via PR #5093 per issue page), #3040 tray vanishing randomly (14), #3616 icons gone after 0.11.0, `std::bad_cast` on DBus proxy, #4261 "Tray crashes waybar now", #1233 icons too big (11), #1175 wrong size on fractionally scaled output (9), #4028 udiskie icon missing while nwg-panel shows it (11). Users report ordering problems (app starts before bar) in #2197/#3597-type issues.
+   - Confidence: high.
+   - Implication: own the StatusNotifierWatcher (or re-register/reconnect robustly when the name owner changes); handle apps that started first; never let a bad item crash the bar; support IconPixmap and icon theme paths; defer tray to after clock/workspaces but design the DBus layer now.
+4. **Memory growth / leaks** (performance/memory). Evidence: #5186 "possible memory leak with minimal Hyprland-only config", growth graph, 2 modules, Waybar 0.15.0 (open, created 2026-07-06, PR #5342 linked); #3981 privacy module leak (issue text says up to 20 GB); #4987 mpris interval 0 leak; eww #1330 "Slowly filling ram up" (12, open), eww #794 (11, closed). Third-party: coffebar/waybar-module-pacman-updates #4. Confidence: high that leaks recur; low on actual idle RSS numbers (none verified). Implication: long-run soak test (RSS over days) in CI; avoid per-event allocation; no GObject/GTK.
+5. **CPU burn / busy loops / polling** (performance). #846 CPU grows ~0.04%/min to 100% of a core (23 comments, 8 +1); #1464 "Freezing at 100% CPU after some time" (20, 8 +1); #669 CPU when battery animation active (10); #4393 infinite loop 100% CPU after resume from suspend (open); #5303 high CPU with custom module (open); #1138 tray module CPU. Confidence: high. Implication: the "no polling" goal has real demand. Test suspend/resume and lost-connection paths explicitly (a poll loop that spins on a dead fd is the classic bug). Animations must be off by default or damage-limited.
+6. **Multi-monitor / hotplug crashes and stale state** (multi-monitor). #227, #120, #1768, #1783, #1019 (18 comments, DPMS wake segfault near gtk_layer_set_monitor), #2750, #2808 (HDMI disconnect), #1928 (wireplumber module crash with multiple displays); recent #4823 (Feb 2026) modules stop updating after hotplug ("g_bus_connection_close_sync failed"). Also user reports of KVM/temporary-headless crashes (from search summary). Confidence: high. Implication: treat output add/remove/zero-outputs as first-class; per-output surface lifecycle independent of shared module state; shared data sources decoupled from surfaces; per-monitor bar config (ironbar #1184, #1343 both requested this).
+7. **Config/UX: styling and flexibility** (config/UX). Waybar #2989 hover for all modules (34 reactions), #1351 "ignore GTK theme" (12 +1), #1282 progress bars (open), #4167 scriptable format (open), #3178 modifier on mouse bindings, #2508 popovers/folding; ironbar #1434 css classes for muted/disabled, #1435 hover-reveal groups. Confidence: medium (issue titles, not read in depth). Implication: expose state as classes/attributes on every module; hover/click/scroll/popup actions available uniformly; do not inherit the GTK theme by default.
+8. **Icons and fonts** (theming). Waybar #2192, #131, #4343 (icon font glyphs misrendered or spacing off), ironbar #51 symbolic icons from the system theme. Yambar has no images/icons, icon fonts only (secondary source: search summary of Codeberg/GitHub README). Confidence: medium. Implication: reliable glyph fallback and Nerd Font handling; icon theme lookup is unavoidable for tray and window icons; ship sane default that needs no icon font.
+9. **HiDPI / fractional scale** (HiDPI). #1175 tray icons wrong size on fractional output (9), #1212 (4), #1077 blurry tray icons (search hit; count not read). Confidence: medium. Implication: wp-fractional-scale-v1 + wp-viewporter, render at buffer scale, request icons at pixel-exact size; scoot has its own renderer path so verify on real fractional scales.
+10. **Missing/incomplete modules** (missing module). #144 ALSA support (17 +1, open since 2018), #66 keyboard layout (44 comments, 16 +1), #688 fuller bluetooth module (15 +1), #746 per-core CPU (5), #247 CPU % sum vs average (open, 11 +1), #2178 indexed charging icons, #2233 scrolling text, ironbar #245 calendar with events. Confidence: high on existence, medium on ranking. See section 2.
+11. **Slow startup / startup ordering** (performance/stability). #1093 "Waybar takes a long time to start" (13); tray-before-bar ordering (see 3). Confidence: medium. Implication: render the first frame (clock + workspaces) before any slow module connects; modules async and independently failing.
+12. **Layer-shell/compositor wire-format churn** (compositor-specific). Hyprland 0.55 broke Waybar's workspace clicks (#5198, #5147). Waybar has per-compositor modules (hyprland/*, sway/*, river, wlr/*), and requests like ironbar #544 river tag support, Waybar #1430 hikari. Confidence: medium. Implication: standard protocols only (ext-workspace, foreign-toplevel, layer-shell) is a differentiator; document exactly which protocol versions are needed.
+13. **Nix/Stylix integration friction** (packaging/Nix). See section 4. Confidence: medium.
+14. **Maintenance/bus-factor of lightweight bars** (other). Yambar's README now says "This project is not developed anymore, and this repository will be archived in a near future"; the maintainer cites lack of time/motivation and technical difficulty from the X11-first design. Confidence: high (fetched). Implication: the lightweight niche is currently under-served; keep code small enough for one maintainer.
+15. **Third-party custom-script modules as the leak/CPU source** (performance). Waybar #5303, coffebar pacman-updates #4, #4987. Many "modules" are exec scripts polled on an interval. Confidence: medium. Implication: offer an event-driven `exec`/stream protocol (lines on stdout update the module) so scripts don't poll at all.
+
+## 2. Most-requested modules and event vs poll
+Ranked by evidence above plus general expectation (unverified beyond issues): workspaces, clock/calendar, window title, tray, volume (pulse/pipewire/ALSA #144), battery, network/WiFi, bluetooth (#688), keyboard layout (#66), CPU/memory/temperature, media/MPRIS, brightness, notifications state, power menu, idle inhibitor, launcher shortcuts (#2510), taskbar (#762).
+- Event-driven: workspaces (ext-workspace), window title/taskbar (foreign-toplevel), tray (DBus signals), volume (PipeWire/Pulse subscribe), network (netlink / NetworkManager DBus signals), battery (UPower DBus PropertiesChanged or udev power_supply uevents), bluetooth (BlueZ DBus), MPRIS (DBus), keyboard layout (compositor/IPC event; no ext protocol I could verify), brightness (udev/inotify on sysfs; needs care), notifications (own daemon), idle inhibit.
+- Needs a timer: clock (but one timerfd aligned to the next minute/second boundary, not fixed polling), CPU/memory/temperature (procfs has no notification; poll only while visible, coarse interval), battery time-remaining estimate, WiFi signal strength if not from DBus, disk usage.
+- Suspend/resume and timezone change need explicit wakeups for the clock (unverified in the searched sources; general design point).
+
+## 3. Lessons from lightweight bars
+- Yambar (Codeberg dnkl/yambar): maintainer's stated pitch, "main focus is on being resource friendly, and in particular, very battery friendly" (issue #64), and conceded "Waybar probably has more plugins". Users then asked for tray (issue #4, 13 comments; maintainer "would gladly accept a PR", "rather annoying to implement"; PR #324 "Icon & Tray support" referenced), taskbar (#42), and icons/images (none supported, icon fonts only). Yambar is now declared unmaintained. Lesson: the gap that hurts is tray + icons + taskbar, not exotic modules. Note: github.com/dnkl/yambar returns 404; the canonical repo is on Codeberg.
+- Waybar itself: grew huge module surface and a large bug surface (see 3/4/5/6).
+- Ironbar: GTK, per-monitor config requested (#1184, #1343); a GTK4 port occurred and changed tray click behavior (#1242 asks for pre-port behavior back). Lesson: toolkit migrations churn user-visible behavior.
+- Eww: RAM growth (#1330, #794); widget-toolkit approach costs memory. Not lightweight.
+- Not verified: quickshell, sfwbar, i3status-rust, Hyprpanel, polybar issue mining (not done).
+
+## 4. Nix-specific pain (thin evidence; mostly titles)
+- Stylix: waybar target exists; docs say custom CSS may be overridden by ordering, fix is `programs.waybar.style = lib.mkAfter ''...''` (Stylix docs/waybar page); Stylix issue #1538 "waybar: attribute.default missing" (hm.nix:91); Stylix #46 originally "Add support for styling waybar"; Discourse "Can't get waybar transparent with stylix" (title only, thread not read); Waybar #3748 "Custom styling gets overwritten!".
+- Stylix regressions: #1569 "The option home-manager.users.user.stylix does not exist" (reported; details not read).
+- Home Manager: Discourse "Home-manager: unable to build waybar" and "Home Manager + Waybar :: Unable to receive desktop appearance" (titles only; contents unverified). Services failing on generation switches (Discourse thread title).
+- Inferred, not verified from sources: fonts and icon themes must be declared for the bar's environment; tray icon lookup depends on XDG_DATA_DIRS/icon themes; a systemd user service tied to graphical-session.target needs correct ordering vs tray apps. Design implication: HM module with `settings` freeform TOML/JSON plus first-class `style` colors from Stylix base16, a systemd user unit with restart-on-failure, and a Stylix target that maps base16 to config colors, exposing an mkAfter-friendly extra style/config option.
+
+## 5. Surprises / likely design mistakes
+- The tray is the most bug-prone piece; treat StatusNotifierWatcher ownership and reconnect as core, not a module.
+- Workspaces breaks most often across compositor versions, so the "simple" module needs the most tests.
+- Persistent (empty) workspaces are a top request; ext-workspace alone may not provide them.
+- Suspend/resume, DPMS wake and hotplug are where crashes and 100% CPU loops live.
+- Scripts polled on intervals are a top leak/CPU source; a stream protocol avoids it.
+- Users want hover/click/scroll/popup behavior on every module and per-monitor variants; hardcoding these later is costly.
+- Fractional scale affects tray icon sizing specifically, not just text.
+- Being unmaintained is what killed the leading lightweight bar (yambar).
+- Also: could not verify real idle RSS/wakeup numbers for any bar; measure scootbar against Waybar/ironbar/yambar yourself.

@@ -4,11 +4,13 @@ status: "open"
 area: "scootbar"
 priority: "high"
 blocked: "module-api-and-clock"
+milestone: "M2"
 ---
 
 # Workspaces module
 
-Filed 2026-09-29. Serves **daily-drive**; the v1 headline with the clock.
+Filed 2026-09-29. Serves **daily-drive**; the headline of the second milestone,
+and the first daily-usable bar.
 
 An `ext-workspace-v1` client that lists each output's workspaces, marks the
 active one (a rounded pill, the look the bar sets), redraws on `done`, and
@@ -28,6 +30,25 @@ a custom draw hook, because it is per-output and shapes the bar's look.
 - The only state bit scoot sends is `active`. Occupied and urgent need
   scoot-side work (below); v1 needs neither.
 - `activate` on a non-focused output is dropped today.
+
+## What the research says about this module
+
+Workspaces are the module that breaks most often in other bars: the Waybar
+Hyprland workspace module alone has some 150 issues, several with dozens of
+comments, most of them compositor-version churn (research report, 2026-09-29;
+issue numbers in it). Two consequences:
+
+- **Bind only to `ext-workspace-v1`**, no compositor-specific path, and test this
+  module hardest: rapid switching, a compositor restart, `finished`, output
+  hotplug, and both scoot and sway.
+- **The most-requested feature is persistent workspaces** (Waybar #1629: 44
+  comments, 47 hearts): always show slots 1..N, even empty. In scoot the set is
+  dynamic (empty workspaces are dropped, and `focus-workspace-index` past the end
+  does nothing, `docs/ipc.md`), so a bar that drew N slots would show ones it
+  cannot switch to, which is a lie. **Default: show what scoot reports.** Fixed
+  slots need a scoot concept first
+  ([persistent workspaces](../../backlog/core/persistent-workspaces.md)); the bar
+  should not synthesize them.
 
 ## Scoot-side follow-ups (filed, built when this module needs them)
 

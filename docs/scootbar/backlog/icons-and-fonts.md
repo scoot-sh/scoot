@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "baselines-and-spikes"
+milestone: "M3"
 ---
 
 # Icons and fonts

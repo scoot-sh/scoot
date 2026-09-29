@@ -273,6 +273,7 @@ falsify. Read `flexwm` there as `scoot`.
 ### IPC / computer use
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
 - [A coalesced `workspace` event on `subscribe`](./ipc/workspace-snapshot-event.md) — medium, filed 2026-09-29 (scootbar planning): occupied workspaces for a bar, which no standard protocol carries
+- [Keyboard layout in IPC](./ipc/keyboard-layout-event.md) — low, filed 2026-09-29 (scootbar research): no standard protocol tells a client the active layout
 - [Switch a specific output's workspace](./ipc/workspace-switch-targeted-output.md) — medium, filed 2026-09-29: `focus-workspace-index` and `ext-workspace` `activate` only reach the focused output
 - [IPC bundle: usable rect, focus-workspace-index, ambient locked](./resolved/protocol-bundle-resolved.md) — RESOLVED 2026-09-15, no bump needed
 - [No cap on concurrent IPC connections, and a half-closed client leaks one](./resolved/ipc-connection-cap-resolved.md) — RESOLVED 2026-09-16: 64 connections, refused with a reason past that, and a write-stall deadline that drops a peer which has stopped reading
@@ -545,6 +546,7 @@ be revisited.
   2026-09-25, `--tty` drives every connected monitor), and the one remaining
   surface is the [remainder](./core/multi-output-remainder.md) below (open,
   high: per-output scale/mode only).
+- [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
 - [A real maximize](./core/maximize.md) — medium, filed 2026-09-29: fill the usable area with the bar visible, distinct from fullscreen; today no state exists and `set_maximized` does nothing
 - [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
   — deliberately left out of milestone 19: design answered 2026-09-22

@@ -3,7 +3,8 @@ title: "Skeleton: one bar layer surface per output, across hotplug"
 status: "open"
 area: "scootbar"
 priority: "high"
-blocked: "baselines-and-spikes (dependency choices)"
+blocked: "baselines-and-spikes"
+milestone: "M1"
 ---
 
 # Skeleton: one bar layer surface per output
@@ -28,6 +29,14 @@ and namespace `scootbar`. It draws a solid bar and nothing else.
 - Reuse scootbg's per-output lifecycle rather than reinventing it; note what
   would move into a shared crate later ([extract-scootui](extract-scootui.md)),
   but do not refactor scootbg here.
+
+## Options are flags until the config file exists
+
+The first milestone has no config file. Edge, height, colors and the font path
+are command-line flags with fixed defaults; the config file
+([config-cli-and-reload](config-cli-and-reload.md)) arrives in a later
+milestone and the flags stay as overrides. With no usable font the bar refuses
+to start and says how to give it one (see [nix-package](nix-package.md)).
 
 ## Tests
 

@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "config-cli-and-reload"
+milestone: "M4"
 ---
 
 # Agent interface

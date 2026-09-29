@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "module-api-and-clock"
+milestone: "M5"
 ---
 
 # Window title module

@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "module-api-and-clock"
+milestone: "M3"
 ---
 
 # Config file, control socket and reload
@@ -20,6 +21,14 @@ font file and size), `left`/`center`/`right`, color tokens, per-module
 tables. Unknown keys are a loud error naming the key; a bad reload keeps the
 running config (as scoot's does). Parser per the
 [spikes](baselines-and-spikes.md).
+
+## The parser spike, first
+
+`toml` (used elsewhere in the tree) vs a smaller one (`basic-toml`) vs a
+hand-rolled subset: size and parse time on the real schema, and how each fails on
+malformed input (a clear error naming the key, never a panic). Moved here from
+[baselines-and-spikes](baselines-and-spikes.md); the first milestones ran on
+command-line flags and did not need it.
 
 ## Control socket and CLI
 

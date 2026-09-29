@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "popups"
+milestone: "M6"
 ---
 
 # Tooltips

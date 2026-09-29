@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "a second consumer: popups, the launcher or scootnotify"
+milestone: "M7"
 ---
 
 # Extract `scootui`

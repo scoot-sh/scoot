@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "medium"
 blocked: "skeleton-layer-surface"
+milestone: "M3"
 ---
 
 # Multi-output policy
@@ -39,6 +40,15 @@ The skeleton gives every output a bar. Real setups want to choose.
   (see [skeleton](skeleton-layer-surface.md)); fonts scale with it.
 - A per-output workspace switch depends on scoot's
   [output-targeted switch](../../backlog/ipc/workspace-switch-targeted-output.md).
+
+## What other bars get wrong
+
+Crashes on output disconnect, modules that stop updating after hotplug, and
+wake-from-DPMS segfaults are the multi-monitor complaints that recur (Waybar #2808,
+#4823, #1019). The rule that prevents them is already in the design: **per-output
+surface lifecycle is separate from shared data sources**, so removing an output
+destroys a surface and nothing else. Pin it with a hotplug storm test that
+re-checks every module still updates afterwards.
 
 ## Done when
 
