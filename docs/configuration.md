@@ -354,8 +354,9 @@ nothing — only the compositor installs the handler.
 redrawn; a shorter width list clamps live columns onto the nearest
 surviving entry, and new windows take the reloaded default), the `[output] scale`
 and each [`[[outputs]]`](#outputs) entry's `scale` (every output's scale is
-re-decided -- its entry's, else the default -- and each output whose scale
-moved re-advertises its new integer on `wl_output`; the fractional value and
+re-decided -- its entry's, else the default -- and every output re-advertises its
+mode and scale on `wl_output` (clients bound to an output whose scale did not
+move hear the same values again); the fractional value and
 its integer companion are re-sent to every live surface, each at its own
 output's scale; the logical geometry is recomputed and the arrangement
 re-derived -- clients that cached the scale may lag until they re-read the
@@ -505,7 +506,10 @@ or `--width`/`--height` under `--headless` -- one table per output, each
 matched by the name `scootctl outputs` lists (`eDP-1`, `DP-1`, `HDMI-A-1`
 under `--tty`; `headless`, `headless-2`, ... under `--headless`). An output
 without an entry, and every output of a file without any, runs at the
-defaults exactly as before.
+defaults exactly as before. A table with no `name`, or a value of the wrong
+type (`scale = "2"`, `mode = 1920`), fails the whole file like any other
+malformed key: startup falls back to defaults (binds included) and a reload
+reports the error and applies nothing.
 
 ```toml
 [output]
@@ -543,7 +547,9 @@ subsurfaces follow it. A bar or other layer surface is told its own
 output's scale, a lock surface its own output's, and a client's cursor
 surface the scale of the output under the pointer, re-told each time the
 client sets it (a pointer crossing between two outputs inside one window
-keeps the old scale on its cursor surface until the client next sets it). A
+keeps the old scale on its cursor surface until the client next sets it; a
+drag icon is told the pointer's output's scale when it is created and is not
+re-told while dragged across the seam). A
 surface with no role yet is told the scale of the output under the pointer,
 where a new window opens. See
 [protocols.md](protocols.md#output-scaling).

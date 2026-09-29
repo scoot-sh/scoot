@@ -34,9 +34,10 @@
 //!   rebuild -- see `State::spawn`, which exports the live theme per child.
 //! - `[output] scale` and each `[[outputs]]` entry's `scale`: every output's
 //!   scale is re-decided (its entry's, else the default -- see
-//!   `output_config.rs`), re-advertised to every output whose scale moved
-//!   (bound `wl_output` clients hear the new integer through the same
-//!   `set_mode` startup uses) and re-sent to every live surface (the
+//!   `output_config.rs`), re-advertised on every output
+//!   (bound `wl_output` clients hear the current mode, scale and `done`
+//!   through the same `set_mode` startup uses, whether or not that output's
+//!   own scale moved) and re-sent to every live surface (the
 //!   fractional `preferred_scale` plus its integer companion, each told its
 //!   own output's scale, walked over every window, layer, lock and cursor
 //!   tree), then re-laid-out: every logical geometry is recomputed and filed
