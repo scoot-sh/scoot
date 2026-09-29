@@ -80,19 +80,18 @@ jobs:
   #
   #   crates/scoot/, crates/scoot-core/, crates/scoot-ipc/,
   #   crates/scootctl/, scripts/smoke-test.sh, vm/compositor-deps.nix
-  #                        -> scoot=true  (Linux, Linux-features, macOS)
+  #                        -> scoot=true  (Linux, Linux-features) and
+  #                           macos=true  (macOS)
   #   crates/scootbg/, crates/scootbg-mem/ -> scootbg=true (scootbg job)
-  #     except their Cargo.toml             -> scoot too, because
-  #     flake.nix reads crates/scootbg/Cargo.toml (`nix flake check`) and
-  #     the macOS job's `cargo check --workspace` compiles both crates
+  #     except crates/scootbg/Cargo.toml    -> scoot too: flake.nix reads
+  #     its description, which the Linux job's `nix flake check` evaluates
   #
-  # So a scootbg-only PR that is not a manifest change skips the macOS
-  # `cargo check` and `nix flake check` (both in the scoot jobs). Both
-  # crates are cfg'd to nothing off Linux, so a break there is unlikely;
-  # if one lands, it shows on the next push to main, which runs everything.
+  # scootbg, scootbg-mem and scootbar never run on a Mac: the macOS job
+  # leaves them out of its `cargo check`, and the Darwin outputs of the
+  # flake have none of them, so no change to them alone sets `macos`.
   #   anything else that is not docs (Cargo.toml, Cargo.lock, flake.*,
   #   nix/, .github/, .config/, resources/, devenv.*, other scripts/ and
-  #   vm/ files, LICENSE)                  -> both
+  #   vm/ files, LICENSE)                  -> all
   #   either side                          -> the scootbg-on-scoot
   #                                           integration job
   #
@@ -104,17 +103,12 @@ jobs:
   #
   #   crates/scootbar/, scripts/scootbar-bench/
   #                                        -> scootbar=true (scootbar job)
-  #     except its Cargo.toml               -> scoot too, for the macOS
-  #     job's `cargo check --workspace`, as scootbg's
+  #     except its Cargo.toml               -> scoot too, for the flake's
+  #     read of its description, as scootbg's
   #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
   #                                           is scootbar's
   #   either scoot or scootbar             -> the scootbar-on-scoot
   #                                           integration job
-  #
-  # So a scootbar-only PR skips the macOS job too, as a scootbg-only one
-  # does. The bar never runs on a Mac: off Linux it is a stub that says so,
-  # compiled there only because the workspace check compiles every crate,
-  # and a break in it shows on the next push to main.
   #
   # Directory prefixes carry their trailing slash: `crates/scoot*` would
   # also match `crates/scootbg`, and `crates/scootbg/` does not match
@@ -134,6 +128,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       scoot: ${{ steps.classify.outputs.scoot }}
+      macos: ${{ steps.classify.outputs.macos }}
       scootbg: ${{ steps.classify.outputs.scootbg }}
       scootbar: ${{ steps.classify.outputs.scootbar }}
       backlog: ${{ steps.classify.outputs.backlog }}
@@ -149,12 +144,14 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           scoot=true
+          macos=true
           scootbg=true
           scootbar=true
           backlog=true
           if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$changed" ]; then
             printf 'Changed:\n%s\n' "$changed"
             scoot=false
+            macos=false
             scootbg=false
             scootbar=false
             backlog=false
@@ -165,25 +162,20 @@ jobs:
                 scripts/backlog | scripts/test_backlog.py)
                   backlog=true ;;
                 crates/scoot/* | crates/scoot-core/* | crates/scoot-ipc/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
-                  scoot=true ;;
-                # Their manifests are read by jobs outside scootbg's own
-                # (flake.nix takes the package description from one, and
-                # the macOS job checks the workspace), so they run everything.
+                  scoot=true
+                  macos=true ;;
+                # flake.nix takes the package description from this
+                # manifest, which the Linux job's `nix flake check` reads.
                 crates/scootbg/Cargo.toml)
                   scoot=true
                   scootbg=true ;;
-                # scootbar builds on scootbg-mem too.
-                crates/scootbg-mem/Cargo.toml)
-                  scoot=true
-                  scootbg=true
-                  scootbar=true ;;
                 crates/scootbg/*)
                   scootbg=true ;;
                 crates/scootbg-mem/*)
                   scootbg=true
                   scootbar=true ;;
-                # Its manifest is read by the macOS job's workspace check and, at
-                # eval time, by flake.nix (the package description).
+                # Its manifest is read at eval time by flake.nix (the
+                # package description), as scootbg's.
                 crates/scootbar/Cargo.toml)
                   scoot=true
                   scootbar=true ;;
@@ -196,15 +188,17 @@ jobs:
                   scootbar=true ;;
                 *)
                   scoot=true
+                  macos=true
                   scootbg=true
                   scootbar=true
                   backlog=true ;;
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot scootbg=$scootbg scootbar=$scootbar backlog=$backlog"
+          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar backlog=$backlog"
           {
             echo "scoot=$scoot"
+            echo "macos=$macos"
             echo "scootbg=$scootbg"
             echo "scootbar=$scootbar"
             echo "backlog=$backlog"
@@ -770,7 +764,7 @@ jobs:
     needs: changes
     # Fail open: only an explicit `false` skips, so a failed `changes` job
     # (empty output) still runs this one instead of skipping it green.
-    if: ${{ !cancelled() && needs.changes.outputs.scoot != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.macos != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 30
     env:
@@ -797,14 +791,16 @@ jobs:
             macos-cargo-
 
       # `--all-targets` so the tests and the CLI's own test targets are
-      # type-checked too, not just the library and binary. `--workspace`
-      # compiles scootbg and scootbar as well, which never run on a Mac:
-      # off Linux each is a stub binary that says it runs on Linux only,
-      # with its Linux dependencies cfg'd out, and that stub is all this
-      # checks of them.
+      # type-checked too, not just the library and binary. The wallpaper
+      # daemon and the bar never run on a Mac, and do not build there
+      # (scootbg-mem's `compile_error!` says so), so they are left out, with
+      # scootbg-mem: this checks
+      # scoot (its Linux halves cfg'd out: a Mac compositor is planned),
+      # scootctl, scoot-ipc and scoot-core. The same command on a Mac is in
+      # docs/development.md.
       - name: cargo check
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo check --workspace --all-targets
+        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --all-targets
 
       # The Darwin half of gh #173: `nix flake check` on Linux omits the
       # Darwin systems (and vice versa), so the Linux job above never
