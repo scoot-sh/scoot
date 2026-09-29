@@ -62,5 +62,11 @@ shape the design:
   Verify it on this machine: debugfs `dri/2/state` shows which fb plane 40
   holds, and a capture must still contain that window.
 
+**Update 2026-09-29 (`Asahi.md`, Test 14):** on kernel 7.1.13 the CRTC
+exposes **two** overlays (plane 40 zpos 1, plane 45 zpos 2, same `LINEAR`
+formats, still no cursor plane). So a window and a future cursor-on-overlay
+need not fight for one plane there. Nothing in this ticket can be measured
+without implementing the marking and the capture contract.
+
 Priority stays low: the case it serves (a video in a non-fullscreen
 window) is the rarer one.

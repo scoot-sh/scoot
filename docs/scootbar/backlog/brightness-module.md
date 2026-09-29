@@ -19,6 +19,14 @@ udev change events do for some drivers) is measured, not assumed, on the Asahi
 machine and one other. The fallback is to re-read only when the bar itself
 changed it, plus once on resume, so it never polls.
 
+**Measured 2026-09-29 on the Asahi M2 (Asahi.md, Test 14).** Writing
+`/sys/class/backlight/apple-panel-bl/brightness` as root emits exactly one
+`change` uevent per write (kernel and udev), with no value in its properties,
+so re-read `brightness` on each. Firmware-originated changes (an SMC
+brightness key) were not observed, and inotify on the file was not tried.
+`actual_brightness` can differ from `brightness` by 1 (rounding). Raw range
+is 0-509 (`max_brightness`), `scale=linear`. Still open: a second machine.
+
 ## Writing
 
 Setting the level needs permission: logind's `SetBrightness` over D-Bus (the
