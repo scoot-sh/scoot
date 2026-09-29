@@ -117,9 +117,10 @@ full per-feature cycle.
     with every later milestone: [testing.md](../testing.md) says where
     each kind of test lives
     - [The scaler's output allocation aborts the daemon when memory is refused](scaler-oom-abort.md)
-      — open, medium, waiting on a user decision: `pic-scale-safe`'s
-      infallible output `Vec` ends the daemon under `RLIMIT_AS` or strict
-      overcommit; accept, probe, fork the scaler, or switch scalers
+      — open, medium: `pic-scale-safe`'s infallible output `Vec` ends the
+      daemon under `RLIMIT_AS` or strict overcommit. Decided 2026-09-29:
+      probe the output and weight tables with `try_reserve_exact` before
+      scaling, and refuse the draw with a `draw_error` if that fails
 
 ## Milestone 2: motion
 

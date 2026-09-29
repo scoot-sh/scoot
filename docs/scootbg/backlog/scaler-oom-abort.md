@@ -3,7 +3,7 @@ title: "The scaler's output allocation aborts the daemon when memory is refused"
 status: "open"
 area: "scootbg"
 priority: "medium"
-blocked: "a user decision between the options below"
+blocked: ""
 ---
 
 # The scaler's output allocation aborts the daemon when memory is refused
@@ -103,5 +103,55 @@ about 2.4 MB an axis. They matter to the options:
   `unsafe`, 174 ms and the output only in memory for 6000×4000 → 4K), so
   a replacement would have to be measured against the same bar.
 
-Waiting on the user's choice; (c) is the one that removes the abort
-rather than narrowing or documenting it.
+## Decision: (b), probe then free
+
+Chosen by the user, 2026-09-29. (c) stays the way to remove the abort
+outright if (b) proves not enough in practice; (a) and (d) are not
+pursued.
+
+## The ticket
+
+**Goal.** A scaling draw that the kernel would refuse fails like the
+`center` case already does: the reply and `query` report `draw_failed`
+with a `draw_error`, the daemon stays up, and the next `set` draws.
+
+**Scope.**
+
+- Before the scaler runs, in the one place scootbg calls it (behind the
+  `MAX_SCALED_SIDE` guard in `image/scale.rs`), reserve a probe with
+  `try_reserve_exact` and drop it at once. Size it as the section above
+  says: the output's RGB size, plus both axes' weight tables (the
+  `f32` table and its `i16` copy, `kernel_size × out_size` each, with the
+  kernel width for the filter in use and the shrink/grow case), plus the
+  row scratch. Compute it with checked arithmetic; an overflow is a
+  refusal, not a panic.
+- Refuse with a new scale error variant whose message says the draw
+  needs N bytes it could not get, surfaced through the existing
+  `draw_error` path. No protocol change.
+- Skip the probe when nothing is scaled (same size, `center`, `tile`).
+- The probe runs once per draw, not per frame or per event; it adds one
+  allocation of the size the scaler is about to make anyway.
+
+**Tests.**
+
+- Extend `tests/draw_failed.rs`: the same lowered `RLIMIT_AS`, now with
+  `--mode fill`, reports `draw_failed` and a `draw_error`, the daemon is
+  still alive, and a following `set` draws. This is the case the test
+  currently avoids by using `center`.
+- A unit test for the probe's size against the scaler's real
+  allocations for each filter, shrinking and growing, so the budget
+  cannot drift below what `pic-scale-safe` takes. Measure the real
+  figure (a counting allocator in the test is enough) rather than
+  trusting the formula.
+- The fuzz target keeps running the same path; replay its corpus.
+
+**Docs.** `cli.md` (a scaling draw under an address-space limit now
+fails cleanly), the CHANGELOG, and the limits section of
+`docs/scootbg/testing.md`. State the residual plainly: under strict
+overcommit another process can take the memory between the probe and
+the scaler's allocation, and then the daemon still aborts.
+
+**Done when.** The `fill` case above passes on headless scoot and sway
+in CI, the full scootbg verification set is clean, and the review gate
+has passed. The item then moves to `resolved/` as
+`scaler-oom-abort-done.md`.
