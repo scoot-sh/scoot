@@ -9,6 +9,18 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-29 — a scale and a mode per monitor
+
+- **`[[outputs]]`** in the config file gives one monitor its own scale and
+  mode, by the connector name `scootctl outputs` lists: a HiDPI laptop panel
+  at 2 beside an ordinary monitor at 1, or a monitor held at 1280x720. An
+  entry overrides `[output] scale` and `--mode` (`--width`/`--height` under
+  `--headless`) for its own output only; a file without entries behaves as
+  before. Windows are told the scale of the monitor they are on, and re-told
+  when they move. `scootctl reload` re-applies scales live; a changed `mode`
+  takes a restart and the reload says so
+  ([docs/configuration.md](docs/configuration.md#outputs)).
+
 ### 2026-09-29 — scootbar installs from Nix
 
 - **`nix run github:scoot-sh/scoot#scootbar-demo`** shows the bar with a

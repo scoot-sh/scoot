@@ -706,9 +706,9 @@ pub fn default_config_toml() -> String {
          # Gap, column widths, the output scale, the ring/background/cursor\n\
          # appearance fields, binds, [floating] and [[window_rule]], new\n\
          # [autostart] spawn entries and [wallpaper] re-apply live with\n\
-         # `scootctl reload`; [tty] gpu, [renderer] backend and [xwayland]\n\
-         # enabled take effect on restart and a reload refuses them with a\n\
-         # message.\n",
+         # `scootctl reload`; [tty] gpu, [renderer] backend, [xwayland]\n\
+         # enabled and an [[outputs]] mode take effect on restart and a\n\
+         # reload refuses them with a message.\n",
     );
 
     out.push_str("\n[layout]\n");
