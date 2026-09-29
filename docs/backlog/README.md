@@ -560,6 +560,9 @@ be revisited.
 - [Per-output position, and a live mode change on reload](./core/output-position-and-live-mode.md)
   — low, filed 2026-09-29: outputs still pack left to right, and a reload
   refuses a changed `mode` pending a restart
+- [Usable area is one pixel narrower than the output after a scale reload](./core/usable-area-shrinks-after-rescale.md)
+  — low, filed 2026-09-29: pre-existing on `main`; a reload onto a
+  fractional logical width reports `usable` 1 px short of `rect`
 - [Workspace shortcuts: no numbered bind, and no move-to-index action at all](./resolved/workspace-index-keybindings-done.md)
   — RESOLVED 2026-09-20: `Super+1`..`9` focuses and `Super+Shift+1`..`9`
   carries-and-follows (new `MoveWindowToWorkspaceIndex` core/IPC/config
