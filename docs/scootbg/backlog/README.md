@@ -131,3 +131,4 @@ full per-feature cycle.
 - [A wallpaper per workspace](per-workspace.md) (`ext-workspace-v1`)
 - [A config file, and rotating through a directory](config-and-rotation.md)
 - [More image formats: AVIF, JPEG XL, HEIF](more-formats.md)
+- [Share tests hard-code 4K page rounding](scootbg-share-tests-page-size.md)
