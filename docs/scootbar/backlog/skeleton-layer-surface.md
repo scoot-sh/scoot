@@ -30,6 +30,15 @@ and namespace `scootbar`. It draws a solid bar and nothing else.
   would move into a shared crate later ([extract-scootui](extract-scootui.md)),
   but do not refactor scootbg here.
 
+## Margins from the first milestone
+
+The skeleton sets the layer surface's margin from a flag (`--margin`, one to four
+values, default 0) with `set_margin`, and the exclusive zone accounts for it as
+[appearance](appearance.md) describes. That keeps every later look (floating bar,
+matching scoot's gaps) a config change, not a rewrite. Test with a margin on
+headless scoot: the zone, the window placement beside it, and the surface size
+equal to the bar's (no transparent border).
+
 ## Options are flags until the config file exists
 
 The first milestone has no config file. Edge, height, colors and the font path
