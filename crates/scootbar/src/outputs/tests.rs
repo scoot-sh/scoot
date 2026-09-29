@@ -313,3 +313,28 @@ fn an_escaped_name_labels_the_output() {
     output.done();
     assert_eq!(output.label().to_string(), "output \"evil\\u{1b}[2J\\\"\"");
 }
+
+#[test]
+fn a_negative_size_sent_as_a_uint_is_taken_as_zero() {
+    // sway 1.12, 1280 wide, `--margin 0,1024`: -768 as a `uint`.
+    let (mut outputs, id) = configured(4_294_966_528, 28);
+    let bar = Bar {
+        margin: Margin {
+            top: 0,
+            right: 1024,
+            bottom: 0,
+            left: 1024,
+        },
+        ..Bar::default()
+    };
+    let output = output(&mut outputs, id);
+    // Resolved as 0: the output (1920) less the margins, at least 1.
+    assert_eq!(output.surface_size(&bar), Some(size(1, 28)));
+    // Either side, and the boundary itself.
+    assert_eq!(output.configure(6, 1920, u32::MAX), Effect::Ack(6));
+    assert_eq!(output.surface_size(&bar), Some(size(1920, 28)));
+    assert_eq!(output.configure(7, i32::MAX as u32, 28), Effect::Ack(7));
+    assert_eq!(output.surface_size(&bar), Some(size(i32::MAX as u32, 28)));
+    assert_eq!(output.configure(8, 1 << 31, 28), Effect::Ack(8));
+    assert_eq!(output.surface_size(&bar), Some(size(1, 28)));
+}

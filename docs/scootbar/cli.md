@@ -14,7 +14,7 @@ are [next](backlog/module-api-and-clock.md).
 ```sh
 scootbar daemon                              # a 28-pixel bar along the top of every output
 scootbar daemon --edge bottom --height 32    # along the bottom, 32 logical pixels tall
-scootbar daemon --margin 8                   # floating 8 pixels in from every edge
+scootbar daemon --margin 8                   # floating 8 pixels in from its edge and both sides
 scootbar daemon --margin 8,12                # 8 above and below, 12 either side
 scootbar daemon --background '#101014'       # its color
 scootbar --help                              # and `scootbar daemon --help`
@@ -85,13 +85,20 @@ one gap below the bar, as they sit one gap from each other.
 
 ## Edge cases
 
-- **A bar taller than the output, or margins wider than it**, are the
-  compositor's to clamp: scoot and sway give the bar what fits, and when
-  nothing fits (margins wider than the output) the bar is drawn one pixel
-  wide rather than not at all. No flag value can make a buffer overflow:
-  the bounds keep every size far from it, and a buffer too large for
-  `wl_shm` is refused with a message, not drawn, and not retried until the
-  size or scale changes.
+- **Side margins wider than the output** leave the bar no width. It is
+  then drawn one pixel wide rather than not at all, on scoot and on sway
+  (which sends the negative width it works out as a huge unsigned one;
+  scootbar treats any side past `i32::MAX` as "yours to choose"). The zone
+  is still reserved.
+- **A bar taller than the output** is the compositor's to clamp, and they
+  differ: scoot gives the bar the output's height and reserves all of it;
+  sway 1.12 configures the full `--height` (1024 on a 720-tall output),
+  so the bar runs off the edge, and reserves the whole output too. Either
+  way no window has room: this is a value to avoid, not a layout.
+- **No flag value can make a buffer overflow**: the bounds keep every size
+  far from it. A buffer too large for `wl_shm` (a compositor asking for an
+  absurd surface) is refused with a message, not drawn, and not retried
+  until the size or scale changes.
 - **The compositor going away** (it exits, crashes, or sends a protocol
   error) ends the daemon with exit status 1 and one line on stderr saying
   why. There is no reconnect; your session's autostart starts it again with
@@ -110,5 +117,5 @@ one gap below the bar, as they sit one gap from each other.
 | Status | When |
 | --- | --- |
 | 0 | `--help` or `--version` |
-| 1 | cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, or the compositor went away |
+| 1 | cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, the compositor went away, or `poll(2)` failed |
 | 2 | a usage error |

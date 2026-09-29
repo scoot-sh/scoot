@@ -69,9 +69,9 @@ jobs:
   #   crates/scootctl/, scripts/smoke-test.sh, vm/compositor-deps.nix
   #                        -> scoot=true  (Linux, Linux-features, macOS)
   #   crates/scootbg/, crates/scootbg-mem/ -> scootbg=true (scootbg job)
-  #     except their Cargo.toml             -> both, because flake.nix
-  #     reads crates/scootbg/Cargo.toml (`nix flake check`) and the macOS
-  #     job's `cargo check --workspace` compiles both crates
+  #     except their Cargo.toml             -> scoot too, because
+  #     flake.nix reads crates/scootbg/Cargo.toml (`nix flake check`) and
+  #     the macOS job's `cargo check --workspace` compiles both crates
   #
   # So a scootbg-only PR that is not a manifest change skips the macOS
   # `cargo check` and `nix flake check` (both in the scoot jobs). Both

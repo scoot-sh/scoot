@@ -144,6 +144,14 @@ fn a_margin_is_reserved_on_the_anchored_edge_and_the_surface_is_the_bar() {
         "the window starts at y {y}, over the bar or its margin: {rect}"
     );
     assert!(y + height <= i64::from(HEIGHT), "{rect}");
+    // Close it rather than leave it to outlive the session (the harness
+    // also kills scoot's children, for a test that fails before here).
+    let reply = session.scoot_ipc(r#"{"type":"action","action":"close_focused"}"#);
+    assert_eq!(reply["type"], "ok", "{reply}");
+    session.wait_for(&mut bar.0, "the window closed", |session| {
+        let reply = session.scoot_ipc(r#"{"type":"windows"}"#);
+        reply["windows"].as_array()?.is_empty().then_some(())
+    });
 }
 
 /// `foot` is the one client the tests use to place a window; it is in the

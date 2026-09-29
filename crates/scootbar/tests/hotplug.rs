@@ -220,3 +220,33 @@ fn sway_reserves_the_margin_on_the_bars_edge_too() {
     assert_ne!(shot.at(4, 28), rgb(BAR), "below the bar");
     assert_eq!(usable["height"].as_i64(), Some(i64::from(shot.height) - 28));
 }
+
+#[test]
+fn side_margins_wider_than_the_output_still_give_a_bar() {
+    let Some(session) = Session::sway("wide", 1) else {
+        return;
+    };
+    // sway's headless output is 1280 wide: 2048 of side margins leave it
+    // -768, which sway sends as the `uint` 4294966528. scootbar takes that
+    // as "yours to choose" and draws the promised 1-pixel bar, rather than
+    // refusing a multi-gigabyte buffer.
+    let mut bar = Reaper(session.bar_with_env(
+        &["--background", BAR, "--margin", "0,1024"],
+        &[("WAYLAND_DEBUG", "1")],
+    ));
+    session.wait_for(&mut bar.0, "a 1-pixel bar drawn", |session| {
+        let trace = session.bar_stderr();
+        (trace.contains("configure, (") && common::created_buffers(&trace).last() == Some(&(1, 28)))
+            .then_some(())
+    });
+    let trace = session.bar_stderr();
+    assert!(
+        trace.contains("4294966528"),
+        "sway no longer sends the negative width; this test pins nothing: {trace}"
+    );
+    assert!(!trace.contains("cannot draw"), "{trace}");
+    assert!(bar.0.try_wait().unwrap().is_none(), "{trace}");
+    // It still reserves its height.
+    let usable = session.sway_usable();
+    assert_eq!(usable[0].1["y"].as_i64(), Some(28), "{usable:?}");
+}

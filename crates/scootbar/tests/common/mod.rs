@@ -393,8 +393,12 @@ impl Session {
     }
 
     /// Kills the compositor (SIGKILL), and for sway its whole process group.
+    /// Its children go first: a client scoot spawned (`foot`, through an IPC
+    /// `spawn`) is re-parented to init when scoot dies, and would otherwise
+    /// outlive the test.
     pub fn kill_compositor(&mut self) {
         if let Some(mut compositor) = self.compositor.take() {
+            kill_children(compositor.id());
             if self.sway_ipc.is_some() {
                 let group = rustix::process::Pid::from_child(&compositor);
                 let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
@@ -408,6 +412,42 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         self.kill_compositor();
+    }
+}
+
+/// SIGKILLs every process whose parent is `parent`, and waits (a bounded
+/// while) until none is left.
+pub fn kill_children(parent: u32) {
+    let children = || -> Vec<u32> {
+        let Ok(entries) = fs::read_dir("/proc") else {
+            return Vec::new();
+        };
+        entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+            .filter(|&pid| {
+                fs::read_to_string(format!("/proc/{pid}/stat"))
+                    .ok()
+                    .and_then(|stat| {
+                        let after = stat.rsplit_once(')')?.1;
+                        after.split_whitespace().nth(1)?.parse::<u32>().ok()
+                    })
+                    == Some(parent)
+            })
+            .collect()
+    };
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let left = children();
+        if left.is_empty() || Instant::now() >= deadline {
+            return;
+        }
+        for pid in left {
+            if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
+                let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 

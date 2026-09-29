@@ -109,6 +109,14 @@ could not bind its IPC socket under the long scratch path), so the whole
 run was repeated at `62181e6`.
 
 
+**Review follow-up** (PR #323): on sway 1.12, side margins wider than the
+output were configured as a width of 4294966528 (-768 as a `uint`) and the
+bar refused to draw; any configured side past `i32::MAX` is now taken as 0
+and resolved to the 1-pixel bar, pinned by a unit test and a sway test that
+fails without the fix. The same review found the window-placement test
+leaking a `foot` per run; the harness now kills the compositor's children
+first, and the test closes its window.
+
 The entry as filed:
 
 Filed 2026-09-29. Serves **daily-drive**.

@@ -47,7 +47,8 @@ devenv shell -- cargo fmt --check -p scootbar
 - **On a headless sway** (`tests/hotplug.rs`): outputs plugged and
   unplugged at runtime, down to none and back; starting with zero outputs;
   a storm of back-to-back plugs and unplugs with the fd count and the
-  mapped buffers checked for leaks; the margin rule again.
+  mapped buffers checked for leaks; the margin rule again; side margins
+  wider than the output (sway's negative width) still drawing a 1-pixel bar.
 
 ## Not covered
 

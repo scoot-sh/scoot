@@ -334,7 +334,16 @@ impl Output {
 
     /// A `configure` on the live surface: remember its size, and ack it.
     /// A new size is also a new chance for a draw that failed.
+    ///
+    /// A side above `i32::MAX` is a compositor's negative size sent as the
+    /// protocol's `uint`: sway 1.12 configures a bar whose side margins are
+    /// wider than the output 4294966528 (-768) wide. No surface can be that
+    /// size, so it is taken as 0, "yours to choose", and resolved as one
+    /// ([`Output::surface_size`]): a bar 1 pixel wide, not a refused
+    /// multi-gigabyte buffer.
     pub fn configure(&mut self, serial: u32, width: u32, height: u32) -> Effect {
+        let sane = |side: u32| if i32::try_from(side).is_ok() { side } else { 0 };
+        let (width, height) = (sane(width), sane(height));
         if !self.surface.is_live() {
             // No live surface: a stale event, already filtered by the
             // glue's object check. Nothing to ack.
