@@ -1,0 +1,8 @@
+# python3 check-zones.py /tmp/sb-m0-bin/clock-hand $TZD /tmp/sb-m0-tz/slim $ZB/zdump
+zones=598 instants_checked=414100 mismatches=0
+# the same with clock-tzrs-dump
+zones=598 instants_checked=414100 mismatches=0
+# negative control: slim Europe/London as America/New_York
+MISMATCH /tmp/sb-m0-tz/neg America/New_York t=-1347210001 want=(-18000, 0, 'EST') got=('3600', '1', 'BST')
+MISMATCH /tmp/sb-m0-tz/neg America/New_York t=-1347210000 want=(-14400, 1, 'EDT') got=('3600', '1', 'BST')
+zones=598 instants_checked=208170 mismatches=1120

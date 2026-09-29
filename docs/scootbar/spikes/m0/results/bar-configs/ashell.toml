@@ -1,0 +1,7 @@
+[modules]
+left = ["Workspaces"]
+center = []
+right = ["Clock"]
+
+[clock]
+format = "%a %d %b %H:%M"

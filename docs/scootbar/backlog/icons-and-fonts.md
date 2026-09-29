@@ -3,7 +3,7 @@ title: "Icons and fonts: symbol glyphs, a small fallback chain, and what is out 
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "baselines-and-spikes, config-cli-and-reload"
+blocked: "config-cli-and-reload"
 milestone: "M3"
 ---
 
@@ -43,6 +43,12 @@ Prefer 1 with 2 as the built-ins' default if the numbers allow, 3 as the opt-in
 for user buttons; record the costs of each.
 
 ## Fonts
+
+The rasterizer is `ab_glyph` (M0,
+[the record](resolved/dependencies-done.md#1-font-rasterizer)), over a mapped
+font file. Hinting is the one quality lever that choice gives up: hinted
+`swash` is visibly crisper at 15 px, for about +770 KB of binary and 1 MB of
+RSS. Decide here, with the fallback chain, whether 1x text needs it.
 
 - A primary font and at most one or two fallbacks, as file paths from config
   (Stylix supplies the paths; no fontconfig at runtime).

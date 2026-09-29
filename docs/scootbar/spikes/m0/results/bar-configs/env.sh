@@ -1,0 +1,1 @@
+export XDG_RUNTIME_DIR=/tmp/sb-bench/rt WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-1} DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/sb-bench/rt/bus FONTCONFIG_FILE=/tmp/sb-bench/fc/fonts.conf HOME=/tmp/sb-bench/home LANG=C.UTF-8

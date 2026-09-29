@@ -26,7 +26,7 @@ running config (as scoot's does). The parser is chosen by the spike below.
 `toml` (used elsewhere in the tree) vs a smaller one (`basic-toml`) vs a
 hand-rolled subset: size and parse time on the real schema, and how each fails on
 malformed input (a clear error naming the key, never a panic). Moved here from
-[baselines-and-spikes](baselines-and-spikes.md); the first milestones ran on
+[baselines-and-spikes](resolved/baselines-and-spikes-done.md); the first milestones ran on
 command-line flags and did not need it.
 
 ## Control socket and CLI

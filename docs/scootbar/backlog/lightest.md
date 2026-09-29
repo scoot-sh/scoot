@@ -3,7 +3,7 @@ title: "The resource ratchet: every milestone measured against the last one and 
 status: "open"
 area: "scootbar"
 priority: "high"
-blocked: "baselines-and-spikes"
+blocked: null
 milestone: "ongoing"
 ---
 
@@ -34,7 +34,7 @@ A milestone is not done until its numbers are published and:
 
 ## Rows
 
-From [baselines-and-spikes](baselines-and-spikes.md), on the same machine and
+From [baselines-and-spikes](resolved/baselines-and-spikes-done.md), on the same machine and
 outputs: idle RSS and PSS, idle wakeups per minute (target for the first
 milestones: one, the clock), CPU over a fixed window while switching
 workspaces, peak memory, stripped binary size, installed closure size

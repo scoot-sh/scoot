@@ -1,0 +1,49 @@
+=== scoot yambar 2026-09-29T03:15:41Z
+startup_ms=[28.5, 31.3, 22.1, 36.1, 22.3]
+procs=1 names=['yambar'] threads=3
+idle window_s=300.0 vol=20 nonvol=0 wakeups_per_min=4.00 cpu_ms=3.59 ticks=0
+mem rss_kb=14252 pss_kb=7402 anon_kb=1816 hwm_kb=14252
+switch n=240 window_s=60.0 vol=4 cpu_ms=0.62 ticks=1 rss_kb=14252 hwm_kb=14252
+=== scoot waybar 2026-09-29T03:22:18Z
+startup_ms=[135.4, 152.3, 142.5, 145.6, 137.4]
+procs=1 names=['.waybar-wrapped'] threads=8
+idle window_s=300.0 vol=25 nonvol=0 wakeups_per_min=5.00 cpu_ms=9.10 ticks=1
+mem rss_kb=53856 pss_kb=43238 anon_kb=8288 hwm_kb=53856
+switch n=240 window_s=60.0 vol=965 cpu_ms=420.39 ticks=43 rss_kb=53860 hwm_kb=53860
+=== scoot ironbar 2026-09-29T03:28:56Z
+startup_ms=[108.9, 136.5, 107.2, 124.4, 191.5]
+procs=1 names=['.ironbar-wrappe'] threads=15
+idle window_s=300.0 vol=1550 nonvol=0 wakeups_per_min=309.99 cpu_ms=170.62 ticks=17
+mem rss_kb=59620 pss_kb=48898 anon_kb=11660 hwm_kb=59620
+switch n=240 window_s=60.0 vol=1112 cpu_ms=83.13 ticks=8 rss_kb=59660 hwm_kb=59660
+=== scoot ashell 2026-09-29T03:35:34Z
+startup_ms=[77.5, 35.5, 26.8, 29.8, 30.1]
+procs=1 names=['ashell'] threads=9
+idle window_s=300.0 vol=1139 nonvol=0 wakeups_per_min=227.80 cpu_ms=124.71 ticks=16
+mem rss_kb=30480 pss_kb=26964 anon_kb=4972 hwm_kb=31140
+switch n=240 window_s=60.0 vol=3150 cpu_ms=312.08 ticks=32 rss_kb=30520 hwm_kb=31140
+=== sway yambar 2026-09-29T03:42:11Z
+startup_ms=[63.1, 20.7, 25.8, 19.6, 20.0]
+procs=1 names=['yambar'] threads=4
+idle window_s=300.0 vol=13 nonvol=2 wakeups_per_min=2.60 cpu_ms=3.22 ticks=0
+mem rss_kb=14192 pss_kb=7352 anon_kb=1856 hwm_kb=14192
+switch n=240 window_s=60.0 vol=1276 cpu_ms=153.54 ticks=16 rss_kb=14424 hwm_kb=14424
+=== sway waybar 2026-09-29T03:48:48Z
+startup_ms=[233.1, 125.1, 132.4, 127.5, 164.2]
+procs=1 names=['.waybar-wrapped'] threads=8
+idle window_s=300.0 vol=15 nonvol=0 wakeups_per_min=3.00 cpu_ms=8.08 ticks=1
+mem rss_kb=53968 pss_kb=43373 anon_kb=8540 hwm_kb=53968
+switch n=240 window_s=60.0 vol=719 cpu_ms=399.02 ticks=40 rss_kb=53968 hwm_kb=53968
+=== sway ironbar 2026-09-29T03:55:26Z
+startup_ms=[249.2, 106.9, 111.7, 131.4, 111.5]
+procs=1 names=['.ironbar-wrappe'] threads=15
+idle window_s=300.0 vol=1539 nonvol=0 wakeups_per_min=307.79 cpu_ms=174.91 ticks=17
+mem rss_kb=58988 pss_kb=48434 anon_kb=11700 hwm_kb=58988
+switch n=240 window_s=60.0 vol=1982 cpu_ms=268.69 ticks=28 rss_kb=59232 hwm_kb=59232
+=== sway ashell 2026-09-29T04:02:04Z
+startup_ms=[86.8, 27.2, 23.0, 25.3, 20.3]
+procs=1 names=['ashell'] threads=9
+idle window_s=300.0 vol=963 nonvol=15 wakeups_per_min=192.59 cpu_ms=112.69 ticks=15
+mem rss_kb=29664 pss_kb=26423 anon_kb=4592 hwm_kb=30120
+switch n=240 window_s=60.0 vol=2937 cpu_ms=311.28 ticks=32 rss_kb=29688 hwm_kb=30120
+=== done 2026-09-29T04:08:42Z

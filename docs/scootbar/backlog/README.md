@@ -78,7 +78,7 @@ the bounds: [research notes](../research.md).
 `blocked` on each entry names what it waits on. Priorities are inside a milestone.
 
 ### M0 — Measure (small, then stop)
-- [Baselines, and the two spikes the first milestone needs](baselines-and-spikes.md) (high)
+- [**Baselines, and the two spikes the first milestone needs**](resolved/baselines-and-spikes-done.md) — RESOLVED 2026-09-29: `ab_glyph` over a mapped font, a timerfd clock with a hand-rolled TZif reader, and the [baselines](../README.md#baselines). The record later entries extend: [dependencies-done](resolved/dependencies-done.md)
 
 ### M1 — A clock you can `nix run`
 Walking skeleton: every piece exists once, end to end, so later steps only add.

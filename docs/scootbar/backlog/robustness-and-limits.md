@@ -26,7 +26,13 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
   child that never prints is fine, one that floods cannot grow memory.
 - **Config and JSON**: size caps, depth limits, and every parse failure a
   named error, never a panic. Hot reload keeps the running config on failure.
-- **Text**: bounded glyph cache and bounded string lengths per module.
+- **Text**: bounded glyph cache and bounded string lengths per module. The
+  font file is mapped ([M0's choice](resolved/dependencies-done.md#1d-mapped-or-read)),
+  so a font truncated in place under the running bar is a `SIGBUS`: decide
+  here whether to document it or read files outside `/nix/store` into the heap.
+- **Time zone file**: the TZif reader caps the file (64 KiB in the spike),
+  checks every count and index, and falls back to the last transition or to
+  UTC rather than failing ([M0 §3](resolved/dependencies-done.md#3-time-zone)).
 - **Module count and layout**: a configured list has a maximum; a layout wider
   than the output clips deliberately, not by overflow (saturating arithmetic on
   every client-controlled size).

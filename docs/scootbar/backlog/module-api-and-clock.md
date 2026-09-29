@@ -34,7 +34,7 @@ never per frame. Dispatch cost is a handful of virtual calls per redraw.
 `left`, `center`, `right` lists of module ids; per-module padding and
 spacing; semantic color tokens (bg, fg, accent, dim, urgent, plus the state
 classes) so a theme source maps onto them. Text through the rasterizer the
-[spikes](baselines-and-spikes.md) chose, glyph cache lazily filled and bounded
+[spikes](resolved/dependencies-done.md) chose (`ab_glyph`), glyph cache lazily filled and bounded
 (see [robustness-and-limits](robustness-and-limits.md)), grayscale AA, no shaping. Recompute layout
 only when a module's measured width changes; damage only the changed
 module's rect.
@@ -45,6 +45,13 @@ Absolute realtime timerfd on the next minute (second, if configured) with
 cancel-on-clock-set, so suspend, NTP steps and DST are handled without
 polling; timezone from `/etc/localtime`. Format string from a flag (a config key
 later), with a small documented set of specifiers.
+
+M0 measured this design (one wakeup per minute, 10 in 600 s) and chose the
+parts; [the record](resolved/dependencies-done.md#what-this-changes-in-the-plan)
+lists what to carry over: re-check the clock after arming, port the spike's
+TZif reader with its `zdump` check as a fixture test, honour `TZ`, `statx`
+the zone file on each wake, and prove suspend/resume on hardware (M0 could
+only read the kernel for it).
 
 ## First frame first
 

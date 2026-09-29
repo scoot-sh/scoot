@@ -1,0 +1,12 @@
+bar:
+  height: 26
+  location: top
+  background: 1e1e2eff
+  foreground: cdd6f4ff
+  font: DejaVu Sans:pixelsize=14
+  right:
+    - clock:
+        date-format: "%a %d %b"
+        time-format: "%H:%M"
+        content:
+          - string: {text: "{date} {time}", right-margin: 8}

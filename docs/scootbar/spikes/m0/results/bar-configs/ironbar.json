@@ -1,0 +1,3 @@
+{ "position": "top", "height": 26,
+  "start": [ { "type": "workspaces" } ],
+  "end": [ { "type": "clock", "format": "%a %d %b %H:%M" } ] }
