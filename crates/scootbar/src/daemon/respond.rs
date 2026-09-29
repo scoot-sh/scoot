@@ -218,6 +218,11 @@ impl Responder<'_> {
             } else {
                 entry.objects.canvas.clear();
             }
+            // Whatever `stale` says next turn: the modules, the style and
+            // the font were swapped wholesale, so every output draws once
+            // (with no modules placed `stale` is always false, and the
+            // removed modules' pixels would stay as ghosts).
+            entry.output.invalidate();
         }
         if geometry {
             self.state.recreate_bars(self.qh);

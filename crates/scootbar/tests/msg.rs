@@ -73,6 +73,15 @@ fn write_config_bg(session: &Session, section: &str, height: u32, background: &s
     std::fs::write(session.runtime_dir().join("bar.toml"), text).unwrap();
 }
 
+/// No module placed anywhere: an empty bar at `height`, in `background`.
+fn write_empty_config(session: &Session, height: u32, background: &str) {
+    let text = format!(
+        "center = []\n\n[bar]\nheight = {height}\nfont = \"{}\"\n\n[colors]\nbackground = \"{background}\"\n",
+        session.font().display()
+    );
+    std::fs::write(session.runtime_dir().join("bar.toml"), text).unwrap();
+}
+
 #[test]
 fn query_reload_and_kill() {
     let Some(session) = Session::scoot("msg", 1, "") else {
@@ -129,20 +138,40 @@ fn query_reload_and_kill() {
         (session.scoot_screenshot(1).at(5, 14) == rgb("#ff0000")).then_some(())
     });
 
-    // A bad file is refused, and the running bar stands.
+    // N→0 at the same height: the bar repaints empty at once, no ghost
+    // clock. The clock sits around the center, so some pixel there is
+    // not the background while it is placed.
+    let background = rgb("#ff0000");
+    let shot = session.scoot_screenshot(1);
+    assert!(
+        (600..1000).any(|x| (0..28).any(|y| shot.at(x, y) != background)),
+        "the clock draws something before the reload"
+    );
+    write_empty_config(&session, 40, "#ff0000");
+    let emptied = reply(&msg(&session, &["reload"]));
+    assert_eq!(emptied["type"], "ok");
+    session.wait_for(&mut bar.0, "the emptied bar", |session| {
+        let queried = reply(&msg(session, &["query"]));
+        let empty = queried["modules"].as_array().is_some_and(Vec::is_empty);
+        let shot = session.scoot_screenshot(1);
+        let cleared = (600..1000).all(|x| (0..28).all(|y| shot.at(x, y) == background));
+        (empty && cleared).then_some(())
+    });
+
+    // A bad file is refused, and the running bar stands (still empty).
     std::fs::write(&path, "[bar\nheight = ]\n").unwrap();
     let bad = msg(&session, &["reload"]);
     assert!(!bad.status.success());
     assert!(String::from_utf8_lossy(&bad.stderr).contains("daemon:"));
     assert_eq!(usable_height(&session), 1000 - 28);
     let queried = reply(&msg(&session, &["query"]));
-    assert_eq!(queried["modules"].as_array().unwrap().len(), 1);
+    assert_eq!(queried["modules"].as_array().unwrap().len(), 0);
 
     // `set` is refused loudly: nothing takes one yet.
     let refused = msg(&session, &["set", "clock", "{}"]);
     assert!(!refused.status.success());
     assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("takes no set value"),
+        String::from_utf8_lossy(&refused.stderr).contains("is not placed"),
         "{}",
         String::from_utf8_lossy(&refused.stderr)
     );

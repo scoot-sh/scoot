@@ -205,10 +205,10 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
 }
 
 /// One placed module's state on one output, as a `query` reply lists it.
-/// Every key is always present, `null` when not known (yet): `output` is
-/// null where the compositor never named the output, `icon` is absent
-/// where the module shows none. New keys may be added; none is removed or
-/// changes meaning within a protocol version.
+/// Every key but `icon` is always present, `null` when not known (yet):
+/// `output` is null where the compositor never named the output. `icon`
+/// is absent where the module shows none. New keys may be added; none is
+/// removed or changes meaning within a protocol version.
 #[derive(Debug, Serialize)]
 pub struct ModuleView<'a> {
     /// The module id, as `--left`/`--center`/`--right` (and `query`) name

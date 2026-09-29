@@ -362,6 +362,19 @@ impl Output {
         }
     }
 
+    /// A reloaded bar with the same geometry: draw once on the next turn,
+    /// whatever `stale` says. With no modules placed `stale` is always
+    /// false (it compares per-module revisions over an empty iterator),
+    /// so without this the compositor would keep the last buffer's
+    /// pixels: the removed modules' ghosts, at unchanged geometry. An
+    /// empty bar's background-only repaint needs it too. A new chance
+    /// after a failed draw, like a `configure`. Cold path (a reload), not
+    /// the loop.
+    pub fn invalidate(&mut self) {
+        self.shown = None;
+        self.failed = None;
+    }
+
     /// A `configure` on the live surface: remember its size, and ack it.
     /// A new size is also a new chance for a draw that failed.
     ///
