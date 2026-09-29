@@ -20,11 +20,18 @@ need icons, and window titles need more than Latin.
 2. **Built-in bitmaps or small path icons** compiled in for the built-in
    modules (mute, wifi bars, battery levels). Theme-independent and sharp at
    any scale if drawn as vectors; costs binary size per icon.
-3. **Icon-theme lookup** (`.desktop` and themed names, needed for tray and
+3. **A PNG file path in config** (`image = "/path/launcher.png"`), for a
+   button that should just be a picture. Decoded once at load with the
+   `png` crate scootbg already carries, scaled to the icon size at the output's
+   real scale, held as a premultiplied bitmap and dropped at reload. Behind a
+   Cargo feature so the smallest build has no decoder. No SVG: rasterizing it
+   is a heavy dependency for a bar.
+4. **Icon-theme lookup** (`.desktop` and themed names, needed for tray and
    window icons): loads and decodes files, which is the heavy path. Only if
    the [tray](tray.md) or window icons force it.
 
-Prefer 1 with 2 as the built-ins' default if the numbers allow; record both.
+Prefer 1 with 2 as the built-ins' default if the numbers allow, 3 as the opt-in
+for user buttons; record the costs of each.
 
 ## Fonts
 
