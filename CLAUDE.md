@@ -342,6 +342,15 @@ devenv test                  # quick check that the shell itself is sound
   `.claude/settings.json` and overwrite the hand-maintained one, including
   its `gh pr merge` permission.
 
+## Backlog
+
+Entries live in `docs/backlog/`, `docs/scootbg/backlog/` and
+`docs/scootbar/backlog/`. Manage them with `scripts/backlog` (see the
+`backlog` skill), not by hand. Resolve with `scripts/backlog resolve SLUG`,
+which stamps `resolved: YYYY-MM-DD` and archives the entry, so there is
+always a date it landed. Run `scripts/backlog check` before committing
+backlog changes.
+
 ## Local scratch/handoff state
 
 `HANDOFF.md` at the repo root is gitignored — the convention for transient,
