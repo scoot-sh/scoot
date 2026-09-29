@@ -90,7 +90,7 @@ the configured delay; the next motion, button or scroll shows it again and
 that frame composites. Hiding suppresses the cursor-element gathering
 (`State::cursor_location`), never the client's own cursor status, so a
 hidden cursor disturbs no plane assignment, a reshown one composites
-exactly one frame, and captures (IPC screenshots,
+until the pointer hides again (headless: one frame; on Asahi the whole delay, Test 14), and captures (IPC screenshots,
 `ext-image-copy-capture-v1`) read a hidden pointer as hidden. Never hides
 behind the session lock; keys do not reset the wait. Headless-verified
 (`compositor::cursor_hide::tests`: synthetic-clock hide, race, reshow

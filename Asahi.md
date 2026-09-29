@@ -2441,7 +2441,7 @@ the pointer still "shown" to the client; with it unset, it never does.
 Compositor CPU with the option set is 13-14
 jiffies against 29-33 with it unset for the 1080p30 clip (**about 55%
 lower**), and 21 against 37-40 for the 60 fps panel-resolution clip
-(**about 43% lower**). Test 5's direct figure for the 1080p30 clip was
+(**about 45% lower**). Test 5's direct figure for the 1080p30 clip was
 10-11 with mpv hiding its own pointer; the 13-14 here is on a different
 kernel with a second output and another Mesa, so do not compare the two
 runs' absolute numbers.
