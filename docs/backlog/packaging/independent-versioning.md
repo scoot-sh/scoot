@@ -44,6 +44,11 @@ the other way round.
 - **What SemVer means for a binary**: name the public interface (CLI flags,
   config schema, control-socket protocol) and what breaks it, e.g. removing a
   config key is a major change. Consider a `version` key in the config schema.
+- **Input is the commit history**: `CLAUDE.md` requires Conventional Commits with the
+  package(s) as the scope, so the bump per package is computed from the commits
+  that name it (`feat` minor, `fix` patch, `!` or `BREAKING CHANGE:` major). The
+  script that bumps and tags reads that; commits with no package scope
+  (`ci`, `docs`, `nix`, `backlog`) never bump a version.
 - **Mechanics**: per-crate `version`, tags `<package>-vX.Y.Z`, a per-package
   changelog, and a small script (like `scripts/backlog`) that bumps, tags and
   checks. Prefer that over adopting a release tool until it is clearly needed.

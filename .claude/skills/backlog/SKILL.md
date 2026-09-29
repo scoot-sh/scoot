@@ -46,7 +46,7 @@ scripts/backlog claims [--prune]                        # every claim on main; -
 ```
 
 - **What a claim is**: a small file, `docs/backlog/claims/<area>__backlog__<slug>.json`,
-  added to `main` in its own commit (`backlog: claim <slug> (<agent>) [skip ci]`)
+  added to `main` in its own commit (`chore(backlog): claim <slug> (<agent>) [skip ci]`)
   holding a uuid, your name and the date. The commit is built with git
   plumbing on top of the fetched `main`: **it never touches your working tree
   or your checked-out branch.** The push is the lock, so if two agents race,
