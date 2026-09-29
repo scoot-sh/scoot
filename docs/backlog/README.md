@@ -1,7 +1,7 @@
 # Backlog
 
 Everything not yet scheduled or done, split by area. Each entry is one file
-with YAML frontmatter (`title`, `status`, `area`, `priority`, `blocked`), so
+with YAML frontmatter (`title`, `status`, `area`, `priority`, `blocked`, plus `resolved`, the date it landed, once it is), so
 the set is filterable without parsing prose:
 
 ```sh
@@ -12,7 +12,8 @@ rg 'blocked: ' docs/backlog/**/*.md | rg -v ': null' # what is waiting on someth
 
 `ROADMAP.md` is the index and carries the ordered work; this directory is
 the detail. scootbg, the wallpaper daemon, keeps its own backlog in
-[`docs/scootbg/backlog/`](../scootbg/backlog/README.md). Prose is the original backlog entry, moved verbatim.
+[`docs/scootbg/backlog/`](../scootbg/backlog/README.md), and scootbar, the
+status bar, in [`docs/scootbar/backlog/`](../scootbar/backlog/README.md). Prose is the original backlog entry, moved verbatim.
 
 **Resolved entries** (struck through in the old monolith, kept for the
 diagnosis history) live in [`resolved/`](./resolved/). They are archived, not
@@ -272,6 +273,7 @@ falsify. Read `flexwm` there as `scoot`.
 ### IPC / computer use
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
 - [A coalesced `workspace` event on `subscribe`](./ipc/workspace-snapshot-event.md) — medium, filed 2026-09-29 (scootbar planning): occupied workspaces for a bar, which no standard protocol carries
+- [Keyboard layout in IPC](./ipc/keyboard-layout-event.md) — low, filed 2026-09-29 (scootbar research): no standard protocol tells a client the active layout
 - [Switch a specific output's workspace](./ipc/workspace-switch-targeted-output.md) — medium, filed 2026-09-29: `focus-workspace-index` and `ext-workspace` `activate` only reach the focused output
 - [IPC bundle: usable rect, focus-workspace-index, ambient locked](./resolved/protocol-bundle-resolved.md) — RESOLVED 2026-09-15, no bump needed
 - [No cap on concurrent IPC connections, and a half-closed client leaks one](./resolved/ipc-connection-cap-resolved.md) — RESOLVED 2026-09-16: 64 connections, refused with a reason past that, and a write-stall deadline that drops a peer which has stopped reading
@@ -391,6 +393,17 @@ falsify. Read `flexwm` there as `scoot`.
   serial); resize and VT-switch reactivation leave it where the user left
   it; the smoke test's park-the-pointer workaround stays as harmless
   protection.
+
+### Packaging and releases (filed 2026-09-29)
+
+Project-wide, not tied to one binary; the bar's own Nix package is
+[scootbar's `nix-package`](../scootbar/backlog/nix-package.md).
+
+- [Independent versions per shipped binary](./packaging/independent-versioning.md) — medium: one shared `0.1.0` and no tags today; the scoot/scootbg `apply-config` coupling made explicit
+- [Vendored sources, third-party licenses, advisories](./packaging/vendoring-and-licenses.md) — medium: what every distro package needs first (two git-fork dependencies vendor and resolve offline)
+- [Release artifacts](./packaging/release-artifacts.md) — medium, blocked on versioning: tag-triggered builds, checksums, signatures, SBOM, changelogs, both architectures
+- [A Nix binary cache for users](./packaging/nix-binary-cache.md) — medium: `nix run` without a cold Smithay compile; distinct from CI's recorded no-store-cache decision
+- [Arch packages](./packaging/arch-package.md), [Debian and Ubuntu packages](./packaging/deb-package.md), [RPM packages](./packaging/rpm-package.md) — low, blocked on the three above
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**
@@ -533,6 +546,11 @@ be revisited.
   2026-09-25, `--tty` drives every connected monitor), and the one remaining
   surface is the [remainder](./core/multi-output-remainder.md) below (open,
   high: per-output scale/mode only).
+- [Cycle outputs left and right, wrapping](./core/output-cycle-binds.md) — medium, filed 2026-09-29: `Super+,` / `Super+.` reach only screens 1 and 2 today, as absolute positions
+- [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
+- [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
+- [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
+- [A real maximize](./core/maximize.md) — medium, filed 2026-09-29: fill the usable area with the bar visible, distinct from fullscreen; today no state exists and `set_maximized` does nothing
 - [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
   — deliberately left out of milestone 19: design answered 2026-09-22
   (`[[outputs]]` config shape, per-output scale enumeration, apply/test

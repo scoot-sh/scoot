@@ -108,6 +108,7 @@ jobs:
     outputs:
       scoot: ${{ steps.classify.outputs.scoot }}
       scootbg: ${{ steps.classify.outputs.scootbg }}
+      backlog: ${{ steps.classify.outputs.backlog }}
     steps:
       # Depth 2: a pull_request run checks out the merge commit, whose first
       # parent is the base branch tip, so `HEAD^1..HEAD` is exactly the PR.
@@ -121,13 +122,18 @@ jobs:
         run: |
           scoot=true
           scootbg=true
+          backlog=true
           if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$changed" ]; then
             printf 'Changed:\n%s\n' "$changed"
             scoot=false
             scootbg=false
+            backlog=false
             while IFS= read -r path; do
               case "$path" in
                 *.md | docs/*) ;;
+                # The backlog tool and its tests: only their own job.
+                scripts/backlog | scripts/test_backlog.py)
+                  backlog=true ;;
                 crates/scoot/* | crates/scoot-core/* | crates/scoot-ipc/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
                   scoot=true ;;
                 # Their manifests are read by jobs outside scootbg's own
@@ -140,15 +146,32 @@ jobs:
                   scootbg=true ;;
                 *)
                   scoot=true
-                  scootbg=true ;;
+                  scootbg=true
+                  backlog=true ;;
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot scootbg=$scootbg"
+          echo "scoot=$scoot scootbg=$scootbg backlog=$backlog"
           {
             echo "scoot=$scoot"
             echo "scootbg=$scootbg"
+            echo "backlog=$backlog"
           } >>"$GITHUB_OUTPUT"
+
+  # scripts/backlog is the swarm's claim tool and pushes to main, so its tests
+  # (a throwaway bare origin and clones in a temp dir; nothing touches this repo)
+  # run whenever it or they change, and on everything else too, as the other
+  # jobs do. Fail open like them: only an explicit `false` skips.
+  backlog-tools:
+    name: Backlog tool tests
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.backlog != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: scripts/backlog tests
+        run: python3 scripts/test_backlog.py
 
   linux:
     name: Linux (compositor)

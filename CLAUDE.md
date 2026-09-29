@@ -67,6 +67,13 @@ window layout OmniWM-style through the Accessibility API.
   issues or comments on any dependency. A fork is one upstream commit plus
   the fewest carried commits, pinned by rev, and listed in
   [`docs/forks.md`](docs/forks.md) in the same PR that adds or changes it.
+  **A fork is the last resort, and the PR that adds one or carries another
+  commit must say so with evidence:** the scoot-side alternatives considered (a
+  handler or wrapper in scoot, an in-tree copy of the module, a workaround at
+  another layer) and why each was rejected, in the `docs/forks.md` entry. A
+  hard constraint (state private to the dependency, a hook that runs where scoot
+  cannot) is checked against the pinned fork's source, not asserted. "The fork
+  was simpler" is not a reason.
 - Prefer CPU-friendly rendering and damage-limited redraws throughout.
 - **"Compositor," not "window manager," in anything user-facing** (`README.md`,
   crate descriptions, `--help` text). Wayland has no separate window-manager
@@ -341,6 +348,44 @@ devenv test                  # quick check that the shell itself is sound
 - **Leave `claude.code.enable` off in `devenv.nix`.** devenv would generate
   `.claude/settings.json` and overwrite the hand-maintained one, including
   its `gh pr merge` permission.
+
+## Backlog
+
+Entries live in `docs/backlog/`, `docs/scootbg/backlog/` and
+`docs/scootbar/backlog/`. Manage them with `scripts/backlog` (see the
+`backlog` skill), not by hand. Resolve with `scripts/backlog resolve SLUG`,
+which stamps `resolved: YYYY-MM-DD` and archives the entry, so there is
+always a date it landed. Run `scripts/backlog check` before committing
+backlog changes.
+
+## Commits and CI
+
+**Conventional Commits, naming the component(s) changed:**
+`type(scope): summary`, e.g. `feat(scootbar): workspaces module`,
+`fix(scoot,scootctl): refuse a stale index`, `docs(backlog): file the tray entry`.
+
+- **Types**: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`,
+  `chore`. A breaking change takes `!` (`feat(scoot)!:`) and/or a
+  `BREAKING CHANGE:` footer saying what broke.
+- **Scope is the package name**: `scoot`, `scootctl`, `scootbg`, `scootbar`
+  (later `scootnotify`, `scootlaunch`), or the library it lives in (`scoot-core`,
+  `scoot-ipc`, `scootbg-mem`, `scootui`). A change spanning packages lists them,
+  comma-separated, or is split. Non-package work uses `nix`, `ci`, `docs`,
+  `backlog`, `deps` or `claude` (`CLAUDE.md` and `.claude/`).
+- **Why**: per-package semver is built from this history later
+  ([independent versioning](docs/backlog/packaging/independent-versioning.md)):
+  a `feat` is a minor bump and a `fix` a patch for the package(s) in its scope, a
+  breaking change a major. So the scope must be accurate, and "breaking" for a
+  binary means its CLI, config schema or control-socket/IPC protocol.
+- **PR titles follow the same form**, since a squash-merge makes the title the
+  commit. History before this rule is not rewritten.
+
+**CI runs only what changed.** Every new package or component adds its path
+filter to the classify job in `.github/workflows/ci.yml` in the same PR that adds
+it, the way scootbg's is, and its jobs run only when its files (or something it
+depends on: `scoot-ipc`, the workspace `Cargo.toml`/`Cargo.lock`, the flake) change.
+No package gets an always-run job. A change to shared code fans out to its
+dependents and nothing more. Commits that are only claims or docs use `[skip ci]`.
 
 ## Local scratch/handoff state
 
