@@ -40,6 +40,8 @@ mod print;
 #[cfg(target_os = "linux")]
 mod render;
 #[cfg(all(target_os = "linux", test))]
+mod snapshots;
+#[cfg(all(target_os = "linux", test))]
 mod testfont;
 #[cfg(target_os = "linux")]
 mod text;

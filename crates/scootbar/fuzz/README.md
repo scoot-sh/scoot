@@ -16,12 +16,23 @@ panic there kills the bar.
 
 Both compile scootbar's own `src/modules/clock/tzif.rs` and `format.rs` by
 `#[path]`, unchanged (`fuzz_targets/common.rs`); they use nothing but
-`std`. This crate is its own workspace, with its own `Cargo.lock`: it is
+`std`. What each target checks is written once, in scootbar's
+`src/modules/clock/fuzz.rs`, compiled here the same way, so each target is
+one line. This crate is its own workspace, with its own `Cargo.lock`: it is
 never built by `cargo build --workspace`, nextest, clippy or the flake, and
-nothing here reaches the shipped binary. The stable property tests in the
-crate (`modules/clock/format/tests.rs`,
-`modules/clock/tzif/tests.rs`) run a bounded version of the same checks in
-every CI run.
+nothing here reaches the shipped binary.
+
+**In CI**, on every scootbar change, the `scootbar` job builds both targets
+and runs them for a fixed budget: 1,000,000 runs of `format` and
+5,000,000 of `tzif`, from `-seed=1`, over the seed corpus and
+`regressions/` (about 35 s). Building them is what keeps the `#[path]`
+includes from rotting: a change that compiles in scootbar but not here
+fails there. A finding's input is printed in base64 in the job's log.
+**On every `cargo test`**, scootbar's
+`modules::clock::fuzz::tests` replay the seed corpus and every file in
+`regressions/` through the same checks on the stable toolchain, and the
+property tests (`modules/clock/format/tests.rs`,
+`modules/clock/tzif/tests.rs`) run a bounded version of them.
 
 ## Running it
 
@@ -45,8 +56,8 @@ devenv shell -- nix shell --inputs-from . nixpkgs#cargo-fuzz --command bash -c '
 - **Give it a scratch corpus first**, as for scootbg: libFuzzer writes what
   it finds into the first directory, and `fuzz/corpus/` is the committed
   seed (real zone files, fat and slim, and a few formats and POSIX rules).
-- A crash goes to `fuzz/regressions/<target>/` once fixed, so every later
-  run replays it.
+- A crash goes to `fuzz/regressions/<target>/` once fixed, named for what
+  it was, so every later run replays it, fuzzing or not.
 
 ## Runs
 

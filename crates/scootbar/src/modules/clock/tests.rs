@@ -7,7 +7,7 @@ use super::tzif::{Tz, days_from_civil};
 use super::zone::Spec;
 use super::{Clock, Period, Settings, Span};
 use crate::modules::harness::Harness;
-use crate::modules::{Module, OutputView, Update, View};
+use crate::modules::{Module, Update};
 
 const NEW_YORK: &[u8] = include_bytes!("fixtures/America_New_York.slim.tzif");
 const LORD_HOWE: &[u8] = include_bytes!("fixtures/Australia_Lord_Howe.fat.tzif");
@@ -158,17 +158,37 @@ fn a_minute_clock_is_armed_for_the_next_minute() {
 /// A spurious wake (nothing to read) changes nothing and re-arms.
 #[test]
 fn a_spurious_wake_is_harmless() {
-    let mut clock = clock("%H:%M", Tz::utc());
-    let before = clock.text.clone();
-    let update = clock.on_ready(0, PollFlags::IN);
+    let clock = clock("%H:%M", Tz::utc());
+    let mut harness = Harness::new(Box::new(clock));
+    assert_eq!(harness.source_count(), 1);
+    let before = harness.view().text().to_owned();
+    let update = harness.deliver(0, PollFlags::IN);
     // Within the same minute nothing changed (a minute boundary may pass
     // during the test, which is a change).
-    if clock.text == before {
+    if harness.view().text() == before {
         assert_eq!(update, Update::Unchanged);
+    } else {
+        assert_eq!(update, Update::Changed);
     }
-    let mut view = View::default();
-    clock.view(&OutputView { name: None }, &mut view);
-    assert_eq!(view.text(), clock.text);
+}
+
+/// `POLLERR` and `POLLHUP` handed over on the timer (which `poll(2)` may
+/// report whatever was asked) end like any wake: the time shown, and the
+/// timer armed again, so the next real tick still comes.
+#[test]
+fn an_error_or_hang_up_on_the_timer_leaves_it_ticking() {
+    let clock = clock("%H:%M:%S", Tz::utc());
+    let mut harness = Harness::new(Box::new(clock));
+    for events in [PollFlags::ERR, PollFlags::HUP, PollFlags::NVAL] {
+        let _ = harness.deliver(0, events);
+        assert_eq!(harness.view().text().len(), "15:07:42".len());
+    }
+    let start = Instant::now();
+    let mut update = None;
+    while update != Some(Update::Changed) && start.elapsed() < Duration::from_secs(3) {
+        update = harness.wait(Duration::from_millis(1500));
+    }
+    assert_eq!(update, Some(Update::Changed), "no tick within 3 s");
 }
 
 /// The zone file is read again when it changes on disk.

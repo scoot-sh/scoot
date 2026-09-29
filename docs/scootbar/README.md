@@ -11,8 +11,10 @@ composable shell.
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
 > [module API and clock](backlog/resolved/module-api-and-clock-done.md),
 > and its [Nix package](backlog/resolved/nix-package-done.md), which
-> ships M1's `nix run`: a clock you can run in one command. M1 closes
-> with its testing and CI ticket. M0, the
+> ships M1's `nix run`: a clock you can run in one command. Its
+> [testing and CI](backlog/resolved/testing-and-ci-done.md) closes M1:
+> snapshot, harness and fuzz layers, a CI path of the bar's own, and the
+> benchmark script ([testing.md](testing.md)). M0, the
 > measuring milestone, is done: the competitor baselines below, and the
 > font rasterizer and clock choices, recorded in
 > [the dependency record](backlog/resolved/dependencies-done.md). The
@@ -178,3 +180,37 @@ real hardware, a third compositor, and the competitors' lines of code and
 dependency counts ([lightest](backlog/lightest.md) wants those rows for
 scootbar itself). yambar, Waybar and ironbar are
 MIT; ashell and i3status-rust are GPL, and were only run as binaries.
+
+### M1, like for like, by the benchmark script
+
+From M1 on, each milestone's numbers come from
+[`scripts/scootbar-bench`](testing.md#benchmark), with every bar showing
+exactly what scootbar shows: here the clock alone (`%a %d %b %H:%M`), so
+yambar and Waybar run without their workspaces. Same machine, same stage
+as above; release scootbar (identical to `main`'s), a debug scoot, sway
+1.12, one idle and one switching run per bar, startup the median of 5
+[with the range]. The raw run is kept as the next milestone's baseline in
+[`bench/m1-clock`](bench/m1-clock/table.md). Startup is timed where the
+compositor receives the frame, with the compositor printing its protocol,
+so it is slower for every bar than the tables above and is compared only
+within this run. **No competitor beats scootbar on any gated row.**
+
+| | scootbar | yambar 1.11.0 | Waybar 0.15.0 |
+|---|---|---|---|
+| Idle RSS, scoot / sway | 3.9 / 3.9 MiB | 14.1 / 13.8 MiB | 52.5 / 52.4 MiB |
+| Idle PSS | 2.2 / 2.2 MiB | 8.6 / 7.8 MiB | 45.8 / 43.2 MiB |
+| Idle heap (`RssAnon`) | 0.9 / 0.9 MiB | 1.8 / 1.8 MiB | 8.1 / 8.3 MiB |
+| Idle wakeups per minute | 2 / 1 | 4 / 3 | 5 / 3 |
+| Idle CPU, 300 s window | 1.6 / 1.6 ms | 3.5 / 3.4 ms | 8.2 / 7.3 ms |
+| CPU, 240 workspace switches in 60 s | 0.1 / 0.2 ms | 0.7 / 0.5 ms | 1.6 / 1.3 ms |
+| Startup to first frame | 21.4 [18.0–37.2] / 24.2 [12.7–27.5] ms | 44.3 [41.3–81.1] / 49.8 [31.2–77.0] ms | 178 [165–267] / 165 [158–216] ms |
+| Size: stripped binary + non-glibc `ldd` closure | 1.03 MB | 19.7 MB | 71.4 MB |
+| Threads | 1 | 3 | 8 |
+
+scootbar is 10,628 lines of Rust (6,995 outside `tests.rs` files) with 6
+direct dependencies on Linux. Its one wakeup a minute on sway (two in the
+clock's own run above) is most likely timing, not a change: sway sends the
+`wl_buffer.release` within a quarter of a millisecond of the commit (the
+clock's record traced it), which can land before the bar has gone back to
+sleep. The run's 5 involuntary switches beside 5 voluntary ones fit that;
+it was not traced again here.

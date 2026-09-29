@@ -85,11 +85,11 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [**Skeleton: a layer surface per output**](resolved/skeleton-layer-surface-done.md) — RESOLVED 2026-09-29: `scootbar daemon`, a solid bar per output across hotplug, device pixels at fractional scales, zero idle wakeups; flags, no config file ([cli.md](../cli.md))
 - [**Module API, layout, theme tokens and the clock**](resolved/module-api-and-clock-done.md) — RESOLVED 2026-09-29: the module contract, three-section layout, color tokens, `ab_glyph` text with a bounded cache, and a timerfd clock (`3:07 pm` by default) redrawing only its own span; `--font` or a well-known file, else a refusal; fonts mapped only when root-owned, unwritable and on a read-only mount, as in the Nix store ([cli.md](../cli.md))
 - [**Nix package**](resolved/nix-package-done.md) — RESOLVED 2026-09-29: `packages.scootbar` (no font in its closure; 49 MB, glibc and libgcc_s) and `scootbar-demo` (DejaVu Sans by default), `pkgs.scootbar`, `nix run`, features by `.override`, eval pins and main-only CI builds ([docs/nix.md](../../nix.md#the-status-bar-scootbar))
-- [Testing and CI](testing-and-ci.md) (medium): harnesses, path-filtered CI, first benchmark
+- [**Testing and CI**](resolved/testing-and-ci-done.md) — RESOLVED 2026-09-29: snapshot tests of the canvas and the bar at 1x and fractional scales, fake events through the module harness and a contract every registered module is held to, the fuzz corpus replayed on stable and both targets run in CI for a fixed budget, a per-module feature matrix and a macOS check on bar-only PRs, and `scripts/scootbar-bench` on scootbg's runner, with M1's run as the ratchet's baseline ([testing.md](../testing.md))
 
 ### M2 — Workspaces: the first bar you can live with
 - [Workspaces module](workspaces-module.md) (high): `ext-workspace-v1`, click to switch
-- [M1 review follow-ups](m1-review-followups.md) (medium): a clock that retries a failed draw, and four hardening gaps
+- [M1 review follow-ups](m1-review-followups.md) (medium): a clock that retries a failed draw, and four hardening gaps (the fuzz crate's CI build done)
 
 ### M3 — Configurable
 - [Config file, control socket and reload](config-cli-and-reload.md) (medium): `scootbar msg`, `query`

@@ -88,7 +88,7 @@ notes it could not reach Reddit or Hacker News), the failures that recur are
 
 ## Verification
 
-Fuzz (see [testing-and-ci](testing-and-ci.md)), an fd storm and a flooding
+Fuzz (see [testing-and-ci](resolved/testing-and-ci-done.md)), an fd storm and a flooding
 `exec` child against a running bar with the RSS and fd count measured before
 and after, and a kill of the compositor mid-frame.
 
