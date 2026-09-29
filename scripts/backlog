@@ -9,6 +9,7 @@ Every entry is one markdown file with a small frontmatter block:
     area: "core"          # the directory it lives in ("resolved" once archived)
     priority: "low"       # high | medium | low | research | null
     blocked: null         # or a string saying what it waits on
+    resolved: "2026-09-29"  # added by `resolve`; absent on open (and older) entries
     ---
 
 Stdlib only. Run `scripts/backlog --help`. Edits change only the frontmatter
@@ -18,6 +19,7 @@ lines named; the prose is never rewritten.
 import argparse
 import json
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -43,7 +45,9 @@ INDEXES = {  # area -> the README that must link each of its open entries
 }
 STATUSES = ("open", "research", "resolved")
 PRIORITIES = ("high", "medium", "low", "research")
-KEYS = ("title", "status", "area", "priority", "blocked")
+KEYS = ("title", "status", "area", "priority", "blocked")  # required
+OPTIONAL_KEYS = ("resolved",)  # a YYYY-MM-DD, stamped when the entry is resolved
+DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}$")
 
 
 class Entry:
@@ -104,6 +108,39 @@ def find(name):
     return hits[0]
 
 
+def git_resolved_dates():
+    """path -> date it landed in a resolved/ directory, from git, oldest first seen.
+
+    Covers entries archived before `resolved:` was stamped. In a shallow clone
+    an entry older than the boundary shows up as added by the boundary commit,
+    which says nothing about when it was resolved, so those are left out.
+    """
+    dirs = sorted({str(d.relative_to(ROOT)) for d in RESOLVED.values()})
+    r = subprocess.run(["git", "-C", str(ROOT), "log", "--diff-filter=AR", "--name-only",
+                        "--format=@%H %as", "--", *dirs], capture_output=True, text=True)
+    if r.returncode != 0:
+        return {}
+    shallow = ROOT / ".git" / "shallow"
+    boundary = set(shallow.read_text().split()) if shallow.is_file() else set()
+    dates, cur = {}, None
+    for line in r.stdout.splitlines():
+        if line.startswith("@"):
+            sha, _, day = line[1:].partition(" ")
+            cur = None if sha in boundary else day
+        elif line and cur:
+            dates[line] = cur  # log runs newest first, so the last write is the oldest
+    return dates
+
+
+def resolved_date(e, git_dates):
+    """(date, source): the stamped field, else git, else (None, None)."""
+    d = e.get("resolved")
+    if d:
+        return d, "stamped"
+    d = git_dates.get(str(e.rel()))
+    return (d, "git") if d else (None, None)
+
+
 def rank(e):
     order = {p: i for i, p in enumerate(PRIORITIES)}
     return (order.get(e.get("priority"), len(PRIORITIES)), e.slug)
@@ -111,8 +148,13 @@ def rank(e):
 
 def cmd_list(a):
     rows = []
-    for e in entries(include_resolved=a.all):
-        if not a.all and e.get("status") == "resolved":
+    git_dates = git_resolved_dates() if (a.all or a.resolved) else {}
+    for e in entries(include_resolved=a.all or a.resolved):
+        if a.resolved and e.get("status") != "resolved":
+            continue
+        if not (a.all or a.resolved) and e.get("status") == "resolved":
+            continue
+        if a.since and (resolved_date(e, git_dates)[0] or "") < a.since:
             continue
         if a.status and e.get("status") != a.status:
             continue
@@ -127,20 +169,31 @@ def cmd_list(a):
         if a.grep and not re.search(a.grep, e.text, re.I):
             continue
         rows.append(e)
-    rows.sort(key=rank)
+    if a.resolved:  # newest first; undated ones last
+        rows.sort(key=lambda e: (resolved_date(e, git_dates)[0] or "", e.slug), reverse=True)
+    else:
+        rows.sort(key=rank)
     for e in rows:
         title = (e.get("title") or "").strip()
         if len(title) > 70:
             title = title[:69] + "…"
         flag = " [blocked]" if e.get("blocked") else ""
-        print(f"{str(e.get('priority') or '-'):8} {str(e.get('status')):9} "
-              f"{str(e.get('area')):10} {e.slug}{flag}\n           {title}")
+        if e.get("status") == "resolved":
+            d, src = resolved_date(e, git_dates)
+            when = f"{d}{'' if src == 'stamped' else ' (git)'}" if d else "date unknown"
+            print(f"{when:22} {e.slug}\n           {title}")
+        else:
+            print(f"{str(e.get('priority') or '-'):8} {str(e.get('status')):9} "
+                  f"{str(e.get('area')):10} {e.slug}{flag}\n           {title}")
     print(f"\n{len(rows)} entries", file=sys.stderr)
 
 
 def cmd_show(a):
     e = find(a.name)
     print(f"# {e.rel()}")
+    if e.get("status") == "resolved":
+        d, src = resolved_date(e, git_resolved_dates())
+        print(f"# resolved: {d} ({src})" if d else "# resolved: date unknown")
     print(e.text if a.full else e.text.split("\n---\n", 1)[0].lstrip("-\n") + "\n")
     if not a.full:
         body = e.text.split("\n---\n", 1)[-1].strip().splitlines()
@@ -173,8 +226,10 @@ def set_fields(e, updates):
 
 
 def validate(key, value):
-    if key not in KEYS:
-        sys.exit(f"backlog: unknown field {key!r} (fields: {', '.join(KEYS)})")
+    if key not in KEYS + OPTIONAL_KEYS:
+        sys.exit(f"backlog: unknown field {key!r} (fields: {', '.join(KEYS + OPTIONAL_KEYS)})")
+    if key == "resolved" and not DATE_RE.match(value):
+        sys.exit("backlog: resolved must be a date, YYYY-MM-DD")
     if key == "status" and value not in STATUSES:
         sys.exit(f"backlog: status must be one of {STATUSES}")
     if key == "priority" and value not in PRIORITIES + ("null",):
@@ -246,8 +301,11 @@ def cmd_resolve(a):
     area = e.get("area")
     if area not in RESOLVED:
         sys.exit(f"backlog: cannot archive area {area!r}")
+    import datetime
+    day = a.date or datetime.date.today().isoformat()
+    validate("resolved", day)
     set_fields(e, {"status": "resolved", "area": "resolved",
-                   "priority": "null", "blocked": "null"})
+                   "priority": "null", "blocked": "null", "resolved": day})
     slug = e.slug if e.slug.endswith(("-done", "-resolved")) else f"{e.slug}-done"
     dst = RESOLVED[area] / f"{slug}.md"
     RESOLVED[area].mkdir(exist_ok=True)
@@ -271,6 +329,10 @@ def cmd_check(a):
             if k not in e.fields:
                 problems.append(f"{rel}: missing {k}")
         st, pr = e.get("status"), e.get("priority")
+        if "resolved" in e.fields and not DATE_RE.match(str(e.get("resolved"))):
+            problems.append(f"{rel}: resolved must be YYYY-MM-DD, got {e.get('resolved')!r}")
+        if "resolved" in e.fields and st != "resolved":
+            problems.append(f"{rel}: has a resolved date but status is {st!r}")
         in_resolved = e.path.parent in RESOLVED.values()
         if st not in STATUSES:
             problems.append(f"{rel}: bad status {st!r}")
@@ -292,11 +354,17 @@ def cmd_check(a):
 
 
 def main():
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # `| head` is not an error
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("list", aliases=["ls"], help="list entries (open ones by default)")
     p.add_argument("--all", action="store_true", help="include resolved")
+    p.add_argument("--resolved", action="store_true",
+                   help="only resolved, newest first, with the date it landed")
+    p.add_argument("--since", metavar="YYYY-MM-DD",
+                   help="only resolved on or after a date (implies --resolved dates; "
+                        "undated entries are excluded)")
     p.add_argument("--status", choices=STATUSES)
     p.add_argument("--area", choices=list(BACKLOGS) + ["resolved"])
     p.add_argument("--priority", choices=PRIORITIES)
@@ -323,8 +391,9 @@ def main():
     p.add_argument("--blocked", help="what it waits on")
     p.set_defaults(fn=cmd_new)
 
-    p = sub.add_parser("resolve", help="mark resolved and archive into resolved/")
+    p = sub.add_parser("resolve", help="mark resolved (stamped with today) and archive into resolved/")
     p.add_argument("name")
+    p.add_argument("--date", metavar="YYYY-MM-DD", help="the day it landed, if not today")
     p.set_defaults(fn=cmd_resolve)
 
     p = sub.add_parser("check", help="validate frontmatter, placement and index links")

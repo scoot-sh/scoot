@@ -6,7 +6,7 @@ description: List, read, file, edit and resolve scoot backlog entries (docs/back
 # Working the backlog
 
 Entries are markdown files with frontmatter (`title`, `status`, `area`,
-`priority`, `blocked`). Use `scripts/backlog` rather than hand-editing
+`priority`, `blocked`, and `resolved` once done). Use `scripts/backlog` rather than hand-editing
 frontmatter or grepping. It is stdlib Python, and every edit touches only the
 frontmatter line it names.
 
@@ -51,11 +51,26 @@ Fields: `title`, `status` (`open|research|resolved`), `area`, `priority`
 scripts/backlog resolve SLUG
 ```
 
-Sets `status: resolved`, clears priority and blocked, and moves the file to
-`resolved/<slug>-done.md` (`git mv` when tracked). It does **not** write the
+Sets `status: resolved`, clears priority and blocked, **stamps
+`resolved: "YYYY-MM-DD"`** (today; `--date` if it landed on another day), and
+moves the file to `resolved/<slug>-done.md` (`git mv` when tracked). Always
+resolve through the script so the date is stamped. It does **not** write the
 resolution: add what landed, the evidence and the PR to the entry's prose, then
 fix every link the move broke (`grep -rn SLUG docs ROADMAP.md README.md`).
 Resolved entries keep their diagnosis history; do not rewrite them.
+
+## When did it land
+
+```sh
+scripts/backlog list --resolved              # newest first, with dates
+scripts/backlog list --resolved --since 2026-09-01
+```
+
+The date is the stamped `resolved:` field. Entries archived before the field
+existed have none, so the script falls back to git: the commit that moved the
+file into `resolved/` (shown as `(git)`). In a shallow clone anything older
+than the boundary reads `date unknown` rather than a wrong date;
+`git fetch --unshallow` recovers it.
 
 ## Check
 

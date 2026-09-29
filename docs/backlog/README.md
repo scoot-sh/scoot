@@ -1,7 +1,7 @@
 # Backlog
 
 Everything not yet scheduled or done, split by area. Each entry is one file
-with YAML frontmatter (`title`, `status`, `area`, `priority`, `blocked`), so
+with YAML frontmatter (`title`, `status`, `area`, `priority`, `blocked`, plus `resolved`, the date it landed, once it is), so
 the set is filterable without parsing prose:
 
 ```sh
