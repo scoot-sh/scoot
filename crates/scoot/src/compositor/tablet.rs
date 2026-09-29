@@ -292,6 +292,13 @@ impl State {
     /// the pointer half of the same rule: only `--tty` draws a cursor at
     /// all, so only it needs a redraw when the request changes.
     pub(super) fn set_tool_cursor_image(&mut self, image: CursorImageStatus) {
+        // A tool's cursor surface is drawn where the pointer is (tool motion
+        // moves the pointer), so it takes the pointer's output's scale,
+        // exactly as `SeatHandler::cursor_image` tells a pointer's (see
+        // `output_scale.rs`).
+        if let CursorImageStatus::Surface(surface) = &image {
+            super::output_scale::tell_scale(surface, self.pointer_scale());
+        }
         self.cursor.set_status(image);
         // A redraw where frames draw the cursor, a capture tick where only
         // captures do -- the same path as `SeatHandler::cursor_image`.
