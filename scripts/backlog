@@ -1,0 +1,333 @@
+#!/usr/bin/env python3
+"""List, show, create and edit backlog entries (docs/backlog, docs/scootbg/backlog).
+
+Every entry is one markdown file with a small frontmatter block:
+
+    ---
+    title: "..."
+    status: "open"        # open | research | resolved
+    area: "core"          # the directory it lives in ("resolved" once archived)
+    priority: "low"       # high | medium | low | research | null
+    blocked: null         # or a string saying what it waits on
+    ---
+
+Stdlib only. Run `scripts/backlog --help`. Edits change only the frontmatter
+lines named; the prose is never rewritten.
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BACKLOGS = {  # area -> directory holding its open entries
+    "core": ROOT / "docs/backlog/core",
+    "ipc": ROOT / "docs/backlog/ipc",
+    "protocols": ROOT / "docs/backlog/protocols",
+    "testing": ROOT / "docs/backlog/testing",
+    "scootbg": ROOT / "docs/scootbg/backlog",
+}
+RESOLVED = {  # where an area's resolved entries are archived
+    **{a: ROOT / "docs/backlog/resolved" for a in ("core", "ipc", "protocols", "testing")},
+    "scootbg": ROOT / "docs/scootbg/backlog/resolved",
+}
+STATUSES = ("open", "research", "resolved")
+PRIORITIES = ("high", "medium", "low", "research")
+KEYS = ("title", "status", "area", "priority", "blocked")
+LIVE_INDEX = ROOT / "docs/backlog/README.md"
+SCOOTBG_INDEX = ROOT / "docs/scootbg/backlog/README.md"
+
+
+class Entry:
+    def __init__(self, path):
+        self.path = path
+        self.text = path.read_text()
+        self.fields = {}
+        m = re.match(r"---\n(.*?)\n---\n", self.text, re.S)
+        self.has_frontmatter = bool(m)
+        if m:
+            for line in m.group(1).splitlines():
+                k, sep, v = line.partition(":")
+                if sep:
+                    self.fields[k.strip()] = self._parse(v.strip())
+
+    @staticmethod
+    def _parse(v):
+        try:
+            return json.loads(v)
+        except ValueError:
+            return v
+
+    @property
+    def slug(self):
+        return self.path.stem
+
+    def get(self, key):
+        return self.fields.get(key)
+
+    def rel(self):
+        return self.path.relative_to(ROOT)
+
+
+def entries(include_resolved=False):
+    dirs = list(BACKLOGS.values()) + (list(RESOLVED.values()) if include_resolved else [])
+    seen = set()
+    for d in dirs:
+        if d in seen or not d.is_dir():
+            continue
+        seen.add(d)
+        for p in sorted(d.glob("*.md")):
+            if p.name != "README.md":
+                yield Entry(p)
+
+
+def find(name):
+    """Resolve a slug, filename or path to one Entry (resolved ones included)."""
+    p = Path(name)
+    if p.suffix == ".md" and p.exists():
+        return Entry(p.resolve())
+    all_ = list(entries(include_resolved=True))
+    exact = [e for e in all_ if e.slug == name or e.slug == name.removesuffix(".md")]
+    hits = exact or [e for e in all_ if name in e.slug]
+    if not hits:
+        sys.exit(f"backlog: nothing matches {name!r}")
+    if len(hits) > 1:
+        sys.exit("backlog: ambiguous, matches:\n  " + "\n  ".join(str(e.rel()) for e in hits))
+    return hits[0]
+
+
+def rank(e):
+    order = {p: i for i, p in enumerate(PRIORITIES)}
+    return (order.get(e.get("priority"), len(PRIORITIES)), e.slug)
+
+
+def cmd_list(a):
+    rows = []
+    for e in entries(include_resolved=a.all):
+        if not a.all and e.get("status") == "resolved":
+            continue
+        if a.status and e.get("status") != a.status:
+            continue
+        if a.area and e.get("area") != a.area:
+            continue
+        if a.priority and e.get("priority") != a.priority:
+            continue
+        if a.blocked and not e.get("blocked"):
+            continue
+        if a.unblocked and e.get("blocked"):
+            continue
+        if a.grep and not re.search(a.grep, e.text, re.I):
+            continue
+        rows.append(e)
+    rows.sort(key=rank)
+    for e in rows:
+        title = (e.get("title") or "").strip()
+        if len(title) > 70:
+            title = title[:69] + "…"
+        flag = " [blocked]" if e.get("blocked") else ""
+        print(f"{str(e.get('priority') or '-'):8} {str(e.get('status')):9} "
+              f"{str(e.get('area')):10} {e.slug}{flag}\n           {title}")
+    print(f"\n{len(rows)} entries", file=sys.stderr)
+
+
+def cmd_show(a):
+    e = find(a.name)
+    print(f"# {e.rel()}")
+    print(e.text if a.full else e.text.split("\n---\n", 1)[0].lstrip("-\n") + "\n")
+    if not a.full:
+        body = e.text.split("\n---\n", 1)[-1].strip().splitlines()
+        print("\n".join(body[:40]))
+        if len(body) > 40:
+            print(f"… ({len(body) - 40} more lines; use --full)")
+
+
+def encode(key, value):
+    if value in ("null", "None", ""):
+        return "null"
+    return json.dumps(value, ensure_ascii=False)
+
+
+def set_fields(e, updates):
+    """Rewrite only the frontmatter lines named in `updates`."""
+    if not e.has_frontmatter:
+        sys.exit(f"backlog: {e.rel()} has no frontmatter")
+    head, sep, rest = e.text.partition("\n---\n")
+    lines = head.splitlines()
+    for key, value in updates.items():
+        new = f"{key}: {encode(key, value)}"
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}:"):
+                lines[i] = new
+                break
+        else:
+            lines.append(new)
+    e.path.write_text("\n".join(lines) + sep + rest)
+
+
+def validate(key, value):
+    if key not in KEYS:
+        sys.exit(f"backlog: unknown field {key!r} (fields: {', '.join(KEYS)})")
+    if key == "status" and value not in STATUSES:
+        sys.exit(f"backlog: status must be one of {STATUSES}")
+    if key == "priority" and value not in PRIORITIES + ("null",):
+        sys.exit(f"backlog: priority must be one of {PRIORITIES} or null")
+
+
+def cmd_set(a):
+    e = find(a.name)
+    updates = {}
+    for kv in a.assignments:
+        k, sep, v = kv.partition("=")
+        if not sep:
+            sys.exit(f"backlog: expected key=value, got {kv!r}")
+        validate(k, v)
+        updates[k] = v
+    set_fields(e, updates)
+    print(f"updated {e.rel()}: " + ", ".join(f"{k}={v}" for k, v in updates.items()))
+
+
+TEMPLATE = """
+# {title}
+
+Filed {today}. Serves **daily-drive** / **computer use** (pick one, say why).
+
+## The gap
+
+What is wrong or missing, with evidence (file paths, measured numbers).
+
+## What to do
+
+The proposed shape, and the edge cases to pin.
+
+## Not in this ticket
+
+What is deliberately out of scope.
+"""
+
+
+def cmd_new(a):
+    import datetime
+    if a.area not in BACKLOGS:
+        sys.exit(f"backlog: area must be one of {', '.join(BACKLOGS)}")
+    if a.priority not in PRIORITIES:
+        sys.exit(f"backlog: priority must be one of {PRIORITIES}")
+    slug = re.sub(r"[^a-z0-9]+", "-", a.slug.lower()).strip("-")
+    path = BACKLOGS[a.area] / f"{slug}.md"
+    if path.exists() or any(e.slug == slug for e in entries(include_resolved=True)):
+        sys.exit(f"backlog: {slug!r} already exists")
+    status = "research" if a.priority == "research" else "open"
+    front = (f"---\ntitle: {json.dumps(a.title, ensure_ascii=False)}\nstatus: \"{status}\"\n"
+             f"area: \"{a.area}\"\npriority: \"{a.priority}\"\n"
+             f"blocked: {encode('blocked', a.blocked or 'null')}\n---\n")
+    path.write_text(front + TEMPLATE.format(title=a.title, today=datetime.date.today()))
+    print(f"created {path.relative_to(ROOT)}")
+    index = SCOOTBG_INDEX if a.area == "scootbg" else LIVE_INDEX
+    print(f"next: fill it in, then link it from {index.relative_to(ROOT)}")
+
+
+def git_mv(src, dst):
+    r = subprocess.run(["git", "-C", str(ROOT), "mv", str(src), str(dst)],
+                       capture_output=True, text=True)
+    if r.returncode != 0:  # untracked file, or not a git checkout
+        src.rename(dst)
+
+
+def cmd_resolve(a):
+    e = find(a.name)
+    if e.get("status") == "resolved":
+        sys.exit(f"backlog: {e.rel()} is already resolved")
+    area = e.get("area")
+    if area not in RESOLVED:
+        sys.exit(f"backlog: cannot archive area {area!r}")
+    set_fields(e, {"status": "resolved", "area": "resolved",
+                   "priority": "null", "blocked": "null"})
+    slug = e.slug if e.slug.endswith(("-done", "-resolved")) else f"{e.slug}-done"
+    dst = RESOLVED[area] / f"{slug}.md"
+    RESOLVED[area].mkdir(exist_ok=True)
+    git_mv(e.path, dst)
+    print(f"archived {e.rel()} -> {dst.relative_to(ROOT)}")
+    print("next: add the resolution to the entry's prose (what landed, evidence, "
+          "PR), and fix its links in the READMEs and ROADMAP.md:")
+    print(f"  grep -rn '{e.slug}' docs ROADMAP.md README.md")
+
+
+def cmd_check(a):
+    problems = []
+    index_text = LIVE_INDEX.read_text() + SCOOTBG_INDEX.read_text() + (ROOT / "ROADMAP.md").read_text()
+    for e in entries(include_resolved=True):
+        rel = e.rel()
+        if not e.has_frontmatter:
+            problems.append(f"{rel}: no frontmatter")
+            continue
+        for k in KEYS:
+            if k not in e.fields:
+                problems.append(f"{rel}: missing {k}")
+        st, pr = e.get("status"), e.get("priority")
+        in_resolved = e.path.parent in RESOLVED.values()
+        if st not in STATUSES:
+            problems.append(f"{rel}: bad status {st!r}")
+        if in_resolved and st != "resolved":
+            problems.append(f"{rel}: in resolved/ but status is {st!r}")
+        if not in_resolved and st == "resolved":
+            problems.append(f"{rel}: status resolved but not archived (scripts/backlog resolve)")
+        if not in_resolved and pr not in PRIORITIES:
+            problems.append(f"{rel}: bad priority {pr!r}")
+        if not in_resolved and e.path.parent.name in BACKLOGS and \
+                e.get("area") not in (e.path.parent.name, "scootbg"):
+            problems.append(f"{rel}: area {e.get('area')!r} does not match its directory")
+        if not in_resolved and e.slug not in index_text:
+            problems.append(f"{rel}: not linked from a README or ROADMAP.md")
+    for p in problems:
+        print(p)
+    print(f"{len(problems)} problem(s)", file=sys.stderr)
+    return 1 if problems else 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("list", aliases=["ls"], help="list entries (open ones by default)")
+    p.add_argument("--all", action="store_true", help="include resolved")
+    p.add_argument("--status", choices=STATUSES)
+    p.add_argument("--area", choices=list(BACKLOGS) + ["resolved"])
+    p.add_argument("--priority", choices=PRIORITIES)
+    p.add_argument("--blocked", action="store_true", help="only entries waiting on something")
+    p.add_argument("--unblocked", action="store_true", help="only entries nothing waits on")
+    p.add_argument("--grep", metavar="REGEX", help="match anywhere in the file")
+    p.set_defaults(fn=cmd_list)
+
+    p = sub.add_parser("show", help="print an entry (slug, unique substring or path)")
+    p.add_argument("name")
+    p.add_argument("--full", action="store_true")
+    p.set_defaults(fn=cmd_show)
+
+    p = sub.add_parser("set", help="edit frontmatter: set SLUG priority=high blocked=null")
+    p.add_argument("name")
+    p.add_argument("assignments", nargs="+", metavar="key=value")
+    p.set_defaults(fn=cmd_set)
+
+    p = sub.add_parser("new", help="create an entry from the template")
+    p.add_argument("area", choices=list(BACKLOGS))
+    p.add_argument("slug")
+    p.add_argument("--title", required=True)
+    p.add_argument("--priority", required=True, choices=PRIORITIES)
+    p.add_argument("--blocked", help="what it waits on")
+    p.set_defaults(fn=cmd_new)
+
+    p = sub.add_parser("resolve", help="mark resolved and archive into resolved/")
+    p.add_argument("name")
+    p.set_defaults(fn=cmd_resolve)
+
+    p = sub.add_parser("check", help="validate frontmatter, placement and index links")
+    p.set_defaults(fn=cmd_check)
+
+    a = ap.parse_args()
+    sys.exit(a.fn(a) or 0)
+
+
+if __name__ == "__main__":
+    main()
