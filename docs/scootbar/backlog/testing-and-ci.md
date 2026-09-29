@@ -3,7 +3,7 @@ title: "Testing and CI: harnesses, fuzz targets, path-filtered CI and a bench sc
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "skeleton-layer-surface"
+blocked: null
 milestone: "M1"
 ---
 

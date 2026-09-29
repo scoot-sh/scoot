@@ -41,7 +41,8 @@ install devenv the usual way.
 | `crates/scootctl` | the `scootctl` remote-control client |
 | `crates/scoot` | the CLI and the Smithay-based compositor |
 | `crates/scootbg` | the wallpaper daemon |
-| `crates/scootbg-mem` | the only `unsafe` code scootbg has |
+| `crates/scootbg-mem` | the only `unsafe` code scootbg has (scootbar's `wl_shm` buffers too) |
+| `crates/scootbar` | the status bar ([docs/scootbar/](scootbar/README.md)) |
 
 [`vm/README.md`](../vm/README.md) sets up a Mac-native NixOS VM to run the
 Linux-only half in.
@@ -74,8 +75,13 @@ tests, a no-`libc`-crate check, the release size) plus scootbg's
 integration tests: on a headless scoot, and on a headless sway from the
 pinned nixpkgs for outputs coming and going, with colors and images
 checked by real pixels on both, fractional scales included. A
-compositor-only change skips scootbg's job. Shared files (`Cargo.*`,
-`flake.*`, `nix/`, `.github/`, and anything unlisted) run everything.
+compositor-only change skips scootbg's job. A change under
+`crates/scootbar/` alone runs scootbar's own job (the same checks) plus
+its integration tests on a headless scoot and sway
+([scootbar/testing.md](scootbar/testing.md)); a `crates/scootbg-mem/`
+change runs scootbar's too, since its buffers are scootbar's. Shared files
+(`Cargo.*`, `flake.*`, `nix/`, `.github/`, and anything unlisted) run
+everything.
 
 **Packages build on merge, not per PR.** `nix build .#scoot .#scootctl
 .#scootbg` runs on every merge to main via

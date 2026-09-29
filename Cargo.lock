@@ -864,6 +864,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "scootbar"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "png",
+ "rustix 1.1.4",
+ "scootbg-mem",
+ "serde_json",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+]
+
+[[package]]
 name = "scootbg"
 version = "0.1.0"
 dependencies = [

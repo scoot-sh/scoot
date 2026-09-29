@@ -3,7 +3,7 @@ title: "Nix package: `packages.scootbar`, overlay, `nix run`, CI and eval tests,
 status: "open"
 area: "scootbar"
 priority: "high"
-blocked: "skeleton-layer-surface"
+blocked: null
 milestone: "M1"
 ---
 

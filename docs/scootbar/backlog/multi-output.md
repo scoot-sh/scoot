@@ -3,7 +3,7 @@ title: "Multi-output policy: which outputs get a bar, per-output overrides, shar
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "skeleton-layer-surface, config-cli-and-reload"
+blocked: "config-cli-and-reload"
 milestone: "M3"
 ---
 
@@ -37,7 +37,7 @@ The skeleton gives every output a bar. Real setups want to choose.
   do not invent one in the bar. If a module should appear "once, on one output",
   name the output in config.
 - Different scales per output: each bar draws at its own real device pixels
-  (see [skeleton](skeleton-layer-surface.md)); fonts scale with it.
+  (see [skeleton](resolved/skeleton-layer-surface-done.md)); fonts scale with it.
 - A per-output workspace switch depends on scoot's
   [output-targeted switch](../../backlog/ipc/workspace-switch-targeted-output.md).
 

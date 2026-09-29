@@ -3,7 +3,7 @@ title: "Module API, layout, theme tokens and the clock"
 status: "open"
 area: "scootbar"
 priority: "high"
-blocked: "skeleton-layer-surface"
+blocked: null
 milestone: "M1"
 ---
 
@@ -52,6 +52,15 @@ lists what to carry over: re-check the clock after arming, port the spike's
 TZif reader with its `zdump` check as a fixture test, honour `TZ`, `statx`
 the zone file on each wake, and prove suspend/resume on hardware (M0 could
 only read the kernel for it).
+
+## The font flag, from the skeleton
+
+The [skeleton](resolved/skeleton-layer-surface-done.md) draws no text, so it
+left the font to this entry: `--font PATH` on `scootbar daemon`, the short
+fixed list of well-known directories when it is not given, and a refusal to
+start, naming how to give it one, when no usable font is found
+([nix-package](nix-package.md)). Document it in `docs/scootbar/cli.md`
+beside the skeleton's flags.
 
 ## First frame first
 
