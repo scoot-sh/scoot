@@ -52,7 +52,8 @@ three sections), `src/theme.rs` (the color tokens and state classes) and
 the seven-segment test font `src/testfont.rs` that pixel tests read back.
 
 `scootbg-mem` is already shared (scootbar depends on it for its buffers,
-and since the clock for mapping a font that lies on a read-only mount).
+and since the clock for mapping a font that is a root-owned, unwritable
+file on a read-only mount).
 Its memfds are named `scootbg-wallpaper`, which is how scootbar's show in
 `/proc/PID/maps`; a name parameter belongs with the extraction.
 

@@ -295,7 +295,14 @@ impl Canvas {
             text,
             style,
         } = content;
-        scene.update(modules, output, text.as_ref(), style, scale, dims.0);
+        // The frame as drawn: at `scale`, which differs from the frame's
+        // own only without a viewport. Measuring, painting and damage all
+        // use it, so they cannot disagree about the scale.
+        let drawn = Frame {
+            size: frame.size,
+            scale,
+        };
+        scene.update(modules, output, text.as_ref(), style, drawn.scale, dims.0);
         let Some(mut canvas) = paint::Canvas::new(slot.shm.pixels_mut(), dims.0, dims.1) else {
             // The buffer was made at `dims`; this cannot happen.
             return Err(DrawError::TooLarge(frame));
@@ -306,7 +313,7 @@ impl Canvas {
             scene,
             text.as_mut(),
             style,
-            frame,
+            drawn,
         );
         slot.state.painted = Some(frame);
 
@@ -330,7 +337,7 @@ impl Canvas {
             region.destroy();
             layer.opaque = Some(frame.size);
         }
-        if render::damage(&mut self.shown, scene, frame, &mut self.damage) {
+        if render::damage(&mut self.shown, scene, drawn, &mut self.damage) {
             surface.damage_buffer(0, 0, logical(dims.0), logical(dims.1));
         } else {
             for span in &self.damage {

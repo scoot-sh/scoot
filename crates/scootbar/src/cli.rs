@@ -17,10 +17,79 @@ use crate::modules::{self, REGISTRY};
 #[cfg(test)]
 mod tests;
 
-pub const USAGE: &str = "\
+// The help text is put together from pieces, so a build without a module
+// documents only what it has: the pieces that name the clock come in two
+// versions, one per build.
+#[cfg(feature = "clock")]
+macro_rules! what_it_shows {
+    () => {
+        "A bar on every output, reserving its space, with a clock."
+    };
+}
+#[cfg(not(feature = "clock"))]
+macro_rules! what_it_shows {
+    () => {
+        "A bar on every output, reserving its space (built with no modules)."
+    };
+}
+
+#[cfg(feature = "clock")]
+macro_rules! idle {
+    () => {
+        "and only when something changed. Idle, it wakes twice a minute: the
+clock's tick, and the compositor's release of the frame the tick replaced
+(one per frame, for any wl_shm client); with no module placed, never."
+    };
+}
+#[cfg(not(feature = "clock"))]
+macro_rules! idle {
+    () => {
+        "and only when something changed: idle, it never wakes."
+    };
+}
+
+#[cfg(feature = "clock")]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+    --center IDS         comma-separated, in order (default: the clock in
+    --right IDS          the center). Giving any of the three sets the whole
+                         layout: a section not given is empty. Modules: clock
+    --padding N          logical pixels either side of each module, 0 to 1024
+                         (default 8)
+    --spacing N          logical pixels between neighbouring modules, 0 to
+                         1024 (default 0)
+    --clock-format FMT   the clock, as strftime (default '%-I:%M %P', which
+                         shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
+                         %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
+                         %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
+                         (no padding), _ (spaces) and 0 (zeros). With %S or
+                         %T it ticks every second, else once a minute. The
+                         zone is $TZ's, else /etc/localtime's
+"
+    };
+}
+#[cfg(not(feature = "clock"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+    --center IDS         comma-separated, in order. This build has none, so
+    --right IDS          only an empty list is taken
+    --padding N          logical pixels either side of each module, 0 to 1024
+                         (default 8)
+    --spacing N          logical pixels between neighbouring modules, 0 to
+                         1024 (default 0)
+"
+    };
+}
+
+pub const USAGE: &str = concat!(
+    "\
 scootbar -- status bar for Wayland
 
-A bar on every output, reserving its space, with a clock.
+",
+    what_it_shows!(),
+    "
 
 USAGE:
     scootbar daemon [OPTIONS]
@@ -30,9 +99,11 @@ USAGE:
 
 COMMANDS:
     daemon     run the bar on every output of this Wayland display
-";
+"
+);
 
-pub const DAEMON_HELP: &str = "\
+pub const DAEMON_HELP: &str = concat!(
+    "\
 scootbar daemon -- run the bar
 
 USAGE:
@@ -44,8 +115,9 @@ one edge (namespace \"scootbar\") that reserves its height, so windows are
 arranged beside it. Outputs plugged in later get one too, and an output
 unplugged takes its bar with it; with no outputs at all it waits for one.
 It draws at each output's real device pixels, fractional scales included,
-and only when something changed: idle, it wakes once a minute, for the
-clock.
+",
+    idle!(),
+    "
 
 The bar:
     --edge EDGE          top (the default) or bottom
@@ -64,31 +136,20 @@ The bar:
 Text:
     --font PATH          a .ttf or .otf file. Without it, the first of a few
                          well-known files (DejaVu Sans, Noto Sans) found; with
-                         none, it refuses to start
+                         none, it refuses to start (a bar with no module
+                         placed needs none)
     --font-size N        the text's size (the em) in logical pixels, 1 to 256
                          (default 14)
 
 Modules:
-    --left IDS           the modules along the left, center and right,
-    --center IDS         comma-separated, in order (default: the clock in
-    --right IDS          the center). Giving any of the three sets the whole
-                         layout: a section not given is empty. Modules: clock
-    --padding N          logical pixels either side of each module, 0 to 1024
-                         (default 8)
-    --spacing N          logical pixels between neighbouring modules, 0 to
-                         1024 (default 0)
-    --clock-format FMT   the clock, as strftime (default '%-I:%M %P', which
-                         shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
-                         %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
-                         %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
-                         (no padding), _ (spaces) and 0 (zeros). With %S or
-                         %T it ticks every second, else once a minute. The
-                         zone is $TZ's, else /etc/localtime's
-
+",
+    modules!(),
+    "
 Runs until the compositor goes away (exit status 1, saying why) or it is
 killed; SIGTERM and SIGINT end it at once, which is harmless: it keeps no
 state. The compositor removes the bars with the connection.
-";
+"
+);
 
 /// A help page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

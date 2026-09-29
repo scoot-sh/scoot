@@ -15,14 +15,18 @@
 //! ~/.local/share/fonts/font.ttf` over the one in use does exactly that
 //! (it opens the old file with `O_TRUNC`).
 //!
-//! So the font is mapped **only where it lies on a read-only mount**
-//! (`scootbg_mem::file::map_if_read_only`): NixOS's `/nix/store`, which is
-//! where Stylix and the NixOS modules take fonts from, and an image-based
-//! system's `/usr`. There nothing can truncate or rewrite it through that
-//! mount, root included. **Everywhere else it is read into the heap**, at
-//! most [`MAX_FONT`] bytes: no path can take the bar down, at the price of
-//! the file's size in memory. The measured cost of each is in
-//! `docs/scootbar/backlog/resolved/module-api-and-clock-done.md`.
+//! So the font is mapped **only where nothing but root deliberately undoing
+//! a read-only file can change it**: a root-owned file with no write bit,
+//! on a read-only mount (`scootbg_mem::file::map_if_immutable`). That is
+//! NixOS's `/nix/store` (root, `0444`, mounted read-only), where Stylix and
+//! the NixOS modules take fonts from. A read-only mount alone is not
+//! enough: it is a property of the mount, and the same file is often
+//! writable elsewhere (a read-only bind mount, systemd's
+//! `ProtectHome=read-only`, flatpak's `/run/host/fonts`), which a review
+//! showed ends in `SIGBUS`. **Everywhere else it is read into the heap**,
+//! at most [`MAX_FONT`] bytes, and no later write to the file can reach the
+//! bar, at the price of the file's size in memory. The measured cost of
+//! each is in `docs/scootbar/backlog/resolved/dependencies-done.md` §8.
 //!
 //! Opened `O_NONBLOCK` and checked to be a regular file first, so a FIFO or
 //! a device cannot hang or balloon start-up.
@@ -63,7 +67,7 @@ pub const WELL_KNOWN: &[&str] = &[
 /// How the font's bytes are held (see the module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Held {
-    /// Mapped from a file on a read-only mount.
+    /// Mapped: a root-owned, unwritable file on a read-only mount.
     Mapped,
     /// Read into the heap.
     Read,
@@ -186,7 +190,7 @@ pub fn load(path: &Path) -> Result<Font, FileError> {
     }
     let path = path.to_owned();
     if let Some(bytes) =
-        scootbg_mem::file::map_if_read_only(&fd, MAX_FONT).map_err(FileError::Io)?
+        scootbg_mem::file::map_if_immutable(&fd, MAX_FONT).map_err(FileError::Io)?
     {
         let face = FontRef::try_from_slice(bytes).map_err(|_| FileError::NotAFont)?;
         return Ok(Font {

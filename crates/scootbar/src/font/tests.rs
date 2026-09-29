@@ -35,17 +35,15 @@ impl Drop for Scratch {
 }
 
 #[test]
-fn a_font_on_a_writable_mount_is_read_into_the_heap() {
+fn a_font_anyone_can_write_is_read_into_the_heap() {
     let scratch = Scratch::new("read");
     let path = scratch.file("seven.ttf", &testfont::build());
     let font = load(&path).unwrap();
     assert_eq!(font.path, path);
-    // A temp dir is writable, so the bytes are the bar's own copy: a later
-    // `cp` over the file cannot take the bar down.
-    let file = std::fs::File::open(&path).unwrap();
-    if !scootbg_mem::file::is_read_only_mount(&rustix::fs::fstatvfs(&file).unwrap().f_flag) {
-        assert_eq!(font.held, Held::Read);
-    }
+    // Written just now, so writable: the bytes are the bar's own copy, and
+    // a later `cp` over the file cannot take the bar down, whatever mount
+    // the temp dir is on.
+    assert_eq!(font.held, Held::Read);
     assert_ne!(font.face.glyph_id('3').0, 0);
     // Truncated in place under the loaded font: nothing happens to it.
     std::fs::write(&path, b"").unwrap();

@@ -19,7 +19,18 @@
 //! whole cache is dropped and refilled from what is drawn next, so an
 //! endless stream of new characters (a window title, later) costs a
 //! bounded amount of memory, not a growing one. A glyph too big to cache
-//! ([`MAX_GLYPH`]) is rasterized straight onto the canvas each time.
+//! ([`MAX_GLYPH`], 1 MiB: a glyph at a 1024-pixel em, `--font-size 256` at
+//! scale 4, still fits) is rasterized straight onto the canvas each time.
+//!
+//! ## The rasterizer's own allocation
+//!
+//! `ab_glyph` rasterizes into a buffer of one `f32` per pixel of the
+//! glyph's bounds, allocated for each rasterization. The bounds come from
+//! the font file, so a hostile or broken font (coordinates near `i16::MAX`
+//! at a small units-per-em) could ask for gigabytes. A glyph whose bounds
+//! pass [`MAX_RASTER_SIDE`] on a side or [`MAX_RASTER`] pixels in all is
+//! therefore not rasterized: it draws nothing. Real text stays far inside
+//! both (a glyph at a 1024-pixel em is about 1,000 × 1,300).
 //!
 //! Control characters are neither measured nor drawn.
 
@@ -34,9 +45,14 @@ mod tests;
 /// Cached glyphs at most, across every size.
 pub const MAX_GLYPHS: usize = 512;
 /// Coverage bytes cached at most.
-pub const MAX_ARENA: usize = 1024 * 1024;
-/// The largest glyph cached, in coverage bytes (a 256-pixel square).
-pub const MAX_GLYPH: usize = 64 * 1024;
+pub const MAX_ARENA: usize = 4 * 1024 * 1024;
+/// The largest glyph cached, in coverage bytes (a 1024-pixel square).
+pub const MAX_GLYPH: usize = 1024 * 1024;
+/// The longest side, in pixels, of a glyph that is rasterized at all.
+pub const MAX_RASTER_SIDE: u32 = 4096;
+/// The most pixels a glyph that is rasterized at all may cover: the
+/// rasterizer's buffer is 4 bytes each, so at most 16 MiB, transiently.
+pub const MAX_RASTER: usize = 4 * 1024 * 1024;
 
 /// One cached glyph: its coverage at `arena[offset..offset + w × h]`, and
 /// where its top-left pixel sits from the pen on the baseline.
@@ -48,6 +64,23 @@ struct Cached {
     left: i32,
     top: i32,
     offset: usize,
+}
+
+/// A glyph ready to draw.
+enum Glyph {
+    Cached(Cached),
+    Uncached(OutlinedGlyph),
+}
+
+/// A glyph's bounds as whole pixels, if they are finite and within the
+/// rasterizer's bounds ([`MAX_RASTER_SIDE`], [`MAX_RASTER`]).
+fn raster_size(width: f32, height: f32) -> Option<(u32, u32)> {
+    let side = |length: f32| {
+        (length.is_finite() && (0.0..=MAX_RASTER_SIDE as f32).contains(&length))
+            .then_some(length as u32)
+    };
+    let (width, height) = (side(width)?, side(height)?);
+    (width as usize * height as usize <= MAX_RASTER).then_some((width, height))
 }
 
 /// A font and its glyph cache.
@@ -152,11 +185,11 @@ impl Text {
     ) {
         let key = u64::from(id.0) << 32 | u64::from(scale.y.to_bits());
         let found = match self.entries.binary_search_by_key(&key, |e| e.key) {
-            Ok(index) => self.entries.get(index).copied(),
+            Ok(index) => self.entries.get(index).copied().map(Glyph::Cached),
             Err(index) => self.fill(key, id, scale, index),
         };
         match found {
-            Some(glyph) => {
+            Some(Glyph::Cached(glyph)) => {
                 let len = glyph.width as usize * glyph.height as usize;
                 let Some(coverage) = self.arena.get(glyph.offset..glyph.offset + len) else {
                     return;
@@ -170,22 +203,23 @@ impl Text {
                     }
                 }
             }
-            // Blank (a space), or too big to cache: straight to the canvas.
-            None => {
-                if let Some(outline) = self.outline(id, scale) {
-                    let bounds = outline.px_bounds();
-                    let (left, top) = (bounds.min.x as i64, bounds.min.y as i64);
-                    outline.draw(|gx, gy, c| {
-                        canvas.blend(
-                            x + left + i64::from(gx),
-                            baseline + top + i64::from(gy),
-                            coverage(c),
-                            color,
-                            clip,
-                        );
-                    });
-                }
+            // Too big to cache (but not to rasterize): straight to the
+            // canvas.
+            Some(Glyph::Uncached(outline)) => {
+                let bounds = outline.px_bounds();
+                let (left, top) = (bounds.min.x as i64, bounds.min.y as i64);
+                outline.draw(|gx, gy, c| {
+                    canvas.blend(
+                        x + left + i64::from(gx),
+                        baseline + top + i64::from(gy),
+                        coverage(c),
+                        color,
+                        clip,
+                    );
+                });
             }
+            // Blank (a space), or too big to rasterize at all.
+            None => {}
         }
     }
 
@@ -195,15 +229,16 @@ impl Text {
     }
 
     /// Rasterizes glyph `id` at `scale` into the cache at `index` (where a
-    /// search for `key` found its place). `None` for a glyph with no
-    /// outline (a space) or one too big to cache.
-    fn fill(&mut self, key: u64, id: GlyphId, scale: PxScale, index: usize) -> Option<Cached> {
+    /// search for `key` found its place). The outline alone for a glyph
+    /// too big to cache; `None` for one with no outline (a space) or too
+    /// big to rasterize (see the module docs).
+    fn fill(&mut self, key: u64, id: GlyphId, scale: PxScale, index: usize) -> Option<Glyph> {
         let outline = self.outline(id, scale)?;
         let bounds = outline.px_bounds();
-        let (width, height) = (bounds.width() as u32, bounds.height() as u32);
-        let len = (width as usize).checked_mul(height as usize)?;
+        let (width, height) = raster_size(bounds.width(), bounds.height())?;
+        let len = width as usize * height as usize;
         if len > MAX_GLYPH {
-            return None;
+            return Some(Glyph::Uncached(outline));
         }
         let mut index = index;
         if self.entries.len() >= MAX_GLYPHS || self.arena.len() + len > MAX_ARENA {
@@ -230,7 +265,7 @@ impl Text {
             offset,
         };
         self.entries.insert(index.min(self.entries.len()), glyph);
-        Some(glyph)
+        Some(Glyph::Cached(glyph))
     }
 
     /// Glyphs cached now, for tests and the bench.

@@ -1,7 +1,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use super::{LOCALTIME, Spec, ZONEINFO, load, read_capped, stamp};
+use super::{LOCALTIME, Spec, ZONEINFO, load, names_utc, read_capped, stamp};
 use crate::modules::clock::tzif::MAX_FILE;
 
 const NEW_YORK: &[u8] = include_bytes!("../fixtures/America_New_York.slim.tzif");
@@ -164,4 +164,39 @@ fn the_stamp_changes_with_the_zone() {
     // Gone.
     std::fs::remove_file(&link).unwrap();
     assert_eq!(stamp(&link), None);
+}
+
+/// With no zone data, a name for UTC is UTC, silently; so is a missing
+/// `/etc/localtime`. A name that is not UTC still says why it fell back.
+#[test]
+fn utc_needs_no_zone_data_and_no_warning() {
+    let scratch = Scratch::new("utc");
+    let empty = scratch.0.to_str().unwrap();
+    for name in [
+        "UTC",
+        ":UTC",
+        "Etc/UTC",
+        "GMT",
+        "Etc/GMT0",
+        "UCT",
+        "Zulu",
+        "Universal",
+    ] {
+        let loaded = load(&resolve(Some(name), Some(empty)));
+        assert!(loaded.problem.is_none(), "{name}: {:?}", loaded.problem);
+        assert_eq!(loaded.tz.at(0).offset, 0, "{name}");
+    }
+    let missing = file(scratch.0.join("localtime").to_str().unwrap(), None);
+    let loaded = load(&missing);
+    assert!(loaded.problem.is_none(), "{:?}", loaded.problem);
+    // A file that exists but is not a zone still says so.
+    let junk = scratch.file("localtime-junk", &[b'x'; 64]);
+    assert!(load(&file(junk.to_str().unwrap(), None)).problem.is_some());
+    // And a name that is not UTC, with no data for it.
+    assert!(
+        load(&resolve(Some("Europe/Paris"), Some(empty)))
+            .problem
+            .is_some()
+    );
+    assert!(names_utc(b"Etc/Zulu") && !names_utc(b"UTC0") && !names_utc(b"Etc/"));
 }

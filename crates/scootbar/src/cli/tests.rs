@@ -328,3 +328,16 @@ fn the_clock_format_is_checked_when_read() {
     assert!(message.contains("control character"), "{message}");
     assert!(message.contains("\\n"), "the newline is escaped: {message}");
 }
+
+/// The help documents what this build has, and nothing it lacks.
+#[test]
+fn the_help_matches_the_build() {
+    let has_clock = crate::modules::find("clock").is_some();
+    assert_eq!(DAEMON_HELP.contains("--clock-format"), has_clock);
+    assert_eq!(DAEMON_HELP.contains("Modules: clock"), has_clock);
+    assert_eq!(USAGE.contains("with a clock"), has_clock);
+    for flag in super::FLAGS {
+        assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
+    }
+    assert!(!DAEMON_HELP.contains("wakes once a minute"));
+}

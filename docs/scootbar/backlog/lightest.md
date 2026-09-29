@@ -36,7 +36,9 @@ A milestone is not done until its numbers are published and:
 
 From [baselines-and-spikes](resolved/baselines-and-spikes-done.md), on the same machine and
 outputs: idle RSS and PSS, idle wakeups per minute (target for the first
-milestones: one, the clock), CPU over a fixed window while switching
+milestones: one timer wake a minute for the clock; each frame brings one
+`wl_buffer.release` from the compositor, so 2 wakeups a minute idle, and 0
+with no module placed), CPU over a fixed window while switching
 workspaces, peak memory, stripped binary size, installed closure size
 ([nix-package](nix-package.md) keeps fonts out of it), startup to first frame,
 plus lines of code and direct dependency count.

@@ -6,7 +6,7 @@
 //! decisions behind it are in `docs/scootbar/`.
 //!
 //! No `unsafe` here: the two mappings it needs, the `wl_shm` buffer and a
-//! font on a read-only mount, are `scootbg-mem`'s.
+//! font file nothing can rewrite, are `scootbg-mem`'s.
 
 #![forbid(unsafe_code)]
 // A build with no module (`--no-default-features`) keeps the module

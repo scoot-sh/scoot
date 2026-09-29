@@ -15,8 +15,9 @@ scoot has not cut a numbered release yet; entries are dated.
   default, as `3:07 pm`; `--clock-format '%H:%M'` makes it `15:07`, and the
   format takes a small `strftime` subset (names in English, no locale). It
   follows `$TZ` or `/etc/localtime`, a zone change within the minute,
-  and clock steps and resumes from suspend at once, and wakes once a
-  minute (once a second with seconds shown).
+  and clock steps and resumes from suspend at once. Its timer fires once a
+  minute (once a second with seconds shown); with the compositor's release
+  of each frame, the bar idles at 2 wakeups a minute.
 - **It needs a font now**: `--font PATH` (a `.ttf` or `.otf`), or the first
   of a few well-known files (DejaVu Sans, Noto Sans) it finds; with none
   it refuses to start and says how to give one. `--font-size`,

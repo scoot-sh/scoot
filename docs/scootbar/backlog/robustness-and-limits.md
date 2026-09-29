@@ -29,12 +29,15 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
 - **Text**: bounded glyph cache and bounded string lengths per module.
   *Built with the clock
   ([module-api-and-clock](resolved/module-api-and-clock-done.md)):* the
-  glyph cache holds at most 512 glyphs and 1 MiB of coverage and is dropped
-  and refilled past either; a module's view text and tooltip are cut at 256
-  bytes; control characters are never drawn. **The font mapping is
-  decided there**: a font is mapped only on a read-only mount (where no
-  truncation can reach it) and read into the heap everywhere else, at most
-  64 MiB, so a `cp` over the font under a running bar cannot `SIGBUS` it.
+  glyph cache holds at most 512 glyphs and 4 MiB of coverage and is dropped
+  and refilled past either; a glyph whose bounds would need a rasterizer
+  buffer past 4 megapixels (a hostile font) is not drawn; a module's view
+  text and tooltip are cut at 256 bytes; control characters are never
+  drawn. **The font mapping is decided there**: a font is mapped only when
+  it is owned by root, writable by no one and on a read-only mount (a
+  read-only mount alone is not enough, as review showed), and read into
+  the heap everywhere else, at most 64 MiB, so a `cp` over the font under a
+  running bar cannot `SIGBUS` it.
   What is left here is a title stream fuzzed through the cache
   ([icons-and-fonts](icons-and-fonts.md) owns that test).
 - **Time zone file**: the TZif reader caps the file (64 KiB in the spike),

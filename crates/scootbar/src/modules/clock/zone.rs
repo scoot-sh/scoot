@@ -15,7 +15,9 @@
 //!
 //! Anything unreadable ends in UTC, with one line on stderr saying so,
 //! never in a refusal to start: a clock in the wrong zone is better than no
-//! bar.
+//! bar. Two cases are UTC without a word, as glibc takes them: a `TZ` that
+//! names UTC (`UTC`, `Etc/UTC`, `GMT`, `Zulu`, ...) on a machine with no
+//! zone data, and `/etc/localtime` absent with `TZ` unset.
 //!
 //! ## Reading a file safely
 //!
@@ -154,6 +156,21 @@ pub fn load(spec: &Spec) -> Loaded {
         };
     };
     let file_error = match read_capped(path) {
+        // No zone data installed (a container, a minimal system): a name
+        // that means UTC is UTC, and `/etc/localtime` absent with `TZ`
+        // unset is UTC too, as glibc takes both, without a word.
+        Err(_) if fallback.as_deref().is_some_and(names_utc) => {
+            return Loaded {
+                tz: Tz::utc(),
+                problem: None,
+            };
+        }
+        Err(_) if fallback.is_none() && std::fs::symlink_metadata(path).is_err() => {
+            return Loaded {
+                tz: Tz::utc(),
+                problem: None,
+            };
+        }
         Ok(bytes) => match Tz::parse(&bytes) {
             Ok(tz) => {
                 return Loaded { tz, problem: None };
@@ -174,6 +191,23 @@ pub fn load(spec: &Spec) -> Loaded {
             path.display()
         )),
     }
+}
+
+/// Whether a `TZ` value names UTC under one of tzdata's names for it.
+pub fn names_utc(name: &[u8]) -> bool {
+    let name = name.strip_prefix(b"Etc/").unwrap_or(name);
+    matches!(
+        name,
+        b"UTC"
+            | b"UCT"
+            | b"GMT"
+            | b"GMT0"
+            | b"GMT+0"
+            | b"GMT-0"
+            | b"Greenwich"
+            | b"Universal"
+            | b"Zulu"
+    )
 }
 
 /// `path`'s bytes: a regular file of at most [`MAX_FILE`] bytes, read

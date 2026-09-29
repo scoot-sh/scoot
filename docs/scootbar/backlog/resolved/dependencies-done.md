@@ -68,7 +68,11 @@ are GPL: they were only run, as binaries, for the baselines.
     `/usr/share/zoneinfo`, or a POSIX string, which the footer parser already
     reads) before `/etc/localtime`. Not in the spike.
   - "Idle is exactly one wakeup per minute" is now a measured target, not
-    a hope: the spike's loop does it (§2a).
+    a hope: the spike's loop does it (§2a). *(Refined by the clock: one
+    timer wake a minute; each frame the bar draws brings one
+    `wl_buffer.release` from the compositor, which the spike, with no
+    Wayland connection, did not have, so the bar idles at 2 wakeups a
+    minute: [module-api-and-clock](module-api-and-clock-done.md).)*
 - **[icons-and-fonts](../icons-and-fonts.md):** the fallback chain and the
   bounded cache are built on `ab_glyph` (`ttf-parser` underneath reads CFF
   and variable fonts: both rendered in §1b). **Revisit hinting there**:

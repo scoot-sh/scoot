@@ -57,7 +57,7 @@ control character.
 
 | Id | Shows | Wakes |
 | --- | --- | --- |
-| `clock` | The local time ([below](#the-clock)) | once a minute, or once a second with seconds shown |
+| `clock` | The local time ([below](#the-clock)) | its timer: once a minute, or once a second with seconds shown (each redraw adds the compositor's release, below) |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -110,8 +110,11 @@ subset. The default, `%-I:%M %P`, is a 12-hour clock with no leading zero:
   are the C locale's, whatever `LANG` says.
 - **Everything else in the format is shown as it is**, any Unicode
   included (as long as the font has it).
-- **It wakes once a minute** (on the minute), or **once a second** when the
-  format shows seconds (`%S`, `%T`), and at no other time: no polling.
+- **Its timer fires once a minute** (on the minute), or **once a second**
+  when the format shows seconds (`%S`, `%T`): no polling. Each tick that
+  changes the text is one frame, and the compositor answers each frame
+  with one `wl_buffer.release`, so an idle minute clock wakes the bar twice
+  a minute ([What it does on the compositor](#what-it-does-on-the-compositor)).
 - **The time zone** is read as glibc reads it: `$TZ` if set (a zone name
   such as `Europe/London`, looked up under `$TZDIR` or
   `/usr/share/zoneinfo`; an absolute path, with or without a leading `:`;
@@ -151,15 +154,18 @@ placed draws no text and needs no font. On NixOS those directories are
 usually empty: give `--font` a store path (`nix build nixpkgs#dejavu_fonts`
 has `share/fonts/truetype/DejaVuSans.ttf`).
 
-**Replacing the font file while the bar runs is safe.** A font on a
-read-only mount (NixOS's `/nix/store`) is mapped, which costs only the
-pages drawn from, shared with every other program using the font, and
-nothing can truncate it there. A font anywhere else (your
-`~/.local/share/fonts`, `/usr/share/fonts`) is read into the bar's memory
-once, costing its size (about 740 KB for DejaVu Sans): copying a new file
-over it with `cp`, which truncates it in place, would kill a bar that had
-mapped it, and cannot touch one that read it. The file is read once, at
-start: a new font needs a restart.
+**Replacing the font file while the bar runs cannot crash it**, except by
+root first making a read-only store file writable. The font is mapped
+(costing only the pages drawn from, shared with every other program using
+the font) only when it is owned by root, has no write bit for anyone, and
+lies on a read-only mount: NixOS's `/nix/store`. Every other font (your
+`~/.local/share/fonts`, `/usr/share/fonts`, and a writable file seen
+through a read-only view such as systemd's `ProtectHome=read-only` or
+flatpak's `/run/host/fonts`) is read into the bar's memory once, costing
+its size (about 740 KB for DejaVu Sans): copying a new file over it with
+`cp`, which truncates it in place, would kill a bar that had mapped it,
+and cannot touch one that read it. The file is read once, at start: a new
+font needs a restart.
 
 ## Colors
 

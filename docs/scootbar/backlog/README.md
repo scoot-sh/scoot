@@ -83,7 +83,7 @@ the bounds: [research notes](../research.md).
 ### M1 — A clock you can `nix run`
 Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [**Skeleton: a layer surface per output**](resolved/skeleton-layer-surface-done.md) — RESOLVED 2026-09-29: `scootbar daemon`, a solid bar per output across hotplug, device pixels at fractional scales, zero idle wakeups; flags, no config file ([cli.md](../cli.md))
-- [**Module API, layout, theme tokens and the clock**](resolved/module-api-and-clock-done.md) — RESOLVED 2026-09-29: the module contract, three-section layout, color tokens, `ab_glyph` text with a bounded cache, and a timerfd clock (`3:07 pm` by default) redrawing only its own span; `--font` or a well-known file, else a refusal; fonts mapped only on a read-only mount ([cli.md](../cli.md))
+- [**Module API, layout, theme tokens and the clock**](resolved/module-api-and-clock-done.md) — RESOLVED 2026-09-29: the module contract, three-section layout, color tokens, `ab_glyph` text with a bounded cache, and a timerfd clock (`3:07 pm` by default) redrawing only its own span; `--font` or a well-known file, else a refusal; fonts mapped only when root-owned, unwritable and on a read-only mount, as in the Nix store ([cli.md](../cli.md))
 - [Nix package](nix-package.md) (high): installable from the start
 - [Testing and CI](testing-and-ci.md) (medium): harnesses, path-filtered CI, first benchmark
 

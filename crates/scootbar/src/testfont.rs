@@ -126,7 +126,23 @@ fn glyph(rects: &[Rect]) -> Vec<u8> {
 
 /// The font file's bytes.
 pub fn build() -> Vec<u8> {
-    let glyphs = glyphs();
+    build_from(glyphs(), UNITS_PER_EM)
+}
+
+/// A hostile font: 16 units to the em, and `8` a square 32,000 units on a
+/// side, so at a 50-pixel em its bounds are 100,000 pixels square (a
+/// rasterizer buffer of 40 GB). Every other glyph as in [`build`].
+pub fn build_hostile() -> Vec<u8> {
+    let mut glyphs = glyphs();
+    for (c, rects) in &mut glyphs {
+        if *c == Some('8') {
+            *rects = vec![(0, 0, 32_000, 32_000)];
+        }
+    }
+    build_from(glyphs, 16)
+}
+
+fn build_from(glyphs: Vec<(Option<char>, Vec<Rect>)>, units_per_em: u16) -> Vec<u8> {
     let count = glyphs.len() as u16;
 
     let mut glyf = Vec::new();
@@ -144,7 +160,7 @@ pub fn build() -> Vec<u8> {
     u32be(&mut head, 0); // checksum adjustment
     u32be(&mut head, 0x5F0F_3CF5); // magic
     u16be(&mut head, 0x000B); // flags
-    u16be(&mut head, UNITS_PER_EM);
+    u16be(&mut head, units_per_em);
     head.extend_from_slice(&[0; 16]); // created, modified
     for v in [0, DESCENT, ADVANCE as i16, ASCENT] {
         i16be(&mut head, v);

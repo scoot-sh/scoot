@@ -167,9 +167,49 @@ fn the_cache_fills_lazily_and_stays_bounded() {
         let (glyphs, bytes) = text.cached();
         assert!(glyphs <= MAX_GLYPHS && bytes <= MAX_ARENA);
     }
-    // A glyph too big to cache is drawn all the same.
+    // A glyph too big to cache (800 × 1400 at a 2000-pixel em, past
+    // 1 MiB) is drawn all the same.
     let before = text.cached();
-    let pixels = draw(&mut text, "8", 1000.0, 700, 1100);
+    let pixels = draw(&mut text, "8", 2000.0, 1000, 2100);
     assert_eq!(text.cached(), before);
     assert!(pixels.chunks_exact(4).any(|p| p[0] == 255));
+}
+
+/// `--font-size 256` at scale 2 is a 512-pixel em: its glyphs are cached,
+/// so a redraw rasterizes (and allocates) nothing.
+#[test]
+fn the_largest_font_size_at_scale_two_is_cached() {
+    let mut text = text();
+    draw(&mut text, "3:07", 512.0, 1300, 600);
+    let filled = text.cached();
+    assert_eq!(filled.0, 4, "every glyph cached");
+    draw(&mut text, "3:07", 512.0, 1300, 600);
+    assert_eq!(text.cached(), filled);
+}
+
+/// A hostile font whose glyph bounds would need a rasterizer buffer of
+/// gigabytes: the glyph is skipped, quickly, and the rest still draws.
+#[test]
+fn a_glyph_too_big_to_rasterize_is_skipped() {
+    let mut text = Text::new(ab_glyph::FontArc::new(
+        FontVec::try_from_vec(testfont::build_hostile()).unwrap(),
+    ));
+    let start = std::time::Instant::now();
+    let pixels = draw(&mut text, "8", 50.0, 300, 60);
+    assert!(
+        pixels.iter().all(|&b| b == 0),
+        "the huge glyph drew something"
+    );
+    assert_eq!(text.cached(), (0, 0));
+    // A glyph within the bounds (the same font's `1`, 312 × 1562) is
+    // rasterized and cached as usual.
+    draw(&mut text, "1", 50.0, 300, 60);
+    assert_eq!(text.cached().0, 1);
+    assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    assert_eq!(super::raster_size(f32::INFINITY, 1.0), None);
+    assert_eq!(super::raster_size(f32::NAN, 1.0), None);
+    assert_eq!(super::raster_size(-1.0, 1.0), None);
+    assert_eq!(super::raster_size(4096.0, 1024.0), Some((4096, 1024)));
+    assert_eq!(super::raster_size(4097.0, 1.0), None);
+    assert_eq!(super::raster_size(4096.0, 1025.0), None);
 }

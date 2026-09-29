@@ -4,7 +4,9 @@
 //! One `timerfd` ([`timer`]), armed at the next boundary (the next local
 //! minute, or second when the format shows seconds), absolute and
 //! cancelled by a clock step, so suspend, NTP steps and summer time need no
-//! polling: idle, the clock wakes the bar once a minute. The zone is read
+//! polling: idle, the clock's timer wakes the bar once a minute (and the
+//! frame each tick draws brings the compositor's `wl_buffer.release`, a
+//! second wakeup). The zone is read
 //! as glibc reads it ([`zone`]) with M0's TZif reader ([`tzif`]); the
 //! format is a small `strftime` subset ([`format`]).
 //!
