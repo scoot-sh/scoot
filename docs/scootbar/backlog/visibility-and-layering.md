@@ -3,7 +3,7 @@ title: "Visibility and layering: top/bottom/overlay, exclusive zone or not, hide
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "config-cli-and-reload"
+blocked: null
 milestone: "M3"
 ---
 

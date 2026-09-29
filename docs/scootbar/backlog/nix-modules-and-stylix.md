@@ -3,7 +3,7 @@ title: "Nix modules (NixOS and home-manager) with Stylix defaults, and a restart
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "config-cli-and-reload"
+blocked: null
 milestone: "M3"
 ---
 

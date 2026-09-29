@@ -3,7 +3,7 @@ title: "Pointer input and interactions: hit-testing, hover, click and scroll act
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "config-cli-and-reload"
+blocked: null
 milestone: "M4"
 ---
 

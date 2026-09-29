@@ -3,7 +3,7 @@ title: "Appearance: floating or flush, rounded corners, opacity, separators, sta
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "config-cli-and-reload"
+blocked: null
 milestone: "M3"
 ---
 

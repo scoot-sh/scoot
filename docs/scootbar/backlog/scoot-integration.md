@@ -3,7 +3,7 @@ title: "Seamless in scoot: a `[bar]` section that starts, reloads and restarts t
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "config-cli-and-reload"
+blocked: null
 milestone: "ongoing"
 ---
 

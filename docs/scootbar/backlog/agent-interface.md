@@ -3,7 +3,7 @@ title: "Agent interface: `query`, `invoke`, `layout` and `subscribe` on the bar'
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "config-cli-and-reload, pointer-and-interactions"
+blocked: "pointer-and-interactions"
 milestone: "M4"
 ---
 
@@ -20,7 +20,7 @@ battery, or hunt pixels to press mute.
 
 - **`query [ID]`**: each module's state as JSON: id, output, text, class,
   value where it has one (percent, muted, SSID, active workspace). One request,
-  bounded reply. Defined in [config-cli-and-reload](config-cli-and-reload.md);
+  bounded reply. Defined in [config-cli-and-reload](resolved/config-cli-and-reload-done.md);
   this entry adds the fidelity guarantees below.
 - **`invoke ID ACTION [ARG]`**: run a module's action exactly as its click or
   scroll binding would (`toggle-mute`, `raise 5`), with no pointer involved. It

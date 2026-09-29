@@ -3,7 +3,7 @@ title: "Icons and fonts: symbol glyphs, a small fallback chain, and what is out 
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "config-cli-and-reload"
+blocked: null
 milestone: "M3"
 ---
 

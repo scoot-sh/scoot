@@ -3,7 +3,7 @@ title: "Multi-output policy: which outputs get a bar, per-output overrides, shar
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "config-cli-and-reload"
+blocked: null
 milestone: "M3"
 ---
 

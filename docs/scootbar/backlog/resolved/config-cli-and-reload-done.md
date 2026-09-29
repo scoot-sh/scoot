@@ -1,10 +1,11 @@
 ---
 title: "Config file, control socket and reload: `scootbar msg`, `query` for agents"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M3"
+resolved: "2026-09-29"
 ---
 
 # Config file, control socket and reload
@@ -54,3 +55,21 @@ and flags in the reference.
 Editing the file and running `scootbar msg reload` changes a live bar,
 `query` returns valid JSON for every module, and malformed config is refused
 without disturbing the running bar.
+
+## Resolution (2026-09-29, PR #339)
+
+Shipped as `scootbar msg` (`query`, `reload`, `version`, `kill`, `set ID JSON`
+validated but refused — no module takes sets yet, the hook for
+`exec-push-button-modules`) plus `$XDG_CONFIG_HOME/scoot/bar.toml` (`--config`
+override; defaults < file < flags, flags re-overlaid on every reload) and a
+lock-guarded `0600` socket following scootbg's framing/claim design. Parser
+spike (`docs/scootbar/spikes/config-parser.md`) chose the workspace's existing
+`toml` (zero new `Cargo.lock` packages). `query` returns every placed module's
+text/class/icon per output — the agent hook. Review caught two real bugs
+before merge: reload not forcing a redraw (fixed via canvas clear), and the
+empty-bar corner (`Output::invalidate`). Evidence: `nextest -p scootbar`
+247/247, clippy/fmt clean, live `tests/msg.rs` pixel test against headless
+scoot; binary +369 KB release. Deliberate deviations: SIGHUP keeps default
+action (`forbid(unsafe_code)` + no signalfd in rustix; reload via
+`msg reload`), no scoot `[bar]` section (out of scope), no `value` key in
+query (room reserved).

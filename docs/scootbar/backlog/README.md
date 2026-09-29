@@ -92,7 +92,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [M1 review follow-ups](resolved/m1-review-followups-done.md) (medium): a clock that retries a failed draw, and four hardening gaps (the fuzz crate's CI build done) — RESOLVED 2026-09-29
 
 ### M3 — Configurable
-- [Config file, control socket and reload](config-cli-and-reload.md) (medium): `scootbar msg`, `query`
+- [Config file, control socket and reload](resolved/config-cli-and-reload-done.md) (medium): `scootbar msg`, `query` — RESOLVED 2026-09-29
 - [Nix modules and Stylix](nix-modules-and-stylix.md) (medium)
 - [Appearance](appearance.md) (medium)
 - [Icons and fonts](icons-and-fonts.md) (medium)
