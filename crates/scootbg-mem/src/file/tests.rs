@@ -2,7 +2,7 @@ use std::io::Write;
 
 use rustix::fs::StatVfsMountFlags;
 
-use super::{Premises, is_read_only_mount, map_if_immutable, may_map};
+use super::{Premises, is_read_only_mount, map_if_read_only, may_map};
 
 /// A scratch file under the target directory's temp, removed on drop.
 struct Scratch(std::path::PathBuf);
@@ -36,13 +36,13 @@ fn a_file_on_a_writable_mount_is_not_mapped() {
         return;
     }
     let file = std::fs::File::open(&scratch.0).unwrap();
-    assert_eq!(map_if_immutable(&file, 1 << 20).unwrap(), None);
+    assert_eq!(map_if_read_only(&file, 1 << 20).unwrap(), None);
 }
 
 #[test]
 fn a_directory_is_not_mapped() {
     let dir = std::fs::File::open(std::env::temp_dir()).unwrap();
-    assert_eq!(map_if_immutable(&dir, 1 << 20).unwrap(), None);
+    assert_eq!(map_if_read_only(&dir, 1 << 20).unwrap(), None);
 }
 
 /// A file that passes every premise: `/nix/store` where it is mounted
@@ -58,13 +58,13 @@ fn a_file_on_a_read_only_mount_is_mapped_whole() {
     let expected = std::fs::read(&path).unwrap();
     let file = std::fs::File::open(&path).unwrap();
     let len = expected.len() as u64;
-    let mapped = map_if_immutable(&file, len)
+    let mapped = map_if_read_only(&file, len)
         .unwrap()
         .expect("a file on a read-only mount is mapped");
     assert_eq!(mapped, &expected[..]);
     // Too large for the cap: not mapped.
     let file = std::fs::File::open(&path).unwrap();
-    assert_eq!(map_if_immutable(&file, len - 1).unwrap(), None);
+    assert_eq!(map_if_read_only(&file, len - 1).unwrap(), None);
 }
 
 fn read_only_file() -> Option<std::path::PathBuf> {
@@ -145,5 +145,5 @@ fn an_unwritable_file_on_a_writable_mount_is_not_mapped() {
     std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o444);
     std::fs::set_permissions(&scratch.0, permissions).unwrap();
     let file = std::fs::File::open(&scratch.0).unwrap();
-    assert_eq!(map_if_immutable(&file, 1 << 20).unwrap(), None);
+    assert_eq!(map_if_read_only(&file, 1 << 20).unwrap(), None);
 }

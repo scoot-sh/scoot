@@ -154,8 +154,10 @@ placed draws no text and needs no font. On NixOS those directories are
 usually empty: give `--font` a store path (`nix build nixpkgs#dejavu_fonts`
 has `share/fonts/truetype/DejaVuSans.ttf`).
 
-**Replacing the font file while the bar runs cannot crash it**, except by
-root first making a read-only store file writable. The font is mapped
+**Replacing the font file while the bar runs cannot crash it**, unless a
+*root* process rewrites a mapped store file in place through a read-write view
+(root ignores the write bit; `nix-daemon` never does, it adds, unlinks and
+renames whole paths). The font is mapped
 (costing only the pages drawn from, shared with every other program using
 the font) only when it is owned by root, has no write bit for anyone, and
 lies on a read-only mount: NixOS's `/nix/store`. Every other font (your

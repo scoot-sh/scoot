@@ -607,7 +607,7 @@ when made this decision its own rather than
 **Mapped only where the file is on a read-only mount, owned by root and
 writable by no one (`st_mode & 0o222 == 0`); read into the heap everywhere
 else** (`crates/scootbar/src/font.rs`,
-`scootbg_mem::file::map_if_immutable`). Why neither of the two options the
+`scootbg_mem::file::map_if_read_only`). Why neither of the two options the
 entry offered as they stood, and why the read-only mount alone, this
 section's first version, was not enough:
 
@@ -627,10 +627,12 @@ section's first version, was not enough:
   `ReadOnlyPaths=`, flatpak's `/run/host/fonts`, read-only container roots,
   and NFS or FUSE mounts, so it is common, not contrived.
 - *Read-only mount, root's, no write bit*: a user cannot write such a file
-  through any path, and root must first `chmod` it. Nix store files are
+  through any path, but root can, because the write bit does not stop it
+  (`CAP_DAC_OVERRIDE`: review of #324 reproduced a `SIGBUS` with a plain `: >`
+  as root through the read-write side of a bind mount). Nix store files are
   exactly that (root, `0444`, and NixOS mounts the store read-only), so
   Stylix and the modules keep the mapping. What is left, in the mapping's
-  docs: root making a store file writable and rewriting it in place through
+  docs: a root process rewriting a store file in place through
   a read-write view (on NixOS that would be `nix-daemon`, which never
   rewrites a store file in place; it adds, unlinks or renames over whole
   files, and the mapping keeps the old inode) and disk errors. The check

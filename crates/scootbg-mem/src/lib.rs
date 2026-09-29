@@ -11,8 +11,8 @@
 //! - [`zeroed`]: a zeroed byte buffer that is both fallible and committed
 //!   only as it is written, for decoders' output;
 //! - [`file`]: a file mapped read-only for the process's life, only where
-//!   it lies on a read-only mount (scootbar's font; scootbg does not use
-//!   it).
+//!   it is a root-owned, unwritable file on a read-only mount (scootbar's font;
+//!   scootbg does not use it).
 //!
 //! Every `unsafe` block carries a `// SAFETY:` argument and holds exactly
 //! one unsafe operation (clippy's `undocumented_unsafe_blocks` and

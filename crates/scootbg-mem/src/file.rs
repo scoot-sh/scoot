@@ -1,5 +1,5 @@
 //! A file mapped read-only for the rest of the process, only where nothing
-//! short of root deliberately rewriting a read-only file can change it:
+//! but a root process rewriting the file in place can change it:
 //! scootbar's font, when it is a root-owned, unwritable file on a read-only
 //! mount (NixOS's `/nix/store`).
 //!
@@ -24,9 +24,12 @@
 //! are exactly that (root, `0444`), so NixOS keeps the mapping; a user's
 //! file behind a read-only view of their home is not, and is read.
 //!
-//! **What is left**, stated rather than hidden: root first making such a
-//! file writable (`chmod`) and then rewriting it in place, through a
-//! read-write view of the same filesystem. On NixOS that is `nix-daemon`,
+//! **What is left**, stated rather than hidden: any *root* process that opens
+//! such a file through a read-write view of the same filesystem and truncates
+//! or rewrites it in place. The write bit does not stop root (it holds
+//! `CAP_DAC_OVERRIDE`); a review reproduced the `SIGBUS` at the head with a
+//! plain `: > file` as root, on a `0444` file, through the read-write side of a
+//! bind mount. On NixOS the only root writer is `nix-daemon`,
 //! which never rewrites a store file in place: it adds new paths, and
 //! deletes (unlinks) or replaces (renames over) whole files, and the
 //! mapping keeps the old inode through both. A disk error reading a mapped
@@ -68,7 +71,7 @@ pub fn may_map(premises: &Premises) -> bool {
 /// regular file of at most `max_len` bytes that [`may_map`] allows.
 /// `Ok(None)` otherwise (the caller reads it instead), and an error only
 /// when asking the kernel fails.
-pub fn map_if_immutable<F: AsFd>(file: F, max_len: u64) -> io::Result<Option<&'static [u8]>> {
+pub fn map_if_read_only<F: AsFd>(file: F, max_len: u64) -> io::Result<Option<&'static [u8]>> {
     let file = file.as_fd();
     let stat = fstat(file)?;
     if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
@@ -95,8 +98,9 @@ pub fn map_if_immutable<F: AsFd>(file: F, max_len: u64) -> io::Result<Option<&'s
     // hint, no `MAP_FIXED`), so nothing existing is replaced. `len` is the
     // file's size, non-zero. The file is on a read-only mount, owned by
     // root and writable by no one, so neither its size nor its bytes can
-    // change under the mapping unless root first makes it writable and
-    // rewrites it through another mount (see the module docs).
+    // change under the mapping unless a root process rewrites it in place
+    // through a read-write view; root ignores the write bit (see the module
+    // docs, which say why that is accepted and where it is not reachable).
     let address = unsafe {
         mmap(
             ptr::null_mut(),

@@ -15,9 +15,9 @@
 //! ~/.local/share/fonts/font.ttf` over the one in use does exactly that
 //! (it opens the old file with `O_TRUNC`).
 //!
-//! So the font is mapped **only where nothing but root deliberately undoing
-//! a read-only file can change it**: a root-owned file with no write bit,
-//! on a read-only mount (`scootbg_mem::file::map_if_immutable`). That is
+//! So the font is mapped **only where nothing but a root process rewriting the
+//! file in place can change it** (root ignores the write bit): a root-owned file with no write bit,
+//! on a read-only mount (`scootbg_mem::file::map_if_read_only`). That is
 //! NixOS's `/nix/store` (root, `0444`, mounted read-only), where Stylix and
 //! the NixOS modules take fonts from. A read-only mount alone is not
 //! enough: it is a property of the mount, and the same file is often
@@ -190,7 +190,7 @@ pub fn load(path: &Path) -> Result<Font, FileError> {
     }
     let path = path.to_owned();
     if let Some(bytes) =
-        scootbg_mem::file::map_if_immutable(&fd, MAX_FONT).map_err(FileError::Io)?
+        scootbg_mem::file::map_if_read_only(&fd, MAX_FONT).map_err(FileError::Io)?
     {
         let face = FontRef::try_from_slice(bytes).map_err(|_| FileError::NotAFont)?;
         return Ok(Font {

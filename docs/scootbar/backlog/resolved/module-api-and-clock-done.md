@@ -83,8 +83,9 @@ Resolved 2026-09-29. What landed:
 
 **Deviations from the entry and the brief**, each deliberate:
 
-- **Idle is two wakeups a minute, not one**, and the target is now stated
-  that way (review of #324): one timer wake a minute, and each frame
+- **Idle is two wakeups a minute, not one.** The target stays one until the
+  maintainer rules on it ([open decisions](../lightest.md#open-decisions)); this
+  is what was measured (review of #324): one timer wake a minute, and each frame
   brings one `wl_buffer.release`. The tick, then 0.9 to 1.2 ms
   later on scoot (0.18 to 0.25 ms on sway) the compositor's
   `wl_buffer.release` for the buffer that tick's commit replaced (trace
