@@ -107,12 +107,25 @@ back for the whole `cursor_hide_after_ms` delay (direct attempts stopped for
 1.035 s in the trace, about 31 frames) before the client fb returned. Unset: no primary
 attempt at all, plane 35 stayed on `AR24`. Compositor CPU: 13-14 against
 29-33 jiffies per 10 s (1080p30 clip, two rounds each), 21 against 37-40 for
-a 60 fps 2560x1600 clip. mpv `presented` flags were not captured, so
-`zero_copy` feedback under the hide is still unverified.
+a 60 fps 2560x1600 clip.
 
-Remaining: `presented`/`zero_copy` under the hide (needs a `WAYLAND_DEBUG`
-run); option 2 (cursor on the overlay plane, needs a Smithay-fork
-change per `docs/forks.md`); this Asahi kernel (7.1.13) now exposes **two**
-overlays per CRTC, so it need not compete with window overlays there (the option-2 text
-above that says it competes for the one overlay predates this). This ticket
-keeps `status: "open"` until those land.
+**`zero_copy` under the hide verified 2026-09-29 (`Asahi.md`, Test 15,
+same binary as Test 14).** Four alternating `WAYLAND_DEBUG=1` sessions ran
+fullscreen mpv (`--cursor-autohide=no`, which sets a visible arrow once
+through `wp_cursor_shape_v1` and sends no `set_cursor`). With
+`cursor_hide_after_ms = 1000`, mpv's `presented` flags were `9`
+(`vsync | zero_copy`) 733 and 732 times. Each count equals scoot's
+`successfully assigned … to plane::Handle(35)` lines in the same session.
+The first `9` came 1.010-1.018 s after the last motion. Continuous motion
+(every 0.25 s) gave only `1`, starting within a frame or two of the first
+move. Unset, the sessions saw 1156 and 1158 `1`s and not one `9`. No
+`discarded` and no other flag value was seen. **This closes option 1's
+Asahi verification.** It covers one client (mpv), a 1000 ms delay,
+motion-driven reshows only, and scale 1.5 on eDP-1.
+
+Remaining: option 2 (cursor on the overlay plane, needs a Smithay-fork
+change per `docs/forks.md`). This Asahi kernel (7.1.13) now exposes **two**
+overlays per CRTC, so option 2 need not compete with window overlays
+there. The option-2 text above, which says it competes for the one overlay,
+predates this. The ticket keeps `status: "open"` until option 2 lands or
+is ruled out.
