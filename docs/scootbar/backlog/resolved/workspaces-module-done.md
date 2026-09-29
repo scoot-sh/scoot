@@ -1,13 +1,16 @@
 ---
 title: "Workspaces module: numbers, the active one marked, click to switch"
-status: "open"
-area: "scootbar"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M2"
+resolved: "2026-09-29"
 ---
 
-# Workspaces module
+# Workspaces module — RESOLVED
+
+Resolved 2026-09-29 (PR #334, squash-merge `646293e`). What landed:
 
 Filed 2026-09-29. Serves **daily-drive**; the headline of the second milestone,
 and the first daily-usable bar.
@@ -82,3 +85,35 @@ one redraw per `done`.
 ## Done when
 
 Time and workspaces on every output, verified by screenshot, at real scale.
+
+## Resolution
+
+- **The module** (`crates/scootbar/src/modules/workspaces/`, feature
+  `workspaces`): an `ext-workspace-v1` client behind three defaulted
+  `Module` hooks that earlier modules keep untouched — `on_dispatch`
+  (state arriving on the connection fd), `on_click` (a press in the
+  module's span), `custom_draw` (the active pill). Per-output numbers
+  sorted by coordinates, active marked, redrawn from the last `done`
+  only; handles never retained (positions, not identities); adopted
+  names (`"2 DP-1"`) shown by number. Click sends `activate` then
+  `commit` through its own minimal hit test over the pill rects; no
+  config, no scroll, no hover — [pointer-and-interactions](../pointer-and-interactions.md)
+  generalizes it later.
+- **The pill is rectangular**, an accent fill with the number in the
+  bar's background: the canvas has no rounded shape until
+  [appearance](../appearance.md) brings one (with its snapshots).
+  Default layout unchanged (clock center); `--left workspaces` places it.
+- **Review finding, fixed before merge**: a click landing on a pill
+  whose workspace was `Removed` since the last `done` would `activate`
+  a destroyed handle — a protocol error killing the bar. `on_click`
+  now requires the handle to still be staged (commit `7bd7c76`).
+- **Evidence** (at the merge): `cargo nextest run -p scootbar`
+  206/206; clippy `-D warnings` clean on default, no-default,
+  clock-alone and workspaces-alone builds; `fmt --check` clean;
+  headless scoot ×2 outputs — pill follows a switch, click switches,
+  appear/disappear redraw, hotplug rebuild, `finished`-mid-batch and
+  `done`-less batches never redraw, one redraw per `done` under churn;
+  screenshots at real scale showing time and workspaces on every output.
+- The three scoot-side follow-ups stay open and optional (snapshot
+  event, output-targeted switch, `urgent` bit); without them the module
+  degrades as the ticket describes.

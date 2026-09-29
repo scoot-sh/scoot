@@ -26,7 +26,7 @@ targeting one that does not exist does nothing
 (`docs/configuration.md`, "Targeting a workspace that doesn't exist yet";
 `docs/ipc.md`). `Super+9` with three workspaces open is a no-op by design. A bar
 cannot honestly draw slots scoot cannot switch to, so
-[the bar's workspaces module](../../scootbar/backlog/workspaces-module.md)
+[the bar's workspaces module](../../scootbar/backlog/resolved/workspaces-module-done.md)
 shows what scoot reports and does not synthesize slots.
 
 ## What to decide

@@ -15,7 +15,7 @@ buttons) and **computer use** (every interaction is scriptable).
 ## What to do
 
 This generalizes the workspaces module's own minimal hit test
-([workspaces-module](workspaces-module.md), shipped earlier) into the module
+([workspaces-module](resolved/workspaces-module-done.md), shipped earlier) into the module
 trait and the config keys below.
 
 - `wl_pointer` on the bar surface: enter, motion, button, and axis (use

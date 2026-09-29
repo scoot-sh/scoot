@@ -88,7 +88,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [**Testing and CI**](resolved/testing-and-ci-done.md) — RESOLVED 2026-09-29: snapshot tests of the canvas and the bar at 1x and fractional scales, fake events through the module harness and a contract every registered module is held to, the fuzz corpus replayed on stable and both targets run in CI for a fixed budget, a per-module feature matrix, and `scripts/scootbar-bench` on scootbg's runner, with M1's run as the ratchet's baseline ([testing.md](../testing.md))
 
 ### M2 — Workspaces: the first bar you can live with
-- [Workspaces module](workspaces-module.md) (high): `ext-workspace-v1`, click to switch
+- [Workspaces module](resolved/workspaces-module-done.md) (high): `ext-workspace-v1`, click to switch — RESOLVED 2026-09-29
 - [M1 review follow-ups](m1-review-followups.md) (medium): a clock that retries a failed draw, and four hardening gaps (the fuzz crate's CI build done)
 
 ### M3 — Configurable
