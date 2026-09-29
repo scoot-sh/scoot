@@ -534,6 +534,7 @@ be revisited.
   2026-09-25, `--tty` drives every connected monitor), and the one remaining
   surface is the [remainder](./core/multi-output-remainder.md) below (open,
   high: per-output scale/mode only).
+- [A real maximize](./core/maximize.md) — medium, filed 2026-09-29: fill the usable area with the bar visible, distinct from fullscreen; today no state exists and `set_maximized` does nothing
 - [Per-output scale/mode configuration surface](./core/per-output-scale-mode.md)
   — deliberately left out of milestone 19: design answered 2026-09-22
   (`[[outputs]]` config shape, per-output scale enumeration, apply/test

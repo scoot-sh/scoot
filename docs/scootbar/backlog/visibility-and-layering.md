@@ -18,6 +18,9 @@ Filed 2026-09-29. Serves **daily-drive**.
   there): the bar disappears while something is fullscreen, and the zone is
   covered. That is the desired default for a bar. An `overlay` bar would stay
   over fullscreen; offer it only as an explicit choice.
+- **Fullscreen and maximize are different on purpose.** Fullscreen hides the
+  bar; a window that should fill the screen *with* the bar visible wants
+  scoot's [maximize](../../backlog/core/maximize.md), which does not exist yet.
 - An exclusive zone shrinks the tiling area; `-1` reserves nothing, which a
   floating overlay-style bar may want.
 - A bar never asks for the keyboard (`keyboard_interactivity: none`), so
