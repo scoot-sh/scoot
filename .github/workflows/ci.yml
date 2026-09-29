@@ -89,6 +89,14 @@ jobs:
   # the integration job's tests/scoot_config.rs has scoot itself spawn
   # `apply-config` from a [wallpaper] section, as the smoke test does.
   #
+  #   crates/scootbar/                     -> scootbar=true (scootbar job)
+  #     except its Cargo.toml               -> scoot too, for the macOS
+  #     job's `cargo check --workspace`, as scootbg's
+  #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
+  #                                           is scootbar's
+  #   either scoot or scootbar             -> the scootbar-on-scoot
+  #                                           integration job
+  #
   # Directory prefixes carry their trailing slash: `crates/scoot*` would
   # also match `crates/scootbg`, and `crates/scootbg/` does not match
   # `crates/scootbg-mem/`, which is why both are listed.
@@ -108,6 +116,7 @@ jobs:
     outputs:
       scoot: ${{ steps.classify.outputs.scoot }}
       scootbg: ${{ steps.classify.outputs.scootbg }}
+      scootbar: ${{ steps.classify.outputs.scootbar }}
       backlog: ${{ steps.classify.outputs.backlog }}
     steps:
       # Depth 2: a pull_request run checks out the merge commit, whose first
@@ -122,11 +131,13 @@ jobs:
         run: |
           scoot=true
           scootbg=true
+          scootbar=true
           backlog=true
           if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$changed" ]; then
             printf 'Changed:\n%s\n' "$changed"
             scoot=false
             scootbg=false
+            scootbar=false
             backlog=false
             while IFS= read -r path; do
               case "$path" in
@@ -139,22 +150,38 @@ jobs:
                 # Their manifests are read by jobs outside scootbg's own
                 # (flake.nix takes the package description from one, and
                 # the macOS job checks the workspace), so they run everything.
-                crates/scootbg/Cargo.toml | crates/scootbg-mem/Cargo.toml)
+                crates/scootbg/Cargo.toml)
                   scoot=true
                   scootbg=true ;;
-                crates/scootbg/* | crates/scootbg-mem/*)
+                # scootbar builds on scootbg-mem too.
+                crates/scootbg-mem/Cargo.toml)
+                  scoot=true
+                  scootbg=true
+                  scootbar=true ;;
+                crates/scootbg/*)
                   scootbg=true ;;
+                crates/scootbg-mem/*)
+                  scootbg=true
+                  scootbar=true ;;
+                # Its manifest is read by the macOS job's workspace check.
+                crates/scootbar/Cargo.toml)
+                  scoot=true
+                  scootbar=true ;;
+                crates/scootbar/*)
+                  scootbar=true ;;
                 *)
                   scoot=true
                   scootbg=true
+                  scootbar=true
                   backlog=true ;;
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot scootbg=$scootbg backlog=$backlog"
+          echo "scoot=$scoot scootbg=$scootbg scootbar=$scootbar backlog=$backlog"
           {
             echo "scoot=$scoot"
             echo "scootbg=$scootbg"
+            echo "scootbar=$scootbar"
             echo "backlog=$backlog"
           } >>"$GITHUB_OUTPUT"
 
@@ -946,3 +973,153 @@ jobs:
         run: |
           cargo nextest run -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --test config --test scoot_config --test draw_failed --no-fail-fast
           cargo test -p scootbg --test daemon --test outputs --test hotplug --test color --test image --test scale --test share --test restore --test config --test scoot_config --test draw_failed
+
+  # scootbar, the status bar (crates/scootbar): its own checks, without
+  # building the compositor, as the scootbg job does. Its compositor-backed
+  # integration tests skip here (no `scoot` binary is built in this job);
+  # they run for real in the next job.
+  scootbar:
+    name: scootbar (status bar)
+    needs: changes
+    # Fail open, as above.
+    if: ${{ !cancelled() && needs.changes.outputs.scootbar != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # Its own cache, for the reason the scootbg job gives.
+      - name: Restore the cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: scootbar-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            scootbar-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            scootbar-cargo-
+
+      - name: cargo fmt
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo fmt --check -p scootbar
+
+      # scootbar is `#![forbid(unsafe_code)]`, which rustc enforces; its
+      # one mapping is scootbg-mem's, checked in the scootbg job.
+      - name: cargo clippy
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo clippy -p scootbar --all-targets -- -D warnings
+
+      # Both runners, for the reason the Linux job gives.
+      - name: cargo nextest and cargo test
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          cargo nextest run -p scootbar --no-fail-fast
+          cargo test -p scootbar
+
+      # No C beyond what std links, as for scootbg: no `libc` crate in the
+      # normal dependency tree, and no shared library beyond glibc and
+      # libgcc_s (no libwayland, no libEGL).
+      - name: No libc crate, and what the release binary links
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          if cargo tree -p scootbar -e normal --prefix none | grep -q '^libc '; then
+            echo "::error title=scootbar depends on the libc crate::find the path with: cargo tree -p scootbar -e normal -i libc"
+            cargo tree -p scootbar -e normal -i libc
+            exit 1
+          fi
+          echo "ok: no libc crate in scootbar's normal dependency tree"
+          # Weighed alone, never in a --workspace build (feature unification).
+          RUSTFLAGS="-D warnings" cargo build --release -p scootbar
+          echo "release binary: $(stat -c %s target/release/scootbar) bytes (stripped)"
+          ldd target/release/scootbar
+          extra=$(ldd target/release/scootbar | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
+          if [ -n "$extra" ]; then
+            echo "::error title=scootbar links a library beyond std's::$(echo "$extra" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "ok: links only what std links"
+
+      - name: Save the cargo cache
+        # Same condition as the Linux job's save; see the comment there.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  # scootbar against a live `scoot --headless` (crates/scootbar/tests/bar.rs:
+  # a bar per output, its zone and margins, pixels at fractional scales and
+  # a live scale change, zero idle wakeups, exit when the compositor goes)
+  # and a headless sway (tests/hotplug.rs: outputs plugged and unplugged at
+  # runtime, zero outputs, a hotplug storm with no leak). Runs when either
+  # side changes, since each can break the other's end-to-end run.
+  # `SCOOTBAR_REQUIRE_SCOOT` and `SCOOTBAR_REQUIRE_SWAY` turn the tests'
+  # skips into failures, so this job cannot go green by skipping; the
+  # first also requires `foot` (the dev shell's), which places a window
+  # beside the bar.
+  scootbar-integration:
+    name: scootbar on headless scoot and sway
+    needs: changes
+    # Fail open: skipped only when both sides are explicitly unchanged.
+    if: ${{ !cancelled() && (needs.changes.outputs.scoot != 'false' || needs.changes.outputs.scootbar != 'false') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - name: Create XDG_RUNTIME_DIR
+        run: |
+          mkdir -p "$RUNNER_TEMP/xdg"
+          chmod 700 "$RUNNER_TEMP/xdg"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
+
+      # Restore-only, from the Linux job's entries: they hold the Smithay
+      # build this job needs.
+      - name: Restore the cargo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            linux-cargo-
+
+      - name: Build scoot and scootbar
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo build -p scoot -p scootbar
+
+      - name: Fetch sway
+        run: |
+          sway=$(nix build --inputs-from . nixpkgs#sway --no-link --print-out-paths)
+          echo "SCOOTBAR_TEST_SWAY=$sway/bin/sway" >>"$GITHUB_ENV"
+
+      - name: Integration tests, compositors required
+        shell: nix develop --command bash -euo pipefail {0}
+        env:
+          SCOOTBAR_REQUIRE_SCOOT: "1"
+          SCOOTBAR_REQUIRE_SWAY: "1"
+        run: |
+          cargo nextest run -p scootbar --test bar --test hotplug --no-fail-fast
+          cargo test -p scootbar --test bar --test hotplug

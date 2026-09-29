@@ -1,0 +1,38 @@
+[package]
+name = "scootbar"
+description = "Status bar for Wayland"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Linux only: on any other target the binary is a stub that says so (see
+# `src/main.rs`), as scootbg's is. Every dependency below is already in the
+# workspace for scootbg, chosen there by measurement
+# (docs/scootbg/backlog/resolved/dependencies-done.md); the skeleton adds
+# none of its own. scootbar's own record, which later entries extend, is
+# docs/scootbar/backlog/resolved/dependencies-done.md.
+[target.'cfg(target_os = "linux")'.dependencies]
+# The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
+# of its own (`#![forbid(unsafe_code)]` in `src/main.rs`).
+scootbg-mem.workspace = true
+# The Wayland client, plain, no toolkit, on its pure-Rust backend: nothing
+# links libwayland.
+wayland-client = "0.31"
+# `wp_viewporter` and `wp_fractional_scale_manager_v1` (staging): drawing
+# at the output's real device pixels at a fractional scale.
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+# `zwlr_layer_shell_v1`: a bar is a layer surface.
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# poll(2) through raw syscalls, no `libc` crate: the same `rustix` the
+# Wayland crates already pull in.
+rustix = { version = "1", default-features = false, features = ["std", "event"] }
+
+# The integration tests read screenshots back: scoot's arrive as base64 PNG
+# over its IPC, sway's through a small wlr-screencopy client into a memfd.
+# Dev-only: none of it reaches the binary's dependency tree.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
+base64.workspace = true
+png = "0.18"
+serde_json.workspace = true
