@@ -17,10 +17,16 @@
 //! bare desktop -- `update_cursor_hide` arms a one-shot deadline
 //! `cursor_hide_after_ms` out. The timer firing past the deadline hides the
 //! pointer (`cursor_idle_hidden`); any pointer motion, button or scroll
-//! shows it again through `note_pointer_activity`. That frame then carries
-//! cursor elements, so it composites -- exactly one frame, until the next
-//! deadline -- and a hidden pointer disturbs no plane assignment, because
-//! there are no cursor elements for the `DrmCompositor` to place.
+//! shows it again through `note_pointer_activity`. From then until the
+//! pointer has sat still for the delay again, every frame carries cursor
+//! elements -- they are gathered for as long as the pointer is shown, not
+//! for one frame -- so on a CRTC with no cursor plane every one of those
+//! frames composites (measured on Asahi's `apple,dcp`: direct scan-out
+//! stops within a frame or two of the first motion and resumes about one
+//! delay after the last, `Asahi.md` Tests 14 and 15). Where a cursor plane
+//! exists the elements go to it and the window can stay direct. A hidden
+//! pointer disturbs no plane assignment, because there are no cursor
+//! elements for the `DrmCompositor` to place.
 //!
 //! Hiding is not the client's `Hidden` status: `Cursor::status` is
 //! untouched, so a client-supplied image, a named shape and its hotspot all
@@ -154,8 +160,10 @@ impl State {
     }
 
     /// Pointer activity: motion, button or scroll. Shows a hidden pointer
-    /// again (through the ordinary cursor redraw, so that frame carries
-    /// the cursor and composites) and pushes the deadline out.
+    /// again (through the ordinary cursor redraw: from that frame on, every
+    /// frame carries the cursor until the pointer hides again, and without
+    /// a cursor plane each of them composites -- see the module doc) and
+    /// pushes the deadline out.
     ///
     /// Hot path: one integer compare while the feature is off, else one
     /// clock read, two stores, and no allocation -- the timer is inserted
@@ -172,9 +180,10 @@ impl State {
         }
         if self.cursor_idle_hidden {
             self.cursor_idle_hidden = false;
-            // The reshown cursor's own redraw: that frame carries cursor
-            // elements again, so it composites -- exactly one, until the
-            // next deadline.
+            // The reshown cursor's own redraw. Not the only frame that
+            // carries cursor elements: every frame does until the next hide,
+            // so on a CRTC with no cursor plane every one of them composites
+            // (see the module doc).
             self.cursor_changed();
         }
         self.cursor_hide_deadline = Some(Instant::now() + self.cursor_hide_delay());
