@@ -44,6 +44,12 @@ name: nix build (packaged artifacts)
 on:
   push:
     branches: [main]
+    # Docs-only pushes (and backlog claim commits under docs/backlog/claims/)
+    # build nothing: skipped only when every changed path matches. See the
+    # same filter in ci.yml.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch:
 
 permissions:

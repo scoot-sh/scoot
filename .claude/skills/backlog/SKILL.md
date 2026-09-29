@@ -47,8 +47,11 @@ scripts/backlog claims [--prune]                        # every claim on main; -
 
 - **What a claim is**: a small file, `docs/backlog/claims/<entry's directories joined with __>__<slug>.json`
   (e.g. `scootbar__backlog__x.json`, `backlog__core__x.json`),
-  added to `main` in its own commit (`chore(backlog): claim <slug> (<agent>) [skip ci]`)
-  holding a uuid, your name and the date. The commit is built with git
+  added to `main` in its own commit (`chore(backlog): claim <slug> (<agent>)`)
+  holding a uuid, your name and the date. It lives under `docs/`, which CI's push
+  filter ignores, so claims start no workflow; never write `[skip ci]` in a commit
+  message (GitHub honors it anywhere in the message, even in a body that merely
+  mentions it). The commit is built with git
   plumbing on top of the fetched `main`: **it never touches your working tree
   or your checked-out branch.** The push is the lock, so if two agents race,
   exactly one push wins and the other re-checks and is refused (or moves to the

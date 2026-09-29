@@ -385,7 +385,12 @@ filter to the classify job in `.github/workflows/ci.yml` in the same PR that add
 it, the way scootbg's is, and its jobs run only when its files (or something it
 depends on: `scoot-ipc`, the workspace `Cargo.toml`/`Cargo.lock`, the flake) change.
 No package gets an always-run job. A change to shared code fans out to its
-dependents and nothing more. Commits that are only claims or docs use `[skip ci]`.
+dependents and nothing more. **Docs-only pushes to main (any `*.md`, anything under
+`docs/`, which includes the backlog claim files) start no workflow**: both workflows
+have a `paths-ignore` on `push`, so a commit that touches only those runs nothing
+and a commit that also touches code runs in full. Do not write `[skip ci]` in
+commit messages: GitHub honors it anywhere in the message, including in a body that
+merely mentions it, which has silently skipped CI on a real PR.
 
 ## Local scratch/handoff state
 

@@ -45,6 +45,19 @@ on:
   pull_request:
   push:
     branches: [main]
+    # Docs-only pushes (a merged docs PR, a backlog claim commit under
+    # docs/backlog/claims/) start nothing. The workflow is skipped only when
+    # EVERY changed path matches, so a commit that also touches code runs in
+    # full. This is a workflow-level filter, which pull_request must not use
+    # (a workflow that never starts leaves a required check waiting forever;
+    # see the `changes` job) but which is safe here: nothing requires a check
+    # on a push to main. It replaces asking every commit message to say
+    # `[skip ci]`, a token GitHub honors anywhere in the message, including
+    # in a body that merely mentions it. Keep it in step with the classify
+    # job's `*.md | docs/*` case.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 permissions:
   contents: read
