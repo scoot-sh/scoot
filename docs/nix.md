@@ -7,6 +7,7 @@
 - [Home-manager module](#home-manager-module)
 - [NixOS module](#nixos-module)
 - [The wallpaper: scootbg](#the-wallpaper-scootbg)
+- [The status bar: scootbar](#the-status-bar-scootbar)
 - [The overlay](#the-overlay)
 - [Migrating from a hand-rolled packaging](#migrating-from-a-hand-rolled-packaging)
 - [Settings failure modes](#settings-failure-modes)
@@ -43,14 +44,17 @@ the `xwayland` build feature and the X server on `PATH` (Linux only; see
 [XWayland](#xwayland-from-the-flake) below),
 `packages.<system>.scootctl` the standalone
 remote-control client, `packages.<system>.scootbg` the wallpaper daemon
-(Linux only; see [The wallpaper](#the-wallpaper-scootbg)), and
-`packages.<system>.default` is whichever is
+(Linux only; see [The wallpaper](#the-wallpaper-scootbg)),
+`packages.<system>.scootbar` the status bar and `scootbar-demo` the bar
+with a font (Linux only; see [The status bar](#the-status-bar-scootbar)),
+and `packages.<system>.default` is whichever is
 honest on that system (see [Platform notes](#platform-notes)). `apps`
-mirrors four of them (`nix run . -- ...`, `nix run .#scootctl -- ...`,
+mirrors six of them (`nix run . -- ...`, `nix run .#scootctl -- ...`,
 `nix run .#scoot-gpu -- --tty -- ...`,
-`nix run .#scoot-xwayland -- --headless --xwayland -- xterm`). The same
-packages are also `pkgs.scoot`, `pkgs.scootctl` and `pkgs.scootbg` through
-[the overlay](#the-overlay).
+`nix run .#scoot-xwayland -- --headless --xwayland -- xterm`,
+`nix run .#scootbar -- daemon --font F`, `nix run .#scootbar-demo`). The
+same packages are also `pkgs.scoot`, `pkgs.scootctl`, `pkgs.scootbg` and
+`pkgs.scootbar` through [the overlay](#the-overlay).
 
 ## Platform notes
 
@@ -68,7 +72,8 @@ config you deploy to a Linux box next to the machine that edits it),
 while the NixOS module's session entry only means anything on NixOS.
 scootbg, the wallpaper daemon, is Linux-only: there is no macOS
 `scootbg` package, and on macOS a `[wallpaper]` section in the
-home-manager settings renders as written and installs nothing.
+home-manager settings renders as written and installs nothing. scootbar,
+the status bar, is Linux-only the same way: no macOS package.
 
 ## GPU tiers from the flake
 
@@ -390,10 +395,55 @@ renders, is pinned by the evaluation checks in `nix/tests.nix`. A
 `nixosTest` would add a full NixOS system build and a VM boot to every
 CI run for no path those do not already cover.
 
+## The status bar: scootbar
+
+`packages.<system>.scootbar` is [scootbar](scootbar/README.md), the status
+bar, alone: one binary, linking nothing beyond glibc and libgcc_s, and
+**no font in its closure**. Its installed closure is one of the bar's
+measured rows ([the resource ratchet](scootbar/backlog/lightest.md)), and a
+bundled font would be most of it. It takes its font from `--font`, or from
+the first of a short list of well-known files
+([cli.md](scootbar/cli.md#fonts)), and with neither it refuses to start,
+saying how to give one. On NixOS those files are usually absent, so name
+one:
+
+```sh
+nix run github:scoot-sh/scoot#scootbar -- daemon \
+  --font "$(nix build --no-link --print-out-paths nixpkgs#dejavu_fonts.minimal)/share/fonts/truetype/DejaVuSans.ttf"
+```
+
+or run **`scootbar-demo`**, the same binary behind a small script that
+adds DejaVu Sans (`dejavu_fonts.minimal`, one 742 KiB file) as its
+default `--font`:
+
+```sh
+nix run github:scoot-sh/scoot#scootbar-demo                          # scootbar daemon, a clock
+nix run github:scoot-sh/scoot#scootbar-demo -- daemon --right clock  # any daemon flags
+```
+
+With no arguments it runs `daemon`; a `--font` you give wins; anything
+other than `daemon` (`--help`, `--version`) passes through unchanged. It
+is a demo, for trying the bar on a box with no fonts where it looks: the
+overlay does not provide it, and a system should install `scootbar` and
+give it a font its own font setup provides.
+
+Modules are Cargo features (one per module, `clock` the default; see
+`crates/scootbar/Cargo.toml`), reachable through `.override`:
+
+```nix
+# A bar with no modules: a plain bar, which needs no font.
+scootbar.override { buildNoDefaultFeatures = true; }
+# Exactly the modules listed.
+scootbar.override { buildNoDefaultFeatures = true; buildFeatures = [ "clock" ]; }
+```
+
+The NixOS and home-manager modules for the bar come later
+([nix-modules-and-stylix](scootbar/backlog/nix-modules-and-stylix.md)).
+
 ## The overlay
 
 `overlays.default` adds `pkgs.scoot`, `pkgs.scootctl` and, on Linux,
-`pkgs.scootbg`:
+`pkgs.scootbg` and `pkgs.scootbar`:
 
 ```nix
 nixpkgs.overlays = [ inputs.scoot.overlays.default ];
@@ -405,7 +455,8 @@ stay one pinned pair, and nothing is built twice. With the overlay applied,
 the modules' `package` and `wallpaper.package` default to these, which is
 what makes the pure modules (`nix/modules/home.nix`, `nix/modules/nixos.nix`)
 usable without the flake's wrappers. On macOS the overlay adds `scoot`
-and `scootctl` (the client) and no `scootbg`.
+and `scootctl` (the client) and no `scootbg` or `scootbar`. It does not
+add `scootbar-demo` (see [The status bar](#the-status-bar-scootbar)).
 
 ## Migrating from a hand-rolled packaging
 

@@ -39,6 +39,8 @@
         (builtins.fromTOML (builtins.readFile ./crates/scootctl/Cargo.toml)).package.description;
       scootbgDescription =
         (builtins.fromTOML (builtins.readFile ./crates/scootbg/Cargo.toml)).package.description;
+      scootbarDescription =
+        (builtins.fromTOML (builtins.readFile ./crates/scootbar/Cargo.toml)).package.description;
     in
     {
       # `nix build` / `nix run`, for getting the binaries without a dev shell.
@@ -67,7 +69,7 @@
           # target/ (~1GB in-store) and .git along -- no longer bust the
           # derivation's cache and force a full rebuild. Everything else
           # this flake reads at eval time (./Cargo.toml for `version`,
-          # ./crates/{scoot,scootctl,scootbg}/Cargo.toml for
+          # ./crates/{scoot,scootctl,scootbg,scootbar}/Cargo.toml for
           # the descriptions, ./Cargo.lock for `cargoLock.lockFile`,
           # ./vm/compositor-deps.nix for buildInputs) resolves against
           # the flake tree, not `src`, so it stays out of the filter.
@@ -295,6 +297,16 @@
               platforms = pkgs.lib.platforms.linux;
             };
           };
+
+          # The status bar, the same shape as scootbg (Linux only, one
+          # binary, nothing linked beyond what std links, no font in its
+          # closure), in its own file so that its Cargo features are
+          # `callPackage` arguments and a build with other modules is an
+          # `.override` (see nix/scootbar.nix).
+          scootbar = pkgs.callPackage ./nix/scootbar.nix {
+            inherit version src cargoLock;
+            description = scootbarDescription;
+          };
         in
         {
           # Linux gets the compositor, Darwin gets the client.
@@ -302,7 +314,12 @@
           inherit scoot scootctl;
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-          inherit scootbg;
+          inherit scootbg scootbar;
+          # scootbar with a nixpkgs font as its default `--font`, so
+          # `nix run .#scootbar-demo` shows a clock on a box with no font
+          # where the bar looks; a separate output so `scootbar` never
+          # carries one (see nix/scootbar-demo.nix).
+          scootbar-demo = pkgs.callPackage ./nix/scootbar-demo.nix { inherit scootbar; };
         }
         // {
           # The GPU scanout tier as a package (gh #177): off by default in
@@ -406,7 +423,9 @@
       # work, `nix run .#scootctl -- windows` runs the standalone client
       # anywhere, `nix run .#scoot-gpu -- --tty -- ...` runs the scanout
       # build and `nix run .#scoot-xwayland -- --headless --xwayland -- xterm`
-      # the XWayland one (Linux only). Each `mainProgram` would resolve
+      # the XWayland one (Linux only), `nix run .#scootbar -- daemon --font
+      # F` the bar and `nix run .#scootbar-demo` the bar with a font (Linux
+      # only). Each `mainProgram` would resolve
       # without the explicit naming; keeping it explicit rather than implied.
       apps = forEach (
         pkgs:
@@ -428,6 +447,14 @@
           scoot-xwayland = {
             type = "app";
             program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-xwayland;
+          };
+          scootbar = {
+            type = "app";
+            program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scootbar;
+          };
+          scootbar-demo = {
+            type = "app";
+            program = pkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.scootbar-demo;
           };
         }
       );
@@ -510,9 +537,10 @@
         }
       );
 
-      # `pkgs.scoot`, `pkgs.scootctl` and (Linux only, where it builds)
-      # `pkgs.scootbg`: this flake's own builds, the same derivations as
-      # `packages`, so an overlay user runs exactly what the flake ships --
+      # `pkgs.scoot`, `pkgs.scootctl` and (Linux only, where they build)
+      # `pkgs.scootbg` and `pkgs.scootbar`: this flake's own builds, the
+      # same derivations as `packages`, so an overlay user runs exactly
+      # what the flake ships --
       # scoot and scootbg from one revision, the `apply-config` pair
       # matched -- and builds nothing twice. Not rebuilt against the
       # consumer's nixpkgs (`final.rustPlatform`): that would tie the
@@ -530,6 +558,9 @@
           "scoot"
           "scootctl"
           "scootbg"
+          # Not `scootbar-demo`: a demo to run, not a package to build on
+          # (it is scootbar plus a font a system's own font setup provides).
+          "scootbar"
         ]) built;
 
       # `programs.scoot`: a home-manager module (per-user config file,

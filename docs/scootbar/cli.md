@@ -152,7 +152,9 @@ it cannot use (missing, not a regular file, empty, over 64 MiB, or not a
 TrueType or OpenType font), naming the file and why. A bar with no modules
 placed draws no text and needs no font. On NixOS those directories are
 usually empty: give `--font` a store path (`nix build nixpkgs#dejavu_fonts`
-has `share/fonts/truetype/DejaVuSans.ttf`).
+has `share/fonts/truetype/DejaVuSans.ttf`), or run the flake's
+`scootbar-demo`, which gives it DejaVu Sans by default
+([docs/nix.md](../nix.md#the-status-bar-scootbar)).
 
 **Replacing the font file while the bar runs cannot crash it**, unless a
 *root* process rewrites a mapped store file in place through a read-write view

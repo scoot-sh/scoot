@@ -9,8 +9,9 @@ composable shell.
 > output, reserving its space, across outputs coming and going; the flags
 > are in [cli.md](cli.md). That is M1's
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
-> [module API and clock](backlog/resolved/module-api-and-clock-done.md);
-> the Nix package completes M1, a clock you can `nix run`. M0, the
+> [module API and clock](backlog/resolved/module-api-and-clock-done.md),
+> and its [Nix package](backlog/resolved/nix-package-done.md), which
+> completes M1: a clock you can `nix run`. M0, the
 > measuring milestone, is done: the competitor baselines below, and the
 > font rasterizer and clock choices, recorded in
 > [the dependency record](backlog/resolved/dependencies-done.md). The
@@ -19,7 +20,12 @@ composable shell.
 ```sh
 scootbar daemon --font /path/to/DejaVuSans.ttf &            # 3:07 pm, centered
 scootbar daemon --clock-format '%a %d %b %H:%M' --right clock &
+nix run github:scoot-sh/scoot#scootbar-demo                 # with a font, from Nix
 ```
+
+From Nix, `packages.<system>.scootbar` is the bar with no font in its
+closure (give it `--font`), and `scootbar-demo` the same bar with DejaVu
+Sans as its default font ([docs/nix.md](../nix.md#the-status-bar-scootbar)).
 
 ## What it is for
 
@@ -154,6 +160,12 @@ How the rows were taken, in short (the full method is in the record):
   surface, from `WAYLAND_DEBUG` output: the first frame, whatever it shows.
 - **Binary** is the executable itself (nixpkgs' unwrapped one); the
   **closure** depends on nixpkgs' default features as much as on the bar.
+  scootbar's own, this flake's `packages.x86_64-linux.scootbar` on the
+  pinned nixpkgs, measured the competitors' way (`nix path-info -S`), is
+  **49 MB** (49,078,696 bytes): the bar 826 KiB, glibc with libidn2 and
+  libunistring 36.0 MiB, gcc's runtime library 9.8 MiB (it carries
+  libgcc_s), and no font
+  ([its record](backlog/resolved/nix-package-done.md#evidence)).
 - One idle and one switching run per bar and compositor; startup is the
   median of 5.
 

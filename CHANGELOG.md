@@ -9,6 +9,17 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-09-29 — scootbar installs from Nix
+
+- **`nix run github:scoot-sh/scoot#scootbar-demo`** shows the bar with a
+  clock on any Linux box with Nix, fonts or not: it is scootbar with DejaVu
+  Sans as its default `--font`. **`packages.<system>.scootbar`** (and
+  `pkgs.scootbar` through the overlay) is the bar alone, with no font in
+  its closure, so it needs `--font` where none of the usual font files
+  exists, as on most NixOS systems. Its modules are Cargo features,
+  chosen with `.override` ([docs/nix.md](docs/nix.md#the-status-bar-scootbar)).
+  Linux only.
+
 ### 2026-09-29 — scootbar shows a clock
 
 - **`scootbar daemon` now shows the time**, centered on the bar by
