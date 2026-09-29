@@ -1,6 +1,6 @@
 ---
 name: backlog
-description: List, read, file, edit and resolve scoot backlog entries (docs/backlog and docs/scootbg/backlog) with scripts/backlog. Use when asked what is left, what to pick next, what is blocked, to file or triage a ticket, or to mark one resolved.
+description: List, read, file, edit and resolve scoot backlog entries (docs/backlog, docs/scootbg/backlog and docs/scootbar/backlog) with scripts/backlog. Use when asked what is left, what to pick next, what is blocked, to file or triage a ticket, or to mark one resolved.
 ---
 
 # Working the backlog
@@ -16,7 +16,7 @@ frontmatter line it names.
 scripts/backlog list                         # everything open, high priority first
 scripts/backlog list --unblocked --priority high
 scripts/backlog list --blocked               # what waits on something
-scripts/backlog list --area scootbg          # core | ipc | protocols | testing | scootbg
+scripts/backlog list --area scootbg          # core | ipc | protocols | testing | scootbg | scootbar
 scripts/backlog list --grep 'ext-workspace'  # match anywhere in the file
 scripts/backlog list --all                   # include the resolved archive
 scripts/backlog show workspace-snapshot      # slug, unique substring or path; --full for all
@@ -33,7 +33,7 @@ scripts/backlog new ipc my-slug --title "One line" --priority medium [--blocked 
 
 Then fill in the template (what is wrong with evidence, what to do, what is
 out of scope), and **link the entry from `docs/backlog/README.md`**
-(`docs/scootbg/backlog/README.md` for scootbg). Check the claims against the
+(`docs/scootbg/backlog/README.md` for scootbg, `docs/scootbar/backlog/README.md` for scootbar). Check the claims against the
 code before writing them; entries here have been wrong before.
 
 ## Edit

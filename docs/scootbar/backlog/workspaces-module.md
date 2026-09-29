@@ -1,0 +1,53 @@
+---
+title: "Workspaces module: numbers, the active one marked, click to switch"
+status: "open"
+area: "scootbar"
+priority: "high"
+blocked: "module-api-and-clock"
+---
+
+# Workspaces module
+
+Filed 2026-09-29. Serves **daily-drive**; the v1 headline with the clock.
+
+An `ext-workspace-v1` client that lists each output's workspaces, marks the
+active one (a rounded pill, the look the bar sets), redraws on `done`, and
+switches with `activate` then `commit` on a click. It is the one module with
+a custom draw hook, because it is per-output and shapes the bar's look.
+
+## Facts from `docs/protocols.md` to design around
+
+- One group per output; each bar shows its own output's group.
+- Handles are positions, not identities, and scoot sends no `id`: redraw from
+  what the last `done` said, never remember a handle. Sort by `coordinates`
+  (not name: `"10"` sorts before `"2"`).
+- A workspace adopted from an unplugged monitor is named `"2 DP-1"`; show the
+  number, and decide how (or whether) to mark adopted ones.
+- The list grows and shrinks with the trailing empty workspace, renumbering
+  what follows.
+- The only state bit scoot sends is `active`. Occupied and urgent need
+  scoot-side work (below); v1 needs neither.
+- `activate` on a non-focused output is dropped today.
+
+## Scoot-side follow-ups (filed, built when this module needs them)
+
+- [workspace snapshot event](../../backlog/ipc/workspace-snapshot-event.md):
+  dim empty workspaces
+- [output-targeted workspace switch](../../backlog/ipc/workspace-switch-targeted-output.md):
+  click on a non-focused monitor's bar
+- [`urgent` state bit](../../backlog/protocols/ext-workspace-urgent-state.md)
+
+Each is optional: the module degrades to "all shown alike" and "clicks on the
+focused output only" without them, and works unmodified on other compositors.
+
+## Tests
+
+Headless scoot with two outputs: the pill follows a switch, a click switches,
+a workspace appearing and disappearing redraws, hotplug rebuilds, a manager
+that finishes mid-batch is not drawn half-updated. Check that a `done`-less
+batch never triggers a redraw and that a window-churn flood costs no more than
+one redraw per `done`.
+
+## Done when
+
+Time and workspaces on every output, verified by screenshot, at real scale.

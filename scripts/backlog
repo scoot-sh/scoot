@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""List, show, create and edit backlog entries (docs/backlog, docs/scootbg/backlog).
+"""List, show, create and edit backlog entries (docs/backlog, docs/scootbg/backlog, docs/scootbar/backlog).
 
 Every entry is one markdown file with a small frontmatter block:
 
@@ -29,16 +29,21 @@ BACKLOGS = {  # area -> directory holding its open entries
     "protocols": ROOT / "docs/backlog/protocols",
     "testing": ROOT / "docs/backlog/testing",
     "scootbg": ROOT / "docs/scootbg/backlog",
+    "scootbar": ROOT / "docs/scootbar/backlog",
 }
 RESOLVED = {  # where an area's resolved entries are archived
     **{a: ROOT / "docs/backlog/resolved" for a in ("core", "ipc", "protocols", "testing")},
     "scootbg": ROOT / "docs/scootbg/backlog/resolved",
+    "scootbar": ROOT / "docs/scootbar/backlog/resolved",
+}
+INDEXES = {  # area -> the README that must link each of its open entries
+    **{a: ROOT / "docs/backlog/README.md" for a in ("core", "ipc", "protocols", "testing")},
+    "scootbg": ROOT / "docs/scootbg/backlog/README.md",
+    "scootbar": ROOT / "docs/scootbar/backlog/README.md",
 }
 STATUSES = ("open", "research", "resolved")
 PRIORITIES = ("high", "medium", "low", "research")
 KEYS = ("title", "status", "area", "priority", "blocked")
-LIVE_INDEX = ROOT / "docs/backlog/README.md"
-SCOOTBG_INDEX = ROOT / "docs/scootbg/backlog/README.md"
 
 
 class Entry:
@@ -224,8 +229,7 @@ def cmd_new(a):
              f"blocked: {encode('blocked', a.blocked or 'null')}\n---\n")
     path.write_text(front + TEMPLATE.format(title=a.title, today=datetime.date.today()))
     print(f"created {path.relative_to(ROOT)}")
-    index = SCOOTBG_INDEX if a.area == "scootbg" else LIVE_INDEX
-    print(f"next: fill it in, then link it from {index.relative_to(ROOT)}")
+    print(f"next: fill it in, then link it from {INDEXES[a.area].relative_to(ROOT)}")
 
 
 def git_mv(src, dst):
@@ -256,7 +260,8 @@ def cmd_resolve(a):
 
 def cmd_check(a):
     problems = []
-    index_text = LIVE_INDEX.read_text() + SCOOTBG_INDEX.read_text() + (ROOT / "ROADMAP.md").read_text()
+    index_text = (ROOT / "ROADMAP.md").read_text() + "".join(
+        i.read_text() for i in set(INDEXES.values()) if i.exists())
     for e in entries(include_resolved=True):
         rel = e.rel()
         if not e.has_frontmatter:
@@ -275,9 +280,9 @@ def cmd_check(a):
             problems.append(f"{rel}: status resolved but not archived (scripts/backlog resolve)")
         if not in_resolved and pr not in PRIORITIES:
             problems.append(f"{rel}: bad priority {pr!r}")
-        if not in_resolved and e.path.parent.name in BACKLOGS and \
-                e.get("area") not in (e.path.parent.name, "scootbg"):
-            problems.append(f"{rel}: area {e.get('area')!r} does not match its directory")
+        dir_area = next((a for a, d in BACKLOGS.items() if d == e.path.parent), None)
+        if dir_area and e.get("area") != dir_area:
+            problems.append(f"{rel}: area {e.get('area')!r} does not match its directory ({dir_area!r})")
         if not in_resolved and e.slug not in index_text:
             problems.append(f"{rel}: not linked from a README or ROADMAP.md")
     for p in problems:
