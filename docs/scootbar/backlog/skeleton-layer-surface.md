@@ -23,7 +23,7 @@ and namespace `scootbar`. It draws a solid bar and nothing else.
   `scootbg-mem` pieces if they fit, otherwise the smallest local equivalent.
 - Draw at real device pixels including fractional scales (`wp_viewporter` +
   `wp_fractional_scale`), a pooled double buffer, damage on change only.
-- Bar height and edge from config defaults; the exclusive zone must equal the
+- Bar height and edge from fixed defaults, overridable by flags (no config file yet); the exclusive zone must equal the
   bar so windows never jump when the first buffer lands (scoot applies the zone
   from the buffer-less initial commit, `layer-surface-bufferless-exclusive-zone-done.md`).
 - Reuse scootbg's per-output lifecycle rather than reinventing it; note what

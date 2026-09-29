@@ -3,7 +3,7 @@ title: "Brightness module: backlight level, scroll to adjust"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "module-api-and-clock, pointer-and-interactions; writing needs dbus-client or a udev rule"
+blocked: "module-api-and-clock, pointer-and-interactions"
 milestone: "M5"
 ---
 
@@ -31,7 +31,7 @@ interim. Ship read-only first and say why writes are gated.
 Level as a percentage, scroll adjusts by a config step (absolute set,
 clamped, never below a minimum that blanks the panel), class `muted` unused.
 `Unavailable` on machines with no backlight (desktops, external monitors, which
-are DDC/CI and out of scope for v1).
+are DDC/CI and out of scope at first).
 
 ## Edge cases
 

@@ -30,7 +30,7 @@ wakeup rate published.
   thresholds.
 - Several batteries: combine, or show the first, by config. No battery at all
   (desktop, VM): `Unavailable`, zero cost, module hidden.
-- Time-remaining is **not** in v1: it needs rate smoothing to be honest, and a
+- Time-remaining is **not** in the first version: it needs rate smoothing to be honest, and a
   wrong estimate is worse than none.
 - A low-battery action hook (`on-low = { exec = [...] }`) fires once per
   crossing, not per update.

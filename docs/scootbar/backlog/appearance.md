@@ -3,7 +3,7 @@ title: "Appearance: floating or flush, rounded corners, opacity, separators, sta
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "module-api-and-clock"
+blocked: "module-api-and-clock, config-cli-and-reload"
 milestone: "M3"
 ---
 
@@ -42,4 +42,4 @@ visually compatible, and document the tokens users would set to match.
 
 The default look is good with no config, each option is documented in the
 same PR, and the flush and floating variants have measured costs published
-with the [release gate](lightest.md).
+with the [resource ratchet](lightest.md).

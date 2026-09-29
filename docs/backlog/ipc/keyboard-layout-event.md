@@ -15,9 +15,11 @@ will produce).
 ## The gap
 
 A keyboard-layout indicator is one of the most-requested bar modules (Waybar
-#66, 44 comments), but **no standard Wayland protocol tells a client the
-active layout**, so a bar cannot get it from scoot through the standards it
-otherwise uses. Whether scoot already exposes any of it over IPC needs checking
+#66, 44 comments), but **no standard Wayland protocol reports the active layout
+to an unfocused client**: `wl_keyboard` sends the keymap and the modifier group
+only to the client that has keyboard focus, which a bar never does (it takes no
+keyboard). So a bar cannot get it from scoot through the standards it otherwise
+uses. Whether scoot already exposes any of it over IPC needs checking
 (`msg type` resolves keys through the keymap probe, `msg-type-dead-keys-compose-done.md`,
 so the state exists inside scoot).
 

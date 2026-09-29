@@ -13,10 +13,10 @@ Every entry is one markdown file with a small frontmatter block:
     milestone: "M2"         # optional; which shippable step it belongs to
     ---
 
-Claims let a swarm of agents work tickets without colliding: `claim` records a
-uuid, agent and date in a local file that git never sees (in the git common
-directory, so every worktree of one clone shares it); `claim --next` picks the
-top ready ticket atomically.
+Claims let a swarm of agents work tickets without colliding: `claim` pushes a small
+claim file to the remote main (checked against a fresh fetch before pickup), and a
+gitignored record in this worktree's git directory keeps its own uuids. `claim
+--next` picks the top ready ticket atomically.
 
 Stdlib only. Run `scripts/backlog --help`. Edits change only the frontmatter
 lines named; the prose is never rewritten.
@@ -284,18 +284,28 @@ class TreeView:
         blobs = read_blobs(sha, epaths + cpaths)
         self.entries = [Entry(ROOT / p, text=blobs[p]) for p in epaths if blobs[p] is not None]
         self.claims = {}  # entry rel path -> (claim file path, record)
+        self.bad_claims = []  # claim files that are not a usable record
         for p in cpaths:
             try:
                 rec = json.loads(blobs[p])
+                for k in ("entry", "uuid", "claimed"):
+                    if not isinstance(rec[k], str):
+                        raise ValueError(k)
+                parse_stamp(rec["claimed"])
+                if "renewed" in rec:
+                    parse_stamp(rec["renewed"])
+                if not isinstance(rec.get("ttl_hours", 0), (int, float)):
+                    raise ValueError("ttl_hours")
+                rec.setdefault("agent", "?")
                 self.claims[rec["entry"]] = (p, rec)
-            except (TypeError, ValueError, KeyError):
-                continue  # not ours to interpret; leave it alone
+            except (TypeError, ValueError, KeyError, AttributeError):
+                self.bad_claims.append(p)  # dead weight: one bad file must not break everyone
 
     def dead_claims(self):
         """Claim files nobody needs: expired, or for an entry no longer open here."""
         open_paths = {str(e.rel()) for e in self.entries}
-        return [path for key, (path, rec) in self.claims.items()
-                if not is_live(rec) or (self.with_entries and key not in open_paths)]
+        return self.bad_claims + [path for key, (path, rec) in self.claims.items()
+                                  if not is_live(rec) or (self.with_entries and key not in open_paths)]
 
 
 def fetch_main():
@@ -454,6 +464,8 @@ def select_next(view, a):
             continue
         if a.priority and e.get("priority") != a.priority:
             continue
+        if e.get("milestone") == "ongoing" and a.milestone != "ongoing":
+            continue  # standing checklists and records, not tasks a swarm picks up
         held = view.claims.get(str(e.rel()))
         if held and is_live(held[1]):
             continue
@@ -511,7 +523,7 @@ def cmd_claim(a):
         if held and is_live(held[1]) and not mine and not a.force:
             raise Refused(e, held[1])
         rec = {"uuid": held[1]["uuid"] if mine else str(uuid.uuid4()), "agent": agent,
-               "entry": key, "claimed": stamp(now_utc()), "cwd": str(Path.cwd()),
+               "entry": key, "claimed": stamp(now_utc()),
                "ttl_hours": CLAIM_TTL_HOURS if a.ttl is None else a.ttl}
         removes = [p for p in view.dead_claims() if p != claim_file(key)]
         return {claim_file(key): json.dumps(rec, indent=2, sort_keys=True) + "\n"}, removes, (e, rec, bool(mine))
@@ -531,7 +543,7 @@ def cmd_claim(a):
         return fail(err)
     e, rec, renewed = res
     with Local() as c:
-        c.claims[str(e.rel())] = rec
+        c.claims[str(e.rel())] = {**rec, "cwd": str(Path.cwd())}  # local only: never pushed
         c.save()
     emit_claim(e, rec, commit, a, "renewed" if renewed else "claimed")
 
@@ -593,6 +605,14 @@ def cmd_claims(a):
         except Unreachable as err:
             return fail(err)
         pruned = [p for _, p, _, st in rows if st != "live"]
+    if a.prune:
+        dead_keys = {k for k, _, _, st in rows if st != "live"}
+        with Local() as c:
+            gone = [k for k in c.claims if k in dead_keys or k not in view.claims]
+            for k in gone:
+                del c.claims[k]
+            if gone:
+                c.save()
     if a.json:
         print(json.dumps([{"entry": k, "state": s, "mine": my_uuid(k) == r["uuid"], **r}
                           for k, _, r, s in rows]))
@@ -606,19 +626,22 @@ def cmd_claims(a):
 
 
 def unblock_dependents(slug):
-    """Drop `slug` from the `blocked` text of every open entry naming it; clear
-    the field when nothing but the slug was there. Prose is left alone."""
+    """Drop `slug` from the `blocked` text of every open entry that names it as an
+    item of a list; clear the field when nothing else was there. A slug inside
+    prose (a plain word like `tray` in a sentence) is not a reference, and other
+    prose is left alone."""
     changed = []
-    token = re.compile(r"(?<![\w-])" + re.escape(slug) + r"(?![\w-])(\s*\([^)]*\))?")
+    ref = re.compile(r"(^|[,;]\s*|\band\s+|\bor\s+)" + re.escape(slug) +
+                     r"(?=\s*(?:$|[,;)]|\band\b|\bor\b|\())(\s*\([^)]*\))?")
     for e in entries():
         b = e.get("blocked")
-        if e.get("status") == "resolved" or not isinstance(b, str) or not token.search(b):
+        if e.get("status") == "resolved" or not isinstance(b, str) or not ref.search(b):
             continue
-        rest = token.sub("", b)
+        rest = ref.sub("", b, count=1)
         for _ in range(4):
-            rest = re.sub(r"^\s*(?:,|;|\band\b|\bor\b)\s*", "", rest)
-            rest = re.sub(r"\s*(?:,|;|\band\b|\bor\b)\s*$", "", rest)
-            rest = re.sub(r"\s*,\s*,", ",", rest)
+            rest = re.sub(r"^\s*(?:[,;]|\band\b|\bor\b)\s*", "", rest)
+            rest = re.sub(r"\s*(?:[,;]|\band\b|\bor\b)\s*$", "", rest)
+            rest = re.sub(r"([,;])\s*[,;]", r"\1", rest)
         rest = rest.strip()
         if not re.search(r"[A-Za-z]", re.sub(r"\b(?:and|or)\b", "", rest)):
             rest = ""
@@ -815,7 +838,9 @@ def cmd_resolve(a):
     RESOLVED[area].mkdir(exist_ok=True)
     git_mv(e.path, dst)
     print(f"archived {e.rel()} -> {dst.relative_to(ROOT)}")
-    forget(key)
+    if rec:
+        print("keeping its claim: `renew` it until the PR merges, or another agent may "
+              "take the still-open ticket (the claim goes dead by itself once it is resolved on main)")
     for other, rest in unblock_dependents(e.slug):
         print(f"unblocked {other.rel()}" if not rest else
               f"{other.rel()} no longer waits on {e.slug}; still: {rest}")

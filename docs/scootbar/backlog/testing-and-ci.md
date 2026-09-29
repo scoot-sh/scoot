@@ -24,9 +24,10 @@ Modeled on scootbg (`crates/scootbg/tests`, `crates/scootbg/fuzz`,
   IPC, pixel assertions, hotplug with `--outputs N`) and headless sway, as
   scootbg's suite does. Tests skip without a compositor binary unless
   `SCOOTBAR_REQUIRE_SCOOT=1` makes that a failure.
-- **Fuzz targets**: the config parser, the `exec`/`push` JSON, the clock format
-  string, the TZif reader, and the D-Bus message parser if hand-rolled. Regression
-  inputs kept in-tree, as scootbg's `regressions/`.
+- **Fuzz targets, each landing with the parser it covers**: the clock format string
+  and the TZif reader (M1); the config parser (M3); the `exec`/`push` JSON (M4);
+  the D-Bus message parser if hand-rolled (M6). Regression inputs kept in-tree, as
+  scootbg's `regressions/`.
 
 ## CI
 
@@ -41,9 +42,9 @@ check` of the stub.
 ## Benchmark
 
 `scripts/scootbar-bench`, reusing `scripts/scootbg-bench`'s Python runner
-(procs, sizing, report), for the [release gate](lightest.md).
+(procs, sizing, report), for the [resource ratchet](lightest.md).
 
 ## Done when
 
 A bar-only PR runs exactly the jobs it needs, every module has harness tests,
-and the four fuzz targets run for a fixed budget without findings.
+and every fuzz target that exists runs for a fixed budget without findings.

@@ -24,7 +24,7 @@ workspaces on scoot headless and one other compositor. Rows: idle RSS and PSS,
 idle wakeups per minute, CPU over a fixed window, peak memory, binary size,
 startup to first frame. Record the method (waited for idle before sampling,
 how wakeups were counted) so later runs are comparable. These rows become the
-[release gate](lightest.md).
+[resource ratchet](lightest.md).
 
 ## Two spikes now
 

@@ -240,6 +240,45 @@ class ClaimTests(Base):
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 2, r.stderr)
 
+    def test_a_malformed_claim_file_on_main_breaks_nothing_and_is_swept(self):
+        self.a.add("a")
+        self.a.add("b")
+        bad = "docs/backlog/claims/scootbar__backlog__b.json"
+        (self.a.root / "docs/backlog/claims").mkdir(parents=True, exist_ok=True)
+        (self.a.root / bad).write_text('{"entry": "docs/scootbar/backlog/b.md"}\n')
+        self.a.git("add", "-A")
+        self.a.git("commit", "-qm", "hand-made bad claim")
+        self.a.git("push", "-q", "origin", "HEAD:main")
+        self.assertEqual(self.a.claim("a")[0].returncode, 0)  # claiming still works
+        self.assertEqual(self.a.run("claims").returncode, 0)  # so does listing
+        self.assertEqual(self.a.run("list", "--ready", "--fetch").returncode, 0)
+        self.assertIsNone(self.w.on_origin(bad))  # and the same claim commit swept it
+
+    def test_the_pushed_claim_carries_no_local_path(self):
+        self.a.add("a")
+        self.a.claim("a")
+        self.assertNotIn("cwd", json.loads(self.w.on_origin(CLAIM_A)))
+        self.assertIn("cwd", self.a.local()["docs/scootbar/backlog/a.md"])
+
+    def test_renew_still_works_after_a_local_resolve_that_is_not_merged_yet(self):
+        self.a.add("a")
+        self.a.claim("a")
+        self.a.git("pull", "--rebase", "-q", "origin", "main")
+        self.assertEqual(self.a.run("resolve", "a").returncode, 0)
+        self.assertEqual(self.a.run("renew", "a").returncode, 0)  # the uuid is kept
+
+    def test_prune_drops_local_records_whose_claim_is_gone(self):
+        self.a.add("a")
+        _, c = self.a.claim("a")
+        self.a.run("release", "a", "--token", c["uuid"])
+        self.a.local()  # release forgets it; simulate a stale record instead
+        f = self.a.root / ".git/backlog-claims.json"
+        data = json.loads(f.read_text())
+        data["claims"]["docs/scootbar/backlog/a.md"] = {"uuid": "x", "agent": "alice", "claimed": "2026-01-01T00:00:00Z"}
+        f.write_text(json.dumps(data))
+        self.a.run("claims", "--prune")
+        self.assertEqual(self.a.local(), {})
+
 
 class NextTests(Base):
     def test_next_prefers_milestone_then_priority_and_skips_blocked_and_claimed(self):
@@ -270,6 +309,13 @@ class NextTests(Base):
         self.a.git("push", "-q", "origin", "HEAD:main")
         # bob's checkout still shows `waits` blocked and `dep` open; main does not
         self.assertEqual(b.claim("--next")[1]["slug"], "waits")
+
+    def test_standing_ongoing_entries_are_never_handed_out(self):
+        self.a.add("checklist", milestone="ongoing")
+        self.a.add("task", milestone="M1")
+        self.assertEqual(self.a.claim("--next")[1]["slug"], "task")
+        self.assertEqual(self.a.claim("--next")[0].returncode, 3)
+        self.assertEqual(self.a.claim("--next", "--milestone", "ongoing")[1]["slug"], "checklist")
 
     def test_next_honours_filters_and_skips_research_unless_asked(self):
         self.a.add("a", milestone="M1")
@@ -343,6 +389,18 @@ class UnblockTests(Base):
         self.assertEqual(json.loads(self.blocked("anded")), "other")
         self.assertEqual(self.blocked("noted"), "null")
         self.assertEqual(json.loads(self.blocked("first")), "other")
+
+    def test_a_separator_is_not_left_dangling_and_plain_words_are_not_references(self):
+        for s, b in (("dep", None), ("tray", None),
+                     ("mid", "a-real, dep; writing needs a udev rule"),
+                     ("prose", "waiting on the tray to land"),
+                     ("paren", "popups (tray menus)")):
+            self.local_entry(s, blocked=b)
+        self.a.run("resolve", "dep")
+        self.a.run("resolve", "tray")
+        self.assertEqual(json.loads(self.blocked("mid")), "a-real; writing needs a udev rule")
+        self.assertEqual(json.loads(self.blocked("prose")), "waiting on the tray to land")
+        self.assertEqual(json.loads(self.blocked("paren")), "popups (tray menus)")
 
     def test_prose_is_left_alone_and_partial_slug_names_do_not_match(self):
         for s, b in (("dep", None), ("dep-two", None), ("needs", "dep and a real-world thing"),

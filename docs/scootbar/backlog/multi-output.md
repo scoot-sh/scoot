@@ -3,7 +3,7 @@ title: "Multi-output policy: which outputs get a bar, per-output overrides, shar
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "skeleton-layer-surface"
+blocked: "skeleton-layer-surface, config-cli-and-reload"
 milestone: "M3"
 ---
 

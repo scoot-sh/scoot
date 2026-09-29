@@ -45,7 +45,8 @@ scripts/backlog release SLUG                            # giving up: push its re
 scripts/backlog claims [--prune]                        # every claim on main; --prune drops dead ones
 ```
 
-- **What a claim is**: a small file, `docs/backlog/claims/<area>__backlog__<slug>.json`,
+- **What a claim is**: a small file, `docs/backlog/claims/<entry's directories joined with __>__<slug>.json`
+  (e.g. `scootbar__backlog__x.json`, `backlog__core__x.json`),
   added to `main` in its own commit (`chore(backlog): claim <slug> (<agent>) [skip ci]`)
   holding a uuid, your name and the date. The commit is built with git
   plumbing on top of the fetched `main`: **it never touches your working tree
@@ -58,7 +59,8 @@ scripts/backlog claims [--prune]                        # every claim on main; -
   pulled yet is still seen as ready.
 - **Only entries that are on `main`** can be claimed; push a new entry first.
 - **`--next` picks** the top open, unblocked, unclaimed entry: lowest milestone
-  first (`M0`, `M1`, ...; entries with none last), then priority. Research
+  first (`M0`, `M1`, ...; entries with none last), then priority. Standing
+  entries (milestone `ongoing`: checklists and decision records) are skipped. Research
   entries only with `--research`.
 - **Exit codes**: `0` claimed; `2` refused (someone holds it; says who and for
   how long); `3` nothing ready; `4` could not fetch or push (no network, or

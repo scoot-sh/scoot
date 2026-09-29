@@ -22,7 +22,7 @@ Filed 2026-09-29. Serves **daily-drive**.
   an autostart entry (or `session.command` pairing, per `nixos-session-command-done.md`).
 - **Stylix without depending on it**: when `config.lib.stylix` exists, default
   the semantic color tokens from its base16 colors and the font from its font
-  (a file path, since scootbar does no font discovery); otherwise fall back to
+  (a file path: scootbar has no fontconfig and only a short fixed directory list); otherwise fall back to
   the plain defaults. Explicit user values always win.
 - **Precedence, written down and tested**: an explicit user value beats Stylix,
   which beats the module's plain defaults. The commonest Nix complaint about other

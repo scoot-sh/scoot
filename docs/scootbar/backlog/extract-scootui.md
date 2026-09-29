@@ -3,7 +3,7 @@ title: "Extract `scootui`: the shared drawing and Wayland scaffolding"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "a second consumer: popups, the launcher or scootnotify"
+blocked: "waits for a second consumer (the launcher or the notification daemon) to start; unblock by hand when one does"
 milestone: "M7"
 ---
 

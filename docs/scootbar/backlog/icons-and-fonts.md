@@ -3,13 +3,13 @@ title: "Icons and fonts: symbol glyphs, a small fallback chain, and what is out 
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "baselines-and-spikes"
+blocked: "baselines-and-spikes, config-cli-and-reload"
 milestone: "M3"
 ---
 
 # Icons and fonts
 
-Filed 2026-09-29. Serves **daily-drive**. v1 (clock and workspaces) needs
+Filed 2026-09-29. Serves **daily-drive**. The first milestones (clock and workspaces) need
 digits and a few letters; the button, volume, network and battery modules
 need icons, and window titles need more than Latin.
 
@@ -49,7 +49,7 @@ for user buttons; record the costs of each.
 - A missing glyph draws the font's `.notdef` box, never panics or blanks the
   bar; a fallback is consulted only for a codepoint the primary lacks, and the
   result cached.
-- **Out of scope for v1, stated**: shaping (ligatures, complex scripts), RTL and
+- **Out of scope at first, stated**: shaping (ligatures, complex scripts), RTL and
   bidirectional layout, color emoji. A window title in such a script renders
   per-codepoint and may look wrong; say so in the docs rather than pull in a
   shaper.

@@ -19,8 +19,7 @@ from scoot's `config.toml`, so it works on other compositors and a bar change
 never breaks scoot. Sections: bar (edge, height, margin, radius, opacity,
 font file and size), `left`/`center`/`right`, color tokens, per-module
 tables. Unknown keys are a loud error naming the key; a bad reload keeps the
-running config (as scoot's does). Parser per the
-[spikes](baselines-and-spikes.md).
+running config (as scoot's does). The parser is chosen by the spike below.
 
 ## The parser spike, first
 

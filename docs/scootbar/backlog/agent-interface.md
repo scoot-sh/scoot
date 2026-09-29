@@ -3,7 +3,7 @@ title: "Agent interface: `query`, `invoke`, `layout` and `subscribe` on the bar'
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "config-cli-and-reload"
+blocked: "config-cli-and-reload, pointer-and-interactions"
 milestone: "M4"
 ---
 

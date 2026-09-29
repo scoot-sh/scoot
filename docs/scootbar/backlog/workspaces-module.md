@@ -28,8 +28,18 @@ a custom draw hook, because it is per-output and shapes the bar's look.
 - The list grows and shrinks with the trailing empty workspace, renumbering
   what follows.
 - The only state bit scoot sends is `active`. Occupied and urgent need
-  scoot-side work (below); v1 needs neither.
+  scoot-side work (below); the first version needs neither.
 - `activate` on a non-focused output is dropped today.
+
+## Pointer in this milestone
+
+Click-to-switch needs pointer input, but the general mechanism (module trait
+`on_input`, the config keys, actions) is a later milestone
+([pointer-and-interactions](pointer-and-interactions.md)) and this one must ship
+without it. So this module carries its **own minimal hit test**: it knows its pill
+rects, takes a `wl_pointer` button press over one, and sends `activate` then
+`commit`. No config, no scroll, no hover. The later entry generalizes that code
+rather than replacing the behavior.
 
 ## What the research says about this module
 

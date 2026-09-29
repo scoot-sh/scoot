@@ -34,8 +34,8 @@ never per frame. Dispatch cost is a handful of virtual calls per redraw.
 `left`, `center`, `right` lists of module ids; per-module padding and
 spacing; semantic color tokens (bg, fg, accent, dim, urgent, plus the state
 classes) so a theme source maps onto them. Text through the rasterizer the
-[spikes](baselines-and-spikes.md) chose, glyph cache lazily filled and never
-evicted (bar strings are small), grayscale AA, no shaping. Recompute layout
+[spikes](baselines-and-spikes.md) chose, glyph cache lazily filled and bounded
+(see [robustness-and-limits](robustness-and-limits.md)), grayscale AA, no shaping. Recompute layout
 only when a module's measured width changes; damage only the changed
 module's rect.
 
@@ -43,8 +43,8 @@ module's rect.
 
 Absolute realtime timerfd on the next minute (second, if configured) with
 cancel-on-clock-set, so suspend, NTP steps and DST are handled without
-polling; timezone from `/etc/localtime`. Format string from config, with a
-small documented set of specifiers.
+polling; timezone from `/etc/localtime`. Format string from a flag (a config key
+later), with a small documented set of specifiers.
 
 ## First frame first
 

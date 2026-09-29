@@ -3,7 +3,7 @@ title: "Data-source modules (umbrella): rules shared by every module that reads 
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "module-api-and-clock, pointer-and-interactions"
+blocked: "window-title-module, volume-module, network-module, battery-module, brightness-module, media-module, bluetooth-module, tray"
 milestone: "ongoing"
 ---
 
@@ -39,8 +39,11 @@ it needs [an IPC event](../../backlog/ipc/keyboard-layout-event.md) first.
 - **Text from outside is untrusted**: bound its length, strip control
   characters, never let it grow a cache without limit.
 - **Tests through the module harness** with fake events, plus a real-source test
-  where the machine allows, and a row in the [release gate](lightest.md).
+  where the machine allows, and a row in the [resource ratchet](lightest.md).
 - **Freeze the module API only after volume and network have exercised it.**
+
+`blocked` above lists the children, so this entry becomes ready (and can be
+resolved) only when all of them are done.
 
 ## Done when
 

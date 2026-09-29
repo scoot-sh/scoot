@@ -3,7 +3,7 @@ title: "`scootnotify`: the notification daemon"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "dbus-client and extract-scootui"
+blocked: "not started: the maintainer starts it; it needs the shared D-Bus client and the ui crate first"
 milestone: "M7"
 ---
 
@@ -30,6 +30,6 @@ Its own binary, not a bar module. Outline, from the planning:
   protocol tells a client (`ext-session-lock-v1` is for the locker itself); if
   none does, a scoot IPC event is the fallback. Settle this before building.
 
-Same standards apply: lowest resource use of its class, a release gate
+Same standards apply: lowest resource use of its class, a resource ratchet
 against `mako`, `dunst` and `swaync`, docs in the same PR, and its own Nix
 module.

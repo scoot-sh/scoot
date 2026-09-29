@@ -40,9 +40,9 @@ wrong icon size at fractional scale (#1175). So:
 - **Icon sources**: themed icon names need an icon-theme lookup and image
   decoding; pixmaps arrive as raw ARGB over D-Bus. Measure what each costs
   and support pixmaps first.
-- **Whether v1 of this is worth its weight**: the tray is where a lightweight
+- **Whether a first version of this is worth its weight**: the tray is where a lightweight
   bar most often becomes a heavy one. Measure against the
-  [release gate](lightest.md) before enabling by default; it is a Cargo
+  [resource ratchet](lightest.md) before enabling by default; it is a Cargo
   feature and off in the smallest build.
 - Item lifecycle: apps that crash without unregistering, and a watcher that
   is already owned by another process.

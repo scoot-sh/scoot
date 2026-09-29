@@ -3,7 +3,7 @@ title: "Visibility and layering: top/bottom/overlay, exclusive zone or not, hide
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "skeleton-layer-surface"
+blocked: "skeleton-layer-surface, config-cli-and-reload"
 milestone: "M3"
 ---
 
@@ -36,7 +36,7 @@ Filed 2026-09-29. Serves **daily-drive**.
   it. The exclusive zone is released on hide so windows reclaim the space.
 - Auto-hide with a reveal on pointer contact needs a thin always-present
   sensing surface; measure its cost and decide if it is worth having at all.
-- Vertical bars (left/right) are **not in v1**: layout is horizontal. Record it
+- Vertical bars (left/right) are **not in the first version**: layout is horizontal. Record it
   as a deliberate omission so it is not lost.
 - A bar bound to a keybinding: document `scoot`'s bind running
   `scootbar msg toggle` as the way, rather than a bar-side hotkey (the bar

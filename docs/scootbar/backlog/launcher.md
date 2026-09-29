@@ -3,7 +3,7 @@ title: "`scootlaunch`: the launcher, and a dmenu mode the bar's pickers can use"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "extract-scootui"
+blocked: "not started: the maintainer starts it, and its own design pass and backlog come first"
 milestone: "M7"
 ---
 
@@ -22,7 +22,7 @@ Its own small binary in the same shell family as the bar and
   what scoot already supports for launchers
   (`docs/protocols.md`, keyboard focus). It exists only while open.
 - Drawn with [`scootui`](extract-scootui.md); text input through the normal
-  keyboard path (no IME in v1, stated).
+  keyboard path (no IME at first, stated).
 - **A dmenu mode**: lines on stdin, the selection on stdout. This is what lets
   the bar's pickers (WiFi networks, power menu, audio sinks) work before
   [popups](popups.md) exist, with no picker code in the bar.
@@ -31,5 +31,5 @@ Its own small binary in the same shell family as the bar and
   first frame fast, and hold nothing when closed.
 - Ranking by recent use in a tiny state file.
 
-Same standards: lowest resource use of its class, a release gate against
+Same standards: lowest resource use of its class, a resource ratchet against
 `fuzzel`, `wofi`, `tofi` and `bemenu`, docs in the same PR, a Nix module.

@@ -371,7 +371,7 @@ backlog changes.
   (later `scootnotify`, `scootlaunch`), or the library it lives in (`scoot-core`,
   `scoot-ipc`, `scootbg-mem`, `scootui`). A change spanning packages lists them,
   comma-separated, or is split. Non-package work uses `nix`, `ci`, `docs`,
-  `backlog` or `deps`.
+  `backlog`, `deps` or `claude` (`CLAUDE.md` and `.claude/`).
 - **Why**: per-package semver is built from this history later
   ([independent versioning](docs/backlog/packaging/independent-versioning.md)):
   a `feat` is a minor bump and a `fix` a patch for the package(s) in its scope, a

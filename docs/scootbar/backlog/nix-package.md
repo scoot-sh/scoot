@@ -33,9 +33,15 @@ entry and eval tests in `nix/tests.nix`).
   `nix run .#scootbar`.
 - **No font in the package's closure.** scootbg's benchmark counts installed
   disk with its non-glibc closure, so a bundled font would show up as a loss.
-  The bare binary finds a font from config or a short list of well-known
-  directories and otherwise **refuses to start with a message naming how to give
-  it one**; the module and Stylix supply the path.
+  The bare binary takes a font from `--font` (a config key later) or a short
+  fixed list of well-known directories, and otherwise **refuses to start with a
+  message naming how to give it one**; the module and Stylix supply the path. On
+  NixOS those directories are usually empty, so `nix run .#scootbar` needs
+  `--font` or the demo output below.
+- **A demo output, `packages.scootbar-demo`**: `scootbar` wrapped with a small font
+  from nixpkgs as its default `--font`, so `nix run .#scootbar-demo` works on a
+  clean NixOS box on day one. It is a separate output: the bare `scootbar` (and
+  its measured closure) never carries the font, and the modules do not use it.
 - **Cargo features as a variant**: `--no-default-features --features ...` is
   reachable by `.override`, tested to build.
 - **CI**: a `scootbar` path filter; `nix flake check -L` covers the new output

@@ -3,7 +3,7 @@ title: "Pointer input and interactions: hit-testing, hover, click and scroll act
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "module-api-and-clock"
+blocked: "module-api-and-clock, config-cli-and-reload"
 milestone: "M4"
 ---
 
@@ -13,6 +13,10 @@ Filed 2026-09-29. Serves **daily-drive** (volume scroll, launcher and power
 buttons) and **computer use** (every interaction is scriptable).
 
 ## What to do
+
+This generalizes the workspaces module's own minimal hit test
+([workspaces-module](workspaces-module.md), shipped earlier) into the module
+trait and the config keys below.
 
 - `wl_pointer` on the bar surface: enter, motion, button, and axis (use
   `axis_value120` / discrete steps so a smooth-scroll touchpad and a wheel

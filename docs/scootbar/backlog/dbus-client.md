@@ -3,7 +3,7 @@ title: "A shared D-Bus client for the shell"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "its own spike, first thing in this entry: zbus vs a hand-rolled client"
+blocked: null
 milestone: "M6"
 ---
 
@@ -16,6 +16,9 @@ Notifications (`org.freedesktop.Notifications`), the system tray
 (StatusNotifierItem), NetworkManager or iwd, logind and UPower all need D-Bus.
 Building it once, in its own small crate, is cheaper than each consumer
 pulling `zbus` and its async runtime.
+
+The spike below is this entry's own first task, not a blocker: nothing waits on
+it before the entry can start.
 
 ## The spike, first
 
