@@ -1,0 +1,12 @@
+pid=7431 window_s=600.009467646 threads=1 start(vol nonvol ticks)=1 0 0 end=11 0 0 rss_kb=2328 pss_kb=718
+start mono=3348.048975 show="Tue 29 Sep 2026 03:08 UTC"
+tick mono=3362.927291 real=1790651340.000192075 late_us=192 ticks=1 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:09 UTC"
+tick mono=3422.927230 real=1790651400.000130628 late_us=131 ticks=2 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:10 UTC"
+tick mono=3482.927240 real=1790651460.000143999 late_us=144 ticks=3 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:11 UTC"
+tick mono=3542.927204 real=1790651520.000106575 late_us=107 ticks=4 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:12 UTC"
+tick mono=3602.927282 real=1790651580.000155325 late_us=155 ticks=5 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:13 UTC"
+tick mono=3662.927215 real=1790651640.000118754 late_us=119 ticks=6 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:14 UTC"
+tick mono=3722.927234 real=1790651700.000136455 late_us=136 ticks=7 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:15 UTC"
+tick mono=3782.927270 real=1790651760.000168720 late_us=169 ticks=8 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:16 UTC"
+tick mono=3842.927301 real=1790651820.000201441 late_us=201 ticks=9 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:17 UTC"
+tick mono=3902.927228 real=1790651880.000123628 late_us=124 ticks=10 cancels=0 reloaded=false show="Tue 29 Sep 2026 03:18 UTC"

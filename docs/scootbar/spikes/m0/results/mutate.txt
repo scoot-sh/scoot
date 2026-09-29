@@ -1,0 +1,20 @@
+mutate /nix/store/p0ff33dca0fbkskqwrl3spvxcn5974h0-tzdata-2026c/share/zoneinfo/America/New_York: parsed=61214 rejected=142338
+exit=0
+mutate /tmp/sb-m0-tz/slim/America/New_York: parsed=27806 rejected=173938
+exit=0
+mutate /nix/store/p0ff33dca0fbkskqwrl3spvxcn5974h0-tzdata-2026c/share/zoneinfo/Australia/Lord_Howe: parsed=63145 rejected=138701
+exit=0
+mutate /tmp/sb-m0-tz/slim/Australia/Lord_Howe: parsed=34748 rejected=165944
+exit=0
+mutate /nix/store/p0ff33dca0fbkskqwrl3spvxcn5974h0-tzdata-2026c/share/zoneinfo/Europe/Dublin: parsed=62490 rejected=141002
+exit=0
+mutate /tmp/sb-m0-tz/slim/Europe/Dublin: parsed=29107 rejected=172389
+exit=0
+mutate /nix/store/p0ff33dca0fbkskqwrl3spvxcn5974h0-tzdata-2026c/share/zoneinfo/Africa/Casablanca: parsed=59381 rejected=141819
+exit=0
+mutate /tmp/sb-m0-tz/slim/Africa/Casablanca: parsed=26884 rejected=173909
+exit=0
+mutate /nix/store/p0ff33dca0fbkskqwrl3spvxcn5974h0-tzdata-2026c/share/zoneinfo/Asia/Tehran: parsed=65370 rejected=135878
+exit=0
+mutate /tmp/sb-m0-tz/slim/Asia/Tehran: parsed=31540 rejected=169272
+exit=0

@@ -1,0 +1,29 @@
+03:18:56.545150 rt_sigaction(SIGBUS, {sa_handler=0x5645b6de82e0, sa_mask=[], sa_flags=SA_RESTORER|SA_ONSTACK|SA_SIGINFO, sa_restorer=0x7fc6bf8421a0}, NULL, 8) = 0
+03:18:56.545258 openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+03:18:56.545351 statx(3, "", AT_STATX_SYNC_AS_STAT|AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0644, stx_size=114, ...}) = 0
+03:18:56.545448 read(3, "TZif2\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"..., 114) = 114
+03:18:56.545529 read(3, "", 32)         = 0
+03:18:56.545639 close(3)                = 0
+03:18:56.545721 statx(AT_FDCWD, "/etc/localtime", AT_STATX_SYNC_AS_STAT, STATX_BASIC_STATS, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0644, stx_size=114, ...}) = 0
+03:18:56.545806 timerfd_create(CLOCK_REALTIME, TFD_CLOEXEC|TFD_NONBLOCK) = 3
+03:18:56.545890 prctl(PR_GET_AUXV, 0x7ffe552f1728, 0x200, 0, 0) = 448
+03:18:56.545978 write(1, "start mono=3959.473025 show=\"Tue"..., 56) = 56
+03:18:56.546056 timerfd_settime(3, TFD_TIMER_ABSTIME|TFD_TIMER_CANCEL_ON_SET, {it_interval={tv_sec=0, tv_nsec=0}, it_value={tv_sec=1790651940, tv_nsec=0}}, {it_interval={tv_sec=0, tv_nsec=0}, it_value={tv_sec=0, tv_nsec=0}}) = 0
+03:18:56.546138 ppoll([{fd=3, events=POLLIN}], 1, NULL, NULL, 8) = 1 ([{fd=3, revents=POLLIN}])
+03:19:00.000453 read(3, "\1\0\0\0\0\0\0\0", 8) = 8
+03:19:00.000611 statx(AT_FDCWD, "/etc/localtime", AT_STATX_SYNC_AS_STAT, STATX_BASIC_STATS, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0644, stx_size=114, ...}) = 0
+03:19:00.000737 write(1, "tick mono=3962.927780 real=17906"..., 126) = 126
+03:19:00.000824 timerfd_settime(3, TFD_TIMER_ABSTIME|TFD_TIMER_CANCEL_ON_SET, {it_interval={tv_sec=0, tv_nsec=0}, it_value={tv_sec=1790652000, tv_nsec=0}}, {it_interval={tv_sec=0, tv_nsec=0}, it_value={tv_sec=0, tv_nsec=0}}) = 0
+03:19:00.000913 ppoll([{fd=3, events=POLLIN}], 1, NULL, NULL, 8) = 1 ([{fd=3, revents=POLLIN}])
+03:20:00.000507 read(3, "\1\0\0\0\0\0\0\0", 8) = 8
+03:20:00.000709 statx(AT_FDCWD, "/etc/localtime", AT_STATX_SYNC_AS_STAT, STATX_BASIC_STATS, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0644, stx_size=114, ...}) = 0
+03:20:00.000890 write(1, "tick mono=4022.927904 real=17906"..., 126) = 126
+03:20:00.001067 timerfd_settime(3, TFD_TIMER_ABSTIME|TFD_TIMER_CANCEL_ON_SET, {it_interval={tv_sec=0, tv_nsec=0}, it_value={tv_sec=1790652060, tv_nsec=0}}, {it_interval={tv_sec=0, tv_nsec=0}, it_value={tv_sec=0, tv_nsec=0}}) = 0
+03:20:00.001178 ppoll([{fd=3, events=POLLIN}], 1, NULL, NULL, 8) = 1 ([{fd=3, revents=POLLIN}])
+03:21:00.000470 read(3, "\1\0\0\0\0\0\0\0", 8) = 8
+03:21:00.000710 statx(AT_FDCWD, "/etc/localtime", AT_STATX_SYNC_AS_STAT, STATX_BASIC_STATS, {stx_mask=STATX_BASIC_STATS|STATX_MNT_ID, stx_attributes=0, stx_mode=S_IFREG|0644, stx_size=114, ...}) = 0
+03:21:00.000844 write(1, "tick mono=4082.927885 real=17906"..., 126) = 126
+03:21:00.001005 timerfd_settime(3, TFD_TIMER_ABSTIME|TFD_TIMER_CANCEL_ON_SET, {it_interval={tv_sec=0, tv_nsec=0}, it_value={tv_sec=1790652120, tv_nsec=0}}, {it_interval={tv_sec=0, tv_nsec=0}, it_value={tv_sec=0, tv_nsec=0}}) = 0
+03:21:00.001169 ppoll([{fd=3, events=POLLIN}], 1, NULL, NULL, 8) = ? ERESTARTNOHAND (To be restarted if no handler)
+03:21:06.521203 --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=8748, si_uid=0} ---
+03:21:06.521546 +++ killed by SIGTERM +++

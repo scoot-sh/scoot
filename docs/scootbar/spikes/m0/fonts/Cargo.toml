@@ -1,0 +1,33 @@
+# Throwaway M0 spike: font rasterizer choice for scootbar. Not a workspace
+# member (the empty [workspace] keeps it out of the root one) and not built by
+# CI (docs/* is ignored by the classify job). Numbers and method:
+# docs/scootbar/backlog/resolved/dependencies-done.md.
+[package]
+name = "sb-font-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+default = []
+fontdue = ["dep:fontdue"]
+ab_glyph = ["dep:ab_glyph"]
+swash = ["dep:swash"]
+# Map the font file instead of reading it into the heap.
+mmap = []
+
+[dependencies]
+fontdue = { version = "0.9", optional = true }
+ab_glyph = { version = "0.2", optional = true }
+swash = { version = "0.2", optional = true }
+rustix = { version = "1", features = ["mm", "fs", "time"] }
+
+# A copy of the workspace [profile.release], so sizes match a member's.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3

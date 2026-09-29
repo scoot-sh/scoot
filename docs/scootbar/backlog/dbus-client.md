@@ -25,7 +25,7 @@ it before the entry can start.
 `zbus`, libdbus bindings and a hand-rolled minimal client (auth EXTERNAL,
 `Hello`, `RequestName`, method calls, signal match rules). Measure a process that
 owns a name and receives a signal: idle RSS, binary size, wakeups. This spike moved
-here from [baselines-and-spikes](baselines-and-spikes.md) so it is decided when the
+here from [baselines-and-spikes](resolved/baselines-and-spikes-done.md) so it is decided when the
 first consumer needs it, not before.
 
 ## What to do

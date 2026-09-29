@@ -3,7 +3,7 @@ title: "Skeleton: one bar layer surface per output, across hotplug"
 status: "open"
 area: "scootbar"
 priority: "high"
-blocked: "baselines-and-spikes"
+blocked: null
 milestone: "M1"
 ---
 

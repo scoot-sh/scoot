@@ -1,0 +1,36 @@
+# Throwaway M0 spike: the clock's timer and timezone path for scootbar. Not a
+# workspace member and not built by CI (see ../fonts/Cargo.toml). Numbers and
+# method: docs/scootbar/backlog/resolved/dependencies-done.md.
+[package]
+name = "sb-clock-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+# Exactly one zone backend per build; none selects the hand-rolled reader.
+default = []
+tzrs = ["dep:tz-rs"]
+jiff = ["dep:jiff"]
+chrono = ["dep:chrono"]
+libc = ["dep:libc"]
+# UTC only, no zone code: the size base.
+utc = []
+# Leave out the dump and mutate test modes, for a fair size.
+bare = []
+
+[dependencies]
+rustix = { version = "1", features = ["time", "event", "fs"] }
+tz-rs = { version = "0.7", optional = true }
+jiff = { version = "0.2", optional = true, default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+chrono = { version = "0.4", optional = true, default-features = false, features = ["clock", "std"] }
+libc = { version = "0.2", optional = true }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3

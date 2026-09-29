@@ -1,0 +1,2 @@
+start mono=3887.267577 show="Mon 28 Sep 2026 23:17 EDT"
+tick mono=3902.927324 real=1790651880.000171419 late_us=171 ticks=1 cancels=0 reloaded=true show="Tue 29 Sep 2026 04:18 BST"

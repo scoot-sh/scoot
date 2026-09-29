@@ -1,0 +1,6 @@
+forward_1h mono=7051.169075 set_to=1790658628.242
+back_to_now mono=7054.169503 set_to=1790655031.242
+lord_howe_dst_start mono=7057.173933 set_to=1791041390.000
+sydney_dst_start mono=7072.174408 set_to=1791043190.000
+new_york_dst_end mono=7087.174937 set_to=1793512790.000
+restore mono=7102.175312 set_to=1790655079.248
