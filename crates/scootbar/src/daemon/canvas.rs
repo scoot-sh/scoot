@@ -223,6 +223,16 @@ impl Canvas {
         self.shown.reset();
     }
 
+    /// A reloaded layout changed the module count: destroys every buffer
+    /// and records the new count, so the next draw starts whole at it.
+    /// (`clear` alone keeps the old count, which the next draw would read
+    /// past.)
+    pub fn resize(&mut self, modules: usize) {
+        self.clear();
+        self.modules = modules;
+        self.shown = Record::new(modules);
+    }
+
     /// `wl_buffer.release` for `buffer`: its slot may be written again, or
     /// is dropped if the surface has moved on to another size.
     pub fn released(&mut self, buffer: &WlBuffer) {

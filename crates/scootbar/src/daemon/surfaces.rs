@@ -193,6 +193,36 @@ pub enum RoundTrip {
 }
 
 impl State {
+    /// A reloaded bar geometry: destroys every live layer surface and
+    /// makes it again with the new [`Bar`](crate::bar::Bar), committed
+    /// with no buffer. The model waits for each new surface's first
+    /// `configure`, as for any new surface, and the loop's next draw
+    /// carries the commit the new requests need. Outputs with no live
+    /// surface (waiting, given up) are untouched: they are made with the
+    /// new bar when their turn comes.
+    pub fn recreate_bars(&mut self, qh: &QueueHandle<Self>) {
+        for entry in self.outputs.iter_mut() {
+            let Some(layer) = entry.objects.layer.take() else {
+                continue;
+            };
+            layer.destroy();
+            entry.objects.canvas.clear();
+            entry.output.recreate();
+            let id = entry.output.id();
+            // `wl_output` is borrowed out of the entry while its layer is
+            // assigned: a proxy clone (a refcount bump) keeps the two
+            // apart. Cold path (a reload), not the loop.
+            let output = entry.objects.wl_output().clone();
+            entry.objects.layer = Some(LayerObjects::create(
+                &self.globals,
+                &self.bar,
+                &output,
+                qh,
+                id,
+            ));
+        }
+    }
+
     /// A global appeared (at start-up or later). Binds it if it is an
     /// output.
     pub fn global(

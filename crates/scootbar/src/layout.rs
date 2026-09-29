@@ -15,6 +15,8 @@
 //!   neighbour: the bar clips deliberately, never by overflow (every sum
 //!   here saturates).
 
+use std::fmt;
+
 use crate::paint::Span;
 
 #[cfg(test)]
@@ -44,6 +46,16 @@ impl Section {
             Self::Left => "--left",
             Self::Center => "--center",
             Self::Right => "--right",
+        }
+    }
+
+    /// The section's name in the config file and the `query` reply:
+    /// `left`, `center` or `right`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Center => "center",
+            Self::Right => "right",
         }
     }
 }
@@ -98,6 +110,44 @@ impl Layout {
     pub fn is_empty(&self) -> bool {
         self.left.is_empty() && self.center.is_empty() && self.right.is_empty()
     }
+}
+
+/// Why placed modules are refused: a duplicate or too many. Unknown ids
+/// are refused earlier, where the list is read (a flag or a file key), so
+/// they name that context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlacementError {
+    /// Placed twice (in one section or across two).
+    Twice(&'static str),
+    TooMany,
+}
+
+impl fmt::Display for PlacementError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Twice(id) => write!(f, "`{id}` is placed twice; a module goes in one place"),
+            Self::TooMany => write!(f, "at most {MAX_MODULES} modules"),
+        }
+    }
+}
+
+/// No module twice across the sections, and at most [`MAX_MODULES`].
+/// `Err` is the offending section and why, for the caller to name its own
+/// context (a flag or a file key).
+pub fn check_placement(layout: &Layout) -> Result<(), (Section, PlacementError)> {
+    let mut seen: Vec<&str> = Vec::new();
+    for section in Section::ALL {
+        for &id in layout.section(section) {
+            if seen.contains(&id) {
+                return Err((section, PlacementError::Twice(id)));
+            }
+            if seen.len() >= MAX_MODULES {
+                return Err((section, PlacementError::TooMany));
+            }
+            seen.push(id);
+        }
+    }
+    Ok(())
 }
 
 /// Lays out modules `sections[i]` wide `widths[i]` (device pixels, padding

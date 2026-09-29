@@ -351,6 +351,30 @@ impl Output {
         self.failed = None;
     }
 
+    /// The glue destroyed the live surface and made a new one (a reloaded
+    /// bar geometry): committed with no buffer, it waits for its first
+    /// `configure` like any new surface. What describes the output stays
+    /// (the scale wishes, the properties), and so does whether a surface
+    /// was closed before: a reloaded surface is not a second chance.
+    pub fn recreate(&mut self) {
+        if self.surface.is_live() {
+            self.made();
+        }
+    }
+
+    /// A reloaded bar with the same geometry: draw once on the next turn,
+    /// whatever `stale` says. With no modules placed `stale` is always
+    /// false (it compares per-module revisions over an empty iterator),
+    /// so without this the compositor would keep the last buffer's
+    /// pixels: the removed modules' ghosts, at unchanged geometry. An
+    /// empty bar's background-only repaint needs it too. A new chance
+    /// after a failed draw, like a `configure`. Cold path (a reload), not
+    /// the loop.
+    pub fn invalidate(&mut self) {
+        self.shown = None;
+        self.failed = None;
+    }
+
     /// A `configure` on the live surface: remember its size, and ack it.
     /// A new size is also a new chance for a draw that failed.
     ///
@@ -562,6 +586,10 @@ impl<O> Outputs<O> {
 
     pub fn get_mut(&mut self, id: OutputId) -> Option<&mut Entry<O>> {
         self.list.iter_mut().find(|e| e.output.id == id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Entry<O>> {
+        self.list.iter()
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Entry<O>> {

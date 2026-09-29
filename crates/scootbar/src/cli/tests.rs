@@ -1,7 +1,10 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
-use super::{Command, DAEMON_HELP, Error, ModulesError, Topic, USAGE, parse, version_string};
+use super::{
+    Command, DAEMON_HELP, Error, MSG_HELP, ModulesError, Msg, MsgError, Topic, USAGE, parse,
+    version_string,
+};
 use crate::bar::{Bar, Edge, MAX_HEIGHT, Margin, MarginError};
 use crate::color::{Color, ColorError};
 use crate::config::{Config, MAX_FONT_SIZE};
@@ -15,7 +18,7 @@ fn config(args: &[&str]) -> Config {
     let mut all = vec!["daemon"];
     all.extend_from_slice(args);
     match run(&all) {
-        Ok(Command::Daemon(config)) => *config,
+        Ok(Command::Daemon(command)) => *command.config,
         other => panic!("{args:?}: {other:?}"),
     }
 }
@@ -236,8 +239,8 @@ fn a_font_path_need_not_be_utf8() {
         raw.clone(),
     ]);
     match parsed {
-        Ok(Command::Daemon(config)) => {
-            assert_eq!(config.font.unwrap().into_os_string(), raw);
+        Ok(Command::Daemon(command)) => {
+            assert_eq!(command.config.font.unwrap().into_os_string(), raw);
         }
         other => panic!("{other:?}"),
     }
@@ -347,4 +350,157 @@ fn the_help_matches_the_build() {
         assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
     }
     assert!(!DAEMON_HELP.contains("wakes once a minute"));
+}
+
+#[test]
+fn msg_commands_parse() {
+    assert_eq!(run(&["msg", "query"]), Ok(Command::Msg(Msg::Query)));
+    assert_eq!(run(&["msg", "reload"]), Ok(Command::Msg(Msg::Reload)));
+    assert_eq!(run(&["msg", "version"]), Ok(Command::Msg(Msg::Version)));
+    assert_eq!(run(&["msg", "kill"]), Ok(Command::Msg(Msg::Kill)));
+    assert_eq!(run(&["msg", "--help"]), Ok(Command::Help(Topic::Msg)));
+    assert_eq!(run(&["help", "msg"]), Ok(Command::Help(Topic::Msg)));
+    assert!(USAGE.contains("msg"));
+    assert!(MSG_HELP.contains("reload"));
+}
+
+#[test]
+#[cfg(any(feature = "clock", feature = "workspaces"))]
+fn msg_set_takes_an_id_and_json() {
+    #[cfg(feature = "clock")]
+    let id = "clock";
+    #[cfg(all(not(feature = "clock"), feature = "workspaces"))]
+    let id = "workspaces";
+    match run(&["msg", "set", id, "{\"on\":true}"]) {
+        Ok(Command::Msg(Msg::Set { id: got, value })) => {
+            assert_eq!(got, id);
+            assert_eq!(value, "{\"on\":true}");
+        }
+        other => panic!("{other:?}"),
+    }
+    // Any JSON value goes, even a bare one.
+    assert!(matches!(
+        run(&["msg", "set", id, "1"]),
+        Ok(Command::Msg(Msg::Set { .. }))
+    ));
+}
+
+#[test]
+fn msg_refusals_name_what_is_wrong() {
+    assert_eq!(run(&["msg"]), Err(Error::Msg(MsgError::Missing)));
+    let unknown = run(&["msg", "halt"]).unwrap_err().to_string();
+    assert!(unknown.contains("halt"), "{unknown}");
+    assert_eq!(run(&["msg", "set"]), Err(Error::Msg(MsgError::NeedsId)));
+    assert_eq!(
+        run(&["msg", "set", "clock"]),
+        Err(Error::Msg(MsgError::NeedsValue))
+    );
+    let unknown = run(&["msg", "set", "battery", "{}"])
+        .unwrap_err()
+        .to_string();
+    assert!(unknown.contains("battery"), "{unknown}");
+    // A trailing argument is unexpected, naming the command.
+    let extra = run(&["msg", "query", "x"]).unwrap_err().to_string();
+    assert!(extra.contains("msg"), "{extra}");
+}
+
+#[test]
+#[cfg(any(feature = "clock", feature = "workspaces"))]
+fn msg_set_with_bad_json_names_it() {
+    #[cfg(feature = "clock")]
+    let id = "clock";
+    #[cfg(all(not(feature = "clock"), feature = "workspaces"))]
+    let id = "workspaces";
+    let bad = run(&["msg", "set", id, "{oops}"]).unwrap_err().to_string();
+    assert!(bad.contains("not JSON"), "{bad}");
+}
+
+#[test]
+fn config_flag_names_the_file_and_changes_nothing_else() {
+    match run(&["daemon", "--config", "/tmp/bar.toml"]) {
+        Ok(Command::Daemon(command)) => {
+            assert_eq!(
+                command.file,
+                Some(std::path::PathBuf::from("/tmp/bar.toml"))
+            );
+            assert_eq!(*command.config, Config::default());
+        }
+        other => panic!("{other:?}"),
+    }
+    // Either spelling, and twice is still twice.
+    assert!(matches!(
+        run(&["daemon", "--config=/tmp/bar.toml"]),
+        Ok(Command::Daemon(_))
+    ));
+    assert!(matches!(
+        run(&["daemon", "--config", "a", "--config", "b"]),
+        Err(Error::Repeated("--config"))
+    ));
+    assert!(matches!(
+        run(&["daemon", "--config"]),
+        Err(Error::MissingValue("--config"))
+    ));
+}
+
+#[test]
+#[cfg(any(feature = "clock", feature = "workspaces"))]
+fn flags_overlay_the_file_section_by_section() {
+    #[cfg(feature = "clock")]
+    let id = "clock";
+    #[cfg(all(not(feature = "clock"), feature = "workspaces"))]
+    let id = "workspaces";
+    // One flag replaces its own section; the file's other sections stand.
+    #[cfg(all(feature = "clock", feature = "workspaces"))]
+    {
+        let mut base = Config::default();
+        base.layout.left = vec!["workspaces"];
+        base.layout.center = vec![];
+        let command = match run(&["daemon", "--right", id]) {
+            Ok(Command::Daemon(command)) => command,
+            other => panic!("{other:?}"),
+        };
+        command.given.overlay(&mut base).unwrap();
+        assert_eq!(base.layout.left, ["workspaces"]);
+        assert_eq!(base.layout.right, [id]);
+    }
+    // One module in the build: an empty section still replaces only
+    // itself, leaving the file's placement standing.
+    #[cfg(not(all(feature = "clock", feature = "workspaces")))]
+    {
+        let mut base = Config::default();
+        base.layout.left = vec![id];
+        base.layout.center = vec![];
+        let command = match run(&["daemon", "--center", ""]) {
+            Ok(Command::Daemon(command)) => command,
+            other => panic!("{other:?}"),
+        };
+        command.given.overlay(&mut base).unwrap();
+        assert_eq!(base.layout.left, [id]);
+        assert!(base.layout.center.is_empty());
+    }
+    // A flag and the file placing the same module twice is refused.
+    let mut base = Config {
+        layout: Layout {
+            left: vec![id],
+            center: vec![],
+            right: vec![],
+            padding: 8,
+            spacing: 0,
+        },
+        ..Config::default()
+    };
+    let command = match run(&["daemon", "--right", id]) {
+        Ok(Command::Daemon(command)) => command,
+        other => panic!("{other:?}"),
+    };
+    let error = command.given.overlay(&mut base).unwrap_err().to_string();
+    assert!(error.contains("twice"), "{error}");
+    // Scalars replace their own value.
+    let mut base = Config::default();
+    let command = match run(&["daemon", "--height", "40"]) {
+        Ok(Command::Daemon(command)) => command,
+        other => panic!("{other:?}"),
+    };
+    command.given.overlay(&mut base).unwrap();
+    assert_eq!(base.bar.height, 40);
 }

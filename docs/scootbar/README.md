@@ -34,6 +34,12 @@ From Nix, `packages.<system>.scootbar` is the bar with no font in its
 closure (give it `--font`), and `scootbar-demo` the same bar with DejaVu
 Sans as its default font ([docs/nix.md](../nix.md#the-status-bar-scootbar)).
 
+Every option lives in `$XDG_CONFIG_HOME/scoot/bar.toml` too (the flags
+override it, at start-up and on every reload), and the running bar answers
+`scootbar msg query` with each module's state as JSON — the agent hook,
+the bar read as data instead of OCR. The keys, the file and the commands
+are in [cli.md](cli.md#the-config-file).
+
 ## What it is for
 
 - **The lowest resource use of any bar at the same scope**, checked at
@@ -46,6 +52,10 @@ Sans as its default font ([docs/nix.md](../nix.md#the-status-bar-scootbar)).
   compositor, so the bar idles at 2 wakeups a minute (the target, [ratified](backlog/lightest.md#decisions)); with no module, 0.
 - **Standard protocols first** (`ext-workspace-v1`, layer shell), so it
   runs on other compositors as scootbg does.
+- **Configurable without restarting, and readable as data**: the file
+  holds every option, `scootbar msg reload` live-applies an edit, and
+  `scootbar msg query` reads each module's state as JSON — for daily
+  driving and for agents alike.
 - **GPU-free**: `wl_shm` buffers at the output's real device pixels.
 
 ## Baselines

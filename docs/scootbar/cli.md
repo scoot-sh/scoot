@@ -1,10 +1,10 @@
 # scootbar command reference
 
 Every `scootbar` command and flag, and how it behaves at the edges. What
-scootbar is and why is in [README.md](README.md). There is no config file
-yet ([config-cli-and-reload](backlog/config-cli-and-reload.md) brings one);
-until then every option is a flag, and the flags stay as overrides once
-the file exists.
+scootbar is and why is in [README.md](README.md). Every option lives in
+the [config file](#the-config-file) too (`$XDG_CONFIG_HOME/scoot/bar.toml`);
+the flags stay and override its values, one by one, at start-up and on
+every reload.
 
 **Early days:** the bar shows a clock in the center, and workspaces wherever
 they are placed (`--left workspaces`).
@@ -21,7 +21,10 @@ scootbar daemon --edge bottom --height 32    # along the bottom, 32 logical pixe
 scootbar daemon --margin 8                   # floating 8 pixels in from its edge and both sides
 scootbar daemon --margin 8,12                # 8 above and below, 12 either side
 scootbar daemon --background '#101014' --foreground '#e0e0e0'
-scootbar --help                              # and `scootbar daemon --help`
+scootbar daemon --config ~/alt-bar.toml    # another file than the default
+scootbar msg query                         # every placed module's state as JSON
+scootbar msg reload                        # re-read the file and live-apply it
+scootbar --help                              # and `scootbar daemon --help`, `scootbar msg --help`
 scootbar --version
 ```
 
@@ -48,11 +51,91 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 | `--padding` | 0 to 1024 | 8 | Logical pixels either side of each module's content. |
 | `--spacing` | 0 to 1024 | 0 | Logical pixels between neighbouring modules. |
 | `--clock-format` | a format, at most 256 bytes | `'%-I:%M %P'` | What the clock shows; see [The clock](#the-clock). |
+| `--config` | a path | `$XDG_CONFIG_HOME/scoot/bar.toml` (`~/.config/scoot/bar.toml` without it) | The config file to read instead of the default; see [below](#the-config-file). |
 
 A malformed or out-of-range value, an unknown flag or a flag given twice is
 a usage error (exit status 2), and nothing starts; so is an unknown module
 id, a module placed twice, or a clock format with an unknown specifier or a
 control character.
+
+## The config file
+
+`scootbar daemon` reads `$XDG_CONFIG_HOME/scoot/bar.toml`
+(`~/.config/scoot/bar.toml` when `XDG_CONFIG_HOME` is unset or empty), its
+own file separate from scoot's `config.toml`, so it works on other
+compositors and a bar change never breaks scoot. `--config PATH` reads
+another file instead. A missing file is the defaults; an explicit
+`--config` naming nothing is a refusal.
+
+Every section is optional; absent is the default. Precedence is defaults,
+then the file, then the flags: a flag given replaces the file's value for
+its own option, any of `--left`/`--center`/`--right` replaces just that
+section of the file's layout, and a reload keeps the flags over the file,
+as at start-up.
+
+```toml
+left = ["workspaces"]
+center = ["clock"]
+
+[bar]
+edge = "top"          # top or bottom
+height = 28           # 1 to 1024
+margin = "8,4"        # one number, or the CSS shorthand "VERTICAL,HORIZONTAL", ...
+font = "/path/to/Font.ttf"
+font-size = 14        # 1 to 256
+padding = 8           # 0 to 1024
+spacing = 0           # 0 to 1024
+
+[colors]
+background = "#1e1e2e"
+foreground = "#cdd6f4"
+accent = "#f9e2af"
+dim = "#6c7086"
+urgent = "#f38ba8"
+
+[clock]
+format = "%-I:%M %P"
+
+[workspaces]          # reserved, empty for now
+```
+
+`margin` takes an integer (every side) or the `--margin` shorthand
+string. The module lists take the ids in [Modules](#modules); giving any
+of the three sets the whole layout, as the flags do. An unknown key
+anywhere is a loud error naming it, as is a bad value, which names its
+dotted key (`bar.height`, `colors.background`, `left`, `clock.format`).
+A bad file refuses to start the daemon (exit status 1); a bad `reload`
+is refused and the running bar stands undisturbed.
+
+## `scootbar msg`
+
+Asks the running daemon over its control socket,
+`$XDG_RUNTIME_DIR/scootbar-DISPLAY.sock`, a lock-guarded, owner-only
+socket with line-framed JSON, one daemon per display: a second daemon
+refuses, saying one already runs.
+
+```sh
+scootbar msg query                  # every placed module's state as JSON
+scootbar msg reload                 # re-read the file and live-apply it
+scootbar msg version                # the daemon's version and protocol, as JSON
+scootbar msg kill                   # stop the daemon, once its reply is sent
+scootbar msg set ID JSON            # refused: no module takes one yet
+```
+
+`query` prints one JSON object: one entry per placed module per output,
+with its `id`, `section` (`left`, `center` or `right`), `output` (the
+compositor's `wl_output.name`, `null` where it never sent one), the `text`
+it shows and its `class` (`normal`, `warn`, `urgent`, `muted`), plus `icon`
+where the module shows one (absent otherwise). This is the agent hook: the bar read as data instead of OCR.
+`reload` re-reads the file and live-applies it — geometry, style, layout,
+modules, the font — after fully validating it first; a bad file is
+refused and the running bar stands. `query`, `version` and `reload` print
+the reply; `kill` and `set` print nothing on success. `set` is the
+forward hook for the modules that will take a value
+([exec-push-button-modules](backlog/exec-push-button-modules.md)): today
+an unknown id, an unplaced one, or any module at all is a loud error,
+never a silent ok. Without a daemon, every command fails saying so
+(exit status 1).
 
 ## Modules
 
@@ -198,16 +281,17 @@ through a read-only view such as systemd's `ProtectHome=read-only` or
 flatpak's `/run/host/fonts`) is read into the bar's memory once, costing
 its size (about 740 KB for DejaVu Sans): copying a new file over it with
 `cp`, which truncates it in place, would kill a bar that had mapped it,
-and cannot touch one that read it. The file is read once, at start: a new
-font needs a restart.
+and cannot touch one that read it. The file is read at start and on every
+reload: changing `bar.font` (or any option) and running
+`scootbar msg reload` swaps it live.
 
 ## Colors
 
 Modules name a state, never a color, and the state picks one of the
 theme's color tokens: `normal` is drawn in `fg`, `warn` in `accent`,
 `urgent` in `urgent` and `muted` in `dim`. The clock is always `normal`.
-Only `bg` (`--background`) and `fg` (`--foreground`) are flags so far; the
-config file gives the others keys. Their defaults are Catppuccin Mocha's:
+Every token has a `[colors]` key; `bg` and `fg` are `--background` and
+`--foreground` flags too. Their defaults are Catppuccin Mocha's:
 
 | Token | Default |
 | --- | --- |
@@ -288,10 +372,14 @@ one gap below the bar, as they sit one gap from each other.
   the compositor.
 - **SIGTERM and SIGINT** end it at once. That is harmless: it keeps no
   state, and the compositor removes its surfaces with the connection.
-- **One per display is not enforced** yet: two daemons on one display give
-  two bars, each reserving its own space. A control socket, and with it a
-  refusal of a second daemon, comes with
-  [config-cli-and-reload](backlog/config-cli-and-reload.md).
+  **SIGHUP keeps its default action** (it ends the daemon) rather than
+  reloading: catching one would need `unsafe` signal registration
+  (rustix has no `signalfd`), which the crate forbids
+  (`#![forbid(unsafe_code)]`), so a reload is `scootbar msg reload`.
+- **One daemon per display** holds the control socket: a second daemon
+  for the same display refuses at start-up, saying one already runs. A
+  socket file left by a crash is recognised by its free lock and
+  replaced; the lock file itself is never removed.
 - **Linux only:** it does not build on any other system (the build stops
   with "scootbg-mem, scootbg and scootbar run on Linux only").
 
@@ -300,5 +388,5 @@ one gap below the bar, as they sit one gap from each other.
 | Status | When |
 | --- | --- |
 | 0 | `--help` or `--version` |
-| 1 | no usable font (with a module placed), cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, the compositor went away, or `poll(2)` failed |
+| 1 | no usable font (with a module placed), cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, the compositor went away, `poll(2)` failed, the config file is malformed, or a `msg` command failed (no daemon, or the daemon refused) |
 | 2 | a usage error |

@@ -1,11 +1,11 @@
 //! Semantic color tokens, and how a module's state [`Class`] maps onto
-//! them. A module names a class, never a color, so a theme source (a config
-//! file, Stylix) stays in control of every color the bar draws.
+//! them. A module names a class, never a color, so a theme source (the
+//! config file's `[colors]`, a Stylix one) stays in control of every color
+//! the bar draws.
 //!
-//! Only `--background` and `--foreground` are flags so far; the other
-//! tokens have their defaults until the config file
-//! (`docs/scootbar/backlog/config-cli-and-reload.md`) gives them keys. The
-//! defaults are Catppuccin Mocha's base, text, yellow, overlay and red.
+//! `--background` and `--foreground` are flags too; the other tokens are
+//! the file's alone. The defaults are Catppuccin Mocha's base, text,
+//! yellow, overlay and red.
 
 use crate::color::Color;
 use crate::modules::Class;

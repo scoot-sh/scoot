@@ -241,6 +241,37 @@ fn a_shown_draw_after_failures_recovers_the_clock() {
 }
 
 #[test]
+fn a_reload_redraws_once_with_no_modules_placed() {
+    let (mut outputs, id) = configured(1920, 28);
+    let bar = Bar::default();
+    let output = output(&mut outputs, id);
+    let want = frame(1920, 28, Scale::Integer(1));
+    output.drew(want);
+    // Drawn: nothing more until something changes. With no modules
+    // placed `stale` is always false (no revisions to compare), yet a
+    // reload must still draw once, or the removed modules' pixels stay.
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
+    output.invalidate();
+    assert_eq!(output.plan(&bar, false), Plan::Draw(want));
+    output.drew(want);
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
+}
+
+#[test]
+fn a_reload_is_a_new_chance_after_a_failed_draw() {
+    let (mut outputs, id) = configured(1920, 28);
+    let bar = Bar::default();
+    let output = output(&mut outputs, id);
+    let want = frame(1920, 28, Scale::Integer(1));
+    for _ in 0..4 {
+        output.draw_failed(want);
+    }
+    assert_eq!(output.plan(&bar, true), Plan::Nothing);
+    output.invalidate();
+    assert_eq!(output.plan(&bar, false), Plan::Draw(want));
+}
+
+#[test]
 fn a_failed_redraw_retries_first_then_commits_the_ack_once_quiet() {
     let (mut outputs, id) = configured(1920, 28);
     let bar = Bar::default();
