@@ -70,4 +70,7 @@ exactly one per minute.
 ## Done when
 
 The clock renders on every output and adding a second trivial module is one
-file, one line and a test.
+file, one line and a test. The font-mapping decision is made here, not left to
+`robustness-and-limits`: a `cp` over the font file under the running bar is a
+`SIGBUS`, so either read files outside `/nix/store` into the heap (about
++750 KB) or document the hazard.

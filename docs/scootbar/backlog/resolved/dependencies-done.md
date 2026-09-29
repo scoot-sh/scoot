@@ -57,7 +57,9 @@ are GPL: they were only run, as binaries, for the baselines.
     arming (a step between reading the clock and arming is not reported by
     `CANCEL_ON_SET`), and `ECANCELED` treated as "redraw now, then re-arm".
   - The time zone: port the spike's `tzif.rs`, with its bounds (a 64 KiB
-    file cap, every count and index checked, an unusable footer falling back
+    file cap enforced while reading, not after: at most `MAX_FILE + 1` bytes from
+    a regular file checked with `fstat`, opened `O_NONBLOCK`, so `TZ=:/dev/zero`
+    or a FIFO cannot hang or balloon the loop; every count and index checked, an unusable footer falling back
     to the last transition, no file at all falling back to UTC), and make
     `check-zones.py` a test: a fixed set of zones and `zdump` output
     checked in as fixtures, so CI needs no tzdata. Clamp the instant before
