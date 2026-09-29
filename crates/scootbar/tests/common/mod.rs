@@ -97,6 +97,19 @@ impl Scratch {
             .unwrap();
         Self(dir)
     }
+
+    /// The test font, written into this directory on first use: what any
+    /// `scootbar daemon` a test starts is pointed at with `--font`, so no
+    /// test depends on the fonts the machine has installed (the daemon
+    /// loads its font before it connects to anything, and refuses to start
+    /// without one).
+    pub fn font(&self) -> PathBuf {
+        let path = self.0.join("seven.ttf");
+        if !path.is_file() {
+            fs::write(&path, testfont::build()).unwrap();
+        }
+        path
+    }
 }
 
 impl Drop for Scratch {
@@ -364,11 +377,7 @@ impl Session {
 
     /// The test font, written into the scratch directory on first use.
     pub fn font(&self) -> PathBuf {
-        let path = self.scratch.0.join("seven.ttf");
-        if !path.is_file() {
-            fs::write(&path, testfont::build()).unwrap();
-        }
-        path
+        self.scratch.font()
     }
 
     pub fn bar_log(&self) -> PathBuf {

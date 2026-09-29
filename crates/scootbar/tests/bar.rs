@@ -326,10 +326,15 @@ fn it_exits_with_an_error_when_the_compositor_goes() {
 
 #[test]
 fn no_compositor_is_an_error_not_a_hang() {
-    // No compositor needed: a display that does not exist.
+    // No compositor needed: a display that does not exist. The test font,
+    // like every other test's: the daemon loads a font before it connects,
+    // so without one this would fail on a machine with no system fonts
+    // before it ever reached the connection it is here to test.
     let scratch = common::Scratch::new("none");
     let output = std::process::Command::new(common::scootbar_bin())
         .arg("daemon")
+        .arg("--font")
+        .arg(scratch.font())
         .env("XDG_RUNTIME_DIR", &scratch.0)
         .env("WAYLAND_DISPLAY", "wayland-none")
         .env_remove("WAYLAND_SOCKET")
