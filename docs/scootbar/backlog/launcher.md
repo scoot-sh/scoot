@@ -11,6 +11,9 @@ blocked: "extract-scootui"
 Filed 2026-09-29 as a pointer, not a spec: it gets its own backlog and design
 pass when it starts. Serves **daily-drive**.
 
+**Name: `scootlaunch`** (settled 2026-09-29, over `scootmenu`); the picker is
+its `--dmenu` mode.
+
 Its own small binary in the same shell family as the bar and
 [`scootnotify`](scootnotify.md).
 
