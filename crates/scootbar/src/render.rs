@@ -25,7 +25,7 @@
 
 use crate::density::{DENOMINATOR, Scale, scaled_length};
 use crate::layout::{self, Section};
-use crate::modules::{OutputView, Placed, View};
+use crate::modules::{CustomDraw, OutputView, Placed, View};
 use crate::outputs::Frame;
 use crate::paint::{Canvas, Span};
 use crate::text::Text;
@@ -49,7 +49,7 @@ pub struct Style {
 
 /// A logical length at `scale`, in device pixels.
 /// 0 stays 0 (`scaled_length` makes every other length at least 1).
-fn device(length: u32, scale: Scale) -> u32 {
+pub(crate) fn device(length: u32, scale: Scale) -> u32 {
     if length == 0 {
         return 0;
     }
@@ -60,7 +60,7 @@ fn device(length: u32, scale: Scale) -> u32 {
 }
 
 /// The em at `scale`, in device pixels.
-fn em(font_size: u32, scale: Scale) -> f32 {
+pub(crate) fn em(font_size: u32, scale: Scale) -> f32 {
     let factor = match scale {
         Scale::Integer(factor) => factor.max(1) as f32,
         Scale::Fractional(v120) => v120.max(1) as f32 / DENOMINATOR as f32,
@@ -165,9 +165,8 @@ impl Scene {
         }
     }
 
-    /// Each module's span, for tests (and, later, hit tests and the agent
-    /// interface's `layout`).
-    #[cfg(test)]
+    /// Each module's span, in the order the modules were placed: the hit
+    /// test routes a pointer press by it.
     pub fn spans(&self) -> &[Span] {
         &self.spans
     }
@@ -176,6 +175,11 @@ impl Scene {
     #[cfg(test)]
     pub fn views(&self) -> &[View] {
         &self.views
+    }
+
+    /// One module's view as last asked, for the click routing.
+    pub fn view(&self, index: usize) -> Option<&View> {
+        self.views.get(index)
     }
 }
 
@@ -211,13 +215,16 @@ impl Record {
 
 /// Paints `scene` at `frame` into `canvas`, whose pixels `record` says it
 /// shows, and updates `record`. Only what differs is painted.
+#[allow(clippy::too_many_arguments)]
 pub fn paint(
     canvas: &mut Canvas<'_>,
     record: &mut Record,
     scene: &Scene,
+    placed: &[Placed],
     text: Option<&mut Text>,
     style: &Style,
     frame: Frame,
+    output: &OutputView<'_>,
 ) {
     let whole = record.at != Some((frame, scene.layout));
     if whole {
@@ -237,13 +244,10 @@ pub fn paint(
     let em = em(style.font_size, frame.scale);
     let padding = device(style.padding, frame.scale);
     let baseline = text.metrics(em).baseline(canvas.height());
-    let entries = scene
-        .views
-        .iter()
-        .zip(&scene.spans)
-        .zip(&scene.revisions)
-        .zip(&record.revisions);
-    for (((view, &span), &revision), &painted) in entries {
+    for (index, view) in scene.views.iter().enumerate() {
+        let span = scene.spans[index];
+        let revision = scene.revisions[index];
+        let painted = record.revisions[index];
         if !whole && revision == painted {
             continue;
         }
@@ -253,16 +257,34 @@ pub fn paint(
         if span.width == 0 {
             continue;
         }
-        text.draw(
-            canvas,
-            view.icon(),
-            view.text(),
-            em,
-            i64::from(span.x) + i64::from(padding),
-            baseline,
-            style.theme.class(view.class()),
-            span,
-        );
+        // The one module with its own look draws itself; the rest draw as
+        // plain text.
+        let mut custom = false;
+        if let Some(placed) = placed.get(index) {
+            custom = placed.module.custom_draw(&mut CustomDraw {
+                output: *output,
+                view,
+                canvas: &mut *canvas,
+                text: &mut *text,
+                span,
+                em,
+                baseline,
+                padding,
+                theme: &style.theme,
+            });
+        }
+        if !custom {
+            text.draw(
+                canvas,
+                view.icon(),
+                view.text(),
+                em,
+                i64::from(span.x) + i64::from(padding),
+                baseline,
+                style.theme.class(view.class()),
+                span,
+            );
+        }
     }
     record.set(scene, frame);
 }

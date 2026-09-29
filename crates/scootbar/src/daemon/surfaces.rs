@@ -25,8 +25,10 @@
 use wayland_client::protocol::wl_buffer::{self, WlBuffer};
 use wayland_client::protocol::wl_callback::{self, WlCallback};
 use wayland_client::protocol::wl_output::{self, WlOutput};
+use wayland_client::protocol::wl_pointer::{self, WlPointer};
 use wayland_client::protocol::wl_region::WlRegion;
 use wayland_client::protocol::wl_registry::WlRegistry;
+use wayland_client::protocol::wl_seat::{self, WlSeat};
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum, delegate_noop};
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
@@ -41,9 +43,11 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
 use super::canvas::Canvas;
 use super::wayland::{Globals, State};
 use crate::bar::Bar;
+use crate::density::Scale;
+use crate::modules::{ClickCtx, OutputView, Update};
 use crate::outputs::{Effect, Entry, OutputId, Rotation, Size};
 use crate::print::warn;
-use crate::render::Scene;
+use crate::render::{self, Scene};
 
 /// The newest `wl_output` scootbar knows (v4 adds `name`). Older outputs
 /// are still bound.
@@ -77,6 +81,12 @@ impl Objects {
         if self.output.version() >= OUTPUT_RELEASE_SINCE {
             self.output.release();
         }
+    }
+
+    /// The output's own `wl_output`, for matching workspace groups and
+    /// pointer surfaces to it by proxy identity.
+    fn wl_output(&self) -> &WlOutput {
+        &self.output
     }
 }
 
@@ -213,6 +223,11 @@ impl State {
     /// state it was in, mid-configure or mid-draw included.
     pub fn global_remove(&mut self, name: u32) {
         if let Some(entry) = self.outputs.remove_global(name) {
+            #[cfg(feature = "workspaces")]
+            self.workspaces
+                .0
+                .borrow_mut()
+                .purge_output(entry.objects.wl_output());
             entry.objects.destroy();
         }
     }
@@ -272,7 +287,7 @@ impl State {
 impl Dispatch<WlOutput, OutputId> for State {
     fn event(
         state: &mut Self,
-        _: &WlOutput,
+        output: &WlOutput,
         event: wl_output::Event,
         id: &OutputId,
         _: &Connection,
@@ -281,6 +296,10 @@ impl Dispatch<WlOutput, OutputId> for State {
         let Some(entry) = state.outputs.get_mut(*id) else {
             return;
         };
+        // The live output's only: a removed one's events may be in flight.
+        if entry.objects.wl_output() != output {
+            return;
+        }
         let output = &mut entry.output;
         match event {
             wl_output::Event::Geometry {
@@ -294,7 +313,15 @@ impl Dispatch<WlOutput, OutputId> for State {
                 ..
             } => output.stage_mode(flags.contains(wl_output::Mode::Current), width, height),
             wl_output::Event::Scale { factor } => output.stage_scale(factor),
-            wl_output::Event::Name { name } => output.stage_name(name),
+            wl_output::Event::Name { name } => {
+                #[cfg(feature = "workspaces")]
+                state
+                    .workspaces
+                    .0
+                    .borrow_mut()
+                    .note_output_name(entry.objects.wl_output(), &name);
+                output.stage_name(name);
+            }
             wl_output::Event::Done => output.done(),
             _ => {}
         }
@@ -440,6 +467,154 @@ impl Dispatch<WlSurface, OutputId> for State {
 }
 
 delegate_noop!(State: WlRegion);
+
+/// `BTN_LEFT` (`linux/input-event-codes.h`): the button a click is. No
+/// scroll, no hover, no other button: the workspaces module's minimal hit
+/// test only.
+const BTN_LEFT: u32 = 0x110;
+
+impl Dispatch<WlSeat, ()> for State {
+    fn event(
+        state: &mut Self,
+        seat: &WlSeat,
+        event: wl_seat::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_seat::Event::Capabilities { capabilities } = event else {
+            return;
+        };
+        let has_pointer = matches!(capabilities, WEnum::Value(caps) if caps.contains(wl_seat::Capability::Pointer));
+        if has_pointer && state.pointer.is_none() {
+            state.pointer = Some(seat.get_pointer(qh, ()));
+        } else if !has_pointer && state.pointer.is_some() {
+            state.pointer = None;
+            state.pointer_on = None;
+        }
+    }
+}
+
+impl Dispatch<WlPointer, ()> for State {
+    fn event(
+        state: &mut Self,
+        pointer: &WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if state.pointer.as_ref() != Some(pointer) {
+            return;
+        }
+        match event {
+            wl_pointer::Event::Enter {
+                surface,
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                // The bar surface entered, if it is still a live one.
+                state.pointer_on = state
+                    .outputs
+                    .iter_mut()
+                    .find(|entry| {
+                        entry.objects.layer.as_ref().map(|l| &l.surface) == Some(&surface)
+                    })
+                    .map(|entry| (entry.output.id(), surface_x, surface_y));
+            }
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                if let Some((_, x, y)) = state.pointer_on.as_mut() {
+                    (*x, *y) = (surface_x, surface_y);
+                }
+            }
+            wl_pointer::Event::Leave { .. } => {
+                state.pointer_on = None;
+            }
+            wl_pointer::Event::Button {
+                button: BTN_LEFT,
+                state: WEnum::Value(wl_pointer::ButtonState::Pressed),
+                ..
+            } => {
+                click(state);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A left press: route it to whichever module's span holds the pointer, as
+/// a position in that span. Only the workspaces module answers today; any
+/// other module keeps the default and nothing happens.
+fn click(state: &mut State) {
+    let Some((id, x, y)) = state.pointer_on else {
+        return;
+    };
+    if !(0.0..state.bar.height as f64).contains(&y) {
+        return;
+    }
+    let Some(entry) = state
+        .outputs
+        .iter_mut()
+        .find(|entry| entry.output.id() == id)
+    else {
+        return;
+    };
+    let scale = entry.output.scale();
+    let x = to_device(x, scale);
+    let scene = &entry.objects.scene;
+    let Some(index) = scene
+        .spans()
+        .iter()
+        .position(|span| span.width > 0 && x >= span.x && x < span.end())
+    else {
+        return;
+    };
+    // `view` borrows the scene, the module borrows the content: disjoint,
+    // so both live together.
+    let scene = &entry.objects.scene;
+    let Some(view) = scene.view(index) else {
+        return;
+    };
+    let span = scene.spans()[index];
+    let content = &mut state.content;
+    let (Some(text), style) = (content.text.as_ref(), &content.style) else {
+        // Unreachable with a module placed (the daemon loads a font for
+        // any), but a press with no font to hit-test against is nothing.
+        return;
+    };
+    let ctx = ClickCtx {
+        output: OutputView {
+            name: entry.output.info().name.as_deref(),
+        },
+        x: x.saturating_sub(span.x),
+        view,
+        text,
+        em: render::em(style.font_size, scale),
+        padding: render::device(style.padding, scale),
+    };
+    if let Some(placed) = content.modules.get_mut(index) {
+        if placed.module.on_click(&ctx) == Update::Changed {
+            placed.revision = placed.revision.wrapping_add(1);
+        }
+    }
+}
+
+/// Surface-local logical pixels to device pixels at `scale`: pointer
+/// coordinates arrive in the surface's (viewport destination) space.
+fn to_device(x: f64, scale: Scale) -> u32 {
+    if !x.is_finite() || x <= 0.0 {
+        return 0;
+    }
+    match scale {
+        Scale::Integer(factor) => (x * f64::from(factor.max(1))) as u32,
+        Scale::Fractional(v120) => (x * f64::from(v120.max(1)) / 120.0) as u32,
+    }
+}
 
 fn rotation_of(transform: wl_output::Transform) -> Rotation {
     use wl_output::Transform as W;

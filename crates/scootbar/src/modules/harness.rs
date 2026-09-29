@@ -7,6 +7,10 @@
 //!   module added, handed over without polling, for what the kernel sends
 //!   rarely or at a bad time (a wake with nothing to read, `POLLERR`,
 //!   `POLLHUP`).
+//! - **Dispatched Wayland state** ([`Harness::dispatch`]) and **clicks**
+//!   ([`Harness::click`]): what the loop hands a module after its central
+//!   dispatch and pointer routing, for the modules that keep Wayland
+//!   objects (workspaces) rather than fd sources.
 //!
 //! Either way the test asserts on the returned [`Update`] and the [`View`].
 //! Every module's tests go through it, and a module in the registry
@@ -44,6 +48,21 @@ impl Harness {
         let added = self.source_count();
         assert!(source < added, "source {source}: the module added {added}");
         self.module.on_ready(source, events)
+    }
+
+    /// A turn of the loop after its Wayland dispatch: what arrived on the
+    /// connection's fd, reported through [`Module::on_dispatch`].
+    /// Only the workspaces module's tests call it.
+    #[allow(dead_code)]
+    pub fn dispatch(&mut self) -> Update {
+        self.module.on_dispatch()
+    }
+
+    /// A pointer button press in the module's span, as the loop routes one.
+    /// Only the workspaces module's tests call it.
+    #[allow(dead_code)]
+    pub fn click(&mut self, ctx: &super::ClickCtx<'_>) -> Update {
+        self.module.on_click(ctx)
     }
 
     /// The module's view for an unnamed output.

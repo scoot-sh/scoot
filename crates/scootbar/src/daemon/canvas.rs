@@ -311,9 +311,11 @@ impl Canvas {
             &mut canvas,
             &mut slot.record,
             scene,
+            modules,
             text.as_mut(),
             style,
             drawn,
+            output,
         );
         slot.state.painted = Some(frame);
 

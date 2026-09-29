@@ -30,6 +30,8 @@
 mod canvas;
 mod surfaces;
 mod wayland;
+#[cfg(feature = "workspaces")]
+mod workspaces;
 
 use std::fmt;
 use std::io;
@@ -118,12 +120,37 @@ pub fn run(config: Config) -> Result<(), Error> {
         text,
         style: config.style(),
     };
-    let (mut wayland, missing) = Wayland::connect(config.bar, content).map_err(Error::Wayland)?;
+    let (mut wayland, missing) = Wayland::connect(
+        config.bar,
+        content,
+        #[cfg(feature = "workspaces")]
+        config.modules.workspaces.link.clone(),
+    )
+    .map_err(Error::Wayland)?;
     for interface in missing {
         warn(format_args!(
             "scootbar: note: the compositor has no {interface}; the bar is drawn at the \
              integer scale and scaled down on fractionally scaled outputs"
         ));
+    }
+    #[cfg(feature = "workspaces")]
+    if config
+        .layout
+        .placed()
+        .any(|(_, id)| id == crate::modules::workspaces::ID)
+    {
+        if !wayland.state.workspaces.0.borrow().has_manager() {
+            warn(format_args!(
+                "scootbar: note: the compositor has no ext_workspace_manager_v1; the \
+                 workspaces module is left out"
+            ));
+        }
+        if wayland.state.pointer.is_none() && wayland.state.globals.seat.is_none() {
+            warn(format_args!(
+                "scootbar: note: the compositor has no wl_seat; clicks on the workspaces \
+                 module do nothing"
+            ));
+        }
     }
     let mut wants_write = false;
     loop {
@@ -131,6 +158,12 @@ pub fn run(config: Config) -> Result<(), Error> {
             .queue
             .dispatch_pending(&mut wayland.state)
             .map_err(Error::Dispatch)?;
+        // What the dispatch brought (workspace batches, pointer presses
+        // are routed in their own dispatch): each module reports, then the
+        // loop draws what moved.
+        for placed in wayland.state.content.modules.iter_mut() {
+            placed.dispatch();
+        }
         draw(&mut wayland.state, &wayland.qh);
         flush(&wayland, &mut wants_write)?;
         let Some(guard) = wayland.queue.prepare_read() else {
