@@ -32,6 +32,13 @@
 #   a macOS home-manager config with a `[wallpaper]` table evaluates, with
 #   no scootbg; and the overlay provides `pkgs.scootbg` (Linux only) and
 #   is what the pure modules default to.
+# - scootbar (docs/scootbar/backlog/resolved/nix-package-done.md): the
+#   overlay provides `pkgs.scootbar` on Linux, the flake's own build, and
+#   no `scootbar-demo`; on Darwin neither the overlay nor `packages` has
+#   one; its Cargo features reach the build through `.override`; the
+#   demo is a separate derivation running the bare bar; and no input of
+#   `scootbar` names a font (its built closure is checked by
+#   .github/workflows/nix-build.yml).
 {
   lib,
   pkgs,
@@ -268,6 +275,20 @@ let
   overlaid = pkgs.appendOverlays [ flake.overlays.default ];
   osOverlaid = evalNixosWith [ ./modules/nixos.nix ] overlaid { enable = true; };
   darwinOverlaid = darwinPkgs.appendOverlays [ flake.overlays.default ];
+  # `lib.hasInfix` over strings that name store paths: the check is of
+  # text, so their context (the derivations they refer to) is dropped, which
+  # the regex builtin under `hasInfix` otherwise refuses.
+  contains =
+    needle: haystack:
+    lib.hasInfix (builtins.unsafeDiscardStringContext needle) (
+      builtins.unsafeDiscardStringContext haystack
+    );
+  # scootbar's Cargo features through `.override` (nix/scootbar.nix).
+  scootbarNoModules = built.scootbar.override { buildNoDefaultFeatures = true; };
+  scootbarClockOnly = built.scootbar.override {
+    buildNoDefaultFeatures = true;
+    buildFeatures = [ "clock" ];
+  };
   sorted = packages: lib.sort lib.lessThan (drvs packages);
 
   # --- home-manager evaluations under test ---
@@ -717,6 +738,64 @@ let
         assert overlaid.scootctl.drvPath == built.scootctl.drvPath;
         true
       )
+      (
+        assert overlaid.scootbar.drvPath == built.scootbar.drvPath;
+        true
+      )
+      # The demo is something to run, not to build on: not in the overlay.
+      (
+        assert !(overlaid ? scootbar-demo);
+        true
+      )
+      # scootbar's Cargo features are `.override` arguments that reach the
+      # cargo hook: the default build names none (the crate's default,
+      # the clock), and a build without modules turns the defaults off.
+      (
+        assert !built.scootbar.cargoBuildNoDefaultFeatures && built.scootbar.cargoBuildFeatures == [ ];
+        true
+      )
+      (
+        assert scootbarNoModules.cargoBuildNoDefaultFeatures && scootbarNoModules.cargoBuildFeatures == [ ];
+        true
+      )
+      (
+        assert
+          scootbarClockOnly.cargoBuildNoDefaultFeatures
+          && scootbarClockOnly.cargoBuildFeatures == [ "clock" ];
+        true
+      )
+      (
+        assert scootbarNoModules.drvPath != built.scootbar.drvPath;
+        true
+      )
+      # One binary named for the bar in each, and the demo runs the bare
+      # build (it is a wrapper, not a second compile) with the font as a
+      # separate store path; no input of `scootbar` names a font.
+      (
+        assert lib.getExe built.scootbar == "${built.scootbar}/bin/scootbar";
+        true
+      )
+      (
+        assert lib.getExe built.scootbar-demo == "${built.scootbar-demo}/bin/scootbar";
+        true
+      )
+      (
+        assert contains (lib.getExe built.scootbar) built.scootbar-demo.text;
+        true
+      )
+      (
+        assert contains "${pkgs.dejavu_fonts.minimal}/share/fonts/truetype/DejaVuSans.ttf"
+          built.scootbar-demo.text;
+        true
+      )
+      (
+        assert lib.all (input: !(contains "font" "${input}")) (
+          built.scootbar.buildInputs
+          ++ built.scootbar.nativeBuildInputs
+          ++ built.scootbar.propagatedBuildInputs
+        );
+        true
+      )
       # ...and what the pure module defaults to, with no package set.
       (
         assert allAssertionsHold osOverlaid.config;
@@ -761,9 +840,17 @@ let
         assert builtins.isString hmDarwin.config.xdg.configFile."scoot/config.toml".source.drvPath;
         true
       )
-      # The overlay gives Darwin the client, and no scootbg.
+      # The overlay gives Darwin the client, and no scootbg or scootbar.
       (
         assert !(darwinOverlaid ? scootbg);
+        true
+      )
+      (
+        assert !(darwinOverlaid ? scootbar);
+        true
+      )
+      (
+        assert !(flake.packages.aarch64-darwin ? scootbar || flake.packages.aarch64-darwin ? scootbar-demo);
         true
       )
       (

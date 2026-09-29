@@ -34,7 +34,7 @@ A milestone (and each entry in it) is **done** when:
 
 1. it went through the full per-feature cycle and its review (`CLAUDE.md`);
 2. it is installable: `nix build .#scootbar` works and `nix flake check` is green
-   ([nix-package](nix-package.md)), and CI covers it;
+   ([nix-package](resolved/nix-package-done.md)), and CI covers it;
 3. its docs are updated in the same PR (`docs/scootbar/`);
 4. its numbers are published and pass the
    [resource ratchet](lightest.md): no row worse than the last milestone, and no
@@ -84,7 +84,7 @@ the bounds: [research notes](../research.md).
 Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [**Skeleton: a layer surface per output**](resolved/skeleton-layer-surface-done.md) — RESOLVED 2026-09-29: `scootbar daemon`, a solid bar per output across hotplug, device pixels at fractional scales, zero idle wakeups; flags, no config file ([cli.md](../cli.md))
 - [**Module API, layout, theme tokens and the clock**](resolved/module-api-and-clock-done.md) — RESOLVED 2026-09-29: the module contract, three-section layout, color tokens, `ab_glyph` text with a bounded cache, and a timerfd clock (`3:07 pm` by default) redrawing only its own span; `--font` or a well-known file, else a refusal; fonts mapped only when root-owned, unwritable and on a read-only mount, as in the Nix store ([cli.md](../cli.md))
-- [Nix package](nix-package.md) (high): installable from the start
+- [**Nix package**](resolved/nix-package-done.md) — RESOLVED 2026-09-29: `packages.scootbar` (no font in its closure; 49 MB, glibc and libgcc_s) and `scootbar-demo` (DejaVu Sans by default), `pkgs.scootbar`, `nix run`, features by `.override`, eval pins and main-only CI builds ([docs/nix.md](../../nix.md#the-status-bar-scootbar))
 - [Testing and CI](testing-and-ci.md) (medium): harnesses, path-filtered CI, first benchmark
 
 ### M2 — Workspaces: the first bar you can live with

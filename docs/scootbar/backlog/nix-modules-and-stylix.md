@@ -3,7 +3,7 @@ title: "Nix modules (NixOS and home-manager) with Stylix defaults, and a restart
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "nix-package, config-cli-and-reload"
+blocked: "config-cli-and-reload"
 milestone: "M3"
 ---
 
@@ -11,7 +11,7 @@ milestone: "M3"
 
 Filed 2026-09-29. Serves **daily-drive**.
 
-- The package itself is [nix-package](nix-package.md), already shipped by now;
+- The package itself is [nix-package](resolved/nix-package-done.md), already shipped by now;
   this entry adds the modules around it, plus a feature-selectable variant so
   `--features clock,workspaces` is one override.
 - A systemd user unit (and its home-manager `Restart=`) so a crashed bar comes

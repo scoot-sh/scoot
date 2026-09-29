@@ -176,7 +176,8 @@ jobs:
                 crates/scootbg-mem/*)
                   scootbg=true
                   scootbar=true ;;
-                # Its manifest is read by the macOS job's workspace check.
+                # Its manifest is read by the macOS job's workspace check and, at
+                # eval time, by flake.nix (the package description).
                 crates/scootbar/Cargo.toml)
                   scoot=true
                   scootbar=true ;;

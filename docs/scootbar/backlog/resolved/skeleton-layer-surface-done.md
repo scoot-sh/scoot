@@ -103,7 +103,7 @@ this is a floor, not the M1 comparison.
 the bar is a plain Wayland client, and every run here is headless and
 pixman); a compositor that `closed`s a bar on a live output (the retry path
 is unit-tested on the model only); the Nix closure (no package yet,
-[nix-package](../nix-package.md)); an earlier run at `d7384ad` gave the same
+[nix-package](nix-package-done.md)); an earlier run at `d7384ad` gave the same
 scoot numbers (0 wakeups, 2,764 KiB RSS) but its sway phase was void (sway
 could not bind its IPC socket under the long scratch path), so the whole
 run was repeated at `62181e6`.
@@ -155,7 +155,7 @@ The first milestone has no config file. Edge, height, colors and the font path
 are command-line flags with fixed defaults; the config file
 ([config-cli-and-reload](../config-cli-and-reload.md)) arrives in a later
 milestone and the flags stay as overrides. With no usable font the bar refuses
-to start and says how to give it one (see [nix-package](../nix-package.md)).
+to start and says how to give it one (see [nix-package](nix-package-done.md)).
 
 ## Tests
 

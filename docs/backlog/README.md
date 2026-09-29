@@ -397,7 +397,7 @@ falsify. Read `flexwm` there as `scoot`.
 ### Packaging and releases (filed 2026-09-29)
 
 Project-wide, not tied to one binary; the bar's own Nix package is
-[scootbar's `nix-package`](../scootbar/backlog/nix-package.md).
+[scootbar's `nix-package`](../scootbar/backlog/resolved/nix-package-done.md).
 
 - [Independent versions per shipped binary](./packaging/independent-versioning.md) — medium: one shared `0.1.0` and no tags today; the scoot/scootbg `apply-config` coupling made explicit
 - [Vendored sources, third-party licenses, advisories](./packaging/vendoring-and-licenses.md) — medium: what every distro package needs first (two git-fork dependencies vendor and resolve offline)

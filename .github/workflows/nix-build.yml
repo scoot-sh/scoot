@@ -33,9 +33,19 @@
 # this repo is check-only by decision, so that artifact stays covered the
 # way it is today (local `nix build` on a Mac).
 #
+# scootbar (docs/scootbar/backlog/resolved/nix-package-done.md) is built
+# here too, with three checks only the packaged artifact can answer: that
+# it links nothing beyond glibc (libc, libm) and libgcc_s -- no libEGL, no
+# libgbm, no libwayland -- as the cargo job asserts of its own build; that
+# no font entered its closure (the demo carries one, the bar must not);
+# and that a Cargo feature set given through `.override` reaches the build
+# (the no-modules bar's `--help` says it has none). The demo is a wrapper
+# over the same binary, so building it costs a shell script, and its run
+# of `--version` proves the wrapper passes a command through.
+#
 # gpu-scanout is deliberately NOT built here: `packages.scoot-gpu` exists
 # since PR #198, but each main-push build pays a full Smithay rebuild the
-# cargo cache can't help with, and the two packaged artifacts above are the
+# cargo cache can't help with, and the packaged artifacts above are the
 # ones users install. The `-gpu` derivation stays covered the way it was
 # before it existed (local `nix build .#scoot-gpu`).
 
@@ -61,7 +71,7 @@ concurrency:
 
 jobs:
   build:
-    name: nix build .#scoot .#scootctl .#scootbg
+    name: nix build .#scoot .#scootctl .#scootbg .#scootbar
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -79,3 +89,28 @@ jobs:
           ./result-scoot/bin/scoot --version
           ./result-scootctl/bin/scootctl --version
           ./result-scootbg/bin/scootbg --version
+
+      - name: nix build .#scootbar .#scootbar-demo, what it links, its closure, a feature override
+        run: |
+          nix build .#scootbar --out-link result-scootbar --print-out-paths
+          nix build .#scootbar-demo --out-link result-scootbar-demo --print-out-paths
+          ./result-scootbar/bin/scootbar --version
+          ./result-scootbar-demo/bin/scootbar --version
+          bin=result-scootbar/bin/scootbar
+          echo "binary: $(stat -L -c %s "$bin") bytes (stripped)"
+          ldd "$bin"
+          extra=$(ldd "$bin" | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
+          if [ -n "$extra" ]; then
+            echo "::error title=packaged scootbar links a library beyond std's::$(echo "$extra" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "ok: links only what std links"
+          nix path-info --recursive --closure-size --human-readable ./result-scootbar
+          if nix path-info --recursive ./result-scootbar | grep -iE 'font'; then
+            echo "::error title=a font is in scootbar's closure::the bare package takes its font from --font; only scootbar-demo carries one"
+            exit 1
+          fi
+          echo "ok: no font in scootbar's closure"
+          nix build --impure --out-link result-scootbar-no-modules --print-out-paths --expr \
+            '(builtins.getFlake (toString ./.)).packages.${builtins.currentSystem}.scootbar.override { buildNoDefaultFeatures = true; }'
+          ./result-scootbar-no-modules/bin/scootbar --help | grep -F 'built with no modules'
