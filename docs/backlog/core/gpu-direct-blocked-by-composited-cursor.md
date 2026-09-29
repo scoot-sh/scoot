@@ -116,7 +116,7 @@ through `wp_cursor_shape_v1` and sends no `set_cursor`). With
 `cursor_hide_after_ms = 1000`, mpv's `presented` flags were `9`
 (`vsync | zero_copy`) 733 and 732 times. Each count equals scoot's
 `successfully assigned … to plane::Handle(35)` lines in the same session.
-The first `9` came 1.010-1.018 s after the last motion. Continuous motion
+The first `9` came 1.010-1.018 s after the last motion in phase B, and about 1.0 s in phase D. Continuous motion
 (every 0.25 s) gave only `1`, starting within a frame or two of the first
 move. Unset, the sessions saw 1156 and 1158 `1`s and not one `9`. No
 `discarded` and no other flag value was seen. **This closes option 1's
