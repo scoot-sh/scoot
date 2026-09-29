@@ -23,9 +23,9 @@
 //! Pure Rust: `rustix` on its `linux_raw` backend, no `libc` crate. Linux
 //! only.
 
-// Off Linux, say so plainly rather than in `rustix`'s missing syscalls.
-// scootbg and scootbar build on this crate, so this is the one message a
-// build of either (or of the whole workspace on a Mac) stops at.
+// Off Linux, say so plainly: this is the first error a build of scootbg or
+// scootbar (or of the whole workspace on a Mac) reports. rustc goes on to
+// report `rustix`'s missing Linux-only items after it, so read the first.
 #[cfg(not(target_os = "linux"))]
 compile_error!(
     "scootbg-mem, scootbg and scootbar run on Linux only; on a Mac, \

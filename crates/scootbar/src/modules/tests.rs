@@ -329,6 +329,17 @@ fn every_registered_module_has_harness_tests() {
             spec.id,
             path.display()
         );
+        // A file nothing declares is never compiled: its harness calls
+        // would prove nothing.
+        let module = modules.join(spec.id.replace('-', "_")).join("mod.rs");
+        let declaration = std::fs::read_to_string(&module)
+            .unwrap_or_else(|e| panic!("{}: no module file at {}: {e}", spec.id, module.display()));
+        assert!(
+            scan::declares_tests_module(&declaration),
+            "{}: {} has no `#[cfg(test)] mod tests;`, so its tests are never compiled",
+            spec.id,
+            module.display()
+        );
     }
 }
 
@@ -364,6 +375,29 @@ fn a_harness_call_is_found_in_code_only() {
     ];
     for code in mentions {
         assert!(!scan::calls_harness(code), "{code}");
+    }
+}
+
+#[test]
+fn a_tests_module_is_found_in_code_only() {
+    for code in [
+        "#[cfg(test)]\nmod tests;",
+        "#[ cfg ( test ) ] mod tests ;",
+        "mod a;\n#[cfg(test)] // the tests\nmod tests;\nmod b;",
+    ] {
+        assert!(scan::declares_tests_module(code), "{code}");
+    }
+    for code in [
+        "",
+        "mod tests;",
+        "#[cfg(any())]\nmod tests;",
+        "#[cfg(test)]\nmod other;",
+        "// #[cfg(test)] mod tests;",
+        "/* #[cfg(test)] mod tests; */",
+        "let s = \"#[cfg(test)] mod tests;\";",
+        "#[cfg(test)] mod tests",
+    ] {
+        assert!(!scan::declares_tests_module(code), "{code}");
     }
 }
 

@@ -7,8 +7,8 @@ change is held to are in [`CLAUDE.md`](../CLAUDE.md).
 
 ```sh
 nix develop                     # every dependency, on Linux or macOS
-cargo test --workspace          # the compositor only compiles on Linux
-cargo nextest run --workspace   # one process per test -- the required runner
+cargo test --workspace          # Linux only: a Mac needs the excludes below
+cargo nextest run --workspace   # Linux only; one process per test -- the required runner
 ```
 
 On a Mac, leave out the crates that only run on Linux, the wallpaper
@@ -21,7 +21,10 @@ cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-m
 
 That is what the macOS CI job runs: the compositor crate with its Linux
 halves cfg'd out (a Mac version is planned), `scootctl`, `scoot-ipc` and
-`scoot-core`.
+`scoot-core`. The same applies to anything else that walks the whole
+workspace on a Mac: rust-analyzer's `check.overrideCommand` (or its
+`cargo.extraArgs`) takes the same `--exclude` flags, and so does
+`cargo doc --workspace`; `cargo metadata` is unaffected.
 
 On Linux the shell also carries what `scripts/smoke-test.sh` drives (`foot`,
 `jq`, ImageMagick, `wayland-info`), sets `$XDG_RUNTIME_DIR` when the box has

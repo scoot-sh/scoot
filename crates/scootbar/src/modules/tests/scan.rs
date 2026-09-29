@@ -14,6 +14,15 @@ pub fn calls_harness(source: &str) -> bool {
         .any(|w| w[0] == "Harness" && w[1] == ":" && w[2] == ":" && is_ident(w[3]) && w[4] == "(")
 }
 
+/// Whether `source` declares its test module in code: `#[cfg(test)] mod
+/// tests;`, spaced or not. A `tests.rs` nothing declares is never
+/// compiled, so its harness calls prove nothing.
+pub fn declares_tests_module(source: &str) -> bool {
+    tokens(source)
+        .windows(8)
+        .any(|w| w == ["cfg", "(", "test", ")", "]", "mod", "tests", ";"])
+}
+
 fn is_ident(token: &str) -> bool {
     token.chars().next().is_some_and(is_ident_char)
 }

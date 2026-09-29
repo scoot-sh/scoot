@@ -335,13 +335,14 @@ as it was; what changed:
   Mac."), and neither does scootbg ("Scootbg only needs Linux too. Scoot
   is there because it'll eventually have scoot for Mac"). Both crates, and
   scootbg-mem, lost their non-Linux stubs and `cfg(target_os = "linux")`
-  gates; off Linux each stops the build with "runs on Linux only", and the
+  gates; off Linux, scootbg-mem (which the other two build on) stops the
+  build with "run on Linux only" as its first error, and the
   `macos` job's `cargo check` excludes them. Only `scoot` keeps its stub.
   The macOS job's `--no-default-features` check went with it; the
   `scootbar` job's clippy and tests of the smallest build cover that build
   on Linux.
 - **The module contract reaches every module.** CI now runs the unit tests
-  of every feature set it clippies (every module, none, each alone), so a
+  of every feature set it tests (every module, none, each alone), so a
   module outside `default` is held to the contract; a module unavailable
   on the test machine fails it unless its registry line has a `stand_in`
   the contract drives instead; the harness-tests check reads code, not

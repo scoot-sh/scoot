@@ -29,9 +29,11 @@ devenv shell -- cargo fmt --check -p scootbar
 | `SCOOTBAR_DEBUG_NO_VIEWPORTER` | read by a **debug** `scootbar` only (compiled out of release builds): leaves `wp_viewporter` unbound, as on a compositor without it, so the integer-scale fallback is tested on compositors that have one |
 | `SCOOTBAR_BLESS` | rewrites the [snapshots](#snapshots) the tests compare instead of comparing them |
 
-The Cargo-feature matrix, as CI runs it: the default build, the smallest
-(every module left out), every module at once, and each module alone,
-each clippied and its unit tests run. The module contract below walks the
+The Cargo-feature matrix, as CI runs it: clippy on the default build, the
+smallest (every module left out) and each module alone; unit tests on the
+default build, every module at once (`--all-features`, the same build as
+the default while every module is in `default`), the smallest and each
+module alone. The module contract below walks the
 registry of the build it is compiled in, so a module left out of
 `default` is held to it only by these:
 
@@ -95,11 +97,16 @@ pinned nixpkgs' tzdata).
     (`Spec::stand_in`, compiled in tests only): the module started as if
     its probe had found what it looks for, a fake device or a fixture.
     The contract then drives the stand-in too, on every machine. A module
-    available anywhere tests run (the clock: a `timerfd`) needs none.
+    available anywhere tests run (the clock: a `timerfd`) needs none. What
+    it cannot check is that a stand-in is the real module: any
+    `Box<dyn Module>` satisfies it, so review is what keeps it honest.
   - *Harness tests*: it has a `modules/<id>/tests.rs` whose code calls the
     harness (`Harness::new(` or `Harness::start(`; comments and string
-    literals are skipped, so a mention is not a call), so a module added
-    without harness tests fails.
+    literals are skipped, so a mention is not a call) and a
+    `#[cfg(test)] mod tests;` in `modules/<id>/mod.rs`, so the file is
+    compiled. A module added without harness tests fails. It cannot tell a
+    call that runs from one in a dead function, so a test that never
+    asserts anything is also review's to catch.
 - **The clock**: the TZif reader against `zdump` at every transition from
   1900 to 2100 of twelve zones picked for their oddities (half-hour and
   45-minute offsets, a 30-minute DST shift, southern summers, Dublin's
