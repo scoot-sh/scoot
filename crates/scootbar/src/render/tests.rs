@@ -74,6 +74,7 @@ impl Bar {
             let count = Rc::new(Cell::new(0));
             placed.push(Placed {
                 section,
+                id: "fixed",
                 module: Box::new(Fixed {
                     shown: cell.clone(),
                     asked: count.clone(),

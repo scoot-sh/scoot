@@ -36,10 +36,17 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # poll(2), and the clock's timerfd, `statx` of the zone file and
 # `clock_gettime`, through raw syscalls, no `libc` crate: the same `rustix`
 # the Wayland crates already pull in.
-rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "time"] }
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net", "time"] }
 # Text: the M0 choice (its record, §1). Lazily parsed over the font's bytes,
 # so memory follows what is drawn; grayscale coverage, no hinting.
 ab_glyph = "0.2"
+# The config file (`bar.toml`) and the control socket's line-framed JSON:
+# the workspace's existing versions, chosen by measurement
+# (docs/scootbar/spikes/config-parser.md, docs/scootbg's dependency
+# record §5). `toml` adds no new package to the tree (`scoot` pins it).
+serde.workspace = true
+serde_json.workspace = true
+toml = "1"
 
 # The integration tests read screenshots back: scoot's arrive as base64 PNG
 # over its IPC, sway's through a small wlr-screencopy client into a memfd.

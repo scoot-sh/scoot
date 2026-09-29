@@ -108,6 +108,7 @@ fn bar(width: u32, height: u32, scale: Scale) -> Image {
         .into_iter()
         .map(|(section, text, icon, class)| Placed {
             section,
+            id: "label",
             module: Box::new(Label { text, icon, class }),
             revision: 0,
         })

@@ -1,8 +1,7 @@
 //! Argument parsing, hand-rolled as scootbg's is (its dependency record,
-//! §4: +12 KB against +299 KB for `clap`). The bar has no config file yet
-//! (`docs/scootbar/backlog/config-cli-and-reload.md` brings one), so every
-//! option is a flag on `daemon` with a fixed default; the flags stay as
-//! overrides once the file exists.
+//! §4: +12 KB against +299 KB for `clap`). The config file
+//! (`$XDG_CONFIG_HOME/scoot/bar.toml`, `crate::config`) holds every option;
+//! the flags stay and override its values, one by one.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -11,7 +10,7 @@ use std::path::PathBuf;
 use crate::bar::{self, Edge, MAX_HEIGHT, Margin, MarginError};
 use crate::color::{Color, ColorError};
 use crate::config::{Config, MAX_FONT_SIZE};
-use crate::layout::{Layout, MAX_GAP, MAX_MODULES, Section};
+use crate::layout::{Layout, MAX_GAP, MAX_MODULES, PlacementError};
 use crate::modules::{self, REGISTRY};
 
 #[cfg(test)]
@@ -169,11 +168,14 @@ scootbar -- status bar for Wayland
 USAGE:
     scootbar daemon [OPTIONS]
     scootbar daemon --help
+    scootbar msg COMMAND
+    scootbar msg --help
     scootbar --version
     scootbar --help
 
 COMMANDS:
     daemon     run the bar on every output of this Wayland display
+    msg        ask the running daemon: query, reload, version, kill, set
 "
 );
 
@@ -222,17 +224,51 @@ Modules:
     modules!(),
     workspaces_help!(),
     "
-Runs until the compositor goes away (exit status 1, saying why) or it is
-killed; SIGTERM and SIGINT end it at once, which is harmless: it keeps no
-state. The compositor removes the bars with the connection.
+The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
+without it) holds every option above; `--config PATH` reads another file
+instead. A flag given replaces the file's value for its own option; a
+missing file is the defaults. Runs until the compositor goes away (exit
+status 1, saying why) or it is killed; SIGTERM and SIGINT end it at once,
+which is harmless: it keeps no state. The compositor removes the bars with
+the connection.
 "
 );
+
+pub const MSG_HELP: &str = "\
+scootbar msg -- ask the running daemon
+
+USAGE:
+    scootbar msg query
+    scootbar msg reload
+    scootbar msg version
+    scootbar msg kill
+    scootbar msg set ID JSON
+    scootbar msg --help
+
+Asks the daemon for this Wayland display over its control socket
+($XDG_RUNTIME_DIR/scootbar-DISPLAY.sock), which the daemon claims at
+start-up and removes when it stops:
+
+    query      each placed module's state as JSON: its id, section and, on
+               every output, the text it shows and its class
+    reload     re-read the config file and live-apply it; a bad file is
+               refused and the running bar stands
+    version    the daemon's version and protocol, as JSON
+    kill       stop the daemon, once its reply is sent
+    set        a JSON value for module ID (no module takes one yet, so this
+               is refused loudly for every id today; the forward hook for
+               the modules that will take one)
+
+`query`, `version` and `reload` print the reply; `kill` and `set` print
+nothing on success. Without a daemon, every command fails saying so.
+";
 
 /// A help page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Topic {
     Main,
     Daemon,
+    Msg,
 }
 
 impl Topic {
@@ -240,15 +276,43 @@ impl Topic {
         match self {
             Self::Main => USAGE,
             Self::Daemon => DAEMON_HELP,
+            Self::Msg => MSG_HELP,
         }
     }
+}
+
+/// What `scootbar msg` asks of the running daemon.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Msg {
+    Query,
+    Reload,
+    Version,
+    Kill,
+    /// A value for module `id` (the registry id, so a misspelled one is
+    /// refused here): the raw JSON, validated but otherwise unread.
+    Set {
+        id: &'static str,
+        value: String,
+    },
+}
+
+/// What `scootbar daemon` runs with: the flags' values, the config file to
+/// read them with, and what the flags alone (without a file) would run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonCommand {
+    pub given: Given,
+    /// `--config`'s path; `None` reads the default file.
+    pub file: Option<PathBuf>,
+    /// The flags over the defaults, without any file.
+    pub config: Box<Config>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Help(Topic),
     Version,
-    Daemon(Box<Config>),
+    Daemon(Box<DaemonCommand>),
+    Msg(Msg),
 }
 
 /// The flags `daemon` takes.
@@ -264,6 +328,7 @@ const CENTER: &str = "--center";
 const RIGHT: &str = "--right";
 const PADDING: &str = "--padding";
 const SPACING: &str = "--spacing";
+const CONFIG: &str = "--config";
 #[cfg(feature = "clock")]
 const CLOCK_FORMAT: &str = "--clock-format";
 
@@ -280,6 +345,7 @@ const FLAGS: &[&str] = &[
     RIGHT,
     PADDING,
     SPACING,
+    CONFIG,
     #[cfg(feature = "clock")]
     CLOCK_FORMAT,
 ];
@@ -311,8 +377,8 @@ impl fmt::Display for ModulesError {
                 }
                 write!(f, ")")
             }
-            Self::Twice(id) => write!(f, "`{id}` is placed twice; a module goes in one place"),
-            Self::TooMany => write!(f, "at most {MAX_MODULES} modules"),
+            Self::Twice(id) => write!(f, "{}", PlacementError::Twice(id)),
+            Self::TooMany => write!(f, "{}", PlacementError::TooMany),
         }
     }
 }
@@ -347,6 +413,7 @@ pub enum Error {
         flag: &'static str,
         error: ModulesError,
     },
+    Msg(MsgError),
     #[cfg(feature = "clock")]
     ClockFormat {
         value: String,
@@ -388,6 +455,7 @@ impl fmt::Display for Error {
                  not `{value}`"
             ),
             Self::Modules { flag, error } => write!(f, "`{flag}`: {error}"),
+            Self::Msg(error) => write!(f, "{error}"),
             #[cfg(feature = "clock")]
             Self::ClockFormat { value, error } => {
                 write!(f, "`{CLOCK_FORMAT} {}`: {error}", value.escape_debug())
@@ -397,6 +465,60 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// Why a `scootbar msg` command is refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MsgError {
+    /// No command at all.
+    Missing,
+    /// Not one of `query`, `reload`, `version`, `kill` or `set`.
+    Unknown(String),
+    /// `set` without its module id, or without its JSON value.
+    NeedsId,
+    NeedsValue,
+    /// No module of that id in this build.
+    UnknownModule(String),
+    /// The value is not JSON.
+    BadJson(String),
+}
+
+impl fmt::Display for MsgError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Missing => write!(f, "missing msg command (try `scootbar msg --help`)"),
+            Self::Unknown(what) => {
+                write!(
+                    f,
+                    "unknown msg command `{what}` (try `scootbar msg --help`)"
+                )
+            }
+            Self::NeedsId => write!(
+                f,
+                "`scootbar msg set` needs a module id and a JSON value \
+                 (try `scootbar msg --help`)"
+            ),
+            Self::NeedsValue => write!(
+                f,
+                "`scootbar msg set ID` needs a JSON value (try `scootbar msg --help`)"
+            ),
+            Self::UnknownModule(id) => {
+                write!(
+                    f,
+                    "no module `{}` in this build (it has:",
+                    id.escape_debug()
+                )?;
+                if REGISTRY.is_empty() {
+                    write!(f, " none")?;
+                }
+                for spec in REGISTRY {
+                    write!(f, " {}", spec.id)?;
+                }
+                write!(f, ")")
+            }
+            Self::BadJson(error) => write!(f, "the value is not JSON: {error}"),
+        }
+    }
+}
 
 /// The `--version` line.
 pub fn version_string() -> String {
@@ -432,6 +554,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Command, Error
             }),
         },
         "daemon" => daemon(args),
+        "msg" => msg(args),
         _ => Err(Error::Unknown(first)),
     }
 }
@@ -441,6 +564,7 @@ fn help(mut args: impl Iterator<Item = Result<String, String>>) -> Result<Comman
     let topic = match args.next() {
         None => Topic::Main,
         Some(Ok(name)) if name == "daemon" => Topic::Daemon,
+        Some(Ok(name)) if name == "msg" => Topic::Msg,
         Some(other) => return Err(Error::Unknown(other.unwrap_or_else(|lossy| lossy))),
     };
     match args.next() {
@@ -453,8 +577,8 @@ fn help(mut args: impl Iterator<Item = Result<String, String>>) -> Result<Comman
 }
 
 /// Every `daemon` flag's value, as given (each at most once).
-#[derive(Default)]
-struct Given {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Given {
     edge: Option<Edge>,
     height: Option<u32>,
     margin: Option<Margin>,
@@ -467,6 +591,9 @@ struct Given {
     right: Option<Vec<&'static str>>,
     padding: Option<u32>,
     spacing: Option<u32>,
+    /// `--config`'s path: not a bar option, so neither `into_config` nor
+    /// `overlay` reads it; `main` loads the file with it.
+    config: Option<PathBuf>,
     #[cfg(feature = "clock")]
     clock_format: Option<modules::clock::format::Format>,
 }
@@ -506,15 +633,95 @@ fn daemon(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
         };
         given.take(flag, raw)?;
     }
-    Ok(Command::Daemon(Box::new(given.into_config()?)))
+    let file = given.config.clone();
+    let config = given.clone().into_config()?;
+    Ok(Command::Daemon(Box::new(DaemonCommand {
+        given,
+        file,
+        config: Box::new(config),
+    })))
+}
+
+/// `msg`'s commands, each at most its own arguments; `--help` alone asks
+/// for its page.
+fn msg(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
+    let command = match next_arg(&mut args, "msg") {
+        None => return Err(Error::Msg(MsgError::Missing)),
+        Some(command) => command?,
+    };
+    if is_help(&command) {
+        return match args.next() {
+            None => Ok(Command::Help(Topic::Msg)),
+            Some(extra) => Err(Error::Unexpected {
+                command: "msg",
+                argument: text(extra).unwrap_or_else(|lossy| lossy),
+            }),
+        };
+    }
+    if command.as_str() != "set" {
+        let request = match command.as_str() {
+            "query" => Msg::Query,
+            "reload" => Msg::Reload,
+            "version" => Msg::Version,
+            "kill" => Msg::Kill,
+            _ => return Err(Error::Msg(MsgError::Unknown(command))),
+        };
+        return match args.next() {
+            None => Ok(Command::Msg(request)),
+            Some(extra) => Err(Error::Unexpected {
+                command: "msg",
+                argument: text(extra).unwrap_or_else(|lossy| lossy),
+            }),
+        };
+    }
+    let Some(id) = next_arg(&mut args, "msg") else {
+        return Err(Error::Msg(MsgError::NeedsId));
+    };
+    let id = id?;
+    let Some(value) = next_arg(&mut args, "msg") else {
+        return Err(Error::Msg(MsgError::NeedsValue));
+    };
+    let value = value?;
+    if let Some(extra) = args.next() {
+        return Err(Error::Unexpected {
+            command: "msg",
+            argument: text(extra).unwrap_or_else(|lossy| lossy),
+        });
+    }
+    let Some(spec) = modules::find(&id) else {
+        return Err(Error::Msg(MsgError::UnknownModule(id)));
+    };
+    if let Err(error) = serde_json::from_str::<serde::de::IgnoredAny>(&value) {
+        return Err(Error::Msg(MsgError::BadJson(error.to_string())));
+    }
+    Ok(Command::Msg(Msg::Set { id: spec.id, value }))
+}
+
+/// The next argument as UTF-8, `None` when there is none: `Err` is its
+/// lossy form for an error message.
+fn next_arg(
+    args: &mut impl Iterator<Item = OsString>,
+    command: &'static str,
+) -> Option<Result<String, Error>> {
+    args.next().map(|arg| {
+        text(arg).map_err(|lossy| Error::Unexpected {
+            command,
+            argument: lossy,
+        })
+    })
 }
 
 impl Given {
     /// Parses `raw` as `flag`'s value.
     fn take(&mut self, flag: &'static str, raw: OsString) -> Result<(), Error> {
-        if flag == FONT {
-            // A path: any bytes will do.
-            return set(&mut self.font, flag, Ok(PathBuf::from(raw)));
+        if flag == FONT || flag == CONFIG {
+            // Paths: any bytes will do.
+            let slot = if flag == FONT {
+                &mut self.font
+            } else {
+                &mut self.config
+            };
+            return set(slot, flag, Ok(PathBuf::from(raw)));
         }
         // Every other flag takes text; a value that is not UTF-8 cannot be
         // any of them, and its lossy form says so in the flag's own error.
@@ -634,6 +841,58 @@ impl Given {
             modules,
         })
     }
+
+    /// Applies the given flags over `base` (the config file's, or the
+    /// defaults'): each flag replaces its own value. Module sections
+    /// replace one by one, unlike [`Given::into_config`]'s whole-layout
+    /// rule, so a flag and the file together are still checked for a
+    /// module placed twice.
+    pub fn overlay(&self, base: &mut Config) -> Result<(), Error> {
+        if let Some(edge) = self.edge {
+            base.bar.edge = edge;
+        }
+        if let Some(height) = self.height {
+            base.bar.height = height;
+        }
+        if let Some(margin) = self.margin {
+            base.bar.margin = margin;
+        }
+        if let Some(background) = self.background {
+            base.theme.background = background;
+        }
+        if let Some(foreground) = self.foreground {
+            base.theme.foreground = foreground;
+        }
+        if let Some(font) = &self.font {
+            base.font = Some(font.clone());
+        }
+        if let Some(font_size) = self.font_size {
+            base.font_size = font_size;
+        }
+        if let Some(padding) = self.padding {
+            base.layout.padding = padding;
+        }
+        if let Some(spacing) = self.spacing {
+            base.layout.spacing = spacing;
+        }
+        #[cfg(feature = "clock")]
+        if let Some(format) = &self.clock_format {
+            base.modules.clock.format = format.clone();
+        }
+        if self.left.is_some() || self.center.is_some() || self.right.is_some() {
+            if let Some(left) = &self.left {
+                base.layout.left = left.clone();
+            }
+            if let Some(center) = &self.center {
+                base.layout.center = center.clone();
+            }
+            if let Some(right) = &self.right {
+                base.layout.right = right.clone();
+            }
+            check_layout(&base.layout)?;
+        }
+        Ok(())
+    }
 }
 
 /// A comma-separated list of module ids; empty is no modules.
@@ -654,26 +913,13 @@ fn module_list(value: &str) -> Result<Vec<&'static str>, ModulesError> {
 
 /// No module twice across the sections, and at most [`MAX_MODULES`].
 fn check_layout(layout: &Layout) -> Result<(), Error> {
-    let mut seen: Vec<&str> = Vec::new();
-    for section in Section::ALL {
-        for &id in layout.section(section) {
-            let flag = section.flag();
-            if seen.contains(&id) {
-                return Err(Error::Modules {
-                    flag,
-                    error: ModulesError::Twice(id),
-                });
-            }
-            if seen.len() >= MAX_MODULES {
-                return Err(Error::Modules {
-                    flag,
-                    error: ModulesError::TooMany,
-                });
-            }
-            seen.push(id);
-        }
-    }
-    Ok(())
+    crate::layout::check_placement(layout).map_err(|(section, error)| Error::Modules {
+        flag: section.flag(),
+        error: match error {
+            PlacementError::Twice(id) => ModulesError::Twice(id),
+            PlacementError::TooMany => ModulesError::TooMany,
+        },
+    })
 }
 
 /// Stores a flag's parsed value, refusing a repeat before a bad value (so

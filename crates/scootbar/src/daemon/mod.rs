@@ -1,12 +1,14 @@
-//! `scootbar daemon`: the Wayland client and the modules, in one thread's
-//! `poll` loop.
+//! `scootbar daemon`: the Wayland client, the modules and the control
+//! socket, in one thread's `poll` loop.
 //!
-//! One `poll` over the Wayland fd and every module's sources (the clock's
-//! timerfd), with no timeout: between events the daemon makes no system
-//! call at all. No async runtime, no frame callbacks (nothing is animated).
-//! Each turn dispatches whatever arrived, hands each ready source to its
-//! module, then asks every output what to draw ([`draw`]), then flushes and
-//! sleeps. Asking after the whole batch means several events that change
+//! One `poll` over the Wayland fd, the control socket's listener and its
+//! clients, and every module's sources (the clock's timerfd), with no
+//! timeout: between events the daemon makes no system call at all. No
+//! async runtime, no frame callbacks (nothing is animated). Each turn
+//! dispatches whatever arrived, serves the control clients (`query`,
+//! `reload`, `version`, `kill`, `set`), hands each ready source to its
+//! module, then asks every output what to draw ([`draw`]), then flushes
+//! and sleeps. Asking after the whole batch means several events that change
 //! one output (a scale change arrives as a `wl_output.scale`, a `done`, a
 //! `preferred_scale` and a `configure`) are one draw, not four, and a
 //! module's change is one draw on every output.
@@ -25,9 +27,14 @@
 //! The compositor going away or a protocol error end the daemon with exit
 //! status 1. **Signals keep their default action**: SIGTERM or SIGINT end it
 //! on the spot, which is harmless, since it keeps no state and the
-//! compositor removes its surfaces with the connection.
+//! compositor removes its surfaces with the connection. SIGHUP is not
+//! caught either: catching it would need `unsafe` signal registration
+//! (rustix has no `signalfd`), which `#![forbid(unsafe_code)]` forbids, so
+//! a reload is `scootbar msg reload` (scootbg documents the same reasoning).
 
 mod canvas;
+mod listen;
+mod respond;
 mod surfaces;
 mod wayland;
 #[cfg(feature = "workspaces")]
@@ -35,12 +42,17 @@ mod workspaces;
 
 use std::fmt;
 use std::io;
+use std::path::PathBuf;
+use std::time::Instant;
 
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
 use wayland_client::backend::WaylandError as BackendError;
 
+use crate::cli::Given;
 use crate::config::Config;
+use crate::control::paths::{self, PathError};
+use crate::control::{Claim, ClaimError, MAX_CONNECTIONS, Server};
 use crate::font;
 use crate::modules::{self, MAX_POLL, OutputView, Placed, Sources};
 use crate::outputs::Plan;
@@ -48,6 +60,8 @@ use crate::print::warn;
 use crate::render::{Scene, Style};
 use crate::text::Text;
 use canvas::Drew;
+use listen::Listening;
+use respond::Responder;
 use wayland::{State, Wayland, WaylandError};
 
 /// What the bars show.
@@ -72,6 +86,10 @@ impl std::fmt::Debug for Content {
 pub enum Error {
     Font(font::Error),
     Wayland(WaylandError),
+    /// The control socket's paths, claim or server.
+    ControlPaths(PathError),
+    Claim(ClaimError),
+    Control(io::Error),
     /// The compositor closed the connection with nothing left to read.
     CompositorGone,
     /// The connection broke, or the compositor sent a last message (a
@@ -87,6 +105,9 @@ impl fmt::Display for Error {
         match self {
             Self::Font(error) => write!(f, "{error}"),
             Self::Wayland(error) => write!(f, "{error}"),
+            Self::ControlPaths(error) => write!(f, "{error}"),
+            Self::Claim(error) => write!(f, "{error}"),
+            Self::Control(error) => write!(f, "control socket: {error}"),
             Self::CompositorGone => write!(
                 f,
                 "lost the connection to the compositor: it closed the connection"
@@ -100,8 +121,16 @@ impl fmt::Display for Error {
     }
 }
 
-/// Runs the bar until the compositor goes away or it cannot go on.
-pub fn run(config: Config) -> Result<(), Error> {
+/// The poll set, all on the stack: the Wayland connection and the modules'
+/// sources ([`MAX_POLL`]), then the control listener and its clients.
+const MAX_FDS: usize = MAX_POLL + 1 + MAX_CONNECTIONS;
+
+/// Runs the bar until the compositor goes away, it cannot go on, or
+/// `scootbar msg kill` stops it. `file` is the config file a `reload`
+/// re-reads; `given` are the daemon flags, overlaid onto every reload as
+/// at start-up, so the precedence (defaults, then the file, then the
+/// flags) holds for the running bar at all times.
+pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Error> {
     let modules = modules::start(&config.layout, &config.modules, &mut |id, why| {
         warn(format_args!(
             "scootbar: note: the {id} module is unavailable, and left out: {why}"
@@ -120,6 +149,12 @@ pub fn run(config: Config) -> Result<(), Error> {
         text,
         style: config.style(),
     };
+    // The control socket first, so a second daemon refuses before it
+    // touches the compositor.
+    let paths = paths::from_env().map_err(Error::ControlPaths)?;
+    let mut claim = Claim::acquire(&paths).map_err(Error::Claim)?;
+    let mut server = Server::new(claim.listener()).map_err(Error::Control)?;
+    let mut listening = Listening::default();
     let (mut wayland, missing) = Wayland::connect(
         config.bar,
         content,
@@ -164,6 +199,18 @@ pub fn run(config: Config) -> Result<(), Error> {
         for placed in wayland.state.content.modules.iter_mut() {
             placed.dispatch();
         }
+        // The control clients: drain the listener, then serve each client
+        // what the last poll reported. A failed accept rests the listener
+        // rather than spins or exits (`listen`).
+        let (listen, timeout) = listening.poll_plan(Instant::now);
+        if listen {
+            if let Err(error) = server.accept(claim.listener()) {
+                warn(format_args!(
+                    "scootbar: cannot accept control clients: {error}"
+                ));
+                listening.rest(Instant::now());
+            }
+        }
         draw(&mut wayland.state, &wayland.qh);
         flush(&wayland, &mut wants_write)?;
         let Some(guard) = wayland.queue.prepare_read() else {
@@ -175,9 +222,10 @@ pub fn run(config: Config) -> Result<(), Error> {
             events |= PollFlags::OUT;
         }
         let connection = guard.connection_fd();
-        // The Wayland fd first, then each module's sources: all on the
-        // stack, so a turn of the loop allocates nothing.
-        let mut fds: [PollFd<'_>; MAX_POLL] =
+        // The Wayland fd first, then each module's sources, then the
+        // control listener and its clients: all on the stack, so a turn
+        // of the loop allocates nothing.
+        let mut fds: [PollFd<'_>; MAX_FDS] =
             std::array::from_fn(|_| PollFd::from_borrowed_fd(connection, PollFlags::empty()));
         let mut owners = [(0usize, 0usize); MAX_POLL];
         fds[0] = PollFd::from_borrowed_fd(connection, events);
@@ -186,13 +234,31 @@ pub fn run(config: Config) -> Result<(), Error> {
             let mut sources = Sources::new(&mut fds, &mut owners, &mut len, index);
             placed.module.sources(&mut sources);
         }
+        // The modules' poll slots end here; the ready flags below must
+        // not read past them (the control slots reuse no owners).
+        let sources = len;
+        if listen {
+            if let Some(slot) = fds.get_mut(len) {
+                *slot = PollFd::new(claim.listener(), PollFlags::IN);
+                len += 1;
+            }
+        }
+        let conns_at = len;
+        for conn in server.conns() {
+            let Some(slot) = fds.get_mut(len) else {
+                break;
+            };
+            *slot = PollFd::new(conn.stream(), conn.interest());
+            len += 1;
+        }
         let polled = fds.get_mut(..len).unwrap_or_default();
-        match poll(polled, None) {
+        let timeout = timeout.map(timespec);
+        match poll(polled, timeout.as_ref()) {
             Ok(_) => {}
             Err(Errno::INTR) => continue,
             Err(errno) => return Err(Error::Poll(errno.into())),
         }
-        let mut ready = [PollFlags::empty(); MAX_POLL];
+        let mut ready = [PollFlags::empty(); MAX_FDS];
         for (flags, fd) in ready.iter_mut().zip(&fds[..len]) {
             *flags = fd.revents();
         }
@@ -210,6 +276,30 @@ pub fn run(config: Config) -> Result<(), Error> {
             // below instead.
             return Err(Error::CompositorGone);
         }
+        // The control clients: a `reload` applies before the modules are
+        // asked, and a `kill` stops before anything is drawn.
+        {
+            let mut responder =
+                Responder::new(&mut wayland.state, &wayland.qh, file.as_ref(), &given);
+            let mut index = 0;
+            while index < server.conns().len() {
+                let revents = ready
+                    .get(conns_at + index)
+                    .copied()
+                    .unwrap_or(PollFlags::empty());
+                if server.service(index, revents, &mut responder) {
+                    index += 1;
+                }
+            }
+            if responder.stop {
+                // Answer owed (`kill`'s reply), then close: by the time the
+                // client sees the close, the socket file is gone and the
+                // lock released, so a new daemon starts straight away.
+                server.close_all();
+                claim.release();
+                return Ok(());
+            }
+        }
         if revents.intersects(PollFlags::IN | PollFlags::HUP | PollFlags::ERR) {
             match guard.read() {
                 Ok(_) => {}
@@ -222,7 +312,7 @@ pub fn run(config: Config) -> Result<(), Error> {
         // Then the modules, each ready source once; a changed view is
         // drawn at the top of the next turn.
         let modules = &mut wayland.state.content.modules;
-        for (flags, &(module, source)) in ready.iter().zip(&owners).take(len).skip(1) {
+        for (flags, &(module, source)) in ready.iter().zip(&owners).take(sources).skip(1) {
             if flags.is_empty() {
                 continue;
             }
@@ -296,4 +386,13 @@ fn flush(wayland: &Wayland, wants_write: &mut bool) -> Result<(), Error> {
         }
         Err(error) => Err(Error::Disconnected(error)),
     }
+}
+
+/// A poll timeout. At most `listen::REST`, so it always fits; a second
+/// is the fallback all the same, never a timeout of zero (a spin).
+fn timespec(duration: std::time::Duration) -> rustix::event::Timespec {
+    rustix::event::Timespec::try_from(duration).unwrap_or(rustix::event::Timespec {
+        tv_sec: 1,
+        tv_nsec: 0,
+    })
 }

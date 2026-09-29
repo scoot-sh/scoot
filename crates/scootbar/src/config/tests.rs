@@ -1,0 +1,283 @@
+//! The config file: what it takes, and how it refuses.
+
+use std::path::PathBuf;
+
+use super::{Config, Error, MAX_FILE, load_startup, reload};
+#[cfg(all(feature = "clock", feature = "workspaces"))]
+use crate::bar::Edge;
+use crate::bar::Margin;
+#[cfg(any(feature = "clock", feature = "workspaces"))]
+use crate::layout::Layout;
+
+/// A scratch directory, removed on drop. The tests run one per process
+/// (nextest), so a pid-suffixed directory cannot collide; no new
+/// dependency for what `std` already does.
+struct Scratch {
+    path: PathBuf,
+}
+
+impl Scratch {
+    fn new() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NONCE: AtomicU64 = AtomicU64::new(0);
+        let path = PathBuf::from(format!(
+            "/tmp/opencode/scootbar-config-test-{}-{}",
+            std::process::id(),
+            NONCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        Self { path }
+    }
+
+    fn file(&self, text: &str) -> PathBuf {
+        let path = self.path.join("bar.toml");
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn read(text: &str) -> Result<Config, Error> {
+    let scratch = Scratch::new();
+    super::read_file(&scratch.file(text))
+}
+
+/// A module id this build has, for the layout tests (every feature
+/// combination has at least the shape tested: each module alone, both, or
+/// neither).
+#[cfg(feature = "clock")]
+const MODULE: &str = "clock";
+#[cfg(all(not(feature = "clock"), feature = "workspaces"))]
+const MODULE: &str = "workspaces";
+
+fn missing_path() -> PathBuf {
+    PathBuf::from("/tmp/opencode/scootbar-config-test-no-such-dir/bar.toml")
+}
+
+#[test]
+fn an_empty_file_is_the_defaults() {
+    assert_eq!(read("").unwrap(), Config::default());
+    assert_eq!(read("# only a comment\n").unwrap(), Config::default());
+}
+
+#[test]
+#[cfg(all(feature = "clock", feature = "workspaces"))]
+fn a_full_file_is_read_whole() {
+    let config = read(
+        r##"
+left = ["workspaces"]
+center = ["clock"]
+right = []
+
+[bar]
+edge = "bottom"
+height = 40
+margin = "8,4"
+font = "/fonts/DejaVuSans.ttf"
+font-size = 13
+padding = 4
+spacing = 2
+
+[colors]
+background = "#101014"
+foreground = "#e0e0e0"
+accent = "#f9e2af"
+dim = "#6c7086"
+urgent = "#f38ba8"
+
+[clock]
+format = "%H:%M"
+
+[workspaces]
+"##,
+    )
+    .unwrap();
+    assert_eq!(config.bar.edge, Edge::Bottom);
+    assert_eq!(config.bar.height, 40);
+    assert_eq!(
+        config.bar.margin,
+        Margin {
+            top: 8,
+            right: 4,
+            bottom: 8,
+            left: 4
+        }
+    );
+    assert_eq!(config.font, Some(PathBuf::from("/fonts/DejaVuSans.ttf")));
+    assert_eq!(config.font_size, 13);
+    assert_eq!(config.layout.padding, 4);
+    assert_eq!(config.layout.spacing, 2);
+    assert_eq!(config.layout.left, ["workspaces"]);
+    assert_eq!(config.layout.center, ["clock"]);
+    assert!(config.layout.right.is_empty());
+    assert_eq!(config.theme.background.to_string(), "#101014");
+    assert_eq!(config.theme.foreground.to_string(), "#e0e0e0");
+    assert_eq!(config.theme.accent.to_string(), "#f9e2af");
+    assert_eq!(config.theme.dim.to_string(), "#6c7086");
+    assert_eq!(config.theme.urgent.to_string(), "#f38ba8");
+    #[cfg(feature = "clock")]
+    assert_eq!(
+        config.modules.clock.format,
+        crate::modules::clock::format::Format::parse("%H:%M").unwrap()
+    );
+}
+
+#[test]
+fn a_margin_is_a_number_or_the_shorthand() {
+    let margin = |text: &str| read(text).unwrap().bar.margin;
+    assert_eq!(margin("[bar]\nmargin = 8\n").top, 8);
+    assert_eq!(margin("[bar]\nmargin = 8\n").left, 8);
+    assert_eq!(
+        margin("[bar]\nmargin = \"8,4\"\n"),
+        Margin {
+            top: 8,
+            right: 4,
+            bottom: 8,
+            left: 4
+        }
+    );
+}
+
+#[test]
+#[cfg(any(feature = "clock", feature = "workspaces"))]
+fn giving_one_section_sets_the_whole_layout() {
+    let layout = read(&format!("left = [\"{MODULE}\"]\n")).unwrap().layout;
+    assert_eq!(layout.left, [MODULE]);
+    assert!(layout.center.is_empty() && layout.right.is_empty());
+    // Nothing given: the defaults.
+    assert_eq!(read("").unwrap().layout, Layout::default());
+}
+
+#[test]
+fn unknown_keys_are_a_loud_error_naming_them() {
+    for (text, key) in [
+        ("[bar]\nhieght = 28\n", "hieght"),
+        ("[colours]\n", "colours"),
+        ("[workspaces]\nanything = 1\n", "anything"),
+        ("up = 1\n", "up"),
+        ("[clock]\nfmt = \"%H\"\n", "fmt"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text}: {error}");
+    }
+}
+
+#[test]
+fn bad_values_name_their_key() {
+    let cases = [
+        ("[bar]\nedge = \"left\"\n", "bar.edge"),
+        ("[bar]\nheight = 0\n", "bar.height"),
+        ("[bar]\nheight = 2048\n", "bar.height"),
+        ("[bar]\nheight = \"tall\"\n", "height"),
+        ("[bar]\nmargin = \"8,x\"\n", "bar.margin"),
+        ("[bar]\nmargin = -1\n", "bar.margin"),
+        ("[bar]\nmargin = [1]\n", "bar.margin"),
+        ("[bar]\nfont-size = 0\n", "bar.font-size"),
+        ("[bar]\npadding = 2048\n", "bar.padding"),
+        ("[colors]\nbackground = \"red\"\n", "colors.background"),
+        ("[colors]\nurgent = \"#12345\"\n", "colors.urgent"),
+        ("left = [\"battery\"]\n", "left"),
+    ];
+    for (text, key) in cases {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text}: {error}");
+    }
+}
+
+/// A module placed twice, in one section or across two, is refused naming
+/// the section.
+#[test]
+#[cfg(any(feature = "clock", feature = "workspaces"))]
+fn a_module_placed_twice_is_refused() {
+    for text in [
+        format!("left = [\"{MODULE}\", \"{MODULE}\"]\n"),
+        format!("left = [\"{MODULE}\"]\nright = [\"{MODULE}\"]\n"),
+    ] {
+        let error = read(&text).unwrap_err().to_string();
+        assert!(error.contains("placed twice"), "{text}: {error}");
+    }
+}
+
+#[test]
+#[cfg(any(feature = "clock", feature = "workspaces"))]
+fn too_many_modules_are_refused() {
+    let mut text = String::from("left = [");
+    for n in 0..40 {
+        if n > 0 {
+            text.push_str(", ");
+        }
+        text.push('"');
+        text.push_str(MODULE);
+        text.push('"');
+    }
+    text.push_str("]\n");
+    let error = read(&text).unwrap_err().to_string();
+    assert!(error.contains("left"), "{error}");
+    assert!(error.contains("at most"), "{error}");
+}
+
+#[test]
+fn malformed_toml_says_what_and_where() {
+    let scratch = Scratch::new();
+    let path = scratch.file("[bar\n");
+    let error = super::read_file(&path).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains(&path.display().to_string()), "{message}");
+    assert!(matches!(error, Error::Parse { .. }));
+}
+
+#[test]
+fn a_missing_file_is_an_error_naming_it() {
+    let path = missing_path();
+    let error = super::read_file(&path).unwrap_err().to_string();
+    assert!(error.contains("no-such-dir"), "{error}");
+}
+
+#[test]
+fn a_file_past_the_bound_is_refused() {
+    let scratch = Scratch::new();
+    let path = scratch.path.join("bar.toml");
+    std::fs::write(&path, vec![b'#'; MAX_FILE as usize + 1]).unwrap();
+    let error = super::read_file(&path).unwrap_err();
+    assert!(matches!(error, Error::TooLarge { .. }), "{error:?}");
+}
+
+#[test]
+fn an_explicit_missing_file_is_a_refusal() {
+    assert!(load_startup(Some(&missing_path())).is_err());
+}
+
+#[test]
+fn reload_without_a_file_is_a_refusal() {
+    assert!(reload(None).is_err());
+}
+
+#[test]
+#[cfg(feature = "clock")]
+fn clock_format_bounds_hold() {
+    // Longer than the clock takes: refused naming the key.
+    let long = "x".repeat(300);
+    let error = read(&format!("[clock]\nformat = \"{long}\"\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("clock.format"), "{error}");
+    let error = read("[clock]\nformat = \"%Q\"\n").unwrap_err().to_string();
+    assert!(error.contains("clock.format"), "{error}");
+}
+
+#[test]
+fn the_default_path_follows_its_homes() {
+    // Whatever this machine's homes are, the path ends in the file.
+    if let Some(path) = super::default_path() {
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("bar.toml")
+        );
+        assert!(path.parent().is_some_and(|dir| dir.ends_with("scoot")));
+    }
+}

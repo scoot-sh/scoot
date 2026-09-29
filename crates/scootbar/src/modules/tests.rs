@@ -456,6 +456,7 @@ fn a_change_bumps_the_revision_and_nothing_else_does() {
     rustix::fs::fcntl_setfl(&read, rustix::fs::OFlags::NONBLOCK).unwrap();
     let mut placed = Placed {
         section: Section::Left,
+        id: "counter",
         module: Box::new(Counter { read, count: 0 }),
         revision: 0,
     };

@@ -63,6 +63,8 @@ use std::os::fd::BorrowedFd;
 
 use rustix::event::{PollFd, PollFlags};
 
+use serde_json::Value;
+
 use crate::layout::{Layout, Section};
 use crate::paint::{Canvas, Span};
 use crate::text::Text;
@@ -111,6 +113,16 @@ pub trait Module {
         Update::Unchanged
     }
 
+    /// A `scootbar msg set ID JSON` value for this module: the request's
+    /// JSON value. No module takes one yet, so the default refuses; the
+    /// modules that will (the exec ones,
+    /// `docs/scootbar/backlog/exec-push-button-modules.md`) read what they
+    /// accept and answer [`Update`] like any other change.
+    fn on_set(&mut self, value: &Value) -> Result<Update, SetError> {
+        let _ = value;
+        Err(SetError::Unsupported)
+    }
+
     /// Draws the module itself, instead of the loop's plain text draw.
     /// `true` when it drew (the loop then draws nothing more for it this
     /// paint); `false` keeps the default. Only the workspaces module opts
@@ -118,6 +130,23 @@ pub trait Module {
     fn custom_draw(&self, ctx: &mut CustomDraw<'_, '_>) -> bool {
         let _ = ctx;
         false
+    }
+}
+
+/// Why a `set` value was refused: the module takes none. (The exec
+/// modules, `docs/scootbar/backlog/exec-push-button-modules.md`, add the
+/// refusal for a value they do not accept with their first use.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetError {
+    /// This module takes no set value (every module today).
+    Unsupported,
+}
+
+impl fmt::Display for SetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsupported => write!(f, "takes no set value"),
+        }
     }
 }
 
@@ -184,6 +213,9 @@ pub fn find(id: &str) -> Option<&'static Spec> {
 /// A started module, where the layout put it.
 pub struct Placed {
     pub section: Section,
+    /// The registry id it was started from (what `--left` and `query`
+    /// name it by).
+    pub id: &'static str,
     pub module: Box<dyn Module>,
     /// Bumped each time the module reports a changed view: the render
     /// compares it with what each output shows (`crate::render`).
@@ -225,6 +257,7 @@ pub fn start(
         match (spec.init)(settings) {
             Init::Available(module) => placed.push(Placed {
                 section,
+                id: spec.id,
                 module,
                 revision: 0,
             }),
@@ -303,6 +336,19 @@ pub enum Class {
     Warn,
     Urgent,
     Muted,
+}
+
+impl Class {
+    /// The class's name in a `query` reply: `normal`, `warn`, `urgent` or
+    /// `muted`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Warn => "warn",
+            Self::Urgent => "urgent",
+            Self::Muted => "muted",
+        }
+    }
 }
 
 /// The most text a view holds, in bytes; more is cut at a character

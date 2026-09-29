@@ -1,5 +1,5 @@
 //! What the bar is, independent of any output: its edge, height and
-//! margins, from the command line (there is no config file yet), and the
+//! margins, from the config file and the flags, and the
 //! layer-surface requests they turn into. Pure, so every rule is a unit
 //! test.
 //!
