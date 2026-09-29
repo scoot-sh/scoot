@@ -112,9 +112,9 @@ shows no workspaces yet, so the switching row is a bystander's:
 
 | | on scoot | on sway |
 |---|---|---|
-| Idle RSS | 3.9 MiB (3.3 MiB with the font mapped) | 3.9 MiB |
-| Idle PSS | 2.1 MiB (1.5 MiB mapped) | 2.1 MiB |
-| Idle heap (`RssAnon`) | 0.92 MiB (0.19 MiB mapped) | 0.92 MiB |
+| Idle RSS | 3.9 MiB (3.4 MiB with the font mapped) | 3.9 MiB |
+| Idle PSS | 2.1 MiB (1.6 MiB mapped) | 2.1 MiB |
+| Idle heap (`RssAnon`) | 0.92 MiB (0.18 MiB mapped) | 0.92 MiB |
 | Peak memory (`VmHWM`) | 3.9 MiB | 3.9 MiB |
 | Idle wakeups per minute | **2.0** | **2.0** |
 | Idle CPU, 300 s window | 1.96 ms | 1.46 ms |
@@ -129,9 +129,11 @@ shows no workspaces yet, so the switching row is a bystander's:
   `wl_shm` client gets that reply once per frame. It is still the fewest of
   any bar here (yambar's 2.6 to 4).
 - **The font's bytes**: DejaVu Sans is read into the heap (742 KiB) unless
-  it lies on a read-only mount, where it is mapped: NixOS's `/nix/store` is
-  one, this machine's store is not, so the main column is the read one and
-  the mapped figures come from the same file on a read-only bind mount
+  it is a root-owned, unwritable file on a read-only mount, where it is
+  mapped: NixOS's `/nix/store` is that, this machine's store is not
+  mounted read-only, so the main column is the read one, and the mapped
+  figures come from a root-owned `0444` copy on a read-only bind mount,
+  measured again at `de27775` after review tightened the rule
   ([cli.md](cli.md#fonts) says why).
 - **The binary** is 246 KB over the skeleton's: the rasterizer and font
   parser about 103 KB (M0 predicted 115), scootbar's own clock, text,

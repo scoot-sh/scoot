@@ -604,10 +604,12 @@ when made this decision its own rather than
 [robustness-and-limits](../robustness-and-limits.md)'s. No new dependency:
 `ab_glyph` as §1 chose it, and the mapping in `scootbg-mem`.
 
-**Mapped only where the file lies on a read-only mount; read into the heap
-everywhere else** (`crates/scootbar/src/font.rs`,
-`scootbg_mem::file::map_if_read_only`). Why neither of the two options the
-entry offered as they stood:
+**Mapped only where the file is on a read-only mount, owned by root and
+writable by no one (`st_mode & 0o222 == 0`); read into the heap everywhere
+else** (`crates/scootbar/src/font.rs`,
+`scootbg_mem::file::map_if_immutable`). Why neither of the two options the
+entry offered as they stood, and why the read-only mount alone, this
+section's first version, was not enough:
 
 - *Map everywhere and document the hazard* leaves a `cp new.ttf
   ~/.local/share/fonts/font.ttf` (which opens the old file `O_TRUNC`)
@@ -616,35 +618,61 @@ entry offered as they stood:
 - *Read everything outside `/nix/store`* keys safety on a path: on a
   single-user Nix install the store is writable by the user, and a path
   check says nothing about a bind mount or a symlink into it.
-- *The mount's read-only flag* (`fstatvfs`, `ST_RDONLY`, which Linux
-  reports per mount) is what actually makes truncation impossible
-  (`EROFS`, root included), and it covers NixOS's store (bind-mounted
-  read-only), where Stylix and the modules take fonts from, and image-based
-  systems' `/usr`. What it leaves, stated in the mapping's docs: the same
-  filesystem written through another, read-write mount (on NixOS only
-  `nix-daemon`, which never rewrites a store file in place) and disk errors.
-  The check and the `unsafe` live together in `scootbg-mem`, so the safety
-  argument is enforced where it is made; scootbar stays
+- *The mount's read-only flag alone* (`fstatvfs`, `ST_RDONLY`) was the first
+  version, and review of #324 broke it: the flag belongs to the mount, not
+  the file, and the same file is often writable through another path. A
+  font bind-mounted read-only and truncated through its read-write path
+  killed that version with `SIGBUS` (reproduced below). That is the shape
+  of systemd's `ProtectHome=read-only`, `ProtectSystem=strict` and
+  `ReadOnlyPaths=`, flatpak's `/run/host/fonts`, read-only container roots,
+  and NFS or FUSE mounts, so it is common, not contrived.
+- *Read-only mount, root's, no write bit*: a user cannot write such a file
+  through any path, and root must first `chmod` it. Nix store files are
+  exactly that (root, `0444`, and NixOS mounts the store read-only), so
+  Stylix and the modules keep the mapping. What is left, in the mapping's
+  docs: root making a store file writable and rewriting it in place through
+  a read-write view (on NixOS that would be `nix-daemon`, which never
+  rewrites a store file in place; it adds, unlinks or renames over whole
+  files, and the mapping keeps the old inode) and disk errors. The check
+  and the `unsafe` live together in `scootbg-mem`; scootbar stays
   `#![forbid(unsafe_code)]`.
 
-Measured in the bar (release build at `44fc656`, headless scoot, DejaVu
-Sans 2.37, 742 KiB, idle 300 s after a 30 s settle, M0's harness), the same
-file read and mapped (a read-only bind mount of a copy):
+Measured in the bar at `de27775` (release build, headless scoot, DejaVu
+Sans 2.37, 742 KiB, M0's harness: 5 startups, a 30 s settle, 300 s idle),
+three copies of the same file:
 
-| | Read (heap) | Mapped |
-|---|---|---|
-| RSS | 3,944 KiB | 3,388 KiB |
-| PSS | 2,108 KiB | 1,552 KiB |
-| Heap (`RssAnon`) | 940 KiB | 196 KiB |
-| Wakeups in 300 s | 10 | 10 |
+| | Read (Nix store copy, root `0444`, read-write mount) | Mapped (root `0444`, read-only bind mount) | Read (root `0644`, read-only bind mount) |
+|---|---|---|---|
+| RSS | 3,952 KiB | 3,432 KiB | 3,924 KiB |
+| PSS | 2,108 KiB | 1,588 KiB | 2,080 KiB |
+| Heap (`RssAnon`) | 932 KiB | 188 KiB | 932 KiB |
+| Wakeups in 300 s | 10 | 10 | 10 |
+| Startup, ms | 12.8, 9.4, 11.3, 12.4, 8.2 | 13.3, 9.2, 8.8, 12.3, 8.9 | 10.2, 9.6, 8.2, 8.4, 9.1 |
 
-So the read path costs 744 KiB of heap and 556 KiB of RSS for this font,
-in line with the entry's "about +750 KB"; a CJK or Nerd font would cost
-its size (the cap is 64 MiB). And, checked live on the same machine: with
-the read-only font, `/proc/PID/maps` shows `r--p ... /tmp/sb-rofont/DejaVuSans.ttf`
-and a truncation is refused (`Read-only file system`); with the writable
-one, no mapping, and the bar kept ticking every second after the file was
-truncated to 0 bytes under it.
+(`44fc656`, before the fix, gave 3,944 / 2,108 / 940 read and 3,388 /
+1,552 / 196 mapped; the mapped copy then was `0644`, which the fix now
+reads.) So the read path costs about 744 KiB of heap and 520 KiB of RSS
+for this font, in line with the entry's "about +750 KB"; a CJK or Nerd
+font would cost its size (the cap is 64 MiB).
+
+**The review's repro, before and after** (`--clock-format '%H:%M:%S'` on
+headless scoot, font a root `0644` copy seen through a read-only bind
+mount, then truncated to 0 bytes through its read-write path):
+
+```
+old: mapped? 1
+old: truncated via the read-write path to 0 bytes
+/bin/bash: line 1: 17963 Bus error               $BIN daemon --font /tmp/sb-rob/DejaVuSans.ttf --clock-format '%H:%M:%S' ...
+old: exited with status 135
+new: mapped? 0
+new: truncated via the read-write path to 0 bytes
+new: alive after 3 s of ticks
+```
+
+(`old` is `6a69352`, `new` `de27775`; "mapped?" counts the font's lines in
+`/proc/PID/maps`.) The root `0444` copy on a read-only mount is mapped
+(`7f3815746000-7f3815800000 r--p ... /tmp/sb-roa/DejaVuSans.ttf`), and
+writing it fails with `Read-only file system`.
 
 ## Not measured, and why
 

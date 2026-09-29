@@ -31,8 +31,9 @@ Resolved 2026-09-29. What landed:
   clipped deliberately. Tokens `bg`, `fg`, `accent`, `dim`, `urgent`, with
   the classes `normal`, `warn`, `urgent`, `muted` mapped onto them
   (`--background`, `--foreground`). Text through `ab_glyph`, grayscale, no
-  shaping, a glyph cache filled lazily and bounded (512 glyphs, 1 MiB,
-  dropped and refilled past either). The layout is recomputed only when a
+  shaping, a glyph cache filled lazily and bounded (512 glyphs, 4 MiB,
+  dropped and refilled past either), and no glyph rasterized whose bounds
+  pass 4096 pixels a side or 4 megapixels (a hostile font's). The layout is recomputed only when a
   measured width, the scale or the bar's width changes; a change repaints
   and damages only its module's span (seen on the protocol trace:
   `damage_buffer(920, 0, 79, 28)` per tick on a 1920-wide bar).
@@ -48,8 +49,9 @@ Resolved 2026-09-29. What landed:
 - **Fonts**: `--font PATH`, a fixed list of well-known files without it,
   and a refusal to start (exit 1) naming how to give one when a module is
   placed and none is usable; no font needed with no module placed.
-  **The mapping decision** (the Done when): mapped only on a read-only
-  mount, read into the heap everywhere else; the reasons and numbers are
+  **The mapping decision** (the Done when): mapped only when the file is
+  on a read-only mount, owned by root and writable by no one (the Nix
+  store), read into the heap everywhere else; the reasons and numbers are
   in [the dependency record's §8](dependencies-done.md#8-the-font-file-decided-the-clock).
 - **Tests**: 137 unit (pure drawing read back from pixels through a
   seven-segment font built in code, the module harness with a trivial
@@ -61,9 +63,29 @@ Resolved 2026-09-29. What landed:
   `cargo fuzz` targets `format` and `tzif` (`crates/scootbar/fuzz`).
   Reference: [cli.md](../../cli.md); tests: [testing.md](../../testing.md).
 
+**Review of #324**, fixed in `de27775`:
+
+- **The first mapping rule was unsafe.** It mapped any font on a
+  read-only mount; review reproduced a `SIGBUS` (exit 135) with a font
+  bind-mounted read-only and truncated through its read-write path, and
+  silent corruption from a smaller `cp` over it. The rule now also needs
+  the file to be root's with no write bit, which store files are; the
+  predicate is a pure function tested for each exclusion, and the repro is
+  recorded below against both commits.
+- **The uncached glyph path could allocate without bound**: `ab_glyph`
+  allocates an `f32` per pixel of a glyph's bounds, and the bounds come
+  from the font. Now capped (4096 a side, 4 megapixels), with a hostile
+  test font; the cache takes glyphs up to 1 MiB so `--font-size 256` at
+  scale 2 is rasterized once, not per draw.
+- One scale for measuring, painting and damage; `--help` matches the
+  build's modules; `TZ=UTC` (and friends) with no zone data, and an absent
+  `/etc/localtime`, are UTC without a warning.
+
 **Deviations from the entry and the brief**, each deliberate:
 
-- **Idle is two wakeups a minute, not one.** The tick, then 0.9 to 1.2 ms
+- **Idle is two wakeups a minute, not one**, and the target is now stated
+  that way (review of #324): one timer wake a minute, and each frame
+  brings one `wl_buffer.release`. The tick, then 0.9 to 1.2 ms
   later on scoot (0.18 to 0.25 ms on sway) the compositor's
   `wl_buffer.release` for the buffer that tick's commit replaced (trace
   below). M0's one-a-minute was measured with no Wayland connection. The
@@ -116,6 +138,13 @@ idle window_s=300.0 vol=10 nonvol=0 wakeups_per_min=2.00 cpu_ms=1.46 ticks=0
 mem rss_kb=3388 pss_kb=1552 anon_kb=196 hwm_kb=3388
 === done 2026-09-29T07:34:06Z
 ```
+
+The mapped run above used a root `0644` copy on a read-only bind mount,
+which the review fix now reads rather than maps. The font paths were
+measured again at `de27775` with a root `0444` copy (mapped: 3,432 KiB
+RSS, 188 KiB heap) and the `0644` one (read: 3,924 KiB RSS, 932 KiB heap),
+with the review's `SIGBUS` repro before and after the fix, in
+[the dependency record's §8](dependencies-done.md#8-the-font-file-decided-the-clock).
 
 Against the skeleton (2,756 KiB RSS, 168 KiB heap, 0 wakeups, 7.2 ms first
 frame): +1.2 MiB RSS read (+0.6 MiB mapped), of which 744 KiB is the

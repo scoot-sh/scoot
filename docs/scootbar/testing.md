@@ -48,8 +48,9 @@ pinned nixpkgs' tzdata).
   the canvas's fills and blending (`paint`).
 - **Pure drawing** (no Wayland): text measured exactly and drawn digits
   read back from the pixels, crisp and at a fractional size, clipped to
-  its span, with the glyph cache filled lazily and held to its bounds
-  (`text`); layout of the three sections, with every small layout checked
+  its span, with the glyph cache filled lazily and held to its bounds, the
+  largest font size cached rather than rasterized per draw, and a hostile
+  font's oversized glyph skipped instead of allocated (`text`); layout of the three sections, with every small layout checked
   for overlap and overflow (`layout`); and the whole path from views to
   pixels (`render`): a change repaints and damages only its module, a new
   width repaints the bar, a buffer that missed a draw catches up, a state
@@ -72,9 +73,10 @@ pinned nixpkgs' tzdata).
   control character, bounded length) (`modules/clock/format`); `TZ` read
   as glibc reads it, and a FIFO, `/dev/zero` or an oversized file refused
   without blocking (`modules/clock/zone`).
-- **Fonts**: a font on a writable mount read into the heap and unaffected
-  by a truncation under it; every unusable file refused with its reason
-  (`font`).
+- **Fonts**: a font anyone can write read into the heap and unaffected by
+  a truncation under it; every unusable file refused with its reason
+  (`font`); the mapping rule's premises each tested alone (read-only mount,
+  root's, no write bit: `scootbg-mem`'s `file`).
 - **On a headless scoot** (`tests/bar.rs`): a bar on each of two outputs
   reserving its height (scoot's `outputs` usable area) and in its color on
   a screenshot; margins, with the zone including the anchored edge's
