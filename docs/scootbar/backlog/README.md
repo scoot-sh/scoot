@@ -55,36 +55,59 @@ Settled in planning (2026-09-29); an entry may reopen one with evidence.
 
 ## Order
 
-Roughly in order; each is one PR through the full per-feature cycle.
+Roughly in order; each is one PR through the full per-feature cycle. Every
+entry's `blocked` field names what it waits on
+(`scripts/backlog list --area scootbar --unblocked` shows what can start).
 
-1. [**Baselines and spikes**](baselines-and-spikes.md) — high: competitor
-   numbers and four measured choices (font, config parser, clock and timezone,
-   D-Bus) before any code
-2. [**Skeleton: a layer surface per output**](skeleton-layer-surface.md) —
-   high: exclusive zone, hotplug, a solid bar
-3. [**Module API, layout, theme and the clock**](module-api-and-clock.md) —
-   high: the trait, text drawing, the timerfd clock
-4. [**Workspaces module**](workspaces-module.md) — high: `ext-workspace-v1`,
-   custom pill drawing, click to switch
-5. [**Pointer input and interactions**](pointer-and-interactions.md) —
-   medium: hit-testing, hover damage, click and scroll actions
-6. [**`exec`, `push` and `button` modules**](exec-push-button-modules.md) —
-   medium: launcher and power buttons, anything scriptable
-7. [**Config file, control socket and reload**](config-cli-and-reload.md) —
-   medium: schema, `scootbar msg`, `query` for agents
-8. [**Nix modules and Stylix**](nix-and-stylix.md) — medium: NixOS and
-   home-manager, Stylix defaults
-9. [**The lightest bar: the release gate**](lightest.md) — high: measured
-   against yambar and waybar before v1
-10. [**Data-source modules**](data-source-modules.md) — medium: window title,
-    battery, volume, network, brightness
-11. [**Popups**](popups.md) — low: sliders, lists and menus as `xdg_popup`s
-12. [**Extract `scootui`**](extract-scootui.md) — low: when a second consumer
-    appears
-13. [**A shared D-Bus client**](dbus-client.md) — low: for notifications, the
-    tray, NetworkManager and logind
-14. [**System tray**](tray.md) — low: StatusNotifierItem
-15. [**`scootnotify`: the notification daemon**](scootnotify.md) — low
+**Foundations**
+
+1. [Baselines and spikes](baselines-and-spikes.md) (high): competitor numbers
+   and four measured choices before any code
+2. [Skeleton: a layer surface per output](skeleton-layer-surface.md) (high)
+3. [Module API, layout, theme and the clock](module-api-and-clock.md) (high)
+4. [Workspaces module](workspaces-module.md) (high): the v1 headline with the clock
+5. [Testing and CI](testing-and-ci.md) (medium): harnesses, fuzz, path-filtered CI
+6. [Robustness and limits](robustness-and-limits.md) (medium): bounds, hostile input, a dying compositor
+
+**Interaction and extension**
+
+7. [Pointer input and interactions](pointer-and-interactions.md) (medium)
+8. [`exec`, `push` and `button` modules](exec-push-button-modules.md) (medium)
+9. [Config file, control socket and reload](config-cli-and-reload.md) (medium)
+10. [Agent interface](agent-interface.md) (medium): `query`, `invoke`, `layout`, `subscribe`
+
+**Look and placement**
+
+11. [Appearance](appearance.md) (medium)
+12. [Icons and fonts](icons-and-fonts.md) (medium)
+13. [Visibility and layering](visibility-and-layering.md) (medium)
+14. [Multi-output policy](multi-output.md) (medium)
+
+**Shipping**
+
+15. [Nix modules and Stylix](nix-and-stylix.md) (medium)
+16. [The lightest bar: the release gate](lightest.md) (high): v1 is not released until this passes
+
+**Modules** ([umbrella](data-source-modules.md) holds the shared rules)
+
+17. [Window title](window-title-module.md) (medium)
+18. [Battery](battery-module.md) (medium)
+19. [Volume](volume-module.md) (medium)
+20. [Network](network-module.md) (medium)
+21. [Brightness](brightness-module.md) (low)
+22. [Media (MPRIS)](media-module.md) (low)
+23. [System tray](tray.md) (low)
+24. [Decision: no built-in CPU/memory/temperature/disk](system-stats-decision.md) (low)
+
+**After v1**
+
+25. [Popups](popups.md) (low)
+26. [Tooltips](tooltips.md) (low)
+27. [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears
+28. [A shared D-Bus client](dbus-client.md) (low)
+29. [Seamless in scoot: a `[bar]` section](scoot-integration.md) (low)
+30. [`scootlaunch`: the launcher](launcher.md) (low, pointer)
+31. [`scootnotify`: the notification daemon](scootnotify.md) (low, pointer)
 
 Scoot-side changes the bar wants are filed in the compositor's backlog, and
 are built only when the workspaces module shows it needs them:
