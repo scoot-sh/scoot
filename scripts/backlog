@@ -13,16 +13,25 @@ Every entry is one markdown file with a small frontmatter block:
     milestone: "M2"         # optional; which shippable step it belongs to
     ---
 
+Claims let a swarm of agents work tickets without colliding: `claim` records a
+uuid, agent and date in a local file that git never sees (in the git common
+directory, so every worktree of one clone shares it); `claim --next` picks the
+top ready ticket atomically.
+
 Stdlib only. Run `scripts/backlog --help`. Edits change only the frontmatter
 lines named; the prose is never rewritten.
 """
 
 import argparse
+import datetime
+import fcntl
 import json
+import os
 import re
 import signal
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -150,10 +159,261 @@ def rank(e):
     return (order.get(e.get("priority"), len(PRIORITIES)), e.slug)
 
 
+
+# ---- claims ---------------------------------------------------------------
+
+CLAIM_TTL_HOURS = float(os.environ.get("BACKLOG_CLAIM_TTL_HOURS", "24"))
+
+
+def claims_path():
+    """Where claims live: the git common directory (shared by every worktree of
+    this clone, and never tracked), or BACKLOG_CLAIMS_FILE."""
+    env = os.environ.get("BACKLOG_CLAIMS_FILE")
+    if env:
+        return Path(env)
+    r = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--git-common-dir"],
+                       capture_output=True, text=True)
+    if r.returncode == 0 and r.stdout.strip():
+        common = Path(r.stdout.strip())
+        return (common if common.is_absolute() else ROOT / common).resolve() / "backlog-claims.json"
+    return ROOT / ".backlog-claims.json"  # not a git checkout: gitignore it yourself
+
+
+def now_utc():
+    return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+
+
+def stamp(dt):
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def parse_stamp(s):
+    return datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def age_hours(rec):
+    latest = max(parse_stamp(rec["claimed"]), parse_stamp(rec.get("renewed", rec["claimed"])))
+    return (now_utc() - latest).total_seconds() / 3600
+
+
+def is_live(rec):
+    return age_hours(rec) < rec.get("ttl_hours", CLAIM_TTL_HOURS)
+
+
+def human_age(hours):
+    if hours < 1:
+        return f"{int(hours * 60)}m"
+    if hours < 48:
+        return f"{hours:.0f}h"
+    return f"{hours / 24:.0f}d"
+
+
+def read_claims():
+    """A snapshot for read-only commands; a missing or unreadable file is empty."""
+    try:
+        return json.loads(claims_path().read_text()).get("claims", {})
+    except (OSError, ValueError):
+        return {}
+
+
+class Claims:
+    """The claims file under an exclusive lock, so a swarm's read-modify-write
+    cycles never interleave. Use as a context manager, call save() to write."""
+
+    def __enter__(self):
+        self.path = claims_path()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock = open(str(self.path) + ".lock", "a")
+        fcntl.flock(self.lock, fcntl.LOCK_EX)
+        try:
+            self.data = json.loads(self.path.read_text())
+            if not isinstance(self.data.get("claims"), dict):
+                raise ValueError("no claims table")
+        except FileNotFoundError:
+            self.data = {"version": 1, "claims": {}}
+        except ValueError as err:
+            self.__exit__()
+            sys.exit(f"backlog: {self.path} is unreadable ({err}); fix or delete it")
+        return self
+
+    @property
+    def claims(self):
+        return self.data["claims"]
+
+    def save(self):
+        tmp = self.path.with_name(self.path.name + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(self.data, indent=2, sort_keys=True) + "\n")
+        os.replace(tmp, self.path)
+
+    def __exit__(self, *exc):
+        fcntl.flock(self.lock, fcntl.LOCK_UN)
+        self.lock.close()
+
+
+def claim_label(rec):
+    tag = "claimed" if is_live(rec) else "stale claim"
+    return f"{tag}: {rec.get('agent', '?')} {human_age(age_hours(rec))} ago"
+
+
+def milestone_rank(e):
+    m = e.get("milestone")
+    if not m:
+        return 99
+    if m == "ongoing":
+        return 98
+    digits = re.sub(r"\D", "", m)
+    return int(digits) if digits else 97
+
+
+def ready_rank(e):
+    return (milestone_rank(e), rank(e))
+
+
+def select_next(claims, a):
+    """The top open, unblocked, unclaimed (or stale-claimed) entry, or None."""
+    wanted = ("open", "research") if a.research else ("open",)
+    pool = []
+    for e in entries():
+        if e.get("status") not in wanted or e.get("blocked"):
+            continue
+        if a.area and e.get("area") != a.area:
+            continue
+        if a.milestone and e.get("milestone") != a.milestone:
+            continue
+        if a.priority and e.get("priority") != a.priority:
+            continue
+        rec = claims.get(str(e.rel()))
+        if rec and is_live(rec):
+            continue
+        pool.append(e)
+    pool.sort(key=ready_rank)
+    return pool[0] if pool else None
+
+
+def emit_claim(e, rec, a, verb):
+    if a.json:
+        print(json.dumps({"entry": str(e.rel()), "slug": e.slug, "title": e.get("title"),
+                          "area": e.get("area"), "priority": e.get("priority"),
+                          "milestone": e.get("milestone"), **rec}))
+    else:
+        print(f"{verb} {e.rel()}\nuuid:    {rec['uuid']}\nagent:   {rec['agent']}\n"
+              f"claimed: {rec['claimed']}\nttl:     {rec['ttl_hours']}h (renew or it goes stale)")
+
+
+def cmd_claim(a):
+    if bool(a.name) == bool(a.next):
+        sys.exit("backlog: give a ticket, or --next, not both and not neither")
+    agent = a.agent or os.environ.get("BACKLOG_AGENT") or os.environ.get("USER") or "agent"
+    with Claims() as c:
+        if a.next:
+            e = select_next(c.claims, a)
+            if e is None:
+                print("backlog: nothing ready (open, unblocked, unclaimed) matches", file=sys.stderr)
+                return 3
+        else:
+            e = find(a.name)
+            if e.get("status") == "resolved":
+                sys.exit(f"backlog: {e.rel()} is resolved")
+            if e.get("blocked"):
+                print(f"note: {e.rel()} is marked blocked: {e.get('blocked')}", file=sys.stderr)
+        key = str(e.rel())
+        cur = c.claims.get(key)
+        if cur and is_live(cur) and not a.force and a.token != cur["uuid"]:
+            print(f"backlog: {key} is {claim_label(cur)} "
+                  f"(uuid {cur['uuid'][:8]}, expires in "
+                  f"{human_age(cur.get('ttl_hours', CLAIM_TTL_HOURS) - age_hours(cur))}); "
+                  "pass --token to renew your own, or --force to take it", file=sys.stderr)
+            return 2
+        now = now_utc()
+        rec = {"uuid": cur["uuid"] if cur and a.token == cur["uuid"] else str(uuid.uuid4()),
+               "agent": agent, "claimed": stamp(now), "ttl_hours": CLAIM_TTL_HOURS if a.ttl is None else a.ttl,
+               "cwd": str(Path.cwd())}
+        c.claims[key] = rec
+        c.save()
+    emit_claim(e, rec, a, "renewed" if cur and a.token == cur.get("uuid") else "claimed")
+
+
+def cmd_renew(a):
+    e = find(a.name)
+    with Claims() as c:
+        rec = c.claims.get(str(e.rel()))
+        if not rec or rec["uuid"] != a.token:
+            sys.exit(f"backlog: no claim on {e.rel()} with that uuid")
+        rec["renewed"] = stamp(now_utc())
+        c.save()
+    print(f"renewed {e.rel()} ({rec['agent']}, ttl {rec.get('ttl_hours', CLAIM_TTL_HOURS)}h)")
+
+
+def cmd_release(a):
+    e = find(a.name)
+    with Claims() as c:
+        rec = c.claims.get(str(e.rel()))
+        if not rec:
+            print(f"{e.rel()} is not claimed")
+            return 0
+        if rec["uuid"] != a.token and not a.force:
+            sys.exit(f"backlog: {e.rel()} is {claim_label(rec)}; pass its --token, or --force")
+        del c.claims[str(e.rel())]
+        c.save()
+    print(f"released {e.rel()}")
+
+
+def cmd_claims(a):
+    rows = []
+    with Claims() as c:
+        for key, rec in sorted(c.claims.items(), key=lambda kv: -age_hours(kv[1])):
+            orphan = not (ROOT / key).exists()
+            stale = not is_live(rec)
+            if a.prune and (orphan or stale):
+                del c.claims[key]
+                rows.append((key, rec, "pruned"))
+                continue
+            rows.append((key, rec, "orphan" if orphan else "stale" if stale else "live"))
+        if a.prune:
+            c.save()
+    if a.json:
+        print(json.dumps([{"entry": k, "state": st, **r} for k, r, st in rows]))
+        return
+    for key, rec, st in rows:
+        print(f"{st:7} {human_age(age_hours(rec)):>4}  {rec['agent']:<14} {rec['uuid'][:8]}  {key}")
+    print(f"\n{len(rows)} claims ({claims_path()})", file=sys.stderr)
+
+
+def unblock_dependents(slug):
+    """Drop `slug` from the `blocked` text of every open entry naming it; clear
+    the field when nothing but the slug was there. Prose is left alone."""
+    changed = []
+    token = re.compile(r"(?<![\w-])" + re.escape(slug) + r"(?![\w-])(\s*\([^)]*\))?")
+    for e in entries():
+        b = e.get("blocked")
+        if e.get("status") == "resolved" or not isinstance(b, str) or not token.search(b):
+            continue
+        rest = token.sub("", b)
+        for _ in range(4):
+            rest = re.sub(r"^\s*(?:,|;|\band\b|\bor\b)\s*", "", rest)
+            rest = re.sub(r"\s*(?:,|;|\band\b|\bor\b)\s*$", "", rest)
+            rest = re.sub(r"\s*,\s*,", ",", rest)
+        rest = rest.strip()
+        if not re.search(r"[A-Za-z]", re.sub(r"\b(?:and|or)\b", "", rest)):
+            rest = ""
+        set_fields(e, {"blocked": rest or "null"})
+        changed.append((e, rest))
+    return changed
+
+
 def cmd_list(a):
     rows = []
     git_dates = git_resolved_dates() if (a.all or a.resolved) else {}
+    claims = read_claims()
     for e in entries(include_resolved=a.all or a.resolved):
+        rec = claims.get(str(e.rel()))
+        live = bool(rec and is_live(rec))
+        if a.claimed and not rec:
+            continue
+        if (a.unclaimed or a.ready) and live:
+            continue
+        if a.ready and (e.get("status") != "open" or e.get("blocked")):
+            continue
         if a.resolved and e.get("status") != "resolved":
             continue
         if not (a.all or a.resolved) and e.get("status") == "resolved":
@@ -183,8 +443,10 @@ def cmd_list(a):
         title = (e.get("title") or "").strip()
         if len(title) > 70:
             title = title[:69] + "…"
+        rec = claims.get(str(e.rel()))
         flag = (" [blocked]" if e.get("blocked") else "") + \
-               (f" ({e.get('milestone')})" if e.get("milestone") else "")
+               (f" ({e.get('milestone')})" if e.get("milestone") else "") + \
+               (f" [{claim_label(rec)}]" if rec else "")
         if e.get("status") == "resolved":
             d, src = resolved_date(e, git_dates)
             when = f"{d}{'' if src == 'stamped' else ' (git)'}" if d else "date unknown"
@@ -198,6 +460,9 @@ def cmd_list(a):
 def cmd_show(a):
     e = find(a.name)
     print(f"# {e.rel()}")
+    rec = read_claims().get(str(e.rel()))
+    if rec:
+        print(f"# {claim_label(rec)} (uuid {rec['uuid'][:8]}, since {rec['claimed']})")
     if e.get("status") == "resolved":
         d, src = resolved_date(e, git_resolved_dates())
         print(f"# resolved: {d} ({src})" if d else "# resolved: date unknown")
@@ -310,9 +575,13 @@ def cmd_resolve(a):
     area = e.get("area")
     if area not in RESOLVED:
         sys.exit(f"backlog: cannot archive area {area!r}")
-    import datetime
     day = a.date or datetime.date.today().isoformat()
     validate("resolved", day)
+    key = str(e.rel())
+    rec = read_claims().get(key)
+    if rec and is_live(rec) and rec["uuid"] != a.token and not a.force:
+        sys.exit(f"backlog: {key} is {claim_label(rec)}; resolve it with that claim's "
+                 "--token (or --force)")
     set_fields(e, {"status": "resolved", "area": "resolved",
                    "priority": "null", "blocked": "null", "resolved": day})
     slug = e.slug if e.slug.endswith(("-done", "-resolved")) else f"{e.slug}-done"
@@ -320,6 +589,13 @@ def cmd_resolve(a):
     RESOLVED[area].mkdir(exist_ok=True)
     git_mv(e.path, dst)
     print(f"archived {e.rel()} -> {dst.relative_to(ROOT)}")
+    with Claims() as c:
+        if c.claims.pop(key, None):
+            c.save()
+            print("released its claim")
+    for other, rest in unblock_dependents(e.slug):
+        print(f"unblocked {other.rel()}" if not rest else
+              f"{other.rel()} no longer waits on {e.slug}; still: {rest}")
     print("next: add the resolution to the entry's prose (what landed, evidence, "
           "PR), and fix its links in the READMEs and ROADMAP.md:")
     print(f"  grep -rn '{e.slug}' docs ROADMAP.md README.md")
@@ -380,6 +656,10 @@ def main():
     p.add_argument("--blocked", action="store_true", help="only entries waiting on something")
     p.add_argument("--unblocked", action="store_true", help="only entries nothing waits on")
     p.add_argument("--milestone", metavar="M", help="only entries in this milestone (e.g. M2)")
+    p.add_argument("--ready", action="store_true",
+                   help="open, unblocked and not claimed: what a swarm can pick up")
+    p.add_argument("--unclaimed", action="store_true", help="no live claim on it")
+    p.add_argument("--claimed", action="store_true", help="has a claim (live or stale)")
     p.add_argument("--grep", metavar="REGEX", help="match anywhere in the file")
     p.set_defaults(fn=cmd_list)
 
@@ -403,8 +683,42 @@ def main():
 
     p = sub.add_parser("resolve", help="mark resolved (stamped with today) and archive into resolved/")
     p.add_argument("name")
+    p.add_argument("--token", help="the uuid of the live claim on it, if there is one")
+    p.add_argument("--force", action="store_true", help="resolve despite someone else's live claim")
     p.add_argument("--date", metavar="YYYY-MM-DD", help="the day it landed, if not today")
     p.set_defaults(fn=cmd_resolve)
+
+    p = sub.add_parser("claim", help="claim a ticket (or --next: the top ready one) for an agent")
+    p.add_argument("name", nargs="?", help="slug, unique substring or path")
+    p.add_argument("--next", action="store_true", help="claim the top open, unblocked, unclaimed entry")
+    p.add_argument("--area", choices=list(BACKLOGS))
+    p.add_argument("--milestone", metavar="M")
+    p.add_argument("--priority", choices=PRIORITIES)
+    p.add_argument("--research", action="store_true", help="with --next: research entries too")
+    p.add_argument("--agent", help="who is claiming (default $BACKLOG_AGENT, then $USER)")
+    p.add_argument("--ttl", type=float, metavar="HOURS",
+                   help=f"hours until the claim goes stale (default {CLAIM_TTL_HOURS:g}, "
+                        "$BACKLOG_CLAIM_TTL_HOURS)")
+    p.add_argument("--token", help="your own claim's uuid, to renew it")
+    p.add_argument("--force", action="store_true", help="take a live claim from someone else")
+    p.add_argument("--json", action="store_true", help="machine-readable result")
+    p.set_defaults(fn=cmd_claim)
+
+    p = sub.add_parser("renew", help="keep a claim alive: renew SLUG --token UUID")
+    p.add_argument("name")
+    p.add_argument("--token", required=True)
+    p.set_defaults(fn=cmd_renew)
+
+    p = sub.add_parser("release", help="give a claim up: release SLUG --token UUID")
+    p.add_argument("name")
+    p.add_argument("--token")
+    p.add_argument("--force", action="store_true", help="release someone else's claim")
+    p.set_defaults(fn=cmd_release)
+
+    p = sub.add_parser("claims", help="list claims (live, stale, orphaned); --prune drops the dead ones")
+    p.add_argument("--prune", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_claims)
 
     p = sub.add_parser("check", help="validate frontmatter, placement and index links")
     p.set_defaults(fn=cmd_check)
