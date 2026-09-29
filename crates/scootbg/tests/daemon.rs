@@ -1,6 +1,5 @@
 //! `scootbg daemon` against a real `scoot --headless`: the socket's whole
 //! lifecycle, end to end, through the real binary.
-#![cfg(target_os = "linux")]
 
 mod common;
 

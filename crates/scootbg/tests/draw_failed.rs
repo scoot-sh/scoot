@@ -33,7 +33,6 @@
 //! thread's `mmap(NULL, 134217728, PROT_NONE, ...)` before the limit; after
 //! it, the decoding thread's only large call is the buffer's
 //! `mmap(NULL, 33177600, ..., MAP_SHARED, ...) = -1 ENOMEM`.
-#![cfg(target_os = "linux")]
 
 mod common;
 

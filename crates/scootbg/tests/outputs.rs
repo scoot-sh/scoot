@@ -1,7 +1,6 @@
 //! One background layer surface per output, against a real
 //! `scoot --headless`: what `query` reports, what scoot reports, and the
 //! protocol requests that made each surface.
-#![cfg(target_os = "linux")]
 
 mod common;
 

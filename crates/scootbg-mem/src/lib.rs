@@ -21,9 +21,17 @@
 //! `docs/scootbg/backlog/resolved/dependencies-done.md` §11.
 //!
 //! Pure Rust: `rustix` on its `linux_raw` backend, no `libc` crate. Linux
-//! only; on any other target this crate is empty.
+//! only.
 
-#![cfg(target_os = "linux")]
+// Off Linux, say so plainly rather than in `rustix`'s missing syscalls.
+// scootbg and scootbar build on this crate, so this is the one message a
+// build of either (or of the whole workspace on a Mac) stops at.
+#[cfg(not(target_os = "linux"))]
+compile_error!(
+    "scootbg-mem, scootbg and scootbar run on Linux only; on a Mac, \
+     cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem \
+     (docs/development.md)"
+);
 
 pub mod alloc;
 pub mod file;

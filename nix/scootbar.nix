@@ -64,8 +64,8 @@ rustPlatform.buildRustPackage {
     homepage = "https://github.com/scoot-sh/scoot";
     license = lib.licenses.mit;
     mainProgram = "scootbar";
-    # A Wayland client: on other systems the crate builds a stub that says
-    # so, so no other package is offered.
+    # A Wayland client that never runs on a Mac, and does not build
+    # there, so no other package is offered.
     platforms = lib.platforms.linux;
   };
 }

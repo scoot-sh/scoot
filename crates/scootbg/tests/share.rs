@@ -5,7 +5,6 @@
 //! buffers made from each), its memfd mappings in `/proc/PID/maps`, and
 //! real pixels by screenshot. On scoot (two 1600×1000 outputs) and on sway
 //! (outputs plugged in and out).
-#![cfg(target_os = "linux")]
 
 mod common;
 

@@ -7,7 +7,6 @@
 //! passed as `--font` by the harness), 50 pixels to the em on a 60-pixel
 //! bar, so every segment is 5 whole pixels and the text is read back by
 //! sampling them ([`common::testfont::decode`]).
-#![cfg(target_os = "linux")]
 
 mod common;
 

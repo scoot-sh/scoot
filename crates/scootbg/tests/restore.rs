@@ -5,7 +5,6 @@
 //! kept apart. Each session's `XDG_STATE_HOME` is a scratch directory
 //! (`common::Session::state_home`), shared between sessions only where a
 //! test says so.
-#![cfg(target_os = "linux")]
 
 mod common;
 

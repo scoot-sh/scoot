@@ -1,7 +1,6 @@
 //! `LargeAlloc` installed as this test binary's global allocator, the way
 //! the daemon runs it: the harness, `Vec`, `String` and threads all
 //! allocate through it.
-#![cfg(target_os = "linux")]
 
 use std::sync::{Mutex, MutexGuard};
 use std::thread;

@@ -3,7 +3,6 @@
 //! plugging one in and out), checked by real pixels. Test images are made
 //! here (`png`, `image-webp`'s lossless encoder) or from the tiny JPEG
 //! fixtures in `tests/fixtures/`.
-#![cfg(target_os = "linux")]
 
 mod common;
 

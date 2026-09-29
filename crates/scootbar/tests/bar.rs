@@ -7,7 +7,6 @@
 //! Skipped without a `scoot` binary (see `common`); `SCOOTBAR_REQUIRE_SCOOT`
 //! makes that a failure. Outputs coming and going are `tests/hotplug.rs`,
 //! on sway: scoot's headless backend cannot add or remove them at runtime.
-#![cfg(target_os = "linux")]
 
 mod common;
 

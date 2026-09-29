@@ -8,9 +8,10 @@ license.workspace = true
 
 # Every dependency below was chosen by measurement; the record, with the
 # alternatives and their numbers, is
-# docs/scootbg/backlog/resolved/dependencies-done.md. Linux only: on any
-# other target the binary is a stub that says so (see `src/main.rs`).
-[target.'cfg(target_os = "linux")'.dependencies]
+# docs/scootbg/backlog/resolved/dependencies-done.md. Linux only: it never
+# runs on a Mac, and does not build there (`scootbg-mem` says so; the
+# macOS CI job leaves it out).
+[dependencies]
 # The only `unsafe` scootbg has: the large-allocation global allocator,
 # and the wl_shm buffer mapping (§6b, §11).
 scootbg-mem.workspace = true
@@ -58,6 +59,6 @@ pic-scale-safe = "0.1"
 # small wlr-screencopy client into a memfd (`fs`), read back with `read`.
 # Dev-only: the binary itself does none of this, and none of it reaches
 # its dependency tree.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
+[dev-dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
 base64.workspace = true

@@ -6,8 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# Linux only: on any other target the binary is a stub that says so (see
-# `src/main.rs`), as scootbg's is. The Wayland crates, `rustix` and
+# Linux only, as scootbg: it never runs on a Mac, and does not build there
+# (`scootbg-mem` says so; the macOS CI job leaves it out). The Wayland crates, `rustix` and
 # `scootbg-mem` are already in the workspace for scootbg, chosen there by
 # measurement (docs/scootbg/backlog/resolved/dependencies-done.md);
 # `ab_glyph` is scootbar's own, chosen in its record,
@@ -20,7 +20,7 @@ license.workspace = true
 default = ["clock"]
 clock = []
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[dependencies]
 # The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
 # of its own (`#![forbid(unsafe_code)]` in `src/main.rs`).
 scootbg-mem.workspace = true
@@ -43,7 +43,7 @@ ab_glyph = "0.2"
 # The integration tests read screenshots back: scoot's arrive as base64 PNG
 # over its IPC, sway's through a small wlr-screencopy client into a memfd.
 # Dev-only: none of it reaches the binary's dependency tree.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
+[dev-dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs", "pipe", "time"] }
 base64.workspace = true
 png = "0.18"

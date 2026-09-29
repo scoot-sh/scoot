@@ -4,7 +4,6 @@
 //!
 //! Skipped without sway (see `Session::sway`); `SCOOTBG_REQUIRE_SWAY`
 //! makes that a failure.
-#![cfg(target_os = "linux")]
 
 mod common;
 

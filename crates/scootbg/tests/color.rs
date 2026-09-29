@@ -5,7 +5,6 @@
 //! The fallback paths (a 1×1 `wl_shm` buffer under a viewport, and a
 //! full-size buffer) are forced with `SCOOTBG_DEBUG_PATH`, which only a
 //! debug build reads; built without debug assertions those cases skip.
-#![cfg(target_os = "linux")]
 
 mod common;
 
