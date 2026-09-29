@@ -41,7 +41,7 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
   [`scaler-oom-abort`](../../scootbg/backlog/scaler-oom-abort.md)); avoid large
   allocations sized by external input.
 - **Restart policy**: scoot does not supervise clients. Ship a systemd user
-  unit / home-manager `Restart=` in [nix-and-stylix](nix-and-stylix.md), and
+  unit / home-manager `Restart=` in [nix-modules-and-stylix](nix-modules-and-stylix.md), and
   say in the docs what happens without one.
 
 ## Verification

@@ -1,18 +1,21 @@
 ---
-title: "Nix modules (NixOS and home-manager) with Stylix defaults"
+title: "Nix modules (NixOS and home-manager) with Stylix defaults, and a restart unit"
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "config-cli-and-reload"
+blocked: "nix-package, config-cli-and-reload"
 ---
 
 # Nix modules with Stylix defaults
 
 Filed 2026-09-29. Serves **daily-drive**.
 
-- `packages.scootbar`, following how `packages.scoot` and scootbg are packaged
-  (`nix-src-fileset-done.md`, `scoot-package-ships-scootctl-done.md`); a
-  feature-selectable variant so `--features clock,workspaces` is one override.
+- The package itself is [nix-package](nix-package.md), already shipped by now;
+  this entry adds the modules around it, plus a feature-selectable variant so
+  `--features clock,workspaces` is one override.
+- A systemd user unit (and its home-manager `Restart=`) so a crashed bar comes
+  back, since scoot does not supervise clients
+  ([robustness-and-limits](robustness-and-limits.md)).
 - NixOS and home-manager modules whose `settings` attrset renders the config
   file, as scoot's home-manager module does; `enable` adds the package and
   an autostart entry (or `session.command` pairing, per `nixos-session-command-done.md`).

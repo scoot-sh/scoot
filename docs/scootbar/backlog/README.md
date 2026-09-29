@@ -85,7 +85,8 @@ entry's `blocked` field names what it waits on
 
 **Shipping**
 
-15. [Nix modules and Stylix](nix-and-stylix.md) (medium)
+15. [Nix package](nix-package.md) (high): ships with the first working milestone
+    [Nix modules and Stylix](nix-modules-and-stylix.md) (medium)
 16. [The lightest bar: the release gate](lightest.md) (high): v1 is not released until this passes
 
 **Modules** ([umbrella](data-source-modules.md) holds the shared rules)
