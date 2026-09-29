@@ -127,6 +127,7 @@ shows no workspaces yet, so the switching row is a bystander's:
 | CPU, 240 workspace switches in 60 s | 0.30 ms (no workspaces shown) | 0.24 ms (no workspaces shown) |
 | Startup to first frame (median of 5) | 9.9 ms | 8.7 ms |
 | Binary | 849 KB (links only glibc and libgcc_s) | as on scoot |
+| Installed closure (this flake) | 49 MB, no font (measured at the [Nix package](backlog/resolved/nix-package-done.md#evidence)) | as on scoot |
 | Threads | 1 | 1 |
 
 - **Two wakeups a minute, not one**: the tick, and about a millisecond
@@ -162,10 +163,10 @@ How the rows were taken, in short (the full method is in the record):
   **closure** depends on nixpkgs' default features as much as on the bar.
   scootbar's own, this flake's `packages.x86_64-linux.scootbar` on the
   pinned nixpkgs, measured the competitors' way (`nix path-info -S`), is
-  **49 MB** (49,078,696 bytes): the bar 826 KiB, glibc with libidn2 and
-  libunistring 36.0 MiB, gcc's runtime library 9.8 MiB (it carries
-  libgcc_s), and no font
-  ([its record](backlog/resolved/nix-package-done.md#evidence)).
+  49 MB (49,078,696 bytes): the bar 826 KiB (the package's build, 845,152
+  bytes), glibc with libidn2 and libunistring 36.0 MiB, gcc's runtime
+  library 9.8 MiB (it carries libgcc_s), and no font. It is the size row
+  as [ruled](backlog/lightest.md#decisions): the binary plus what it links.
 - One idle and one switching run per bar and compositor; startup is the
   median of 5.
 

@@ -40,7 +40,7 @@ milestones: **two** with a clock placed, the clock's timer plus the compositor's
 `wl_buffer.release` for each frame it draws, and **zero** with no module placed;
 ratified, see [Decisions](#decisions)), CPU over a fixed window while switching
 workspaces, peak memory, stripped binary size, installed closure size
-([nix-package](nix-package.md) keeps fonts out of it), startup to first frame,
+([nix-package](resolved/nix-package-done.md) keeps fonts out of it), startup to first frame,
 plus lines of code and direct dependency count.
 
 Also **a multi-day soak**: RSS and fd count sampled over days with the bar
@@ -84,6 +84,8 @@ were the maintainer's calls.
   The row is the binary plus its linked closure, which is how scootbg's own
   benchmark counts it. The M0 baselines recorded the installed closures (yambar
   771 MB, Waybar 1,037 MB, ironbar 1,232 MB, ashell 720 MB, nixpkgs default
-  features); scootbar links only glibc, libm and libgcc_s. Its own closure figure
-  is measured and published on that row when `packages.scootbar` lands
-  ([nix-package](nix-package.md)).
+  features); scootbar links only glibc, libm and libgcc_s. Its own closure,
+  measured when `packages.scootbar` landed
+  ([nix-package](resolved/nix-package-done.md#evidence)), is 49 MB with no
+  font, published on the clock's table in
+  [the README](../README.md#baselines).

@@ -31,7 +31,7 @@ builds it already does.
   and how a user opts in.
 - **What to push**: from `main` and release tags only, built by CI in a clean
   environment: `packages` for `scoot`, `scootctl`, `scootbg`,
-  [`scootbar`](../../scootbar/backlog/nix-package.md) (and `scoot-gpu`, which CI
+  [`scootbar`](../../scootbar/backlog/resolved/nix-package-done.md) (and `scoot-gpu`, which CI
   skips today because of its cost), and the dev shell for contributors. Systems:
   `x86_64-linux` and `aarch64-linux`. Never push builds of fork pull requests: a
   poisoned cache entry is a supply-chain hole.

@@ -250,7 +250,7 @@ The [skeleton](skeleton-layer-surface-done.md) draws no text, so it
 left the font to this entry: `--font PATH` on `scootbar daemon`, the short
 fixed list of well-known directories when it is not given, and a refusal to
 start, naming how to give it one, when no usable font is found
-([nix-package](../nix-package.md)). Document it in `docs/scootbar/cli.md`
+([nix-package](nix-package-done.md)). Document it in `docs/scootbar/cli.md`
 beside the skeleton's flags.
 
 ## First frame first
