@@ -1,0 +1,41 @@
+# `cargo fuzz` targets over the clock's two parsers of outside input: the
+# format string (`--clock-format`) and the TZif reader (`/etc/localtime`,
+# `TZ`). Test tooling only: never part of the shipped binary, and never a
+# member of the repository's workspace (the `[workspace]` table below makes
+# this its own), so `cargo build --workspace`, nextest, clippy and the
+# flake's builds never compile it. How to run it: README.md here.
+[package]
+name = "scootbar-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+# The two files are compiled by `#[path]` from scootbar's own source, and
+# use nothing but `std`.
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "format"
+path = "fuzz_targets/format.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tzif"
+path = "fuzz_targets/tzif.rs"
+test = false
+doc = false
+bench = false
+
+# Only symbols, for readable crash stacks.
+[profile.release]
+debug = 1

@@ -3,7 +3,7 @@ title: "Workspaces module: numbers, the active one marked, click to switch"
 status: "open"
 area: "scootbar"
 priority: "high"
-blocked: "module-api-and-clock"
+blocked: null
 milestone: "M2"
 ---
 

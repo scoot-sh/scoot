@@ -22,7 +22,7 @@ Resolved 2026-09-29. What landed:
   **hand-rolled TZif reader** (+8 KB, 0 mismatches against `zdump` over
   414,100 instants in 598 zones, fat and slim); runner-up `tz-rs`.
   Suspend/resume is covered by the kernel source, not exercised; to confirm
-  on hardware in [module-api-and-clock](../module-api-and-clock.md).
+  on hardware in [module-api-and-clock](module-api-and-clock-done.md).
 - **Baselines** for yambar, Waybar, ironbar and ashell on scoot headless and
   sway headless, published in
   [`docs/scootbar/README.md`](../../README.md#baselines), with the method.

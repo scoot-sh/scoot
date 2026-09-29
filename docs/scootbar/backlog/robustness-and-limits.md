@@ -26,13 +26,28 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
   child that never prints is fine, one that floods cannot grow memory.
 - **Config and JSON**: size caps, depth limits, and every parse failure a
   named error, never a panic. Hot reload keeps the running config on failure.
-- **Text**: bounded glyph cache and bounded string lengths per module. The
-  font file is mapped ([M0's choice](resolved/dependencies-done.md#1d-mapped-or-read)),
-  so a font truncated in place under the running bar is a `SIGBUS`: decide
-  here whether to document it or read files outside `/nix/store` into the heap.
+- **Text**: bounded glyph cache and bounded string lengths per module.
+  *Built with the clock
+  ([module-api-and-clock](resolved/module-api-and-clock-done.md)):* the
+  glyph cache holds at most 512 glyphs and 4 MiB of coverage and is dropped
+  and refilled past either; a glyph whose bounds would need a rasterizer
+  buffer past 4 megapixels (a hostile font) is not drawn; a module's view
+  text and tooltip are cut at 256 bytes; control characters are never
+  drawn. **The font mapping is decided there**: a font is mapped only when
+  it is owned by root, writable by no one and on a read-only mount (a
+  read-only mount alone is not enough, as review showed), and read into
+  the heap everywhere else, at most 64 MiB, so a `cp` over the font under a
+  running bar cannot `SIGBUS` it.
+  What is left here is a title stream fuzzed through the cache
+  ([icons-and-fonts](icons-and-fonts.md) owns that test).
 - **Time zone file**: the TZif reader caps the file (64 KiB in the spike),
   checks every count and index, and falls back to the last transition or to
   UTC rather than failing ([M0 §3](resolved/dependencies-done.md#3-time-zone)).
+  *Built with the clock:* the cap is enforced while reading (at most 64 KiB
+  + 1 bytes, from a regular file only, opened without blocking, so
+  `TZ=:/dev/zero` or a FIFO cannot hang or balloon it), the instant is
+  clamped before any arithmetic, and a `cargo fuzz` target covers the
+  reader and the POSIX rule parser.
 - **Module count and layout**: a configured list has a maximum; a layout wider
   than the output clips deliberately, not by overflow (saturating arithmetic on
   every client-controlled size).

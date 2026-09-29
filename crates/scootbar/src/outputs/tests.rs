@@ -42,13 +42,13 @@ fn a_bound_output_waits_for_its_settle_then_creates_once() {
     let (mut outputs, id) = bound();
     let output = output(&mut outputs, id);
     assert_eq!(output.surface(), Surface::Waiting);
-    assert_eq!(output.plan(&Bar::default()), Plan::Nothing);
+    assert_eq!(output.plan(&Bar::default(), false), Plan::Nothing);
     assert_eq!(output.settled(), Effect::Create);
     assert_eq!(output.surface(), Surface::Pending);
     // A second callback (cannot happen, but) creates nothing more.
     assert_eq!(output.settled(), Effect::None);
     // Nothing to draw before the first configure.
-    assert_eq!(output.plan(&Bar::default()), Plan::Nothing);
+    assert_eq!(output.plan(&Bar::default(), false), Plan::Nothing);
 }
 
 #[test]
@@ -89,10 +89,10 @@ fn a_configure_is_acked_and_then_drawn() {
     let bar = Bar::default();
     let output = output(&mut outputs, id);
     let want = frame(1920, 28, Scale::Integer(1));
-    assert_eq!(output.plan(&bar), Plan::Draw(want));
+    assert_eq!(output.plan(&bar, false), Plan::Draw(want));
     output.drew(want);
     // Drawn: nothing more until something changes. No wakeups at idle.
-    assert_eq!(output.plan(&bar), Plan::Nothing);
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
 }
 
 #[test]
@@ -103,9 +103,9 @@ fn a_configure_that_changes_nothing_is_committed_not_redrawn() {
     let want = frame(1920, 28, Scale::Integer(1));
     output.drew(want);
     assert_eq!(output.configure(6, 1920, 28), Effect::Ack(6));
-    assert_eq!(output.plan(&bar), Plan::Commit);
+    assert_eq!(output.plan(&bar, false), Plan::Commit);
     output.committed();
-    assert_eq!(output.plan(&bar), Plan::Nothing);
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn a_new_size_redraws() {
     output.drew(frame(1920, 28, Scale::Integer(1)));
     assert_eq!(output.configure(6, 1280, 28), Effect::Ack(6));
     assert_eq!(
-        output.plan(&bar),
+        output.plan(&bar, false),
         Plan::Draw(frame(1280, 28, Scale::Integer(1)))
     );
 }
@@ -154,12 +154,12 @@ fn a_zero_width_with_no_mode_waits() {
     assert_eq!(output.settled(), Effect::Create);
     assert_eq!(output.configure(1, 0, 28), Effect::Ack(1));
     assert_eq!(output.surface_size(&Bar::default()), None);
-    assert_eq!(output.plan(&Bar::default()), Plan::Nothing);
+    assert_eq!(output.plan(&Bar::default(), false), Plan::Nothing);
     // The mode arrives: now it can be drawn.
     output.stage_mode(true, 800, 600);
     output.done();
     assert_eq!(
-        output.plan(&Bar::default()),
+        output.plan(&Bar::default(), false),
         Plan::Draw(frame(800, 28, Scale::Integer(1)))
     );
 }
@@ -173,22 +173,22 @@ fn a_scale_change_redraws_at_the_new_scale() {
     output.stage_scale(2);
     output.done();
     assert_eq!(
-        output.plan(&bar),
+        output.plan(&bar, false),
         Plan::Draw(frame(1920, 28, Scale::Integer(2)))
     );
     output.drew(frame(1920, 28, Scale::Integer(2)));
     output.prefer_fractional(180);
     assert_eq!(
-        output.plan(&bar),
+        output.plan(&bar, false),
         Plan::Draw(frame(1920, 28, Scale::Fractional(180)))
     );
     output.drew(frame(1920, 28, Scale::Fractional(180)));
     // The same scale again changes nothing.
     output.prefer_fractional(180);
-    assert_eq!(output.plan(&bar), Plan::Nothing);
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
     // A surface integer scale below the fraction's does not win.
     output.prefer_buffer_scale(1);
-    assert_eq!(output.plan(&bar), Plan::Nothing);
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
 }
 
 #[test]
@@ -199,16 +199,16 @@ fn a_failed_draw_is_not_retried_until_the_frame_changes() {
     let want = frame(1920, 28, Scale::Integer(1));
     output.draw_failed(want);
     // Never drawn, so there is nothing to commit either.
-    assert_eq!(output.plan(&bar), Plan::Nothing);
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
     // A new configure is a new chance.
     assert_eq!(output.configure(6, 1920, 28), Effect::Ack(6));
-    assert_eq!(output.plan(&bar), Plan::Draw(want));
+    assert_eq!(output.plan(&bar, false), Plan::Draw(want));
     output.draw_failed(want);
     // So is a new scale.
     output.stage_scale(2);
     output.done();
     assert_eq!(
-        output.plan(&bar),
+        output.plan(&bar, false),
         Plan::Draw(frame(1920, 28, Scale::Integer(2)))
     );
 }
@@ -221,11 +221,11 @@ fn a_failed_redraw_still_commits_the_ack_on_a_mapped_surface() {
     output.drew(frame(1920, 28, Scale::Integer(1)));
     assert_eq!(output.configure(6, 3000, 28), Effect::Ack(6));
     let want = frame(3000, 28, Scale::Integer(1));
-    assert_eq!(output.plan(&bar), Plan::Draw(want));
+    assert_eq!(output.plan(&bar, false), Plan::Draw(want));
     output.draw_failed(want);
-    assert_eq!(output.plan(&bar), Plan::Commit);
+    assert_eq!(output.plan(&bar, false), Plan::Commit);
     output.committed();
-    assert_eq!(output.plan(&bar), Plan::Nothing);
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
 }
 
 #[test]
@@ -236,7 +236,7 @@ fn closed_retries_once_then_gives_up() {
     output.drew(frame(1920, 28, Scale::Integer(1)));
     assert_eq!(output.closed(), Effect::DestroyAndRetry);
     assert_eq!(output.surface(), Surface::Closed);
-    assert_eq!(output.plan(&bar), Plan::Nothing);
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
     // A second `closed` for the destroyed surface is stale.
     assert_eq!(output.closed(), Effect::None);
     assert_eq!(output.retry(), Effect::Create);
@@ -244,14 +244,14 @@ fn closed_retries_once_then_gives_up() {
     // The new surface draws from scratch once configured.
     assert_eq!(output.configure(9, 1920, 28), Effect::Ack(9));
     assert_eq!(
-        output.plan(&bar),
+        output.plan(&bar, false),
         Plan::Draw(frame(1920, 28, Scale::Integer(1)))
     );
     assert_eq!(output.closed(), Effect::DestroyAndGiveUp);
     assert_eq!(output.surface(), Surface::GaveUp);
     assert_eq!(output.retry(), Effect::None);
     assert_eq!(output.configure(10, 1920, 28), Effect::None);
-    assert_eq!(output.plan(&bar), Plan::Nothing);
+    assert_eq!(output.plan(&bar, false), Plan::Nothing);
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn a_draw_recorded_after_close_does_not_resurrect_it() {
     output.drew(frame(1920, 28, Scale::Integer(1)));
     assert_eq!(output.retry(), Effect::Create);
     assert_eq!(output.configure(2, 1920, 28), Effect::Ack(2));
-    assert!(matches!(output.plan(&Bar::default()), Plan::Draw(_)));
+    assert!(matches!(output.plan(&Bar::default(), false), Plan::Draw(_)));
 }
 
 #[test]

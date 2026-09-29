@@ -5,18 +5,20 @@ the lightest bar that is still beautiful and configurable. It starts as a
 clock, gains workspaces, and grows by modules, one small daemon of a
 composable shell.
 
-> **Status: early.** `scootbar daemon` puts a solid bar on every output,
-> reserving its space, across outputs coming and going; the flags are in
-> [cli.md](cli.md). That is M1's first step, the
-> [skeleton](backlog/resolved/skeleton-layer-surface-done.md); the clock,
-> the module API and the Nix package complete M1, a clock you can
-> `nix run`. M0, the measuring milestone, is done: the competitor
-> baselines below, and the font rasterizer and clock choices, recorded in
+> **Status: early.** `scootbar daemon` puts a bar with a clock on every
+> output, reserving its space, across outputs coming and going; the flags
+> are in [cli.md](cli.md). That is M1's
+> [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
+> [module API and clock](backlog/resolved/module-api-and-clock-done.md);
+> the Nix package completes M1, a clock you can `nix run`. M0, the
+> measuring milestone, is done: the competitor baselines below, and the
+> font rasterizer and clock choices, recorded in
 > [the dependency record](backlog/resolved/dependencies-done.md). The
 > plan, milestone by milestone, is the [backlog](backlog/README.md).
 
 ```sh
-scootbar daemon --height 28 --background '#1e1e2e' &
+scootbar daemon --font /path/to/DejaVuSans.ttf &            # 3:07 pm, centered
+scootbar daemon --clock-format '%a %d %b %H:%M' --right clock &
 ```
 
 ## What it is for
@@ -25,8 +27,11 @@ scootbar daemon --height 28 --background '#1e1e2e' &
   every milestone against the last one and against the bars below, in the
   [resource ratchet](backlog/lightest.md). A loss is a finding to fix.
 - **Event-driven, no polling**: one `poll(2)` loop, and idle wakeups are a
-  measured row. A minute clock should wake once a minute; M0's spike clock
-  does ([measured](backlog/resolved/dependencies-done.md#2a-idle-one-wakeup-per-minute)).
+  measured row. A minute clock's timer wakes it once a minute (M0's spike
+  clock [measured](backlog/resolved/dependencies-done.md#2a-idle-one-wakeup-per-minute)
+  it), and each frame it draws brings one `wl_buffer.release` from the
+  compositor, so the bar idles at 2 wakeups a minute (the target is one; see the
+  [open decisions](backlog/lightest.md#open-decisions)); with no module, 0.
 - **Standard protocols first** (`ext-workspace-v1`, layer shell), so it
   runs on other compositors as scootbg does.
 - **GPU-free**: `wl_shm` buffers at the output's real device pixels.
@@ -98,8 +103,44 @@ the same machine the same day, release build at `62181e6`:
 
 The raw runs are in the
 [skeleton's record](backlog/resolved/skeleton-layer-surface-done.md#evidence).
-The clock will add text (the font rasterizer, M0's +115 KB) and one wakeup a
-minute; the M1 column replaces this one.
+
+**scootbar with the clock** (M1's
+[module API and clock](backlog/resolved/module-api-and-clock-done.md)),
+showing `%a %d %b %H:%M` as the other bars did, in DejaVu Sans 2.37 from
+the pinned nixpkgs, measured the same way on the same machine the same
+day, release build at `44fc656`. Like yambar and ironbar on scoot, it
+shows no workspaces yet, so the switching row is a bystander's:
+
+| | on scoot | on sway |
+|---|---|---|
+| Idle RSS | 3.9 MiB (3.4 MiB with the font mapped) | 3.9 MiB |
+| Idle PSS | 2.1 MiB (1.6 MiB mapped) | 2.1 MiB |
+| Idle heap (`RssAnon`) | 0.92 MiB (0.18 MiB mapped) | 0.92 MiB |
+| Peak memory (`VmHWM`) | 3.9 MiB | 3.9 MiB |
+| Idle wakeups per minute | **2.0** | **2.0** |
+| Idle CPU, 300 s window | 1.96 ms | 1.46 ms |
+| CPU, 240 workspace switches in 60 s | 0.30 ms (no workspaces shown) | 0.24 ms (no workspaces shown) |
+| Startup to first frame (median of 5) | 9.9 ms | 8.7 ms |
+| Binary | 849 KB (links only glibc and libgcc_s) | as on scoot |
+| Threads | 1 | 1 |
+
+- **Two wakeups a minute, not one**: the tick, and about a millisecond
+  later the compositor's `wl_buffer.release` for the buffer the tick's
+  frame replaced, on both compositors (the record has the trace). Every
+  `wl_shm` client gets that reply once per frame. It is still the fewest of
+  any bar here (yambar's 2.6 to 4).
+- **The font's bytes**: DejaVu Sans is read into the heap (742 KiB) unless
+  it is a root-owned, unwritable file on a read-only mount, where it is
+  mapped: NixOS's `/nix/store` is that, this machine's store is not
+  mounted read-only, so the main column is the read one, and the mapped
+  figures come from a root-owned `0444` copy on a read-only bind mount,
+  measured again at `de27775` after review tightened the rule
+  ([cli.md](cli.md#fonts) says why).
+- **The binary** is 246 KB over the skeleton's: the rasterizer and font
+  parser about 103 KB (M0 predicted 115), scootbar's own clock, text,
+  layout and render code about 52 KB, generic code from `core`, `std` and
+  `alloc` the rest. yambar's 407 KB links `libwayland-client`, `pixman`
+  and `fcft` besides; scootbar's is the whole of it.
 
 How the rows were taken, in short (the full method is in the record):
 

@@ -35,7 +35,7 @@ raw run are in §4 here.
 | Area | Choice | Runner-up | Deciding numbers |
 |---|---|---|---|
 | **Font rasterizer** | **`ab_glyph` 0.2** (`FontRef` over the font's bytes) | `swash` 0.2 (runner-up, for hinting); `fontdue` 0.9 rejected | Binary +115 KB against swash's +885 KB and fontdue's +82 KB. Idle after filling 190 glyphs (DejaVu Sans, 1x and 1.5x): heap 228 KB, RSS 2.8 MB, against swash's 260 KB / 3.9 MB and fontdue's **19.3 MB / 22.3 MB** (fontdue outlines every mapped glyph at load: 42–63 ms, against ab_glyph's 0.05 ms) |
-| **Font file** | **mapped** (`mmap`, private, read-only) | read into the heap | DejaVu Sans (742 KiB): heap 228 KB mapped against 976 KB read; load 0.05 ms against 0.6 ms; the pages are page cache, shared and reclaimable. One hazard, stated in §1d |
+| **Font file** | **mapped** (`mmap`, private, read-only); **refined in M1 (§8): mapped only on a read-only mount, read into the heap elsewhere** | read into the heap | DejaVu Sans (742 KiB): heap 228 KB mapped against 976 KB read; load 0.05 ms against 0.6 ms; the pages are page cache, shared and reclaimable. One hazard, stated in §1d, closed in §8 |
 | **Clock timer** | **absolute `CLOCK_REALTIME` timerfd** on the next local minute boundary, `TFD_TIMER_CANCEL_ON_SET`, re-armed after every wake with a post-arm check | a relative or interval timer | **10 wakeups in 600.0 s**, 0 involuntary switches, 0 CPU ticks; each tick 107–201 µs after the boundary; a clock step wakes it at once (§2) |
 | **Time zone** | **a hand-rolled TZif v1–v4 reader with the POSIX TZ footer** (one file, ~450 lines, no dependencies) | `tz-rs` 0.7 (also correct; +16 KB more) | +8,192 B over a UTC-only build, against tz-rs +24,576, chrono +53,344, jiff +77,824. **0 mismatches against `zdump` over 414,100 instants in 598 zones, fat and slim files, years 1800–2200**; tz-rs also 0 (§3) |
 | Zone change | `statx` the zone path on every wake; reload when device, inode, mtime or size change | inotify on `/etc` | no extra fd and no extra wakeup; a swapped `/etc/localtime` shows at the next tick (§3c) |
@@ -48,7 +48,7 @@ are GPL: they were only run, as binaries, for the baselines.
 
 ## What this changes in the plan
 
-- **[module-api-and-clock](../module-api-and-clock.md):**
+- **[module-api-and-clock](module-api-and-clock-done.md):**
   - Text through `ab_glyph`: `FontRef` over a mapping of the font file,
     with `PxScale` converted from the em size (ab_glyph's `PxScale` is the
     ascent-to-descent height, not the em: `em × height_unscaled ÷
@@ -68,7 +68,11 @@ are GPL: they were only run, as binaries, for the baselines.
     `/usr/share/zoneinfo`, or a POSIX string, which the footer parser already
     reads) before `/etc/localtime`. Not in the spike.
   - "Idle is exactly one wakeup per minute" is now a measured target, not
-    a hope: the spike's loop does it (§2a).
+    a hope: the spike's loop does it (§2a). *(Refined by the clock: one
+    timer wake a minute; each frame the bar draws brings one
+    `wl_buffer.release` from the compositor, which the spike, with no
+    Wayland connection, did not have, so the bar idles at 2 wakeups a
+    minute: [module-api-and-clock](module-api-and-clock-done.md).)*
 - **[icons-and-fonts](../icons-and-fonts.md):** the fallback chain and the
   bounded cache are built on `ab_glyph` (`ttf-parser` underneath reads CFF
   and variable fonts: both rendered in §1b). **Revisit hinting there**:
@@ -254,7 +258,7 @@ equivalent to clock_was_set()"), which schedules `timerfd_clock_was_set()`
 monotonic-to-realtime offset changed, and suspend changes it (realtime
 advances across suspend, monotonic does not). So a resume is delivered
 exactly as a clock step is, the path §2c exercises. **Still to confirm on
-hardware** in [module-api-and-clock](../module-api-and-clock.md)'s tests.
+hardware** in [module-api-and-clock](module-api-and-clock-done.md)'s tests.
 
 ### 2c. Step results
 
@@ -592,6 +596,85 @@ are about 200 KB. yambar's 407,296 is smaller, but it links
 carries them); scootbar links none, so its binary is the whole of it. The
 font rasterizer (+115 KB, §1) and the TZif reader (+8 KB, §3) join with the
 clock.
+
+## 8. The font file, decided (the clock)
+
+Added by [module-api-and-clock](module-api-and-clock-done.md), whose Done
+when made this decision its own rather than
+[robustness-and-limits](../robustness-and-limits.md)'s. No new dependency:
+`ab_glyph` as §1 chose it, and the mapping in `scootbg-mem`.
+
+**Mapped only where the file is on a read-only mount, owned by root and
+writable by no one (`st_mode & 0o222 == 0`); read into the heap everywhere
+else** (`crates/scootbar/src/font.rs`,
+`scootbg_mem::file::map_if_read_only`). Why neither of the two options the
+entry offered as they stood, and why the read-only mount alone, this
+section's first version, was not enough:
+
+- *Map everywhere and document the hazard* leaves a `cp new.ttf
+  ~/.local/share/fonts/font.ttf` (which opens the old file `O_TRUNC`)
+  killing the bar with `SIGBUS`: a plausible user action, a crash, and a
+  crash is treated like data loss (`CLAUDE.md`).
+- *Read everything outside `/nix/store`* keys safety on a path: on a
+  single-user Nix install the store is writable by the user, and a path
+  check says nothing about a bind mount or a symlink into it.
+- *The mount's read-only flag alone* (`fstatvfs`, `ST_RDONLY`) was the first
+  version, and review of #324 broke it: the flag belongs to the mount, not
+  the file, and the same file is often writable through another path. A
+  font bind-mounted read-only and truncated through its read-write path
+  killed that version with `SIGBUS` (reproduced below). That is the shape
+  of systemd's `ProtectHome=read-only`, `ProtectSystem=strict` and
+  `ReadOnlyPaths=`, flatpak's `/run/host/fonts`, read-only container roots,
+  and NFS or FUSE mounts, so it is common, not contrived.
+- *Read-only mount, root's, no write bit*: a user cannot write such a file
+  through any path, but root can, because the write bit does not stop it
+  (`CAP_DAC_OVERRIDE`: review of #324 reproduced a `SIGBUS` with a plain `: >`
+  as root through the read-write side of a bind mount). Nix store files are
+  exactly that (root, `0444`, and NixOS mounts the store read-only), so
+  Stylix and the modules keep the mapping. What is left, in the mapping's
+  docs: a root process rewriting a store file in place through
+  a read-write view (on NixOS that would be `nix-daemon`, which never
+  rewrites a store file in place; it adds, unlinks or renames over whole
+  files, and the mapping keeps the old inode) and disk errors. The check
+  and the `unsafe` live together in `scootbg-mem`; scootbar stays
+  `#![forbid(unsafe_code)]`.
+
+Measured in the bar at `de27775` (release build, headless scoot, DejaVu
+Sans 2.37, 742 KiB, M0's harness: 5 startups, a 30 s settle, 300 s idle),
+three copies of the same file:
+
+| | Read (Nix store copy, root `0444`, read-write mount) | Mapped (root `0444`, read-only bind mount) | Read (root `0644`, read-only bind mount) |
+|---|---|---|---|
+| RSS | 3,952 KiB | 3,432 KiB | 3,924 KiB |
+| PSS | 2,108 KiB | 1,588 KiB | 2,080 KiB |
+| Heap (`RssAnon`) | 932 KiB | 188 KiB | 932 KiB |
+| Wakeups in 300 s | 10 | 10 | 10 |
+| Startup, ms | 12.8, 9.4, 11.3, 12.4, 8.2 | 13.3, 9.2, 8.8, 12.3, 8.9 | 10.2, 9.6, 8.2, 8.4, 9.1 |
+
+(`44fc656`, before the fix, gave 3,944 / 2,108 / 940 read and 3,388 /
+1,552 / 196 mapped; the mapped copy then was `0644`, which the fix now
+reads.) So the read path costs about 744 KiB of heap and 520 KiB of RSS
+for this font, in line with the entry's "about +750 KB"; a CJK or Nerd
+font would cost its size (the cap is 64 MiB).
+
+**The review's repro, before and after** (`--clock-format '%H:%M:%S'` on
+headless scoot, font a root `0644` copy seen through a read-only bind
+mount, then truncated to 0 bytes through its read-write path):
+
+```
+old: mapped? 1
+old: truncated via the read-write path to 0 bytes
+/bin/bash: line 1: 17963 Bus error               $BIN daemon --font /tmp/sb-rob/DejaVuSans.ttf --clock-format '%H:%M:%S' ...
+old: exited with status 135
+new: mapped? 0
+new: truncated via the read-write path to 0 bytes
+new: alive after 3 s of ticks
+```
+
+(`old` is `6a69352`, `new` `de27775`; "mapped?" counts the font's lines in
+`/proc/PID/maps`.) The root `0444` copy on a read-only mount is mapped
+(`7f3815746000-7f3815800000 r--p ... /tmp/sb-roa/DejaVuSans.ttf`), and
+writing it fails with `Read-only file system`.
 
 ## Not measured, and why
 

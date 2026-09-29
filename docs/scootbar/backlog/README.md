@@ -10,7 +10,7 @@ one file per item, YAML frontmatter (`title`, `status`, `area: "scootbar"`,
 ```sh
 scripts/backlog list --area scootbar --milestone M1   # what is in a milestone
 scripts/backlog list --area scootbar --unblocked      # what can start now
-scripts/backlog show module-api-and-clock
+scripts/backlog show workspaces-module
 ```
 
 Items move to `resolved/` here when done, with a `-done` suffix.
@@ -83,12 +83,13 @@ the bounds: [research notes](../research.md).
 ### M1 — A clock you can `nix run`
 Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [**Skeleton: a layer surface per output**](resolved/skeleton-layer-surface-done.md) — RESOLVED 2026-09-29: `scootbar daemon`, a solid bar per output across hotplug, device pixels at fractional scales, zero idle wakeups; flags, no config file ([cli.md](../cli.md))
-- [Module API, layout, theme tokens and the clock](module-api-and-clock.md) (high)
+- [**Module API, layout, theme tokens and the clock**](resolved/module-api-and-clock-done.md) — RESOLVED 2026-09-29: the module contract, three-section layout, color tokens, `ab_glyph` text with a bounded cache, and a timerfd clock (`3:07 pm` by default) redrawing only its own span; `--font` or a well-known file, else a refusal; fonts mapped only when root-owned, unwritable and on a read-only mount, as in the Nix store ([cli.md](../cli.md))
 - [Nix package](nix-package.md) (high): installable from the start
 - [Testing and CI](testing-and-ci.md) (medium): harnesses, path-filtered CI, first benchmark
 
 ### M2 — Workspaces: the first bar you can live with
 - [Workspaces module](workspaces-module.md) (high): `ext-workspace-v1`, click to switch
+- [M1 review follow-ups](m1-review-followups.md) (medium): a clock that retries a failed draw, and four hardening gaps
 
 ### M3 — Configurable
 - [Config file, control socket and reload](config-cli-and-reload.md) (medium): `scootbar msg`, `query`

@@ -1,6 +1,6 @@
 [package]
 name = "scootbg-mem"
-description = "The only unsafe code in scootbg: its allocator and wl_shm buffers"
+description = "The only unsafe code in scootbg and scootbar: an allocator, wl_shm buffers and a read-only file mapping"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

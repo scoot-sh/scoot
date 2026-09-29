@@ -34,10 +34,10 @@
 //! ## Drawing
 //!
 //! The surface is drawn when it is configured and its [`Frame`] (logical
-//! size and scale) differs from the one it was last committed with, and
-//! only then: that is the whole damage rule while the bar is one color. A
-//! `configure` that changes nothing still needs a commit, so the ack takes
-//! effect ([`Plan::Commit`]). Many events in one read (a scale change
+//! size and scale) differs from the one it was last committed with, or a
+//! module's view changed since (`stale`, which `crate::render` works out),
+//! and only then. A `configure` that changes nothing still needs a commit,
+//! so the ack takes effect ([`Plan::Commit`]). Many events in one read (a scale change
 //! arrives as several) are one plan, since the loop asks after dispatching
 //! them all.
 //!
@@ -185,8 +185,8 @@ pub enum Effect {
     DestroyAndGiveUp,
 }
 
-/// What a draw is at: everything that decides the buffer's pixels while the
-/// bar is one color. Two equal frames are the same pixels.
+/// What a draw is at: the surface's size and scale. With the same modules'
+/// views, two equal frames are the same pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Frame {
     /// The surface's size, in logical pixels.
@@ -239,7 +239,6 @@ impl Output {
         self.id
     }
 
-    #[cfg(test)]
     pub fn info(&self) -> &Info {
         &self.info
     }
@@ -404,8 +403,10 @@ impl Output {
         Some(Size { width, height })
     }
 
-    /// What to do for this output now (see the module docs).
-    pub fn plan(&self, bar: &Bar) -> Plan {
+    /// What to do for this output now (see the module docs). `stale`: a
+    /// module's view changed since the surface was last drawn, so the same
+    /// frame is drawn again (only the changed modules' pixels).
+    pub fn plan(&self, bar: &Bar, stale: bool) -> Plan {
         let Some(size) = self.surface_size(bar) else {
             return Plan::Nothing;
         };
@@ -413,7 +414,7 @@ impl Output {
             size,
             scale: self.scale(),
         };
-        if self.shown != Some(want) && self.failed != Some(want) {
+        if (self.shown != Some(want) || stale) && self.failed != Some(want) {
             return Plan::Draw(want);
         }
         // The same pixels, or a draw that failed at this frame: an acked

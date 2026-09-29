@@ -1026,10 +1026,14 @@ jobs:
         run: cargo fmt --check -p scootbar
 
       # scootbar is `#![forbid(unsafe_code)]`, which rustc enforces; its
-      # one mapping is scootbg-mem's, checked in the scootbg job.
+      # two mappings (the shm buffer, a font on a read-only mount) are
+      # scootbg-mem's, checked in the scootbg job. The second run is the
+      # smallest build, every module left out, which must stay buildable.
       - name: cargo clippy
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo clippy -p scootbar --all-targets -- -D warnings
+        run: |
+          cargo clippy -p scootbar --all-targets -- -D warnings
+          cargo clippy -p scootbar --no-default-features --all-targets -- -D warnings
 
       # Both runners, for the reason the Linux job gives.
       - name: cargo nextest and cargo test
@@ -1077,7 +1081,9 @@ jobs:
   # a bar per output, its zone and margins, pixels at fractional scales and
   # a live scale change, zero idle wakeups, exit when the compositor goes)
   # and a headless sway (tests/hotplug.rs: outputs plugged and unplugged at
-  # runtime, zero outputs, a hotplug storm with no leak). Runs when either
+  # runtime, zero outputs, a hotplug storm with no leak), and the clock on
+  # both (tests/clock.rs: the time read back off screenshots, per-module
+  # damage, no wakeup between minutes, the font refusals). Runs when either
   # side changes, since each can break the other's end-to-end run.
   # `SCOOTBAR_REQUIRE_SCOOT` and `SCOOTBAR_REQUIRE_SWAY` turn the tests'
   # skips into failures, so this job cannot go green by skipping; the
@@ -1134,5 +1140,5 @@ jobs:
           SCOOTBAR_REQUIRE_SCOOT: "1"
           SCOOTBAR_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbar --test bar --test hotplug --no-fail-fast
-          cargo test -p scootbar --test bar --test hotplug
+          cargo nextest run -p scootbar --test bar --test hotplug --test clock --no-fail-fast
+          cargo test -p scootbar --test bar --test hotplug --test clock

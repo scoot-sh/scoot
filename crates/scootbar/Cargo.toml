@@ -7,11 +7,19 @@ rust-version.workspace = true
 license.workspace = true
 
 # Linux only: on any other target the binary is a stub that says so (see
-# `src/main.rs`), as scootbg's is. Every dependency below is already in the
-# workspace for scootbg, chosen there by measurement
-# (docs/scootbg/backlog/resolved/dependencies-done.md); the skeleton adds
-# none of its own. scootbar's own record, which later entries extend, is
-# docs/scootbar/backlog/resolved/dependencies-done.md.
+# `src/main.rs`), as scootbg's is. The Wayland crates, `rustix` and
+# `scootbg-mem` are already in the workspace for scootbg, chosen there by
+# measurement (docs/scootbg/backlog/resolved/dependencies-done.md);
+# `ab_glyph` is scootbar's own, chosen in its record,
+# docs/scootbar/backlog/resolved/dependencies-done.md (§1).
+
+# One feature per module, so the smallest build has none of a module's code
+# (`src/modules/mod.rs` says how a module is added). A build without any
+# module draws a plain bar and needs no font.
+[features]
+default = ["clock"]
+clock = []
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
 # of its own (`#![forbid(unsafe_code)]` in `src/main.rs`).
@@ -24,15 +32,19 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 # `zwlr_layer_shell_v1`: a bar is a layer surface.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
-# poll(2) through raw syscalls, no `libc` crate: the same `rustix` the
-# Wayland crates already pull in.
-rustix = { version = "1", default-features = false, features = ["std", "event"] }
+# poll(2), and the clock's timerfd, `statx` of the zone file and
+# `clock_gettime`, through raw syscalls, no `libc` crate: the same `rustix`
+# the Wayland crates already pull in.
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "time"] }
+# Text: the M0 choice (its record, §1). Lazily parsed over the font's bytes,
+# so memory follows what is drawn; grayscale coverage, no hinting.
+ab_glyph = "0.2"
 
 # The integration tests read screenshots back: scoot's arrive as base64 PNG
 # over its IPC, sway's through a small wlr-screencopy client into a memfd.
 # Dev-only: none of it reaches the binary's dependency tree.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "process", "fs"] }
+rustix = { version = "1", default-features = false, features = ["std", "process", "fs", "pipe", "time"] }
 base64.workspace = true
 png = "0.18"
 serde_json.workspace = true
