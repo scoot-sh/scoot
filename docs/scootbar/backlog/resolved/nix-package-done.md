@@ -167,7 +167,10 @@ before committing (`/nix/store/fsv7x4mrnrvxbx32w3fx0n2q3qr2a9m1-scootbar-0.1.0.d
 is the one the committed head evaluates to (re-checked below). The
 container runs Nix with `sandbox = false`. The first build's cargo left
 `/homeless-shelter/.cargo` behind, which made Nix refuse the next build
-there. Every build after that ran with `--option sandbox true`.
+there. The later commands ran with `--option sandbox true`, but the store path measured
+below is the first, unsandboxed build (later ones were cache hits). The review's
+sandboxed `--rebuild` gave the same 845,152-byte binary and the same references,
+so no number here changes.
 
 ```
 $ nix build .#scootbar .#scootbar-demo -L          # cold: real 2m13s

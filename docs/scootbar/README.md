@@ -11,7 +11,8 @@ composable shell.
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
 > [module API and clock](backlog/resolved/module-api-and-clock-done.md),
 > and its [Nix package](backlog/resolved/nix-package-done.md), which
-> completes M1: a clock you can `nix run`. M0, the
+> ships M1's `nix run`: a clock you can run in one command. M1 closes
+> with its testing and CI ticket. M0, the
 > measuring milestone, is done: the competitor baselines below, and the
 > font rasterizer and clock choices, recorded in
 > [the dependency record](backlog/resolved/dependencies-done.md). The
@@ -165,7 +166,8 @@ How the rows were taken, in short (the full method is in the record):
   pinned nixpkgs, measured the competitors' way (`nix path-info -S`), is
   49 MB (49,078,696 bytes): the bar 826 KiB (the package's build, 845,152
   bytes), glibc with libidn2 and libunistring 36.0 MiB, gcc's runtime
-  library 9.8 MiB (it carries libgcc_s), and no font. It is the size row
+  10.2 MiB (`gcc-lib` 9.8 MiB, which carries libgcc_s, plus two 193 KiB
+  `libgcc` paths), and no font. It is the size row
   as [ruled](backlog/lightest.md#decisions): the binary plus what it links.
 - One idle and one switching run per bar and compositor; startup is the
   median of 5.

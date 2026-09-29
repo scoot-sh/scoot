@@ -45,7 +45,7 @@
 #
 # gpu-scanout is deliberately NOT built here: `packages.scoot-gpu` exists
 # since PR #198, but each main-push build pays a full Smithay rebuild the
-# cargo cache can't help with, and the two packaged artifacts above are the
+# cargo cache can't help with, and the packaged artifacts above are the
 # ones users install. The `-gpu` derivation stays covered the way it was
 # before it existed (local `nix build .#scoot-gpu`).
 
