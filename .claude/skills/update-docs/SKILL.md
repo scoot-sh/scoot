@@ -115,6 +115,4 @@ then quietly become false as the feature lands.
 - [ ] Enumerating prose converted to tables
 - [ ] Documented options/flags/commands diffed old vs new — nothing lost
 - [ ] Screenshot or diagram if the claim is visual
-- [ ] Credibility signal and "why over the alternative" near the top
-- [ ] "Not yet" list present and verified against HEAD
 - [ ] Every internal link resolves
