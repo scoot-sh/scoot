@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use super::{JobError, Worker, work};
@@ -9,6 +11,13 @@ use crate::image::{Filter, Mode, samples};
 use crate::jobs::Target;
 use crate::outputs::{OutputId, Outputs};
 use crate::wallpaper::Image;
+
+thread_local! {
+    /// The handle of the thread `spawn_thread` last started on this test's
+    /// thread. Tests share one process under `cargo test`, so the thread a
+    /// test started can only be told from a neighbour's by its handle.
+    pub(super) static LAST_THREAD: RefCell<Option<JoinHandle<()>>> = const { RefCell::new(None) };
+}
 
 fn ids(n: usize) -> Vec<OutputId> {
     let mut outputs: Outputs<()> = Outputs::default();
@@ -152,23 +161,20 @@ fn a_job_runs_on_its_own_thread_and_wakes_the_loop() {
     // Read once: not readable again until the next job.
     assert!(!readable(&worker, 0));
     assert!(worker.take().is_none());
-    // The thread has ended (give it a moment to finish unwinding).
+    // This job's thread has ended (give it a moment to finish unwinding).
+    // Its own handle, not a count of threads by name: a neighbouring test's
+    // decode thread is not this one staying.
+    let thread = LAST_THREAD
+        .with(|last| last.borrow_mut().take())
+        .expect("the worker started a thread");
+    assert_eq!(thread.thread().name(), Some("scootbg-decode"));
     let deadline = Instant::now() + Duration::from_secs(5);
-    while threads_named("scootbg-decode") > 0 {
+    while !thread.is_finished() {
         assert!(Instant::now() < deadline, "the decoding thread stayed");
         std::thread::sleep(Duration::from_millis(10));
     }
+    thread.join().expect("the decoding thread ended cleanly");
     std::fs::remove_dir_all(&dir).unwrap();
-}
-
-fn threads_named(name: &str) -> usize {
-    std::fs::read_dir("/proc/self/task")
-        .unwrap()
-        .filter_map(Result::ok)
-        .filter(|task| {
-            std::fs::read_to_string(task.path().join("comm")).is_ok_and(|comm| comm.trim() == name)
-        })
-        .count()
 }
 
 fn refuse(_: Box<dyn FnOnce() + Send>) -> std::io::Result<()> {

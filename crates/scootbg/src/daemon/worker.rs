@@ -76,7 +76,14 @@ fn spawn_thread(job: Box<dyn FnOnce() + Send>) -> io::Result<()> {
         .name("scootbg-decode".into())
         .stack_size(DECODE_STACK)
         .spawn(job)
-        .map(drop)
+        .map(|handle| {
+            // A test waits on its own thread, not on every thread of that
+            // name in a process its neighbours share.
+            #[cfg(test)]
+            tests::LAST_THREAD.with(|last| *last.borrow_mut() = Some(handle));
+            #[cfg(not(test))]
+            drop(handle);
+        })
 }
 
 /// A result, and the ticket of the job it belongs to.
