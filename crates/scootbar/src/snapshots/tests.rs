@@ -148,9 +148,11 @@ fn bar(width: u32, height: u32, scale: Scale) -> Image {
         &mut canvas,
         &mut record,
         &scene,
+        &placed,
         Some(&mut text),
         &style,
         frame,
+        &OutputView { name: None },
     );
     Image::from_xrgb(&pixels, device_width, device_height, true)
 }

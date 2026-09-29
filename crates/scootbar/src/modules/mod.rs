@@ -26,6 +26,24 @@
 //!    frame. `output` lets a per-output module (workspaces) differ; most
 //!    ignore it.
 //!
+//! Two hooks with defaults cover what the fd pattern cannot, so no module
+//! written before them changes:
+//!
+//! - **[`Module::on_dispatch`]** reports state that arrived on the Wayland
+//!   connection's fd, which the loop owns and dispatches centrally: the
+//!   workspaces module keeps `ext-workspace-v1` objects, whose events land
+//!   there rather than on a module-owned fd. The loop calls it after every
+//!   dispatch, before drawing.
+//! - **[`Module::on_click`]** takes a pointer button press in the module's
+//!   own span, with what it needs to hit-test it ([`ClickCtx`]). Only the
+//!   workspaces module implements it, with its own minimal hit test over
+//!   its pill rects; the general mechanism
+//!   (`docs/scootbar/backlog/pointer-and-interactions.md`) generalizes this
+//!   code rather than replacing the behavior.
+//! - **[`Module::custom_draw`]** draws the module itself ([`CustomDraw`]),
+//!   for the one module whose look is not plain text on the bar: the
+//!   workspaces module's pill behind the active workspace.
+//!
 //! Modules are built once at start-up as trait objects (the only allocation
 //! they cost the loop), and a redraw is a handful of virtual calls.
 //!
@@ -46,11 +64,16 @@ use std::os::fd::BorrowedFd;
 use rustix::event::{PollFd, PollFlags};
 
 use crate::layout::{Layout, Section};
+use crate::paint::{Canvas, Span};
+use crate::text::Text;
+use crate::theme::Theme;
 
 #[cfg(feature = "clock")]
 pub mod clock;
 #[cfg(test)]
 pub mod harness;
+#[cfg(feature = "workspaces")]
+pub mod workspaces;
 
 #[cfg(test)]
 mod tests;
@@ -68,6 +91,34 @@ pub trait Module {
 
     /// Fills `view` (cleared by the caller) for `output`.
     fn view(&self, output: &OutputView<'_>, view: &mut View);
+
+    /// State that arrived on the Wayland connection's fd since the last
+    /// turn: the loop calls this after every dispatch, before drawing, and
+    /// bumps the revision when it says the view changed. A module with no
+    /// Wayland objects keeps the default. (The workspaces module's
+    /// `ext-workspace-v1` objects land there, on an fd the module does not
+    /// own, so `sources`/`on_ready` cannot see them.)
+    fn on_dispatch(&mut self) -> Update {
+        Update::Unchanged
+    }
+
+    /// A pointer button press landed in this module's span: `ctx` says
+    /// where, with what the module needs to hit-test it. Only the
+    /// workspaces module answers; the loop routes the press to whichever
+    /// module's span holds it, so any other module keeps the default.
+    fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Update {
+        let _ = ctx;
+        Update::Unchanged
+    }
+
+    /// Draws the module itself, instead of the loop's plain text draw.
+    /// `true` when it drew (the loop then draws nothing more for it this
+    /// paint); `false` keeps the default. Only the workspaces module opts
+    /// in, for its pill behind the active workspace.
+    fn custom_draw(&self, ctx: &mut CustomDraw<'_, '_>) -> bool {
+        let _ = ctx;
+        false
+    }
 }
 
 /// What `init` found.
@@ -113,6 +164,16 @@ pub const REGISTRY: &[Spec] = &[
         #[cfg(test)]
         stand_in: None,
     },
+    #[cfg(feature = "workspaces")]
+    Spec {
+        id: workspaces::ID,
+        init: workspaces::init,
+        // Available on any machine the tests run on: without a compositor
+        // it starts with an empty view, like a module still waiting for
+        // its first event.
+        #[cfg(test)]
+        stand_in: None,
+    },
 ];
 
 /// The registry entry for `id`.
@@ -134,6 +195,14 @@ impl Placed {
     /// view changed.
     pub fn ready(&mut self, source: usize, events: PollFlags) {
         if self.module.on_ready(source, events) == Update::Changed {
+            self.revision = self.revision.wrapping_add(1);
+        }
+    }
+
+    /// Hands the turn's Wayland dispatch to the module, and bumps the
+    /// revision if the view changed (see [`Module::on_dispatch`]).
+    pub fn dispatch(&mut self) {
+        if self.module.on_dispatch() == Update::Changed {
             self.revision = self.revision.wrapping_add(1);
         }
     }
@@ -171,6 +240,8 @@ pub fn start(
 pub struct Settings {
     #[cfg(feature = "clock")]
     pub clock: clock::Settings,
+    #[cfg(feature = "workspaces")]
+    pub workspaces: workspaces::Settings,
 }
 
 /// What a module may know about the output it is asked to show on.
@@ -178,6 +249,46 @@ pub struct Settings {
 pub struct OutputView<'a> {
     /// `wl_output.name` (`DP-1`), if the compositor sent one.
     pub name: Option<&'a str>,
+}
+
+/// A pointer button press in a module's span, for [`Module::on_click`]:
+/// where it landed and what the module needs to hit-test it.
+#[allow(dead_code)] // Only the workspaces module reads it.
+pub struct ClickCtx<'a> {
+    /// The output whose bar was clicked.
+    pub output: OutputView<'a>,
+    /// Device pixels from the module span's left edge.
+    pub x: u32,
+    /// The view as drawn: the hit test walks its text.
+    pub view: &'a View,
+    /// What the module was measured with: the same measurer, size and
+    /// padding the loop drew it with, so its hit rects match its ink.
+    pub text: &'a Text,
+    /// The em in device pixels, as drawn.
+    pub em: f32,
+    /// Device pixels either side of the module's content, as drawn.
+    pub padding: u32,
+}
+
+/// What a module draws itself with, for [`Module::custom_draw`]: the same
+/// canvas, measurer, span and metrics the loop's plain text draw would use.
+#[allow(dead_code)] // Only the workspaces module reads it.
+pub struct CustomDraw<'r, 'c> {
+    /// The output being drawn.
+    pub output: OutputView<'r>,
+    /// The view as measured: the module draws its text.
+    pub view: &'r View,
+    pub canvas: &'r mut Canvas<'c>,
+    pub text: &'r mut Text,
+    /// This module's span, in device pixels.
+    pub span: Span,
+    /// The em in device pixels, as measured.
+    pub em: f32,
+    /// The baseline, in device pixels from the canvas's top.
+    pub baseline: i64,
+    /// Device pixels either side of the module's content, as measured.
+    pub padding: u32,
+    pub theme: &'r Theme,
 }
 
 /// A state class: how the bar colors a module's view (through the theme's

@@ -333,9 +333,16 @@ fn the_clock_format_is_checked_when_read() {
 #[test]
 fn the_help_matches_the_build() {
     let has_clock = crate::modules::find("clock").is_some();
+    let has_workspaces = crate::modules::find("workspaces").is_some();
     assert_eq!(DAEMON_HELP.contains("--clock-format"), has_clock);
     assert_eq!(DAEMON_HELP.contains("Modules: clock"), has_clock);
-    assert_eq!(USAGE.contains("with a clock"), has_clock);
+    assert_eq!(USAGE.contains("a clock"), has_clock);
+    assert_eq!(USAGE.contains("workspaces"), has_workspaces);
+    assert_eq!(
+        DAEMON_HELP.contains("the workspaces module"),
+        has_workspaces
+    );
+    assert_eq!(DAEMON_HELP.contains("ext-workspace-v1"), has_workspaces);
     for flag in super::FLAGS {
         assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
     }

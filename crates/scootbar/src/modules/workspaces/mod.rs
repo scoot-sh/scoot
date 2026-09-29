@@ -1,0 +1,779 @@
+//! The workspaces module: each output's workspace numbers, the active one
+//! in a pill, switching on click.
+//!
+//! An `ext-workspace-v1` client. The compositor announces one group per
+//! output and, per group, workspace handles with a `name`, one-element
+//! `coordinates` and an `active` state bit, closing every batch with
+//! `done`. The module shows each output its own group's numbers, marks the
+//! active one, and sends `activate` then `commit` for the pill clicked.
+//!
+//! ## Positions, not identities
+//!
+//! Handles are positions: scoot sends no `id`, renumbers past a dropped
+//! workspace, and names an adopted workspace `"2 DP-1"`. So nothing is
+//! remembered across batches except the last `done`'s committed state:
+//! names are parsed to their leading number at event time (an adopted
+//! workspace shows its number), workspaces sort by `coordinates` (not name:
+//! `"10"` sorts before `"2"`), and a click acts on the committed handle,
+//! never an older one. A name with no leading number (a foreign
+//! compositor's free-form name) shows its 1-based position.
+//!
+//! ## Batching: staged, committed, never half-drawn
+//!
+//! Events between two `done`s mutate staged state only; `done` sorts and
+//! commits it and bumps the generation, which [`Module::on_dispatch`]
+//! reports. A batch without `done` therefore never redraws, and a manager
+//! `finished` mid-batch drops the staged half (restoring the last commit)
+//! without bumping, so it is never drawn half-updated. Window-churn floods
+//! cost one redraw: any number of `done`s before the loop's next draw is
+//! still one draw.
+//!
+//! ## Fixed bounds, no allocation past start-up
+//!
+//! Groups and workspaces live in fixed arrays ([`MAX_GROUPS`],
+//! [`MAX_WORKSPACES`]), so events, frames and clicks allocate nothing. Past
+//! either bound the extras are left out (said once on stderr); both are far
+//! past anything reachable (scoot has at most 8 outputs, and a workspace
+//! needs a window to exist). The 256-byte view bound
+//! ([`super::MAX_TEXT`]) still caps hostile counts or names.
+//!
+//! ## The pill and the hit test
+//!
+//! The active workspace's pill is drawn by [`Module::custom_draw`] as a
+//! rectangular accent fill behind its number, with the number itself in the
+//! bar's background color; the rest draws as plain text. It is rectangular
+//! because the canvas has no rounded shape until
+//! `docs/scootbar/backlog/appearance.md` adds one: the fill becomes rounded
+//! then, the colors and rects stay. [`Module::on_click`] hit-tests the same
+//! rects, walked with [`Text::advance`] exactly as the text draw walks its
+//! pen, so the rects match the ink pixel for pixel.
+
+use std::cell::RefCell;
+use std::fmt::Write;
+use std::rc::Rc;
+
+use wayland_client::protocol::wl_output::WlOutput;
+use wayland_protocols::ext::workspace::v1::client::ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1;
+use wayland_protocols::ext::workspace::v1::client::ext_workspace_handle_v1::ExtWorkspaceHandleV1;
+use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::ExtWorkspaceManagerV1;
+
+use super::{ClickCtx, CustomDraw, Init, Module, OutputView, Sources, Update, View};
+use crate::paint::Span;
+use crate::print::warn;
+use crate::text::Text;
+
+#[cfg(test)]
+mod tests;
+
+/// The id `--left`, `--center` and `--right` name it by.
+pub const ID: &str = "workspaces";
+
+/// Groups tracked at most: one per output.
+const MAX_GROUPS: usize = 8;
+/// Workspaces per group, staged, committed and unassigned each.
+const MAX_WORKSPACES: usize = 32;
+/// Output names kept at most, in bytes: `wl_output` names are short
+/// (`DP-1`, `HEADLESS-1`); longer ones are cut.
+const MAX_NAME: usize = 64;
+
+/// The module's options: none of its own. The link is plumbing, not
+/// configuration: a fresh daemon run's shared workspace state, held here so
+/// the daemon's Wayland dispatch and this module see the same one. Equal by
+/// construction, so command-line parsing still compares.
+#[derive(Debug, Clone, Default)]
+pub struct Settings {
+    pub link: Link,
+}
+
+impl PartialEq for Settings {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Settings {}
+
+/// One daemon run's workspace state, shared between the module and the
+/// daemon's Wayland dispatch.
+#[derive(Debug, Clone, Default)]
+pub struct Link(pub(crate) Rc<RefCell<Shared>>);
+
+/// Everything the protocol told the bar, staged and committed.
+///
+/// Staged state is what the current batch says; committed is what the last
+/// `done` closed. Groups are staged in place (added on sight, swept at
+/// `done` when removed); workspaces are staged per group, with announced
+/// but unassigned handles in `pending` until their `workspace_enter`.
+#[derive(Debug, Default)]
+pub struct Shared {
+    manager: Option<ExtWorkspaceManagerV1>,
+    /// False after the manager's `finished`: no more events will come, and
+    /// no request may be sent on it (the server destroyed its side; a
+    /// request would be a protocol error). The committed view stays as the
+    /// last thing known.
+    live: bool,
+    /// Bumped at every `done`; [`Workspaces::seen`] trails it.
+    generation: u64,
+    groups: [Group; MAX_GROUPS],
+    groups_len: usize,
+    pending: [Ws; MAX_WORKSPACES],
+    pending_len: usize,
+    /// Output names seen on `wl_output`, by proxy identity: a group's name
+    /// is applied when it enters the output, whichever event came first
+    /// (scoot sends `name` before the groups' `output_enter`).
+    known: [KnownName; MAX_GROUPS],
+    known_len: usize,
+    /// Said once: past a bound, or created nothing to show.
+    said_no_room: bool,
+}
+
+impl Shared {
+    /// Whether the manager was bound: the daemon bound it, or the
+    /// compositor lacks the protocol.
+    pub(crate) fn has_manager(&self) -> bool {
+        self.manager.is_some()
+    }
+}
+
+/// One output's group and its workspaces.
+#[derive(Debug, Clone)]
+struct Group {
+    group: Option<ExtWorkspaceGroupHandleV1>,
+    output: Option<WlOutput>,
+    name: [u8; MAX_NAME],
+    name_len: usize,
+    staged: [Ws; MAX_WORKSPACES],
+    staged_len: usize,
+    committed: [Ws; MAX_WORKSPACES],
+    committed_len: usize,
+    /// `removed` since the last `done`: swept then, never drawn meanwhile.
+    staged_dead: bool,
+}
+
+impl Default for Group {
+    fn default() -> Self {
+        Self {
+            group: None,
+            output: None,
+            name: [0; MAX_NAME],
+            name_len: 0,
+            staged: std::array::from_fn(|_| Ws::default()),
+            staged_len: 0,
+            committed: std::array::from_fn(|_| Ws::default()),
+            committed_len: 0,
+            staged_dead: false,
+        }
+    }
+}
+
+impl Group {
+    fn name(&self) -> &str {
+        std::str::from_utf8(&self.name[..self.name_len]).unwrap_or("")
+    }
+
+    fn set_name(&mut self, name: &str) {
+        set_name_bytes(&mut self.name, &mut self.name_len, name);
+    }
+}
+
+/// One output's name, kept by proxy identity so a group entering it later
+/// still learns it.
+#[derive(Debug, Clone)]
+struct KnownName {
+    output: Option<WlOutput>,
+    name: [u8; MAX_NAME],
+    name_len: usize,
+}
+
+impl Default for KnownName {
+    fn default() -> Self {
+        Self {
+            output: None,
+            name: [0; MAX_NAME],
+            name_len: 0,
+        }
+    }
+}
+
+impl KnownName {
+    fn set_name(&mut self, name: &str) {
+        set_name_bytes(&mut self.name, &mut self.name_len, name);
+    }
+}
+
+/// Copies `name` into fixed bytes, cut at a character boundary.
+fn set_name_bytes(into: &mut [u8; MAX_NAME], len: &mut usize, name: &str) {
+    let bytes = name.as_bytes();
+    let room = bytes.len().min(MAX_NAME);
+    into[..room].copy_from_slice(&bytes[..room]);
+    let mut cut = room;
+    while cut > 0 && std::str::from_utf8(&into[..cut]).is_err() {
+        cut -= 1;
+    }
+    *len = cut;
+}
+
+/// One workspace: what the view and the hit test need, plus the handle a
+/// click acts on (from the last `done`, never older).
+#[derive(Debug, Clone, Default)]
+struct Ws {
+    handle: Option<ExtWorkspaceHandleV1>,
+    /// The name's leading number; 0 when it had none (shown as its
+    /// position instead).
+    number: u32,
+    /// The first `coordinates` element; 0 when never sent (arrival order
+    /// then, the sort being stable).
+    coord: u32,
+    active: bool,
+}
+
+/// The leading ASCII digits of a workspace name (`"2 DP-1"` shows `2`); 0
+/// when there are none.
+fn parse_number(name: &str) -> u32 {
+    let digits = name.bytes().take_while(u8::is_ascii_digit).count().min(9);
+    name[..digits].parse().unwrap_or(0)
+}
+
+/// The first `coordinates` element, native byte order, as the protocol
+/// carries a `uint` array; 0 for a short or empty array.
+fn parse_coord(coordinates: &[u8]) -> u32 {
+    coordinates
+        .get(..4)
+        .and_then(|four| four.try_into().ok())
+        .map(u32::from_ne_bytes)
+        .unwrap_or(0)
+}
+
+impl Shared {
+    fn no_room(&mut self, what: &str) {
+        if !self.said_no_room {
+            self.said_no_room = true;
+            warn(format_args!(
+                "scootbar: workspaces: past its bound ({what}); leaving the rest out"
+            ));
+        }
+    }
+
+    pub(crate) fn set_manager(&mut self, manager: ExtWorkspaceManagerV1) {
+        self.manager = Some(manager);
+        self.live = true;
+    }
+
+    fn group_index(&self, group: &ExtWorkspaceGroupHandleV1) -> Option<usize> {
+        self.groups[..self.groups_len]
+            .iter()
+            .position(|entry| entry.group.as_ref() == Some(group))
+    }
+
+    /// The staged workspace `handle`, wherever it is (unassigned or in a
+    /// group), for the `name`/`coordinates`/`state` events, which may arrive
+    /// before its `workspace_enter`.
+    fn staged_mut(&mut self, handle: &ExtWorkspaceHandleV1) -> Option<&mut Ws> {
+        if let Some(found) = self.pending[..self.pending_len]
+            .iter_mut()
+            .find(|ws| ws.handle.as_ref() == Some(handle))
+        {
+            return Some(found);
+        }
+        self.groups[..self.groups_len]
+            .iter_mut()
+            .flat_map(|group| group.staged[..group.staged_len].iter_mut())
+            .find(|ws| ws.handle.as_ref() == Some(handle))
+    }
+
+    /// A `workspace_group` event: staged on sight, committed at `done`.
+    pub(crate) fn on_group(&mut self, group: ExtWorkspaceGroupHandleV1) {
+        if self.groups_len >= MAX_GROUPS {
+            self.no_room("groups");
+            return;
+        }
+        // A group re-announced (a bind race): keep the one place.
+        if let Some(index) = self.group_index(&group) {
+            self.groups[index].staged_dead = false;
+            return;
+        }
+        self.groups[self.groups_len] = Group {
+            group: Some(group),
+            ..Group::default()
+        };
+        self.groups_len += 1;
+    }
+
+    /// A group's `removed`: swept at the next `done`, so the batch it
+    /// closes still draws whole.
+    pub(crate) fn on_group_removed(&mut self, group: &ExtWorkspaceGroupHandleV1) {
+        if let Some(index) = self.group_index(group) {
+            self.groups[index].staged_dead = true;
+        }
+    }
+
+    /// A group's `output_enter`: whose output it stands on, by proxy
+    /// identity (a replugged monitor is a new object, never a stale name).
+    /// The name is whatever [`Shared::note_output_name`] last said for that
+    /// object, whenever it arrived relative to this event.
+    pub(crate) fn on_output_enter(&mut self, group: &ExtWorkspaceGroupHandleV1, output: WlOutput) {
+        if let Some(index) = self.group_index(group) {
+            // The name kept for this object, if its `name` event already
+            // arrived (copied out first: no allocation on this path).
+            let mut remembered = [0u8; MAX_NAME];
+            let mut remembered_len = 0;
+            let mut found = false;
+            for known in &self.known[..self.known_len] {
+                if known.output.as_ref() == Some(&output) {
+                    remembered = known.name;
+                    remembered_len = known.name_len;
+                    found = true;
+                    break;
+                }
+            }
+            let entry = &mut self.groups[index];
+            entry.output = Some(output);
+            if found {
+                entry.name = remembered;
+                entry.name_len = remembered_len;
+            }
+        }
+    }
+
+    /// A group's `output_leave`: stands on nothing until entered again.
+    pub(crate) fn on_output_leave(&mut self, group: &ExtWorkspaceGroupHandleV1, output: &WlOutput) {
+        if let Some(index) = self.group_index(group) {
+            let entry = &mut self.groups[index];
+            if entry.output.as_ref() == Some(output) {
+                entry.output = None;
+                entry.name_len = 0;
+            }
+        }
+    }
+
+    /// The output's `name` event: kept by object for groups entering it
+    /// later, and applied to every group standing on it now.
+    pub(crate) fn note_output_name(&mut self, output: &WlOutput, name: &str) {
+        if let Some(known) = self.known[..self.known_len]
+            .iter_mut()
+            .find(|known| known.output.as_ref() == Some(output))
+        {
+            known.set_name(name);
+        } else if self.known_len < MAX_GROUPS {
+            self.known[self.known_len].output = Some(output.clone());
+            self.known[self.known_len].set_name(name);
+            self.known_len += 1;
+        } else {
+            self.no_room("output names");
+        }
+        for entry in &mut self.groups[..self.groups_len] {
+            if entry.output.as_ref() != Some(output) {
+                continue;
+            }
+            entry.set_name(name);
+        }
+    }
+
+    /// The output went away under the group (its `wl_output` global
+    /// removed): forget the object, so a replugged monitor under the same
+    /// name never matches this group's stale entry.
+    pub(crate) fn purge_output(&mut self, output: &WlOutput) {
+        for entry in &mut self.groups[..self.groups_len] {
+            if entry.output.as_ref() == Some(output) {
+                entry.output = None;
+                entry.name_len = 0;
+                entry.staged_dead = true;
+            }
+        }
+        if let Some(slot) = self.known[..self.known_len]
+            .iter()
+            .position(|known| known.output.as_ref() == Some(output))
+        {
+            self.known.swap(slot, self.known_len - 1);
+            self.known[self.known_len - 1] = KnownName::default();
+            self.known_len -= 1;
+        }
+    }
+
+    /// A manager `workspace` event: announced, unassigned until its group's
+    /// `workspace_enter`.
+    pub(crate) fn on_workspace(&mut self, handle: ExtWorkspaceHandleV1) {
+        if self.pending_len >= MAX_WORKSPACES {
+            self.no_room("workspaces");
+            return;
+        }
+        self.pending[self.pending_len] = Ws {
+            handle: Some(handle),
+            ..Ws::default()
+        };
+        self.pending_len += 1;
+    }
+
+    /// A group's `workspace_enter`: takes the announced handle into the
+    /// group's staged list.
+    pub(crate) fn on_workspace_enter(
+        &mut self,
+        group: &ExtWorkspaceGroupHandleV1,
+        handle: &ExtWorkspaceHandleV1,
+    ) {
+        let Some(index) = self.group_index(group) else {
+            return;
+        };
+        let Some(slot) = self.pending[..self.pending_len]
+            .iter()
+            .position(|ws| ws.handle.as_ref() == Some(handle))
+        else {
+            return;
+        };
+        let entry = &mut self.groups[index];
+        if entry.staged_len >= MAX_WORKSPACES {
+            self.no_room("workspaces");
+            return;
+        }
+        self.pending.swap(slot, self.pending_len - 1);
+        let ws = std::mem::take(&mut self.pending[self.pending_len - 1]);
+        self.pending_len -= 1;
+        entry.staged[entry.staged_len] = ws;
+        entry.staged_len += 1;
+    }
+
+    /// A group's `workspace_leave`: out of the staged list.
+    pub(crate) fn on_workspace_leave(
+        &mut self,
+        group: &ExtWorkspaceGroupHandleV1,
+        handle: &ExtWorkspaceHandleV1,
+    ) {
+        let Some(index) = self.group_index(group) else {
+            return;
+        };
+        let entry = &mut self.groups[index];
+        if let Some(slot) = entry.staged[..entry.staged_len]
+            .iter()
+            .position(|ws| ws.handle.as_ref() == Some(handle))
+        {
+            entry.staged.swap(slot, entry.staged_len - 1);
+            entry.staged_len -= 1;
+        }
+    }
+
+    pub(crate) fn on_workspace_name(&mut self, handle: &ExtWorkspaceHandleV1, name: &str) {
+        if let Some(ws) = self.staged_mut(handle) {
+            ws.number = parse_number(name);
+        }
+    }
+
+    pub(crate) fn on_workspace_coordinates(
+        &mut self,
+        handle: &ExtWorkspaceHandleV1,
+        coordinates: &[u8],
+    ) {
+        if let Some(ws) = self.staged_mut(handle) {
+            ws.coord = parse_coord(coordinates);
+        }
+    }
+
+    pub(crate) fn on_workspace_state(&mut self, handle: &ExtWorkspaceHandleV1, active: bool) {
+        if let Some(ws) = self.staged_mut(handle) {
+            ws.active = active;
+        }
+    }
+
+    /// A workspace `removed`: gone from wherever it was staged.
+    pub(crate) fn on_workspace_removed(&mut self, handle: &ExtWorkspaceHandleV1) {
+        if let Some(slot) = self.pending[..self.pending_len]
+            .iter()
+            .position(|ws| ws.handle.as_ref() == Some(handle))
+        {
+            self.pending.swap(slot, self.pending_len - 1);
+            self.pending_len -= 1;
+        }
+        for group in &mut self.groups[..self.groups_len] {
+            if let Some(slot) = group.staged[..group.staged_len]
+                .iter()
+                .position(|ws| ws.handle.as_ref() == Some(handle))
+            {
+                group.staged.swap(slot, group.staged_len - 1);
+                group.staged_len -= 1;
+            }
+        }
+    }
+
+    /// The manager's `done`: the batch is whole, so dead groups are swept,
+    /// every staged list is committed (sorted by coordinates, stably), and
+    /// the generation moves: one `done`, at most one redraw.
+    pub(crate) fn on_done(&mut self) {
+        let mut kept = 0;
+        for index in 0..self.groups_len {
+            if self.groups[index].staged_dead {
+                continue;
+            }
+            if index != kept {
+                self.groups.swap(index, kept);
+            }
+            kept += 1;
+        }
+        self.groups_len = kept;
+        for group in &mut self.groups[..self.groups_len] {
+            group.committed[..group.staged_len].clone_from_slice(&group.staged[..group.staged_len]);
+            group.committed_len = group.staged_len;
+            group.committed[..group.committed_len].sort_by_key(|ws| ws.coord);
+        }
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// The manager's `finished` mid-batch: the staged half is dropped
+    /// (restored from the commit), so it is never drawn; the generation
+    /// does not move, so nothing redraws. No request may be sent after.
+    pub(crate) fn on_finished(&mut self) {
+        self.live = false;
+        self.pending_len = 0;
+        for group in &mut self.groups[..self.groups_len] {
+            group.staged[..group.committed_len]
+                .clone_from_slice(&group.committed[..group.committed_len]);
+            group.staged_len = group.committed_len;
+            group.staged_dead = false;
+        }
+    }
+
+    /// The committed group for the output named `name`, if it has
+    /// workspaces to show.
+    fn committed_for(&self, name: Option<&str>) -> Option<usize> {
+        let name = name?;
+        self.groups[..self.groups_len]
+            .iter()
+            .position(|group| group.name() == name && group.committed_len > 0)
+    }
+}
+
+pub fn init(settings: &super::Settings) -> Init {
+    Init::Available(Box::new(Workspaces {
+        link: settings.workspaces.link.clone(),
+        seen: 0,
+    }))
+}
+
+/// The module: an `Rc` to the shared state plus the generation last drawn.
+pub struct Workspaces {
+    link: Link,
+    seen: u64,
+}
+
+impl Workspaces {
+    /// The committed workspace `(number, active)` pairs for `output`, in
+    /// the order the view shows them. A workspace the protocol never named
+    /// (`number` 0) shows its 1-based position.
+    fn items(&self, output: &OutputView<'_>, shown: &mut [(u32, bool)], count: &mut usize) {
+        let shared = self.link.0.borrow();
+        let Some(index) = shared.committed_for(output.name) else {
+            *count = 0;
+            return;
+        };
+        let group = &shared.groups[index];
+        let len = group.committed_len.min(shown.len());
+        for (index, (slot, ws)) in shown.iter_mut().zip(&group.committed[..len]).enumerate() {
+            let number = if ws.number == 0 {
+                (index as u32).saturating_add(1)
+            } else {
+                ws.number
+            };
+            *slot = (number, ws.active);
+        }
+        *count = len;
+    }
+
+    fn write_view(&self, output: &OutputView<'_>, view: &mut View) {
+        let mut items = [(0u32, false); MAX_WORKSPACES];
+        let mut count = 0;
+        self.items(output, &mut items, &mut count);
+        for (index, &(number, _)) in items[..count].iter().enumerate() {
+            if index > 0 {
+                let _ = view.text_mut().write_char(' ');
+            }
+            let _ = write!(view.text_mut(), "{number}");
+        }
+    }
+}
+
+/// One item's device-pixel span within the view's text, walked exactly as
+/// [`Text::draw`] walks its pen (from `x0`, stepping each character's
+/// advance), so the bounds match the ink. `None` past the last item.
+fn item_span(text: &Text, full: &str, em: f32, x0: i64, want: usize) -> Option<(u32, u32)> {
+    let mut pen = x0 as f32;
+    let mut index = 0;
+    let mut start = pen;
+    for c in full.chars() {
+        if c == ' ' {
+            if index == want {
+                return Some((pixels(start), pixels(pen)));
+            }
+            index += 1;
+            pen += text.advance(' ', em);
+            start = pen;
+        } else if !c.is_control() {
+            pen += text.advance(c, em);
+        }
+    }
+    (index == want).then(|| (pixels(start), pixels(pen)))
+}
+
+fn pixels(value: f32) -> u32 {
+    value.round().max(0.0) as u32
+}
+
+/// The item whose pill holds `x`: each item's span ([`item_span`]) padded
+/// by half the module padding, `x` in device pixels from the content's
+/// start (past the padding). `None` in a gap or past the items.
+fn hit_index(text: &Text, full: &str, em: f32, pad: u32, count: usize, x: u32) -> Option<usize> {
+    let step = pad / 2;
+    for item in 0..count {
+        let Some((start, end)) = item_span(text, full, em, i64::from(pad), item) else {
+            break;
+        };
+        if (start.saturating_sub(step)..end.saturating_add(step)).contains(&x) {
+            return Some(item);
+        }
+    }
+    None
+}
+
+impl Module for Workspaces {
+    fn sources<'fd>(&'fd self, _sources: &mut Sources<'_, 'fd>) {}
+
+    fn on_ready(&mut self, _source: usize, _events: rustix::event::PollFlags) -> Update {
+        Update::Unchanged
+    }
+
+    /// A `done` since the last turn: the committed view moved.
+    fn on_dispatch(&mut self) -> Update {
+        let generation = self.link.0.borrow().generation;
+        if generation == self.seen {
+            return Update::Unchanged;
+        }
+        self.seen = generation;
+        Update::Changed
+    }
+
+    fn view(&self, output: &OutputView<'_>, view: &mut View) {
+        self.write_view(output, view);
+    }
+
+    /// The press hit one of this output's pills: `activate` it and `commit`
+    /// the batch. Anything else (no group here, past the items, the active
+    /// pill itself, a dead manager) sends nothing. The view changes when
+    /// the compositor answers with a `done`, reported through
+    /// [`Module::on_dispatch`].
+    fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Update {
+        let shared = self.link.0.borrow();
+        let (Some(name), Some(manager), true) =
+            (ctx.output.name, shared.manager.clone(), shared.live)
+        else {
+            return Update::Unchanged;
+        };
+        let Some(index) = shared.committed_for(Some(name)) else {
+            return Update::Unchanged;
+        };
+        let group = &shared.groups[index];
+        // Relative to the span's start, like `ctx.x`: the content begins
+        // past the padding.
+        let full = ctx.view.text();
+        let hit = hit_index(
+            ctx.text,
+            full,
+            ctx.em,
+            ctx.padding,
+            group.committed_len,
+            ctx.x,
+        );
+        let Some(hit) = hit else {
+            return Update::Unchanged;
+        };
+        let ws = &group.committed[hit];
+        if ws.active {
+            // Already there: the compositor would no-op, so send nothing.
+            return Update::Unchanged;
+        }
+        let Some(handle) = ws.handle.clone() else {
+            return Update::Unchanged;
+        };
+        drop(shared);
+        handle.activate();
+        manager.commit();
+        Update::Unchanged
+    }
+
+    /// The pill behind the active workspace: an accent fill over its item
+    /// span, the number itself in the bar's background, the rest as plain
+    /// text. Rectangular until appearance brings a rounded shape; `false`
+    /// (the plain draw) when there is nothing to mark.
+    fn custom_draw(&self, ctx: &mut CustomDraw<'_, '_>) -> bool {
+        let shared = self.link.0.borrow();
+        let Some(index) = shared.committed_for(ctx.output.name) else {
+            return false;
+        };
+        let group = &shared.groups[index];
+        let active = group.committed[..group.committed_len]
+            .iter()
+            .position(|ws| ws.active);
+        let Some(active) = active else {
+            return false;
+        };
+        let full = ctx.view.text();
+        let x0 = i64::from(ctx.span.x) + i64::from(ctx.padding);
+        let Some((start, end)) = item_span(ctx.text, full, ctx.em, x0, active) else {
+            return false;
+        };
+        let pad = ctx.padding / 2;
+        let lo = start.saturating_sub(pad).max(ctx.span.x);
+        let hi = end.saturating_add(pad).min(ctx.span.end());
+        if hi <= lo {
+            return false;
+        }
+        let pill = Span {
+            x: lo,
+            width: hi - lo,
+        };
+        // The borrows end here: the draws below take the canvas and the
+        // text, not the shared state.
+        drop(shared);
+        ctx.canvas.fill_span(pill, ctx.theme.accent);
+        let background = ctx.theme.background;
+        let ink = ctx.theme.class(ctx.view.class());
+        let x = ctx.span.x;
+        ctx.text.draw(
+            ctx.canvas,
+            None,
+            full,
+            ctx.em,
+            x0,
+            ctx.baseline,
+            background,
+            pill,
+        );
+        if pill.x > x {
+            ctx.text.draw(
+                ctx.canvas,
+                None,
+                full,
+                ctx.em,
+                x0,
+                ctx.baseline,
+                ink,
+                Span {
+                    x,
+                    width: pill.x - x,
+                },
+            );
+        }
+        if pill.end() < ctx.span.end() {
+            ctx.text.draw(
+                ctx.canvas,
+                None,
+                full,
+                ctx.em,
+                x0,
+                ctx.baseline,
+                ink,
+                Span {
+                    x: pill.end(),
+                    width: ctx.span.end() - pill.end(),
+                },
+            );
+        }
+        true
+    }
+}

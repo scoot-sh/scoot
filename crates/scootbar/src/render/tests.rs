@@ -123,9 +123,11 @@ impl Bar {
             &mut canvas,
             record,
             &self.scene,
+            &self.placed,
             Some(&mut self.text),
             &self.style,
             frame(),
+            &OutputView { name: None },
         );
     }
 }
@@ -320,9 +322,11 @@ fn without_a_font_only_the_background() {
         &mut canvas,
         &mut record,
         &bar.scene,
+        &bar.placed,
         None,
         &bar.style,
         frame(),
+        &OutputView { name: None },
     );
     let background = rgb(bar.style.theme.background);
     assert!(

@@ -19,14 +19,26 @@ mod tests;
 
 // The help text is put together from pieces, so a build without a module
 // documents only what it has: the pieces that name the clock come in two
-// versions, one per build.
-#[cfg(feature = "clock")]
+// versions, one per build, and the workspaces piece is empty without it.
+#[cfg(all(feature = "clock", feature = "workspaces"))]
+macro_rules! what_it_shows {
+    () => {
+        "A bar on every output, reserving its space, with workspaces and a clock."
+    };
+}
+#[cfg(all(feature = "clock", not(feature = "workspaces")))]
 macro_rules! what_it_shows {
     () => {
         "A bar on every output, reserving its space, with a clock."
     };
 }
-#[cfg(not(feature = "clock"))]
+#[cfg(all(not(feature = "clock"), feature = "workspaces"))]
+macro_rules! what_it_shows {
+    () => {
+        "A bar on every output, reserving its space, with workspaces."
+    };
+}
+#[cfg(all(not(feature = "clock"), not(feature = "workspaces")))]
 macro_rules! what_it_shows {
     () => {
         "A bar on every output, reserving its space (built with no modules)."
@@ -48,38 +60,101 @@ macro_rules! idle {
     };
 }
 
-#[cfg(feature = "clock")]
+#[cfg(all(feature = "clock", feature = "workspaces"))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
-    --center IDS         comma-separated, in order (default: the clock in
-    --right IDS          the center). Giving any of the three sets the whole
-                         layout: a section not given is empty. Modules: clock
-    --padding N          logical pixels either side of each module, 0 to 1024
-                         (default 8)
-    --spacing N          logical pixels between neighbouring modules, 0 to
-                         1024 (default 0)
-    --clock-format FMT   the clock, as strftime (default '%-I:%M %P', which
-                         shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
-                         %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
-                         %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
-                         (no padding), _ (spaces) and 0 (zeros). With %S or
-                         %T it ticks every second, else once a minute. The
-                         zone is $TZ's, else /etc/localtime's
+     --center IDS         comma-separated, in order (default: the clock in
+     --right IDS          the center). Giving any of the three sets the whole
+                          layout: a section not given is empty. Modules: clock, workspaces
+     --padding N          logical pixels either side of each module, 0 to 1024
+                          (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                          1024 (default 0)
+     --clock-format FMT   the clock, as strftime (default '%-I:%M %P', which
+                          shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
+                          %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
+                          %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
+                          (no padding), _ (spaces) and 0 (zeros). With %S or
+                          %T it ticks every second, else once a minute. The
+                          zone is $TZ's, else /etc/localtime's
 "
     };
 }
-#[cfg(not(feature = "clock"))]
+#[cfg(all(feature = "clock", not(feature = "workspaces")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
-    --center IDS         comma-separated, in order. This build has none, so
-    --right IDS          only an empty list is taken
-    --padding N          logical pixels either side of each module, 0 to 1024
-                         (default 8)
-    --spacing N          logical pixels between neighbouring modules, 0 to
-                         1024 (default 0)
+     --center IDS         comma-separated, in order (default: the clock in
+     --right IDS          the center). Giving any of the three sets the whole
+                          layout: a section not given is empty. Modules: clock
+     --padding N          logical pixels either side of each module, 0 to 1024
+                          (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                          1024 (default 0)
+     --clock-format FMT   the clock, as strftime (default '%-I:%M %P', which
+                          shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
+                          %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
+                          %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
+                          (no padding), _ (spaces) and 0 (zeros). With %S or
+                          %T it ticks every second, else once a minute. The
+                          zone is $TZ's, else /etc/localtime's
 "
+    };
+}
+#[cfg(all(not(feature = "clock"), feature = "workspaces"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: workspaces
+     --padding N          logical pixels either side of each module, 0 to 1024
+                          (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                          1024 (default 0)
+"
+    };
+}
+#[cfg(all(not(feature = "clock"), not(feature = "workspaces")))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. This build has none, so
+     --right IDS          only an empty list is taken
+     --padding N          logical pixels either side of each module, 0 to 1024
+                          (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                          1024 (default 0)
+"
+    };
+}
+#[cfg(feature = "workspaces")]
+macro_rules! workspaces_help {
+    () => {
+        "Workspaces (the workspaces module):
+    one number per workspace of the output the bar is on, the active one
+    marked; a click on a number shows that workspace. Nothing is shown
+    where the compositor has no ext-workspace-v1, and clicks do nothing
+    where it has no wl_seat
+"
+    };
+}
+#[cfg(not(feature = "workspaces"))]
+macro_rules! workspaces_help {
+    () => {
+        ""
+    };
+}
+#[cfg(feature = "workspaces")]
+macro_rules! workspace_wakes {
+    () => {
+        " A workspace change redraws the workspaces module once."
+    };
+}
+#[cfg(not(feature = "workspaces"))]
+macro_rules! workspace_wakes {
+    () => {
+        ""
     };
 }
 
@@ -117,6 +192,7 @@ unplugged takes its bar with it; with no outputs at all it waits for one.
 It draws at each output's real device pixels, fractional scales included,
 ",
     idle!(),
+    workspace_wakes!(),
     "
 
 The bar:
@@ -144,6 +220,7 @@ Text:
 Modules:
 ",
     modules!(),
+    workspaces_help!(),
     "
 Runs until the compositor goes away (exit status 1, saying why) or it is
 killed; SIGTERM and SIGINT end it at once, which is harmless: it keeps no

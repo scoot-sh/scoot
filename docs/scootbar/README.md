@@ -7,7 +7,9 @@ composable shell.
 
 > **Status: early.** `scootbar daemon` puts a bar with a clock on every
 > output, reserving its space, across outputs coming and going; the flags
-> are in [cli.md](cli.md). That is M1's
+> are in [cli.md](cli.md). Workspaces are one flag away
+> (`--left workspaces`: each output's numbers with the active one
+> marked, click to switch). That is M1's
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
 > [module API and clock](backlog/resolved/module-api-and-clock-done.md),
 > and its [Nix package](backlog/resolved/nix-package-done.md), which
@@ -23,6 +25,8 @@ composable shell.
 ```sh
 scootbar daemon --font /path/to/DejaVuSans.ttf &            # 3:07 pm, centered
 scootbar daemon --clock-format '%a %d %b %H:%M' --right clock &
+scootbar daemon --left workspaces --center clock --font /path/to/DejaVuSans.ttf &
+                                                            # workspaces on the left, the clock centered
 nix run github:scoot-sh/scoot#scootbar-demo                 # with a font, from Nix
 ```
 

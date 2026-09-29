@@ -6,13 +6,14 @@ yet ([config-cli-and-reload](backlog/config-cli-and-reload.md) brings one);
 until then every option is a flag, and the flags stay as overrides once
 the file exists.
 
-**Early days:** the bar shows a clock. Workspaces are
-[next](backlog/workspaces-module.md).
+**Early days:** the bar shows a clock in the center, and workspaces wherever
+they are placed (`--left workspaces`).
 
 ## Commands
 
 ```sh
 scootbar daemon                              # a 28-pixel bar along the top of every output, the clock in the middle
+scootbar daemon --left workspaces --center clock  # each output's workspace numbers on the left, the clock in the middle
 scootbar daemon --clock-format '%H:%M'       # a 24-hour clock (the default is 12-hour: 3:07 pm)
 scootbar daemon --font ~/.local/share/fonts/Inter.ttf --font-size 13
 scootbar daemon --right clock                # the clock at the right end
@@ -58,6 +59,7 @@ control character.
 | Id | Shows | Wakes |
 | --- | --- | --- |
 | `clock` | The local time ([below](#the-clock)) | its timer: once a minute, or once a second with seconds shown (each redraw adds the compositor's release, below) |
+| `workspaces` | Each output's workspace numbers, the active one marked ([below](#workspaces)) | on the compositor's workspace changes: one redraw per batch, however many events it held |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -130,6 +132,32 @@ subset. The default, `%-I:%M %P`, is a 12-hour clock with no leading zero:
   -s`, a resume from suspend), which wakes the bar at once to redraw; a
   summer-time change shows at the first tick after it.
 
+## Workspaces
+
+Each output's workspace numbers, spoken over `ext-workspace-v1`, with the
+active one marked by a pill in the accent color (its number drawn in the
+bar's background). One number per workspace the compositor reports for the
+output the bar is on, sorted by position: what scoot reports is what is
+shown, no fixed slots. A workspace adopted from an unplugged monitor shows
+its number (`"2 DP-1"` shows `2`). A name with no leading number (a foreign
+compositor's free-form name) shows its 1-based position.
+
+**Click a number to show that workspace**: the bar sends `activate` for it
+and `commit`s the batch. Clicking the active one sends nothing. A click on
+a non-focused output's bar is dropped by scoot today (it takes no output);
+`output-targeted workspace switch` (in the backlog) will carry it across.
+
+- **The pill is rectangular for now**: the canvas has no rounded shape until
+  [appearance](backlog/appearance.md) adds one, which rounds the fill; the
+  colors and rects stay.
+- **Without `ext-workspace-v1`** the module shows nothing (one stderr note
+  at start-up says the protocol is missing) and takes no space.
+  **Without `wl_seat`** clicks do nothing (said too). The bar still starts;
+  the clock is unaffected.
+- **The list grows and shrinks with the trailing empty workspace**,
+  renumbering what follows; only the `active` state bit is shown so far
+  (occupied and urgent need scoot-side work, in the module's entry).
+
 ## Fonts
 
 A font file, not a font name: there is no fontconfig. Without `--font`,
@@ -198,8 +226,9 @@ config file gives the others keys. Their defaults are Catppuccin Mocha's:
   beside it, never under it. The zone is set before the bar's first frame
   is drawn: on scoot, windows move out of the way once, when the bar
   connects, and do not jump again when it draws.
-- **It takes no keyboard focus.** It takes no pointer input yet either
-  (clicks on it do nothing).
+- **It takes no keyboard focus.** Pointer clicks on the workspaces
+  module's numbers switch to them ([above](#workspaces)); anywhere else
+  clicks do nothing.
 - **It draws at each output's real device pixels**, fractional scales
   included (`wp_fractional_scale_v1` with `wp_viewporter`). A compositor
   without those two gets the bar drawn at its integer scale (the fraction

@@ -327,6 +327,12 @@ impl Session {
         &self.scratch.0
     }
 
+    /// The compositor's Wayland socket path, for clients a test starts
+    /// itself (a window to switch workspaces with).
+    pub fn wayland_socket(&self) -> PathBuf {
+        self.scratch.0.join(&self.wayland_display)
+    }
+
     /// `scootbar` with this session's environment, and none of the
     /// Wayland variables of the one the tests run in.
     pub fn scootbar(&self) -> Command {

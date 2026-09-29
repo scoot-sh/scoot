@@ -144,6 +144,17 @@ impl Text {
         width.ceil().max(0.0) as u32
     }
 
+    /// One character's advance at `em`, in device pixels, unrounded: what
+    /// [`Text::measure`] sums and [`Text::draw`] steps its pen by. A caller
+    /// walking the same characters in the same order lands exactly where
+    /// the draw lands, which is how the workspaces module's pill rects
+    /// match its ink.
+    #[allow(dead_code)] // Only the workspaces module walks advances.
+    pub fn advance(&self, c: char, em: f32) -> f32 {
+        let scaled = self.font.as_scaled(self.scale(em));
+        scaled.h_advance(self.font.glyph_id(c))
+    }
+
     /// Draws `icon` and `text` at `em` in `color`, the pen starting at `x`
     /// on the baseline `baseline`, clipped to `clip`.
     #[allow(clippy::too_many_arguments)]

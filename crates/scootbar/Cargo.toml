@@ -17,8 +17,9 @@ license.workspace = true
 # (`src/modules/mod.rs` says how a module is added). A build without any
 # module draws a plain bar and needs no font.
 [features]
-default = ["clock"]
+default = ["clock", "workspaces"]
 clock = []
+workspaces = []
 
 [dependencies]
 # The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
