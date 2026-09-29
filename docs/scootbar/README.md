@@ -30,8 +30,7 @@ scootbar daemon --clock-format '%a %d %b %H:%M' --right clock &
   measured row. A minute clock's timer wakes it once a minute (M0's spike
   clock [measured](backlog/resolved/dependencies-done.md#2a-idle-one-wakeup-per-minute)
   it), and each frame it draws brings one `wl_buffer.release` from the
-  compositor, so the bar idles at 2 wakeups a minute (the target is one; see the
-  [open decisions](backlog/lightest.md#open-decisions)); with no module, 0.
+  compositor, so the bar idles at 2 wakeups a minute (the target, [ratified](backlog/lightest.md#decisions)); with no module, 0.
 - **Standard protocols first** (`ext-workspace-v1`, layer shell), so it
   runs on other compositors as scootbg does.
 - **GPU-free**: `wl_shm` buffers at the output's real device pixels.
