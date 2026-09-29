@@ -60,7 +60,9 @@
 //!   is followed by). Not re-told on bare motion: a pointer crossing the
 //!   seam inside one client surface keeps the old scale on its cursor
 //!   surface until the next `set_cursor` -- a softer cursor for a moment,
-//!   never a wrong position (the render path places it per output);
+//!   never a wrong position (the render path places it per output). A
+//!   drag icon is in the same class: told the scale of the output under the
+//!   pointer at creation, never re-told while dragged across the seam;
 //! - a **subsurface or popup**: whatever its parent was told, copied when
 //!   the role is assigned (`handlers.rs`'s `new_subsurface`/`new_popup`,
 //!   `layer_shell.rs`'s popup adoption, the input-method popup), and

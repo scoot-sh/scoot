@@ -2204,7 +2204,7 @@ advertised three ways, matching what clients actually support:
 Real limits rather than polish:
 
 - **Per output, one answer per surface.** `scootctl reload` re-applies
-  every output's scale live (re-advertised on `wl_output` where it moved,
+  every output's scale live (re-advertised on every output's `wl_output`, moved or not,
   re-sent to every live surface, geometry recomputed). A surface is told
   one scale -- the scale of the output it belongs to, not of every output
   it overlaps: a window the output it is placed on (its workspace's; a
