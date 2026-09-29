@@ -173,19 +173,27 @@ impl Responder<'_> {
         {
             config.modules.workspaces.link = self.state.workspaces.clone();
         }
+        // Started first, but said only once the reload is known good (see
+        // below): a refused reload stays silent.
+        let mut notes = Vec::new();
         let modules = modules::start(&config.layout, &config.modules, &mut |id, why| {
-            warn(format_args!(
-                "scootbar: note: the {id} module is unavailable, and left out: {why}"
+            notes.push(format!(
+                "the {id} module is unavailable, and left out: {why}"
             ));
         });
-        // The font first: a font that vanished since validation refuses
-        // the reload with the running bar untouched.
+        // The font next: a font that vanished since validation refuses
+        // the reload with the running bar untouched. The notes above are
+        // said only now, once the reload is known good, so a refused
+        // reload stays silent.
         let text = if modules.is_empty() {
             None
         } else {
             let font = font::find(config.font.as_deref()).map_err(|error| error.to_string())?;
             Some(Text::new(font.face))
         };
+        for note in notes {
+            warn(format_args!("scootbar: note: {note}"));
+        }
         let geometry = config.bar != self.state.bar;
         let count = modules.len();
         let resize = count != self.state.content.modules.len();
@@ -196,13 +204,19 @@ impl Responder<'_> {
         // New placement, new style, new font: every output measures its
         // views again from scratch. The scenes are small (one short vector
         // per module) and a reload is rare, so they are rebuilt rather
-        // than patched; a changed module count also resizes the canvases,
-        // whose records are sized to it.
+        // than patched. Every canvas is cleared too, resized where the
+        // module count changed (whose records are sized to it): the style,
+        // the text and the modules are swapped wholesale, while fresh
+        // scenes start at revision 0, so the old shown record could match
+        // the new state and the next turn would draw nothing until the
+        // next tick. The buffers are made again on demand.
         let content = &self.state.content;
         for entry in self.state.outputs.iter_mut() {
             entry.objects.scene = Scene::new(&content.modules);
             if resize {
                 entry.objects.canvas.resize(count);
+            } else {
+                entry.objects.canvas.clear();
             }
         }
         if geometry {

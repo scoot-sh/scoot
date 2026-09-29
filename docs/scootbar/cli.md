@@ -122,9 +122,11 @@ scootbar msg kill                   # stop the daemon, once its reply is sent
 scootbar msg set ID JSON            # refused: no module takes one yet
 ```
 
-`query` prints one JSON object: every placed module's id, section and, on
-every output, the text it shows and its class (`normal`, `warn`, `urgent`,
-`muted`). This is the agent hook: the bar read as data instead of OCR.
+`query` prints one JSON object: one entry per placed module per output,
+with its `id`, `section` (`left`, `center` or `right`), `output` (the
+compositor's `wl_output.name`, `null` where it never sent one), the `text`
+it shows and its `class` (`normal`, `warn`, `urgent`, `muted`), plus `icon`
+where the module shows one (absent otherwise). This is the agent hook: the bar read as data instead of OCR.
 `reload` re-reads the file and live-applies it — geometry, style, layout,
 modules, the font — after fully validating it first; a bad file is
 refused and the running bar stands. `query`, `version` and `reload` print

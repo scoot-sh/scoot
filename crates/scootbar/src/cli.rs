@@ -249,8 +249,9 @@ Asks the daemon for this Wayland display over its control socket
 ($XDG_RUNTIME_DIR/scootbar-DISPLAY.sock), which the daemon claims at
 start-up and removes when it stops:
 
-    query      each placed module's state as JSON: its id, section and, on
-               every output, the text it shows and its class
+    query      each placed module's state as JSON: its id, section,
+               output, text and class, plus its icon where it shows one
+               (output is null where the compositor never named it)
     reload     re-read the config file and live-apply it; a bad file is
                refused and the running bar stands
     version    the daemon's version and protocol, as JSON

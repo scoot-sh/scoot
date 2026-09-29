@@ -1,6 +1,7 @@
 //! `scootbar msg` against a live bar on headless scoot: `query` reads every
-//! placed module as JSON, `reload` live-applies an edited config file (and
-//! refuses a bad one with the running bar undisturbed), `version` answers,
+//! placed module as JSON, `reload` live-applies an edited config file (an
+//! appearance-only change redraws at once, checked in the pixels; a bad
+//! one is refused with the running bar undisturbed), `version` answers,
 //! `set` is refused loudly, and `kill` stops the daemon.
 //!
 //! Skipped without a `scoot` binary (see `common`);
@@ -10,7 +11,7 @@ mod common;
 
 use std::process::{Child, Stdio};
 
-use common::{Reaper, Session, wait_exit};
+use common::{Reaper, Session, rgb, wait_exit};
 use serde_json::Value;
 
 /// Starts `scootbar daemon --height 28 --config PATH` in the session, its
@@ -58,10 +59,15 @@ fn usable_height(session: &Session) -> i64 {
 }
 
 /// A config file placing the clock in `section` at `height`, in the
-/// session's font.
+/// session's font, on the default background.
 fn write_config(session: &Session, section: &str, height: u32) {
+    write_config_bg(session, section, height, "#1e1e2e");
+}
+
+/// [`write_config`] with the bar's background color set.
+fn write_config_bg(session: &Session, section: &str, height: u32, background: &str) {
     let text = format!(
-        "{section} = [\"clock\"]\n\n[bar]\nheight = {height}\nfont = \"{}\"\n",
+        "{section} = [\"clock\"]\n\n[bar]\nheight = {height}\nfont = \"{}\"\n\n[colors]\nbackground = \"{background}\"\n",
         session.font().display()
     );
     std::fs::write(session.runtime_dir().join("bar.toml"), text).unwrap();
@@ -107,6 +113,21 @@ fn query_reload_and_kill() {
         (queried["modules"][0]["section"] == "center").then_some(())
     });
     assert_eq!(usable_height(&session), 1000 - 28);
+
+    // An appearance-only change, nothing else touched: the reload redraws
+    // at once, without waiting for the next tick. The clock sits in the
+    // center of a 1600-pixel output, so the bar's left edge is background.
+    assert_eq!(
+        session.scoot_screenshot(1).at(5, 14),
+        rgb("#1e1e2e"),
+        "the bar's background before the reload"
+    );
+    write_config_bg(&session, "center", 40, "#ff0000");
+    let recolored = reply(&msg(&session, &["reload"]));
+    assert_eq!(recolored["type"], "ok");
+    session.wait_for(&mut bar.0, "the reloaded background", |session| {
+        (session.scoot_screenshot(1).at(5, 14) == rgb("#ff0000")).then_some(())
+    });
 
     // A bad file is refused, and the running bar stands.
     std::fs::write(&path, "[bar\nheight = ]\n").unwrap();
