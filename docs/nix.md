@@ -438,8 +438,97 @@ scootbar.override { buildNoDefaultFeatures = true; }
 scootbar.override { buildNoDefaultFeatures = true; buildFeatures = [ "clock" ]; }
 ```
 
-The NixOS and home-manager modules for the bar come later
-([nix-modules-and-stylix](scootbar/backlog/nix-modules-and-stylix.md)).
+### The modules: `programs.scootbar`
+
+`homeModules.scootbar` (home-manager) and `nixosModules.scootbar` (NixOS)
+are separate from the `programs.scoot` modules (`default` and `scoot`), so
+importing one changes nothing about the other. Both take the same options;
+the flake's own `scootbar` is the default `package`.
+
+```nix
+imports = [ inputs.scoot.homeModules.scootbar ];   # or nixosModules.scootbar
+programs.scootbar = {
+  enable = true;
+  features = [ "clock" "workspaces" ];   # optional: build with exactly these modules
+  settings = {                           # bar.toml, any key: see scootbar/cli.md#the-config-file
+    left = [ "workspaces" ];
+    center = [ "clock" ];
+    bar.height = 32;
+    colors.accent = "#89b4fa";
+  };
+};
+```
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `enable` | `false` | Installs the bar, writes its config and (unless `systemd.enable` is off) runs it. |
+| `package` | the flake's `scootbar` (`pkgs.scootbar` with the overlay, else null) | The bar. Null with `enable` is refused, by name. |
+| `features` | `null` | The modules as Cargo features, **exactly** the ones listed (`scootbar.override { buildNoDefaultFeatures = true; buildFeatures = features; }`); `[ ]` is a bar with no modules and no font. Null keeps `package` as it is. Needs a package with `.override`, as the flake's. |
+| `settings` | `{ }` | Free-form: rendered as TOML to the bar's config, so a new option never needs a module change first. Unknown keys are the bar's own loud error, not the module's. |
+| `stylix.enable` | `true` | Whether to take defaults from Stylix when it is in use (below). |
+| `systemd.enable` | `true` | The user service, below. Off: start `scootbar daemon` from your compositor's autostart. |
+
+**The file.** home-manager writes `~/.config/scoot/bar.toml`, the bar's
+default path, so `scootbar daemon` from a shell reads what the service does
+and `scootbar msg reload` re-reads it. NixOS writes `/etc/scootbar/bar.toml`
+(the bar reads only `$XDG_CONFIG_HOME`, not `XDG_CONFIG_DIRS`), which the
+system unit names with `--config`; a `scootbar daemon` started by hand reads
+the user's own file instead.
+
+**The service** is `scootbar.service` (a user unit): `WantedBy=` and
+`PartOf=` `graphical-session.target`, `After=` it and `Before=tray.target`
+(an ordering against a target the session does not define does nothing),
+`Restart=on-failure` with `RestartSec=2`, so a crash, or a start before the
+compositor's `WAYLAND_DISPLAY` is imported, retries, while `scootbar msg
+kill` and a stop stay stopped (scoot does not supervise its clients). A new
+config restarts it (`X-Restart-Triggers`). scoot does not start
+`graphical-session.target` itself: a scoot session script imports the
+environment and starts it, as for any compositor:
+
+```sh
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+systemctl --user start graphical-session.target
+```
+
+**Stylix, without depending on it.** When `config.lib.stylix` exists and
+`stylix.enable` is on, `settings` gets defaults from it: the five `colors`
+tokens from the base16 palette (`background` base00, `foreground` base05,
+`accent` base0A, `dim` base03, `urgent` base08), `bar.font` from
+`stylix.fonts.sansSerif` and `bar.font-size` from `stylix.fonts.sizes.desktop`
+(points, converted to the bar's pixels at 4/3 and clamped to 1 to 256). The
+font is a **file path**: scootbar has no fontconfig, so a build step finds
+the regular face in the font package's `share/fonts` (the file named for the
+family, `DejaVuSans.ttf` for "DejaVu Sans", `...-Regular.ttf` for a Nerd
+Font, an `_18pt` optical size for Inter). A package with no such file fails
+that build naming the family; set `settings.bar.font` to a path then. The
+module never imports Stylix; nothing changes without it, and
+`programs.scootbar.stylix.enable = false` turns the defaults off with it
+present.
+
+**Precedence**, highest first, per key:
+
+1. **A value you set in `settings`** (an ordinary definition).
+2. **Stylix's** (`lib.mkDefault`).
+3. **The module's plain default**: `bar.font` as DejaVu Sans
+   (`dejavu_fonts.minimal`, so a bar with modules always starts), and only
+   that, unless `features = [ ]`. Every other key absent is the bar's own
+   default.
+
+So `settings.colors.background = "#123456"` replaces that one token and
+keeps the other four from Stylix, and a value you set is never overridden by
+theming (the trouble Waybar's users report). This is pinned by an
+evaluation test, and checked against a real Stylix and home-manager/NixOS
+(see `nix/scootbar-tests.nix`). A native `stylix.targets.scootbar` is not
+provided: that is an upstream Stylix change.
+
+**Checks.** `checks.<system>.scootbar-modules` (Linux; run by CI's
+`nix flake check`) evaluates both modules with and without a Stylix stand-in,
+pins the precedence, the font pick, `features`, the unit and the refusals,
+and runs the **real `scootbar` binary** over each rendered file (there is no
+`--check` flag: it starts with `--config FILE` and no compositor, and a file
+it accepts passes the config, font and module checks and stops at "cannot
+connect to the Wayland compositor"; a file with an unknown key is refused by
+name).
 
 ## The overlay
 
