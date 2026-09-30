@@ -14,7 +14,7 @@ use crate::layout::Section;
 use crate::modules::{Class, Module, OutputView, Placed, Sources, Update, View};
 use crate::outputs::{Frame, Size};
 use crate::paint::{Canvas, Span};
-use crate::render::{Record, Scene, Style, paint};
+use crate::render::{Member, Record, Scene, Style, paint};
 use crate::testfont;
 use crate::text::Text;
 use crate::theme::Theme;
@@ -29,6 +29,13 @@ const NAMES: &[&str] = &[
     "bar-rounded-1x-alpha",
     "bar-rounded-1.5x-alpha",
     "bar-translucent-1x",
+    "bar-separated-1x",
+    "workspaces-pill-1x",
+    "workspaces-circle-1x",
+    "workspaces-circle-two-digits-1x",
+    "workspaces-pill-1.5x",
+    "workspaces-circle-1.5x",
+    "workspaces-circle-two-digits-1.5x",
 ];
 
 const fn gray(v: u8) -> Color {
@@ -118,6 +125,11 @@ struct Look {
     background: Color,
     radius: u32,
     opacity: u8,
+    /// The separator's width; with a nonzero one the scene has all three
+    /// modules on the left, so there are gaps to draw it in.
+    separator: u32,
+    /// The middle module's margin.
+    margin: u32,
 }
 
 impl Default for Look {
@@ -126,6 +138,8 @@ impl Default for Look {
             background: gray(0),
             radius: 0,
             opacity: u8::MAX,
+            separator: 0,
+            margin: 0,
         }
     }
 }
@@ -155,7 +169,8 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         },
         font_size: 14,
         padding: 4,
-        spacing: 6,
+        spacing: if look.separator > 0 { 10 } else { 6 },
+        separator: look.separator,
         radius: look.radius,
         opacity: look.opacity,
     };
@@ -167,7 +182,17 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
     let mut text = Text::new(FontArc::new(
         FontVec::try_from_vec(testfont::build()).unwrap(),
     ));
-    let mut scene = Scene::all(&modules.map(|m| m.0));
+    let together = look.separator > 0;
+    let members: Vec<Member> = modules
+        .iter()
+        .enumerate()
+        .map(|(module, m)| Member {
+            module,
+            section: if together { Section::Left } else { m.0 },
+            margin: if module == 1 { look.margin } else { 0 },
+        })
+        .collect();
+    let mut scene = Scene::with_members(&members);
     scene.update(
         &placed,
         &OutputView { name: None },
@@ -258,6 +283,25 @@ fn bar_rounded_translucent_at_1_5x() {
         "bar-rounded-1.5x-alpha",
         "the alpha plane at scale 1.5, radius 6 (9 device pixels), opacity 128",
         &Image::from_alpha(&pixels, w, h),
+    );
+}
+
+/// Separators and a margin: the three modules together on the left with
+/// 10 pixels of spacing, a 2-pixel line in each gap (the `dim` token, the
+/// middle half of the bar's height), and the middle module's 3-pixel
+/// margin widening both gaps beside it.
+#[test]
+fn bar_with_separators_and_a_margin_at_1x() {
+    let look = Look {
+        separator: 2,
+        margin: 3,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    check(
+        "bar-separated-1x",
+        "the 160x20 bar at scale 1, all modules left, spacing 10, separator 2, middle margin 3",
+        &Image::from_xrgb(&pixels, w, h, true),
     );
 }
 

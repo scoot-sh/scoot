@@ -112,6 +112,9 @@ pub struct LayerObjects {
     pub(super) buffer_scale: u32,
     pub(super) destination: Option<Size>,
     pub(super) opaque: Option<(Size, Option<u32>)>,
+    /// The input region (logical size and effective corner radius, see
+    /// `crate::region`; `None` while never set).
+    pub(super) input: Option<(Size, u32)>,
 }
 
 impl LayerObjects {
@@ -177,6 +180,7 @@ impl LayerObjects {
             buffer_scale: 1,
             destination: None,
             opaque: None,
+            input: None,
         }
     }
 
@@ -717,6 +721,12 @@ fn click(state: &mut State) {
         // any), but a press with no font to hit-test against is nothing.
         return;
     };
+    // The surface's device height, as the last draw sized it.
+    let height = entry
+        .output
+        .surface_size(&entry.objects.bar)
+        .and_then(|size| scale.buffer(size))
+        .map_or(0, |(_, height)| height);
     let ctx = ClickCtx {
         output: OutputView {
             name: entry.output.info().name.as_deref(),
@@ -726,6 +736,9 @@ fn click(state: &mut State) {
         text,
         em: render::em(style.font_size, scale),
         padding: render::device(style.padding, scale),
+        span_width: span.width,
+        height,
+        scale,
     };
     if let Some(placed) = module.and_then(|module| content.modules.get_mut(module)) {
         if placed.module.on_click(&ctx) == Update::Changed {

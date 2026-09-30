@@ -168,6 +168,7 @@ fn a_warm_tick_allocates_nothing() {
         font_size: 50,
         padding: 10,
         spacing: 0,
+        separator: 0,
         radius: 0,
         opacity: u8::MAX,
     };

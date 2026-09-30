@@ -916,6 +916,7 @@ impl Given {
                 right: self.right.unwrap_or_default(),
                 padding,
                 spacing,
+                ..defaults.layout
             }
         };
         check_layout(&layout)?;

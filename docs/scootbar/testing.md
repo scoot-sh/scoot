@@ -161,6 +161,22 @@ pinned nixpkgs' tzdata).
   a storm of back-to-back plugs and unplugs with the fd count and the
   mapped buffers checked for leaks; the margin rule again; side margins
   wider than the output (sway's negative width) still drawing a 1-pixel bar.
+- **The bar's shape on headless scoot** (`tests/appearance.rs`, and the
+  circle pill in `tests/workspaces.rs`): a click in the cut corner of a
+  rounded bar reaches the window behind it while a click on its flat part
+  does not, and a square bar swallows both (the negative control: with the
+  input region left unset the test fails, checked); the first module's ink
+  sits exactly `radius - padding / 2` further in on a rounded bar than on
+  a square one; a module's `margin` moves it by exactly that much; and a
+  `pill-shape = "circle"` pill is round on a screenshot and a click on
+  another workspace's digit still switches to it. Pure: the input region's
+  rectangles (`region`: every pixel the paint gives any coverage is
+  clickable, the four corners mirror, no overlap, no underflow at any size),
+  the layout with margins and an edge inset (`layout`), the separators and
+  the corner clearance through the render path (`render/tests/spacing.rs`),
+  the pill's fill and the pill's geometry (`paint`, `modules/workspaces/pill`,
+  and `hit_target` for the click), and every config bound
+  (`config/spacing_tests.rs`).
 
 ## Snapshots
 
@@ -174,8 +190,12 @@ icon, `.notdef` and three state classes, at scale 1 (`bar-1x.pgm`), 1.5
 (`bar-clipped-1.25x.pgm`); and the rounded and translucent bar, as the
 alpha plane (white where the bar is, so the cut shows) at scale 1 with
 radius 6 (`bar-rounded-1x-alpha.pgm`) and at 1.5 with half opacity
-(`bar-rounded-1.5x-alpha.pgm`), and the color plane of a translucent bar
-with text blended over it, premultiplied (`bar-translucent-1x.pgm`). The
+(`bar-rounded-1.5x-alpha.pgm`), the color plane of a translucent bar
+with text blended over it, premultiplied (`bar-translucent-1x.pgm`), the
+separators and a margin (`bar-separated-1x.pgm`), and the workspaces pill
+as a pill, a circle around one digit and a circle widened around two,
+at 1 and at 1.5 (`workspaces-pill-1x.pgm`, `workspaces-circle-1x.pgm`,
+`workspaces-circle-two-digits-1x.pgm` and the `-1.5x` ones). The
 pixel tests beside each module assert what
 they mean; these pin everything else in the picture (the antialiasing,
 where a fractional scale lands an edge), so any change to it is seen.
@@ -193,8 +213,99 @@ rewrites them; look at the diff or the images before committing. Without
 never bless one. A failure writes what was drawn to
 `$TMPDIR/scootbar-snapshots/NAME.actual.pgm` and prints both images as
 text. An image no test compares fails too (`no_snapshot_is_left_over`).
-The pill's own rounding has no scene yet: it is still
-[appearance](backlog/appearance.md)'s.
+The workspaces scenes are drawn by `modules/workspaces/tests.rs` through
+the same `check`.
+
+## The appearance hardware test
+
+`scripts/scootbar-appearance-hw-test.sh` is what real hardware adds to the
+headless tests above: the four looks of [appearance](backlog/appearance.md)
+(flush-opaque, rounded-opaque, rounded-translucent, floating), each on a real
+compositor, in one run that ends in a PASS/FAIL/INFO table. Nothing in the
+CI runs it; **the maintainer runs it on hardware, and the numbers go into
+the [resource ratchet](backlog/lightest.md#appearance-looks-flush-against-floating)**.
+
+```sh
+cargo build --release -p scoot -p scootctl -p scootbar
+# On the machine: Ctrl+Alt+F3, log in, cd to the checkout, and stay on that VT
+SCOOTBAR_HW_MODE=--tty SCOOTBAR_HW_OUT=/tmp/sb-appearance-tty scripts/scootbar-appearance-hw-test.sh
+```
+
+`SCOOTBAR_HW_MODE` is `--headless` (the default, no hardware: how the script itself is
+rehearsed), `--nested` (run inside a host compositor) or `--tty` (a real
+display: the run that counts, about four minutes; the script says why the
+VT must be kept and marks a run whose compositor was paused). `SCOOTBAR_HW_OUT` is a new
+directory (a run already in it is refused, `SCOOTBAR_HW_OVERWRITE=1` replaces it). The
+header of the script lists the other settings (`SCOOTBAR_HW_GAP`, `SCOOTBAR_HW_RADIUS`, `SCOOTBAR_HW_IDLE_SECS`,
+`SCOOTBAR_HW_REDRAWS`, ...) and the prerequisites: release builds, `python3` (standard
+library only: the PNG decoding and the pixel checks), `foot` for the click
+check. Exit status 0 with no FAIL, 1 with a FAIL, 2 for a setup problem (no
+binary, a busy seat, the compositor never came up), which is not a result.
+
+Per look it does, in order:
+
+- **Pixels**, on a `scootctl screenshot` of the output (no pointer): the four
+  corners of a rounded bar show the desktop and a flush square one shows the
+  bar's color there; the top edge just past a corner, the left edge's middle
+  and the body are the bar's; a translucent bar's body is the blend of the
+  bar and the desktop within six levels; a floating bar has the desktop in
+  its margin and at the screen's corner. Every sampled pixel is in
+  `pixels.tsv`.
+- **The zone**: the usable area's top is the bar's height (flush) or the
+  height plus the margin (floating).
+- **The protocol**: in a run of its own with `WAYLAND_DEBUG=1`, a square bar
+  makes no `set_input_region` request and a rounded one makes one; the
+  first `damage_buffer` is the bar's own size (a floating bar's is narrower by
+  its side margins).
+- **Idle**: after settling, `SCOOTBAR_HW_IDLE_SECS` of nothing: scootbar's context
+  switches (the wakeups: at most 8 allowed for a clock's tick and the
+  compositor's release), its CPU jiffies (at most 2) and its RSS, and the
+  compositor's jiffies.
+- **A whole-bar redraw** repeated `SCOOTBAR_HW_REDRAWS` times (`scootbar msg reload`
+  re-places every output, which draws the whole bar and hands the compositor a
+  new buffer): the CPU jiffies of scootbar and of scoot. Each look is compared
+  with flush-opaque at the end.
+- **A cursor sweep** along the bar, paced below the display's refresh rate so
+  every move is a frame, for `SCOOTBAR_HW_SWEEP_SECS`: scoot's CPU per move, which is the
+  compositor's cost of the look under the cursor (blending a translucent
+  bar, and the opaque region an opaque one declares).
+
+After the four looks, **the click check**: a 120-high bar with radius 60 that
+reserves no space, over two `foot` windows. A click on the bar's flat part must
+not move focus; a click in the left window's corner, under the bar's cut
+corner, must move focus to that window, and the same click under a square bar
+of the same size must not (the control that shows the harness measures the
+bar). `SCOOTBAR_HW_EXPECT_INPUT_REGION=ignored` states the opposite expectation for a
+compositor that ignores input regions; scoot honors them.
+
+**Every setting is namespaced `SCOOTBAR_HW_*`**, because generic names
+collide with the environment (devenv's stdenv exports `SIZE=size`, which broke
+an earlier `SIZE` knob); `SCOOTBAR_HW_SIZE` must be `WIDTHxHEIGHT`.
+
+**`--tty` guards**: it is refused (exit status 3, nothing written, not even
+the output directory) when `WAYLAND_DISPLAY` or `DISPLAY` is set, that is,
+when run from inside a graphical session, unless `SCOOTBAR_HW_TAKE_SEAT=1`.
+At start-up it prints how to get back: a VT switch (`Ctrl+Alt+F<n>`, the VT
+of your session) is the only abort, since once scoot owns the keyboard
+`Ctrl+C` reaches scoot's focused `foot`, not the script. The refusals are
+pinned by `tests/hw_script.rs`.
+
+**What only makes sense on hardware**: the CPU and RSS numbers (the headless
+compositor presents nowhere, and debug builds are marked INFO, not for the
+ratchet), the cursor sweep's compositor cost, and the whole point of `--tty`,
+which is that the corners and the blend are what a real display shows. The
+pixel, zone, protocol and click checks are the same everywhere and pass on
+`--headless` and `--nested` (rehearsed for this entry, see the results in
+[appearance](backlog/appearance.md#landed-and-remaining)). The CPU
+differences are small next to the 10 ms jiffy: a difference of one jiffy over
+a run is noise, and the table says so; a change is worth quoting when it
+holds across two runs.
+
+**What to send back**: the `SCOOTBAR_HW_OUT` directory, or at least `summary.tsv`,
+`pixels.tsv`, `results.txt` and `environment.txt` (the commit and the exact
+binaries, the cache key of the numbers), plus any FAIL line and, for a
+failing pixel, its screenshot (`SCOOTBAR_HW_OUT/<look>.png`). Paste `summary.tsv` into the
+ratchet's appearance table.
 
 ## Fuzzing
 

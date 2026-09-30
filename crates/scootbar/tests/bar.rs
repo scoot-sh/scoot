@@ -12,7 +12,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{Reaper, Session, Shot, rgb, wait_exit, wakeups};
+use common::{Reaper, Session, Shot, foot_missing, rgb, wait_exit, wakeups};
 use serde_json::Value;
 
 const BAR: &str = "#c03020";
@@ -124,7 +124,7 @@ fn a_margin_is_reserved_on_the_anchored_edge_and_the_surface_is_the_bar() {
     }
 
     // A window goes beside it, inside the usable area.
-    if common_foot_missing() {
+    if foot_missing() {
         return;
     }
     let reply = session.scoot_ipc(r#"{"type":"action","action":"spawn","command":["foot"]}"#);
@@ -211,22 +211,6 @@ fn a_translucent_bar_is_blended_over_the_desktop() {
         );
     }
     assert_ne!(blended, bar);
-}
-
-/// `foot` is the one client the tests use to place a window; it is in the
-/// dev shell. Without it the placement check is skipped, unless
-/// `SCOOTBAR_REQUIRE_SCOOT` asks for everything.
-fn common_foot_missing() -> bool {
-    let found = std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("foot").is_file()));
-    if !found {
-        assert!(
-            std::env::var_os("SCOOTBAR_REQUIRE_SCOOT").is_none(),
-            "SCOOTBAR_REQUIRE_SCOOT is set but there is no foot on PATH"
-        );
-        eprintln!("skipped the window check -- no foot on PATH");
-    }
-    !found
 }
 
 #[test]

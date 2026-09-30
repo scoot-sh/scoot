@@ -592,10 +592,43 @@ pub fn settled_fds(pid: u32) -> usize {
 }
 
 /// At most the double buffer per output is mapped, and at least one.
+///
+/// The lower bound is waited for (up to [`PATIENCE`]): the zone is applied
+/// by the bufferless first commit, so a test that saw it may look before the
+/// daemon has configured, acked and mapped its first buffer. The upper bound
+/// is never waited for: more than the double buffer fails at once.
 pub fn assert_buffers(pid: u32, outputs: usize) {
-    let mapped = shm_mappings(pid);
-    assert!(
-        (outputs..=2 * outputs).contains(&mapped),
-        "{mapped} shm buffers mapped for {outputs} outputs"
-    );
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let mapped = shm_mappings(pid);
+        assert!(
+            mapped <= 2 * outputs,
+            "{mapped} shm buffers mapped for {outputs} outputs (at most {})",
+            2 * outputs
+        );
+        if mapped >= outputs {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{mapped} shm buffers mapped for {outputs} outputs (at least {outputs}) after {PATIENCE:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// `foot` is the one client the tests use to place a window; it is in the
+/// dev shell. Without it the placement check is skipped, unless
+/// `SCOOTBAR_REQUIRE_SCOOT` asks for everything.
+pub fn foot_missing() -> bool {
+    let found = std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("foot").is_file()));
+    if !found {
+        assert!(
+            std::env::var_os("SCOOTBAR_REQUIRE_SCOOT").is_none(),
+            "SCOOTBAR_REQUIRE_SCOOT is set but there is no foot on PATH"
+        );
+        eprintln!("skipped the window check -- no foot on PATH");
+    }
+    !found
 }

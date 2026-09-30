@@ -45,6 +45,9 @@ pub struct Style {
     pub font_size: u32,
     pub padding: u32,
     pub spacing: u32,
+    /// The width of the line drawn between neighbouring modules in a
+    /// section, logical pixels; 0 draws none.
+    pub separator: u32,
     /// The bar's corner radius, in logical pixels; 0 is square.
     pub radius: u32,
     /// The background's alpha, 255 (opaque) down to 0.
@@ -109,6 +112,8 @@ pub struct Member {
     /// Index into the started modules.
     pub module: usize,
     pub section: Section,
+    /// Logical pixels of room on each side of it, from the layout.
+    pub margin: u32,
 }
 
 /// The modules `layout` places, as members, in its order. A module that
@@ -118,7 +123,11 @@ pub fn members(layout: &layout::Layout, placed: &[Placed]) -> Vec<Member> {
         .placed()
         .filter_map(|(section, id)| {
             let module = placed.iter().position(|p| p.id == id)?;
-            Some(Member { module, section })
+            Some(Member {
+                module,
+                section,
+                margin: layout.margin_of(id),
+            })
         })
         .collect()
 }
@@ -134,6 +143,10 @@ pub struct Scene {
     revisions: Vec<u64>,
     /// Device pixels, padding included; 0 for an empty view.
     widths: Vec<u32>,
+    /// Each member's margin, logical pixels (the layout's).
+    margins: Vec<u32>,
+    /// Each member's margin as last laid out, device pixels.
+    margins_device: Vec<u32>,
     spans: Vec<Span>,
     /// The next layout, compared with `spans` before it replaces them.
     next: Vec<Span>,
@@ -153,7 +166,11 @@ impl Scene {
         let members: Vec<Member> = sections
             .iter()
             .enumerate()
-            .map(|(module, &section)| Member { module, section })
+            .map(|(module, &section)| Member {
+                module,
+                section,
+                margin: 0,
+            })
             .collect();
         Self::with_members(&members)
     }
@@ -166,6 +183,8 @@ impl Scene {
             views: vec![View::default(); count],
             revisions: vec![NEVER; count],
             widths: vec![0; count],
+            margins: members.iter().map(|m| m.margin).collect(),
+            margins_device: vec![0; count],
             spans: vec![Span::default(); count],
             next: vec![Span::default(); count],
             sections: members.iter().map(|m| m.section).collect(),
@@ -236,10 +255,19 @@ impl Scene {
         if !resized {
             return;
         }
+        // Clear the corners: the first module's padding starts at the
+        // radius (its pill, which reaches half a padding out, stays past
+        // it), so nothing is drawn in a corner square.
+        let edge = radius.saturating_sub(padding / 4);
+        for (device_margin, &margin) in self.margins_device.iter_mut().zip(&self.margins) {
+            *device_margin = device(margin, scale);
+        }
         layout::arrange(
             &self.sections,
             &self.widths,
+            &self.margins_device,
             device(style.spacing, scale),
+            edge,
             width,
             &mut self.next,
         );
@@ -334,6 +362,9 @@ pub fn paint(
             &scene.corners,
         );
     }
+    if whole {
+        separators(canvas, scene, style, frame.scale);
+    }
     let Some(text) = text else {
         // No font: no module has any width, so nothing but the background.
         record.set(scene, frame);
@@ -368,6 +399,7 @@ pub fn paint(
                 em,
                 baseline,
                 padding,
+                scale: frame.scale,
                 theme: &style.theme,
             });
         }
@@ -385,6 +417,36 @@ pub fn paint(
         }
     }
     record.set(scene, frame);
+}
+
+/// The lines between neighbouring modules in a section, in the theme's
+/// `dim` token: one centered in each gap, `style.separator` wide (cut back
+/// to the gap, so a line never touches a module's span, which the
+/// module's own repaint would overwrite), from a quarter of the bar's
+/// height down to three quarters. Painted only with the whole bar: no
+/// module's repaint reaches a gap.
+fn separators(canvas: &mut Canvas<'_>, scene: &Scene, style: &Style, scale: Scale) {
+    let width = device(style.separator, scale);
+    if width == 0 {
+        return;
+    }
+    let height = canvas.height();
+    let (top, bottom) = (height / 4, height - height / 4);
+    let mut previous: Option<(Section, u32)> = None;
+    for (&span, &section) in scene.spans.iter().zip(&scene.sections) {
+        if span.width == 0 {
+            continue;
+        }
+        if let Some((was, end)) = previous {
+            let gap = span.x.saturating_sub(end);
+            if was == section && gap > 0 {
+                let line = width.min(gap);
+                let x = end + (gap - line) / 2;
+                canvas.fill_rect(Span { x, width: line }, top, bottom, style.theme.dim);
+            }
+        }
+        previous = Some((section, span.end()));
+    }
 }
 
 /// The spans to damage on a surface showing `shown` so it shows `scene` at

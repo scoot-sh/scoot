@@ -7,6 +7,7 @@
 use ab_glyph::{FontArc, FontVec};
 
 use super::{Group, Link, MAX_WORKSPACES, Ws, hit_index, item_span, parse_coord, parse_number};
+use crate::density::Scale;
 use crate::modules::harness::Harness;
 use crate::modules::{ClickCtx, CustomDraw, MAX_TEXT, Module, OutputView, Update, find};
 use crate::paint::{Canvas, Span};
@@ -201,6 +202,9 @@ fn a_removed_workspace_is_not_redrawn_nor_clicked_before_its_done() {
         text: &font,
         em: EM,
         padding: PAD,
+        span_width: 400,
+        height: 60,
+        scale: Scale::Integer(1),
     };
     assert_eq!(harness.click(&ctx), Update::Unchanged);
 }
@@ -316,6 +320,9 @@ fn a_click_without_a_manager_sends_nothing() {
             text: &font,
             em: EM,
             padding: PAD,
+            span_width: 400,
+            height: 60,
+            scale: Scale::Integer(1),
         };
         assert_eq!(harness.click(&ctx), Update::Unchanged, "x {x}");
     }
@@ -338,6 +345,7 @@ fn custom_draw_marks_only_the_active_item() {
     canvas.fill_span(span, theme.background);
     let module = super::Workspaces {
         link: link.clone(),
+        pill: super::Pill::default(),
         seen: 0,
     };
     let mut custom = CustomDraw {
@@ -349,6 +357,7 @@ fn custom_draw_marks_only_the_active_item() {
         em: EM,
         baseline,
         padding: PAD,
+        scale: Scale::Integer(1),
         theme: &theme,
     };
     assert!(module.custom_draw(&mut custom));
@@ -388,6 +397,7 @@ fn without_a_group_custom_draw_keeps_the_plain_draw() {
     let mut canvas = Canvas::new(&mut pixels, 400, 60).unwrap();
     let module = super::Workspaces {
         link: super::Link::default(),
+        pill: super::Pill::default(),
         seen: 0,
     };
     let mut custom = CustomDraw {
@@ -399,7 +409,402 @@ fn without_a_group_custom_draw_keeps_the_plain_draw() {
         em: EM,
         baseline,
         padding: PAD,
+        scale: Scale::Integer(1),
         theme: &theme,
     };
     assert!(!module.custom_draw(&mut custom));
+}
+
+/// The pill drawn as the render path calls it with `pill`'s shape, for
+/// workspace 2 of 2 active: the pixels of a 400x60 bar, and the item's
+/// span.
+fn pill_drawn(pill: super::Pill) -> (Vec<u8>, u32, u32) {
+    let (harness, link) = started();
+    commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
+    let view = harness.view_on(Some("DP-1"));
+    let theme = Theme::default();
+    let mut font = text();
+    let span = Span { x: 0, width: 400 };
+    let baseline = font.metrics(EM).baseline(60);
+    let mut pixels = vec![0u8; 400 * 60 * 4];
+    let mut canvas = Canvas::new(&mut pixels, 400, 60).unwrap();
+    canvas.fill_span(span, theme.background);
+    let module = super::Workspaces {
+        link,
+        pill,
+        seen: 0,
+    };
+    let mut custom = CustomDraw {
+        output: DP1,
+        view: &view,
+        canvas: &mut canvas,
+        text: &mut font,
+        span,
+        em: EM,
+        baseline,
+        padding: PAD,
+        scale: Scale::Integer(1),
+        theme: &theme,
+    };
+    assert!(module.custom_draw(&mut custom));
+    let (start, end) = item_span(&text(), "1 2", EM, i64::from(PAD), 1).unwrap();
+    (pixels, start, end)
+}
+
+fn at(pixels: &[u8], x: u32, y: u32) -> [u8; 3] {
+    let i = ((y * 400 + x) * 4) as usize;
+    [pixels[i + 2], pixels[i + 1], pixels[i]]
+}
+
+#[test]
+fn a_rounded_pill_cuts_its_corners_and_a_square_one_does_not() {
+    let theme = Theme::default();
+    let accent = [theme.accent.r, theme.accent.g, theme.accent.b];
+    let bg = [theme.background.r, theme.background.g, theme.background.b];
+    // The pill spans start - 4 .. end + 4 (half the padding), full height.
+    let (square, start, end) = pill_drawn(super::Pill::default());
+    let (left, right) = (start - PAD / 2, end + PAD / 2 - 1);
+    for (x, y) in [(left, 0), (right, 0), (left, 59), (right, 59)] {
+        assert_eq!(at(&square, x, y), accent, "square corner ({x},{y})");
+    }
+    // Radius 4 is a quarter circle of 4 pixels in each corner: the corner
+    // pixel is the bar's, the edge midpoints are still the pill's.
+    let (round, ..) = pill_drawn(super::Pill {
+        shape: super::Shape::Rect,
+        radius: 4,
+        inset: 0,
+    });
+    for (x, y) in [(left, 0), (right, 0), (left, 59), (right, 59)] {
+        assert_eq!(at(&round, x, y), bg, "round corner ({x},{y})");
+    }
+    for (x, y) in [(left, 30), (right, 30), ((left + right) / 2, 0)] {
+        assert_eq!(at(&round, x, y), accent, "edge ({x},{y})");
+    }
+    // Beyond half the pill's short side, the radius is cut back, not
+    // wrapped: a pill of a huge radius still draws and keeps its middle.
+    let (huge, ..) = pill_drawn(super::Pill {
+        shape: super::Shape::Rect,
+        radius: u32::MAX,
+        inset: 0,
+    });
+    assert_eq!(at(&huge, (left + right) / 2, 30), accent);
+}
+
+#[test]
+fn an_inset_lifts_the_pill_off_the_bar_and_never_past_the_text() {
+    let theme = Theme::default();
+    let accent = [theme.accent.r, theme.accent.g, theme.accent.b];
+    let bg = [theme.background.r, theme.background.g, theme.background.b];
+    let (pixels, start, end) = pill_drawn(super::Pill {
+        shape: super::Shape::Rect,
+        radius: 0,
+        inset: 3,
+    });
+    let x = start - 2;
+    assert_eq!(at(&pixels, x, 2), bg, "above the pill");
+    assert_eq!(at(&pixels, x, 3), accent, "the pill's first row");
+    assert_eq!(at(&pixels, x, 56), accent, "the pill's last row");
+    assert_eq!(at(&pixels, x, 57), bg, "below the pill");
+    assert_eq!(at(&pixels, end + 1, 30), accent);
+    // An inset past what the line leaves is cut back so the number stays
+    // on the pill: the pill still covers the digit's rows.
+    let (pixels, start, _) = pill_drawn(super::Pill {
+        shape: super::Shape::Rect,
+        radius: 0,
+        inset: 1000,
+    });
+    let x = start - 2;
+    let rows: Vec<u32> = (0..60).filter(|&y| at(&pixels, x, y) == accent).collect();
+    assert!(!rows.is_empty(), "the pill vanished");
+    let line = {
+        let m = text().metrics(EM);
+        (m.ascent - m.descent).ceil() as u32
+    };
+    assert!(
+        rows.len() as u32 >= line,
+        "{} rows for a {line}-row line",
+        rows.len()
+    );
+}
+
+// ---- the pill's shapes ------------------------------------------------
+
+use super::pill::{Pill, Shape};
+use super::{Geometry, hit_target, pill_geometry};
+
+fn geometry(pill: &Pill, full: &str, active: usize, height: u32) -> Geometry {
+    pill_geometry(
+        pill,
+        &text(),
+        full,
+        EM,
+        PAD,
+        active,
+        1000,
+        height,
+        Scale::Integer(1),
+    )
+    .expect("an item to mark")
+}
+
+#[test]
+fn a_circle_around_one_digit_is_as_wide_as_it_is_tall() {
+    let circle = Pill {
+        shape: Shape::Circle,
+        ..Pill::default()
+    };
+    let g = geometry(&circle, "1 2 3", 1, 60);
+    // Rows the whole bar less nothing here: the line is 50 of 60, so the
+    // inset is 0 and the pill 60 tall; the disc is as wide.
+    assert_eq!(g.bottom - g.top, 60);
+    // Grown to the diameter, or as far as the neighbours' ink allows.
+    assert!(g.hi - g.lo >= 38, "no narrower than the item itself");
+    let (_, before_end) = item_span(&text(), "1 2 3", EM, i64::from(PAD), 0).unwrap();
+    let (after_start, _) = item_span(&text(), "1 2 3", EM, i64::from(PAD), 2).unwrap();
+    assert!(g.lo >= before_end.min(g.lo) && g.hi <= after_start.max(g.hi));
+    // With room to grow (a bar 30 tall, the item wider than that) it is
+    // exactly the item's own extent: never narrower.
+    let plain = geometry(&Pill::default(), "1 2 3", 1, 60);
+    assert!(g.lo <= plain.lo && g.hi >= plain.hi);
+}
+
+#[test]
+fn a_two_digit_number_widens_a_circle_into_a_pill_rather_than_clipping() {
+    let circle = Pill {
+        shape: Shape::Circle,
+        inset: 0,
+        radius: 0,
+    };
+    let g = geometry(&circle, "9 10 11", 1, 60);
+    let (start, end) = item_span(&text(), "9 10 11", EM, i64::from(PAD), 1).unwrap();
+    // The pill covers the whole number and its padding: never clipped.
+    assert!(g.lo <= start && g.hi >= end, "{g:?} vs {start}..{end}");
+    // And it is wider than tall: a pill, not a disc.
+    assert!(g.hi - g.lo > g.bottom - g.top);
+}
+
+#[test]
+fn a_press_on_a_grown_pill_is_the_active_item_not_a_neighbours() {
+    let circle = Pill {
+        shape: Shape::Circle,
+        ..Pill::default()
+    };
+    let full = "1 2 3";
+    let font = text();
+    let g = geometry(&circle, full, 1, 60);
+    let active = Some((1, g));
+    let (_, first_end) = item_span(&font, full, EM, i64::from(PAD), 0).unwrap();
+    // Just past the first item's ink: inside its padded hit rect, and (a
+    // circle grown toward it) on the active pill.
+    let x = first_end + 1;
+    if (g.lo..g.hi).contains(&x) {
+        assert_eq!(super::hit_index(&font, full, EM, PAD, 3, x), Some(0));
+        assert_eq!(hit_target(&font, full, EM, PAD, 3, x, active), Some(1));
+    }
+    // The first digit's middle is its own; the third's too; past all of
+    // them is nothing.
+    let (a, b) = item_span(&font, full, EM, i64::from(PAD), 0).unwrap();
+    assert_eq!(
+        hit_target(&font, full, EM, PAD, 3, (a + b) / 2, active),
+        Some(0)
+    );
+    let (a, b) = item_span(&font, full, EM, i64::from(PAD), 2).unwrap();
+    assert_eq!(
+        hit_target(&font, full, EM, PAD, 3, (a + b) / 2, active),
+        Some(2)
+    );
+    assert_eq!(hit_target(&font, full, EM, PAD, 3, 900, active), None);
+    // No active item: the plain hit test.
+    assert_eq!(
+        hit_target(&font, full, EM, PAD, 3, first_end + 1, None),
+        super::hit_index(&font, full, EM, PAD, 3, first_end + 1)
+    );
+}
+
+#[test]
+fn every_shape_keeps_the_pill_inside_its_span_whatever_the_size() {
+    let font = text();
+    for shape in [Shape::Rect, Shape::Pill, Shape::Circle] {
+        let pill = Pill {
+            shape,
+            radius: 7,
+            inset: 3,
+        };
+        for (span_width, height) in [(0, 0), (1, 1), (30, 12), (200, 60), (u32::MAX, u32::MAX)] {
+            for scale in [Scale::Integer(1), Scale::Fractional(150)] {
+                for active in [0, 1, 2, 9] {
+                    let g = pill_geometry(
+                        &pill, &font, "1 2 3", EM, PAD, active, span_width, height, scale,
+                    );
+                    if let Some(g) = g {
+                        assert!(g.lo < g.hi && g.hi <= span_width, "{g:?} in {span_width}");
+                        assert!(g.top <= g.bottom && g.bottom <= height, "{g:?} in {height}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- snapshots of the shapes -------------------------------------------
+
+const fn gray(v: u8) -> crate::color::Color {
+    crate::color::Color { r: v, g: v, b: v }
+}
+
+/// The pill drawn through `custom_draw` on a `width` x `height` (logical)
+/// bar at `scale`, in gray tokens (background 0, accent 0xc0, ink 0xff),
+/// for workspaces `numbers` with the `active`th marked.
+fn shapes_scene(
+    pill: Pill,
+    numbers: &[u32],
+    active: usize,
+    scale: Scale,
+    (width, height): (u32, u32),
+) -> crate::snapshots::Image {
+    let (harness, link) = started();
+    let items: Vec<(u32, u32, bool)> = numbers
+        .iter()
+        .enumerate()
+        .map(|(i, &n)| (n, i as u32 + 1, i == active))
+        .collect();
+    commit(&link, "DP-1", &items);
+    let view = harness.view_on(Some("DP-1"));
+    let theme = Theme {
+        background: gray(0),
+        foreground: gray(0xff),
+        accent: gray(0xc0),
+        dim: gray(0x80),
+        urgent: gray(0xe0),
+    };
+    let (w, h) = scale
+        .buffer(crate::outputs::Size { width, height })
+        .unwrap();
+    let em = crate::render::em(14, scale);
+    let padding = crate::render::device(8, scale);
+    let mut font = text();
+    let baseline = font.metrics(em).baseline(h);
+    let span = Span { x: 0, width: w };
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+    let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
+    canvas.fill_span(span, theme.background);
+    let module = super::Workspaces {
+        link,
+        pill,
+        seen: 0,
+    };
+    let mut custom = CustomDraw {
+        output: DP1,
+        view: &view,
+        canvas: &mut canvas,
+        text: &mut font,
+        span,
+        em,
+        baseline,
+        padding,
+        scale,
+        theme: &theme,
+    };
+    assert!(module.custom_draw(&mut custom));
+    crate::snapshots::Image::from_xrgb(&pixels, w, h, true)
+}
+
+const BAR_SIZE: (u32, u32) = (120, 24);
+
+fn shape(shape: Shape, inset: u32) -> Pill {
+    Pill {
+        shape,
+        radius: 0,
+        inset,
+    }
+}
+
+#[test]
+fn snapshot_a_pill_at_1x() {
+    crate::snapshots::check(
+        "workspaces-pill-1x",
+        "the active workspace (2 of 1 2 3) in a pill, inset 3, on a 120x24 bar at scale 1",
+        &shapes_scene(
+            shape(Shape::Pill, 3),
+            &[1, 2, 3],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+        ),
+    );
+}
+
+#[test]
+fn snapshot_a_circle_at_1x() {
+    crate::snapshots::check(
+        "workspaces-circle-1x",
+        "the active workspace (2 of 1 2 3) in a circle, inset 2, on a 120x24 bar at scale 1",
+        &shapes_scene(
+            shape(Shape::Circle, 2),
+            &[1, 2, 3],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+        ),
+    );
+}
+
+#[test]
+fn snapshot_a_circle_around_two_digits_at_1x() {
+    crate::snapshots::check(
+        "workspaces-circle-two-digits-1x",
+        "the active workspace (10 of 9 10 11) in a circle, inset 2, at scale 1: widened to a pill",
+        &shapes_scene(
+            shape(Shape::Circle, 2),
+            &[9, 10, 11],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+        ),
+    );
+}
+
+#[test]
+fn snapshot_a_pill_at_1_5x() {
+    crate::snapshots::check(
+        "workspaces-pill-1.5x",
+        "the pill of workspaces-pill-1x at scale 1.5 (fractional, 180x36 device pixels)",
+        &shapes_scene(
+            shape(Shape::Pill, 3),
+            &[1, 2, 3],
+            1,
+            Scale::Fractional(180),
+            BAR_SIZE,
+        ),
+    );
+}
+
+#[test]
+fn snapshot_a_circle_at_1_5x() {
+    crate::snapshots::check(
+        "workspaces-circle-1.5x",
+        "the circle of workspaces-circle-1x at scale 1.5",
+        &shapes_scene(
+            shape(Shape::Circle, 2),
+            &[1, 2, 3],
+            1,
+            Scale::Fractional(180),
+            BAR_SIZE,
+        ),
+    );
+}
+
+#[test]
+fn snapshot_a_circle_around_two_digits_at_1_5x() {
+    crate::snapshots::check(
+        "workspaces-circle-two-digits-1.5x",
+        "the widened circle of workspaces-circle-two-digits-1x at scale 1.5",
+        &shapes_scene(
+            shape(Shape::Circle, 2),
+            &[9, 10, 11],
+            1,
+            Scale::Fractional(180),
+            BAR_SIZE,
+        ),
+    );
 }

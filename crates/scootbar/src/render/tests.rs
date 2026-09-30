@@ -19,6 +19,8 @@ use crate::testfont;
 use crate::text::Text;
 use crate::theme::Theme;
 
+mod spacing;
+
 /// A module whose view the test sets, counting how often it is asked.
 struct Fixed {
     shown: Rc<RefCell<(String, Class)>>,
@@ -96,6 +98,7 @@ impl Bar {
                 font_size: EM,
                 padding: 10,
                 spacing: 0,
+                separator: 0,
                 radius: 0,
                 opacity: u8::MAX,
             },
@@ -466,15 +469,18 @@ fn a_scene_shows_only_its_members_in_its_own_sections() {
         Member {
             module: 0,
             section: Section::Left,
+            margin: 0,
         },
         Member {
             module: 1,
             section: Section::Right,
+            margin: 0,
         },
     ];
     let b = [Member {
         module: 1,
         section: Section::Left,
+        margin: 0,
     }];
     let mut scene_a = Scene::with_members(&a);
     let mut scene_b = Scene::with_members(&b);
@@ -521,7 +527,8 @@ fn a_scene_shows_only_its_members_in_its_own_sections() {
         members(&layout, &bar.placed),
         [Member {
             module: 0,
-            section: Section::Left
+            section: Section::Left,
+            margin: 0,
         }]
     );
     // An empty scene is fine: nothing to lay out, nothing stale.

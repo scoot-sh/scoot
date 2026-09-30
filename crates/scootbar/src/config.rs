@@ -28,6 +28,8 @@ use crate::theme::Theme;
 
 mod outputs;
 #[cfg(test)]
+mod spacing_tests;
+#[cfg(test)]
 mod tests;
 
 /// The em when `--font-size` is not given, in logical pixels.
@@ -87,6 +89,7 @@ impl Config {
             font_size: self.font_size,
             padding: self.layout.padding,
             spacing: self.layout.spacing,
+            separator: self.layout.separator,
             radius: self.radius,
             opacity: self.opacity,
         }
@@ -281,6 +284,7 @@ struct BarFile {
     font_size: Option<u32>,
     padding: Option<u32>,
     spacing: Option<u32>,
+    separator: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -304,13 +308,32 @@ struct ClockFile {
     /// One glyph, drawn before the time.
     #[cfg(feature = "clock")]
     icon: Option<String>,
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "clock")]
+    margin: Option<u32>,
 }
 
-/// Reserved for the workspaces module's future options: empty, so any key
-/// in it is a loud error naming the key.
+/// The workspaces module's options. Without the `workspaces` feature there
+/// are none, and any key is a loud error naming it.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields, default)]
-struct WorkspacesFile {}
+struct WorkspacesFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "workspaces")]
+    margin: Option<u32>,
+    /// The active workspace's pill: `rect`, `pill` or `circle`.
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "pill-shape")]
+    pill_shape: Option<String>,
+    /// A `rect` pill's corner radius, logical pixels.
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "pill-radius")]
+    pill_radius: Option<u32>,
+    /// The pill's gap from the bar's top and bottom, logical pixels.
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "pill-inset")]
+    pill_inset: Option<u32>,
+}
 
 impl File {
     /// Validates every value and fills the defaults: `Err` names the
@@ -416,7 +439,43 @@ impl File {
         };
         let padding = gap(path, "bar.padding", bar.padding, defaults.layout.padding)?;
         let spacing = gap(path, "bar.spacing", bar.spacing, defaults.layout.spacing)?;
-        let layout = self.layout(path, padding, spacing, &defaults.layout)?;
+        let separator = gap(path, "bar.separator", bar.separator, 0)?;
+        if separator > spacing {
+            return Err(value(
+                path,
+                "bar.separator",
+                format_args!(
+                    "is a line drawn in the gap between modules, so it takes at most \
+                     bar.spacing ({spacing}), not `{separator}`"
+                ),
+            ));
+        }
+        #[cfg_attr(not(any(feature = "clock", feature = "workspaces")), allow(unused_mut))]
+        let mut margins: Vec<(&'static str, u32)> = Vec::new();
+        #[cfg(feature = "clock")]
+        if let Some(margin) = self.clock.margin {
+            let margin = gap(path, "clock.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::clock::ID, margin));
+            }
+        }
+        #[cfg(feature = "workspaces")]
+        if let Some(margin) = self.workspaces.margin {
+            let margin = gap(path, "workspaces.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::workspaces::ID, margin));
+            }
+        }
+        let layout = self.layout(
+            path,
+            Gaps {
+                padding,
+                spacing,
+                separator,
+                margins,
+            },
+            &defaults.layout,
+        )?;
         let theme = self.theme(path, &defaults.theme)?;
         let outputs = outputs::policy(path, self.outputs.as_ref(), &self.output)?;
         #[cfg_attr(not(feature = "clock"), allow(unused_mut))]
@@ -431,6 +490,36 @@ impl File {
                     format_args!("{}: {error}", format.escape_debug()),
                 )
             })?;
+        }
+        #[cfg(feature = "workspaces")]
+        {
+            use crate::modules::workspaces::Shape;
+            let pill = &mut modules.workspaces.pill;
+            if let Some(text) = &self.workspaces.pill_shape {
+                pill.shape = Shape::parse(text).ok_or_else(|| {
+                    value(
+                        path,
+                        "workspaces.pill-shape",
+                        format_args!("takes rect, pill or circle, not `{}`", text.escape_debug()),
+                    )
+                })?;
+            }
+            if let Some(radius) = self.workspaces.pill_radius {
+                pill.radius = gap(path, "workspaces.pill-radius", Some(radius), 0)?;
+                if pill.shape != Shape::Rect {
+                    return Err(value(
+                        path,
+                        "workspaces.pill-radius",
+                        format_args!(
+                            "rounds a `rect` pill; the `pill` and `circle` shapes are already \
+                             as round as they fit (drop it, or set pill-shape = \"rect\")"
+                        ),
+                    ));
+                }
+            }
+            if let Some(inset) = self.workspaces.pill_inset {
+                pill.inset = gap(path, "workspaces.pill-inset", Some(inset), 0)?;
+            }
         }
         #[cfg(feature = "clock")]
         if let Some(icon) = &self.clock.icon {
@@ -461,17 +550,19 @@ impl File {
 
     /// The module lists: giving any of the three sets the whole layout, as
     /// the flags do (a part not given is empty).
-    fn layout(
-        &self,
-        path: &Path,
-        padding: u32,
-        spacing: u32,
-        defaults: &Layout,
-    ) -> Result<Layout, Error> {
+    fn layout(&self, path: &Path, gaps: Gaps, defaults: &Layout) -> Result<Layout, Error> {
+        let Gaps {
+            padding,
+            spacing,
+            separator,
+            margins,
+        } = gaps;
         let layout = if self.left.is_none() && self.center.is_none() && self.right.is_none() {
             Layout {
                 padding,
                 spacing,
+                separator,
+                margins,
                 ..defaults.clone()
             }
         } else {
@@ -481,6 +572,8 @@ impl File {
                 right: ids(path, Section::Right, &self.right)?,
                 padding,
                 spacing,
+                separator,
+                margins,
             }
         };
         check_placement(&layout).map_err(|(section, error)| Error::Value {
@@ -517,6 +610,15 @@ impl File {
             urgent: color("colors.urgent", colors.urgent.as_ref(), defaults.urgent)?,
         })
     }
+}
+
+/// The layout's spacings, validated: what [`File::layout`] adds to the
+/// module lists.
+struct Gaps {
+    padding: u32,
+    spacing: u32,
+    separator: u32,
+    margins: Vec<(&'static str, u32)>,
 }
 
 /// A value error at `key`: what it takes, in `message`.

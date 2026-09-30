@@ -23,8 +23,8 @@
 //! ## One draw
 //!
 //! One batch: attach, the viewport's destination or the buffer scale, the
-//! opaque region (each only when it differs from what the surface has, as
-//! they persist), damage, commit. With a viewporter every buffer, at any
+//! opaque region and the input region (each only when it differs from what
+//! the surface has, as they persist), damage, commit. With a viewporter every buffer, at any
 //! scale, is attached at buffer scale 1 and sized by the viewport's
 //! destination (the surface's logical size); without one, the scale is an
 //! integer and goes to `set_buffer_scale`. **Damage is only what changed**
@@ -48,6 +48,7 @@ use crate::density::Scale;
 use crate::modules::OutputView;
 use crate::outputs::{Frame, OutputId, Size};
 use crate::paint::{self, Span};
+use crate::region;
 use crate::render::{self, Record, Scene};
 
 #[cfg(test)]
@@ -360,6 +361,18 @@ impl Canvas {
             set_opaque_region(globals, qh, surface, opaque);
             layer.opaque = Some(opaque);
         }
+        // The input region is the rounded shape (logical pixels, so the
+        // scale is not part of its key): only when the size or the
+        // effective radius changes, and never for a square bar, which
+        // keeps the default (the whole surface).
+        let round = region::effective_radius(style.radius, frame.size.width, frame.size.height);
+        let input = (frame.size, round);
+        if layer.input != Some(input) {
+            if round > 0 || layer.input.is_some_and(|(_, was)| was > 0) {
+                set_input_region(globals, qh, surface, input);
+            }
+            layer.input = Some(input);
+        }
         if render::damage(&mut self.shown, scene, drawn, &mut self.damage) {
             surface.damage_buffer(0, 0, logical(dims.0), logical(dims.1));
         } else {
@@ -422,6 +435,34 @@ fn set_opaque_region(
         );
     }
     surface.set_opaque_region(Some(&region));
+    region.destroy();
+}
+
+/// `wl_surface.set_input_region` for a surface of `size` (logical) whose
+/// corners are cut by `radius` ([`region::input_rects`]): the bar's rounded
+/// shape, or (`radius` 0) the default, the whole surface.
+fn set_input_region(
+    globals: &Globals,
+    qh: &QueueHandle<State>,
+    surface: &WlSurface,
+    (size, radius): (Size, u32),
+) {
+    if radius == 0 {
+        surface.set_input_region(None);
+        return;
+    }
+    let mut rects = Vec::with_capacity(2 * radius as usize + 1);
+    region::input_rects(size.width, size.height, radius, &mut rects);
+    let region = globals.compositor.create_region(qh, ());
+    for rect in rects {
+        region.add(
+            logical(rect.x),
+            logical(rect.y),
+            logical(rect.width),
+            logical(rect.height),
+        );
+    }
+    surface.set_input_region(Some(&region));
     region.destroy();
 }
 
