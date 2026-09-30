@@ -53,6 +53,7 @@
 use ab_glyph::{Font, FontArc, GlyphId, OutlinedGlyph, PxScale, ScaleFont, point};
 
 use crate::color::Color;
+use crate::icon::{self, Art, Bitmap};
 use crate::paint::{Canvas, Span};
 
 #[cfg(test)]
@@ -121,6 +122,8 @@ pub struct Text {
     /// Sorted by `key`.
     entries: Vec<Cached>,
     arena: Vec<u8>,
+    /// Path and image icons at the sizes drawn (`crate::icon`).
+    icons: icon::Cache,
 }
 
 /// A size's vertical metrics, in device pixels.
@@ -156,6 +159,7 @@ impl Text {
             fallbacks,
             entries: Vec::new(),
             arena: Vec::new(),
+            icons: icon::Cache::default(),
         }
     }
 
@@ -225,6 +229,57 @@ impl Text {
     #[allow(dead_code)] // Only the workspaces module walks advances.
     pub fn advance(&self, c: char, em: f32) -> f32 {
         self.resolve(c, em).advance
+    }
+
+    /// The side, in device pixels, of a path or image icon at `em`: the
+    /// em, rounded, at least 1.
+    pub fn art_side(em: f32) -> u32 {
+        // `as` saturates a non-finite or huge em; `icon` refuses past its
+        // own bound when drawing.
+        em.round().max(1.0) as u32
+    }
+
+    /// The gap after a path or image icon that has text after it: one
+    /// space of the primary font, as a glyph icon has.
+    pub fn art_gap(&self, em: f32) -> u32 {
+        self.advance(' ', em).round().max(0.0) as u32
+    }
+
+    /// Draws `art`, a square [`Text::art_side`] on a side, its left edge
+    /// at `x` and centered vertically in the canvas, clipped to `clip`. A
+    /// path icon is tinted `color`; an image is drawn as it is.
+    pub fn draw_art(
+        &mut self,
+        canvas: &mut Canvas<'_>,
+        art: &Art,
+        em: f32,
+        x: i64,
+        color: Color,
+        clip: Span,
+    ) {
+        let side = Self::art_side(em);
+        let Some(bitmap) = self.icons.get(art, side) else {
+            return;
+        };
+        let top = (i64::from(canvas.height()) - i64::from(side)) / 2;
+        let side = side as usize;
+        match bitmap {
+            Bitmap::Mask(coverage) => {
+                for (gy, row) in coverage.chunks_exact(side).enumerate() {
+                    for (gx, &c) in row.iter().enumerate() {
+                        canvas.blend(x + gx as i64, top + gy as i64, c, color, clip);
+                    }
+                }
+            }
+            Bitmap::Premultiplied(pixels) => {
+                for (gy, row) in pixels.chunks_exact(side * 4).enumerate() {
+                    for (gx, pixel) in row.chunks_exact(4).enumerate() {
+                        let pixel = [pixel[0], pixel[1], pixel[2], pixel[3]];
+                        canvas.blend_premultiplied(x + gx as i64, top + gy as i64, pixel, clip);
+                    }
+                }
+            }
+        }
     }
 
     /// Draws `icon` and `text` at `em` in `color`, the pen starting at `x`

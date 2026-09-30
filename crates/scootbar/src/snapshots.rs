@@ -27,6 +27,8 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 #[cfg(test)]
+mod icons;
+#[cfg(test)]
 mod tests;
 
 /// An image as the snapshots store it: one sample per pixel (gray) or
@@ -204,7 +206,7 @@ pub fn check(name: &str, what: &str, image: &Image) {
     let path = path(name, image);
     let comment = format!(
         "scootbar snapshot `{name}`: {what}\n\
-         Made by the test of that name in src/snapshots/tests.rs; to update it,\n\
+         Made by the test of that name in src/snapshots/ (tests.rs, icons.rs); to update it,\n\
          SCOOTBAR_BLESS=1 cargo test -p scootbar snapshots (src/snapshots.rs)."
     );
     if blessing() {

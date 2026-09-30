@@ -24,6 +24,7 @@ mod control;
 mod daemon;
 mod density;
 mod font;
+mod icon;
 mod layout;
 mod modules;
 mod outputs;

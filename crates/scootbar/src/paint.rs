@@ -322,6 +322,32 @@ impl<'a> Canvas<'a> {
         *pad = mix(0xff, *pad);
     }
 
+    /// Blends `pixel` (`b, g, r, a`, premultiplied: an image's) over the
+    /// pixel at `(x, y)`, if it is inside `clip` and the canvas: the
+    /// source-over `src + dst × (255 − a) ÷ 255` on every channel.
+    pub fn blend_premultiplied(&mut self, x: i64, y: i64, pixel: [u8; 4], clip: Span) {
+        if pixel[3] == 0
+            || x < i64::from(clip.x)
+            || x >= i64::from(clip.end())
+            || x < 0
+            || y < 0
+            || x >= i64::from(self.width)
+            || y >= i64::from(self.height)
+        {
+            return;
+        }
+        let index = (y as usize * self.width as usize + x as usize) * 4;
+        let Some(dest) = self.pixels.get_mut(index..index + 4) else {
+            return;
+        };
+        let keep = 255 - u32::from(pixel[3]);
+        for (d, &s) in dest.iter_mut().zip(&pixel) {
+            // At most `s + d`, which a valid premultiplied pixel keeps
+            // within 255; clamped in case the source is not valid.
+            *d = (u32::from(s) + (u32::from(*d) * keep + 127) / 255).min(255) as u8;
+        }
+    }
+
     /// The alpha byte at `(x, y)`, for tests.
     #[cfg(test)]
     pub fn alpha_at(&self, x: u32, y: u32) -> u8 {
