@@ -77,6 +77,11 @@ pub const ID: &str = "workspaces";
 const MAX_GROUPS: usize = 8;
 /// Workspaces per group, staged, committed and unassigned each.
 const MAX_WORKSPACES: usize = 32;
+
+/// The most spaces `item-gap` takes between two numbers: the view's text is
+/// cut at [`super::MAX_TEXT`] bytes, and at 8 spaces that still holds 28
+/// single-digit workspaces.
+pub const MAX_ITEM_GAP: u32 = 8;
 /// Output names kept at most, in bytes: `wl_output` names are short
 /// (`DP-1`, `HEADLESS-1`); longer ones are cut.
 const MAX_NAME: usize = 64;
@@ -85,16 +90,29 @@ const MAX_NAME: usize = 64;
 /// configuration: a fresh daemon run's shared workspace state, held here so
 /// the daemon's Wayland dispatch and this module see the same one. Equal by
 /// construction, so command-line parsing still compares.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Settings {
     pub link: Link,
     pub pill: Pill,
+    /// Spaces between the numbers, `1..=`[`MAX_ITEM_GAP`]: one space is about
+    /// a third of the font size.
+    pub item_gap: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            link: Link::default(),
+            pill: Pill::default(),
+            item_gap: 1,
+        }
+    }
 }
 
 impl PartialEq for Settings {
     fn eq(&self, other: &Self) -> bool {
         // The link is plumbing, equal by construction.
-        self.pill == other.pill
+        self.pill == other.pill && self.item_gap == other.item_gap
     }
 }
 
@@ -551,6 +569,7 @@ pub fn init(settings: &super::Settings) -> Init {
     Init::Available(Box::new(Workspaces {
         link: settings.workspaces.link.clone(),
         pill: settings.workspaces.pill,
+        item_gap: settings.workspaces.item_gap.clamp(1, MAX_ITEM_GAP),
         seen: 0,
     }))
 }
@@ -559,6 +578,8 @@ pub fn init(settings: &super::Settings) -> Init {
 pub struct Workspaces {
     link: Link,
     pill: Pill,
+    /// Spaces between two numbers in the view's text.
+    item_gap: u32,
     seen: u64,
 }
 
@@ -591,7 +612,9 @@ impl Workspaces {
         self.items(output, &mut items, &mut count);
         for (index, &(number, _)) in items[..count].iter().enumerate() {
             if index > 0 {
-                let _ = view.text_mut().write_char(' ');
+                for _ in 0..self.item_gap {
+                    let _ = view.text_mut().write_char(' ');
+                }
             }
             let _ = write!(view.text_mut(), "{number}");
         }
@@ -600,20 +623,26 @@ impl Workspaces {
 
 /// One item's device-pixel span within the view's text, walked exactly as
 /// [`Text::draw`] walks its pen (from `x0`, stepping each character's
-/// advance), so the bounds match the ink. `None` past the last item.
+/// advance), so the bounds match the ink. A run of spaces (`item-gap`) is one
+/// gap between two items, not several. `None` past the last item.
 fn item_span(text: &Text, full: &str, em: f32, x0: i64, want: usize) -> Option<(u32, u32)> {
     let mut pen = x0 as f32;
     let mut index = 0;
     let mut start = pen;
+    let mut in_gap = false;
     for c in full.chars() {
         if c == ' ' {
-            if index == want {
-                return Some((pixels(start), pixels(pen)));
+            if !in_gap {
+                if index == want {
+                    return Some((pixels(start), pixels(pen)));
+                }
+                index += 1;
+                in_gap = true;
             }
-            index += 1;
             pen += text.advance(' ', em);
             start = pen;
         } else if !c.is_control() {
+            in_gap = false;
             pen += text.advance(c, em);
         }
     }

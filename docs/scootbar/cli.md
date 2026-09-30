@@ -303,12 +303,19 @@ always drew):
 | `pill-shape` | `"rect"` (default), `"pill"`, `"circle"` | `rect`: the item's extent, corners per `pill-radius`. `pill`: the same extent with ends as round as fit (half circles). `circle`: at least as wide as tall, centered on the number. |
 | `pill-radius` | 0 to 1024 | a `rect`'s corner radius, cut back to half its shorter side. Refused with `pill` or `circle`, which are already as round as they fit. |
 | `pill-inset` | 0 to 1024 | the gap from the bar's top and bottom edges, so the pill is shorter than the bar. Cut back so the pill is never shorter than the text's line: the number is drawn in the bar's color over the fill, and a shorter pill would clip it away. |
+| `item-gap` | 1 to 8 (default 1) | the spaces between two numbers: one space is about a third of the font size, so 1 is the old tight row and 4 a roomy one. The pill and the click target of each number follow; a click in the gap hits nothing. The bar's text is cut at 256 bytes, which 8 spaces still leaves room for 28 single-digit workspaces. |
 
 ```toml
 # A rounded pill, lifted 4 off the bar's edges
 [workspaces]
 pill-shape = "pill"
 pill-inset = 4
+```
+
+```toml
+# More room between the numbers (each number's pill and click target follow)
+[workspaces]
+item-gap = 4
 ```
 
 ```toml
