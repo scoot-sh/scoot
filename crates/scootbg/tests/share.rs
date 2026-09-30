@@ -111,9 +111,24 @@ fn memfd_maps(pid: u32) -> Vec<u64> {
         .collect()
 }
 
-/// A `width`×`height` buffer's mapping in kB: whole 4 KiB pages.
+/// The kernel's page size, from the auxiliary vector (`AT_PAGESZ`): 4096 on
+/// most hosts, 16384 on Apple Silicon under Asahi. Read from `/proc` with
+/// `std` alone, so the tests need no crate for it.
+fn page_size() -> u64 {
+    const AT_PAGESZ: u64 = 6;
+    let auxv = std::fs::read("/proc/self/auxv").expect("/proc/self/auxv");
+    auxv.chunks_exact(16)
+        .find_map(|entry| {
+            let key = u64::from_ne_bytes(entry[..8].try_into().unwrap());
+            (key == AT_PAGESZ).then(|| u64::from_ne_bytes(entry[8..].try_into().unwrap()))
+        })
+        .expect("AT_PAGESZ in the auxiliary vector")
+}
+
+/// A `width`×`height` buffer's mapping in kB: whole pages of this host's size.
 fn buffer_kb(width: u64, height: u64) -> u64 {
-    (width * height * 4).div_ceil(4096) * 4
+    let page = page_size();
+    (width * height * 4).div_ceil(page) * page / 1024
 }
 
 /// Waits until the daemon maps `count` wallpaper memfds (a buffer another

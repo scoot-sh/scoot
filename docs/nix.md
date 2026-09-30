@@ -485,9 +485,12 @@ the user's own file instead.
 `PartOf=` `graphical-session.target`, `After=` it and `Before=tray.target`
 (an ordering against a target the session does not define does nothing),
 `Restart=on-failure` with `RestartSec=2` and `StartLimitIntervalSec=0` (no
-burst limit, so the retries never end in `failed`), so a crash, or a start before the
-compositor's `WAYLAND_DISPLAY` is imported, retries, while `scootbar msg
-kill` and a stop stay stopped (scoot does not supervise its clients). The unit
+burst limit: insurance, since systemd's default of 5 starts in 10 s is not
+reached by a 2 s retry either, measured on systemd 261), so a crash, or a
+start before the compositor's `WAYLAND_DISPLAY` is imported, retries, while
+`scootbar msg kill` and a stop stay stopped (scoot does not supervise its
+clients). `scripts/scootbar-unit-test.sh` runs this unit under a real
+`systemd --user` against a live scoot and checks each of those. The unit
 carries `X-Restart-Triggers` on the config file; home-manager's switch
 restarts it on a new config, while whether NixOS restarts a user unit on
 switch depends on the release (log in again or `systemctl --user restart

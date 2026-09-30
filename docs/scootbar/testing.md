@@ -245,7 +245,7 @@ display: the run that counts, about four minutes; the script says why the
 VT must be kept and marks a run whose compositor was paused). `SCOOTBAR_HW_OUT` is a new
 directory (a run already in it is refused, `SCOOTBAR_HW_OVERWRITE=1` replaces it). The
 header of the script lists the other settings (`SCOOTBAR_HW_GAP`, `SCOOTBAR_HW_RADIUS`, `SCOOTBAR_HW_IDLE_SECS`,
-`SCOOTBAR_HW_REDRAWS`, ...; `SCOOTBAR_HW_FONT=/path/to/DejaVuSans.ttf` on a box whose fonts live outside the usual system paths, such as NixOS, or the bars run with no clock) and the prerequisites: release builds, `python3` (standard
+`SCOOTBAR_HW_REDRAWS`, ...; `SCOOTBAR_HW_OUTPUTS=eDP-1` for one bar on a box with several displays (the default puts a bar on each), `SCOOTBAR_HW_FONT=/path/to/DejaVuSans.ttf` on a box whose fonts live outside the usual system paths, such as NixOS, or the bars run with no clock) and the prerequisites: release builds, `python3` (standard
 library only: the PNG decoding and the pixel checks), `foot` for the click
 check. Exit status 0 with no FAIL, 1 with a FAIL, 2 for a setup problem (no
 binary, a busy seat, the compositor never came up), which is not a result.
@@ -426,3 +426,16 @@ compares against, and its table is in the [README](README.md#m1-like-for-like-by
 - **A compositor that closes a bar surface**: the retry-once-then-give-up
   path is unit-tested on the model only; neither compositor here closes
   a bar that is still on a live output.
+
+## The systemd unit under a real user manager
+
+`scripts/scootbar-unit-test.sh` runs the unit `nixosModules.scootbar` generates
+under the real `systemd --user` against a live headless scoot (nothing drawn on
+a display, no VT taken): it keeps retrying with no compositor, comes up once
+`WAYLAND_DISPLAY` reaches the manager, is restarted after a SIGKILL (and eight in a
+row), and stays stopped after a SIGTERM, `scootbar msg kill` and a stop. It builds
+the unit from this checkout's committed flake with Nix, loads it into the manager's
+*runtime* directory only (nothing persistent), refuses to run if a `scootbar.service`
+already exists, and removes everything on exit. Needs Linux with a user manager,
+Nix, a built scoot and scootctl, and python3; it prints `RESULT: PASS n FAIL m` and
+exits 1 on a FAIL. It is not run in CI (CI has no user manager).
