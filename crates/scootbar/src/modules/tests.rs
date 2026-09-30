@@ -275,6 +275,7 @@ fn spec(stand_in: Option<StandIn>) -> Spec {
     Spec {
         id: "test",
         init: unavailable,
+        actions: &[],
         stand_in,
     }
 }
@@ -455,6 +456,7 @@ fn a_change_bumps_the_revision_and_nothing_else_does() {
     let (read, write) = rustix::pipe::pipe().unwrap();
     rustix::fs::fcntl_setfl(&read, rustix::fs::OFlags::NONBLOCK).unwrap();
     let mut placed = Placed {
+        bindings: Default::default(),
         id: "counter",
         module: Box::new(Counter { read, count: 0 }),
         revision: 0,

@@ -7,10 +7,10 @@
 //!   module added, handed over without polling, for what the kernel sends
 //!   rarely or at a bad time (a wake with nothing to read, `POLLERR`,
 //!   `POLLHUP`).
-//! - **Dispatched Wayland state** ([`Harness::dispatch`]) and **clicks**
-//!   ([`Harness::click`]): what the loop hands a module after its central
-//!   dispatch and pointer routing, for the modules that keep Wayland
-//!   objects (workspaces) rather than fd sources.
+//! - **Dispatched Wayland state** ([`Harness::dispatch`]) and **pointer
+//!   input** ([`Harness::input`], [`Harness::invoke`]): what the loop hands
+//!   a module after its central dispatch and pointer routing, for the
+//!   modules that keep Wayland objects (workspaces) rather than fd sources.
 //!
 //! Either way the test asserts on the returned [`Update`] and the [`View`].
 //! Every module's tests go through it, and a module in the registry
@@ -58,11 +58,22 @@ impl Harness {
         self.module.on_dispatch()
     }
 
-    /// A pointer button press in the module's span, as the loop routes one.
-    /// Only the workspaces module's tests call it.
+    /// A pointer input in the module's span, as the loop routes one: the
+    /// action it means by default.
     #[allow(dead_code)]
-    pub fn click(&mut self, ctx: &super::ClickCtx<'_>) -> Update {
-        self.module.on_click(ctx)
+    pub fn input(&self, input: &super::Input<'_>) -> Option<crate::action::Action> {
+        self.module.on_input(input)
+    }
+
+    /// A module action, as a binding, a default or an agent runs it.
+    #[allow(dead_code)]
+    pub fn invoke(
+        &mut self,
+        output: &OutputView<'_>,
+        action: &crate::action::ModuleAction,
+        steps: u32,
+    ) -> Result<Update, super::InvokeError> {
+        self.module.invoke(output, action, steps)
     }
 
     /// The module's view for an unnamed output.

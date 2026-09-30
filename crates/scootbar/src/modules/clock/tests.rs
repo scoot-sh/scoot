@@ -183,6 +183,7 @@ fn a_warm_tick_allocates_nothing() {
     };
     let output = OutputView { name: None };
     let mut placed = vec![Placed {
+        bindings: Default::default(),
         id: "still",
         module: Box::new(Still("3:07".to_owned())),
         revision: 0,

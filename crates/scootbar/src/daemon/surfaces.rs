@@ -26,10 +26,8 @@
 use wayland_client::protocol::wl_buffer::{self, WlBuffer};
 use wayland_client::protocol::wl_callback::{self, WlCallback};
 use wayland_client::protocol::wl_output::{self, WlOutput};
-use wayland_client::protocol::wl_pointer::{self, WlPointer};
 use wayland_client::protocol::wl_region::WlRegion;
 use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::protocol::wl_seat::{self, WlSeat};
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum, delegate_noop};
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
@@ -44,9 +42,9 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
 use super::canvas::Canvas;
 use super::wayland::{Globals, State};
 use crate::bar::Bar;
-use crate::density::Scale;
-use crate::modules::{ClickCtx, OutputView, Placed, Update};
+use crate::modules::Placed;
 use crate::outputs::{Effect, Entry, OutputId, Rotation, Size};
+use crate::pointer::Pointer;
 use crate::policy::Placement;
 use crate::print::warn;
 use crate::render::{self, Scene};
@@ -248,25 +246,24 @@ impl State {
         qh: &QueueHandle<Self>,
     ) {
         self.placement = placement;
+        // The modules a press or scroll was for are gone with the old ones:
+        // nothing stays armed across a reload. The pointer has not moved,
+        // and a surface that survives gets no new `enter`, so its focus
+        // stays (a surface made again forgets it below).
+        self.input.disarm();
+        self.sync_pointer(qh);
         for entry in self.outputs.iter_mut() {
             let before = entry.objects.bar;
             let effect = Self::place(&self.placement, &self.content.modules, entry);
             if effect != Effect::None || entry.objects.bar == before {
-                if effect == Effect::Destroy
-                    && self
-                        .pointer_on
-                        .is_some_and(|(id, ..)| id == entry.output.id())
-                {
-                    // A press routed to a surface that is gone.
-                    self.pointer_on = None;
-                }
-                Self::apply(&self.globals, entry, effect, conn, qh);
+                Self::apply(&self.globals, &mut self.input, entry, effect, conn, qh);
                 continue;
             }
             let Some(layer) = entry.objects.layer.take() else {
                 continue;
             };
             layer.destroy();
+            self.input.forget(entry.output.id());
             entry.output.recreate();
             let id = entry.output.id();
             // `wl_output` is borrowed out of the entry while its layer is
@@ -290,13 +287,9 @@ impl State {
     /// are served, so requests that arrive together (a rapid toggle) are
     /// one change, of the net result only.
     pub fn apply_visibility(&mut self, conn: &Connection, qh: &QueueHandle<Self>) {
-        if self.hidden {
-            // A press routed to a surface that is gone.
-            self.pointer_on = None;
-        }
         for entry in self.outputs.iter_mut() {
             let effect = entry.output.set_hidden(self.hidden);
-            Self::apply(&self.globals, entry, effect, conn, qh);
+            Self::apply(&self.globals, &mut self.input, entry, effect, conn, qh);
         }
     }
 
@@ -312,7 +305,6 @@ impl State {
         version: u32,
     ) {
         // The globals bound on demand are `binds`' business.
-        #[cfg(feature = "workspaces")]
         if self.offer(interface, name, version, qh) {
             return;
         }
@@ -343,11 +335,11 @@ impl State {
     /// A global went away. An output's objects are all destroyed, whatever
     /// state it was in, mid-configure or mid-draw included.
     pub fn global_remove(&mut self, name: u32) {
-        #[cfg(feature = "workspaces")]
         if self.withdraw(name) {
             return;
         }
         if let Some(entry) = self.outputs.remove_global(name) {
+            self.input.forget(entry.output.id());
             #[cfg(feature = "workspaces")]
             self.workspaces
                 .0
@@ -360,6 +352,7 @@ impl State {
     /// Carries out `effect` for `entry`.
     fn apply(
         globals: &Globals,
+        input: &mut Pointer,
         entry: &mut Entry<Objects>,
         effect: Effect,
         conn: &Connection,
@@ -389,12 +382,15 @@ impl State {
                     layer.destroy();
                 }
                 objects.canvas.clear();
+                // A press or hover over a surface that is gone.
+                input.forget(id);
             }
             Effect::DestroyAndRetry => {
                 if let Some(layer) = objects.layer.take() {
                     layer.destroy();
                 }
                 objects.canvas.clear();
+                input.forget(id);
                 // Said when the retry happens, not here: a compositor
                 // closes the surfaces of an output it is removing, and
                 // that is no news.
@@ -405,6 +401,7 @@ impl State {
                     layer.destroy();
                 }
                 objects.canvas.clear();
+                input.forget(id);
                 warn(format_args!(
                     "scootbar: the compositor closed the bar on {} again; giving up on \
                      that output until it is plugged in again",
@@ -485,7 +482,7 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
             zwlr_layer_surface_v1::Event::Closed => entry.output.closed(),
             _ => Effect::None,
         };
-        Self::apply(&state.globals, entry, effect, conn, qh);
+        Self::apply(&state.globals, &mut state.input, entry, effect, conn, qh);
     }
 }
 
@@ -549,7 +546,7 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                 effect
             }
         };
-        Self::apply(&state.globals, entry, effect, conn, qh);
+        Self::apply(&state.globals, &mut state.input, entry, effect, conn, qh);
     }
 }
 
@@ -609,164 +606,6 @@ impl Dispatch<WlSurface, OutputId> for State {
 }
 
 delegate_noop!(State: WlRegion);
-
-/// `BTN_LEFT` (`linux/input-event-codes.h`): the button a click is. No
-/// scroll, no hover, no other button: the workspaces module's minimal hit
-/// test only.
-const BTN_LEFT: u32 = 0x110;
-
-impl Dispatch<WlSeat, ()> for State {
-    fn event(
-        state: &mut Self,
-        seat: &WlSeat,
-        event: wl_seat::Event,
-        _: &(),
-        _: &Connection,
-        qh: &QueueHandle<Self>,
-    ) {
-        let wl_seat::Event::Capabilities { capabilities } = event else {
-            return;
-        };
-        let has_pointer = matches!(capabilities, WEnum::Value(caps) if caps.contains(wl_seat::Capability::Pointer));
-        if has_pointer && state.pointer.is_none() {
-            state.pointer = Some(seat.get_pointer(qh, ()));
-        } else if !has_pointer && state.pointer.is_some() {
-            state.pointer = None;
-            state.pointer_on = None;
-        }
-    }
-}
-
-impl Dispatch<WlPointer, ()> for State {
-    fn event(
-        state: &mut Self,
-        pointer: &WlPointer,
-        event: wl_pointer::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        if state.pointer.as_ref() != Some(pointer) {
-            return;
-        }
-        match event {
-            wl_pointer::Event::Enter {
-                surface,
-                surface_x,
-                surface_y,
-                ..
-            } => {
-                // The bar surface entered, if it is still a live one.
-                state.pointer_on = state
-                    .outputs
-                    .iter_mut()
-                    .find(|entry| {
-                        entry.objects.layer.as_ref().map(|l| &l.surface) == Some(&surface)
-                    })
-                    .map(|entry| (entry.output.id(), surface_x, surface_y));
-            }
-            wl_pointer::Event::Motion {
-                surface_x,
-                surface_y,
-                ..
-            } => {
-                if let Some((_, x, y)) = state.pointer_on.as_mut() {
-                    (*x, *y) = (surface_x, surface_y);
-                }
-            }
-            wl_pointer::Event::Leave { .. } => {
-                state.pointer_on = None;
-            }
-            wl_pointer::Event::Button {
-                button: BTN_LEFT,
-                state: WEnum::Value(wl_pointer::ButtonState::Pressed),
-                ..
-            } => {
-                click(state);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// A left press: route it to whichever module's span holds the pointer, as
-/// a position in that span. Only the workspaces module answers today; any
-/// other module keeps the default and nothing happens.
-fn click(state: &mut State) {
-    let Some((id, x, y)) = state.pointer_on else {
-        return;
-    };
-    let Some(entry) = state
-        .outputs
-        .iter_mut()
-        .find(|entry| entry.output.id() == id)
-    else {
-        return;
-    };
-    if !(0.0..entry.objects.bar.height as f64).contains(&y) {
-        return;
-    }
-    let scale = entry.output.scale();
-    let x = to_device(x, scale);
-    let scene = &entry.objects.scene;
-    let Some(index) = scene
-        .spans()
-        .iter()
-        .position(|span| span.width > 0 && x >= span.x && x < span.end())
-    else {
-        return;
-    };
-    // `view` borrows the scene, the module borrows the content: disjoint,
-    // so both live together.
-    let scene = &entry.objects.scene;
-    let Some(view) = scene.view(index) else {
-        return;
-    };
-    let span = scene.spans()[index];
-    let module = scene.module(index);
-    let content = &mut state.content;
-    let (Some(text), style) = (content.text.as_ref(), &content.style) else {
-        // Unreachable with a module placed (the daemon loads a font for
-        // any), but a press with no font to hit-test against is nothing.
-        return;
-    };
-    // The surface's device height, as the last draw sized it.
-    let height = entry
-        .output
-        .surface_size(&entry.objects.bar)
-        .and_then(|size| scale.buffer(size))
-        .map_or(0, |(_, height)| height);
-    let ctx = ClickCtx {
-        output: OutputView {
-            name: entry.output.info().name.as_deref(),
-        },
-        x: x.saturating_sub(span.x),
-        view,
-        text,
-        em: render::em(style.font_size, scale),
-        padding: render::device(style.padding, scale),
-        span_width: span.width,
-        height,
-        scale,
-    };
-    if let Some(placed) = module.and_then(|module| content.modules.get_mut(module)) {
-        if placed.module.on_click(&ctx) == Update::Changed {
-            placed.revision = placed.revision.wrapping_add(1);
-        }
-    }
-}
-
-/// Surface-local logical pixels to device pixels at `scale`: pointer
-/// coordinates arrive in the surface's (viewport destination) space.
-fn to_device(x: f64, scale: Scale) -> u32 {
-    if !x.is_finite() || x <= 0.0 {
-        return 0;
-    }
-    match scale {
-        Scale::Integer(factor) => (x * f64::from(factor.max(1))) as u32,
-        Scale::Fractional(v120) => (x * f64::from(v120.max(1)) / 120.0) as u32,
-    }
-}
 
 fn rotation_of(transform: wl_output::Transform) -> Rotation {
     use wl_output::Transform as W;

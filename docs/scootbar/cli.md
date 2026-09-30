@@ -7,7 +7,8 @@ the flags stay and override its values, one by one, at start-up and on
 every reload.
 
 **Early days:** the bar shows a clock in the center, and workspaces wherever
-they are placed (`--left workspaces`).
+they are placed (`--left workspaces`). Modules answer the pointer
+([click, scroll and hover](#pointer-input)).
 
 ## Commands
 
@@ -108,6 +109,7 @@ urgent = "#f38ba8"
 
 [clock]
 format = "%-I:%M %P"
+on-click = { exec = ["foot", "-e", "calcurse"] }   # a command; or on-right-click, on-middle-click, on-scroll-up, on-scroll-down
 icon = "\U000f0e65"     # one glyph before the time, from a symbol font: see Fonts
 # icon-path = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"   # or SVG path data, or:
 # icon-viewbox = "0 0 24 24"                          # the path's plane (that is the default)
@@ -119,6 +121,8 @@ margin = 0            # as the clock's
 pill-shape = "rect"   # the active number's pill: rect, pill or circle
 pill-radius = 0       # a rect's corner radius, 0 to 1024
 pill-inset = 0        # the pill's gap from the bar's top and bottom, 0 to 1024
+on-scroll-up = "previous"   # the interaction keys, on every module: see Pointer input
+on-scroll-down = "next"
 
 [output."eDP-1"]      # what differs on one output: see Outputs below
 height = 36
@@ -183,7 +187,8 @@ never a silent ok. Without a daemon, every command fails saying so
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
-lists those that are. The `icon-image` feature is not a module: it adds the PNG
+lists those that are. Every module takes the five
+[interaction keys](#pointer-input). The `icon-image` feature is not a module: it adds the PNG
 decoder for [image icons](#icons), and is off by default.
 
 ## Layout
@@ -297,7 +302,7 @@ gains it: the click is the same `activate`.
   rebound until a reload removes and re-adds the module.
 - **Without `ext-workspace-v1`** the module shows nothing (one stderr note
   at start-up says the protocol is missing) and takes no space.
-  **Without `wl_seat`** clicks do nothing (said too). The bar still starts;
+  **Without `wl_seat`** clicks do nothing (said too: see [Pointer input](#pointer-input)). The bar still starts;
   the clock is unaffected.
 - **The list grows and shrinks with the trailing empty workspace**,
   renumbering what follows; only the `active` state bit is shown so far
@@ -360,6 +365,101 @@ pill-inset = 3
 - **Not built (their own follow-ups)**: dot-style indicators (a row of
   small dots in place of the numbers), and colors for the inactive
   workspaces or per-state pill colors.
+
+## Pointer input
+
+Clicks, scrolls and hover, on every module. The bar never takes the keyboard
+(its layer surface asks for no keyboard interactivity, so it cannot disturb
+focus), and **touch is ignored**: the bar binds the seat's pointer only, so
+a touch screen's taps reach nothing here (until a touch design exists,
+they are not translated into clicks).
+
+**Interaction keys.** Each module's table takes five keys, each holding one
+action:
+
+| Key | Runs on |
+| --- | --- |
+| `on-click` | a left click |
+| `on-right-click` | a right click |
+| `on-middle-click` | a middle click |
+| `on-scroll-up` | the wheel or a two-finger swipe up |
+| `on-scroll-down` | down |
+
+A value is one of:
+
+```toml
+on-scroll-down = "next"                          # an action the module defines
+on-middle-click = "activate 3"                   # ... with a whole number
+on-click = { exec = ["foot", "-e", "btop"] }     # a command, run directly
+on-click = { scoot = "quit" }                    # a request to scoot's control socket
+```
+
+- **A module's own actions** are named, checked when the file is read (a
+  typo is a refusal naming the key and listing what the module has), and
+  optionally take one whole number. The `clock` has none; `workspaces` has
+  `activate N` (switch to the workspace showing number `N` on that bar's
+  output), `previous` and `next` (move the active one, stopping at the
+  ends; a scroll of several notches moves that many places).
+- **`exec`** is an array, the command then its arguments, at most 32 of
+  them of at most 4096 bytes each, none holding a NUL. **It is never run
+  through a shell**; write `["sh", "-c", "..."]` to use one, and the
+  quoting is yours. A string instead of an array is a refusal that says
+  so. The command's stdin, stdout and stderr are `/dev/null`, it leads its
+  own process group, and **it inherits none of the bar's file
+  descriptors**. Its environment is the bar's. It is reaped the moment it
+  exits (no zombie, no timer), and at most 8 launched commands run at once:
+  a ninth is refused with a line on stderr, not queued, so a hung command
+  and a flood of clicks cannot fill the process table. The bar does not
+  supervise what it launched: it lives as long as it likes (see
+  [the unit's `KillMode`](../nix.md#the-status-bar-scootbar) for what a
+  restart of the bar does to it).
+- **`{ scoot = "quit" }`** asks scoot to end the session over its control
+  socket (`SCOOT_SOCKET`, else `$XDG_RUNTIME_DIR/scoot.sock`) with no
+  process spawn: one line, with a 250 ms bound each way on a fresh
+  connection, so a wedged scoot cannot hang the bar. Under another
+  compositor, or with no session, it says it cannot reach scoot on stderr
+  and does nothing. `quit` is the only value.
+- **A key you do not set keeps the module's default**: the workspaces
+  module's left click on a number switches to it (as it always did), and
+  nothing else has one. A binding replaces the default.
+- **A failing action** (a program that is not there, a full table) is one
+  line on stderr, at most one a second, with a count of the ones held back.
+  The bar carries on.
+
+**What a click is.** A button *press* arms the module under the pointer; the
+*release* runs the action only if the pointer is still over that same
+module. A release anywhere else (the pointer slid off, left the bar, or
+the module went away meanwhile: a reload, a module that now shows nothing)
+does nothing and leaves nothing armed. A second button pressed while one
+is held cancels both. Buttons other than left, right and middle (back,
+forward, touch) are ignored. A click lands on the layout that is on screen
+(what the last draw committed), so a click during a redraw goes to what you
+saw.
+
+**What a scroll is.** Vertical scroll only; horizontal scroll is ignored.
+A wheel notch is one step (`axis_value120`, or `axis_discrete` on an older
+compositor), and a smooth scroll (a touchpad) adds up to steps at 15 pixels
+a step, the remainder carried between events and dropped when the direction
+reverses, the scroll ends or the pointer leaves. Down is `on-scroll-down`.
+**However fast the device sends events, a scroll binding runs at most once
+a frame (16 ms)**, carrying the steps that piled up (at most 32: a flood
+past that is dropped, not queued): a module action moves that many
+places, and an `exec` command runs once however many steps it covers. While
+steps wait the loop sleeps only until the frame is due; with nothing
+waiting it sleeps as before.
+
+**Hover.** A module with a binding is drawn in the `accent` color while
+the pointer is over it, and only that module's span is redrawn, on that
+output's bar alone; moving between modules redraws the one left and the one
+entered. A module with no binding is not tinted (the workspaces module
+draws its own pill, and is not tinted either).
+
+**Cost.** The bar asks the seat for a pointer only while a placed module
+has a binding or a default of its own (today: the workspaces module).
+A clock-only bar with no bindings never takes the pointer, and costs what
+it did before there was any input. A reload that adds or removes bindings
+takes or drops it. A motion event stores two numbers; nothing on an
+input path allocates.
 
 ## Fonts
 

@@ -83,6 +83,7 @@ fn frame() -> Frame {
 /// One module, measured: its span's width.
 fn width_of(shown: &'static str, icon: Icon) -> u32 {
     let placed = [Placed {
+        bindings: Default::default(),
         id: "iconic",
         module: Box::new(Iconic {
             text: shown,
@@ -128,6 +129,7 @@ fn an_icon_adds_its_square_and_a_space_before_the_text() {
 /// Paints one module and returns the canvas pixels.
 fn painted(icon: Icon, text_: &'static str, class: Class) -> Vec<u8> {
     let placed = [Placed {
+        bindings: Default::default(),
         id: "iconic",
         module: Box::new(Iconic {
             text: text_,
@@ -224,6 +226,7 @@ fn the_text_starts_after_the_icon_and_its_gap() {
 fn an_icon_is_clipped_to_a_span_narrower_than_it() {
     // A bar narrower than the icon: nothing past the canvas, no panic.
     let placed = [Placed {
+        bindings: Default::default(),
         id: "iconic",
         module: Box::new(Iconic {
             text: "",
@@ -269,6 +272,7 @@ fn an_icon_is_clipped_to_a_span_narrower_than_it() {
 #[test]
 fn a_warm_repaint_of_an_icon_allocates_nothing() {
     let placed = [Placed {
+        bindings: Default::default(),
         id: "iconic",
         module: Box::new(Iconic {
             text: "12",
@@ -323,6 +327,7 @@ fn an_icon_too_big_to_draw_takes_no_room() {
         ..style()
     };
     let placed = [Placed {
+        bindings: Default::default(),
         id: "iconic",
         module: Box::new(Iconic {
             text: "",

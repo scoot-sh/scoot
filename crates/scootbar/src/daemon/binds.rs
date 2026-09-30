@@ -2,9 +2,10 @@
 //!
 //! A bound `ext_workspace_manager_v1` makes the compositor send the bar
 //! every workspace change, and the daemon wake for and parse each one, so
-//! it is bound only while a workspaces module is placed. The seat is only
-//! there for that module's clicks today, so it follows the same rule
-//! (`wants_seat` is where another module that takes clicks would join it).
+//! it is bound only while a workspaces module is placed. The seat is there
+//! for pointer input, so it is bound only while a placed module takes any
+//! (a binding in the config, or the workspaces click: [`State::needs_pointer`]);
+//! the `wl_pointer` itself is `input`'s.
 //!
 //! The decision is remade at every point that can change it, by
 //! [`State::sync_binds`]: once at connect (from the globals the registry
@@ -17,6 +18,7 @@
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::{Proxy, QueueHandle};
+#[cfg(feature = "workspaces")]
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::ExtWorkspaceManagerV1;
 
 use super::wayland::State;
@@ -33,6 +35,7 @@ struct Offer {
 #[derive(Debug)]
 pub struct Binds {
     registry: WlRegistry,
+    #[cfg(feature = "workspaces")]
     manager: Option<Offer>,
     seat: Option<Offer>,
 }
@@ -41,6 +44,7 @@ impl Binds {
     pub fn new(registry: WlRegistry) -> Self {
         Self {
             registry,
+            #[cfg(feature = "workspaces")]
             manager: None,
             seat: None,
         }
@@ -49,6 +53,7 @@ impl Binds {
 
 impl State {
     /// Whether the workspaces module is placed, so it needs the manager.
+    #[cfg(feature = "workspaces")]
     fn wants_workspaces(&self) -> bool {
         self.content
             .modules
@@ -56,9 +61,9 @@ impl State {
             .any(|placed| placed.id == crate::modules::workspaces::ID)
     }
 
-    /// Whether anything placed takes clicks, so it needs the seat.
+    /// Whether anything placed takes pointer input, so it needs the seat.
     fn wants_seat(&self) -> bool {
-        self.wants_workspaces()
+        self.needs_pointer()
     }
 
     /// Notes a global the registry listed or announced. Whether it is one
@@ -71,9 +76,13 @@ impl State {
         qh: &QueueHandle<Self>,
     ) -> bool {
         let offer = Some(Offer { name, version });
+        #[cfg(feature = "workspaces")]
         if interface == ExtWorkspaceManagerV1::interface().name {
             self.binds.manager = offer;
-        } else if interface == WlSeat::interface().name {
+            self.sync_binds(qh);
+            return true;
+        }
+        if interface == WlSeat::interface().name {
             self.binds.seat = offer;
         } else {
             return false;
@@ -86,7 +95,11 @@ impl State {
     /// compositor says it is finished with it.
     pub fn withdraw(&mut self, name: u32) -> bool {
         let mut found = false;
-        for offer in [&mut self.binds.manager, &mut self.binds.seat] {
+        #[cfg(feature = "workspaces")]
+        let offers = [&mut self.binds.manager, &mut self.binds.seat];
+        #[cfg(not(feature = "workspaces"))]
+        let offers = [&mut self.binds.seat];
+        for offer in offers {
             if offer.is_some_and(|o| o.name == name) {
                 *offer = None;
                 found = true;
@@ -98,24 +111,26 @@ impl State {
     /// Makes the binds as what is placed says, and only that: a global
     /// already held, or not offered, is left alone. Cheap and idempotent.
     pub fn sync_binds(&mut self, qh: &QueueHandle<Self>) {
-        let mut shared = self.workspaces.0.borrow_mut();
-        if !self.wants_workspaces() {
-            if shared.has_manager() {
-                shared.release();
-            }
-        } else if !shared.has_manager() {
-            if let Some(offer) = self.binds.manager {
-                // Version 1 is the only one.
-                let manager = self.binds.registry.bind::<ExtWorkspaceManagerV1, _, _>(
-                    offer.name,
-                    offer.version.min(1),
-                    qh,
-                    (),
-                );
-                shared.set_manager(manager);
+        #[cfg(feature = "workspaces")]
+        {
+            let mut shared = self.workspaces.0.borrow_mut();
+            if !self.wants_workspaces() {
+                if shared.has_manager() {
+                    shared.release();
+                }
+            } else if !shared.has_manager() {
+                if let Some(offer) = self.binds.manager {
+                    // Version 1 is the only one.
+                    let manager = self.binds.registry.bind::<ExtWorkspaceManagerV1, _, _>(
+                        offer.name,
+                        offer.version.min(1),
+                        qh,
+                        (),
+                    );
+                    shared.set_manager(manager);
+                }
             }
         }
-        drop(shared);
         if self.wants_seat() {
             if self.globals.seat.is_none() {
                 if let Some(offer) = self.binds.seat {
@@ -131,9 +146,12 @@ impl State {
             // Below version 5 a seat cannot be released: it stays, with its
             // pointer, rather than leave a live seat nothing holds.
             if let Some(pointer) = self.pointer.take() {
-                pointer.release();
+                if pointer.version() >= 3 {
+                    pointer.release();
+                }
             }
-            self.pointer_on = None;
+            self.input.leave();
+            self.seat_pointer = false;
             if let Some(seat) = self.globals.seat.take() {
                 seat.release();
             }

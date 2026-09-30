@@ -484,8 +484,10 @@ the user's own file instead.
 **The service** is `scootbar.service` (a user unit): `WantedBy=` and
 `PartOf=` `graphical-session.target`, `After=` it and `Before=tray.target`
 (an ordering against a target the session does not define does nothing),
-`Restart=on-failure` with `RestartSec=2` and `StartLimitIntervalSec=0` (no
-burst limit: insurance, since systemd's default of 5 starts in 10 s is not
+`Restart=on-failure` with `RestartSec=2`, `KillMode=process` (the apps a
+[binding](scootbar/cli.md#pointer-input) launches are the bar's children,
+and a restart for a new config would otherwise kill them with it) and
+`StartLimitIntervalSec=0` (no burst limit: insurance, since systemd's default of 5 starts in 10 s is not
 reached by a 2 s retry either, measured on systemd 261), so a crash, or a
 start before the compositor's `WAYLAND_DISPLAY` is imported, retries, while
 `scootbar msg kill` and a stop stay stopped (scoot does not supervise its

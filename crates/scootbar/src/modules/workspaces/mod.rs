@@ -1,11 +1,14 @@
 //! The workspaces module: each output's workspace numbers, the active one
-//! in a pill, switching on click.
+//! in a pill, switching on click, scrolling through them on request.
 //!
 //! An `ext-workspace-v1` client. The compositor announces one group per
 //! output and, per group, workspace handles with a `name`, one-element
 //! `coordinates` and an `active` state bit, closing every batch with
 //! `done`. The module shows each output its own group's numbers, marks the
-//! active one, and sends `activate` then `commit` for the pill clicked.
+//! active one, and sends `activate` then `commit` for the pill clicked
+//! (`on_input` names the workspace, `invoke` does the sending: the same
+//! path `on-click = "activate 3"`, `on-scroll-down = "next"` and an agent's
+//! `invoke` take).
 //!
 //! ## Positions, not identities
 //!
@@ -43,7 +46,7 @@
 //! accent fill behind its number, with the number itself in the bar's
 //! background color; the rest draws as plain text. Its shape (`rect` by
 //! default, `pill`, `circle`), radius and inset are [`pill`]'s.
-//! [`Module::on_click`] hit-tests the items' rects, walked with
+//! [`Module::on_input`] hit-tests the items' rects, walked with
 //! [`Text::advance`] exactly as the text draw walks its pen, so the rects
 //! match the ink pixel for pixel; and the active pill's own drawn extent
 //! ([`pill_geometry`], the one the draw uses) wins first, so a circle
@@ -59,9 +62,13 @@ use wayland_protocols::ext::workspace::v1::client::ext_workspace_group_handle_v1
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_handle_v1::ExtWorkspaceHandleV1;
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::ExtWorkspaceManagerV1;
 
-use super::{ClickCtx, CustomDraw, Init, Module, OutputView, Sources, Update, View};
+use super::{
+    ActionSpec, ArgKind, CustomDraw, Init, Input, InvokeError, Module, OutputView, Sources, Update,
+    View,
+};
 pub use pill::{Pill, Shape};
 
+use crate::action::{Action, ModuleAction, Trigger};
 use crate::density::Scale;
 use crate::paint::Span;
 use crate::print::warn;
@@ -73,6 +80,22 @@ mod tests;
 
 /// The id `--left`, `--center` and `--right` name it by.
 pub const ID: &str = "workspaces";
+
+/// The actions a binding may name (`activate 3`, `previous`, `next`).
+pub const ACTIONS: &[ActionSpec] = &[
+    ActionSpec {
+        name: "activate",
+        arg: ArgKind::Required,
+    },
+    ActionSpec {
+        name: "previous",
+        arg: ArgKind::None,
+    },
+    ActionSpec {
+        name: "next",
+        arg: ArgKind::None,
+    },
+];
 
 /// Groups tracked at most: one per output.
 const MAX_GROUPS: usize = 8;
@@ -646,12 +669,7 @@ impl Workspaces {
         let group = &shared.groups[index];
         let len = group.committed_len.min(shown.len());
         for (index, (slot, ws)) in shown.iter_mut().zip(&group.committed[..len]).enumerate() {
-            let number = if ws.number == 0 {
-                (index as u32).saturating_add(1)
-            } else {
-                ws.number
-            };
-            *slot = (number, ws.active);
+            *slot = (shown_number(ws, index) as u32, ws.active);
         }
         *count = len;
     }
@@ -669,6 +687,26 @@ impl Workspaces {
             let _ = write!(view.text_mut(), "{number}");
         }
     }
+}
+
+/// What an `invoke`d action asks of the workspaces.
+enum Op {
+    /// Switch to the workspace showing this number.
+    Activate(i32),
+    /// Move the active one by the step count: forward or back.
+    Step(bool),
+}
+
+/// The number workspace `ws`, at position `index`, shows as: the leading
+/// number of its name, or its 1-based position when the protocol never
+/// named it. What `activate N` means too.
+fn shown_number(ws: &Ws, index: usize) -> i32 {
+    let number = if ws.number == 0 {
+        (index as u32).saturating_add(1)
+    } else {
+        ws.number
+    };
+    i32::try_from(number).unwrap_or(i32::MAX)
 }
 
 /// One item's device-pixel span within the view's text, walked exactly as
@@ -814,21 +852,17 @@ impl Module for Workspaces {
         self.write_view(output, view);
     }
 
-    /// The press hit one of this output's pills: `activate` it and `commit`
-    /// the batch. Anything else (no group here, past the items, the active
-    /// pill itself, a dead manager) sends nothing. The view changes when
-    /// the compositor answers with a `done`, reported through
-    /// [`Module::on_dispatch`].
-    fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Update {
+    /// A click on one of this output's pills means `activate` for that
+    /// workspace's number. Anything else (no group here, past the items,
+    /// the active pill itself, any other input) means nothing: a scroll
+    /// has no default here (`previous` and `next` are for a binding).
+    fn on_input(&self, input: &Input<'_>) -> Option<Action> {
+        if input.trigger != Trigger::Click {
+            return None;
+        }
+        let ctx = input.at;
         let shared = self.link.0.borrow();
-        let (Some(name), Some(manager), true) =
-            (ctx.output.name, shared.manager.clone(), shared.live)
-        else {
-            return Update::Unchanged;
-        };
-        let Some(index) = shared.committed_for(Some(name)) else {
-            return Update::Unchanged;
-        };
+        let index = shared.committed_for(ctx.output.name)?;
         let group = &shared.groups[index];
         // Relative to the span's start, like `ctx.x`: the content begins
         // past the padding.
@@ -858,17 +892,78 @@ impl Module for Workspaces {
             group.committed_len,
             ctx.x,
             active,
-        );
-        let Some(hit) = hit else {
-            return Update::Unchanged;
-        };
+        )?;
         let ws = &group.committed[hit];
         if ws.active {
+            // Already there: the compositor would no-op, so ask for nothing.
+            return None;
+        }
+        Some(Action::Module(ModuleAction::new(
+            "activate",
+            Some(shown_number(ws, hit)),
+        )))
+    }
+
+    /// `activate N` switches to the workspace showing number `N` on
+    /// `output`; `previous` and `next` move the active one by `steps`
+    /// places, stopping at the ends (no wrap). The view changes when the
+    /// compositor answers with a `done`, reported through
+    /// [`Module::on_dispatch`], so these never report `Changed`.
+    fn invoke(
+        &mut self,
+        output: &OutputView<'_>,
+        action: &ModuleAction,
+        steps: u32,
+    ) -> Result<Update, InvokeError> {
+        // What was asked, checked before anything is looked up: a bad name
+        // or number is an error whatever the compositor is doing.
+        let op = match (&*action.name, action.arg) {
+            ("activate", Some(number)) => Op::Activate(number),
+            ("activate", None) => return Err(InvokeError::NeedsArg),
+            ("previous" | "next", Some(_)) => return Err(InvokeError::NoArg),
+            ("previous", None) => Op::Step(false),
+            ("next", None) => Op::Step(true),
+            _ => return Err(InvokeError::Unknown),
+        };
+        let shared = self.link.0.borrow();
+        // A dead manager (the compositor sent `finished`) takes no request:
+        // one past it is a protocol error, which would kill the bar. The
+        // module shows the last thing it knew, and nothing is sent.
+        let (Some(manager), true) = (shared.manager.clone(), shared.live) else {
+            return Ok(Update::Unchanged);
+        };
+        let Some(group_index) = shared.committed_for(output.name) else {
+            return Err(InvokeError::Refused("no workspaces on this output"));
+        };
+        let group = &shared.groups[group_index];
+        let committed = &group.committed[..group.committed_len];
+        let target = match op {
+            Op::Activate(number) => committed
+                .iter()
+                .enumerate()
+                .position(|(index, ws)| shown_number(ws, index) == number)
+                .ok_or(InvokeError::Refused("no workspace has that number here"))?,
+            Op::Step(forward) => {
+                let Some(active) = committed.iter().position(|ws| ws.active) else {
+                    return Ok(Update::Unchanged);
+                };
+                let steps = steps.max(1) as usize;
+                if forward {
+                    active
+                        .saturating_add(steps)
+                        .min(committed.len().saturating_sub(1))
+                } else {
+                    active.saturating_sub(steps)
+                }
+            }
+        };
+        let ws = &committed[target];
+        if ws.active {
             // Already there: the compositor would no-op, so send nothing.
-            return Update::Unchanged;
+            return Ok(Update::Unchanged);
         }
         let Some(handle) = ws.handle.clone() else {
-            return Update::Unchanged;
+            return Ok(Update::Unchanged);
         };
         // `Removed` sweeps the handle from staged at once but from
         // committed only at the next `done`: the pill is still drawn
@@ -883,12 +978,22 @@ impl Module for Workspaces {
             .iter()
             .any(|staged| staged.handle.as_ref() == Some(&handle))
         {
-            return Update::Unchanged;
+            return Ok(Update::Unchanged);
         }
         drop(shared);
         handle.activate();
         manager.commit();
-        Update::Unchanged
+        Ok(Update::Unchanged)
+    }
+
+    /// Clicking switches workspaces with no binding at all.
+    fn handles_input(&self) -> bool {
+        true
+    }
+
+    /// The pill is the module's own look; nothing is tinted over it.
+    fn tints_on_hover(&self) -> bool {
+        false
     }
 
     /// The pill behind the active workspace: an accent fill over its item

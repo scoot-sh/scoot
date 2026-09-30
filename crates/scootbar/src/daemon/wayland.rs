@@ -10,7 +10,7 @@
 //! | `wp_fractional_scale_manager_v1` | optional, with `wp_viewporter`: device-pixel sizes at fractional scales |
 //! | `wl_output` (each) | bound as they appear, released as they go |
 //! | `ext_workspace_manager_v1` | optional, bound only while the workspaces module is placed (`binds`): without it the module stays empty (said on stderr when placed) |
-//! | `wl_seat` | optional, bound only while a module that takes clicks is placed (`binds`): without it a click cannot reach the bar (said on stderr when workspaces are placed) |
+//! | `wl_seat` | optional, bound only while a placed module takes pointer input (`binds`: a binding in the config, or the workspaces click): without it the pointer cannot reach the bar, so no click, scroll or hover (said on stderr when a module needs it) |
 //!
 //! Without the two optional ones the bar is drawn at the integer scale
 //! (`wl_output.scale`, the fraction rounded up) and the compositor scales it
@@ -31,7 +31,6 @@ use wayland_client::globals::{BindError, GlobalError, GlobalListContents, regist
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_pointer::WlPointer;
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
-#[cfg(feature = "workspaces")]
 use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
@@ -88,10 +87,9 @@ pub struct Globals {
     pub viewporter: Option<WpViewporter>,
     /// Bound only with a viewporter, the one way to act on a fraction.
     pub fractional_scale: Option<WpFractionalScaleManagerV1>,
-    /// Bound when the compositor offers it; without it no click reaches
-    /// the bar. Workspaces-only for now: the general pointer mechanism
-    /// (`docs/scootbar/backlog/pointer-and-interactions.md`) generalizes it.
-    #[cfg(feature = "workspaces")]
+    /// Bound when the compositor offers it; without it no pointer input
+    /// reaches the bar. The `wl_pointer` itself is taken only while a
+    /// module needs one (`input`).
     pub seat: Option<WlSeat>,
 }
 
@@ -113,13 +111,18 @@ pub struct State {
     #[cfg(feature = "workspaces")]
     pub workspaces: Link,
     /// Which optional globals are offered, bound only while placed.
-    #[cfg(feature = "workspaces")]
     pub binds: super::binds::Binds,
-    /// The seat's pointer, once its capabilities say it has one.
+    /// The seat's pointer: taken once its capabilities say it has one and
+    /// a module needs it (`input::State::sync_pointer`).
     pub pointer: Option<WlPointer>,
-    /// Which output the pointer is over, and where on its bar surface
-    /// (surface-local logical pixels, from the last enter or motion).
-    pub pointer_on: Option<(crate::outputs::OutputId, f64, f64)>,
+    /// Whether the seat's capabilities include a pointer.
+    pub seat_pointer: bool,
+    /// What the pointer is doing (`crate::pointer`).
+    pub input: crate::pointer::Pointer,
+    /// The commands bindings launched, and reaped.
+    pub spawner: crate::spawn::Spawner,
+    /// Rate-limits what a failing binding says.
+    pub warned: super::input::Throttle,
 }
 
 pub struct Wayland {
@@ -185,7 +188,6 @@ impl Wayland {
                 shm,
                 viewporter,
                 fractional_scale,
-                #[cfg(feature = "workspaces")]
                 seat: None,
             },
             outputs: Outputs::default(),
@@ -194,10 +196,12 @@ impl Wayland {
             content,
             #[cfg(feature = "workspaces")]
             workspaces,
-            #[cfg(feature = "workspaces")]
             binds: super::binds::Binds::new(list.registry().clone()),
             pointer: None,
-            pointer_on: None,
+            seat_pointer: false,
+            input: crate::pointer::Pointer::default(),
+            spawner: crate::spawn::Spawner::default(),
+            warned: super::input::Throttle::default(),
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {

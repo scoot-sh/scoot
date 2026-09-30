@@ -7,9 +7,12 @@
 use ab_glyph::{FontArc, FontVec};
 
 use super::{Group, Link, MAX_WORKSPACES, Ws, hit_index, item_span, parse_coord, parse_number};
+use crate::action::{Action, ModuleAction, Trigger};
 use crate::density::Scale;
 use crate::modules::harness::Harness;
-use crate::modules::{ClickCtx, CustomDraw, MAX_TEXT, Module, OutputView, Update, find};
+use crate::modules::{
+    ClickCtx, CustomDraw, Input, InvokeError, MAX_TEXT, Module, OutputView, Update, find,
+};
 use crate::paint::{Canvas, Span};
 use crate::testfont;
 use crate::text::Text;
@@ -216,7 +219,25 @@ fn a_removed_workspace_is_not_redrawn_nor_clicked_before_its_done() {
         height: 60,
         scale: Scale::Integer(1),
     };
-    assert_eq!(harness.click(&ctx), Update::Unchanged);
+    // The pill is still drawn, so a press on it means `activate 1`; the
+    // guard in `invoke` (staged no longer holds it) is what keeps the
+    // request from going out.
+    assert_eq!(click(&harness, &ctx), Some(activate(1)));
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("activate", Some(1)), 1),
+        Ok(Update::Unchanged)
+    );
+}
+
+fn activate(number: i32) -> Action {
+    Action::Module(ModuleAction::new("activate", Some(number)))
+}
+
+fn click(harness: &Harness, at: &ClickCtx<'_>) -> Option<Action> {
+    harness.input(&Input {
+        trigger: Trigger::Click,
+        at,
+    })
 }
 
 #[test]
@@ -316,12 +337,14 @@ fn a_click_without_a_manager_sends_nothing() {
     // there), a gap, or nowhere near the text.
     let (first, first_end) = item_span(&font, "1 2", EM, i64::from(PAD), 0).unwrap();
     let (second, second_end) = item_span(&font, "1 2", EM, i64::from(PAD), 1).unwrap();
-    for x in [
-        0,
-        (first + first_end) / 2,
-        (first_end + second) / 2,
-        (second + second_end) / 2,
-        second_end + 100,
+    for (x, means) in [
+        (0, None),
+        // The inactive pill means `activate 1`.
+        ((first + first_end) / 2, Some(activate(1))),
+        // A gap, the active pill (already there), and past the text: nothing.
+        ((first_end + second) / 2, None),
+        ((second + second_end) / 2, None),
+        (second_end + 100, None),
     ] {
         let ctx = ClickCtx {
             output: DP1,
@@ -334,8 +357,64 @@ fn a_click_without_a_manager_sends_nothing() {
             height: 60,
             scale: Scale::Integer(1),
         };
-        assert_eq!(harness.click(&ctx), Update::Unchanged, "x {x}");
+        assert_eq!(click(&harness, &ctx), means, "x {x}");
     }
+    // And whatever was asked, nothing goes out without a manager.
+    for name in ["activate", "previous", "next"] {
+        let arg = (name == "activate").then_some(1);
+        assert_eq!(
+            harness.invoke(&DP1, &ModuleAction::new(name, arg), 1),
+            Ok(Update::Unchanged),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn only_a_click_means_anything_by_default() {
+    // No scroll, right or middle click has a default here: a scroll over
+    // the bar must not change workspaces unless the config says so.
+    let (harness, link) = started();
+    commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
+    let font = text();
+    let view = harness.view_on(Some("DP-1"));
+    let (first, first_end) = item_span(&font, "1 2", EM, i64::from(PAD), 0).unwrap();
+    let ctx = ClickCtx {
+        output: DP1,
+        x: (first + first_end) / 2,
+        view: &view,
+        text: &font,
+        em: EM,
+        padding: PAD,
+        span_width: 400,
+        height: 60,
+        scale: Scale::Integer(1),
+    };
+    for trigger in Trigger::ALL {
+        let means = harness.input(&Input { trigger, at: &ctx });
+        assert_eq!(means.is_some(), trigger == Trigger::Click, "{trigger:?}");
+    }
+}
+
+#[test]
+fn a_badly_asked_action_is_a_named_error_before_anything_else() {
+    // Even with no manager (nothing could be sent): a bad name or number
+    // is refused, not silently accepted.
+    let (mut harness, _) = started();
+    let ask = |harness: &mut Harness, name: &'static str, arg| {
+        harness.invoke(&DP1, &ModuleAction::new(name, arg), 1)
+    };
+    assert_eq!(
+        ask(&mut harness, "activate", None),
+        Err(InvokeError::NeedsArg)
+    );
+    assert_eq!(ask(&mut harness, "next", Some(2)), Err(InvokeError::NoArg));
+    assert_eq!(
+        ask(&mut harness, "previous", Some(2)),
+        Err(InvokeError::NoArg)
+    );
+    assert_eq!(ask(&mut harness, "toggle", None), Err(InvokeError::Unknown));
+    assert_eq!(ask(&mut harness, "", None), Err(InvokeError::Unknown));
 }
 
 /// The pill draws through the module as the render path calls it: an

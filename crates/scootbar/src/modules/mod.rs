@@ -34,12 +34,14 @@
 //!   workspaces module keeps `ext-workspace-v1` objects, whose events land
 //!   there rather than on a module-owned fd. The loop calls it after every
 //!   dispatch, before drawing.
-//! - **[`Module::on_click`]** takes a pointer button press in the module's
-//!   own span, with what it needs to hit-test it ([`ClickCtx`]). Only the
-//!   workspaces module implements it, with its own minimal hit test over
-//!   its pill rects; the general mechanism
-//!   (`docs/scootbar/backlog/pointer-and-interactions.md`) generalizes this
-//!   code rather than replacing the behavior.
+//! - **[`Module::on_input`]** takes a pointer input in the module's own
+//!   span ([`Input`]: a click or a scroll, with what it needs to hit-test
+//!   it, [`ClickCtx`]) and answers the [`Action`] that input means by
+//!   default, or none. It never acts: the bar carries the action out
+//!   ([`crate::action::perform`]), through [`Module::invoke`], which is
+//!   also what a configured binding (`on-click = "next"`) calls. Only the
+//!   workspaces module has a default (a click on a workspace switches to
+//!   it); a binding in the config replaces it.
 //! - **[`Module::custom_draw`]** draws the module itself ([`CustomDraw`]),
 //!   for the one module whose look is not plain text on the bar: the
 //!   workspaces module's pill behind the active workspace.
@@ -54,9 +56,9 @@
 //! [`harness`] in `<id>/tests.rs`. A module whose `init` probes for
 //! something a test machine may lack (a battery, a backlight) also gives
 //! its registry line a [`Spec::stand_in`], so the contract test in
-//! `tests.rs` exercises it everywhere. Pointer input (`on_input`) arrives with
-//! `docs/scootbar/backlog/pointer-and-interactions.md`, as a method with a
-//! default, so no module written before it changes.
+//! `tests.rs` exercises it everywhere. A module that answers actions lists
+//! them on its registry line ([`Spec::actions`]), so a misspelled one in the
+//! config is refused when it is read, and implements [`Module::invoke`].
 
 use std::fmt::{self, Write};
 use std::os::fd::BorrowedFd;
@@ -65,6 +67,7 @@ use rustix::event::{PollFd, PollFlags};
 
 use serde_json::Value;
 
+use crate::action::{Action, Bindings, ModuleAction, Trigger};
 use crate::density::Scale;
 use crate::icon::{Art, Icon};
 use crate::layout::Layout;
@@ -106,13 +109,44 @@ pub trait Module {
         Update::Unchanged
     }
 
-    /// A pointer button press landed in this module's span: `ctx` says
-    /// where, with what the module needs to hit-test it. Only the
-    /// workspaces module answers; the loop routes the press to whichever
-    /// module's span holds it, so any other module keeps the default.
-    fn on_click(&mut self, ctx: &ClickCtx<'_>) -> Update {
-        let _ = ctx;
-        Update::Unchanged
+    /// A pointer input landed in this module's span: `input` says which and
+    /// where, with what the module needs to hit-test it. Answers the action
+    /// the input means when the config binds none (its own default), or
+    /// `None`. Pure: it reads the module and never acts, so a hit test is a
+    /// unit test. The default is no answer.
+    fn on_input(&self, input: &Input<'_>) -> Option<Action> {
+        let _ = input;
+        None
+    }
+
+    /// Carries out the module-defined action `action` on `output` (what a
+    /// binding, a default from [`Module::on_input`] or an agent's `invoke`
+    /// names), `steps` times for a scroll (1 otherwise). The default
+    /// refuses every name: a module with actions lists them on its
+    /// registry line and implements this.
+    fn invoke(
+        &mut self,
+        output: &OutputView<'_>,
+        action: &ModuleAction,
+        steps: u32,
+    ) -> Result<Update, InvokeError> {
+        let _ = (output, action, steps);
+        Err(InvokeError::Unknown)
+    }
+
+    /// Whether the module answers pointer input with no binding in the
+    /// config, so the bar needs a pointer for it (the workspaces module's
+    /// click). A bar whose modules neither answer nor are bound takes no
+    /// pointer at all.
+    fn handles_input(&self) -> bool {
+        false
+    }
+
+    /// Whether the bar draws the module in the `accent` token while the
+    /// pointer is over it and it has a binding. A module that draws itself
+    /// (workspaces) says no.
+    fn tints_on_hover(&self) -> bool {
+        true
     }
 
     /// A `scootbar msg set ID JSON` value for this module: the request's
@@ -152,6 +186,33 @@ impl fmt::Display for SetError {
     }
 }
 
+/// Why a module refused an action: said on stderr, or to the agent that
+/// asked. (A build without a module that has actions, the workspaces one
+/// so far, constructs none but `Unknown`.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(feature = "workspaces"), allow(dead_code))]
+pub enum InvokeError {
+    /// The module has no such action.
+    Unknown,
+    /// The action takes a number and got none.
+    NeedsArg,
+    /// The action takes no number and got one.
+    NoArg,
+    /// The action is known but cannot run now (`why`).
+    Refused(&'static str),
+}
+
+impl fmt::Display for InvokeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unknown => write!(f, "no such action"),
+            Self::NeedsArg => write!(f, "takes a whole number"),
+            Self::NoArg => write!(f, "takes no number"),
+            Self::Refused(why) => write!(f, "{why}"),
+        }
+    }
+}
+
 /// What `init` found.
 pub enum Init {
     Available(Box<dyn Module>),
@@ -172,6 +233,10 @@ pub enum Update {
 pub struct Spec {
     pub id: &'static str,
     pub init: fn(&Settings) -> Init,
+    /// The actions the module defines, for a binding to name
+    /// ([`Module::invoke`]); none for most modules, which take only
+    /// `exec` and `scoot` bindings.
+    pub actions: &'static [ActionSpec],
     /// Tests only: the module started as if `init`'s probe had found what
     /// it looks for (a fake device, a fixture), so the contract test in
     /// `tests.rs` drives its events and view on a machine without it.
@@ -180,6 +245,28 @@ pub struct Spec {
     /// module that comes up unavailable there without one.
     #[cfg(test)]
     pub stand_in: Option<StandIn>,
+}
+
+/// One module-defined action: its name, and whether it takes a whole
+/// number (`"activate 3"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionSpec {
+    pub name: &'static str,
+    pub arg: ArgKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(feature = "workspaces"), allow(dead_code))]
+pub enum ArgKind {
+    None,
+    Required,
+}
+
+impl Spec {
+    /// The action `name` of this module, if it defines one.
+    pub fn action(&self, name: &str) -> Option<&ActionSpec> {
+        self.actions.iter().find(|action| action.name == name)
+    }
 }
 
 /// Tests only: how a [`Spec::stand_in`] starts its module.
@@ -192,6 +279,7 @@ pub const REGISTRY: &[Spec] = &[
     Spec {
         id: clock::ID,
         init: clock::init,
+        actions: &[],
         #[cfg(test)]
         stand_in: None,
     },
@@ -199,6 +287,7 @@ pub const REGISTRY: &[Spec] = &[
     Spec {
         id: workspaces::ID,
         init: workspaces::init,
+        actions: workspaces::ACTIONS,
         // Available on any machine the tests run on: without a compositor
         // it starts with an empty view, like a module still waiting for
         // its first event.
@@ -218,12 +307,26 @@ pub struct Placed {
     /// name it by).
     pub id: &'static str,
     pub module: Box<dyn Module>,
+    /// What the config binds to this module's pointer inputs.
+    pub bindings: Bindings,
     /// Bumped each time the module reports a changed view: the render
     /// compares it with what each output shows (`crate::render`).
     pub revision: u64,
 }
 
 impl Placed {
+    /// Whether pointer input can do anything here: a binding, or a default
+    /// of the module's own.
+    pub fn interactive(&self) -> bool {
+        !self.bindings.is_empty() || self.module.handles_input()
+    }
+
+    /// Whether the bar tints it under the pointer (see
+    /// [`Module::tints_on_hover`]).
+    pub fn hoverable(&self) -> bool {
+        !self.bindings.is_empty() && self.module.tints_on_hover()
+    }
+
     /// Hands source `source` to the module, and bumps the revision if the
     /// view changed.
     pub fn ready(&mut self, source: usize, events: PollFlags) {
@@ -259,6 +362,7 @@ pub fn start(
             Init::Available(module) => placed.push(Placed {
                 id: spec.id,
                 module,
+                bindings: settings.bindings_of(spec.id),
                 revision: 0,
             }),
             Init::Unavailable(why) => warn(spec.id, &why),
@@ -275,6 +379,21 @@ pub struct Settings {
     pub clock: clock::Settings,
     #[cfg(feature = "workspaces")]
     pub workspaces: workspaces::Settings,
+    /// The interaction keys the config sets, by module id: only modules
+    /// that bind something are listed.
+    pub bindings: Vec<(&'static str, Bindings)>,
+}
+
+impl Settings {
+    /// The bindings module `id` has (none for a module the config leaves
+    /// alone).
+    pub fn bindings_of(&self, id: &str) -> Bindings {
+        self.bindings
+            .iter()
+            .find(|(module, _)| *module == id)
+            .map(|(_, bindings)| bindings.clone())
+            .unwrap_or_default()
+    }
 }
 
 /// What a module may know about the output it is asked to show on.
@@ -284,8 +403,8 @@ pub struct OutputView<'a> {
     pub name: Option<&'a str>,
 }
 
-/// A pointer button press in a module's span, for [`Module::on_click`]:
-/// where it landed and what the module needs to hit-test it.
+/// Where a pointer input landed in a module's span, and what the module
+/// needs to hit-test it.
 #[allow(dead_code)] // Only the workspaces module reads it.
 pub struct ClickCtx<'a> {
     /// The output whose bar was clicked.
@@ -307,6 +426,14 @@ pub struct ClickCtx<'a> {
     pub span_width: u32,
     pub height: u32,
     pub scale: Scale,
+}
+
+/// A pointer input for [`Module::on_input`]. (Only the workspaces module
+/// reads it, so far.)
+#[cfg_attr(not(feature = "workspaces"), allow(dead_code))]
+pub struct Input<'a> {
+    pub trigger: Trigger,
+    pub at: &'a ClickCtx<'a>,
 }
 
 /// What a module draws itself with, for [`Module::custom_draw`]: the same

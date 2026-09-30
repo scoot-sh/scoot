@@ -154,6 +154,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
     let placed: Vec<Placed> = modules
         .into_iter()
         .map(|(_, text, icon, class)| Placed {
+            bindings: Default::default(),
             id: "label",
             module: Box::new(Label { text, icon, class }),
             revision: 0,
@@ -187,6 +188,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         .iter()
         .enumerate()
         .map(|(module, m)| Member {
+            hover: false,
             module,
             section: if together { Section::Left } else { m.0 },
             margin: if module == 1 { look.margin } else { 0 },

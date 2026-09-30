@@ -114,6 +114,8 @@ pub struct Member {
     pub section: Section,
     /// Logical pixels of room on each side of it, from the layout.
     pub margin: u32,
+    /// Whether it is tinted under the pointer (`Placed::hoverable`).
+    pub hover: bool,
 }
 
 /// The modules `layout` places, as members, in its order. A module that
@@ -127,6 +129,7 @@ pub fn members(layout: &layout::Layout, placed: &[Placed]) -> Vec<Member> {
                 module,
                 section,
                 margin: layout.margin_of(id),
+                hover: placed[module].hoverable(),
             })
         })
         .collect()
@@ -150,6 +153,13 @@ pub struct Scene {
     spans: Vec<Span>,
     /// The next layout, compared with `spans` before it replaces them.
     next: Vec<Span>,
+    /// Which members are tinted under the pointer.
+    hoverable: Vec<bool>,
+    /// The pointer's x on this output's bar, device pixels, while it is
+    /// over it.
+    pointer: Option<u32>,
+    /// The member the pointer is over and tints, if any.
+    hover: Option<usize>,
     sections: Vec<Section>,
     layout: u64,
     /// The scale and bar width everything was measured at.
@@ -170,6 +180,25 @@ impl Scene {
                 module,
                 section,
                 margin: 0,
+                hover: false,
+            })
+            .collect();
+        Self::with_members(&members)
+    }
+
+    /// A scene showing the first `sections.len()` started modules, each in
+    /// its section, with the members `hover` lists tinted under the pointer.
+    #[cfg(test)]
+    pub fn all_hoverable(sections: &[Section], hover: &[bool]) -> Self {
+        let members: Vec<Member> = sections
+            .iter()
+            .zip(hover)
+            .enumerate()
+            .map(|(module, (&section, &hover))| Member {
+                module,
+                section,
+                margin: 0,
+                hover,
             })
             .collect();
         Self::with_members(&members)
@@ -187,6 +216,9 @@ impl Scene {
             margins_device: vec![0; count],
             spans: vec![Span::default(); count],
             next: vec![Span::default(); count],
+            hoverable: members.iter().map(|m| m.hover).collect(),
+            pointer: None,
+            hover: None,
             sections: members.iter().map(|m| m.section).collect(),
             layout: 0,
             measured: None,
@@ -197,10 +229,35 @@ impl Scene {
     /// Whether some module this scene shows changed since `shown` was
     /// drawn.
     pub fn stale(&self, placed: &[Placed], shown: &Record) -> bool {
-        self.modules
+        self.hover != shown.hover
+            || self
+                .modules
+                .iter()
+                .zip(&shown.revisions)
+                .any(|(&module, &shown)| placed.get(module).is_some_and(|p| p.revision != shown))
+    }
+
+    /// The pointer is at `x` device pixels on this output's bar, or (`None`)
+    /// not over it. The hovered member follows, and is drawn at the next
+    /// draw ([`Scene::stale`] says so).
+    pub fn set_pointer(&mut self, x: Option<u32>) {
+        self.pointer = x;
+        self.resolve_hover();
+    }
+
+    /// The member whose span holds device pixel `x` (an empty span holds
+    /// none): where a press goes.
+    pub fn member_at(&self, x: u32) -> Option<usize> {
+        self.spans
             .iter()
-            .zip(&shown.revisions)
-            .any(|(&module, &shown)| placed.get(module).is_some_and(|p| p.revision != shown))
+            .position(|span| span.width > 0 && x >= span.x && x < span.end())
+    }
+
+    fn resolve_hover(&mut self) {
+        self.hover = self
+            .pointer
+            .and_then(|x| self.member_at(x))
+            .filter(|&member| self.hoverable.get(member).copied().unwrap_or(false));
     }
 
     /// Brings the views, widths and spans up to date for a bar `extent`
@@ -273,6 +330,8 @@ impl Scene {
         if self.next != self.spans {
             std::mem::swap(&mut self.next, &mut self.spans);
             self.layout = self.layout.wrapping_add(1);
+            // What is under the pointer moved with the layout.
+            self.resolve_hover();
         }
     }
 
@@ -312,6 +371,8 @@ impl Scene {
 pub struct Record {
     at: Option<(Frame, u64)>,
     revisions: Vec<u64>,
+    /// The member drawn tinted under the pointer.
+    hover: Option<usize>,
 }
 
 impl Record {
@@ -320,6 +381,7 @@ impl Record {
         Self {
             at: None,
             revisions: vec![NEVER; count],
+            hover: None,
         }
     }
 
@@ -327,12 +389,21 @@ impl Record {
     pub fn reset(&mut self) {
         self.at = None;
         self.revisions.fill(NEVER);
+        self.hover = None;
     }
 
     /// Makes this record say what `scene` shows at `frame`.
     fn set(&mut self, scene: &Scene, frame: Frame) {
         self.at = Some((frame, scene.layout));
         self.revisions.copy_from_slice(&scene.revisions);
+        self.hover = scene.hover;
+    }
+
+    /// Whether member `index` must be painted again: its view changed, or
+    /// it entered or left the pointer since this record's pixels were drawn.
+    fn differs(&self, scene: &Scene, index: usize) -> bool {
+        scene.revisions.get(index) != self.revisions.get(index)
+            || (scene.hover == Some(index)) != (self.hover == Some(index))
     }
 }
 
@@ -374,9 +445,7 @@ pub fn paint(
     let baseline = text.metrics(em).baseline(canvas.height());
     for (index, view) in scene.views.iter().enumerate() {
         let span = scene.spans[index];
-        let revision = scene.revisions[index];
-        let painted = record.revisions[index];
-        if !whole && revision == painted {
+        if !whole && !record.differs(scene, index) {
             continue;
         }
         if !whole {
@@ -403,7 +472,11 @@ pub fn paint(
             });
         }
         if !custom {
-            let color = style.theme.class(view.class());
+            let color = if scene.hover == Some(index) {
+                style.theme.accent
+            } else {
+                style.theme.class(view.class())
+            };
             let mut x = i64::from(span.x) + i64::from(padding);
             if let Some(art) = view.art() {
                 text.draw_art(canvas, art, em, x, color, span);
@@ -484,13 +557,8 @@ pub fn damage(shown: &mut Record, scene: &Scene, frame: Frame, damage: &mut Vec<
     damage.clear();
     let whole = shown.at != Some((frame, scene.layout));
     if !whole {
-        for ((&span, &revision), &was) in scene
-            .spans
-            .iter()
-            .zip(&scene.revisions)
-            .zip(&shown.revisions)
-        {
-            if revision != was && span.width > 0 {
+        for (index, &span) in scene.spans.iter().enumerate() {
+            if shown.differs(scene, index) && span.width > 0 {
                 damage.push(span);
             }
         }

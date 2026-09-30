@@ -32,9 +32,9 @@
 //! (rustix has no `signalfd`), which `#![forbid(unsafe_code)]` forbids, so
 //! a reload is `scootbar msg reload` (scootbg documents the same reasoning).
 
-#[cfg(feature = "workspaces")]
 mod binds;
 mod canvas;
+mod input;
 mod listen;
 mod respond;
 mod surfaces;
@@ -60,6 +60,7 @@ use crate::modules::{self, MAX_POLL, OutputView, Placed, Sources};
 use crate::outputs::Plan;
 use crate::print::warn;
 use crate::render::Style;
+use crate::spawn::MAX_CHILDREN;
 use crate::text::Text;
 use canvas::Drew;
 use listen::Listening;
@@ -124,8 +125,9 @@ impl fmt::Display for Error {
 }
 
 /// The poll set, all on the stack: the Wayland connection and the modules'
-/// sources ([`MAX_POLL`]), then the control listener and its clients.
-const MAX_FDS: usize = MAX_POLL + 1 + MAX_CONNECTIONS;
+/// sources ([`MAX_POLL`]), then the control listener and its clients, then
+/// the launched commands' pidfds.
+const MAX_FDS: usize = MAX_POLL + 1 + MAX_CONNECTIONS + MAX_CHILDREN;
 
 /// Runs the bar until the compositor goes away, it cannot go on, or
 /// `scootbar msg kill` stops it. `file` is the config file a `reload`
@@ -185,19 +187,17 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         .to_start(&config.layout)
         .placed()
         .any(|(_, id)| id == crate::modules::workspaces::ID)
+        && !wayland.state.workspaces.0.borrow().has_manager()
     {
-        if !wayland.state.workspaces.0.borrow().has_manager() {
-            warn(format_args!(
-                "scootbar: note: the compositor has no ext_workspace_manager_v1; the \
-                 workspaces module is left out"
-            ));
-        }
-        if wayland.state.pointer.is_none() && wayland.state.globals.seat.is_none() {
-            warn(format_args!(
-                "scootbar: note: the compositor has no wl_seat; clicks on the workspaces \
-                 module do nothing"
-            ));
-        }
+        warn(format_args!(
+            "scootbar: note: the compositor has no ext_workspace_manager_v1; the \
+             workspaces module is left out"
+        ));
+    }
+    if wayland.state.needs_pointer() && wayland.state.globals.seat.is_none() {
+        warn(format_args!(
+            "scootbar: note: the compositor has no wl_seat; clicks, scrolls and hover do nothing"
+        ));
     }
     let mut wants_write = false;
     loop {
@@ -211,6 +211,10 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         for placed in wayland.state.content.modules.iter_mut() {
             placed.dispatch();
         }
+        // The scroll those events earned, if a frame has passed since the
+        // last one; the clock is read only while steps wait.
+        let mut now = None;
+        wayland.state.pump_scroll(&mut now);
         // The control clients: drain the listener, then serve each client
         // what the last poll reported. A failed accept rests the listener
         // rather than spins or exits (`listen`).
@@ -263,8 +267,21 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
             *slot = PollFd::new(conn.stream(), conn.interest());
             len += 1;
         }
+        // The launched commands' pidfds, readable when one exits.
+        let children_at = len;
+        wayland.state.spawner.sources(&mut fds, &mut len);
         let polled = fds.get_mut(..len).unwrap_or_default();
-        let timeout = timeout.map(timespec);
+        // Asleep no longer than the soonest of: the listener's rest, a
+        // scroll held to its frame, a child on a kernel with no pidfds.
+        let timeout = [
+            timeout,
+            wayland.state.scroll_timeout(&mut now),
+            wayland.state.spawner.poll_timeout(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .map(timespec);
         match poll(polled, timeout.as_ref()) {
             Ok(_) => {}
             Err(Errno::INTR) => continue,
@@ -287,6 +304,15 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
             // explains). Anything still readable (a protocol error) is read
             // below instead.
             return Err(Error::CompositorGone);
+        }
+        // A launched command exited: collect it (every child is looked at,
+        // so a missed wake could not leave one).
+        if ready
+            .get(children_at..len)
+            .is_some_and(|flags| flags.iter().any(|f| !f.is_empty()))
+            || wayland.state.spawner.poll_timeout().is_some()
+        {
+            wayland.state.spawner.reap();
         }
         // The control clients: a `reload` applies before the modules are
         // asked, and a `kill` stops before anything is drawn.
@@ -349,7 +375,14 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
 fn draw(state: &mut State, qh: &wayland_client::QueueHandle<State>) {
     let globals = &state.globals;
     let content = &mut state.content;
+    let focus = state.input.focus();
     for entry in state.outputs.iter_mut() {
+        // Where the pointer is on this bar, for hover: worked out here,
+        // once a turn, however many motions arrived.
+        entry
+            .objects
+            .scene
+            .set_pointer(input::pointer_x(focus, entry));
         let stale = entry
             .objects
             .scene
