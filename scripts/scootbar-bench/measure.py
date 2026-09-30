@@ -43,32 +43,39 @@ QUIET_TIMEOUT = 30.0
 
 
 def voluntary(pid):
-    """(voluntary, involuntary) context switches summed over every thread
-    of ``pid``."""
-    vol = invol = 0
+    """``{(pid, tid): (voluntary, involuntary)}`` context switches of every
+    thread of ``pid``."""
+    out = {}
     try:
         tids = os.listdir(f"/proc/{pid}/task")
     except (FileNotFoundError, ProcessLookupError):
-        return 0, 0
+        return out
     for tid in tids:
         st = procs.status(f"{pid}/task/{tid}")
-        vol += st.get("voluntary_ctxt_switches", 0)
-        invol += st.get("nonvoluntary_ctxt_switches", 0)
-    return vol, invol
+        out[(pid, tid)] = (st.get("voluntary_ctxt_switches", 0),
+                           st.get("nonvoluntary_ctxt_switches", 0))
+    return out
 
 
 def sample(group):
     """What the bar's processes have done so far: context switches per
-    process and the group's CPU."""
-    return {pid: voluntary(pid) for pid in group.pids()}, group.usage_ns()
+    thread and the group's CPU."""
+    threads = {}
+    for pid in group.pids():
+        threads.update(voluntary(pid))
+    return threads, group.usage_ns()
 
 
 def delta(before, after):
-    """(voluntary, involuntary, cpu ms) between two samples. A process that
-    exited in between is not counted (its CPU is: the group keeps it)."""
+    """(voluntary, involuntary, cpu ms) between two samples, per thread: a
+    thread that started in between counts all of its switches, one that
+    exited in between is not counted (its CPU is: the group keeps it). The
+    first version summed per process, and a bar whose thread pool comes and
+    goes (Waybar's does) lost the exited threads' earlier switches, so a
+    window could read negative."""
     (sw0, cpu0), (sw1, cpu1) = before, after
-    vol = sum(v - sw0.get(pid, (0, 0))[0] for pid, (v, _) in sw1.items())
-    invol = sum(i - sw0.get(pid, (0, 0))[1] for pid, (_, i) in sw1.items())
+    vol = sum(v - sw0.get(key, (0, 0))[0] for key, (v, _) in sw1.items())
+    invol = sum(i - sw0.get(key, (0, 0))[1] for key, (_, i) in sw1.items())
     return vol, invol, (cpu1 - cpu0) / 1e6
 
 

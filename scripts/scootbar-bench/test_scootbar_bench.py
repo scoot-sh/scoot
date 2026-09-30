@@ -182,11 +182,16 @@ class Quiet(unittest.TestCase):
 
 
 class Switches(unittest.TestCase):
-    def test_deltas_count_only_processes_seen_at_the_end(self):
-        before = ({10: (5, 1), 11: (7, 0)}, 1_000_000)
-        after = ({10: (8, 1), 12: (2, 2)}, 4_500_000)
-        # 10: +3 voluntary; 12 is new: all of its own; 11 exited: nothing.
+    def test_deltas_are_per_thread_and_never_negative_when_threads_exit(self):
+        before = ({(10, "10"): (5, 1), (10, "11"): (7, 0), (11, "11"): (9, 0)}, 1_000_000)
+        after = ({(10, "10"): (8, 1), (12, "12"): (2, 2)}, 4_500_000)
+        # (10, 10): +3 voluntary; (12, 12) is new: all of its own; the
+        # threads that exited are not counted, not subtracted.
         self.assertEqual(measure.delta(before, after), (5, 2, 3.5))
+        # A pool whose threads were all replaced still reads zero or more.
+        gone = ({(10, "10"): (100, 4)}, 1_000_000)
+        fresh = ({(10, "77"): (3, 0)}, 1_000_000)
+        self.assertEqual(measure.delta(gone, fresh), (3, 0, 0.0))
 
 
 def write(d, meta, runs):
