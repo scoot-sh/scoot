@@ -4,13 +4,13 @@ A dark, high-contrast look built around one wallpaper: colorful rays exploding
 from a dark center. It is an **opt-in example**, not a default: nothing in scoot,
 scootbar or scootbg changes unless you use these files.
 
-![scoot with the radial burst look: a floating translucent bar with circled workspaces, two terminals side by side with thin rings, blue on the focused one and orange on the other, the wallpaper showing around them](../../assets/radial-burst-preview.png)
+![scoot with the radial burst look: a floating translucent bar with circled workspaces, two translucent terminals side by side with thin rings, blue on the focused one and orange on the other, the wallpaper showing around and through them](../../assets/radial-burst-preview.png)
 
 | File | For |
 | --- | --- |
 | [`scoot.toml`](scoot.toml) | the compositor: background, ring colors and widths, rounded corners, column widths with a full-width column on `Super+m`, the wallpaper |
 | [`bar.toml`](bar.toml) | scootbar: a floating, rounded, translucent bar, workspaces as circles, the clock |
-| [`foot.ini`](foot.ini) | foot: the palette, padding and font size (needs a foot with `[colors-dark]` sections, 1.24 or later) |
+| [`foot.ini`](foot.ini) | foot: the palette, 80% opacity, padding and font size (needs a foot with `[colors-dark]` sections, 1.24 or later) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
 modules install it when the settings have a `[wallpaper]` table, from source
@@ -58,6 +58,10 @@ opt-in and you can drop any of them:
   Asahi M2 the shaped and translucent looks cost no more than a flush one that the
   method could resolve; see the [resource ratchet](../../scootbar/backlog/lightest.md#appearance-looks-flush-against-floating).
   Set `opacity = 1` (and `radius = 0`) for the plain bar.
+- **The translucent terminals** (foot's `alpha=0.80`) make each terminal window non-opaque,
+  so scoot blends it over the wallpaper every frame, and a fullscreen one cannot be scanned
+  out directly on `--tty`. That extra work was not measured here. Set `alpha=1.0` in
+  [`foot.ini`](foot.ini) for opaque terminals.
 
 ## Image credit and license
 
