@@ -245,7 +245,7 @@ display: the run that counts, about four minutes; the script says why the
 VT must be kept and marks a run whose compositor was paused). `SCOOTBAR_HW_OUT` is a new
 directory (a run already in it is refused, `SCOOTBAR_HW_OVERWRITE=1` replaces it). The
 header of the script lists the other settings (`SCOOTBAR_HW_GAP`, `SCOOTBAR_HW_RADIUS`, `SCOOTBAR_HW_IDLE_SECS`,
-`SCOOTBAR_HW_REDRAWS`, ...; `SCOOTBAR_HW_FONT=/path/to/DejaVuSans.ttf` on a box whose fonts live outside the usual system paths, such as NixOS, or the bars run with no clock) and the prerequisites: release builds, `python3` (standard
+`SCOOTBAR_HW_REDRAWS`, ...; `SCOOTBAR_HW_OUTPUTS=eDP-1` for one bar on a box with several displays (the default puts a bar on each), `SCOOTBAR_HW_FONT=/path/to/DejaVuSans.ttf` on a box whose fonts live outside the usual system paths, such as NixOS, or the bars run with no clock) and the prerequisites: release builds, `python3` (standard
 library only: the PNG decoding and the pixel checks), `foot` for the click
 check. Exit status 0 with no FAIL, 1 with a FAIL, 2 for a setup problem (no
 binary, a busy seat, the compositor never came up), which is not a result.
