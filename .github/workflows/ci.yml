@@ -158,6 +158,9 @@ jobs:
             while IFS= read -r path; do
               case "$path" in
                 *.md | docs/*) ;;
+                # Needs a real `systemd --user`, which CI has none of: run by hand
+                # (docs/scootbar/testing.md), so a change to it alone runs nothing.
+                scripts/scootbar-unit-test.sh) ;;
                 # The backlog tool and its tests: only their own job.
                 scripts/backlog | scripts/test_backlog.py)
                   backlog=true ;;
