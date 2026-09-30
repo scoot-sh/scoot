@@ -64,7 +64,10 @@
 #   SCOOTBAR_HW_OUTPUTS       comma-separated connector names for the bar's `outputs` (e.g.
 #                             eDP-1); default: all outputs, so a box with two live displays
 #                             measures two bars. One name gives one-bar numbers, comparable
-#                             with the one-output clock-scope baselines
+#                             with the one-output clock-scope baselines. It must include the
+#                             name of scoot's FIRST output (every check reads that one; the
+#                             script refuses a list without it). A name no output has is
+#                             never matched, so the bar is simply not drawn there
 #   SCOOTBAR_HW_IDLE_SECS     default 20
 #   SCOOTBAR_HW_REDRAWS       whole-bar redraws per look, default 300
 #   SCOOTBAR_HW_SWEEP_SECS    the paced cursor sweep along the bar per look, default 8
@@ -458,6 +461,17 @@ start_compositor() {
     # For `scootbar msg` (the redraw storm), which finds its daemon by the
     # display.
     export WAYLAND_DISPLAY="$WAYLAND"
+    # Every screenshot and pixel check reads the FIRST output, so a SCOOTBAR_HW_OUTPUTS list
+    # that leaves it out would measure a screen with no bar (and fail with a misleading
+    # pixel mismatch): refuse it here, where scoot can say which output that is.
+    if [ -n "$OUTPUTS" ]; then
+        FIRST=$(ctl outputs | python3 -c 'import json, sys; print(json.load(sys.stdin)["outputs"][0]["name"])') \
+            || die "could not ask scoot for its outputs"
+        case ",$OUTPUTS," in
+            *",$FIRST,"*) ;;
+            *) die "SCOOTBAR_HW_OUTPUTS must include scoot's first output, which every check reads: it is '$FIRST', the list is '$OUTPUTS'" ;;
+        esac
+    fi
 }
 
 # --- bars --------------------------------------------------------------------

@@ -109,9 +109,9 @@ is about 300 kB (flush 3632 against 3936, floating 3680 against 4016), so RSS
 differences under roughly that are noise. The translucent look's RSS was 560 to
 624 kB above the others in the two-bar run; in both one-bar runs it is level
 with them, so that gap did not reproduce and is not a finding. The occasional
-two context switches in a window (one of eight here, one of four in the two-bar
-run) fit the clock's minute tick landing inside a 20 s window, which it does
-about a third of the time; no trace was taken to show it.
+two context switches in a window (2 of 12 windows, against about 4 expected if a
+minute tick lands in a 20 s window a third of the time) are consistent with the
+clock's tick; no trace was taken to show it, and two switches per tick is assumed.
 
 The rule applies as ever: none of these rows may regress the clock-scope
 numbers above, and a look that costs real CPU or memory is off by default
