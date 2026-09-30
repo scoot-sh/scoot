@@ -26,17 +26,67 @@ rounded bar at 1x and 1.5x and a translucent one; a headless-scoot test of
 each on screenshots; the measured fill costs in
 [cli.md](../cli.md#shape-and-opacity). Both options are file-only.
 
-**Remaining:** the input region narrowed to the rounded shape (scoot's
-`state.rs` handling of input regions is not yet verified end to end); text
-clipped to the rounded shape; the default margin matching scoot's gap (the
-default is still flush, square and opaque: making the default floating is a
-product call); the per-module `margin`; optional
-separators; the active-workspace pill's radius and inset; the `hover` token
-and per-module token-per-state overrides (the four classes already map to
-tokens); the opt-in animation question (dropped unless measured); the
-floating-versus-flush damage measurement on real hardware and its entry in
-the [resource ratchet](lightest.md); per-output overrides stay with
-[multi-output](resolved/multi-output-done.md).
+**Landed (second slice):**
+
+- **The input region is the rounded shape.** Verified first: scoot honors
+  `wl_surface.set_input_region` on a layer surface (`layer_surface_under`
+  asks the surface tree, `state.rs`), checked end to end on a headless scoot
+  (`tests/appearance.rs`: a click in the window's corner under a rounded
+  bar reaches the window, on the flat part it does not, a square bar swallows
+  both; with the region left unset the test fails). One rectangle per corner
+  row, at most `2 x radius + 1`, set only when the size or radius changes
+  (`src/region.rs`), exact where the plan was a cross of two rectangles, so
+  the visible arc in each corner stays clickable.
+- **Text is kept out of the corners** rather than clipped to them: the
+  layout clears the bar's ends by `radius - padding / 2`, so the first and
+  last module's ink and the pill are never in a corner square (decided over
+  per-pixel clipping: it costs nothing in the paint and cannot leave a
+  glyph half cut).
+- **Per-module `margin`** (`[clock] margin`, `[workspaces] margin`) and
+  **separators** (`[bar] separator`, a `dim` line in the gap, at most
+  `spacing`), with bounded, loudly refused config. `bar.padding` and
+  `bar.spacing` already existed (`--padding`, `--spacing`).
+- **The workspaces pill**: `pill-shape` (`rect`, `pill`, `circle`),
+  `pill-radius`, `pill-inset`; a circle widens into a pill around a
+  two-digit number and stops short of its neighbours; the hit test follows
+  the drawn pill. Snapshots at 1x and 1.5x for each, two digits included.
+- **The example**: a `[bar]` snippet with `margin` equal to scoot's window
+  gap and the two settings to change together, in
+  [cli.md](../cli.md#margins). The default look is unchanged: flush, square
+  and opaque; making it floating stays a product call.
+- **`scripts/scootbar-appearance-hw-test.sh`**, the hardware test, and its
+  method in [testing.md](../testing.md#the-appearance-hardware-test).
+  Rehearsed on `--headless` and `--nested` (14 PASS, 0 FAIL, the pixel,
+  zone, protocol and click checks).
+
+**Remaining:**
+
+- **The measured flush and floating costs, published with the
+  [resource ratchet](lightest.md#appearance-looks-flush-against-floating).**
+  Needs real hardware: run the script with `MODE=--tty` and paste
+  `summary.tsv` into that table. This is what keeps the ticket open.
+- **The `hover` token and per-module token-per-state overrides.** Not
+  built, on purpose. The bar tracks the pointer's position for a press
+  (`pointer_on`), but nothing draws a hover: a hover state needs motion to
+  redraw the module under it and back, which is
+  [pointer-and-interactions](pointer-and-interactions.md) (M4), not built. A
+  token no module can enter has no honest test beyond forcing it. The four
+  classes already map to tokens, and the only module that sets one
+  (workspaces) does not; per-module overrides have nothing to override yet.
+- **Dot-style workspace indicators** (a row of small dots in place of the
+  numbers) and **colors for inactive workspaces or per-state pill colors**:
+  separate follow-ups, not built here.
+- **The default margin matching scoot's gap**: still a product call
+  (the default is flush, square and opaque).
+- **The opt-in animation question**: dropped, unmeasured (no frame callbacks
+  were added).
+- **A circle wider than its module**: a circle's diameter is limited to the
+  module's span (text plus `padding` each side), so a big pill on a small
+  `padding` is an oval; documented in
+  [cli.md](../cli.md#the-active-workspaces-pill). Growing the module's own
+  span to the diameter is the alternative, if the maintainer wants a disc at
+  any padding.
+- **Per-output overrides** stay with [multi-output](multi-output.md).
 
 ## What to build
 

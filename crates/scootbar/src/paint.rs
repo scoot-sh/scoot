@@ -53,8 +53,7 @@ impl Corners {
                 // The pixel's center, from the circle's center.
                 let dx = edge - (x as f32 + 0.5);
                 let dy = edge - (y as f32 + 0.5);
-                let inside = edge - dx.hypot(dy) + 0.5;
-                coverage.push((inside.clamp(0.0, 1.0) * 255.0).round() as u8);
+                coverage.push(corner_coverage(edge, dx, dy));
             }
         }
         Self { radius, coverage }
@@ -79,6 +78,14 @@ impl Corners {
         }
         self.coverage.get(y * r + x).copied().unwrap_or(255)
     }
+}
+
+/// The coverage (0 to 255) of a pixel whose center is `dx` and `dy` from the
+/// center of a circle of `radius`: how far inside it sits, in pixels,
+/// clamped to one. The one formula the bar's corners and the pill share.
+fn corner_coverage(radius: f32, dx: f32, dy: f32) -> u8 {
+    let inside = radius - dx.hypot(dy) + 0.5;
+    (inside.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 /// `pixel` (`b, g, r, a`, premultiplied) with every channel scaled by
@@ -165,48 +172,69 @@ impl<'a> Canvas<'a> {
     /// canvas, with `color`: corners of `radius` (cut back to what it can
     /// hold), antialiased over what is there, the rest opaque. The
     /// active-workspace pill. No allocation: a corner pixel's coverage is
-    /// computed as [`Corners::new`] does, only for the few in the corners.
+    /// computed as [`Corners::new`] does, only for the few in the corners,
+    /// and everything else is whole-row runs.
     #[allow(dead_code)] // Only the workspaces module draws a pill.
     pub fn fill_pill(&mut self, span: Span, y0: u32, y1: u32, radius: u32, color: Color) {
         let (w, h) = (span.width, y1.saturating_sub(y0));
         let radius = radius.min(w / 2).min(h / 2);
+        if radius == 0 {
+            self.fill_rect(span, y0, y1, color);
+            return;
+        }
+        // The straight rows between the corners, in one fill.
+        self.fill_rect(
+            span,
+            y0.saturating_add(radius),
+            y1.saturating_sub(radius),
+            color,
+        );
+        let r = radius as f32;
+        let pixel = color.xrgb8888().to_le_bytes();
         let clip = Span {
             x: 0,
             width: self.width,
         };
-        let r = f32::from(u16::try_from(radius).unwrap_or(u16::MAX));
-        for y in y0.min(self.height)..y1.min(self.height) {
-            let ly = y - y0;
-            let corner_row = ly < radius || ly >= h - radius;
-            if !corner_row {
-                self.fill_rect(span, y, y + 1, color);
-                continue;
+        for ly in (0..radius).chain(h - radius..h) {
+            let y = y0.saturating_add(ly);
+            if y >= self.height {
+                break;
             }
-            // Distance of the pixel's center below or above the arc's
-            // center row.
+            // The row's distance from the arcs' center row.
             let dy = if ly < radius {
                 r - (ly as f32 + 0.5)
             } else {
                 (ly as f32 + 0.5) - (h - radius) as f32
             };
-            let end = span.end().min(self.width);
-            for x in span.x.min(self.width)..end {
-                let lx = x - span.x;
-                let coverage = if lx < radius || lx >= w - radius {
-                    let dx = if lx < radius {
-                        r - (lx as f32 + 0.5)
-                    } else {
-                        (lx as f32 + 0.5) - (w - radius) as f32
-                    };
-                    let inside = r - dx.hypot(dy) + 0.5;
-                    (inside.clamp(0.0, 1.0) * 255.0).round() as u8
+            // Between the corners the row is whole.
+            self.fill_rect(
+                Span {
+                    x: span.x.saturating_add(radius),
+                    width: w - 2 * radius,
+                },
+                y,
+                y.saturating_add(1),
+                color,
+            );
+            for lx in (0..radius).chain(w - radius..w) {
+                let x = span.x.saturating_add(lx);
+                if x >= self.width {
+                    break;
+                }
+                let dx = if lx < radius {
+                    r - (lx as f32 + 0.5)
                 } else {
-                    255
+                    (lx as f32 + 0.5) - (w - radius) as f32
                 };
-                match coverage {
+                match corner_coverage(r, dx, dy) {
                     0 => {}
-                    255 => self.fill_rect(Span { x, width: 1 }, y, y + 1, color),
-                    _ => self.blend(i64::from(x), i64::from(y), coverage, color, clip),
+                    255 => {
+                        let at = (y as usize * self.width as usize + x as usize) * 4;
+                        if let Some(dest) = self.pixels.get_mut(at..at + 4) {
+                            dest.copy_from_slice(&pixel);
+                        }
+                    }
+                    coverage => self.blend(i64::from(x), i64::from(y), coverage, color, clip),
                 }
             }
         }

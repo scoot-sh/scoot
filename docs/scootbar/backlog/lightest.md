@@ -54,6 +54,28 @@ Published in `docs/scootbar/README.md` with the method, by
 `scripts/scootbar-bench` (reusing `scripts/scootbg-bench`'s runner), with each
 milestone's table kept, not overwritten.
 
+## Appearance looks (flush against floating)
+
+[appearance](appearance.md) is done when the flush and floating looks have
+measured costs published here. `scripts/scootbar-appearance-hw-test.sh`
+measures them (four looks: flush-opaque, rounded-opaque,
+rounded-translucent, floating), on real `--tty` hardware for the numbers that
+count; [testing.md](../testing.md#the-appearance-hardware-test) has the
+method and what to send back. Paste its `summary.tsv` here, one row per look,
+with the run's `environment.txt` (the commit and binaries it was taken against)
+under it:
+
+| Look | scootbar RSS kB | idle wakeups / 20 s | idle jiffies | whole-bar redraw: scootbar / scoot ms | cursor move over the bar: scoot ms |
+| --- | --- | --- | --- | --- | --- |
+| flush-opaque | pending hardware | | | | |
+| rounded-opaque | pending hardware | | | | |
+| rounded-translucent | pending hardware | | | | |
+| floating | pending hardware | | | | |
+
+The rule applies as ever: none of these rows may regress the clock-scope
+numbers above, and a look that costs real CPU or memory is off by default
+(they all are: the default look is flush, square and opaque).
+
 ## Rules
 
 - Release builds only (`lto = "fat"`, `panic = "abort"`).

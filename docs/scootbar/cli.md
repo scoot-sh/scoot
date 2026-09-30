@@ -97,6 +97,7 @@ fallback-fonts = ["/path/to/Symbols.ttf", "/path/to/Cjk.otf"]   # at most 2: see
 font-size = 14        # 1 to 256
 padding = 8           # 0 to 1024
 spacing = 0           # 0 to 1024
+separator = 0         # a line in the gap between modules, 0 to spacing: see Spacing
 
 [colors]
 background = "#1e1e2e"
@@ -108,8 +109,13 @@ urgent = "#f38ba8"
 [clock]
 format = "%-I:%M %P"
 icon = "\U000f0e65"     # one glyph before the time, from a symbol font: see Fonts
+margin = 0            # extra room on each side of the module, 0 to 1024: see Spacing
 
-[workspaces]          # reserved, empty for now
+[workspaces]
+margin = 0            # as the clock's
+pill-shape = "rect"   # the active number's pill: rect, pill or circle
+pill-radius = 0       # a rect's corner radius, 0 to 1024
+pill-inset = 0        # the pill's gap from the bar's top and bottom, 0 to 1024
 
 [output."eDP-1"]      # what differs on one output: see Outputs below
 height = 36
@@ -117,8 +123,10 @@ right = ["clock"]
 ```
 
 `margin` takes an integer (every side) or the `--margin` shorthand
-string. `radius` and `opacity` are file-only: they have no flags (see
-[Shape and opacity](#shape-and-opacity)). The module lists take the ids in [Modules](#modules); giving any
+string. `radius`, `opacity`, `separator`, the modules' `margin` and the
+pill's keys are file-only: they have no flags (see
+[Shape and opacity](#shape-and-opacity), [Spacing](#spacing) and
+[the pill](#the-active-workspaces-pill)). The module lists take the ids in [Modules](#modules); giving any
 of the three sets the whole layout, as the flags do. An unknown key
 anywhere is a loud error naming it, as is a bad value, which names its
 dotted key (`bar.height`, `colors.background`, `left`, `clock.format`;
@@ -179,8 +187,13 @@ lists those that are.
   right edge, in the order listed; **center** ones are packed together and
   centered on the bar.
 - Each module is as wide as its content plus `--padding` on both sides;
-  `--spacing` separates neighbours. A module with nothing to show takes no
-  space at all, padding and spacing included.
+  `--spacing` separates neighbours, and a module's own `margin` adds room
+  on each side of it ([Spacing](#spacing)). A module with nothing to show
+  takes no space at all, padding, margin and spacing included.
+- **A rounded bar keeps its ends clear of the corners**: the first module
+  on the left and the last on the right start `radius` less half a padding
+  in from the bar's end, so their ink (a padding further in) and the
+  workspaces pill (half a padding out) are never in a corner square.
 - **When they do not fit**, the left part keeps its place, the right part
   gives way to it, and the center part is pushed off center to fit between
   them, then cut. Nothing overlaps and nothing is drawn past the bar's end;
@@ -263,10 +276,9 @@ switch a specific output's, only the focused output's bar switches
 (`focus-output` first, then click). Nothing in scootbar changes when scoot
 gains it: the click is the same `activate`.
 
-- **The pill is rectangular for now**: the bar's corners can be rounded
-  ([Shape and opacity](#shape-and-opacity)) but the pill's own radius and
-  inset are still [appearance](backlog/appearance.md)'s; the colors and
-  rects stay.
+- **The pill is square and the bar's full height by default**; its shape
+  is [configurable](#the-active-workspaces-pill): rounded, a pill, or a
+  circle.
 - **Without `ext-workspace-v1`** the module shows nothing (one stderr note
   at start-up says the protocol is missing) and takes no space.
   **Without `wl_seat`** clicks do nothing (said too). The bar still starts;
@@ -274,6 +286,57 @@ gains it: the click is the same `activate`.
 - **The list grows and shrinks with the trailing empty workspace**,
   renumbering what follows; only the `active` state bit is shown so far
   (occupied and urgent need scoot-side work, in the module's entry).
+
+### The active workspace's pill
+
+`[workspaces]` shapes the pill behind the active number (all file-only,
+logical pixels; the defaults are the square, full-height pill the module
+always drew):
+
+| Key | Values | Meaning |
+| --- | --- | --- |
+| `pill-shape` | `"rect"` (default), `"pill"`, `"circle"` | `rect`: the item's extent, corners per `pill-radius`. `pill`: the same extent with ends as round as fit (half circles). `circle`: at least as wide as tall, centered on the number. |
+| `pill-radius` | 0 to 1024 | a `rect`'s corner radius, cut back to half its shorter side. Refused with `pill` or `circle`, which are already as round as they fit. |
+| `pill-inset` | 0 to 1024 | the gap from the bar's top and bottom edges, so the pill is shorter than the bar. Cut back so the pill is never shorter than the text's line: the number is drawn in the bar's color over the fill, and a shorter pill would clip it away. |
+
+```toml
+# A rounded pill, lifted 4 off the bar's edges
+[workspaces]
+pill-shape = "pill"
+pill-inset = 4
+```
+
+```toml
+# A circle around a one-digit number
+[bar]
+padding = 10           # the circle can be as wide as the module: see below
+[workspaces]
+pill-shape = "circle"
+pill-inset = 3
+```
+
+- **How a circle is sized**: its diameter is the pill's height (the bar's
+  height less twice the inset). A **two-digit number widens the circle into
+  a pill** as wide as the text needs, never a clipped disc. Growth is
+  limited to the room around the number: it stops at a neighbouring
+  number's ink, and cannot pass the module's own span (the numbers plus
+  `padding` either side). So on a crowded bar, or one whose `padding` is
+  small next to its height, a single digit gets an oval rather than a
+  disc: raise `padding` or the `pill-inset` until it is round.
+- **Clicks follow the pill**: a press on the drawn pill of the active
+  number does nothing (it is already shown), never a neighbour's switch,
+  even where a grown circle overlaps the neighbour's own click area; a press
+  on the padding around any other number still activates that workspace.
+- The corners are the same analytic coverage as the bar's, with no
+  supersampling and no allocation, painted only when the module repaints
+  (a workspace change). Measured (release build, one pill 80 device pixels
+  wide on a 1600x28 bar): the default square full-height pill costs 151 ns
+  (the plain fill it replaced, 153 ns); a rounded pill inset by a quarter of
+  the height costs 6.3 us, and 20 us on 3200x56 (scale 2), once per
+  workspace change.
+- **Not built (their own follow-ups)**: dot-style indicators (a row of
+  small dots in place of the numbers), and colors for the inactive
+  workspaces or per-state pill colors.
 
 ## Fonts
 
@@ -573,7 +636,66 @@ does nothing; the protocol says so.
 
 To line a floating bar up with scoot's tiling, match `--margin` to scoot's
 `[layout] gap` ([configuration.md](../configuration.md)): windows then sit
-one gap below the bar, as they sit one gap from each other.
+one gap below the bar, as they sit one gap from each other. The default is
+still a flush, square, opaque bar (flush to the edge with no margin);
+making it float is a choice, and these are the two settings to change
+together, with the values that match scoot's defaults (`gap` 12):
+
+```toml
+# ~/.config/scoot/bar.toml: a floating bar that lines up with the windows
+[bar]
+margin = 12            # = scoot's [layout] gap
+radius = 8             # = scoot's [appearance] corner_radius, if you round windows
+opacity = 1.0
+```
+
+```toml
+# ~/.config/scoot/config.toml: what they must match
+[layout]
+gap = 12               # the bar's margin
+
+[appearance]
+corner_radius = 8      # the bar's radius (0, square, is scoot's default)
+```
+
+Change `gap` and `margin` together and the bar keeps lining up; change
+only one and the bar's edge drifts from the windows'. The bar does not read
+scoot's config (it works on other compositors), so nothing keeps them in
+step but you.
+
+## Spacing
+
+Three lengths, all logical pixels and all bounded 0 to 1024 (a value past
+that, negative or not a whole number is a loud refusal naming its key):
+
+| Key | Flag | What it spaces |
+| --- | --- | --- |
+| `[bar] padding` | `--padding` | inside each module: room either side of its content |
+| `[bar] spacing` | `--spacing` | between neighbouring modules in a section |
+| `[clock] margin`, `[workspaces] margin` | none | outside one module: that much more room on each side of it, on top of `spacing`. Its own span never covers it, so a repaint of the module leaves it alone. A module with nothing to show takes none. |
+
+`[bar] separator` draws a line in the gap between neighbouring modules of a
+section: that many logical pixels wide, in the theme's `dim` color, from a
+quarter to three quarters of the bar's height, centered in the gap. It sits
+in the gap, so it needs one: **`separator` may not exceed `spacing`** (a
+larger value is refused, naming both), and the drawn line is cut back to the
+actual gap. There is none between two sections, beside a module with
+nothing to show, or at the bar's ends. `0`, the default, draws none.
+
+```toml
+left = ["workspaces", "clock"]
+
+[bar]
+spacing = 12
+separator = 1          # a hairline centered in each 12-pixel gap
+
+[workspaces]
+margin = 4             # 4 more either side: the gaps beside it are 20
+```
+
+Nothing here costs a frame: the lines are painted with the whole bar, never
+for a module's own repaint, and the layout is worked out only when a width
+or the size changes.
 
 ## Shape and opacity
 
@@ -607,10 +729,23 @@ opacity = 0.9
 - **The radius is cut back to fit**: `--height` below twice the file's
   `radius` (the flag replaces the file's height), or a compositor giving
   the bar less height than asked, draws the corners as large as the bar
-  holds. Text is not clipped to the rounded shape: with `padding` smaller
-  than the radius, a module at the bar's end can reach into a corner.
-- **Corners are still clickable**: the input region is not narrowed to the
-  rounded shape yet.
+  holds.
+- **Text is kept out of the corners, not clipped to them**: the layout
+  clears the bar's ends by the radius (see [Layout](#layout)), so no ink
+  is near a corner whatever `padding` is. This costs the radius less half a
+  padding of room at each end, and needs no per-pixel clipping in the
+  paint; a bar whose radius is 0 loses nothing.
+- **Corners are not clickable**: the surface's input region is the rounded
+  shape (one rectangle per corner row, at most `2 x radius + 1`, set when
+  the size or radius changes), so a click in a cut corner reaches what is
+  behind the bar (the wallpaper, a window under a bar that does not reserve
+  space) instead of an invisible bar. scoot honors `wl_surface.set_input_region`
+  on layer surfaces, checked end to end on a headless scoot: a click in the
+  window's corner under a rounded bar focuses that window, and the same click
+  under a square bar does not. The region is in logical pixels, so it is the
+  same at every scale (at a fractional scale it can differ from the drawn
+  edge by a device pixel). A compositor that ignores input regions leaves
+  the corners clickable, which is the protocol's fallback.
 - Measured costs (release build, 1600x28 bar, radius 14): filling the whole
   bar takes 4.9 us square and 6.1 us rounded and translucent; 3200x56 (scale
   2), 16.2 us and 29.2 us. A repaint of one module's span, the common case,
