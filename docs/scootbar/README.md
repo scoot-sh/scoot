@@ -33,6 +33,9 @@ nix run github:scoot-sh/scoot#scootbar-demo                 # with a font, from 
 From Nix, `packages.<system>.scootbar` is the bar with no font in its
 closure (give it `--font`), and `scootbar-demo` the same bar with DejaVu
 Sans as its default font ([docs/nix.md](../nix.md#the-status-bar-scootbar)).
+`programs.scootbar` (home-manager and NixOS modules, a restarting user
+service, Stylix defaults when Stylix is in use) is documented there too
+([the modules](../nix.md#the-modules-programsscootbar)).
 
 Every option lives in `$XDG_CONFIG_HOME/scoot/bar.toml` too (the flags
 override it, at start-up and on every reload), and the running bar answers

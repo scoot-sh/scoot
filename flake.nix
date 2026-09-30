@@ -599,6 +599,19 @@
         {
           default = hmWrapper;
           scoot = hmWrapper;
+          # `programs.scootbar` (nix/modules/scootbar-home.nix): its own
+          # module, not part of `default`, so importing scoot's changes
+          # nothing about the bar. The flake's build is `mkDefault`, as
+          # above; null where it does not build (Darwin), where enabling
+          # the option is then refused by name.
+          scootbar =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/scootbar-home.nix ];
+              programs.scootbar.package = nixpkgs.lib.mkDefault (
+                (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootbar or null
+              );
+            };
         };
 
       # Current home-manager spelling (`homeModules.*`); the legacy
@@ -622,27 +635,49 @@
         {
           default = osWrapper;
           scoot = osWrapper;
+          # `programs.scootbar` (nix/modules/scootbar-nixos.nix), as the
+          # home-manager one: separate from `default`.
+          scootbar =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/scootbar-nixos.nix ];
+              programs.scootbar.package = nixpkgs.lib.mkDefault (
+                (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootbar or null
+              );
+            };
         };
 
       # Hermetic module checks (see nix/tests.nix): standalone
       # evalModules + rendered-file content assertions. Eval-time Nix,
       # so no benchmark applies -- nothing here runs per-event or
       # per-frame; it runs once per `nix flake check`.
-      checks = forEach (pkgs: {
-        scoot-modules = pkgs.callPackage ./nix/tests.nix {
-          # The flake's own wrappers, overlay and packages, so the checks
-          # cover what a flake consumer imports, not just the pure modules;
-          # and aarch64-darwin's package set, evaluated (never built) to
-          # prove a macOS home-manager config with a `[wallpaper]` table
-          # evaluates.
-          flake = {
-            inherit (self) overlays packages;
-            homeModule = self.homeModules.scoot;
-            nixosModule = self.nixosModules.scoot;
+      checks = forEach (
+        pkgs:
+        {
+          scoot-modules = pkgs.callPackage ./nix/tests.nix {
+            # The flake's own wrappers, overlay and packages, so the checks
+            # cover what a flake consumer imports, not just the pure modules;
+            # and aarch64-darwin's package set, evaluated (never built) to
+            # prove a macOS home-manager config with a `[wallpaper]` table
+            # evaluates.
+            flake = {
+              inherit (self) overlays packages;
+              homeModule = self.homeModules.scoot;
+              nixosModule = self.nixosModules.scoot;
+            };
+            darwinPkgs = nixpkgs.legacyPackages.aarch64-darwin;
           };
-          darwinPkgs = nixpkgs.legacyPackages.aarch64-darwin;
-        };
-      });
+        }
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          # The scootbar modules (nix/scootbar-tests.nix): evaluated with and
+          # without Stylix, and the rendered file run through the real bar.
+          scootbar-modules = pkgs.callPackage ./nix/scootbar-tests.nix {
+            inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) scootbar;
+            homeModule = self.homeModules.scootbar;
+            nixosModule = self.nixosModules.scootbar;
+          };
+        }
+      );
 
       formatter = forEach (pkgs: pkgs.nixfmt);
     };

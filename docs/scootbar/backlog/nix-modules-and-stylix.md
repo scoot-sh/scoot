@@ -39,6 +39,24 @@ Filed 2026-09-29. Serves **daily-drive**.
 - Checks: the module evaluates on both systems, the rendered file parses with
   the real binary, and CI's flake checks cover it.
 
+## Status (2026-09-30)
+
+Landed: the home-manager and NixOS modules (`nix/modules/scootbar*.nix`), the
+`features` override, Stylix defaults with the pinned precedence, the user
+unit, docs ([nix.md](../../nix.md#the-modules-programsscootbar)) and
+`checks.<system>.scootbar-modules` (evaluation with and without a Stylix
+stand-in, the real binary over each rendered file; no `--check` flag exists,
+so it runs `daemon --config FILE` with no compositor and expects the
+connection refusal). Also evaluated by hand against real Stylix `fb28acd`
+with real NixOS and home-manager.
+
+Left, so the entry stays open: run the unit under a real user manager against
+a running scoot session (`graphical-session.target` started by a session
+script, restart after `kill -SEGV`), on both architectures; a build of the
+check on aarch64-linux (only evaluated); the `session.command`/autostart
+pairing sentence in the docs; and a `scootbar --check` flag, which would let
+the check validate a file without faking a missing compositor.
+
 ## Done when
 
 `programs.scootbar.enable = true` gives a themed, running bar under
