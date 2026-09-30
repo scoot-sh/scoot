@@ -42,6 +42,7 @@ formula is unchanged (6252), which CI covers.
 
 A gotcha found on the way: those tests run against whichever `scoot` sits
 beside them, and a stale `target/debug/scoot` (here from nine days earlier) made
-**eight more** tests fail that have nothing to do with pages (scale, color and
-config cases in scootbg and scootbar) and passed once `scoot` was rebuilt.
+**eight more** tests failed on a run with the stale one (scale, color and config
+cases in scootbg and scootbar) and passed once `scoot` was rebuilt; the cause was
+not investigated.
 `cargo build -p scoot` first.
