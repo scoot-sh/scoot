@@ -552,7 +552,9 @@ impl File {
                     return Err(value(
                         path,
                         "workspaces.item-gap",
-                        format_args!("takes a whole number of spaces from 1 to {max}, not {spaces}"),
+                        format_args!(
+                            "takes a whole number of spaces from 1 to {max}, not {spaces}"
+                        ),
                     ));
                 }
                 modules.workspaces.item_gap = spaces;

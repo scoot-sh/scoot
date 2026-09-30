@@ -835,7 +835,7 @@ fn the_view_separates_the_numbers_by_the_item_gap() {
     }
     let (mut harness, link) = started();
     commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
-    harness.dispatch();
+    assert_eq!(harness.dispatch(), Update::Changed);
     assert_eq!(harness.view_on(Some("DP-1")).text(), "1 2", "the default");
 }
 
@@ -853,7 +853,11 @@ fn a_wider_item_gap_is_still_one_gap_between_items() {
     for (item, number) in ["1", "2", "10"].iter().enumerate() {
         let (start, stop) = item_span(&font, wide, EM, x0, item).unwrap();
         let (n_start, n_stop) = item_span(&font, narrow, EM, x0, item).unwrap();
-        assert_eq!(stop - start, n_stop - n_start, "item {item} ({number}) keeps its own width");
+        assert_eq!(
+            stop - start,
+            n_stop - n_start,
+            "item {item} ({number}) keeps its own width"
+        );
         assert!(start >= end, "item {item} overlaps the last");
         let shifted = n_start as f32 + 3.0 * space * item as f32;
         assert!(
