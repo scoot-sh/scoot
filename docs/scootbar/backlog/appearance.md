@@ -63,7 +63,7 @@ each on screenshots; the measured fill costs in
 
 - **The measured flush and floating costs, published with the
   [resource ratchet](lightest.md#appearance-looks-flush-against-floating).**
-  Needs real hardware: run the script with `MODE=--tty` and paste
+  Needs real hardware: run the script with `SCOOTBAR_HW_MODE=--tty` and paste
   `summary.tsv` into that table. This is what keeps the ticket open.
 - **The `hover` token and per-module token-per-state overrides.** Not
   built, on purpose. The bar tracks the pointer's position for a press

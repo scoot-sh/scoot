@@ -10,11 +10,11 @@
 # docs/scootbar/backlog/lightest.md's resource ratchet. Method and what to send
 # back: docs/scootbar/testing.md ("The appearance hardware test").
 #
-#   MODE=--headless OUT=/tmp/sb-appearance scripts/scootbar-appearance-hw-test.sh
-#   MODE=--nested   OUT=/tmp/sb-appearance scripts/scootbar-appearance-hw-test.sh
-#   MODE=--tty      OUT=/tmp/sb-appearance scripts/scootbar-appearance-hw-test.sh
+#   SCOOTBAR_HW_MODE=--headless SCOOTBAR_HW_OUT=/tmp/sb-appearance scripts/scootbar-appearance-hw-test.sh
+#   SCOOTBAR_HW_MODE=--nested   SCOOTBAR_HW_OUT=/tmp/sb-appearance scripts/scootbar-appearance-hw-test.sh
+#   SCOOTBAR_HW_MODE=--tty      SCOOTBAR_HW_OUT=/tmp/sb-appearance scripts/scootbar-appearance-hw-test.sh
 #
-# MODE selects the scoot backend (default --headless, which needs no hardware
+# SCOOTBAR_HW_MODE selects the scoot backend (default --headless, which needs no hardware
 # and is how the harness itself is rehearsed). The numbers that matter are the
 # --tty ones: dumb buffers scanned out by a real display, the CPU the
 # compositor really spends re-compositing a translucent bar. --nested: run this
@@ -24,8 +24,9 @@
 # --tty, on the machine (a laptop whose desktop is not scoot is the low-risk
 # case; treat anything else as needing your say-so, CLAUDE.md):
 #
-#   Ctrl+Alt+F3, log in, cd to this checkout
-#   MODE=--tty OUT=/tmp/sb-appearance-tty scripts/scootbar-appearance-hw-test.sh
+#   Ctrl+Alt+F3, log in, cd to this checkout (a plain VT: --tty is refused when
+#   WAYLAND_DISPLAY or DISPLAY is set, unless SCOOTBAR_HW_TAKE_SEAT=1)
+#   SCOOTBAR_HW_MODE=--tty SCOOTBAR_HW_OUT=/tmp/sb-appearance-tty scripts/scootbar-appearance-hw-test.sh
 #
 # **Stay on that VT until it finishes** (about 4 minutes at the defaults). A
 # --tty compositor on an inactive VT is paused by logind: it holds no DRM
@@ -42,37 +43,47 @@
 # the clock (any of scootbar's well-known ones; without one the bars run with
 # no modules). No ImageMagick, jq or other tool.
 #
-# Overrides (all optional): SCOOT, SCOOTCTL, SCOOTBAR (binaries; the default is
+# Overrides (all optional). Every knob is namespaced SCOOTBAR_HW_*: generic
+# names collide with the environment (devenv's stdenv exports SIZE=size).
+# SCOOT and SCOOTCTL (binaries) are the smoke test's own names; the default is
 # the release build then the debug build of the tree this script is in, or of
-# $CARGO_TARGET_DIR), OUT (output directory; a directory that already holds a
-# run is refused, OVERWRITE=1 replaces it), GAP (scoot's [layout] gap for the
-# session, default 12), RADIUS (the bar's corner radius, default 12), BAR_HEIGHT
-# (default 32), BAR (the bar's color, default #c03020), OPACITY (the
-# translucent look's, default 0.5), IDLE_SECS (default 20), REDRAWS (whole-bar
-# redraws per look, default 300), SWEEP_SECS (the paced cursor sweep along the
-# bar per look, default 8), EXPECT_INPUT_REGION (honored, the default and
-# what scoot does, or ignored: what the click check must see),
-# CLICK_HEIGHT/CLICK_RADIUS (the click check's bar, default 120/60),
-# SIZE (headless and nested only, WxH, default 1600x1000).
+# $CARGO_TARGET_DIR.
+#   SCOOTBAR_HW_MODE          --headless (default), --nested or --tty
+#   SCOOTBAR_HW_OUT           output directory (required; a directory that already
+#                             holds a run is refused, SCOOTBAR_HW_OVERWRITE=1 replaces it)
+#   SCOOTBAR_HW_SCOOTBAR      the scootbar binary
+#   SCOOTBAR_HW_GAP           scoot's [layout] gap for the session, default 12
+#   SCOOTBAR_HW_RADIUS        the bar's corner radius, default 12
+#   SCOOTBAR_HW_BAR_HEIGHT    default 32
+#   SCOOTBAR_HW_BAR           the bar's color, default #c03020
+#   SCOOTBAR_HW_OPACITY       the translucent look's, default 0.5
+#   SCOOTBAR_HW_IDLE_SECS     default 20
+#   SCOOTBAR_HW_REDRAWS       whole-bar redraws per look, default 300
+#   SCOOTBAR_HW_SWEEP_SECS    the paced cursor sweep along the bar per look, default 8
+#   SCOOTBAR_HW_EXPECT_INPUT_REGION  honored (default: what scoot does) or ignored
+#   SCOOTBAR_HW_CLICK_HEIGHT / SCOOTBAR_HW_CLICK_RADIUS  the click check's bar, default 120/60
+#   SCOOTBAR_HW_SIZE          headless and nested only, WxH, default 1600x1000
+#   SCOOTBAR_HW_TAKE_SEAT=1   --tty from inside a graphical session (refused otherwise)
 #
 # Exit status: 0 with no FAIL, 1 with any FAIL, 2 for a setup problem (no
-# binary, no seat, the compositor never came up), which is not a result.
+# binary, no seat, the compositor never came up), which is not a result; 3
+# for the --tty refusal from inside a graphical session.
 set -euo pipefail
 
-MODE=${MODE:---headless}
-OUT=${OUT:-}
-GAP=${GAP:-12}
-RADIUS=${RADIUS:-12}
-BAR_HEIGHT=${BAR_HEIGHT:-32}
-BAR=${BAR:-#c03020}
-OPACITY=${OPACITY:-0.5}
-IDLE_SECS=${IDLE_SECS:-20}
-REDRAWS=${REDRAWS:-300}
-EXPECT_INPUT_REGION=${EXPECT_INPUT_REGION:-honored}
-CLICK_HEIGHT=${CLICK_HEIGHT:-120}
-CLICK_RADIUS=${CLICK_RADIUS:-60}
-SIZE=${SIZE:-1600x1000}
-SWEEP_SECS=${SWEEP_SECS:-8}
+MODE=${SCOOTBAR_HW_MODE:---headless}
+OUT=${SCOOTBAR_HW_OUT:-}
+GAP=${SCOOTBAR_HW_GAP:-12}
+RADIUS=${SCOOTBAR_HW_RADIUS:-12}
+BAR_HEIGHT=${SCOOTBAR_HW_BAR_HEIGHT:-32}
+BAR=${SCOOTBAR_HW_BAR:-#c03020}
+OPACITY=${SCOOTBAR_HW_OPACITY:-0.5}
+IDLE_SECS=${SCOOTBAR_HW_IDLE_SECS:-20}
+REDRAWS=${SCOOTBAR_HW_REDRAWS:-300}
+EXPECT_INPUT_REGION=${SCOOTBAR_HW_EXPECT_INPUT_REGION:-honored}
+CLICK_HEIGHT=${SCOOTBAR_HW_CLICK_HEIGHT:-120}
+CLICK_RADIUS=${SCOOTBAR_HW_CLICK_RADIUS:-60}
+SIZE=${SCOOTBAR_HW_SIZE:-1600x1000}
+SWEEP_SECS=${SCOOTBAR_HW_SWEEP_SECS:-8}
 
 die() {
     echo "error: $*" >&2
@@ -81,22 +92,43 @@ die() {
 
 case "$MODE" in
     --headless | --nested | --tty) ;;
-    *) die "MODE must be --headless, --nested or --tty, not '$MODE'" ;;
+    *) die "SCOOTBAR_HW_MODE must be --headless, --nested or --tty, not '$MODE'" ;;
 esac
-[ -n "$OUT" ] || die "set OUT to the directory the numbers go in (a new one)"
+[ -n "$OUT" ] || die "set SCOOTBAR_HW_OUT to the directory the numbers go in (a new one)"
 for n in GAP RADIUS BAR_HEIGHT IDLE_SECS REDRAWS SWEEP_SECS CLICK_HEIGHT CLICK_RADIUS; do
     case "${!n}" in
-        '' | *[!0-9]*) die "$n must be a whole number, not '${!n}'" ;;
+        '' | *[!0-9]*) die "SCOOTBAR_HW_$n must be a whole number, not '${!n}'" ;;
     esac
 done
+case "$SIZE" in
+    [0-9]*x[0-9]*) ;;
+    *) die "SCOOTBAR_HW_SIZE must be WIDTHxHEIGHT, not '$SIZE'" ;;
+esac
+case "${SIZE%x*}${SIZE#*x}" in
+    *[!0-9]*) die "SCOOTBAR_HW_SIZE must be WIDTHxHEIGHT (digits only), not '$SIZE'" ;;
+esac
 case "$BAR" in
     '#'[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]) ;;
-    *) die "BAR must be '#rrggbb', not '$BAR'" ;;
+    *) die "SCOOTBAR_HW_BAR must be '#rrggbb', not '$BAR'" ;;
 esac
 case "$EXPECT_INPUT_REGION" in
     honored | ignored) ;;
-    *) die "EXPECT_INPUT_REGION must be honored or ignored" ;;
+    *) die "SCOOTBAR_HW_EXPECT_INPUT_REGION must be honored or ignored" ;;
 esac
+if [ "$MODE" = --tty ]; then
+    if { [ -n "${WAYLAND_DISPLAY:-}" ] || [ -n "${DISPLAY:-}" ]; } && [ "${SCOOTBAR_HW_TAKE_SEAT:-0}" != 1 ]; then
+        echo "refusing --tty from inside a graphical session (WAYLAND_DISPLAY or DISPLAY is set):" >&2
+        echo "  scoot would try to take the seat from your desktop. Log in on a plain VT" >&2
+        echo "  (Ctrl+Alt+F3) and run it there, or set SCOOTBAR_HW_TAKE_SEAT=1 if you mean it." >&2
+        exit 3
+    fi
+    cat >&2 <<'MSG'
+--tty: scoot will own this VT's display and keyboard. The way back is a VT
+switch (Ctrl+Alt+F<n>, the VT your session is on). Ctrl+C does NOT stop the
+script once scoot has the keyboard: it goes to scoot's focused foot. Switching
+away pauses the run (its numbers then do not count). Stay on this VT until done.
+MSG
+fi
 command -v python3 >/dev/null || die "python3 is not on PATH (stdlib only, but it is needed)"
 [ -n "${XDG_RUNTIME_DIR:-}" ] || die "no XDG_RUNTIME_DIR -- log in on a VT, do not su"
 
@@ -115,7 +147,7 @@ pick() {
 }
 SCOOT=${SCOOT:-$(pick scoot)}
 SCOOTCTL=${SCOOTCTL:-$(pick scootctl)}
-SCOOTBAR=${SCOOTBAR:-$(pick scootbar)}
+SCOOTBAR=${SCOOTBAR_HW_SCOOTBAR:-$(pick scootbar)}
 [ -n "$SCOOT" ] && [ -x "$SCOOT" ] || die "no scoot binary (cargo build --release -p scoot, or set SCOOT)"
 [ -n "$SCOOTBAR" ] && [ -x "$SCOOTBAR" ] || die "no scootbar binary (cargo build --release -p scootbar, or set SCOOTBAR)"
 if [ -z "$SCOOTCTL" ] || [ ! -x "$SCOOTCTL" ]; then
@@ -131,10 +163,10 @@ ctl() {
     fi
 }
 
-if [ -e "$OUT/summary.tsv" ] && [ "${OVERWRITE:-0}" != 1 ]; then
+if [ -e "$OUT/summary.tsv" ] && [ "${SCOOTBAR_HW_OVERWRITE:-0}" != 1 ]; then
     echo "$OUT already holds a run ($OUT/summary.tsv exists); refusing to overwrite it." >&2
-    echo "  measure afresh: OUT=<a new directory> $0" >&2
-    echo "  overwrite it:   OVERWRITE=1 OUT=$OUT $0   (destroys the numbers in it)" >&2
+    echo "  measure afresh: SCOOTBAR_HW_OUT=<a new directory> $0" >&2
+    echo "  overwrite it:   SCOOTBAR_HW_OVERWRITE=1 SCOOTBAR_HW_OUT=$OUT $0   (destroys the numbers in it)" >&2
     exit 2
 fi
 mkdir -p "$OUT"
@@ -450,8 +482,7 @@ start_bar() {
     BAR_PID=$(cat "$RUN/bar.pid")
     # Drawn: the zone is reserved (the usable area no longer starts at 0),
     # unless the look reserves none (BAR_ZONE=0: the click check's bar).
-    local i
-    for i in $(seq 150); do
+    for _ in $(seq 150); do
         if [ "${BAR_ZONE:-1}" = 0 ]; then
             sleep 1
             break
@@ -524,7 +555,13 @@ measure_look() {
         return
     }
     shoot "$name"
-    read -r SCALE UY UH RW RH < <(geometry)
+    local geo
+    geo=$(geometry) || {
+        row FAIL "$name: geometry" "scootctl outputs failed or had no output"
+        stop_bar
+        return
+    }
+    read -r SCALE UY UH RW RH <<< "$geo"
     echo "  output ${RW}x${RH} logical, scale $SCALE, usable y=$UY height=$UH"
 
     # What the desktop looks like where the bar is not: sampled well below it.
@@ -566,6 +603,9 @@ measure_look() {
                 "blended left edge@0,$mid_y=mix($BAR,$desk,$OPACITY)~6"
             ;;
         floating)
+            # margin = gap + radius (not the gap alone, as cli.md's snippet):
+            # the probe at (m,m) then lands on the cut corner at a distance
+            # from the screen's corner, distinct from the margin around it.
             local m_dev
             m_dev=$(dev "$((GAP + RADIUS))" "$SCALE")
             mid_y=$((m_dev + h_dev / 2))

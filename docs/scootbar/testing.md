@@ -228,16 +228,16 @@ the [resource ratchet](backlog/lightest.md#appearance-looks-flush-against-floati
 ```sh
 cargo build --release -p scoot -p scootctl -p scootbar
 # On the machine: Ctrl+Alt+F3, log in, cd to the checkout, and stay on that VT
-MODE=--tty OUT=/tmp/sb-appearance-tty scripts/scootbar-appearance-hw-test.sh
+SCOOTBAR_HW_MODE=--tty SCOOTBAR_HW_OUT=/tmp/sb-appearance-tty scripts/scootbar-appearance-hw-test.sh
 ```
 
-`MODE` is `--headless` (the default, no hardware: how the script itself is
+`SCOOTBAR_HW_MODE` is `--headless` (the default, no hardware: how the script itself is
 rehearsed), `--nested` (run inside a host compositor) or `--tty` (a real
 display: the run that counts, about four minutes; the script says why the
-VT must be kept and marks a run whose compositor was paused). `OUT` is a new
-directory (a run already in it is refused, `OVERWRITE=1` replaces it). The
-header of the script lists the other settings (`GAP`, `RADIUS`, `IDLE_SECS`,
-`REDRAWS`, ...) and the prerequisites: release builds, `python3` (standard
+VT must be kept and marks a run whose compositor was paused). `SCOOTBAR_HW_OUT` is a new
+directory (a run already in it is refused, `SCOOTBAR_HW_OVERWRITE=1` replaces it). The
+header of the script lists the other settings (`SCOOTBAR_HW_GAP`, `SCOOTBAR_HW_RADIUS`, `SCOOTBAR_HW_IDLE_SECS`,
+`SCOOTBAR_HW_REDRAWS`, ...) and the prerequisites: release builds, `python3` (standard
 library only: the PNG decoding and the pixel checks), `foot` for the click
 check. Exit status 0 with no FAIL, 1 with a FAIL, 2 for a setup problem (no
 binary, a busy seat, the compositor never came up), which is not a result.
@@ -257,16 +257,16 @@ Per look it does, in order:
   makes no `set_input_region` request and a rounded one makes one; the
   first `damage_buffer` is the bar's own size (a floating bar's is narrower by
   its side margins).
-- **Idle**: after settling, `IDLE_SECS` of nothing: scootbar's context
+- **Idle**: after settling, `SCOOTBAR_HW_IDLE_SECS` of nothing: scootbar's context
   switches (the wakeups: at most 8 allowed for a clock's tick and the
   compositor's release), its CPU jiffies (at most 2) and its RSS, and the
   compositor's jiffies.
-- **A whole-bar redraw** repeated `REDRAWS` times (`scootbar msg reload`
+- **A whole-bar redraw** repeated `SCOOTBAR_HW_REDRAWS` times (`scootbar msg reload`
   re-places every output, which draws the whole bar and hands the compositor a
   new buffer): the CPU jiffies of scootbar and of scoot. Each look is compared
   with flush-opaque at the end.
 - **A cursor sweep** along the bar, paced below the display's refresh rate so
-  every move is a frame, for `SWEEP_SECS`: scoot's CPU per move, which is the
+  every move is a frame, for `SCOOTBAR_HW_SWEEP_SECS`: scoot's CPU per move, which is the
   compositor's cost of the look under the cursor (blending a translucent
   bar, and the opaque region an opaque one declares).
 
@@ -275,8 +275,20 @@ reserves no space, over two `foot` windows. A click on the bar's flat part must
 not move focus; a click in the left window's corner, under the bar's cut
 corner, must move focus to that window, and the same click under a square bar
 of the same size must not (the control that shows the harness measures the
-bar). `EXPECT_INPUT_REGION=ignored` states the opposite expectation for a
+bar). `SCOOTBAR_HW_EXPECT_INPUT_REGION=ignored` states the opposite expectation for a
 compositor that ignores input regions; scoot honors them.
+
+**Every setting is namespaced `SCOOTBAR_HW_*`**, because generic names
+collide with the environment (devenv's stdenv exports `SIZE=size`, which broke
+an earlier `SIZE` knob); `SCOOTBAR_HW_SIZE` must be `WIDTHxHEIGHT`.
+
+**`--tty` guards**: it is refused (exit status 3, nothing written, not even
+the output directory) when `WAYLAND_DISPLAY` or `DISPLAY` is set, that is,
+when run from inside a graphical session, unless `SCOOTBAR_HW_TAKE_SEAT=1`.
+At start-up it prints how to get back: a VT switch (`Ctrl+Alt+F<n>`, the VT
+of your session) is the only abort, since once scoot owns the keyboard
+`Ctrl+C` reaches scoot's focused `foot`, not the script. The refusals are
+pinned by `tests/hw_script.rs`.
 
 **What only makes sense on hardware**: the CPU and RSS numbers (the headless
 compositor presents nowhere, and debug builds are marked INFO, not for the
@@ -289,10 +301,10 @@ differences are small next to the 10 ms jiffy: a difference of one jiffy over
 a run is noise, and the table says so; a change is worth quoting when it
 holds across two runs.
 
-**What to send back**: the `OUT` directory, or at least `summary.tsv`,
+**What to send back**: the `SCOOTBAR_HW_OUT` directory, or at least `summary.tsv`,
 `pixels.tsv`, `results.txt` and `environment.txt` (the commit and the exact
 binaries, the cache key of the numbers), plus any FAIL line and, for a
-failing pixel, its screenshot (`OUT/<look>.png`). Paste `summary.tsv` into the
+failing pixel, its screenshot (`SCOOTBAR_HW_OUT/<look>.png`). Paste `summary.tsv` into the
 ratchet's appearance table.
 
 ## Fuzzing

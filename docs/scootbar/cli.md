@@ -679,7 +679,9 @@ section: that many logical pixels wide, in the theme's `dim` color, from a
 quarter to three quarters of the bar's height, centered in the gap. It sits
 in the gap, so it needs one: **`separator` may not exceed `spacing`** (a
 larger value is refused, naming both), and the drawn line is cut back to the
-actual gap. There is none between two sections, beside a module with
+actual gap. The check is against the file's `spacing`: a `--spacing` flag
+given later replaces it and can leave a separator wider than the gap, which
+is then cut to it (drawn narrower, never over a module). There is none between two sections, beside a module with
 nothing to show, or at the bar's ends. `0`, the default, draws none.
 
 ```toml
