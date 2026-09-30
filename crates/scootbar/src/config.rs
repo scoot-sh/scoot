@@ -26,6 +26,10 @@ use crate::render::Style;
 use crate::text::MAX_FALLBACKS;
 use crate::theme::Theme;
 
+#[cfg(feature = "clock")]
+mod icon;
+#[cfg(all(test, feature = "clock"))]
+mod icon_tests;
 mod outputs;
 #[cfg(test)]
 mod spacing_tests;
@@ -308,6 +312,24 @@ struct ClockFile {
     /// One glyph, drawn before the time.
     #[cfg(feature = "clock")]
     icon: Option<String>,
+    /// SVG path data, drawn before the time (instead of `icon`).
+    #[cfg(feature = "clock")]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(feature = "clock")]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn before the time (instead of `icon`). Only in a
+    /// build with the `icon-image` feature: without it the key is unknown.
+    #[cfg(all(feature = "clock", feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "clock", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
     /// Extra logical pixels on each side of the module.
     #[cfg(feature = "clock")]
     margin: Option<u32>,
@@ -522,11 +544,8 @@ impl File {
             }
         }
         #[cfg(feature = "clock")]
-        if let Some(icon) = &self.clock.icon {
-            modules.clock.icon = Some(
-                parse_icon(icon)
-                    .map_err(|message| value(path, "clock.icon", format_args!("{message}")))?,
-            );
+        if let Some(icon) = icon::clock(path, &self.clock)? {
+            modules.clock.icon = Some(icon);
         }
         Ok(Config {
             bar: Bar {
@@ -723,19 +742,4 @@ fn parse_opacity(value: &toml::Value) -> Option<u8> {
     (0.0..=1.0)
         .contains(&opacity)
         .then(|| (opacity * 255.0).round() as u8)
-}
-
-/// An icon: exactly one Unicode character (a symbol font's glyph is one
-/// private-use codepoint). Not shaped, so a sequence of several (an emoji
-/// with a modifier) is refused rather than drawn as separate boxes.
-#[cfg(feature = "clock")]
-fn parse_icon(text: &str) -> Result<char, String> {
-    let mut chars = text.chars();
-    match (chars.next(), chars.next()) {
-        (Some(c), None) if !c.is_control() => Ok(c),
-        _ => Err(format!(
-            "takes exactly one character (a glyph from a symbol font), not `{}`",
-            text.escape_debug()
-        )),
-    }
 }

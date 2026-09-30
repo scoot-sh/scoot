@@ -1056,10 +1056,11 @@ jobs:
       - name: Benchmark harness tests
         run: python3 -m unittest discover -s scripts/scootbar-bench -p 'test_*.py'
 
-      # scootbar's modules, read from its manifest (every feature but
-      # `default` is one: crates/scootbar/Cargo.toml says so), for the
-      # feature matrix in the next two steps, so a new module joins the
-      # matrix with no change here.
+      # scootbar's features, read from its manifest (every feature but
+      # `default`: one per module, and `icon-image`, the optional PNG
+      # decoder; crates/scootbar/Cargo.toml says so), for the feature
+      # matrix in the next two steps, so a new module joins the matrix
+      # with no change here.
       - name: List scootbar's modules
         shell: nix develop --command bash -euo pipefail {0}
         run: |
@@ -1245,5 +1246,8 @@ jobs:
           SCOOTBAR_REQUIRE_SCOOT: "1"
           SCOOTBAR_REQUIRE_SWAY: "1"
         run: |
-          cargo nextest run -p scootbar --test bar --test hotplug --test clock --no-fail-fast
-          cargo test -p scootbar --test bar --test hotplug --test clock
+          cargo nextest run -p scootbar --test bar --test hotplug --test clock --test icons --no-fail-fast
+          cargo test -p scootbar --test bar --test hotplug --test clock --test icons
+          # The PNG icon's end-to-end test is compiled only with its
+          # feature, which the default build leaves out.
+          cargo nextest run -p scootbar --features icon-image --test icons --no-fail-fast

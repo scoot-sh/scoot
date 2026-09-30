@@ -1,10 +1,11 @@
 ---
 title: "Icons and fonts: symbol glyphs, a small fallback chain, and what is out of scope"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M3"
+resolved: "2026-09-30"
 ---
 
 # Icons and fonts
@@ -37,7 +38,7 @@ need icons, and window titles need more than Latin.
    the Nix module can do it in a derivation, so the bar loads only the PNG.
 4. **Icon-theme lookup** (`.desktop` and themed names, needed for tray and
    window icons): loads and decodes files, which is the heavy path. Only if
-   the [tray](tray.md) or window icons force it.
+   the [tray](../tray.md) or window icons force it.
 
 Prefer 1 with 2 as the built-ins' default if the numbers allow, 3 as the opt-in
 for user buttons; record the costs of each.
@@ -45,7 +46,7 @@ for user buttons; record the costs of each.
 ## Fonts
 
 The rasterizer is `ab_glyph` (M0,
-[the record](resolved/dependencies-done.md#1-font-rasterizer)), over a mapped
+[the record](dependencies-done.md#1-font-rasterizer)), over a mapped
 font file. Hinting is the one quality lever that choice gives up: hinted
 `swash` is visibly crisper at 15 px, for about +770 KB of binary and 1 MB of
 RSS. Decide here, with the fallback chain, whether 1x text needs it.
@@ -97,16 +98,42 @@ Measured (release, `lto = "fat"`, `strip`): the binary is 1,405,712 bytes at
 Each fallback file costs its size in the heap unless it is a mapped store file
 (the same rule as the primary).
 
-## Remaining
+## Landed, second slice (2026-09-30, `feat/scootbar-icons-fonts-2`)
 
-- **Option 3, PNG behind a Cargo feature**: measured, not built. Adding the
-  `png` crate and one decode call to scootbar costs +122,880 bytes
-  (1,405,712 to 1,528,592), so it must sit behind a feature. Needs the icon
-  config key, scaling and premultiplying, and a module that takes an image.
-- **Option 2, path icons**: not started (needs the path parser and the
-  coverage fill).
-- **Hinting (`swash`)**: not evaluated here; the +770 KB / +1 MB RSS figures
-  above stand from M0. Decide with a 15 px screenshot comparison.
-- Icons in modules other than the clock (none exist yet), and a per-module
-  `icon` key when the button, volume, network and battery modules land.
-- Option 4 stays with [tray](tray.md).
+The first slice is above (`0c3f3e2`: the fallback chain, the bounded glyph
+cache, `clock.icon`, option 1). The remaining options are done, and this entry
+is resolved. ([icons.md](../../icons.md) has the mechanism and every number):
+
+- **Option 2, path icons**: `clock.icon-path` (with `icon-viewbox`), SVG path
+  data parsed by hand (every command, bounded, fuzzed), filled by the bar's own
+  analytic anti-aliased rasterizer, tinted from the state's theme token, cached
+  per (icon, size) and bounded, at the output's real scale. +36.9 KB of binary (+2.6%),
+  3.5 us to rasterize a 24 px icon, no allocation on a warm repaint. This is
+  the mechanism the button, volume, network and battery modules reuse
+  (`config::icon` and `View::show_icon`): **their per-module `icon` keys arrive
+  with those modules**, none is invented ahead of them, and the built-in
+  bitmaps or paths for mute, wifi bars and battery levels are theirs to draw.
+- **Option 3, PNG icons**: `clock.icon-image` behind the **`icon-image`** Cargo
+  feature, decoded once with the workspace's `png` (bounded: 8 MiB, 1024 x
+  1024, regular files only), premultiplied, scaled with a triangle/area filter
+  at the real scale, dropped at reload. **Off by default**: the decoder is
+  +114,688 bytes (+7.8%), which the resource ratchet does not allow for a feature a
+  path icon replaces; `--no-default-features` is the smallest either way.
+- **Hinting: decided, do not ship `swash`.** Measured in a throwaway copy:
+  +843,768 bytes (+57%) and +0.79 MB RSS (+16.7%) for a small gain at 12 to
+  16 px at 1x (the share of blurry ink pixels moves by three or four points, and
+  at 15 px it rises); side-by-side images in [icons.md](../../icons.md#hinting-swash-against-ab_glyph-decided).
+- **Real fonts checked**: DejaVu Sans, Symbols Nerd Font and Noto Sans CJK
+  (a variable `.ttc`) together on headless scoot draw Latin, a symbol icon and
+  Japanese, Korean and Chinese with no box.
+
+## Not built
+
+- **Option 4, icon-theme lookup**, which only the [tray](../tray.md) or window
+  icons force, and it stays with them.
+- **Icons in other modules**: only the clock and workspaces exist. Per-module
+  `icon` keys, and the built-in paths for mute, wifi bars and battery levels,
+  arrive with the button, volume, network and battery modules, through the same
+  `config::icon` and `View::show_icon`.
+- **A libFuzzer target for the path parser**: the stable property tests run on
+  every `cargo test`; see [icons.md](../../icons.md#what-was-not-built).

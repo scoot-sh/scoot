@@ -6,6 +6,7 @@ use super::format::Format;
 use super::tzif::{Tz, days_from_civil};
 use super::zone::Spec;
 use super::{Clock, Period, Settings, Span};
+use crate::icon::Icon;
 use crate::modules::harness::Harness;
 use crate::modules::{Module, Update};
 
@@ -337,7 +338,7 @@ fn the_icon_is_in_the_view_and_the_time_is_unchanged() {
     use crate::modules::{Module, OutputView, View};
     let settings = Settings {
         format: Format::parse("%H").unwrap(),
-        icon: Some('\u{f0e65}'),
+        icon: Some(Icon::Glyph('\u{f0e65}')),
     };
     let clock = Clock::new(settings, Spec::Utc).unwrap();
     let mut view = View::default();

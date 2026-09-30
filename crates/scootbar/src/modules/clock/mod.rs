@@ -41,6 +41,7 @@ use std::os::fd::AsFd;
 use rustix::event::PollFlags;
 
 use super::{Init, Module, OutputView, Sources, Update, View};
+use crate::icon::Icon;
 use crate::print::warn;
 use format::{Civil, Format};
 use timer::{Fired, Timer};
@@ -57,9 +58,10 @@ const MAX_ATTEMPTS: u32 = 4;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Settings {
     pub format: Format,
-    /// A glyph drawn before the time, from the bar's font chain (a symbol
-    /// font as a fallback); `None` is no icon.
-    pub icon: Option<char>,
+    /// An icon drawn before the time: a glyph from the bar's font chain (a
+    /// symbol font as a fallback), or a path or image the bar draws
+    /// itself (`crate::icon`); `None` is no icon.
+    pub icon: Option<Icon>,
 }
 
 /// How long one shown value lasts.
@@ -113,7 +115,7 @@ pub fn init(settings: &super::Settings) -> Init {
 
 pub struct Clock {
     format: Format,
-    icon: Option<char>,
+    icon: Option<Icon>,
     period: Period,
     spec: Spec,
     /// The zone file as last read; `None` when it could not be `statx`ed.
@@ -243,6 +245,8 @@ impl Module for Clock {
 
     fn view(&self, _output: &OutputView<'_>, view: &mut View) {
         let _ = view.text_mut().write_str(&self.text);
-        view.set_icon(self.icon);
+        if let Some(icon) = &self.icon {
+            view.show_icon(icon);
+        }
     }
 }

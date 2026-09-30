@@ -66,6 +66,7 @@ use rustix::event::{PollFd, PollFlags};
 use serde_json::Value;
 
 use crate::density::Scale;
+use crate::icon::{Art, Icon};
 use crate::layout::Layout;
 use crate::paint::{Canvas, Span};
 use crate::text::Text;
@@ -384,6 +385,8 @@ pub struct View {
     text: Bounded,
     tooltip: Bounded,
     icon: Option<char>,
+    /// A path or image icon, instead of a glyph one: never both.
+    art: Option<Art>,
     class: Class,
 }
 
@@ -392,6 +395,7 @@ impl View {
         self.text.clear();
         self.tooltip.clear();
         self.icon = None;
+        self.art = None;
         self.class = Class::Normal;
     }
 
@@ -408,9 +412,32 @@ impl View {
         &mut self.tooltip
     }
 
-    /// A glyph drawn before the text, from the same font chain.
+    /// A glyph drawn before the text, from the same font chain. Tests set
+    /// one directly; a module shows its icon through [`View::show_icon`].
+    #[cfg(test)]
     pub fn set_icon(&mut self, icon: Option<char>) {
         self.icon = icon;
+    }
+
+    /// Shows `icon` before the text, whichever kind it is (see
+    /// [`crate::icon`]): a glyph is drawn through the font chain, a path or
+    /// image by the bar. Replaces any icon set before.
+    pub fn show_icon(&mut self, icon: &Icon) {
+        match icon {
+            Icon::Glyph(c) => {
+                self.icon = Some(*c);
+                self.art = None;
+            }
+            Icon::Art(art) => {
+                self.icon = None;
+                self.art = Some(art.clone());
+            }
+        }
+    }
+
+    /// The path or image icon, if the view shows one.
+    pub fn art(&self) -> Option<&Art> {
+        self.art.as_ref()
     }
 
     #[allow(dead_code)]
@@ -437,7 +464,7 @@ impl View {
 
     /// Whether it shows nothing: it then takes no space.
     pub fn is_empty(&self) -> bool {
-        self.text.0.is_empty() && self.icon.is_none()
+        self.text.0.is_empty() && self.icon.is_none() && self.art.is_none()
     }
 
     /// Tests only: whether a write to the text or the tooltip was cut at

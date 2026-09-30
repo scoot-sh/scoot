@@ -235,8 +235,10 @@ Text:
                          placed needs none)
     --font-size N        the text's size (the em) in logical pixels, 1 to 256
                          (default 14)
-    Fallback fonts (`bar.fallback-fonts`) and a clock icon (`clock.icon`) are
-    config-file only; see docs/scootbar/cli.md.
+    Fallback fonts (`bar.fallback-fonts`) and a clock icon (`clock.icon`, a
+    glyph; `clock.icon-path`, SVG path data; `clock.icon-image`, a PNG, in a
+    build with the icon-image feature) are config-file only; see
+    docs/scootbar/cli.md.
 
 Modules:
 ",

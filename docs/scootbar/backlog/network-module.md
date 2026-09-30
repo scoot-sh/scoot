@@ -3,7 +3,7 @@ title: "Network module: link state, WiFi name and signal, click to pick"
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "pointer-and-interactions, icons-and-fonts"
+blocked: "pointer-and-interactions"
 milestone: "M5"
 ---
 

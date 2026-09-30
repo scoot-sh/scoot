@@ -3,7 +3,7 @@ title: "Volume module: level, mute, scroll to change, click to mute"
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "pointer-and-interactions, icons-and-fonts"
+blocked: "pointer-and-interactions"
 milestone: "M5"
 ---
 
@@ -31,7 +31,7 @@ PipeWire and PulseAudio both answer the PulseAudio native protocol (via
   sink changing (headphones plugged in) is an event too.
 - `on-scroll-up/down` step (config, default 5%), `on-click` toggle mute,
   `on-right-click` a mixer command; maximum (100% or allow over-amplification).
-- Class `muted`; an icon by level (see [icons](icons-and-fonts.md)).
+- Class `muted`; an icon by level (see [icons](resolved/icons-and-fonts-done.md)).
 - `query` returns `{volume, muted, sink}`; `invoke raise|lower|toggle-mute`
   ([agent-interface](agent-interface.md)).
 - A separate `microphone` variant (source volume, mute) shares the code.

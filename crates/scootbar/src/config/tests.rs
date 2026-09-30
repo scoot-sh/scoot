@@ -374,7 +374,10 @@ fn fallback_fonts_are_at_most_two_paths() {
 fn a_clock_icon_is_exactly_one_character() {
     assert_eq!(read("").unwrap().modules.clock.icon, None);
     let config = read("[clock]\nicon = \"\u{f0e65}\"\n").unwrap();
-    assert_eq!(config.modules.clock.icon, Some('\u{f0e65}'));
+    assert_eq!(
+        config.modules.clock.icon,
+        Some(crate::icon::Icon::Glyph('\u{f0e65}'))
+    );
     for bad in ["", "ab", "\\n", "\\u0065\\u0301"] {
         let error = read(&format!("[clock]\nicon = \"{bad}\"\n"))
             .unwrap_err()

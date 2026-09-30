@@ -241,10 +241,9 @@ impl Scene {
             placed.module.view(output, view);
             *revision = placed.revision;
             let width = match text {
-                Some(text) if !view.is_empty() => text
-                    .measure(view.icon(), view.text(), em)
-                    .saturating_add(padding)
-                    .max(1),
+                Some(text) if !view.is_empty() => {
+                    content_width(text, view, em).saturating_add(padding).max(1)
+                }
                 // Nothing to show, or no font to show it with.
                 _ => 0,
             };
@@ -404,19 +403,48 @@ pub fn paint(
             });
         }
         if !custom {
+            let color = style.theme.class(view.class());
+            let mut x = i64::from(span.x) + i64::from(padding);
+            if let Some(art) = view.art() {
+                text.draw_art(canvas, art, em, x, color, span);
+                x += i64::from(art_extent(text, view, em));
+            }
             text.draw(
                 canvas,
                 view.icon(),
                 view.text(),
                 em,
-                i64::from(span.x) + i64::from(padding),
+                x,
                 baseline,
-                style.theme.class(view.class()),
+                color,
                 span,
             );
         }
     }
     record.set(scene, frame);
+}
+
+/// What a path or image icon takes before the text: its square, and the
+/// gap after it when text follows; 0 for a view with none.
+fn art_extent(text: &Text, view: &View, em: f32) -> u32 {
+    // An icon past `icon::MAX_SIDE` is not drawn, so it takes no room
+    // either (a blank gap of that size would be worse than none).
+    if view.art().is_none() || Text::art_side(em) > crate::icon::MAX_SIDE {
+        return 0;
+    }
+    let gap = if view.text().is_empty() {
+        0
+    } else {
+        text.art_gap(em)
+    };
+    Text::art_side(em).saturating_add(gap)
+}
+
+/// A view's width in device pixels, padding not included: the icon (a
+/// glyph, or a path or image square), a gap, then the text.
+fn content_width(text: &Text, view: &View, em: f32) -> u32 {
+    text.measure(view.icon(), view.text(), em)
+        .saturating_add(art_extent(text, view, em))
 }
 
 /// The lines between neighbouring modules in a section, in the theme's

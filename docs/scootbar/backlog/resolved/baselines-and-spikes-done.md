@@ -70,7 +70,7 @@ how wakeups were counted) so later runs are comparable. These rows become the
 - **Config parser** (`toml` vs `basic-toml` vs a hand-rolled subset):
   [config-cli-and-reload](../config-cli-and-reload.md).
 - **D-Bus** (`zbus` vs libdbus vs hand-rolled): [dbus-client](../dbus-client.md).
-- **Icons** (glyph font vs built-in vs PNG cost): [icons-and-fonts](../icons-and-fonts.md).
+- **Icons** (glyph font vs built-in vs PNG cost): [icons-and-fonts](icons-and-fonts-done.md).
 
 Every dependency is licence-checked (MIT-compatible) and recorded with its
 alternatives and numbers, as scootbg's record does.
