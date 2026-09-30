@@ -43,7 +43,7 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 | `--edge` | `top` or `bottom` | `top` | The output edge the bar runs along. Vertical bars are not in the first version. |
 | `--height` | 1 to 1024 | 28 | The bar's height in logical pixels. On a scaled output it is drawn at the output's real pixels: 28 at scale 1.5 is 42 device pixels. |
 | `--margin` | one to four of 0 to 1024, comma-separated | `0` | Space between the bar and the output's edges, in logical pixels, in CSS order: `ALL`, `VERTICAL,HORIZONTAL`, `TOP,HORIZONTAL,BOTTOM` or `TOP,RIGHT,BOTTOM,LEFT`. See [Margins](#margins). |
-| `--background` | `'#rrggbb'` | `'#1e1e2e'` | The bar's color, six hex digits in either case. Quote it: the shell reads `#` as a comment. No alpha yet. |
+| `--background` | `'#rrggbb'` | `'#1e1e2e'` | The bar's color, six hex digits in either case. Quote it: the shell reads `#` as a comment. Its opacity is the file's `[bar] opacity`: see [Shape and opacity](#shape-and-opacity). |
 | `--foreground` | `'#rrggbb'` | `'#cdd6f4'` | The text's color (the theme's `fg` token: see [Colors](#colors)). |
 | `--font` | a path | the first [well-known font](#fonts) found | The font file, TrueType or OpenType (`.ttf`, `.otf`; a collection's first face). Any bytes: a path need not be UTF-8. |
 | `--font-size` | 1 to 256 | 14 | The text's size, the em, in logical pixels; drawn at the output's real pixels like the bar. |
@@ -81,6 +81,8 @@ center = ["clock"]
 edge = "top"          # top or bottom
 height = 28           # 1 to 1024
 margin = "8,4"        # one number, or the CSS shorthand "VERTICAL,HORIZONTAL", ...
+radius = 8            # 0 to 512, and at most half the height; 0 is square
+opacity = 0.9         # 0 (transparent) to 1 (opaque), the background's alpha
 font = "/path/to/Font.ttf"
 font-size = 14        # 1 to 256
 padding = 8           # 0 to 1024
@@ -100,7 +102,8 @@ format = "%-I:%M %P"
 ```
 
 `margin` takes an integer (every side) or the `--margin` shorthand
-string. The module lists take the ids in [Modules](#modules); giving any
+string. `radius` and `opacity` are file-only: they have no flags (see
+[Shape and opacity](#shape-and-opacity)). The module lists take the ids in [Modules](#modules); giving any
 of the three sets the whole layout, as the flags do. An unknown key
 anywhere is a loud error naming it, as is a bad value, which names its
 dotted key (`bar.height`, `colors.background`, `left`, `clock.format`).
@@ -232,9 +235,10 @@ and `commit`s the batch. Clicking the active one sends nothing. A click on
 a non-focused output's bar is dropped by scoot today (it takes no output);
 `output-targeted workspace switch` (in the backlog) will carry it across.
 
-- **The pill is rectangular for now**: the canvas has no rounded shape until
-  [appearance](backlog/appearance.md) adds one, which rounds the fill; the
-  colors and rects stay.
+- **The pill is rectangular for now**: the bar's corners can be rounded
+  ([Shape and opacity](#shape-and-opacity)) but the pill's own radius and
+  inset are still [appearance](backlog/appearance.md)'s; the colors and
+  rects stay.
 - **Without `ext-workspace-v1`** the module shows nothing (one stderr note
   at start-up says the protocol is missing) and takes no space.
   **Without `wl_seat`** clicks do nothing (said too). The bar still starts;
@@ -349,6 +353,47 @@ does nothing; the protocol says so.
 To line a floating bar up with scoot's tiling, match `--margin` to scoot's
 `[layout] gap` ([configuration.md](../configuration.md)): windows then sit
 one gap below the bar, as they sit one gap from each other.
+
+## Shape and opacity
+
+`[bar] radius` rounds the bar's four corners, in logical pixels: 0 (the
+default) is square, and the most is half the height (a pill), which the file
+enforces (`bar.radius` names the limit when it is refused). `[bar] opacity`
+is the background's alpha, 1 (the default) opaque down to 0 transparent;
+text stays fully opaque over it. There is no blur, gradient or shadow.
+
+```toml
+[bar]
+height = 28
+margin = "8,8"     # match scoot's [layout] gap: see Margins
+radius = 10
+opacity = 0.9
+```
+
+- **The corners are analytic**: each edge pixel's alpha is how far its
+  center sits inside the circle, no supersampling. The coverage of one
+  corner is computed once per radius and scale, and the other three mirror
+  it, so a repaint costs a table lookup for the few pixels in a corner.
+- **A rounded or translucent bar is an `ARGB8888` buffer** (premultiplied);
+  a square, opaque bar stays `XRGB8888`, exactly as before either option.
+  Only the surface is the bar, never a bigger transparent one: the margin
+  is still the protocol's, and the corner pixels are the only transparent
+  ones.
+- **Opaque region**: an opaque bar tells the compositor which pixels are
+  opaque, so it can skip blending under them (all of a square bar; all but
+  the four corner squares of a rounded one). A translucent bar declares
+  none: the compositor blends all of it, which is the cost of the option.
+- **The radius is cut back to fit**: `--height` below twice the file's
+  `radius` (the flag replaces the file's height), or a compositor giving
+  the bar less height than asked, draws the corners as large as the bar
+  holds. Text is not clipped to the rounded shape: with `padding` smaller
+  than the radius, a module at the bar's end can reach into a corner.
+- **Corners are still clickable**: the input region is not narrowed to the
+  rounded shape yet.
+- Measured costs (release build, 1600x28 bar, radius 14): filling the whole
+  bar takes 4.9 us square and 6.1 us rounded and translucent; 3200x56 (scale
+  2), 16.2 us and 29.2 us. A repaint of one module's span, the common case,
+  costs the same as before except in the rows of a corner.
 
 ## Edge cases
 

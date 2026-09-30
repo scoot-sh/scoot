@@ -101,10 +101,11 @@ pub struct LayerObjects {
     /// What this surface's persistent, double-buffered state was last set
     /// to, so a draw sends only what changes: the buffer scale (1 on a
     /// fresh surface, as the protocol says), the viewport's destination and
-    /// the opaque region (logical sizes; `None` while never set).
+    /// the opaque region (logical size and inset, see
+    /// `Style::opaque_inset`; `None` while never set).
     pub(super) buffer_scale: u32,
     pub(super) destination: Option<Size>,
-    pub(super) opaque: Option<Size>,
+    pub(super) opaque: Option<(Size, Option<u32>)>,
 }
 
 impl LayerObjects {

@@ -167,6 +167,8 @@ fn a_warm_tick_allocates_nothing() {
         font_size: 50,
         padding: 10,
         spacing: 0,
+        radius: 0,
+        opacity: u8::MAX,
     };
     let scale = Scale::Integer(1);
     let frame = Frame {
@@ -194,7 +196,17 @@ fn a_warm_tick_allocates_nothing() {
     let mut turn = |placed: &mut Vec<Placed>| {
         let _ = clock.refresh();
         placed[0].revision += 1;
-        scene.update(placed, &output, Some(&text), &style, scale, WIDTH);
+        scene.update(
+            placed,
+            &output,
+            Some(&text),
+            &style,
+            scale,
+            Size {
+                width: WIDTH,
+                height: HEIGHT,
+            },
+        );
         let mut canvas = Canvas::new(&mut pixels, WIDTH, HEIGHT).unwrap();
         render::paint(
             &mut canvas,

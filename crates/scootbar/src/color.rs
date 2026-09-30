@@ -50,8 +50,18 @@ impl Color {
     /// formats are little-endian, so written with `to_le_bytes` it sits in
     /// memory as blue, green, red, then the unused byte, set to 0xff so the
     /// buffer reads as opaque even to code that looks at it.
+    #[allow(dead_code)] // Only `fill_span` (the workspaces module) reads it.
     pub fn xrgb8888(self) -> u32 {
         0xff00_0000 | u32::from(self.r) << 16 | u32::from(self.g) << 8 | u32::from(self.b)
+    }
+
+    /// One premultiplied `ARGB8888` pixel of this color at `alpha` (0
+    /// transparent, 255 opaque): each channel scaled by the alpha, rounded,
+    /// as `wl_shm`'s `argb8888` (and every compositor's blend) expects.
+    /// At 255 it is [`Color::xrgb8888`].
+    pub fn argb8888(self, alpha: u8) -> u32 {
+        let scale = |channel: u8| (u32::from(channel) * u32::from(alpha) + 127) / 255;
+        u32::from(alpha) << 24 | scale(self.r) << 16 | scale(self.g) << 8 | scale(self.b)
     }
 }
 

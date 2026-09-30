@@ -59,3 +59,24 @@ fn it_prints_as_it_parses() {
     assert_eq!(color.to_string(), "#1e1e2e");
     assert_eq!(Color::parse(&color.to_string()), Ok(color));
 }
+
+#[test]
+fn an_argb_pixel_is_premultiplied_and_opaque_is_xrgb() {
+    let color = Color {
+        r: 0xff,
+        g: 0x80,
+        b: 0x00,
+    };
+    assert_eq!(color.argb8888(255), color.xrgb8888());
+    assert_eq!(color.argb8888(0), 0);
+    // Half alpha: every channel halved (rounded), the alpha in the top byte.
+    assert_eq!(color.argb8888(128), 0x8080_4000);
+    for alpha in 0..=255u8 {
+        let pixel = color.argb8888(alpha);
+        assert_eq!((pixel >> 24) as u8, alpha);
+        // Premultiplied: no channel is above the alpha.
+        for shift in [0, 8, 16] {
+            assert!((pixel >> shift) as u8 <= alpha, "alpha {alpha}");
+        }
+    }
+}

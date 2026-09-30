@@ -281,3 +281,61 @@ fn the_default_path_follows_its_homes() {
         assert!(path.parent().is_some_and(|dir| dir.ends_with("scoot")));
     }
 }
+
+#[test]
+fn a_radius_and_an_opacity_default_to_square_and_opaque() {
+    let config = read("").unwrap();
+    assert_eq!((config.radius, config.opacity), (0, 255));
+    let config = read("[bar]\nradius = 12\nopacity = 0.5\n").unwrap();
+    assert_eq!((config.radius, config.opacity), (12, 128));
+    let style = config.style();
+    assert_eq!((style.radius, style.opacity), (12, 128));
+    let opacity = |text: &str| read(&format!("[bar]\nopacity = {text}\n")).map(|c| c.opacity);
+    assert_eq!(opacity("1").unwrap(), 255);
+    assert_eq!(opacity("1.0").unwrap(), 255);
+    assert_eq!(opacity("0").unwrap(), 0);
+    assert_eq!(opacity("0.0").unwrap(), 0);
+    assert_eq!(opacity("0.9").unwrap(), 230);
+}
+
+#[test]
+fn a_radius_is_at_most_half_the_height() {
+    // The default height is 28: 14 is a pill, 15 is refused.
+    assert_eq!(read("[bar]\nradius = 14\n").unwrap().radius, 14);
+    let error = read("[bar]\nradius = 15\n").unwrap_err().to_string();
+    assert!(
+        error.contains("'bar.radius'") && error.contains("(14)"),
+        "{error}"
+    );
+    assert_eq!(
+        read("[bar]\nheight = 40\nradius = 20\n").unwrap().radius,
+        20
+    );
+    assert!(read("[bar]\nheight = 40\nradius = 21\n").is_err());
+    // The most any bar has.
+    assert!(read("[bar]\nheight = 1024\nradius = 512\n").is_ok());
+    assert!(read("[bar]\nheight = 1024\nradius = 513\n").is_err());
+}
+
+#[test]
+fn a_bad_radius_or_opacity_is_refused_naming_its_key() {
+    for (text, key) in [
+        ("[bar]\nradius = -1\n", "bar.radius"),
+        ("[bar]\nradius = \"8\"\n", "bar.radius"),
+        ("[bar]\nradius = 1.5\n", "bar.radius"),
+        ("[bar]\nopacity = 1.1\n", "bar.opacity"),
+        ("[bar]\nopacity = -0.1\n", "bar.opacity"),
+        ("[bar]\nopacity = 2\n", "bar.opacity"),
+        ("[bar]\nopacity = nan\n", "bar.opacity"),
+        ("[bar]\nopacity = inf\n", "bar.opacity"),
+        ("[bar]\nopacity = \"0.5\"\n", "bar.opacity"),
+        ("[bar]\nopacity = true\n", "bar.opacity"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        // Type errors come from the TOML layer and name the key too.
+        assert!(
+            error.contains(key.strip_prefix("bar.").unwrap()),
+            "{text:?}: {error}"
+        );
+    }
+}

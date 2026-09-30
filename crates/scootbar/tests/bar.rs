@@ -153,6 +153,66 @@ fn a_margin_is_reserved_on_the_anchored_edge_and_the_surface_is_the_bar() {
     });
 }
 
+/// Writes `[bar]` config into the session's scratch directory and returns
+/// the flags that read it (radius and opacity are file-only options).
+fn bar_config(session: &Session, bar: &str) -> [String; 2] {
+    let path = session.runtime_dir().join("appearance.toml");
+    std::fs::write(&path, format!("[bar]\n{bar}")).unwrap();
+    ["--config".to_owned(), path.to_string_lossy().into_owned()]
+}
+
+#[test]
+fn a_floating_rounded_bar_shows_the_desktop_in_its_corners() {
+    let Some(session) = Session::scoot("rounded", 1, "") else {
+        return;
+    };
+    let config = bar_config(&session, "height = 40\nmargin = \"10,20\"\nradius = 20\n");
+    let mut bar = Reaper(session.bar(&["--background", BAR, &config[0], &config[1]]));
+    // Zone: the height plus the top margin, whatever the corners.
+    wait_usable(&session, &mut bar, &[1], (0, 50, 1600, 950));
+    let shot = wait_drawn(&session, &mut bar, 1, 800, 30);
+    // The bar is the rounded rectangle at (20, 10), 1560 by 40: the
+    // corner pixels are the desktop's, the top edge from the radius on and
+    // the left edge's middle are (nearly) the bar's.
+    for (x, y) in [(20, 10), (1579, 10), (20, 49), (1579, 49)] {
+        assert_not(&shot, x, y, "a cut corner");
+    }
+    assert_eq!(shot.at(40, 10), rgb(BAR), "the top edge past the corner");
+    assert_eq!(shot.at(800, 49), rgb(BAR), "the bottom edge");
+    let side = shot.at(20, 30);
+    for (got, want) in side.iter().zip(rgb(BAR)) {
+        assert!(got.abs_diff(want) <= 6, "the left edge's middle: {side:?}");
+    }
+    // Nothing of the bar in the margin.
+    assert_not(&shot, 19, 30, "left of the bar");
+    assert_not(&shot, 800, 9, "above the bar");
+}
+
+#[test]
+fn a_translucent_bar_is_blended_over_the_desktop() {
+    let Some(session) = Session::scoot("opacity", 1, "") else {
+        return;
+    };
+    let config = bar_config(&session, "opacity = 0.5\n");
+    let mut bar = Reaper(session.bar(&["--background", BAR, &config[0], &config[1]]));
+    wait_usable(&session, &mut bar, &[1], (0, 28, 1600, 972));
+    let desktop = session.scoot_screenshot(1).at(800, 500);
+    let shot = session.wait_for(&mut bar.0, "the bar drawn", |session| {
+        let shot = session.scoot_screenshot(1);
+        (shot.at(800, 14) != desktop).then_some(shot)
+    });
+    let blended = shot.at(800, 14);
+    let bar = rgb(BAR);
+    for i in 0..3 {
+        let want = (u16::from(bar[i]) + u16::from(desktop[i])) / 2;
+        assert!(
+            u16::from(blended[i]).abs_diff(want) <= 3,
+            "channel {i}: {blended:?} is not half of {bar:?} over {desktop:?}"
+        );
+    }
+    assert_ne!(blended, bar);
+}
+
 /// `foot` is the one client the tests use to place a window; it is in the
 /// dev shell. Without it the placement check is skipped, unless
 /// `SCOOTBAR_REQUIRE_SCOOT` asks for everything.

@@ -13,6 +13,31 @@ Filed 2026-09-29. Serves **daily-drive**. Beauty is second to speed and
 correctness (`CLAUDE.md`): every knob here is measured, and one that costs
 real CPU or memory is off by default or cut.
 
+## Landed and remaining
+
+**Landed (first slice):** protocol margins and the exclusive zone with a
+margin (`bar.margin`, pinned by `tests/bar.rs`, PR before this one); the
+corner radius (`bar.radius`, analytic coverage, the corner table cached per
+radius and scale in the scene); opacity (`bar.opacity`, a premultiplied
+`ARGB8888` buffer only when a radius or opacity asks for one, else
+`XRGB8888` as before); the opaque region (whole, a cross that leaves the
+corner squares out, or none when translucent); snapshot scenes for the
+rounded bar at 1x and 1.5x and a translucent one; a headless-scoot test of
+each on screenshots; the measured fill costs in
+[cli.md](../cli.md#shape-and-opacity). Both options are file-only.
+
+**Remaining:** the input region narrowed to the rounded shape (scoot's
+`state.rs` handling of input regions is not yet verified end to end); text
+clipped to the rounded shape; the default margin matching scoot's gap (the
+default is still flush, square and opaque: making the default floating is a
+product call); the per-module `margin`; optional
+separators; the active-workspace pill's radius and inset; the `hover` token
+and per-module token-per-state overrides (the four classes already map to
+tokens); the opt-in animation question (dropped unless measured); the
+floating-versus-flush damage measurement on real hardware and its entry in
+the [resource ratchet](lightest.md); per-output overrides stay with
+[multi-output](multi-output.md).
+
 ## What to build
 
 - **Placement**: flush to the edge, or floating with a margin and corner
