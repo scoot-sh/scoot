@@ -355,6 +355,10 @@ struct WorkspacesFile {
     #[cfg(feature = "workspaces")]
     #[serde(rename = "pill-inset")]
     pill_inset: Option<u32>,
+    /// Spaces between the workspace numbers.
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "item-gap")]
+    item_gap: Option<u32>,
 }
 
 impl File {
@@ -541,6 +545,19 @@ impl File {
             }
             if let Some(inset) = self.workspaces.pill_inset {
                 pill.inset = gap(path, "workspaces.pill-inset", Some(inset), 0)?;
+            }
+            if let Some(spaces) = self.workspaces.item_gap {
+                let max = crate::modules::workspaces::MAX_ITEM_GAP;
+                if !(1..=max).contains(&spaces) {
+                    return Err(value(
+                        path,
+                        "workspaces.item-gap",
+                        format_args!(
+                            "takes a whole number of spaces from 1 to {max}, not {spaces}"
+                        ),
+                    ));
+                }
+                modules.workspaces.item_gap = spaces;
             }
         }
         #[cfg(feature = "clock")]

@@ -34,6 +34,16 @@ fn started() -> (Harness, Link) {
     (harness, link)
 }
 
+/// The same, with `item-gap` spaces between the numbers.
+fn started_with_gap(item_gap: u32) -> (Harness, Link) {
+    let spec = find("workspaces").expect("the workspaces module is built");
+    let mut settings = super::super::Settings::default();
+    settings.workspaces.item_gap = item_gap;
+    let link = settings.workspaces.link.clone();
+    let harness = Harness::start(spec, &settings).expect("workspaces starts anywhere");
+    (harness, link)
+}
+
 /// Commits one output's workspaces as a single `done` would: `items` are
 /// `(number, coord, active)`, sorted by `coord` at commit like the real
 /// path.
@@ -346,6 +356,7 @@ fn custom_draw_marks_only_the_active_item() {
     let module = super::Workspaces {
         link: link.clone(),
         pill: super::Pill::default(),
+        item_gap: 1,
         seen: 0,
     };
     let mut custom = CustomDraw {
@@ -398,6 +409,7 @@ fn without_a_group_custom_draw_keeps_the_plain_draw() {
     let module = super::Workspaces {
         link: super::Link::default(),
         pill: super::Pill::default(),
+        item_gap: 1,
         seen: 0,
     };
     let mut custom = CustomDraw {
@@ -432,6 +444,7 @@ fn pill_drawn(pill: super::Pill) -> (Vec<u8>, u32, u32) {
     let module = super::Workspaces {
         link,
         pill,
+        item_gap: 1,
         seen: 0,
     };
     let mut custom = CustomDraw {
@@ -691,6 +704,7 @@ fn shapes_scene(
     let module = super::Workspaces {
         link,
         pill,
+        item_gap: 1,
         seen: 0,
     };
     let mut custom = CustomDraw {
@@ -807,4 +821,127 @@ fn snapshot_a_circle_around_two_digits_at_1_5x() {
             BAR_SIZE,
         ),
     );
+}
+
+/// `item-gap`: the view separates the numbers by that many spaces, and the
+/// default is the one space it always was.
+#[test]
+fn the_view_separates_the_numbers_by_the_item_gap() {
+    for (gap, want) in [(1, "1 2 3"), (3, "1   2   3"), (8, "1        2        3")] {
+        let (mut harness, link) = started_with_gap(gap);
+        commit(&link, "DP-1", &[(1, 1, false), (2, 2, true), (3, 3, false)]);
+        assert_eq!(harness.dispatch(), Update::Changed);
+        assert_eq!(harness.view_on(Some("DP-1")).text(), want, "item-gap {gap}");
+    }
+    let (mut harness, link) = started();
+    commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
+    assert_eq!(harness.dispatch(), Update::Changed);
+    assert_eq!(harness.view_on(Some("DP-1")).text(), "1 2", "the default");
+}
+
+/// A run of spaces is one gap: the items still tile the text and each is as
+/// wide as its digits, every later one sits the extra spaces further out, the
+/// hit test finds each by its middle, and the middle of a gap hits nothing.
+#[test]
+fn a_wider_item_gap_is_still_one_gap_between_items() {
+    let font = text();
+    let narrow = "1 2 10";
+    let wide = "1    2    10";
+    let x0 = i64::from(PAD);
+    let space = font.advance(' ', EM);
+    let mut end = 0;
+    for (item, number) in ["1", "2", "10"].iter().enumerate() {
+        let (start, stop) = item_span(&font, wide, EM, x0, item).unwrap();
+        let (n_start, n_stop) = item_span(&font, narrow, EM, x0, item).unwrap();
+        assert_eq!(
+            stop - start,
+            n_stop - n_start,
+            "item {item} ({number}) keeps its own width"
+        );
+        assert!(start >= end, "item {item} overlaps the last");
+        let shifted = n_start as f32 + 3.0 * space * item as f32;
+        assert!(
+            (start as f32 - shifted).abs() <= 1.5,
+            "item {item} starts at {start}, {shifted} expected"
+        );
+        let middle = (start + stop) / 2;
+        assert_eq!(hit_index(&font, wide, EM, PAD, 3, middle), Some(item));
+        end = stop;
+    }
+    assert!(item_span(&font, wide, EM, x0, 3).is_none());
+    let (_, first_end) = item_span(&font, wide, EM, x0, 0).unwrap();
+    let (second_start, _) = item_span(&font, wide, EM, x0, 1).unwrap();
+    assert_eq!(
+        hit_index(&font, wide, EM, PAD, 3, (first_end + second_start) / 2),
+        None,
+        "the middle of a gap is no item"
+    );
+}
+
+/// With room between the numbers a circle reaches its full diameter and still
+/// leaves its neighbours' ink alone (with one space it may have to give way).
+#[test]
+fn a_circle_reaches_its_full_diameter_when_the_gap_leaves_room() {
+    let circle = Pill {
+        shape: Shape::Circle,
+        ..Pill::default()
+    };
+    let full = "1      2      3";
+    let g = geometry(&circle, full, 1, 60);
+    assert_eq!(g.hi - g.lo, g.bottom - g.top, "a full disc: {g:?}");
+    let (_, before_end) = item_span(&text(), full, EM, i64::from(PAD), 0).unwrap();
+    let (after_start, _) = item_span(&text(), full, EM, i64::from(PAD), 2).unwrap();
+    assert!(
+        g.lo >= before_end && g.hi <= after_start,
+        "{g:?} against the neighbours' ink {before_end}..{after_start}"
+    );
+}
+
+/// The widest gap with the most workspaces is cut at the view bound like any
+/// text: no overrun, no control characters.
+#[test]
+fn hostile_counts_stay_within_the_view_bound_at_the_widest_gap() {
+    let (harness, link) = started_with_gap(super::MAX_ITEM_GAP);
+    let big: Vec<(u32, u32, bool)> = (0..MAX_WORKSPACES as u32)
+        .map(|i| (u32::MAX - i, i + 1, i == 0))
+        .collect();
+    commit(&link, "DP-1", &big);
+    let view = harness.view_on(Some("DP-1"));
+    assert!(view.text().len() <= MAX_TEXT);
+    assert!(view.was_cut());
+    assert!(!view.text().chars().any(char::is_control));
+}
+
+/// A text cut at the bound can end inside a gap or inside a number. Whatever
+/// the cut, the spans, the hit test and the pill must answer without a panic,
+/// and an item that is gone has no span.
+#[test]
+fn a_text_cut_inside_a_gap_or_a_number_is_still_measurable() {
+    let font = text();
+    let x0 = i64::from(PAD);
+    let mut full = String::new();
+    for number in 1..=40 {
+        if !full.is_empty() {
+            full.push_str(&" ".repeat(super::MAX_ITEM_GAP as usize));
+        }
+        full.push_str(&number.to_string());
+    }
+    let circle = Pill {
+        shape: Shape::Circle,
+        ..Pill::default()
+    };
+    // Every byte through the last 20 (where a cut lands mid-number and mid-gap), a coarse
+    // sweep before them: the walk is O(text) per item, slow in a debug build.
+    for cut in (150..236).step_by(13).chain(236..=MAX_TEXT) {
+        let shown = &full[..cut];
+        let mut seen = 0;
+        while item_span(&font, shown, EM, x0, seen).is_some() {
+            seen += 1;
+        }
+        assert!(seen > 1 && seen <= 40, "cut {cut}: {seen} items");
+        for x in (0..6000).step_by(67) {
+            let _ = hit_index(&font, shown, EM, PAD, seen, x);
+        }
+        let _ = geometry(&circle, shown, 0, 60);
+    }
 }

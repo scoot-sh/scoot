@@ -138,3 +138,27 @@ fn the_pill_shapes_are_read_by_name() {
         .to_string();
     assert!(error.contains("'workspaces.pill-radius'"), "{error}");
 }
+
+#[test]
+#[cfg(feature = "workspaces")]
+fn the_workspaces_item_gap_is_a_count_of_spaces() {
+    assert_eq!(
+        read("").unwrap().modules.workspaces.item_gap,
+        1,
+        "the default is one space"
+    );
+    for spaces in [1, 4, 8] {
+        let config = read(&format!("[workspaces]\nitem-gap = {spaces}\n")).unwrap();
+        assert_eq!(config.modules.workspaces.item_gap, spaces);
+    }
+    for text in [
+        "[workspaces]\nitem-gap = 0\n",
+        "[workspaces]\nitem-gap = 9\n",
+        "[workspaces]\nitem-gap = -1\n",
+        "[workspaces]\nitem-gap = 1.5\n",
+        "[workspaces]\nitem-gap = \"2\"\n",
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains("item-gap"), "{text:?}: {error}");
+    }
+}
