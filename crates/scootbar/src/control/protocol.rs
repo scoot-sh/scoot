@@ -12,6 +12,7 @@
 //! {"type":"modules","modules":[{"id":"clock","section":"center","output":"DP-1","text":"3:07 pm","class":"normal"}]}
 //! {"type":"version","protocol":1,"version":"0.1.0"}
 //! {"type":"ok"}
+//! {"type":"bar","visible":false}
 //! {"type":"error","message":"..."}
 //! ```
 //!
@@ -49,6 +50,9 @@ pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 /// ```text
 /// {"protocol":1,"type":"query"}
 /// {"protocol":1,"type":"reload"}
+/// {"protocol":1,"type":"hide"}
+/// {"protocol":1,"type":"show"}
+/// {"protocol":1,"type":"toggle"}
 /// {"protocol":1,"type":"version"}
 /// {"protocol":1,"type":"kill"}
 /// {"protocol":1,"type":"set","id":"clock","value":{...}}
@@ -59,6 +63,12 @@ pub enum Request<'a> {
     Query,
     /// Re-read the config file and live-apply it.
     Reload,
+    /// Destroy every bar surface and buffer, releasing the exclusive zone.
+    Hide,
+    /// Make the bars again.
+    Show,
+    /// [`Request::Hide`] if shown, [`Request::Show`] if hidden.
+    Toggle,
     /// Stop the daemon.
     Kill,
     /// The daemon's version and protocol.
@@ -75,6 +85,9 @@ impl Request<'_> {
         match self {
             Self::Query => "query",
             Self::Reload => "reload",
+            Self::Hide => "hide",
+            Self::Show => "show",
+            Self::Toggle => "toggle",
             Self::Kill => "kill",
             Self::Version => "version",
             Self::Set { .. } => "set",
@@ -96,7 +109,13 @@ impl Request<'_> {
         }
         let (id, value) = match self {
             Self::Set { id, value } => (Some(id.as_ref()), Some(value)),
-            Self::Query | Self::Reload | Self::Kill | Self::Version => (None, None),
+            Self::Query
+            | Self::Reload
+            | Self::Hide
+            | Self::Show
+            | Self::Toggle
+            | Self::Kill
+            | Self::Version => (None, None),
         };
         let line = Line {
             protocol: PROTOCOL_VERSION,
@@ -193,6 +212,9 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
     match &*kind {
         "query" => Ok(Request::Query),
         "reload" => Ok(Request::Reload),
+        "hide" => Ok(Request::Hide),
+        "show" => Ok(Request::Show),
+        "toggle" => Ok(Request::Toggle),
         "kill" => Ok(Request::Kill),
         "version" => Ok(Request::Version),
         "set" => {
@@ -232,6 +254,10 @@ pub struct ModuleView<'a> {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Reply<'a> {
     Ok,
+    /// Whether the bars are shown now, after a `hide`, `show` or `toggle`.
+    Bar {
+        visible: bool,
+    },
     Version {
         protocol: u32,
         version: &'a str,

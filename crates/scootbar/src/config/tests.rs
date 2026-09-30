@@ -76,6 +76,8 @@ right = []
 
 [bar]
 edge = "bottom"
+layer = "overlay"
+exclusive = false
 height = 40
 margin = "8,4"
 font = "/fonts/DejaVuSans.ttf"
@@ -98,6 +100,8 @@ format = "%H:%M"
     )
     .unwrap();
     assert_eq!(config.bar.edge, Edge::Bottom);
+    assert_eq!(config.bar.layer, crate::bar::Layer::Overlay);
+    assert!(!config.bar.exclusive);
     assert_eq!(config.bar.height, 40);
     assert_eq!(
         config.bar.margin,
@@ -171,6 +175,9 @@ fn unknown_keys_are_a_loud_error_naming_them() {
 fn bad_values_name_their_key() {
     let cases = [
         ("[bar]\nedge = \"left\"\n", "bar.edge"),
+        ("[bar]\nlayer = \"background\"\n", "bar.layer"),
+        ("[bar]\nlayer = 1\n", "layer"),
+        ("[bar]\nexclusive = \"yes\"\n", "exclusive"),
         ("[bar]\nheight = 0\n", "bar.height"),
         ("[bar]\nheight = 2048\n", "bar.height"),
         ("[bar]\nheight = \"tall\"\n", "height"),

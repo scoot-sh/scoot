@@ -102,6 +102,9 @@ fn every_request_round_trips_through_its_line() {
     let requests = [
         Request::Query,
         Request::Reload,
+        Request::Hide,
+        Request::Show,
+        Request::Toggle,
         Request::Kill,
         Request::Version,
         Request::Set {
@@ -116,6 +119,9 @@ fn every_request_round_trips_through_its_line() {
         match (request, parsed) {
             (Request::Query, Ok(Request::Query))
             | (Request::Reload, Ok(Request::Reload))
+            | (Request::Hide, Ok(Request::Hide))
+            | (Request::Show, Ok(Request::Show))
+            | (Request::Toggle, Ok(Request::Toggle))
             | (Request::Kill, Ok(Request::Kill))
             | (Request::Version, Ok(Request::Version)) => {}
             (

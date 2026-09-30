@@ -35,7 +35,7 @@ pub const MAX_HEIGHT: u32 = 1024;
 pub const MAX_MARGIN: u32 = 1024;
 
 /// The output edge the bar is anchored to. Vertical bars are not in the
-/// first version (`docs/scootbar/backlog/visibility-and-layering.md`).
+/// first version, on purpose (`docs/scootbar/cli.md`, Edge cases).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Edge {
     #[default]
@@ -50,6 +50,40 @@ impl Edge {
             "bottom" => Some(Self::Bottom),
             _ => None,
         }
+    }
+}
+
+/// The layer-shell layer the bar sits in. `background` is left out: it
+/// is the wallpaper's layer, not a bar's. A fullscreen window hides `top` in scoot
+/// (`docs/protocols.md`), and never `overlay`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Layer {
+    /// Behind windows: they cover the bar wherever they overlap it.
+    Bottom,
+    /// In front of windows, hidden by a fullscreen one.
+    #[default]
+    Top,
+    /// In front of everything, fullscreen windows included.
+    Overlay,
+}
+
+impl Layer {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "bottom" => Some(Self::Bottom),
+            "top" => Some(Self::Top),
+            "overlay" => Some(Self::Overlay),
+            _ => None,
+        }
+    }
+}
+
+/// Parses `--exclusive` and `bar.exclusive`'s text: `true` or `false`.
+pub fn parse_bool(text: &str) -> Option<bool> {
+    match text {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
     }
 }
 
@@ -156,6 +190,10 @@ pub struct Bar {
     /// Logical pixels, 1 to [`MAX_HEIGHT`].
     pub height: u32,
     pub margin: Margin,
+    pub layer: Layer,
+    /// Whether the bar reserves its height, so windows are arranged beside
+    /// it; `false` floats it over them (exclusive zone -1).
+    pub exclusive: bool,
 }
 
 impl Default for Bar {
@@ -164,6 +202,8 @@ impl Default for Bar {
             edge: Edge::Top,
             height: DEFAULT_HEIGHT,
             margin: Margin::default(),
+            layer: Layer::Top,
+            exclusive: true,
         }
     }
 }
@@ -195,9 +235,15 @@ impl Bar {
         (0, self.height)
     }
 
-    /// `set_exclusive_zone`: the bar's height. The compositor adds the
-    /// margin on the anchored edge itself (see the module docs).
+    /// `set_exclusive_zone`: the bar's height, or -1 for a bar that
+    /// reserves nothing and ignores the zones of others (0 would still
+    /// keep clear of another bar's zone; -1 is the protocol's "float").
+    /// The compositor adds the margin on the anchored edge itself (see the
+    /// module docs).
     pub fn exclusive_zone(&self) -> i32 {
+        if !self.exclusive {
+            return -1;
+        }
         // At most `MAX_HEIGHT`, so it fits; saturate rather than wrap all
         // the same.
         i32::try_from(self.height).unwrap_or(i32::MAX)

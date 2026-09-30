@@ -1,13 +1,33 @@
 ---
 title: "Visibility and layering: top/bottom/overlay, exclusive zone or not, hide and show"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M3"
+resolved: "2026-09-30"
 ---
 
 # Visibility and layering
+
+## Resolution (2026-09-30)
+
+Landed: `[bar] layer` / `--layer` (`bottom`, `top`, `overlay`), `exclusive` /
+`--exclusive` (`false` sends zone -1), and `scootbar msg hide|show|toggle`
+(hiding destroys every layer surface and buffer, releases the zone, and is
+applied once per loop turn so a burst of toggles is one change; `{"type":"bar","visible":B}`
+is the reply). Reference: [cli.md](../../cli.md#layers-and-the-zone).
+Verified on headless scoot in `crates/scootbar/tests/visibility.rs`: every layer
+on both edges with and without the zone, the layer and zone on the wire, a
+hidden bar holding zero shm mappings, forty concurrent toggles settling on the
+net result, a reload keeping a hidden bar hidden, and a window returning to its
+rectangle with no intermediate one.
+
+Decided, not built: **vertical bars** are a deliberate omission (the layout,
+modules and hit-test are horizontal); **auto-hide** is left out, decided from
+the design rather than measured (a sensing surface is what `hide` removes; a
+`scoot` bind running `scootbar msg toggle` costs nothing unused), to be
+revisited with `pointer-and-interactions`.
 
 Filed 2026-09-29. Serves **daily-drive**.
 

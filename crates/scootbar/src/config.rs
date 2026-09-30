@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::bar::{Bar, Edge, MAX_HEIGHT, Margin};
+use crate::bar::{Bar, Edge, Layer, MAX_HEIGHT, Margin};
 use crate::color::Color;
 use crate::layout::{Layout, MAX_GAP, Section, check_placement};
 use crate::modules::Settings;
@@ -236,6 +236,8 @@ struct File {
 #[serde(deny_unknown_fields, default)]
 struct BarFile {
     edge: Option<String>,
+    layer: Option<String>,
+    exclusive: Option<bool>,
     height: Option<u32>,
     margin: Option<toml::Value>,
     radius: Option<u32>,
@@ -289,6 +291,17 @@ impl File {
                 )
             })?,
         };
+        let layer = match &bar.layer {
+            None => defaults.bar.layer,
+            Some(text) => Layer::parse(text).ok_or_else(|| {
+                value(
+                    path,
+                    "bar.layer",
+                    format_args!("takes bottom, top or overlay, not `{text}`"),
+                )
+            })?,
+        };
+        let exclusive = bar.exclusive.unwrap_or(defaults.bar.exclusive);
         let height = match bar.height {
             None => defaults.bar.height,
             Some(height) if (1..=MAX_HEIGHT).contains(&height) => height,
@@ -370,6 +383,8 @@ impl File {
                 edge,
                 height,
                 margin,
+                layer,
+                exclusive,
             },
             theme,
             layout,

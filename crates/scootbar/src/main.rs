@@ -111,7 +111,7 @@ fn run_daemon(command: cli::DaemonCommand) -> ExitCode {
 }
 
 /// `msg`: one request to the running daemon, one reply. `query`,
-/// `version` and `reload` print the reply; `kill` and `set` print nothing
+/// `version`, `reload`, `hide`, `show` and `toggle` print the reply; `kill` and `set` print nothing
 /// on success, as scootbg's silent commands do.
 fn run_msg(msg: cli::Msg) -> ExitCode {
     use print::warn;
@@ -136,6 +136,9 @@ fn run_msg(msg: cli::Msg) -> ExitCode {
         }
         cli::Msg::Query => send(&control::protocol::Request::Query, true),
         cli::Msg::Reload => send(&control::protocol::Request::Reload, true),
+        cli::Msg::Hide => send(&control::protocol::Request::Hide, true),
+        cli::Msg::Show => send(&control::protocol::Request::Show, true),
+        cli::Msg::Toggle => send(&control::protocol::Request::Toggle, true),
         cli::Msg::Version => send(&control::protocol::Request::Version, true),
         cli::Msg::Kill => send(&control::protocol::Request::Kill, false),
     }
