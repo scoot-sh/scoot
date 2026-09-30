@@ -325,6 +325,11 @@ struct ClockFile {
     #[cfg(all(feature = "clock", feature = "icon-image"))]
     #[serde(rename = "icon-image")]
     icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "clock", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
     /// Extra logical pixels on each side of the module.
     #[cfg(feature = "clock")]
     margin: Option<u32>,

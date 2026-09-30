@@ -107,7 +107,7 @@ is resolved. ([icons.md](../../icons.md) has the mechanism and every number):
 - **Option 2, path icons**: `clock.icon-path` (with `icon-viewbox`), SVG path
   data parsed by hand (every command, bounded, fuzzed), filled by the bar's own
   analytic anti-aliased rasterizer, tinted from the state's theme token, cached
-  per (icon, size) and bounded, at the output's real scale. +24.6 KB of binary,
+  per (icon, size) and bounded, at the output's real scale. +36.9 KB of binary (+2.6%),
   3.5 us to rasterize a 24 px icon, no allocation on a warm repaint. This is
   the mechanism the button, volume, network and battery modules reuse
   (`config::icon` and `View::show_icon`): **their per-module `icon` keys arrive
@@ -117,7 +117,7 @@ is resolved. ([icons.md](../../icons.md) has the mechanism and every number):
   feature, decoded once with the workspace's `png` (bounded: 8 MiB, 1024 x
   1024, regular files only), premultiplied, scaled with a triangle/area filter
   at the real scale, dropped at reload. **Off by default**: the decoder is
-  +127 KB (+8.7%), which the resource ratchet does not allow for a feature a
+  +114,688 bytes (+7.8%), which the resource ratchet does not allow for a feature a
   path icon replaces; `--no-default-features` is the smallest either way.
 - **Hinting: decided, do not ship `swash`.** Measured in a throwaway copy:
   +843,768 bytes (+57%) and +0.79 MB RSS (+16.7%) for a small gain at 12 to

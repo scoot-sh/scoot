@@ -427,7 +427,9 @@ pub fn paint(
 /// What a path or image icon takes before the text: its square, and the
 /// gap after it when text follows; 0 for a view with none.
 fn art_extent(text: &Text, view: &View, em: f32) -> u32 {
-    if view.art().is_none() {
+    // An icon past `icon::MAX_SIDE` is not drawn, so it takes no room
+    // either (a blank gap of that size would be worse than none).
+    if view.art().is_none() || Text::art_side(em) > crate::icon::MAX_SIDE {
         return 0;
     }
     let gap = if view.text().is_empty() {

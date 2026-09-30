@@ -312,7 +312,9 @@ impl Rng {
 
 /// What a parse that succeeded must satisfy; drawing it must not panic.
 fn check_ok(segs: &[Seg], raster: &mut Rasterizer) {
-    let bound = MAX_COORD * 4.0;
+    // Derived points (reflected controls reach about 12x the input cap)
+    // are not bounded by it, only finite; this is a generous ceiling.
+    let bound = MAX_COORD * 32.0;
     let ok =
         |(x, y): (f32, f32)| x.is_finite() && y.is_finite() && x.abs() <= bound && y.abs() <= bound;
     for seg in segs {

@@ -17,7 +17,7 @@ pub(super) fn clock(path: &Path, file: &ClockFile) -> Result<Option<Icon>, Error
     #[cfg(feature = "icon-image")]
     let image = file.icon_image.as_deref();
     #[cfg(not(feature = "icon-image"))]
-    let image: Option<&str> = None;
+    let image = file.icon_image.as_ref();
     let given = [
         ("clock.icon", file.icon.is_some()),
         ("clock.icon-path", file.icon_path.is_some()),
@@ -34,17 +34,39 @@ pub(super) fn clock(path: &Path, file: &ClockFile) -> Result<Option<Icon>, Error
             format_args!("a clock shows one icon: it cannot be set with {first}"),
         ));
     }
+    #[cfg(not(feature = "icon-image"))]
+    if image.is_some() {
+        return Err(value(
+            path,
+            "clock.icon-image",
+            format_args!(
+                "needs a build with the `icon-image` Cargo feature (`cargo build --features \
+                 icon-image`, or `icon-image` in programs.scootbar.features); this one has no \
+                 PNG decoder. Use clock.icon-path for an icon that needs none"
+            ),
+        ));
+    }
+    if file.icon_viewbox.is_some() && file.icon_path.is_none() {
+        let with = if file.icon.is_some() {
+            "clock.icon is a glyph and has no viewbox"
+        } else {
+            "clock.icon-image is a picture and has none"
+        };
+        let with = if file.icon.is_none() && image.is_none() {
+            "no icon-path is set"
+        } else {
+            with
+        };
+        return Err(value(
+            path,
+            "clock.icon-viewbox",
+            format_args!("is the viewbox of clock.icon-path, and {with}"),
+        ));
+    }
     if let Some(text) = &file.icon {
         return parse_glyph(text)
             .map(|c| Some(Icon::Glyph(c)))
             .map_err(|message| value(path, "clock.icon", format_args!("{message}")));
-    }
-    if file.icon_viewbox.is_some() && file.icon_path.is_none() {
-        return Err(value(
-            path,
-            "clock.icon-viewbox",
-            format_args!("is the viewbox of clock.icon-path, which is not set"),
-        ));
     }
     if let Some(d) = &file.icon_path {
         let view = match &file.icon_viewbox {

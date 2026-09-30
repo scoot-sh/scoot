@@ -133,6 +133,13 @@ pub fn decode(bytes: &[u8]) -> Result<Image, Error> {
     let png = |error: png::DecodingError| Error::Png(error.to_string());
     let mut decoder =
         png::Decoder::new_with_limits(Cursor::new(bytes), png::Limits { bytes: MAX_DECODE });
+    // Ancillary chunks the bar has no use for are not kept: the decoder's
+    // byte budget does not cover text and profile chunks, so a file of
+    // hundreds of thousands of `tEXt` chunks would otherwise cost memory
+    // in proportion. Gamma, sRGB and ICC profiles are ignored (the pixels
+    // are taken as they are stored).
+    decoder.set_ignore_text_chunk(true);
+    decoder.set_ignore_iccp_chunk(true);
     // 8 bits a channel, palettes and low depths expanded, tRNS applied.
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().map_err(png)?;

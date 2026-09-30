@@ -698,3 +698,10 @@ writing it fails with `Read-only file system`.
 - **Idle detection** for the bars: a fixed 30 s settle, not a detected one.
 - **Where the competitors' wakeups come from** (ironbar's ~5 a second,
   ashell's ~3.5): measured, not explained.
+
+> **Later note (2026-09-30, [icons.md](../../icons.md#hinting-swash-against-ab_glyph-decided)):**
+> "visibly crisper at 15 px" (§1c, above) was a look at swash's output alone.
+> Measured side by side on the bar itself at 12, 14, 15 and 16 px, the gain is
+> small (fully inked pixels up four to seven points, partly covered ones down
+> three or four, and up at 15 px) for +843,768 bytes and +0.79 MB RSS, so
+> `swash` was not adopted.

@@ -313,3 +313,36 @@ fn a_warm_repaint_of_an_icon_allocates_nothing() {
     let ((), allocations) = scootbg_mem::count_allocations(|| draw(&mut canvas, &mut record));
     assert_eq!(allocations, 0, "a warm repaint allocated");
 }
+
+#[test]
+fn an_icon_too_big_to_draw_takes_no_room() {
+    // 200 logical px at scale 3 is an em of 600 device pixels, past the
+    // 512 an icon is drawn at: no square, no gap, and nothing drawn.
+    let style = Style {
+        font_size: 200,
+        ..style()
+    };
+    let placed = [Placed {
+        id: "iconic",
+        module: Box::new(Iconic {
+            text: "",
+            icon: square(),
+            class: Class::Normal,
+        }),
+        revision: 0,
+    }];
+    let mut scene = Scene::all(&[Section::Left]);
+    scene.update(
+        &placed,
+        &OutputView { name: None },
+        Some(&font()),
+        &style,
+        Scale::Integer(3),
+        Size {
+            width: 2000,
+            height: 700,
+        },
+    );
+    // Only the padding (both sides, 10 logical px each at scale 3).
+    assert_eq!(scene.spans()[0].width, 2 * PADDING * 3);
+}

@@ -10,8 +10,8 @@ sets (at most one):
 | Key | What | Cost | Built |
 | --- | --- | --- | --- |
 | `icon = "\U000f0e65"` | One glyph from the font chain (a symbol font as a fallback) | one more font file | always |
-| `icon-path = "M12 2 ..."` | SVG path data, filled by the bar's own rasterizer, tinted from the theme | +24.6 KB of binary | always |
-| `icon-image = "/abs/icon.png"` | A PNG, decoded once, scaled at the output's real scale | +127 KB of binary | `--features icon-image` |
+| `icon-path = "M12 2 ..."` | SVG path data, filled by the bar's own rasterizer, tinted from the theme | +36.9 KB of binary | always |
+| `icon-image = "/abs/icon.png"` | A PNG, decoded once, scaled at the output's real scale | +115 KB of binary | `--features icon-image` |
 
 The clock is the only module with an icon so far. A module names an icon, never
 pixels: it holds an `Icon` (`src/icon/mod.rs`) from its settings and shows it
@@ -63,9 +63,15 @@ view's class (`normal` `fg`, `warn` `accent`, `urgent` `urgent`, `muted` `dim`),
 so it follows Stylix like the text beside it. A gap of one space of the primary
 font follows it when text does.
 
+The cache clears **wholesale** past 16 (icon, size) pairs or 4 MiB, and an
+image's scaling allocates a temporary buffer on each miss (up to 8 MiB for a
+1024-pixel source), so it starts to matter when several modules and outputs at
+different scales all use icons: each refill is a burst of work and allocation at
+the next draw, though never per frame in steady state.
+
 The bitmap is cached per (icon, size) in one arena of at most 4 MiB and 16
 entries; past either the cache is dropped and refilled from what is drawn next
-(the glyph cache's rule), and a size past 512 pixels draws nothing. A new
+(the glyph cache's rule), and a size past 512 pixels draws nothing and takes no room. A new
 output scale is a new size, so it is one miss. A warm repaint allocates nothing
 (`render/tests/icons.rs`, counted through `scootbg_mem`'s allocator).
 
@@ -91,8 +97,12 @@ the draw path for a view with no icon gained one `Option` check. Binary size
 | Build | main | this change |
 | --- | --- | --- |
 | `--no-default-features` (no module) | 1,164,032 | 1,168,128 (+4,096) |
-| default (`clock`, `workspaces`) | 1,442,576 | 1,467,160 (+24,584, +1.7%) |
-| default + `icon-image` | | 1,594,136 (+126,976 for the decoder) |
+| default (`clock`, `workspaces`) | 1,442,576 | 1,479,448 (+36,872, +2.6%) |
+| default + `icon-image` | | 1,594,136 (+114,688 for the decoder) |
+
+Sizes re-measured on the final code (`cargo build --release -p scootbar` twice, identical: main's default is 1,442,576 and its
+`--no-default-features` 1,164,032, rebuilt from `origin/main`; a size taken at an
+earlier commit of this branch differs by a few KB, as the config plumbing grew).
 
 Idle RSS of the default release bar on headless scoot with a clock and a path
 icon is 4,792 kB against 4,744 kB without the icon (`VmRSS` after 2.5 s; the
@@ -108,10 +118,10 @@ premultiplied `b, g, r, a` bitmap, and drops it with the module at the next
 reload. It uses the `png` crate the workspace already carries (scootbg, scoot),
 `0.18`, MIT OR Apache-2.0, default features, no new package in the tree.
 
-**The feature is off by default**, measured: the decoder is +126,976 bytes on a
-1,467,160-byte bar (+8.7%), and the [resource ratchet](backlog/lightest.md) does
+**The feature is off by default**, measured: the decoder is +114,688 bytes on a
+1,479,448-byte bar (+7.8%), and the [resource ratchet](backlog/lightest.md) does
 not let a row regress for a feature most bars will not use, where a path icon
-does the same job for 24 KB and follows the theme. `--no-default-features` is
+does the same job for 37 KB and follows the theme. `--no-default-features` is
 the smallest build either way. Build it in with `--features icon-image`, or on
 Nix through the module's `features` list
 (`programs.scootbar.features = [ "clock" "workspaces" "icon-image" ]`, see
@@ -119,6 +129,13 @@ Nix through the module's `features` list
 the config error says so, as for a module that is not built. The CI matrix
 treats it as one more feature: clippy and unit tests alone and combined, and
 the headless-scoot test with it on.
+
+**Where it runs**: on the daemon's main thread, when the config is read (start-up
+and every `scootbar msg reload`), so a large file stalls the bar for as long as
+it takes to decode: measured worst cases, release, 10.7 ms for a 1024 x 1024
+RGBA image, 24 ms for a 4.5 MB file of 300,000 `tEXt` chunks (the flood test
+is in the tree); the scaling to a size happens at the first draw of that size
+(6 ms for 1024 to 512 px). Nothing runs per frame.
 
 Bounded like the font loader: opened `O_NONBLOCK` and required to be a regular
 file (a FIFO or device is refused without a read; a symlink loop is the kernel's
@@ -128,6 +145,12 @@ size is checked before any pixel buffer exists (at most 1024 x 1024, so a
 100000 x 100000 header is refused once the header chunk is read). Tests refuse a truncated file
 at every length, a bad checksum in the header and in the data, a zero size,
 oversize headers, and compressed data 4096x larger than its header declares.
+**Ignored on purpose**: gamma (`gAMA`), `sRGB`, ICC profiles and text chunks:
+the pixels are taken as stored, and `tEXt`/`zTXt`/`iTXt`/`iCCP` are discarded
+as they are read (the decoder's 16 MiB budget covers pixel and row buffers, not
+ancillary chunks, so keeping them let an 8 MiB file of ~600k tiny `tEXt` chunks
+reach 71 MB of RSS in review). Adam7-interlaced files and APNG (the default
+image, whether or not an `fcTL` precedes its `IDAT`) are tested pixel-exact.
 Palettes, 1 to 16 bits, gray, gray and alpha, RGB and RGBA are all read (the
 decoder expands them to 8-bit RGBA); an animated PNG shows its default image.
 
@@ -190,7 +213,7 @@ DejaVu Sans on headless scoot. In the image each pair is `ab_glyph` (top) then
 
 | | `ab_glyph` (shipped) | `swash` hinted | Cost |
 | --- | --- | --- | --- |
-| Release binary, default features | 1,467,160 B | 2,310,928 B | **+843,768 B (+57%)** |
+| Release binary, default features (both at `804c0d1`) | 1,467,160 B | 2,310,928 B | **+843,768 B (+57%)** |
 | Idle `VmRSS`, three runs at 15 px | 4,780 / 4,760 / 4,796 kB | 5,580 / 5,532 / 5,592 kB | **+0.79 MB (+16.7%)**, PSS +0.79 MB |
 
 (`RssAnon` +50 kB and `RssFile` +0.75 MB: the cost is the code's pages, not the
@@ -205,7 +228,7 @@ glyph cache.) Ink pixels in the crop, by how much of them are partial coverage
 | 16 | 49.0% / 45.9% | 25.0% / 29.5% |
 
 **Decision: do not ship `swash`.** Hinting does snap horizontal stems (more
-fully inked pixels, five to seven points, and 5 to 13% fewer ink pixels), and a
+fully inked pixels, four to seven points, and 3 to 13% fewer ink pixels), and a
 side-by-side shows a slightly crisper x-height and crossbars at 12 and 14 px.
 But the difference is small (the share of blurry pixels moves by three or four
 points and at 15 px goes *up*), where the cost is 57% more binary and a sixth

@@ -489,3 +489,142 @@ fn pixels_of_an_equal_picture_are_equal_whatever_the_id() {
     assert_ne!(a, c);
     assert_ne!(a.id(), b.id());
 }
+
+/// `raw` as a zlib stream of stored (uncompressed) blocks.
+fn zlib_stored(raw: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x78, 0x01];
+    let mut chunks = raw.chunks(65_535).peekable();
+    if chunks.peek().is_none() {
+        out.extend_from_slice(&[1, 0, 0, 0xff, 0xff]);
+    }
+    while let Some(chunk) = chunks.next() {
+        out.push(u8::from(chunks.peek().is_none()));
+        out.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(!(chunk.len() as u16)).to_le_bytes());
+        out.extend_from_slice(chunk);
+    }
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in raw {
+        a = (a + u32::from(byte)) % 65_521;
+        b = (b + a) % 65_521;
+    }
+    out.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    out
+}
+
+#[test]
+fn an_adam7_interlaced_image_decodes_pixel_exact() {
+    let (w, h) = (11u32, 9u32);
+    let color = |x: u32, y: u32| {
+        [
+            (x * 20) as u8,
+            (y * 25) as u8,
+            (x * y) as u8,
+            200 + (x % 3) as u8,
+        ]
+    };
+    // The seven passes: (x start, y start, x step, y step).
+    let passes = [
+        (0, 0, 8, 8),
+        (4, 0, 8, 8),
+        (0, 4, 4, 8),
+        (2, 0, 4, 4),
+        (0, 2, 2, 4),
+        (1, 0, 2, 2),
+        (0, 1, 1, 2),
+    ];
+    let mut raw = Vec::new();
+    for (x0, y0, dx, dy) in passes {
+        let xs: Vec<u32> = (x0..w).step_by(dx).collect();
+        if xs.is_empty() {
+            continue;
+        }
+        for y in (y0..h).step_by(dy) {
+            raw.push(0);
+            for &x in &xs {
+                raw.extend_from_slice(&color(x, y));
+            }
+        }
+    }
+    let mut data = SIGNATURE.to_vec();
+    let mut header = w.to_be_bytes().to_vec();
+    header.extend_from_slice(&h.to_be_bytes());
+    header.extend_from_slice(&[8, 6, 0, 0, 1]);
+    data.extend(chunk(b"IHDR", &header));
+    data.extend(chunk(b"IDAT", &zlib_stored(&raw)));
+    data.extend(chunk(b"IEND", &[]));
+    let image = decode(&data).unwrap();
+    assert_eq!((image.width, image.height), (w, h));
+    for y in 0..h {
+        for x in 0..w {
+            let [r, g, b, a] = color(x, y);
+            let premultiply = |c: u8| ((u32::from(c) * u32::from(a) + 127) / 255) as u8;
+            assert_eq!(
+                pixel(&image, x, y),
+                [premultiply(b), premultiply(g), premultiply(r), a],
+                "({x}, {y})"
+            );
+        }
+    }
+}
+
+/// An APNG of `frames` solid frames (red, then green, then blue), the
+/// default image being the first frame or a separate one (white).
+fn apng(separate_default: bool) -> Vec<u8> {
+    let solid = |c: [u8; 4]| c.repeat(4);
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, 2, 2);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .set_animated(if separate_default { 2 } else { 3 }, 0)
+            .unwrap();
+        encoder.set_sep_def_img(separate_default).unwrap();
+        let mut writer = encoder.write_header().unwrap();
+        if separate_default {
+            writer
+                .write_image_data(&solid([255, 255, 255, 255]))
+                .unwrap();
+        }
+        writer.write_image_data(&solid([255, 0, 0, 255])).unwrap();
+        writer.write_image_data(&solid([0, 255, 0, 255])).unwrap();
+        if !separate_default {
+            writer.write_image_data(&solid([0, 0, 255, 255])).unwrap();
+        }
+    }
+    out
+}
+
+#[test]
+fn an_apng_decodes_to_its_default_image() {
+    // The first frame is the default image (an `fcTL` before the `IDAT`).
+    let image = decode(&apng(false)).unwrap();
+    assert_eq!(pixel(&image, 0, 0), [0, 0, 255, 255], "red, as b g r a");
+    // A separate default image (no `fcTL` before the `IDAT`): the white one.
+    let image = decode(&apng(true)).unwrap();
+    assert_eq!(pixel(&image, 1, 1), [255, 255, 255, 255]);
+}
+
+#[test]
+fn a_flood_of_text_chunks_costs_neither_memory_nor_time() {
+    // 300,000 `tEXt` chunks (about 6 MB), then the image: ignored as they
+    // are read, so nothing accumulates.
+    let good = rgba(2, 2, |_, _| [1, 2, 3, 255]);
+    let iend = good.len() - 12;
+    let mut data = good[..33].to_vec();
+    let text = chunk(b"tEXt", b"k v");
+    for _ in 0..300_000 {
+        data.extend_from_slice(&text);
+    }
+    data.extend_from_slice(&good[33..]);
+    assert!(data.len() as u64 <= MAX_FILE && data.len() > iend);
+    let start = std::time::Instant::now();
+    let image = decode(&data).unwrap();
+    assert_eq!(pixel(&image, 0, 0), [3, 2, 1, 255]);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(3),
+        "{:?}",
+        start.elapsed()
+    );
+}

@@ -437,7 +437,7 @@ scootbar.override { buildNoDefaultFeatures = true; }
 # Exactly the modules listed.
 scootbar.override { buildNoDefaultFeatures = true; buildFeatures = [ "clock" ]; }
 # The default modules and the PNG decoder for `icon-image` (not a module and
-# not a default: +127 KB, docs/scootbar/icons.md), built the same way.
+# not a default: +115 KB, docs/scootbar/icons.md), built the same way.
 scootbar.override { buildFeatures = [ "icon-image" ]; }
 ```
 

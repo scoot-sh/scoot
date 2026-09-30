@@ -52,6 +52,14 @@ fn a_bad_path_or_viewbox_is_refused_naming_its_key() {
         ));
         assert!(error.contains("clock.icon-viewbox"), "{bad:?}: {error}");
     }
+    // A viewbox beside a glyph icon is meaningless too.
+    let error = err("[clock]\nicon = \"x\"\nicon-viewbox = \"0 0 24 24\"\n");
+    assert!(
+        error.contains("clock.icon-viewbox")
+            && error.contains("clock.icon-path")
+            && error.contains("clock.icon "),
+        "{error}"
+    );
     // A viewbox for nothing.
     let error = err("[clock]\nicon-viewbox = \"0 0 24 24\"\n");
     assert!(
@@ -83,7 +91,13 @@ fn a_clock_shows_one_icon() {
 #[test]
 fn without_the_feature_the_image_key_is_unknown() {
     let error = err("[clock]\nicon-image = \"/x.png\"\n");
-    assert!(error.contains("icon-image"), "{error}");
+    assert!(
+        error.contains("clock.icon-image") && error.contains("`icon-image` Cargo feature"),
+        "{error}"
+    );
+    // Unknown keys are still refused as unknown.
+    let error = err("[clock]\nicon-imagee = \"/x.png\"\n");
+    assert!(error.contains("unknown field"), "{error}");
 }
 
 #[cfg(feature = "icon-image")]

@@ -16,7 +16,10 @@
 //! groups, an implicit repeat counting each time), at most [`MAX_SEGS`]
 //! segments once arcs are expanded, and every number finite and within
 //! [`MAX_COORD`] (so no later arithmetic overflows `f32`, and none reaches
-//! an `as` cast unbounded). Anything else, a stray character included, is an
+//! an `as` cast unbounded). Points *derived* from them (a relative move's
+//! running sum, the reflected control point of `S` and `T`, an arc's
+//! cubics) are not bounded by that cap, only by staying finite, which is
+//! checked, and the rasterizer clamps everything to its square. Anything else, a stray character included, is an
 //! [`Error`] naming the byte it stopped at; nothing is skipped or
 //! guessed, and no input panics (`fuzz` in the tests runs a large space of
 //! mutated and random strings through it).
