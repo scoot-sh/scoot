@@ -740,7 +740,8 @@ pub fn default_config_toml() -> String {
     ));
     out.push_str(
         "# Ring thickness around every window that is not focused; unset means the same\n\
-         # as focus_ring_width (shown here with that default). Same clamp; 0 is no ring.\n",
+         # as focus_ring_width (shown here with that default; uncommenting it pins the value,\n\
+         # so it stops following focus_ring_width). Same clamp; 0 is no ring.\n",
     );
     out.push_str(&format!(
         "# focus_ring_inactive_width = {}\n",

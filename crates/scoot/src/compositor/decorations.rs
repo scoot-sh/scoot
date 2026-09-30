@@ -767,7 +767,7 @@ impl Decorations {
             if !placement.floating && ringed(placement, output) {
                 // The CSD backdrop first (deeper than the ring run below);
                 // `None` skips it without touching the persistent buffer.
-                // `focus_ring_width > 0` mirrors the ring's own gate
+                // the window's ring width (`ring_width(..)`) > 0 mirrors the ring's own gate
                 // (`ring_rects` is all-`None` and `push_painted` returns
                 // before painting at width 0): a backdrop with no ring would
                 // be colored corners around nothing.
@@ -821,7 +821,7 @@ impl Decorations {
         for placement in arrangement.placements.iter().rev() {
             if placement.floating && ringed(placement, output) {
                 let before = elements.len();
-                // `focus_ring_width > 0` mirrors the ring's own gate
+                // the window's ring width (`ring_width(..)`) > 0 mirrors the ring's own gate
                 // (`ring_rects` is all-`None` and `push_painted` returns
                 // before painting at width 0): a backdrop with no ring would
                 // be colored corners around nothing.
@@ -914,7 +914,7 @@ impl Decorations {
                 continue;
             }
             let color = ring_color(arrangement, placement.id, appearance);
-            // `focus_ring_width > 0` mirrors the ring's own gate: a
+            // the window's ring width (`ring_width(..)`) > 0 mirrors the ring's own gate: a
             // backdrop with no ring would be colored corners around nothing.
             if ring_width(arrangement, placement.id, appearance) > 0
                 && let Some(rect) = backdrop(placement)
@@ -971,7 +971,7 @@ impl Decorations {
             }
             let color = ring_color(arrangement, placement.id, appearance);
             let before = elements.len();
-            // `focus_ring_width > 0` mirrors the ring's own gate: a
+            // the window's ring width (`ring_width(..)`) > 0 mirrors the ring's own gate: a
             // backdrop with no ring would be colored corners around nothing.
             if ring_width(arrangement, placement.id, appearance) > 0
                 && let Some(rect) = backdrop(placement)
