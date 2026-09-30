@@ -54,7 +54,7 @@ pub struct CountingAlloc;
 // SAFETY: every call is forwarded to `System` unchanged (same pointer,
 // same layout, same contract), so the allocator upholds `GlobalAlloc`'s
 // contract exactly as `System` does; the counting touches only an atomic
-// counter and a thread-local flag, neither of which allocates or can fail.
+// flag and a thread-local counter, neither of which allocates or can fail.
 unsafe impl GlobalAlloc for CountingAlloc {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
