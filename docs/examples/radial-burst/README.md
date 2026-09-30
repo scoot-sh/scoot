@@ -4,11 +4,11 @@ A dark, high-contrast look built around one wallpaper: colorful rays exploding
 from a dark center. It is an **opt-in example**, not a default: nothing in scoot,
 scootbar or scootbg changes unless you use these files.
 
-![scoot with the radial burst look: a floating translucent bar with circled workspaces, two terminals with a blue ring on the focused one and a thin orange ring on the other, the wallpaper beside them](../../assets/radial-burst-preview.png)
+![scoot with the radial burst look: a floating translucent bar with circled workspaces, two terminals side by side with thin rings, blue on the focused one and orange on the other, the wallpaper showing around them](../../assets/radial-burst-preview.png)
 
 | File | For |
 | --- | --- |
-| [`scoot.toml`](scoot.toml) | the compositor: background, ring colors and widths, rounded corners, column widths, the wallpaper |
+| [`scoot.toml`](scoot.toml) | the compositor: background, ring colors and widths, rounded corners, column widths with a full-width column on `Super+m`, the wallpaper |
 | [`bar.toml`](bar.toml) | scootbar: a floating, rounded, translucent bar, workspaces as circles, the clock |
 | [`foot.ini`](foot.ini) | foot: the palette, padding and font size (needs a foot with `[colors-dark]` sections, 1.24 or later) |
 
