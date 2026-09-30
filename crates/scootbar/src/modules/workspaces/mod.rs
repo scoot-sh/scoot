@@ -80,7 +80,7 @@ const MAX_WORKSPACES: usize = 32;
 
 /// The most spaces `item-gap` takes between two numbers: the view's text is
 /// cut at [`super::MAX_TEXT`] bytes, and at 8 spaces that still holds 28
-/// single-digit workspaces.
+/// single-digit workspaces (about 26 numbered up to 99).
 pub const MAX_ITEM_GAP: u32 = 8;
 /// Output names kept at most, in bytes: `wl_output` names are short
 /// (`DP-1`, `HEADLESS-1`); longer ones are cut.

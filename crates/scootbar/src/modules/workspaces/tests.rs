@@ -896,3 +896,50 @@ fn a_circle_reaches_its_full_diameter_when_the_gap_leaves_room() {
         "{g:?} against the neighbours' ink {before_end}..{after_start}"
     );
 }
+
+/// The widest gap with the most workspaces is cut at the view bound like any
+/// text: no overrun, no control characters.
+#[test]
+fn hostile_counts_stay_within_the_view_bound_at_the_widest_gap() {
+    let (harness, link) = started_with_gap(super::MAX_ITEM_GAP);
+    let big: Vec<(u32, u32, bool)> = (0..MAX_WORKSPACES as u32)
+        .map(|i| (u32::MAX - i, i + 1, i == 0))
+        .collect();
+    commit(&link, "DP-1", &big);
+    let view = harness.view_on(Some("DP-1"));
+    assert!(view.text().len() <= MAX_TEXT);
+    assert!(view.was_cut());
+    assert!(!view.text().chars().any(char::is_control));
+}
+
+/// A text cut at the bound can end inside a gap or inside a number. Whatever
+/// the cut, the spans, the hit test and the pill must answer without a panic,
+/// and an item that is gone has no span.
+#[test]
+fn a_text_cut_inside_a_gap_or_a_number_is_still_measurable() {
+    let font = text();
+    let x0 = i64::from(PAD);
+    let mut full = String::new();
+    for number in 1..=40 {
+        if !full.is_empty() {
+            full.push_str(&" ".repeat(super::MAX_ITEM_GAP as usize));
+        }
+        full.push_str(&number.to_string());
+    }
+    let circle = Pill {
+        shape: Shape::Circle,
+        ..Pill::default()
+    };
+    for cut in 150..=MAX_TEXT {
+        let shown = &full[..cut];
+        let mut seen = 0;
+        while item_span(&font, shown, EM, x0, seen).is_some() {
+            seen += 1;
+        }
+        assert!(seen > 1 && seen <= 40, "cut {cut}: {seen} items");
+        for x in (0..6000).step_by(11) {
+            let _ = hit_index(&font, shown, EM, PAD, seen, x);
+        }
+        let _ = geometry(&circle, shown, 0, 60);
+    }
+}
