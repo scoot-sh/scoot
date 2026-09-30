@@ -95,7 +95,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [Config file, control socket and reload](resolved/config-cli-and-reload-done.md) (medium): `scootbar msg`, `query` — RESOLVED 2026-09-29
 - [Nix modules and Stylix](nix-modules-and-stylix.md) (medium)
 - [Appearance](appearance.md) (medium)
-- [Icons and fonts](icons-and-fonts.md) (medium)
+- [Icons and fonts](resolved/icons-and-fonts-done.md) (medium): the fallback chain, a glyph, a path or a PNG icon on the clock — RESOLVED 2026-09-30
 - [Multi-output policy](resolved/multi-output-done.md) (medium): `outputs`, `[output."NAME"]` overrides — RESOLVED 2026-09-30
 - [Per-output font size](multi-output-font-size.md) (low)
 - [Visibility and layering](resolved/visibility-and-layering-done.md) (medium): layer, edge, zone or float, `msg hide|show|toggle` — RESOLVED 2026-09-30

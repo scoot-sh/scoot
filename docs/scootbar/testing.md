@@ -30,19 +30,22 @@ devenv shell -- cargo fmt --check -p scootbar
 | `SCOOTBAR_BLESS` | rewrites the [snapshots](#snapshots) the tests compare instead of comparing them |
 
 The Cargo-feature matrix, as CI runs it: clippy on the default build, the
-smallest (every module left out) and each module alone; unit tests on the
-default build, every module at once (`--all-features`, the same build as
-the default while every module is in `default`), the smallest and each
-module alone. The module contract below walks the
+smallest (every module left out) and each feature alone (every feature but
+`default` is in the matrix: the modules, and `icon-image`, the PNG decoder,
+which is not a module and is off by default); unit tests on the default
+build, everything at once (`--all-features`), the smallest and each feature
+alone. The module contract below walks the
 registry of the build it is compiled in, so a module left out of
 `default` is held to it only by these:
 
 ```sh
 devenv shell -- cargo clippy -p scootbar --no-default-features --all-targets -- -D warnings
 devenv shell -- cargo clippy -p scootbar --no-default-features --features clock --all-targets -- -D warnings
+devenv shell -- cargo clippy -p scootbar --no-default-features --features icon-image --all-targets -- -D warnings
 devenv shell -- cargo nextest run -p scootbar --bin scootbar --all-features
 devenv shell -- cargo nextest run -p scootbar --bin scootbar --no-default-features
 devenv shell -- cargo nextest run -p scootbar --bin scootbar --no-default-features --features clock
+devenv shell -- cargo nextest run -p scootbar --bin scootbar --no-default-features --features icon-image
 ```
 
 No test needs a font or time-zone data on the machine: the text tests draw
@@ -195,7 +198,12 @@ with text blended over it, premultiplied (`bar-translucent-1x.pgm`), the
 separators and a margin (`bar-separated-1x.pgm`), and the workspaces pill
 as a pill, a circle around one digit and a circle widened around two,
 at 1 and at 1.5 (`workspaces-pill-1x.pgm`, `workspaces-circle-1x.pgm`,
-`workspaces-circle-two-digits-1x.pgm` and the `-1.5x` ones). The
+`workspaces-circle-two-digits-1x.pgm` and the `-1.5x` ones); and, from
+`src/snapshots/icons.rs`, a path icon (a "home" and a ring drawn with arcs, in
+two state tokens) with text at 1 and 1.5 (`icon-path-1x.pgm`,
+`icon-path-1.5x.pgm`), one alone at 1.25 (`icon-path-only-1.25x.pgm`), and a
+PNG icon (a soft-edged disc, gray and alpha) at 1 and 1.5 (`icon-image-1x.pgm`,
+`icon-image-1.5x.pgm`, compared in a build with `icon-image`). The
 pixel tests beside each module assert what
 they mean; these pin everything else in the picture (the antialiasing,
 where a fractional scale lands an edge), so any change to it is seen.

@@ -436,7 +436,13 @@ Modules are Cargo features (one per module, `clock` the default; see
 scootbar.override { buildNoDefaultFeatures = true; }
 # Exactly the modules listed.
 scootbar.override { buildNoDefaultFeatures = true; buildFeatures = [ "clock" ]; }
+# The default modules and the PNG decoder for `icon-image` (not a module and
+# not a default: +127 KB, docs/scootbar/icons.md), built the same way.
+scootbar.override { buildFeatures = [ "icon-image" ]; }
 ```
+
+`programs.scootbar.features` (below) is the same list, so `features = [ "clock"
+"workspaces" "icon-image" ]` builds the default bar with PNG icons.
 
 ### The modules: `programs.scootbar`
 
