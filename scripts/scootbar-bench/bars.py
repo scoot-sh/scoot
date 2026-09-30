@@ -21,8 +21,16 @@ the measured process is the bar).
 import json
 import os
 
-# What a milestone shows. M1 is the clock; M2 adds the workspaces.
-SCOPES = {"clock": ("clock",)}
+# What a milestone shows, by part of the bar: the clock on the right, the
+# workspaces on the left. M1 is the clock; M3's scope is both.
+SCOPES = {
+    "clock": {"right": ("clock",)},
+    "clock-workspaces": {"left": ("workspaces",), "right": ("clock",)},
+}
+
+
+def shows(scope, module):
+    return any(module in mods for mods in SCOPES[scope].values())
 
 FORMAT = "%a %d %b %H:%M"
 HEIGHT = 26
@@ -74,7 +82,13 @@ class Bar:
             return [self.binary]
         return real_executables(os.path.join(self.store, "bin"))
 
-    def write_config(self, directory, font_file, scope):
+    def cannot_show(self, scope, compositor):
+        """Why this bar cannot show ``scope`` on ``compositor``, or ``None``
+        when it can. The harness does not run a bar for a scope it cannot
+        show, nor invent a number for it: the report names it instead."""
+        return None
+
+    def write_config(self, directory, font_file, scope, compositor):
         """Writes the bar's configuration under ``directory``; returns the
         command line that uses it."""
         raise NotImplementedError
@@ -87,9 +101,15 @@ class Scootbar(Bar):
     def executable(self):
         return self.binary
 
-    def write_config(self, directory, font_file, scope):
-        # No configuration file yet: every option is a flag
-        # (docs/scootbar/cli.md).
+    def write_config(self, directory, font_file, scope, compositor):
+        # No configuration file: every option is a flag (docs/scootbar/cli.md).
+        # Giving any of --left/--center/--right sets the whole layout, so a
+        # part the scope leaves empty is simply not given (M1's command line
+        # for the clock scope is unchanged).
+        layout = []
+        for part in ("left", "center", "right"):
+            if part in SCOPES[scope]:
+                layout += [f"--{part}", ",".join(SCOPES[scope][part])]
         return [
             self.binary, "daemon",
             "--font", font_file,
@@ -97,7 +117,7 @@ class Scootbar(Bar):
             "--height", str(HEIGHT),
             "--background", f"#{BACKGROUND}",
             "--foreground", f"#{FOREGROUND}",
-            "--right", ",".join(SCOPES[scope]),
+            *layout,
             "--clock-format", FORMAT,
         ]
 
@@ -106,48 +126,95 @@ class Yambar(Bar):
     name = "yambar"
     nix_attr = "yambar"
 
-    def write_config(self, directory, font_file, scope):
-        assert SCOPES[scope] == ("clock",), scope
+    def cannot_show(self, scope, compositor):
+        # yambar 1.11.0 has no ext-workspace-v1 module (its modules for
+        # workspaces are i3/sway, river and dwl-style tags), so on scoot it
+        # cannot show the workspaces; on sway its `i3` module (which speaks
+        # sway's IPC) does.
+        if shows(scope, "workspaces") and compositor != "sway":
+            return ("yambar 1.11.0 has no ext-workspace-v1 module, so it cannot "
+                    f"show workspaces on {compositor}")
+        return None
+
+    def write_config(self, directory, font_file, scope, compositor):
+        assert not self.cannot_show(scope, compositor), (scope, compositor)
         date, time = FORMAT.rsplit(" ", 1)
         path = os.path.join(directory, "yambar.yml")
+        parts = SCOPES[scope]
+        text = (
+            "bar:\n"
+            f"  height: {HEIGHT}\n"
+            "  location: top\n"
+            f"  background: {BACKGROUND}ff\n"
+            f"  foreground: {FOREGROUND}ff\n"
+            f"  font: DejaVu Sans:pixelsize={FONT_PX}\n"
+        )
+        if "left" in parts:
+            text += "  left:\n"
+            for module in parts["left"]:
+                text += self.module(module, date, time)
+        if "right" in parts:
+            text += "  right:\n"
+            for module in parts["right"]:
+                text += self.module(module, date, time)
         with open(path, "w") as f:
-            f.write(
-                "bar:\n"
-                f"  height: {HEIGHT}\n"
-                "  location: top\n"
-                f"  background: {BACKGROUND}ff\n"
-                f"  foreground: {FOREGROUND}ff\n"
-                f"  font: DejaVu Sans:pixelsize={FONT_PX}\n"
-                "  right:\n"
+            f.write(text)
+        return [self.executable(), "-c", path]
+
+    @staticmethod
+    def module(module, date, time):
+        if module == "clock":
+            return (
                 "    - clock:\n"
                 f'        date-format: "{date}"\n'
                 f'        time-format: "{time}"\n'
                 "        content:\n"
                 '          - string: {text: "{date} {time}", right-margin: 8}\n'
             )
-        return [self.executable(), "-c", path]
+        assert module == "workspaces", module
+        # The `i3` module: one string per workspace, its number. Sway's
+        # workspaces are named by number here (`workspace number N`).
+        return (
+            "    - i3:\n"
+            "        sort: native\n"
+            "        content:\n"
+            '          "":\n'
+            '            string: {text: "{name}", margin: 4}\n'
+        )
 
 
 class Waybar(Bar):
     name = "waybar"
     nix_attr = "waybar"
 
-    def write_config(self, directory, font_file, scope):
-        assert SCOPES[scope] == ("clock",), scope
+    # Waybar's module for the workspaces, by compositor: ext-workspace-v1
+    # on scoot, sway's own IPC on sway.
+    WORKSPACES = {"scoot": "ext/workspaces", "sway": "sway/workspaces"}
+
+    def cannot_show(self, scope, compositor):
+        if shows(scope, "workspaces") and compositor not in self.WORKSPACES:
+            return f"no workspaces module for {compositor}"
+        return None
+
+    def write_config(self, directory, font_file, scope, compositor):
+        assert not self.cannot_show(scope, compositor), (scope, compositor)
         config = os.path.join(directory, "waybar.jsonc")
         style = os.path.join(directory, "waybar.css")
+        ids = {"clock": "clock"}
+        if shows(scope, "workspaces"):
+            ids["workspaces"] = self.WORKSPACES[compositor]
+        body = {
+            "layer": "top",
+            "position": "top",
+            "height": HEIGHT,
+            "clock": {"format": "{:" + FORMAT + "}", "interval": 60, "tooltip": False},
+        }
+        if "workspaces" in ids:
+            body[ids["workspaces"]] = {"format": "{name}"}
+        for part, mods in SCOPES[scope].items():
+            body[f"modules-{part}"] = [ids[m] for m in mods]
         with open(config, "w") as f:
-            json.dump(
-                {
-                    "layer": "top",
-                    "position": "top",
-                    "height": HEIGHT,
-                    "modules-right": ["clock"],
-                    "clock": {"format": "{:" + FORMAT + "}", "interval": 60, "tooltip": False},
-                },
-                f,
-                indent=1,
-            )
+            json.dump(body, f, indent=1)
         with open(style, "w") as f:
             f.write(
                 f'* {{ font-family: "DejaVu Sans"; font-size: {FONT_PX}px; }}\n'

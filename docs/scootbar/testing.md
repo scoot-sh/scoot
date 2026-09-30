@@ -362,6 +362,9 @@ devenv shell -- cargo build --release -p scootbar
 devenv shell -- cargo build -p scoot -p scootctl     # any profile
 devenv shell -- python3 scripts/scootbar-bench/bench.py run --out /tmp/sbar \
   --scoot target/debug/scoot --scootctl target/debug/scootctl
+# --scope clock (the default, M1's) or clock-workspaces (M3's); --scootbar PATH
+# and --scootbar-source TREE measure a binary built elsewhere, such as an
+# earlier milestone's for a like-for-like compare
 python3 scripts/scootbar-bench/bench.py report /tmp/sbar            # tables and rule 2, exit 1 on a loss
 python3 scripts/scootbar-bench/bench.py compare /tmp/sbar /tmp/old  # rule 1, exit 1 on a regression
 python3 -m unittest discover -s scripts/scootbar-bench -p 'test_*.py'
@@ -375,9 +378,38 @@ another). `--compositors`, `--bars` and the timings narrow it.
 **The stage** is M0's: one 1920×1080 output of headless scoot or sway
 (pixman), a private session bus, fontconfig seeing DejaVu only, and two
 `foot` windows on two workspaces. **Each bar shows exactly the milestone's
-scope** (`--scope`, `clock` at M1): a 26-pixel top bar, DejaVu Sans at 14
-pixels, `#1e1e2e` behind `#cdd6f4`, `%a %d %b %H:%M` on the right, minute
-updates. Competitors come from the pinned nixpkgs.
+scope** (`--scope`): a 26-pixel top bar, DejaVu Sans at 14 pixels,
+`#1e1e2e` behind `#cdd6f4`, `%a %d %b %H:%M` on the right, minute updates.
+Competitors come from the pinned nixpkgs. The scopes:
+
+| Scope | Milestone | scootbar | Waybar | yambar |
+|---|---|---|---|---|
+| `clock` | M1 | `--right clock` | `clock` on the right | `clock` on the right |
+| `clock-workspaces` | M3 | `--left workspaces --right clock` | `ext/workspaces` (scoot) or `sway/workspaces` (sway) on the left, the clock on the right | on sway, the `i3` module (it speaks sway's IPC) on the left, the clock on the right; **on scoot, nothing** |
+
+**yambar cannot show workspaces on scoot**: 1.11.0 has no ext-workspace-v1
+module (its workspace modules are `i3`, `river` and `dwl`). The harness does
+not run it there and does not invent a number: the column reads "cannot show
+this scope", `meta.json` records why (`cannot_show`), and `report` ends with
+`NOT COMPARED on scoot: yambar ...` and counts it as **not passed** (exit 1),
+since the rule does not say what to do when a competitor cannot show the
+scope. That is the conservative reading of "a gate that cannot be judged has
+not been passed"; whether it should instead be waived for that pair is the
+maintainer's call, not the script's. On sway yambar is compared in full.
+A scope's bar must also draw: the screenshot check after the idle window
+crops each placed part (a 300-pixel span on the left, center or right of
+the bar) and fails the run if it shows a single color, so a workspaces module
+that drew nothing (no protocol, no socket) is a failed run and not a cheap row.
+
+**The machine** is recorded, since numbers from a laptop depend on it: every
+record carries the cpufreq governor and current, policy-maximum and
+hardware-maximum frequencies of each CPU, every hwmon temperature, the power
+supplies (mains online, battery) and the load average, before and after it
+(`hw_start`/`hw_end`), and `meta.json` has them at the start and end of the
+run plus the CPU model and page size. `report` summarizes them (a policy cap
+below the hardware maximum, mains lost, the frequency range, the temperature
+range). The Apple M2 exposes no CPU temperature, only NAND, battery, charger
+and radio ones, so a throttle there shows only as a cap or a falling clock.
 
 **The rows**, per bar and compositor:
 
@@ -393,7 +425,9 @@ updates. Competitors come from the pinned nixpkgs.
 - *Idle*: a fresh start, its first frame awaited, a fixed settle, then a
   window: RSS, PSS, heap (`RssAnon`) and peak (`VmHWM`) at its end;
   **wakeups** as voluntary context switches over every thread (the
-  ratified target counts these); CPU from the run's cgroup, which keeps
+  ratified target counts these) counted per thread, so a thread pool that
+  comes and goes cannot make a window negative (an exited thread's switches
+  are then missed, never subtracted); CPU from the run's cgroup, which keeps
   exited children's time too. A screenshot then checks the bar's color is
   at the top of the output, so a bar that failed to draw fails its row.
 - *Switching*: straight after, `--switches` workspace switches at
@@ -412,8 +446,22 @@ a competitor beats scootbar (rule 2), and every gated row a competitor has
 and scootbar does not (its runs failed, or it was not run), since a gate
 that cannot be judged has not been passed; `compare` lists every row on
 which scootbar is worse than an earlier run (rule 1). Each milestone's run is kept in [`bench/`](bench/README.md),
-never overwritten; M1's, `bench/m1-clock`, is the baseline the next one
-compares against, and its table is in the [README](README.md#m1-like-for-like-by-the-benchmark-script).
+never overwritten. **A baseline is only comparable when it came from the same
+machine**: `bench/m1-clock` was measured on a Claude Code cloud sandbox VM (4-vCPU Xeon, not hardware the maintainer owns) with a
+debug scoot, so M3's rule-1 check was made **like for like** instead: the
+old commit's scootbar is rebuilt on the machine that measures the new one
+(`--scootbar PATH --scootbar-source TREE` point the harness at a binary and the
+tree it came from), both run the same harness at the old scope, alternating
+(A-B-B-A, with a cool-down between) so each side has two runs, and `compare`
+is run on each pairing. A row is called a regression only when it
+regresses in every pairing; a row that flags in some is reported as noise
+with its counts, and a run compared with its own rerun shows what the rule's
+false-positive rate is (at 16 KiB pages one page of `RssAnon` is enough to
+flag when a row has a single idle sample). M3's is
+[`bench/m3-asahi-*`](bench/README.md), and its table is in the
+[README](README.md#m3-clock-and-workspaces-on-the-asahi-m2); `m1-clock` stays
+as the published M1 record, and its table is in the
+[README](README.md#m1-like-for-like-by-the-benchmark-script).
 
 ## Not covered
 

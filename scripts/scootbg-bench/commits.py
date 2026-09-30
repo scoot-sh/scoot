@@ -15,10 +15,14 @@ Two formats, one per server library:
   CLOCK_REALTIME in microseconds, truncated to 32 bits, printed as
   milliseconds.
 - libwayland 1.24+ (sway): ``[21:58:30.696327] wl_surface#11.commit()``:
-  local time of day with microseconds. Requests carry no arrow; events it
+  the **UTC** time of day with microseconds (measured: on a machine in
+  America/New_York the stamps ran exactly four hours ahead of the local
+  clock when read as local time, so every commit looked 4 h in the future
+  and nothing ever seemed quiet). Requests carry no arrow; events it
   sends are printed with `` -> ``.
 """
 
+import calendar
 import re
 import time
 
@@ -41,11 +45,11 @@ def _unwrap_u32(truncated_us, reference_us):
 
 
 def _time_of_day_to_us(hh, mm, ss, us, reference_us):
-    """Local ``hh:mm:ss.us`` as epoch microseconds nearest the reference
+    """UTC ``hh:mm:ss.us`` as epoch microseconds nearest the reference
     (so a trace across midnight still resolves)."""
     ref_s = reference_us / 1e6
-    lt = time.localtime(ref_s)
-    midnight = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    lt = time.gmtime(ref_s)
+    midnight = calendar.timegm((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, 0))
     of_day = (hh * 3600 + mm * 60 + ss) * 1_000_000 + us
     best = None
     for day in (-1, 0, 1):

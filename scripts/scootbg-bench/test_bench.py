@@ -40,12 +40,33 @@ class ParseLine(unittest.TestCase):
 
     def test_libwayland_request_and_null_attach(self):
         now_s = time.time()
-        lt = time.localtime(now_s)
+        lt = time.gmtime(now_s)
         line = f"[{lt.tm_hour:02}:{lt.tm_min:02}:{lt.tm_sec:02}.123456] wl_surface#11.attach(nil, 0, 0)"
         t, surface, request, args = commits.parse_line(line, int(now_s * 1e6))
         self.assertEqual((surface, request), (11, "attach"))
         self.assertTrue(commits.attach_is_null(args))
         self.assertLess(abs(t - int(now_s * 1e6)), 2_000_000)
+
+    def test_libwayland_stamps_are_utc_whatever_the_machines_zone(self):
+        # libwayland prints UTC; read as local time they were 4 h off in
+        # America/New_York and no commit ever looked old enough to be quiet.
+        old = os.environ.get("TZ")
+        try:
+            for zone in ("America/New_York", "Asia/Kolkata", "UTC"):
+                os.environ["TZ"] = zone
+                time.tzset()
+                now_s = time.time()
+                lt = time.gmtime(now_s)
+                line = (f"[{lt.tm_hour:02}:{lt.tm_min:02}:{lt.tm_sec:02}.000000] "
+                        "wl_surface#11.commit()")
+                t = commits.parse_line(line, int(now_s * 1e6))[0]
+                self.assertLess(abs(t - int(now_s * 1e6)), 2_000_000, zone)
+        finally:
+            if old is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old
+            time.tzset()
 
     def test_libwayland_events_and_other_interfaces_are_ignored(self):
         now = time.time_ns() // 1000

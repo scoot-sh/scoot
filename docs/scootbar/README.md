@@ -64,8 +64,8 @@ are in [cli.md](cli.md#the-config-file).
 ## Baselines
 
 The bars scootbar is measured against, before scootbar exists, so each
-milestone has something to beat. Measured 2026-09-29 on one machine (a 4-vCPU
-VM), each bar configured to show a clock (`%a %d %b %H:%M`) and, where it
+milestone has something to beat. Measured 2026-09-29 on one machine (a Claude Code
+cloud sandbox VM, 4 vCPUs, not hardware the maintainer owns), each bar configured to show a clock (`%a %d %b %H:%M`) and, where it
 can, the workspaces, with two windows on two workspaces. The method, the
 raw runs and the configs are in the record's
 [§4](backlog/resolved/dependencies-done.md#4-baselines); treat times as
@@ -231,3 +231,114 @@ clock's own run above) is most likely timing, not a change: sway sends the
 clock's record traced it), which can land before the bar has gone back to
 sleep. The run's 5 involuntary switches beside 5 voluntary ones fit that;
 it was not traced again here.
+
+### M3, clock and workspaces, on the Asahi M2
+
+The M3 ratchet run, by [`scripts/scootbar-bench`](testing.md#benchmark) at
+`--scope clock-workspaces` (scootbar `--left workspaces --right clock`;
+Waybar's `ext/workspaces` on scoot and `sway/workspaces` on sway; yambar's
+`i3` module on sway). **Machine**: the maintainer's Asahi MacBook Air, Apple
+M2 (4 Blizzard + 4 Avalanche cores, 16 KiB pages), Linux 7.1.13 aarch64,
+`schedutil`, on mains power with the battery full, release builds of scootbar
+(`main` at `3211551`; `main` has since moved only by a backlog claim, so
+the code is the same) under headless scoot (release, same binary for
+every run) and sway 1.12, yambar 1.11.0 and Waybar 0.15.0 from the pinned
+nixpkgs. Raw runs, with `meta.json` (every reading of the machine) and
+`run.log`: [`bench/m3-asahi-clock-workspaces`](bench/m3-asahi-clock-workspaces/table.md).
+A fanless machine: the readings the kernel gives are in
+[the record](#what-the-machine-did), none shows a throttle.
+
+| | scootbar | yambar 1.11.0 | Waybar 0.15.0 |
+|---|---|---|---|
+| Idle RSS, scoot / sway | 3.5 / 3.5 MiB | not compared / 13.4 MiB | 51.4 / 51.4 MiB |
+| Idle PSS | 2.1 / 2.1 MiB | not compared / 8.0 MiB | 45.5 / 43.2 MiB |
+| Idle heap (`RssAnon`) | 0.4 / 0.4 MiB | not compared / 3.1 MiB | 10.7 / 10.8 MiB |
+| Idle wakeups per minute | 2 / 2 | not compared / 3 | 5 / 3 |
+| Idle CPU, 300 s window | 1.0 / 0.8 ms | not compared / 2.5 ms | 5.1 / 4.1 ms |
+| CPU, 240 workspace switches in 60 s | 26.3 / 22.2 ms | not compared / 177 ms | 464 / 1425 ms |
+| Startup to first frame | 37.3 [33.2-45.1] / 18.2 [9.2-21.4] ms | not compared / 28.4 [17.4-33.1] ms | 97.8 [82.4-110] / 62.9 [59.7-70.7] ms |
+| Size: stripped binary + non-glibc `ldd` closure | 1.38 MB | 20.95 MB | 73.97 MB |
+| Threads | 1 | 4 (sway) | 8 / 9 |
+
+**yambar is not compared on scoot**: 1.11.0 has no ext-workspace-v1 module,
+so it cannot show workspaces there, and the harness neither runs it nor
+invents a number ([testing.md](testing.md#benchmark)). **No competitor beats
+scootbar on any gated row** (the bare stripped yambar executable, 396 kB, is smaller than scootbar's 1.25 MB; the gated size row counts the closure, where yambar is 20.95 MB on nixpkgs' default features): three ties, each within the noise
+rule (startup against yambar, idle wakeups against yambar and Waybar, both on
+sway; scootbar's 2 a minute meets the ratified target). The rule's second
+half still fails, since one competitor and compositor pair was not compared
+at all. scootbar's cost of a workspace switch at this scope is 26.3 ms for 240
+switches against Waybar's 464 ms and yambar's 177 ms (sway).
+
+**Against its own M1, like for like.** `bench/m1-clock` was measured on a
+different machine (a Claude Code cloud sandbox VM (4-vCPU Xeon), not hardware the maintainer owns; debug scoot, kernel 6.18) and is
+not comparable with this box's numbers: M1's scootbar read 3.9 MiB there and
+reads 2.9 MiB here. So M1's scootbar was rebuilt on the box (`3801c12`,
+release, `cargo build --release -p scootbar`, today's toolchain) and both it
+and M3's (`3211551`, built the same way) ran **the same harness, at the clock
+scope M1 measured, one after the other, A-B-B-A** with 180 s between runs, so
+each side has two runs and each pairing of a run with the other side's is a
+compare. The table is the first run of each side; the second is in the
+directories below.
+
+| Clock scope, scoot / sway | M1 `3801c12` | M3 `3211551` | regressed in how many of the 4 pairings |
+|---|---|---|---|
+| Idle RSS | 2.9 / 2.9 MiB | 3.5 / 3.5 MiB | 4 and 4 |
+| Idle PSS | 1.5 / 1.5 MiB | 2.1 / 2.1 MiB | 4 and 4 |
+| Idle heap (`RssAnon`) | 0.3 / 0.3 MiB | 0.4 / 0.5 MiB | 4 and 4 |
+| Peak memory (`VmHWM`) | 2.9 / 2.9 MiB | 3.5 / 3.5 MiB | 4 and 4 |
+| **CPU, 240 workspace switches in 60 s** | 0.2 / 0.1 ms | **12.0 / 10.5 ms** | 4 and 4 |
+| Wakeups over those switches (not gated) | 2 / 2 | 242 / 242 | (not gated) |
+| Idle CPU, 300 s window | 0.9 / 0.6 ms | 1.2 / 0.6 ms | 3 and 1: noise (see below) |
+| Idle wakeups per minute | 2 / 2 | 2 / 2 (sway 1.8 in the first run) | 0 and 0 |
+| Startup to first frame | 31.4 / 17.6 ms | 34.9 / 8.4 ms | 0 and 0 |
+| Size: stripped binary + non-glibc `ldd` closure | 924,320 B | 1,383,080 B | 4 |
+| Bare executable, stripped (not gated) | 791,224 B | 1,249,984 B | 4 |
+| Lines of Rust, all / outside `tests.rs` | 10,628 / 6,995 | 25,347 / 16,312 | (reported) |
+| Direct dependencies on Linux | 6 | 10 (adds `png`, `serde`, `serde_json`, `toml`) | (reported) |
+
+**The no-regression rule fails at M3.** Memory is up by about 0.6 MiB
+(20%), the stripped binary and its closure by 50%, and the **CPU and wakeups
+of a workspace switch at the clock scope, where the bar shows no workspaces,
+went from 2 wakeups to 242 over 240 switches and from about 0.2 ms to 12 ms**.
+The likely cause (read, then confirmed by a protocol trace of one run of
+`scootbar daemon --right clock` on headless scoot: six switches produced
+eight `ext_workspace_manager_v1.done` events and the matching
+`ext_workspace_handle_v1.state` events, all received by a bar with no
+workspaces module): `daemon/wayland.rs` binds `ext_workspace_manager_v1`
+whenever the `workspaces` feature is compiled in, placed or not, so the bar
+is woken for, and parses, every workspace change it never shows (its open
+descriptors also went from 5 to 8; binding a global opens none, so that is not attributed to this). The harness measured this and did not
+change it; the fix is for the maintainer to schedule. The idle-CPU row is not
+called a regression: on scoot it flags in 3 of the 4 pairings and on sway
+in 1 of 4, with values of 0.8 to 1.2 ms against a noise rule built for
+runs with one idle sample each.
+
+**Noise, measured.** M1 against its own rerun flags one row as regressed
+(sway `RssAnon`, 272 kB against 288 kB: one 16 KiB page, with one idle
+sample so the spread is 0 and only the unit's floor applies) and exits 1;
+M3 against its own rerun flags none (exit 0) and two as better. Every row
+called a regression above is a difference of at least 0.1 MiB (memory),
+50 times (switching CPU) or 459 KB (size) and reproduces in all four
+pairings.
+
+#### What the machine did
+
+Every record carries the readings before and after it
+(`hw_start`/`hw_end`), summarized by `report`. Across the five runs
+(60 to 24 readings each): governor `schedutil`; no cpufreq policy cap below
+the hardware maximum (2424 MHz on the efficiency cores, 3204 MHz on the
+performance ones) in any of them; mains online and the battery full at the
+start and end of every run; hwmon temperatures 22 to 27 C (the NAND,
+battery, charger and WiFi sensors: **the M2 exposes no CPU temperature**, so
+a throttle could only show as a policy cap, and none did; the current
+frequency ranged 600 to 3204 MHz, which is the governor, not a cap); load
+average at most 0.14 at any run's start. The runs had 180 s of cool-down
+between them and each ran about 13 to 16 minutes (clock scope, scootbar
+alone) or 37 minutes (clock and workspaces, three bars). The cores are not
+pinned: a bar's CPU rows can differ with which cluster it landed on, which
+is what the repeated runs and the rule's margin are for.
+
+Runs, all under [`bench/`](bench/README.md): `m3-asahi-m1-baseline-clock` and
+`-rerun` (M1's scootbar), `m3-asahi-clock` and `-rerun` (M3's), and
+`m3-asahi-clock-workspaces`.

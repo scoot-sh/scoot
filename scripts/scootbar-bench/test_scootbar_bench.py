@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(HERE, "..", "scootbg-bench"))
 
 import bars  # noqa: E402
+import machine  # noqa: E402
 import measure  # noqa: E402
 import stage  # noqa: E402
 import tables  # noqa: E402
@@ -24,7 +25,7 @@ import tables  # noqa: E402
 class Configs(unittest.TestCase):
     def test_every_bar_shows_the_clock_in_the_same_look(self):
         with tempfile.TemporaryDirectory() as d:
-            argv = bars.Scootbar(binary="/x/scootbar").write_config(d, "/f/DejaVuSans.ttf", "clock")
+            argv = bars.Scootbar(binary="/x/scootbar").write_config(d, "/f/DejaVuSans.ttf", "clock", "scoot")
             flags = dict(zip(argv[2::2], argv[3::2]))
             self.assertEqual(argv[:2], ["/x/scootbar", "daemon"])
             self.assertEqual(flags["--clock-format"], bars.FORMAT)
@@ -33,7 +34,7 @@ class Configs(unittest.TestCase):
             self.assertEqual(flags["--font-size"], str(bars.FONT_PX))
             self.assertEqual(flags["--background"], "#" + bars.BACKGROUND)
 
-            argv = bars.Yambar(store="/s/yambar").write_config(d, None, "clock")
+            argv = bars.Yambar(store="/s/yambar").write_config(d, None, "clock", "scoot")
             self.assertEqual(argv[:2], ["/s/yambar/bin/yambar", "-c"])
             with open(argv[2]) as f:
                 text = f.read()
@@ -43,7 +44,7 @@ class Configs(unittest.TestCase):
             self.assertIn(f"height: {bars.HEIGHT}", text)
             self.assertIn(f"background: {bars.BACKGROUND}ff", text)
 
-            argv = bars.Waybar(store="/s/waybar").write_config(d, None, "clock")
+            argv = bars.Waybar(store="/s/waybar").write_config(d, None, "clock", "scoot")
             self.assertEqual(argv[0], "/s/waybar/bin/waybar")
             with open(argv[argv.index("-c") + 1]) as f:
                 config = json.load(f)
@@ -54,9 +55,64 @@ class Configs(unittest.TestCase):
             with open(argv[argv.index("-s") + 1]) as f:
                 self.assertIn(f"#{bars.BACKGROUND}", f.read())
 
-    def test_a_scope_a_competitor_cannot_show_is_refused(self):
+    def test_the_clock_scopes_scootbar_command_line_is_m1s(self):
+        # The like-for-like baseline ran M1's scootbar with exactly these
+        # flags; a part the scope leaves empty is not given at all.
+        with tempfile.TemporaryDirectory() as d:
+            argv = bars.Scootbar(binary="/x/scootbar").write_config(d, "/f.ttf", "clock", "sway")
+        self.assertEqual(argv[argv.index("--right") + 1], "clock")
+        self.assertNotIn("--left", argv)
+        self.assertNotIn("--center", argv)
+
+    def test_the_workspaces_scope_places_workspaces_left_and_the_clock_right(self):
+        with tempfile.TemporaryDirectory() as d:
+            argv = bars.Scootbar(binary="/x/scootbar").write_config(
+                d, "/f.ttf", "clock-workspaces", "scoot")
+        self.assertEqual(argv[argv.index("--left") + 1], "workspaces")
+        self.assertEqual(argv[argv.index("--right") + 1], "clock")
+        self.assertNotIn("--center", argv)
+
+    def test_waybar_uses_each_compositors_workspaces_module(self):
+        for compositor, module in (("scoot", "ext/workspaces"), ("sway", "sway/workspaces")):
+            with tempfile.TemporaryDirectory() as d:
+                argv = bars.Waybar(store="/s/waybar").write_config(
+                    d, None, "clock-workspaces", compositor)
+                with open(argv[argv.index("-c") + 1]) as f:
+                    config = json.load(f)
+            self.assertEqual(config["modules-left"], [module])
+            self.assertEqual(config["modules-right"], ["clock"])
+            self.assertNotIn("modules-center", config)
+            self.assertEqual(config[module], {"format": "{name}"})
+
+    def test_yambar_shows_workspaces_on_sway_only_and_says_why_not_on_scoot(self):
+        y = bars.Yambar(store="/s/yambar")
+        self.assertIsNone(y.cannot_show("clock", "scoot"))
+        self.assertIsNone(y.cannot_show("clock-workspaces", "sway"))
+        why = y.cannot_show("clock-workspaces", "scoot")
+        self.assertIn("ext-workspace-v1", why)
+        with tempfile.TemporaryDirectory() as d:
+            argv = y.write_config(d, None, "clock-workspaces", "sway")
+            with open(argv[2]) as f:
+                text = f.read()
+            with self.assertRaises(AssertionError):
+                y.write_config(d, None, "clock-workspaces", "scoot")
+        self.assertIn("  left:\n    - i3:", text)
+        self.assertIn("  right:\n    - clock:", text)
+        # The clock alone has no left part.
+        with tempfile.TemporaryDirectory() as d:
+            argv = y.write_config(d, None, "clock", "scoot")
+            with open(argv[2]) as f:
+                self.assertNotIn("left:", f.read())
+
+    def test_the_other_bars_can_show_every_scope_on_both_compositors(self):
+        for cls in (bars.Scootbar, bars.Waybar):
+            for scope in bars.SCOPES:
+                for compositor in ("scoot", "sway"):
+                    self.assertIsNone(cls(store="/s", binary="/b").cannot_show(scope, compositor))
+
+    def test_an_unknown_scope_is_refused(self):
         with tempfile.TemporaryDirectory() as d, self.assertRaises(KeyError):
-            bars.Yambar(store="/s").write_config(d, None, "workspaces")
+            bars.Waybar(store="/s").write_config(d, None, "battery", "scoot")
 
     def test_the_fontconfig_file_sees_one_directory(self):
         with tempfile.TemporaryDirectory() as d:
@@ -65,6 +121,18 @@ class Configs(unittest.TestCase):
             self.assertIn("<dir>/fonts/here</dir>", text)
             self.assertEqual(text.count("<dir>"), 1)
             self.assertTrue(os.path.isdir(os.path.join(d, "fc-cache")))
+
+
+class Machine(unittest.TestCase):
+    def test_a_reading_has_what_the_kernel_offers_and_summarises(self):
+        state = machine.state()
+        self.assertEqual(set(state), {"cpus", "temps_c", "power", "loadavg"})
+        self.assertIsInstance(machine.summary(state), str)
+        # A synthetic capped, hot reading.
+        state = {"cpus": {"cpu0": {"governor": "g", "cur_khz": 2000000,
+                                   "policy_max_khz": 1000000, "hw_max_khz": 2000000}},
+                 "temps_c": {"a/b": 80.0}, "power": {}, "loadavg": [0, 0, 0]}
+        self.assertEqual(machine.summary(state), "max cur 2000 MHz, cap YES, hottest a/b 80.0 C")
 
 
 class Executables(unittest.TestCase):
@@ -114,11 +182,16 @@ class Quiet(unittest.TestCase):
 
 
 class Switches(unittest.TestCase):
-    def test_deltas_count_only_processes_seen_at_the_end(self):
-        before = ({10: (5, 1), 11: (7, 0)}, 1_000_000)
-        after = ({10: (8, 1), 12: (2, 2)}, 4_500_000)
-        # 10: +3 voluntary; 12 is new: all of its own; 11 exited: nothing.
+    def test_deltas_are_per_thread_and_never_negative_when_threads_exit(self):
+        before = ({(10, "10"): (5, 1), (10, "11"): (7, 0), (11, "11"): (9, 0)}, 1_000_000)
+        after = ({(10, "10"): (8, 1), (12, "12"): (2, 2)}, 4_500_000)
+        # (10, 10): +3 voluntary; (12, 12) is new: all of its own; the
+        # threads that exited are not counted, not subtracted.
         self.assertEqual(measure.delta(before, after), (5, 2, 3.5))
+        # A pool whose threads were all replaced still reads zero or more.
+        gone = ({(10, "10"): (100, 4)}, 1_000_000)
+        fresh = ({(10, "77"): (3, 0)}, 1_000_000)
+        self.assertEqual(measure.delta(gone, fresh), (3, 0, 0.0))
 
 
 def write(d, meta, runs):
@@ -212,6 +285,43 @@ class Gates(unittest.TestCase):
         self.assertIn("LOSS on scoot: Idle RSS: rival", lost.stdout)
         self.assertEqual(passed.returncode, 0, passed.stderr)
         self.assertIn("0 loss(es)", passed.stdout)
+
+    def test_a_bar_that_cannot_show_the_scope_is_named_and_not_passed(self):
+        meta, runs = results(scootbar_rss_kb=1024, rival_rss_kb=4096)
+        meta["bars"]["rival"]["cannot_show"] = {"scoot": "no ext-workspace-v1 module"}
+        meta["bars"]["rival"]["ran"] = {"scoot": False}
+        runs = [r for r in runs if r["bar"] != "rival"]
+        with tempfile.TemporaryDirectory() as d:
+            write(d, meta, runs)
+            text, failed = tables.gate(d)
+        self.assertIn("cannot show this scope", text)
+        self.assertIn("- NOT COMPARED on scoot: rival: no ext-workspace-v1 module", text)
+        self.assertEqual(failed, 1, text)
+        self.assertIn("0 loss(es)", text)
+
+    def test_the_machines_readings_are_summarised_beside_the_numbers(self):
+        def reading(cur, cap, ac):
+            return {"cpus": {"cpu0": {"governor": "schedutil", "cur_khz": cur,
+                                      "policy_max_khz": cap, "hw_max_khz": 2424000}},
+                    "temps_c": {"chip/NAND": 31.5}, "power": {"ac": {"type": "Mains", "online": ac}},
+                    "loadavg": [0.1, 0.1, 0.1]}
+
+        meta, runs = results(1024, 4096)
+        runs[3]["hw_start"] = reading(600000, 2424000, "1")
+        runs[3]["hw_end"] = reading(2000000, 1800000, "0")
+        with tempfile.TemporaryDirectory() as d:
+            write(d, meta, runs)
+            text, _ = tables.gate(d)
+        line = next(x for x in text.splitlines() if x.startswith("Machine, 2 readings"))
+        self.assertIn("schedutil", line)
+        self.assertIn("below the hardware maximum in 1", line)
+        self.assertIn("600 to 2000 MHz", line)
+        self.assertIn("offline in 1", line)
+        # M1's runs carry none: no line, no crash.
+        meta, runs = results(1024, 4096)
+        with tempfile.TemporaryDirectory() as d:
+            write(d, meta, runs)
+            self.assertNotIn("Machine,", tables.gate(d)[0])
 
     def test_compare_finds_a_regression_and_ignores_noise(self):
         with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as now:

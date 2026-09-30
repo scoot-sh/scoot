@@ -14,7 +14,9 @@ exits 1 when either fails:
 2. ``report``: **no competitor beats scootbar** at the milestone's scope,
    on any gated row both have. A gated row a competitor has and scootbar
    lacks (its runs failed, or it was not run) fails it too: a gate that
-   cannot be judged has not been passed.
+   cannot be judged has not been passed. So does a competitor that cannot
+   show the scope on a compositor at all (yambar has no ext-workspace
+   module, so not on scoot): it is named, never given a number.
 
 Rows the ratchet does not gate are shown, marked so: the bare executable
 (size is judged with what it links, as ruled), threads and the switching
@@ -87,8 +89,12 @@ def table(meta, runs, compositor):
         cells = []
         for name in bars:
             if not vals.get(name):
-                cells.append("did not run" if not meta["bars"][name].get("ran", {}).get(compositor)
-                             else "n/a")
+                if meta["bars"][name].get("cannot_show", {}).get(compositor):
+                    cells.append("cannot show this scope")
+                elif not meta["bars"][name].get("ran", {}).get(compositor):
+                    cells.append("did not run")
+                else:
+                    cells.append("n/a")
                 continue
             text = scootbg_report.cell(vals[name], unit)
             if name != REFERENCE and not ref and gated:
@@ -142,6 +148,7 @@ def gate(results_dir):
             out.append(f"- tie: {label}: {name}")
         if ties:
             out.append("")
+    out += machine_lines(meta, runs)
     info = meta["bars"].get(REFERENCE, {}).get("code")
     if info:
         out.append(
@@ -151,6 +158,8 @@ def gate(results_dir):
             f"({', '.join(info['dependency_names'])})."
         )
         out.append("")
+    not_compared = [(c, name, why) for name, b in meta["bars"].items()
+                    for c, why in b.get("cannot_show", {}).items()]
     out.append(f"Gate (no competitor beats scootbar): {len(all_losses)} loss(es).")
     for compositor, label, name, ref, other, margin in all_losses:
         out.append(f"- LOSS on {compositor}: {label}: {name} {other:.2f} against "
@@ -160,13 +169,48 @@ def gate(results_dir):
                    "scootbar value.")
     for compositor, label, name in all_unjudged:
         out.append(f"- NO SCOOTBAR VALUE on {compositor}: {label}: {name} has one")
+    if not_compared:
+        out.append(f"Not compared, so not passed: {len(not_compared)} bar and compositor "
+                   "pair(s) cannot show the milestone's scope, so no row was measured or "
+                   "invented for them (the rule does not say what to do then: a maintainer "
+                   "call).")
+    for compositor, name, why in not_compared:
+        out.append(f"- NOT COMPARED on {compositor}: {name}: {why}")
     bad = failures(runs)
     if bad:
         out += ["", f"{len(bad)} failed run(s):"]
         for r in bad:
             first = (r.get("error") or "").splitlines()[:1]
             out.append(f"- {r['compositor']} {r['bar']} {r['row']} round {r['round']}: {first}")
-    return "\n".join(out), len(all_losses) + len(all_unjudged)
+    return "\n".join(out), len(all_losses) + len(all_unjudged) + len(not_compared)
+
+
+def machine_lines(meta, runs):
+    """What the machine did during the runs (``machine.py``): whether the
+    clocks were capped or mains power lost in any record, and the range of
+    the current frequencies seen, so a throttled run says so beside its
+    numbers. Nothing when the runs carry no readings (M1's do not)."""
+    states = [s for r in runs for s in (r.get("hw_start"), r.get("hw_end")) if s]
+    if not states:
+        return []
+    capped = sum(1 for s in states
+                 if any(c["policy_max_khz"] and c["hw_max_khz"]
+                        and c["policy_max_khz"] < c["hw_max_khz"] for c in s["cpus"].values()))
+    curs = [c["cur_khz"] for s in states for c in s["cpus"].values() if c["cur_khz"]]
+    governors = sorted({c["governor"] for s in states for c in s["cpus"].values()
+                        if c["governor"]})
+    mains = [p.get("online") for s in states for p in s["power"].values()
+             if p.get("type") == "Mains"]
+    temps = [v for s in states for v in s["temps_c"].values()]
+    line = (f"Machine, {len(states)} readings around the runs: governor "
+            f"{'/'.join(governors) or '?'}; cpufreq policy cap below the hardware maximum in "
+            f"{capped}; current frequency seen {min(curs) / 1000:.0f} to {max(curs) / 1000:.0f} MHz"
+            if curs else f"Machine, {len(states)} readings around the runs")
+    if mains:
+        line += f"; a mains supply offline in {sum(1 for m in mains if m == '0')} of them"
+    if temps:
+        line += f"; hwmon temperatures {min(temps):.0f} to {max(temps):.0f} C"
+    return [line + ".", ""]
 
 
 def compare(results_dir, baseline_dir):
