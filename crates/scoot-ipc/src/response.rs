@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::event::{EventKind, OutputRemoved, OutputRestored};
+use crate::event::{EventKind, OutputChanged, OutputRemoved, OutputRestored};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
@@ -249,8 +249,8 @@ pub enum Response {
     },
     /// What a `Subscribe` request answers on success: the event kinds this
     /// connection is now dedicated to, echoed back. Afterwards the
-    /// connection carries [`OutputRemoved`]/[`OutputRestored`] (and whatever
-    /// later kinds subscribe to) unasked, and any other request on it is
+    /// connection carries [`OutputRemoved`]/[`OutputRestored`]/
+    /// [`OutputChanged`] unasked, and any other request on it is
     /// refused with an error.
     ///
     /// A new variant, so this is one of the halves that moved
@@ -275,6 +275,14 @@ pub enum Response {
     /// connections subscribed to [`EventKind::Output`], under the same
     /// version move as `OutputRemoved`.
     OutputRestored(OutputRestored),
+    /// An output's mode changed in place; see [`OutputChanged`] for what
+    /// each field means and when this fires. Sent only to connections
+    /// subscribed to [`EventKind::Output`].
+    ///
+    /// A new variant, so this moves `PROTOCOL_VERSION` 4 → 5 (see that
+    /// constant's doc): an older client handed one would fail its decode,
+    /// which can only happen to a client new enough to have subscribed.
+    OutputChanged(OutputChanged),
     Error {
         message: String,
     },

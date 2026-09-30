@@ -2,9 +2,9 @@
 //! `PROTOCOL_VERSION` bump.
 
 use scoot_ipc::{
-    Action, EventKind, Horizontal, OutputRemoved, OutputRestored, OutputSnapshot, PROTOCOL_VERSION,
-    PointerButton, Rect, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, WindowSnapshot,
-    decode, encode,
+    Action, EventKind, Horizontal, OutputChanged, OutputRemoved, OutputRestored, OutputSnapshot,
+    PROTOCOL_VERSION, PointerButton, Rect, Request, Response, SCREENSHOT_CURSOR_DEFAULT,
+    Screenshot, WindowSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -413,14 +413,14 @@ fn a_reload_report_round_trips_with_both_lists() {
 
 /// The Phase 4-6 record: the refusal *strings* moved (restart wording, the
 /// autostart spawn delta) while the reply *shape* did not -- so this still
-/// decodes as the same two string lists. (The protocol is at 4 now for the
-/// event subscription below; these strings are still payload, not wire.)
+/// decodes as the same two string lists. (The protocol is at 5 now for the
+/// output-changed event below; these strings are still payload, not wire.)
 /// Strings are payload, not wire format: an older client parses this reply
 /// exactly as it parsed the old strings.
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 4,
+        PROTOCOL_VERSION, 5,
         "no new reply variant or field shipped with the reload completion"
     );
     let response = Response::Reloaded {
@@ -853,6 +853,34 @@ fn an_output_restored_event_round_trips_with_what_moved() {
             "adopter_active": 0,
             "origin": "DP-1",
             "moved": 3,
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+/// The changed-mode payload: the same connector at a new framebuffer size,
+/// with the scale it keeps running at.
+#[test]
+fn an_output_changed_event_round_trips_with_the_new_mode() {
+    let response = Response::OutputChanged(OutputChanged {
+        output: 1,
+        name: "DP-1".into(),
+        width: 2952,
+        height: 1660,
+        scale: 1.5,
+    });
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "output_changed",
+            "output": 1,
+            "name": "DP-1",
+            "width": 2952,
+            "height": 1660,
+            "scale": 1.5,
         })
     );
     assert_eq!(

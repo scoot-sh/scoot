@@ -22,7 +22,7 @@ pub use action::{Action, Horizontal, Vertical};
 #[cfg(unix)]
 pub use client::Client;
 pub use codec::{decode, encode, read_message, read_message_buffered, write_message};
-pub use event::{EventKind, OutputRemoved, OutputRestored};
+pub use event::{EventKind, OutputChanged, OutputRemoved, OutputRestored};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
 pub use request::{PointerButton, Request, SCREENSHOT_CURSOR_DEFAULT};
 pub use response::{OutputSnapshot, Rect, Response, Screenshot, WindowSnapshot};
@@ -55,4 +55,8 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// existing clients nothing at runtime -- while an unknown event kind in a
 /// `subscribe` is answered with an ordinary `Error` like any unknown
 /// request tag, so an older server meets a newer subscriber the same way.
-pub const PROTOCOL_VERSION: u32 = 4;
+///
+/// And again 4 → 5 for the output-changed event (2026-10): one new tag,
+/// `Response::OutputChanged`, under the same rule -- only a subscriber ever
+/// receives one.
+pub const PROTOCOL_VERSION: u32 = 5;

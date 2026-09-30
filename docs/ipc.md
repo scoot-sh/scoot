@@ -229,6 +229,7 @@ $ scootctl subscribe
 {"type":"subscribed","events":["output"]}
 {"type":"output_removed","output":2,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":0,"adopter_active":2,"origin":"DP-1"}
 {"type":"output_restored","output":3,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":2,"adopter_active":0,"origin":"DP-1","moved":3}
+{"type":"output_changed","output":1,"name":"DP-1","width":2952,"height":1660,"scale":1.5}
 ```
 
 `scootctl subscribe` prints the answer, then one compact JSON object per
@@ -245,10 +246,13 @@ Three rules, matching the request/reply contract beside them:
   requests — they pipeline, so one is enough for any number of them.
 - **Filtering is by kind, not by field.** The server sends every event of
   the subscribed kinds, and the client filters or debounces further
-  itself. In particular both payloads below fire on every monitor standby
-  too (a routine unplug to scoot) — that is accepted, and it is the
-  difference from a notification pushed at the user unconditionally, which
-  is why scoot still draws and sends nothing itself.
+  itself. In particular the removal/restore pair below fires on every
+  monitor standby too (a routine unplug to scoot) — that is accepted, and
+  it is the difference from a notification pushed at the user
+  unconditionally, which is why scoot still draws and sends nothing
+  itself. `output_changed` fires only on an applied resize, never on
+  standby (the mode is unchanged then), and a refused resize fires
+  nothing.
 - **The same socket and the same credentials.** There is no second channel:
   a subscriber connects to the same `0600`, same-user control socket every
   other client uses.
@@ -274,6 +278,26 @@ the restore and after it returns to its pre-adopt view (`null` when the
 adopter itself is gone, e.g. a chained unplug whose middle monitor never
 returned — then nothing moved either).
 
+**`output_changed`** — an output's mode changed in place: the same
+connector at a new framebuffer size, with the scale it keeps running at (a
+mode change never changes the scale). This is the re-probe resize — a
+`--tty` hotplug offering a new mode for a connector that stays connected
+(a VM window moving between displays of different densities), or a
+`--nested` host window being resized — not a removal: no workspace is
+adopted, nothing moves, and no restore follows. A script watching density
+recomputes the scale it wants from `width` / `height` and applies it with a
+config reload (`output.scale` and `outputs.<name>.scale` apply live);
+polling `outputs` gives the same numbers, this just says when to look. It
+fires once per applied resize, after the windows are re-laid-out at the new
+size; a resize the render target refuses fires nothing.
+
+| Field | Meaning |
+| --- | --- |
+| `output` | The output's id, as `outputs` reports it. |
+| `name` | Its connector name (`DP-1` under `--tty`, `headless-2` otherwise) — the same string `outputs` names it by. |
+| `width` / `height` | The new framebuffer size in physical pixels. |
+| `scale` | The scale the output keeps running at — the scale to recompute *from*. |
+
 A subscriber that stops reading is disconnected rather than buffered
 without bound: past the same 1 MiB queued-reply bound a connection
 observes, or with no byte leaving for the same 10-second stall window, the
@@ -281,8 +305,9 @@ compositor shuts the connection down and drops the subscription. Output
 removal never waits for a subscriber. A client that disconnects itself
 leaves no record behind.
 
-Versioning: the subscription is IPC protocol 4 — the `subscribed`,
-`output_removed` and `output_restored` tags under one bump. A client that
+Versioning: the subscription is IPC protocol 5 — the `subscribed`,
+`output_removed` and `output_restored` tags under the 3 → 4 bump, plus the
+`output_changed` tag under 4 → 5. A client that
 never sends `subscribe` never receives any of them. An unknown event kind
 in a `subscribe` is answered with an ordinary `error` like any unknown
 request tag, so an older server meets a newer subscriber with an error,

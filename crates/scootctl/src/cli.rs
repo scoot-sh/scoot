@@ -536,8 +536,8 @@ mod tests {
     fn version_string_tracks_both_constants() {
         // The no-drift pin: the expected line is recomputed from the same
         // two constants the helper derives from, so moving either constant
-        // without the string fails here. A hardcoded `"3"` surviving a
-        // `PROTOCOL_VERSION` 3 -> 4 is exactly what this catches.
+        // without the string fails here. A hardcoded `"4"` surviving a
+        // `PROTOCOL_VERSION` 4 -> 5 is exactly what this catches.
         assert_eq!(
             version_string(),
             format!(
@@ -546,7 +546,7 @@ mod tests {
                 scoot_ipc::PROTOCOL_VERSION
             )
         );
-        // And the shape the ticket fixes: `scoot 0.1.0 (ipc protocol 4)`,
+        // And the shape the ticket fixes: `scoot 0.1.0 (ipc protocol 5)`,
         // one line, no trailing newline (`print_line` adds it).
         assert!(version_string().starts_with("scoot "));
         assert!(!version_string().ends_with('\n'));

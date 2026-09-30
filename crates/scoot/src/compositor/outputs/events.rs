@@ -1,4 +1,4 @@
-//! IPC event subscription over output remove and restore.
+//! IPC event subscription over output remove, restore and in-place resize.
 //!
 //! The ticket's pins, on headless outputs with a real client holding
 //! windows on them (identity is name-only here -- the EDID half is pinned
@@ -18,14 +18,16 @@
 //! 5. a part-written tail drains on the tick, and is given up on only with
 //!    no progress at all -- a slow reader is never dropped;
 //! 6. the adversarial halves: an empty subscribe is refused, and a dropped
-//!    connection leaves no record.
+//!    connection leaves no record;
+//! 7. resizing an output in place tells the subscriber the new mode and the
+//!    scale it keeps -- and a resize that fails fires nothing.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use scoot_core::{Action, OutputId, Vertical, WindowId};
-use scoot_ipc::{EventKind, OutputRemoved, OutputRestored, Response, decode};
+use scoot_ipc::{EventKind, OutputChanged, OutputRemoved, OutputRestored, Response, decode};
 
 use super::per_output::{Ack, CANVAS, Step, session};
 use crate::compositor::headless;
@@ -395,6 +397,48 @@ fn drain(client: &UnixStream) {
         if count == 0 {
             break;
         }
+    }
+}
+
+/// A resize that changes an output's mode in place tells subscribers the
+/// new size and the scale it keeps: the hook a density-watching script
+/// recomputes its scale from (gh #318), without polling `outputs`.
+#[test]
+fn a_subscriber_learns_about_an_in_place_resize() {
+    let mut harness = session(2);
+    let client = subscribe(&mut harness, 7);
+
+    assert!(harness.state.resize_output_of(OutputId(2), 300, 220));
+    harness.settle();
+    assert_eq!(
+        next_event(&client),
+        Response::OutputChanged(OutputChanged {
+            output: 2,
+            name: "headless-2".into(),
+            width: 300,
+            height: 220,
+            scale: 1.0,
+        })
+    );
+}
+
+/// A resize that fails (no such output) fires nothing: `false` means
+/// nothing changed, so there is nothing to report.
+#[test]
+fn a_failed_resize_fires_no_changed_event() {
+    let mut harness = session(2);
+    let mut client = subscribe(&mut harness, 7);
+
+    assert!(!harness.state.resize_output_of(OutputId(99), 300, 220));
+    harness.settle();
+    // The emission is synchronous with the resize, so whatever arrived is
+    // already queued: a non-blocking read answers at once, with no timeout
+    // to wait out either way.
+    client.set_nonblocking(true).expect("non-blocking");
+    let mut byte = [0u8; 1];
+    match client.read(&mut byte) {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        other => panic!("a failed resize must fire no event, got {other:?}"),
     }
 }
 

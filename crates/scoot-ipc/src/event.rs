@@ -41,8 +41,9 @@ use serde::{Deserialize, Serialize};
 
 /// One class of event a connection can subscribe to.
 ///
-/// Only [`EventKind::Output`] exists today (output removed/restored -- see
-/// [`OutputRemoved`] and [`OutputRestored`]). Adding a kind is additive on
+/// Only [`EventKind::Output`] exists today (output removed/restored/changed
+/// -- see [`OutputRemoved`], [`OutputRestored`] and [`OutputChanged`]).
+/// Adding a kind is additive on
 /// the request half, like adding an action: a client that never names it
 /// sends -- and a server decodes -- byte-for-byte what it did before, and
 /// an older server meets the new name with an ordinary `Error`, not a kill.
@@ -51,9 +52,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
-    /// Output removed and output restored, carrying the adoption: which
-    /// output adopted the removed output's workspaces, the adopted workspace
-    /// range, and the adopter's active workspace before and after.
+    /// Output removed, restored and changed, carrying the adoption for the
+    /// first two (which output adopted the removed output's workspaces, the
+    /// adopted workspace range, and the adopter's active workspace before
+    /// and after) and the new mode for the third.
     Output,
 }
 
@@ -141,4 +143,37 @@ pub struct OutputRestored {
     /// How many still-open windows actually moved back. Windows moved by
     /// hand or closed in between stay where they are.
     pub moved: usize,
+}
+
+/// An output's mode changed in place: the same connector at a new
+/// framebuffer size, with the scale it keeps running at.
+///
+/// This is the re-probe resize -- a `--tty` hotplug offering a new mode for
+/// a connector that stays connected (a VM window moving between displays of
+/// different densities), or a `--nested` host window being resized -- not a
+/// removal: no workspace is adopted, nothing moves, and no restored event
+/// follows. A script watching density (per-pixel size against physical size)
+/// recomputes the scale it wants from `width`/`height` and applies it with
+/// a config reload (`output.scale` and `outputs.<name>.scale` apply live);
+/// polling `outputs` gives the same numbers, this just says when to look.
+///
+/// Fires once per applied resize, after the windows are re-laid-out at the
+/// new size. A resize the render target refuses fires nothing: the output
+/// stays at its old size, which no client was left believing otherwise. A
+/// same-size call still counts as applied: callers skip those before
+/// reaching here, so every event names a size that actually changed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutputChanged {
+    /// The output's id, as `outputs` reports it.
+    pub output: u64,
+    /// Its connector name (`DP-1` under `--tty`, `headless-2` otherwise) --
+    /// the same string `outputs` names it by.
+    pub name: String,
+    /// The new framebuffer size in physical pixels.
+    pub width: i32,
+    /// The new framebuffer size in physical pixels.
+    pub height: i32,
+    /// The scale the output keeps running at: a mode change never changes
+    /// the scale, so this is the scale to recompute *from*.
+    pub scale: f64,
 }

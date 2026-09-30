@@ -3,18 +3,20 @@
 //! A subscription dedicates one connection to events (see `scoot_ipc::event`
 //! for the protocol half): `Request::Subscribe` names the [`EventKind`]s,
 //! the reply is `Response::Subscribed`, and afterwards the connection
-//! carries [`Response::OutputRemoved`]/[`Response::OutputRestored`] unasked
-//! as outputs come and go. This module is the server side of that: who is
-//! subscribed, getting events to them, and dropping subscribers that stop
-//! reading.
+//! carries [`Response::OutputRemoved`]/[`Response::OutputRestored`]/
+//! [`Response::OutputChanged`] unasked as outputs come, go and change size.
+//! This module is the server side of that: who is subscribed, getting events
+//! to them, and dropping subscribers that stop reading.
 //!
 //! The shape mirrors the socket's two existing hand-offs (`PendingIdle`,
 //! `PendingShot`): a subscriber is a clone of its connection's socket --
 //! which shares the file status flags, so it is non-blocking like the
 //! original -- plus the same [`Outbound`] queue a connection uses. Events
 //! are emitted on the event-loop thread from the hotplug paths
-//! (`State::remove_output`, `State::restore_displaced`), which are cold
-//! (a monitor plug cycle, never per frame), so one encode per event plus
+//! (`State::remove_output`, `State::restore_displaced`) and the resize path
+//! (`State::resize_output_of`), which are cold
+//! (a monitor plug cycle or mode change, never per frame), so one encode
+//! per event plus
 //! one clone per subscriber is the whole cost, and subscribing costs
 //! nothing per message or frame: the connection loop answers requests
 //! exactly as before, with one boolean check for the dedicated-connection
@@ -47,7 +49,7 @@
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use scoot_ipc::{EventKind, OutputRemoved, OutputRestored, Response, encode};
+use scoot_ipc::{EventKind, OutputChanged, OutputRemoved, OutputRestored, Response, encode};
 
 use super::{Outbound, State};
 
@@ -139,7 +141,16 @@ impl State {
         self.emit(EventKind::Output, &line);
     }
 
-    /// The shared tail of both emitters: one encoded line to every
+    /// Sends an output-changed event to every `Output` subscriber.
+    /// See the module doc for what happens to one that stops reading.
+    pub fn emit_output_changed(&mut self, event: OutputChanged) {
+        let Ok(line) = encode(&Response::OutputChanged(event)) else {
+            return;
+        };
+        self.emit(EventKind::Output, &line);
+    }
+
+    /// The shared tail of all three emitters: one encoded line to every
     /// subscriber of `kind`.
     ///
     /// `line` is encoded once, outside, and cloned per subscriber -- one
