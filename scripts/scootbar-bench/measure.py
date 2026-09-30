@@ -32,6 +32,7 @@ import signal
 import subprocess
 import time
 
+import machine
 import procs
 
 START_TIMEOUT = 30.0
@@ -141,7 +142,15 @@ def base(stage, bar, row, round_no):
         "round": round_no,
         "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "loadavg": os.getloadavg()[0],
+        "hw_start": machine.state(),
     }
+
+
+def finish(rec):
+    """Stamps the machine's state at the end of a record (``machine.py``),
+    so a run that throttled or lost mains power shows it."""
+    rec["hw_end"] = machine.state()
+    return rec
 
 
 def wait_quiet(trace, quiet_s=QUIET_S, timeout=QUIET_TIMEOUT):
@@ -176,32 +185,57 @@ def startup(stage, bar, argv, rounds):
         finally:
             if run is not None:
                 run.close()
-        out.append(rec)
+        out.append(finish(rec))
     return out
 
 
-def screen_ok(stage, magick, rgb):
-    """Whether the bar's own color is at the top left of the output (every
-    bar here is configured with it); ``None`` when there is no screenshot
-    or no ImageMagick to read one."""
+PART_W = 300
+BAR_H = 26
+OUTPUT_W = 1920
+
+
+def screen_ok(stage, magick, rgb, parts=()):
+    """``(ok, missing)`` from one screenshot of the output. ``ok``: the
+    bar's own color is at the top, at the middle of its width where no
+    module is placed (the workspaces are on the left and the clock on the
+    right; a pixel at the corner could be a workspace's). ``missing``: the
+    parts of ``parts`` (``left``, ``center``, ``right``) whose 300-pixel
+    span of the bar shows only one color, so their modules drew nothing
+    (Waybar's ``ext/workspaces`` with no workspace protocol would do that).
+    Both are ``None`` when there is no screenshot or no ImageMagick to
+    read one."""
     if not magick:
-        return None
+        return None, None
     png = stage.sess.screenshot(1, stage.sess.path("shot.png"))
     if not png:
-        return None
+        return None, None
     r = subprocess.run(
-        [magick, png, "-format", "%[fx:int(255*p{4,4}.r)],%[fx:int(255*p{4,4}.g)],"
-         "%[fx:int(255*p{4,4}.b)]", "info:"],
+        [magick, png, "-format", "%[fx:int(255*p{960,4}.r)],%[fx:int(255*p{960,4}.g)],"
+         "%[fx:int(255*p{960,4}.b)]", "info:"],
         capture_output=True, text=True,
     )
     try:
         got = [int(v) for v in r.stdout.strip().split(",")]
     except ValueError:
-        return None
-    return all(abs(a - b) <= 1 for a, b in zip(got, rgb))
+        return None, None
+    missing = []
+    x0 = {"left": 0, "center": (OUTPUT_W - PART_W) // 2, "right": OUTPUT_W - PART_W}
+    for part in parts:
+        r = subprocess.run(
+            [magick, png, "-crop", f"{PART_W}x{BAR_H}+{x0[part]}+0", "+repage",
+             "-format", "%k", "info:"],
+            capture_output=True, text=True,
+        )
+        try:
+            if int(r.stdout.strip()) < 2:
+                missing.append(part)
+        except ValueError:
+            return None, None
+    return all(abs(a - b) <= 1 for a, b in zip(got, rgb)), missing
 
 
-def idle(stage, bar, argv, settle_s, window_s, switches, hz, magick=None, rgb=(0x1e, 0x1e, 0x2e)):
+def idle(stage, bar, argv, settle_s, window_s, switches, hz, magick=None, rgb=(0x1e, 0x1e, 0x2e),
+         parts=()):
     rec = base(stage, bar, "idle", 1)
     run = BarRun(stage, bar, argv, "idle")
     try:
@@ -233,7 +267,8 @@ def idle(stage, bar, argv, settle_s, window_s, switches, hz, magick=None, rgb=(0
             threads=sum(m["threads"] for m in mem),
             fds=sum(m["fds"] for m in mem),
         )
-        rec["screen_ok"] = screen_ok(stage, magick, rgb)
+        rec["screen_ok"], missing = screen_ok(stage, magick, rgb, parts)
+        rec["parts_missing"] = missing
         if switches:
             before = sample(run.group)
             t_start = time.monotonic()
@@ -250,11 +285,13 @@ def idle(stage, bar, argv, settle_s, window_s, switches, hz, magick=None, rgb=(0
                 rss_after_switching_kb=sum(procs.rss_kb(p) for p in run.group.pids()),
             )
             stage.switch(0)
-        rec["ok"] = run.alive() and rec["screen_ok"] is not False
+        rec["ok"] = run.alive() and rec["screen_ok"] is not False and not missing
         if rec["screen_ok"] is False:
             rec["error"] = "the bar's color is not at the top of the output"
+        elif missing:
+            rec["error"] = f"nothing drawn in the bar's {', '.join(missing)} part"
     except (RuntimeError, OSError, subprocess.SubprocessError) as e:
         rec.update(ok=False, error=str(e))
     finally:
         run.close()
-    return [rec]
+    return [finish(rec)]

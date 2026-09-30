@@ -3,7 +3,7 @@
 benchmark (docs/scootbar/backlog/lightest.md).
 
     scripts/scootbar-bench/bench.py run --out DIR [--compositors scoot,sway]
-        [--bars scootbar,yambar,waybar] [--scope clock] [--rounds 5]
+        [--bars scootbar,yambar,waybar] [--scope clock|clock-workspaces] [--rounds 5]
         [--settle-secs 30] [--idle-secs 300] [--switches 240] [--switch-hz 4]
     scripts/scootbar-bench/bench.py report DIR
     scripts/scootbar-bench/bench.py compare DIR BASELINE_DIR
@@ -52,6 +52,7 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.append(os.path.join(REPO, "scripts", "scootbg-bench"))
 
 import bars as B  # noqa: E402
+import machine as hw  # noqa: E402
 import measure  # noqa: E402
 import size  # noqa: E402
 import tables  # noqa: E402
@@ -83,22 +84,33 @@ def version_line(argv, env=None):
 
 
 def machine():
-    info = {"kernel": platform.release(), "cpus": os.cpu_count(), "loadavg_start": os.getloadavg()}
+    info = {"kernel": platform.release(), "arch": platform.machine(), "cpus": os.cpu_count(),
+            "page_size": os.sysconf("SC_PAGE_SIZE"), "loadavg_start": os.getloadavg(),
+            "start": hw.state()}
     try:
         with open("/proc/cpuinfo") as f:
             info["cpu"] = next(line.split(":", 1)[1].strip() for line in f
                                if line.startswith("model name"))
     except (OSError, StopIteration):
-        pass
+        # aarch64's /proc/cpuinfo has no model name: lscpu has.
+        try:
+            lscpu = subprocess.run(["lscpu"], capture_output=True, text=True, timeout=10).stdout
+            names = [line.split(":", 1)[1].strip() for line in lscpu.splitlines()
+                     if line.startswith("Model name")]
+            vendor = next((line.split(":", 1)[1].strip() for line in lscpu.splitlines()
+                           if line.startswith("Vendor ID")), "")
+            info["cpu"] = f"{vendor} {' + '.join(names)}".strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
     return info
 
 
-def code_size():
+def code_size(source):
     """scootbar's own size, the ratchet's maintainability rows: lines of
-    Rust under ``crates/scootbar/src`` (and outside its ``tests.rs``
-    files), and its direct dependencies on Linux (normal ones, from
-    ``cargo metadata``)."""
-    root = os.path.join(REPO, "crates", "scootbar", "src")
+    Rust under ``crates/scootbar/src`` of the tree ``source`` (the one the
+    binary was built from) and outside its ``tests.rs`` files, and its
+    direct dependencies on Linux (normal ones, from ``cargo metadata``)."""
+    root = os.path.join(source, "crates", "scootbar", "src")
     lines = outside = 0
     for dirpath, _dirs, names in os.walk(root):
         for name in names:
@@ -108,7 +120,7 @@ def code_size():
                 lines += n
                 outside += 0 if name == "tests.rs" else n
     r = subprocess.run(["cargo", "metadata", "--no-deps", "--format-version", "1"],
-                       cwd=REPO, capture_output=True, text=True, check=True)
+                       cwd=source, capture_output=True, text=True, check=True)
     package = next(p for p in json.loads(r.stdout)["packages"] if p["name"] == "scootbar")
     names = sorted({
         d["name"] for d in package["dependencies"]
@@ -194,7 +206,12 @@ def cmd_run(a):
                            if k != "files"}
         meta["bars"][bar.name] = entry
     if B.Scootbar in (type(b) for b in roster):
-        meta["bars"]["scootbar"]["code"] = code_size()
+        meta["bars"]["scootbar"]["code"] = code_size(a.scootbar_source)
+        meta["bars"]["scootbar"]["source"] = {
+            "tree": a.scootbar_source,
+            "commit": subprocess.run(["git", "-C", a.scootbar_source, "rev-parse", "HEAD"],
+                                     capture_output=True, text=True).stdout.strip(),
+        }
 
     runs_path = os.path.join(a.out, "runs.jsonl")
     meta_path = os.path.join(a.out, "meta.json")
@@ -217,17 +234,28 @@ def cmd_run(a):
     save_meta()
     for compositor in compositors:
         for bar in roster:
+            why = bar.cannot_show(a.scope, compositor)
+            if why:
+                # Not run, and no number invented: the report names it.
+                meta["bars"][bar.name].setdefault("cannot_show", {})[compositor] = why
+                meta["bars"][bar.name]["ran"][compositor] = False
+                print(f"[{time.strftime('%H:%M:%S')}] {compositor:5} {bar.name:8} "
+                      f"NOT RUN at scope {a.scope}: {why}", flush=True)
+                save_meta()
+                continue
             with Stage(compositor, bins, stage_tools, keep=a.keep) as stage:
                 config_dir = stage.sess.path("config", bar.name)
                 os.makedirs(config_dir, exist_ok=True)
-                argv = bar.write_config(config_dir, font_file, a.scope)
+                argv = bar.write_config(config_dir, font_file, a.scope, compositor)
                 recs = measure.startup(stage, bar, argv, a.rounds)
                 recs += measure.idle(stage, bar, argv, a.settle_secs, a.idle_secs, a.switches,
-                                     a.switch_hz, magick=magick)
+                                     a.switch_hz, magick=magick,
+                                     parts=tuple(B.SCOPES[a.scope]))
                 record(recs)
                 meta["bars"][bar.name]["ran"][compositor] = any(r.get("ok") for r in recs)
                 save_meta()
     meta["machine"]["loadavg_end"] = os.getloadavg()
+    meta["machine"]["end"] = hw.state()
     save_meta()
     text = tables.render(a.out)
     with open(os.path.join(a.out, "table.md"), "w") as f:
@@ -264,6 +292,9 @@ def main():
     r.add_argument("--scootbar", default=os.path.join(target, "release", "scootbar"))
     r.add_argument("--scoot", default=os.path.join(target, "release", "scoot"))
     r.add_argument("--scootctl", default=os.path.join(target, "release", "scootctl"))
+    r.add_argument("--scootbar-source", default=REPO,
+                   help="the source tree --scootbar was built from, for the code rows "
+                        "(default: this one)")
     r.add_argument("--keep", action="store_true", help="keep each stage's scratch directory")
     rp = sub.add_parser("report")
     rp.add_argument("dir")

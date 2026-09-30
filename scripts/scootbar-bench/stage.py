@@ -85,11 +85,16 @@ class Stage:
         )
         if not wait_until(lambda: os.path.exists(bus), PATIENCE):
             raise RuntimeError("the session bus did not come up")
-        self.env = self.sess.client_env({
+        extra = {
             "FONTCONFIG_FILE": fonts,
             "DBUS_SESSION_BUS_ADDRESS": f"unix:path={bus}",
             "LANG": "C.UTF-8",
-        })
+        }
+        if self.kind == "sway":
+            # A bar's sway workspaces module (Waybar's `sway/workspaces`,
+            # yambar's `i3`) finds sway's IPC socket here.
+            extra["SWAYSOCK"] = self.sess.ipc
+        self.env = self.sess.client_env(extra)
         self.window()
         self.switch(1)
         self.window()
