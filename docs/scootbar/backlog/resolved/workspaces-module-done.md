@@ -101,7 +101,7 @@ Time and workspaces on every output, verified by screenshot, at real scale.
   generalizes it later.
 - **The pill is rectangular**, an accent fill with the number in the
   bar's background: the canvas has no rounded shape until
-  [appearance](../appearance.md) brings one (with its snapshots).
+  [appearance](appearance-done.md) brings one (with its snapshots).
   Default layout unchanged (clock center); `--left workspaces` places it.
 - **Review finding, fixed before merge**: a click landing on a pill
   whose workspace was `Removed` since the last `done` would `activate`

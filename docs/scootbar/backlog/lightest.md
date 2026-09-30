@@ -56,21 +56,43 @@ milestone's table kept, not overwritten.
 
 ## Appearance looks (flush against floating)
 
-[appearance](appearance.md) is done when the flush and floating looks have
-measured costs published here. `scripts/scootbar-appearance-hw-test.sh`
+[appearance](resolved/appearance-done.md) was done when the flush and floating
+looks had measured costs published here. `scripts/scootbar-appearance-hw-test.sh`
 measures them (four looks: flush-opaque, rounded-opaque,
 rounded-translucent, floating), on real `--tty` hardware for the numbers that
-count; [testing.md](../testing.md#the-appearance-hardware-test) has the
-method and what to send back. Paste its `summary.tsv` here, one row per look,
-with the run's `environment.txt` (the commit and binaries it was taken against)
-under it:
+count; [testing.md](../testing.md#the-appearance-hardware-test) has the method.
+
+Measured 2026-09-30 on the Asahi M2 (NixOS aarch64, 8 CPUs), `--tty` on VT 2,
+DejaVu Sans as the clock's font (`SCOOTBAR_HW_FONT`), release builds of scoot
+and scootbar from `main` at `ee8948f`; the script was `653e370` (it differs from
+`ee8948f` only in the font option). One run, 14 PASS, 0 FAIL. **Two outputs
+were live**, the panel (eDP-1, 2560x1600) and an external monitor (DP-1,
+1920x1080), both at scale 1, and the default `outputs = "all"` put a bar on
+each: RSS and the redraw costs below are for **two bars**, so they are not
+comparable as they stand with the one-output clock-scope numbers above (rerun
+with `outputs = ["eDP-1"]` for that). Idle is 20 s after settling; a redraw is
+one of 300 whole-bar redraws (`scootbar msg reload`); the cursor number is
+scoot's CPU per pointer move over the bar in an 8 s paced sweep.
 
 | Look | scootbar RSS kB | idle wakeups / 20 s | idle jiffies | whole-bar redraw: scootbar / scoot ms | cursor move over the bar: scoot ms |
 | --- | --- | --- | --- | --- | --- |
-| flush-opaque | pending hardware | | | | |
-| rounded-opaque | pending hardware | | | | |
-| rounded-translucent | pending hardware | | | | |
-| floating | pending hardware | | | | |
+| flush-opaque | 3872 | 0 | 0 | 0.20 / 0.10 | 0.86 |
+| rounded-opaque | 3920 | 0 | 0 | 0.23 / 0.13 | 0.81 |
+| rounded-translucent | 4496 | 2 | 0 | 0.23 / 0.13 | 0.86 |
+| floating | 3936 | 0 | 0 | 0.23 / 0.13 | 0.81 |
+
+How to read it. Jiffies are 10 ms, so one jiffy over 300 redraws is 0.033 ms:
+the +0.03 ms of every rounded or floating look against flush is **one jiffy,
+not a measured cost**, and the cursor rows differ by less than the script's
+own rule (trust a difference only past a jiffy per hundred moves). What the
+run does show: a rounded, translucent or floating bar costs no more than a
+flush one that this method can resolve, and all four idle at 0 jiffies. The
+translucent look had two context switches in its window (within the limit of
+8; not attributed, the clock's minute tick being the likely cause) and an RSS
+576 kB above the other three. A first run with no clock font (3536, 3600, 3616,
+3616 kB) showed no such gap, so that RSS difference is one run's result to
+re-check, not yet a finding. The raw files (`summary.tsv`, `pixels.tsv`,
+`environment.txt`, screenshots, protocol traces) are not committed.
 
 The rule applies as ever: none of these rows may regress the clock-scope
 numbers above, and a look that costs real CPU or memory is off by default

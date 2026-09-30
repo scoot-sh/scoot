@@ -1,10 +1,11 @@
 ---
 title: "Appearance: floating or flush, rounded corners, opacity, separators, state colors"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M3"
+resolved: "2026-09-30"
 ---
 
 # Appearance
@@ -24,7 +25,7 @@ radius and scale in the scene); opacity (`bar.opacity`, a premultiplied
 corner squares out, or none when translucent); snapshot scenes for the
 rounded bar at 1x and 1.5x and a translucent one; a headless-scoot test of
 each on screenshots; the measured fill costs in
-[cli.md](../cli.md#shape-and-opacity). Both options are file-only.
+[cli.md](../../cli.md#shape-and-opacity). Both options are file-only.
 
 **Landed (second slice):**
 
@@ -52,41 +53,34 @@ each on screenshots; the measured fill costs in
   the drawn pill. Snapshots at 1x and 1.5x for each, two digits included.
 - **The example**: a `[bar]` snippet with `margin` equal to scoot's window
   gap and the two settings to change together, in
-  [cli.md](../cli.md#margins). The default look is unchanged: flush, square
+  [cli.md](../../cli.md#margins). The default look is unchanged: flush, square
   and opaque; making it floating stays a product call.
 - **`scripts/scootbar-appearance-hw-test.sh`**, the hardware test, and its
-  method in [testing.md](../testing.md#the-appearance-hardware-test).
+  method in [testing.md](../../testing.md#the-appearance-hardware-test).
   Rehearsed on `--headless` and `--nested` (14 PASS, 0 FAIL, the pixel,
   zone, protocol and click checks).
 
-**Remaining:**
+**Resolved 2026-09-30, on the measured costs.** The "done when" is met: the
+default look is good with no config (flush, square, opaque, unchanged), each
+option is documented in [cli.md](../../cli.md), and the flush, rounded,
+translucent and floating looks have measured costs on real `--tty` hardware,
+published in the [resource ratchet](../lightest.md#appearance-looks-flush-against-floating):
+14 PASS, 0 FAIL on the Asahi M2; the three shaped looks cost no more than the
+flush one that a 10 ms-jiffy method can resolve, and all four idle at 0 jiffies.
+That run had two outputs live (two bars), which the table says; one figure, the
+translucent look's RSS, is a single run's difference to re-check, not a finding.
+Making the run include a real clock needed one script change,
+`SCOOTBAR_HW_FONT` (a NixOS box keeps its fonts in the store, where the script
+did not look).
 
-- **The measured flush and floating costs, published with the
-  [resource ratchet](lightest.md#appearance-looks-flush-against-floating).**
-  Needs real hardware: run the script with `SCOOTBAR_HW_MODE=--tty` and paste
-  `summary.tsv` into that table. This is what keeps the ticket open.
-- **The `hover` token and per-module token-per-state overrides.** Not
-  built, on purpose. The bar tracks the pointer's position for a press
-  (`pointer_on`), but nothing draws a hover: a hover state needs motion to
-  redraw the module under it and back, which is
-  [pointer-and-interactions](pointer-and-interactions.md) (M4), not built. A
-  token no module can enter has no honest test beyond forcing it. The four
-  classes already map to tokens, and the only module that sets one
-  (workspaces) does not; per-module overrides have nothing to override yet.
-- **Dot-style workspace indicators** (a row of small dots in place of the
-  numbers) and **colors for inactive workspaces or per-state pill colors**:
-  separate follow-ups, not built here.
-- **The default margin matching scoot's gap**: still a product call
-  (the default is flush, square and opaque).
-- **The opt-in animation question**: dropped, unmeasured (no frame callbacks
-  were added).
-- **A circle wider than its module**: a circle's diameter is limited to the
-  module's span (text plus `padding` each side), so a big pill on a small
-  `padding` is an oval; documented in
-  [cli.md](../cli.md#the-active-workspaces-pill). Growing the module's own
-  span to the diameter is the alternative, if the maintainer wants a disc at
-  any padding.
-- **Per-output overrides** stay with [multi-output](multi-output.md).
+**What is not done, and where it went:** the `hover` token and per-module
+token-per-state overrides (they need pointer motion, so
+[pointer-and-interactions](../pointer-and-interactions.md)), dot-style workspace
+indicators, colors for inactive workspaces, a disc at any padding, and the
+default margin matching scoot's gap (a product call) are filed together in
+[appearance-followups](../appearance-followups.md). The opt-in animation question
+is dropped, unmeasured (no frame callbacks were added). Per-output overrides
+are [multi-output](multi-output-done.md).
 
 ## What to build
 
@@ -105,7 +99,7 @@ each on screenshots; the measured fill costs in
     floating bar lines up with the tiling; document the two settings to change
     together.
   - **Per-output override** of every one of these belongs to
-    [multi-output](resolved/multi-output-done.md).
+    [multi-output](multi-output-done.md).
 - **Exclusive zone with a margin**: the reserved strip must be the bar plus the
   margin on its anchored edge, or windows sit too close or too far. Whether
   scoot counts that margin toward the zone is checked against the pinned
@@ -122,7 +116,7 @@ each on screenshots; the measured fill costs in
   coverage, no supersampling; edge pixels cached, not recomputed per frame.
   The rounded rectangle lands with **snapshot tests** at 1x and a
   fractional scale (a scene in `crates/scootbar/src/snapshots/tests.rs`;
-  [testing](../testing.md#snapshots)): [testing-and-ci](resolved/testing-and-ci-done.md)
+  [testing](../../testing.md#snapshots)): [testing-and-ci](testing-and-ci-done.md)
   asked for them, but the canvas had no rounded shape to snapshot yet.
 - **Opacity**: bar background alpha in the ARGB buffer (premultiplied). No
   blur, no gradients, no shadows.
@@ -133,7 +127,7 @@ each on screenshots; the measured fill costs in
   frame callbacks while it runs; if built, it is opt-in, bounded (a few
   frames), and back to zero wakeups the moment it ends. Measured or dropped.
 - Per-output overrides (a taller bar on a HiDPI output) belong to
-  [multi-output](resolved/multi-output-done.md).
+  [multi-output](multi-output-done.md).
 
 ## Coordination with scoot
 
@@ -145,4 +139,4 @@ visually compatible, and document the tokens users would set to match.
 
 The default look is good with no config, each option is documented in the
 same PR, and the flush and floating variants have measured costs published
-with the [resource ratchet](lightest.md).
+with the [resource ratchet](../lightest.md).

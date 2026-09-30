@@ -118,7 +118,7 @@ of it: [testing.md](../../testing.md).
   results.
 - **Docs**: [testing.md](../../testing.md) (snapshots, the harness, fuzzing
   in CI, the CI jobs, the benchmark), both fuzz READMEs,
-  [appearance](../appearance.md) (the rounded-rectangle snapshots),
+  [appearance](appearance-done.md) (the rounded-rectangle snapshots),
   [the M1 follow-ups](m1-review-followups-done.md) (item 3 done), and the
   README's status line and baselines.
 
@@ -139,7 +139,7 @@ infrastructure.
 
 - **No rounded rectangles in the snapshots**: the canvas has none yet (it
   fills spans and blends coverage). They land with the primitive, in
-  [appearance](../appearance.md), which now says so. Adding a primitive
+  [appearance](appearance-done.md), which now says so. Adding a primitive
   only to snapshot it would be speculative.
 - **"The returned `Action`"** is the module API's `Update`
   (`Changed`/`Unchanged`); nothing was renamed.

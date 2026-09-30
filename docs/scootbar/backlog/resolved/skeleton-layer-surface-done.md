@@ -144,7 +144,7 @@ and namespace `scootbar`. It draws a solid bar and nothing else.
 
 The skeleton sets the layer surface's margin from a flag (`--margin`, one to four
 values, default 0) with `set_margin`, and the exclusive zone accounts for it as
-[appearance](../appearance.md) describes. That keeps every later look (floating bar,
+[appearance](appearance-done.md) describes. That keeps every later look (floating bar,
 matching scoot's gaps) a config change, not a rewrite. Test with a margin on
 headless scoot: the zone, the window placement beside it, and the surface size
 equal to the bar's (no transparent border).

@@ -219,7 +219,7 @@ the same `check`.
 ## The appearance hardware test
 
 `scripts/scootbar-appearance-hw-test.sh` is what real hardware adds to the
-headless tests above: the four looks of [appearance](backlog/appearance.md)
+headless tests above: the four looks of [appearance](backlog/resolved/appearance-done.md)
 (flush-opaque, rounded-opaque, rounded-translucent, floating), each on a real
 compositor, in one run that ends in a PASS/FAIL/INFO table. Nothing in the
 CI runs it; **the maintainer runs it on hardware, and the numbers go into
@@ -296,7 +296,7 @@ ratchet), the cursor sweep's compositor cost, and the whole point of `--tty`,
 which is that the corners and the blend are what a real display shows. The
 pixel, zone, protocol and click checks are the same everywhere and pass on
 `--headless` and `--nested` (rehearsed for this entry, see the results in
-[appearance](backlog/appearance.md#landed-and-remaining)). The CPU
+[appearance](backlog/resolved/appearance-done.md#landed-and-remaining)). The CPU
 differences are small next to the 10 ms jiffy: a difference of one jiffy over
 a run is noise, and the table says so; a change is worth quoting when it
 holds across two runs.
