@@ -94,7 +94,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 ### M3 — Configurable
 - [Config file, control socket and reload](resolved/config-cli-and-reload-done.md) (medium): `scootbar msg`, `query` — RESOLVED 2026-09-29
 - [Nix modules and Stylix](nix-modules-and-stylix.md) (medium)
-- [Appearance](appearance.md) (medium)
+- [Appearance](resolved/appearance-done.md) (medium): rounded corners, opacity, spacing, pill and circle workspaces, the corner-shaped input region, measured on hardware — RESOLVED 2026-09-30
 - [Icons and fonts](resolved/icons-and-fonts-done.md) (medium): the fallback chain, a glyph, a path or a PNG icon on the clock — RESOLVED 2026-09-30
 - [Multi-output policy](resolved/multi-output-done.md) (medium): `outputs`, `[output."NAME"]` overrides — RESOLVED 2026-09-30
 - [Per-output font size](multi-output-font-size.md) (low)
@@ -104,6 +104,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [Pointer input and interactions](pointer-and-interactions.md) (medium)
 - [`exec`, `push` and `button` modules](exec-push-button-modules.md) (medium): launcher and power buttons
 - [Agent interface](agent-interface.md) (medium): `invoke`, `layout`, `subscribe`
+- [Appearance follow-ups](appearance-followups.md) (low): hover token, per-module state colors, dot indicators, inactive-workspace colors
 
 ### M5 — Daily-driver modules, one release each
 The [umbrella](data-source-modules.md) holds the rules they share.

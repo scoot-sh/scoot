@@ -57,6 +57,10 @@
 #   SCOOTBAR_HW_BAR_HEIGHT    default 32
 #   SCOOTBAR_HW_BAR           the bar's color, default #c03020
 #   SCOOTBAR_HW_OPACITY       the translucent look's, default 0.5
+#   SCOOTBAR_HW_FONT          a .ttf or .otf file for the clock, passed to scootbar as --font.
+#                             Without it the script looks in the usual system paths, which
+#                             misses a NixOS box (fonts live in the store): the bars then run
+#                             with no modules, and the RSS and redraw numbers omit the font
 #   SCOOTBAR_HW_IDLE_SECS     default 20
 #   SCOOTBAR_HW_REDRAWS       whole-bar redraws per look, default 300
 #   SCOOTBAR_HW_SWEEP_SECS    the paced cursor sweep along the bar per look, default 8
@@ -84,6 +88,7 @@ CLICK_HEIGHT=${SCOOTBAR_HW_CLICK_HEIGHT:-120}
 CLICK_RADIUS=${SCOOTBAR_HW_CLICK_RADIUS:-60}
 SIZE=${SCOOTBAR_HW_SIZE:-1600x1000}
 SWEEP_SECS=${SCOOTBAR_HW_SWEEP_SECS:-8}
+FONT=${SCOOTBAR_HW_FONT:-}
 
 die() {
     echo "error: $*" >&2
@@ -111,6 +116,13 @@ case "$BAR" in
     '#'[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]) ;;
     *) die "SCOOTBAR_HW_BAR must be '#rrggbb', not '$BAR'" ;;
 esac
+if [ -n "$FONT" ]; then
+    [ -f "$FONT" ] || die "SCOOTBAR_HW_FONT is not a regular file: '$FONT'"
+    case "$FONT" in
+        *.ttf | *.otf) ;;
+        *) die "SCOOTBAR_HW_FONT must be a .ttf or .otf file, not '$FONT'" ;;
+    esac
+fi
 case "$EXPECT_INPUT_REGION" in
     honored | ignored) ;;
     *) die "SCOOTBAR_HW_EXPECT_INPUT_REGION must be honored or ignored" ;;
@@ -442,15 +454,21 @@ start_compositor() {
 # A font the clock can use, so the bar carries a module like a real one; none
 # means a solid bar with no modules.
 FONT_OK=
-for f in /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf /usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf \
-    /usr/share/fonts/TTF/DejaVuSans.ttf /usr/share/fonts/truetype/DejaVuSans.ttf /usr/share/fonts/dejavu/DejaVuSans.ttf \
-    /run/current-system/sw/share/X11/fonts/DejaVuSans.ttf /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf \
-    /usr/share/fonts/noto/NotoSans-Regular.ttf; do
-    if [ -f "$f" ]; then
-        FONT_OK=$f
-        break
-    fi
-done
+FONT_ARGS=()
+if [ -n "$FONT" ]; then
+    FONT_OK=$FONT
+    FONT_ARGS=(--font "$FONT")
+else
+    for f in /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf /usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf \
+        /usr/share/fonts/TTF/DejaVuSans.ttf /usr/share/fonts/truetype/DejaVuSans.ttf /usr/share/fonts/dejavu/DejaVuSans.ttf \
+        /run/current-system/sw/share/X11/fonts/DejaVuSans.ttf /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf \
+        /usr/share/fonts/noto/NotoSans-Regular.ttf; do
+        if [ -f "$f" ]; then
+            FONT_OK=$f
+            break
+        fi
+    done
+fi
 # The clock is centered, so it never touches a corner or an edge the pixel
 # checks read (they sample the bar's left quarter, clear of it). Its minute
 # tick is at most one redraw in the idle window.
@@ -458,7 +476,7 @@ if [ -n "$FONT_OK" ]; then
     CENTER=(--center clock)
 else
     CENTER=(--center=)
-    row INFO "font" "no well-known font found: the bars run with no modules (RSS then omits the font)"
+    row INFO "font" "no well-known font found (set SCOOTBAR_HW_FONT to a .ttf): the bars run with no modules (RSS then omits the font)"
 fi
 
 # Runs scootbar with config `$1` (a name), its [bar] lines in the remaining
@@ -475,7 +493,7 @@ start_bar() {
         cd "$RUN"
         env WAYLAND_DISPLAY="$WAYLAND" \
             ${BAR_ENV:+"$BAR_ENV"} \
-            "$SCOOTBAR" daemon --config "$config" --background "$BAR" "${CENTER[@]}" \
+            "$SCOOTBAR" daemon --config "$config" --background "$BAR" ${FONT_ARGS[@]+"${FONT_ARGS[@]}"} "${CENTER[@]}" \
             > "$OUT/bar-$name.log" 2>&1 &
         echo $! > "$RUN/bar.pid"
     )

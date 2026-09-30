@@ -3,7 +3,7 @@
 //! Parsing is strict, as scootbg's is: a `#` and exactly six hex digits,
 //! either case, and nothing else (no surrounding whitespace, no `#rgb`
 //! shorthand). No alpha yet: a translucent bar is
-//! `docs/scootbar/backlog/appearance.md`'s, with the ARGB buffer and the
+//! `docs/scootbar/backlog/resolved/appearance-done.md`'s, with the ARGB buffer and the
 //! blend cost it measures.
 
 use std::fmt;
