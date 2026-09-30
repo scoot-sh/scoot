@@ -103,6 +103,10 @@ pub struct State {
     pub globals: Globals,
     pub outputs: Outputs<Objects>,
     pub bar: Bar,
+    /// The bars are hidden (`scootbar msg hide`): no output has a surface.
+    /// What the control clients ask for, carried out once per loop turn by
+    /// `State::apply_visibility`.
+    pub hidden: bool,
     /// What the bars show: the modules, the font and the style.
     pub content: Content,
     /// The workspaces module's shared state: the daemon's
@@ -200,6 +204,7 @@ impl Wayland {
             },
             outputs: Outputs::default(),
             bar,
+            hidden: false,
             content,
             #[cfg(feature = "workspaces")]
             workspaces,

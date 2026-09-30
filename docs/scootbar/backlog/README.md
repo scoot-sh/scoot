@@ -97,7 +97,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [Appearance](appearance.md) (medium)
 - [Icons and fonts](icons-and-fonts.md) (medium)
 - [Multi-output policy](multi-output.md) (medium)
-- [Visibility and layering](visibility-and-layering.md) (medium)
+- [Visibility and layering](resolved/visibility-and-layering-done.md) (medium): layer, edge, zone or float, `msg hide|show|toggle` — RESOLVED 2026-09-30
 
 ### M4 — Interactive, and readable by agents
 - [Pointer input and interactions](pointer-and-interactions.md) (medium)

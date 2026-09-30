@@ -85,6 +85,22 @@ impl Handler for Responder<'_> {
                 Ok(()) => write_reply(out, &Reply::Ok),
                 Err(message) => write_reply(out, &Reply::Error { message: &message }),
             },
+            Request::Hide | Request::Show | Request::Toggle => {
+                // Only the flag: the loop makes or destroys the surfaces
+                // once the turn's requests are all served, so a burst of
+                // toggles is one change.
+                self.state.hidden = match request {
+                    Request::Hide => true,
+                    Request::Show => false,
+                    _ => !self.state.hidden,
+                };
+                write_reply(
+                    out,
+                    &Reply::Bar {
+                        visible: !self.state.hidden,
+                    },
+                );
+            }
             Request::Kill => {
                 self.stop = true;
                 write_reply(out, &Reply::Ok);

@@ -8,9 +8,10 @@
 //! event looks the output up by it again. An output removed meanwhile is
 //! not found, and the event is dropped, whatever it was.
 //!
-//! The surface: `top` layer, namespace `scootbar`, anchored to its edge and
+//! The surface: the bar's layer (`top` by default), namespace `scootbar`, anchored to its edge and
 //! both sides with size 0 × height, the bar's margins, an exclusive zone of
-//! its height (`crate::bar` says why not height plus margin), and no
+//! its height, or -1 when it floats (`crate::bar` says why not height plus
+//! margin), and no
 //! keyboard interactivity. All of that is set before the first commit,
 //! which has no buffer, so the compositor reserves the bar's space from
 //! that commit and windows move once, before the bar draws. Each
@@ -134,7 +135,11 @@ impl LayerObjects {
         let layer = globals.layer_shell.get_layer_surface(
             &surface,
             Some(output),
-            Layer::Top,
+            match bar.layer {
+                crate::bar::Layer::Bottom => Layer::Bottom,
+                crate::bar::Layer::Top => Layer::Top,
+                crate::bar::Layer::Overlay => Layer::Overlay,
+            },
             NAMESPACE.to_owned(),
             qh,
             id,
@@ -224,6 +229,23 @@ impl State {
         }
     }
 
+    /// Makes every output's bar as `self.hidden` says: destroys the layer
+    /// surface and its buffers on a hide (the exclusive zone goes with the
+    /// surface, so windows reclaim the space), makes them again on a show.
+    /// Idempotent, and called once per loop turn after the control clients
+    /// are served, so requests that arrive together (a rapid toggle) are
+    /// one change, of the net result only.
+    pub fn apply_visibility(&mut self, conn: &Connection, qh: &QueueHandle<Self>) {
+        if self.hidden {
+            // A press routed to a surface that is gone.
+            self.pointer_on = None;
+        }
+        for entry in self.outputs.iter_mut() {
+            let effect = entry.output.set_hidden(self.hidden);
+            Self::apply(&self.globals, &self.bar, entry, effect, conn, qh);
+        }
+    }
+
     /// A global appeared (at start-up or later). Binds it if it is an
     /// output.
     pub fn global(
@@ -246,6 +268,12 @@ impl State {
             canvas: Canvas::new(modules.len()),
             scene: Scene::new(modules),
         });
+        // Hidden now: the output settles into no surface.
+        if self.hidden {
+            if let Some(entry) = self.outputs.get_mut(id) {
+                let _ = entry.output.set_hidden(true);
+            }
+        }
         // After the bind, so its callback comes after every event it caused.
         conn.display().sync(qh, RoundTrip::Settle(id));
     }
@@ -289,6 +317,12 @@ impl State {
                 if let Some(layer) = &objects.layer {
                     layer.layer.ack_configure(serial);
                 }
+            }
+            Effect::Destroy => {
+                if let Some(layer) = objects.layer.take() {
+                    layer.destroy();
+                }
+                objects.canvas.clear();
             }
             Effect::DestroyAndRetry => {
                 if let Some(layer) = objects.layer.take() {

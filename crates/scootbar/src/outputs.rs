@@ -162,6 +162,9 @@ pub enum Surface {
     /// closes every surface would otherwise be answered with a new one
     /// forever). A replug is a new output and starts afresh.
     GaveUp,
+    /// The bars are hidden (`scootbar msg hide`): no surface, no buffer,
+    /// and none made until they are shown.
+    Hidden,
 }
 
 impl Surface {
@@ -185,6 +188,8 @@ pub enum Effect {
     DestroyAndRetry,
     /// Destroy the layer surface and say that this output is given up on.
     DestroyAndGiveUp,
+    /// Destroy the layer surface and its buffers: the bars are hidden.
+    Destroy,
 }
 
 /// What a draw is at: the surface's size and scale. With the same modules'
@@ -235,6 +240,9 @@ pub struct Output {
     /// The settle callback has fired.
     settled: bool,
     surface: Surface,
+    /// The bars are hidden: no surface is made, whatever else happens. Runtime
+    /// state (`scootbar msg hide`), kept across a reload.
+    hidden: bool,
     /// The compositor has closed a surface on this output before.
     closed_once: bool,
     /// The scales the compositor asked the live surface to be drawn at.
@@ -335,6 +343,44 @@ impl Output {
             self.staged.apply(&mut self.info);
         }
         if self.surface == Surface::Waiting {
+            if self.hidden {
+                self.surface = Surface::Hidden;
+                return Effect::None;
+            }
+            self.made();
+            Effect::Create
+        } else {
+            Effect::None
+        }
+    }
+
+    /// Hides or shows this output's bar (idempotent: asking for what is
+    /// already the case is [`Effect::None`]). Hiding forgets what the
+    /// surface was showing and whether it was ever closed or given up on:
+    /// showing is a fresh start with one chance, a new surface awaiting its
+    /// first `configure`. An output that has not settled only notes it: the
+    /// settle decides.
+    pub fn set_hidden(&mut self, hidden: bool) -> Effect {
+        if self.hidden == hidden {
+            return Effect::None;
+        }
+        self.hidden = hidden;
+        if hidden {
+            match self.surface {
+                Surface::Waiting | Surface::Hidden => Effect::None,
+                Surface::Pending
+                | Surface::Configured { .. }
+                | Surface::Closed
+                | Surface::GaveUp => {
+                    self.surface = Surface::Hidden;
+                    self.ack_uncommitted = false;
+                    self.shown = None;
+                    self.failed = None;
+                    self.closed_once = false;
+                    Effect::Destroy
+                }
+            }
+        } else if self.surface == Surface::Hidden {
             self.made();
             Effect::Create
         } else {
@@ -566,6 +612,7 @@ impl<O> Outputs<O> {
                 done: false,
                 settled: false,
                 surface: Surface::Waiting,
+                hidden: false,
                 closed_once: false,
                 preferred: Preferred::default(),
                 ack_uncommitted: false,

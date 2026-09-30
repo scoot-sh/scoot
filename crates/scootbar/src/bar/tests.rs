@@ -1,5 +1,6 @@
 use super::{
-    Anchors, Bar, DEFAULT_HEIGHT, Edge, MAX_HEIGHT, MAX_MARGIN, Margin, MarginError, parse_height,
+    Anchors, Bar, DEFAULT_HEIGHT, Edge, Layer, MAX_HEIGHT, MAX_MARGIN, Margin, MarginError,
+    parse_bool, parse_height,
 };
 
 fn margin(top: u32, right: u32, bottom: u32, left: u32) -> Margin {
@@ -164,4 +165,32 @@ fn a_fallback_width_takes_off_the_side_margins_and_is_never_zero() {
         ..Bar::default()
     };
     assert_eq!(wide.width_on(u32::MAX), u32::MAX - 2 * MAX_MARGIN);
+}
+
+#[test]
+fn a_floating_bar_reserves_nothing() {
+    let bar = Bar {
+        exclusive: false,
+        margin: margin(8, 8, 8, 8),
+        ..Bar::default()
+    };
+    // -1: no zone, and not moved by another bar's zone either.
+    assert_eq!(bar.exclusive_zone(), -1);
+    assert_eq!(Bar::default().exclusive_zone(), DEFAULT_HEIGHT as i32);
+}
+
+#[test]
+fn layers_and_booleans_parse_exactly() {
+    assert_eq!(Layer::parse("bottom"), Some(Layer::Bottom));
+    assert_eq!(Layer::parse("top"), Some(Layer::Top));
+    assert_eq!(Layer::parse("overlay"), Some(Layer::Overlay));
+    for bad in ["background", "Top", "", " top"] {
+        assert_eq!(Layer::parse(bad), None, "{bad:?}");
+    }
+    assert_eq!(parse_bool("true"), Some(true));
+    assert_eq!(parse_bool("false"), Some(false));
+    for bad in ["", "yes", "1", "True"] {
+        assert_eq!(parse_bool(bad), None, "{bad:?}");
+    }
+    assert_eq!(Bar::default().layer, Layer::Top);
 }

@@ -403,3 +403,70 @@ fn a_negative_size_sent_as_a_uint_is_taken_as_zero() {
     assert_eq!(output.configure(8, 1 << 31, 28), Effect::Ack(8));
     assert_eq!(output.surface_size(&bar), Some(size(1, 28)));
 }
+
+#[test]
+fn hiding_destroys_the_surface_and_showing_makes_a_fresh_one() {
+    let (mut outputs, id) = configured(1920, 28);
+    let output = output(&mut outputs, id);
+    output.drew(frame(1920, 28, Scale::Integer(1)));
+    assert_eq!(output.set_hidden(true), Effect::Destroy);
+    assert_eq!(output.surface(), Surface::Hidden);
+    assert!(!output.surface().is_live());
+    // Nothing to draw or commit, and a stale event is not acked.
+    assert_eq!(output.plan(&Bar::default(), true), Plan::Nothing);
+    assert_eq!(output.configure(9, 1920, 28), Effect::None);
+    // Asking again changes nothing (a coalesced burst).
+    assert_eq!(output.set_hidden(true), Effect::None);
+    assert_eq!(output.set_hidden(false), Effect::Create);
+    assert_eq!(output.surface(), Surface::Pending);
+    assert_eq!(output.set_hidden(false), Effect::None);
+    // Awaiting its first configure, nothing shown.
+    assert_eq!(output.plan(&Bar::default(), true), Plan::Nothing);
+    assert_eq!(output.configure(10, 1920, 28), Effect::Ack(10));
+    assert_eq!(
+        output.plan(&Bar::default(), false),
+        Plan::Draw(frame(1920, 28, Scale::Integer(1)))
+    );
+}
+
+#[test]
+fn an_output_hidden_before_it_settles_settles_into_no_surface() {
+    let (mut outputs, id) = bound();
+    let output = output(&mut outputs, id);
+    assert_eq!(output.set_hidden(true), Effect::None);
+    assert_eq!(output.settled(), Effect::None);
+    assert_eq!(output.surface(), Surface::Hidden);
+    assert_eq!(output.set_hidden(false), Effect::Create);
+    // Shown before the settle: the settle creates.
+    let (mut outputs, id) = bound();
+    let output = self::output(&mut outputs, id);
+    assert_eq!(output.set_hidden(true), Effect::None);
+    assert_eq!(output.set_hidden(false), Effect::None);
+    assert_eq!(output.settled(), Effect::Create);
+}
+
+#[test]
+fn hiding_during_a_close_retry_leaves_no_surface_and_a_late_retry_is_a_no_op() {
+    let (mut outputs, id) = configured(1920, 28);
+    let output = output(&mut outputs, id);
+    assert_eq!(output.closed(), Effect::DestroyAndRetry);
+    assert_eq!(output.set_hidden(true), Effect::Destroy);
+    assert_eq!(output.retry(), Effect::None);
+    assert_eq!(output.surface(), Surface::Hidden);
+    // Hide, show, and the old retry lands on the new surface: no second one.
+    assert_eq!(output.set_hidden(false), Effect::Create);
+    assert_eq!(output.retry(), Effect::None);
+    assert_eq!(output.surface(), Surface::Pending);
+}
+
+#[test]
+fn showing_gives_a_gave_up_output_one_new_chance() {
+    let (mut outputs, id) = configured(1920, 28);
+    let output = output(&mut outputs, id);
+    assert_eq!(output.closed(), Effect::DestroyAndRetry);
+    assert_eq!(output.retry(), Effect::Create);
+    assert_eq!(output.closed(), Effect::DestroyAndGiveUp);
+    assert_eq!(output.set_hidden(true), Effect::Destroy);
+    assert_eq!(output.set_hidden(false), Effect::Create);
+    assert_eq!(output.closed(), Effect::DestroyAndRetry);
+}

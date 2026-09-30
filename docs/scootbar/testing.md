@@ -134,6 +134,15 @@ pinned nixpkgs' tzdata).
   trace, since a solid color scaled down looks the same), and the
   integer-scale fallback without a viewporter; zero wakeups
   while idle; exit status 1 when the compositor is killed.
+- **Layers, the zone and hiding on a headless scoot**
+  (`tests/visibility.rs`): every layer on both edges, with and without the
+  zone, drawn along its edge and reserving its height or nothing; the layer
+  and the zone in the protocol requests (pixels cannot tell `bottom` from
+  `top` on an empty desktop); `msg hide` releasing the zone and every
+  `wl_shm` mapping of the daemon, and `show` bringing both back; forty
+  concurrent `toggle`s settling on the net result; a reload keeping a hidden
+  bar hidden; a real window (`foot`) reclaiming the space and returning to
+  its rectangle with no intermediate one, sampled every few milliseconds.
 - **The clock on headless scoot and sway** (`tests/clock.rs`): the time
   read back off screenshots on two outputs, in the zone `TZ` names, in the
   12-hour default and in `%H:%M`; a seconds clock ticking on screen, with

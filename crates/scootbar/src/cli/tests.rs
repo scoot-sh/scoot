@@ -5,7 +5,7 @@ use super::{
     Command, DAEMON_HELP, Error, MSG_HELP, ModulesError, Msg, MsgError, Topic, USAGE, parse,
     version_string,
 };
-use crate::bar::{Bar, Edge, MAX_HEIGHT, Margin, MarginError};
+use crate::bar::{Bar, Edge, Layer, MAX_HEIGHT, Margin, MarginError};
 use crate::color::{Color, ColorError};
 use crate::config::{Config, MAX_FONT_SIZE};
 use crate::layout::{Layout, MAX_GAP};
@@ -44,6 +44,7 @@ fn every_flag_takes_its_value_either_way() {
             bottom: 8,
             left: 4,
         },
+        ..Bar::default()
     };
     assert_eq!(
         daemon(&["--edge", "bottom", "--height", "40", "--margin", "8,4",]),
@@ -503,4 +504,57 @@ fn flags_overlay_the_file_section_by_section() {
     };
     command.given.overlay(&mut base).unwrap();
     assert_eq!(base.bar.height, 40);
+}
+
+#[test]
+fn layer_and_exclusive_flags_take_their_values() {
+    let bar = daemon(&["--layer", "overlay", "--exclusive=false"]);
+    assert_eq!(bar.layer, Layer::Overlay);
+    assert!(!bar.exclusive);
+    assert_eq!(daemon(&["--layer=bottom"]).layer, Layer::Bottom);
+    assert_eq!(daemon(&[]).layer, Layer::Top);
+    assert!(daemon(&["--exclusive", "true"]).exclusive);
+    assert_eq!(
+        run(&["daemon", "--layer", "background"]),
+        Err(Error::Layer("background".into()))
+    );
+    for bad in ["yes", "1", "True", ""] {
+        assert_eq!(
+            run(&["daemon", "--exclusive", bad]),
+            Err(Error::Exclusive(bad.into()))
+        );
+    }
+    assert_eq!(
+        run(&["daemon", "--layer", "top", "--layer", "top"]),
+        Err(Error::Repeated("--layer"))
+    );
+}
+
+#[test]
+fn a_layer_flag_overlays_the_files_value() {
+    let mut base = Config::default();
+    base.bar.layer = Layer::Bottom;
+    base.bar.exclusive = false;
+    let given = match run(&["daemon", "--layer", "overlay"]) {
+        Ok(Command::Daemon(command)) => command.given,
+        other => panic!("{other:?}"),
+    };
+    given.overlay(&mut base).unwrap();
+    assert_eq!(base.bar.layer, Layer::Overlay);
+    // Not given: the file's value stands.
+    assert!(!base.bar.exclusive);
+}
+
+#[test]
+fn visibility_commands_take_no_arguments() {
+    assert_eq!(run(&["msg", "hide"]), Ok(Command::Msg(Msg::Hide)));
+    assert_eq!(run(&["msg", "show"]), Ok(Command::Msg(Msg::Show)));
+    assert_eq!(run(&["msg", "toggle"]), Ok(Command::Msg(Msg::Toggle)));
+    assert!(matches!(
+        run(&["msg", "toggle", "now"]),
+        Err(Error::Unexpected { .. })
+    ));
+    for word in ["hide", "show", "toggle"] {
+        assert!(super::MSG_HELP.contains(word), "{word}");
+    }
 }

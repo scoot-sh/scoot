@@ -18,12 +18,14 @@ scootbar daemon --clock-format '%H:%M'       # a 24-hour clock (the default is 1
 scootbar daemon --font ~/.local/share/fonts/Inter.ttf --font-size 13
 scootbar daemon --right clock                # the clock at the right end
 scootbar daemon --edge bottom --height 32    # along the bottom, 32 logical pixels tall
+scootbar daemon --layer overlay --exclusive false  # over everything, reserving nothing
 scootbar daemon --margin 8                   # floating 8 pixels in from its edge and both sides
 scootbar daemon --margin 8,12                # 8 above and below, 12 either side
 scootbar daemon --background '#101014' --foreground '#e0e0e0'
 scootbar daemon --config ~/alt-bar.toml    # another file than the default
 scootbar msg query                         # every placed module's state as JSON
 scootbar msg reload                        # re-read the file and live-apply it
+scootbar msg toggle                        # hide the bar (and release its space), or show it
 scootbar --help                              # and `scootbar daemon --help`, `scootbar msg --help`
 scootbar --version
 ```
@@ -40,7 +42,9 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 
 | Flag | Takes | Default | What it does |
 | --- | --- | --- | --- |
-| `--edge` | `top` or `bottom` | `top` | The output edge the bar runs along. Vertical bars are not in the first version. |
+| `--edge` | `top` or `bottom` | `top` | The output edge the bar runs along. Vertical bars (left and right) are a deliberate omission: the layout is horizontal, and the modules, the hit-testing and the text all assume it. |
+| `--layer` | `bottom`, `top` or `overlay` | `top` | The layer-shell layer. See [Layers and the zone](#layers-and-the-zone). |
+| `--exclusive` | `true` or `false` | `true` | Whether the bar reserves its height, so windows are arranged beside it, or floats over them, reserving nothing. |
 | `--height` | 1 to 1024 | 28 | The bar's height in logical pixels. On a scaled output it is drawn at the output's real pixels: 28 at scale 1.5 is 42 device pixels. |
 | `--margin` | one to four of 0 to 1024, comma-separated | `0` | Space between the bar and the output's edges, in logical pixels, in CSS order: `ALL`, `VERTICAL,HORIZONTAL`, `TOP,HORIZONTAL,BOTTOM` or `TOP,RIGHT,BOTTOM,LEFT`. See [Margins](#margins). |
 | `--background` | `'#rrggbb'` | `'#1e1e2e'` | The bar's color, six hex digits in either case. Quote it: the shell reads `#` as a comment. Its opacity is the file's `[bar] opacity`: see [Shape and opacity](#shape-and-opacity). |
@@ -79,6 +83,8 @@ center = ["clock"]
 
 [bar]
 edge = "top"          # top or bottom
+layer = "top"         # bottom, top or overlay
+exclusive = true      # false: float over the windows, reserving nothing
 height = 28           # 1 to 1024
 margin = "8,4"        # one number, or the CSS shorthand "VERTICAL,HORIZONTAL", ...
 radius = 8            # 0 to 512, and at most half the height; 0 is square
@@ -120,6 +126,9 @@ refuses, saying one already runs.
 ```sh
 scootbar msg query                  # every placed module's state as JSON
 scootbar msg reload                 # re-read the file and live-apply it
+scootbar msg hide                   # destroy the bar's surfaces and buffers, release its space
+scootbar msg show                   # make them again
+scootbar msg toggle                 # hide if shown, show if hidden
 scootbar msg version                # the daemon's version and protocol, as JSON
 scootbar msg kill                   # stop the daemon, once its reply is sent
 scootbar msg set ID JSON            # refused: no module takes one yet
@@ -132,8 +141,9 @@ it shows and its `class` (`normal`, `warn`, `urgent`, `muted`), plus `icon`
 where the module shows one (absent otherwise). This is the agent hook: the bar read as data instead of OCR.
 `reload` re-reads the file and live-applies it — geometry, style, layout,
 modules, the font — after fully validating it first; a bad file is
-refused and the running bar stands. `query`, `version` and `reload` print
-the reply; `kill` and `set` print nothing on success. `set` is the
+refused and the running bar stands. `hide`, `show` and `toggle` are
+[below](#hiding-the-bar). `query`, `version`, `reload`, `hide`, `show` and
+`toggle` print the reply; `kill` and `set` print nothing on success. `set` is the
 forward hook for the modules that will take a value
 ([exec-push-button-modules](backlog/exec-push-button-modules.md)): today
 an unknown id, an unplaced one, or any module at all is a loud error,
@@ -307,7 +317,7 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
 
 ## What it does on the compositor
 
-- **One bar per output**, a `top`-layer surface with the namespace
+- **One bar per output**, a layer surface (`top` by default) with the namespace
   `scootbar` (for compositor rules that match on it), anchored to its edge
   and both sides. An output plugged in later gets a bar; an output
   unplugged takes its bar with it, and the others are untouched. With no
@@ -336,6 +346,86 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
 - If the compositor closes a bar (some do when an output goes away), it is
   made again once; closed a second time, that output is given up on until
   it is unplugged and plugged back in, and stderr says so.
+
+## Layers and the zone
+
+`--layer` (or `[bar] layer`) picks the layer-shell layer the bar sits in.
+On scoot, `bottom` sits behind windows (they cover the bar where they
+overlap it) and `top` and `overlay` in front, and **a fullscreen window hides
+the `top` layer** (and the bar's zone is covered with it): the bar
+disappears while something is fullscreen, which is the right default for a
+bar. `overlay` stays over fullscreen windows; ask for it on purpose.
+Fullscreen and maximize are different on purpose: a window that should fill
+the screen *with* the bar visible wants scoot's
+[maximize](../backlog/core/maximize.md), which does not exist yet. There is
+no `background` layer: that is the wallpaper's.
+
+`--exclusive false` (or `exclusive = false`) sends an exclusive zone of -1:
+the bar reserves nothing and windows go under it, and it also ignores any
+other bar's zone. It is the choice for a floating overlay-style bar. With
+the default `true` the zone is the bar's height, and the compositor adds the
+margin on the anchored edge (see [Margins](#margins)). Whichever layer:
+the bar never takes the keyboard, so clicking it never moves window focus.
+
+Each of the three layers on each of the two edges, with and without the
+zone, is checked on headless scoot (`crates/scootbar/tests/visibility.rs`),
+along with the layer and the zone in the protocol requests themselves.
+Changing either on a running bar is a `reload`, which makes the surfaces
+again.
+
+To toggle the bar from a key, bind it in scoot's own config (the bar takes
+no keyboard, so it has no hotkey of its own):
+
+```toml
+[binds]
+"super+b" = "spawn scootbar msg toggle"
+```
+
+## Hiding the bar
+
+`scootbar msg hide` **destroys the bar's layer surface and its buffers** on
+every output: a hidden bar holds no `wl_shm` buffer (checked in
+`tests/visibility.rs` by counting the daemon's memory mappings, which go to
+zero and come back), and its exclusive zone is released, so windows
+reclaim the space. `show` makes them again, committed with no buffer before
+the first draw as at start-up, so windows move once (back out of the bar's
+way) and do not jump again when it draws; the round trip leaves a window
+where it started (also checked, sampling the window's rectangle every few
+milliseconds across the show). `toggle` flips whichever it is. The reply says
+what is now the case: `{"type":"bar","visible":false}`.
+
+- All three are idempotent, and applied **once per loop turn** with the net
+  result: a burst of requests (forty `toggle`s at once, say) is one change
+  of the final state, never a hide-show-hide flicker, since the surfaces are
+  made or destroyed only after every request that arrived together has been
+  served.
+- Hidden is runtime state. A `reload` keeps it (a geometry change while
+  hidden just waits for the `show`), and a restarted daemon starts shown.
+- An output plugged in while hidden gets no bar until `show`; one that was
+  unplugged and plugged in again is the same. `show` with no output is fine:
+  each output's bar is made when it arrives.
+- A hide during a redraw needs no care: a draw is one synchronous step of
+  the loop, and the hide is another. Events for a destroyed surface (a
+  `configure`, a buffer release) are dropped, as after any removal.
+- The modules keep running while hidden (the clock's timer still fires
+  every minute, a workspace change still wakes the daemon), and nothing is
+  drawn: a hidden bar costs the process, not the surfaces. A bar with no
+  module placed wakes zero times, hidden or not.
+- A `top` bar under a fullscreen window needs nothing from scootbar: the
+  compositor stops drawing the layer and the bar has nothing to do.
+- **`hide` after the compositor closed a bar** (an output going away) forgets
+  that: `show` gives it a fresh one, with one retry as at start-up.
+
+### Not built: auto-hide
+
+An auto-hide bar that appears on pointer contact needs a thin
+always-present sensing surface at the edge, which is exactly what `hide`
+removes (a surface, a buffer, an input region and pointer events that wake
+the daemon). It was **decided against for now, not measured**: the cost
+that matters (a sensing strip's pages and its pointer wakeups) would only
+be worth paying if the strip could beat a key bind that toggles the bar
+(above), which costs nothing when unused, and pointer input on the bar is
+still minimal (`pointer-and-interactions`). Revisit it with that item.
 
 ## Margins
 
@@ -421,6 +511,10 @@ opacity = 0.9
   reloading: catching one would need `unsafe` signal registration
   (rustix has no `signalfd`), which the crate forbids
   (`#![forbid(unsafe_code)]`), so a reload is `scootbar msg reload`.
+- **Vertical bars** (`left` and `right` edges) are not offered: a
+  deliberate omission, not a gap. The layout, the modules and the click
+  hit-test are horizontal; a vertical bar would be a second layout, not an
+  option.
 - **One daemon per display** holds the control socket: a second daemon
   for the same display refuses at start-up, saying one already runs. A
   socket file left by a crash is recognised by its free lock and

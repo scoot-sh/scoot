@@ -300,6 +300,9 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 return Ok(());
             }
         }
+        // Whatever the clients asked of the bars' visibility: once, with
+        // the net result of the whole batch.
+        wayland.state.apply_visibility(&wayland.conn, &wayland.qh);
         if revents.intersects(PollFlags::IN | PollFlags::HUP | PollFlags::ERR) {
             match guard.read() {
                 Ok(_) => {}

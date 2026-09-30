@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::bar::{self, Edge, MAX_HEIGHT, Margin, MarginError};
+use crate::bar::{self, Edge, Layer, MAX_HEIGHT, Margin, MarginError};
 use crate::color::{Color, ColorError};
 use crate::config::{Config, MAX_FONT_SIZE};
 use crate::layout::{Layout, MAX_GAP, MAX_MODULES, PlacementError};
@@ -175,7 +175,7 @@ USAGE:
 
 COMMANDS:
     daemon     run the bar on every output of this Wayland display
-    msg        ask the running daemon: query, reload, version, kill, set
+    msg        ask the running daemon: query, reload, hide, show, toggle, version, kill, set
 "
 );
 
@@ -187,9 +187,9 @@ USAGE:
     scootbar daemon [OPTIONS]
 
 Connects to the compositor named by $WAYLAND_DISPLAY, which must support
-wlr-layer-shell, and gives every output a bar: a top-layer surface along
-one edge (namespace \"scootbar\") that reserves its height, so windows are
-arranged beside it. Outputs plugged in later get one too, and an output
+wlr-layer-shell, and gives every output a bar: a layer surface (top, by
+default) along one edge (namespace \"scootbar\") that reserves its height,
+so windows are arranged beside it, unless told to float over them. Outputs plugged in later get one too, and an output
 unplugged takes its bar with it; with no outputs at all it waits for one.
 It draws at each output's real device pixels, fractional scales included,
 ",
@@ -199,6 +199,12 @@ It draws at each output's real device pixels, fractional scales included,
 
 The bar:
     --edge EDGE          top (the default) or bottom
+    --layer LAYER        bottom (behind windows), top (the default: in front of
+                         windows, hidden by a fullscreen one) or overlay (in
+                         front of everything, fullscreen windows included)
+    --exclusive BOOL     true (the default: reserve the bar's height, so
+                         windows are arranged beside it) or false (float over
+                         the windows, reserving nothing)
     --height N           the bar's height in logical pixels, 1 to 1024
                          (default 28)
     --margin M           space between the bar and the output's edges, in
@@ -240,6 +246,9 @@ scootbar msg -- ask the running daemon
 USAGE:
     scootbar msg query
     scootbar msg reload
+    scootbar msg hide
+    scootbar msg show
+    scootbar msg toggle
     scootbar msg version
     scootbar msg kill
     scootbar msg set ID JSON
@@ -254,13 +263,19 @@ start-up and removes when it stops:
                (output is null where the compositor never named it)
     reload     re-read the config file and live-apply it; a bad file is
                refused and the running bar stands
+    hide       take the bars away: every layer surface and buffer is
+               destroyed and the exclusive zone released, so windows
+               reclaim the space and the bar holds no memory but the process
+    show       make the bars again
+    toggle     hide if shown, show if hidden
     version    the daemon's version and protocol, as JSON
     kill       stop the daemon, once its reply is sent
     set        a JSON value for module ID (no module takes one yet, so this
                is refused loudly for every id today; the forward hook for
                the modules that will take one)
 
-`query`, `version` and `reload` print the reply; `kill` and `set` print
+`query`, `version`, `reload`, `hide`, `show` and `toggle` print the reply (the
+last three say `{\"type\":\"bar\",\"visible\":false}`, what is now the case); `kill` and `set` print
 nothing on success. Without a daemon, every command fails saying so.
 ";
 
@@ -287,6 +302,9 @@ impl Topic {
 pub enum Msg {
     Query,
     Reload,
+    Hide,
+    Show,
+    Toggle,
     Version,
     Kill,
     /// A value for module `id` (the registry id, so a misspelled one is
@@ -318,6 +336,8 @@ pub enum Command {
 
 /// The flags `daemon` takes.
 const EDGE: &str = "--edge";
+const LAYER: &str = "--layer";
+const EXCLUSIVE: &str = "--exclusive";
 const HEIGHT: &str = "--height";
 const MARGIN: &str = "--margin";
 const BACKGROUND: &str = "--background";
@@ -335,6 +355,8 @@ const CLOCK_FORMAT: &str = "--clock-format";
 
 const FLAGS: &[&str] = &[
     EDGE,
+    LAYER,
+    EXCLUSIVE,
     HEIGHT,
     MARGIN,
     BACKGROUND,
@@ -395,6 +417,8 @@ pub enum Error {
     MissingValue(&'static str),
     Repeated(&'static str),
     Edge(String),
+    Layer(String),
+    Exclusive(String),
     Height(String),
     Margin {
         value: String,
@@ -438,6 +462,12 @@ impl fmt::Display for Error {
                 write!(f, "`{flag}` given twice (try `scootbar daemon --help`)")
             }
             Self::Edge(value) => write!(f, "`{EDGE}` takes top or bottom, not `{value}`"),
+            Self::Layer(value) => {
+                write!(f, "`{LAYER}` takes bottom, top or overlay, not `{value}`")
+            }
+            Self::Exclusive(value) => {
+                write!(f, "`{EXCLUSIVE}` takes true or false, not `{value}`")
+            }
             Self::Height(value) => write!(
                 f,
                 "`{HEIGHT}` takes a whole number of logical pixels from 1 to {MAX_HEIGHT}, \
@@ -472,7 +502,7 @@ impl std::error::Error for Error {}
 pub enum MsgError {
     /// No command at all.
     Missing,
-    /// Not one of `query`, `reload`, `version`, `kill` or `set`.
+    /// Not one of `query`, `reload`, `hide`, `show`, `toggle`, `version`, `kill` or `set`.
     Unknown(String),
     /// `set` without its module id, or without its JSON value.
     NeedsId,
@@ -581,6 +611,8 @@ fn help(mut args: impl Iterator<Item = Result<String, String>>) -> Result<Comman
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Given {
     edge: Option<Edge>,
+    layer: Option<Layer>,
+    exclusive: Option<bool>,
     height: Option<u32>,
     margin: Option<Margin>,
     background: Option<Color>,
@@ -663,6 +695,9 @@ fn msg(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
         let request = match command.as_str() {
             "query" => Msg::Query,
             "reload" => Msg::Reload,
+            "hide" => Msg::Hide,
+            "show" => Msg::Show,
+            "toggle" => Msg::Toggle,
             "version" => Msg::Version,
             "kill" => Msg::Kill,
             _ => return Err(Error::Msg(MsgError::Unknown(command))),
@@ -732,6 +767,16 @@ impl Given {
                 &mut self.edge,
                 flag,
                 Edge::parse(&value).ok_or(Error::Edge(value)),
+            ),
+            LAYER => set(
+                &mut self.layer,
+                flag,
+                Layer::parse(&value).ok_or(Error::Layer(value)),
+            ),
+            EXCLUSIVE => set(
+                &mut self.exclusive,
+                flag,
+                bar::parse_bool(&value).ok_or(Error::Exclusive(value)),
             ),
             HEIGHT => set(
                 &mut self.height,
@@ -830,6 +875,8 @@ impl Given {
                 edge: self.edge.unwrap_or(defaults.bar.edge),
                 height: self.height.unwrap_or(defaults.bar.height),
                 margin: self.margin.unwrap_or(defaults.bar.margin),
+                layer: self.layer.unwrap_or(defaults.bar.layer),
+                exclusive: self.exclusive.unwrap_or(defaults.bar.exclusive),
             },
             theme: crate::theme::Theme {
                 background: self.background.unwrap_or(defaults.theme.background),
@@ -853,6 +900,12 @@ impl Given {
     pub fn overlay(&self, base: &mut Config) -> Result<(), Error> {
         if let Some(edge) = self.edge {
             base.bar.edge = edge;
+        }
+        if let Some(layer) = self.layer {
+            base.bar.layer = layer;
+        }
+        if let Some(exclusive) = self.exclusive {
+            base.bar.exclusive = exclusive;
         }
         if let Some(height) = self.height {
             base.bar.height = height;
