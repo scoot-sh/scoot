@@ -64,8 +64,8 @@ are in [cli.md](cli.md#the-config-file).
 ## Baselines
 
 The bars scootbar is measured against, before scootbar exists, so each
-milestone has something to beat. Measured 2026-09-29 on one machine (a 4-vCPU
-VM), each bar configured to show a clock (`%a %d %b %H:%M`) and, where it
+milestone has something to beat. Measured 2026-09-29 on one machine (a Claude Code
+cloud sandbox VM, 4 vCPUs, not hardware the maintainer owns), each bar configured to show a clock (`%a %d %b %H:%M`) and, where it
 can, the workspaces, with two windows on two workspaces. The method, the
 raw runs and the configs are in the record's
 [§4](backlog/resolved/dependencies-done.md#4-baselines); treat times as
@@ -263,7 +263,7 @@ A fanless machine: the readings the kernel gives are in
 **yambar is not compared on scoot**: 1.11.0 has no ext-workspace-v1 module,
 so it cannot show workspaces there, and the harness neither runs it nor
 invents a number ([testing.md](testing.md#benchmark)). **No competitor beats
-scootbar on any row it was measured on**: three ties, each within the noise
+scootbar on any gated row** (the bare stripped yambar executable, 396 kB, is smaller than scootbar's 1.25 MB; the gated size row counts the closure, where yambar is 20.95 MB on nixpkgs' default features): three ties, each within the noise
 rule (startup against yambar, idle wakeups against yambar and Waybar, both on
 sway; scootbar's 2 a minute meets the ratified target). The rule's second
 half still fails, since one competitor and compositor pair was not compared
@@ -271,7 +271,7 @@ at all. scootbar's cost of a workspace switch at this scope is 26.3 ms for 240
 switches against Waybar's 464 ms and yambar's 177 ms (sway).
 
 **Against its own M1, like for like.** `bench/m1-clock` was measured on a
-different machine (a 4-vCPU Xeon container, debug scoot, kernel 6.18) and is
+different machine (a Claude Code cloud sandbox VM (4-vCPU Xeon), not hardware the maintainer owns; debug scoot, kernel 6.18) and is
 not comparable with this box's numbers: M1's scootbar read 3.9 MiB there and
 reads 2.9 MiB here. So M1's scootbar was rebuilt on the box (`3801c12`,
 release, `cargo build --release -p scootbar`, today's toolchain) and both it
@@ -308,7 +308,7 @@ eight `ext_workspace_manager_v1.done` events and the matching
 workspaces module): `daemon/wayland.rs` binds `ext_workspace_manager_v1`
 whenever the `workspaces` feature is compiled in, placed or not, so the bar
 is woken for, and parses, every workspace change it never shows (its open
-descriptors went from 5 to 8 too). The harness measured this and did not
+descriptors also went from 5 to 8; binding a global opens none, so that is not attributed to this). The harness measured this and did not
 change it; the fix is for the maintainer to schedule. The idle-CPU row is not
 called a regression: on scoot it flags in 3 of the 4 pairings and on sway
 in 1 of 4, with values of 0.8 to 1.2 ms against a noise rule built for

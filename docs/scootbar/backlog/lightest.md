@@ -131,7 +131,9 @@ target. Nothing in it was fixed in the PR that recorded it.
 published M1 run (`bench/m1-clock`) came from a different machine, so M1's
 scootbar (`3801c12`) was rebuilt on the Asahi box and both sides ran the same
 harness at the clock scope, A-B-B-A, two runs each; a row counts only when it
-regresses in all four pairings.
+regresses in all four pairings. That test is a measurement-method choice
+stricter than the rule's "beyond the noise margin"; the maintainer can overrule it
+(it leaves scoot idle CPU, flagged in 3 of 4, uncounted).
 
 | Row (gated) | M1 `3801c12` | M3 `3211551` | Pairings regressed |
 |---|---|---|---|
@@ -152,13 +154,13 @@ cause of the switching row**, confirmed by a protocol trace: the daemon binds
 `ext_workspace_manager_v1` whenever the `workspaces` feature is built, placed
 or not (`crates/scootbar/src/daemon/wayland.rs`, the bind before the seat), so a
 bar with no workspaces module is woken and parses every workspace change
-(one wakeup per switch; open descriptors went from 5 to 8). The memory and size
+(one wakeup per switch; open descriptors also went from 5 to 8, which a bound global does not explain). The memory and size
 growth is the work since M1 (the module config, `toml`, `serde`, `png`: 6 to 10
 direct dependencies; 10,628 to 25,347 lines of Rust, 6,995 to 16,312 outside
 `tests.rs` files), not yet attributed row by row.
 
 **Rule 2 (no competitor beats scootbar at the milestone's scope) is not
-passed, though no row is lost.** At clock and workspaces, on every row
+passed, though no row is lost.** At clock and workspaces, on every gated row
 measured, there are 0 competitor wins: Waybar is 15 to 27 times larger in
 memory and 18 to 64 times slower while switching, yambar (on sway) is 4 to 8
 times larger and 8 times slower while switching; the ties (startup against yambar,

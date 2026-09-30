@@ -447,7 +447,7 @@ and scootbar does not (its runs failed, or it was not run), since a gate
 that cannot be judged has not been passed; `compare` lists every row on
 which scootbar is worse than an earlier run (rule 1). Each milestone's run is kept in [`bench/`](bench/README.md),
 never overwritten. **A baseline is only comparable when it came from the same
-machine**: `bench/m1-clock` was measured on a 4-vCPU Xeon container with a
+machine**: `bench/m1-clock` was measured on a Claude Code cloud sandbox VM (4-vCPU Xeon, not hardware the maintainer owns) with a
 debug scoot, so M3's rule-1 check was made **like for like** instead: the
 old commit's scootbar is rebuilt on the machine that measures the new one
 (`--scootbar PATH --scootbar-source TREE` point the harness at a binary and the
