@@ -4,7 +4,7 @@ A dark, high-contrast look built around one wallpaper: colorful rays exploding
 from a dark center. It is an **opt-in example**, not a default: nothing in scoot,
 scootbar or scootbg changes unless you use these files.
 
-![scoot with the radial burst look: a floating translucent bar with circled workspaces, one translucent terminal on the left running fastfetch with a thin blue ring, the wallpaper showing through it and filling the right half, under a floating translucent bar with circled workspaces](../../assets/radial-burst-preview.png)
+![scoot with the radial burst look: one translucent terminal on the left running fastfetch with a thin blue ring, the wallpaper showing through it and filling the right half, under a floating translucent bar with circled workspaces](../../assets/radial-burst-preview.png)
 
 | File | For |
 | --- | --- |
@@ -59,9 +59,10 @@ opt-in and you can drop any of them:
   method could resolve; see the [resource ratchet](../../scootbar/backlog/lightest.md#appearance-looks-flush-against-floating).
   Set `opacity = 1` (and `radius = 0`) for the plain bar.
 - **The translucent terminals** (foot's `alpha=0.80`) make each terminal window non-opaque,
-  so scoot blends it over the wallpaper every frame, and a fullscreen one cannot be scanned
-  out directly on `--tty`. That extra work was not measured here. Set `alpha=1.0` in
-  [`foot.ini`](foot.ini) for opaque terminals.
+  so scoot blends it over the wallpaper whenever that region is redrawn. In the optional
+  `gpu-scanout` `--tty` tier, a fullscreen translucent window also cannot be handed to the
+  display directly ([tty.md](../../tty.md)). That extra work was not measured here. Set
+  `alpha=1.0` in [`foot.ini`](foot.ini) for opaque terminals.
 
 ## Image credit and license
 
