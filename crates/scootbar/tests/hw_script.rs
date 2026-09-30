@@ -80,3 +80,14 @@ fn a_font_that_is_not_a_font_file_is_a_setup_error_before_anything_is_written() 
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_bad_outputs_list_is_a_setup_error_before_anything_is_written() {
+    for value in ["eDP-1 DP-1", "eDP-1,", ",eDP-1", "a,,b", "a\"b", "a;b"] {
+        let out = fresh("outputs");
+        let (code, stderr) = run(&[("SCOOTBAR_HW_OUTPUTS", value)], &out);
+        assert_eq!(code, 2, "SCOOTBAR_HW_OUTPUTS={value}: {stderr}");
+        assert!(stderr.contains("SCOOTBAR_HW_OUTPUTS"), "{stderr}");
+        assert!(!out.exists());
+    }
+}
