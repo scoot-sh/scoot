@@ -15,7 +15,7 @@ use super::{
     Class, Init, MAX_POLL, MAX_SOURCES, MAX_TEXT, Module, OutputView, Placed, REGISTRY, Settings,
     Sources, Spec, StandIn, Update, View, find, start,
 };
-use crate::layout::{Layout, Section};
+use crate::layout::Layout;
 
 /// Counts the bytes written to a pipe; shows the count, `warn` past 3.
 struct Counter {
@@ -455,7 +455,6 @@ fn a_change_bumps_the_revision_and_nothing_else_does() {
     let (read, write) = rustix::pipe::pipe().unwrap();
     rustix::fs::fcntl_setfl(&read, rustix::fs::OFlags::NONBLOCK).unwrap();
     let mut placed = Placed {
-        section: Section::Left,
         id: "counter",
         module: Box::new(Counter { read, count: 0 }),
         revision: 0,
@@ -500,7 +499,7 @@ fn start_places_what_the_layout_lists_in_order() {
             said.push(format!("{id}: {why}"))
         });
         assert_eq!(placed.len(), 1);
-        assert_eq!(placed[0].section, Section::Right);
+        assert_eq!(placed[0].id, "clock");
     }
     assert!(said.is_empty(), "{said:?}");
     let _ = Init::Unavailable(String::new());

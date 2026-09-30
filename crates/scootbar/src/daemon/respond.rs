@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use wayland_client::QueueHandle;
+use wayland_client::{Connection, QueueHandle};
 
 use super::wayland::State;
 use crate::cli::Given;
@@ -20,8 +20,8 @@ use crate::control::Handler;
 use crate::control::protocol::{ModuleView, PROTOCOL_VERSION, Reply, Request, write_reply};
 use crate::font;
 use crate::modules::{self, OutputView, Placed, Update, View};
+use crate::policy::Placement;
 use crate::print::warn;
-use crate::render::Scene;
 use crate::text::Text;
 
 /// The request handler for one round of the poll loop.
@@ -29,6 +29,7 @@ pub struct Responder<'a> {
     /// Set by `kill`: the poll loop stops after this round.
     pub stop: bool,
     state: &'a mut State,
+    conn: &'a Connection,
     qh: &'a QueueHandle<State>,
     /// The config file a `reload` re-reads.
     file: Option<&'a PathBuf>,
@@ -42,6 +43,7 @@ pub struct Responder<'a> {
 impl<'a> Responder<'a> {
     pub fn new(
         state: &'a mut State,
+        conn: &'a Connection,
         qh: &'a QueueHandle<State>,
         file: Option<&'a PathBuf>,
         given: &'a Given,
@@ -49,6 +51,7 @@ impl<'a> Responder<'a> {
         Self {
             stop: false,
             state,
+            conn,
             qh,
             file,
             given,
@@ -113,8 +116,8 @@ impl Handler for Responder<'_> {
     }
 }
 
-/// A `query` reply: every placed module's view on every output, in
-/// placement order. The views are asked into one reused [`View`], so a
+/// A `query` reply: every placed module's view on every output that shows
+/// it, in start order. The views are asked into one reused [`View`], so a
 /// query allocates nothing beyond the connection's output buffer.
 fn write_query(
     out: &mut Vec<u8>,
@@ -129,8 +132,12 @@ fn write_query(
     let mut failed = false;
     out.extend_from_slice(br#"{"type":"modules","modules":["#);
     let mut first = true;
-    for module in placed {
+    for (index, module) in placed.iter().enumerate() {
         for entry in outputs.iter() {
+            // Only the outputs that show it, in the section they place it.
+            let Some(section) = entry.objects.scene.section_of(index) else {
+                continue;
+            };
             let name = entry.output.info().name.as_deref();
             scratch.clear();
             module.module.view(&OutputView { name }, scratch);
@@ -140,7 +147,7 @@ fn write_query(
             first = false;
             let view = ModuleView {
                 id: module.id,
-                section: module.section.name(),
+                section: section.name(),
                 output: name,
                 text: scratch.text(),
                 class: scratch.class().name(),
@@ -192,11 +199,15 @@ impl Responder<'_> {
         // Started first, but said only once the reload is known good (see
         // below): a refused reload stays silent.
         let mut notes = Vec::new();
-        let modules = modules::start(&config.layout, &config.modules, &mut |id, why| {
-            notes.push(format!(
-                "the {id} module is unavailable, and left out: {why}"
-            ));
-        });
+        let modules = modules::start(
+            &config.outputs.to_start(&config.layout),
+            &config.modules,
+            &mut |id, why| {
+                notes.push(format!(
+                    "the {id} module is unavailable, and left out: {why}"
+                ));
+            },
+        );
         // The font next: a font that vanished since validation refuses
         // the reload with the running bar untouched. The notes above are
         // said only now, once the reload is known good, so a refused
@@ -210,39 +221,28 @@ impl Responder<'_> {
         for note in notes {
             warn(format_args!("scootbar: note: {note}"));
         }
-        let geometry = config.bar != self.state.bar;
-        let count = modules.len();
-        let resize = count != self.state.content.modules.len();
-        self.state.bar = config.bar;
         self.state.content.modules = modules;
         self.state.content.text = text;
         self.state.content.style = config.style();
-        // New placement, new style, new font: every output measures its
-        // views again from scratch. The scenes are small (one short vector
-        // per module) and a reload is rare, so they are rebuilt rather
-        // than patched. Every canvas is cleared too, resized where the
-        // module count changed (whose records are sized to it): the style,
-        // the text and the modules are swapped wholesale, while fresh
-        // scenes start at revision 0, so the old shown record could match
-        // the new state and the next turn would draw nothing until the
-        // next tick. The buffers are made again on demand.
-        let content = &self.state.content;
-        for entry in self.state.outputs.iter_mut() {
-            entry.objects.scene = Scene::new(&content.modules);
-            if resize {
-                entry.objects.canvas.resize(count);
-            } else {
-                entry.objects.canvas.clear();
-            }
-            // Whatever `stale` says next turn: the modules, the style and
-            // the font were swapped wholesale, so every output draws once
-            // (with no modules placed `stale` is always false, and the
-            // removed modules' pixels would stay as ghosts).
-            entry.output.invalidate();
-        }
-        if geometry {
-            self.state.recreate_bars(self.qh);
-        }
+        // New placement, new style, new font: every output is placed again
+        // from scratch (its bar, its modules, its scene and buffers, and
+        // whether it has a bar at all; `State::replace_placement`). The
+        // scenes are small (one short vector per module) and a reload is
+        // rare, so they are rebuilt rather than patched. Fresh scenes start
+        // at revision 0, so the old shown record could match the new state
+        // and the next turn would draw nothing until the next tick: the
+        // canvases are emptied and every output draws once (with no modules
+        // placed `stale` is always false, and the removed modules' pixels
+        // would stay as ghosts).
+        self.state.replace_placement(
+            Placement {
+                bar: config.bar,
+                layout: config.layout,
+                policy: config.outputs,
+            },
+            self.conn,
+            self.qh,
+        );
         Ok(())
     }
 

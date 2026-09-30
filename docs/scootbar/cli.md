@@ -22,6 +22,7 @@ scootbar daemon --layer overlay --exclusive false  # over everything, reserving 
 scootbar daemon --margin 8                   # floating 8 pixels in from its edge and both sides
 scootbar daemon --margin 8,12                # 8 above and below, 12 either side
 scootbar daemon --background '#101014' --foreground '#e0e0e0'
+scootbar daemon --outputs DP-1,eDP-1        # a bar only on those two outputs
 scootbar daemon --config ~/alt-bar.toml    # another file than the default
 scootbar msg query                         # every placed module's state as JSON
 scootbar msg reload                        # re-read the file and live-apply it
@@ -42,6 +43,7 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 
 | Flag | Takes | Default | What it does |
 | --- | --- | --- | --- |
+| `--outputs` | `all`, or connector names, comma-separated | `all` | Which outputs get a bar (`DP-1,eDP-1`). See [Outputs](#outputs). |
 | `--edge` | `top` or `bottom` | `top` | The output edge the bar runs along. Vertical bars (left and right) are a deliberate omission: the layout is horizontal, and the modules, the hit-testing and the text all assume it. |
 | `--layer` | `bottom`, `top` or `overlay` | `top` | The layer-shell layer. See [Layers and the zone](#layers-and-the-zone). |
 | `--exclusive` | `true` or `false` | `true` | Whether the bar reserves its height, so windows are arranged beside it, or floats over them, reserving nothing. |
@@ -78,6 +80,7 @@ section of the file's layout, and a reload keeps the flags over the file,
 as at start-up.
 
 ```toml
+outputs = "all"       # or ["DP-1", "eDP-1"]: see Outputs below
 left = ["workspaces"]
 center = ["clock"]
 
@@ -105,6 +108,10 @@ urgent = "#f38ba8"
 format = "%-I:%M %P"
 
 [workspaces]          # reserved, empty for now
+
+[output."eDP-1"]      # what differs on one output: see Outputs below
+height = 36
+right = ["clock"]
 ```
 
 `margin` takes an integer (every side) or the `--margin` shorthand
@@ -112,7 +119,8 @@ string. `radius` and `opacity` are file-only: they have no flags (see
 [Shape and opacity](#shape-and-opacity)). The module lists take the ids in [Modules](#modules); giving any
 of the three sets the whole layout, as the flags do. An unknown key
 anywhere is a loud error naming it, as is a bad value, which names its
-dotted key (`bar.height`, `colors.background`, `left`, `clock.format`).
+dotted key (`bar.height`, `colors.background`, `left`, `clock.format`;
+`output."eDP-1".height` in an output table).
 A bad file refuses to start the daemon (exit status 1); a bad `reload`
 is refused and the running bar stands undisturbed.
 
@@ -134,7 +142,9 @@ scootbar msg kill                   # stop the daemon, once its reply is sent
 scootbar msg set ID JSON            # refused: no module takes one yet
 ```
 
-`query` prints one JSON object: one entry per placed module per output,
+`query` prints one JSON object: one entry per placed module per output
+that shows it (an output with no bar, or one whose [table](#outputs) leaves
+the module out, has none),
 with its `id`, `section` (`left`, `center` or `right`), `output` (the
 compositor's `wl_output.name`, `null` where it never sent one), the `text`
 it shows and its `class` (`normal`, `warn`, `urgent`, `muted`), plus `icon`
@@ -244,6 +254,11 @@ compositor's free-form name) shows its 1-based position.
 and `commit`s the batch. Clicking the active one sends nothing. A click on
 a non-focused output's bar is dropped by scoot today (it takes no output);
 `output-targeted workspace switch` (in the backlog) will carry it across.
+On a second monitor's bar this is the one limit of the multi-output
+setup: each bar shows its own output's workspaces, but until scoot can
+switch a specific output's, only the focused output's bar switches
+(`focus-output` first, then click). Nothing in scootbar changes when scoot
+gains it: the click is the same `activate`.
 
 - **The pill is rectangular for now**: the bar's corners can be rounded
   ([Shape and opacity](#shape-and-opacity)) but the pill's own radius and
@@ -317,7 +332,7 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
 
 ## What it does on the compositor
 
-- **One bar per output**, a layer surface (`top` by default) with the namespace
+- **One bar per selected output** ([Outputs](#outputs)), a layer surface (`top` by default) with the namespace
   `scootbar` (for compositor rules that match on it), anchored to its edge
   and both sides. An output plugged in later gets a bar; an output
   unplugged takes its bar with it, and the others are untouched. With no
@@ -381,6 +396,75 @@ no keyboard, so it has no hotkey of its own):
 "super+b" = "spawn scootbar msg toggle"
 ```
 
+## Outputs
+
+By default every output gets a bar, all alike. The top-level `outputs` key
+(or `--outputs`) picks which, and `[output."NAME"]` tables change one
+output's bar. `NAME` is the compositor's own name for the output
+(`wl_output.name`: the connector, `DP-1`, `eDP-1`, `HDMI-A-1`; `scootctl
+outputs` on scoot, `swaymsg -t get_outputs` on sway).
+
+```toml
+outputs = ["eDP-1", "DP-1"]     # before any [table]: TOML puts later keys in it
+left = ["workspaces"]
+right = ["clock"]
+
+[output."DP-1"]                 # the external monitor: taller, at the bottom, no workspaces
+height = 36
+edge = "bottom"
+left = []
+right = ["clock"]
+```
+
+- **`outputs`** is `"all"` (the default) or a list of names: only those
+  outputs get a bar. An output plugged in later that is listed gets one; one
+  that leaves loses its bar (and nothing else). An output the compositor
+  never named (a `wl_output` older than version 4) matches only `all`.
+  Names are compared byte for byte. The flag is `--outputs all` or
+  `--outputs DP-1,eDP-1`; given, it replaces the file's list.
+- **`[output."NAME"]`** takes `edge`, `layer`, `exclusive`, `height`, `margin`
+  (the same values as `[bar]`) and `left`/`center`/`right`. A key not given
+  keeps the shared value. Giving any of the three lists sets that output's
+  whole layout, as at the top level: a list not given is empty, and
+  `left = []` alone is a bar with nothing on it. Colors, the font, `padding`,
+  `spacing`, `radius`, `opacity` and each module's own options are shared by
+  every bar. An output table wins over a flag for its output (`--height 40`
+  is the height of every output that does not set its own).
+- **Refused, naming the key:** `outputs = []` (hide the bar with `msg hide`
+  instead), a name listed twice, an empty or over-long (128 bytes) name or one
+  with a control character, more than 32 names or tables, an
+  `[output."X"]` table for an output `outputs` leaves out (it could never
+  apply; with `outputs = "all"` a table for an output that is not plugged in
+  is fine), an unknown key, a bad value, and a module placed twice **within
+  one output** (the same module on two outputs is the point). `--outputs`
+  is checked against the file's tables the same way, so the pair is a
+  usage error, not a silent dead table.
+- **One set of modules, started once.** The daemon starts each module in
+  the shared layout or any output's override a single time, even if a
+  `[output]` table then leaves it off every bar, and every output's bar
+  reads it, so a second
+  monitor adds a surface and its two buffers, not a second clock timer or a
+  second set of file descriptors (checked in `tests/outputs.rs`: the daemon
+  holds 8 fds with one output and 8 with two). A module's change redraws
+  only the outputs that show it. The workspaces module is shared too, and
+  each bar shows its own output's workspaces (see [Workspaces](#workspaces)
+  for the switching limit). There is no "primary" output: to put a module
+  on one output only, name that output in its table.
+- **Scale.** Each bar is drawn at its own output's real device pixels
+  (fractional scales included), so text and pill scale with their output. A
+  per-output `font-size` is not built; the em is the same logical size
+  everywhere.
+- **`radius`** is shared and at most half the shared height: on an output
+  whose own `height` is smaller the corners are cut back to what that bar
+  holds (`radius` is 0 to half the height at the file level).
+- **A reload** re-places every output: one the list now leaves out loses
+  its bar (and its zone), one it now includes gets one, and a bar whose
+  geometry changed is made again. Modules are restarted as at any reload.
+- **`hide`/`show`** keep to the list: a shown bar is made only on a selected
+  output. The two reasons a bar can be absent (hidden, not selected) are
+  independent, so a `show` after a reload that changed the list makes the
+  new list's bars.
+
 ## Hiding the bar
 
 `scootbar msg hide` **destroys the bar's layer surface and its buffers** on
@@ -401,7 +485,8 @@ what is now the case: `{"type":"bar","visible":false}`.
   served.
 - Hidden is runtime state. A `reload` keeps it (a geometry change while
   hidden just waits for the `show`), and a restarted daemon starts shown.
-- An output plugged in while hidden gets no bar until `show`; one that was
+- An output plugged in while hidden gets no bar until `show` (and only if the
+  [list](#outputs) selects it); one that was
   unplugged and plugged in again is the same. `show` with no output is fine:
   each output's bar is made when it arrives.
 - A hide during a redraw needs no care: a draw is one synchronous step of

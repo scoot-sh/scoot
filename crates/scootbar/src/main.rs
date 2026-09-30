@@ -28,6 +28,7 @@ mod layout;
 mod modules;
 mod outputs;
 mod paint;
+mod policy;
 mod print;
 mod render;
 #[cfg(test)]

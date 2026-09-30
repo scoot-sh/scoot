@@ -12,6 +12,7 @@ use crate::color::{Color, ColorError};
 use crate::config::{Config, MAX_FONT_SIZE};
 use crate::layout::{Layout, MAX_GAP, MAX_MODULES, PlacementError};
 use crate::modules::{self, REGISTRY};
+use crate::policy::{self, MAX_OUTPUTS, PolicyError, Select};
 
 #[cfg(test)]
 mod tests;
@@ -174,7 +175,7 @@ USAGE:
     scootbar --help
 
 COMMANDS:
-    daemon     run the bar on every output of this Wayland display
+    daemon     run the bar on this Wayland display's outputs (every one, by default)
     msg        ask the running daemon: query, reload, hide, show, toggle, version, kill, set
 "
 );
@@ -187,7 +188,7 @@ USAGE:
     scootbar daemon [OPTIONS]
 
 Connects to the compositor named by $WAYLAND_DISPLAY, which must support
-wlr-layer-shell, and gives every output a bar: a layer surface (top, by
+wlr-layer-shell, and gives every output (or the ones --outputs names) a bar: a layer surface (top, by
 default) along one edge (namespace \"scootbar\") that reserves its height,
 so windows are arranged beside it, unless told to float over them. Outputs plugged in later get one too, and an output
 unplugged takes its bar with it; with no outputs at all it waits for one.
@@ -196,6 +197,16 @@ It draws at each output's real device pixels, fractional scales included,
     idle!(),
     workspace_wakes!(),
     "
+
+Outputs:
+    --outputs LIST       all (the default) or comma-separated connector names,
+                         like DP-1,eDP-1: only those outputs get a bar. One
+                         plugged in later gets one if it is listed; one that
+                         leaves loses its bar. The config file also sets a
+                         bar's edge, layer, exclusive, height, margin and
+                         module lists per output, in [output.\"NAME\"] tables
+                         (see docs/scootbar/cli.md); those win over the
+                         flags below for that output
 
 The bar:
     --edge EDGE          top (the default) or bottom
@@ -258,8 +269,8 @@ Asks the daemon for this Wayland display over its control socket
 ($XDG_RUNTIME_DIR/scootbar-DISPLAY.sock), which the daemon claims at
 start-up and removes when it stops:
 
-    query      each placed module's state as JSON: its id, section,
-               output, text and class, plus its icon where it shows one
+    query      each placed module's state as JSON, once per output that
+               shows it: its id, section, output, text and class, plus its icon where it shows one
                (output is null where the compositor never named it)
     reload     re-read the config file and live-apply it; a bad file is
                refused and the running bar stands
@@ -335,6 +346,7 @@ pub enum Command {
 }
 
 /// The flags `daemon` takes.
+const OUTPUTS: &str = "--outputs";
 const EDGE: &str = "--edge";
 const LAYER: &str = "--layer";
 const EXCLUSIVE: &str = "--exclusive";
@@ -354,6 +366,7 @@ const CONFIG: &str = "--config";
 const CLOCK_FORMAT: &str = "--clock-format";
 
 const FLAGS: &[&str] = &[
+    OUTPUTS,
     EDGE,
     LAYER,
     EXCLUSIVE,
@@ -406,6 +419,28 @@ impl fmt::Display for ModulesError {
     }
 }
 
+/// Why an `--outputs` value is refused (or, after the overlay, why the
+/// flag and the file together are).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutputsError {
+    /// Empty, or an empty entry (`DP-1,`).
+    Empty,
+    /// More than [`MAX_OUTPUTS`] names, or a name the policy refuses.
+    Policy(PolicyError),
+}
+
+impl fmt::Display for OutputsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => write!(
+                f,
+                "takes `all` or comma-separated connector names, like `DP-1,eDP-1`"
+            ),
+            Self::Policy(error) => write!(f, "{error}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     Missing,
@@ -416,6 +451,12 @@ pub enum Error {
     },
     MissingValue(&'static str),
     Repeated(&'static str),
+    Outputs {
+        value: String,
+        error: OutputsError,
+    },
+    /// `--outputs` and the file's `[output]` tables together.
+    OutputsClash(PolicyError),
     Edge(String),
     Layer(String),
     Exclusive(String),
@@ -460,6 +501,12 @@ impl fmt::Display for Error {
             }
             Self::Repeated(flag) => {
                 write!(f, "`{flag}` given twice (try `scootbar daemon --help`)")
+            }
+            Self::Outputs { value, error } => {
+                write!(f, "`{OUTPUTS} {}`: {error}", value.escape_debug())
+            }
+            Self::OutputsClash(error) => {
+                write!(f, "`{OUTPUTS}` with the config file: {error}")
             }
             Self::Edge(value) => write!(f, "`{EDGE}` takes top or bottom, not `{value}`"),
             Self::Layer(value) => {
@@ -610,6 +657,7 @@ fn help(mut args: impl Iterator<Item = Result<String, String>>) -> Result<Comman
 /// Every `daemon` flag's value, as given (each at most once).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Given {
+    outputs: Option<Select>,
     edge: Option<Edge>,
     layer: Option<Layer>,
     exclusive: Option<bool>,
@@ -763,6 +811,11 @@ impl Given {
         // any of them, and its lossy form says so in the flag's own error.
         let value = text(raw).unwrap_or_else(|lossy| lossy);
         match flag {
+            OUTPUTS => set(
+                &mut self.outputs,
+                flag,
+                output_list(&value).map_err(|error| Error::Outputs { value, error }),
+            ),
             EDGE => set(
                 &mut self.edge,
                 flag,
@@ -889,6 +942,10 @@ impl Given {
             radius: defaults.radius,
             opacity: defaults.opacity,
             modules,
+            outputs: crate::policy::Policy {
+                select: self.outputs.unwrap_or_default(),
+                overrides: Vec::new(),
+            },
         })
     }
 
@@ -898,6 +955,12 @@ impl Given {
     /// rule, so a flag and the file together are still checked for a
     /// module placed twice.
     pub fn overlay(&self, base: &mut Config) -> Result<(), Error> {
+        if let Some(select) = &self.outputs {
+            base.outputs.select = select.clone();
+            // The list over the file's tables: one the list leaves out
+            // could never apply.
+            base.outputs.check().map_err(Error::OutputsClash)?;
+        }
         if let Some(edge) = self.edge {
             base.bar.edge = edge;
         }
@@ -949,6 +1012,29 @@ impl Given {
         }
         Ok(())
     }
+}
+
+/// `--outputs`: `all`, or comma-separated connector names, each at most
+/// once. Compared with the file's tables after the overlay.
+fn output_list(value: &str) -> Result<Select, OutputsError> {
+    if value == "all" {
+        return Ok(Select::All);
+    }
+    let mut names = Vec::new();
+    for name in value.split(',') {
+        if name.is_empty() {
+            return Err(OutputsError::Empty);
+        }
+        if names.len() >= MAX_OUTPUTS {
+            return Err(OutputsError::Policy(PolicyError::TooManyOutputs));
+        }
+        policy::check_name(name).map_err(|e| OutputsError::Policy(PolicyError::Name(e)))?;
+        if names.iter().any(|earlier| earlier == name) {
+            return Err(OutputsError::Policy(PolicyError::Twice(name.to_owned())));
+        }
+        names.push(name.to_owned());
+    }
+    Ok(Select::Named(names))
 }
 
 /// A comma-separated list of module ids; empty is no modules.

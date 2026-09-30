@@ -45,10 +45,10 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLay
 
 use super::Content;
 use super::surfaces::Objects;
-use crate::bar::Bar;
 #[cfg(feature = "workspaces")]
 use crate::modules::workspaces::Link;
 use crate::outputs::Outputs;
+use crate::policy::Placement;
 
 #[derive(Debug)]
 pub enum WaylandError {
@@ -102,7 +102,8 @@ pub struct Globals {
 pub struct State {
     pub globals: Globals,
     pub outputs: Outputs<Objects>,
-    pub bar: Bar,
+    /// The shared bar and layout, and which output gets what.
+    pub placement: Placement,
     /// The bars are hidden (`scootbar msg hide`): no output has a surface.
     /// What the control clients ask for, carried out once per loop turn by
     /// `State::apply_visibility`.
@@ -132,7 +133,7 @@ impl Wayland {
     /// globals (one round trip), binds them, and binds each output. Also
     /// returns the optional globals the compositor lacks, to say so.
     pub fn connect(
-        bar: Bar,
+        placement: Placement,
         content: Content,
         #[cfg(feature = "workspaces")] workspaces: Link,
     ) -> Result<(Self, Vec<&'static str>), WaylandError> {
@@ -203,7 +204,7 @@ impl Wayland {
                 seat,
             },
             outputs: Outputs::default(),
-            bar,
+            placement,
             hidden: false,
             content,
             #[cfg(feature = "workspaces")]

@@ -180,12 +180,11 @@ fn a_warm_tick_allocates_nothing() {
     };
     let output = OutputView { name: None };
     let mut placed = vec![Placed {
-        section: Section::Left,
         id: "still",
         module: Box::new(Still("3:07".to_owned())),
         revision: 0,
     }];
-    let mut scene = Scene::new(&placed);
+    let mut scene = Scene::all(&[Section::Left]);
     let mut record = Record::new(1);
     let mut shown = Record::new(1);
     let mut damage_spans = Vec::new();

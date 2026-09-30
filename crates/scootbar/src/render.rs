@@ -102,9 +102,33 @@ pub(crate) fn em(font_size: u32, scale: Scale) -> f32 {
     font_size as f32 * factor
 }
 
-/// One output's modules as last measured and laid out.
+/// A module an output shows, and the section it goes in there: outputs
+/// place the one set of started modules differently (`crate::policy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Member {
+    /// Index into the started modules.
+    pub module: usize,
+    pub section: Section,
+}
+
+/// The modules `layout` places, as members, in its order. A module that
+/// did not start (unavailable) is skipped, as it takes no space.
+pub fn members(layout: &layout::Layout, placed: &[Placed]) -> Vec<Member> {
+    layout
+        .placed()
+        .filter_map(|(section, id)| {
+            let module = placed.iter().position(|p| p.id == id)?;
+            Some(Member { module, section })
+        })
+        .collect()
+}
+
+/// One output's modules as last measured and laid out. Everything here is
+/// indexed by member (its place on this output), not by started module.
 #[derive(Debug, Default)]
 pub struct Scene {
+    /// Each member's index into the started modules.
+    modules: Vec<usize>,
     views: Vec<View>,
     /// The revision each view is at.
     revisions: Vec<u64>,
@@ -122,28 +146,42 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// A scene for `placed`: its vectors are sized once, here.
-    pub fn new(placed: &[Placed]) -> Self {
-        let count = placed.len();
+    /// A scene showing the first `sections.len()` started modules, each in
+    /// its section.
+    #[cfg(test)]
+    pub fn all(sections: &[Section]) -> Self {
+        let members: Vec<Member> = sections
+            .iter()
+            .enumerate()
+            .map(|(module, &section)| Member { module, section })
+            .collect();
+        Self::with_members(&members)
+    }
+
+    /// A scene for `members`: its vectors are sized once, here.
+    pub fn with_members(members: &[Member]) -> Self {
+        let count = members.len();
         Self {
+            modules: members.iter().map(|m| m.module).collect(),
             views: vec![View::default(); count],
             revisions: vec![NEVER; count],
             widths: vec![0; count],
             spans: vec![Span::default(); count],
             next: vec![Span::default(); count],
-            sections: placed.iter().map(|p| p.section).collect(),
+            sections: members.iter().map(|m| m.section).collect(),
             layout: 0,
             measured: None,
             corners: Corners::NONE,
         }
     }
 
-    /// Whether some module changed since `shown` was drawn.
-    pub fn stale(placed: &[Placed], shown: &Record) -> bool {
-        placed
+    /// Whether some module this scene shows changed since `shown` was
+    /// drawn.
+    pub fn stale(&self, placed: &[Placed], shown: &Record) -> bool {
+        self.modules
             .iter()
             .zip(&shown.revisions)
-            .any(|(placed, &shown)| placed.revision != shown)
+            .any(|(&module, &shown)| placed.get(module).is_some_and(|p| p.revision != shown))
     }
 
     /// Brings the views, widths and spans up to date for a bar `extent`
@@ -166,13 +204,17 @@ impl Scene {
         self.measured = Some((scale, width));
         let em = em(style.font_size, scale);
         let padding = device(style.padding, scale).saturating_mul(2);
-        let entries = placed
+        let entries = self
+            .modules
             .iter()
             .zip(&mut self.views)
             .zip(&mut self.revisions)
             .zip(&mut self.widths);
         let mut resized = all;
-        for (((placed, view), revision), measured) in entries {
+        for (((&module, view), revision), measured) in entries {
+            let Some(placed) = placed.get(module) else {
+                continue;
+            };
             if !all && *revision == placed.revision {
                 continue;
             }
@@ -219,7 +261,19 @@ impl Scene {
         &self.views
     }
 
-    /// One module's view as last asked, for the click routing.
+    /// The section started module `module` is in on this output, if it
+    /// shows it.
+    pub fn section_of(&self, module: usize) -> Option<Section> {
+        let member = self.modules.iter().position(|&m| m == module)?;
+        self.sections.get(member).copied()
+    }
+
+    /// The started module that member `index` is, for the click routing.
+    pub fn module(&self, index: usize) -> Option<usize> {
+        self.modules.get(index).copied()
+    }
+
+    /// One member's view as last asked, for the click routing.
     pub fn view(&self, index: usize) -> Option<&View> {
         self.views.get(index)
     }
@@ -304,7 +358,7 @@ pub fn paint(
         // The one module with its own look draws itself; the rest draw as
         // plain text.
         let mut custom = false;
-        if let Some(placed) = placed.get(index) {
+        if let Some(placed) = scene.modules.get(index).and_then(|&m| placed.get(m)) {
             custom = placed.module.custom_draw(&mut CustomDraw {
                 output: *output,
                 view,

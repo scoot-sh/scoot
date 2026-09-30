@@ -571,3 +571,31 @@ pub fn shm_mappings(pid: u32) -> usize {
 pub fn open_fds(pid: u32) -> usize {
     fs::read_dir(format!("/proc/{pid}/fd")).unwrap().count()
 }
+
+/// The daemon's fd count once steady: the same on four reads 100 ms apart.
+pub fn settled_fds(pid: u32) -> usize {
+    let deadline = Instant::now() + PATIENCE;
+    let mut count = open_fds(pid);
+    let mut stable = 0;
+    while stable < 3 {
+        std::thread::sleep(Duration::from_millis(100));
+        let now = open_fds(pid);
+        if now == count {
+            stable += 1;
+        } else {
+            count = now;
+            stable = 0;
+        }
+        assert!(Instant::now() < deadline, "the fd count never settled");
+    }
+    count
+}
+
+/// At most the double buffer per output is mapped, and at least one.
+pub fn assert_buffers(pid: u32, outputs: usize) {
+    let mapped = shm_mappings(pid);
+    assert!(
+        (outputs..=2 * outputs).contains(&mapped),
+        "{mapped} shm buffers mapped for {outputs} outputs"
+    );
+}

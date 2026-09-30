@@ -558,3 +558,93 @@ fn visibility_commands_take_no_arguments() {
         assert!(super::MSG_HELP.contains(word), "{word}");
     }
 }
+
+#[test]
+fn outputs_takes_all_or_connector_names() {
+    use crate::policy::Select;
+    assert_eq!(config(&[]).outputs.select, Select::All);
+    assert_eq!(config(&["--outputs", "all"]).outputs.select, Select::All);
+    assert_eq!(
+        config(&["--outputs=DP-1,eDP-1"]).outputs.select,
+        Select::Named(vec!["DP-1".into(), "eDP-1".into()])
+    );
+    // Only the exact word `all` is all: a connector called `All` is a name.
+    assert_eq!(
+        config(&["--outputs", "All"]).outputs.select,
+        Select::Named(vec!["All".into()])
+    );
+}
+
+#[test]
+fn a_bad_outputs_value_is_refused() {
+    for value in [
+        "",
+        ",",
+        "DP-1,",
+        ",DP-1",
+        "DP-1,,DP-2",
+        "DP-1,DP-1",
+        "a\u{1b}b",
+    ] {
+        assert!(
+            matches!(
+                run(&["daemon", "--outputs", value]),
+                Err(Error::Outputs { .. })
+            ),
+            "{value:?}"
+        );
+    }
+    let many: Vec<String> = (0..=crate::policy::MAX_OUTPUTS)
+        .map(|n| format!("O-{n}"))
+        .collect();
+    assert!(matches!(
+        run(&["daemon", "--outputs", &many.join(",")]),
+        Err(Error::Outputs { .. })
+    ));
+    assert_eq!(
+        run(&["daemon", "--outputs", "a", "--outputs", "b"]),
+        Err(Error::Repeated("--outputs"))
+    );
+    // Never echoed raw.
+    let message = run(&["daemon", "--outputs", "a\u{1b}[31m,a\u{1b}[31m"])
+        .unwrap_err()
+        .to_string();
+    assert!(!message.contains('\u{1b}'), "{message:?}");
+}
+
+/// The list over the file's `[output]` tables: a table the list leaves out
+/// could never apply, so the pair is refused.
+#[test]
+fn the_flag_and_the_files_tables_are_checked_together() {
+    use crate::policy::{BarOverride, Override, Policy, Select};
+    let mut base = Config {
+        outputs: Policy {
+            select: Select::All,
+            overrides: vec![Override {
+                name: "DP-2".into(),
+                bar: BarOverride::default(),
+                modules: None,
+            }],
+        },
+        ..Config::default()
+    };
+    let overlay = |base: &mut Config, list: &str| match run(&["daemon", "--outputs", list]) {
+        Ok(Command::Daemon(command)) => command.given.overlay(base),
+        other => panic!("{other:?}"),
+    };
+    let error = overlay(&mut base, "DP-1").unwrap_err().to_string();
+    assert!(
+        error.contains("DP-2") && error.contains("--outputs"),
+        "{error}"
+    );
+    assert_eq!(overlay(&mut base, "DP-1,DP-2"), Ok(()));
+    assert_eq!(overlay(&mut base, "all"), Ok(()));
+    // No flag: the file's own list stands, untouched.
+    let mut base = Config::default();
+    base.outputs.select = Select::Named(vec!["HDMI-A-1".into()]);
+    match run(&["daemon", "--height", "30"]) {
+        Ok(Command::Daemon(command)) => command.given.overlay(&mut base).unwrap(),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(base.outputs.select, Select::Named(vec!["HDMI-A-1".into()]));
+}

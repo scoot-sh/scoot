@@ -12,7 +12,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use common::{Reaper, Session, open_fds, rgb, shm_mappings, wakeups};
+use common::{Reaper, Session, assert_buffers, rgb, settled_fds, wakeups};
 use serde_json::Value;
 
 const BAR: &str = "#20c030";
@@ -65,34 +65,6 @@ fn plug(session: &Session) -> String {
 
 fn unplug(session: &Session, name: &str) {
     session.swaymsg(&["output", name, "unplug"]);
-}
-
-/// The daemon's fd count once steady: the same on four reads 100 ms apart.
-fn settled_fds(pid: u32) -> usize {
-    let deadline = Instant::now() + common::PATIENCE;
-    let mut count = open_fds(pid);
-    let mut stable = 0;
-    while stable < 3 {
-        std::thread::sleep(Duration::from_millis(100));
-        let now = open_fds(pid);
-        if now == count {
-            stable += 1;
-        } else {
-            count = now;
-            stable = 0;
-        }
-        assert!(Instant::now() < deadline, "the fd count never settled");
-    }
-    count
-}
-
-/// At most the double buffer per output is mapped, and at least one.
-fn assert_buffers(pid: u32, outputs: usize) {
-    let mapped = shm_mappings(pid);
-    assert!(
-        (outputs..=2 * outputs).contains(&mapped),
-        "{mapped} shm buffers mapped for {outputs} outputs"
-    );
 }
 
 #[test]
@@ -248,4 +220,140 @@ fn side_margins_wider_than_the_output_still_give_a_bar() {
     // It still reserves its height.
     let usable = session.sway_usable();
     assert_eq!(usable[0].1["y"].as_i64(), Some(28), "{usable:?}");
+}
+
+/// The clock's text on `output` as `scootbar msg query` reports it.
+fn clock_text(session: &Session, output: &str) -> Option<String> {
+    let reply = session.scootbar().arg("msg").arg("query").output().unwrap();
+    let reply: Value = serde_json::from_slice(&reply.stdout).ok()?;
+    reply["modules"]
+        .as_array()?
+        .iter()
+        .find(|m| m["id"] == "clock" && m["output"] == output)
+        .and_then(|m| m["text"].as_str().map(str::to_owned))
+}
+
+/// Waits until the clock on `output` reads two different times: it still
+/// ticks (`--clock-format %S`, once a second).
+fn assert_ticking(session: &Session, bar: &mut Reaper, output: &str) {
+    let first = session.wait_for(&mut bar.0, "the clock queried", |session| {
+        clock_text(session, output)
+    });
+    session.wait_for(&mut bar.0, "the clock to tick", |session| {
+        clock_text(session, output).filter(|now| *now != first)
+    });
+}
+
+/// Whether output `name` has no bar: its whole area is usable.
+fn has_no_bar(session: &Session, name: &str) -> bool {
+    session
+        .sway_usable()
+        .iter()
+        .find(|(n, _)| n == name)
+        .is_some_and(|(_, usable)| usable["y"].as_i64() == Some(0))
+}
+
+#[test]
+fn the_list_decides_which_plugged_output_gets_a_bar() {
+    let Some(session) = Session::sway("list", 1) else {
+        return;
+    };
+    // sway names its headless outputs HEADLESS-1, -2, ... in the order
+    // they appear: the first is there, the second is left out, the third
+    // is listed, and none of that is assumed without checking.
+    let mut bar = Reaper(session.bar(&["--background", BAR, "--outputs", "HEADLESS-1,HEADLESS-3"]));
+    let first = wait_all_bars_on(&session, &mut bar, &["HEADLESS-1"]);
+    assert_eq!(first, ["HEADLESS-1"]);
+    let pid = bar.0.id();
+    let fds = settled_fds(pid);
+
+    let second = plug(&session);
+    assert_eq!(second, "HEADLESS-2", "sway's naming changed");
+    let third = plug(&session);
+    assert_eq!(third, "HEADLESS-3", "sway's naming changed");
+    wait_all_bars_on(&session, &mut bar, &["HEADLESS-1", "HEADLESS-3"]);
+    assert!(
+        has_no_bar(&session, &second),
+        "the unlisted output has a bar"
+    );
+    assert_buffers(pid, 2);
+
+    // The listed output leaves and a new, unlisted one takes its place.
+    unplug(&session, &third);
+    let fourth = plug(&session);
+    assert_eq!(fourth, "HEADLESS-4");
+    wait_all_bars_on(&session, &mut bar, &["HEADLESS-1"]);
+    session.wait_for(&mut bar.0, "the unlisted output settled", |session| {
+        has_no_bar(session, &fourth).then_some(())
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(has_no_bar(&session, &fourth));
+    assert!(
+        bar.0.try_wait().unwrap().is_none(),
+        "{}",
+        session.bar_stderr()
+    );
+    unplug(&session, &second);
+    unplug(&session, &fourth);
+    wait_all_bars_on(&session, &mut bar, &["HEADLESS-1"]);
+    assert_eq!(settled_fds(pid), fds, "fds leaked across the replugs");
+    assert_buffers(pid, 1);
+}
+
+/// Every output that must have the bar has it, and the rest do not.
+fn wait_all_bars_on(session: &Session, bar: &mut Reaper, want: &[&str]) -> Vec<String> {
+    session.wait_for(&mut bar.0, "the listed outputs' bars", |session| {
+        let outputs = session.sway_usable();
+        let with: Vec<String> = outputs
+            .iter()
+            .filter(|(name, usable)| has_bar(session, name, usable))
+            .map(|(name, _)| name.clone())
+            .collect();
+        let mut with = with;
+        with.sort();
+        (with == want).then_some(with)
+    })
+}
+
+#[test]
+fn modules_still_update_after_a_hotplug_storm() {
+    let Some(session) = Session::sway("storm-modules", 2) else {
+        return;
+    };
+    let mut bar = Reaper(session.bar(&[
+        "--background",
+        BAR,
+        "--center",
+        "clock",
+        "--clock-format",
+        "%S",
+    ]));
+    let first = wait_all_bars(&session, &mut bar, "a bar on each output");
+    assert_eq!(first.len(), 2);
+    let pid = bar.0.id();
+    let fds = settled_fds(pid);
+    for name in &first {
+        assert_ticking(&session, &mut bar, name);
+    }
+    // Plugged and unplugged back to back, then every original output out
+    // from under its bar, and one plugged in: the shared clock (started
+    // once) keeps ticking on what is left, and on the newcomer.
+    for _ in 0..10 {
+        let name = plug(&session);
+        unplug(&session, &name);
+    }
+    for name in &first {
+        unplug(&session, name);
+    }
+    let last = plug(&session);
+    let bars = wait_all_bars(&session, &mut bar, "one bar after the storm");
+    assert_eq!(bars, std::slice::from_ref(&last));
+    assert_ticking(&session, &mut bar, &last);
+    assert_eq!(settled_fds(pid), fds, "fds leaked across the storm");
+    assert_buffers(pid, 1);
+    assert!(
+        bar.0.try_wait().unwrap().is_none(),
+        "{}",
+        session.bar_stderr()
+    );
 }
