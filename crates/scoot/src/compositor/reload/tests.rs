@@ -173,6 +173,56 @@ fn reload_applies_gap_appearance_and_binds_and_lists_them() {
     );
 }
 
+/// `focus_ring_inactive_width` is an `[appearance]` field like the others:
+/// applied live, reported under its own name, a redraw requested, and a
+/// second reload of the same file silent. Unsetting it again follows the
+/// active width, and the active width alone moving drags an unset inactive
+/// width with it (one effective thickness, reported through the field that
+/// actually changed in the file).
+#[test]
+fn reload_applies_the_inactive_ring_width_live() {
+    let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
+    assert_eq!(fixture.state.appearance.ring_width(false), 3);
+
+    fixture.rewrite(
+        "[layout]\ngap = 20\n\n[appearance]\nfocus_ring_width = 4\nfocus_ring_inactive_width = 1\n",
+    );
+    let response = fixture.reload();
+    for name in [field::RING_WIDTH, field::RING_INACTIVE_WIDTH] {
+        assert!(
+            applied(&response).contains(&name.to_owned()),
+            "{name} was not reported applied: {response:?}"
+        );
+    }
+    assert_eq!(fixture.state.appearance.focus_ring_width, 4);
+    assert_eq!(fixture.state.appearance.focus_ring_inactive_width, Some(1));
+    assert!(
+        fixture.state.needs_render,
+        "a changed ring width reloaded without requesting a render"
+    );
+
+    // Same file again: nothing to report.
+    fixture.state.needs_render = false;
+    let response = fixture.reload();
+    assert!(applied(&response).is_empty(), "{response:?}");
+
+    // Only the inactive width moves: it alone is reported and redraws.
+    fixture.rewrite(
+        "[layout]\ngap = 20\n\n[appearance]\nfocus_ring_width = 4\nfocus_ring_inactive_width = 0\n",
+    );
+    let response = fixture.reload();
+    assert_eq!(applied(&response), [field::RING_INACTIVE_WIDTH.to_owned()]);
+    assert_eq!(fixture.state.appearance.ring_width(false), 0);
+    assert_eq!(fixture.state.appearance.ring_width(true), 4);
+    assert!(fixture.state.needs_render);
+
+    // Unset again: back to following the active width.
+    fixture.rewrite("[layout]\ngap = 20\n\n[appearance]\nfocus_ring_width = 4\n");
+    let response = fixture.reload();
+    assert_eq!(applied(&response), [field::RING_INACTIVE_WIDTH.to_owned()]);
+    assert_eq!(fixture.state.appearance.ring_width(false), 4);
+}
+
 #[test]
 fn reload_applies_column_widths_scale_and_refuses_restart_fields() {
     let mut fixture = Fixture::with_config("");

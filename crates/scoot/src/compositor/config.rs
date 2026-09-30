@@ -165,6 +165,7 @@ impl OutputConfig {
 #[serde(deny_unknown_fields)]
 struct AppearanceConfig {
     focus_ring_width: Option<i32>,
+    focus_ring_inactive_width: Option<i32>,
     focus_ring_active_color: Option<String>,
     focus_ring_inactive_color: Option<String>,
     background_color: Option<String>,
@@ -203,6 +204,8 @@ impl AppearanceConfig {
         };
         Appearance {
             focus_ring_width: self.focus_ring_width.unwrap_or(defaults.focus_ring_width),
+            // Unset stays unset: the ring then follows the active width.
+            focus_ring_inactive_width: self.focus_ring_inactive_width,
             focus_ring_active_color: color(
                 self.focus_ring_active_color,
                 "focus_ring_active_color",
@@ -734,6 +737,15 @@ pub fn default_config_toml() -> String {
     out.push_str(&format!(
         "# focus_ring_width = {}\n",
         appearance.focus_ring_width
+    ));
+    out.push_str(
+        "# Ring thickness around every window that is not focused; unset means the same\n\
+         # as focus_ring_width (shown here with that default; uncommenting it pins the value,\n\
+         # so it stops following focus_ring_width). Same clamp; 0 is no ring.\n",
+    );
+    out.push_str(&format!(
+        "# focus_ring_inactive_width = {}\n",
+        appearance.ring_width(false)
     ));
     out.push_str(&format!(
         "# focus_ring_active_color = \"{}\"\n",
@@ -2358,6 +2370,97 @@ mod tests {
         );
     }
 
+    // -- [appearance] focus_ring_inactive_width ------------------------------
+
+    fn ring_widths(toml: &str) -> (i32, i32) {
+        let file: FileConfig = toml::from_str(toml).expect("valid toml");
+        let appearance = LoadedConfig::from_file(file).appearance;
+        (appearance.ring_width(true), appearance.ring_width(false))
+    }
+
+    #[test]
+    fn an_unset_inactive_ring_width_equals_the_active_one() {
+        assert_eq!(ring_widths(""), (3, 3), "the defaults render as before");
+        assert_eq!(
+            ring_widths("[layout]\ngap = 20\n\n[appearance]\nfocus_ring_width = 6\n"),
+            (6, 6)
+        );
+        let file: FileConfig =
+            toml::from_str("[appearance]\nfocus_ring_width = 2\n").expect("valid toml");
+        assert_eq!(
+            LoadedConfig::from_file(file)
+                .appearance
+                .focus_ring_inactive_width,
+            None,
+            "unset stays unset, so it keeps following the active width"
+        );
+    }
+
+    #[test]
+    fn an_inactive_ring_width_is_independent_of_the_active_one() {
+        assert_eq!(
+            ring_widths(
+                "[layout]\ngap = 20\n\n[appearance]\nfocus_ring_width = 4\nfocus_ring_inactive_width = 1\n"
+            ),
+            (4, 1)
+        );
+        // Thicker than the active one is the user's call too.
+        assert_eq!(
+            ring_widths(
+                "[layout]\ngap = 20\n\n[appearance]\nfocus_ring_width = 2\nfocus_ring_inactive_width = 5\n"
+            ),
+            (2, 5)
+        );
+    }
+
+    #[test]
+    fn a_zero_inactive_ring_width_means_no_ring_on_unfocused_windows() {
+        assert_eq!(
+            ring_widths("[appearance]\nfocus_ring_width = 3\nfocus_ring_inactive_width = 0\n"),
+            (3, 0)
+        );
+    }
+
+    #[test]
+    fn a_negative_inactive_ring_width_is_left_alone_like_the_active_one() {
+        // Unclamped below, as `focus_ring_width` is: every ring site gates
+        // on `> 0`, so it draws no ring.
+        let (active, inactive) =
+            ring_widths("[appearance]\nfocus_ring_width = 3\nfocus_ring_inactive_width = -2\n");
+        assert_eq!(active, 3);
+        assert_eq!(inactive, -2);
+    }
+
+    #[test]
+    fn an_inactive_ring_width_wider_than_half_the_gap_is_clamped() {
+        assert_eq!(
+            ring_widths(
+                "[layout]\ngap = 6\n\n[appearance]\nfocus_ring_width = 2\nfocus_ring_inactive_width = 20\n"
+            ),
+            (2, 3),
+            "clamped to half of gap=6"
+        );
+        let toml = format!(
+            "[layout]\ngap = {}\n\n[appearance]\nfocus_ring_inactive_width = {}\n",
+            i32::MAX,
+            i32::MAX
+        );
+        let (_, inactive) = ring_widths(&toml);
+        assert_eq!(
+            inactive,
+            Config::MAX_GAP / 2,
+            "clamped against the capped gap, so `rect.w + 2 * width` cannot overflow"
+        );
+    }
+
+    #[test]
+    fn an_unset_inactive_ring_width_is_clamped_with_the_active_one() {
+        assert_eq!(
+            ring_widths("[layout]\ngap = 6\n\n[appearance]\nfocus_ring_width = 20\n"),
+            (3, 3)
+        );
+    }
+
     // -- [appearance] cursor fields ---------------------------------------
 
     /// A config file sets just the cursor fields: they apply, and nothing
@@ -3191,6 +3294,7 @@ mod tests {
         let emitted = default_config_toml();
         for key in [
             "focus_ring_width",
+            "focus_ring_inactive_width",
             "focus_ring_active_color",
             "focus_ring_inactive_color",
             "background_color",
@@ -3299,6 +3403,10 @@ mod tests {
             format!("# column_widths = [{}]", widths.join(", ")),
             format!("# default_column_width = {}", config.default_column_width),
             format!("# focus_ring_width = {}", appearance.focus_ring_width),
+            format!(
+                "# focus_ring_inactive_width = {}",
+                appearance.ring_width(false)
+            ),
             format!(
                 "# focus_ring_active_color = \"{}\"",
                 hex(appearance.focus_ring_active_color)

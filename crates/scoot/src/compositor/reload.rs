@@ -162,6 +162,7 @@ mod field {
     pub const COLUMN_WIDTHS: &str = "layout.column_widths";
     pub const DEFAULT_COLUMN_WIDTH: &str = "layout.default_column_width";
     pub const RING_WIDTH: &str = "appearance.focus_ring_width";
+    pub const RING_INACTIVE_WIDTH: &str = "appearance.focus_ring_inactive_width";
     pub const RING_ACTIVE: &str = "appearance.focus_ring_active_color";
     pub const RING_INACTIVE: &str = "appearance.focus_ring_inactive_color";
     pub const BACKGROUND: &str = "appearance.background_color";
@@ -263,6 +264,7 @@ impl State {
                 || name == field::COLUMN_WIDTHS
                 || name == field::DEFAULT_COLUMN_WIDTH
                 || name == field::RING_WIDTH
+                || name == field::RING_INACTIVE_WIDTH
                 || name == field::RING_ACTIVE
                 || name == field::RING_INACTIVE
                 || name == field::BACKGROUND
@@ -327,6 +329,11 @@ impl State {
         if appearance.focus_ring_width != live.focus_ring_width {
             self.appearance.focus_ring_width = appearance.focus_ring_width;
             report.applied.push(field::RING_WIDTH.to_owned());
+            appearance_changed = true;
+        }
+        if appearance.focus_ring_inactive_width != live.focus_ring_inactive_width {
+            self.appearance.focus_ring_inactive_width = appearance.focus_ring_inactive_width;
+            report.applied.push(field::RING_INACTIVE_WIDTH.to_owned());
             appearance_changed = true;
         }
         if appearance.focus_ring_active_color != live.focus_ring_active_color {

@@ -642,6 +642,10 @@ default_column_width = 1
 [appearance]
 # Ring thickness; clamped to at most half of gap.
 focus_ring_width = 3
+# Ring thickness around every window that is not focused; unset means the same
+# as focus_ring_width (shown here with that default; uncommenting it pins the value,
+# so it stops following focus_ring_width). Same clamp; 0 is no ring.
+focus_ring_inactive_width = 3
 focus_ring_active_color = "#6ba6fa"
 focus_ring_inactive_color = "#595961"
 background_color = "#14141a"
