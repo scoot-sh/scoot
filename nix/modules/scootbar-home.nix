@@ -28,7 +28,7 @@ in
         Before = [ "tray.target" ];
         # Retry for as long as the compositor is not there. systemd's default
         # burst limit (5 starts in 10 s) is not reached by a 2 s retry
-        # (measured, scripts/scootbar-unit-test.sh S7), so this is insurance:
+        # (measured, scripts/scootbar-unit-test.sh S7, systemd 261), so this is insurance:
         # it keeps the retries unending if RestartSec is ever lowered.
         StartLimitIntervalSec = 0;
         # A new config restarts the bar (it starts in milliseconds).
