@@ -1,0 +1,28 @@
+# The "radial burst" look for scoot: a dark plum background, a blue ring around the
+# focused window and a thin orange one around the rest, rounded corners, and the
+# wallpaper in ../../assets/wallpapers. See README.md in this directory.
+#
+#   scoot --config docs/examples/radial-burst/scoot.toml
+#
+# Nothing here is a default: every costly part is opt-in (see "What it costs").
+
+[layout]
+gap = 18
+# Columns a little narrower than the default half screen, so the wallpaper shows
+# beside one or two windows: 0.3 (index 0) for a new column, 0.42 (index 1) on
+# `cycle-column-width`.
+column_widths = [0.3, 0.42]
+default_column_width = 0
+
+[appearance]
+background_color = "#241721"          # shows until the wallpaper is up, and behind it
+corner_radius = 16                    # costs a little per frame: 0 is free
+focus_ring_width = 6
+focus_ring_inactive_width = 2         # thinner ring on the windows that are not focused
+focus_ring_active_color = "#31a9e5"
+focus_ring_inactive_color = "#e36e38"
+
+[wallpaper]
+# A relative path is resolved against this file's directory.
+image = "../../assets/wallpapers/radial-burst.png"
+mode = "fill"
