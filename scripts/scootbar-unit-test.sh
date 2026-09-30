@@ -98,6 +98,9 @@ cleanup() {
     [ "$SET_ENV" = 1 ] && sc unset-environment WAYLAND_DISPLAY
     [ -n "$SCOOT_PID" ] && kill "$SCOOT_PID" 2>/dev/null && wait "$SCOOT_PID" 2>/dev/null
     rm -rf "$W"
+    # The bar makes a lock file named after the display it was told to connect to, and leaves it
+    # when the connection fails: the one for the socket name that is not there.
+    rm -f "$RT/scootbar-$NOWHERE.lock"
     echo "--- cleanup: unit loaded: $(sc is-enabled scootbar.service 2>&1 | head -1); WAYLAND_DISPLAY in the manager: $(sc show-environment | grep -c WAYLAND_DISPLAY); scratch dir: $([ -e "$W" ] && echo left || echo gone)"
 }
 trap cleanup EXIT
