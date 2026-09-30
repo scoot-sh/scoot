@@ -64,8 +64,9 @@ count; [testing.md](../testing.md#the-appearance-hardware-test) has the method.
 
 Measured 2026-09-30 on the Asahi M2 (NixOS aarch64, 8 CPUs), `--tty` on VT 2,
 DejaVu Sans as the clock's font (`SCOOTBAR_HW_FONT`), release builds of scoot
-and scootbar from `main` at `ee8948f`; the script was `653e370` (it differs from
-`ee8948f` only in the font option). One run, 14 PASS, 0 FAIL. **Two outputs
+and scootbar made on the box from `main` at `ee8948f` (the run's `environment.txt`
+records the script's tree, `653e370`, not the binaries'; the script's only
+change from `ee8948f` is the font option). One run, 14 PASS, 0 FAIL. **Two outputs
 were live**, the panel (eDP-1, 2560x1600) and an external monitor (DP-1,
 1920x1080), both at scale 1, and the default `outputs = "all"` put a bar on
 each: RSS and the redraw costs below are for **two bars**, so they are not
@@ -89,7 +90,7 @@ run does show: a rounded, translucent or floating bar costs no more than a
 flush one that this method can resolve, and all four idle at 0 jiffies. The
 translucent look had two context switches in its window (within the limit of
 8; not attributed, the clock's minute tick being the likely cause) and an RSS
-576 kB above the other three. A first run with no clock font (3536, 3600, 3616,
+560 to 624 kB above the other three. A first run with no clock font (3536, 3600, 3616,
 3616 kB) showed no such gap, so that RSS difference is one run's result to
 re-check, not yet a finding. The raw files (`summary.tsv`, `pixels.tsv`,
 `environment.txt`, screenshots, protocol traces) are not committed.

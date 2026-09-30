@@ -119,8 +119,8 @@ esac
 if [ -n "$FONT" ]; then
     [ -f "$FONT" ] || die "SCOOTBAR_HW_FONT is not a regular file: '$FONT'"
     case "$FONT" in
-        *.ttf | *.otf | *.ttc) ;;
-        *) die "SCOOTBAR_HW_FONT must be a .ttf, .otf or .ttc file, not '$FONT'" ;;
+        *.ttf | *.otf) ;;
+        *) die "SCOOTBAR_HW_FONT must be a .ttf or .otf file, not '$FONT'" ;;
     esac
 fi
 case "$EXPECT_INPUT_REGION" in

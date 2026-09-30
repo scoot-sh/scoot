@@ -101,7 +101,7 @@ jobs:
   # the integration job's tests/scoot_config.rs has scoot itself spawn
   # `apply-config` from a [wallpaper] section, as the smoke test does.
   #
-  #   crates/scootbar/, scripts/scootbar-bench/
+  #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-appearance-hw-test.sh
   #                                        -> scootbar=true (scootbar job)
   #     except its Cargo.toml               -> scoot too, for the flake's
   #     read of its description, as scootbg's
@@ -185,6 +185,11 @@ jobs:
                 # scootbar job. It imports scootbg's runner, whose own
                 # changes fall to the catch-all below and run everything.
                 scripts/scootbar-bench/*)
+                  scootbar=true ;;
+                # The appearance hardware test: not run in CI (it needs a
+                # real display), but its refusals are pinned by
+                # crates/scootbar/tests/hw_script.rs in the scootbar job.
+                scripts/scootbar-appearance-hw-test.sh)
                   scootbar=true ;;
                 *)
                   scoot=true
