@@ -4,7 +4,7 @@ A dark, high-contrast look built around one wallpaper: colorful rays exploding
 from a dark center. It is an **opt-in example**, not a default: nothing in scoot,
 scootbar or scootbg changes unless you use these files.
 
-![scoot with the radial burst look: a floating translucent bar with circled workspaces, two translucent terminals side by side with thin rings, blue on the focused one and orange on the other, the wallpaper showing around and through them](../../assets/radial-burst-preview.png)
+![scoot with the radial burst look: a floating translucent bar with circled workspaces, one translucent terminal on the left running fastfetch with a thin blue ring, the wallpaper showing through it and filling the right half, under a floating translucent bar with circled workspaces](../../assets/radial-burst-preview.png)
 
 | File | For |
 | --- | --- |
