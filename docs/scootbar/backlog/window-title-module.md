@@ -30,7 +30,7 @@ an agent.
 - Click focuses/`activate`s; middle-click `close`s (behind a config key, off by
   default: closing a window by an accidental click loses work).
 - Later, the app's icon from `xdg-toplevel-icon` (name only in scoot today) once
-  [icons](icons-and-fonts.md) decides a path.
+  [icons](resolved/icons-and-fonts-done.md) decides a path.
 
 ## The edge that matters
 

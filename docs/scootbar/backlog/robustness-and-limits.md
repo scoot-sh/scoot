@@ -39,7 +39,7 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
   the heap everywhere else, at most 64 MiB, so a `cp` over the font under a
   running bar cannot `SIGBUS` it.
   What is left here is a title stream fuzzed through the cache
-  ([icons-and-fonts](icons-and-fonts.md) owns that test).
+  ([icons-and-fonts](resolved/icons-and-fonts-done.md) owns that test).
 - **Time zone file**: the TZif reader caps the file (64 KiB in the spike),
   checks every count and index, and falls back to the last transition or to
   UTC rather than failing ([M0 §3](resolved/dependencies-done.md#3-time-zone)).

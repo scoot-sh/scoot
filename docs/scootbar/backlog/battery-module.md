@@ -3,7 +3,7 @@ title: "Battery module: level, charging state, warn and critical classes"
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "icons-and-fonts"
+blocked: null
 milestone: "M5"
 ---
 

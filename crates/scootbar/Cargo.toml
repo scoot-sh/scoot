@@ -15,11 +15,20 @@ license.workspace = true
 
 # One feature per module, so the smallest build has none of a module's code
 # (`src/modules/mod.rs` says how a module is added). A build without any
-# module draws a plain bar and needs no font.
+# module draws a plain bar and needs no font. `icon-image` is the one
+# feature that is not a module: it is an optional decoder (below).
 [features]
 default = ["clock", "workspaces"]
 clock = []
 workspaces = []
+# PNG icons (`[clock] icon-image`): the `png` decoder, and nothing of it
+# without the feature. Not a module, and not in `default`: the decoder is
+# +115 KB on a 1.48 MB bar (release, `lto = "fat"`, stripped, measured in
+# docs/scootbar/icons.md) for a picture where a path icon needs none, so
+# the default build stays inside the resource ratchet
+# (docs/scootbar/backlog/lightest.md). Built in with `--features
+# icon-image`, or the Nix module's `features` list.
+icon-image = ["dep:png"]
 
 [dependencies]
 # The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
@@ -47,6 +56,10 @@ ab_glyph = "0.2"
 serde.workspace = true
 serde_json.workspace = true
 toml = "1"
+# The PNG icon's decoder, behind the `icon-image` feature: the `png` scootbg
+# already carries (same version, same lock entry, MIT OR Apache-2.0), its
+# default features, and no new package in the tree.
+png = { version = "0.18", optional = true }
 
 # The integration tests read screenshots back: scoot's arrive as base64 PNG
 # over its IPC, sway's through a small wlr-screencopy client into a memfd.

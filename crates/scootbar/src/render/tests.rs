@@ -19,6 +19,7 @@ use crate::testfont;
 use crate::text::Text;
 use crate::theme::Theme;
 
+mod icons;
 mod spacing;
 
 /// A module whose view the test sets, counting how often it is asked.

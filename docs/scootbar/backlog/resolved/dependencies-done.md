@@ -19,7 +19,7 @@ baselines. **Every later entry that picks a dependency adds its own section
 here** (the config parser in
 [config-cli-and-reload](../config-cli-and-reload.md), D-Bus in
 [dbus-client](../dbus-client.md), icons in
-[icons-and-fonts](../icons-and-fonts.md)), with its alternatives, numbers
+[icons-and-fonts](icons-and-fonts-done.md)), with its alternatives, numbers
 and licence check.
 
 The spike code is kept, not deleted, so each number can be re-derived: it
@@ -73,7 +73,7 @@ are GPL: they were only run, as binaries, for the baselines.
     `wl_buffer.release` from the compositor, which the spike, with no
     Wayland connection, did not have, so the bar idles at 2 wakeups a
     minute: [module-api-and-clock](module-api-and-clock-done.md).)*
-- **[icons-and-fonts](../icons-and-fonts.md):** the fallback chain and the
+- **[icons-and-fonts](icons-and-fonts-done.md):** the fallback chain and the
   bounded cache are built on `ab_glyph` (`ttf-parser` underneath reads CFF
   and variable fonts: both rendered in §1b). **Revisit hinting there**:
   swash's hinted output is visibly crisper at 15 px (§1c). If users want
@@ -687,7 +687,7 @@ writing it fails with `Read-only file system`.
   the `unsafe` counts are a grep, as in scootbg's record, and no advisory
   database was checked for these crates.
 - **Shaping, fallback fonts and emoji**: out of scope for a clock (see
-  [icons-and-fonts](../icons-and-fonts.md)).
+  [icons-and-fonts](icons-and-fonts-done.md)).
 - **`cosmic-text`**: excluded by the entry (too heavy for digits).
 - **The fuzzing of `tzif.rs`**: a mutation smoke test only (§3b).
 - **i3status-rust** (§4a), and every bar on a **third compositor or real
@@ -698,3 +698,10 @@ writing it fails with `Read-only file system`.
 - **Idle detection** for the bars: a fixed 30 s settle, not a detected one.
 - **Where the competitors' wakeups come from** (ironbar's ~5 a second,
   ashell's ~3.5): measured, not explained.
+
+> **Later note (2026-09-30, [icons.md](../../icons.md#hinting-swash-against-ab_glyph-decided)):**
+> "visibly crisper at 15 px" (§1c, above) was a look at swash's output alone.
+> Measured side by side on the bar itself at 12, 14, 15 and 16 px, the gain is
+> small (fully inked pixels up four to seven points, partly covered ones down
+> three or four, and up at 15 px) for +843,768 bytes and +0.79 MB RSS, so
+> `swash` was not adopted.

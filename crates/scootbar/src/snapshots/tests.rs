@@ -365,13 +365,16 @@ fn no_snapshot_is_left_over() {
     for entry in std::fs::read_dir(&dir).unwrap() {
         let name = entry.unwrap().file_name();
         let name = name.to_string_lossy();
-        if name == "tests.rs" {
+        if name == "tests.rs" || name == "icons.rs" {
             continue;
         }
         let stem = name
             .strip_suffix(".pgm")
             .or_else(|| name.strip_suffix(".ppm"))
             .unwrap_or_else(|| panic!("{name}: not a snapshot"));
-        assert!(NAMES.contains(&stem), "{name}: no test compares it");
+        assert!(
+            NAMES.contains(&stem) || super::icons::NAMES.contains(&stem),
+            "{name}: no test compares it"
+        );
     }
 }

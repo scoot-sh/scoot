@@ -109,6 +109,9 @@ urgent = "#f38ba8"
 [clock]
 format = "%-I:%M %P"
 icon = "\U000f0e65"     # one glyph before the time, from a symbol font: see Fonts
+# icon-path = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"   # or SVG path data, or:
+# icon-viewbox = "0 0 24 24"                          # the path's plane (that is the default)
+# icon-image = "/abs/path/icon.png"                   # or a PNG (--features icon-image): see Icons
 margin = 0            # extra room on each side of the module, 0 to 1024: see Spacing
 
 [workspaces]
@@ -158,7 +161,8 @@ the module out, has none),
 with its `id`, `section` (`left`, `center` or `right`), `output` (the
 compositor's `wl_output.name`, `null` where it never sent one), the `text`
 it shows and its `class` (`normal`, `warn`, `urgent`, `muted`), plus `icon`
-where the module shows one (absent otherwise). This is the agent hook: the bar read as data instead of OCR.
+where the module shows a glyph icon (absent otherwise, and for a path or image
+icon, which is not text). This is the agent hook: the bar read as data instead of OCR.
 `reload` re-reads the file and live-applies it — geometry, style, layout,
 modules, the font — after fully validating it first; a bad file is
 refused and the running bar stands. `hide`, `show` and `toggle` are
@@ -179,7 +183,8 @@ never a silent ok. Without a daemon, every command fails saying so
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
-lists those that are.
+lists those that are. The `icon-image` feature is not a module: it adds the PNG
+decoder for [image icons](#icons), and is off by default.
 
 ## Layout
 
@@ -421,6 +426,60 @@ as Arabic or Devanagari, combining marks), right-to-left and bidirectional
 layout (text runs left to right in logical order), and color emoji (outlines in
 one color only; an emoji is drawn only if a font in the chain has an outline for
 it). A title in such a script draws per codepoint.
+
+**Real fonts, checked**: DejaVu Sans with `SymbolsNerdFont-Regular.ttf` and
+`NotoSansCJK-VF.otf.ttc` (nixpkgs' `nerd-fonts.symbols-only` and
+`noto-fonts-cjk-sans`) draw Latin, a symbol icon and Japanese, Korean and
+Chinese together. A `.ttc` collection loads (its first face), and so does a
+variable CFF2 font (its default instance). A CJK font is 30 MB or more, so
+put it where it is mapped (a read-only `/nix/store`) or expect its size in the
+bar's memory, as for any font not on a read-only mount; see
+[icons.md](icons.md#fonts-what-the-real-ones-do).
+
+### Icons
+
+An icon is drawn before a module's text, `em` device pixels on a side (the size
+of the text, at the output's real scale, so it is sharp at 1.5x and never a
+smaller bitmap stretched), with a space after it when text follows. Three keys
+give one, at most one of them per module; the clock takes them now, and the
+button, volume, network and battery modules will take the same three:
+
+| Key | Takes | Drawn |
+| --- | --- | --- |
+| `icon` | exactly one character: a glyph from a symbol font in the [font chain](#fallback-fonts-and-icons) | as text, in the state's color |
+| `icon-path` | SVG path data, a `d` string: `M m L l H h V v C c S s Q q T t A a Z z`, up to 16 KiB and 1024 commands | filled by the bar itself, anti-aliased, **tinted from the theme token** of the module's state (`normal` `fg`, `warn` `accent`, `urgent` `urgent`, `muted` `dim`), so it follows Stylix |
+| `icon-viewbox` | `"min-x min-y width height"`, only with `icon-path`; default `"0 0 24 24"` | which part of the path's plane is the icon, fitted into the square and centered |
+| `icon-image` | an absolute path to a PNG file (a build with `--features icon-image`) | scaled to the size, in its own colors (not tinted) |
+
+```toml
+[clock]
+# Material's "home", straight from an SVG's <path d="...">:
+icon-path = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"
+# Font Awesome-style paths are on a 512 plane:
+# icon-path = "M..."
+# icon-viewbox = "0 0 512 512"
+```
+
+![A path icon at scale 1.5](icons/path-1.5x.png)
+
+A path that is not valid is a config error naming `clock.icon-path` and the
+byte it stopped at (a refused reload leaves the running bar as it was): the
+whole path grammar is accepted, and nothing else, with no guessing. A viewbox
+without a path, or two of the three icon keys, is an error too. A PNG is
+decoded when the config is read, so a missing, unreadable, non-regular (a FIFO,
+a device), huge (past 1024 x 1024 or 8 MiB), truncated or corrupt file is a
+config error naming `clock.icon-image` and the file, and the file may be moved
+afterward: the bar holds the picture, and drops it at the next reload. Give a
+PNG **at least as large as the icon**; it is scaled by a premultiplied
+bilinear/area filter and centered keeping its aspect ratio.
+
+![A PNG icon at scale 1.5](icons/image-1.5x.png)
+
+Without the `icon-image` feature `icon-image` is an unknown key, and the config
+error says so. **SVG files are not read** (a renderer is a large dependency and
+an untrusted-markup parser): put the `d` string of a one-color icon in
+`icon-path`, or convert a full-color SVG to PNG ahead of time. How it works, the
+costs and the decisions are in [icons.md](icons.md).
 
 ## Colors
 
