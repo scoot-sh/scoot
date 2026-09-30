@@ -12,6 +12,11 @@ scootbar or scootbg changes unless you use these files.
 | [`bar.toml`](bar.toml) | scootbar: a floating, rounded, translucent bar, workspaces as circles, the clock |
 | [`foot.ini`](foot.ini) | foot: the palette and some padding |
 
+It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
+modules install it, from source `cargo install --path crates/scootbg`), and a font file
+for scootbar (see the comment in [`bar.toml`](bar.toml)). Without `scootbg` scoot logs one
+warning and carries on with the background color.
+
 Try it from a checkout, each in its own terminal (scootbar and foot once scoot is up):
 
 ```sh
