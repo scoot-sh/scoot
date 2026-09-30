@@ -51,7 +51,7 @@ connection refusal). Also evaluated by hand against real Stylix `fb28acd`
 with real NixOS and home-manager.
 
 **Run under a real user manager, 2026-09-30** (the Asahi M2, NixOS aarch64,
-systemd 261; `scripts/scootbar-unit-test.sh`, 18 PASS, 0 FAIL): the unit from
+systemd 261; `scripts/scootbar-unit-test.sh`, 17 PASS, 0 FAIL): the unit from
 `nixosModules.scootbar` (a real NixOS evaluation, not a hand-written unit) and
 the Nix-built `scootbar`, loaded into the user manager's runtime directory
 against a live headless scoot. Started with no compositor it kept retrying
@@ -60,7 +60,7 @@ against a live headless scoot. Started with no compositor it kept retrying
 redrawn bar; eight SIGKILLs in a row never left it failed; a SIGTERM,
 `scootbar msg kill` and `systemctl --user stop` each stayed stopped. The
 control the docs had not had: with systemd's *default* start limit the same
-retry also kept going (13 restarts in 30 s), so `StartLimitIntervalSec=0` is
+retry also kept going (9 restarts in 22 s, the script's S7), so `StartLimitIntervalSec=0` is
 insurance against a shorter `RestartSec`, not what keeps the unit alive; the
 module comments and nix.md said otherwise and are corrected. A first run failed
 S5 on the script's own race (a `Type=simple` unit is "active" before the bar has
