@@ -470,3 +470,57 @@ fn showing_gives_a_gave_up_output_one_new_chance() {
     assert_eq!(output.set_hidden(false), Effect::Create);
     assert_eq!(output.closed(), Effect::DestroyAndRetry);
 }
+
+#[test]
+fn an_unselected_output_settles_into_no_surface_and_selecting_makes_one() {
+    let (mut outputs, id) = bound();
+    let output = output(&mut outputs, id);
+    assert_eq!(output.set_selected(false), Effect::None);
+    assert_eq!(output.settled(), Effect::None);
+    assert_eq!(output.surface(), Surface::Hidden);
+    assert_eq!(output.plan(&Bar::default(), true), Plan::Nothing);
+    assert_eq!(output.set_selected(false), Effect::None);
+    assert_eq!(output.set_selected(true), Effect::Create);
+    assert_eq!(output.surface(), Surface::Pending);
+}
+
+#[test]
+fn deselecting_a_live_output_destroys_its_surface() {
+    let (mut outputs, id) = configured(1920, 28);
+    let output = output(&mut outputs, id);
+    output.drew(frame(1920, 28, Scale::Integer(1)));
+    assert_eq!(output.set_selected(false), Effect::Destroy);
+    assert_eq!(output.surface(), Surface::Hidden);
+    assert_eq!(output.configure(9, 1920, 28), Effect::None);
+    assert_eq!(output.plan(&Bar::default(), true), Plan::Nothing);
+}
+
+/// Hidden and unselected are two reasons for one absence: a surface is
+/// made only when neither holds, whichever order they lift in.
+#[test]
+fn a_surface_needs_the_bars_shown_and_the_output_selected() {
+    let (mut outputs, id) = configured(1920, 28);
+    let output = output(&mut outputs, id);
+    assert_eq!(output.set_hidden(true), Effect::Destroy);
+    assert_eq!(output.set_selected(false), Effect::None);
+    assert_eq!(output.set_hidden(false), Effect::None);
+    assert_eq!(output.surface(), Surface::Hidden);
+    assert_eq!(output.set_selected(true), Effect::Create);
+    // The other order.
+    assert_eq!(output.set_selected(false), Effect::Destroy);
+    assert_eq!(output.set_hidden(true), Effect::None);
+    assert_eq!(output.set_selected(true), Effect::None);
+    assert_eq!(output.surface(), Surface::Hidden);
+    assert_eq!(output.set_hidden(false), Effect::Create);
+    assert_eq!(output.surface(), Surface::Pending);
+}
+
+#[test]
+fn deselecting_during_a_close_retry_leaves_no_surface() {
+    let (mut outputs, id) = configured(1920, 28);
+    let output = output(&mut outputs, id);
+    assert_eq!(output.closed(), Effect::DestroyAndRetry);
+    assert_eq!(output.set_selected(false), Effect::Destroy);
+    assert_eq!(output.retry(), Effect::None);
+    assert_eq!(output.surface(), Surface::Hidden);
+}

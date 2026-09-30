@@ -69,11 +69,10 @@ impl Bar {
         let mut placed = Vec::new();
         let mut shown = Vec::new();
         let mut asked = Vec::new();
-        for &(section, text) in modules {
+        for &(_, text) in modules {
             let cell = Rc::new(RefCell::new((text.to_owned(), Class::Normal)));
             let count = Rc::new(Cell::new(0));
             placed.push(Placed {
-                section,
                 id: "fixed",
                 module: Box::new(Fixed {
                     shown: cell.clone(),
@@ -84,7 +83,7 @@ impl Bar {
             shown.push(cell);
             asked.push(count);
         }
-        let scene = Scene::new(&placed);
+        let scene = Scene::all(&modules.iter().map(|m| m.0).collect::<Vec<_>>());
         let font = FontArc::new(FontVec::try_from_vec(testfont::build()).unwrap());
         Self {
             placed,
@@ -244,7 +243,7 @@ fn a_change_repaints_and_damages_only_that_module() {
     let mut spans = Vec::new();
     bar.paint(&mut pixels, &mut record);
     assert!(damage(&mut shown, &bar.scene, frame(), &mut spans));
-    assert!(!Scene::stale(&bar.placed, &shown));
+    assert!(!bar.scene.stale(&bar.placed, &shown));
     // Scribble on the right module's pixels: a partial repaint of the left
     // one must leave them alone.
     let right = bar.scene.spans()[1];
@@ -253,7 +252,7 @@ fn a_change_repaints_and_damages_only_that_module() {
     pixels[i..i + 4].copy_from_slice(&[1, 2, 3, 0xff]);
 
     bar.set(0, "1:01", Class::Normal);
-    assert!(Scene::stale(&bar.placed, &shown));
+    assert!(bar.scene.stale(&bar.placed, &shown));
     bar.paint(&mut pixels, &mut record);
     assert!(!damage(&mut shown, &bar.scene, frame(), &mut spans));
     assert_eq!(spans, [bar.scene.spans()[0]]);
@@ -449,4 +448,83 @@ fn the_style_says_when_it_needs_alpha_and_what_is_opaque() {
         ..opaque
     };
     assert_eq!(both.opaque_inset(), None);
+}
+
+/// An output shows the modules it lists, in its own sections: a module
+/// another output shows takes no space here, its changes do not make this
+/// scene stale, and the scenes of two outputs differ over the same started
+/// modules.
+#[test]
+fn a_scene_shows_only_its_members_in_its_own_sections() {
+    use super::{Member, members};
+    use crate::layout::Layout;
+    let mut bar = Bar::new(&[(Section::Left, "1:00"), (Section::Left, "2:00")]);
+    // Started as "fixed" both; members are found by id, so build them by
+    // index for two outputs: A shows both (second on the right), B only the
+    // second, on the left.
+    let a = [
+        Member {
+            module: 0,
+            section: Section::Left,
+        },
+        Member {
+            module: 1,
+            section: Section::Right,
+        },
+    ];
+    let b = [Member {
+        module: 1,
+        section: Section::Left,
+    }];
+    let mut scene_a = Scene::with_members(&a);
+    let mut scene_b = Scene::with_members(&b);
+    let output = OutputView { name: None };
+    for (scene, spans) in [(&mut scene_a, 2), (&mut scene_b, 1)] {
+        scene.update(
+            &bar.placed,
+            &output,
+            Some(&bar.text),
+            &bar.style,
+            Scale::Integer(1),
+            Size {
+                width: WIDTH,
+                height: HEIGHT,
+            },
+        );
+        assert_eq!(scene.spans().len(), spans);
+    }
+    assert_eq!(scene_a.spans()[0].x, 0);
+    assert_eq!(scene_a.spans()[1].end(), WIDTH);
+    assert_eq!(scene_b.spans()[0].x, 0);
+    assert_eq!(scene_b.module(0), Some(1));
+    assert_eq!(scene_a.section_of(1), Some(Section::Right));
+    assert_eq!(scene_b.section_of(0), None);
+    // Module 0 changes: A is stale, B (which does not show it) is not.
+    let shown_a = Record::new(2);
+    let mut damaged = Vec::new();
+    let mut shown_a = shown_a;
+    let mut shown_b = Record::new(1);
+    let _ = super::damage(&mut shown_a, &scene_a, frame(), &mut damaged);
+    let _ = super::damage(&mut shown_b, &scene_b, frame(), &mut damaged);
+    assert!(!scene_a.stale(&bar.placed, &shown_a));
+    bar.set(0, "1:01", Class::Normal);
+    assert!(scene_a.stale(&bar.placed, &shown_a));
+    assert!(!scene_b.stale(&bar.placed, &shown_b));
+    // Members resolve from a layout by id, skipping what did not start.
+    let layout = Layout {
+        left: vec!["fixed", "gone"],
+        center: Vec::new(),
+        right: Vec::new(),
+        ..Layout::default()
+    };
+    assert_eq!(
+        members(&layout, &bar.placed),
+        [Member {
+            module: 0,
+            section: Section::Left
+        }]
+    );
+    // An empty scene is fine: nothing to lay out, nothing stale.
+    let empty = Scene::with_members(&[]);
+    assert!(!empty.stale(&bar.placed, &Record::new(0)));
 }

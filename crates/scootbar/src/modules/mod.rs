@@ -65,7 +65,7 @@ use rustix::event::{PollFd, PollFlags};
 
 use serde_json::Value;
 
-use crate::layout::{Layout, Section};
+use crate::layout::Layout;
 use crate::paint::{Canvas, Span};
 use crate::text::Text;
 use crate::theme::Theme;
@@ -210,9 +210,8 @@ pub fn find(id: &str) -> Option<&'static Spec> {
     REGISTRY.iter().find(|spec| spec.id == id)
 }
 
-/// A started module, where the layout put it.
+/// A started module. Where it goes is each output's own (`crate::render::Member`).
 pub struct Placed {
-    pub section: Section,
     /// The registry id it was started from (what `--left` and `query`
     /// name it by).
     pub id: &'static str,
@@ -249,14 +248,13 @@ pub fn start(
     warn: &mut dyn FnMut(&str, &str),
 ) -> Vec<Placed> {
     let mut placed = Vec::new();
-    for (section, id) in layout.placed() {
+    for (_, id) in layout.placed() {
         // The command line refuses unknown ids; skipped all the same.
         let Some(spec) = find(id) else {
             continue;
         };
         match (spec.init)(settings) {
             Init::Available(module) => placed.push(Placed {
-                section,
                 id: spec.id,
                 module,
                 revision: 0,

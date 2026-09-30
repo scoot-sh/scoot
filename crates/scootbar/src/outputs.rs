@@ -162,8 +162,9 @@ pub enum Surface {
     /// closes every surface would otherwise be answered with a new one
     /// forever). A replug is a new output and starts afresh.
     GaveUp,
-    /// The bars are hidden (`scootbar msg hide`): no surface, no buffer,
-    /// and none made until they are shown.
+    /// No bar is wanted here: the bars are hidden (`scootbar msg hide`) or
+    /// the config leaves this output out (`outputs`). No surface, no
+    /// buffer, and none made until both say otherwise.
     Hidden,
 }
 
@@ -243,6 +244,10 @@ pub struct Output {
     /// The bars are hidden: no surface is made, whatever else happens. Runtime
     /// state (`scootbar msg hide`), kept across a reload.
     hidden: bool,
+    /// The config wants a bar here (`outputs`). Runtime state the glue sets
+    /// from the policy and the output's name; a new output is selected
+    /// until told otherwise.
+    selected: bool,
     /// The compositor has closed a surface on this output before.
     closed_once: bool,
     /// The scales the compositor asked the live surface to be drawn at.
@@ -343,7 +348,7 @@ impl Output {
             self.staged.apply(&mut self.info);
         }
         if self.surface == Surface::Waiting {
-            if self.hidden {
+            if !self.wanted() {
                 self.surface = Surface::Hidden;
                 return Effect::None;
             }
@@ -365,8 +370,33 @@ impl Output {
             return Effect::None;
         }
         self.hidden = hidden;
-        if hidden {
-            match self.surface {
+        self.resync()
+    }
+
+    /// Whether the config wants a bar on this output at all (`outputs`,
+    /// `crate::policy`), and what that does to the surface: the same as
+    /// hiding, and independent of it (a selected output stays without a
+    /// surface while the bars are hidden, and a shown bar comes back
+    /// only on a selected output). The glue asks at the settle, once the
+    /// name is known, and again when a reload changes the list.
+    pub fn set_selected(&mut self, selected: bool) -> Effect {
+        if self.selected == selected {
+            return Effect::None;
+        }
+        self.selected = selected;
+        self.resync()
+    }
+
+    /// A surface is wanted while the bars are shown and the output is
+    /// selected.
+    fn wanted(&self) -> bool {
+        !self.hidden && self.selected
+    }
+
+    /// Makes the surface as [`Output::wanted`] says.
+    fn resync(&mut self) -> Effect {
+        if !self.wanted() {
+            return match self.surface {
                 Surface::Waiting | Surface::Hidden => Effect::None,
                 Surface::Pending
                 | Surface::Configured { .. }
@@ -379,8 +409,9 @@ impl Output {
                     self.closed_once = false;
                     Effect::Destroy
                 }
-            }
-        } else if self.surface == Surface::Hidden {
+            };
+        }
+        if self.surface == Surface::Hidden {
             self.made();
             Effect::Create
         } else {
@@ -613,6 +644,7 @@ impl<O> Outputs<O> {
                 settled: false,
                 surface: Surface::Waiting,
                 hidden: false,
+                selected: true,
                 closed_once: false,
                 preferred: Preferred::default(),
                 ack_uncommitted: false,

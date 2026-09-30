@@ -139,8 +139,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
     ];
     let placed: Vec<Placed> = modules
         .into_iter()
-        .map(|(section, text, icon, class)| Placed {
-            section,
+        .map(|(_, text, icon, class)| Placed {
             id: "label",
             module: Box::new(Label { text, icon, class }),
             revision: 0,
@@ -168,7 +167,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
     let mut text = Text::new(FontArc::new(
         FontVec::try_from_vec(testfont::build()).unwrap(),
     ));
-    let mut scene = Scene::new(&placed);
+    let mut scene = Scene::all(&modules.map(|m| m.0));
     scene.update(
         &placed,
         &OutputView { name: None },

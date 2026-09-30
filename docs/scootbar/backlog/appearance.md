@@ -36,7 +36,7 @@ and per-module token-per-state overrides (the four classes already map to
 tokens); the opt-in animation question (dropped unless measured); the
 floating-versus-flush damage measurement on real hardware and its entry in
 the [resource ratchet](lightest.md); per-output overrides stay with
-[multi-output](multi-output.md).
+[multi-output](resolved/multi-output-done.md).
 
 ## What to build
 
@@ -55,7 +55,7 @@ the [resource ratchet](lightest.md); per-output overrides stay with
     floating bar lines up with the tiling; document the two settings to change
     together.
   - **Per-output override** of every one of these belongs to
-    [multi-output](multi-output.md).
+    [multi-output](resolved/multi-output-done.md).
 - **Exclusive zone with a margin**: the reserved strip must be the bar plus the
   margin on its anchored edge, or windows sit too close or too far. Whether
   scoot counts that margin toward the zone is checked against the pinned
@@ -83,7 +83,7 @@ the [resource ratchet](lightest.md); per-output overrides stay with
   frame callbacks while it runs; if built, it is opt-in, bounded (a few
   frames), and back to zero wakeups the moment it ends. Measured or dropped.
 - Per-output overrides (a taller bar on a HiDPI output) belong to
-  [multi-output](multi-output.md).
+  [multi-output](resolved/multi-output-done.md).
 
 ## Coordination with scoot
 

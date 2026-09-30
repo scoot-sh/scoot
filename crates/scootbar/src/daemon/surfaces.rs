@@ -45,8 +45,9 @@ use super::canvas::Canvas;
 use super::wayland::{Globals, State};
 use crate::bar::Bar;
 use crate::density::Scale;
-use crate::modules::{ClickCtx, OutputView, Update};
+use crate::modules::{ClickCtx, OutputView, Placed, Update};
 use crate::outputs::{Effect, Entry, OutputId, Rotation, Size};
+use crate::policy::Placement;
 use crate::print::warn;
 use crate::render::{self, Scene};
 
@@ -63,6 +64,10 @@ pub const NAMESPACE: &str = "scootbar";
 pub struct Objects {
     output: WlOutput,
     pub(super) layer: Option<LayerObjects>,
+    /// This output's bar geometry: the shared one with its `[output]`
+    /// overrides applied. Set when the output settles (its name is known
+    /// then) and on a reload.
+    pub(super) bar: Bar,
     /// The buffers drawn on the surface; emptied with it.
     pub(super) canvas: Canvas,
     /// The modules as this output shows them.
@@ -199,20 +204,65 @@ pub enum RoundTrip {
 }
 
 impl State {
-    /// A reloaded bar geometry: destroys every live layer surface and
-    /// makes it again with the new [`Bar`](crate::bar::Bar), committed
-    /// with no buffer. The model waits for each new surface's first
-    /// `configure`, as for any new surface, and the loop's next draw
-    /// carries the commit the new requests need. Outputs with no live
-    /// surface (waiting, given up) are untouched: they are made with the
-    /// new bar when their turn comes.
-    pub fn recreate_bars(&mut self, qh: &QueueHandle<Self>) {
+    /// What one output gets under the current placement: its bar geometry,
+    /// the modules it shows, and whether it has a bar at all. Rebuilds its
+    /// scene and empties its buffers (they are sized to its module count),
+    /// and draws once more whatever `stale` says, since the modules, style
+    /// or font may have been swapped wholesale. Returns what selecting or
+    /// deselecting the output does to its surface; a changed geometry on a
+    /// surface that stays is the caller's to recreate.
+    fn place(placement: &Placement, modules: &[Placed], entry: &mut Entry<Objects>) -> Effect {
+        let resolved = placement.resolve(entry.output.info().name.as_deref());
+        // An output with no bar shows nothing (a `query` lists no module on
+        // it).
+        let members = if resolved.selected {
+            render::members(&resolved.layout, modules)
+        } else {
+            Vec::new()
+        };
+        let objects = &mut entry.objects;
+        objects.bar = resolved.bar;
+        objects.scene = Scene::with_members(&members);
+        objects.canvas.resize(members.len());
+        entry.output.invalidate();
+        entry.output.set_selected(resolved.selected)
+    }
+
+    /// A reloaded placement (the modules and style already swapped in):
+    /// every output is placed again. An output the list now leaves out
+    /// loses its surface, one it now includes gets one, and a surface whose
+    /// bar geometry changed is destroyed and made again with the new
+    /// [`Bar`], committed with no buffer. The model waits for each new
+    /// surface's first `configure`, as for any new surface, and the loop's
+    /// next draw carries the commit the new requests need. Outputs with no
+    /// live surface (waiting, given up) are made with the new bar when
+    /// their turn comes.
+    pub fn replace_placement(
+        &mut self,
+        placement: Placement,
+        conn: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        self.placement = placement;
         for entry in self.outputs.iter_mut() {
+            let before = entry.objects.bar;
+            let effect = Self::place(&self.placement, &self.content.modules, entry);
+            if effect != Effect::None || entry.objects.bar == before {
+                if effect == Effect::Destroy
+                    && self
+                        .pointer_on
+                        .is_some_and(|(id, ..)| id == entry.output.id())
+                {
+                    // A press routed to a surface that is gone.
+                    self.pointer_on = None;
+                }
+                Self::apply(&self.globals, entry, effect, conn, qh);
+                continue;
+            }
             let Some(layer) = entry.objects.layer.take() else {
                 continue;
             };
             layer.destroy();
-            entry.objects.canvas.clear();
             entry.output.recreate();
             let id = entry.output.id();
             // `wl_output` is borrowed out of the entry while its layer is
@@ -221,7 +271,7 @@ impl State {
             let output = entry.objects.wl_output().clone();
             entry.objects.layer = Some(LayerObjects::create(
                 &self.globals,
-                &self.bar,
+                &entry.objects.bar,
                 &output,
                 qh,
                 id,
@@ -242,7 +292,7 @@ impl State {
         }
         for entry in self.outputs.iter_mut() {
             let effect = entry.output.set_hidden(self.hidden);
-            Self::apply(&self.globals, &self.bar, entry, effect, conn, qh);
+            Self::apply(&self.globals, entry, effect, conn, qh);
         }
     }
 
@@ -261,12 +311,15 @@ impl State {
             return;
         }
         let version = version.min(OUTPUT_VERSION);
-        let modules = &self.content.modules;
+        // Its modules and geometry wait for the settle, when its name is
+        // known (`State::place`).
+        let bar = self.placement.bar;
         let id = self.outputs.add(name, |id| Objects {
             output: registry.bind::<WlOutput, _, _>(name, version, qh, id),
             layer: None,
-            canvas: Canvas::new(modules.len()),
-            scene: Scene::new(modules),
+            bar,
+            canvas: Canvas::new(0),
+            scene: Scene::default(),
         });
         // Hidden now: the output settles into no surface.
         if self.hidden {
@@ -294,7 +347,6 @@ impl State {
     /// Carries out `effect` for `entry`.
     fn apply(
         globals: &Globals,
-        bar: &Bar,
         entry: &mut Entry<Objects>,
         effect: Effect,
         conn: &Connection,
@@ -302,6 +354,7 @@ impl State {
     ) {
         let id = entry.output.id();
         let objects = &mut entry.objects;
+        let bar = &objects.bar;
         match effect {
             Effect::None => {}
             Effect::Create => {
@@ -419,7 +472,7 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
             zwlr_layer_surface_v1::Event::Closed => entry.output.closed(),
             _ => Effect::None,
         };
-        Self::apply(&state.globals, &state.bar, entry, effect, conn, qh);
+        Self::apply(&state.globals, entry, effect, conn, qh);
     }
 }
 
@@ -460,7 +513,18 @@ impl Dispatch<WlCallback, RoundTrip> for State {
             return;
         };
         let effect = match round_trip {
-            RoundTrip::Settle(_) => entry.output.settled(),
+            // The name is known now: which bar, which modules, and whether
+            // there is one at all. (`place` marks an unselected output, so
+            // its settle creates nothing.)
+            RoundTrip::Settle(_) => {
+                match Self::place(&state.placement, &state.content.modules, entry) {
+                    // No surface exists before the settle, so placing
+                    // never does anything to one; whatever it says is
+                    // carried out all the same.
+                    Effect::None => entry.output.settled(),
+                    other => other,
+                }
+            }
             RoundTrip::Retry(_) => {
                 let effect = entry.output.retry();
                 if effect == Effect::Create {
@@ -472,7 +536,7 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                 effect
             }
         };
-        Self::apply(&state.globals, &state.bar, entry, effect, conn, qh);
+        Self::apply(&state.globals, entry, effect, conn, qh);
     }
 }
 
@@ -619,9 +683,6 @@ fn click(state: &mut State) {
     let Some((id, x, y)) = state.pointer_on else {
         return;
     };
-    if !(0.0..state.bar.height as f64).contains(&y) {
-        return;
-    }
     let Some(entry) = state
         .outputs
         .iter_mut()
@@ -629,6 +690,9 @@ fn click(state: &mut State) {
     else {
         return;
     };
+    if !(0.0..entry.objects.bar.height as f64).contains(&y) {
+        return;
+    }
     let scale = entry.output.scale();
     let x = to_device(x, scale);
     let scene = &entry.objects.scene;
@@ -646,6 +710,7 @@ fn click(state: &mut State) {
         return;
     };
     let span = scene.spans()[index];
+    let module = scene.module(index);
     let content = &mut state.content;
     let (Some(text), style) = (content.text.as_ref(), &content.style) else {
         // Unreachable with a module placed (the daemon loads a font for
@@ -662,7 +727,7 @@ fn click(state: &mut State) {
         em: render::em(style.font_size, scale),
         padding: render::device(style.padding, scale),
     };
-    if let Some(placed) = content.modules.get_mut(index) {
+    if let Some(placed) = module.and_then(|module| content.modules.get_mut(module)) {
         if placed.module.on_click(&ctx) == Update::Changed {
             placed.revision = placed.revision.wrapping_add(1);
         }

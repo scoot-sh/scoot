@@ -6,7 +6,7 @@ clock, gains workspaces, and grows by modules, one small daemon of a
 composable shell.
 
 > **Status: early.** `scootbar daemon` puts a bar with a clock on every
-> output, reserving its space, across outputs coming and going; the flags
+> output (or the ones you list), reserving its space, across outputs coming and going; the flags
 > are in [cli.md](cli.md). Workspaces are one flag away
 > (`--left workspaces`: each output's numbers with the active one
 > marked, click to switch). That is M1's

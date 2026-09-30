@@ -57,7 +57,7 @@ use crate::font;
 use crate::modules::{self, MAX_POLL, OutputView, Placed, Sources};
 use crate::outputs::Plan;
 use crate::print::warn;
-use crate::render::{Scene, Style};
+use crate::render::Style;
 use crate::text::Text;
 use canvas::Drew;
 use listen::Listening;
@@ -131,11 +131,15 @@ const MAX_FDS: usize = MAX_POLL + 1 + MAX_CONNECTIONS;
 /// at start-up, so the precedence (defaults, then the file, then the
 /// flags) holds for the running bar at all times.
 pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Error> {
-    let modules = modules::start(&config.layout, &config.modules, &mut |id, why| {
-        warn(format_args!(
-            "scootbar: note: the {id} module is unavailable, and left out: {why}"
-        ));
-    });
+    let modules = modules::start(
+        &config.outputs.to_start(&config.layout),
+        &config.modules,
+        &mut |id, why| {
+            warn(format_args!(
+                "scootbar: note: the {id} module is unavailable, and left out: {why}"
+            ));
+        },
+    );
     // A font only if something will draw text: with none usable, refuse to
     // start (the error says how to give one).
     let text = if modules.is_empty() {
@@ -156,7 +160,11 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
     let mut server = Server::new(claim.listener()).map_err(Error::Control)?;
     let mut listening = Listening::default();
     let (mut wayland, missing) = Wayland::connect(
-        config.bar,
+        crate::policy::Placement {
+            bar: config.bar,
+            layout: config.layout.clone(),
+            policy: config.outputs.clone(),
+        },
         content,
         #[cfg(feature = "workspaces")]
         config.modules.workspaces.link.clone(),
@@ -170,7 +178,8 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
     }
     #[cfg(feature = "workspaces")]
     if config
-        .layout
+        .outputs
+        .to_start(&config.layout)
         .placed()
         .any(|(_, id)| id == crate::modules::workspaces::ID)
     {
@@ -279,8 +288,13 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         // The control clients: a `reload` applies before the modules are
         // asked, and a `kill` stops before anything is drawn.
         {
-            let mut responder =
-                Responder::new(&mut wayland.state, &wayland.qh, file.as_ref(), &given);
+            let mut responder = Responder::new(
+                &mut wayland.state,
+                &wayland.conn,
+                &wayland.qh,
+                file.as_ref(),
+                &given,
+            );
             let mut index = 0;
             while index < server.conns().len() {
                 let revents = ready
@@ -331,11 +345,13 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
 /// (the first draw, or a new size) or a glyph is drawn for the first time.
 fn draw(state: &mut State, qh: &wayland_client::QueueHandle<State>) {
     let globals = &state.globals;
-    let bar = &state.bar;
     let content = &mut state.content;
     for entry in state.outputs.iter_mut() {
-        let stale = Scene::stale(&content.modules, entry.objects.canvas.shown());
-        match entry.output.plan(bar, stale) {
+        let stale = entry
+            .objects
+            .scene
+            .stale(&content.modules, entry.objects.canvas.shown());
+        match entry.output.plan(&entry.objects.bar, stale) {
             Plan::Nothing => {}
             Plan::Commit => {
                 if let Some(layer) = &entry.objects.layer {

@@ -21,9 +21,11 @@ use crate::bar::{Bar, Edge, Layer, MAX_HEIGHT, Margin};
 use crate::color::Color;
 use crate::layout::{Layout, MAX_GAP, Section, check_placement};
 use crate::modules::Settings;
+use crate::policy::Policy;
 use crate::render::Style;
 use crate::theme::Theme;
 
+mod outputs;
 #[cfg(test)]
 mod tests;
 
@@ -53,6 +55,8 @@ pub struct Config {
     /// The background's alpha: 255 opaque, 0 transparent.
     pub opacity: u8,
     pub modules: Settings,
+    /// Which outputs get a bar, and their overrides.
+    pub outputs: Policy,
 }
 
 impl Default for Config {
@@ -66,6 +70,7 @@ impl Default for Config {
             radius: 0,
             opacity: u8::MAX,
             modules: Settings::default(),
+            outputs: Policy::default(),
         }
     }
 }
@@ -112,6 +117,13 @@ pub enum Error {
         key: &'static str,
         message: String,
     },
+    /// The same, in an `[output."NAME"]` table.
+    Output {
+        path: PathBuf,
+        output: String,
+        key: &'static str,
+        message: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -128,6 +140,17 @@ impl fmt::Display for Error {
             Self::Value { path, key, message } => {
                 write!(f, "{}: '{key}': {message}", path.display())
             }
+            Self::Output {
+                path,
+                output,
+                key,
+                message,
+            } => write!(
+                f,
+                "{}: 'output.\"{}\".{key}': {message}",
+                path.display(),
+                output.escape_debug()
+            ),
         }
     }
 }
@@ -230,6 +253,10 @@ struct File {
     colors: ColorsFile,
     clock: ClockFile,
     workspaces: WorkspacesFile,
+    /// `"all"` or a list of connector names (validated in `outputs`).
+    outputs: Option<toml::Value>,
+    /// `[output."NAME"]`: what differs on one output.
+    output: std::collections::BTreeMap<String, outputs::OutputFile>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -365,6 +392,7 @@ impl File {
         let spacing = gap(path, "bar.spacing", bar.spacing, defaults.layout.spacing)?;
         let layout = self.layout(path, padding, spacing, &defaults.layout)?;
         let theme = self.theme(path, &defaults.theme)?;
+        let outputs = outputs::policy(path, self.outputs.as_ref(), &self.output)?;
         #[cfg_attr(not(feature = "clock"), allow(unused_mut))]
         let mut modules = defaults.modules;
         #[cfg(feature = "clock")]
@@ -393,6 +421,7 @@ impl File {
             radius,
             opacity,
             modules,
+            outputs,
         })
     }
 

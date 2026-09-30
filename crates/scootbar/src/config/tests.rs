@@ -42,7 +42,7 @@ impl Drop for Scratch {
     }
 }
 
-fn read(text: &str) -> Result<Config, Error> {
+pub(super) fn read(text: &str) -> Result<Config, Error> {
     let scratch = Scratch::new();
     super::read_file(&scratch.file(text))
 }
@@ -51,9 +51,9 @@ fn read(text: &str) -> Result<Config, Error> {
 /// combination has at least the shape tested: each module alone, both, or
 /// neither).
 #[cfg(feature = "clock")]
-const MODULE: &str = "clock";
+pub(super) const MODULE: &str = "clock";
 #[cfg(all(not(feature = "clock"), feature = "workspaces"))]
-const MODULE: &str = "workspaces";
+pub(super) const MODULE: &str = "workspaces";
 
 fn missing_path() -> PathBuf {
     PathBuf::from("/tmp/opencode/scootbar-config-test-no-such-dir/bar.toml")
