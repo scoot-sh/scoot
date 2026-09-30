@@ -464,7 +464,7 @@ where
 {
     let drawn = |placement: &Placement| drawn_rect(placement.rect, windows.get(&placement.id));
     // The CSD backdrop rule (see `decorations.rs`'s CSD section): a window
-    // gets a ring-colored backdrop under its drawn rect when it decorates
+    // gets a ring-colored backdrop under its four corners when it decorates
     // itself, so its own rounded corners read as the ring. That is exactly
     // the windows that did not negotiate server-side decorations: GTK never
     // creates a `zxdg_toplevel_decoration_v1` object, while an SSD client
@@ -477,6 +477,9 @@ where
     // window-wide `wp_alpha_modifier_v1` translucency (an opaque backdrop
     // would tint every pixel, not just the corners -- pinned by
     // `alpha_modifier`'s own suite, whose client never binds decorations).
+    // Per-pixel-alpha content needs no exemption here: the backdrop covers
+    // only the corners (see `decorations::backdrop_corners`), so a
+    // translucent window's middle blends with what is behind it.
     let backdrop = |placement: &Placement| -> Option<Rect> {
         if appearance.focus_ring_width <= 0 {
             return None;
