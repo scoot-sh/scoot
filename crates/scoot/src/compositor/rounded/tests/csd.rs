@@ -3,9 +3,9 @@
 //! own corners at a radius nothing on the wire reports, so the ring's
 //! tighter inner edge leaves a background crescent at every corner
 //! (`docs/backlog/resolved/client-rounded-corners-vs-ring-done.md`). The ring path
-//! backs such a window with a solid rect in its own ring color, drawn
-//! directly under its drawn rect: the client's own alpha shapes the visible
-//! part, so the corners read as the ring hugging the client's curve.
+//! backs such a window's four corners with solid squares in its own ring
+//! color, drawn directly under them: the client's own alpha shapes the
+//! visible part, so the corners read as the ring hugging the client's curve.
 //!
 //! Every test here maps one window drawing a full-size buffer with
 //! transparent rounded corners (client radius 12, past the configured 10 --
@@ -197,4 +197,68 @@ fn a_window_with_no_commit_gets_a_ring_but_no_backdrop_fill() {
         ring,
         "the hollow ring still draws",
     );
+}
+
+/// A self-rounded window whose content is itself translucent (per-pixel
+/// alpha, the way Ghostty's `background-opacity` is) blends its middle with
+/// the background, not the ring color: the backdrop covers only the corners
+/// (gh #336). The corners keep their backdrop (see the first test above).
+#[test]
+fn a_translucent_self_rounded_window_blends_its_middle_with_the_background() {
+    const RADIUS: i32 = 10;
+    const THICKNESS: i32 = 4;
+    // Premultiplied half-red: valid `Argb8888`, blends 50/50 with whatever
+    // is beneath it.
+    const TRANSLUCENT: [u8; 4] = [0x00, 0x00, 0x80, 0x80];
+    let mut fixture = Fixture::with_radius_at_scale(RADIUS, THICKNESS, 1.0);
+    let pixels = render_self_rounded(&mut fixture, TRANSLUCENT, false);
+    let drawn = fixture.placement();
+    let (bg, ring) = samples(&pixels, drawn);
+
+    for (px, py) in crescent(drawn) {
+        assert_pixel(
+            &pixels,
+            CANVAS,
+            px,
+            py,
+            ring,
+            "the corners keep their backdrop",
+        );
+    }
+
+    // The middle: half content over the background. Pixman truncates where
+    // GLES rounds, so allow a few LSBs -- while the ring-tinted blend the
+    // full-rect backdrop produced sits far outside it on every channel.
+    let blend = |src: u8, dst: u8| (u16::from(src) + u16::from(dst) * 127 / 255) as u8;
+    let over_bg = [
+        blend(TRANSLUCENT[0], bg[0]),
+        blend(TRANSLUCENT[1], bg[1]),
+        blend(TRANSLUCENT[2], bg[2]),
+        0xFF,
+    ];
+    let over_ring = [
+        blend(TRANSLUCENT[0], ring[0]),
+        blend(TRANSLUCENT[1], ring[1]),
+        blend(TRANSLUCENT[2], ring[2]),
+        0xFF,
+    ];
+    assert!(
+        over_bg
+            .iter()
+            .zip(over_ring)
+            .any(|(a, b)| a.abs_diff(b) > 10),
+        "the test needs backgrounds the ring tint cannot hide behind: {bg:?} vs {ring:?}"
+    );
+    let middle = pixel(
+        &pixels,
+        CANVAS,
+        drawn.x + drawn.w / 2,
+        drawn.y + drawn.h / 2,
+    );
+    for (got, want) in middle.iter().zip(over_bg) {
+        assert!(
+            got.abs_diff(want) <= 3,
+            "the middle must blend with the background, not the ring: got {middle:?}, want {over_bg:?}"
+        );
+    }
 }

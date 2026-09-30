@@ -46,14 +46,17 @@
 //! (costly and fragile) or per-toolkit guessing (guessing), so this module
 //! does neither. Instead, every window the CSD rule in `render/elements.rs`
 //! calls self-decorated gets a solid backdrop in its own ring color, drawn
-//! directly under it at exactly its drawn rect: the client's own alpha
-//! shapes the visible part, so the corners read as the ring hugging the
-//! client's curve with no radius knowledge anywhere. Square CSD content
-//! covers the backdrop completely, so it changes nothing there;
-//! server-side windows get none at all, nor do windows with a window-wide
-//! translucency (`wp_alpha_modifier_v1` -- an opaque backdrop would tint
-//! every pixel, not just the corners; see the rule in
-//! `render/elements.rs`).
+//! directly under its four corners (see [`backdrop_corners`]): the client's
+//! own alpha shapes the visible part, so the corners read as the ring
+//! hugging the client's curve with no radius knowledge anywhere. Only the
+//! corners are backed -- a full-rect backdrop would tint translucent client
+//! content (a per-pixel-alpha window like Ghostty at `background-opacity <
+//! 1`) against the ring color instead of what is behind it. Square CSD
+//! content covers the corner squares completely except at its own curve, so
+//! the backdrop changes nothing there; server-side windows get none at all,
+//! nor do windows with a window-wide translucency (`wp_alpha_modifier_v1`
+//! -- an opaque backdrop would tint every pixel, not just the corners; see
+//! the rule in `render/elements.rs`).
 //!
 //! # Persistent buffers, not fresh ones (the damage-tracking pitfall)
 //!
@@ -474,11 +477,49 @@ struct WindowRing {
     bottom: SolidColorBuffer,
     left: SolidColorBuffer,
     right: SolidColorBuffer,
-    /// The CSD backdrop (see the module doc's CSD section): one solid rect
-    /// in the window's ring color under its drawn rect. Only pushed for
-    /// self-decorated windows; other windows never touch it, so it stays
-    /// empty and contributes no element.
-    backdrop: SolidColorBuffer,
+    /// The CSD backdrop (see the module doc's CSD section): one solid buffer
+    /// per corner square (see [`backdrop_corners`]). Only pushed for
+    /// self-decorated windows; other windows never touch them, so they stay
+    /// empty and contribute no element.
+    backdrop: [SolidColorBuffer; 4],
+}
+
+/// The smallest CSD backdrop corner square, in logical pixels.
+///
+/// The backdrop only exists for the corners -- a client's rounding lives
+/// there -- so each square must cover the widest radius a client is likely
+/// to round with: libadwaita uses about 12px for windows and a little more
+/// for dialogs, and 24 leaves margin on top. A client rounding past 24 with
+/// a small configured radius keeps a background sliver at its corners, the
+/// same tradeoff the full-rect backdrop's corner sizing always had. A
+/// translucent window still tints inside those squares, but its own curve
+/// hides most of that.
+const BACKDROP_CORNER_MIN: i32 = 24;
+
+/// The CSD backdrop's four corner squares for a window whose drawn rect (in
+/// the frame's coordinates, like the caller passes to [`push`]) is `rect`:
+/// top-left, top-right, bottom-left, bottom-right, each `max(radius, 24)`
+/// logical pixels a side. The middle of the window gets no backdrop, so
+/// translucent client content blends with what is behind the window instead
+/// of with the ring color.
+///
+/// The side is clamped to the rect itself, so a window smaller than two
+/// squares still stays covered corner to corner (the squares overlap, which
+/// draws once for an opaque ring color; a translucent `focus_ring_*` color
+/// would double-blend the overlapped rows on such a tiny window); a
+/// degenerate rect backs nothing.
+fn backdrop_corners(rect: Rect, radius: i32) -> [Option<Rect>; 4] {
+    let side = radius.max(BACKDROP_CORNER_MIN).min(rect.w).min(rect.h);
+    if side <= 0 {
+        return [None; 4];
+    }
+    let (x, y, w, h) = (rect.x, rect.y, rect.w, rect.h);
+    [
+        Some(Rect::new(x, y, side, side)),
+        Some(Rect::new(x + w - side, y, side, side)),
+        Some(Rect::new(x, y + h - side, side, side)),
+        Some(Rect::new(x + w - side, y + h - side, side, side)),
+    ]
 }
 
 /// One window's ring element: either a solid bar (the square path, and the
@@ -653,9 +694,10 @@ impl Decorations {
     ///
     /// `backdrop` is the CSD backdrop rect per placement, or `None` for no
     /// backdrop (see the module doc's CSD section): the caller's CSD rule,
-    /// in global logical coordinates like `drawn`. A backdrop is pushed
-    /// directly under its window's ring run, so it travels with the window
-    /// (the floating paths count it in `spans`).
+    /// in global logical coordinates like `drawn`. Its corner squares (see
+    /// [`backdrop_corners`]) are pushed directly under the window's ring run,
+    /// so they travel with the window (the floating paths count them in
+    /// `spans`).
     ///
     /// This is the square ring: the rounded session reaches
     /// [`Decorations::elements_rounded`] instead, so this path has no branch
@@ -689,13 +731,11 @@ impl Decorations {
                 {
                     let color = ring_color(arrangement, placement.id, appearance);
                     let ring = self.rings.entry(placement.id).or_default();
-                    push(
-                        &mut elements,
-                        &mut ring.backdrop,
-                        Some(to_output_local(rect, bounds)),
-                        color,
-                        scale,
-                    );
+                    let corners =
+                        backdrop_corners(to_output_local(rect, bounds), appearance.corner_radius);
+                    for (buffer, corner) in ring.backdrop.iter_mut().zip(corners) {
+                        push(&mut elements, buffer, corner, color, scale);
+                    }
                 }
                 self.push_square(
                     &mut elements,
@@ -717,8 +757,9 @@ impl Decorations {
     /// elements each window's ring is appended to `spans`. Called after
     /// [`Decorations::elements`] for the same arrangement, whose `retain`
     /// already dropped closed windows' buffers. Each window's CSD backdrop
-    /// (see `elements`'s `backdrop`) is pushed first and counted in its span,
-    /// so it travels with the window, not with the strip's rings.
+    /// corner squares (see `elements`'s `backdrop`) are pushed first and
+    /// counted in its span, so they travel with the window, not with the
+    /// strip's rings.
     #[allow(clippy::too_many_arguments)]
     pub fn floating_elements(
         &mut self,
@@ -744,13 +785,11 @@ impl Decorations {
                 {
                     let color = ring_color(arrangement, placement.id, appearance);
                     let ring = self.rings.entry(placement.id).or_default();
-                    push(
-                        &mut elements,
-                        &mut ring.backdrop,
-                        Some(to_output_local(rect, bounds)),
-                        color,
-                        scale,
-                    );
+                    let corners =
+                        backdrop_corners(to_output_local(rect, bounds), appearance.corner_radius);
+                    for (buffer, corner) in ring.backdrop.iter_mut().zip(corners) {
+                        push(&mut elements, buffer, corner, color, scale);
+                    }
                 }
                 self.push_square(
                     &mut elements,
@@ -802,9 +841,9 @@ impl Decorations {
     /// same windows get no ring here as there: invisible ones, fullscreen
     /// ones and other outputs' ones -- and the same output-local
     /// coordinates, around the same `drawn` rect. Each window's CSD backdrop
-    /// (see `elements`'s `backdrop`) is pushed through its persistent buffer
-    /// first, as a square fallback bar: it is a plain rect, which needs no
-    /// paint.
+    /// corner squares (see `elements`'s `backdrop`) are pushed through their
+    /// persistent buffers first, as square fallback bars: they are plain
+    /// rects, which need no paint.
     #[allow(clippy::too_many_arguments)]
     pub fn elements_rounded<R>(
         &mut self,
@@ -835,13 +874,11 @@ impl Decorations {
                 && let Some(rect) = backdrop(placement)
             {
                 let ring = self.rings.entry(placement.id).or_default();
-                push_painted_rect(
-                    &mut elements,
-                    &mut ring.backdrop,
-                    Some(to_output_local(rect, bounds)),
-                    color,
-                    scale,
-                );
+                let corners =
+                    backdrop_corners(to_output_local(rect, bounds), appearance.corner_radius);
+                for (buffer, corner) in ring.backdrop.iter_mut().zip(corners) {
+                    push_painted_rect(&mut elements, buffer, corner, color, scale);
+                }
             }
             self.push_painted(
                 &mut elements,
@@ -860,7 +897,8 @@ impl Decorations {
     /// [`Decorations::floating_elements`] for the rounded session: the
     /// floating windows' painted rings, top of the stack first, each
     /// window's element count appended to `spans`. Each window's CSD backdrop
-    /// (see `elements`'s `backdrop`) is pushed first and counted in its span.
+    /// corner squares (see `elements`'s `backdrop`) are pushed first and
+    /// counted in its span.
     #[allow(clippy::too_many_arguments)]
     pub fn floating_elements_rounded<R>(
         &mut self,
@@ -892,13 +930,11 @@ impl Decorations {
                 && let Some(rect) = backdrop(placement)
             {
                 let ring = self.rings.entry(placement.id).or_default();
-                push_painted_rect(
-                    &mut elements,
-                    &mut ring.backdrop,
-                    Some(to_output_local(rect, bounds)),
-                    color,
-                    scale,
-                );
+                let corners =
+                    backdrop_corners(to_output_local(rect, bounds), appearance.corner_radius);
+                for (buffer, corner) in ring.backdrop.iter_mut().zip(corners) {
+                    push_painted_rect(&mut elements, buffer, corner, color, scale);
+                }
             }
             self.push_painted(
                 &mut elements,
@@ -1769,6 +1805,67 @@ mod tests {
         assert_eq!(rects.right, Some(Rect::new(150, 100, 4, 150)));
     }
 
+    // -- backdrop_corners --------------------------------------------------
+
+    #[test]
+    fn backdrop_corners_cover_24_or_the_radius_per_corner() {
+        let rect = Rect::new(10, 20, 200, 100);
+        // The configured radius (10) is under the 24px minimum: the squares
+        // cover the widest client rounding with margin.
+        assert_eq!(
+            backdrop_corners(rect, 10),
+            [
+                Some(Rect::new(10, 20, 24, 24)),
+                Some(Rect::new(186, 20, 24, 24)),
+                Some(Rect::new(10, 96, 24, 24)),
+                Some(Rect::new(186, 96, 24, 24)),
+            ]
+        );
+        // A large configured radius widens the squares past the minimum.
+        assert_eq!(
+            backdrop_corners(rect, 40),
+            [
+                Some(Rect::new(10, 20, 40, 40)),
+                Some(Rect::new(170, 20, 40, 40)),
+                Some(Rect::new(10, 80, 40, 40)),
+                Some(Rect::new(170, 80, 40, 40)),
+            ]
+        );
+    }
+
+    #[test]
+    fn backdrop_corners_clamp_to_a_small_window() {
+        // The side clamps to the rect itself: the squares overlap, which is
+        // idempotent for one opaque color, but none sticks out past an edge.
+        let rect = Rect::new(0, 0, 10, 8);
+        let corners = backdrop_corners(rect, 10);
+        assert_eq!(
+            corners,
+            [
+                Some(Rect::new(0, 0, 8, 8)),
+                Some(Rect::new(2, 0, 8, 8)),
+                Some(Rect::new(0, 0, 8, 8)),
+                Some(Rect::new(2, 0, 8, 8)),
+            ]
+        );
+        for corner in corners.into_iter().flatten() {
+            assert!(corner.x >= rect.x && corner.right() <= rect.right());
+            assert!(corner.y >= rect.y && corner.bottom() <= rect.bottom());
+        }
+    }
+
+    #[test]
+    fn backdrop_corners_back_nothing_degenerate() {
+        assert_eq!(
+            backdrop_corners(Rect::new(0, 0, 0, 0), 10),
+            [None, None, None, None]
+        );
+        assert_eq!(
+            backdrop_corners(Rect::new(5, 5, 0, 10), 10),
+            [None, None, None, None]
+        );
+    }
+
     // -- Decorations::elements -----------------------------------------------
 
     /// The `drawn` lookup for a window that fills its slot: what every
@@ -1894,24 +1991,39 @@ mod tests {
             drawn_rect,
         );
 
-        assert_eq!(elements.len(), 5, "four ring bars plus the backdrop");
+        assert_eq!(
+            elements.len(),
+            8,
+            "four ring bars plus four backdrop corners"
+        );
         let active: Color32F = appearance.focus_ring_active_color.into();
         let backdrops: Vec<_> = elements
             .iter()
-            .filter(|element| element.geometry(1.0.into()).size == (200, 150).into())
+            .filter(|element| element.geometry(1.0.into()).size == (24, 24).into())
             .collect();
         assert_eq!(
             backdrops.len(),
-            1,
-            "exactly the drawn rect is backdrop-sized"
+            4,
+            "the corners -- not the whole drawn rect -- are backed"
         );
-        let backdrop = backdrops[0];
+        let mut locs: Vec<_> = backdrops
+            .iter()
+            .map(|element| element.geometry(1.0.into()).loc)
+            .collect();
+        locs.sort_by_key(|loc| (loc.x, loc.y));
         assert_eq!(
-            backdrop.geometry(1.0.into()).loc,
-            (100, 100).into(),
-            "the backdrop sits on the drawn rect, output-local"
+            locs,
+            vec![
+                (100, 100).into(),
+                (100, 226).into(),
+                (276, 100).into(),
+                (276, 226).into(),
+            ],
+            "one square per corner of the drawn rect, output-local"
         );
-        assert_eq!(backdrop.color(), active);
+        for backdrop in backdrops {
+            assert_eq!(backdrop.color(), active);
+        }
     }
 
     #[test]
@@ -1938,14 +2050,17 @@ mod tests {
 
         assert_eq!(
             elements.len(),
-            10,
-            "two windows, backdrop plus four bars each"
+            16,
+            "two windows, four backdrop corners plus four bars each"
         );
         let inactive: Color32F = appearance.focus_ring_inactive_color.into();
         let unfocused_backdrop = elements
             .iter()
-            .find(|element| element.geometry(1.0.into()).loc == (100, 100).into())
-            .expect("the unfocused window's backdrop");
+            .find(|element| {
+                element.geometry(1.0.into()).loc == (100, 100).into()
+                    && element.geometry(1.0.into()).size == (24, 24).into()
+            })
+            .expect("the unfocused window's top-left backdrop corner");
         assert_eq!(unfocused_backdrop.color(), inactive);
     }
 
@@ -2031,13 +2146,19 @@ mod tests {
             drawn_rect,
         );
 
-        assert_eq!(spans, vec![(WindowId(1), 5)], "backdrop plus four bars");
-        assert_eq!(elements.len(), 5);
+        assert_eq!(
+            spans,
+            vec![(WindowId(1), 8)],
+            "four backdrop corners plus four bars"
+        );
+        assert_eq!(elements.len(), 8);
         assert!(
             elements
                 .iter()
-                .any(|element| element.geometry(1.0.into()).size == (300, 220).into()),
-            "the span carries the backdrop with the ring"
+                .filter(|element| element.geometry(1.0.into()).size == (24, 24).into())
+                .count()
+                == 4,
+            "the span carries the backdrop corners with the ring"
         );
     }
 
