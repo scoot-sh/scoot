@@ -113,6 +113,7 @@ impl<'a> Canvas<'a> {
     }
 
     /// Fills the full-height `span`, clipped to the canvas, with `color`.
+    #[allow(dead_code)] // Only the workspaces module reads it; the bar fills through `fill_shaped`.
     pub fn fill_span(&mut self, span: Span, color: Color) {
         let x0 = span.x.min(self.width) as usize;
         let x1 = span.end().min(self.width) as usize;

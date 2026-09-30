@@ -50,6 +50,7 @@ impl Color {
     /// formats are little-endian, so written with `to_le_bytes` it sits in
     /// memory as blue, green, red, then the unused byte, set to 0xff so the
     /// buffer reads as opaque even to code that looks at it.
+    #[allow(dead_code)] // Only `fill_span` (the workspaces module) reads it.
     pub fn xrgb8888(self) -> u32 {
         0xff00_0000 | u32::from(self.r) << 16 | u32::from(self.g) << 8 | u32::from(self.b)
     }
