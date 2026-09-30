@@ -137,6 +137,38 @@ fn a_dialog_hint_floats_a_window_even_without_a_parent() {
     assert!(!fixture.last_configure(dialog).any_tiled);
 }
 
+/// GTK 4 attaches an `xdg_dialog_v1` object to every toplevel, sending
+/// `unset_modal` for an ordinary main window: such a window tiles. Only a
+/// modal hint, or a dialog object on a window that also names a parent,
+/// floats.
+#[test]
+fn a_nonmodal_dialog_without_a_parent_tiles() {
+    let mut fixture = Fixture::new();
+    fixture.map(Spec::tiled());
+    let window = fixture.map(Spec {
+        color: DIALOG_BGRA,
+        nonmodal_dialog: true,
+        ..Spec::tiled()
+    });
+    assert!(!fixture.floating(window));
+    let last = fixture.last_configure(window);
+    assert!(last.tiled && last.width > 0, "{last:?}");
+}
+
+#[test]
+fn a_nonmodal_dialog_with_a_parent_floats() {
+    let mut fixture = Fixture::new();
+    fixture.map(Spec::tiled());
+    let dialog = fixture.map(Spec {
+        color: DIALOG_BGRA,
+        parent: Some(0),
+        nonmodal_dialog: true,
+        ..Spec::tiled()
+    });
+    assert!(fixture.floating(dialog));
+    assert!(!fixture.last_configure(dialog).any_tiled);
+}
+
 #[test]
 fn an_ordinary_window_tiles_and_is_told_so() {
     let mut fixture = Fixture::new();

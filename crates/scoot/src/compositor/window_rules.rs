@@ -8,8 +8,11 @@
 //! each on by default and all switched off together by `[floating] auto =
 //! false`:
 //!
-//! 1. an `xdg_dialog_v1` object (the `xdg-dialog-v1` protocol) -- the
-//!    standard way a toolkit says "this is a dialog";
+//! 1. a modal `xdg_dialog_v1` object (the `xdg-dialog-v1` protocol's
+//!    `set_modal`), or a non-modal one on a window that also names a parent
+//!    -- the standard way a toolkit says "this is a dialog". GTK 4 attaches
+//!    a non-modal dialog object to every toplevel, so an unparented,
+//!    non-modal one is an ordinary main window and tiles;
 //! 2. a parent (`xdg_toplevel.set_parent`) -- a transient window;
 //! 3. a fixed size (`min_size == max_size`, both axes non-zero) -- a window
 //!    that cannot be resized, which a column would stretch or leave mostly
@@ -145,7 +148,10 @@ impl Default for FloatingRules {
 pub struct MapSignals<'a> {
     pub app_id: &'a str,
     pub title: &'a str,
-    /// It has an `xdg_dialog_v1` object.
+    /// It is a dialog: a modal `xdg_dialog_v1` object, or (for Wayland) a
+    /// dialog object on a window that also names a parent. An unparented,
+    /// non-modal dialog object (what GTK 4 attaches to every toplevel) is
+    /// an ordinary main window, so it arrives here as `false`.
     pub dialog: bool,
     /// It named a parent (`set_parent`).
     pub parent: bool,

@@ -115,11 +115,19 @@ impl State {
             let mut limits = states.cached_state.get::<SurfaceCachedState>();
             let (min, max) = (limits.current().min_size, limits.current().max_size);
             let fixed_size = min.w > 0 && min.h > 0 && min == max;
+            // GTK 4 attaches an `xdg_dialog_v1` object to every toplevel,
+            // sending `unset_modal` for an ordinary main window: the object's
+            // existence alone is not a dialog signal. Only a modal hint, or
+            // a non-modal dialog object on a window that also names a parent,
+            // floats (checked before `parent`, so the reason logs as Dialog).
+            let parent = attributes.parent.is_some();
+            let dialog = attributes.dialog_hint == ToplevelDialogHint::Modal
+                || (attributes.dialog_hint == ToplevelDialogHint::Dialog && parent);
             let signals = MapSignals {
                 app_id: attributes.app_id.as_deref().unwrap_or_default(),
                 title: attributes.title.as_deref().unwrap_or_default(),
-                dialog: attributes.dialog_hint != ToplevelDialogHint::Unknown,
-                parent: attributes.parent.is_some(),
+                dialog,
+                parent,
                 fixed_size,
             };
             Some(rules.decide(&signals))
