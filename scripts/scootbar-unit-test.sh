@@ -20,10 +20,18 @@
 # Needs: Linux with a running `systemd --user` manager and Nix (flakes enabled), a
 # built scoot and scootctl (SCOOT / SCOOTCTL, else target/release then target/debug of
 # this tree: `cargo build -p scoot -p scootctl`), python3 on PATH. It uses a headless
-# scoot, so nothing is drawn on a display and no VT is taken. It REFUSES to run if a
-# scootbar.service already exists in the user manager (yours), and on exit removes
-# everything it made: the unit and its drop-in, WAYLAND_DISPLAY in the manager's
-# environment, and its scratch directory.
+# scoot, so nothing is drawn on a display and no VT is taken: before a compositor of
+# ours exists the bar is pointed at a socket name that does not exist, never at
+# whatever the session has. It REFUSES to run if a scootbar.service (or its drop-in
+# directory) already exists in the user manager, or if the manager's environment
+# already holds a WAYLAND_DISPLAY (a real session's: this test would overwrite it).
+# On exit, and on INT, TERM or HUP, it removes what it made: the unit and its
+# drop-ins, the WAYLAND_DISPLAY it put in the manager's environment (only that), and
+# its scratch directory. A SIGKILL of the script itself cannot be trapped and leaves
+# them: `systemctl --user stop scootbar.service`, delete
+# $XDG_RUNTIME_DIR/systemd/user/scootbar.service{,.d}, `systemctl --user
+# daemon-reload` and `systemctl --user unset-environment WAYLAND_DISPLAY`. The
+# `nix build` writes the store, which stays.
 #
 # The one deviation from the module's unit: it names /etc/scootbar/bar.toml, which does
 # not exist unless the module is enabled on this machine, so a drop-in points ExecStart
@@ -31,7 +39,8 @@
 # graphical-session.target (a session script's job), and X-Restart-Triggers (NixOS
 # switch and home-manager activation act on it).
 #
-# The flake is read at this checkout's committed HEAD (`git+file`): commit first.
+# The flake is this checkout read through `git+file`: tracked files, including
+# uncommitted edits to them (a NEW file needs `git add`); the printed commit is HEAD.
 set -u
 die() { echo "error: $*" >&2; exit 2; }
 
@@ -43,6 +52,13 @@ UNITDIR=$RT/systemd/user
 command -v nix >/dev/null || die "nix is not on PATH"
 command -v python3 >/dev/null || die "python3 is not on PATH"
 systemctl --user show-environment >/dev/null 2>&1 || die "no running systemd --user manager"
+case "$ROOT" in
+    *[!A-Za-z0-9/_.+-]*) die "the checkout path '$ROOT' has characters the flake URL cannot carry here; use a path of letters, digits and / _ . + -" ;;
+esac
+[ ! -e "$XDG_RUNTIME_DIR/systemd/user/scootbar.service.d" ] || die "$XDG_RUNTIME_DIR/systemd/user/scootbar.service.d already exists; remove it (it is not this test's)"
+if systemctl --user show-environment | grep -q '^WAYLAND_DISPLAY='; then
+    die "the user manager's environment already has a WAYLAND_DISPLAY (a live session's): this test sets and then unsets it. Run it where no session has imported one"
+fi
 if systemctl --user cat scootbar.service >/dev/null 2>&1; then
     die "a scootbar.service already exists in your user manager; this test would shadow it. Stop and remove it first, or run on another account"
 fi
@@ -52,7 +68,8 @@ CTL=$(pick "${SCOOTCTL:-}" "$ROOT/target/release/scootctl" "$ROOT/target/debug/s
 [ -n "$SCOOT" ] && [ -n "$CTL" ] || die "no scoot/scootctl binary (cargo build -p scoot -p scootctl, or set SCOOT and SCOOTCTL)"
 
 W=$(mktemp -d "$RT/scootbar-unit-test.XXXXXX")
-pass=0; fail=0; SCOOT_PID=
+pass=0; fail=0; SCOOT_PID=; SET_ENV=0
+NOWHERE=scootbar-unit-test-no-such-socket
 sc() { systemctl --user "$@"; }
 ck() { local d=$1; shift; if "$@"; then echo "PASS  $d"; pass=$((pass+1)); else echo "FAIL  $d"; fail=$((fail+1)); fi; }
 prop() { sc show -p "$1" --value scootbar.service; }
@@ -61,21 +78,31 @@ active() { [ "$(prop ActiveState)" = active ]; }
 inactive() { [ "$(prop ActiveState)" = inactive ]; }
 not_failed() { [ "$(prop ActiveState)" != failed ]; }
 restarts_ge() { [ "$(prop NRestarts)" -ge "$1" ]; }
-bar_reserved() { SCOOT_SOCKET=$W/scoot.sock "$CTL" outputs 2>/dev/null | python3 -c '
+# 0: the bar has reserved its zone; 1: it has not; 2: scoot could not be asked
+bar_state() { SCOOT_SOCKET=$W/scoot.sock "$CTL" outputs 2>/dev/null | python3 -c '
 import json,sys
-o=json.load(sys.stdin)["outputs"][0]
+try:
+    o=json.load(sys.stdin)["outputs"][0]
+except Exception:
+    sys.exit(2)
 sys.exit(0 if o["usable"]["y"]>0 or o["usable"]["height"]<o["rect"]["height"] else 1)'; }
-bar_gone() { ! bar_reserved; }
+bar_reserved() { bar_state; }
+bar_gone() { bar_state; [ $? -eq 1 ]; }
+# Signal the unit's own main process, and only a real one: MainPID is 0 when there is none,
+# and `kill -KILL 0` would be the script's whole process group.
+kill_main() { local p; p=$(prop MainPID); case "$p" in '' | *[!0-9]*) return 1 ;; esac; [ "$p" -gt 1 ] || return 1; kill "-$1" "$p"; }
 stopped_after() { sleep "$1"; inactive; }
 cleanup() {
     sc stop scootbar.service >/dev/null 2>&1; sc reset-failed scootbar.service >/dev/null 2>&1
     rm -rf "$UNITDIR/scootbar.service" "$UNITDIR/scootbar.service.d"; sc daemon-reload
-    sc unset-environment WAYLAND_DISPLAY
+    [ "$SET_ENV" = 1 ] && sc unset-environment WAYLAND_DISPLAY
     [ -n "$SCOOT_PID" ] && kill "$SCOOT_PID" 2>/dev/null && wait "$SCOOT_PID" 2>/dev/null
     rm -rf "$W"
     echo "--- cleanup: unit loaded: $(sc is-enabled scootbar.service 2>&1 | head -1); WAYLAND_DISPLAY in the manager: $(sc show-environment | grep -c WAYLAND_DISPLAY); scratch dir: $([ -e "$W" ] && echo left || echo gone)"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 
 cat > "$W/unit.nix" <<NIX
 let
@@ -100,8 +127,9 @@ in {
 }
 NIX
 echo "== building the unit, bar.toml and package from the flake at $(git -C "$ROOT" rev-parse --short HEAD) (nix)"
-mapfile -t OUTS < <(nix build --impure --no-link --print-out-paths -f "$W/unit.nix" unit barToml package 2>"$W/nix.err") \
+NIXOUT=$(nix build --impure --no-link --print-out-paths -f "$W/unit.nix" unit barToml package 2>"$W/nix.err") \
     || { cat "$W/nix.err" >&2; die "nix could not build the module's unit"; }
+mapfile -t OUTS <<<"$NIXOUT"
 [ "${#OUTS[@]}" -eq 3 ] || { cat "$W/nix.err" >&2; die "expected 3 outputs from nix, got ${#OUTS[@]}"; }
 U=${OUTS[0]}; TOML=${OUTS[1]}; PKG=${OUTS[2]}
 echo "   unit $U"; echo "   toml $TOML"; echo "   bar  $PKG"
@@ -113,12 +141,18 @@ cat > "$UNITDIR/scootbar.service.d/override.conf" <<DROP
 ExecStart=
 ExecStart=$PKG/bin/scootbar daemon --config $TOML
 DROP
+# Before a compositor of ours exists the bar must not find the session's (libwayland falls back
+# to wayland-0): this drop-in names a socket that is not there, and S1 takes it away.
+cat > "$UNITDIR/scootbar.service.d/nowhere.conf" <<DROP
+[Service]
+Environment=WAYLAND_DISPLAY=$NOWHERE
+DROP
 sc daemon-reload
 echo "== the unit as systemd $(systemctl --version | head -1 | cut -d' ' -f2) loads it"
 sc cat scootbar.service | grep -E "^(ExecStart|Restart|RestartSec|StartLimit|After|Before|PartOf)" | sed 's/^/   /'
 ck "systemd-analyze verify accepts the unit" systemd-analyze --user verify "$UNITDIR/scootbar.service"
 
-echo "== S0: started with no compositor (no WAYLAND_DISPLAY): it must keep retrying, not give up"
+echo "== S0: started with no compositor to connect to: it must keep retrying, not give up"
 sc start --no-block scootbar.service
 sleep 14
 echo "   state=$(prop ActiveState)/$(prop SubState) NRestarts=$(prop NRestarts) Result=$(prop Result)"
@@ -133,7 +167,8 @@ WL=
 for _ in $(seq 40); do WL=$(sed -e 's/\x1b\[[0-9;]*m//g' "$W/scoot.log" | grep 'scoot is up' | grep -o 'wayland-[0-9]*' | head -1); [ -n "$WL" ] && break; sleep 0.25; done
 [ -n "$WL" ] || { cat "$W/scoot.log" >&2; die "scoot did not come up"; }
 echo "   scoot is up on $WL"
-sc set-environment WAYLAND_DISPLAY="$WL"
+sc set-environment WAYLAND_DISPLAY="$WL"; SET_ENV=1
+rm -f "$UNITDIR/scootbar.service.d/nowhere.conf"; sc daemon-reload
 ck "S1 the unit becomes active on the next retry" wait_for 10 active
 ck "S1 the bar reserved its zone on scoot" wait_for 10 bar_reserved
 PID1=$(prop MainPID); echo "   MainPID=$PID1 NRestarts=$(prop NRestarts)"
@@ -141,7 +176,8 @@ ck "S1 the running bar is the Nix-built one" sh -c "readlink /proc/$PID1/exe | g
 ck "S1 the bar answers its control socket" env WAYLAND_DISPLAY="$WL" "$PKG/bin/scootbar" msg version
 
 echo "== S2: SIGKILL: Restart=on-failure must bring it back"
-N0=$(prop NRestarts); kill -KILL "$PID1"
+N0=$(prop NRestarts)
+ck "S2 SIGKILL sent to the unit's own main process" kill_main KILL
 ck "S2 a new bar is active again" wait_for 10 active
 ck "S2 the bar is drawn again" wait_for 10 bar_reserved
 PID2=$(prop MainPID); echo "   MainPID $PID1 -> $PID2, NRestarts $N0 -> $(prop NRestarts)"
@@ -151,7 +187,7 @@ echo "== S3: eight SIGKILLs in a row: it must never end up failed"
 N0=$(prop NRestarts); ok=1
 for _ in $(seq 8); do
     wait_for 8 active || { ok=0; break; }
-    P=$(prop MainPID); kill -KILL "$P"
+    P=$(prop MainPID); kill_main KILL || { ok=0; break; }
     wait_for 8 sh -c "m=\$(systemctl --user show -p MainPID --value scootbar.service); [ \"\$m\" != '$P' ] && [ \"\$m\" != 0 ]" || { ok=0; break; }
 done
 wait_for 8 active && sa=1 || sa=0
@@ -160,7 +196,7 @@ ck "S3 still active after eight kills, never failed" sh -c "[ $ok = 1 ] && [ $sa
 ck "S3 NRestarts rose by at least 8" sh -c "[ '$(prop NRestarts)' -ge $((N0+8)) ]"
 
 echo "== S4: SIGTERM (a clean stop): it must NOT come back"
-wait_for 8 active; kill -TERM "$(prop MainPID)"
+wait_for 8 active; ck "S4 SIGTERM sent to the unit's own main process" kill_main TERM
 ck "S4 stays stopped after SIGTERM" stopped_after 6
 echo "   state=$(prop ActiveState)/$(prop SubState) Result=$(prop Result) ExecMainStatus=$(prop ExecMainStatus)"
 ck "S4 the zone was released" wait_for 5 bar_gone
@@ -177,8 +213,11 @@ echo "== S6: systemctl --user stop: it must stay stopped"
 sc start scootbar.service; wait_for 10 active; wait_for 10 bar_reserved; sc stop scootbar.service
 ck "S6 inactive after stop" inactive
 
-echo "== S7 (INFO): the same retry with systemd's DEFAULT start limit (5 in 10 s), no compositor"
-sc unset-environment WAYLAND_DISPLAY
+echo "== S7: a control: the same retry with systemd's DEFAULT start limit (5 in 10 s), nothing to connect to"
+cat > "$UNITDIR/scootbar.service.d/nowhere.conf" <<DROP
+[Service]
+Environment=WAYLAND_DISPLAY=$NOWHERE
+DROP
 cat > "$UNITDIR/scootbar.service.d/limit.conf" <<DROP
 [Unit]
 StartLimitIntervalSec=10s
@@ -186,7 +225,8 @@ StartLimitBurst=5
 DROP
 sc daemon-reload; sc reset-failed scootbar.service >/dev/null 2>&1
 sc start --no-block scootbar.service; sleep 22
-echo "INFO  S7 default limit: state=$(prop ActiveState)/$(prop SubState) NRestarts=$(prop NRestarts) Result=$(prop Result) (a retry every ~2 s does not reach 5 starts inside 10 s, so the module's StartLimitIntervalSec=0 is insurance against a shorter RestartSec, not what keeps this unit alive)"
+echo "   state=$(prop ActiveState)/$(prop SubState) NRestarts=$(prop NRestarts) Result=$(prop Result)"
+ck "S7 with the default limit a 2 s retry still does not end in failed (so StartLimitIntervalSec=0 is insurance, not what keeps it alive; systemd $(systemctl --version | head -1 | cut -d' ' -f2))" not_failed
 echo
 echo "RESULT: PASS $pass  FAIL $fail"
 [ "$fail" -eq 0 ]
