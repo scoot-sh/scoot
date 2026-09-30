@@ -122,11 +122,10 @@ fn leftmost_ink(shot: &common::Shot, rows: u32) -> Option<u32> {
 #[cfg(feature = "clock")]
 /// Starts a 60-high bar showing the clock at the left, in the test font
 /// at 50 pixels to the em, with `toml` as its config, and returns the
-/// leftmost ink column once the clock is up.
-fn clock_ink(tag: &str, toml: &str) -> u32 {
-    let Some(session) = Session::scoot(tag, 1, "") else {
-        return u32::MAX;
-    };
+/// leftmost ink column once the clock is up, or `None` where there is no
+/// scoot to run it on (the test is then skipped, as `Session::scoot` says).
+fn clock_ink(tag: &str, toml: &str) -> Option<u32> {
+    let session = Session::scoot(tag, 1, "")?;
     let flags = config(&session, toml);
     let mut bar = Reaper(session.bar(&[
         "--background",
@@ -141,9 +140,9 @@ fn clock_ink(tag: &str, toml: &str) -> u32 {
         &flags[0],
         &flags[1],
     ]));
-    session.wait_for(&mut bar.0, "the clock drawn", |session| {
+    Some(session.wait_for(&mut bar.0, "the clock drawn", |session| {
         leftmost_ink(&session.scoot_screenshot(1), 60)
-    })
+    }))
 }
 
 /// The first module starts past the corner: with a radius of 30 on a
@@ -154,11 +153,14 @@ fn clock_ink(tag: &str, toml: &str) -> u32 {
 #[test]
 #[cfg(feature = "clock")]
 fn text_stays_out_of_a_rounded_bars_corners() {
-    let square = clock_ink("ink-square", "[bar]\nheight = 60\npadding = 8\n");
+    let Some(square) = clock_ink("ink-square", "[bar]\nheight = 60\npadding = 8\n") else {
+        return;
+    };
     let round = clock_ink(
         "ink-round",
         "[bar]\nheight = 60\nradius = 30\npadding = 8\n",
-    );
+    )
+    .expect("scoot was there for the first bar");
     assert_eq!(round, square + 26, "square {square}, round {round}");
     assert!(round >= 30, "ink in the corner square");
 }
@@ -168,7 +170,10 @@ fn text_stays_out_of_a_rounded_bars_corners() {
 #[test]
 #[cfg(feature = "clock")]
 fn a_module_margin_moves_it_in_from_the_edge() {
-    let plain = clock_ink("margin-none", "[bar]\nheight = 60\n");
-    let margined = clock_ink("margin-12", "[bar]\nheight = 60\n[clock]\nmargin = 12\n");
+    let Some(plain) = clock_ink("margin-none", "[bar]\nheight = 60\n") else {
+        return;
+    };
+    let margined = clock_ink("margin-12", "[bar]\nheight = 60\n[clock]\nmargin = 12\n")
+        .expect("scoot was there for the first bar");
     assert_eq!(margined, plain + 12);
 }
