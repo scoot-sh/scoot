@@ -78,8 +78,11 @@ struct Spec {
     /// `set_min_size` / `set_max_size`.
     min: Option<(i32, i32)>,
     max: Option<(i32, i32)>,
-    /// `xdg_wm_dialog_v1.get_xdg_dialog` (and `set_modal`).
+    /// `xdg_wm_dialog_v1.get_xdg_dialog` (and `set_modal` for a modal one).
     dialog: bool,
+    /// `xdg_wm_dialog_v1.get_xdg_dialog` followed by `unset_modal`: what GTK
+    /// 4 attaches to every toplevel, including an ordinary main window.
+    nonmodal_dialog: bool,
     /// What it draws at when a configure leaves the size to it.
     natural: (i32, i32),
 }
@@ -94,6 +97,7 @@ impl Spec {
             min: None,
             max: None,
             dialog: false,
+            nonmodal_dialog: false,
             natural: NATURAL,
         }
     }
@@ -571,10 +575,18 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 if let Some((w, h)) = spec.max {
                     toplevel.set_max_size(w, h);
                 }
-                let dialog = if spec.dialog {
+                let dialog = if spec.dialog || spec.nonmodal_dialog {
+                    assert!(
+                        !(spec.dialog && spec.nonmodal_dialog),
+                        "a window cannot be both modal and non-modal"
+                    );
                     let manager = client.wm_dialog.clone().ok_or("no xdg_wm_dialog_v1")?;
                     let dialog = manager.get_xdg_dialog(&toplevel, &qh, ());
-                    dialog.set_modal();
+                    if spec.dialog {
+                        dialog.set_modal();
+                    } else {
+                        dialog.unset_modal();
+                    }
                     Some(dialog)
                 } else {
                     None

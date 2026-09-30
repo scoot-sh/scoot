@@ -765,7 +765,7 @@ Three behaviors worth knowing, plus the reload rule:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `auto` | bool | `true` | Float a window automatically when it first maps if it says it is a dialog (`xdg-dialog-v1`), names a parent (`xdg_toplevel.set_parent`, a transient window), or has a fixed size (equal non-zero minimum and maximum). `false` turns all three off; `[[window_rule]]`s still apply. Re-applied live by `scootctl reload`, for windows that map after it. |
+| `auto` | bool | `true` | Float a window automatically when it first maps if it is a dialog (a modal `xdg-dialog-v1` hint, or a dialog object on a window that also names a parent — an unparented, non-modal dialog object, which GTK 4 attaches to every toplevel, tiles), names a parent (`xdg_toplevel.set_parent`, a transient window), or has a fixed size (equal non-zero minimum and maximum). `false` turns all three off; `[[window_rule]]`s still apply. Re-applied live by `scootctl reload`, for windows that map after it. |
 | `modifier` | string | `"super"` | The modifier held to drag floating windows: with the left button anywhere on one it moves it, with the right button it resizes it. `super`, `alt`, `ctrl` or `shift` (or an alias a `[binds]` combo accepts: `logo`, `meta`, `cmd`, `control`); anything else falls back to `super` with a warning at startup, and is refused by name on a reload (the running modifier stays). Worth changing under `--nested`, where the host compositor often keeps Super for itself. Re-applied live by `scootctl reload`. |
 
 What floating is — a layer above each workspace's scrolling strip, for

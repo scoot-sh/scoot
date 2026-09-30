@@ -13,7 +13,7 @@ read your files anyway.
 | Protocol | Version | State |
 | --- | --- | --- |
 | `xdg-shell` | 7 | Windows and popups. An `xdg_toplevel` is a column entry, told it is [tiled](#tiled-windows) on all four edges, or a [floating](#floating-windows) window, told neither; [`set_fullscreen`](#fullscreen) is honoured. |
-| `xdg-dialog-v1` | 1 | `xdg_wm_dialog_v1`: a toplevel marked as a dialog (modal or not) [floats](#floating-windows) when it maps. |
+| `xdg-dialog-v1` | 1 | `xdg_wm_dialog_v1`: a modal toplevel (`set_modal`), or a dialog object on a window with a parent, [floats](#floating-windows) when it maps. An unparented, non-modal dialog object (what GTK 4 attaches to every toplevel) tiles. |
 | `xdg-decoration-v1` | 1 | `zxdg_decoration_manager_v1` — server-side decorations, so a client stops drawing its own titlebar; see [`prefer_no_csd`](configuration.md#appearance). scoot draws a focus ring, never a titlebar. |
 | `wlr-layer-shell-v1` | 5 | [Bars, docks, wallpapers, launchers](#layer-shell-bars-wallpapers-launchers). |
 | `ext-workspace-v1` | 1 | [Workspaces](#workspaces-ext-workspace-v1). |
@@ -263,9 +263,12 @@ the protocol side.
 **What floats, decided once, at the window's first commit.** By then a
 client has sent its app id, title, parent and size limits. In order:
 
-1. an `xdg_dialog_v1` object (`xdg_wm_dialog_v1.get_xdg_dialog`, modal or
-   not) — GTK 4 attaches one to its dialogs: `zenity --info`, `--question`
-   and `--file-selection` (GTK 4.22) all float this way;
+1. a modal `xdg_dialog_v1` object (`xdg_wm_dialog_v1.get_xdg_dialog` +
+   `set_modal`), or a dialog object on a window that also names a parent —
+   GTK 4 attaches a non-modal object to every toplevel, so an unparented,
+   non-modal one is an ordinary main window and tiles. GTK 4's dialogs:
+   `zenity --info`, `--question` and `--file-selection` (GTK 4.22) all float
+   this way;
 2. a parent (`xdg_toplevel.set_parent`) — GTK 3's dialogs (the About dialog
    of `gtk3-widget-factory` 3.24.52) float this way;
 3. a fixed size — equal, non-zero `set_min_size` and `set_max_size` on both
