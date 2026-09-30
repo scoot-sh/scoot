@@ -93,6 +93,7 @@ margin = "8,4"        # one number, or the CSS shorthand "VERTICAL,HORIZONTAL", 
 radius = 8            # 0 to 512, and at most half the height; 0 is square
 opacity = 0.9         # 0 (transparent) to 1 (opaque), the background's alpha
 font = "/path/to/Font.ttf"
+fallback-fonts = ["/path/to/Symbols.ttf", "/path/to/Cjk.otf"]   # at most 2: see Fonts
 font-size = 14        # 1 to 256
 padding = 8           # 0 to 1024
 spacing = 0           # 0 to 1024
@@ -106,6 +107,7 @@ urgent = "#f38ba8"
 
 [clock]
 format = "%-I:%M %P"
+icon = "\U000f0e65"     # one glyph before the time, from a symbol font: see Fonts
 
 [workspaces]          # reserved, empty for now
 
@@ -184,8 +186,9 @@ lists those that are.
   them, then cut. Nothing overlaps and nothing is drawn past the bar's end;
   text is clipped to its module's space.
 - Text is vertically centered on the bar. It is not shaped: one glyph per
-  character, no ligatures, kerning or right-to-left runs. A character the
-  font lacks draws the font's missing-glyph box. Control characters are
+  character, no ligatures, kerning or right-to-left runs (see
+  [Fonts](#fonts) for what is out of scope). A character no font in the chain has
+  draws the primary font's missing-glyph box. Control characters are
   not drawn.
 
 ## The clock
@@ -313,6 +316,48 @@ its size (about 740 KB for DejaVu Sans): copying a new file over it with
 and cannot touch one that read it. The file is read at start and on every
 reload: changing `bar.font` (or any option) and running
 `scootbar msg reload` swaps it live.
+
+### Fallback fonts and icons
+
+`bar.fallback-fonts` (file only, no flag) names at most **two** more font
+files, tried in order for a character the primary lacks. A character is drawn
+from the first font in the chain that has a glyph for it; a fallback is asked
+only about characters the fonts before it lack. A character in none of them
+draws the **primary's** missing-glyph box: never a blank, never a panic. Each
+fallback must load like the primary: one that cannot is a refusal naming it
+(a start-up error, or a refused reload with the running bar untouched), and
+more than two is a config error naming `bar.fallback-fonts`. Line height and
+vertical centering come from the primary alone. There is no fontconfig, so
+give the paths (Stylix supplies them on NixOS).
+
+That is also how **icons** work: an icon is a glyph from a symbol font (Nerd
+Font, Material Symbols, Font Awesome) given as text in the config, with the
+symbol font as a fallback (or the primary). The clock takes one, drawn before
+the time with a space between:
+
+```toml
+[bar]
+fallback-fonts = ["/path/to/SymbolsNerdFont-Regular.ttf"]
+[clock]
+icon = "\U000f0e65"   # or the character itself; exactly one, else a config error
+```
+
+The icon is one code point, not one grapheme: an emoji plus a variation
+selector or a ZWJ sequence is refused, but a lone format or combining
+character passes and draws as a `.notdef` box or a blank, so give a real
+symbol.
+
+Glyphs are cached per font, size and scale, at most 512 glyphs and 4 MiB;
+past either the cache is dropped and refilled from what is drawn next, so
+arbitrary text (a window title) costs bounded memory. It is keyed by size, so
+outputs at different scales each keep their glyphs until the bound, rather than
+one dropping the other's on every frame.
+
+**Out of scope, and will look wrong**: shaping (ligatures, complex scripts such
+as Arabic or Devanagari, combining marks), right-to-left and bidirectional
+layout (text runs left to right in logical order), and color emoji (outlines in
+one color only; an emoji is drawn only if a font in the chain has an outline for
+it). A title in such a script draws per codepoint.
 
 ## Colors
 

@@ -346,3 +346,39 @@ fn a_bad_radius_or_opacity_is_refused_naming_its_key() {
         );
     }
 }
+
+#[test]
+fn fallback_fonts_are_at_most_two_paths() {
+    assert!(read("").unwrap().fallback_fonts.is_empty());
+    let config = read("[bar]\nfallback-fonts = [\"/f/Symbols.ttf\", \"/f/Cjk.otf\"]\n").unwrap();
+    assert_eq!(
+        config.fallback_fonts,
+        [PathBuf::from("/f/Symbols.ttf"), PathBuf::from("/f/Cjk.otf")]
+    );
+    let error = read("[bar]\nfallback-fonts = [\"a\", \"b\", \"c\"]\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("bar.fallback-fonts") && error.contains("at most 2"),
+        "{error}"
+    );
+    // The wrong type is a parse refusal naming the key.
+    let error = read("[bar]\nfallback-fonts = \"a\"\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("fallback-fonts"), "{error}");
+}
+
+#[test]
+#[cfg(feature = "clock")]
+fn a_clock_icon_is_exactly_one_character() {
+    assert_eq!(read("").unwrap().modules.clock.icon, None);
+    let config = read("[clock]\nicon = \"\u{f0e65}\"\n").unwrap();
+    assert_eq!(config.modules.clock.icon, Some('\u{f0e65}'));
+    for bad in ["", "ab", "\\n", "\\u0065\\u0301"] {
+        let error = read(&format!("[clock]\nicon = \"{bad}\"\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("clock.icon"), "{bad:?}: {error}");
+    }
+}

@@ -145,8 +145,9 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
     let text = if modules.is_empty() {
         None
     } else {
-        let font = font::find(config.font.as_deref()).map_err(Error::Font)?;
-        Some(Text::new(font.face))
+        let text =
+            font::text(config.font.as_deref(), &config.fallback_fonts).map_err(Error::Font)?;
+        Some(text)
     };
     let content = Content {
         modules,

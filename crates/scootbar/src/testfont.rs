@@ -60,6 +60,8 @@ const SHAPES: [(char, u8); 13] = [
 
 const COLON: [Rect; 2] = [(250, 150, 350, 250), (250, 450, 350, 550)];
 const NOTDEF: Rect = (100, 0, 500, 700);
+/// What [`build_symbols`]' glyphs draw: a bar across the middle.
+pub const BAR: Rect = (100, 300, 500, 400);
 
 /// The font's glyphs in id order, with the character each maps from.
 fn glyphs() -> Vec<(Option<char>, Vec<Rect>)> {
@@ -140,6 +142,15 @@ pub fn build_hostile() -> Vec<u8> {
         }
     }
     build_from(glyphs, 16)
+}
+
+/// A symbol font: `.notdef` (the same solid block) and one glyph for each
+/// of `chars`, a horizontal bar, so a test can tell which font drew a
+/// character. Every glyph is [`ADVANCE`] wide, as in [`build`].
+pub fn build_symbols(chars: impl IntoIterator<Item = char>) -> Vec<u8> {
+    let mut glyphs = vec![(None, vec![NOTDEF])];
+    glyphs.extend(chars.into_iter().map(|c| (Some(c), vec![BAR])));
+    build_from(glyphs, UNITS_PER_EM)
 }
 
 fn build_from(glyphs: Vec<(Option<char>, Vec<Rect>)>, units_per_em: u16) -> Vec<u8> {

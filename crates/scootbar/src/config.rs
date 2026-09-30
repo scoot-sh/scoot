@@ -23,6 +23,7 @@ use crate::layout::{Layout, MAX_GAP, Section, check_placement};
 use crate::modules::Settings;
 use crate::policy::Policy;
 use crate::render::Style;
+use crate::text::MAX_FALLBACKS;
 use crate::theme::Theme;
 
 mod outputs;
@@ -47,6 +48,9 @@ pub struct Config {
     pub layout: Layout,
     /// `--font`; `None` looks in the well-known places (`crate::font`).
     pub font: Option<PathBuf>,
+    /// `bar.fallback-fonts`: at most [`MAX_FALLBACKS`] files tried, in
+    /// order, for a character the font lacks. No flag: config file only.
+    pub fallback_fonts: Vec<PathBuf>,
     /// The em, in logical pixels, 1 to [`MAX_FONT_SIZE`].
     pub font_size: u32,
     /// The bar's corner radius, in logical pixels: 0 to [`MAX_RADIUS`], and
@@ -66,6 +70,7 @@ impl Default for Config {
             theme: Theme::default(),
             layout: Layout::default(),
             font: None,
+            fallback_fonts: Vec::new(),
             font_size: DEFAULT_FONT_SIZE,
             radius: 0,
             opacity: u8::MAX,
@@ -270,6 +275,8 @@ struct BarFile {
     radius: Option<u32>,
     opacity: Option<toml::Value>,
     font: Option<String>,
+    #[serde(rename = "fallback-fonts")]
+    fallback_fonts: Option<Vec<String>>,
     #[serde(rename = "font-size")]
     font_size: Option<u32>,
     padding: Option<u32>,
@@ -294,6 +301,9 @@ struct ClockFile {
     /// would.
     #[cfg(feature = "clock")]
     format: Option<String>,
+    /// One glyph, drawn before the time.
+    #[cfg(feature = "clock")]
+    icon: Option<String>,
 }
 
 /// Reserved for the workspaces module's future options: empty, so any key
@@ -374,6 +384,22 @@ impl File {
             })?,
         };
         let font = bar.font.as_ref().map(PathBuf::from);
+        let fallback_fonts: Vec<PathBuf> = match &bar.fallback_fonts {
+            None => Vec::new(),
+            Some(paths) if paths.len() <= MAX_FALLBACKS => {
+                paths.iter().map(PathBuf::from).collect()
+            }
+            Some(paths) => {
+                return Err(value(
+                    path,
+                    "bar.fallback-fonts",
+                    format_args!(
+                        "takes at most {MAX_FALLBACKS} font files, not {}",
+                        paths.len()
+                    ),
+                ));
+            }
+        };
         let font_size = match bar.font_size {
             None => defaults.font_size,
             Some(size) if (1..=MAX_FONT_SIZE).contains(&size) => size,
@@ -406,6 +432,13 @@ impl File {
                 )
             })?;
         }
+        #[cfg(feature = "clock")]
+        if let Some(icon) = &self.clock.icon {
+            modules.clock.icon = Some(
+                parse_icon(icon)
+                    .map_err(|message| value(path, "clock.icon", format_args!("{message}")))?,
+            );
+        }
         Ok(Config {
             bar: Bar {
                 edge,
@@ -417,6 +450,7 @@ impl File {
             theme,
             layout,
             font,
+            fallback_fonts,
             font_size,
             radius,
             opacity,
@@ -587,4 +621,19 @@ fn parse_opacity(value: &toml::Value) -> Option<u8> {
     (0.0..=1.0)
         .contains(&opacity)
         .then(|| (opacity * 255.0).round() as u8)
+}
+
+/// An icon: exactly one Unicode character (a symbol font's glyph is one
+/// private-use codepoint). Not shaped, so a sequence of several (an emoji
+/// with a modifier) is refused rather than drawn as separate boxes.
+#[cfg(feature = "clock")]
+fn parse_icon(text: &str) -> Result<char, String> {
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) if !c.is_control() => Ok(c),
+        _ => Err(format!(
+            "takes exactly one character (a glyph from a symbol font), not `{}`",
+            text.escape_debug()
+        )),
+    }
 }

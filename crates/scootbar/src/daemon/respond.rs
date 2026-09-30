@@ -22,7 +22,6 @@ use crate::font;
 use crate::modules::{self, OutputView, Placed, Update, View};
 use crate::policy::Placement;
 use crate::print::warn;
-use crate::text::Text;
 
 /// The request handler for one round of the poll loop.
 pub struct Responder<'a> {
@@ -215,8 +214,9 @@ impl Responder<'_> {
         let text = if modules.is_empty() {
             None
         } else {
-            let font = font::find(config.font.as_deref()).map_err(|error| error.to_string())?;
-            Some(Text::new(font.face))
+            let text = font::text(config.font.as_deref(), &config.fallback_fonts)
+                .map_err(|error| error.to_string())?;
+            Some(text)
         };
         for note in notes {
             warn(format_args!("scootbar: note: {note}"));
