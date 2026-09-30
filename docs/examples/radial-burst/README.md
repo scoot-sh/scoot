@@ -62,11 +62,12 @@ opt-in and you can drop any of them:
 ## Image credit and license
 
 `docs/assets/wallpapers/radial-burst.png` is "Colorful radial lines exploding on a dark
-background" (Abstract Radial Speed Lines Zoom Blast Background, a vector illustration),
-published on Unsplash on June 18, 2026:
+background" by Sufyan pir, published on Unsplash on June 18, 2026:
 <https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM>.
-**It is not covered by this repository's MIT license.** It was downloaded from Unsplash
-(its `/illustrations/` pages are Unsplash+). Which license terms apply to it, and whether
-they allow redistribution in a public repository, has not been verified, and the artist's
-name is not recorded here. If you redistribute scoot or fork it, check that first, or
-remove the file and the `[wallpaper]` table. See [NOTICE](../../../NOTICE).
+Its page (checked 2026-09-30) says "Free to use under the Unsplash License"
+(<https://unsplash.com/license>), which lets you download, copy, modify and distribute
+it, commercially and without attribution, but not compile images to build a similar or
+competing service; the credit here is a courtesy. **The image is not covered by this
+repository's MIT license**: it stays under Unsplash's. If you redistribute scoot or fork
+it, it comes with that license. To drop it, remove the file and the `[wallpaper]` table.
+See [NOTICE](../../../NOTICE).
