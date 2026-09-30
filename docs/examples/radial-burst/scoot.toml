@@ -1,5 +1,5 @@
-# The "radial burst" look for scoot: a dark plum background, a blue ring around the
-# focused window and a thin orange one around the rest, rounded corners, and the
+# The "radial burst" look for scoot: a dark plum background, a thin blue ring around
+# the focused window and a thin orange one around the rest, rounded corners, and the
 # wallpaper in ../../assets/wallpapers. See README.md in this directory.
 #
 #   scoot --config docs/examples/radial-burst/scoot.toml
@@ -8,17 +8,18 @@
 
 [layout]
 gap = 18
-# Columns a little narrower than the default half screen, so the wallpaper shows
-# beside one or two windows: 0.3 (index 0) for a new column, 0.42 (index 1) on
-# `cycle-column-width`.
-column_widths = [0.3, 0.42]
-default_column_width = 0
+# The default thirds and half, new columns at half (index 1), plus a full-width
+# column (index 3) that Super+m jumps to below: a stand-in for maximize until scoot
+# has one (docs/backlog/core/maximize.md). `cycle-column-width` steps through all
+# four; nothing un-does the full width but another width.
+column_widths = [0.3333333333333333, 0.5, 0.6666666666666666, 1.0]
+default_column_width = 1
 
 [appearance]
 background_color = "#241721"          # shows until the wallpaper is up, and behind it
 corner_radius = 16                    # costs a little per frame: 0 is free
-focus_ring_width = 6
-focus_ring_inactive_width = 2         # thinner ring on the windows that are not focused
+focus_ring_width = 2                  # the color, not the weight, says which is focused
+focus_ring_inactive_width = 2
 focus_ring_active_color = "#31a9e5"
 focus_ring_inactive_color = "#e36e38"
 
@@ -26,3 +27,6 @@ focus_ring_inactive_color = "#e36e38"
 # A relative path is resolved against this file's directory.
 image = "../../assets/wallpapers/radial-burst.png"
 mode = "fill"
+
+[binds]
+"super+m" = "set-column-width 3"      # the full-width column above
