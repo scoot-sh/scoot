@@ -38,6 +38,8 @@ use std::path::{Path, PathBuf};
 use ab_glyph::{FontArc, FontRef, FontVec};
 use rustix::fs::{FileType, Mode, OFlags, fstat, open};
 
+use crate::text::{MAX_FALLBACKS, Text};
+
 #[cfg(test)]
 mod tests;
 
@@ -98,6 +100,8 @@ pub enum Error {
     NoneFound { tried: Vec<(PathBuf, FileError)> },
     /// The `--font` file cannot be used.
     Given { path: PathBuf, error: FileError },
+    /// A `bar.fallback-fonts` file cannot be used.
+    Fallback { path: PathBuf, error: FileError },
 }
 
 /// Why one file cannot be used.
@@ -131,6 +135,13 @@ impl fmt::Display for Error {
             Self::Given { path, error } => {
                 write!(f, "cannot use the font {}: {error}", path.display())
             }
+            Self::Fallback { path, error } => {
+                write!(
+                    f,
+                    "cannot use the fallback font {}: {error}",
+                    path.display()
+                )
+            }
             Self::NoneFound { tried } => {
                 write!(
                     f,
@@ -147,6 +158,27 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// The bar's text: the font `given` names (or the first well-known one)
+/// with `fallbacks` behind it, each a file that must load: a fallback that
+/// cannot is a loud refusal, like the primary, not a silent gap in the
+/// glyphs. At most [`MAX_FALLBACKS`] are taken (the config refuses more).
+pub fn text(given: Option<&Path>, fallbacks: &[PathBuf]) -> Result<Text, Error> {
+    let primary = find(given)?;
+    let fallbacks = fallbacks
+        .iter()
+        .take(MAX_FALLBACKS)
+        .map(|path| {
+            load(path)
+                .map(|font| font.face)
+                .map_err(|error| Error::Fallback {
+                    path: path.clone(),
+                    error,
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Text::with_fallbacks(primary.face, fallbacks))
+}
 
 /// The font `--font` names, or the first usable well-known one.
 pub fn find(given: Option<&Path>) -> Result<Font, Error> {

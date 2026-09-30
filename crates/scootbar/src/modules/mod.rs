@@ -398,8 +398,7 @@ impl View {
         &mut self.tooltip
     }
 
-    /// A glyph drawn before the text, from the same font.
-    #[allow(dead_code)]
+    /// A glyph drawn before the text, from the same font chain.
     pub fn set_icon(&mut self, icon: Option<char>) {
         self.icon = icon;
     }

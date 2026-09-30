@@ -68,3 +68,45 @@ RSS. Decide here, with the fallback chain, whether 1x text needs it.
 An icon appears in a module in the chosen way, a title with mixed Latin and
 CJK draws without a panic or a missing-glyph blank, and the glyph cache is
 bounded under a fuzzed title stream.
+
+## Landed (2026-09-30, `feat/scootbar-icons-fonts`)
+
+- **Fallback chain**: `bar.fallback-fonts`, at most two files, config file
+  only; consulted only for a codepoint the primary lacks; a character in no
+  font draws the primary's `.notdef`; a fallback that cannot load is a loud
+  refusal (start-up error, or a refused reload). `src/text.rs`, `src/font.rs`.
+- **Glyph cache**: was already capped (512 glyphs, 4 MiB, dropped whole past
+  either); the key now carries the font. Tested under a fuzzed 3000-title
+  stream at four sizes through a two-font chain
+  (`text::tests::the_cache_stays_bounded_under_a_fuzzed_title_stream`). It is
+  *not* dropped on scale change: it is keyed by size, and outputs at different
+  scales alternate every frame, so a drop per change would rasterize on every
+  frame; the bound is what keeps memory finite.
+- **Icons, option 1**: `clock.icon = "..."` (exactly one character) drawn
+  before the time from the chain, so a symbol font as fallback supplies it.
+  Tested in units, and on headless scoot (`tests/icons.rs`).
+- **Mixed Latin and CJK title**: draws with no blank and no panic
+  (`text::tests::a_title_of_latin_and_cjk_draws_with_no_blank`, and the
+  `.notdef` box with no CJK font). Shaping, RTL and color emoji are stated as
+  out of scope in `docs/scootbar/cli.md`.
+
+Measured (release, `lto = "fat"`, `strip`): the binary is 1,405,712 bytes at
+`origin/main` and 1,413,904 with this change (+8 KiB, no new dependency);
+`measure`+`draw` of a 41-character line at 21 px, glyphs cached, is
+17.6 and 16.6 us against 18.2 and 18.4 us before (no regression).
+Each fallback file costs its size in the heap unless it is a mapped store file
+(the same rule as the primary).
+
+## Remaining
+
+- **Option 3, PNG behind a Cargo feature**: measured, not built. Adding the
+  `png` crate and one decode call to scootbar costs +122,880 bytes
+  (1,405,712 to 1,528,592), so it must sit behind a feature. Needs the icon
+  config key, scaling and premultiplying, and a module that takes an image.
+- **Option 2, path icons**: not started (needs the path parser and the
+  coverage fill).
+- **Hinting (`swash`)**: not evaluated here; the +770 KB / +1 MB RSS figures
+  above stand from M0. Decide with a 15 px screenshot comparison.
+- Icons in modules other than the clock (none exist yet), and a per-module
+  `icon` key when the button, volume, network and battery modules land.
+- Option 4 stays with [tray](tray.md).

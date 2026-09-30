@@ -1,8 +1,24 @@
 //! Text: measuring and drawing a line with `ab_glyph`, through a bounded
 //! glyph cache. Grayscale coverage, no hinting, no shaping and no kerning
 //! (one glyph per character, advanced by its width), as M0 chose for a bar
-//! whose first text is a clock (`docs/scootbar/backlog/icons-and-fonts.md`
-//! takes up fallback fonts and hinting).
+//! whose first text is a clock.
+//!
+//! ## Fallback fonts
+//!
+//! A primary font and at most [`MAX_FALLBACKS`] fallbacks. A character is
+//! drawn from the first font that has a glyph for it, in order; a font is
+//! asked only about the characters the ones before it lack. A character no
+//! font has draws the *primary's* `.notdef`, so a missing glyph is a visible
+//! box, never a blank or a panic. Each font converts a size to its own
+//! `PxScale` (fonts differ in units per em and in height), but the line's
+//! vertical metrics are the primary's alone, so a fallback with a taller
+//! ascent overflows its row rather than moving the bar's text. The cache key
+//! carries the font, so two fonts' glyph ids never collide.
+//!
+//! Out of scope, stated: shaping (ligatures, complex scripts, marks that
+//! combine), right-to-left and bidirectional layout, and color emoji (the
+//! rasterizer draws outlines in one color). A title in such a script draws
+//! per codepoint, in logical order, and may look wrong.
 //!
 //! ## Sizes
 //!
@@ -42,6 +58,8 @@ use crate::paint::{Canvas, Span};
 #[cfg(test)]
 mod tests;
 
+/// Fallback fonts at most, after the primary.
+pub const MAX_FALLBACKS: usize = 2;
 /// Cached glyphs at most, across every size.
 pub const MAX_GLYPHS: usize = 512;
 /// Coverage bytes cached at most.
@@ -66,6 +84,18 @@ struct Cached {
     offset: usize,
 }
 
+/// One character resolved against the font chain.
+#[derive(Debug, Clone, Copy)]
+struct Resolved {
+    /// 0 the primary, then the fallbacks.
+    font: usize,
+    id: GlyphId,
+    /// That font's scale for the size.
+    scale: PxScale,
+    /// In device pixels, unrounded.
+    advance: f32,
+}
+
 /// A glyph ready to draw.
 enum Glyph {
     Cached(Cached),
@@ -85,7 +115,9 @@ fn raster_size(width: f32, height: f32) -> Option<(u32, u32)> {
 
 /// A font and its glyph cache.
 pub struct Text {
-    font: FontArc,
+    primary: FontArc,
+    /// At most [`MAX_FALLBACKS`], in the order they are tried.
+    fallbacks: Vec<FontArc>,
     /// Sorted by `key`.
     entries: Vec<Cached>,
     arena: Vec<u8>,
@@ -110,21 +142,63 @@ impl Metrics {
 }
 
 impl Text {
+    #[cfg(test)]
     pub fn new(font: FontArc) -> Self {
+        Self::with_fallbacks(font, Vec::new())
+    }
+
+    /// `primary`, then `fallbacks` (only the first [`MAX_FALLBACKS`] are
+    /// kept).
+    pub fn with_fallbacks(primary: FontArc, mut fallbacks: Vec<FontArc>) -> Self {
+        fallbacks.truncate(MAX_FALLBACKS);
         Self {
-            font,
+            primary,
+            fallbacks,
             entries: Vec::new(),
             arena: Vec::new(),
         }
     }
 
-    fn scale(&self, em: f32) -> PxScale {
-        let units = self.font.units_per_em().unwrap_or(1000.0).max(1.0);
-        PxScale::from(em.max(0.0) * self.font.height_unscaled() / units)
+    /// Font `index`: 0 the primary, then the fallbacks. An index past them
+    /// is the primary (none is ever made).
+    fn face(&self, index: usize) -> &FontArc {
+        match index.checked_sub(1) {
+            None => &self.primary,
+            Some(i) => self.fallbacks.get(i).unwrap_or(&self.primary),
+        }
+    }
+
+    fn scale(font: &FontArc, em: f32) -> PxScale {
+        let units = font.units_per_em().unwrap_or(1000.0).max(1.0);
+        PxScale::from(em.max(0.0) * font.height_unscaled() / units)
+    }
+
+    /// The font that draws `c` at `em`, with its glyph, scale and advance:
+    /// the first with a glyph for it, else the primary's `.notdef`.
+    fn resolve(&self, c: char, em: f32) -> Resolved {
+        let mut index = 0;
+        let mut id = self.primary.glyph_id(c);
+        if id.0 == 0 {
+            for (i, font) in self.fallbacks.iter().enumerate() {
+                let found = font.glyph_id(c);
+                if found.0 != 0 {
+                    (index, id) = (i + 1, found);
+                    break;
+                }
+            }
+        }
+        let font = self.face(index);
+        let scale = Self::scale(font, em);
+        Resolved {
+            font: index,
+            id,
+            scale,
+            advance: font.as_scaled(scale).h_advance(id),
+        }
     }
 
     pub fn metrics(&self, em: f32) -> Metrics {
-        let scaled = self.font.as_scaled(self.scale(em));
+        let scaled = self.primary.as_scaled(Self::scale(&self.primary, em));
         Metrics {
             ascent: scaled.ascent(),
             descent: scaled.descent(),
@@ -134,10 +208,9 @@ impl Text {
     /// The width, in device pixels rounded up, of `icon` (then a space)
     /// and `text` at `em`.
     pub fn measure(&self, icon: Option<char>, text: &str, em: f32) -> u32 {
-        let scaled = self.font.as_scaled(self.scale(em));
         let mut width = 0.0f32;
         for c in chars(icon, text) {
-            width += scaled.h_advance(self.font.glyph_id(c));
+            width += self.resolve(c, em).advance;
         }
         // Finite and non-negative for any real font; `as` saturates the
         // rest.
@@ -151,8 +224,7 @@ impl Text {
     /// match its ink.
     #[allow(dead_code)] // Only the workspaces module walks advances.
     pub fn advance(&self, c: char, em: f32) -> f32 {
-        let scaled = self.font.as_scaled(self.scale(em));
-        scaled.h_advance(self.font.glyph_id(c))
+        self.resolve(c, em).advance
     }
 
     /// Draws `icon` and `text` at `em` in `color`, the pen starting at `x`
@@ -169,17 +241,15 @@ impl Text {
         color: Color,
         clip: Span,
     ) {
-        let scale = self.scale(em);
         let mut pen = x as f32;
         for c in chars(icon, text) {
-            let id = self.font.glyph_id(c);
-            let advance = self.font.as_scaled(scale).h_advance(id);
+            let glyph = self.resolve(c, em);
             let origin = pen.round() as i64;
             if origin >= i64::from(clip.end()) {
                 break;
             }
-            self.draw_glyph(canvas, id, scale, origin, baseline, color, clip);
-            pen += advance;
+            self.draw_glyph(canvas, glyph, origin, baseline, color, clip);
+            pen += glyph.advance;
         }
     }
 
@@ -187,17 +257,20 @@ impl Text {
     fn draw_glyph(
         &mut self,
         canvas: &mut Canvas<'_>,
-        id: GlyphId,
-        scale: PxScale,
+        Resolved {
+            font, id, scale, ..
+        }: Resolved,
         x: i64,
         baseline: i64,
         color: Color,
         clip: Span,
     ) {
-        let key = u64::from(id.0) << 32 | u64::from(scale.y.to_bits());
+        // Font, glyph id and size: the font's index (at most 2) above the
+        // id's 16 bits above the size's 32.
+        let key = (font as u64) << 48 | u64::from(id.0) << 32 | u64::from(scale.y.to_bits());
         let found = match self.entries.binary_search_by_key(&key, |e| e.key) {
             Ok(index) => self.entries.get(index).copied().map(Glyph::Cached),
-            Err(index) => self.fill(key, id, scale, index),
+            Err(index) => self.fill(key, font, id, scale, index),
         };
         match found {
             Some(Glyph::Cached(glyph)) => {
@@ -234,8 +307,8 @@ impl Text {
         }
     }
 
-    fn outline(&self, id: GlyphId, scale: PxScale) -> Option<OutlinedGlyph> {
-        self.font
+    fn outline(&self, font: usize, id: GlyphId, scale: PxScale) -> Option<OutlinedGlyph> {
+        self.face(font)
             .outline_glyph(id.with_scale_and_position(scale, point(0.0, 0.0)))
     }
 
@@ -243,8 +316,15 @@ impl Text {
     /// search for `key` found its place). The outline alone for a glyph
     /// too big to cache; `None` for one with no outline (a space) or too
     /// big to rasterize (see the module docs).
-    fn fill(&mut self, key: u64, id: GlyphId, scale: PxScale, index: usize) -> Option<Glyph> {
-        let outline = self.outline(id, scale)?;
+    fn fill(
+        &mut self,
+        key: u64,
+        font: usize,
+        id: GlyphId,
+        scale: PxScale,
+        index: usize,
+    ) -> Option<Glyph> {
+        let outline = self.outline(font, id, scale)?;
         let bounds = outline.px_bounds();
         let (width, height) = raster_size(bounds.width(), bounds.height())?;
         let len = width as usize * height as usize;

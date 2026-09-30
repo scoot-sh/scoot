@@ -130,3 +130,25 @@ fn the_well_known_list_is_absolute_and_tried_in_order() {
         }
     }
 }
+
+#[test]
+fn a_fallback_that_fails_is_an_error_naming_it() {
+    let scratch = Scratch::new("fallback");
+    let seven = scratch.file("seven.ttf", &testfont::build());
+    let symbols = scratch.file("symbols.ttf", &testfont::build_symbols(['x']));
+    let junk = scratch.file("junk.ttf", b"nope");
+    // Both load: the chain is the primary and its fallbacks.
+    assert!(super::text(Some(&seven), std::slice::from_ref(&symbols)).is_ok());
+    // A bad fallback is a refusal naming it, not a silent gap.
+    let error = super::text(Some(&seven), &[symbols, junk.clone()])
+        .err()
+        .unwrap();
+    assert!(matches!(&error, Error::Fallback { path, .. } if *path == junk));
+    let message = error.to_string();
+    assert!(
+        message.contains("fallback font") && message.contains("junk.ttf"),
+        "{message}"
+    );
+    let missing = scratch.0.join("absent.ttf");
+    assert!(super::text(Some(&seven), &[missing]).is_err());
+}

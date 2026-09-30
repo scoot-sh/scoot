@@ -20,6 +20,7 @@ fn utc(year: i64, month: u32, day: u32, hour: i64, minute: i64, second: i64) -> 
 fn clock(format: &str, tz: Tz) -> Clock {
     let settings = Settings {
         format: Format::parse(format).unwrap(),
+        icon: None,
     };
     let mut clock = Clock::new(settings, Spec::Utc).unwrap();
     clock.tz = tz;
@@ -308,6 +309,7 @@ fn a_changed_zone_file_is_read_again() {
     std::fs::write(&path, NEW_YORK).unwrap();
     let settings = Settings {
         format: Format::parse("%Z").unwrap(),
+        icon: None,
     };
     let spec = Spec::File {
         path: path.clone(),
@@ -327,4 +329,22 @@ fn a_changed_zone_file_is_read_again() {
     let _ = clock.on_ready(0, PollFlags::IN);
     assert_eq!(clock.text, "IST");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_icon_is_in_the_view_and_the_time_is_unchanged() {
+    use crate::modules::{Module, OutputView, View};
+    let settings = Settings {
+        format: Format::parse("%H").unwrap(),
+        icon: Some('\u{f0e65}'),
+    };
+    let clock = Clock::new(settings, Spec::Utc).unwrap();
+    let mut view = View::default();
+    clock.view(&OutputView { name: None }, &mut view);
+    assert_eq!(view.icon(), Some('\u{f0e65}'));
+    assert_eq!(view.text(), clock.text);
+    // Cleared and refilled, as the bar does: still there.
+    view.clear();
+    clock.view(&OutputView { name: None }, &mut view);
+    assert_eq!(view.icon(), Some('\u{f0e65}'));
 }
