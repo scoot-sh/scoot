@@ -65,6 +65,7 @@ use rustix::event::{PollFd, PollFlags};
 
 use serde_json::Value;
 
+use crate::density::Scale;
 use crate::layout::Layout;
 use crate::paint::{Canvas, Span};
 use crate::text::Text;
@@ -319,6 +320,9 @@ pub struct CustomDraw<'r, 'c> {
     pub baseline: i64,
     /// Device pixels either side of the module's content, as measured.
     pub padding: u32,
+    /// The scale the bar is drawn at: a module's own logical lengths
+    /// (the pill's radius and inset) are device pixels through it.
+    pub scale: Scale,
     pub theme: &'r Theme,
 }
 

@@ -4,8 +4,21 @@ use crate::paint::Span;
 use Section::{Center as C, Left as L, Right as R};
 
 fn spans(sections: &[Section], widths: &[u32], spacing: u32, bar: u32) -> Vec<(u32, u32)> {
+    placed(sections, widths, &[], spacing, 0, bar)
+}
+
+/// Like [`spans`], with margins (shorter than the modules: the rest 0) and
+/// an edge inset.
+fn placed(
+    sections: &[Section],
+    widths: &[u32],
+    margins: &[u32],
+    spacing: u32,
+    edge: u32,
+    bar: u32,
+) -> Vec<(u32, u32)> {
     let mut out = vec![Span::default(); sections.len()];
-    arrange(sections, widths, spacing, bar, &mut out);
+    arrange(sections, widths, margins, spacing, edge, bar, &mut out);
     out.iter().map(|s| (s.x, s.width)).collect()
 }
 
@@ -103,9 +116,78 @@ fn placed_lists_left_to_right() {
         right: vec!["d"],
         padding: 0,
         spacing: 0,
+        separator: 0,
+        margins: vec![("c", 6)],
     };
+    assert_eq!((layout.margin_of("c"), layout.margin_of("a")), (6, 0));
     let placed: Vec<_> = layout.placed().collect();
     assert_eq!(placed, [(L, "a"), (L, "b"), (C, "c"), (R, "d")]);
     assert!(!layout.is_empty());
     assert_eq!(Section::Left.flag(), "--left");
+}
+
+#[test]
+fn a_margin_adds_room_outside_the_module_on_both_sides() {
+    // Two on the left, the second with a margin of 4: 4 before, 4 after.
+    assert_eq!(
+        placed(&[L, L, L], &[10, 10, 10], &[0, 4, 0], 5, 0, 1000),
+        [(0, 10), (19, 10), (38, 10)]
+    );
+    // A margined module alone on the right ends its margin from the edge.
+    assert_eq!(placed(&[R], &[10], &[7], 0, 0, 100), [(83, 10)]);
+    // Centered as a whole, margins included.
+    assert_eq!(placed(&[C], &[10], &[10], 0, 0, 100), [(45, 10)]);
+    // An empty module takes no margin either.
+    assert_eq!(
+        placed(&[L, L], &[0, 10], &[9, 0], 5, 0, 100),
+        [(0, 0), (0, 10)]
+    );
+}
+
+#[test]
+fn the_edge_inset_keeps_both_ends_clear() {
+    assert_eq!(
+        placed(&[L, C, R], &[10, 10, 10], &[], 0, 12, 200),
+        [(12, 10), (95, 10), (178, 10)]
+    );
+    // Half the bar or more is the whole bar: nothing fits, nothing panics.
+    assert_eq!(
+        placed(&[L, R], &[10, 10], &[], 0, 500, 100),
+        [(50, 0), (50, 0)]
+    );
+    assert_eq!(placed(&[L], &[10], &[], 0, u32::MAX, 0), [(0, 0)]);
+}
+
+/// Margins and an edge inset keep every rule: in the bar, past the
+/// inset, in order, no overlap, nothing overflowing.
+#[test]
+fn margins_and_an_edge_keep_the_rules() {
+    let sections = [L, L, C, C, R, R];
+    for (bar, edge) in [(0u32, 3u32), (1, 0), (50, 20), (100, 7), (1000, 40)] {
+        for mask in 0u32..(1 << 6) {
+            let widths: Vec<u32> = (0..6)
+                .map(|i| if mask >> i & 1 == 1 { 7 + i * 13 } else { 0 })
+                .collect();
+            let out = placed(&sections, &widths, &[0, 5, 2, 0, 9, 1], 3, edge, bar);
+            let inner = edge.min(bar / 2);
+            let mut end = 0;
+            for (&(x, width), &wanted) in out.iter().zip(&widths) {
+                assert!(x + width <= bar - inner, "{bar} {edge} {widths:?} {out:?}");
+                assert!(width <= wanted);
+                if width > 0 {
+                    assert!(x >= inner.max(end), "{bar} {edge} {widths:?} {out:?}");
+                    end = x + width;
+                }
+            }
+        }
+    }
+    // Absurd values saturate rather than overflow.
+    let _ = placed(
+        &[L, C, R],
+        &[u32::MAX; 3],
+        &[u32::MAX; 3],
+        u32::MAX,
+        u32::MAX,
+        u32::MAX,
+    );
 }

@@ -487,6 +487,8 @@ fn flags_overlay_the_file_section_by_section() {
             right: vec![],
             padding: 8,
             spacing: 0,
+            separator: 0,
+            margins: vec![],
         },
         ..Config::default()
     };

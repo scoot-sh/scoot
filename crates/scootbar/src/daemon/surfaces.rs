@@ -112,6 +112,9 @@ pub struct LayerObjects {
     pub(super) buffer_scale: u32,
     pub(super) destination: Option<Size>,
     pub(super) opaque: Option<(Size, Option<u32>)>,
+    /// The input region (logical size and effective corner radius, see
+    /// `crate::region`; `None` while never set).
+    pub(super) input: Option<(Size, u32)>,
 }
 
 impl LayerObjects {
@@ -177,6 +180,7 @@ impl LayerObjects {
             buffer_scale: 1,
             destination: None,
             opaque: None,
+            input: None,
         }
     }
 

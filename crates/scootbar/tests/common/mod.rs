@@ -599,3 +599,19 @@ pub fn assert_buffers(pid: u32, outputs: usize) {
         "{mapped} shm buffers mapped for {outputs} outputs"
     );
 }
+
+/// `foot` is the one client the tests use to place a window; it is in the
+/// dev shell. Without it the placement check is skipped, unless
+/// `SCOOTBAR_REQUIRE_SCOOT` asks for everything.
+pub fn foot_missing() -> bool {
+    let found = std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("foot").is_file()));
+    if !found {
+        assert!(
+            std::env::var_os("SCOOTBAR_REQUIRE_SCOOT").is_none(),
+            "SCOOTBAR_REQUIRE_SCOOT is set but there is no foot on PATH"
+        );
+        eprintln!("skipped the window check -- no foot on PATH");
+    }
+    !found
+}

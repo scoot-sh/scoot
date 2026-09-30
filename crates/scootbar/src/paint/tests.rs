@@ -232,3 +232,84 @@ fn a_blend_over_a_translucent_pixel_is_a_premultiplied_over() {
     c.blend(0, 0, 255, WHITE, whole);
     assert_eq!(c.alpha_at(0, 0), 255);
 }
+
+#[test]
+fn a_rect_fill_is_opaque_clipped_and_leaves_the_rest() {
+    let mut pixels = vec![0u8; 4 * 5 * 4];
+    let mut c = canvas(&mut pixels, 5, 4);
+    c.fill_rect(Span { x: 1, width: 2 }, 1, 3, COLOR);
+    for y in 0..4 {
+        for x in 0..5 {
+            let inside = (1..3).contains(&x) && (1..3).contains(&y);
+            assert_eq!(c.at(x, y) == [0x12, 0x34, 0x56], inside, "({x},{y})");
+        }
+    }
+    assert_eq!(c.alpha_at(1, 1), 0xff);
+    assert_eq!(c.alpha_at(0, 0), 0);
+    // Past the edges, empty, and reversed rows are clipped or nothing.
+    c.fill_rect(
+        Span {
+            x: 3,
+            width: u32::MAX,
+        },
+        0,
+        u32::MAX,
+        WHITE,
+    );
+    assert_eq!(c.at(4, 3), [255, 255, 255]);
+    c.fill_rect(Span { x: 0, width: 0 }, 0, 4, COLOR);
+    c.fill_rect(Span { x: 0, width: 5 }, 3, 1, COLOR);
+    assert_eq!(c.at(0, 2), [0, 0, 0]);
+}
+
+#[test]
+fn a_pill_is_round_and_opaque_inside_and_antialiased_at_the_edge() {
+    let (w, h, r) = (20u32, 12u32, 5u32);
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+    let mut c = canvas(&mut pixels, w, h);
+    c.fill_pill(Span { x: 0, width: w }, 0, h, r, WHITE);
+    // The middle and the straight edges are fully covered.
+    assert_eq!(c.at(10, 6), [255, 255, 255]);
+    assert_eq!(c.at(10, 0), [255, 255, 255]);
+    assert_eq!(c.at(0, 6), [255, 255, 255]);
+    // The corner pixel is untouched, and the four corners mirror.
+    let corner = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)];
+    for (x, y) in corner {
+        assert_eq!(c.at(x, y), [0, 0, 0], "corner ({x},{y})");
+    }
+    // Some pixel on the arc is partly covered: neither 0 nor 255.
+    let partial = (0..r)
+        .flat_map(|y| (0..r).map(move |x| (x, y)))
+        .any(|(x, y)| !matches!(c.at(x, y)[0], 0 | 255));
+    assert!(partial, "no antialiased edge");
+    // The mirror of every corner pixel matches it exactly.
+    for y in 0..r {
+        for x in 0..r {
+            let a = c.at(x, y);
+            assert_eq!(a, c.at(w - 1 - x, y));
+            assert_eq!(a, c.at(x, h - 1 - y));
+            assert_eq!(a, c.at(w - 1 - x, h - 1 - y));
+        }
+    }
+}
+
+#[test]
+fn a_pill_of_any_size_or_radius_never_panics_and_stays_in_its_rows() {
+    let mut pixels = vec![0u8; 4 * 6 * 4];
+    let mut c = canvas(&mut pixels, 6, 4);
+    for (x, width) in [(0, 0), (0, 1), (2, 100), (9, 3), (0, u32::MAX)] {
+        for (y0, y1) in [(0, 0), (1, 3), (3, 1), (0, u32::MAX), (2, 2)] {
+            for r in [0, 1, 2, 1000, u32::MAX] {
+                c.fill_pill(Span { x, width }, y0, y1, r, COLOR);
+            }
+        }
+    }
+    let mut pixels = vec![0u8; 4 * 6 * 4];
+    let mut c = canvas(&mut pixels, 6, 4);
+    c.fill_pill(Span { x: 0, width: 6 }, 1, 3, 0, WHITE);
+    for x in 0..6 {
+        assert_eq!(c.at(x, 0), [0, 0, 0]);
+        assert_eq!(c.at(x, 1), [255, 255, 255]);
+        assert_eq!(c.at(x, 3), [0, 0, 0]);
+    }
+}

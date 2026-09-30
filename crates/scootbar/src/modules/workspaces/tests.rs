@@ -7,6 +7,7 @@
 use ab_glyph::{FontArc, FontVec};
 
 use super::{Group, Link, MAX_WORKSPACES, Ws, hit_index, item_span, parse_coord, parse_number};
+use crate::density::Scale;
 use crate::modules::harness::Harness;
 use crate::modules::{ClickCtx, CustomDraw, MAX_TEXT, Module, OutputView, Update, find};
 use crate::paint::{Canvas, Span};
@@ -338,6 +339,7 @@ fn custom_draw_marks_only_the_active_item() {
     canvas.fill_span(span, theme.background);
     let module = super::Workspaces {
         link: link.clone(),
+        pill: super::Pill::default(),
         seen: 0,
     };
     let mut custom = CustomDraw {
@@ -349,6 +351,7 @@ fn custom_draw_marks_only_the_active_item() {
         em: EM,
         baseline,
         padding: PAD,
+        scale: Scale::Integer(1),
         theme: &theme,
     };
     assert!(module.custom_draw(&mut custom));
@@ -388,6 +391,7 @@ fn without_a_group_custom_draw_keeps_the_plain_draw() {
     let mut canvas = Canvas::new(&mut pixels, 400, 60).unwrap();
     let module = super::Workspaces {
         link: super::Link::default(),
+        pill: super::Pill::default(),
         seen: 0,
     };
     let mut custom = CustomDraw {
@@ -399,7 +403,116 @@ fn without_a_group_custom_draw_keeps_the_plain_draw() {
         em: EM,
         baseline,
         padding: PAD,
+        scale: Scale::Integer(1),
         theme: &theme,
     };
     assert!(!module.custom_draw(&mut custom));
+}
+
+/// The pill drawn as the render path calls it with `pill`'s shape, for
+/// workspace 2 of 2 active: the pixels of a 400x60 bar, and the item's
+/// span.
+fn pill_drawn(pill: super::Pill) -> (Vec<u8>, u32, u32) {
+    let (harness, link) = started();
+    commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
+    let view = harness.view_on(Some("DP-1"));
+    let theme = Theme::default();
+    let mut font = text();
+    let span = Span { x: 0, width: 400 };
+    let baseline = font.metrics(EM).baseline(60);
+    let mut pixels = vec![0u8; 400 * 60 * 4];
+    let mut canvas = Canvas::new(&mut pixels, 400, 60).unwrap();
+    canvas.fill_span(span, theme.background);
+    let module = super::Workspaces {
+        link,
+        pill,
+        seen: 0,
+    };
+    let mut custom = CustomDraw {
+        output: DP1,
+        view: &view,
+        canvas: &mut canvas,
+        text: &mut font,
+        span,
+        em: EM,
+        baseline,
+        padding: PAD,
+        scale: Scale::Integer(1),
+        theme: &theme,
+    };
+    assert!(module.custom_draw(&mut custom));
+    let (start, end) = item_span(&text(), "1 2", EM, i64::from(PAD), 1).unwrap();
+    (pixels, start, end)
+}
+
+fn at(pixels: &[u8], x: u32, y: u32) -> [u8; 3] {
+    let i = ((y * 400 + x) * 4) as usize;
+    [pixels[i + 2], pixels[i + 1], pixels[i]]
+}
+
+#[test]
+fn a_rounded_pill_cuts_its_corners_and_a_square_one_does_not() {
+    let theme = Theme::default();
+    let accent = [theme.accent.r, theme.accent.g, theme.accent.b];
+    let bg = [theme.background.r, theme.background.g, theme.background.b];
+    // The pill spans start - 4 .. end + 4 (half the padding), full height.
+    let (square, start, end) = pill_drawn(super::Pill::default());
+    let (left, right) = (start - PAD / 2, end + PAD / 2 - 1);
+    for (x, y) in [(left, 0), (right, 0), (left, 59), (right, 59)] {
+        assert_eq!(at(&square, x, y), accent, "square corner ({x},{y})");
+    }
+    // Radius 4 is a quarter circle of 4 pixels in each corner: the corner
+    // pixel is the bar's, the edge midpoints are still the pill's.
+    let (round, ..) = pill_drawn(super::Pill {
+        radius: 4,
+        inset: 0,
+    });
+    for (x, y) in [(left, 0), (right, 0), (left, 59), (right, 59)] {
+        assert_eq!(at(&round, x, y), bg, "round corner ({x},{y})");
+    }
+    for (x, y) in [(left, 30), (right, 30), ((left + right) / 2, 0)] {
+        assert_eq!(at(&round, x, y), accent, "edge ({x},{y})");
+    }
+    // Beyond half the pill's short side, the radius is cut back, not
+    // wrapped: a pill of a huge radius still draws and keeps its middle.
+    let (huge, ..) = pill_drawn(super::Pill {
+        radius: u32::MAX,
+        inset: 0,
+    });
+    assert_eq!(at(&huge, (left + right) / 2, 30), accent);
+}
+
+#[test]
+fn an_inset_lifts_the_pill_off_the_bar_and_never_past_the_text() {
+    let theme = Theme::default();
+    let accent = [theme.accent.r, theme.accent.g, theme.accent.b];
+    let bg = [theme.background.r, theme.background.g, theme.background.b];
+    let (pixels, start, end) = pill_drawn(super::Pill {
+        radius: 0,
+        inset: 3,
+    });
+    let x = start - 2;
+    assert_eq!(at(&pixels, x, 2), bg, "above the pill");
+    assert_eq!(at(&pixels, x, 3), accent, "the pill's first row");
+    assert_eq!(at(&pixels, x, 56), accent, "the pill's last row");
+    assert_eq!(at(&pixels, x, 57), bg, "below the pill");
+    assert_eq!(at(&pixels, end + 1, 30), accent);
+    // An inset past what the line leaves is cut back so the number stays
+    // on the pill: the pill still covers the digit's rows.
+    let (pixels, start, _) = pill_drawn(super::Pill {
+        radius: 0,
+        inset: 1000,
+    });
+    let x = start - 2;
+    let rows: Vec<u32> = (0..60).filter(|&y| at(&pixels, x, y) == accent).collect();
+    assert!(!rows.is_empty(), "the pill vanished");
+    let line = {
+        let m = text().metrics(EM);
+        (m.ascent - m.descent).ceil() as u32
+    };
+    assert!(
+        rows.len() as u32 >= line,
+        "{} rows for a {line}-row line",
+        rows.len()
+    );
 }

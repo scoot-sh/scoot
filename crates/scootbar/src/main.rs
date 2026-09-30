@@ -30,6 +30,7 @@ mod outputs;
 mod paint;
 mod policy;
 mod print;
+mod region;
 mod render;
 #[cfg(test)]
 mod snapshots;

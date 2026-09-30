@@ -243,6 +243,8 @@ impl Policy {
                     right: own.right.clone(),
                     padding: layout.padding,
                     spacing: layout.spacing,
+                    separator: layout.separator,
+                    margins: layout.margins.clone(),
                 },
                 None => layout.clone(),
             },

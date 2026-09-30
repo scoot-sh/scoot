@@ -39,14 +39,16 @@
 //!
 //! ## The pill and the hit test
 //!
-//! The active workspace's pill is drawn by [`Module::custom_draw`] as a
-//! rectangular accent fill behind its number, with the number itself in the
-//! bar's background color; the rest draws as plain text. It is rectangular
-//! because the canvas has no rounded shape until
-//! `docs/scootbar/backlog/appearance.md` adds one: the fill becomes rounded
-//! then, the colors and rects stay. [`Module::on_click`] hit-tests the same
-//! rects, walked with [`Text::advance`] exactly as the text draw walks its
-//! pen, so the rects match the ink pixel for pixel.
+//! The active workspace's pill is drawn by [`Module::custom_draw`] as an
+//! accent fill behind its number, with the number itself in the bar's
+//! background color; the rest draws as plain text. By default the fill is
+//! square and the bar's full height; `[workspaces] pill-radius` rounds its
+//! corners and `pill-inset` lifts it off the bar's top and bottom (cut back
+//! so the pill is never shorter than the text's line, or the number, drawn
+//! in the background color, would be clipped away). The click rects are the
+//! pill's horizontal extent whatever its shape: [`Module::on_click`]
+//! hit-tests them, walked with [`Text::advance`] exactly as the text draw
+//! walks its pen, so the rects match the ink pixel for pixel.
 
 use std::cell::RefCell;
 use std::fmt::Write;
@@ -83,11 +85,23 @@ const MAX_NAME: usize = 64;
 #[derive(Debug, Clone, Default)]
 pub struct Settings {
     pub link: Link,
+    pub pill: Pill,
+}
+
+/// The active workspace's pill: logical pixels, both 0 by default (square,
+/// the bar's full height).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Pill {
+    /// The corner radius; cut back to half the pill's shorter side.
+    pub radius: u32,
+    /// The gap from the bar's top and bottom edges.
+    pub inset: u32,
 }
 
 impl PartialEq for Settings {
-    fn eq(&self, _other: &Self) -> bool {
-        true
+    fn eq(&self, other: &Self) -> bool {
+        // The link is plumbing, equal by construction.
+        self.pill == other.pill
     }
 }
 
@@ -543,6 +557,7 @@ impl Shared {
 pub fn init(settings: &super::Settings) -> Init {
     Init::Available(Box::new(Workspaces {
         link: settings.workspaces.link.clone(),
+        pill: settings.workspaces.pill,
         seen: 0,
     }))
 }
@@ -550,6 +565,7 @@ pub fn init(settings: &super::Settings) -> Init {
 /// The module: an `Rc` to the shared state plus the generation last drawn.
 pub struct Workspaces {
     link: Link,
+    pill: Pill,
     seen: u64,
 }
 
@@ -629,6 +645,20 @@ fn hit_index(text: &Text, full: &str, em: f32, pad: u32, count: usize, x: u32) -
         }
     }
     None
+}
+
+impl Workspaces {
+    /// The pill's rows, `top .. bottom`: the bar's full height less the
+    /// inset at each end, the inset cut back so the pill stays as tall as
+    /// the text's line and never clips the number drawn over it.
+    fn pill_rows(&self, ctx: &CustomDraw<'_, '_>) -> (u32, u32) {
+        let height = ctx.canvas.height();
+        let metrics = ctx.text.metrics(ctx.em);
+        let line = (metrics.ascent - metrics.descent).ceil().max(0.0) as u32;
+        let room = height.saturating_sub(line) / 2;
+        let inset = crate::render::device(self.pill.inset, ctx.scale).min(room);
+        (inset, height - inset)
+    }
 }
 
 impl Module for Workspaces {
@@ -713,8 +743,7 @@ impl Module for Workspaces {
 
     /// The pill behind the active workspace: an accent fill over its item
     /// span, the number itself in the bar's background, the rest as plain
-    /// text. Rectangular until appearance brings a rounded shape; `false`
-    /// (the plain draw) when there is nothing to mark.
+    /// text; `false` (the plain draw) when there is nothing to mark.
     fn custom_draw(&self, ctx: &mut CustomDraw<'_, '_>) -> bool {
         let shared = self.link.0.borrow();
         let Some(index) = shared.committed_for(ctx.output.name) else {
@@ -745,7 +774,14 @@ impl Module for Workspaces {
         // The borrows end here: the draws below take the canvas and the
         // text, not the shared state.
         drop(shared);
-        ctx.canvas.fill_span(pill, ctx.theme.accent);
+        let (top, bottom) = self.pill_rows(ctx);
+        ctx.canvas.fill_pill(
+            pill,
+            top,
+            bottom,
+            crate::render::device(self.pill.radius, ctx.scale),
+            ctx.theme.accent,
+        );
         let background = ctx.theme.background;
         let ink = ctx.theme.class(ctx.view.class());
         let x = ctx.span.x;

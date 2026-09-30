@@ -5,9 +5,15 @@
 //!   the right edge, in the order listed; **center** ones are packed
 //!   together, centered on the bar.
 //! - A module's width is its measured content plus its padding on both
-//!   sides; `spacing` separates neighbours in a section. A module that
-//!   shows nothing (an empty view, or not ready yet) takes no space at all,
-//!   padding and spacing included.
+//!   sides; `spacing` separates neighbours in a section, and a module's own
+//!   `margin` adds that much more on each side of it (outside its span, so
+//!   what the module paints never covers it). A module that shows nothing
+//!   (an empty view, or not ready yet) takes no space at all, padding,
+//!   margin and spacing included.
+//! - The **edge inset** keeps the ends of the bar clear: the left section
+//!   starts, and the right one ends, that far in from the bar's edge, and
+//!   the center is centered on what is left. A rounded bar asks for its
+//!   corner radius here, so no module's paint reaches a corner.
 //! - **When they do not fit**, the left section keeps its place, the right
 //!   one gives way to it, and the center one is pushed off center to fit
 //!   between them, then cut. Every span is clipped to the bar and none
@@ -26,7 +32,8 @@ mod tests;
 pub const DEFAULT_PADDING: u32 = 8;
 /// Default space between neighbouring modules, in logical pixels.
 pub const DEFAULT_SPACING: u32 = 0;
-/// The most `--padding` and `--spacing` take.
+/// The most `--padding`, `--spacing`, a module's `margin` and the
+/// separator's width take.
 pub const MAX_GAP: u32 = 1024;
 /// The most modules a layout holds.
 pub const MAX_MODULES: usize = 32;
@@ -70,6 +77,14 @@ pub struct Layout {
     pub padding: u32,
     /// Logical pixels between neighbouring modules.
     pub spacing: u32,
+    /// The width of the line drawn in the gap between neighbours in a
+    /// section, in logical pixels; 0 draws none. At most `spacing` (the
+    /// config refuses more): the line sits in the gap and never under a
+    /// module.
+    pub separator: u32,
+    /// Extra logical pixels on each side of a module, by id: only the
+    /// nonzero ones are listed, so a bar with none has an empty list.
+    pub margins: Vec<(&'static str, u32)>,
 }
 
 impl Default for Layout {
@@ -86,6 +101,8 @@ impl Default for Layout {
             right: Vec::new(),
             padding: DEFAULT_PADDING,
             spacing: DEFAULT_SPACING,
+            separator: 0,
+            margins: Vec::new(),
         }
     }
 }
@@ -97,6 +114,14 @@ impl Layout {
             Section::Center => &self.center,
             Section::Right => &self.right,
         }
+    }
+
+    /// The margin module `id` has, in logical pixels (0 for none).
+    pub fn margin_of(&self, id: &str) -> u32 {
+        self.margins
+            .iter()
+            .find(|(module, _)| *module == id)
+            .map_or(0, |&(_, margin)| margin)
     }
 
     /// Every placed module, left to right by section: `(section, id)`.
@@ -151,20 +176,35 @@ pub fn check_placement(layout: &Layout) -> Result<(), (Section, PlacementError)>
 }
 
 /// Lays out modules `sections[i]` wide `widths[i]` (device pixels, padding
-/// included; 0 takes no space) with `spacing` between neighbours on a bar
-/// `bar` wide, into `spans`. The three slices are as long as each other;
+/// included; 0 takes no space) with `margins[i]` more on each side and
+/// `spacing` between neighbours, on a bar `bar` wide whose ends are `edge`
+/// pixels clear, into `spans`. The four slices are as long as each other;
 /// modules of one section must be contiguous and in order, as
 /// [`Layout::placed`] lists them.
-pub fn arrange(sections: &[Section], widths: &[u32], spacing: u32, bar: u32, spans: &mut [Span]) {
-    let bar = i64::from(bar);
+pub fn arrange(
+    sections: &[Section],
+    widths: &[u32],
+    margins: &[u32],
+    spacing: u32,
+    edge: u32,
+    bar: u32,
+    spans: &mut [Span],
+) {
+    // The room between the clear ends; every position below is relative
+    // to its start, and `edge` is added back at the end.
+    let edge = edge.min(bar / 2);
+    let bar = i64::from(bar - 2 * edge);
     let spacing = i64::from(spacing);
-    // Each section's total width, spacing included.
+    let margin = |index: usize| i64::from(margins.get(index).copied().unwrap_or(0));
+    // Each section's total width, margins and spacing included.
     let total = |wanted: Section| -> i64 {
         let mut sum = 0i64;
         let mut count = 0i64;
-        for (section, width) in sections.iter().zip(widths) {
+        for (index, (section, width)) in sections.iter().zip(widths).enumerate() {
             if *section == wanted && *width > 0 {
-                sum = sum.saturating_add(i64::from(*width));
+                sum = sum
+                    .saturating_add(i64::from(*width))
+                    .saturating_add(margin(index).saturating_mul(2));
                 count += 1;
             }
         }
@@ -187,23 +227,29 @@ pub fn arrange(sections: &[Section], widths: &[u32], spacing: u32, bar: u32, spa
         bounds(Section::Center).0,
         bounds(Section::Right).0,
     ];
-    for ((section, width), span) in sections.iter().zip(widths).zip(spans.iter_mut()) {
+    for (index, ((section, width), span)) in sections
+        .iter()
+        .zip(widths)
+        .zip(spans.iter_mut())
+        .enumerate()
+    {
         let (_, lo, hi) = bounds(*section);
         let pen = &mut pens[*section as usize];
         if *width == 0 {
             *span = Span {
-                x: clamp_u32(*pen, lo, hi),
+                x: clamp_u32(*pen, lo, hi) + edge,
                 width: 0,
             };
             continue;
         }
-        let start = *pen;
+        let margin = margin(index);
+        let start = pen.saturating_add(margin);
         let end = start.saturating_add(i64::from(*width));
-        *pen = end.saturating_add(spacing);
+        *pen = end.saturating_add(margin).saturating_add(spacing);
         let x = start.clamp(lo, hi.max(lo));
         let end = end.clamp(x, hi.max(x));
         *span = Span {
-            x: clamp_u32(x, 0, i64::from(u32::MAX)),
+            x: clamp_u32(x, 0, i64::from(u32::MAX - edge)) + edge,
             width: clamp_u32(end - x, 0, i64::from(u32::MAX)),
         };
     }
