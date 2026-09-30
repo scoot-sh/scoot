@@ -342,6 +342,11 @@ fallback-fonts = ["/path/to/SymbolsNerdFont-Regular.ttf"]
 icon = "\U000f0e65"   # or the character itself; exactly one, else a config error
 ```
 
+The icon is one code point, not one grapheme: an emoji plus a variation
+selector or a ZWJ sequence is refused, but a lone format or combining
+character passes and draws as a `.notdef` box or a blank, so give a real
+symbol.
+
 Glyphs are cached per font, size and scale, at most 512 glyphs and 4 MiB;
 past either the cache is dropped and refilled from what is drawn next, so
 arbitrary text (a window title) costs bounded memory. It is keyed by size, so
