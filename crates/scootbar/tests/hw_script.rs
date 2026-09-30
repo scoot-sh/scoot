@@ -60,3 +60,23 @@ fn a_bad_size_or_mode_is_a_setup_error_before_anything_is_written() {
         assert!(!out.exists());
     }
 }
+
+#[test]
+fn a_font_that_is_not_a_font_file_is_a_setup_error_before_anything_is_written() {
+    let dir = std::env::temp_dir().join(format!("sb-hw-font-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let text = dir.join("not-a-font.txt");
+    std::fs::write(&text, "x").unwrap();
+    for value in [
+        "/nonexistent/DejaVuSans.ttf",
+        dir.to_str().unwrap(),
+        text.to_str().unwrap(),
+    ] {
+        let out = fresh("font");
+        let (code, stderr) = run(&[("SCOOTBAR_HW_FONT", value)], &out);
+        assert_eq!(code, 2, "SCOOTBAR_HW_FONT={value}: {stderr}");
+        assert!(stderr.contains("SCOOTBAR_HW_FONT"), "{stderr}");
+        assert!(!out.exists());
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
