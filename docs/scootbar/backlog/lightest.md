@@ -117,6 +117,65 @@ The rule applies as ever: none of these rows may regress the clock-scope
 numbers above, and a look that costs real CPU or memory is off by default
 (they all are: the default look is flush, square and opaque).
 
+## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
+
+Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`
+at `3211551` (`crates/scootbar` has not changed on `main` since). Tables, machine
+readings and the method are in the
+[README](../README.md#m3-clock-and-workspaces-on-the-asahi-m2) and
+[testing.md](../testing.md#benchmark); the raw runs are
+`bench/m3-asahi-*`. This records the findings; it waives no row and moves no
+target. Nothing in it was fixed in the PR that recorded it.
+
+**Rule 1 (no row regresses against the last milestone) fails.** The only
+published M1 run (`bench/m1-clock`) came from a different machine, so M1's
+scootbar (`3801c12`) was rebuilt on the Asahi box and both sides ran the same
+harness at the clock scope, A-B-B-A, two runs each; a row counts only when it
+regresses in all four pairings.
+
+| Row (gated) | M1 `3801c12` | M3 `3211551` | Pairings regressed |
+|---|---|---|---|
+| Idle RSS, scoot / sway | 2.9 / 2.9 MiB | 3.5 / 3.5 MiB | 4 and 4 |
+| Idle PSS | 1.5 / 1.5 MiB | 2.1 / 2.1 MiB | 4 and 4 |
+| Idle heap (`RssAnon`) | 0.3 / 0.3 MiB | 0.4 / 0.5 MiB | 4 and 4 |
+| Peak memory (`VmHWM`) | 2.9 / 2.9 MiB | 3.5 / 3.5 MiB | 4 and 4 |
+| CPU while switching workspaces (240 switches) | 0.2 / 0.1 ms | 12.0 / 10.5 ms | 4 and 4 |
+| Size, stripped binary + non-glibc `ldd` closure | 924,320 B | 1,383,080 B | 4 |
+
+Not counted: idle CPU (scoot flags in 3 of 4 pairings at 0.8 to 1.2 ms, sway
+in 1 of 4), startup (0 of 4) and idle wakeups (0 of 4, still 2 a minute).
+The wakeups while switching (2 to 242) are not a gated row but are the same
+finding as the switching CPU. The noise rule's own false-positive rate: M1
+against its own rerun flagged one row (sway `RssAnon`, 272 against 288 kB, one
+16 KiB page), exit 1; M3 against its rerun flagged none, exit 0. **Likely
+cause of the switching row**, confirmed by a protocol trace: the daemon binds
+`ext_workspace_manager_v1` whenever the `workspaces` feature is built, placed
+or not (`crates/scootbar/src/daemon/wayland.rs`, the bind before the seat), so a
+bar with no workspaces module is woken and parses every workspace change
+(one wakeup per switch; open descriptors went from 5 to 8). The memory and size
+growth is the work since M1 (the module config, `toml`, `serde`, `png`: 6 to 10
+direct dependencies; 10,628 to 25,347 lines of Rust, 6,995 to 16,312 outside
+`tests.rs` files), not yet attributed row by row.
+
+**Rule 2 (no competitor beats scootbar at the milestone's scope) is not
+passed, though no row is lost.** At clock and workspaces, on every row
+measured, there are 0 competitor wins: Waybar is 15 to 27 times larger in
+memory and 18 to 64 times slower while switching, yambar (on sway) is 4 to 8
+times larger and 8 times slower while switching; the ties (startup against yambar,
+idle wakeups against yambar and Waybar, both on sway) are inside the noise
+rule. **yambar on scoot was not compared**: 1.11.0 has no ext-workspace-v1
+module, so it cannot show workspaces there and the harness does not invent a
+number. The harness counts that as not passed (`report` exits 1); whether
+that pair is waived is the maintainer's call, which the rule does not make
+for an agent.
+
+**Rule 3 (size of the codebase and dependency count)**: reported above, 6 to
+10 direct dependencies and 6,995 to 16,312 lines outside tests, no threshold
+to judge them against.
+
+Verdict: **M3's gate does not pass**: rule 1 fails on the rows above, and rule 2
+has one pair not compared. Neither was waived here.
+
 ## Rules
 
 - Release builds only (`lto = "fat"`, `panic = "abort"`).
