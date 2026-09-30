@@ -1,0 +1,33 @@
+# The "radial burst" look for scootbar: a floating, rounded, slightly translucent bar
+# with the workspaces as circles on the left and the clock in the middle.
+#
+#   scootbar daemon --config docs/examples/radial-burst/bar.toml
+#
+# scootbar needs a font file; it tries a few well-known ones. Name one if yours is
+# elsewhere (NixOS keeps fonts in the store):
+# [bar]
+# font = "/path/to/DejaVuSans.ttf"
+
+left = ["workspaces"]
+center = ["clock"]
+
+[bar]
+height = 40
+margin = 12          # the layer-shell margin around the bar
+radius = 16
+opacity = 0.88       # translucent: a little more memory (an ARGB buffer) and no opaque region
+font-size = 17
+padding = 12
+spacing = 14
+
+[colors]
+background = "#241721"
+foreground = "#fdef1d"
+accent = "#31a9e5"
+dim = "#99911d"
+urgent = "#bf128d"
+
+[workspaces]
+pill-shape = "circle"
+pill-inset = 7
+item-gap = 4         # spaces between the numbers

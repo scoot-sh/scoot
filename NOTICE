@@ -27,3 +27,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+----------------------------------------------------------------------------
+
+docs/assets/wallpapers/radial-burst.png is not part of scoot's MIT-licensed
+code and is not covered by its license. It is "Colorful radial lines exploding
+on a dark background" (Abstract Radial Speed Lines Zoom Blast Background, a
+vector illustration), published on Unsplash on June 18, 2026:
+
+  https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM
+
+It was downloaded from Unsplash (its /illustrations/ pages are Unsplash+). Which
+license terms apply to it, and whether they allow redistribution in a public
+repository, has not been verified, and the artist's name is not recorded here.
+It is used only by the optional example
+in docs/examples/radial-burst; scoot, scootbar and scootbg do not embed it. If
+you redistribute scoot, check that license first, or remove the file.
