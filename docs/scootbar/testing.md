@@ -426,3 +426,16 @@ compares against, and its table is in the [README](README.md#m1-like-for-like-by
 - **A compositor that closes a bar surface**: the retry-once-then-give-up
   path is unit-tested on the model only; neither compositor here closes
   a bar that is still on a live output.
+
+## The systemd unit under a real user manager
+
+`scripts/scootbar-unit-test.sh` runs the unit `nixosModules.scootbar` generates
+under the real `systemd --user` against a live headless scoot (nothing drawn on
+a display, no VT taken): it keeps retrying with no compositor, comes up once
+`WAYLAND_DISPLAY` reaches the manager, is restarted after a SIGKILL (and eight in a
+row), and stays stopped after a SIGTERM, `scootbar msg kill` and a stop. It builds
+the unit from this checkout's committed flake with Nix, loads it into the manager's
+*runtime* directory only (nothing persistent), refuses to run if a `scootbar.service`
+already exists, and removes everything on exit. Needs Linux with a user manager,
+Nix, a built scoot and scootctl, and python3; it prints `RESULT: PASS n FAIL m` and
+exits 1 on a FAIL. It is not run in CI (CI has no user manager).

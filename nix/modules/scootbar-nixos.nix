@@ -26,8 +26,10 @@ in
       after = [ "graphical-session.target" ];
       # Before what hosts a tray, where the session has such a target.
       before = [ "tray.target" ];
-      # Retry for as long as the compositor is not there (the default burst
-      # limit, 5 in 10 s, would stop a 2 s retry for good).
+      # Retry for as long as the compositor is not there. systemd's default
+      # burst limit (5 starts in 10 s) is not reached by a 2 s retry (measured,
+      # scripts/scootbar-unit-test.sh S7), so this is insurance: it keeps the
+      # retries unending if RestartSec is ever lowered.
       unitConfig.StartLimitIntervalSec = 0;
       restartTriggers = [ cfg.configFile ];
       serviceConfig = {

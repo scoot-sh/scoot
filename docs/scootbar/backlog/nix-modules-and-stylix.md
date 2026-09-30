@@ -50,12 +50,30 @@ so it runs `daemon --config FILE` with no compositor and expects the
 connection refusal). Also evaluated by hand against real Stylix `fb28acd`
 with real NixOS and home-manager.
 
-Left, so the entry stays open: run the unit under a real user manager against
-a running scoot session (`graphical-session.target` started by a session
-script, restart after `kill -SEGV`), on both architectures; a build of the
-check on aarch64-linux (only evaluated); the `session.command`/autostart
-pairing sentence in the docs; and a `scootbar --check` flag, which would let
-the check validate a file without faking a missing compositor.
+**Run under a real user manager, 2026-09-30** (the Asahi M2, NixOS aarch64,
+systemd 261; `scripts/scootbar-unit-test.sh`, 18 PASS, 0 FAIL): the unit from
+`nixosModules.scootbar` (a real NixOS evaluation, not a hand-written unit) and
+the Nix-built `scootbar`, loaded into the user manager's runtime directory
+against a live headless scoot. Started with no compositor it kept retrying
+(6 restarts in 14 s, never failed) and came up on the first retry after
+`WAYLAND_DISPLAY` reached the manager; a SIGKILL was followed by a restart and a
+redrawn bar; eight SIGKILLs in a row never left it failed; a SIGTERM,
+`scootbar msg kill` and `systemctl --user stop` each stayed stopped. The
+control the docs had not had: with systemd's *default* start limit the same
+retry also kept going (13 restarts in 30 s), so `StartLimitIntervalSec=0` is
+insurance against a shorter `RestartSec`, not what keeps the unit alive; the
+module comments and nix.md said otherwise and are corrected. A first run failed
+S5 on the script's own race (a `Type=simple` unit is "active" before the bar has
+its control socket), not a product fault.
+
+Left, so the entry stays open: the home-manager-generated unit (the run above is
+the NixOS module's; the shapes are shared, not run) and a themed run with real
+Stylix and home-manager; `graphical-session.target` started by a session script
+(the unit was started directly), and `X-Restart-Triggers` on a real switch;
+x86_64 (the run was aarch64); a build of the check on aarch64-linux (only
+evaluated); the `session.command`/autostart pairing sentence in the docs; and a
+`scootbar --check` flag, which would let the check validate a file without
+faking a missing compositor.
 
 ## Done when
 
