@@ -1,7 +1,8 @@
 //! Pixels: the drawing the bar does, with no Wayland objects, so it is
-//! tested on plain byte slices. A [`Canvas`] over an `XRGB8888` buffer
-//! (4 bytes a pixel, little-endian), with full-height span fills and glyph
-//! coverage blended over what is there, and the bar's rounded corners. This is the pure canvas
+//! tested on plain byte slices. A [`Canvas`] over an `XRGB8888` or
+//! premultiplied `ARGB8888` buffer (4 bytes a pixel, little-endian), with
+//! full-height span fills, glyph coverage blended over what is there, and the
+//! bar's rounded corners. This is the pure canvas
 //! `docs/scootbar/backlog/extract-scootui.md` would extract.
 
 use crate::color::Color;
