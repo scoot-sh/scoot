@@ -41,14 +41,13 @@
 //!
 //! The active workspace's pill is drawn by [`Module::custom_draw`] as an
 //! accent fill behind its number, with the number itself in the bar's
-//! background color; the rest draws as plain text. By default the fill is
-//! square and the bar's full height; `[workspaces] pill-radius` rounds its
-//! corners and `pill-inset` lifts it off the bar's top and bottom (cut back
-//! so the pill is never shorter than the text's line, or the number, drawn
-//! in the background color, would be clipped away). The click rects are the
-//! pill's horizontal extent whatever its shape: [`Module::on_click`]
-//! hit-tests them, walked with [`Text::advance`] exactly as the text draw
-//! walks its pen, so the rects match the ink pixel for pixel.
+//! background color; the rest draws as plain text. Its shape (`rect` by
+//! default, `pill`, `circle`), radius and inset are [`pill`]'s.
+//! [`Module::on_click`] hit-tests the items' rects, walked with
+//! [`Text::advance`] exactly as the text draw walks its pen, so the rects
+//! match the ink pixel for pixel; and the active pill's own drawn extent
+//! ([`pill_geometry`], the one the draw uses) wins first, so a circle
+//! grown past its item never turns a click on it into a neighbour's.
 
 use std::cell::RefCell;
 use std::fmt::Write;
@@ -60,10 +59,14 @@ use wayland_protocols::ext::workspace::v1::client::ext_workspace_handle_v1::ExtW
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::ExtWorkspaceManagerV1;
 
 use super::{ClickCtx, CustomDraw, Init, Module, OutputView, Sources, Update, View};
+pub use pill::{Pill, Shape};
+
+use crate::density::Scale;
 use crate::paint::Span;
 use crate::print::warn;
 use crate::text::Text;
 
+pub mod pill;
 #[cfg(test)]
 mod tests;
 
@@ -86,16 +89,6 @@ const MAX_NAME: usize = 64;
 pub struct Settings {
     pub link: Link,
     pub pill: Pill,
-}
-
-/// The active workspace's pill: logical pixels, both 0 by default (square,
-/// the bar's full height).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Pill {
-    /// The corner radius; cut back to half the pill's shorter side.
-    pub radius: u32,
-    /// The gap from the bar's top and bottom edges.
-    pub inset: u32,
 }
 
 impl PartialEq for Settings {
@@ -647,18 +640,78 @@ fn hit_index(text: &Text, full: &str, em: f32, pad: u32, count: usize, x: u32) -
     None
 }
 
-impl Workspaces {
-    /// The pill's rows, `top .. bottom`: the bar's full height less the
-    /// inset at each end, the inset cut back so the pill stays as tall as
-    /// the text's line and never clips the number drawn over it.
-    fn pill_rows(&self, ctx: &CustomDraw<'_, '_>) -> (u32, u32) {
-        let height = ctx.canvas.height();
-        let metrics = ctx.text.metrics(ctx.em);
-        let line = (metrics.ascent - metrics.descent).ceil().max(0.0) as u32;
-        let room = height.saturating_sub(line) / 2;
-        let inset = crate::render::device(self.pill.inset, ctx.scale).min(room);
-        (inset, height - inset)
+/// Where the active item's pill goes, span-relative device pixels: its
+/// horizontal extent and rows. What the draw paints and the hit test
+/// honors, so they cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Geometry {
+    lo: u32,
+    hi: u32,
+    top: u32,
+    bottom: u32,
+}
+
+/// Item `active`'s pill in a module span `span_width` wide on a bar
+/// `height` tall, everything device pixels at `scale`. `None` when there
+/// is nothing to paint (no such item, an empty extent).
+#[allow(clippy::too_many_arguments)]
+fn pill_geometry(
+    pill: &Pill,
+    text: &Text,
+    full: &str,
+    em: f32,
+    padding: u32,
+    active: usize,
+    span_width: u32,
+    height: u32,
+    scale: Scale,
+) -> Option<Geometry> {
+    let (start, end) = item_span(text, full, em, i64::from(padding), active)?;
+    let side = padding / 2;
+    let lo = start.saturating_sub(side);
+    let hi = end.saturating_add(side).min(span_width);
+    if hi <= lo {
+        return None;
     }
+    // What the pill may grow into: up to the neighbours' ink, but never
+    // less than the item's own padded extent.
+    let before = active
+        .checked_sub(1)
+        .and_then(|n| item_span(text, full, em, i64::from(padding), n))
+        .map_or(0, |(_, end)| end);
+    let after = item_span(text, full, em, i64::from(padding), active + 1)
+        .map_or(span_width, |(start, _)| start);
+    let room = (lo.min(before), hi.max(after.min(span_width)));
+    let metrics = text.metrics(em);
+    let line = (metrics.ascent - metrics.descent).ceil().max(0.0) as u32;
+    let (top, bottom) = pill.rows(height, line, scale);
+    let (lo, hi) = pill.extent((lo, hi), room, (top, bottom));
+    Some(Geometry {
+        lo,
+        hi,
+        top,
+        bottom,
+    })
+}
+
+/// The item a press at `x` (span-relative device pixels) means: the active
+/// one when `x` is on its pill (`active`: its index and drawn extent), else
+/// the item whose padded rect holds it ([`hit_index`]).
+fn hit_target(
+    text: &Text,
+    full: &str,
+    em: f32,
+    pad: u32,
+    count: usize,
+    x: u32,
+    active: Option<(usize, Geometry)>,
+) -> Option<usize> {
+    if let Some((item, geometry)) = active {
+        if (geometry.lo..geometry.hi).contains(&x) {
+            return Some(item);
+        }
+    }
+    hit_index(text, full, em, pad, count, x)
 }
 
 impl Module for Workspaces {
@@ -701,13 +754,31 @@ impl Module for Workspaces {
         // Relative to the span's start, like `ctx.x`: the content begins
         // past the padding.
         let full = ctx.view.text();
-        let hit = hit_index(
+        let active = group.committed[..group.committed_len]
+            .iter()
+            .position(|ws| ws.active)
+            .and_then(|item| {
+                let geometry = pill_geometry(
+                    &self.pill,
+                    ctx.text,
+                    full,
+                    ctx.em,
+                    ctx.padding,
+                    item,
+                    ctx.span_width,
+                    ctx.height,
+                    ctx.scale,
+                )?;
+                Some((item, geometry))
+            });
+        let hit = hit_target(
             ctx.text,
             full,
             ctx.em,
             ctx.padding,
             group.committed_len,
             ctx.x,
+            active,
         );
         let Some(hit) = hit else {
             return Update::Unchanged;
@@ -758,28 +829,31 @@ impl Module for Workspaces {
         };
         let full = ctx.view.text();
         let x0 = i64::from(ctx.span.x) + i64::from(ctx.padding);
-        let Some((start, end)) = item_span(ctx.text, full, ctx.em, x0, active) else {
+        let Some(geometry) = pill_geometry(
+            &self.pill,
+            ctx.text,
+            full,
+            ctx.em,
+            ctx.padding,
+            active,
+            ctx.span.width,
+            ctx.canvas.height(),
+            ctx.scale,
+        ) else {
             return false;
         };
-        let pad = ctx.padding / 2;
-        let lo = start.saturating_sub(pad).max(ctx.span.x);
-        let hi = end.saturating_add(pad).min(ctx.span.end());
-        if hi <= lo {
-            return false;
-        }
         let pill = Span {
-            x: lo,
-            width: hi - lo,
+            x: ctx.span.x.saturating_add(geometry.lo),
+            width: geometry.hi - geometry.lo,
         };
         // The borrows end here: the draws below take the canvas and the
         // text, not the shared state.
         drop(shared);
-        let (top, bottom) = self.pill_rows(ctx);
         ctx.canvas.fill_pill(
             pill,
-            top,
-            bottom,
-            crate::render::device(self.pill.radius, ctx.scale),
+            geometry.top,
+            geometry.bottom,
+            self.pill.radius(ctx.scale),
             ctx.theme.accent,
         );
         let background = ctx.theme.background;

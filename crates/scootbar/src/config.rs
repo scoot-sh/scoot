@@ -321,7 +321,11 @@ struct WorkspacesFile {
     /// Extra logical pixels on each side of the module.
     #[cfg(feature = "workspaces")]
     margin: Option<u32>,
-    /// The active workspace's pill: its corner radius, logical pixels.
+    /// The active workspace's pill: `rect`, `pill` or `circle`.
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "pill-shape")]
+    pill_shape: Option<String>,
+    /// A `rect` pill's corner radius, logical pixels.
     #[cfg(feature = "workspaces")]
     #[serde(rename = "pill-radius")]
     pill_radius: Option<u32>,
@@ -489,9 +493,29 @@ impl File {
         }
         #[cfg(feature = "workspaces")]
         {
+            use crate::modules::workspaces::Shape;
             let pill = &mut modules.workspaces.pill;
+            if let Some(text) = &self.workspaces.pill_shape {
+                pill.shape = Shape::parse(text).ok_or_else(|| {
+                    value(
+                        path,
+                        "workspaces.pill-shape",
+                        format_args!("takes rect, pill or circle, not `{}`", text.escape_debug()),
+                    )
+                })?;
+            }
             if let Some(radius) = self.workspaces.pill_radius {
                 pill.radius = gap(path, "workspaces.pill-radius", Some(radius), 0)?;
+                if pill.shape != Shape::Rect {
+                    return Err(value(
+                        path,
+                        "workspaces.pill-radius",
+                        format_args!(
+                            "rounds a `rect` pill; the `pill` and `circle` shapes are already \
+                             as round as they fit (drop it, or set pill-shape = \"rect\")"
+                        ),
+                    ));
+                }
             }
             if let Some(inset) = self.workspaces.pill_inset {
                 pill.inset = gap(path, "workspaces.pill-inset", Some(inset), 0)?;

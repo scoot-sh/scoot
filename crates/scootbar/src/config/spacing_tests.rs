@@ -3,6 +3,8 @@
 //! refusal naming its key rather than a size the layout must survive.
 
 use super::tests::read;
+#[cfg(feature = "workspaces")]
+use crate::modules::workspaces::Shape;
 
 #[test]
 fn the_defaults_add_nothing() {
@@ -83,7 +85,7 @@ fn a_workspaces_margin_and_pill_are_bounded() {
     let config = read("[workspaces]\nmargin = 3\npill-radius = 8\npill-inset = 2\n").unwrap();
     assert_eq!(config.layout.margins, [("workspaces", 3)]);
     let pill = config.modules.workspaces.pill;
-    assert_eq!((pill.radius, pill.inset), (8, 2));
+    assert_eq!((pill.shape, pill.radius, pill.inset), (Shape::Rect, 8, 2));
     for text in [
         "[workspaces]\nmargin = 1025\n",
         "[workspaces]\npill-radius = 1025\n",
@@ -91,6 +93,11 @@ fn a_workspaces_margin_and_pill_are_bounded() {
         "[workspaces]\npill-radius = -1\n",
         "[workspaces]\npill-inset = 0.5\n",
         "[workspaces]\npill-radius = \"8\"\n",
+        "[workspaces]\npill-shape = \"oval\"\n",
+        "[workspaces]\npill-shape = \"Circle\"\n",
+        "[workspaces]\npill-shape = 1\n",
+        "[workspaces]\npill-shape = \"pill\"\npill-radius = 4\n",
+        "[workspaces]\npill-shape = \"circle\"\npill-radius = 0\n",
     ] {
         let error = read(text).unwrap_err().to_string();
         assert!(
@@ -109,4 +116,25 @@ fn margins_survive_a_layout_that_names_the_modules() {
     .unwrap();
     assert_eq!(config.layout.margin_of("clock"), 2);
     assert_eq!(config.layout.margin_of("workspaces"), 5);
+}
+
+#[test]
+#[cfg(feature = "workspaces")]
+fn the_pill_shapes_are_read_by_name() {
+    for (name, shape) in [
+        ("rect", Shape::Rect),
+        ("pill", Shape::Pill),
+        ("circle", Shape::Circle),
+    ] {
+        let config = read(&format!("[workspaces]\npill-shape = \"{name}\"\n")).unwrap();
+        assert_eq!(config.modules.workspaces.pill.shape, shape);
+    }
+    // A radius goes with a rect, spelled out or by default.
+    assert!(read("[workspaces]\npill-shape = \"rect\"\npill-radius = 4\n").is_ok());
+    // The inset goes with any.
+    assert!(read("[workspaces]\npill-shape = \"circle\"\npill-inset = 3\n").is_ok());
+    let error = read("[workspaces]\npill-shape = \"pill\"\npill-radius = 4\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("'workspaces.pill-radius'"), "{error}");
 }

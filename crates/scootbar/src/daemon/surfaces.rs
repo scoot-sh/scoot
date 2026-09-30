@@ -721,6 +721,12 @@ fn click(state: &mut State) {
         // any), but a press with no font to hit-test against is nothing.
         return;
     };
+    // The surface's device height, as the last draw sized it.
+    let height = entry
+        .output
+        .surface_size(&entry.objects.bar)
+        .and_then(|size| scale.buffer(size))
+        .map_or(0, |(_, height)| height);
     let ctx = ClickCtx {
         output: OutputView {
             name: entry.output.info().name.as_deref(),
@@ -730,6 +736,9 @@ fn click(state: &mut State) {
         text,
         em: render::em(style.font_size, scale),
         padding: render::device(style.padding, scale),
+        span_width: span.width,
+        height,
+        scale,
     };
     if let Some(placed) = module.and_then(|module| content.modules.get_mut(module)) {
         if placed.module.on_click(&ctx) == Update::Changed {

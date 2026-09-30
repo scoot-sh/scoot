@@ -484,3 +484,96 @@ fn workspaces_follow_a_hotplugged_output_on_sway() {
     std::thread::sleep(Duration::from_millis(200));
     assert!(session.bar_stderr().is_empty(), "{}", session.bar_stderr());
 }
+
+/// How many rows of column `x` hold the pill's accent.
+fn accent_rows(shot: &Shot, x: u32) -> u32 {
+    (0..HEIGHT)
+        .filter(|&y| shot.at(x, y) == rgb(ACCENT))
+        .count() as u32
+}
+
+/// The columns holding text-colored pixels (an inactive number).
+fn text_cols(shot: &Shot) -> Vec<u32> {
+    (0..shot.width)
+        .filter(|&x| (0..HEIGHT).any(|y| shot.at(x, y) == rgb(FG)))
+        .collect()
+}
+
+/// `[workspaces] pill-shape = "circle"` round through the real bar, and a
+/// click on another workspace's digit still switches to it: the hit test
+/// follows the shape the draw paints. (`read` is not used: it takes the
+/// background-colored corners inside a round pill's columns for ink.)
+#[test]
+fn a_circle_pill_is_round_and_a_click_still_switches() {
+    let Some(session) = Session::scoot("ws-circle", 1, "") else {
+        return;
+    };
+    let path = session.runtime_dir().join("circle.toml");
+    std::fs::write(
+        &path,
+        "[bar]\npadding = 16\n[workspaces]\npill-shape = \"circle\"\n",
+    )
+    .unwrap();
+    let mut args = workspaces_args();
+    let path = path.to_string_lossy().into_owned();
+    args.extend(["--center=", "--config", &path]);
+    let mut bar = Reaper(session.bar(&args));
+    let shot = session.wait_for(&mut bar.0, "the workspace shown", |session| {
+        let shot = session.scoot_screenshot(1);
+        pill(&shot).map(|_| shot)
+    });
+    // The pill is a disc: its leftmost column holds only a few rows of
+    // accent (a square pill holds all 60; the padding is wide enough for the
+    // module's span to hold a 60-wide disc), it reaches the bar's top and
+    // bottom in the middle, and it
+    // is at least as wide as it is tall.
+    let (lo, hi) = pill(&shot).unwrap();
+    let edge = accent_rows(&shot, lo);
+    assert!(edge < HEIGHT / 2, "{edge} accent rows at the pill's edge");
+    let mid = (lo + hi) / 2;
+    // (Within a few levels of the accent: the disc's top row is antialiased.)
+    for (y, what) in [(0, "top"), (HEIGHT - 1, "bottom")] {
+        for (got, want) in shot.at(mid, y).iter().zip(rgb(ACCENT)) {
+            assert!(
+                got.abs_diff(want) <= 8,
+                "the pill's {what}: {:?}",
+                shot.at(mid, y)
+            );
+        }
+    }
+    assert!(hi - lo + 1 >= HEIGHT - 2, "{lo}..{hi}");
+
+    let toy = ToyWindow::open(session.wayland_socket());
+    session.wait_for(&mut bar.0, "a window mapped", |session| {
+        let reply = session.scoot_ipc(r#"{"type":"windows"}"#);
+        (!reply["windows"].as_array()?.is_empty()).then_some(())
+    });
+    // Two workspaces: the inactive number is text-colored.
+    session.wait_for(&mut bar.0, "the grown list", |session| {
+        (!text_cols(&session.scoot_screenshot(1)).is_empty()).then_some(())
+    });
+    let reply =
+        session.scoot_ipc(r#"{"type":"action","action":"focus_workspace_index","index":1}"#);
+    assert_eq!(reply["type"], "ok", "{reply}");
+    // Workspace 2 active: the pill is right of the text-colored digit.
+    let shot = session.wait_for(&mut bar.0, "workspace 2 active", |session| {
+        let shot = session.scoot_screenshot(1);
+        let text = text_cols(&shot);
+        let (lo, _) = pill(&shot)?;
+        (!text.is_empty() && text.iter().all(|&x| x < lo)).then_some(shot)
+    });
+    // Workspace 1's digit is the only text-colored ink: click its middle.
+    let text = text_cols(&shot);
+    let x = (text[0] + text[text.len() - 1]) / 2;
+    let reply = session.scoot_ipc(&format!(
+        r#"{{"type":"click","x":{x},"y":{},"button":"left"}}"#,
+        HEIGHT / 2
+    ));
+    assert_eq!(reply["type"], "ok", "{reply}");
+    // Workspace 1 active: the pill now covers where the click landed.
+    session.wait_for(&mut bar.0, "the click switched", |session| {
+        let (lo, hi) = pill(&session.scoot_screenshot(1))?;
+        (lo <= x && x <= hi).then_some(())
+    });
+    toy.close(&session, &mut bar);
+}

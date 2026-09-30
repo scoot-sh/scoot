@@ -300,6 +300,12 @@ pub struct ClickCtx<'a> {
     pub em: f32,
     /// Device pixels either side of the module's content, as drawn.
     pub padding: u32,
+    /// The module's span width and the bar's height, device pixels, and
+    /// the scale they are at: what a module needs to place a shape it
+    /// draws (the workspaces pill) the way it drew it.
+    pub span_width: u32,
+    pub height: u32,
+    pub scale: Scale,
 }
 
 /// What a module draws itself with, for [`Module::custom_draw`]: the same

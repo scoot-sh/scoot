@@ -30,6 +30,12 @@ const NAMES: &[&str] = &[
     "bar-rounded-1.5x-alpha",
     "bar-translucent-1x",
     "bar-separated-1x",
+    "workspaces-pill-1x",
+    "workspaces-circle-1x",
+    "workspaces-circle-two-digits-1x",
+    "workspaces-pill-1.5x",
+    "workspaces-circle-1.5x",
+    "workspaces-circle-two-digits-1.5x",
 ];
 
 const fn gray(v: u8) -> Color {
