@@ -26,8 +26,8 @@
 use crate::density::{DENOMINATOR, Scale, scaled_length};
 use crate::layout::{self, Section};
 use crate::modules::{CustomDraw, OutputView, Placed, View};
-use crate::outputs::Frame;
-use crate::paint::{Canvas, Span};
+use crate::outputs::{Frame, Size};
+use crate::paint::{Canvas, Corners, Span};
 use crate::text::Text;
 use crate::theme::Theme;
 
@@ -45,6 +45,40 @@ pub struct Style {
     pub font_size: u32,
     pub padding: u32,
     pub spacing: u32,
+    /// The bar's corner radius, in logical pixels; 0 is square.
+    pub radius: u32,
+    /// The background's alpha, 255 (opaque) down to 0.
+    pub opacity: u8,
+}
+
+impl Style {
+    /// Whether the buffer needs an alpha channel: a translucent
+    /// background, or corners with nothing behind them. Otherwise the bar
+    /// is `XRGB8888`, as it was before either option existed.
+    pub fn translucent(&self) -> bool {
+        self.opacity < u8::MAX || self.radius > 0
+    }
+
+    /// How far in from each edge the surface is opaque, in logical pixels,
+    /// for the opaque region: `Some(0)` all of it, `Some(n)` all but the
+    /// corner squares of side `n`, `None` none (a translucent background
+    /// is blended by the compositor). One more than the radius: the
+    /// corner's antialiased edge, at a fractional scale, can round half a
+    /// device pixel past it.
+    pub fn opaque_inset(&self) -> Option<u32> {
+        (self.opacity == u8::MAX).then(|| match self.radius {
+            0 => 0,
+            radius => radius.saturating_add(1),
+        })
+    }
+
+    /// The corner radius in device pixels at `scale`, for a bar `extent`
+    /// device pixels: cut back to what the bar can hold.
+    fn corners(&self, scale: Scale, extent: Size) -> u32 {
+        device(self.radius, scale)
+            .min(extent.width / 2)
+            .min(extent.height / 2)
+    }
 }
 
 /// A logical length at `scale`, in device pixels.
@@ -83,6 +117,8 @@ pub struct Scene {
     layout: u64,
     /// The scale and bar width everything was measured at.
     measured: Option<(Scale, u32)>,
+    /// The corners' coverage, rebuilt only when their radius changes.
+    corners: Corners,
 }
 
 impl Scene {
@@ -98,6 +134,7 @@ impl Scene {
             sections: placed.iter().map(|p| p.section).collect(),
             layout: 0,
             measured: None,
+            corners: Corners::NONE,
         }
     }
 
@@ -109,8 +146,8 @@ impl Scene {
             .any(|(placed, &shown)| placed.revision != shown)
     }
 
-    /// Brings the views, widths and spans up to date for a bar `width`
-    /// device pixels wide at `scale`.
+    /// Brings the views, widths and spans up to date for a bar `extent`
+    /// device pixels big at `scale`.
     pub fn update(
         &mut self,
         placed: &[Placed],
@@ -118,8 +155,13 @@ impl Scene {
         text: Option<&Text>,
         style: &Style,
         scale: Scale,
-        width: u32,
+        extent: Size,
     ) {
+        let width = extent.width;
+        let radius = style.corners(scale, extent);
+        if radius != self.corners.radius() {
+            self.corners = Corners::new(radius);
+        }
         let all = self.measured != Some((scale, width));
         self.measured = Some((scale, width));
         let em = em(style.font_size, scale);
@@ -228,12 +270,14 @@ pub fn paint(
 ) {
     let whole = record.at != Some((frame, scene.layout));
     if whole {
-        canvas.fill_span(
+        canvas.fill_shaped(
             Span {
                 x: 0,
                 width: canvas.width(),
             },
             style.theme.background,
+            style.opacity,
+            &scene.corners,
         );
     }
     let Some(text) = text else {
@@ -252,7 +296,7 @@ pub fn paint(
             continue;
         }
         if !whole {
-            canvas.fill_span(span, style.theme.background);
+            canvas.fill_shaped(span, style.theme.background, style.opacity, &scene.corners);
         }
         if span.width == 0 {
             continue;

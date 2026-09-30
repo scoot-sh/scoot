@@ -66,6 +66,21 @@ impl Image {
         }
     }
 
+    /// The alpha channel of a canvas, as a gray image: white where the bar
+    /// is, black where it is cut away. A premultiplied canvas's color
+    /// plane cannot show that, only its alpha does.
+    pub fn from_alpha(pixels: &[u8], width: u32, height: u32) -> Self {
+        let count = width as usize * height as usize;
+        let samples: Vec<u8> = pixels.chunks_exact(4).take(count).map(|p| p[3]).collect();
+        assert_eq!(samples.len(), count);
+        Self {
+            width,
+            height,
+            gray: true,
+            samples,
+        }
+    }
+
     fn channels(&self) -> usize {
         if self.gray { 1 } else { 3 }
     }

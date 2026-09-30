@@ -21,7 +21,15 @@ use crate::theme::Theme;
 
 /// Every snapshot a test here compares: a file in `src/snapshots/` that
 /// is not one of these fails [`no_snapshot_is_left_over`].
-const NAMES: &[&str] = &["fills", "bar-1x", "bar-1.5x", "bar-clipped-1.25x"];
+const NAMES: &[&str] = &[
+    "fills",
+    "bar-1x",
+    "bar-1.5x",
+    "bar-clipped-1.25x",
+    "bar-rounded-1x-alpha",
+    "bar-rounded-1.5x-alpha",
+    "bar-translucent-1x",
+];
 
 const fn gray(v: u8) -> Color {
     Color { r: v, g: v, b: v }
@@ -99,6 +107,31 @@ impl Module for Label {
 /// a block) muted in the center, and an icon with text on the right, in
 /// gray tokens so the image is one sample a pixel.
 fn bar(width: u32, height: u32, scale: Scale) -> Image {
+    let (pixels, w, h) = draw(width, height, scale, Look::default());
+    Image::from_xrgb(&pixels, w, h, true)
+}
+
+/// What a scene's bar looks like beyond the layout: the options
+/// `[bar] radius` and `opacity` set.
+#[derive(Clone, Copy)]
+struct Look {
+    background: Color,
+    radius: u32,
+    opacity: u8,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self {
+            background: gray(0),
+            radius: 0,
+            opacity: u8::MAX,
+        }
+    }
+}
+
+/// The bar drawn through the render path: its pixels and device size.
+fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32) {
     let modules = [
         (Section::Left, "12:34", None, Class::Normal),
         (Section::Center, "a Z", None, Class::Muted),
@@ -115,7 +148,7 @@ fn bar(width: u32, height: u32, scale: Scale) -> Image {
         .collect();
     let style = Style {
         theme: Theme {
-            background: gray(0),
+            background: look.background,
             foreground: gray(0xff),
             accent: gray(0xc0),
             dim: gray(0x80),
@@ -124,6 +157,8 @@ fn bar(width: u32, height: u32, scale: Scale) -> Image {
         font_size: 14,
         padding: 4,
         spacing: 6,
+        radius: look.radius,
+        opacity: look.opacity,
     };
     let frame = Frame {
         size: Size { width, height },
@@ -140,7 +175,10 @@ fn bar(width: u32, height: u32, scale: Scale) -> Image {
         Some(&text),
         &style,
         scale,
-        device_width,
+        Size {
+            width: device_width,
+            height: device_height,
+        },
     );
     let mut pixels = vec![0xaa; device_width as usize * device_height as usize * 4];
     let mut canvas = Canvas::new(&mut pixels, device_width, device_height).unwrap();
@@ -155,7 +193,7 @@ fn bar(width: u32, height: u32, scale: Scale) -> Image {
         frame,
         &OutputView { name: None },
     );
-    Image::from_xrgb(&pixels, device_width, device_height, true)
+    (pixels, device_width, device_height)
 }
 
 #[test]
@@ -186,6 +224,59 @@ fn bar_clipped_at_1_25x() {
         "bar-clipped-1.25x",
         "the bar at 70x20 and scale 1.25, too narrow: its sections clipped",
         &bar(70, 20, Scale::Fractional(150)),
+    );
+}
+
+/// Rounded corners at a whole scale: the alpha plane, so what is cut away
+/// shows (the color plane cannot say). The radius 6 is nearly half this
+/// 20-pixel bar's height.
+#[test]
+fn bar_rounded_at_1x() {
+    let look = Look {
+        radius: 6,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    check(
+        "bar-rounded-1x-alpha",
+        "the alpha plane of the 160x20 bar at scale 1 with radius 6: corners cut, edge antialiased",
+        &Image::from_alpha(&pixels, w, h),
+    );
+}
+
+/// The same radius at 1.5, where the device radius is 9 and the edge
+/// lands between pixels; half opacity, so the plane also shows the
+/// background's alpha (128) inside the corners.
+#[test]
+fn bar_rounded_translucent_at_1_5x() {
+    let look = Look {
+        radius: 6,
+        opacity: 128,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Fractional(180), look);
+    check(
+        "bar-rounded-1.5x-alpha",
+        "the alpha plane at scale 1.5, radius 6 (9 device pixels), opacity 128",
+        &Image::from_alpha(&pixels, w, h),
+    );
+}
+
+/// A translucent background with text blended over it, premultiplied:
+/// the color plane is the background at half alpha, and the glyph
+/// coverage mixes full white into it.
+#[test]
+fn bar_translucent_at_1x() {
+    let look = Look {
+        background: gray(0x80),
+        opacity: 128,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    check(
+        "bar-translucent-1x",
+        "the color plane of the bar at scale 1 over a 0x80 background at opacity 128, premultiplied",
+        &Image::from_xrgb(&pixels, w, h, true),
     );
 }
 

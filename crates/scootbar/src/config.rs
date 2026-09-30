@@ -32,6 +32,8 @@ pub const DEFAULT_FONT_SIZE: u32 = 14;
 /// The largest `--font-size`: past it a glyph is too big to cache (it is
 /// still drawn), and no bar wants one that tall.
 pub const MAX_FONT_SIZE: u32 = 256;
+/// The largest `bar.radius`: half the tallest bar.
+pub const MAX_RADIUS: u32 = MAX_HEIGHT / 2;
 /// The largest config file read: a real one is about a kilobyte, so
 /// anything past this is not one. Bounds what a reload buffers.
 pub const MAX_FILE: u64 = 64 * 1024;
@@ -45,6 +47,11 @@ pub struct Config {
     pub font: Option<PathBuf>,
     /// The em, in logical pixels, 1 to [`MAX_FONT_SIZE`].
     pub font_size: u32,
+    /// The bar's corner radius, in logical pixels: 0 to [`MAX_RADIUS`], and
+    /// at most half the height.
+    pub radius: u32,
+    /// The background's alpha: 255 opaque, 0 transparent.
+    pub opacity: u8,
     pub modules: Settings,
 }
 
@@ -56,6 +63,8 @@ impl Default for Config {
             layout: Layout::default(),
             font: None,
             font_size: DEFAULT_FONT_SIZE,
+            radius: 0,
+            opacity: u8::MAX,
             modules: Settings::default(),
         }
     }
@@ -68,6 +77,8 @@ impl Config {
             font_size: self.font_size,
             padding: self.layout.padding,
             spacing: self.layout.spacing,
+            radius: self.radius,
+            opacity: self.opacity,
         }
     }
 }
@@ -227,6 +238,8 @@ struct BarFile {
     edge: Option<String>,
     height: Option<u32>,
     margin: Option<toml::Value>,
+    radius: Option<u32>,
+    opacity: Option<toml::Value>,
     font: Option<String>,
     #[serde(rename = "font-size")]
     font_size: Option<u32>,
@@ -295,6 +308,31 @@ impl File {
             Some(margin) => parse_margin(margin)
                 .map_err(|message| value(path, "bar.margin", format_args!("{message}")))?,
         };
+        let radius = match bar.radius {
+            None => defaults.radius,
+            Some(radius) if radius <= MAX_RADIUS && radius <= height / 2 => radius,
+            Some(radius) => {
+                return Err(value(
+                    path,
+                    "bar.radius",
+                    format_args!(
+                        "takes a whole number of logical pixels from 0 to half the height \
+                         ({}), not `{radius}`",
+                        (height / 2).min(MAX_RADIUS)
+                    ),
+                ));
+            }
+        };
+        let opacity = match &bar.opacity {
+            None => defaults.opacity,
+            Some(opacity) => parse_opacity(opacity).ok_or_else(|| {
+                value(
+                    path,
+                    "bar.opacity",
+                    format_args!("takes a number from 0 (transparent) to 1 (opaque)"),
+                )
+            })?,
+        };
         let font = bar.font.as_ref().map(PathBuf::from);
         let font_size = match bar.font_size {
             None => defaults.font_size,
@@ -337,6 +375,8 @@ impl File {
             layout,
             font,
             font_size,
+            radius,
+            opacity,
             modules,
         })
     }
@@ -490,4 +530,17 @@ fn parse_margin(value: &toml::Value) -> Result<Margin, String> {
             "takes one to four whole numbers separated by commas, or one number alone".to_owned(),
         ),
     }
+}
+
+/// `bar.opacity`: a number from 0 to 1 (an integer is 0 or 1), as alpha
+/// 0 to 255, rounded. NaN and out-of-range values are refused.
+fn parse_opacity(value: &toml::Value) -> Option<u8> {
+    let opacity = match value {
+        toml::Value::Float(float) => *float,
+        toml::Value::Integer(integer) => *integer as f64,
+        _ => return None,
+    };
+    (0.0..=1.0)
+        .contains(&opacity)
+        .then(|| (opacity * 255.0).round() as u8)
 }

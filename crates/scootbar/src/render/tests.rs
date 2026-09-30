@@ -97,6 +97,8 @@ impl Bar {
                 font_size: EM,
                 padding: 10,
                 spacing: 0,
+                radius: 0,
+                opacity: u8::MAX,
             },
         }
     }
@@ -113,7 +115,10 @@ impl Bar {
             Some(&self.text),
             &self.style,
             Scale::Integer(1),
-            WIDTH,
+            Size {
+                width: WIDTH,
+                height: HEIGHT,
+            },
         );
     }
 
@@ -199,7 +204,10 @@ fn a_view_is_asked_only_after_a_change() {
         Some(&bar.text),
         &bar.style,
         Scale::Fractional(180),
-        WIDTH,
+        Size {
+            width: WIDTH,
+            height: HEIGHT,
+        },
     );
     assert_eq!((bar.asked[0].get(), bar.asked[1].get()), (2, 3));
 }
@@ -349,4 +357,96 @@ fn a_reset_record_draws_whole() {
     assert!(spans.is_empty());
     shown.reset();
     assert!(damage(&mut shown, &bar.scene, frame(), &mut spans));
+}
+
+fn alpha(pixels: &[u8], x: u32, y: u32) -> u8 {
+    pixels[((y * WIDTH + x) * 4 + 3) as usize]
+}
+
+/// A module at the bar's left edge repainted must not paint the corner
+/// back in: the incremental paint equals a fresh whole one.
+#[test]
+fn a_repaint_at_the_edge_keeps_the_corners_cut() {
+    let mut bar = Bar::new(&[(Section::Left, "12:59 am"), (Section::Right, "3:07 pm")]);
+    bar.style.radius = 20;
+    bar.style.opacity = 200;
+    let mut record = Record::new(2);
+    let mut pixels = buffer();
+    bar.paint(&mut pixels, &mut record);
+    assert_eq!(alpha(&pixels, 0, 0), 0, "top-left cut");
+    assert_eq!(alpha(&pixels, WIDTH - 1, 0), 0, "top-right cut");
+    assert_eq!(alpha(&pixels, 0, HEIGHT - 1), 0, "bottom-left cut");
+    assert_eq!(alpha(&pixels, WIDTH / 2, 0), 200, "the background's alpha");
+    // Change both modules (each touches an edge) and paint incrementally.
+    bar.set(0, "1:00 am", Class::Warn);
+    bar.set(1, "4:08 pm", Class::Urgent);
+    bar.paint(&mut pixels, &mut record);
+    let mut fresh_pixels = buffer();
+    let mut fresh = Record::new(2);
+    bar.paint(&mut fresh_pixels, &mut fresh);
+    assert_eq!(pixels, fresh_pixels);
+    assert_eq!(alpha(&pixels, 0, 0), 0);
+    assert_eq!(alpha(&pixels, WIDTH - 1, 0), 0);
+}
+
+#[test]
+fn the_radius_is_cut_back_to_what_the_bar_holds() {
+    let mut bar = Bar::new(&[(Section::Left, "1")]);
+    // A radius past half the height is what half the height allows.
+    bar.style.radius = 500;
+    let mut record = Record::new(1);
+    let mut pixels = buffer();
+    bar.paint(&mut pixels, &mut record);
+    assert_eq!(bar.scene.corners.radius(), HEIGHT / 2);
+    assert_eq!(alpha(&pixels, 0, 0), 0);
+    assert!(
+        alpha(&pixels, 0, HEIGHT / 2) > 240,
+        "a pill's side is nearly full"
+    );
+    // Square by default, and a scale multiplies the radius.
+    bar.style.radius = 0;
+    bar.update();
+    assert_eq!(bar.scene.corners.radius(), 0);
+    bar.style.radius = 4;
+    bar.scene.update(
+        &bar.placed,
+        &OutputView { name: None },
+        Some(&bar.text),
+        &bar.style,
+        Scale::Integer(2),
+        Size {
+            width: WIDTH,
+            height: HEIGHT,
+        },
+    );
+    assert_eq!(bar.scene.corners.radius(), 8);
+}
+
+#[test]
+fn the_style_says_when_it_needs_alpha_and_what_is_opaque() {
+    let opaque = Style {
+        radius: 0,
+        opacity: u8::MAX,
+        ..Bar::new(&[]).style
+    };
+    assert!(!opaque.translucent());
+    assert_eq!(opaque.opaque_inset(), Some(0));
+    let round = Style {
+        radius: 8,
+        ..opaque
+    };
+    assert!(round.translucent(), "corners need an alpha channel");
+    assert_eq!(round.opaque_inset(), Some(9), "all but the corner squares");
+    let faint = Style {
+        opacity: 254,
+        ..opaque
+    };
+    assert!(faint.translucent());
+    assert_eq!(faint.opaque_inset(), None, "nothing is opaque");
+    let both = Style {
+        radius: 8,
+        opacity: 0,
+        ..opaque
+    };
+    assert_eq!(both.opaque_inset(), None);
 }

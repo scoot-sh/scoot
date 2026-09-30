@@ -46,7 +46,7 @@ use super::surfaces::LayerObjects;
 use super::wayland::{Globals, State};
 use crate::density::Scale;
 use crate::modules::OutputView;
-use crate::outputs::{Frame, OutputId};
+use crate::outputs::{Frame, OutputId, Size};
 use crate::paint::{self, Span};
 use crate::render::{self, Record, Scene};
 
@@ -135,6 +135,7 @@ impl Slot {
         id: OutputId,
         dims: (u32, u32),
         modules: usize,
+        format: wl_shm::Format,
     ) -> Result<Self, ShmError> {
         let mut shm = ShmBuffer::new(dims.0, dims.1)?;
         let geometry = shm.geometry();
@@ -153,7 +154,7 @@ impl Slot {
             geometry.width,
             geometry.height,
             geometry.stride,
-            wl_shm::Format::Xrgb8888,
+            format,
             qh,
             id,
         );
@@ -296,8 +297,15 @@ impl Canvas {
         let slot = match entry {
             Some(slot) => slot,
             None => {
-                let fresh =
-                    Slot::new(globals, qh, id, dims, self.modules).map_err(DrawError::Shm)?;
+                // `ARGB8888` only when the style needs an alpha channel;
+                // a reload that changes that clears every buffer first.
+                let format = if content.style.translucent() {
+                    wl_shm::Format::Argb8888
+                } else {
+                    wl_shm::Format::Xrgb8888
+                };
+                let fresh = Slot::new(globals, qh, id, dims, self.modules, format)
+                    .map_err(DrawError::Shm)?;
                 entry.insert(fresh)
             }
         };
@@ -305,7 +313,7 @@ impl Canvas {
             modules,
             text,
             style,
-        } = content;
+        } = &mut *content;
         // The frame as drawn: at `scale`, which differs from the frame's
         // own only without a viewport. Measuring, painting and damage all
         // use it, so they cannot disagree about the scale.
@@ -313,7 +321,11 @@ impl Canvas {
             size: frame.size,
             scale,
         };
-        scene.update(modules, output, text.as_ref(), style, drawn.scale, dims.0);
+        let extent = Size {
+            width: dims.0,
+            height: dims.1,
+        };
+        scene.update(modules, output, text.as_ref(), style, drawn.scale, extent);
         let Some(mut canvas) = paint::Canvas::new(slot.shm.pixels_mut(), dims.0, dims.1) else {
             // The buffer was made at `dims`; this cannot happen.
             return Err(DrawError::TooLarge(frame));
@@ -343,12 +355,10 @@ impl Canvas {
             }
             None => set_buffer_scale(surface, &mut layer.buffer_scale, scale.integer()),
         }
-        if layer.opaque != Some(frame.size) {
-            let region = globals.compositor.create_region(qh, ());
-            region.add(0, 0, logical(frame.size.width), logical(frame.size.height));
-            surface.set_opaque_region(Some(&region));
-            region.destroy();
-            layer.opaque = Some(frame.size);
+        let opaque = (frame.size, style.opaque_inset());
+        if layer.opaque != Some(opaque) {
+            set_opaque_region(globals, qh, surface, opaque);
+            layer.opaque = Some(opaque);
         }
         if render::damage(&mut self.shown, scene, drawn, &mut self.damage) {
             surface.damage_buffer(0, 0, logical(dims.0), logical(dims.1));
@@ -373,6 +383,46 @@ impl Canvas {
         }
         Ok(Drew::Committed)
     }
+}
+
+/// `wl_surface.set_opaque_region` for a surface of `size` (logical) that is
+/// opaque `inset` pixels in from every edge (`Style::opaque_inset`): all of
+/// it, or a cross of two rectangles that leaves the corner squares out
+/// (their pixels are partly transparent), or none of it (`None`: the
+/// compositor blends the whole surface).
+fn set_opaque_region(
+    globals: &Globals,
+    qh: &QueueHandle<State>,
+    surface: &WlSurface,
+    (size, inset): (Size, Option<u32>),
+) {
+    let Some(inset) = inset else {
+        surface.set_opaque_region(None);
+        return;
+    };
+    let (width, height) = (size.width, size.height);
+    // A surface too small for its corners keeps none opaque, as the paint
+    // draws it square only when the corners do not fit: be conservative.
+    let inset = inset.min(width / 2).min(height / 2);
+    let region = globals.compositor.create_region(qh, ());
+    if inset == 0 {
+        region.add(0, 0, logical(width), logical(height));
+    } else {
+        region.add(
+            0,
+            logical(inset),
+            logical(width),
+            logical(height - 2 * inset),
+        );
+        region.add(
+            logical(inset),
+            0,
+            logical(width - 2 * inset),
+            logical(height),
+        );
+    }
+    surface.set_opaque_region(Some(&region));
+    region.destroy();
 }
 
 /// `wl_surface.set_buffer_scale`, sent only when it changes (`current` is

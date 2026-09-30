@@ -128,7 +128,8 @@ pinned nixpkgs' tzdata).
   reserving its height (scoot's `outputs` usable area) and in its color on
   a screenshot; margins, with the zone including the anchored edge's
   margin, the surface exactly the bar, and a real window (`foot`) placed
-  beside it; a bottom bar; device-exact buffers at 1.5, 1.25 and 2 with
+  beside it; a floating rounded bar whose cut corners show the desktop
+  and a half-opaque one blended over it, on screenshots; a bottom bar; device-exact buffers at 1.5, 1.25 and 2 with
   the scale changed live by a config reload (checked on the protocol
   trace, since a solid color scaled down looks the same), and the
   integer-scale fallback without a viewporter; zero wakeups
@@ -161,7 +162,12 @@ inside and outside a clip, in color (`fills.ppm`); and a three-section bar
 through the whole render path, in the seven-segment test font with an
 icon, `.notdef` and three state classes, at scale 1 (`bar-1x.pgm`), 1.5
 (`bar-1.5x.pgm`) and 1.25 too narrow for its modules, so they clip
-(`bar-clipped-1.25x.pgm`). The pixel tests beside each module assert what
+(`bar-clipped-1.25x.pgm`); and the rounded and translucent bar, as the
+alpha plane (white where the bar is, so the cut shows) at scale 1 with
+radius 6 (`bar-rounded-1x-alpha.pgm`) and at 1.5 with half opacity
+(`bar-rounded-1.5x-alpha.pgm`), and the color plane of a translucent bar
+with text blended over it, premultiplied (`bar-translucent-1x.pgm`). The
+pixel tests beside each module assert what
 they mean; these pin everything else in the picture (the antialiasing,
 where a fractional scale lands an edge), so any change to it is seen.
 
@@ -178,8 +184,8 @@ rewrites them; look at the diff or the images before committing. Without
 never bless one. A failure writes what was drawn to
 `$TMPDIR/scootbar-snapshots/NAME.actual.pgm` and prints both images as
 text. An image no test compares fails too (`no_snapshot_is_left_over`).
-Rounded rectangles have no scene yet: the canvas has no rounded shape
-until [appearance](backlog/appearance.md) adds one, with its snapshots.
+The pill's own rounding has no scene yet: it is still
+[appearance](backlog/appearance.md)'s.
 
 ## Fuzzing
 

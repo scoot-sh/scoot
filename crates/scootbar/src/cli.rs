@@ -839,6 +839,8 @@ impl Given {
             layout,
             font: self.font,
             font_size: self.font_size.unwrap_or(defaults.font_size),
+            radius: defaults.radius,
+            opacity: defaults.opacity,
             modules,
         })
     }
