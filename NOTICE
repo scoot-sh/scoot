@@ -37,9 +37,9 @@ vector illustration), published on Unsplash on June 18, 2026:
 
   https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM
 
-It is Unsplash content (its /illustrations/ pages are Unsplash+), used under the
-Unsplash license that applied to the copy the maintainer downloaded. The
-artist's name is not recorded here, and the terms were not checked against
-redistribution in a public repository. It is used only by the optional example
+It was downloaded from Unsplash (its /illustrations/ pages are Unsplash+). Which
+license terms apply to it, and whether they allow redistribution in a public
+repository, has not been verified, and the artist's name is not recorded here.
+It is used only by the optional example
 in docs/examples/radial-burst; scoot, scootbar and scootbg do not embed it. If
 you redistribute scoot, check that license first, or remove the file.

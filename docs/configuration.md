@@ -897,6 +897,9 @@ color = "#101014"
 | `output."NAME"` | table | The same five keys for one output, by connector name (as `scootbg query` and `scootctl outputs` list them: `headless-2`, `DP-2`, ...). Each output table stands alone: an output's `image` does not take the top level's `mode`. An empty table is nothing on that output. |
 | `command` | string | The `scootbg` to run. Default `"scootbg"`, found on `PATH`; a path with a `/` in it resolves like `image`. The Nix modules set it to the installed package's store path. |
 
+A worked example with a wallpaper, ring colors, a bar and a terminal palette is in
+[examples/radial-burst](examples/radial-burst/README.md).
+
 An empty `[wallpaper]` table is a section too: it says "no wallpaper from
 the config" and clears whatever the config set before. For no wallpaper
 handling at all, leave the whole table out.

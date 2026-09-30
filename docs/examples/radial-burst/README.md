@@ -10,10 +10,11 @@ scootbar or scootbg changes unless you use these files.
 | --- | --- |
 | [`scoot.toml`](scoot.toml) | the compositor: background, ring colors and widths, rounded corners, column widths, the wallpaper |
 | [`bar.toml`](bar.toml) | scootbar: a floating, rounded, translucent bar, workspaces as circles, the clock |
-| [`foot.ini`](foot.ini) | foot: the palette and some padding |
+| [`foot.ini`](foot.ini) | foot: the palette, padding and font size (needs a foot with `[colors-dark]` sections, 1.24 or later) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
-modules install it, from source `cargo install --path crates/scootbg`), and a font file
+modules install it when the settings have a `[wallpaper]` table, from source
+`cargo install --path crates/scootbg`), and a font file
 for scootbar (see the comment in [`bar.toml`](bar.toml)). Without `scootbg` scoot logs one
 warning and carries on with the background color.
 
@@ -31,8 +32,9 @@ a copy of the wallpaper.
 
 ## The palette
 
-Six hues from the image: background `#241721` (plum), blue `#31a9e5`, orange `#e36e38`
-and `#fa9233`, hot pink `#bf128d`, purple `#6d1d98`, yellow `#fdef1d`, olive `#99911d`.
+The image's hues: background `#241721` (plum), blue `#31a9e5`, two oranges (`#e36e38`
+for the ring, `#fa9233` in foot), hot pink `#bf128d`, purple `#6d1d98`, yellow `#fdef1d`
+and olive `#99911d`.
 The focused window's ring is blue and the others' orange; the bar, foot and scoot all
 read from the same set. They came from Stylix's palette generator run on the image,
 with two changes by hand: the terminal's ANSI slots are spread across the six hues (the
@@ -45,8 +47,9 @@ The defaults stay light on purpose; this look spends some of that, so each piece
 opt-in and you can drop any of them:
 
 - **The wallpaper** makes scootbg hold the decoded image: about 12 MB RSS at 1920x1080
-  and about 37 MB on two 4K outputs, against about 4 MB for a solid color
-  ([scootbg](../../scootbg/README.md)). Drop `[wallpaper]` for a solid
+  and about 37 MB on two 4K outputs, against about 4 MB for a solid color (measured with
+  a larger JPEG, but the buffer follows the output, not the file;
+  [scootbg](../../scootbg/README.md)). Drop `[wallpaper]` for a solid
   `background_color` and the cost is gone.
 - **`corner_radius`** costs a little per frame when non-zero (measured at about +9% on a
   three-window session under pixman; see [configuration.md](../../configuration.md#appearance)).
@@ -62,9 +65,8 @@ opt-in and you can drop any of them:
 background" (Abstract Radial Speed Lines Zoom Blast Background, a vector illustration),
 published on Unsplash on June 18, 2026:
 <https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM>.
-**It is not covered by this repository's MIT license.** It is Unsplash content (its
-`/illustrations/` pages are Unsplash+), used under the Unsplash license that applied to
-the copy the maintainer downloaded; the artist's name is not recorded here, and the
-terms were not checked against redistribution in a public repository. If you
-redistribute scoot or fork it, check that license first, or remove the file and the
-`[wallpaper]` table. See [NOTICE](../../../NOTICE).
+**It is not covered by this repository's MIT license.** It was downloaded from Unsplash
+(its `/illustrations/` pages are Unsplash+). Which license terms apply to it, and whether
+they allow redistribution in a public repository, has not been verified, and the artist's
+name is not recorded here. If you redistribute scoot or fork it, check that first, or
+remove the file and the `[wallpaper]` table. See [NOTICE](../../../NOTICE).
