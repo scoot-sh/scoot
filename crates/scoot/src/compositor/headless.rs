@@ -1206,6 +1206,19 @@ impl State {
         // host resize -- with windows already up. `apply()` ends in
         // `request_render()`, so the frame is still requested exactly once.
         self.apply();
+        // The mode changed in place: tell `Output` subscribers the new size
+        // (see `ipc/events.rs`). A script watching density recomputes the
+        // scale it wants from this and reloads it; polling `outputs` gives
+        // the same numbers, this just says when to look. After `apply()` so
+        // the layout the event describes is already live. A resize that
+        // failed returns `false` above and fires nothing.
+        self.emit_output_changed(scoot_ipc::OutputChanged {
+            output: id.0,
+            name: output.name(),
+            width,
+            height,
+            scale,
+        });
         true
     }
 
@@ -1251,6 +1264,11 @@ impl State {
     /// element's geometry at the current scale, so each moved element
     /// damages both its old and its new region on the first post-rescale
     /// frame by construction.
+    ///
+    /// Deliberately *not* emitting `OutputChanged` either: the mode did not
+    /// move, only the scale, and a scale change firing the event a
+    /// density-watching script answers with a scale-setting reload would
+    /// feedback-loop (`changed` → reload → rescale → `changed`).
     pub(super) fn rescale_outputs(&mut self) {
         // Walked by index with cloned outputs, like the render loop: the
         // steps below take `&mut State`, which no borrow of `self.outputs`
