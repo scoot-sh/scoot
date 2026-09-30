@@ -930,14 +930,16 @@ fn a_text_cut_inside_a_gap_or_a_number_is_still_measurable() {
         shape: Shape::Circle,
         ..Pill::default()
     };
-    for cut in 150..=MAX_TEXT {
+    // Every byte through the last 20 (where a cut lands mid-number and mid-gap), a coarse
+    // sweep before them: the walk is O(text) per item, slow in a debug build.
+    for cut in (150..236).step_by(13).chain(236..=MAX_TEXT) {
         let shown = &full[..cut];
         let mut seen = 0;
         while item_span(&font, shown, EM, x0, seen).is_some() {
             seen += 1;
         }
         assert!(seen > 1 && seen <= 40, "cut {cut}: {seen} items");
-        for x in (0..6000).step_by(11) {
+        for x in (0..6000).step_by(67) {
             let _ = hit_index(&font, shown, EM, PAD, seen, x);
         }
         let _ = geometry(&circle, shown, 0, 60);
