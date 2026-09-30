@@ -64,7 +64,7 @@ opt-in and you can drop any of them:
 `docs/assets/wallpapers/radial-burst.png` is "Colorful radial lines exploding on a dark
 background" by Sufyan pir, published on Unsplash on June 18, 2026:
 <https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM>.
-Its page says "Free to use under the Unsplash License"
+Its page (checked 2026-09-30) says "Free to use under the Unsplash License"
 (<https://unsplash.com/license>), which lets you download, copy, modify and distribute
 it, commercially and without attribution, but not compile images to build a similar or
 competing service; the credit here is a courtesy. **The image is not covered by this
