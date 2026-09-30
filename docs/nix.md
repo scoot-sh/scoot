@@ -478,10 +478,14 @@ the user's own file instead.
 **The service** is `scootbar.service` (a user unit): `WantedBy=` and
 `PartOf=` `graphical-session.target`, `After=` it and `Before=tray.target`
 (an ordering against a target the session does not define does nothing),
-`Restart=on-failure` with `RestartSec=2`, so a crash, or a start before the
+`Restart=on-failure` with `RestartSec=2` and `StartLimitIntervalSec=0` (no
+burst limit, so the retries never end in `failed`), so a crash, or a start before the
 compositor's `WAYLAND_DISPLAY` is imported, retries, while `scootbar msg
-kill` and a stop stay stopped (scoot does not supervise its clients). A new
-config restarts it (`X-Restart-Triggers`). scoot does not start
+kill` and a stop stay stopped (scoot does not supervise its clients). The unit
+carries `X-Restart-Triggers` on the config file; home-manager's switch
+restarts it on a new config, while whether NixOS restarts a user unit on
+switch depends on the release (log in again or `systemctl --user restart
+scootbar` otherwise; unverified here). scoot does not start
 `graphical-session.target` itself: a scoot session script imports the
 environment and starts it, as for any compositor:
 
@@ -497,10 +501,15 @@ tokens from the base16 palette (`background` base00, `foreground` base05,
 `stylix.fonts.sansSerif` and `bar.font-size` from `stylix.fonts.sizes.desktop`
 (points, converted to the bar's pixels at 4/3 and clamped to 1 to 256). The
 font is a **file path**: scootbar has no fontconfig, so a build step finds
-the regular face in the font package's `share/fonts` (the file named for the
-family, `DejaVuSans.ttf` for "DejaVu Sans", `...-Regular.ttf` for a Nerd
-Font, an `_18pt` optical size for Inter). A package with no such file fails
-that build naming the family; set `settings.bar.font` to a path then. The
+the regular face in the font package's `share/fonts`: a file named for the
+family, `DejaVuSans.ttf` for "DejaVu Sans", or `Family-Regular.ttf` (Noto
+Sans, a Nerd Font). **Variable fonts** (Inter's `InterVariable.ttf`),
+**`.ttc` collections** and **other naming** (Ubuntu's `Ubuntu-R.ttf`,
+Cantarell, Fira Sans) are not resolved. The bar then gets the plain default
+font (DejaVu Sans) rather than a failed system build, and the font's build
+prints a warning naming the family (in its build log, and in `warning` beside
+the font in the store; not at evaluation, which would need the font package
+built then). Set `settings.bar.font` to a path to choose the face. The
 module never imports Stylix; nothing changes without it, and
 `programs.scootbar.stylix.enable = false` turns the defaults off with it
 present.
@@ -509,7 +518,8 @@ present.
 
 1. **A value you set in `settings`** (an ordinary definition).
 2. **Stylix's** (`lib.mkDefault`).
-3. **The module's plain default**: `bar.font` as DejaVu Sans
+3. **The module's plain default**: `bar.font` as DejaVu Sans (also what an
+   unresolved Stylix font becomes)
    (`dejavu_fonts.minimal`, so a bar with modules always starts), and only
    that, unless `features = [ ]`. Every other key absent is the bar's own
    default.

@@ -26,6 +26,9 @@ in
       after = [ "graphical-session.target" ];
       # Before what hosts a tray, where the session has such a target.
       before = [ "tray.target" ];
+      # Retry for as long as the compositor is not there (the default burst
+      # limit, 5 in 10 s, would stop a 2 s retry for good).
+      unitConfig.StartLimitIntervalSec = 0;
       restartTriggers = [ cfg.configFile ];
       serviceConfig = {
         ExecStart = "${lib.getExe cfg.finalPackage} daemon --config /etc/scootbar/bar.toml";

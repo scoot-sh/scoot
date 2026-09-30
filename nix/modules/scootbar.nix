@@ -38,54 +38,52 @@ let
   # Stylix hands over a font as a package and a family name, and scootbar
   # takes a file (there is no fontconfig). The file is found at build time
   # in the package's `share/fonts`: the regular face whose file name is the
-  # family name ("DejaVu Sans" -> DejaVuSans.ttf, "JetBrainsMono Nerd
-  # Font" -> JetBrainsMonoNerdFont-Regular.ttf), else that name with an
-  # optical size in it ("Inter_18pt-Regular"). A package with no such
-  # file fails the build, naming both, rather than start a bar with the
-  # wrong face; set `settings.bar.font` to a path to choose one. Only built
-  # when Stylix is in use and the user has not set `bar.font`.
+  # family name, or that name plus `-Regular` ("DejaVu Sans" ->
+  # DejaVuSans.ttf, "JetBrainsMono Nerd Font" ->
+  # JetBrainsMonoNerdFont-Regular.ttf). Variable fonts (InterVariable.ttf),
+  # collections (.ttc) and other naming (Ubuntu-R.ttf) are NOT resolved:
+  # then the bar gets the plain default font (DejaVu Sans) instead of a
+  # failed system build, and the derivation says so on stderr (in the build
+  # log) and in `$out/warning` (the font itself is `$out/font`), naming the
+  # family; set
+  # `settings.bar.font` to a path to choose. A warning at evaluation time
+  # (`lib.warn`) would need the font package built during evaluation
+  # (import from derivation), so it is at build time. Only built when Stylix
+  # is in use and the user has not set `bar.font`.
+  fallbackFont = "${pkgs.dejavu_fonts.minimal}/share/fonts/truetype/DejaVuSans.ttf";
   fontFile =
     font:
     pkgs.runCommand "scootbar-font-${lib.strings.sanitizeDerivationName font.name}"
       {
-        nativeBuildInputs = [
-          pkgs.findutils
-          pkgs.gnused
-        ];
+        nativeBuildInputs = [ pkgs.findutils ];
         # Not `name`, which would rename the derivation.
         family = font.name;
         package = font.package;
+        fallback = fallbackFont;
       }
       ''
         norm() { tr -d ' _-' | tr '[:upper:]' '[:lower:]'; }
         want=$(printf '%s' "$family" | norm)
         files=$(find -L "$package/share/fonts" -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | sort || true)
         pick=
-        for pass in exact prefix; do
-          while IFS= read -r file; do
-            [ -n "$file" ] || continue
-            base=$(basename "$file"); base=''${base%.*}
-            have=$(printf '%s' "$base" | norm)
-            case "$pass" in
-              exact) [ "$have" = "$want" ] || [ "$have" = "''${want}regular" ] || continue ;;
-              prefix)
-                # Optical-size files ("Inter_18pt-Regular"): the name, a
-                # size, and nothing but "regular" after it. Not
-                # "InterMono", another family.
-                case "$have" in "$want"*) ;; *) continue ;; esac
-                rest=$(printf '%s' "''${have#"$want"}" | sed -E 's/[0-9]+(pt)?//g')
-                [ -z "$rest" ] || [ "$rest" = regular ] || continue ;;
-            esac
+        while IFS= read -r file; do
+          [ -n "$file" ] || continue
+          base=$(basename "$file"); base=''${base%.*}
+          have=$(printf '%s' "$base" | norm)
+          if [ "$have" = "$want" ] || [ "$have" = "''${want}regular" ]; then
             pick=$file
-            break 2
-          done <<<"$files"
-        done
+            break
+          fi
+        done <<<"$files"
+        mkdir $out
+        : > $out/warning
         if [ -z "$pick" ]; then
-          echo "scootbar: no font file for \"$family\" in $package/share/fonts;" >&2
-          echo "  set programs.scootbar.settings.bar.font to a .ttf/.otf path" >&2
-          exit 1
+          msg="scootbar: no regular-face file named for \"$family\" in $package/share/fonts (variable fonts, .ttc and other naming are not resolved); using DejaVu Sans. Set programs.scootbar.settings.bar.font to a .ttf/.otf path to choose."
+          echo "warning: $msg" >&2
+          echo "$msg" > $out/warning
+          pick=$fallback
         fi
-        ln -s "$pick" $out
+        ln -s "$pick" $out/font
       '';
 
   # Stylix's size is in points; the bar's is logical pixels (the em). CSS
@@ -242,7 +240,7 @@ in
       # A font only when something draws text; the bar refuses to start
       # for a font it cannot use and needs none for a bar with no modules.
       programs.scootbar.settings = lib.mkIf (cfg.features != [ ]) {
-        bar.font = lib.mkOptionDefault "${pkgs.dejavu_fonts.minimal}/share/fonts/truetype/DejaVuSans.ttf";
+        bar.font = lib.mkOptionDefault fallbackFont;
       };
     })
 
@@ -259,7 +257,7 @@ in
           font-size = lib.mkDefault (pixels config.stylix.fonts.sizes.desktop);
         }
         // lib.optionalAttrs (cfg.features != [ ]) {
-          font = lib.mkDefault "${fontFile config.stylix.fonts.sansSerif}";
+          font = lib.mkDefault "${fontFile config.stylix.fonts.sansSerif}/font";
         };
       };
     })

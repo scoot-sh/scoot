@@ -26,6 +26,10 @@ in
         PartOf = [ "graphical-session.target" ];
         After = [ "graphical-session.target" ];
         Before = [ "tray.target" ];
+        # Retry for as long as the compositor is not there: with the default
+        # burst limit (5 starts in 10 s) a 2 s retry would land in "failed"
+        # and stop for good.
+        StartLimitIntervalSec = 0;
         # A new config restarts the bar (it starts in milliseconds).
         X-Restart-Triggers = [ "${cfg.configFile}" ];
       };

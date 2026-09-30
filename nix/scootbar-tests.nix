@@ -52,13 +52,17 @@ let
   dejavu = pkgs.dejavu_fonts.minimal;
   dejavuFile = "${dejavu}/share/fonts/truetype/DejaVuSans.ttf";
 
-  # Only for the file-picking pins (read as a symlink, never loaded).
+  # Only for the file-picking pins (read as a symlink, never loaded). The
+  # shapes are real packages': noto-fonts ships Family-Regular plus Bold and
+  # a Mono family; the Nerd Font one is Family-Regular/Bold in opentype; Inter
+  # ships only InterVariable*.ttf and Inter.ttc; Ubuntu ships Ubuntu-R.ttf.
   distractors = pkgs.runCommand "font-distractors" { } ''
-    mkdir -p $out/share/fonts/truetype
-    for f in Inter-Bold Inter-Italic Inter_18pt-Regular InterMono-Regular; do
+    mkdir -p $out/share/fonts/truetype $out/share/fonts/opentype
+    for f in NotoSans-Regular NotoSans-Bold NotoSansMono-Regular \
+             InterVariable InterVariable-Italic Ubuntu-R Ubuntu-B; do
       : > $out/share/fonts/truetype/$f.ttf
     done
-    mkdir -p $out/share/fonts/opentype
+    : > $out/share/fonts/truetype/Inter.ttc
     : > $out/share/fonts/opentype/JetBrainsMonoNerdFont-Bold.otf
     : > $out/share/fonts/opentype/JetBrainsMonoNerdFont-Regular.otf
   '';
@@ -207,7 +211,13 @@ let
   userWins = evalHomeStylix { } {
     enable = true;
     settings = {
-      colors.background = "#123456";
+      colors = {
+        background = "#123456";
+        foreground = "#234567";
+        accent = "#345678";
+        dim = "#456789";
+        urgent = "#56789a";
+      };
       bar.font = "/user/font.ttf";
       bar.font-size = 20;
     };
@@ -226,9 +236,22 @@ let
   };
   bigSize = evalHomeStylix { size = 200; } { enable = true; };
   zeroSize = evalHomeStylix { size = 0; } { enable = true; };
+  pickNoto = evalHomeStylix {
+    font = {
+      name = "Noto Sans";
+      package = distractors;
+    };
+  } { enable = true; };
+  # No regular-face file by these names: the plain default, with a warning.
   pickInter = evalHomeStylix {
     font = {
       name = "Inter";
+      package = distractors;
+    };
+  } { enable = true; };
+  pickUbuntu = evalHomeStylix {
+    font = {
+      name = "Ubuntu";
       package = distractors;
     };
   } { enable = true; };
@@ -324,21 +347,42 @@ let
       && builtins.isString s.bar.font
       && s.bar.font != dejavuFile
       && lib.hasPrefix builtins.storeDir s.bar.font;
-    "user beats Stylix beats plain: user values kept" =
+    # Every Stylix leaf, one user override at a time: each must yield to the
+    # user (a leaf defined without mkDefault would conflict, and fail here).
+    "user beats Stylix beats plain: every Stylix key yields to a user value" =
       let
         s = settingsOf userWins;
       in
-      s.colors.background == "#123456" && s.bar.font == "/user/font.ttf" && s.bar."font-size" == 20;
-    "user beats Stylix beats plain: the other four colors stay Stylix's" =
-      let
-        s = settingsOf userWins;
-      in
-      builtins.removeAttrs s.colors [ "background" ] == {
-        foreground = "#e0e0e0";
-        accent = "#ffff00";
-        dim = "#303030";
-        urgent = "#ff0000";
-      };
+      s.colors == {
+        background = "#123456";
+        foreground = "#234567";
+        accent = "#345678";
+        dim = "#456789";
+        urgent = "#56789a";
+      }
+      && s.bar.font == "/user/font.ttf"
+      && s.bar."font-size" == 20;
+    "user beats Stylix beats plain: one user token keeps the other four Stylix's" =
+      lib.all
+        (
+          token:
+          let
+            s =
+              (evalHomeStylix { } {
+                enable = true;
+                settings.colors.${token} = "#abcdef";
+              }).config.programs.scootbar.settings.colors;
+          in
+          s.${token} == "#abcdef"
+          && builtins.removeAttrs s [ token ] == builtins.removeAttrs (settingsOf themed).colors [ token ]
+        )
+        [
+          "background"
+          "foreground"
+          "accent"
+          "dim"
+          "urgent"
+        ];
     "a user's one token without Stylix adds only that token" =
       settingsOf profileVsUser == {
         colors.accent = "#abcdef";
@@ -392,6 +436,7 @@ let
       && u.Unit.After == [ "graphical-session.target" ]
       && u.Unit.PartOf == [ "graphical-session.target" ]
       && u.Unit.Before == [ "tray.target" ]
+      && u.Unit.StartLimitIntervalSec == 0
       && u.Install.WantedBy == [ "graphical-session.target" ]
       && u.Unit.X-Restart-Triggers == [ "${plain.config.programs.scootbar.configFile}" ];
     "home: systemd.enable = false writes no unit and keeps the file" =
@@ -405,6 +450,7 @@ let
       && u.serviceConfig.Restart == "on-failure"
       && u.serviceConfig.ExecStart == "${lib.getExe scootbar} daemon --config /etc/scootbar/bar.toml"
       && u.after == [ "graphical-session.target" ]
+      && u.unitConfig.StartLimitIntervalSec == 0
       && u.wantedBy == [ "graphical-session.target" ];
     "nixos: Stylix defaults apply there too" = (settingsOf osThemed).colors.accent == "#ffff00";
   };
@@ -431,7 +477,9 @@ runCommand "scootbar-modules"
     passAsFile = [ "expectations" ];
     inherit unknownKey;
     # The two font pins read the symlink the module builds.
+    pickNoto = (settingsOf pickNoto).bar.font;
     pickInter = (settingsOf pickInter).bar.font;
+    pickUbuntu = (settingsOf pickUbuntu).bar.font;
     pickNerd = (settingsOf pickNerd).bar.font;
     themedFont = (settingsOf themed).bar.font;
     inherit dejavuFile distractors;
@@ -451,7 +499,16 @@ runCommand "scootbar-modules"
 
     # 2. The font is found by name inside the family's package.
     [ "$(readlink -f "$themedFont")" = "$dejavuFile" ] || { echo "themed font is not DejaVuSans.ttf: $themedFont"; exit 1; }
-    [ "$(readlink -f "$pickInter")" = "$distractors/share/fonts/truetype/Inter_18pt-Regular.ttf" ] || { echo "Inter picked $(readlink -f "$pickInter")"; exit 1; }
+    [ "$(readlink -f "$pickNoto")" = "$distractors/share/fonts/truetype/NotoSans-Regular.ttf" ] || { echo "Noto picked $(readlink -f "$pickNoto")"; exit 1; }
+    # No regular face by that name (variable font, .ttc, Ubuntu-R): the plain
+    # default font, and the derivation's warning names the family.
+    for pair in "Inter=$pickInter" "Ubuntu=$pickUbuntu"; do
+      fam=''${pair%%=*}; font=''${pair#*=}
+      [ "$(readlink -f "$font")" = "$dejavuFile" ] || { echo "$fam did not fall back to DejaVu Sans: $(readlink -f "$font")"; exit 1; }
+      grep -q "no regular-face file named for \"$fam\"" "$(dirname "$font")/warning" || { echo "no warning for $fam:"; cat "$(dirname "$font")/warning"; exit 1; }
+    done
+    # A resolved font leaves the warning empty.
+    [ ! -s "$(dirname "$pickNoto")/warning" ] || { echo "warning on a resolved font"; exit 1; }
     [ "$(readlink -f "$pickNerd")" = "$distractors/share/fonts/opentype/JetBrainsMonoNerdFont-Regular.otf" ] || { echo "Nerd picked $(readlink -f "$pickNerd")"; exit 1; }
 
     # 3. The real binary. With no compositor, a file it accepts gets past
