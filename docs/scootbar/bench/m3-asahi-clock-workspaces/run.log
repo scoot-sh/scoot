@@ -1,0 +1,76 @@
+[18:59:35] scoot scootbar startup r1 ok {'latency_ms': 33.21}
+[18:59:35] scoot scootbar startup r2 ok {'latency_ms': 36.0}
+[18:59:35] scoot scootbar startup r3 ok {'latency_ms': 45.11}
+[18:59:35] scoot scootbar startup r4 ok {'latency_ms': 44.67}
+[18:59:35] scoot scootbar startup r5 ok {'latency_ms': 37.27}
+[18:59:35] scoot scootbar idle    r1 ok {'rss_kb': 3616, 'pss_kb': 2120, 'wakeups_per_min': 2.0, 'idle_cpu_ms': 0.97, 'switch_cpu_ms': 26.27}
+[18:59:35] scoot yambar   NOT RUN at scope clock-workspaces: yambar 1.11.0 has no ext-workspace-v1 module, so it cannot show workspaces on scoot
+[19:06:09] scoot waybar   startup r1 ok {'latency_ms': 110.03}
+[19:06:09] scoot waybar   startup r2 ok {'latency_ms': 103.16}
+[19:06:09] scoot waybar   startup r3 ok {'latency_ms': 82.4}
+[19:06:09] scoot waybar   startup r4 ok {'latency_ms': 97.79}
+[19:06:09] scoot waybar   startup r5 ok {'latency_ms': 96.0}
+[19:06:09] scoot waybar   idle    r1 ok {'rss_kb': 52592, 'pss_kb': 46631, 'wakeups_per_min': 5.0, 'idle_cpu_ms': 5.1, 'switch_cpu_ms': 463.75}
+[19:12:43] sway  scootbar startup r1 ok {'latency_ms': 16.72}
+[19:12:43] sway  scootbar startup r2 ok {'latency_ms': 18.23}
+[19:12:43] sway  scootbar startup r3 ok {'latency_ms': 21.41}
+[19:12:43] sway  scootbar startup r4 ok {'latency_ms': 9.18}
+[19:12:43] sway  scootbar startup r5 ok {'latency_ms': 18.87}
+[19:12:43] sway  scootbar idle    r1 ok {'rss_kb': 3616, 'pss_kb': 2136, 'wakeups_per_min': 2.0, 'idle_cpu_ms': 0.82, 'switch_cpu_ms': 22.17}
+[19:19:16] sway  yambar   startup r1 ok {'latency_ms': 17.39}
+[19:19:16] sway  yambar   startup r2 ok {'latency_ms': 28.44}
+[19:19:16] sway  yambar   startup r3 ok {'latency_ms': 29.25}
+[19:19:16] sway  yambar   startup r4 ok {'latency_ms': 19.52}
+[19:19:16] sway  yambar   startup r5 ok {'latency_ms': 33.08}
+[19:19:16] sway  yambar   idle    r1 ok {'rss_kb': 13744, 'pss_kb': 8234, 'wakeups_per_min': 3.0, 'idle_cpu_ms': 2.49, 'switch_cpu_ms': 177.23}
+[19:25:50] sway  waybar   startup r1 ok {'latency_ms': 70.67}
+[19:25:50] sway  waybar   startup r2 ok {'latency_ms': 70.46}
+[19:25:50] sway  waybar   startup r3 ok {'latency_ms': 59.68}
+[19:25:50] sway  waybar   startup r4 ok {'latency_ms': 62.91}
+[19:25:50] sway  waybar   startup r5 ok {'latency_ms': 62.1}
+[19:25:50] sway  waybar   idle    r1 ok {'rss_kb': 52624, 'pss_kb': 44232, 'wakeups_per_min': 3.0, 'idle_cpu_ms': 4.1, 'switch_cpu_ms': 1425.44}
+**On scoot** (scoot 0.1.0 (ipc protocol 5))
+
+| Row | scootbar | yambar | waybar |
+|---|---|---|---|
+| Size: stripped binary + non-glibc `ldd` closure (bytes) | 1,383,080 | 20,950,384 | 73,973,448 |
+| Bare executable, stripped (bytes) *(not gated)* | 1,249,984 | 396,008 | 2,954,024 |
+| Startup to first frame (ms) | 37.3 [33.2–45.1] | cannot show this scope | 97.8 [82.4–110] |
+| Idle RSS (MiB) | 3.5 | cannot show this scope | 51.4 |
+| Idle PSS (MiB) | 2.1 | cannot show this scope | 45.5 |
+| Idle heap (`RssAnon`) (MiB) | 0.4 | cannot show this scope | 10.7 |
+| Peak memory (`VmHWM`) (MiB) | 3.5 | cannot show this scope | 51.4 |
+| Idle wakeups per minute | 2 | cannot show this scope | 5 |
+| Idle CPU in the window (ms) | 1.0 | cannot show this scope | 5.1 |
+| CPU while switching workspaces (ms) | 26.3 | cannot show this scope | 464 |
+| Wakeups while switching workspaces *(not gated)* | 482 | cannot show this scope | 965 |
+| Threads *(not gated)* | 1 | cannot show this scope | 8 |
+
+**On sway** (sway version 1.12)
+
+| Row | scootbar | yambar | waybar |
+|---|---|---|---|
+| Size: stripped binary + non-glibc `ldd` closure (bytes) | 1,383,080 | 20,950,384 | 73,973,448 |
+| Bare executable, stripped (bytes) *(not gated)* | 1,249,984 | 396,008 | 2,954,024 |
+| Startup to first frame (ms) | 18.2 [9.2–21.4] | 28.4 [17.4–33.1] | 62.9 [59.7–70.7] |
+| Idle RSS (MiB) | 3.5 | 13.4 | 51.4 |
+| Idle PSS (MiB) | 2.1 | 8.0 | 43.2 |
+| Idle heap (`RssAnon`) (MiB) | 0.4 | 3.1 | 10.8 |
+| Peak memory (`VmHWM`) (MiB) | 3.5 | 13.4 | 51.4 |
+| Idle wakeups per minute | 2 | 3 | 3 |
+| Idle CPU in the window (ms) | 0.8 | 2.5 | 4.1 |
+| CPU while switching workspaces (ms) | 22.2 | 177 | 1425 |
+| Wakeups while switching workspaces *(not gated)* | 482 | 1205 | 2642 |
+| Threads *(not gated)* | 1 | 4 | 9 |
+
+- tie: Startup to first frame: yambar
+- tie: Idle wakeups per minute: yambar
+- tie: Idle wakeups per minute: waybar
+
+Machine, 60 readings around the runs: governor schedutil; cpufreq policy cap below the hardware maximum in 0; current frequency seen 600 to 3204 MHz; a mains supply offline in 0 of them; hwmon temperatures 22 to 26 C.
+
+scootbar's code: 25,347 lines of Rust in `crates/scootbar/src`, 16,312 outside `tests.rs` files; 10 direct dependencies on Linux (ab_glyph, png, rustix, scootbg-mem, serde, serde_json, toml, wayland-client, wayland-protocols, wayland-protocols-wlr).
+
+Gate (no competitor beats scootbar): 0 loss(es).
+Not compared, so not passed: 1 bar and compositor pair(s) cannot show the milestone's scope, so no row was measured or invented for them (the rule does not say what to do then: a maintainer call).
+- NOT COMPARED on scoot: yambar: yambar 1.11.0 has no ext-workspace-v1 module, so it cannot show workspaces on scoot

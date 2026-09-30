@@ -1,0 +1,51 @@
+[18:11:04] scoot scootbar startup r1 ok {'latency_ms': 34.74}
+[18:11:04] scoot scootbar startup r2 ok {'latency_ms': 34.92}
+[18:11:04] scoot scootbar startup r3 ok {'latency_ms': 44.23}
+[18:11:04] scoot scootbar startup r4 ok {'latency_ms': 33.73}
+[18:11:04] scoot scootbar startup r5 ok {'latency_ms': 42.83}
+[18:11:04] scoot scootbar idle    r1 ok {'rss_kb': 3600, 'pss_kb': 2118, 'wakeups_per_min': 2.0, 'idle_cpu_ms': 1.21, 'switch_cpu_ms': 11.95}
+[18:17:38] sway  scootbar startup r1 ok {'latency_ms': 8.45}
+[18:17:38] sway  scootbar startup r2 ok {'latency_ms': 17.27}
+[18:17:38] sway  scootbar startup r3 ok {'latency_ms': 17.55}
+[18:17:38] sway  scootbar startup r4 ok {'latency_ms': 8.03}
+[18:17:38] sway  scootbar startup r5 ok {'latency_ms': 8.32}
+[18:17:38] sway  scootbar idle    r1 ok {'rss_kb': 3616, 'pss_kb': 2146, 'wakeups_per_min': 1.8, 'idle_cpu_ms': 0.6, 'switch_cpu_ms': 10.53}
+**On scoot** (scoot 0.1.0 (ipc protocol 5))
+
+| Row | scootbar |
+|---|---|
+| Size: stripped binary + non-glibc `ldd` closure (bytes) | 1,383,080 |
+| Bare executable, stripped (bytes) *(not gated)* | 1,249,984 |
+| Startup to first frame (ms) | 34.9 [33.7–44.2] |
+| Idle RSS (MiB) | 3.5 |
+| Idle PSS (MiB) | 2.1 |
+| Idle heap (`RssAnon`) (MiB) | 0.4 |
+| Peak memory (`VmHWM`) (MiB) | 3.5 |
+| Idle wakeups per minute | 2 |
+| Idle CPU in the window (ms) | 1.2 |
+| CPU while switching workspaces (ms) | 12.0 |
+| Wakeups while switching workspaces *(not gated)* | 242 |
+| Threads *(not gated)* | 1 |
+
+**On sway** (sway version 1.12)
+
+| Row | scootbar |
+|---|---|
+| Size: stripped binary + non-glibc `ldd` closure (bytes) | 1,383,080 |
+| Bare executable, stripped (bytes) *(not gated)* | 1,249,984 |
+| Startup to first frame (ms) | 8.4 [8.0–17.6] |
+| Idle RSS (MiB) | 3.5 |
+| Idle PSS (MiB) | 2.1 |
+| Idle heap (`RssAnon`) (MiB) | 0.5 |
+| Peak memory (`VmHWM`) (MiB) | 3.5 |
+| Idle wakeups per minute | 2 |
+| Idle CPU in the window (ms) | 0.6 |
+| CPU while switching workspaces (ms) | 10.5 |
+| Wakeups while switching workspaces *(not gated)* | 242 |
+| Threads *(not gated)* | 1 |
+
+Machine, 24 readings around the runs: governor schedutil; cpufreq policy cap below the hardware maximum in 0; current frequency seen 600 to 3204 MHz; a mains supply offline in 0 of them; hwmon temperatures 22 to 26 C.
+
+scootbar's code: 25,347 lines of Rust in `crates/scootbar/src`, 16,312 outside `tests.rs` files; 10 direct dependencies on Linux (ab_glyph, png, rustix, scootbg-mem, serde, serde_json, toml, wayland-client, wayland-protocols, wayland-protocols-wlr).
+
+Gate (no competitor beats scootbar): 0 loss(es).
