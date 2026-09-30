@@ -481,7 +481,9 @@ where
     // only the corners (see `decorations::backdrop_corners`), so a
     // translucent window's middle blends with what is behind it.
     let backdrop = |placement: &Placement| -> Option<Rect> {
-        if appearance.focus_ring_width <= 0 {
+        // Only "is there any ring": `Decorations` re-gates per window on
+        // that window's own width (active or inactive).
+        if appearance.max_ring_width() <= 0 {
             return None;
         }
         let window = windows.get(&placement.id)?;

@@ -220,7 +220,18 @@ impl From<Color> for Color32F {
 /// shared by both consumers anyway (see [`Color::to_argb8888`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Appearance {
+    /// The focus ring's thickness around the focused window, in logical
+    /// pixels. Every other window's ring is [`Appearance::ring_width`]'s
+    /// business: `focus_ring_inactive_width` when set, this one otherwise.
     pub focus_ring_width: i32,
+    /// `[appearance] focus_ring_inactive_width`: the ring thickness around
+    /// every window that is not focused, or `None` (unset) for the same
+    /// thickness as `focus_ring_width`. An `Option` rather than a value
+    /// resolved at load time so "unset" keeps following the active width
+    /// for any struct built from `..Appearance::default()` with only
+    /// `focus_ring_width` changed. Read through [`Appearance::ring_width`],
+    /// never directly, so no site can pick the wrong one for a window.
+    pub focus_ring_inactive_width: Option<i32>,
     pub focus_ring_active_color: Color,
     pub focus_ring_inactive_color: Color,
     pub background_color: Color,
@@ -274,6 +285,7 @@ impl Default for Appearance {
     fn default() -> Self {
         Self {
             focus_ring_width: 3,
+            focus_ring_inactive_width: None,
             // A bright accent blue for the focused window's ring...
             focus_ring_active_color: Color::new(0.42, 0.65, 0.98, 1.0),
             // ...and a muted gray for every other window's, close in spirit
@@ -357,9 +369,29 @@ impl Appearance {
         size.clamp(Self::MIN_CURSOR_SIZE, Self::MAX_CURSOR_SIZE)
     }
 
+    /// The ring thickness for a window in the given focus state: the one
+    /// rule every per-window ring site shares (the bar rects, the painted
+    /// arcs and their outer radius, the gates), as [`ring_color`] is for the
+    /// color. Unset `focus_ring_inactive_width` means the active width.
+    pub fn ring_width(&self, focused: bool) -> i32 {
+        if focused {
+            self.focus_ring_width
+        } else {
+            self.focus_ring_inactive_width
+                .unwrap_or(self.focus_ring_width)
+        }
+    }
+
+    /// The wider of the two ring thicknesses: what a site that has no window
+    /// to ask about (only "is there any ring at all") must test against.
+    pub fn max_ring_width(&self) -> i32 {
+        self.focus_ring_width.max(self.ring_width(false))
+    }
+
     /// The load-time clamp every config-derived [`Appearance`] goes through:
     ///
-    /// - `focus_ring_width` to at most half the layout's gap. A ring wider
+    /// - `focus_ring_width` (and `focus_ring_inactive_width`, when set) to at
+    ///   most half the layout's gap. A ring wider
     ///   than half the gap could reach past the midpoint between two adjacent
     ///   windows and visually collide with the neighbor's own ring or window
     ///   content -- a real visual bug, not a preference, so this clamps
@@ -383,6 +415,19 @@ impl Appearance {
                 "focus_ring_width is wider than half the layout gap; clamping"
             );
             self.focus_ring_width = max;
+        }
+        // The same bound, for the same reason, on the width of every
+        // unfocused window's ring. A negative value is left alone like the
+        // active width's: it draws no ring (every site gates on `> 0`).
+        if let Some(inactive) = self.focus_ring_inactive_width
+            && inactive > max
+        {
+            tracing::warn!(
+                configured = inactive,
+                max,
+                "focus_ring_inactive_width is wider than half the layout gap; clamping"
+            );
+            self.focus_ring_inactive_width = Some(max);
         }
         if self.corner_radius < 0 {
             tracing::warn!(
@@ -726,7 +771,7 @@ impl Decorations {
                 // (`ring_rects` is all-`None` and `push_painted` returns
                 // before painting at width 0): a backdrop with no ring would
                 // be colored corners around nothing.
-                if appearance.focus_ring_width > 0
+                if ring_width(arrangement, placement.id, appearance) > 0
                     && let Some(rect) = backdrop(placement)
                 {
                     let color = ring_color(arrangement, placement.id, appearance);
@@ -780,7 +825,7 @@ impl Decorations {
                 // (`ring_rects` is all-`None` and `push_painted` returns
                 // before painting at width 0): a backdrop with no ring would
                 // be colored corners around nothing.
-                if appearance.focus_ring_width > 0
+                if ring_width(arrangement, placement.id, appearance) > 0
                     && let Some(rect) = backdrop(placement)
                 {
                     let color = ring_color(arrangement, placement.id, appearance);
@@ -821,7 +866,8 @@ impl Decorations {
         let local_bounds = Rect::new(0, 0, bounds.w, bounds.h);
         let color = ring_color(arrangement, placement.id, appearance);
         let rect = to_output_local(drawn(placement), bounds);
-        let rects = ring_rects(rect, appearance.focus_ring_width, local_bounds);
+        let width = ring_width(arrangement, placement.id, appearance);
+        let rects = ring_rects(rect, width, local_bounds);
         let ring = self.rings.entry(placement.id).or_default();
         push(elements, &mut ring.top, rects.top, color, scale);
         push(elements, &mut ring.bottom, rects.bottom, color, scale);
@@ -870,7 +916,7 @@ impl Decorations {
             let color = ring_color(arrangement, placement.id, appearance);
             // `focus_ring_width > 0` mirrors the ring's own gate: a
             // backdrop with no ring would be colored corners around nothing.
-            if appearance.focus_ring_width > 0
+            if ring_width(arrangement, placement.id, appearance) > 0
                 && let Some(rect) = backdrop(placement)
             {
                 let ring = self.rings.entry(placement.id).or_default();
@@ -885,6 +931,7 @@ impl Decorations {
                 placement.id,
                 to_output_local(drawn(placement), bounds),
                 appearance,
+                ring_width(arrangement, placement.id, appearance),
                 color,
                 local_bounds,
                 scale,
@@ -926,7 +973,7 @@ impl Decorations {
             let before = elements.len();
             // `focus_ring_width > 0` mirrors the ring's own gate: a
             // backdrop with no ring would be colored corners around nothing.
-            if appearance.focus_ring_width > 0
+            if ring_width(arrangement, placement.id, appearance) > 0
                 && let Some(rect) = backdrop(placement)
             {
                 let ring = self.rings.entry(placement.id).or_default();
@@ -941,6 +988,7 @@ impl Decorations {
                 placement.id,
                 to_output_local(drawn(placement), bounds),
                 appearance,
+                ring_width(arrangement, placement.id, appearance),
                 color,
                 local_bounds,
                 scale,
@@ -977,6 +1025,7 @@ impl Decorations {
         id: WindowId,
         rect: Rect,
         appearance: &Appearance,
+        thickness: i32,
         color: Color,
         bounds: Rect,
         scale: f64,
@@ -985,7 +1034,6 @@ impl Decorations {
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Texture + Send + Clone + 'static,
     {
-        let thickness = appearance.focus_ring_width;
         if thickness <= 0 {
             return;
         }
@@ -1000,8 +1048,10 @@ impl Decorations {
         let entry = self.painted.entry(id).or_default();
         if entry.key != Some(key) {
             entry.key = Some(key);
-            build_strips(rect, appearance, color, scale, entry);
-        } else if entry.top_at.is_some() && !refresh_strip_origins(rect, appearance, scale, entry) {
+            build_strips(rect, appearance, thickness, color, scale, entry);
+        } else if entry.top_at.is_some()
+            && !refresh_strip_origins(rect, appearance, thickness, scale, entry)
+        {
             // A fractional-scale rounding boundary moved under a cached ring
             // and a strip canvas -- or an in-canvas paint offset -- no longer
             // matches what the buffers were painted for: repaint this frame.
@@ -1011,7 +1061,7 @@ impl Decorations {
             // last build failed stays on the silent square fallback until
             // its key changes, rather than retrying (and warning) every
             // frame.
-            build_strips(rect, appearance, color, scale, entry);
+            build_strips(rect, appearance, thickness, color, scale, entry);
         }
         let (Some(top), Some(bottom), Some(top_at), Some(bottom_at)) =
             (&entry.top, &entry.bottom, &entry.top_at, &entry.bottom_at)
@@ -1130,6 +1180,13 @@ fn ring_color(arrangement: &Arrangement, id: WindowId, appearance: &Appearance) 
     }
 }
 
+/// The window's ring thickness, chosen by the same focus test as
+/// [`ring_color`]: every per-window use of the width goes through this, so
+/// the two can never disagree about which state a window is in.
+fn ring_width(arrangement: &Arrangement, id: WindowId, appearance: &Appearance) -> i32 {
+    appearance.ring_width(arrangement.focused == Some(id))
+}
+
 /// Everything about one window's painted ring that follows from geometry
 /// alone (no color): the two strip placements plus the full-canvas paint
 /// inputs [`build_strips`] fills them from.
@@ -1161,8 +1218,12 @@ struct StripPlan {
 /// buffer: the ring of an invisible window is invisible either way, and
 /// `MemoryRenderBuffer::from_slice` on an empty slice would only assert
 /// downstream).
-fn plan_strips(rect: Rect, appearance: &Appearance, scale: f64) -> Option<StripPlan> {
-    let thickness = appearance.focus_ring_width;
+fn plan_strips(
+    rect: Rect,
+    appearance: &Appearance,
+    thickness: i32,
+    scale: f64,
+) -> Option<StripPlan> {
     let (loc, logical, canvas) = ring_layout(rect, thickness, scale);
     if canvas.w <= 0 || canvas.h <= 0 {
         return None;
@@ -1241,10 +1302,11 @@ fn plan_strips(rect: Rect, appearance: &Appearance, scale: f64) -> Option<StripP
 fn refresh_strip_origins(
     rect: Rect,
     appearance: &Appearance,
+    thickness: i32,
     scale: f64,
     entry: &mut PaintedRing,
 ) -> bool {
-    let Some(plan) = plan_strips(rect, appearance, scale) else {
+    let Some(plan) = plan_strips(rect, appearance, thickness, scale) else {
         return false;
     };
     let (Some(top_at), Some(bottom_at)) = (&mut entry.top_at, &mut entry.bottom_at) else {
@@ -1327,6 +1389,7 @@ fn painted_side_bars(
 fn build_strips(
     rect: Rect,
     appearance: &Appearance,
+    thickness: i32,
     color: Color,
     scale: f64,
     entry: &mut PaintedRing,
@@ -1337,7 +1400,7 @@ fn build_strips(
     entry.bottom_at = None;
     entry.inner_at = None;
     entry.outer_at = None;
-    let Some(plan) = plan_strips(rect, appearance, scale) else {
+    let Some(plan) = plan_strips(rect, appearance, thickness, scale) else {
         tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
         return;
     };
@@ -1721,6 +1784,170 @@ mod tests {
         }
         .clamped(-6);
         assert_eq!(appearance.focus_ring_width, 0);
+    }
+
+    #[test]
+    fn an_unset_inactive_ring_width_is_the_active_width() {
+        let appearance = Appearance {
+            focus_ring_width: 4,
+            ..Appearance::default()
+        };
+        assert_eq!(appearance.focus_ring_inactive_width, None);
+        assert_eq!(appearance.ring_width(true), 4);
+        assert_eq!(appearance.ring_width(false), 4);
+        assert_eq!(appearance.max_ring_width(), 4);
+    }
+
+    #[test]
+    fn a_set_inactive_ring_width_applies_to_unfocused_windows_only() {
+        let appearance = Appearance {
+            focus_ring_width: 4,
+            focus_ring_inactive_width: Some(1),
+            ..Appearance::default()
+        };
+        assert_eq!(appearance.ring_width(true), 4);
+        assert_eq!(appearance.ring_width(false), 1);
+        assert_eq!(appearance.max_ring_width(), 4);
+        let thicker = Appearance {
+            focus_ring_inactive_width: Some(6),
+            ..appearance
+        };
+        assert_eq!(thicker.max_ring_width(), 6);
+    }
+
+    #[test]
+    fn an_inactive_ring_width_wider_than_half_the_gap_is_clamped() {
+        let appearance = Appearance {
+            focus_ring_width: 2,
+            focus_ring_inactive_width: Some(8),
+            ..Appearance::default()
+        }
+        .clamped(10);
+        assert_eq!(appearance.focus_ring_width, 2);
+        assert_eq!(appearance.focus_ring_inactive_width, Some(5));
+    }
+
+    #[test]
+    fn an_inactive_ring_width_within_half_the_gap_zero_or_unset_is_left_alone() {
+        for inactive in [Some(3), Some(0), None] {
+            let appearance = Appearance {
+                focus_ring_inactive_width: inactive,
+                ..Appearance::default()
+            }
+            .clamped(10);
+            assert_eq!(appearance.focus_ring_inactive_width, inactive);
+        }
+    }
+
+    #[test]
+    fn a_zero_gap_clamps_the_inactive_ring_to_zero() {
+        let appearance = Appearance {
+            focus_ring_inactive_width: Some(4),
+            ..Appearance::default()
+        }
+        .clamped(0);
+        assert_eq!(appearance.focus_ring_inactive_width, Some(0));
+    }
+
+    /// The bars of each window are as thick as that window's focus state says
+    /// (`ring_width`), for every side, and swap when focus moves -- with the
+    /// unfocused ring thinner, the old focused window's bars shrink and the
+    /// new one's grow. Sizes and positions are read off the elements.
+    #[test]
+    fn square_bars_take_the_width_of_their_windows_focus_state() {
+        let appearance = Appearance {
+            focus_ring_width: 4,
+            focus_ring_inactive_width: Some(2),
+            ..Appearance::default()
+        };
+        let a = placement(1, Rect::new(100, 100, 200, 150));
+        let b = placement(2, Rect::new(400, 100, 200, 150));
+        let mut decorations = Decorations::default();
+        for (focused, widths) in [(1, (4, 2)), (2, (2, 4)), (1, (4, 2))] {
+            let elements = decorations.elements(
+                &arrangement(vec![a, b], focused),
+                &appearance,
+                OutputId(1),
+                SCREEN,
+                1.0,
+                slot,
+                |_| None,
+            );
+            assert_eq!(elements.len(), 8);
+            for element in &elements {
+                let geometry = element.geometry(1.0.into());
+                let (expected, name) = if geometry.loc.x < 350 {
+                    (widths.0, "a")
+                } else {
+                    (widths.1, "b")
+                };
+                // The top/bottom bars are `width` tall, the side bars `width` wide.
+                let thickness = geometry.size.w.min(geometry.size.h);
+                assert_eq!(
+                    thickness, expected,
+                    "window {name}, focus on {focused}: bar {geometry:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_zero_inactive_width_builds_no_bars_for_unfocused_windows() {
+        let appearance = Appearance {
+            focus_ring_inactive_width: Some(0),
+            ..Appearance::default()
+        };
+        let a = placement(1, Rect::new(100, 100, 200, 150));
+        let b = placement(2, Rect::new(400, 100, 200, 150));
+        let mut decorations = Decorations::default();
+        let elements = decorations.elements(
+            &arrangement(vec![a, b], 2),
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            |_| None,
+        );
+        assert_eq!(elements.len(), 4, "only the focused window is ringed");
+        assert!(
+            elements
+                .iter()
+                .all(|element| element.geometry(1.0.into()).loc.x > 350)
+        );
+    }
+
+    /// A backdrop is gated on its window's own ring width: an unfocused CSD
+    /// window with no ring gets no backdrop corners either, while the focused
+    /// one (same frame) keeps its own.
+    #[test]
+    fn the_csd_backdrop_follows_the_windows_own_ring_width() {
+        let appearance = Appearance {
+            focus_ring_inactive_width: Some(0),
+            ..Appearance::default()
+        };
+        let a = placement(1, Rect::new(100, 100, 200, 150));
+        let b = placement(2, Rect::new(400, 100, 200, 150));
+        let mut decorations = Decorations::default();
+        let elements = decorations.elements(
+            &arrangement(vec![a, b], 2),
+            &appearance,
+            OutputId(1),
+            SCREEN,
+            1.0,
+            slot,
+            |placement| Some(placement.rect),
+        );
+        assert_eq!(
+            elements.len(),
+            8,
+            "four bars plus four corners, window b only"
+        );
+        assert!(
+            elements
+                .iter()
+                .all(|element| element.geometry(1.0.into()).loc.x > 350)
+        );
     }
 
     #[test]
@@ -2348,7 +2575,8 @@ mod tests {
                 for (dx, dy) in (0..4).flat_map(|dx| (0..4).map(move |dy| (dx, dy))) {
                     let rect = Rect::new(10 + dx, 20 + dy, 97, 83);
                     let what = format!("scale {scale} thickness {thickness} rect {rect:?}");
-                    let plan = plan_strips(rect, &appearance, scale).expect("a plan");
+                    let plan = plan_strips(rect, &appearance, appearance.focus_ring_width, scale)
+                        .expect("a plan");
                     let [left, right] =
                         painted_side_bars(&plan.top, &plan.bottom, plan.inner, plan.outer);
                     let (left, right) = (left.expect("a left bar"), right.expect("a right bar"));
@@ -2424,6 +2652,7 @@ mod tests {
                 build_strips(
                     rect,
                     &appearance,
+                    appearance.focus_ring_width,
                     appearance.focus_ring_active_color,
                     scale,
                     &mut entry,
@@ -2432,7 +2661,13 @@ mod tests {
             let repaint = start.elapsed() / CALLS;
             let start = std::time::Instant::now();
             for _ in 0..CALLS {
-                assert!(refresh_strip_origins(rect, &appearance, scale, &mut entry));
+                assert!(refresh_strip_origins(
+                    rect,
+                    &appearance,
+                    appearance.focus_ring_width,
+                    scale,
+                    &mut entry
+                ));
             }
             let hit = start.elapsed() / CALLS;
             println!(
@@ -2454,7 +2689,13 @@ mod tests {
             ..Appearance::default()
         };
         for scale in [1.0, 1.5, 2.0] {
-            let plan = plan_strips(Rect::new(10, 10, 97, 6), &appearance, scale).expect("a plan");
+            let plan = plan_strips(
+                Rect::new(10, 10, 97, 6),
+                &appearance,
+                appearance.focus_ring_width,
+                scale,
+            )
+            .expect("a plan");
             assert_eq!(
                 painted_side_bars(&plan.top, &plan.bottom, plan.inner, plan.outer),
                 [None, None],
@@ -2480,6 +2721,7 @@ mod tests {
         build_strips(
             rect,
             appearance,
+            appearance.focus_ring_width,
             appearance.focus_ring_active_color,
             scale,
             &mut entry,
@@ -2501,8 +2743,10 @@ mod tests {
         let scale = 1.25;
         let before_rect = Rect::new(1, 50, 100, 100);
         let after_rect = Rect::new(2, 50, 100, 100);
-        let before = plan_strips(before_rect, &appearance, scale).expect("a plan");
-        let after = plan_strips(after_rect, &appearance, scale).expect("a plan");
+        let before = plan_strips(before_rect, &appearance, appearance.focus_ring_width, scale)
+            .expect("a plan");
+        let after = plan_strips(after_rect, &appearance, appearance.focus_ring_width, scale)
+            .expect("a plan");
         assert_eq!(
             before.top.canvas, after.top.canvas,
             "the test only means something if the canvases match"
@@ -2517,7 +2761,13 @@ mod tests {
         );
         let mut entry = painted_entry(before_rect, &appearance, scale);
         assert!(
-            !refresh_strip_origins(after_rect, &appearance, scale, &mut entry),
+            !refresh_strip_origins(
+                after_rect,
+                &appearance,
+                appearance.focus_ring_width,
+                scale,
+                &mut entry
+            ),
             "canvas-matching move at scale {scale} must repaint: the ring hole drifted"
         );
     }
@@ -2534,7 +2784,13 @@ mod tests {
                 let after_rect = Rect::new(x + 1, 50, 100, 100);
                 let mut entry = painted_entry(before_rect, &appearance, scale);
                 assert!(
-                    refresh_strip_origins(after_rect, &appearance, scale, &mut entry),
+                    refresh_strip_origins(
+                        after_rect,
+                        &appearance,
+                        appearance.focus_ring_width,
+                        scale,
+                        &mut entry
+                    ),
                     "integer-scale move {x}→{} at scale {scale} must reuse the buffers",
                     x + 1,
                 );
@@ -2555,18 +2811,26 @@ mod tests {
         assert!(!refresh_strip_origins(
             after_rect,
             &appearance,
+            appearance.focus_ring_width,
             scale,
             &mut entry
         ));
         build_strips(
             after_rect,
             &appearance,
+            appearance.focus_ring_width,
             appearance.focus_ring_active_color,
             scale,
             &mut entry,
         );
         assert!(
-            refresh_strip_origins(after_rect, &appearance, scale, &mut entry),
+            refresh_strip_origins(
+                after_rect,
+                &appearance,
+                appearance.focus_ring_width,
+                scale,
+                &mut entry
+            ),
             "refreshing the position just repainted for must be a hit"
         );
     }
@@ -2607,14 +2871,24 @@ mod tests {
                     )
                     .collect();
                 for (before_rect, after_rect) in moves {
-                    let before = plan_strips(before_rect, &appearance, scale).expect("a plan");
-                    let after = plan_strips(after_rect, &appearance, scale).expect("a plan");
+                    let before =
+                        plan_strips(before_rect, &appearance, appearance.focus_ring_width, scale)
+                            .expect("a plan");
+                    let after =
+                        plan_strips(after_rect, &appearance, appearance.focus_ring_width, scale)
+                            .expect("a plan");
                     let plans_agree = before.top.canvas == after.top.canvas
                         && before.bottom.canvas == after.bottom.canvas
                         && before.inner == after.inner
                         && before.outer == after.outer;
                     let mut entry = painted_entry(before_rect, &appearance, scale);
-                    let hit = refresh_strip_origins(after_rect, &appearance, scale, &mut entry);
+                    let hit = refresh_strip_origins(
+                        after_rect,
+                        &appearance,
+                        appearance.focus_ring_width,
+                        scale,
+                        &mut entry,
+                    );
                     assert_eq!(
                         hit, plans_agree,
                         "scale {scale} thickness {thickness} move {before_rect:?}→{after_rect:?}: \
@@ -2647,7 +2921,13 @@ mod tests {
         let appearance = painted_appearance();
         let mut entry = PaintedRing::default();
         assert!(
-            !refresh_strip_origins(Rect::new(10, 50, 100, 100), &appearance, 1.0, &mut entry),
+            !refresh_strip_origins(
+                Rect::new(10, 50, 100, 100),
+                &appearance,
+                appearance.focus_ring_width,
+                1.0,
+                &mut entry
+            ),
             "a poisoned entry must never report a hit"
         );
         assert!(

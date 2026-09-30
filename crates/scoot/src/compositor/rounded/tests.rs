@@ -45,6 +45,7 @@ use crate::compositor::test_support::{Harness, assert_pixel, find_color, pixel, 
 
 mod committed;
 mod csd;
+mod inactive_width;
 
 /// The framebuffer these tests render into.
 const CANVAS: i32 = 400;
