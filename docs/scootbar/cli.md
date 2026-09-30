@@ -439,8 +439,10 @@ right = ["clock"]
   one output** (the same module on two outputs is the point). `--outputs`
   is checked against the file's tables the same way, so the pair is a
   usage error, not a silent dead table.
-- **One set of modules, started once.** The daemon starts each module any
-  output shows a single time and every output's bar reads it, so a second
+- **One set of modules, started once.** The daemon starts each module in
+  the shared layout or any output's override a single time, even if a
+  `[output]` table then leaves it off every bar, and every output's bar
+  reads it, so a second
   monitor adds a surface and its two buffers, not a second clock timer or a
   second set of file descriptors (checked in `tests/outputs.rs`: the daemon
   holds 8 fds with one output and 8 with two). A module's change redraws
