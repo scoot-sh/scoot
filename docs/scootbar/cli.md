@@ -408,7 +408,8 @@ what is now the case: `{"type":"bar","visible":false}`.
   the loop, and the hide is another. Events for a destroyed surface (a
   `configure`, a buffer release) are dropped, as after any removal.
 - The modules keep running while hidden (the clock's timer still fires
-  every minute, a workspace change still wakes the daemon), and nothing is
+  every minute, or every second with a seconds format; a workspace change
+  still wakes the daemon), and nothing is
   drawn: a hidden bar costs the process, not the surfaces. A bar with no
   module placed wakes zero times, hidden or not.
 - A `top` bar under a fullscreen window needs nothing from scootbar: the
