@@ -103,7 +103,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [Pointer input and interactions](resolved/pointer-and-interactions-done.md) (medium): click, scroll and hover, `exec` and `scoot = "quit"` actions — RESOLVED 2026-09-30
 - [`exec`, `push` and `button` modules](resolved/exec-push-button-modules-done.md) (medium): launcher and power buttons — RESOLVED 2026-09-30
 - [Keep an unchanged `exec` command across a reload](exec-keep-across-reload.md) (low)
-- [Agent interface](agent-interface.md) (medium): `invoke`, `layout`, `subscribe`
+- [Agent interface](resolved/agent-interface-done.md) (medium): `invoke`, `layout`, `subscribe` — RESOLVED 2026-09-30
 - [Appearance follow-ups](appearance-followups.md) (low): hover token, per-module state colors, dot indicators, inactive-workspace colors
 
 ### M5 — Daily-driver modules, one release each
