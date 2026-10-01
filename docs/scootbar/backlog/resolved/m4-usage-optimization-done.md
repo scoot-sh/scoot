@@ -1,10 +1,11 @@
 ---
 title: "Bring M4's idle memory and CPU back down"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M4"
+resolved: "2026-10-01"
 ---
 
 # Bring M4's idle memory and CPU back down
@@ -19,11 +20,11 @@ indirectly (the agent interface does not need the bar to be lean).
 The maintainer ruled on 2026-10-01 that M4's **binary size** is accepted and that
 optimization effort goes to **usage** rather than disk space (user: "Keep the
 button and exec inside the bar. Accept it. Aim for optimization in usage more
-than pure disk space."; [lightest's Decisions](lightest.md#decisions)).
+than pure disk space."; [lightest's Decisions](../lightest.md#decisions)).
 `button`, `push` and `exec` stay in the default features. That ruling is about
 size and about where to spend effort; **it does not waive the idle memory
 rows**, which regressed against M3 post-fix and `main` on the Asahi M2
-([M4 on the Asahi M2](../README.md#m4-pointer-input-exec-and-the-agent-interface-on-the-asahi-m2)),
+([M4 on the Asahi M2](../../README.md#m4-pointer-input-exec-and-the-agent-interface-on-the-asahi-m2)),
 scoot, scope clock, one pinned `scoot`, medians of each run:
 
 | Row | `main` | #364 | #366 | #367 | growth per layer |
@@ -35,7 +36,7 @@ scoot, scope clock, one pinned `scoot`, medians of each run:
 
 Idle wakeups (2 a minute), threads, startup and the CPU of 240 workspace
 switches are unchanged. **The final stack's re-measurement at the fixed heads
-supersedes these where it differs** ([final stack](../README.md#m4-final-stack-the-fix-round-re-measured),
+supersedes these where it differs** ([final stack](../../README.md#m4-final-stack-the-fix-round-re-measured),
 #367's tip `d0c4f35d1` against the A-B-A `main` runs): idle RSS 3.64 against
 3.52 and 3.53 MiB (+0.11 to +0.13, inside the harness margin), **idle PSS 2.24
 against 2.11 and 2.13 (+0.11 to +0.13, a regression by `compare`, on scoot and
@@ -99,5 +100,45 @@ drift shows.
   maintainer kept them in the bar.
 - What *using* the modules costs (a configured `exec` module's wakeups): the
   dev VM's table in
-  [exec-push-button-modules-done](resolved/exec-push-button-modules-done.md#the-ratchet)
+  [exec-push-button-modules-done](exec-push-button-modules-done.md#the-ratchet)
   is the record; that is its own measurement.
+
+## Resolution (2026-10-01)
+
+Done in [the usage-optimization PR](https://github.com/scoot-sh/scoot/pulls?q=m4-usage-optimization):
+the numbers, the attribution and every lever tried are in
+[the README's "M4 usage optimization"](../../README.md#m4-usage-optimization); the raw
+runs are `bench/m4-usage-*` ([index](../../bench/README.md)), every `compare` and the
+pooled verdicts [`m4-usage-compares.md`](../../bench/m4-usage-compares.md), the `smaps`
+and `pagemap` evidence [`m4-usage-attribution`](../../bench/m4-usage-attribution/README.md).
+
+- **Where it went.** All of the idle PSS step was file pages of the bar's own
+  executable (`r-xp` `Rss` 960 kB on `main`, 1152 kB at the tip); heap, stack, faults
+  and the executed code (231 against 232 functions) were the same. The ~240 functions
+  an idle bar runs sit in 14 of 17 64 KiB windows of `.text`, and the kernel maps a
+  file's pages 64 KiB at a time.
+- **What landed.** A hot-text order file (`crates/scootbar/orderfile/hot-text.ld`, a GNU
+  ld `--section-ordering-file` of globs) that a `build.rs` hands the linker when a
+  trial link says it takes it, the tool that makes and checks it
+  (`scripts/scootbar-orderfile/`), and `scripts/scootbar-bench/redraw.py`, the redraw
+  benchmark the ticket asked for first. `r-xp` `Rss` 640 kB; idle PSS 1.79 to 1.81 MiB
+  against `main`'s 2.04 to 2.06 and the stack's 2.25 on scoot; idle RSS 3.27 to 3.28
+  against 3.50 to 3.53 and 3.72; the same binary size, redraw cost, idle CPU, wakeups
+  and startup.
+- **Acceptance bar: met.** Idle RSS, PSS and peak better than `main`'s, heap and idle CPU
+  the same (pooled `verdict()` over three runs a side, scoot and sway, `main` re-run
+  beside it), wakeups 2 a minute, no other row regressed. The **size row** is
+  +19.0% and was not part of the bar (the ruling above); it is neither waived nor moved.
+- **Levers dropped, measured.** `opt-level = "s"` for scootbar: `.text` -16% but +31%
+  CPU per redraw; `opt-level = 2`: +18%; per-dependency size levels, `codegen-units = 16`
+  and `--sort-section=name`: no gain; lld and GNU ld with exact symbol names: the names
+  differ between a `cargo` build and the Nix package (182 of 235 hot names), so only a
+  glob file carries. Not done: sharing the toml table shapes and `#[cold]` hints
+  (cold code costs no page once the hot code is together), `madvise` (`unsafe`).
+- **Not taken, measured:** no-PIE (-0.09 MiB PSS, gives up ASLR) and DT_RELR (-0.12
+  MiB, needs glibc 2.36); a decision for the maintainer.
+- **Open questions.** The profile was taken on aarch64 only; x86_64 should gain by the same
+  mechanism, unmeasured. The file decays as the code changes (a function no longer listed
+  goes wherever the linker puts it); `scripts/scootbar-orderfile/orderfile.py check`
+  says by how much and regenerating it is one command
+  ([testing.md](../../testing.md#the-hot-text-order-file)).

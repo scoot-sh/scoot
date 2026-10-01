@@ -105,7 +105,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [Keep an unchanged `exec` command across a reload](exec-keep-across-reload.md) (low)
 - [Agent interface](resolved/agent-interface-done.md) (medium): `invoke`, `layout`, `subscribe` — RESOLVED 2026-09-30
 - [Appearance follow-ups](appearance-followups.md) (low): hover token, per-module state colors, dot indicators, inactive-workspace colors
-- [Bring M4's idle memory and CPU back down](m4-usage-optimization.md) (medium): the idle RSS/PSS/heap growth the size ruling did not waive; levers to measure first
+- [Bring M4's idle memory and CPU back down](resolved/m4-usage-optimization-done.md) (medium): a hot-text order file puts the functions a bar runs together: idle PSS 2.25 to 1.8 MiB, below `main` before M4's 2.05; `opt-level` dropped for +31% redraw CPU — RESOLVED 2026-10-01
 
 ### M5 — Daily-driver modules, one release each
 The [umbrella](data-source-modules.md) holds the rules they share.

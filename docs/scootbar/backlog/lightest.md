@@ -288,11 +288,34 @@ stack; nothing is waived, no target moved, no PR touched by this note.**
   [Decisions](#decisions): "Keep the button and exec inside the bar. Accept it.
   Aim for optimization in usage more than pure disk space."). The **memory
   rows are still regressed** and tracked by
-  [m4-usage-optimization](m4-usage-optimization.md); the fixed heads re-measured
+  [m4-usage-optimization](resolved/m4-usage-optimization-done.md); the fixed heads re-measured
   ([the README's final stack](../README.md#m4-final-stack-the-fix-round-re-measured))
   show size and idle PSS flagged against `main` on both compositors, and idle
   RSS, heap, CPU, wakeups, startup and the switching CPU not. **Nothing else is
   waived**, and no target moved.
+- **Usage optimization, 2026-10-01 ([m4-usage-optimization](resolved/m4-usage-optimization-done.md)).**
+  The memory step was one thing: the bar's executable mapping (`r-xp` `Rss` 960 kB
+  on `main`, 1152 kB with M4), because the ~240 functions an idle bar runs are
+  spread over every 64 KiB of `.text` and the kernel maps a file's pages 64 KiB
+  at a time; heap, stack and faults did not grow. A **hot-text order file** (a
+  GNU ld `--section-ordering-file` of globs, passed by a `build.rs` that first
+  trial-links) puts them in one stretch: `r-xp` `Rss` 640 kB, idle PSS **1.79 to 1.81
+  MiB against `main`'s 2.04 to 2.06 and the stack's 2.25** on scoot (sway 1.89 to
+  1.91 against 2.08 to 2.09 and 2.26), idle RSS 3.27 to 3.28 against 3.50 to 3.53 and
+  3.72, with idle CPU, wakeups (2 a minute), startup and the CPU of 240 switches
+  unchanged and the binary the same size. Seven harness runs on scoot and sway in
+  A-B-C-B-A-B-A order, **the CPU row pooled over three runs a side**: RSS, PSS and peak better
+  than `main`'s (sway: PSS), the rest the same. `compare` of the build against `main`
+  exits 1 in every pairing on the **size row only**, which this PR does not move or
+  waive (the ruling above), and in two of nine also on sway's idle CPU (0.7 against 0.8
+  ms, a row on which `main`'s own three runs span 0.2 ms; pooled: same). At the
+  workspaces scope the stack also cost 5% more CPU for 240 switches (29.0 against
+  27.6 ms, margin 1.4); the build is `main`'s. Tried and dropped, measured:
+  `opt-level = "s"` for scootbar (`.text` -16%, **+31% CPU per redraw**),
+  `opt-level = 2` (+18%), per-dependency size levels, `codegen-units`,
+  `--sort-section`, and the two linkers that need a symbol list the Nix build's names do
+  not match ([README](../README.md#m4-usage-optimization)). Nothing is waived and no
+  target moved.
 - Not remeasured: rule 2 (competitors), which nothing in this stack touches,
   and what *using* the new modules costs (the dev VM's table in
   [exec-push-button-modules-done](resolved/exec-push-button-modules-done.md)).
@@ -343,5 +366,5 @@ were the maintainer's calls.
   memory rows.** The words are about size and about where optimization effort
   goes; the idle RSS/PSS growth of +0.13 to +0.20 MiB per layer is still a
   regression against M3 post-fix and against `main`, to be worked down as a usage-optimization
-  item ([m4-usage-optimization](m4-usage-optimization.md)). Nothing else in the
+  item ([m4-usage-optimization](resolved/m4-usage-optimization-done.md)). Nothing else in the
   ratchet moves.
