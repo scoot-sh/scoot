@@ -44,7 +44,10 @@
 # $XDG_RUNTIME_DIR/systemd/user/{scootbar.service{,.d},scootbar-test-session.target,
 # graphical-session.target.wants}, `systemctl --user daemon-reload` and `systemctl
 # --user unset-environment WAYLAND_DISPLAY`. The `nix build` writes the store, which
-# stays.
+# stays. A bar the test SIGKILLs (S2, S3) leaves its control socket
+# $XDG_RUNTIME_DIR/scootbar-wayland-N.sock and a lock file beside it, as any crashed bar
+# does; the next bar on that display name recognises the dead lock and replaces them, and
+# they are not removed here (the name may be a live session's).
 #
 # --home never touches your home-manager generation: `activate` of the generation
 # runs for real, but with HOME and XDG_RUNTIME_DIR pointed into the scratch
