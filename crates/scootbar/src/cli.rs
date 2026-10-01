@@ -293,9 +293,11 @@ start-up and removes when it stops:
     toggle     hide if shown, show if hidden
     version    the daemon's version and protocol, as JSON
     kill       stop the daemon, once its reply is sent
-    set        a JSON value for module ID (no module takes one yet, so this
-               is refused loudly for every id today; the forward hook for
-               the modules that will take one)
+    set        a JSON value for the `push` module ID, which the config
+               defines (`[push.ID]`): a string (the text), an object
+               `{\"text\": ..., \"class\": ..., \"tooltip\": ...}` or null
+               (clears it). Any other module, an id that is not placed and a
+               value the module refuses are loud errors, never a silent ok
 
 `query`, `version`, `reload`, `hide`, `show` and `toggle` print the reply (the
 last three say `{\"type\":\"bar\",\"visible\":false}`, what is now the case); `kill` and `set` print
