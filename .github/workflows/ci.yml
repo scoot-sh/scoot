@@ -101,7 +101,8 @@ jobs:
   # the integration job's tests/scoot_config.rs has scoot itself spawn
   # `apply-config` from a [wallpaper] section, as the smoke test does.
   #
-  #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-appearance-hw-test.sh
+  #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-orderfile/,
+  #   scripts/scootbar-appearance-hw-test.sh
   #                                        -> scootbar=true (scootbar job, which
   #                                           also builds the Nix module check)
   #     except its Cargo.toml               -> scoot too, for the flake's
@@ -199,6 +200,10 @@ jobs:
                 # scootbar job. It imports scootbg's runner, whose own
                 # changes fall to the catch-all below and run everything.
                 scripts/scootbar-bench/*)
+                  scootbar=true ;;
+                # The tool behind crates/scootbar/orderfile/; its unit tests
+                # and the check of the order file run in the scootbar job.
+                scripts/scootbar-orderfile/*)
                   scootbar=true ;;
                 # The appearance hardware test: not run in CI (it needs a
                 # real display), but its refusals are pinned by
@@ -1078,6 +1083,21 @@ jobs:
       - name: Benchmark harness tests
         run: python3 -m unittest discover -s scripts/scootbar-bench -p 'test_*.py'
 
+      # The order-file tool's own logic (a symbol to a glob, a qemu log, the
+      # file's shape), the same way.
+      - name: Order file tool tests
+        run: python3 -m unittest discover -s scripts/scootbar-orderfile -p 'test_*.py'
+
+      # build.rs's own logic (which RUSTFLAGS shape the trial link, and that a
+      # linker that cannot be run or refuses the flag fails the trial rather
+      # than the build): Cargo does not run a build script's tests, so rustc
+      # does.
+      - name: scootbar build script tests
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          rustc --edition 2024 --test crates/scootbar/build.rs -o "$RUNNER_TEMP/scootbar-build-rs-tests"
+          "$RUNNER_TEMP/scootbar-build-rs-tests"
+
       # scootbar's features, read from its manifest (every feature but
       # `default`: one per module, and `icon-image`, the optional PNG
       # decoder; crates/scootbar/Cargo.toml says so), for the feature
@@ -1152,6 +1172,20 @@ jobs:
             exit 1
           fi
           echo "ok: links only what std links"
+
+      # crates/scootbar/orderfile/hot-text.ld has to find its functions in a
+      # real release build, or the kernel is back to mapping nearly all of
+      # the code at start-up (docs/scootbar/README.md, "Usage
+      # optimization"). An unstripped build in its own directory, so the
+      # stripped one above stays what it is; the profile was taken on
+      # aarch64, so some of its functions are not here, hence the margin.
+      - name: The hot-text order file lands in the release build
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          CARGO_PROFILE_RELEASE_STRIP=false CARGO_TARGET_DIR="$RUNNER_TEMP/scootbar-unstripped" \
+            cargo build --release -p scootbar
+          python3 scripts/scootbar-orderfile/orderfile.py check \
+            --binary "$RUNNER_TEMP/scootbar-unstripped/release/scootbar" --min-coverage 0.8
 
       # The fuzz targets (crates/scootbar/fuzz, its own workspace, which no
       # step above compiles) for a fixed budget: a fixed number of runs from
