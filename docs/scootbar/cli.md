@@ -161,7 +161,7 @@ time zone database, say) print their note as a start does and are left out;
 that is not a failure. What the flag costs (aarch64, release, stripped): +2.4 KB of text (code and
 help; 1,200,636 to 1,203,036 bytes), no change in data or bss, the file
 the same size to the byte (segments are page-aligned), and an idle daemon's
-`VmRSS` unchanged (3,360 kB either way, five runs each). It moves startup
+`VmRSS` unchanged within noise (3,360 to 3,376 kB, one 3,552 outlier, five runs each). It moves startup
 code into a function the start also uses; nothing on a per-frame path.
 
 ## `scootbar msg`
