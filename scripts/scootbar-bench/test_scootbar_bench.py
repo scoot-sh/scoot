@@ -104,6 +104,64 @@ class Configs(unittest.TestCase):
             with open(argv[2]) as f:
                 self.assertNotIn("left:", f.read())
 
+    def test_ironbar_config_and_the_scope_it_cannot_show_on_scoot(self):
+        i = bars.Ironbar(store="/s/ironbar")
+        self.assertTrue(i.informational)
+        self.assertIsNone(i.cannot_show("clock", "scoot"))
+        self.assertIsNone(i.cannot_show("clock-workspaces", "sway"))
+        self.assertIn("ext-workspace-v1", i.cannot_show("clock-workspaces", "scoot"))
+        with tempfile.TemporaryDirectory() as d:
+            argv = i.write_config(d, None, "clock-workspaces", "sway")
+            with open(argv[argv.index("-c") + 1]) as f:
+                config = json.load(f)
+            with open(argv[argv.index("-t") + 1]) as f:
+                css = f.read()
+            with self.assertRaises(AssertionError):
+                i.write_config(d, None, "clock-workspaces", "scoot")
+            clock_only = i.write_config(d, None, "clock", "scoot")
+            with open(clock_only[clock_only.index("-c") + 1]) as f:
+                alone = json.load(f)
+        self.assertEqual(argv[0], "/s/ironbar/bin/ironbar")
+        self.assertEqual(config["height"], bars.HEIGHT)
+        self.assertEqual(config["position"], "top")
+        self.assertEqual(config["start"], [{"type": "workspaces"}])
+        self.assertEqual(config["end"], [{"type": "clock", "format": bars.FORMAT}])
+        self.assertNotIn("center", config)
+        self.assertIn(f"font-size: {bars.FONT_PX}px", css)
+        self.assertIn("DejaVu Sans", css)
+        self.assertIn(f"#{bars.BACKGROUND}", css)
+        self.assertIn(f"#{bars.FOREGROUND}", css)
+        self.assertNotIn("start", alone)
+
+    def test_ashell_config_places_modules_and_sets_the_look(self):
+        a = bars.Ashell(store="/s/ashell")
+        self.assertTrue(a.informational)
+        for scope in bars.SCOPES:
+            for compositor in ("scoot", "sway"):
+                self.assertIsNone(a.cannot_show(scope, compositor))
+        with tempfile.TemporaryDirectory() as d:
+            argv = a.write_config(d, None, "clock-workspaces", "scoot")
+            with open(argv[argv.index("-c") + 1]) as f:
+                text = f.read()
+            clock = a.write_config(d, None, "clock", "sway")
+            with open(clock[clock.index("-c") + 1]) as f:
+                clock_text = f.read()
+        self.assertEqual(argv[0], "/s/ashell/bin/ashell")
+        self.assertIn('left = ["Workspaces"]', text)
+        # The window title in its default middle is not the scope's.
+        self.assertIn("center = []", text)
+        self.assertIn('right = ["Tempo"]', text)
+        self.assertIn(f'clock_format = "{bars.FORMAT}"', text)
+        self.assertIn('font_name = "DejaVu Sans"', text)
+        self.assertIn(f'base = "#{bars.BACKGROUND}"', text)
+        self.assertIn(f'text_color = "#{bars.FOREGROUND}"', text)
+        self.assertIn("left = []", clock_text)
+
+    def test_the_informational_bars_are_opt_in_and_the_ratified_set_is_unchanged(self):
+        self.assertEqual([c.name for c in bars.ALL if c.informational], ["ironbar", "ashell"])
+        self.assertEqual([c.name for c in bars.ALL if not c.informational],
+                         ["scootbar", "yambar", "waybar"])
+
     def test_the_other_bars_can_show_every_scope_on_both_compositors(self):
         for cls in (bars.Scootbar, bars.Waybar):
             for scope in bars.SCOPES:
@@ -298,6 +356,48 @@ class Gates(unittest.TestCase):
         self.assertIn("- NOT COMPARED on scoot: rival: no ext-workspace-v1 module", text)
         self.assertEqual(failed, 1, text)
         self.assertIn("0 loss(es)", text)
+
+    def test_an_informational_bar_ahead_is_a_finding_and_never_fails_the_gate(self):
+        meta, runs = results(scootbar_rss_kb=4096, rival_rss_kb=1024)
+        meta["bars"]["rival"]["informational"] = True
+        with tempfile.TemporaryDirectory() as d:
+            write(d, meta, runs)
+            text, failed = tables.gate(d)
+        self.assertEqual(failed, 0, text)
+        self.assertIn("0 loss(es)", text)
+        self.assertIn("rival (informational)", text)
+        # Still shown, and said, but as a finding apart from the gate.
+        rss = next(line for line in text.splitlines() if line.startswith("| Idle RSS"))
+        self.assertIn("beats scootbar", rss)
+        self.assertIn("- FINDING on scoot: Idle RSS: rival", text)
+        self.assertIn("promoting them into the rule is the maintainer's call", text)
+        self.assertNotIn("LOSS", text)
+        self.assertNotIn("- tie:", text)
+
+    def test_an_informational_bar_that_cannot_show_the_scope_is_not_a_failed_gate(self):
+        meta, runs = results(scootbar_rss_kb=1024, rival_rss_kb=4096)
+        meta["bars"]["rival"].update(informational=True, ran={"scoot": False},
+                                     cannot_show={"scoot": "no ext-workspace-v1"})
+        runs = [r for r in runs if r["bar"] != "rival"]
+        with tempfile.TemporaryDirectory() as d:
+            write(d, meta, runs)
+            text, failed = tables.gate(d)
+        self.assertEqual(failed, 0, text)
+        self.assertIn("cannot show this scope", text)
+        self.assertIn("- not shown on scoot: rival: no ext-workspace-v1", text)
+        self.assertNotIn("NOT COMPARED", text)
+
+    def test_an_informational_bar_with_a_value_scootbar_lacks_is_not_unjudged(self):
+        meta, runs = results(scootbar_rss_kb=1024, rival_rss_kb=4096)
+        meta["bars"]["rival"]["informational"] = True
+        for r in runs:
+            if r["bar"] == "scootbar" and r["row"] == "idle":
+                r.update(ok=False, error="no first frame")
+        with tempfile.TemporaryDirectory() as d:
+            write(d, meta, runs)
+            text, failed = tables.gate(d)
+        self.assertEqual(failed, 0, text)
+        self.assertNotIn("NO SCOOTBAR VALUE", text)
 
     def test_the_machines_readings_are_summarised_beside_the_numbers(self):
         def reading(cur, cap, ac):
