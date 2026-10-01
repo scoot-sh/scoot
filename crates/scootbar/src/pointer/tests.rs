@@ -225,6 +225,25 @@ fn a_reload_disarms_a_press_but_the_pointer_stays_where_it_is() {
     );
 }
 
+#[test]
+fn a_reload_with_a_button_held_keeps_the_chord_detection() {
+    let (mut pointer, a, _) = focused();
+    let here = target(a, 0);
+    pointer.press(LEFT, Some(here));
+    pointer.disarm();
+    // The left button is still down: a right press now is a second button
+    // held, a chord, and neither releases is a click.
+    pointer.press(RIGHT, Some(here));
+    assert_eq!(pointer.release(RIGHT, Some(here)), None);
+    assert_eq!(pointer.release(LEFT, Some(here)), None);
+    // Both are up: a press is a plain click again.
+    pointer.press(LEFT, Some(here));
+    assert_eq!(
+        pointer.release(LEFT, Some(here)),
+        Some((Trigger::Click, here))
+    );
+}
+
 // ---- touch ----
 
 #[test]

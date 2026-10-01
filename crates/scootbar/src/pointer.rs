@@ -195,9 +195,14 @@ impl Pointer {
 
     /// The modules changed under the pointer (a reload): what was armed or
     /// waiting was for modules that are not there any more, so it goes. The
-    /// pointer itself has not moved, and is still over the bar.
+    /// pointer itself has not moved, and is still over the bar, and the
+    /// buttons still held still are: they stay in `down`, so a second one
+    /// pressed after the reload is still a chord (no click), and each
+    /// release clears its own.
     pub fn disarm(&mut self) {
+        let down = self.down;
         self.clear();
+        self.down = down;
     }
 
     fn clear(&mut self) {
