@@ -10,7 +10,7 @@
 //! - **`{ exec = ["cmd", "arg"] }`**: a command line, run directly, never
 //!   through a shell unless the user writes `sh -c` themselves;
 //! - **`{ scoot = "quit" }`**: a request to scoot's own control socket
-//!   (a build with the `scoot` feature).
+//!   (always built, not a Cargo feature: the request is one fixed line).
 //!
 //! An input with no configured binding asks the module for its own default
 //! ([`crate::modules::Module::on_input`]: the workspaces module's click is

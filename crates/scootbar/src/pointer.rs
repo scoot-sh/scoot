@@ -12,11 +12,12 @@
 //! was gone by then) does nothing, and never leaves a press armed: that
 //! is how a button behaves everywhere else, and it is what makes "a
 //! release after the pointer left" a non-event rather than a stray
-//! action. A second button pressed while one is armed disarms both (a
-//! chord is not a click). Only left, right and middle are buttons; the
-//! rest are ignored. The surface holds an implicit grab from press to
-//! release, so the release always arrives, and a `leave` (the surface
-//! went away) clears the press too.
+//! action. A second button pressed while one is held disarms both, and
+//! no press arms until every button is up again (a chord is not a click).
+//! Only left, right and middle are buttons; the rest are ignored. The
+//! surface holds an implicit grab from press to release, so the release
+//! always arrives, and a `leave` (the surface went away) clears the press
+//! too.
 //!
 //! ## Scrolling is counted in steps and released once a frame
 //!
@@ -90,6 +91,15 @@ impl Button {
         }
     }
 
+    /// This button's bit in [`Pointer::down`].
+    fn bit(self) -> u8 {
+        match self {
+            Self::Left => 1,
+            Self::Right => 2,
+            Self::Middle => 4,
+        }
+    }
+
     fn trigger(self) -> Trigger {
         match self {
             Self::Left => Trigger::Click,
@@ -133,6 +143,10 @@ struct Armed {
 pub struct Pointer {
     focus: Option<Focus>,
     armed: Option<Armed>,
+    /// The buttons held now, a [`Button::bit`] each: a press arms only when
+    /// none was, so a third button pressed after a cancelled chord (while
+    /// one of the first two is still held) is not a click either.
+    down: u8,
     /// The continuous `axis` movement of the frame being read, in 120ths
     /// of a step.
     continuous: i32,
@@ -188,6 +202,7 @@ impl Pointer {
 
     fn clear(&mut self) {
         self.armed = None;
+        self.down = 0;
         self.continuous = 0;
         self.discrete = 0;
         self.has_discrete = false;
@@ -200,18 +215,21 @@ impl Pointer {
         let Some(button) = Button::from_code(code) else {
             return;
         };
-        if self.armed.is_some() {
-            // A second button: a chord is no click.
-            self.armed = None;
-            return;
-        }
-        self.armed = target.map(|target| Armed { button, target });
+        let chord = self.down != 0;
+        self.down |= button.bit();
+        // A second button while one is held: a chord is no click.
+        self.armed = if chord {
+            None
+        } else {
+            target.map(|target| Armed { button, target })
+        };
     }
 
     /// A button went up over `target` (`None`: over no module): the click
     /// to carry out, if the button was armed on this same module.
     pub fn release(&mut self, code: u32, target: Option<Target>) -> Option<(Trigger, Target)> {
         let button = Button::from_code(code)?;
+        self.down &= !button.bit();
         let armed = self.armed.filter(|armed| armed.button == button)?;
         self.armed = None;
         (target == Some(armed.target)).then_some((button.trigger(), armed.target))

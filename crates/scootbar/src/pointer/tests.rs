@@ -114,6 +114,26 @@ fn a_second_button_makes_a_chord_not_a_click() {
 }
 
 #[test]
+fn a_third_button_after_a_chord_arms_nothing_while_one_is_held() {
+    let (mut pointer, a, _) = focused();
+    let here = target(a, 0);
+    pointer.press(LEFT, Some(here));
+    pointer.press(RIGHT, Some(here));
+    // Left comes up, right is still down: a middle press is part of the
+    // same chord, not a click of its own.
+    assert_eq!(pointer.release(LEFT, Some(here)), None);
+    pointer.press(MIDDLE, Some(here));
+    assert_eq!(pointer.release(MIDDLE, Some(here)), None);
+    assert_eq!(pointer.release(RIGHT, Some(here)), None);
+    // Everything up: the next press is a click again.
+    pointer.press(MIDDLE, Some(here));
+    assert_eq!(
+        pointer.release(MIDDLE, Some(here)),
+        Some((Trigger::MiddleClick, here))
+    );
+}
+
+#[test]
 fn the_wrong_buttons_release_does_not_fire_or_disarm() {
     let (mut pointer, a, _) = focused();
     let here = target(a, 0);

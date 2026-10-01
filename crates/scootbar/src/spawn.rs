@@ -9,8 +9,9 @@
 //!   the control socket and its lock, the shm memfds, the clock's timerfd,
 //!   font and zone files) is `CLOEXEC`, which is what `std` sets on
 //!   everything it opens and what the crate's own `rustix` calls ask for.
-//!   `tests/exec.rs` lists the fds of a command launched by a running bar,
-//!   so a future fd opened without it fails a test. (`WAYLAND_SOCKET`, the
+//!   `tests/pointer.rs::a_launched_command_holds_none_of_the_bars_descriptors`
+//!   lists the fds of a command launched by a running bar, so a future fd
+//!   opened without it fails a test. (`WAYLAND_SOCKET`, the
 //!   fd number a compositor may have started the bar with, is removed from
 //!   the environment by `wayland-client` when it takes the socket.) The
 //!   child leads its own process group, so a signal to the bar's group

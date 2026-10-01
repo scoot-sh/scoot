@@ -254,7 +254,7 @@ fn a_child_inherits_none_of_the_callers_descriptors() {
     // A descriptor opened the way `std` and `rustix` open everything here
     // is close-on-exec, so the child sees only stdio and what it opened
     // itself. (The running bar's own descriptors are checked by
-    // `tests/exec.rs`.)
+    // `tests/pointer.rs::a_launched_command_holds_none_of_the_bars_descriptors`.)
     let dir = Dir::new("fds");
     let file = std::fs::File::open("/dev/null").expect("open");
     let held = rustix::io::fcntl_dupfd_cloexec(&file, 100).expect("dup");

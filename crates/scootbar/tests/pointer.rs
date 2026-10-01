@@ -19,7 +19,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use common::{Reaper, Session, Shot, open_fds, rgb, settled_fds};
+use common::{PATIENCE, Reaper, Session, Shot, open_fds, rgb, settled_fds};
 
 const BAR: &str = "#102030";
 const FG: &str = "#f0f0f0";
@@ -317,11 +317,20 @@ fn a_launched_command_holds_none_of_the_bars_descriptors() {
         fds.iter().all(|&fd| fd <= 3),
         "inherited: {fds:?} (the bar has {held})"
     );
-    assert_eq!(
-        open_fds(rig.pid()),
-        held,
-        "the launch leaked a descriptor into the bar"
-    );
+    // The bar holds the child's pidfd until its loop reaps it, a turn after
+    // the command printed its last line: the count is back to what it was
+    // once that turn has run, never at a fixed moment (a loaded machine
+    // makes the turn late, which failed this test about half the runs under
+    // six spinning CPUs). A leak is a count that never comes back.
+    let deadline = Instant::now() + PATIENCE;
+    while open_fds(rig.pid()) != held {
+        assert!(
+            Instant::now() < deadline,
+            "the launch leaked a descriptor into the bar: {} open, {held} before",
+            open_fds(rig.pid())
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
