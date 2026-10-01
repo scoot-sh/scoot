@@ -253,8 +253,7 @@ Four findings, fixed in `7b2c6a57c` (the code; this entry is the commit
 after it and changes none). The checks above ran at the tree before it, and
 are stale for what it touched, so they were re-run at it (below); the stack
 was rebased onto `main` at `7a1f9030a` in between, which changes no file
-under `crates/` (`git diff ba4ceef99 7b2c6a57c -- crates Cargo.lock` is
-empty, `ba4ceef99` being the commit as it was tested).
+under `crates/`, so every check below is of `7b2c6a57c`'s crates tree.
 
 - **A flaky test, found and fixed.** `a_launched_command_holds_none_of_the_bars_descriptors`
   failed once under load in review. The cause was in the test, not the bar:
@@ -279,7 +278,7 @@ empty, `ba4ceef99` being the commit as it was tested).
   Cargo feature gates `{ scoot = "quit" }` (decision 1: there is none).
 
 ```text
-checks at 7b2c6a57c's crates tree (shipped as ba4ceef99), dev VM, own targets in /dev/shm,
+checks captured at 7b2c6a57c's crates tree, dev VM, own targets in /dev/shm,
 scoot built from this tree (/dev/shm/m4t/debug/scoot):
 cargo fmt --check -p scootbar                                          ok
 cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
@@ -293,3 +292,94 @@ cargo nextest run -p scootbar --bin scootbar --all-features                486 p
   ... --no-default-features 342 | --features clock 414 | --features workspaces 401 | --features icon-image 360
 fuzz crate: cargo check --locked --bins                                ok
 ```
+
+### After the second review (2026-10-01)
+
+CI was red at the head, from a test and not the bar: two descriptor tests
+asserted every descriptor a child holds is at most 3, and CI's test process
+is started with descriptors open without close-on-exec (4, 5, 142 and 145),
+which every child inherits. Every dev-VM run had started from a clean
+shell, so none saw it. Fixed in `2c0b07a0b`; a second, smaller finding in
+`6dbcf4d0f`; and a cross-test race the audit below found, in `4d4556f18` (the
+code; this entry is the commit after them and changes none).
+
+- **Reproduced first, at `47b413a99`** (the head the review failed), on the
+  dev VM under a launcher that leaves those descriptors open and ignores
+  `SIGHUP` (`/dev/shm/hostile.sh` on the VM: `exec 4</dev/null 5</dev/null
+  142</dev/null 145</dev/null; trap '' HUP; exec "$@"`):
+
+  ```text
+  hostile cargo nextest run -p scootbar --no-fail-fast
+  FAIL spawn::tests::a_child_inherits_none_of_the_callers_descriptors    [0, 1, 142, 145, 2, 3, 4, 5]
+  FAIL scootbar::pointer a_launched_command_holds_none_of_the_bars_descriptors   inherited: [0, 1, 142, 145, 2, 3, 4, 5] (the bar has 12)
+  Summary 534 tests run: 532 passed, 2 failed
+  ```
+- **The fix.** The tests compare the child's descriptors with the ones the
+  test process would hand any child (`/proc/self/fdinfo`, `O_CLOEXEC` not
+  set; `src/testfds.rs` and `tests/common`): stdio, those, and the one
+  descriptor `ls` opens (the lowest free number, so a leak cannot hide
+  behind it: it takes that number and pushes `ls`'s to the next). The
+  pointer test also asserts the running bar holds no descriptor without
+  close-on-exec beyond what its launcher gave it, which names a leak
+  whatever a command lists. The control test (a descriptor left inheritable
+  does reach the child, and the comparison names it) and every test that
+  lists a child's descriptors take one lock: under `cargo test` they share a
+  process, and the control's descriptor would otherwise reach a sibling's
+  child while that sibling's baseline lacked it.
+- **Wording.** `spawn.rs` and `cli.md` said a command "inherits none of the
+  bar's file descriptors". True of the ones the bar opens; one a launcher
+  left open when it started the bar reaches every command, as any child.
+- **`disarm` kept losing chord detection (low).** A reload cleared the
+  held-button set with what was armed, so a second button pressed after a
+  reload with one still held looked like a first press. The pointer has not
+  moved and the button is still down, so `disarm` now keeps the set (each
+  release clears its own) and drops only what was armed or waiting
+  (`a_reload_with_a_button_held_keeps_the_chord_detection`).
+- **Other tests that assume a clean launcher: audited, and one race found.**
+  `grep -rnE "env::var|var_os|set_var|current_dir|\.env\("` over `src/` and
+  `tests/`: the reads in tests are `PATH` (to find `foot`), the
+  `SCOOTBAR_REQUIRE_*` and `SCOOTBAR_TEST_*` switches, and `TZ` set on a child
+  by the test itself; every other test sets what it needs on the child it
+  starts (`XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, `env_remove` of
+  `WAYLAND_SOCKET` and `WAYLAND_DEBUG`); none sets a variable in its own
+  process or changes the directory. The suite also ran, from `/`, under a
+  launcher with `TZ=Asia/Kathmandu`, `WAYLAND_DISPLAY`, `WAYLAND_SOCKET` and
+  `WAYLAND_DEBUG` set and `HOME`, `XDG_RUNTIME_DIR` and `XDG_CONFIG_HOME`
+  unset, on top of the open descriptors and the ignored `SIGHUP`: 538 passed
+  (nextest), every `cargo test` target ok (`env-run-ptr-4d4556f18.txt`). No
+  test here sends `SIGHUP` or reads a `SigIgn` mask. **The race:** a grep for
+  descriptors created without close-on-exec found `rustix::pipe::pipe()`
+  (pipe(2) with no flags) in `modules/tests.rs`, four tests. Under `cargo
+  test` (one process) one of those pipes can be open while a descriptor test
+  spawns and lists a child, and then reaches the child without being in the
+  baseline: a rare flake that nextest, a process per test, cannot show. They
+  are `pipe_with(CLOEXEC)` now. (Product code: every `timerfd_create` and
+  file open asks for `CLOEXEC`, and the bar-level assertion above checks the
+  rest on a running bar.)
+
+```text
+checks captured at 4d4556f18 (the code: git archive, fresh extract), dev VM, scoot built from the stack's
+tree (/dev/shm/scoot-bin, built at 47b413a99: the stack changes no file under
+crates/scoot*), own targets in /dev/shm; log: verify-ptr-4d4556f18.log
+cargo fmt --check -p scootbar                                          ok
+cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
+  (default) | --no-default-features | ... --features clock | ... --features workspaces
+  | ... --features icon-image | --all-features
+SCOOTBAR_TEST_SCOOT=/dev/shm/scoot-bin SCOOTBAR_REQUIRE_SCOOT=1 cargo nextest run -p scootbar
+  plain                                                  Summary 538 tests run: 538 passed, 0 skipped
+  hostile (fds 4 5 142 145 open, SIGHUP ignored)         538 passed
+cargo test -p scootbar, plain and hostile                all "test result: ok" (471 + 3 + 11 + 8 + 7 + 4 + 2 + 1 + 4 + 11 + 7 + 9 ...)
+cargo test -p scootbar --bin scootbar, hostile, x5       471 passed each (the cross-test races under one process)
+from /, TZ=Asia/Kathmandu, WAYLAND_* set, no HOME, hostile   538 passed (nextest), all ok (cargo test)
+nextest, target dir with no scoot, hostile               538 passed (the integration tests skip)
+hostile nextest --bin scootbar: --all-features 490 | --no-default-features 346
+  | --features clock 418 | --features workspaces 405 | --features icon-image 364
+cargo check --locked --bins in crates/scootbar/fuzz                    ok
+(captured earlier, at 2c0b07a0b, which differs from 4d4556f18 only in modules/tests.rs's four pipes:
+ the same suite also passed under nohup, 538, and 538 with a plain launcher; log verify-ptr-2c0b07a0b.log)
+```
+
+Not verified: nothing new beyond the first entry's list (touch, real
+hardware, sway, a real `systemd --user`); the new check's only negative
+control is the existing one at the spawner (a leaked descriptor is named); the
+bar-level `fdinfo` assertion was not run against a deliberately leaking bar.
