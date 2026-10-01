@@ -460,6 +460,19 @@ fn a_stream_of_changes_is_told_at_the_frame_rate() {
     // One connection writes a `set` about every millisecond for 400 ms: a
     // change on nearly every loop turn, for a frame (16 ms) to coalesce.
     let mut stream = UnixStream::connect(rig.socket()).unwrap();
+    // Every `set` is answered, and a connection nobody reads the answers of
+    // stalls itself: the daemon stops reading requests once its socket
+    // buffer of replies is full, which is about 270 tiny replies (the kernel
+    // counts each write's overhead, not its 14 bytes). A loop of a thousand
+    // requests a second for 400 ms reaches that on a fast machine, the last
+    // `set` is never read and the test waits for it for ever (it hung one
+    // `cargo test` run in four). So the answers are read as they come.
+    let mut replies = stream.try_clone().unwrap();
+    let drain = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut sink = [0u8; 4096];
+        while matches!(replies.read(&mut sink), Ok(n) if n > 0) {}
+    });
     let started = Instant::now();
     let mut last = 0u32;
     while started.elapsed() < Duration::from_millis(400) {
@@ -491,6 +504,8 @@ fn a_stream_of_changes_is_told_at_the_frame_rate() {
         }
         assert!(heard < last + 10, "never heard the last value {last}");
     }
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    let _ = drain.join();
     let frames = u32::try_from(elapsed.as_millis() / 16).unwrap();
     assert!(heard >= 2, "{heard} events for {last} sets");
     assert!(
