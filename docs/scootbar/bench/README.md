@@ -27,3 +27,4 @@ its own. The method is in [testing.md](../testing.md#benchmark).
 | [`m3-asahi-clock`](m3-asahi-clock/table.md) | the clock | M3 `3211551` | the same machine and harness; scootbar only |
 | [`m3-asahi-clock-rerun`](m3-asahi-clock-rerun/table.md) | the clock | M3 `3211551` | the same, second run |
 | [`m3-asahi-clock-workspaces`](m3-asahi-clock-workspaces/table.md) | clock and workspaces | M3 `3211551` | the same machine; scootbar, yambar (sway only) and Waybar, on scoot and sway |
+| [`m3-asahi-clock-bindfix`](m3-asahi-clock-bindfix/table.md) | the clock | `cbbeffd` (M3 plus the unplaced-workspaces bind fix) | the same machine and harness; scootbar only; a **single run**; release `scootbar` built from that commit, headless `scoot`/`scootctl` release built from the same tree (source identical to `main` at `90a96ca`, no `crates/scoot` change) |

@@ -32,6 +32,8 @@
 //! (rustix has no `signalfd`), which `#![forbid(unsafe_code)]` forbids, so
 //! a reload is `scootbar msg reload` (scootbg documents the same reasoning).
 
+#[cfg(feature = "workspaces")]
+mod binds;
 mod canvas;
 mod listen;
 mod respond;

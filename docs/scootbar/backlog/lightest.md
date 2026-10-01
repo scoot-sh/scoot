@@ -178,6 +178,36 @@ to judge them against.
 Verdict: **M3's gate does not pass**: rule 1 fails on the rows above, and rule 2
 has one pair not compared. Neither was waived here.
 
+**After the fix (2026-09-30, `cbbeffd`, branch `fix/scootbar-unplaced-workspace-bind`).**
+The daemon now binds `ext_workspace_manager_v1` and `wl_seat` only while a
+workspaces module is placed (at connect, when the global appears later, and
+after a `reload`, which also lets them go when the module is removed). One run
+of the same harness and settings on the same machine
+([`bench/m3-asahi-clock-bindfix`](../bench/m3-asahi-clock-bindfix/table.md);
+a single run, not repeated, so each verdict below is one pairing):
+`compare` against [`m3-asahi-clock`](../bench/m3-asahi-clock/table.md) exits 1
+(one flag: sway idle CPU, 0.6 to 0.9 ms, a row the table above already did
+not count; switching CPU is better on both compositors) and against
+[`m3-asahi-m1-baseline-clock`](../bench/m3-asahi-m1-baseline-clock/table.md)
+exits 1 (11 flags).
+
+- **Fixed: CPU while switching workspaces**, 12.0 / 10.5 ms (scoot / sway) to
+  0.2 / 0.2 ms, against M1's 0.2 / 0.1 ms (`compare`: same). Wakeups while
+  switching (not gated), 242 to 2, as M1.
+- **Still regressed against M1, not touched by this fix:** idle RSS, idle PSS,
+  idle heap and peak memory (3.5 / 2.1 / 0.4 / 3.5 MiB, as at M3, against
+  M1's 2.9 / 1.5 / 0.3 / 2.9) and size (1,383,080 against 924,320 bytes).
+  Idle CPU is flagged on both compositors in this one pairing against M1
+  (0.9 to 1.0 ms against 0.6 to 0.9), where the table above did not count it
+  (it flagged in 3 of 4 pairings); one run does not settle it.
+- **Open descriptors (5 to 8) are not this bind.** A clock-only bar on headless
+  scoot holds 8 after the fix, as before it (`ls -l /proc/PID/fd`: three on
+  stdio, the clock's timerfd, the daemon's lock file and three sockets, one of
+  them listed twice). Binding a global opens none; which of these M1 did not
+  have was not traced here. Not a gated row.
+- Nothing here waives a row or changes M3's verdict: rule 1 still fails on
+  memory and size.
+
 ## Rules
 
 - Release builds only (`lto = "fat"`, `panic = "abort"`).

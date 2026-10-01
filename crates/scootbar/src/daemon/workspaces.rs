@@ -13,8 +13,9 @@
 //! scoot sends none), both `capabilities` (the bar only ever sends
 //! `activate`+`commit`, which a compositor without the capability ignores),
 //! and a `finished` manager's objects afterwards (the shared state stops
-//! the module sending anything on them: a request past `finished` is a
-//! protocol error, which would kill the bar).
+//! the module sending anything on them: a request on the manager past
+//! `finished` is a protocol error, which would kill the bar; destroying its
+//! handles stays legal).
 
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, event_created_child};
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_group_handle_v1::{
@@ -37,13 +38,29 @@ impl Dispatch<ExtWorkspaceManagerV1, ()> for State {
 
     fn event(
         state: &mut Self,
-        _: &ExtWorkspaceManagerV1,
+        manager: &ExtWorkspaceManagerV1,
         event: ext_workspace_manager_v1::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
         let mut shared = state.workspaces.0.borrow_mut();
+        // A manager let go (`binds`: no workspaces module placed), or
+        // replaced by a later bind, may still have events on the wire. They
+        // are not this run's state: a handle it announces is destroyed
+        // unseen, and its `finished` must not mark the new manager dead.
+        if shared.manager() != Some(manager) {
+            match event {
+                ext_workspace_manager_v1::Event::WorkspaceGroup { workspace_group } => {
+                    workspace_group.destroy();
+                }
+                ext_workspace_manager_v1::Event::Workspace { workspace } => {
+                    workspace.destroy();
+                }
+                _ => {}
+            }
+            return;
+        }
         match event {
             ext_workspace_manager_v1::Event::WorkspaceGroup { workspace_group } => {
                 shared.on_group(workspace_group);
