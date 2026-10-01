@@ -9,8 +9,8 @@
 //! | `wp_viewporter` | optional: sizes a buffer drawn at a fractional scale |
 //! | `wp_fractional_scale_manager_v1` | optional, with `wp_viewporter`: device-pixel sizes at fractional scales |
 //! | `wl_output` (each) | bound as they appear, released as they go |
-//! | `ext_workspace_manager_v1` | optional: without it the workspaces module stays empty (said on stderr when placed) |
-//! | `wl_seat` | optional: without it a click cannot reach the bar (said on stderr when workspaces are placed) |
+//! | `ext_workspace_manager_v1` | optional, bound only while the workspaces module is placed (`binds`): without it the module stays empty (said on stderr when placed) |
+//! | `wl_seat` | optional, bound only while a module that takes clicks is placed (`binds`): without it a click cannot reach the bar (said on stderr when workspaces are placed) |
 //!
 //! Without the two optional ones the bar is drawn at the integer scale
 //! (`wl_output.scale`, the fraction rounded up) and the compositor scales it
@@ -36,8 +36,6 @@ use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_client::{ConnectError, Connection, EventQueue, Proxy, QueueHandle, delegate_noop};
-#[cfg(feature = "workspaces")]
-use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::ExtWorkspaceManagerV1;
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
@@ -114,6 +112,9 @@ pub struct State {
     /// `ext-workspace-v1` dispatch writes it, the module reads it.
     #[cfg(feature = "workspaces")]
     pub workspaces: Link,
+    /// Which optional globals are offered, bound only while placed.
+    #[cfg(feature = "workspaces")]
+    pub binds: super::binds::Binds,
     /// The seat's pointer, once its capabilities say it has one.
     pub pointer: Option<WlPointer>,
     /// Which output the pointer is over, and where on its bar surface
@@ -177,22 +178,6 @@ impl Wayland {
         } else {
             None
         };
-        // The workspaces module's protocol: version 1 is the only one.
-        // Optional: without it the module stays empty, said in `run` (not
-        // in `missing`, whose note is about scaling).
-        #[cfg(feature = "workspaces")]
-        {
-            let bound: Option<ExtWorkspaceManagerV1> = maybe(list.bind(&qh, 1..=1, ()));
-            if let Some(manager) = bound {
-                workspaces.0.borrow_mut().set_manager(manager);
-            }
-        }
-        // A seat for clicks: the pointer itself is taken once its
-        // capabilities arrive (`surfaces`: a seat without one must never
-        // see `get_pointer`). Said in `run` when workspaces are placed.
-        // Workspaces-only for now (see `Globals::seat`).
-        #[cfg(feature = "workspaces")]
-        let seat: Option<WlSeat> = maybe(list.bind(&qh, 1..=9, ()));
         let mut state = State {
             globals: Globals {
                 compositor,
@@ -201,7 +186,7 @@ impl Wayland {
                 viewporter,
                 fractional_scale,
                 #[cfg(feature = "workspaces")]
-                seat,
+                seat: None,
             },
             outputs: Outputs::default(),
             placement,
@@ -209,6 +194,8 @@ impl Wayland {
             content,
             #[cfg(feature = "workspaces")]
             workspaces,
+            #[cfg(feature = "workspaces")]
+            binds: super::binds::Binds::new(list.registry().clone()),
             pointer: None,
             pointer_on: None,
         };
@@ -265,13 +252,6 @@ fn optional<I: Proxy>(missing: &mut Vec<&'static str>, bound: Result<I, BindErro
             None
         }
     }
-}
-
-/// An optional global whose absence is said elsewhere (the workspaces
-/// protocol and the seat, in `run`): `None` when absent or too old.
-#[cfg(feature = "workspaces")]
-fn maybe<I: Proxy>(bound: Result<I, BindError>) -> Option<I> {
-    bound.ok()
 }
 
 impl wayland_client::Dispatch<WlRegistry, GlobalListContents> for State {

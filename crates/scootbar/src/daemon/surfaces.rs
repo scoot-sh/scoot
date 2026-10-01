@@ -311,6 +311,11 @@ impl State {
         name: u32,
         version: u32,
     ) {
+        // The globals bound on demand are `binds`' business.
+        #[cfg(feature = "workspaces")]
+        if self.offer(interface, name, version, qh) {
+            return;
+        }
         if interface != WlOutput::interface().name {
             return;
         }
@@ -338,6 +343,10 @@ impl State {
     /// A global went away. An output's objects are all destroyed, whatever
     /// state it was in, mid-configure or mid-draw included.
     pub fn global_remove(&mut self, name: u32) {
+        #[cfg(feature = "workspaces")]
+        if self.withdraw(name) {
+            return;
+        }
         if let Some(entry) = self.outputs.remove_global(name) {
             #[cfg(feature = "workspaces")]
             self.workspaces

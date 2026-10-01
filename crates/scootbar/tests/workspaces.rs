@@ -577,3 +577,206 @@ fn a_circle_pill_is_round_and_a_click_still_switches() {
     });
     toy.close(&session, &mut bar);
 }
+
+// What the bar holds while no workspaces module is placed: a bar that does
+// not show workspaces must not be woken for them, so it must not bind
+// `ext_workspace_manager_v1` (or the seat, which only that module's clicks
+// need), and a reload adding or removing the module binds and releases them
+// live. Read from the bar's own `WAYLAND_DEBUG` trace.
+
+/// How many times the trace binds `interface` from the registry.
+fn bound(trace: &str, interface: &str) -> usize {
+    trace
+        .lines()
+        .filter(|line| {
+            line.contains("-> wl_registry@") && line.contains(&format!("\"{interface}\""))
+        })
+        .count()
+}
+
+/// The trace lines that are the compositor's events on a workspace
+/// protocol object (the manager, a group or a workspace): `<-` marks an
+/// event in the trace.
+fn workspace_events(trace: &str) -> Vec<&str> {
+    trace
+        .lines()
+        .filter(|line| {
+            line.contains("<- ")
+                && [
+                    "ext_workspace_manager_v1@",
+                    "ext_workspace_group_handle_v1@",
+                    "ext_workspace_handle_v1@",
+                ]
+                .iter()
+                .any(|object| line.contains(object))
+        })
+        .collect()
+}
+
+/// A config file placing `left` in the session's font, a clock in the
+/// center, and the bar 28 high.
+fn placing(session: &Session, left: &str) -> PathBuf {
+    let path = session.runtime_dir().join("binds.toml");
+    std::fs::write(
+        &path,
+        format!(
+            "left = [{left}]\ncenter = [\"clock\"]\n\n[bar]\nheight = 28\nfont = \"{}\"\n",
+            session.font().display()
+        ),
+    )
+    .unwrap();
+    path
+}
+
+/// `scootbar daemon --config PATH` with a protocol trace in the bar log.
+fn traced_daemon(session: &Session, path: &std::path::Path) -> Reaper {
+    let log = std::fs::File::create(session.bar_log()).unwrap();
+    let child = session
+        .scootbar()
+        .arg("daemon")
+        .arg("--config")
+        .arg(path)
+        .env("WAYLAND_DEBUG", "1")
+        .stdout(std::process::Stdio::null())
+        .stderr(log)
+        .spawn()
+        .unwrap();
+    Reaper(child)
+}
+
+fn reload(session: &Session) {
+    let out = session.scootbar().args(["msg", "reload"]).output().unwrap();
+    assert!(
+        out.status.success(),
+        "reload: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Opens a window, switches to the workspace after it and closes the
+/// window: a batch of workspace changes a bound manager would be sent.
+fn churn(session: &Session, bar: &mut Reaper) {
+    let toy = ToyWindow::open(session.wayland_socket());
+    session.wait_for(&mut bar.0, "a window mapped", |session| {
+        let reply = session.scoot_ipc(r#"{"type":"windows"}"#);
+        (!reply["windows"].as_array()?.is_empty()).then_some(())
+    });
+    let reply =
+        session.scoot_ipc(r#"{"type":"action","action":"focus_workspace_index","index":1}"#);
+    assert_eq!(reply["type"], "ok", "{reply}");
+    toy.close(session, bar);
+    // A round trip through the bar's own connection: what scoot sent has
+    // been read by now.
+    std::thread::sleep(Duration::from_millis(300));
+}
+
+#[test]
+fn a_bar_without_the_module_binds_no_workspace_protocol_and_hears_nothing() {
+    let Some(session) = Session::scoot("ws-unplaced", 1, "") else {
+        return;
+    };
+    let path = placing(&session, "");
+    let mut bar = traced_daemon(&session, &path);
+    session.wait_for(&mut bar.0, "the bar up", |session| {
+        session.bar_stderr().contains(".configure,").then_some(())
+    });
+    churn(&session, &mut bar);
+    let trace = session.bar_stderr();
+    assert!(trace.contains("\"wl_output\""), "no trace: {trace}");
+    assert_eq!(bound(&trace, "ext_workspace_manager_v1"), 0);
+    assert_eq!(bound(&trace, "wl_seat"), 0);
+    let events = workspace_events(&trace);
+    assert!(events.is_empty(), "{events:?}");
+}
+
+#[test]
+fn a_bar_with_the_module_binds_the_protocol_once_and_hears_the_changes() {
+    let Some(session) = Session::scoot("ws-placed", 1, "") else {
+        return;
+    };
+    let path = placing(&session, "\"workspaces\"");
+    let mut bar = traced_daemon(&session, &path);
+    session.wait_for(&mut bar.0, "the first batch", |session| {
+        session.bar_stderr().contains(".done, ").then_some(())
+    });
+    churn(&session, &mut bar);
+    let trace = session.bar_stderr();
+    assert_eq!(bound(&trace, "ext_workspace_manager_v1"), 1);
+    assert_eq!(bound(&trace, "wl_seat"), 1);
+    assert!(workspace_events(&trace).len() > 4);
+}
+
+#[test]
+fn a_reload_binds_and_releases_the_protocol_with_the_module() {
+    let Some(session) = Session::scoot("ws-reload", 1, "") else {
+        return;
+    };
+    let mut bar = traced_daemon(&session, &placing(&session, ""));
+    session.wait_for(&mut bar.0, "the bar up", |session| {
+        session.bar_stderr().contains(".configure,").then_some(())
+    });
+    let pid = bar.0.id();
+    let fds = common::settled_fds(pid);
+    assert_eq!(bound(&session.bar_stderr(), "ext_workspace_manager_v1"), 0);
+
+    // Added: bound now, and the first batch arrives.
+    placing(&session, "\"workspaces\"");
+    reload(&session);
+    session.wait_for(&mut bar.0, "the manager's first batch", |session| {
+        session.bar_stderr().contains(".done, ").then_some(())
+    });
+    let trace = session.bar_stderr();
+    assert_eq!(bound(&trace, "ext_workspace_manager_v1"), 1, "{trace}");
+    assert_eq!(bound(&trace, "wl_seat"), 1);
+
+    // Removed: stopped and released, every handle destroyed, and the
+    // descriptors back to where they were.
+    placing(&session, "");
+    reload(&session);
+    session.wait_for(&mut bar.0, "the manager stopped", |session| {
+        let trace = session.bar_stderr();
+        (trace.contains(".stop()") && trace.contains(".finished, ")).then_some(())
+    });
+    let trace = session.bar_stderr();
+    assert!(
+        trace
+            .lines()
+            .any(|l| l.contains("-> ext_workspace_handle_v1@") && l.contains(".destroy()"))
+    );
+    assert!(
+        trace
+            .lines()
+            .any(|l| l.contains("-> wl_seat@") && l.contains(".release()")),
+        "the seat was not released"
+    );
+    assert_eq!(common::settled_fds(pid), fds, "a release leaked fds");
+    // Nothing more is heard: whatever comes after the stop is `finished`
+    // and the handles that raced it.
+    let stopped = trace.find(".stop()").unwrap();
+    let mark = session.bar_stderr().len();
+    churn(&session, &mut bar);
+    let after = session.bar_stderr();
+    assert!(
+        workspace_events(&after[mark.max(stopped)..])
+            .iter()
+            .all(|line| line.contains(".finished, ")),
+        "{}",
+        &after[mark..]
+    );
+
+    // Added again: a fresh bind, working.
+    placing(&session, "\"workspaces\"");
+    reload(&session);
+    session.wait_for(&mut bar.0, "the second bind", |session| {
+        (bound(&session.bar_stderr(), "ext_workspace_manager_v1") == 2).then_some(())
+    });
+    churn(&session, &mut bar);
+    // Alive throughout and never a protocol error: the bar still answers.
+    assert!(bar.0.try_wait().unwrap().is_none());
+    assert!(
+        !session.bar_stderr().contains("error"),
+        "{}",
+        session.bar_stderr()
+    );
+    assert_eq!(common::settled_fds(pid), fds, "a second bind leaked fds");
+}

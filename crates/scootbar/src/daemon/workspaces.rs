@@ -37,13 +37,29 @@ impl Dispatch<ExtWorkspaceManagerV1, ()> for State {
 
     fn event(
         state: &mut Self,
-        _: &ExtWorkspaceManagerV1,
+        manager: &ExtWorkspaceManagerV1,
         event: ext_workspace_manager_v1::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
         let mut shared = state.workspaces.0.borrow_mut();
+        // A manager let go (`binds`: no workspaces module placed), or
+        // replaced by a later bind, may still have events on the wire. They
+        // are not this run's state: a handle it announces is destroyed
+        // unseen, and its `finished` must not mark the new manager dead.
+        if shared.manager() != Some(manager) {
+            match event {
+                ext_workspace_manager_v1::Event::WorkspaceGroup { workspace_group } => {
+                    workspace_group.destroy();
+                }
+                ext_workspace_manager_v1::Event::Workspace { workspace } => {
+                    workspace.destroy();
+                }
+                _ => {}
+            }
+            return;
+        }
         match event {
             ext_workspace_manager_v1::Event::WorkspaceGroup { workspace_group } => {
                 shared.on_group(workspace_group);

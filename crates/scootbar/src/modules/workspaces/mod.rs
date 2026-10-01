@@ -53,6 +53,7 @@ use std::cell::RefCell;
 use std::fmt::Write;
 use std::rc::Rc;
 
+use wayland_client::Proxy;
 use wayland_client::protocol::wl_output::WlOutput;
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1;
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_handle_v1::ExtWorkspaceHandleV1;
@@ -252,6 +253,14 @@ struct Ws {
     active: bool,
 }
 
+/// Destroys a workspace handle once (staged and committed hold clones of
+/// one handle, and a destroyed one is no longer alive).
+fn destroy_workspace(ws: &Ws) {
+    if let Some(handle) = ws.handle.as_ref().filter(|h| h.is_alive()) {
+        handle.destroy();
+    }
+}
+
 /// The leading ASCII digits of a workspace name (`"2 DP-1"` shows `2`); 0
 /// when there are none.
 fn parse_number(name: &str) -> u32 {
@@ -282,6 +291,47 @@ impl Shared {
     pub(crate) fn set_manager(&mut self, manager: ExtWorkspaceManagerV1) {
         self.manager = Some(manager);
         self.live = true;
+    }
+
+    /// The manager, for the daemon to tell it from a stale one (one it
+    /// asked to `stop`, whose last events may still be on the wire).
+    pub(crate) fn manager(&self) -> Option<&ExtWorkspaceManagerV1> {
+        self.manager.as_ref()
+    }
+
+    /// Lets the protocol go: no workspaces module is placed any more
+    /// (`daemon::binds`). Stops the manager (the compositor answers
+    /// `finished` and sends nothing after), destroys every handle it made,
+    /// and forgets what they said, so a later bind starts clean. The output
+    /// names stay: they come from `wl_output`, not from this protocol.
+    /// Bumps the generation, so a module placed again draws from nothing.
+    pub(crate) fn release(&mut self) {
+        if let Some(manager) = self.manager.take() {
+            if manager.is_alive() {
+                manager.stop();
+            }
+        }
+        self.live = false;
+        for ws in self.pending[..self.pending_len].iter() {
+            destroy_workspace(ws);
+        }
+        for group in &mut self.groups[..self.groups_len] {
+            for ws in group.staged[..group.staged_len]
+                .iter()
+                .chain(&group.committed[..group.committed_len])
+            {
+                destroy_workspace(ws);
+            }
+            if let Some(handle) = group.group.as_ref().filter(|h| h.is_alive()) {
+                handle.destroy();
+            }
+        }
+        self.groups = std::array::from_fn(|_| Group::default());
+        self.groups_len = 0;
+        self.pending = std::array::from_fn(|_| Ws::default());
+        self.pending_len = 0;
+        self.said_no_room = false;
+        self.generation = self.generation.wrapping_add(1);
     }
 
     fn group_index(&self, group: &ExtWorkspaceGroupHandleV1) -> Option<usize> {

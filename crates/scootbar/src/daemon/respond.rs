@@ -243,6 +243,9 @@ impl Responder<'_> {
             self.conn,
             self.qh,
         );
+        // What is placed now decides what the bar holds (`binds`).
+        #[cfg(feature = "workspaces")]
+        self.state.sync_binds(self.qh);
         Ok(())
     }
 

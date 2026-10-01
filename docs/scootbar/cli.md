@@ -284,6 +284,14 @@ gains it: the click is the same `activate`.
 - **The pill is square and the bar's full height by default**; its shape
   is [configurable](#the-active-workspaces-pill): rounded, a pill, or a
   circle.
+- **The protocol is bound only while the module is placed.** A bar with no
+  workspaces module never binds `ext_workspace_manager_v1` or `wl_seat`, so
+  the compositor sends it nothing about workspaces and it wakes for none of
+  it. A `scootbar msg reload` that adds the module binds both then; one
+  that removes it stops the manager, destroys its handles and releases the
+  seat and pointer (the descriptor count returns to what it was). A
+  compositor that starts advertising the protocol later is bound at that
+  point if the module is placed.
 - **Without `ext-workspace-v1`** the module shows nothing (one stderr note
   at start-up says the protocol is missing) and takes no space.
   **Without `wl_seat`** clicks do nothing (said too). The bar still starts;
