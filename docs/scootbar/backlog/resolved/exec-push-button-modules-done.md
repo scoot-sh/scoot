@@ -13,7 +13,12 @@ resolved: "2026-09-30"
 Resolved 2026-09-30 (draft PR, second of the M4 stack, on the pointer input
 PR). What landed, the decisions, and the evidence are below the original
 entry, which is kept as filed. **The resource ratchet for it is measured on the
-dev VM only (below); the run on the real hardware is still to do.**
+dev VM only (below); the run on the real hardware is still to do.** *Update 2026-10-01: measured on the Asahi M2 since: see
+[the M4 section](../../README.md#m4-pointer-input-exec-and-the-agent-interface-on-the-asahi-m2)
+and #368. The stack against M3 post-fix, `compare` exit 1 at every layer: size
++9.5% (#364), +14.2% (#366), +19.0% (#367), idle RSS/PSS/peak +0.14 to +0.20
+MiB; startup, wakeups, idle CPU (pooled) and the switching CPU unchanged;
+nothing waived.*
 
 Filed 2026-09-29. Serves **daily-drive** (launcher and power buttons) and
 **computer use** (anything can put text on the bar).
@@ -144,7 +149,8 @@ is the reference.
    `SIGINT` ignored):
 
    ```text
-   before (8e34e3fd3's bar)        loop shells alive   after (d201a88ed's bar)   loop shells alive
+   before (8e34e3fd3's bar)        loop shells alive   after (the bar built from d201a88ed's   loop shells alive
+                                                       src/, before its amend)
                                    +0.3 s   +3 s                                 +0.3 s   +3 s
    SIGTERM  (exit 143)               1        1        SIGTERM  (exit 143)         0        0
    SIGINT   (exit 130)               1        1        SIGINT   (exit 130)         0        0
@@ -216,7 +222,8 @@ The same bench, dev VM and settings as the pointer entry's
 --settle-secs 20 --idle-secs 120 --switches 40`, two runs of each alternating,
 **PR 1** (pointer input, `c9361fc4c`'s tree) against **this PR**, so the rows are
 the cost of this entry alone. **Dev VM numbers, not the ratchet's machine; the
-run that counts is the maintainer's and is still to do.**
+run that counts is the maintainer's and is still to do** (done since: see the
+update at the top).
 
 | Row | PR 1 (2 runs) | this PR (2 runs) | `compare` |
 | --- | --- | --- | --- |
@@ -292,7 +299,8 @@ that this *process* had no children, which another test's child breaks when
 tests share one process (`cargo test`); it and the zombie test now check the
 command's own pid (`echo $$`), and both runners pass.
 
-Not verified: real hardware, sway, a `button` whose command opens a window on a
+Not verified: real hardware (the Asahi M2 ratchet was done since, headless: see the
+update at the top; no `--tty` run), sway, a `button` whose command opens a window on a
 real desktop (the click was checked to run the command), and `cargo fuzz`.
 
 ### After review (2026-10-01)
@@ -320,7 +328,8 @@ descriptor-test changes): `d201a88ed` is now `843930926` and `8e34e3fd3` is
 
   ```text
   before (8e34e3fd3's test):  7 failures / 300   (iterations 37, 40, 88, 184, 191, 206, 255)
-  after  (d201a88ed):         0 failures / 300   load average 1.75
+  after  (the unit-test binary built from d201a88ed's src/, before its amend, which
+          changed only tests/exec.rs and testing.md):  0 failures / 300   load average 1.75
   ```
 - **Docs**: the recipe is print-first (`while :; do ...; sleep N; done`), a
   one-shot command is a poll backing off to a minute, and "one line per
@@ -345,7 +354,7 @@ cargo fmt --check -p scootbar                                          ok
 cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
   (default) | --no-default-features | ... --features clock | ... --features workspaces
   | ... --features button | ... --features push | ... --features exec
-  | --features icon-image | --all-features
+  | --features icon-image | ... --no-default-features --features icon-image | --all-features
 SCOOTBAR_TEST_SCOOT=/dev/shm/m4t/debug/scoot SCOOTBAR_REQUIRE_SCOOT=1 \
   cargo nextest run -p scootbar --no-fail-fast        Summary 633 tests run: 633 passed, 0 skipped
 cargo nextest run -p scootbar --no-fail-fast  (target dir with no scoot)   633 passed (the integration tests skip)

@@ -14,7 +14,12 @@ Resolved 2026-09-30 (draft PR, third of the M4 stack, on the `exec` / `push` /
 `button` PR). What landed, the decisions, the ratchet and the evidence are
 below the original entry, which is kept as filed. **The resource ratchet for it
 is measured on the dev VM only (below); the run on the real hardware is still
-to do.**
+to do.** *Update 2026-10-01: measured on the Asahi M2 since: see
+[the M4 section](../../README.md#m4-pointer-input-exec-and-the-agent-interface-on-the-asahi-m2)
+and #368. The stack against M3 post-fix, `compare` exit 1 at every layer: size
++9.5% (#364), +14.2% (#366), +19.0% (#367), idle RSS/PSS/peak +0.14 to +0.20
+MiB; startup, wakeups, idle CPU (pooled) and the switching CPU unchanged;
+nothing waived.*
 
 Filed 2026-09-29. Serves **computer use** (the reason to make the bar
 machine-readable) and daily-drive (scripts). The bar's socket is separate from
@@ -132,7 +137,7 @@ cost of this entry alone. Runs 1 to 4 are of the first build of this PR
 build (`d925d11b...`, code `883a9039`, which fixes a subscriber bug and streams
 `layout`; the idle path is the same two calls a turn), pr3 first then pr2.
 **Dev VM numbers, not the ratchet's machine; the run that counts is the
-maintainer's and is still to do.**
+maintainer's and is still to do** (done since: see the update at the top).
 
 | Row | PR 2 (6 runs) | this PR (6 runs) | `compare` (per run) |
 | --- | --- | --- | --- |
@@ -219,7 +224,8 @@ rectangle. `query`'s text is checked against the screen in `tests/exec.rs` (the
 same state).
 
 Not verified: real hardware (no `--tty` run: nothing here touches the DRM or
-the VT path), the ratchet on the maintainer's machine, `subscribe` against a
+the VT path), the ratchet on the maintainer's machine (done since on the
+Asahi M2, headless: see the update at the top), `subscribe` against a
 compositor other than scoot headless and sway (the `output` events are checked
 on sway, `module` events on scoot), and a subscriber under a sustained
 frame-rate stream for long. A `SCOOTBAR_REQUIRE_SWAY=1` run of `tests/hotplug.rs`
@@ -268,10 +274,15 @@ onto `main` at `7a1f9030a` and the two PRs under this one (their own fixes).
   the last value for ever. `cargo test -p scootbar --test agent` hung in 2 of 8
   runs, and the full `cargo test` run of the review round hung on it for 8
   minutes. A thread now drains the replies: 0 hangs and 0 failures in 55 runs
-  after. The daemon's behavior (a client that does not read stalls its own
-  connection) is unchanged: it is the back-pressure a slow reader gets, not a
-  fault this PR introduced, and the oldest connection is still the one evicted
-  when the cap is reached.
+  after. The daemon's behavior is unchanged, and the code says it is deliberate:
+  `control/conn.rs` stops handling a connection's requests once
+  `OUT_SOFT_LIMIT` (4,096 bytes) of replies are queued and resumes when the
+  client reads, and `control/mod.rs` uses no timers: at the cap of 16 the oldest
+  connection is closed to admit a new one (`admit`), which is what bounds a
+  client that never reads. [robustness-and-limits](../robustness-and-limits.md)
+  still lists "a write-stall deadline that drops a peer that stopped reading" as
+  a bound to build: this is the case it describes, and it is not built (the hung
+  run held its connection for eight minutes). Left alone here.
 
 ```text
 checks at 384e78bdd (git archive of it, dev VM, own targets in /dev/shm, scoot built from
@@ -280,7 +291,7 @@ cargo fmt --check -p scootbar                                          ok
 cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
   (default) | --no-default-features | ... --features clock | ... --features workspaces
   | ... --features button | ... --features push | ... --features exec
-  | --features icon-image | --all-features
+  | --features icon-image | ... --no-default-features --features icon-image | --all-features
 SCOOTBAR_TEST_SCOOT=/dev/shm/m4t/debug/scoot SCOOTBAR_REQUIRE_SCOOT=1 \
   cargo nextest run -p scootbar --no-fail-fast        Summary 686 tests run: 686 passed, 0 skipped
 cargo nextest run -p scootbar --no-fail-fast  (target dir with no scoot)   686 passed (the integration tests skip)

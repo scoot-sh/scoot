@@ -146,8 +146,12 @@ scopes (`--scope clock`, and `--scope clock-workspaces`, M3's), the base
 being `main` at `e6ca6e35a` (M3 with the unplaced-workspaces bind fix, #363)
 and this PR rebased onto it (`c9361fc4c`'s tree). **These are the dev VM's
 numbers, not the ratchet's machine; the run that counts is the maintainer's
-on the real hardware, and is still to do.** Every row below is shown, none
-waived.
+on the real hardware, and is still to do.** (*Update 2026-10-01: it was done,
+on the Asahi M2, at this PR's tip and at the stack's: size +9.5% and idle heap
+one to two pages against M3 post-fix, `compare` exit 1, startup, wakeups, idle
+CPU and the switching CPU unchanged, nothing waived. See
+[the M4 section](../../README.md#m4-pointer-input-exec-and-the-agent-interface-on-the-asahi-m2)
+and #368.*) Every row below is shown, none waived.
 
 | Row | `main` (2 runs) | this PR (2 runs) | `compare`, run 1 |
 | --- | --- | --- | --- |
@@ -243,7 +247,7 @@ and came back).
 
 Not verified: touch (scoot cannot inject it; the bar never asks for a
 `wl_touch`, pinned by `touch_and_the_keyboard_never_get_a_pointer`), real
-hardware (any `--tty` or Asahi run: none was done), sway, and a restart of
+hardware (any `--tty` run; the Asahi ratchet above was a headless one), sway, and a restart of
 the Nix user unit under a real `systemd --user` through
 `scripts/scootbar-unit-test.sh` (only the transient-unit control above).
 
@@ -265,8 +269,9 @@ under `crates/`, so every check below is of `7b2c6a57c`'s crates tree.
   load (`~/m4/stress.sh`: one `--exact` run per iteration):
 
   ```text
-  before (87bc33c02's test):  25 failures in the first 66 iterations
-    (the loop was stopped after iteration 66; "left: 9 right: 8", once "left: 10")
+  before (87bc33c02's test):  25 failures in at least 66 iterations
+    (the loop was killed at an unrecorded point after iteration 66, where its last
+    failure was; "left: 9 right: 8", once "left: 10")
   after  (7b2c6a57c):         0 failures / 100 iterations, load average 6.9
   ```
 - **A third button after a cancelled chord armed Middle** while one of the
