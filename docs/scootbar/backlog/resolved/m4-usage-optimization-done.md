@@ -105,7 +105,7 @@ drift shows.
 
 ## Resolution (2026-10-01)
 
-Done in [the usage-optimization PR](https://github.com/scoot-sh/scoot/pulls?q=m4-usage-optimization):
+Done in [PR #372](https://github.com/scoot-sh/scoot/pull/372):
 the numbers, the attribution and every lever tried are in
 [the README's "M4 usage optimization"](../../README.md#m4-usage-optimization); the raw
 runs are `bench/m4-usage-*` ([index](../../bench/README.md)), every `compare` and the
