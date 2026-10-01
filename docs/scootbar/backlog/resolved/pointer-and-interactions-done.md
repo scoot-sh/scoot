@@ -246,3 +246,50 @@ Not verified: touch (scoot cannot inject it; the bar never asks for a
 hardware (any `--tty` or Asahi run: none was done), sway, and a restart of
 the Nix user unit under a real `systemd --user` through
 `scripts/scootbar-unit-test.sh` (only the transient-unit control above).
+
+### After review (2026-10-01)
+
+Four findings, fixed in `7b2c6a57c` (the code; this entry is the commit
+after it and changes none). The checks above ran at the tree before it, and
+are stale for what it touched, so they were re-run at it (below); the stack
+was rebased onto `main` at `7a1f9030a` in between, which changes no file
+under `crates/` (`git diff ba4ceef99 7b2c6a57c -- crates Cargo.lock` is
+empty, `ba4ceef99` being the commit as it was tested).
+
+- **A flaky test, found and fixed.** `a_launched_command_holds_none_of_the_bars_descriptors`
+  failed once under load in review. The cause was in the test, not the bar:
+  it compared the bar's descriptor count at a fixed moment after the command
+  printed its last line, but the bar holds the child's pidfd until its loop
+  reaps it, a turn later. The test now waits for the count to come back (up
+  to the suite's 20 s patience); a leak is a count that never does. On the
+  dev VM, the test binary run alone in a loop with six busy loops of CPU
+  load (`~/m4/stress.sh`: one `--exact` run per iteration):
+
+  ```text
+  before (87bc33c02's test):  25 failures in the first 66 iterations
+    (the loop was stopped after iteration 66; "left: 9 right: 8", once "left: 10")
+  after  (7b2c6a57c):         0 failures / 100 iterations, load average 6.9
+  ```
+- **A third button after a cancelled chord armed Middle** while one of the
+  first two was still held. The pointer now keeps the set of buttons down and
+  arms a press only when none was, so a chord ends at the last release
+  (`a_third_button_after_a_chord_arms_nothing_while_one_is_held`).
+- Two comments were wrong: `spawn.rs` cited `tests/exec.rs` for the
+  descriptor test (it is `tests/pointer.rs`), and `action.rs` said a `scoot`
+  Cargo feature gates `{ scoot = "quit" }` (decision 1: there is none).
+
+```text
+checks at 7b2c6a57c's crates tree (shipped as ba4ceef99), dev VM, own targets in /dev/shm,
+scoot built from this tree (/dev/shm/m4t/debug/scoot):
+cargo fmt --check -p scootbar                                          ok
+cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
+  (default) | --no-default-features | ... --features clock | ... --features workspaces
+  | ... --features icon-image | --features icon-image | --all-features
+SCOOTBAR_TEST_SCOOT=/dev/shm/m4t/debug/scoot SCOOTBAR_REQUIRE_SCOOT=1 \
+  cargo nextest run -p scootbar --no-fail-fast        Summary 534 tests run: 534 passed, 0 skipped
+cargo nextest run -p scootbar --no-fail-fast  (target dir with no scoot)   534 passed (the integration tests skip)
+SCOOTBAR_TEST_SCOOT=... SCOOTBAR_REQUIRE_SCOOT=1 cargo test -p scootbar    467 + 3 + 11 + 8 + 7 + 4 + 2 + 1 + 4 + 11 + 7 + 9 passed
+cargo nextest run -p scootbar --bin scootbar --all-features                486 passed
+  ... --no-default-features 342 | --features clock 414 | --features workspaces 401 | --features icon-image 360
+fuzz crate: cargo check --locked --bins                                ok
+```
