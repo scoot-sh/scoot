@@ -263,7 +263,12 @@ pinned nixpkgs' tzdata).
   pipelined behind the `subscribe` refused in the same write, a client that
   hangs up ending it, a subscriber that stops reading dropped after what the
   socket's own buffer took, an event too big for one write ending it, a
-  broadcast reaching only its kind and the others keeping theirs); the layout
+  broadcast reaching only its kind and the others keeping theirs); the
+  streaming client against a scratch socket (`control/tests.rs`: a stream that
+  closes between lines ends 0, a line the connection cut is discarded and an
+  error, a first line cut likewise, a daemon that says nothing is no reply, and
+  a line past the bound is refused; the cut and bound tests fail with the old
+  print-it-anyway behavior); the layout
   geometry (`daemon/agent/tests.rs`: top and bottom edges, margins, an origin
   left of zero, hostile sizes, and the property that every device pixel of a
   span is inside its rectangle at scales 1, 1.25, 1.5, 1.75, 2, 2.5 and 3); and
@@ -277,7 +282,9 @@ pinned nixpkgs' tzdata).
   bar with no rectangles, `query ID`, `invoke` running each trigger's binding
   and refusing each wrong ask without running anything, a `set` a
   millisecond for 400 ms heard by a subscriber as the last text in about one
-  event a frame, not one a change (it fails with the gate removed), an idle
+  event a frame, not one a change (it fails with the gate removed; it reads the
+  replies to its sets as they come, for a connection nobody reads the replies
+  of stalls itself after about 270 and the test would wait for ever), an idle
   bar with two subscribers waking for nothing, a subscriber that hangs up
   leaving the daemon answering, a subscribed connection refused further
   requests, and the subscriber cap with a slot coming back (`tests/hotplug.rs` adds an `output` subscriber told a

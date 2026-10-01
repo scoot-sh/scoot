@@ -73,8 +73,9 @@ is the reference.
 - **`layout`**: per output, its name, origin, scale and `bar` rectangle (`null`
   while hidden or not configured), and each module's rectangle, all in the
   compositor's global logical pixels **as last drawn**: the scene's own spans (the
-  layout the last committed frame used) converted at the scale that frame was
-  drawn at, rounded outward (`Scale::logical_floor` / `logical_ceil`), so a
+  layout the last committed frame used, in device pixels) converted at the
+  output's current scale (agent.rs `write_layout` reads `output.scale()`; it is
+  not recorded with the frame), rounded outward (`Scale::logical_floor` / `logical_ceil`), so a
   pointer on any drawn pixel of a module is inside its rectangle and a pointer
   one pixel outside is not.
 - **`invoke ID ACTION [N] [--output NAME]`** goes through `action::perform`, the
@@ -230,3 +231,63 @@ One thing in the first build that review of it found and this one fixes: a
 `subscribe` re-armed the event state, so a change held back by the frame gate
 was forgotten by every subscriber already attached. It is now decided by
 `Events::begin` and `pending`, with unit tests.
+
+### After review (2026-10-01)
+
+The review's four findings, and one more found re-running the tests, are
+fixed in `3f01c5ef7` and `384e78bdd` (this entry is the commit after them and
+changes no code). The checks above ran at an earlier tree, so they are stale
+for what these touched and were re-run at `384e78bdd`. The stack was rebased
+onto `main` at `7a1f9030a` and the two PRs under this one (their own fixes).
+
+- **`subscribe` printed a cut line as if whole and exited 0.** The daemon
+  drops a subscriber whose batch the socket cannot take whole, which can leave
+  the client a prefix of a line. `control::client::stream_to` now gives `each`
+  whole lines only: an unterminated last line is discarded, the command says
+  so on stderr and **exits 1** (a daemon that closes between two lines is still
+  0), and a line past the 16 MiB bound is refused the same way. Four tests
+  (`control/tests.rs`, against a scratch socket); with the old behavior put
+  back, the three that assert the new outcome fail (`a_line_cut_by_the_connection_ending_is_discarded_and_an_error`,
+  `a_first_line_cut_is_discarded_too`, `a_line_with_no_end_past_the_bound_is_refused_not_passed_on`)
+  and the clean-close one passes.
+- **Docs**: aiming at a layout rectangle is `scoot msg pointer click X Y`
+  (checked against `crates/scoot/src/cli.rs`'s own help and `docs/ipc.md`;
+  there is no `scoot msg click`); `layout` converts the last committed
+  frame's device-pixel spans with the output's **current** scale
+  (`write_layout` reads `output.scale()`; nothing records the scale a frame was
+  drawn at), which this entry and `cli.md` had overstated; `subscribe` has no
+  snapshot, so "subscribe first, then query".
+- **A hang in a test, found by `cargo test` (nextest never reached it).**
+  `a_stream_of_changes_is_told_at_the_frame_rate` wrote about 300 `set`s in
+  400 ms and never read an answer. A connection nobody reads the answers of
+  stalls itself once the socket's buffer of replies is full, about 270 tiny
+  replies (the kernel counts each write's overhead, not its 14 bytes): the
+  daemon stops reading requests (`ss -xp` on a hung run showed 1,064 unread
+  bytes of requests in the daemon's receive queue and the bar showing the 289th
+  value, not the last), the last `set` is never applied and the test waits for
+  the last value for ever. `cargo test -p scootbar --test agent` hung in 2 of 8
+  runs, and the full `cargo test` run of the review round hung on it for 8
+  minutes. A thread now drains the replies: 0 hangs and 0 failures in 55 runs
+  after. The daemon's behavior (a client that does not read stalls its own
+  connection) is unchanged: it is the back-pressure a slow reader gets, not a
+  fault this PR introduced, and the oldest connection is still the one evicted
+  when the cap is reached.
+
+```text
+checks at 384e78bdd (git archive of it, dev VM, own targets in /dev/shm, scoot built from
+the pointer tree: no crates/scoot change anywhere in the stack, /dev/shm/m4t/debug/scoot):
+cargo fmt --check -p scootbar                                          ok
+cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
+  (default) | --no-default-features | ... --features clock | ... --features workspaces
+  | ... --features button | ... --features push | ... --features exec
+  | --features icon-image | --all-features
+SCOOTBAR_TEST_SCOOT=/dev/shm/m4t/debug/scoot SCOOTBAR_REQUIRE_SCOOT=1 \
+  cargo nextest run -p scootbar --no-fail-fast        Summary 686 tests run: 686 passed, 0 skipped
+cargo nextest run -p scootbar --no-fail-fast  (target dir with no scoot)   686 passed (the integration tests skip)
+SCOOTBAR_TEST_SCOOT=... SCOOTBAR_REQUIRE_SCOOT=1 cargo test -p scootbar    595 + 10 + 3 + 11 + 8 + 13 + 8 + 4 + 2 + 1 + 4 + 11 + 7 + 9 passed
+SCOOTBAR_REQUIRE_SWAY=1 cargo test -p scootbar --test hotplug              8 passed, 0 skipped (sway 1.12 on the VM)
+cargo nextest run -p scootbar --bin scootbar --all-features                614 passed
+  ... --no-default-features 391 | clock 464 | workspaces 451 | icon-image 409
+  | button 413 | push 416 | exec 440
+cargo check --locked --bins in crates/scootbar/fuzz                        ok
+```
