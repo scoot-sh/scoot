@@ -229,6 +229,64 @@ bound the comparison (ashell's bar height and font size are not options; neither
 has a clock interval setting; M0's ashell config used a clock table 0.10.0
 ignores) are in the README subsection.
 
+**2026-10-01 note: the M4 stack on the Asahi M2.** The three draft PRs
+(#364 pointer input, #366 `button`/`push`/`exec`, #367 the agent interface)
+were measured at each layer's tip against `main` and against M3's post-fix
+run: one scope (the clock), scootbar alone, the same machine, harness and
+settings, one pinned release `scoot` for every run, eleven runs in three rounds
+(`bench/m4-asahi-clock-*`; tables and method in the
+[README](../README.md#m4-pointer-input-exec-and-the-agent-interface-on-the-asahi-m2)).
+**One departure from the baseline, stated plainly:** the M3 post-fix run ran
+scoot and sway, and rounds one and two of this run ran **scoot only**; round
+three ran both for `main`, #367 and the experiment, and **#364 and #366 have no
+sway run**. **Rule 1 (no regression against the last measured state) fails for the
+stack; nothing is waived, no target moved, no PR touched by this note.**
+
+- **Regressed against M3 post-fix, per `compare`** (the harness's own
+  verdict, exit 1 for each layer): the **size** row at every layer, 1,383,080 B
+  to 1,514,152 (#364, +9.5%), 1,579,720 (#366, +14.2%) and 1,645,256
+  (#367, +19.0%), against `main` at 1,383,080 (exit 0 in two of three runs; the
+  third flags only sway's idle heap, by one page, on byte-identical code); the
+  **idle memory** rows, at #366 RSS 3.5 to 3.7, PSS 2.1 to 2.3, heap 0.4 to 0.5
+  and peak 3.5 to 3.7 MiB, and at #364 and #367 the heap (0.4 to 0.5 MiB, one or
+  two 16 KiB pages). RSS, PSS and peak are +0.13 to +0.20 MiB at every layer in
+  every run; which of them `compare` flags in a given run depends on where that
+  run falls against a 0.18 MiB margin.
+- **Unchanged** (`compare`: same, in every run of every layer): startup, idle
+  wakeups (2 a minute), the CPU and wakeups of 240 workspace switches (0.2 ms
+  and 2), threads (1). **Idle CPU**, pooled with `verdict()` over #367's three
+  runs [1.044, 0.993, 1.096] ms against `main`'s three [0.926, 0.943, 0.951]:
+  same (margin 0.128); single runs flag it in places (#367's first run against
+  `main`'s first, round three's pair on both compositors, the experiment's
+  second run against M3 post-fix), which is the row's noise on this box.
+- **The noise rule**: the margin is the largest of 5% of the baseline's
+  median, the two sides' spread and the unit's floor (0.1 ms, 0.01 MiB, 1
+  unit). Each build against its own other runs on scoot: `main` exits 0 and 0,
+  #367 exits 0 and 0, the experiment exits 1 and 0 (idle CPU 1.09 to 1.30 ms).
+- **Per-PR compares cannot see the cumulative creep.** #366 against #364 and
+  #367 against #366 each exit 0 (+65,568 and +65,536 B, inside the size row's
+  5% margin of 75,708 B), while the stack's total is +262,176 B (+19.0%, exit
+  1 against `main`). The loaded code and data grew +17.1%; at #366, about half
+  of its new text and read-only symbols (53 of 106 KB, by `nm`) is `toml`
+  deserialization of the three new table shapes, and sharing one instance
+  would save about 33 to 36 KB (estimated, not implemented). The file grows in
+  64 KiB-aligned steps, so a layer's size step is its real growth rounded
+  across boundaries.
+- **An experiment, not in any PR:** `[profile.release.package.scootbar]
+  opt-level = "s"` (with `strip = true`, quoted in the README) on #367 takes
+  `.text` from 1,105,320 to 927,720 B (-16.1%, 0.3% below `main`'s), the bare
+  executable to 1,315,552 B (-13.0% against #367 but **still 65,568 B larger than
+  `main`'s 1,249,984**: the "smaller than `main`" lead reproduced for `.text`
+  only), the closure to 1,448,648 B (inside the size margin, so `compare` does not
+  flag it) and idle RSS/PSS to within the margin of `main`'s. Its idle CPU,
+  [1.086, 1.302, 1.062] ms against `main`'s three, is **the same** by the
+  pooled verdict (margin 0.265; an earlier two-run reading said regressed); the
+  median is +0.14 ms and three runs cannot say whether that is a cost. Redraw
+  cost was not measured. The maintainer decides; nothing in the stack changed.
+- Not remeasured: rule 2 (competitors), which nothing in this stack touches,
+  and what *using* the new modules costs (the dev VM's table in
+  [exec-push-button-modules-done](resolved/exec-push-button-modules-done.md)).
+
 ## Rules
 
 - Release builds only (`lto = "fat"`, `panic = "abort"`).

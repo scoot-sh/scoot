@@ -1,0 +1,293 @@
+{
+ "date": "2026-10-01 04:26:00 EDT",
+ "machine": {
+  "kernel": "7.1.13",
+  "arch": "aarch64",
+  "cpus": 8,
+  "page_size": 16384,
+  "loadavg_start": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "start": {
+   "cpus": {
+    "cpu0": {
+     "governor": "schedutil",
+     "cur_khz": 600000,
+     "policy_max_khz": 2424000,
+     "hw_max_khz": 2424000
+    },
+    "cpu1": {
+     "governor": "schedutil",
+     "cur_khz": 600000,
+     "policy_max_khz": 2424000,
+     "hw_max_khz": 2424000
+    },
+    "cpu2": {
+     "governor": "schedutil",
+     "cur_khz": 600000,
+     "policy_max_khz": 2424000,
+     "hw_max_khz": 2424000
+    },
+    "cpu3": {
+     "governor": "schedutil",
+     "cur_khz": 600000,
+     "policy_max_khz": 2424000,
+     "hw_max_khz": 2424000
+    },
+    "cpu4": {
+     "governor": "schedutil",
+     "cur_khz": 3204000,
+     "policy_max_khz": 3204000,
+     "hw_max_khz": 3204000
+    },
+    "cpu5": {
+     "governor": "schedutil",
+     "cur_khz": 3204000,
+     "policy_max_khz": 3204000,
+     "hw_max_khz": 3204000
+    },
+    "cpu6": {
+     "governor": "schedutil",
+     "cur_khz": 3204000,
+     "policy_max_khz": 3204000,
+     "hw_max_khz": 3204000
+    },
+    "cpu7": {
+     "governor": "schedutil",
+     "cur_khz": 3204000,
+     "policy_max_khz": 3204000,
+     "hw_max_khz": 3204000
+    }
+   },
+   "temps_c": {
+    "macsmc_hwmon/NAND Flash Temperature": 24.918,
+    "macsmc_hwmon/Battery Hotspot": 22.199,
+    "macsmc_hwmon/Charge Regulator Temp": 26.405,
+    "macsmc_hwmon/WiFi/BT Module Temp": 26.269,
+    "macsmc_battery/temp": 22.2,
+    "nvme/Composite": 23.85
+   },
+   "power": {
+    "macsmc-ac": {
+     "type": "Mains",
+     "online": "1"
+    },
+    "macsmc-battery": {
+     "type": "Battery",
+     "status": "Full",
+     "capacity": "100"
+    },
+    "tps6598x-source-psy-0-0038": {
+     "type": "USB",
+     "online": "0"
+    },
+    "tps6598x-source-psy-0-003a": {
+     "type": "USB",
+     "online": "1"
+    },
+    "tps6598x-source-psy-0-003f": {
+     "type": "USB",
+     "online": "0"
+    }
+   },
+   "loadavg": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "cpu": "Apple Blizzard-M2 + Avalanche-M2",
+  "loadavg_end": [
+   0.00341796875,
+   0.02587890625,
+   0.00048828125
+  ],
+  "end": {
+   "cpus": {
+    "cpu0": {
+     "governor": "schedutil",
+     "cur_khz": 600000,
+     "policy_max_khz": 2424000,
+     "hw_max_khz": 2424000
+    },
+    "cpu1": {
+     "governor": "schedutil",
+     "cur_khz": 600000,
+     "policy_max_khz": 2424000,
+     "hw_max_khz": 2424000
+    },
+    "cpu2": {
+     "governor": "schedutil",
+     "cur_khz": 600000,
+     "policy_max_khz": 2424000,
+     "hw_max_khz": 2424000
+    },
+    "cpu3": {
+     "governor": "schedutil",
+     "cur_khz": 600000,
+     "policy_max_khz": 2424000,
+     "hw_max_khz": 2424000
+    },
+    "cpu4": {
+     "governor": "schedutil",
+     "cur_khz": 660000,
+     "policy_max_khz": 3204000,
+     "hw_max_khz": 3204000
+    },
+    "cpu5": {
+     "governor": "schedutil",
+     "cur_khz": 660000,
+     "policy_max_khz": 3204000,
+     "hw_max_khz": 3204000
+    },
+    "cpu6": {
+     "governor": "schedutil",
+     "cur_khz": 660000,
+     "policy_max_khz": 3204000,
+     "hw_max_khz": 3204000
+    },
+    "cpu7": {
+     "governor": "schedutil",
+     "cur_khz": 660000,
+     "policy_max_khz": 3204000,
+     "hw_max_khz": 3204000
+    }
+   },
+   "temps_c": {
+    "macsmc_hwmon/NAND Flash Temperature": 24.952,
+    "macsmc_hwmon/Battery Hotspot": 22.199,
+    "macsmc_hwmon/Charge Regulator Temp": 26.322,
+    "macsmc_hwmon/WiFi/BT Module Temp": 26.301,
+    "macsmc_battery/temp": 22.2,
+    "nvme/Composite": 23.85
+   },
+   "power": {
+    "macsmc-ac": {
+     "type": "Mains",
+     "online": "1"
+    },
+    "macsmc-battery": {
+     "type": "Battery",
+     "status": "Full",
+     "capacity": "100"
+    },
+    "tps6598x-source-psy-0-0038": {
+     "type": "USB",
+     "online": "0"
+    },
+    "tps6598x-source-psy-0-003a": {
+     "type": "USB",
+     "online": "1"
+    },
+    "tps6598x-source-psy-0-003f": {
+     "type": "USB",
+     "online": "0"
+    }
+   },
+   "loadavg": [
+    0.00341796875,
+    0.02587890625,
+    0.00048828125
+   ]
+  }
+ },
+ "commit": "7a1f9030a3cfa888528462f652ad57edf035b951",
+ "tree_dirty": false,
+ "harness": {
+  "bars.py": "4606c9ab1abf56bc10050364170d7ee996d969b752fa229af779c1ab847fdf37",
+  "bench.py": "e6eadda2d0114103f06af5cc076554e3fb072efafb2ca453d23a0705ce366953",
+  "machine.py": "281bb9c928a14c9ccfb329f8307c866e8da5889946e0b7d72071179e8424a7af",
+  "measure.py": "c25713b80ef1a0417c6c771fb8a768d85fe11863c68ffdf0774251aee1b7d7e5",
+  "stage.py": "136e648b89d894fdeaaf71c60b6a13a933d865f3333a751c91aeda00b801870d",
+  "tables.py": "2a66faf3f77b43d5f6ca22d73113eaff594dc1a310e8edbdf341c215797a5746",
+  "test_scootbar_bench.py": "1610069267cf8c98e288717f0c9ddb62b02c30d6b8af656cfbfd29591dd59cba"
+ },
+ "scope": "clock",
+ "compositors": [
+  "scoot",
+  "sway"
+ ],
+ "compositor_versions": {
+  "scoot": "scoot 0.1.0 (ipc protocol 5)",
+  "sway": "sway version 1.12"
+ },
+ "compositor_binaries": {
+  "scoot": {
+   "path": "/home/steve/code/m4/target-main/release/scoot",
+   "sha256": "4e105065f5b28266d539f4bc57da1f3d86efaf3a61c34618aca9de0e58993126"
+  },
+  "scootctl": {
+   "path": "/home/steve/code/m4/target-main/release/scootctl",
+   "sha256": "d1ffa1b02104752a2262ec2eeb585679cb6aa92711f972352354dc92d0bf68f4"
+  },
+  "sway": {
+   "path": "/nix/store/z8ya5vmppyaxgmbbsysdsla680v5cax1-sway-1.12/bin/sway",
+   "sha256": "a3e021f0c637e5b44e7d234d8cbc61f43339d184cf369f29f064702204cf0ce8"
+  },
+  "swaymsg": {
+   "path": "/nix/store/z8ya5vmppyaxgmbbsysdsla680v5cax1-sway-1.12/bin/swaymsg",
+   "sha256": "d17df0f767d165ee6da41fe4cd46764e0f32baa0f8f0bb65120612678e4b39c9"
+  },
+  "grim": {
+   "path": "/nix/store/bkkwdh985ng36gjvy8ps98zjkdc9fl9f-grim-1.5.0/bin/grim",
+   "sha256": "1d58cb89283326539af1d7b99783ec266c5d7ece80dc9ac7920237f3728d748f"
+  }
+ },
+ "tools": {
+  "foot": "/nix/store/jc9r9y0ilfamxhkf5mpxniimkj8ky65l-foot-1.28.0",
+  "dbus": "/nix/store/pizr05f9y1y76nh65al07p469lkbb96z-dbus-1.16.2",
+  "dejavu_fonts": "/nix/store/h5vnkf92q6n18bl5i3x8am75m2yxvpcy-dejavu-fonts-2.37",
+  "font_file": "/nix/store/33wfvwgr4vy0gaznf3wafla7mfni1znw-dejavu-fonts-minimal-2.37/share/fonts/truetype/DejaVuSans.ttf"
+ },
+ "settings": {
+  "rounds": 5,
+  "settle_secs": 30.0,
+  "idle_secs": 300.0,
+  "switches": 240,
+  "switch_hz": 4.0
+ },
+ "bars": {
+  "scootbar": {
+   "version": "scootbar 0.1.0",
+   "ran": {
+    "scoot": true,
+    "sway": true
+   },
+   "binaries": [
+    {
+     "path": "/home/steve/code/m4/target-367/release/scootbar",
+     "sha256": "b387be8f7e98a66ed577323492d66cf9d1313669d01d8fabc7f216da741c4fd9"
+    }
+   ],
+   "static": {
+    "binaries_bytes": 1512160,
+    "ldd_libraries_bytes": 133096,
+    "size_bytes": 1645256,
+    "runtime_only_bytes": 0
+   },
+   "code": {
+    "lines": 34909,
+    "lines_outside_tests": 22779,
+    "direct_dependencies": 10,
+    "dependency_names": [
+     "ab_glyph",
+     "png",
+     "rustix",
+     "scootbg-mem",
+     "serde",
+     "serde_json",
+     "toml",
+     "wayland-client",
+     "wayland-protocols",
+     "wayland-protocols-wlr"
+    ]
+   },
+   "source": {
+    "tree": "/home/steve/code/m4/t367",
+    "commit": "b6dee9710f946e137ad9e438581bb73b34b24dbf"
+   }
+  }
+ }
+}

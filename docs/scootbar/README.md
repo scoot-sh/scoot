@@ -433,3 +433,200 @@ to flatter anyone:
 - The screenshot presence check passes for both on the sides they run (the
   bar's color at the top, something drawn on each placed part): the content
   is only ever checked for presence.
+
+### M4, pointer input, `exec` and the agent interface, on the Asahi M2
+
+The resource ratchet's first run on hardware for M4's stack: three draft PRs
+(#364 pointer input, #366 `button`/`push`/`exec`, #367 the agent interface),
+each layer's tip, against `main` and against M3's post-fix run
+([`m3-asahi-clock-bindfix`](bench/m3-asahi-clock-bindfix/table.md)).
+`scripts/scootbar-bench` at `--scope clock --bars scootbar`, the defaults (5
+startup rounds, 30 s settle, a 300 s idle window, 240 switches at 4 Hz), the
+same machine as M3 (Apple M2, 8 cores, 16 KiB pages, Linux 7.1.13,
+`schedutil`, on mains), release scootbar (`lto = "fat"`, stripped) built per
+tree in its own worktree and target directory, **one headless release
+`scoot`/`scootctl` built from `main` (`7a1f9030a`) for every run** (the same
+binary, sha256 `4e105065f5b2...`), and **the harness from `main` for every
+run** (its scootbar config and its measuring code are unchanged since
+`cbbeffd`; only the competitors' tables differ, `bars.py`/`bench.py`/
+`tables.py` adding ironbar and ashell). 180 s of cool-down between runs.
+**Eleven runs in three rounds.** Rounds one and two ran **`--compositors scoot`
+only** (about 6.5 minutes a run), **a departure from the M3 post-fix baseline,
+which ran scoot and sway**: `main`, #364, #366, #367, the experiment below, then
+the experiment, #367 and `main` again. Round three restores sway for three
+builds (`--compositors scoot,sway`, about 13 minutes a run): `main`, #367 and
+the experiment. **#364 and #366 have no sway run.** Nothing on the box but the
+run (no bar, compositor or cgroup of anyone's), load average at most 0.28 at
+any start. The raw runs, each with `meta.json`, `runs.jsonl`, `table.md` and
+`run.log`, are `bench/m4-asahi-clock-*` (`-rerun` is the second round, `both`
+the third). Every `compare` as it ran, and the pooled verdicts with the script
+that computed them, are in [`bench/m4-asahi-compares.md`](bench/m4-asahi-compares.md).
+The stack's tips are those at the time of the run: `meta.json` records #364
+`47b413a99`, #366 `cdb9936bd` and #367 `b6dee9710`; #367's tip has since gained
+one docs-only commit (its `crates/` tree is identical).
+
+The median of each run, scoot (a build's runs side by side, in order: first
+round, second, third):
+
+| Row, scoot | M3 post-fix `cbbeffd` | `main` `7a1f903` | #364 `47b413a` | #366 `cdb9936` | #367 `b6dee97` | `opt-level = "s"` on #367 (experiment) |
+|---|---|---|---|---|---|---|
+| Startup to first frame (ms) | 31.0 | 30.5 / 37.8 / 29.8 | 31.2 | 37.4 | 39.2 / 32.3 / 38.1 | 29.5 / 31.6 / 30.4 |
+| Idle RSS (MiB) | 3.52 | 3.53 / 3.52 / 3.53 | 3.67 | 3.73 | 3.67 / 3.66 / 3.67 | 3.59 / 3.59 / 3.59 |
+| Idle PSS (MiB) | 2.12 | 2.06 / 2.06 / 2.06 | 2.20 | 2.26 | 2.20 / 2.20 / 2.20 | 2.12 / 2.13 / 2.12 |
+| Idle heap, `RssAnon` (MiB) | 0.42 | 0.44 / 0.44 / 0.44 | 0.45 | 0.45 | 0.45 / 0.45 / 0.45 | 0.44 / 0.45 / 0.44 |
+| Peak memory, `VmHWM` (MiB) | 3.52 | 3.53 / 3.52 / 3.53 | 3.67 | 3.73 | 3.67 / 3.66 / 3.67 | 3.59 / 3.59 / 3.59 |
+| Idle wakeups per minute | 2 | 2 / 2 / 2 | 2 | 2 | 2 / 2 / 2 | 2 / 2 / 2 |
+| Idle CPU, 300 s window (ms) | 1.04 | 0.93 / 0.94 / 0.95 | 0.96 | 0.98 | 1.04 / 0.99 / 1.10 | 1.09 / 1.30 / 1.06 |
+| CPU, 240 workspace switches (ms) | 0.25 | 0.25 / 0.20 / 0.25 | 0.20 | 0.23 | 0.21 / 0.24 / 0.21 | 0.25 / 0.24 / 0.25 |
+| Wakeups over those switches *(not gated)* | 2 | 2 / 2 / 2 | 2 | 2 | 2 / 2 / 2 | 2 / 2 / 2 |
+| Threads *(not gated)* | 1 | 1 / 1 / 1 | 1 | 1 | 1 / 1 / 1 | 1 / 1 / 1 |
+| **Size: stripped binary + non-glibc `ldd` closure (B)** | 1,383,080 | 1,383,080 | **1,514,152** | **1,579,720** | **1,645,256** | 1,448,648 |
+| Bare executable, stripped *(not gated)* | 1,249,984 | 1,249,984 | 1,381,056 | 1,446,624 | 1,512,160 | 1,315,552 |
+| Loaded code and data: `.text` + `.rodata` + `.eh_frame` + `.data.rel.ro` (B) | n/a | 1,160,027 | 1,223,171 | 1,327,699 | 1,358,147 | 1,175,787 |
+| `.text` (B) | n/a | 930,792 | 984,552 | 1,079,816 | 1,105,320 | 927,720 |
+| Lines of Rust: all / outside tests / direct deps | 25,549 / 16,514 / 10 | 25,550 / 16,515 / 10 | 29,182 / 18,721 / 10 | 32,603 / 21,034 / 10 | 34,909 / 22,779 / 10 | same as #367 |
+
+Sway, round three only (one run each; M3 post-fix, `main`, #367, experiment):
+startup 16.8, 16.9, 17.6, 17.9 ms; idle RSS 3.52, 3.55, 3.66, 3.59 MiB; PSS 2.15,
+2.11, 2.22, 2.16; heap 0.42, 0.45, 0.44, 0.44; wakeups 2 in all; **idle CPU 0.89,
+0.68, 0.83, 0.94 ms**; 240 switches 0.24, 0.20, 0.25, 0.23 ms; size as above.
+
+`main` now reproduces M3 post-fix: `compare` of each of its three runs against
+it exits 0, 0 and 1, **the one flag being sway's idle heap, 0.4 to 0.5 MiB, with
+code that is byte-identical to the baseline's** (a single 16 KiB page: the row's
+flags below are the same size), and the idle CPU row reads better (1.04 to
+0.93 to 0.95 ms; sway 0.89 to 0.68). The pinned `scoot` and `main`'s harness
+are what make the comparison fair.
+
+**`compare` against M3 post-fix (rule 1), run by run, each as the harness
+prints it; nothing is waived.**
+
+| Run | `compare` exit | Gated rows it flags as regressed |
+|---|---|---|
+| `main` (three) | 0, 0, 1 | only sway's idle heap, in the third (above) |
+| #364 | 1 | idle heap 0.4 to 0.5 MiB (0.42 to 0.45: one or two 16 KiB pages); **size** 1,383,080 to 1,514,152 B (+9.5%) |
+| #366 | 1 | idle RSS 3.5 to 3.7, idle PSS 2.1 to 2.3, idle heap 0.4 to 0.5, peak memory 3.5 to 3.7 MiB; **size** to 1,579,720 B (+14.2%) |
+| #367 (three) | 1, 1, 1 | idle heap 0.4 to 0.5 MiB in all three; **size** to 1,645,256 B (+19.0%) in all three |
+| experiment (three) | 0, 1, 0 | second: idle heap and idle CPU (1.0 to 1.3 ms); the experiment's bare executable is flagged in all, not gated |
+
+**Per-PR compares cannot see the cumulative creep, and these show it.** Each
+layer against the one under it: #366 against #364 exits **0** (+65,568 B is
+inside the size row's 5% margin, 75,708 B), #367 against #366 exits **0**
+(+65,536 B), while #364 against `main` exits 1. The **stack total** against
+`main` (#367's first run against `main`'s first) exits **1**: size
++262,176 B (+19.0%), idle PSS 2.06 to 2.20 MiB, and idle CPU 0.93 to 1.04 ms
+(one run each; pooled below, the idle CPU is not a regression).
+
+**Idle CPU, pooled with the repo's own `verdict()`** (`scripts/scootbg-bench/report.py`,
+the runs of a build as one series, margin the largest of 5% of the baseline's
+median, the two spreads and 0.1 ms), scoot: `main`'s three runs [0.926, 0.943,
+0.951] ms against M3 post-fix's one sample (1.04), better; #364 (0.962) and
+#366 (0.979) against `main` pooled, same; **#367's three [1.044, 0.993, 1.096]
+against `main` pooled, same** (margin 0.128; the medians differ by 0.10); the
+experiment's three [1.086, 1.302, 1.062] against `main` pooled, **same** (margin
+0.265; medians 1.086 against 0.943), and against M3 post-fix, same. **An earlier
+reading of this table had the experiment regressed: with the two runs of rounds
+one and two it was (margin 0.233, difference 0.26); the third run (1.062) moved
+the pooled verdict, which is what a row this noisy does.** On sway, with one
+run each, #367 (0.83) and the experiment (0.94) flag against `main`'s 0.68 and
+read same against M3 post-fix's 0.89: `main` itself differs from the baseline
+by 0.21 ms there. A per-run flag at this row is a 0.1 ms edge on a single sample.
+
+**What the stack costs, by row.**
+
+- **Size, every layer.** The closure goes up by 131,072, 65,568 and 65,536
+  bytes: the layers are +9.5%, +4.3% and +4.1% of the gated row, +19.0% in
+  all. The file grows in **steps of about 64 KiB**: the segments are aligned
+  to 64 KiB (`readelf -l`: `Align 0x10000`) and the writable one starts at the
+  next boundary after the executable one, so a layer's step is its real
+  growth rounded across boundaries. The loaded code and data grew by 63,144,
+  104,528 and 30,448 bytes (+5.4%, +8.5%, +2.3%; +17.1% in all), of which
+  `.text` is 53,760, 95,264 and 25,504 bytes. #364's +131,072 is a 63 KB
+  growth that fell across a boundary; #366's 104 KB and #367's 30 KB both read
+  as about 65 KB.
+- **Idle memory**: RSS, PSS and peak are +0.13 to +0.20 MiB at every layer
+  (3.53 to 3.67/3.73/3.67 MiB RSS; PSS 2.06 to 2.20/2.26/2.20), and `RssAnon` one
+  to two 16 KiB pages. `compare` flags different rows in different runs because the
+  margin (5% of the median, 0.18 MiB for RSS) sits inside the effect; the effect
+  itself is the same every run (all five runs of #364 to #367 are 0.13 to 0.20
+  MiB above `main`'s three; on sway, #367 is 0.11 above `main`). It tracks the
+  growth of the executable's mapping (the dev VM's `smaps` for #364 put all of it
+  there; not repeated here).
+- **Unchanged**: idle wakeups (2 a minute at every layer), threads (1), the
+  wakeups and CPU of 240 workspace switches (0.2 ms, as M3 post-fix), and
+  startup (a median 29 to 39 ms in every run, inside the rule's margin of 20 to
+  38 ms).
+
+**Experiment, not shipped: `opt-level = "s"` for scootbar alone.** The PR 1
+review reported that this shrank scootbar's R-E segment by 13% and made the
+stripped binary smaller than `main`'s. **The first part reproduced; the second
+did not**: the stripped bare executable here is 1,315,552 B against `main`'s
+1,249,984 (+65,568, +5.2%); only **`.text`** comes in below `main`'s (927,720
+against 930,792 B, -0.3%), and 16.1% below #367's (1,105,320). The change, on
+top of #367 (it was a local commit, `854f3394`, on the Asahi box, in no PR and
+since removed there; the diff below is all there was):
+
+```toml
+# EXPERIMENT (not for the stack): scootbar alone at opt-level "s".
+[profile.release.package.scootbar]
+opt-level = "s"
+strip = true
+```
+
+On this machine: the bare executable 1,512,160 to 1,315,552 B (-13.0%), the
+closure to 1,448,648 B (+4.7% over `main`, inside the row's margin, so `compare`
+against M3 post-fix does not flag it), loaded code and data +1.4% over `main`
+(against +17.1%), idle RSS/PSS 3.59/2.12 MiB (+0.06 MiB over `main`, inside the
+margin), startup, wakeups and the switching CPU unchanged. **Idle CPU is the
+open question**: its three runs [1.086, 1.302, 1.062] ms against `main`'s
+[0.926, 0.943, 0.951] are **the same by the pooled verdict** (margin 0.265), as
+they are against #367's pooled; the 1.302 run also flagged against the
+experiment's own first run (exit 1), and with only the first two runs the
+pooled verdict had said regressed. The median is +0.14 ms (about 15%) in a
+300 s window; whether that is a cost or noise needs more runs than three. What this
+did **not** measure: the cost of a full redraw or of text-heavy frames at
+`opt-level = "s"`, which no row of the harness exercises. Whether to take 197 KB
+off the binary for a possible ~0.14 ms of idle CPU is the maintainer's call.
+
+**Could the three table shapes share code?** An estimate, from `nm --size-sort`
+of unstripped release builds of #364 and #366: of the +106 KB of new
+`.text` and `.rodata` symbols, **53 KB are the `toml` deserialization of
+`BTreeMap<String, ButtonFile>`, `PushFile` and `ExecFile`** (18.3, 16.5 and 18.4 KB:
+`TableMapAccess::next_entry_seed`, `ValueDeserializer::deserialize_any` and the
+`MapVisitor`, each monomorphized once per shape); the modules, the payload
+and `Command` are the rest. Deserializing the three tables into one
+`BTreeMap<String, CustomFile>` (a struct with the union of the keys, the kind
+taken from the table's name, the per-kind unknown-key refusal done by hand)
+would keep one instance and drop two: **about 33 to 36 KB of `.text`
+(3% of it), net of the hand-written checks.** Not implemented: it rewrites
+`config/custom.rs`'s error reporting (each kind refuses its own unknown keys
+by dotted name today, through `deny_unknown_fields`) and is not clearly
+small or safe.
+
+**Noise, measured.** Each build against its own other runs (scoot, the
+compositor all runs share): `main` exits 0 and 0, #367 exits 0 and 0, and the
+experiment exits 1 (its second run against its first: idle CPU 1.09 to 1.30 ms)
+and 0. A single run against another build's single run is a different matter:
+in round three #367 against `main` flags idle PSS and idle CPU on both
+compositors (scoot 0.95 to 1.10 ms, sway 0.68 to 0.83), which the pooled scoot
+verdict above does not call a regression. The idle CPU and idle heap rows are the
+noisy ones on this box, as at M3.
+
+**What the machine did** (readings around the first eight runs, from `meta.json`
+and `runs.jsonl`; the third round's meta records the same kind): governor
+`schedutil` throughout; no cpufreq policy cap below the hardware maximum in any
+reading; mains online in every one; the battery sensors' hwmon temperatures 22 to
+29 C (the M2 exposes no CPU temperature, so a throttle could only show as a
+cap, and none did); the current frequency 600 to 3204 MHz, which is the
+governor.
+
+**What this does not settle.** It is one machine and one scope (the clock,
+scootbar alone), and sway was run for three builds, once each: `exec`, `button`,
+`push` and the agent interface cost what a build that configures none of them
+costs here, which is what the default config does; what *using* them costs is
+the dev VM's table in
+[exec-push-button-modules-done](backlog/resolved/exec-push-button-modules-done.md#the-ratchet),
+not remeasured here. Rule 2 (no competitor beats scootbar) was not rerun;
+nothing in this stack touches what it compared. **The ratchet's rule 1 fails
+on size and idle memory for this stack, as M3's did; the PRs are drafts
+and nothing is waived** ([lightest](backlog/lightest.md#m3-gate-clock-and-workspaces-measured-2026-09-30-does-not-pass)'s 2026-10-01 note).
