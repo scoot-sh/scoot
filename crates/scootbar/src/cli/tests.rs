@@ -800,3 +800,12 @@ fn the_help_names_check() {
     assert!(USAGE.contains("scootbar daemon --check"));
     assert!(DAEMON_HELP.contains("--check validates"));
 }
+
+#[test]
+fn msg_help_does_not_promise_that_exit_0_means_the_daemon_exited() {
+    // A subscriber dropped with a full socket ends on a clean newline too.
+    let help = super::MSG_HELP;
+    assert!(help.contains("does NOT mean the daemon exited"));
+    assert!(help.contains("subscribe again and then query"));
+    assert!(!help.contains("ends when the daemon does"));
+}

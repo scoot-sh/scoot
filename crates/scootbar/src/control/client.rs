@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use super::paths::{self, PathError, Paths};
-use super::protocol::Request;
+use super::protocol::{DROPPED, Request};
 
 /// How long to wait on a daemon that accepted the connection but does not
 /// answer, before giving up rather than hanging a script.
@@ -38,6 +38,9 @@ pub enum Error {
     /// and was not passed on (the daemon drops a subscriber that does not
     /// read fast enough, which can cut the batch it was writing).
     Cut,
+    /// The daemon said it was dropping this subscription (`{"type":"dropped"}`,
+    /// the last line): events may have been missed.
+    Dropped,
     /// The daemon answered with an error.
     Daemon(String),
 }
@@ -60,6 +63,12 @@ impl fmt::Display for Error {
                 "the connection ended in the middle of a line, which was discarded \
                  (the daemon drops a subscriber that does not read fast enough): \
                  events may have been missed: subscribe again, then query"
+            ),
+            Self::Dropped => write!(
+                f,
+                "the daemon dropped this subscription (to admit another client, or \
+                 because it was not read fast enough): events may have been missed: \
+                 subscribe again, then query"
             ),
             Self::Daemon(message) => write!(f, "daemon: {message}"),
         }
@@ -169,6 +178,10 @@ fn exchange(stream: &mut UnixStream, request: &Request<'_>) -> Result<String, Er
 /// request is an `Err`. There is no read timeout: events come when they
 /// come. `each` is only ever given whole lines: a connection that ends
 /// inside one is [`Error::Cut`], and what it had sent of that line is dropped.
+/// A `{"type":"dropped"}` line is given to `each` like any other and then
+/// ends the stream as [`Error::Dropped`]. **`Ok` does not mean the daemon
+/// went away**: a daemon that drops a subscriber it cannot write to (a full
+/// socket) closes it with nothing more, which is a clean end too.
 pub fn stream(request: &Request<'_>, each: impl FnMut(&str) -> bool) -> Result<(), Error> {
     let paths = paths::from_env().map_err(Error::Paths)?;
     stream_to(&paths, request, each)
@@ -257,8 +270,13 @@ pub fn stream_to(
                 return Err(Error::Daemon(message.to_owned()));
             }
         }
+        let dropped = line.as_bytes() == DROPPED;
         if !each(&line) {
             return Ok(());
+        }
+        if dropped {
+            // Passed on first, so a script reading the lines sees it too.
+            return Err(Error::Dropped);
         }
     }
 }

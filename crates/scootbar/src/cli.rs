@@ -299,9 +299,13 @@ start-up and removes when it stops:
     subscribe  stay connected and print one JSON line per event of the kinds
                named (both by default): `module` (a module's view changed,
                at most once a frame) and `output` (one was added or removed);
-               ends when the daemon does (status 0), or with status 1 if the
-               daemon dropped it mid-line (that line is discarded); there is
-               no snapshot: subscribe first, then query
+               there is no snapshot: subscribe first, then query. It ends
+               with status 1 on a `{\"type\":\"dropped\"}` line (the daemon
+               dropped it) or when the stream is cut mid-line (that line is
+               discarded), and with status 0 when the stream just ends,
+               which does NOT mean the daemon exited: a subscriber that was
+               too slow or stopped (its socket full) is closed with no line.
+               After any end, subscribe again and then query
     reload     re-read the config file and live-apply it; a bad file is
                refused and the running bar stands
     hide       take the bars away: every layer surface and buffer is

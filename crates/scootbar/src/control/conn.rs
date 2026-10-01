@@ -29,7 +29,7 @@ use std::os::unix::net::UnixStream;
 use rustix::event::PollFlags;
 
 use super::framing::{Line, LineBuffer};
-use super::protocol::{EventKind, MAX_REQUEST_LINE, Reply, write_reply};
+use super::protocol::{DROPPED, EventKind, MAX_REQUEST_LINE, Reply, write_reply};
 
 /// Stop handling requests once this much output is queued; resume when the
 /// client has read it.
@@ -224,6 +224,19 @@ impl Conn {
             Ok(n) if n == bytes.len() => Status::Keep,
             // Partial, full or broken: the subscriber is not keeping up.
             _ => Status::Close,
+        }
+    }
+
+    /// Tells a subscriber it is being dropped, if it can be told without
+    /// waiting: one nonblocking write of [`DROPPED`], and whatever
+    /// the socket does with it is the end of it. A subscriber is always at a
+    /// line boundary here (an event is written whole or the connection is
+    /// closed), so the line lands whole or not at all; a partial write of
+    /// its 19 bytes (a socket with less room than that) leaves a prefix with
+    /// no newline, which the client reads as a cut line.
+    pub fn notify_dropped(&mut self) {
+        if self.subscription().is_some() {
+            let _ = self.stream.write(DROPPED);
         }
     }
 

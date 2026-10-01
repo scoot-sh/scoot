@@ -8,9 +8,9 @@ use std::os::unix::net::UnixStream;
 
 use rustix::event::PollFlags;
 
-use super::Server;
 use super::conn::{Conn, Handler, Kinds, Status};
 use super::protocol::{self, EventKind, Request, RequestError};
+use super::{MAX_CONNECTIONS, MAX_SUBSCRIBERS, Server};
 
 fn parse(line: &str) -> Result<Request<'_>, RequestError> {
     protocol::parse(line.as_bytes())
@@ -389,4 +389,101 @@ fn the_subscriber_count_follows_the_connections() {
     drop(client);
     assert!(!server.service(0, PollFlags::IN | PollFlags::HUP, &mut handler));
     assert_eq!(server.subscribers(), 0);
+}
+
+/// Whether the peer closed: nothing more to read, and not just nothing yet.
+fn closed(client: &mut UnixStream) -> bool {
+    let mut byte = [0u8; 1];
+    matches!(client.read(&mut byte), Ok(0))
+}
+
+/// `clients` connections of which the first `subscribed` subscribe.
+fn server_subscribed(clients: usize, subscribed: usize) -> (Server, Vec<UnixStream>) {
+    let (mut server, mut ends) = server_with(clients);
+    let mut handler = Subscriber::default();
+    for (index, client) in ends.iter_mut().enumerate().take(subscribed) {
+        client.write_all(b"subscribe\n").unwrap();
+        assert!(server.service(index, PollFlags::IN, &mut handler));
+        read_all(client);
+    }
+    assert_eq!(server.subscribers(), subscribed);
+    (server, ends)
+}
+
+#[test]
+fn a_flood_of_connections_closes_the_idle_ones_and_not_the_subscribers() {
+    // The two oldest connections are subscribers; the cap is full of idle
+    // clients behind them. Each new client closes the oldest idle one.
+    let (mut server, mut clients) = server_subscribed(MAX_CONNECTIONS, 2);
+    for round in 0..MAX_CONNECTIONS * 3 {
+        let (client, accepted) = UnixStream::pair().unwrap();
+        client.set_nonblocking(true).unwrap();
+        server.admit(accepted);
+        clients.push(client);
+        assert_eq!(server.conns().len(), MAX_CONNECTIONS, "round {round}");
+        assert_eq!(server.subscribers(), 2, "round {round}");
+    }
+    // They still carry events.
+    server.broadcast(EventKind::Module, b"{\"type\":\"module\"}\n");
+    for subscriber in &mut clients[..2] {
+        assert_eq!(read_all(subscriber), "{\"type\":\"module\"}\n");
+        assert!(!closed(subscriber));
+    }
+    // The idle ones that were there at the start are the ones that went.
+    for idle in &mut clients[2..MAX_CONNECTIONS] {
+        assert!(closed(idle));
+    }
+}
+
+#[test]
+fn the_oldest_idle_client_goes_first_not_the_oldest_connection() {
+    let (mut server, mut clients) = server_subscribed(MAX_CONNECTIONS, 1);
+    let (client, accepted) = UnixStream::pair().unwrap();
+    client.set_nonblocking(true).unwrap();
+    server.admit(accepted);
+    // Client 0 (a subscriber, the oldest) stays; client 1 (the oldest idle) went.
+    assert!(!closed(&mut clients[0]));
+    assert!(closed(&mut clients[1]));
+    assert!(!closed(&mut clients[2]));
+    assert_eq!(server.subscribers(), 1);
+}
+
+#[test]
+fn with_only_subscribers_left_to_close_the_oldest_is_told_it_was_dropped() {
+    // Out of descriptors with nothing but subscribers open (the cap cannot
+    // get here: there are fewer subscribers than it admits).
+    let (mut server, mut clients) = server_subscribed(MAX_SUBSCRIBERS, MAX_SUBSCRIBERS);
+    assert!(server.free_an_fd());
+    assert_eq!(server.subscribers(), MAX_SUBSCRIBERS - 1);
+    // Whole, as the last line, then closed; the others untouched.
+    assert_eq!(read_all(&mut clients[0]), "{\"type\":\"dropped\"}\n");
+    assert!(closed(&mut clients[0]));
+    for kept in &mut clients[1..] {
+        assert_eq!(read_all(kept), "");
+        assert!(!closed(kept));
+    }
+}
+
+#[test]
+fn a_dropped_notice_is_only_for_subscribers() {
+    let (mut server, mut clients) = server_subscribed(2, 0);
+    assert!(server.free_an_fd());
+    assert_eq!(read_all(&mut clients[0]), "");
+    assert!(closed(&mut clients[0]));
+    assert!(server.free_an_fd());
+    assert!(!server.free_an_fd(), "nothing left, and no spare");
+}
+
+#[test]
+fn a_subscriber_whose_socket_is_full_is_dropped_without_waiting() {
+    // The common drop: it stopped reading, its socket is full. The notice is
+    // one nonblocking write that may not fit, and nothing waits for it.
+    let (mut client, mut conn) = pair();
+    let mut handler = Subscriber::default();
+    subscribe(&mut client, &mut conn, &mut handler);
+    let event = [b'x'; 4096];
+    while conn.send_event(&event) == Status::Keep {}
+    let before = std::time::Instant::now();
+    conn.notify_dropped();
+    assert!(before.elapsed() < std::time::Duration::from_secs(1));
 }

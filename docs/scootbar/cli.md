@@ -279,13 +279,30 @@ tells every module again. A subscribed connection serves no further requests
 at once (a fifth is refused saying so), and **a subscriber that stops
 reading is disconnected, never buffered**: each batch is one nonblocking
 write, and one the socket cannot take whole ends the connection. With no
-subscriber the daemon does one branch a loop turn. The command prints whole
-lines only, and exits 0 when the daemon closes the connection between two of
-them. A subscriber the daemon dropped can be left a **prefix of a line** (the
-write the socket could not take whole): that line is discarded, never
-printed as if whole, and the command says so on stderr and exits 1, so a
-script can tell "the daemon went away" from "I was dropped and may have
-missed events" (subscribe again, then `query`).
+subscriber the daemon does one branch a loop turn.
+
+**How a subscription ends, and what a script may conclude.** The command
+prints whole lines only, and there are endings it can tell apart and one it
+cannot:
+
+- A `{"type":"dropped"}` line, the last one (printed, then the command exits
+  **1** with a line on stderr saying so): the daemon dropped this
+  subscriber and said so. It is sent only when the daemon can write it
+  without waiting, which is the rare drop: closing a subscriber when out of
+  file descriptors with nothing but subscribers to close. A flood of ordinary
+  connections never does it: the oldest *non-subscriber* is closed first, and
+  subscribers are at most 4 of the 16 connections the daemon holds.
+- A line cut in the middle (exit **1**, stderr says the connection ended in
+  the middle of a line): the daemon dropped the subscriber part-way through
+  writing a batch. The partial line is discarded, never printed as if whole.
+- An error reply to the `subscribe` itself (exit **1**): refused, with why.
+- **Anything else is exit 0, and it does not mean the daemon went away.** The
+  stream just ends. That is what the daemon exiting looks like, and also what
+  a subscriber dropped for being too slow, or stopped (`SIGSTOP`, a hung
+  pipe: its socket is full, so there is no room for a `dropped` line) looks
+  like, as does a drop whose partial write happened to stop on a line
+  boundary. A script cannot tell these apart, so after **any** end, exit 0
+  included: subscribe again, then `query`.
 
 ## Modules
 
@@ -1250,5 +1267,5 @@ opacity = 0.9
 | Status | When |
 | --- | --- |
 | 0 | `--help` or `--version`, or `daemon --check` found nothing wrong |
-| 1 | no usable font (with a module placed), cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, the compositor went away, `poll(2)` failed, the config file is malformed (`daemon --check` too), or a `msg` command failed (no daemon, or the daemon refused) |
+| 1 | no usable font (with a module placed), cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, the compositor went away, `poll(2)` failed, the config file is malformed (`daemon --check` too), or a `msg` command failed (no daemon, or the daemon refused), or a `msg subscribe` ended on a `dropped` line, in the middle of a line, or on stdout closing |
 | 2 | a usage error |

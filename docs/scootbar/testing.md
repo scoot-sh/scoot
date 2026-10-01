@@ -263,16 +263,23 @@ pinned nixpkgs' tzdata).
   pipelined behind the `subscribe` refused in the same write, a client that
   hangs up ending it, a subscriber that stops reading dropped after what the
   socket's own buffer took, an event too big for one write ending it, a
-  broadcast reaching only its kind and the others keeping theirs); the
+  broadcast reaching only its kind and the others keeping theirs, a flood of
+  connections closing the idle ones and never a subscriber, and an evicted
+  subscriber told `dropped` whole as its last line); the
   streaming client against a scratch socket (`control/tests.rs`: a stream that
-  closes between lines ends 0, a line the connection cut is discarded and an
-  error, a first line cut likewise, a daemon that says nothing is no reply, and
+  closes between lines ends 0, a `dropped` line is passed on and then an
+  error, a line the connection cut is discarded and an error, a first line cut likewise, a daemon that says nothing is no reply, and
   a line past the bound is refused; the cut and bound tests fail with the old
   print-it-anyway behavior); the layout
   geometry (`daemon/agent/tests.rs`: top and bottom edges, margins, an origin
   left of zero, hostile sizes, and the property that every device pixel of a
   span is inside its rectangle at scales 1, 1.25, 1.5, 1.75, 2, 2.5 and 3); and
-  the worst reply sitting far inside its bound by arithmetic.
+  the worst reply sitting far inside its bound by arithmetic; and
+  `tests/subscribe_status.rs` (no compositor: `msg subscribe` against a
+  socket that writes what it is told): a `dropped` line printed and exit 1, a
+  cut line exit 1 and not printed, and a stream that just ends exit 0 with
+  nothing said, so the one ending that cannot be told from the daemon exiting
+  is pinned as such.
 - **The agent interface on a headless scoot** (`tests/agent.rs`): the
   fidelity test (two outputs at scales 1 and 1.5; each rectangle holds ink on
   the output's own screenshot and the bar has none outside them; every

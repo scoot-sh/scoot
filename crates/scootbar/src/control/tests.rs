@@ -482,3 +482,31 @@ fn a_line_with_no_end_past_the_bound_is_refused_not_passed_on() {
         "{result:?}"
     );
 }
+
+#[test]
+fn a_dropped_line_is_passed_on_and_then_ends_the_stream_as_an_error() {
+    // What the daemon sends a subscriber it evicts: the whole line, then it
+    // closes. `each` sees it (a script reading the stream does), and the
+    // result is not a success.
+    let (lines, result) = streamed(
+        "stream-dropped",
+        [
+            "{\"type\":\"subscribed\",\"events\":[\"module\"]}\n",
+            "{\"type\":\"dropped\"}\n",
+        ]
+        .concat()
+        .into_bytes(),
+    );
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines[1].as_bytes(), super::protocol::DROPPED);
+    let error = result.unwrap_err();
+    assert!(matches!(error, super::client::Error::Dropped), "{error:?}");
+    assert!(error.to_string().contains("subscribe again"), "{error}");
+}
+
+#[test]
+fn the_dropped_line_is_json_of_that_type() {
+    let value: serde_json::Value = serde_json::from_slice(super::protocol::DROPPED).unwrap();
+    assert_eq!(value, serde_json::json!({"type": "dropped"}));
+    assert_eq!(super::protocol::DROPPED.last(), Some(&b'\n'));
+}

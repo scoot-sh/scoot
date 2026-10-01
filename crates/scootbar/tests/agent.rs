@@ -602,6 +602,29 @@ fn only_so_many_connections_may_subscribe_and_a_slot_comes_back() {
 }
 
 #[test]
+fn a_subscription_outlives_a_flood_of_other_connections() {
+    // More idle connections than the daemon holds: each closes the oldest
+    // *idle* one, and a subscription (the oldest connection here) is not
+    // aged out by them.
+    use std::os::unix::net::UnixStream;
+    let tables = "[push.status]\nplaceholder = \"0\"\n";
+    let Some(rig) = Rig::start("agent-flood", "", 1, tables, "right = [\"status\"]\n") else {
+        return;
+    };
+    let mut subscriber = Subscriber::start(&rig, &["module"]);
+    let flood: Vec<UnixStream> = (0..48)
+        .map(|_| UnixStream::connect(rig.socket()).unwrap())
+        .collect();
+    // The daemon has seen them all: it answers a request after the flood.
+    assert!(rig.json(&["version"])["protocol"].is_number());
+    rig.ok(&["set", "status", "\"7\""]);
+    let event = subscriber.next();
+    assert_eq!(event["type"], "module", "{event}");
+    assert_eq!(event["text"], "7", "{event}");
+    drop(flood);
+}
+
+#[test]
 fn an_idle_bar_with_subscribers_and_queries_wakes_for_nothing() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
     let Some(rig) = Rig::start("agent-idle", "", 1, tables, "right = [\"status\"]\n") else {

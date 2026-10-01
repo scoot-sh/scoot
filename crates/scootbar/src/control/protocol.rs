@@ -441,6 +441,16 @@ pub enum Event<'a> {
     },
 }
 
+/// The last line a subscriber the daemon is about to drop can be sent, when
+/// the daemon can still write it (a subscriber evicted to admit another
+/// client is at a line boundary with room in its socket). **Best effort, and
+/// absent for the common drop**: a subscriber that stopped reading has a full
+/// socket, and the daemon never blocks or buffers for it, so it gets nothing
+/// and its stream just ends. A line that is here means "dropped"; the end of
+/// a stream with none means the daemon went away or dropped it, and the
+/// subscriber must resubscribe and `query` either way.
+pub const DROPPED: &[u8] = b"{\"type\":\"dropped\"}\n";
+
 /// Appends `event` and its newline to `out`.
 pub fn write_event(out: &mut Vec<u8>, event: &Event<'_>) {
     let start = out.len();
