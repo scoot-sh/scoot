@@ -153,6 +153,13 @@ fn layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales() {
     assert_eq!(layout["type"], "layout");
     let outputs = layout["outputs"].as_array().unwrap();
     assert_eq!(outputs.len(), 2, "{layout}");
+    // Two outputs, at two scales: the test is vacuous if they agree.
+    let mut scales: Vec<f64> = outputs
+        .iter()
+        .map(|o| o["scale"].as_f64().unwrap())
+        .collect();
+    scales.sort_by(f64::total_cmp);
+    assert_eq!(scales, [1.0, 1.5], "{layout}");
     let mut expected = 0;
     for output in outputs {
         let scale = output["scale"].as_f64().unwrap();
@@ -485,4 +492,36 @@ fn only_so_many_connections_may_subscribe_and_a_slot_comes_back() {
             }
         }
     }
+}
+
+#[test]
+fn an_idle_bar_with_subscribers_and_queries_wakes_for_nothing() {
+    let tables = "[push.status]\nplaceholder = \"0\"\n";
+    let Some(rig) = Rig::start("agent-idle", "", 1, tables, "right = [\"status\"]\n") else {
+        return;
+    };
+    let pid = rig.bar.0.id();
+    // Two subscribers, as an agent and a script might hold.
+    let _first = Subscriber::start(&rig, &[]);
+    let _second = Subscriber::start(&rig, &["module"]);
+    // Past the start-up and the subscribers' first round.
+    std::thread::sleep(Duration::from_millis(500));
+    let before = common::wakeups(pid);
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(
+        common::wakeups(pid),
+        before,
+        "the bar woke while idle with subscribers: {}",
+        rig.session.bar_stderr()
+    );
+    // A change wakes it once to tell them, and then it is idle again.
+    rig.ok(&["set", "status", "\"1\""]);
+    std::thread::sleep(Duration::from_millis(500));
+    let after_set = common::wakeups(pid);
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(
+        common::wakeups(pid),
+        after_set,
+        "the bar kept waking after one change"
+    );
 }
