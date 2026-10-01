@@ -3,7 +3,7 @@ title: "`exec`, `push` and `button` modules: extend the bar without Rust"
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "pointer-and-interactions"
+blocked: null
 milestone: "M4"
 ---
 

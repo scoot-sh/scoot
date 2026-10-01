@@ -20,6 +20,7 @@ fn bar_with(modules: &[(Section, &str)], margins: &[u32]) -> Bar {
         .zip(margins)
         .enumerate()
         .map(|(module, (&(section, _), &margin))| Member {
+            hover: false,
             module,
             section,
             margin,

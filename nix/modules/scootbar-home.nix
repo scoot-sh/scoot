@@ -43,6 +43,11 @@ in
         # compositor that is not up yet is not spun against.
         Restart = "on-failure";
         RestartSec = 2;
+        # A bar button or a binding launches apps as the bar's children
+        # (docs/scootbar/cli.md#pointer-input). With the default
+        # `control-group` every restart of the bar (a config change, a
+        # crash) would kill them with it; `process` stops only the bar.
+        KillMode = "process";
       };
       Install.WantedBy = [ "graphical-session.target" ];
     };

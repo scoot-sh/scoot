@@ -25,7 +25,8 @@
 #   name, and the size is in pixels;
 # - `features` reaches the build as `buildNoDefaultFeatures` +
 #   `buildFeatures` and an empty list sets no font;
-# - the unit: Restart=on-failure, ordered after and wanted by
+# - the unit: Restart=on-failure, KillMode=process (apps the bar launches
+#   survive its restart), ordered after and wanted by
 #   graphical-session.target, and `systemd.enable = false` writes none;
 # - `enable = false` manages nothing; a null package is refused by name;
 # - the real binary accepts every rendered file (`scootbar daemon --check`:
@@ -430,6 +431,7 @@ let
         u = plain.config.systemd.user.services.scootbar;
       in
       u.Service.Restart == "on-failure"
+      && u.Service.KillMode == "process"
       && u.Service.ExecStart == "${lib.getExe scootbar} daemon"
       && u.Unit.After == [ "graphical-session.target" ]
       && u.Unit.PartOf == [ "graphical-session.target" ]
@@ -446,6 +448,7 @@ let
       os.config.environment.systemPackages == [ scootbar ]
       && os.config.environment.etc."scootbar/bar.toml".source == os.config.programs.scootbar.configFile
       && u.serviceConfig.Restart == "on-failure"
+      && u.serviceConfig.KillMode == "process"
       && u.serviceConfig.ExecStart == "${lib.getExe scootbar} daemon --config /etc/scootbar/bar.toml"
       && u.after == [ "graphical-session.target" ]
       && u.unitConfig.StartLimitIntervalSec == 0

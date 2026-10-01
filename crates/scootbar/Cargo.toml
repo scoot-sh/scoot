@@ -45,7 +45,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # poll(2), and the clock's timerfd, `statx` of the zone file and
 # `clock_gettime`, through raw syscalls, no `libc` crate: the same `rustix`
 # the Wayland crates already pull in.
-rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net", "time"] }
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net", "time", "process"] }
 # Text: the M0 choice (its record, §1). Lazily parsed over the font's bytes,
 # so memory follows what is drawn; grayscale coverage, no hinting.
 ab_glyph = "0.2"
@@ -65,6 +65,10 @@ png = { version = "0.18", optional = true }
 # over its IPC, sway's through a small wlr-screencopy client into a memfd.
 # Dev-only: none of it reaches the binary's dependency tree.
 [dev-dependencies]
+# Only to check that `src/scoot.rs`'s hand-written request is what scoot's
+# protocol encodes (the crate is not linked into the bar: measured +131,072
+# bytes, docs/scootbar/backlog/resolved/pointer-and-interactions-done.md).
+scoot-ipc.workspace = true
 rustix = { version = "1", default-features = false, features = ["std", "process", "fs", "pipe", "time"] }
 base64.workspace = true
 png = "0.18"

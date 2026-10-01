@@ -3,7 +3,7 @@ title: "Volume module: level, mute, scroll to change, click to mute"
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "pointer-and-interactions"
+blocked: null
 milestone: "M5"
 ---
 

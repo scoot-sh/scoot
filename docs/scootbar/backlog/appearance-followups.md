@@ -18,14 +18,15 @@ to each item, so each is measured or cut.
 
 What [appearance](resolved/appearance-done.md) left, none of it started:
 
-- **The `hover` token and per-module token-per-state overrides.** The bar tracks
-  the pointer's position for a press (`pointer_on`) but draws no hover: a hover
-  state needs pointer motion to redraw the module under it and back, which is
-  [pointer-and-interactions](pointer-and-interactions.md) (M4). A token no module
-  can enter has no honest test beyond forcing it. The four classes (`normal`,
-  `warn`, `urgent`, `muted`) already map to tokens, and the only module that sets
-  one (workspaces) does not, so per-module overrides have nothing to override yet.
-  Do this with or after pointer-and-interactions.
+- **A `hover` token, and per-module token-per-state overrides.** Hover exists now
+  ([pointer-and-interactions](resolved/pointer-and-interactions-done.md), M4): a module
+  with a binding is drawn in the existing `accent` token while the pointer is over it,
+  and only that module's span is redrawn. There is no `hover` token of its own, so the
+  tint cannot differ from the accent (and the workspaces pill, which draws itself, has no
+  hover at all). A dedicated token, and per-module overrides now that a module can enter
+  one, is what is left. Note the hover tint is on by default for bound modules, which the
+  rule below ("behind an option that is off by default") would not allow for a new look:
+  the maintainer ruled nothing on it yet, and the PR that landed it says so.
 - **Dot-style workspace indicators**: a row of small dots in place of the numbers.
   A different look from the pill and circle shapes, so a `workspaces` display mode,
   not a `pill-shape`. Needs a hit test that follows the dots and a fixed small
@@ -44,7 +45,7 @@ What [appearance](resolved/appearance-done.md) left, none of it started:
 
 ## What to do
 
-Take them in the order above only as pointer-and-interactions allows; each stays
+Take them in the order above (pointer-and-interactions, which this waited on, is done); each stays
 behind an option that is off by default, and each lands with snapshots at 1x and
 a fractional scale and a row in the [resource ratchet](lightest.md) if it draws.
 

@@ -100,7 +100,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [Visibility and layering](resolved/visibility-and-layering-done.md) (medium): layer, edge, zone or float, `msg hide|show|toggle` — RESOLVED 2026-09-30
 
 ### M4 — Interactive, and readable by agents
-- [Pointer input and interactions](pointer-and-interactions.md) (medium)
+- [Pointer input and interactions](resolved/pointer-and-interactions-done.md) (medium): click, scroll and hover, `exec` and `scoot = "quit"` actions — RESOLVED 2026-09-30
 - [`exec`, `push` and `button` modules](exec-push-button-modules.md) (medium): launcher and power buttons
 - [Agent interface](agent-interface.md) (medium): `invoke`, `layout`, `subscribe`
 - [Appearance follow-ups](appearance-followups.md) (low): hover token, per-module state colors, dot indicators, inactive-workspace colors

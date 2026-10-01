@@ -36,6 +36,9 @@ in
         ExecStart = "${lib.getExe cfg.finalPackage} daemon --config /etc/scootbar/bar.toml";
         Restart = "on-failure";
         RestartSec = 2;
+        # Apps the bar launches (a button, a binding) are its children:
+        # stop only the bar on a restart, not everything it started.
+        KillMode = "process";
       };
     };
   };

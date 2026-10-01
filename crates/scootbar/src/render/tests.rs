@@ -19,6 +19,7 @@ use crate::testfont;
 use crate::text::Text;
 use crate::theme::Theme;
 
+mod hover;
 mod icons;
 mod spacing;
 
@@ -76,6 +77,7 @@ impl Bar {
             let cell = Rc::new(RefCell::new((text.to_owned(), Class::Normal)));
             let count = Rc::new(Cell::new(0));
             placed.push(Placed {
+                bindings: Default::default(),
                 id: "fixed",
                 module: Box::new(Fixed {
                     shown: cell.clone(),
@@ -468,17 +470,20 @@ fn a_scene_shows_only_its_members_in_its_own_sections() {
     // second, on the left.
     let a = [
         Member {
+            hover: false,
             module: 0,
             section: Section::Left,
             margin: 0,
         },
         Member {
+            hover: false,
             module: 1,
             section: Section::Right,
             margin: 0,
         },
     ];
     let b = [Member {
+        hover: false,
         module: 1,
         section: Section::Left,
         margin: 0,
@@ -527,6 +532,7 @@ fn a_scene_shows_only_its_members_in_its_own_sections() {
     assert_eq!(
         members(&layout, &bar.placed),
         [Member {
+            hover: false,
             module: 0,
             section: Section::Left,
             margin: 0,

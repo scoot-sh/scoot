@@ -3,7 +3,7 @@ title: "Agent interface: `query`, `invoke`, `layout` and `subscribe` on the bar'
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "pointer-and-interactions"
+blocked: null
 milestone: "M4"
 ---
 

@@ -75,6 +75,7 @@ fn bar(width: u32, scale: Scale, modules: Vec<Iconic>) -> Image {
     let placed: Vec<Placed> = modules
         .into_iter()
         .map(|module| Placed {
+            bindings: Default::default(),
             id: "label",
             module: Box::new(module),
             revision: 0,
@@ -105,6 +106,7 @@ fn bar(width: u32, scale: Scale, modules: Vec<Iconic>) -> Image {
     ));
     let members: Vec<Member> = (0..placed.len())
         .map(|module| Member {
+            hover: false,
             module,
             section: Section::Left,
             margin: 0,

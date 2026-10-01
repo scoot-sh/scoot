@@ -26,6 +26,9 @@ use crate::render::Style;
 use crate::text::MAX_FALLBACKS;
 use crate::theme::Theme;
 
+#[cfg(test)]
+mod binding_tests;
+mod bindings;
 #[cfg(feature = "clock")]
 mod icon;
 #[cfg(all(test, feature = "clock"))]
@@ -333,6 +336,23 @@ struct ClockFile {
     /// Extra logical pixels on each side of the module.
     #[cfg(feature = "clock")]
     margin: Option<u32>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "clock")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "clock")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "clock")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "clock")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "clock")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
 }
 
 /// The workspaces module's options. Without the `workspaces` feature there
@@ -359,6 +379,23 @@ struct WorkspacesFile {
     #[cfg(feature = "workspaces")]
     #[serde(rename = "item-gap")]
     item_gap: Option<u32>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
 }
 
 impl File {
@@ -504,7 +541,7 @@ impl File {
         )?;
         let theme = self.theme(path, &defaults.theme)?;
         let outputs = outputs::policy(path, self.outputs.as_ref(), &self.output)?;
-        #[cfg_attr(not(feature = "clock"), allow(unused_mut))]
+        #[cfg_attr(not(any(feature = "clock", feature = "workspaces")), allow(unused_mut))]
         let mut modules = defaults.modules;
         #[cfg(feature = "clock")]
         if let Some(format) = &self.clock.format {
@@ -563,6 +600,62 @@ impl File {
         #[cfg(feature = "clock")]
         if let Some(icon) = icon::clock(path, &self.clock)? {
             modules.clock.icon = Some(icon);
+        }
+        #[cfg(feature = "clock")]
+        {
+            let clock = &self.clock;
+            let read = bindings::read(
+                path,
+                crate::modules::clock::ID,
+                &bindings::Raw {
+                    keys: [
+                        "clock.on-click",
+                        "clock.on-right-click",
+                        "clock.on-middle-click",
+                        "clock.on-scroll-up",
+                        "clock.on-scroll-down",
+                    ],
+                    values: [
+                        clock.on_click.as_ref(),
+                        clock.on_right_click.as_ref(),
+                        clock.on_middle_click.as_ref(),
+                        clock.on_scroll_up.as_ref(),
+                        clock.on_scroll_down.as_ref(),
+                    ],
+                },
+            )?;
+            if !read.is_empty() {
+                modules.bindings.push((crate::modules::clock::ID, read));
+            }
+        }
+        #[cfg(feature = "workspaces")]
+        {
+            let workspaces = &self.workspaces;
+            let read = bindings::read(
+                path,
+                crate::modules::workspaces::ID,
+                &bindings::Raw {
+                    keys: [
+                        "workspaces.on-click",
+                        "workspaces.on-right-click",
+                        "workspaces.on-middle-click",
+                        "workspaces.on-scroll-up",
+                        "workspaces.on-scroll-down",
+                    ],
+                    values: [
+                        workspaces.on_click.as_ref(),
+                        workspaces.on_right_click.as_ref(),
+                        workspaces.on_middle_click.as_ref(),
+                        workspaces.on_scroll_up.as_ref(),
+                        workspaces.on_scroll_down.as_ref(),
+                    ],
+                },
+            )?;
+            if !read.is_empty() {
+                modules
+                    .bindings
+                    .push((crate::modules::workspaces::ID, read));
+            }
         }
         Ok(Config {
             bar: Bar {

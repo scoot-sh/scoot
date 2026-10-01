@@ -108,6 +108,8 @@ jobs:
   #     read of its description, as scootbg's
   #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
   #                                           is scootbar's
+  #   crates/scoot-ipc/                    -> scootbar too: a dev-dependency,
+  #                                           which pins its `quit` request
   #   either scoot or scootbar             -> the scootbar-on-scoot
   #                                           integration job
   #
@@ -167,9 +169,15 @@ jobs:
                 # The backlog tool and its tests: only their own job.
                 scripts/backlog | scripts/test_backlog.py)
                   backlog=true ;;
-                crates/scoot/* | crates/scoot-core/* | crates/scoot-ipc/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
+                crates/scoot/* | crates/scoot-core/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
                   scoot=true
                   macos=true ;;
+                # scootbar's tests check its hand-written `quit` request
+                # against what this crate encodes (a dev-dependency).
+                crates/scoot-ipc/*)
+                  scoot=true
+                  macos=true
+                  scootbar=true ;;
                 # flake.nix takes the package description from this
                 # manifest, which the Linux job's `nix flake check` reads.
                 crates/scootbg/Cargo.toml)

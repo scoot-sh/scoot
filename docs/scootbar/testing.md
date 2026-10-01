@@ -181,6 +181,50 @@ pinned nixpkgs' tzdata).
   and `hit_target` for the click), and every config bound
   (`config/spacing_tests.rs`).
 
+- **Pointer input** (M4's [pointer-and-interactions](backlog/resolved/pointer-and-interactions-done.md)),
+  pure: the pointer state machine in every order it can see (`pointer`:
+  a click fires on release and only over the module it was armed on, a
+  release after the pointer left or slid off or on another output is
+  nothing and leaves nothing armed, a chord is no click, other buttons and
+  a release with no press are ignored, a press over nothing arms nothing;
+  one notch is one step whether the wheel sends `axis`, `axis_discrete`,
+  `axis_value120` or all of them in either order, smooth scrolls add up
+  and drop their remainder on a reversal, `axis_stop` and leave, ten
+  thousand events are one action per 16 ms frame with the steps capped
+  and carried, hostile values and a clock running backwards do not
+  overflow, touch and the keyboard never get a pointer); hover in the
+  render path (`render/tests/hover.rs`: a hover repaints and damages only
+  the span left and the span entered, in either buffer, on one output
+  only, never bumps a module's revision, follows a module that grows or
+  vanishes under the pointer, and a press is routed by the layout on
+  screen until the next draw); the config keys (`config/binding_tests.rs`:
+  every action kind, every refusal naming its key, the bounds on an `exec`
+  line); `action` (what reaches a module, the effects, a failing command);
+  the spawner (`spawn`: no shell, reaped with no zombie through the
+  pidfd and through the fallback, the cap of 8 and the slot that frees, a
+  flood of short commands, process group, no inherited descriptor, with a
+  control that shows the check sees a leaked one); and scoot's `quit` (`scoot`: the
+  request is what `scoot-ipc` encodes, a scoot that closes, refuses,
+  hangs, is absent or has a full queue, an endless reply).
+- **Pointer input on a headless scoot** (`tests/pointer.rs`, through scoot's
+  own `click`, `pointer_move`, `pointer_button` and `scroll` injection):
+  each button runs its own binding; a press off the module, or a release
+  after the pointer left it, is no click (and breaking that fails the test,
+  checked); a four-hundred-event scroll flood is a handful of commands, at
+  most one per frame, with no zombie left; a command launched by a running
+  bar holds none of the descriptors the bar opens (the bar holds real ones:
+  Wayland and control sockets, the lock, memfds, the timerfd; what the
+  test process itself was handed by its launcher is allowed through, and the
+  bar holds no descriptor without close-on-exec beyond those) and the bar's own count
+  does not move; short commands leave no zombie and a hung one is capped
+  at eight, said, and its slot reused; a failing command is one line, not
+  thirty; hover tints the clock on a screenshot and only while the pointer
+  is on it, and a clock with no binding is never tinted; the pointer is
+  taken only while a binding needs it and released when a reload removes
+  it (on the protocol trace); a reload with a misspelled action is refused
+  by key and changes nothing, and one with a good binding takes the
+  pointer. Touch cannot be injected, so it is covered by the pure test.
+
 ## Snapshots
 
 `src/snapshots/tests.rs` draws fixed scenes and compares every pixel with

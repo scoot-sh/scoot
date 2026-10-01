@@ -29,6 +29,7 @@ pub mod testfont;
 #[allow(unused_imports)] // Only the binaries that check pixels use it.
 pub use shots::{Shot, rgb};
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt};
@@ -570,6 +571,55 @@ pub fn shm_mappings(pid: u32) -> usize {
 /// The number of fds `pid` holds open.
 pub fn open_fds(pid: u32) -> usize {
     fs::read_dir(format!("/proc/{pid}/fd")).unwrap().count()
+}
+
+/// The descriptors `pid` (`"self"` for this process) holds without
+/// close-on-exec: the ones any child it starts inherits. A test process may
+/// hold some it was handed by whatever started it (a CI runner, `nohup`, a
+/// shell's `exec 4<file`), so "holds none of the bar's descriptors" is
+/// checked against this set, not against "nothing above stdio".
+pub fn inheritable_fds(pid: impl std::fmt::Display) -> BTreeSet<i32> {
+    // `O_CLOEXEC` as `fdinfo` prints it (octal).
+    const O_CLOEXEC: u32 = 0o2_000_000;
+    let mut set = BTreeSet::new();
+    let Ok(entries) = fs::read_dir(format!("/proc/{pid}/fd")) else {
+        return set;
+    };
+    for entry in entries.flatten() {
+        let Some(fd) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        // One that closed since the listing (the directory's own) has no
+        // fdinfo and is not inherited.
+        let Ok(info) = fs::read_to_string(format!("/proc/{pid}/fdinfo/{fd}")) else {
+            continue;
+        };
+        let flags = info
+            .lines()
+            .find_map(|line| line.strip_prefix("flags:"))
+            .and_then(|flags| u32::from_str_radix(flags.trim(), 8).ok());
+        if flags.is_some_and(|flags| flags & O_CLOEXEC == 0) {
+            set.insert(fd);
+        }
+    }
+    set
+}
+
+/// What a child may hold when it was started by a process whose
+/// [`inheritable_fds`] were `inherited` and listed itself with `ls`: stdio,
+/// what it inherited, and the one descriptor `ls` opens to read the
+/// directory, the lowest still free. A leaked descriptor cannot hide behind
+/// that one: it takes the lowest free number and pushes `ls`'s to the next.
+pub fn allowed_in_child(inherited: &BTreeSet<i32>) -> BTreeSet<i32> {
+    let mut allowed = inherited.clone();
+    allowed.extend(0..=2);
+    let lowest_free = (3..).find(|fd| !allowed.contains(fd)).unwrap_or(3);
+    allowed.insert(lowest_free);
+    allowed
 }
 
 /// The daemon's fd count once steady: the same on four reads 100 ms apart.

@@ -38,7 +38,7 @@ a custom draw hook, because it is per-output and shapes the bar's look.
 
 Click-to-switch needs pointer input, but the general mechanism (module trait
 `on_input`, the config keys, actions) is a later milestone
-([pointer-and-interactions](pointer-and-interactions.md)) and this one must ship
+([pointer-and-interactions](pointer-and-interactions-done.md)) and this one must ship
 without it. So this module carries its **own minimal hit test**: it knows its pill
 rects, takes a `wl_pointer` button press over one, and sends `activate` then
 `commit`. No config, no scroll, no hover. The later entry generalizes that code
@@ -97,7 +97,7 @@ Time and workspaces on every output, verified by screenshot, at real scale.
   only; handles never retained (positions, not identities); adopted
   names (`"2 DP-1"`) shown by number. Click sends `activate` then
   `commit` through its own minimal hit test over the pill rects; no
-  config, no scroll, no hover — [pointer-and-interactions](../pointer-and-interactions.md)
+  config, no scroll, no hover — [pointer-and-interactions](pointer-and-interactions-done.md)
   generalizes it later.
 - **The pill is rectangular**, an accent fill with the number in the
   bar's background: the canvas has no rounded shape until

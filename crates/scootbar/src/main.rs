@@ -16,6 +16,7 @@
 // machinery with nothing to drive it; the default build checks it all.
 #![cfg_attr(not(feature = "clock"), allow(dead_code))]
 
+mod action;
 mod bar;
 mod cli;
 mod color;
@@ -29,12 +30,17 @@ mod layout;
 mod modules;
 mod outputs;
 mod paint;
+mod pointer;
 mod policy;
 mod print;
 mod region;
 mod render;
+mod scoot;
 #[cfg(test)]
 mod snapshots;
+mod spawn;
+#[cfg(test)]
+mod testfds;
 #[cfg(test)]
 mod testfont;
 mod text;

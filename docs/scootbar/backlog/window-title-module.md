@@ -3,7 +3,7 @@ title: "Window title module: the focused window's title, click to focus"
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "pointer-and-interactions"
+blocked: null
 milestone: "M5"
 ---
 
