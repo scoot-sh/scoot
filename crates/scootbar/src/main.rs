@@ -104,6 +104,15 @@ fn run_daemon(command: cli::DaemonCommand) -> ExitCode {
     } else {
         *command.config
     };
+    if command.check {
+        return match daemon::check(&config) {
+            Ok(()) => print_out("ok\n"),
+            Err(error) => {
+                warn(format_args!("scootbar: {error}"));
+                ExitCode::FAILURE
+            }
+        };
+    }
     match daemon::run(config, startup.file, command.given) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

@@ -543,11 +543,11 @@ provided: that is an upstream Stylix change.
 **Checks.** `checks.<system>.scootbar-modules` (Linux; run by CI's
 `nix flake check`) evaluates both modules with and without a Stylix stand-in,
 pins the precedence, the font pick, `features`, the unit and the refusals,
-and runs the **real `scootbar` binary** over each rendered file (there is no
-`--check` flag: it starts with `--config FILE` and no compositor, and a file
-it accepts passes the config, font and module checks and stops at "cannot
-connect to the Wayland compositor"; a file with an unknown key is refused by
-name).
+and runs the **real `scootbar` binary** over each rendered file with
+[`scootbar daemon --check`](scootbar/cli.md#--check-validate-without-running)
+(the config, the flags over it, the modules and the font, as a start does
+them, with no compositor and nothing written to the runtime directory); a
+file with an unknown key is refused by name.
 
 ## The overlay
 
