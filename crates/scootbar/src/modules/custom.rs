@@ -111,7 +111,14 @@ static NAMES: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 /// `name` as a `&'static str`, the same one every time it is asked for;
 /// `None` once [`MAX_NAMES`] distinct names have been made.
 pub fn intern(name: &str) -> Option<&'static str> {
-    let mut names = NAMES
+    intern_in(&NAMES, name)
+}
+
+/// [`intern`] over a table of its own: the process-wide one is shared by
+/// every test that parses a custom module, so the test that fills a table
+/// to its cap fills one it owns.
+fn intern_in(table: &Mutex<Vec<&'static str>>, name: &str) -> Option<&'static str> {
+    let mut names = table
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(known) = names.iter().find(|known| **known == name) {

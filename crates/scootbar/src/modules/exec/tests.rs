@@ -52,6 +52,20 @@ fn module(script: &str, format: Format) -> Harness {
     Harness::new(start("test", &settings(script, format)).expect("starts"))
 }
 
+/// Starting a module, as `scootbar daemon --check` does, runs nothing: the
+/// command is started when the loop first wakes the module.
+#[test]
+fn starting_a_module_runs_no_command() {
+    let dir = Dir::new("start-runs-nothing");
+    let marker = dir.file("ran");
+    let script = format!("touch {}; echo 1", marker.display());
+    let started = start("test", &settings(&script, Format::Text)).expect("starts");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!marker.exists(), "start ran the command");
+    drop(started);
+    assert!(!marker.exists());
+}
+
 /// Drives the module until `done` holds, or fails.
 fn until(harness: &mut Harness, what: &str, mut done: impl FnMut(&Harness) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);

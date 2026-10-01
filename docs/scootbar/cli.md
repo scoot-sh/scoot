@@ -601,7 +601,11 @@ arguments of at most 4096 bytes. `format` says how a line is read: `text`
   4, ... up to 60 s; a run that lasted 30 s or more starts the sequence
   over. A command that cannot start (no such program) takes the same path,
   and the one warning says why: `exit status: 127, command not found`, or
-  `126, not executable`; any other reason (`125`) is on the line before it.
+  `126, not executable`. Status `125` is the bar's for any other reason it
+  could not run the command (and then a line before says why), but programs
+  exit 125 themselves (`docker run`, GNU `timeout`, `env` and `nice`, `git
+  bisect run`), so the warning says only that it is the command's own or the
+  bar's and that any line above says why.
   Each restart is said on stderr, throttled to one warning a second per
   module, so a restart that follows another warning within the second is
   silent.

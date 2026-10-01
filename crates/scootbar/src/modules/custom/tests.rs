@@ -57,19 +57,21 @@ fn a_name_is_interned_once_and_reused() {
 
 #[test]
 fn interning_is_capped_and_a_known_name_still_resolves() {
-    // The table is process-wide; in its own process (nextest) it starts
-    // empty, so filling it is this test's alone.
-    let first = intern("cap-first").unwrap();
+    // A table of this test's own: filling the process-wide one would starve
+    // every sibling that interns a name while `cargo test` runs them side by
+    // side in one process.
+    let table = Mutex::new(Vec::new());
+    let first = intern_in(&table, "cap-first").unwrap();
     let mut made = 1;
     for i in 0..MAX_NAMES * 2 {
-        if intern(&format!("cap-{i}")).is_some() {
+        if intern_in(&table, &format!("cap-{i}")).is_some() {
             made += 1;
         }
     }
-    assert!(made <= MAX_NAMES, "{made} names");
-    assert_eq!(intern(&format!("cap-{}", MAX_NAMES * 2)), None);
+    assert_eq!(made, MAX_NAMES);
+    assert_eq!(intern_in(&table, &format!("cap-{}", MAX_NAMES * 2)), None);
     // A name already in the table is found even when it is full.
-    assert!(std::ptr::eq(first, intern("cap-first").unwrap()));
+    assert!(std::ptr::eq(first, intern_in(&table, "cap-first").unwrap()));
 }
 
 /// Each exec module polls at most two fds (its pipe or timer, and its

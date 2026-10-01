@@ -67,12 +67,15 @@ const NOT_RUN: u8 = 125;
 
 /// What a command's exit `code` says when it is one of the guard's: the
 /// words for the bar's warning (a command that exits with one of them by
-/// itself, as `sh -c missing` does with 127, means the same).
+/// itself, as `sh -c missing` does with 127, means the same). 125 is the
+/// one a program also exits with for its own reasons (`docker run`, GNU
+/// `timeout`, `env` and `nice`, `git bisect run`), so its words say both and
+/// point at a line that may not exist: the bar cannot tell them apart.
 pub fn meaning(code: i32) -> Option<&'static str> {
     match u8::try_from(code).ok()? {
         NOT_FOUND => Some(", command not found"),
         NOT_EXECUTABLE => Some(", not executable"),
-        NOT_RUN => Some(", could not be run: see the line above"),
+        NOT_RUN => Some(", the command's own or the guard's: any line above says why"),
         _ => None,
     }
 }

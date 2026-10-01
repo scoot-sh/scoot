@@ -148,3 +148,30 @@ fn a_bar_with_no_module_needs_no_font() {
     let out = run(&scratch, &["--check", "--config", file.to_str().unwrap()]);
     assert!(out.status.success(), "{}", stderr(&out));
 }
+
+/// `--check` starts the placed modules exactly as a start does, and an
+/// `exec` module's start only arms a timer: the command runs when the loop
+/// first wakes it, which `--check` never runs. A command a check ran would
+/// be a side effect of validating a file about to be installed.
+#[cfg(feature = "exec")]
+#[test]
+fn a_check_never_runs_an_exec_modules_command() {
+    let scratch = Scratch::new("ck-exec");
+    let marker = scratch.0.join("ran");
+    let file = write(
+        &scratch,
+        "exec.toml",
+        &format!(
+            "right = [\"out\"]\n[bar]\nfont = {:?}\n[exec.out]\ncommand = [\"sh\", \"-c\", {:?}]\n",
+            scratch.font(),
+            format!("touch {}; echo 1", marker.display())
+        ),
+    );
+    let out = run(&scratch, &["--check", "--config", file.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "ok\n");
+    // A spawned `sh` touches the marker within milliseconds; give a late
+    // one ample time before calling it absent.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(!marker.exists(), "--check ran the exec module's command");
+}

@@ -120,7 +120,14 @@ fn a_command_started_directly_is_named_as_before() {
 fn the_guards_statuses_have_the_words_a_shells_do() {
     assert_eq!(meaning(127), Some(", command not found"));
     assert_eq!(meaning(126), Some(", not executable"));
-    assert!(meaning(125).is_some_and(|m| m.contains("see the line above")));
+    // 125 is also what `docker run`, `timeout` and `git bisect run` exit with,
+    // so it cannot claim a line above that the guard never printed.
+    let said = meaning(125).expect("125");
+    assert!(
+        said.contains("command's own") && said.contains("any line above"),
+        "{said}"
+    );
+    assert!(!said.contains("see the line above"), "{said}");
     for code in [0, 1, 2, 124, 128, 255, 256, -1] {
         assert_eq!(meaning(code), None, "{code}");
     }
