@@ -19,7 +19,13 @@ what scootbg and scoot bound (`docs/scootbg/README.md`, `docs/ipc.md#resource-bo
 - **Control socket**: connection cap with a refusal that says why; line and
   message size caps; a write-stall deadline that drops a peer that stopped
   reading; `EMFILE` on accept sheds instead of spinning the loop.
-- **`exec` modules**: a cap on the number of children and on line length (drop
+- **`exec` modules** (*built*, with
+  [exec-push-button-modules](resolved/exec-push-button-modules-done.md): at most
+  8 placed, lines past 4096 bytes dropped whole, one 4 KiB read per 16 ms frame
+  while output keeps coming, restarts 1 s to 60 s, a pidfd to reap, the process
+  group killed with the module, a fuzz target for the payload, and a flooding
+  child against a running bar with the RSS and fd count checked in
+  `tests/exec.rs`): a cap on the number of children and on line length (drop
   the excess with a warning); update rate coalesced to the next frame; restart
   with exponential backoff; children reaped (no zombies), never inheriting the
   bar's fds (close-on-exec everywhere, verified as scoot's fd audit did); a
@@ -68,7 +74,7 @@ notes it could not reach Reddit or Hacker News), the failures that recur are
   runaway growth in a privacy module (#3981). Test: a multi-day soak in the
   [ratchet](lightest.md), and no per-event allocation on the hot path.
 - **Busy loops from polled scripts** (Waybar #5303, #4987): see the streaming
-  rule in [exec-push-button-modules](exec-push-button-modules.md).
+  rule in [exec-push-button-modules](resolved/exec-push-button-modules-done.md).
 - **Tray failures** (the largest single group): see [tray](tray.md).
 - **Zero outputs** and a compositor restart mid-session.
 

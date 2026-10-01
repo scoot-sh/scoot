@@ -20,7 +20,7 @@ losing on.
 
 ## Recommendation
 
-- **Do not build them in at first.** Serve them with the [`exec` module](exec-push-button-modules.md):
+- **Do not build them in at first.** Serve them with the [`exec` module](resolved/exec-push-button-modules-done.md):
   a user who wants a CPU readout writes a one-line script with the interval
   they choose, and pays for it knowingly. Ship documented recipes.
 - If a built-in is ever added, it is opt-in, off in the smallest build, driven

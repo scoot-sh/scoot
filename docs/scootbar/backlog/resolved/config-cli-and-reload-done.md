@@ -35,7 +35,7 @@ command-line flags and did not need it.
 A lock-guarded, `0600`, same-user socket with line-framed JSON, like scootbg's
 (`crates/scootbg/src/framing.rs`, `protocol.rs`). `scootbar msg`:
 
-- `set ID JSON` (see [exec-push-button-modules](exec-push-button-modules.md))
+- `set ID JSON` (see [exec-push-button-modules](exec-push-button-modules-done.md))
 - `query` returns each module's current state as JSON (text, class, value
   where it has one): battery, volume, network, workspace. This is the agent
   hook.
