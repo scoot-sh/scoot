@@ -342,3 +342,94 @@ is what the repeated runs and the rule's margin are for.
 Runs, all under [`bench/`](bench/README.md): `m3-asahi-m1-baseline-clock` and
 `-rerun` (M1's scootbar), `m3-asahi-clock` and `-rerun` (M3's), and
 `m3-asahi-clock-workspaces`.
+
+### M3, all five bars, on the Asahi M2
+
+The same run as [M3 above](#m3-clock-and-workspaces-on-the-asahi-m2), with
+ironbar and ashell added, and nothing else changed: scope
+`clock-workspaces`, 5 startup rounds, a 30 s settle, a 300 s idle window,
+240 switches at 4 a second, 180 s of cool-down before. **ironbar and ashell
+are informational columns.** The ratified competitors are still yambar and
+Waybar ([Decisions](backlog/lightest.md#decisions)); the gate does not count
+the extra two (they cannot lose a row for scootbar, and a pair they cannot
+show is not "not compared"), and whether to promote them into the rule is the
+maintainer's call. They run as the binaries nixpkgs builds (ironbar 0.19.0,
+MIT; ashell 0.10.0, GPL-3.0-or-later), and their configs set only the keys
+that give the common look ([testing.md](testing.md#benchmark)).
+
+**Machine and commit**: the same Asahi MacBook Air as above (Apple M2, 8
+cores, 16 KiB pages, Linux 7.1.13 aarch64, `schedutil`, on mains power with
+the battery full; 96 readings around the runs show no cpufreq cap below the
+hardware maximum, 600 to 3204 MHz seen, hwmon temperatures 22 to 31 C, load
+average 0.00 at the start). Measured on 2026-09-30 from 20:47 EDT, by the
+harness at commit `80241e5f` (branch `feat/scootbar-bench-ironbar-ashell`);
+scootbar's release binary was built from that tree, whose `crates/` is
+identical to `main` at `90a96ca0` (M3's code).
+**The bind fix (#363, `e6ca6e35`) landed on `main` after this run was built
+and is not in it**: it drops the workspace-manager bind when the bar places no
+workspaces module, which only matters at the `clock` scope, not at this one,
+where scootbar shows workspaces. Raw runs, `meta.json` and `run.log`:
+[`bench/m3-asahi-clock-workspaces-all`](bench/m3-asahi-clock-workspaces-all/table.md).
+
+| scoot / sway | scootbar | yambar 1.11.0 | Waybar 0.15.0 | ironbar 0.19.0 (info) | ashell 0.10.0 (info) |
+|---|---|---|---|---|---|
+| Idle RSS | 3.5 / 3.5 MiB | not compared / 13.4 MiB | 51.3 / 51.4 MiB | cannot show / 56.2 MiB | 28.9 / 28.1 MiB |
+| Idle PSS | 2.1 / 2.1 MiB | not compared / 8.0 MiB | 45.6 / 43.2 MiB | cannot show / 47.9 MiB | 26.4 / 25.6 MiB |
+| Idle heap (`RssAnon`) | 0.4 / 0.4 MiB | not compared / 3.1 MiB | 10.7 / 10.8 MiB | cannot show / 14.8 MiB | 6.7 / 6.2 MiB |
+| Idle wakeups per minute | 2 / 2 | not compared / 3 | 5 / 3 | cannot show / 313 | 276 / 194 |
+| Idle CPU, 300 s window | 1.1 / 0.6 ms | not compared / 2.3 ms | 4.3 / 5.5 ms | cannot show / 56.0 ms | 95.1 / 81.4 ms |
+| CPU, 240 workspace switches in 60 s | 27.5 / 22.3 ms | not compared / 187 ms | 482 / 1455 ms | cannot show / 127 ms | 267 / 234 ms |
+| Wakeups over those switches (not gated) | 482 / 481 | not compared / 1202 | 965 / 2298 | cannot show / 1942 | 3208 / 2912 |
+| Startup to first frame | 34.4 [33.6-45.4] / 17.1 [7.8-17.7] ms | not compared / 27.2 [18.8-36.3] ms | 91.7 [85.9-101] / 69.5 [54.4-86.0] ms | cannot show / 61.0 [51.2-66.2] ms | 28.6 [27.3-38.1] / 30.5 [21.1-35.4] ms |
+| Size: stripped binary + non-glibc `ldd` closure | 1.38 MB | 20.95 MB | 73.97 MB | 100.86 MB | 39.52 MB |
+| Bare executable, stripped (not gated) | 1.25 MB | 396 kB | 2.95 MB | 24.75 MB | 29.11 MB |
+| Threads | 1 | 4 (sway) | 8 / 9 | 19 (sway) | 12 / 12 |
+
+scootbar's, yambar's and Waybar's columns are this run's own, a second
+measurement of what the [earlier M3 table](#m3-clock-and-workspaces-on-the-asahi-m2)
+has (for instance scootbar's startup on scoot reads 34.4 here against 37.3 ms
+there, Waybar's switching CPU on scoot 482 against 464 ms). **The extra two
+columns, read against scootbar** (by the harness's noise rule): neither
+beats scootbar on any gated row on either compositor. Two rows are ties,
+both startup against ashell (scoot: ashell's median 28.6 ms is lower than
+scootbar's 34.4 ms but inside the combined spread; sway 30.5 against 17.1
+ms): the number is lower on one side and the rule calls it a tie, not a win
+for ashell. Everywhere else scootbar is ahead: memory 8 times (ashell) to 16
+times (ironbar) larger than scootbar's; idle wakeups 194 to 313 a minute
+against scootbar's 2; the switching CPU 5.7 times (ironbar, sway) to 10 times
+(ashell) scootbar's. ironbar's switching CPU on sway (127 ms) is below
+yambar's 187 ms and Waybar's 1455 ms and still 5.7 times scootbar's 22.3 ms.
+
+**ironbar is not run on scoot at this scope**, as yambar is not: it speaks
+compositor IPCs (sway, Hyprland, Niri) and has no ext-workspace-v1 support
+(M0: `failed to create module Workspaces`), so it cannot show the workspaces
+there, and the harness neither runs it nor invents a number.
+
+**Things that make these two columns not like for like**, none changed
+to flatter anyone:
+
+- ashell's bar height and font size are not options (iced theme tokens): its
+  bar is not 26 px at 14 px; only the font family (DejaVu Sans), the colors
+  (`#1e1e2e`, `#cdd6f4`), the clock format and the modules are set. ironbar's `height` is a minimum that GTK may grow.
+- ironbar and ashell have no setting for the clock's update interval; they
+  run their own timers. ashell's 194 to 276 and ironbar's 313 voluntary
+  wakeups a minute are what they do idle in this session, not something the
+  config asked for. ashell also retries a PulseAudio connection every 5 s
+  and logs `Failed to start PulseAudio thread: Access denied` (the bench
+  session runs no sound server); how much of its idle
+  cost that is was not separated, and a session with one could read lower.
+- **M0's ashell config did not do what it said.** ashell 0.10.0 names its
+  clock module `Tempo` and configures it under `[tempo] clock_format`;
+  M0's `[clock] format` is reported on its stderr as `Unknown configuration
+  field ignored: clock`, so the format was ashell's default (`%a %d %b %R`,
+  which draws the same text). It is a presence-only difference here; the
+  harness's config uses the real keys and starts without that warning.
+- Rendering: ashell (iced/wgpu) and ironbar (GTK 4) needed no software-rendering
+  variables on this box's headless sessions (no `WGPU_BACKEND`, no
+  `LIBGL_ALWAYS_SOFTWARE`): sampled 8 to 12 s into a run, neither had a DRM
+  device open (`/proc/PID/fd`), ashell had loaded libEGL and ironbar libvulkan
+  (to probe, it seems) and neither drew on the GPU. That is as measured, not a
+  guarantee of what they do with a GPU session.
+- The screenshot presence check passes for both on the sides they run (the
+  bar's color at the top, something drawn on each placed part): the content
+  is only ever checked for presence.

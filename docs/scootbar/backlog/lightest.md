@@ -208,6 +208,27 @@ exits 1 (11 flags).
 - Nothing here waives a row or changes M3's verdict: rule 1 still fails on
   memory and size.
 
+**2026-09-30 note: ironbar and ashell, informational.** The same run was
+repeated with ironbar 0.19.0 and ashell 0.10.0 as two extra columns
+(`bench/m3-asahi-clock-workspaces-all`, tables in the
+[README](../README.md#m3-all-five-bars-on-the-asahi-m2)). They are M0's "if
+cheap" pair, not the ratified competitors: **the gate still judges yambar and
+Waybar only, and this note changes no rule, target or verdict.** Whether to
+promote either into rule 2 is the maintainer's call; the harness lists
+them apart (`Informational, not gated`) and never counts them. What the columns
+show: **neither beats scootbar on any gated row on scoot or sway**, so there is
+no row to report as a loss. Two are ties by the noise rule (startup against
+ashell on both compositors; on scoot ashell's median, 28.6 ms, is below
+scootbar's 34.4 ms but inside the spread). Elsewhere scootbar is ahead by
+8 to 16 times in memory, by about 100 to 160 times in idle wakeups (ironbar 313 a
+minute, ashell 194 to 276, against 2) and by 5.7 to 10 times in the CPU of 240
+workspace switches. ironbar cannot show the workspaces on scoot (no
+ext-workspace-v1), so it is not run there, as yambar. The bind fix (#363) is
+not in these numbers, and does not bear on this scope. The caveats that
+bound the comparison (ashell's bar height and font size are not options; neither
+has a clock interval setting; M0's ashell config used a clock table 0.10.0
+ignores) are in the README subsection.
+
 ## Rules
 
 - Release builds only (`lto = "fat"`, `panic = "abort"`).
