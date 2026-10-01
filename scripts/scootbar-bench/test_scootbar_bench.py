@@ -18,6 +18,7 @@ sys.path.append(os.path.join(HERE, "..", "scootbg-bench"))
 import bars  # noqa: E402
 import machine  # noqa: E402
 import measure  # noqa: E402
+import redraw  # noqa: E402
 import stage  # noqa: E402
 import tables  # noqa: E402
 
@@ -433,6 +434,30 @@ class Gates(unittest.TestCase):
             text, regressions = tables.compare(now, base)
             self.assertEqual(regressions, 2, text)  # RSS and Size
             self.assertIn("| scoot | Idle RSS | 1.0 | 2.0 | **REGRESSED** |", text)
+
+
+class Redraw(unittest.TestCase):
+    """redraw.py's inputs: what it sends the bar, with no bar running."""
+
+    def test_every_set_is_a_different_32_character_text(self):
+        texts = redraw.texts(3000)
+        self.assertEqual(len(set(texts)), 3000)
+        self.assertTrue(all(len(t) == 32 for t in texts))
+
+    def test_neighbours_differ_so_no_set_is_skipped_as_unchanged(self):
+        texts = redraw.texts(500)
+        self.assertTrue(all(a != b for a, b in zip(texts, texts[1:])))
+
+    def test_a_request_is_one_line_of_the_control_protocol(self):
+        line = redraw.request("hello")
+        self.assertTrue(line.endswith(b"\n") and line.count(b"\n") == 1)
+        body = json.loads(line)
+        self.assertEqual((body["protocol"], body["type"], body["id"]), (1, "set", "status"))
+        self.assertEqual(body["value"], {"text": "hello"})
+
+    def test_the_median_of_an_even_count_is_the_upper_middle(self):
+        self.assertEqual(redraw.median([3.0, 1.0, 2.0]), 2.0)
+        self.assertEqual(redraw.median([4.0, 1.0, 2.0, 3.0]), 3.0)
 
 
 if __name__ == "__main__":
