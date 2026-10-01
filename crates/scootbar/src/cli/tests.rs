@@ -355,7 +355,11 @@ fn the_help_matches_the_build() {
 
 #[test]
 fn msg_commands_parse() {
-    assert_eq!(run(&["msg", "query"]), Ok(Command::Msg(Msg::Query)));
+    assert_eq!(
+        run(&["msg", "query"]),
+        Ok(Command::Msg(Msg::Query { id: None }))
+    );
+    assert_eq!(run(&["msg", "layout"]), Ok(Command::Msg(Msg::Layout)));
     assert_eq!(run(&["msg", "reload"]), Ok(Command::Msg(Msg::Reload)));
     assert_eq!(run(&["msg", "version"]), Ok(Command::Msg(Msg::Version)));
     assert_eq!(run(&["msg", "kill"]), Ok(Command::Msg(Msg::Kill)));
@@ -405,8 +409,106 @@ fn msg_refusals_name_what_is_wrong() {
     assert!(bad.contains("no way") && bad.contains("module id"), "{bad}");
     assert!(run(&["msg", "set", "", "{}"]).is_err());
     // A trailing argument is unexpected, naming the command.
-    let extra = run(&["msg", "query", "x"]).unwrap_err().to_string();
+    let extra = run(&["msg", "query", "x", "y"]).unwrap_err().to_string();
     assert!(extra.contains("msg"), "{extra}");
+    let extra = run(&["msg", "layout", "x"]).unwrap_err().to_string();
+    assert!(extra.contains("msg"), "{extra}");
+}
+
+#[test]
+fn msg_query_may_name_a_module() {
+    assert_eq!(
+        run(&["msg", "query", "clock"]),
+        Ok(Command::Msg(Msg::Query {
+            id: Some("clock".into())
+        }))
+    );
+    assert_eq!(
+        run(&["msg", "query", "no way"]),
+        Err(Error::Msg(MsgError::BadModuleId("no way".into())))
+    );
+}
+
+#[test]
+fn msg_invoke_takes_an_action_a_number_and_an_output() {
+    assert_eq!(
+        run(&["msg", "invoke", "volume", "scroll-up"]),
+        Ok(Command::Msg(Msg::Invoke {
+            id: "volume".into(),
+            action: "scroll-up".into(),
+            arg: None,
+            output: None,
+        }))
+    );
+    assert_eq!(
+        run(&["msg", "invoke", "volume", "raise", "-5", "--output", "DP-1"]),
+        Ok(Command::Msg(Msg::Invoke {
+            id: "volume".into(),
+            action: "raise".into(),
+            arg: Some(-5),
+            output: Some("DP-1".into()),
+        }))
+    );
+    // The flag may come first.
+    assert!(matches!(
+        run(&["msg", "invoke", "v", "raise", "--output", "DP-1", "3"]),
+        Ok(Command::Msg(Msg::Invoke {
+            arg: Some(3),
+            output: Some(_),
+            ..
+        }))
+    ));
+}
+
+#[test]
+fn msg_invoke_refusals_name_what_is_wrong() {
+    assert_eq!(run(&["msg", "invoke"]), Err(Error::Msg(MsgError::NeedsId)));
+    assert_eq!(
+        run(&["msg", "invoke", "volume"]),
+        Err(Error::Msg(MsgError::NeedsAction))
+    );
+    assert_eq!(
+        run(&["msg", "invoke", "no way", "x"]),
+        Err(Error::Msg(MsgError::BadModuleId("no way".into())))
+    );
+    assert_eq!(
+        run(&["msg", "invoke", "v", "x", "1.5"]),
+        Err(Error::Msg(MsgError::BadArg("1.5".into())))
+    );
+    assert_eq!(
+        run(&["msg", "invoke", "v", "x", "99999999999"]),
+        Err(Error::Msg(MsgError::BadArg("99999999999".into())))
+    );
+    assert_eq!(
+        run(&["msg", "invoke", "v", "x", "--output"]),
+        Err(Error::Msg(MsgError::NeedsOutput))
+    );
+    assert!(run(&["msg", "invoke", "v", "x", "1", "2"]).is_err());
+    assert!(run(&["msg", "invoke", "v", "x", "--output", "a", "--output", "b"]).is_err());
+}
+
+#[test]
+fn msg_subscribe_names_kinds_and_none_means_every_kind() {
+    use crate::control::protocol::EventKind;
+    assert_eq!(
+        run(&["msg", "subscribe"]),
+        Ok(Command::Msg(Msg::Subscribe {
+            events: vec![EventKind::Module, EventKind::Output]
+        }))
+    );
+    assert_eq!(
+        run(&["msg", "subscribe", "output", "output"]),
+        Ok(Command::Msg(Msg::Subscribe {
+            events: vec![EventKind::Output]
+        }))
+    );
+    let bad = run(&["msg", "subscribe", "window"])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        bad.contains("window") && bad.contains("module, output"),
+        "{bad}"
+    );
 }
 
 #[test]
@@ -697,4 +799,13 @@ fn check_is_a_switch_that_takes_no_value_and_may_come_once() {
 fn the_help_names_check() {
     assert!(USAGE.contains("scootbar daemon --check"));
     assert!(DAEMON_HELP.contains("--check validates"));
+}
+
+#[test]
+fn msg_help_does_not_promise_that_exit_0_means_the_daemon_exited() {
+    // A subscriber dropped with a full socket ends on a clean newline too.
+    let help = super::MSG_HELP;
+    assert!(help.contains("does NOT mean the daemon exited"));
+    assert!(help.contains("subscribe again and then query"));
+    assert!(!help.contains("ends when the daemon does"));
 }

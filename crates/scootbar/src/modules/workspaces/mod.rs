@@ -1010,6 +1010,27 @@ impl Module for Workspaces {
         Ok(Update::Unchanged)
     }
 
+    /// `{"active": 2, "workspaces": [1, 2, 3]}` for `output`: the shown
+    /// numbers and the active one's (`null` when none is); `None` before
+    /// the compositor has said anything for this output.
+    fn value(&self, output: &OutputView<'_>) -> Option<serde_json::Value> {
+        let mut items = [(0u32, false); MAX_WORKSPACES];
+        let mut count = 0;
+        self.items(output, &mut items, &mut count);
+        let shown = items.get(..count)?;
+        if shown.is_empty() {
+            return None;
+        }
+        let active = shown
+            .iter()
+            .find(|(_, active)| *active)
+            .map(|(number, _)| *number);
+        Some(serde_json::json!({
+            "active": active,
+            "workspaces": shown.iter().map(|(number, _)| *number).collect::<Vec<_>>(),
+        }))
+    }
+
     /// Clicking switches workspaces with no binding at all.
     fn handles_input(&self) -> bool {
         true

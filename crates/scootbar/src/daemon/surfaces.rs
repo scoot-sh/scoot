@@ -339,6 +339,8 @@ impl State {
             return;
         }
         if let Some(entry) = self.outputs.remove_global(name) {
+            self.events
+                .note_output(false, entry.output.info().name.as_deref());
             self.input.forget(entry.output.id());
             #[cfg(feature = "workspaces")]
             self.workspaces
@@ -431,9 +433,14 @@ impl Dispatch<WlOutput, OutputId> for State {
         let output = &mut entry.output;
         match event {
             wl_output::Event::Geometry {
+                x,
+                y,
                 transform: WEnum::Value(transform),
                 ..
-            } => output.stage_rotation(rotation_of(transform)),
+            } => {
+                output.stage_origin(x, y);
+                output.stage_rotation(rotation_of(transform));
+            }
             wl_output::Event::Mode {
                 flags: WEnum::Value(flags),
                 width,
@@ -527,6 +534,9 @@ impl Dispatch<WlCallback, RoundTrip> for State {
             // there is one at all. (`place` marks an unselected output, so
             // its settle creates nothing.)
             RoundTrip::Settle(_) => {
+                state
+                    .events
+                    .note_output(true, entry.output.info().name.as_deref());
                 match Self::place(&state.placement, &state.content.modules, entry) {
                     // No surface exists before the settle, so placing
                     // never does anything to one; whatever it says is

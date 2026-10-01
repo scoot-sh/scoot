@@ -126,6 +126,25 @@ fn each_output_shows_its_own_numbers_sorted_by_coordinates() {
 }
 
 #[test]
+fn the_value_is_the_numbers_and_the_active_one_per_output() {
+    let (harness, link) = started();
+    commit(&link, "DP-1", &[(10, 10, false), (2, 2, true)]);
+    commit(&link, "HDMI-1", &[(1, 1, false)]);
+    assert_eq!(
+        harness.value_on(Some("DP-1")),
+        Some(serde_json::json!({"active": 2, "workspaces": [2, 10]}))
+    );
+    // None active is `null`, not 0.
+    assert_eq!(
+        harness.value_on(Some("HDMI-1")),
+        Some(serde_json::json!({"active": null, "workspaces": [1]}))
+    );
+    // Nothing shown, no value: the same as its empty view.
+    assert_eq!(harness.value_on(Some("DP-2")), None);
+    assert_eq!(harness.value_on(None), None);
+}
+
+#[test]
 fn a_workspace_never_named_shows_its_position() {
     let (harness, link) = started();
     // Sorted by coordinates first: `(3, 3)` stays first, `(0, 5)` shows

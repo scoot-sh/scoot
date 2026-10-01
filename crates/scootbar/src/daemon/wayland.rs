@@ -123,6 +123,8 @@ pub struct State {
     pub spawner: crate::spawn::Spawner,
     /// Rate-limits what a failing binding says.
     pub warned: super::input::Throttle,
+    /// What subscribers are owed (`events`).
+    pub events: super::events::Events,
 }
 
 pub struct Wayland {
@@ -202,6 +204,7 @@ impl Wayland {
             input: crate::pointer::Pointer::default(),
             spawner: crate::spawn::Spawner::default(),
             warned: super::input::Throttle::default(),
+            events: super::events::Events::default(),
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {

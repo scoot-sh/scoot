@@ -255,9 +255,10 @@ impl State {
     }
 }
 
-/// The two ways out of the process, for [`action::perform`].
-struct Launch<'a> {
-    spawner: &'a mut crate::spawn::Spawner,
+/// The two ways out of the process, for [`action::perform`] (a pointer press,
+/// and `invoke`).
+pub(super) struct Launch<'a> {
+    pub(super) spawner: &'a mut crate::spawn::Spawner,
 }
 
 impl Effects for Launch<'_> {

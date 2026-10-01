@@ -100,7 +100,8 @@ fn paths_refuse_what_they_cannot_serve() {
 #[test]
 fn every_request_round_trips_through_its_line() {
     let requests = [
-        Request::Query,
+        Request::Query { id: None },
+        Request::Layout,
         Request::Reload,
         Request::Hide,
         Request::Show,
@@ -122,7 +123,8 @@ fn every_request_round_trips_through_its_line() {
         assert!(line.ends_with('\n'), "{line}");
         let parsed = protocol::parse(line.trim_end_matches('\n').as_bytes());
         match (request, parsed) {
-            (Request::Query, Ok(Request::Query))
+            (Request::Query { id: None }, Ok(Request::Query { id: None }))
+            | (Request::Layout, Ok(Request::Layout))
             | (Request::Reload, Ok(Request::Reload))
             | (Request::Hide, Ok(Request::Hide))
             | (Request::Show, Ok(Request::Show))
@@ -173,7 +175,7 @@ fn requests_refuse_loudly() {
         ),
         (
             "{\"protocol\":1,\"type\":\"set\",\"value\":1}",
-            "needs an `id`",
+            "need an `id`",
         ),
         (
             "{\"protocol\":1,\"type\":\"set\",\"id\":\"clock\"}",
@@ -187,7 +189,7 @@ fn requests_refuse_loudly() {
     // Unknown fields are ignored, for later arguments' room.
     assert!(matches!(
         protocol::parse(b"{\"protocol\":1,\"type\":\"query\",\"output\":\"DP-1\"}"),
-        Ok(Request::Query)
+        Ok(Request::Query { id: None })
     ));
 }
 
@@ -354,7 +356,7 @@ fn the_server_admits_and_evicts() {
 fn a_client_to_nothing_is_told_to_start_one() {
     let scratch = Scratch::new("client");
     let paths = scratch.paths();
-    let error = super::client::send_to(&paths, &Request::Query)
+    let error = super::client::send_to(&paths, &Request::Query { id: None })
         .unwrap_err()
         .to_string();
     assert!(error.contains("no scootbar daemon is running"), "{error}");
@@ -385,4 +387,130 @@ fn a_client_and_a_server_exchange_one_request() {
     });
     assert_eq!(reply, "{\"type\":\"ok\"}\n");
     assert_eq!(PROTOCOL_VERSION, 1);
+}
+
+// ---- the streaming client ----
+
+/// A daemon that reads the request, writes `bytes` (all of them, or as many
+/// as the client reads) and closes, and what `stream_to` made of it: the
+/// lines `each` was given, and the result.
+fn streamed(name: &str, bytes: Vec<u8>) -> (Vec<String>, Result<(), super::client::Error>) {
+    let scratch = Scratch::new(name);
+    let paths = scratch.paths();
+    let listener = UnixListener::bind(&paths.socket).unwrap();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut byte = [0u8; 1];
+            while stream.read(&mut byte).unwrap() > 0 && byte[0] != b'\n' {}
+            // The client may stop reading (a bound): a write error is fine.
+            let _ = stream.write_all(&bytes);
+        });
+        let mut lines = Vec::new();
+        let request = Request::Subscribe { events: Vec::new() };
+        let result = super::client::stream_to(&paths, &request, |line| {
+            lines.push(line.to_owned());
+            true
+        });
+        // A client that never connected (a path error) leaves the daemon
+        // thread in `accept`, which the scope would wait for for ever: one
+        // connection to the still-open listener lets it end.
+        let _ = UnixStream::connect(&paths.socket);
+        (lines, result)
+    })
+}
+
+#[test]
+fn a_stream_that_closes_between_lines_ends_cleanly() {
+    let (lines, result) = streamed(
+        "stream-whole",
+        b"{\"type\":\"subscribed\",\"events\":[\"module\"]}\n{\"type\":\"module\"}\n".to_vec(),
+    );
+    result.unwrap();
+    assert_eq!(
+        lines,
+        [
+            "{\"type\":\"subscribed\",\"events\":[\"module\"]}\n",
+            "{\"type\":\"module\"}\n"
+        ]
+    );
+}
+
+#[test]
+fn a_line_cut_by_the_connection_ending_is_discarded_and_an_error() {
+    // The daemon drops a subscriber its write cannot finish: the client may
+    // be left a prefix of an event. It is not printed as if whole, and the
+    // outcome is not a success.
+    let (lines, result) = streamed(
+        "stream-cut",
+        b"{\"type\":\"subscribed\",\"events\":[\"module\"]}\n{\"type\":\"module\",\"id\":\"clo"
+            .to_vec(),
+    );
+    assert_eq!(
+        lines,
+        ["{\"type\":\"subscribed\",\"events\":[\"module\"]}\n"]
+    );
+    let error = result.unwrap_err();
+    assert!(matches!(error, super::client::Error::Cut), "{error:?}");
+    assert!(error.to_string().contains("discarded"), "{error}");
+}
+
+#[test]
+fn a_first_line_cut_is_discarded_too() {
+    let (lines, result) = streamed("stream-cut-first", b"{\"type\":\"subscr".to_vec());
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(
+        matches!(result, Err(super::client::Error::Cut)),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn a_daemon_that_says_nothing_is_no_reply_not_a_cut() {
+    let (lines, result) = streamed("stream-silent", Vec::new());
+    assert!(lines.is_empty());
+    assert!(
+        matches!(result, Err(super::client::Error::NoReply)),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn a_line_with_no_end_past_the_bound_is_refused_not_passed_on() {
+    let mut bytes = b"{\"type\":\"subscribed\",\"events\":[]}\n".to_vec();
+    bytes.resize(bytes.len() + (16 << 20) + 1024, b'x');
+    let (lines, result) = streamed("stream-long", bytes);
+    assert_eq!(lines.len(), 1, "only the first line was whole");
+    assert!(
+        matches!(result, Err(super::client::Error::BadReply(_))),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn a_dropped_line_is_passed_on_and_then_ends_the_stream_as_an_error() {
+    // What the daemon sends a subscriber it evicts: the whole line, then it
+    // closes. `each` sees it (a script reading the stream does), and the
+    // result is not a success.
+    let (lines, result) = streamed(
+        "stream-dropped",
+        [
+            "{\"type\":\"subscribed\",\"events\":[\"module\"]}\n",
+            "{\"type\":\"dropped\"}\n",
+        ]
+        .concat()
+        .into_bytes(),
+    );
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines[1].as_bytes(), super::protocol::DROPPED);
+    let error = result.unwrap_err();
+    assert!(matches!(error, super::client::Error::Dropped), "{error:?}");
+    assert!(error.to_string().contains("subscribe again"), "{error}");
+}
+
+#[test]
+fn the_dropped_line_is_json_of_that_type() {
+    let value: serde_json::Value = serde_json::from_slice(super::protocol::DROPPED).unwrap();
+    assert_eq!(value, serde_json::json!({"type": "dropped"}));
+    assert_eq!(super::protocol::DROPPED.last(), Some(&b'\n'));
 }

@@ -33,7 +33,7 @@ PipeWire and PulseAudio both answer the PulseAudio native protocol (via
   `on-right-click` a mixer command; maximum (100% or allow over-amplification).
 - Class `muted`; an icon by level (see [icons](resolved/icons-and-fonts-done.md)).
 - `query` returns `{volume, muted, sink}`; `invoke raise|lower|toggle-mute`
-  ([agent-interface](agent-interface.md)).
+  ([agent-interface](resolved/agent-interface-done.md)).
 - A separate `microphone` variant (source volume, mute) shares the code.
 
 ## Edge cases

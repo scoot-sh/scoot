@@ -254,6 +254,48 @@ pinned nixpkgs' tzdata).
   names across the kinds, the interned name the same `&str` on every read, the
   count placed and defined, a table nothing places never started); the control
   socket reading `"value": null` as a value.
+- **The agent interface** (M4's
+  [agent-interface](backlog/resolved/agent-interface-done.md)): the requests on
+  the wire (`control/subscribe_tests.rs`: `query ID`, `invoke` with its number
+  and output and every refusal, `subscribe` naming kinds, each request
+  round-tripping through its own line); a subscribed connection (answers
+  once, refuses anything further with one line however many arrive, a request
+  pipelined behind the `subscribe` refused in the same write, a client that
+  hangs up ending it, a subscriber that stops reading dropped after what the
+  socket's own buffer took, an event too big for one write ending it, a
+  broadcast reaching only its kind and the others keeping theirs, a flood of
+  connections closing the idle ones and never a subscriber, and an evicted
+  subscriber told `dropped` whole as its last line); the
+  streaming client against a scratch socket (`control/tests.rs`: a stream that
+  closes between lines ends 0, a `dropped` line is passed on and then an
+  error, a line the connection cut is discarded and an error, a first line cut likewise, a daemon that says nothing is no reply, and
+  a line past the bound is refused; the cut and bound tests fail with the old
+  print-it-anyway behavior); the layout
+  geometry (`daemon/agent/tests.rs`: top and bottom edges, margins, an origin
+  left of zero, hostile sizes, and the property that every device pixel of a
+  span is inside its rectangle at scales 1, 1.25, 1.5, 1.75, 2, 2.5 and 3); and
+  the worst reply sitting far inside its bound by arithmetic; and
+  `tests/subscribe_status.rs` (no compositor: `msg subscribe` against a
+  socket that writes what it is told): a `dropped` line printed and exit 1, a
+  cut line exit 1 and not printed, and a stream that just ends exit 0 with
+  nothing said, so the one ending that cannot be told from the daemon exiting
+  is pinned as such.
+- **The agent interface on a headless scoot** (`tests/agent.rs`): the
+  fidelity test (two outputs at scales 1 and 1.5; each rectangle holds ink on
+  the output's own screenshot and the bar has none outside them; every
+  module's rectangle clicked at its first and last logical pixel through
+  scoot's own input injection and the binding runs; one pixel outside, it
+  does not), a hidden
+  bar with no rectangles, `query ID`, `invoke` running each trigger's binding
+  and refusing each wrong ask without running anything, a `set` a
+  millisecond for 400 ms heard by a subscriber as the last text in about one
+  event a frame, not one a change (it fails with the gate removed; it reads the
+  replies to its sets as they come, for a connection nobody reads the replies
+  of stalls itself after about 270 and the test would wait for ever), an idle
+  bar with two subscribers waking for nothing, a subscriber that hangs up
+  leaving the daemon answering, a subscribed connection refused further
+  requests, and the subscriber cap with a slot coming back (`tests/hotplug.rs` adds an `output` subscriber told a
+  plugged and an unplugged output on sway).
 - **On a headless scoot** (`tests/exec.rs`): an `exec` module's output read back
   off a screenshot and `query` agreeing with it; a JSON line's class drawn in
   its token's color; `msg set` changing a `push` module on screen and in

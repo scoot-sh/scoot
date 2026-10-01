@@ -1,7 +1,9 @@
 //! What the daemon answers to each control request.
 //!
 //! Every request is answered at once, from the daemon's state: `query`
-//! reads each placed module's view on every output, `reload` re-reads the
+//! and `layout` read what is drawn (`agent`), `invoke` runs an action as a
+//! click would, `subscribe` dedicates the connection to events (`events`),
+//! `reload` re-reads the
 //! config file and live-applies it, `version` and `kill` are what they
 //! sound like, and `set` goes to the module (only `push` takes one).
 //!
@@ -13,13 +15,14 @@ use std::path::PathBuf;
 
 use wayland_client::{Connection, QueueHandle};
 
+use super::agent;
 use super::wayland::State;
 use crate::cli::Given;
 use crate::config::{self, Config};
-use crate::control::Handler;
-use crate::control::protocol::{ModuleView, PROTOCOL_VERSION, Reply, Request, write_reply};
+use crate::control::protocol::{PROTOCOL_VERSION, Reply, Request, write_reply};
+use crate::control::{Handler, Kinds, MAX_SUBSCRIBERS};
 use crate::font;
-use crate::modules::{self, OutputView, Placed, Update, View};
+use crate::modules::{self, Update, View};
 use crate::policy::Placement;
 use crate::print::warn;
 
@@ -37,6 +40,10 @@ pub struct Responder<'a> {
     /// One view, reused for every module on every output a `query` asks
     /// about, so a query allocates nothing past the reply itself.
     view: View,
+    /// How many connections are subscribed now, for the cap.
+    subscribers: usize,
+    /// Set by a `subscribe` just handled: what the connection now carries.
+    subscription: Option<Kinds>,
 }
 
 impl<'a> Responder<'a> {
@@ -46,6 +53,7 @@ impl<'a> Responder<'a> {
         qh: &'a QueueHandle<State>,
         file: Option<&'a PathBuf>,
         given: &'a Given,
+        subscribers: usize,
     ) -> Self {
         Self {
             stop: false,
@@ -55,11 +63,17 @@ impl<'a> Responder<'a> {
             file,
             given,
             view: View::default(),
+            subscribers,
+            subscription: None,
         }
     }
 }
 
 impl Handler for Responder<'_> {
+    fn take_subscription(&mut self) -> Option<Kinds> {
+        self.subscription.take()
+    }
+
     fn handle(&mut self, line: &[u8], out: &mut Vec<u8>) {
         let reply;
         let request = match crate::control::protocol::parse(line) {
@@ -70,12 +84,48 @@ impl Handler for Responder<'_> {
             }
         };
         match request {
-            Request::Query => write_query(
-                out,
-                &self.state.content.modules,
-                &self.state.outputs,
-                &mut self.view,
-            ),
+            Request::Query { id } => {
+                if let Err(message) = agent::write_query(
+                    out,
+                    &self.state.content.modules,
+                    &self.state.outputs,
+                    &mut self.view,
+                    id.as_deref(),
+                ) {
+                    write_reply(out, &Reply::Error { message: &message });
+                }
+            }
+            Request::Layout => agent::write_layout(out, self.state),
+            Request::Invoke {
+                id,
+                action,
+                arg,
+                output,
+            } => match agent::invoke(self.state, &id, &action, arg, output.as_deref()) {
+                Ok(()) => write_reply(out, &Reply::Ok),
+                Err(message) => write_reply(out, &Reply::Error { message: &message }),
+            },
+            Request::Subscribe { events } => {
+                if self.subscribers >= MAX_SUBSCRIBERS {
+                    write_reply(
+                        out,
+                        &Reply::Error {
+                            message: &format_args!(
+                                "at most {MAX_SUBSCRIBERS} connections may be subscribed at once"
+                            ),
+                        },
+                    );
+                } else {
+                    write_reply(
+                        out,
+                        &Reply::Subscribed {
+                            events: events.iter().map(|kind| kind.name()).collect(),
+                        },
+                    );
+                    self.subscription = Some(Kinds::of(&events));
+                    self.subscribers += 1;
+                }
+            }
             Request::Version => {
                 reply = Reply::Version {
                     protocol: PROTOCOL_VERSION,
@@ -113,58 +163,6 @@ impl Handler for Responder<'_> {
             },
         }
     }
-}
-
-/// A `query` reply: every placed module's view on every output that shows
-/// it, in start order. The views are asked into one reused [`View`], so a
-/// query allocates nothing beyond the connection's output buffer.
-fn write_query(
-    out: &mut Vec<u8>,
-    placed: &[Placed],
-    outputs: &crate::outputs::Outputs<super::surfaces::Objects>,
-    scratch: &mut View,
-) {
-    let start = out.len();
-    // Every element serializes (strings, numbers, a char), and writing
-    // into a `Vec` cannot fail: `failed` is still checked rather than
-    // assumed, so a half-written line never goes out.
-    let mut failed = false;
-    out.extend_from_slice(br#"{"type":"modules","modules":["#);
-    let mut first = true;
-    for (index, module) in placed.iter().enumerate() {
-        for entry in outputs.iter() {
-            // Only the outputs that show it, in the section they place it.
-            let Some(section) = entry.objects.scene.section_of(index) else {
-                continue;
-            };
-            let name = entry.output.info().name.as_deref();
-            scratch.clear();
-            module.module.view(&OutputView { name }, scratch);
-            if !first {
-                out.push(b',');
-            }
-            first = false;
-            let view = ModuleView {
-                id: module.id,
-                section: section.name(),
-                output: name,
-                text: scratch.text(),
-                class: scratch.class().name(),
-                icon: scratch.icon(),
-            };
-            if serde_json::to_writer(&mut *out, &view).is_err() {
-                failed = true;
-                break;
-            }
-        }
-    }
-    if failed {
-        out.truncate(start);
-        out.extend_from_slice(br#"{"type":"error","message":"internal: reply failed to encode"}"#);
-    } else {
-        out.extend_from_slice(b"]}");
-    }
-    out.push(b'\n');
 }
 
 impl Responder<'_> {
@@ -222,6 +220,8 @@ impl Responder<'_> {
             warn(format_args!("scootbar: note: {note}"));
         }
         self.state.content.modules = modules;
+        // Every module is a new one: subscribers are told them all.
+        self.state.events.invalidate();
         self.state.content.text = text;
         self.state.content.style = config.style();
         // New placement, new style, new font: every output is placed again
@@ -253,19 +253,7 @@ impl Responder<'_> {
     /// silent ok.
     fn set(&mut self, id: &str, value: &serde_json::Value) -> Result<(), String> {
         let Some(placed) = self.state.content.modules.iter_mut().find(|p| p.id == id) else {
-            let mut shows = String::new();
-            for placed in &self.state.content.modules {
-                if !shows.is_empty() {
-                    shows.push(' ');
-                }
-                shows.push_str(placed.id);
-            }
-            if shows.is_empty() {
-                return Err(format!("`{id}` is not placed: this bar shows nothing"));
-            }
-            return Err(format!(
-                "`{id}` is not placed in this bar (it shows:{shows})"
-            ));
+            return Err(agent::not_placed(id, &self.state.content.modules));
         };
         match placed.module.on_set(value) {
             Ok(Update::Changed) => {

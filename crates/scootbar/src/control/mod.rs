@@ -2,9 +2,11 @@
 //! connections, all non-blocking, from the daemon's single `poll` loop.
 //!
 //! At most [`MAX_CONNECTIONS`] clients at once. When one more arrives, the
-//! oldest is closed to admit it, so clients that connect and never send
-//! (or never read) cannot lock out a `scootbar msg kill`, and the daemon needs
-//! no timers to find them.
+//! oldest that is not a subscriber is closed to admit it, so clients that
+//! connect and never send (or never read) cannot lock out a `scootbar msg
+//! kill`, and the daemon needs no timers to find them; a subscription is
+//! not aged out by a flood of connects (there are at most
+//! [`MAX_SUBSCRIBERS`] of them, a fixed few of the cap).
 //!
 //! **The listener is always polled.** It is level-triggered, so a
 //! connection that cannot be accepted keeps it readable, and the loop must
@@ -12,7 +14,7 @@
 //! the server frees one it owns and accepts the waiting client, so `kill`
 //! still gets through:
 //!
-//! 1. close the oldest client, the same policy as above; else
+//! 1. close a client, the same policy as above; else
 //! 2. close the spare, a `dup` of the listener taken at start-up (a dup,
 //!    not a path such as `/dev/null`, so it cannot be missing), and
 //!    retake it once a client closes;
@@ -38,6 +40,8 @@ pub mod protocol;
 pub mod client;
 
 #[cfg(test)]
+mod subscribe_tests;
+#[cfg(test)]
 mod tests;
 
 use std::io;
@@ -48,17 +52,29 @@ use rustix::event::PollFlags;
 use rustix::io::Errno;
 
 pub use claim::{Claim, ClaimError};
-pub use conn::{Conn, Handler, Status};
+pub use conn::{Conn, Handler, Kinds, Status};
+
+/// Subscribers at once, at most: a subscriber costs nothing while nothing
+/// happens but is one write per event while something does, and an agent
+/// needs one or two. One more is refused with an error that says so.
+pub const MAX_SUBSCRIBERS: usize = 4;
 
 /// Clients served at once. `scootbar msg` commands are one request each,
 /// so more than a handful at a time means something is stuck or hostile.
 pub const MAX_CONNECTIONS: usize = 16;
+
+// A new client can always be admitted by closing one that is not a
+// subscriber (`Server::evict`).
+const _: () = assert!(MAX_SUBSCRIBERS < MAX_CONNECTIONS);
 
 /// Size of the read scratch buffer shared by every connection.
 const SCRATCH: usize = 4096;
 
 pub struct Server {
     conns: Vec<Conn>,
+    /// How many of `conns` are subscribed: the loop asks every turn, so it
+    /// is kept, not counted.
+    subscribers: usize,
     scratch: Box<[u8; SCRATCH]>,
     /// One fd held back for when the process is out of them (see the
     /// module docs). `None` only while it has been spent and not yet
@@ -76,6 +92,7 @@ impl Server {
     pub fn with_spare(spare: Option<OwnedFd>) -> Self {
         Self {
             conns: Vec::with_capacity(MAX_CONNECTIONS),
+            subscribers: 0,
             scratch: Box::new([0; SCRATCH]),
             spare,
         }
@@ -83,6 +100,33 @@ impl Server {
 
     pub fn conns(&self) -> &[Conn] {
         &self.conns
+    }
+
+    /// How many connections are subscribed.
+    pub fn subscribers(&self) -> usize {
+        self.subscribers
+    }
+
+    fn recount(&mut self) {
+        self.subscribers = self
+            .conns
+            .iter()
+            .filter(|conn| conn.subscription().is_some())
+            .count();
+    }
+
+    /// Sends `bytes` (whole event lines) to every subscriber of `kind`, in
+    /// one write each; one that cannot take it all is closed. Nothing is
+    /// buffered.
+    pub fn broadcast(&mut self, kind: protocol::EventKind, bytes: &[u8]) {
+        if self.subscribers == 0 || bytes.is_empty() {
+            return;
+        }
+        self.conns.retain_mut(|conn| match conn.subscription() {
+            Some(kinds) if kinds.wants(kind) => conn.send_event(bytes) == Status::Keep,
+            _ => true,
+        });
+        self.recount();
     }
 
     #[cfg(test)]
@@ -135,21 +179,39 @@ impl Server {
             return;
         }
         if self.conns.len() >= MAX_CONNECTIONS {
-            // The oldest goes; `Vec` order is accept order.
-            self.conns.remove(0);
+            self.evict();
         }
         self.conns.push(Conn::new(stream));
+        self.recount();
     }
 
-    /// Closes the oldest client, else the spare. `false` when there is
-    /// nothing left to close.
+    /// Closes one client to make room: the oldest that is not a subscriber
+    /// (`Vec` order is accept order), since a flood of connects must not
+    /// age out an agent's subscription, which is the one thing it cannot
+    /// simply retry without missing events. Only when every client is a
+    /// subscriber (at most [`MAX_SUBSCRIBERS`], fewer than
+    /// [`MAX_CONNECTIONS`], so that needs the descriptor limit, not the
+    /// cap) does the oldest subscriber go, told so
+    /// ([`Conn::notify_dropped`]). `false` when there was none to close.
+    fn evict(&mut self) -> bool {
+        let index = self
+            .conns
+            .iter()
+            .position(|conn| conn.subscription().is_none())
+            .or(if self.conns.is_empty() { None } else { Some(0) });
+        let Some(index) = index else {
+            return false;
+        };
+        let mut gone = self.conns.remove(index);
+        gone.notify_dropped();
+        self.recount();
+        true
+    }
+
+    /// Closes a client (see [`Server::evict`]), else the spare. `false`
+    /// when there is nothing left to close.
     fn free_an_fd(&mut self) -> bool {
-        if !self.conns.is_empty() {
-            self.conns.remove(0);
-            true
-        } else {
-            self.spare.take().is_some()
-        }
+        self.evict() || self.spare.take().is_some()
     }
 
     /// Services connection `index` for `revents`, dropping it if done.
@@ -163,13 +225,15 @@ impl Server {
         let Some(conn) = self.conns.get_mut(index) else {
             return false;
         };
-        match conn.service(revents, &mut self.scratch[..], handler) {
+        let kept = match conn.service(revents, &mut self.scratch[..], handler) {
             Status::Keep => true,
             Status::Close => {
                 self.conns.remove(index);
                 false
             }
-        }
+        };
+        self.recount();
+        kept
     }
 
     /// Shutdown: one non-blocking attempt to send what each client is

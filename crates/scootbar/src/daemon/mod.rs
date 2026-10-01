@@ -34,8 +34,10 @@
 //! `#![forbid(unsafe_code)]` forbids, so a reload is `scootbar msg reload`
 //! (scootbg documents the same reasoning).
 
+mod agent;
 mod binds;
 mod canvas;
+mod events;
 mod input;
 mod listen;
 mod respond;
@@ -243,6 +245,8 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
             }
         }
         draw(&mut wayland.state, &wayland.qh);
+        // What changed, to the subscribers (one branch with none).
+        wayland.state.pump_events(&mut server, &mut now);
         flush(&wayland, &mut wants_write)?;
         let Some(guard) = wayland.queue.prepare_read() else {
             // Events arrived for our queue meanwhile: dispatch them.
@@ -291,6 +295,7 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         let timeout = [
             timeout,
             wayland.state.scroll_timeout(&mut now),
+            wayland.state.events_timeout(&mut now),
             wayland.state.spawner.poll_timeout(),
         ]
         .into_iter()
@@ -338,6 +343,7 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 &wayland.qh,
                 file.as_ref(),
                 &given,
+                server.subscribers(),
             );
             let mut index = 0;
             while index < server.conns().len() {

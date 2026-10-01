@@ -56,11 +56,31 @@ pub const MAX_REQUEST_LINE: usize = 64 * 1024;
 /// {"protocol":1,"type":"version"}
 /// {"protocol":1,"type":"kill"}
 /// {"protocol":1,"type":"set","id":"clock","value":{...}}
+/// {"protocol":1,"type":"query","id":"status"}
+/// {"protocol":1,"type":"layout"}
+/// {"protocol":1,"type":"invoke","id":"volume","action":"raise","arg":5,"output":"DP-1"}
+/// {"protocol":1,"type":"subscribe","events":["module","output"]}
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request<'a> {
-    /// Each placed module's current state, as JSON.
-    Query,
+    /// Each placed module's current state, as JSON; only module `id`'s when
+    /// one is named.
+    Query { id: Option<Cow<'a, str>> },
+    /// Each placed module's rectangle on every output, as last drawn.
+    Layout,
+    /// Run module `id`'s action `action` (a module-defined action, or a
+    /// trigger: `click`, `right-click`, `middle-click`, `scroll-up`,
+    /// `scroll-down`, which runs the configured binding) exactly as a click
+    /// or scroll would, with `arg` (a whole number, a scroll's steps) on
+    /// `output` (by default the first that shows the module).
+    Invoke {
+        id: Cow<'a, str>,
+        action: Cow<'a, str>,
+        arg: Option<i32>,
+        output: Option<Cow<'a, str>>,
+    },
+    /// Dedicate this connection to events of these kinds.
+    Subscribe { events: Vec<EventKind> },
     /// Re-read the config file and live-apply it.
     Reload,
     /// Destroy every bar surface and buffer, releasing the exclusive zone.
@@ -73,17 +93,43 @@ pub enum Request<'a> {
     Kill,
     /// The daemon's version and protocol.
     Version,
-    /// A value for module `id` ([`crate::modules::Module::on_set`]): no
-    /// module takes one yet, so this is refused loudly for every id today,
-    /// and is the forward hook for the modules that will.
+    /// A value for module `id` ([`crate::modules::Module::on_set`]): only a
+    /// `push` module takes one; any other is refused loudly.
     Set { id: Cow<'a, str>, value: Value },
+}
+
+/// What a subscriber can ask to be told about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventKind {
+    /// A module's view changed (`{"type":"module", ...}`, as `query` lists it).
+    Module,
+    /// An output was added or removed (`{"type":"output", ...}`).
+    Output,
+}
+
+impl EventKind {
+    pub const ALL: [Self; 2] = [Self::Module, Self::Output];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Module => "module",
+            Self::Output => "output",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
 }
 
 impl Request<'_> {
     /// The `type` string on the wire.
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Query => "query",
+            Self::Query { .. } => "query",
+            Self::Layout => "layout",
+            Self::Invoke { .. } => "invoke",
+            Self::Subscribe { .. } => "subscribe",
             Self::Reload => "reload",
             Self::Hide => "hide",
             Self::Show => "show",
@@ -106,23 +152,53 @@ impl Request<'_> {
             id: Option<&'r str>,
             #[serde(skip_serializing_if = "Option::is_none")]
             value: Option<&'r Value>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            action: Option<&'r str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            arg: Option<i32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            output: Option<&'r str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            events: Option<Vec<&'static str>>,
         }
-        let (id, value) = match self {
-            Self::Set { id, value } => (Some(id.as_ref()), Some(value)),
-            Self::Query
+        let mut line = Line {
+            protocol: PROTOCOL_VERSION,
+            kind: self.name(),
+            id: None,
+            value: None,
+            action: None,
+            arg: None,
+            output: None,
+            events: None,
+        };
+        match self {
+            Self::Set { id, value } => {
+                line.id = Some(id.as_ref());
+                line.value = Some(value);
+            }
+            Self::Query { id } => line.id = id.as_deref(),
+            Self::Invoke {
+                id,
+                action,
+                arg,
+                output,
+            } => {
+                line.id = Some(id.as_ref());
+                line.action = Some(action.as_ref());
+                line.arg = *arg;
+                line.output = output.as_deref();
+            }
+            Self::Subscribe { events } => {
+                line.events = Some(events.iter().map(|kind| kind.name()).collect());
+            }
+            Self::Layout
             | Self::Reload
             | Self::Hide
             | Self::Show
             | Self::Toggle
             | Self::Kill
-            | Self::Version => (None, None),
-        };
-        let line = Line {
-            protocol: PROTOCOL_VERSION,
-            kind: self.name(),
-            id,
-            value,
-        };
+            | Self::Version => {}
+        }
         // Serializing strings and numbers into a `String` cannot fail; if
         // it ever did, the empty line gets a "malformed" reply, not a panic.
         let mut text = serde_json::to_string(&line).unwrap_or_default();
@@ -148,6 +224,12 @@ pub enum RequestError {
     NoId,
     /// `set` without a `value`.
     NoValue,
+    /// `invoke` without an `action`.
+    NoAction,
+    /// `invoke`'s `arg` is not a whole number that fits.
+    BadArg,
+    /// `subscribe` names a kind that does not exist.
+    UnknownEvent(String),
 }
 
 impl fmt::Display for RequestError {
@@ -165,9 +247,20 @@ impl fmt::Display for RequestError {
             Self::Unknown(name) => write!(f, "unknown request `{name}`"),
             Self::NoId => write!(
                 f,
-                "`set` needs an `id` (a module id, as `query` lists them)"
+                "`set` and `invoke` need an `id` (a module id, as `query` lists them)"
             ),
             Self::NoValue => write!(f, "`set` needs a `value` (a JSON value for the module)"),
+            Self::NoAction => write!(
+                f,
+                "`invoke` needs an `action` (a module's action, or click, right-click, \
+                 middle-click, scroll-up or scroll-down)"
+            ),
+            Self::BadArg => write!(f, "`arg` takes a whole number"),
+            Self::UnknownEvent(kind) => write!(
+                f,
+                "unknown event kind `{}` (they are: module, output)",
+                kind.escape_debug()
+            ),
         }
     }
 }
@@ -185,6 +278,14 @@ struct Envelope<'a> {
     /// would read `"value": null` as absent into an `Option<Value>`.
     #[serde(default, deserialize_with = "present")]
     value: Option<Value>,
+    #[serde(borrow)]
+    action: Option<Cow<'a, str>>,
+    /// Any JSON number: whether it is a whole number that fits is checked,
+    /// so a float or a huge one is refused by name, not as malformed.
+    arg: Option<Value>,
+    #[serde(borrow)]
+    output: Option<Cow<'a, str>>,
+    events: Option<Vec<String>>,
 }
 
 /// A value that is there, whatever it is, `null` included.
@@ -218,7 +319,45 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
     }
     let kind = envelope.kind.ok_or(RequestError::NoType)?;
     match &*kind {
-        "query" => Ok(Request::Query),
+        "query" => Ok(Request::Query { id: envelope.id }),
+        "layout" => Ok(Request::Layout),
+        "invoke" => {
+            let id = envelope.id.ok_or(RequestError::NoId)?;
+            let action = envelope.action.ok_or(RequestError::NoAction)?;
+            let arg = match envelope.arg {
+                None | Some(Value::Null) => None,
+                Some(value) => Some(
+                    value
+                        .as_i64()
+                        .and_then(|n| i32::try_from(n).ok())
+                        .ok_or(RequestError::BadArg)?,
+                ),
+            };
+            Ok(Request::Invoke {
+                id,
+                action,
+                arg,
+                output: envelope.output,
+            })
+        }
+        "subscribe" => {
+            let mut events = Vec::new();
+            match envelope.events {
+                // None named: every kind (a bare `scootbar msg subscribe`).
+                None => events.extend(EventKind::ALL),
+                Some(names) if names.is_empty() => events.extend(EventKind::ALL),
+                Some(names) => {
+                    for name in names {
+                        let kind =
+                            EventKind::parse(&name).ok_or(RequestError::UnknownEvent(name))?;
+                        if !events.contains(&kind) {
+                            events.push(kind);
+                        }
+                    }
+                }
+            }
+            Ok(Request::Subscribe { events })
+        }
         "reload" => Ok(Request::Reload),
         "hide" => Ok(Request::Hide),
         "show" => Ok(Request::Show),
@@ -255,6 +394,71 @@ pub struct ModuleView<'a> {
     /// A glyph shown before the text, if it shows one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<char>,
+    /// Its tooltip, where it has one (absent while empty).
+    #[serde(skip_serializing_if = "is_empty")]
+    pub tooltip: &'a str,
+    /// What it holds that is not text, where it has something (the
+    /// workspaces module: `{"active": 2, "workspaces": [1, 2, 3]}`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+}
+
+/// One rectangle, logical pixels in the compositor's global space (the
+/// space `scoot msg pointer` takes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// One module's place on one output's bar.
+#[derive(Debug, Serialize)]
+pub struct PlacedRect<'a> {
+    pub id: &'a str,
+    pub section: &'static str,
+    #[serde(flatten)]
+    pub rect: Rect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Point {
+    pub x: i32,
+    pub y: i32,
+}
+
+/// An event on a subscribed connection.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum Event<'a> {
+    /// A module's view changed, shown as `query` lists it.
+    Module(ModuleView<'a>),
+    /// An output came or went.
+    Output {
+        change: &'static str,
+        name: Option<&'a str>,
+    },
+}
+
+/// The last line a subscriber the daemon is about to drop can be sent, when
+/// the daemon can still write it (a subscriber evicted to admit another
+/// client is at a line boundary with room in its socket). **Best effort, and
+/// absent for the common drop**: a subscriber that stopped reading has a full
+/// socket, and the daemon never blocks or buffers for it, so it gets nothing
+/// and its stream just ends. A line that is here means "dropped"; the end of
+/// a stream with none means the daemon went away or dropped it, and the
+/// subscriber must resubscribe and `query` either way.
+pub const DROPPED: &[u8] = b"{\"type\":\"dropped\"}\n";
+
+/// Appends `event` and its newline to `out`.
+pub fn write_event(out: &mut Vec<u8>, event: &Event<'_>) {
+    let start = out.len();
+    if serde_json::to_writer(&mut *out, event).is_err() {
+        out.truncate(start);
+        return;
+    }
+    out.push(b'\n');
 }
 
 /// A reply line.
@@ -270,10 +474,19 @@ pub enum Reply<'a> {
         protocol: u32,
         version: &'a str,
     },
+    /// The answer to `subscribe`: the kinds this connection now carries.
+    Subscribed {
+        events: Vec<&'static str>,
+    },
     Error {
         #[serde(serialize_with = "display")]
         message: &'a dyn fmt::Display,
     },
+}
+
+/// For `skip_serializing_if`, which hands over a reference to the field.
+fn is_empty(text: &&str) -> bool {
+    text.is_empty()
 }
 
 /// Serializes through `Display` without an intermediate `String`.

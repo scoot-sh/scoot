@@ -46,8 +46,10 @@ service, Stylix defaults when Stylix is in use) is documented there too
 Every option lives in `$XDG_CONFIG_HOME/scoot/bar.toml` too (the flags
 override it, at start-up and on every reload), and the running bar answers
 `scootbar msg query` with each module's state as JSON — the agent hook,
-the bar read as data instead of OCR. The keys, the file and the commands
-are in [cli.md](cli.md#the-config-file).
+the bar read as data instead of OCR. `msg layout` says where each module
+is, `msg invoke` presses one, and `msg subscribe` streams what changes
+([the agent interface](cli.md#the-agent-interface)). The keys, the file and
+the commands are in [cli.md](cli.md#the-config-file).
 
 ## What it is for
 
@@ -66,8 +68,10 @@ are in [cli.md](cli.md#the-config-file).
   and a bar with no binding never takes the pointer at all.
 - **Configurable without restarting, and readable as data**: the file
   holds every option, `scootbar msg reload` live-applies an edit, and
-  `scootbar msg query` reads each module's state as JSON — for daily
-  driving and for agents alike.
+  `scootbar msg query` reads each module's state as JSON, `layout` and
+  `invoke` let an agent press a module with no pixels to hunt, and
+  `subscribe` streams changes, one batch a frame at most and nothing with no
+  subscriber — for daily driving and for agents alike.
 - **GPU-free**: `wl_shm` buffers at the output's real device pixels.
 
 ## Baselines

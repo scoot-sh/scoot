@@ -67,6 +67,36 @@ impl Scale {
         }
     }
 
+    /// The scale as a number: 1.5 for `Fractional(180)`.
+    pub fn factor(self) -> f64 {
+        match self {
+            Self::Integer(factor) => f64::from(factor.max(1)),
+            Self::Fractional(v120) => f64::from(v120.max(1)) / f64::from(DENOMINATOR),
+        }
+    }
+
+    /// `device` pixels along an axis as logical pixels, rounded down: where
+    /// a span begins, as a pointer would have to be at or past to be on it.
+    pub fn logical_floor(self, device: u32) -> u32 {
+        let (num, den) = self.ratio();
+        u32::try_from(u64::from(device) * num / den).unwrap_or(u32::MAX)
+    }
+
+    /// The same, rounded up: where a span ends, as a pointer would have to
+    /// be before to be on it.
+    pub fn logical_ceil(self, device: u32) -> u32 {
+        let (num, den) = self.ratio();
+        u32::try_from((u64::from(device) * num).div_ceil(den)).unwrap_or(u32::MAX)
+    }
+
+    /// Logical per device pixel, as a fraction: `(numerator, denominator)`.
+    fn ratio(self) -> (u64, u64) {
+        match self {
+            Self::Integer(factor) => (1, u64::from(factor.max(1))),
+            Self::Fractional(v120) => (u64::from(DENOMINATOR), u64::from(v120.max(1))),
+        }
+    }
+
     /// The integer factor for `wl_surface.set_buffer_scale`, where there is
     /// no viewport to size the buffer: a fraction is never sent that way
     /// (the viewport path is the only one that draws at a fraction).

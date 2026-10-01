@@ -26,6 +26,9 @@ scootbar daemon --background '#101014' --foreground '#e0e0e0'
 scootbar daemon --outputs DP-1,eDP-1        # a bar only on those two outputs
 scootbar daemon --config ~/alt-bar.toml    # another file than the default
 scootbar msg query                         # every placed module's state as JSON
+scootbar msg layout                        # where each module is on screen, for a click
+scootbar msg invoke volume raise 5         # run a module's action, as its click would
+scootbar msg subscribe                     # stream changes, one JSON line each
 scootbar msg reload                        # re-read the file and live-apply it
 scootbar msg toggle                        # hide the bar (and release its space), or show it
 scootbar --help                              # and `scootbar daemon --help`, `scootbar msg --help`
@@ -184,7 +187,10 @@ socket with line-framed JSON, one daemon per display: a second daemon
 refuses, saying one already runs.
 
 ```sh
-scootbar msg query                  # every placed module's state as JSON
+scootbar msg query [ID]             # every placed module's state as JSON (or one module's)
+scootbar msg layout                 # each module's rectangle in global logical pixels
+scootbar msg invoke ID ACTION [N] [--output NAME]  # run an action as a click would
+scootbar msg subscribe [module] [output]           # stay connected, print events
 scootbar msg reload                 # re-read the file and live-apply it
 scootbar msg hide                   # destroy the bar's surfaces and buffers, release its space
 scootbar msg show                   # make them again
@@ -201,16 +207,102 @@ with its `id`, `section` (`left`, `center` or `right`), `output` (the
 compositor's `wl_output.name`, `null` where it never sent one), the `text`
 it shows and its `class` (`normal`, `warn`, `urgent`, `muted`), plus `icon`
 where the module shows a glyph icon (absent otherwise, and for a path or image
-icon, which is not text). This is the agent hook: the bar read as data instead of OCR.
+icon, which is not text), `tooltip` (absent while empty) and a
+`value` where it has one (the workspaces module: `{"active": 2, "workspaces": [1, 2, 3]}`
+for that output, `active` `null` when none is). This is the agent hook: the
+bar read as data instead of OCR. `query ID` lists only that module (an id that
+is not placed is an error naming the ones that are). The reply is bounded
+(512 KiB; an agent's bar is a few hundred bytes a module, text and tooltip
+each capped at 256 bytes), and is written from the very state the screen is
+drawn from, so it cannot disagree with a screenshot.
 `reload` re-reads the file and live-applies it — geometry, style, layout,
 modules, the font — after fully validating it first; a bad file is
 refused and the running bar stands. `hide`, `show` and `toggle` are
-[below](#hiding-the-bar). `query`, `version`, `reload`, `hide`, `show` and
-`toggle` print the reply; `kill` and `set` print nothing on success. `set`
+[below](#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
+`toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,
+and `subscribe` prints what the daemon sends until it closes (below). `set`
 writes to a [`push` module](#button-push-and-exec-modules): an id that is not
 placed, a module that takes no value (every one but `push`) and a value it
 refuses are each a loud error naming why, never a silent ok. Without a
 daemon, every command fails saying so (exit status 1).
+
+## The agent interface
+
+What an agent (or a script) uses to read the bar and press it, with no
+screenshot to read and no pixels to hunt. All of it is on the bar's own
+socket, separate from scoot's IPC.
+
+**`layout`** prints, per output, its `output` name, `origin` (in the
+compositor's global logical pixels), `scale`, the `bar` rectangle (`null`
+while the bar is hidden or not yet configured) and the `modules` that show
+something, left to right, each with `id`, `section` and an `x`, `y`,
+`width`, `height` rectangle in the same global logical pixels. It is the
+layout **as last drawn**: the spans (in device pixels) the last committed
+frame used, converted with the output's **current** scale (the reply does not
+record the scale a frame was drawn at, so a scale change that has not been
+redrawn yet is the one moment a rectangle and the pixels can disagree) and
+rounded outward, so a pointer anywhere on a drawn pixel of a module is inside
+its rectangle. Aim scoot's pointer injection at the middle of a rectangle
+(`scoot msg pointer click X Y`, which moves there and presses and releases the
+left button; `right` and `middle` name the others) and the module is pressed; a test clicks the first and last logical pixel of
+every rectangle and one pixel outside it, on two outputs at scales 1 and
+1.5. A hidden bar has no rectangles at all. A module whose text is empty
+takes no space and is not listed.
+
+**`invoke ID ACTION [N] [--output NAME]`** runs an action exactly as a click
+or scroll would: the same code a pointer press ends in, so what an agent does
+and what a user does cannot diverge. `ACTION` is one of the module's own
+actions (`scootbar msg --help`, or the refusal, lists them: the workspaces
+module's `activate N`, `activate-position N`, `previous`, `next`), or a
+trigger (`click`, `right-click`, `middle-click`, `scroll-up`, `scroll-down`),
+which runs the binding configured for it. A scroll's `N` is its steps (1 to
+32, default 1); a module's own action takes the number it asks for. `--output`
+names the output whose module is meant (default: the first that shows it).
+A module that is not placed, an action it does not have (or a trigger it has
+no binding for), a number where none is taken or a missing or out-of-range
+one, and an output that does not show the module are each a named error and
+run nothing. Success prints nothing.
+
+**`subscribe [module] [output]`** keeps the connection open and prints one
+JSON line per event, after one `{"type":"subscribed","events":[...]}` line.
+No kind named is both. **There is no snapshot**: a subscription starts from
+now and only changes follow, so to read the state and then follow it,
+**subscribe first, then `query`** (the other order can miss a change between
+the two; this one at worst repeats one the `query` already shows). A `module` event is a `query` entry with `"type":"module"`,
+sent when that module's view changed, once per output that shows it; an
+`output` event is `{"type":"output","change":"added"|"removed","name":...}`.
+Events are **coalesced to the frame rate**: a module that changes a hundred
+times in a frame is told once, with its latest view, and a batch goes out at
+most every 16 ms (the loop sleeps only until a held batch is due). A reload
+tells every module again. A subscribed connection serves no further requests
+(it gets one error line, however many it sends), at most 4 may be subscribed
+at once (a fifth is refused saying so), and **a subscriber that stops
+reading is disconnected, never buffered**: each batch is one nonblocking
+write, and one the socket cannot take whole ends the connection. With no
+subscriber the daemon does one branch a loop turn.
+
+**How a subscription ends, and what a script may conclude.** The command
+prints whole lines only, and there are endings it can tell apart and one it
+cannot:
+
+- A `{"type":"dropped"}` line, the last one (printed, then the command exits
+  **1** with a line on stderr saying so): the daemon dropped this
+  subscriber and said so. It is sent only when the daemon can write it
+  without waiting, which is the rare drop: closing a subscriber when out of
+  file descriptors with nothing but subscribers to close. A flood of ordinary
+  connections never does it: the oldest *non-subscriber* is closed first, and
+  subscribers are at most 4 of the 16 connections the daemon holds.
+- A line cut in the middle (exit **1**, stderr says the connection ended in
+  the middle of a line): the daemon dropped the subscriber part-way through
+  writing a batch. The partial line is discarded, never printed as if whole.
+- An error reply to the `subscribe` itself (exit **1**): refused, with why.
+- **Anything else is exit 0, and it does not mean the daemon went away.** The
+  stream just ends. That is what the daemon exiting looks like, and also what
+  a subscriber dropped for being too slow, or stopped (`SIGSTOP`, a hung
+  pipe: its socket is full, so there is no room for a `dropped` line) looks
+  like, as does a drop whose partial write happened to stop on a line
+  boundary. A script cannot tell these apart, so after **any** end, exit 0
+  included: subscribe again, then `query`.
 
 ## Modules
 
@@ -1175,5 +1267,5 @@ opacity = 0.9
 | Status | When |
 | --- | --- |
 | 0 | `--help` or `--version`, or `daemon --check` found nothing wrong |
-| 1 | no usable font (with a module placed), cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, the compositor went away, `poll(2)` failed, the config file is malformed (`daemon --check` too), or a `msg` command failed (no daemon, or the daemon refused) |
+| 1 | no usable font (with a module placed), cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, the compositor went away, `poll(2)` failed, the config file is malformed (`daemon --check` too), or a `msg` command failed (no daemon, or the daemon refused), or a `msg subscribe` ended on a `dropped` line, in the middle of a line, or on stdout closing |
 | 2 | a usage error |

@@ -135,9 +135,10 @@ fn run_daemon(command: cli::DaemonCommand) -> ExitCode {
     }
 }
 
-/// `msg`: one request to the running daemon, one reply. `query`,
-/// `version`, `reload`, `hide`, `show` and `toggle` print the reply; `kill` and `set` print nothing
-/// on success, as scootbg's silent commands do.
+/// `msg`: one request to the running daemon, one reply. `query`, `layout`,
+/// `version`, `reload`, `hide`, `show` and `toggle` print the reply; `kill`, `set`
+/// and `invoke` print nothing on success, as scootbg's silent commands do;
+/// `subscribe` prints what the daemon sends until it closes.
 fn run_msg(msg: cli::Msg) -> ExitCode {
     use print::warn;
     match msg {
@@ -159,13 +160,63 @@ fn run_msg(msg: cli::Msg) -> ExitCode {
                 false,
             )
         }
-        cli::Msg::Query => send(&control::protocol::Request::Query, true),
+        cli::Msg::Query { id } => send(
+            &control::protocol::Request::Query {
+                id: id.map(Cow::Owned),
+            },
+            true,
+        ),
+        cli::Msg::Layout => send(&control::protocol::Request::Layout, true),
+        cli::Msg::Invoke {
+            id,
+            action,
+            arg,
+            output,
+        } => send(
+            &control::protocol::Request::Invoke {
+                id: Cow::Owned(id),
+                action: Cow::Owned(action),
+                arg,
+                output: output.map(Cow::Owned),
+            },
+            false,
+        ),
+        cli::Msg::Subscribe { events } => {
+            subscribe(&control::protocol::Request::Subscribe { events })
+        }
         cli::Msg::Reload => send(&control::protocol::Request::Reload, true),
         cli::Msg::Hide => send(&control::protocol::Request::Hide, true),
         cli::Msg::Show => send(&control::protocol::Request::Show, true),
         cli::Msg::Toggle => send(&control::protocol::Request::Toggle, true),
         cli::Msg::Version => send(&control::protocol::Request::Version, true),
         cli::Msg::Kill => send(&control::protocol::Request::Kill, false),
+    }
+}
+
+/// `subscribe`: prints the daemon's lines as they come, until it closes the
+/// connection between two lines (exit status 0, as scootctl's) or stdout
+/// does. A `dropped` line, or a connection that ends inside a line (the
+/// daemon dropped the subscriber mid-write, which discards that line), is
+/// exit status 1. Status 0 is not "the daemon exited": a subscriber dropped
+/// with a full socket ends the same way, so a caller resubscribes and
+/// queries after any end.
+fn subscribe(request: &control::protocol::Request<'_>) -> ExitCode {
+    use print::warn;
+    let mut stdout_closed = false;
+    let result = control::client::stream(request, |line| {
+        if print::print(line).is_err() {
+            stdout_closed = true;
+            return false;
+        }
+        true
+    });
+    match result {
+        Ok(()) if stdout_closed => ExitCode::FAILURE,
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            warn(format_args!("scootbar: {error}"));
+            ExitCode::FAILURE
+        }
     }
 }
 

@@ -34,7 +34,7 @@ it needs [an IPC event](../../backlog/ipc/keyboard-layout-event.md) first.
 - **`Unavailable` means zero cost**: no fds, no width, no timer, no log spam.
   Retry when the thing appears (a socket, an inotify watch), never by polling.
 - **A state class, a `query` entry and an `invoke` action** for each
-  ([agent-interface](agent-interface.md)), and interactions through the shared
+  ([agent-interface](resolved/agent-interface-done.md)), and interactions through the shared
   config keys.
 - **Text from outside is untrusted**: bound its length, strip control
   characters, never let it grow a cache without limit.

@@ -267,7 +267,10 @@ pub const MSG_HELP: &str = "\
 scootbar msg -- ask the running daemon
 
 USAGE:
-    scootbar msg query
+    scootbar msg query [ID]
+    scootbar msg layout
+    scootbar msg invoke ID ACTION [NUMBER] [--output NAME]
+    scootbar msg subscribe [module] [output]
     scootbar msg reload
     scootbar msg hide
     scootbar msg show
@@ -282,8 +285,27 @@ Asks the daemon for this Wayland display over its control socket
 start-up and removes when it stops:
 
     query      each placed module's state as JSON, once per output that
-               shows it: its id, section, output, text and class, plus its icon where it shows one
-               (output is null where the compositor never named it)
+               shows it (or only module ID's): its id, section, output,
+               text and class, plus its icon, tooltip and value where it has
+               them (output is null where the compositor never named it)
+    layout     each output's bar and each module's rectangle on it, in the
+               compositor's global logical pixels as last drawn, so a click
+               can be aimed with `scoot msg pointer click X Y`
+    invoke     run module ID's ACTION as a click would (a module's own
+               action, with its NUMBER, or one of click, right-click,
+               middle-click, scroll-up, scroll-down, which runs the
+               configured binding; NUMBER is a scroll's steps), on the
+               output NAME shows it on (default: the first)
+    subscribe  stay connected and print one JSON line per event of the kinds
+               named (both by default): `module` (a module's view changed,
+               at most once a frame) and `output` (one was added or removed);
+               there is no snapshot: subscribe first, then query. It ends
+               with status 1 on a `{\"type\":\"dropped\"}` line (the daemon
+               dropped it) or when the stream is cut mid-line (that line is
+               discarded), and with status 0 when the stream just ends,
+               which does NOT mean the daemon exited: a subscriber that was
+               too slow or stopped (its socket full) is closed with no line.
+               After any end, subscribe again and then query
     reload     re-read the config file and live-apply it; a bad file is
                refused and the running bar stands
     hide       take the bars away: every layer surface and buffer is
@@ -299,9 +321,10 @@ start-up and removes when it stops:
                (clears it). Any other module, an id that is not placed and a
                value the module refuses are loud errors, never a silent ok
 
-`query`, `version`, `reload`, `hide`, `show` and `toggle` print the reply (the
-last three say `{\"type\":\"bar\",\"visible\":false}`, what is now the case); `kill` and `set` print
-nothing on success. Without a daemon, every command fails saying so.
+`query`, `layout`, `version`, `reload`, `hide`, `show` and `toggle` print the
+reply (the last three say `{\"type\":\"bar\",\"visible\":false}`, what is now the
+case); `kill`, `set` and `invoke` print nothing on success. Without a daemon,
+every command fails saying so.
 ";
 
 /// A help page.
@@ -325,7 +348,23 @@ impl Topic {
 /// What `scootbar msg` asks of the running daemon.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
-    Query,
+    /// Each module's state, or one module's.
+    Query {
+        id: Option<String>,
+    },
+    /// Each module's rectangle, as last drawn.
+    Layout,
+    /// Run a module's action (or a trigger's binding) as a click would.
+    Invoke {
+        id: String,
+        action: String,
+        arg: Option<i32>,
+        output: Option<String>,
+    },
+    /// Stay connected and print events of these kinds.
+    Subscribe {
+        events: Vec<crate::control::protocol::EventKind>,
+    },
     Reload,
     Hide,
     Show,
@@ -568,11 +607,19 @@ impl std::error::Error for Error {}
 pub enum MsgError {
     /// No command at all.
     Missing,
-    /// Not one of `query`, `reload`, `hide`, `show`, `toggle`, `version`, `kill` or `set`.
+    /// Not one of `query`, `layout`, `invoke`, `subscribe`, `reload`, `hide`, `show`, `toggle`, `version`, `kill` or `set`.
     Unknown(String),
-    /// `set` without its module id, or without its JSON value.
+    /// `set` and `invoke` without their module id, or `set` without its JSON
+    /// value, or `invoke` without its action.
     NeedsId,
     NeedsValue,
+    NeedsAction,
+    /// `invoke`'s number is not a whole number that fits.
+    BadArg(String),
+    /// `--output` without a name.
+    NeedsOutput,
+    /// `subscribe` names a kind that does not exist.
+    UnknownEvent(String),
     /// Not the shape of a module id.
     BadModuleId(String),
     /// The value is not JSON.
@@ -603,6 +650,21 @@ impl fmt::Display for MsgError {
                 "`{}` is not a module id (1 to {} letters, digits, `-` and `_`)",
                 id.escape_debug(),
                 crate::modules::custom::MAX_NAME
+            ),
+            Self::NeedsAction => write!(
+                f,
+                "`scootbar msg invoke ID` needs an action (try `scootbar msg --help`)"
+            ),
+            Self::BadArg(arg) => write!(
+                f,
+                "`{}` is not a whole number (`scootbar msg invoke ID ACTION [NUMBER]`)",
+                arg.escape_debug()
+            ),
+            Self::NeedsOutput => write!(f, "`--output` needs an output name"),
+            Self::UnknownEvent(kind) => write!(
+                f,
+                "unknown event kind `{}` (they are: module, output)",
+                kind.escape_debug()
             ),
             Self::BadJson(error) => write!(f, "the value is not JSON: {error}"),
         }
@@ -765,46 +827,119 @@ fn msg(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
             }),
         };
     }
-    if command.as_str() != "set" {
-        let request = match command.as_str() {
-            "query" => Msg::Query,
-            "reload" => Msg::Reload,
-            "hide" => Msg::Hide,
-            "show" => Msg::Show,
-            "toggle" => Msg::Toggle,
-            "version" => Msg::Version,
-            "kill" => Msg::Kill,
-            _ => return Err(Error::Msg(MsgError::Unknown(command))),
-        };
-        return match args.next() {
-            None => Ok(Command::Msg(request)),
-            Some(extra) => Err(Error::Unexpected {
-                command: "msg",
-                argument: text(extra).unwrap_or_else(|lossy| lossy),
-            }),
-        };
-    }
-    let Some(id) = next_arg(&mut args, "msg") else {
-        return Err(Error::Msg(MsgError::NeedsId));
+    let extra = |argument: OsString| Error::Unexpected {
+        command: "msg",
+        argument: text(argument).unwrap_or_else(|lossy| lossy),
     };
-    let id = id?;
-    let Some(value) = next_arg(&mut args, "msg") else {
-        return Err(Error::Msg(MsgError::NeedsValue));
-    };
-    let value = value?;
-    if let Some(extra) = args.next() {
-        return Err(Error::Unexpected {
-            command: "msg",
-            argument: text(extra).unwrap_or_else(|lossy| lossy),
-        });
+    match command.as_str() {
+        "query" => {
+            let id = match next_arg(&mut args, "msg") {
+                None => None,
+                Some(id) => {
+                    let id = id?;
+                    if !crate::modules::custom::well_formed(&id) {
+                        return Err(Error::Msg(MsgError::BadModuleId(id)));
+                    }
+                    Some(id)
+                }
+            };
+            match args.next() {
+                None => Ok(Command::Msg(Msg::Query { id })),
+                Some(argument) => Err(extra(argument)),
+            }
+        }
+        "invoke" => {
+            let Some(id) = next_arg(&mut args, "msg") else {
+                return Err(Error::Msg(MsgError::NeedsId));
+            };
+            let id = id?;
+            if !crate::modules::custom::well_formed(&id) {
+                return Err(Error::Msg(MsgError::BadModuleId(id)));
+            }
+            let Some(action) = next_arg(&mut args, "msg") else {
+                return Err(Error::Msg(MsgError::NeedsAction));
+            };
+            let action = action?;
+            let (mut arg, mut output) = (None, None);
+            while let Some(next) = next_arg(&mut args, "msg") {
+                let next = next?;
+                if next == "--output" {
+                    let Some(name) = next_arg(&mut args, "msg") else {
+                        return Err(Error::Msg(MsgError::NeedsOutput));
+                    };
+                    if output.replace(name?).is_some() {
+                        return Err(Error::Repeated("--output"));
+                    }
+                } else if arg.is_none() {
+                    arg = Some(
+                        next.parse::<i32>()
+                            .map_err(|_| Error::Msg(MsgError::BadArg(next.clone())))?,
+                    );
+                } else {
+                    return Err(extra(OsString::from(next)));
+                }
+            }
+            Ok(Command::Msg(Msg::Invoke {
+                id,
+                action,
+                arg,
+                output,
+            }))
+        }
+        "subscribe" => {
+            let mut events = Vec::new();
+            while let Some(kind) = next_arg(&mut args, "msg") {
+                let kind = kind?;
+                let Some(parsed) = crate::control::protocol::EventKind::parse(&kind) else {
+                    return Err(Error::Msg(MsgError::UnknownEvent(kind)));
+                };
+                if !events.contains(&parsed) {
+                    events.push(parsed);
+                }
+            }
+            // None named: every kind.
+            if events.is_empty() {
+                events.extend(crate::control::protocol::EventKind::ALL);
+            }
+            Ok(Command::Msg(Msg::Subscribe { events }))
+        }
+        "set" => {
+            let Some(id) = next_arg(&mut args, "msg") else {
+                return Err(Error::Msg(MsgError::NeedsId));
+            };
+            let id = id?;
+            let Some(value) = next_arg(&mut args, "msg") else {
+                return Err(Error::Msg(MsgError::NeedsValue));
+            };
+            let value = value?;
+            if let Some(argument) = args.next() {
+                return Err(extra(argument));
+            }
+            if !crate::modules::custom::well_formed(&id) {
+                return Err(Error::Msg(MsgError::BadModuleId(id)));
+            }
+            if let Err(error) = serde_json::from_str::<serde::de::IgnoredAny>(&value) {
+                return Err(Error::Msg(MsgError::BadJson(error.to_string())));
+            }
+            Ok(Command::Msg(Msg::Set { id, value }))
+        }
+        other => {
+            let request = match other {
+                "layout" => Msg::Layout,
+                "reload" => Msg::Reload,
+                "hide" => Msg::Hide,
+                "show" => Msg::Show,
+                "toggle" => Msg::Toggle,
+                "version" => Msg::Version,
+                "kill" => Msg::Kill,
+                _ => return Err(Error::Msg(MsgError::Unknown(command))),
+            };
+            match args.next() {
+                None => Ok(Command::Msg(request)),
+                Some(argument) => Err(extra(argument)),
+            }
+        }
     }
-    if !crate::modules::custom::well_formed(&id) {
-        return Err(Error::Msg(MsgError::BadModuleId(id)));
-    }
-    if let Err(error) = serde_json::from_str::<serde::de::IgnoredAny>(&value) {
-        return Err(Error::Msg(MsgError::BadJson(error.to_string())));
-    }
-    Ok(Command::Msg(Msg::Set { id, value }))
 }
 
 /// The next argument as UTF-8, `None` when there is none: `Err` is its
