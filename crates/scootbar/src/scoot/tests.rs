@@ -94,7 +94,10 @@ fn a_wedged_scoot_costs_a_bounded_wait() {
     let error = send_to(&dir.socket(), ScootAction::Quit).unwrap_err();
     let waited = started.elapsed();
     assert!(error.contains("did not answer"), "{error}");
-    assert!(waited < Duration::from_secs(1), "waited {waited:?}");
+    // Bounded is what is proved, not fast: the real wait is about one
+    // `TIMEOUT` (250 ms), and a loaded machine stretches it, so the bound is
+    // a multiple a wedge that never answers could not meet.
+    assert!(waited < Duration::from_secs(5), "waited {waited:?}");
     drop(server);
 }
 

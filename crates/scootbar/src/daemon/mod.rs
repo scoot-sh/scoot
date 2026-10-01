@@ -26,11 +26,13 @@
 //!
 //! The compositor going away or a protocol error end the daemon with exit
 //! status 1. **Signals keep their default action**: SIGTERM or SIGINT end it
-//! on the spot, which is harmless, since it keeps no state and the
-//! compositor removes its surfaces with the connection. SIGHUP is not
-//! caught either: catching it would need `unsafe` signal registration
-//! (rustix has no `signalfd`), which `#![forbid(unsafe_code)]` forbids, so
-//! a reload is `scootbar msg reload` (scootbg documents the same reasoning).
+//! on the spot, running no destructor: it keeps no state and the
+//! compositor removes its surfaces with the connection, and an `exec`
+//! module's command is ended by the kernel's parent-death signal, not by a
+//! `Drop` (`modules::exec::guard`). SIGHUP is not caught either: catching
+//! it would need `unsafe` signal registration, which
+//! `#![forbid(unsafe_code)]` forbids, so a reload is `scootbar msg reload`
+//! (scootbg documents the same reasoning).
 
 mod binds;
 mod canvas;

@@ -12,7 +12,10 @@ composable shell.
 > marked, click to switch). Every module answers the pointer: clicks,
 > scrolls and hover run a module action, a command or a request to scoot
 > that the config binds ([pointer input](cli.md#pointer-input), M4's
-> [first step](backlog/resolved/pointer-and-interactions-done.md)). That is M1's
+> [first step](backlog/resolved/pointer-and-interactions-done.md)), and
+> the config can define a `button`, a `push` target for `scootbar msg set`
+> and an `exec` module that streams a command's output, with no Rust
+> ([how](cli.md#button-push-and-exec-modules)). That is M1's
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
 > [module API and clock](backlog/resolved/module-api-and-clock-done.md),
 > and its [Nix package](backlog/resolved/nix-package-done.md), which

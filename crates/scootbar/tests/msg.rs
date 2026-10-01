@@ -167,7 +167,7 @@ fn query_reload_and_kill() {
     let queried = reply(&msg(&session, &["query"]));
     assert_eq!(queried["modules"].as_array().unwrap().len(), 0);
 
-    // `set` is refused loudly: nothing takes one yet.
+    // `set` is refused loudly: no module is placed to take one.
     let refused = msg(&session, &["set", "clock", "{}"]);
     assert!(!refused.status.success());
     assert!(
@@ -178,7 +178,7 @@ fn query_reload_and_kill() {
     let refused = msg(&session, &["set", "battery", "{}"]);
     assert!(!refused.status.success());
     assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("no module"),
+        String::from_utf8_lossy(&refused.stderr).contains("is not placed"),
         "{}",
         String::from_utf8_lossy(&refused.stderr)
     );

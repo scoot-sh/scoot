@@ -1,6 +1,6 @@
-# `cargo fuzz` targets over the clock's two parsers of outside input: the
-# format string (`--clock-format`) and the TZif reader (`/etc/localtime`,
-# `TZ`). Test tooling only: never part of the shipped binary, and never a
+# `cargo fuzz` targets over the parsers of outside input: the clock's format
+# string (`--clock-format`) and TZif reader (`/etc/localtime`, `TZ`), and the
+# update payload of the `exec` and `push` modules. Test tooling only: never part of the shipped binary, and never a
 # member of the repository's workspace (the `[workspace]` table below makes
 # this its own), so `cargo build --workspace`, nextest, clippy and the
 # flake's builds never compile it. How to run it: README.md here.
@@ -21,10 +21,19 @@ members = ["."]
 # use nothing but `std`.
 [dependencies]
 libfuzzer-sys = "0.4"
+# The payload parser reads JSON (`serde_json`, as scootbar does).
+serde_json = "1"
 
 [[bin]]
 name = "format"
 path = "fuzz_targets/format.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "payload"
+path = "fuzz_targets/payload.rs"
 test = false
 doc = false
 bench = false

@@ -1,6 +1,7 @@
 # scootbar's fuzz targets
 
-Two `cargo fuzz` targets over the clock's parsers of outside input. Any
+Three `cargo fuzz` targets over the parsers of outside input: two the
+clock's, one the update payload of the `exec` and `push` modules. Any
 panic is a finding: the bar's release profile is `panic = "abort"`, so a
 panic there kills the bar.
 
@@ -13,8 +14,15 @@ panic there kills the bar.
   `TZ` names) and as a POSIX TZ string. A zone read must answer any instant
   with an offset within a day and two hours of UTC and a printable
   abbreviation of at most 8 bytes.
+- **`payload`**: arbitrary bytes as an `exec` module's output line, in both
+  formats, and, where they are JSON, as a `msg set` value
+  (`src/modules/payload.rs`). Refused or accepted without a panic; an
+  accepted update holds text and tooltip within 256 bytes, with no control
+  character and no space at either end; a refused one changes nothing. It
+  compiles `class.rs` and `payload.rs` by `#[path]`, and uses `serde_json`
+  (the only dependency of this crate besides `libfuzzer-sys`).
 
-Both compile scootbar's own `src/modules/clock/tzif.rs` and `format.rs` by
+The first two compile scootbar's own `src/modules/clock/tzif.rs` and `format.rs` by
 `#[path]`, unchanged (`fuzz_targets/common.rs`); they use nothing but
 `std`. What each target checks is written once, in scootbar's
 `src/modules/clock/fuzz.rs`, compiled here the same way, so each target is
@@ -22,9 +30,9 @@ one line. This crate is its own workspace, with its own `Cargo.lock`: it is
 never built by `cargo build --workspace`, nextest, clippy or the flake, and
 nothing here reaches the shipped binary.
 
-**In CI**, on every scootbar change, the `scootbar` job builds both targets
+**In CI**, on every scootbar change, the `scootbar` job builds the targets
 and runs them for a fixed budget: 1,000,000 runs of `format` and
-5,000,000 of `tzif`, from `-seed=1`, over the seed corpus and
+5,000,000 of `tzif` and 2,000,000 of `payload`, from `-seed=1`, over the seed corpus and
 `regressions/` (about 35 s). Building them is what keeps the `#[path]`
 includes from rotting: a change that compiles in scootbar but not here
 fails there. A finding's input is printed in base64 in the job's log.

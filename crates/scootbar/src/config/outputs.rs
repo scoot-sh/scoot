@@ -48,6 +48,7 @@ pub(super) fn policy(
     path: &Path,
     outputs: Option<&toml::Value>,
     tables: &BTreeMap<String, OutputFile>,
+    known: &[&'static str],
 ) -> Result<Policy, Error> {
     let value = |message: PolicyError| Error::Value {
         path: path.to_owned(),
@@ -98,7 +99,7 @@ pub(super) fn policy(
             key: "output",
             message: format!("`{}`: {error}", name.escape_debug()),
         })?;
-        overrides.push(over(path, name, table)?);
+        overrides.push(over(path, name, table, known)?);
     }
     let policy = Policy { select, overrides };
     policy.check().map_err(|error| Error::Value {
@@ -112,7 +113,12 @@ pub(super) fn policy(
     Ok(policy)
 }
 
-fn over(path: &Path, name: &str, table: &OutputFile) -> Result<Override, Error> {
+fn over(
+    path: &Path,
+    name: &str,
+    table: &OutputFile,
+    known: &[&'static str],
+) -> Result<Override, Error> {
     let edge = match &table.edge {
         None => None,
         Some(text) => Some(Edge::parse(text).ok_or_else(|| {
@@ -164,7 +170,7 @@ fn over(path: &Path, name: &str, table: &OutputFile) -> Result<Override, Error> 
         None
     } else {
         let list = |section: Section, given: &Option<Vec<String>>| {
-            ids(path, section, given).map_err(|error| match error {
+            ids(path, section, given, known).map_err(|error| match error {
                 // The shared list's error names `left`, not the table.
                 Error::Value { key, message, .. } => refusal(path, name, key, message),
                 other => other,

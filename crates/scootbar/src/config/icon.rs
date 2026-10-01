@@ -1,113 +1,145 @@
 //! A module's icon from its config keys: `icon` (a glyph), `icon-path`
 //! (SVG path data, with `icon-viewbox`) or `icon-image` (a PNG, in a build
 //! with the `icon-image` feature). At most one; each refusal names the key.
-//! The clock is the only module with one so far; the modules that follow
-//! (button, volume, network, battery) take the same three keys through
-//! this function.
+//! The clock and the `button` modules take the same three keys through
+//! [`read`] (the modules that follow, volume, network and battery, will).
 
+#[cfg(any(feature = "clock", feature = "icon-image"))]
 use std::path::Path;
 use std::sync::Arc;
 
-use super::{ClockFile, Error, value};
+#[cfg(feature = "clock")]
+use super::{ClockFile, Error};
 use crate::icon::path::{Vector, ViewBox};
 use crate::icon::{Art, Icon};
 
+/// A table's icon keys as the file gave them.
+pub(super) struct Keys<'a> {
+    pub icon: Option<&'a str>,
+    pub icon_path: Option<&'a str>,
+    pub icon_viewbox: Option<&'a str>,
+    /// The key's presence is all a build without the `icon-image` feature
+    /// needs (it refuses it, saying what is missing).
+    pub icon_image: Option<&'a str>,
+}
+
 /// The clock's icon, if its section gives one.
+#[cfg(feature = "clock")]
 pub(super) fn clock(path: &Path, file: &ClockFile) -> Result<Option<Icon>, Error> {
     #[cfg(feature = "icon-image")]
     let image = file.icon_image.as_deref();
     #[cfg(not(feature = "icon-image"))]
-    let image = file.icon_image.as_ref();
+    let image = file.icon_image.as_ref().map(|_| "");
+    read(
+        "clock",
+        "a clock",
+        &Keys {
+            icon: file.icon.as_deref(),
+            icon_path: file.icon_path.as_deref(),
+            icon_viewbox: file.icon_viewbox.as_deref(),
+            icon_image: image,
+        },
+    )
+    .map_err(|(key, message)| Error::Named {
+        path: path.to_owned(),
+        key,
+        message,
+    })
+}
+
+/// The icon the keys of table `prefix` (`clock`, `button.launcher`) name,
+/// if any. `what` is how a message calls the module (`a clock`). `Err` is
+/// the dotted key at fault and why.
+pub(super) fn read(
+    prefix: &str,
+    what: &str,
+    keys: &Keys<'_>,
+) -> Result<Option<Icon>, (String, String)> {
+    let key = |name: &str| format!("{prefix}.{name}");
     let given = [
-        ("clock.icon", file.icon.is_some()),
-        ("clock.icon-path", file.icon_path.is_some()),
-        ("clock.icon-image", image.is_some()),
+        ("icon", keys.icon.is_some()),
+        ("icon-path", keys.icon_path.is_some()),
+        ("icon-image", keys.icon_image.is_some()),
     ];
     let mut set = given
         .iter()
         .filter(|(_, is_set)| *is_set)
-        .map(|(key, _)| *key);
+        .map(|(name, _)| *name);
     if let (Some(first), Some(second)) = (set.next(), set.next()) {
-        return Err(value(
-            path,
-            second,
-            format_args!("a clock shows one icon: it cannot be set with {first}"),
-        ));
-    }
-    #[cfg(not(feature = "icon-image"))]
-    if image.is_some() {
-        return Err(value(
-            path,
-            "clock.icon-image",
-            format_args!(
-                "needs a build with the `icon-image` Cargo feature (`cargo build --features \
-                 icon-image`, or `icon-image` in programs.scootbar.features); this one has no \
-                 PNG decoder. Use clock.icon-path for an icon that needs none"
+        return Err((
+            key(second),
+            format!(
+                "{what} shows one icon: it cannot be set with {}",
+                key(first)
             ),
         ));
     }
-    if file.icon_viewbox.is_some() && file.icon_path.is_none() {
-        let with = if file.icon.is_some() {
-            "clock.icon is a glyph and has no viewbox"
-        } else {
-            "clock.icon-image is a picture and has none"
-        };
-        let with = if file.icon.is_none() && image.is_none() {
-            "no icon-path is set"
-        } else {
-            with
-        };
-        return Err(value(
-            path,
-            "clock.icon-viewbox",
-            format_args!("is the viewbox of clock.icon-path, and {with}"),
+    #[cfg(not(feature = "icon-image"))]
+    if keys.icon_image.is_some() {
+        return Err((
+            key("icon-image"),
+            format!(
+                "needs a build with the `icon-image` Cargo feature (`cargo build --features \
+                 icon-image`, or `icon-image` in programs.scootbar.features); this one has no \
+                 PNG decoder. Use {} for an icon that needs none",
+                key("icon-path")
+            ),
         ));
     }
-    if let Some(text) = &file.icon {
+    if keys.icon_viewbox.is_some() && keys.icon_path.is_none() {
+        let with = if keys.icon.is_some() {
+            format!("{} is a glyph and has no viewbox", key("icon"))
+        } else if keys.icon_image.is_some() {
+            format!("{} is a picture and has none", key("icon-image"))
+        } else {
+            "no icon-path is set".to_owned()
+        };
+        return Err((
+            key("icon-viewbox"),
+            format!("is the viewbox of {}, and {with}", key("icon-path")),
+        ));
+    }
+    if let Some(text) = keys.icon {
         return parse_glyph(text)
             .map(|c| Some(Icon::Glyph(c)))
-            .map_err(|message| value(path, "clock.icon", format_args!("{message}")));
+            .map_err(|message| (key("icon"), message));
     }
-    if let Some(d) = &file.icon_path {
-        let view = match &file.icon_viewbox {
+    if let Some(d) = keys.icon_path {
+        let view = match keys.icon_viewbox {
             None => ViewBox::default(),
             Some(text) => ViewBox::parse(text).map_err(|error| {
-                value(
-                    path,
-                    "clock.icon-viewbox",
-                    format_args!(
+                (
+                    key("icon-viewbox"),
+                    format!(
                         "takes four numbers, `min-x min-y width height` (such as \"0 0 24 24\"): {error}"
                     ),
                 )
             })?,
         };
         let vector = Vector::parse(d, view).map_err(|error| {
-            value(
-                path,
-                "clock.icon-path",
-                format_args!("not usable SVG path data: {error}"),
+            (
+                key("icon-path"),
+                format!("not usable SVG path data: {error}"),
             )
         })?;
         return Ok(Some(Icon::Art(Art::Vector(Arc::new(vector)))));
     }
     #[cfg(feature = "icon-image")]
-    if let Some(text) = image {
+    if let Some(text) = keys.icon_image {
         let file = Path::new(text);
         if !file.is_absolute() {
-            return Err(value(
-                path,
-                "clock.icon-image",
-                format_args!(
+            return Err((
+                key("icon-image"),
+                format!(
                     "takes an absolute path to a PNG file, not `{}`",
                     text.escape_debug()
                 ),
             ));
         }
         let image = crate::icon::image::load(file).map_err(|error| {
-            value(
-                path,
-                "clock.icon-image",
-                format_args!("cannot use {}: {error}", file.display()),
+            (
+                key("icon-image"),
+                format!("cannot use {}: {error}", file.display()),
             )
         })?;
         return Ok(Some(Icon::Art(Art::Image(Arc::new(image)))));

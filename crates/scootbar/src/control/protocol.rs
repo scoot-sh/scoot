@@ -181,7 +181,15 @@ struct Envelope<'a> {
     kind: Option<Cow<'a, str>>,
     #[serde(borrow)]
     id: Option<Cow<'a, str>>,
+    /// Present even when `null` (a `push` module's way to clear): serde
+    /// would read `"value": null` as absent into an `Option<Value>`.
+    #[serde(default, deserialize_with = "present")]
     value: Option<Value>,
+}
+
+/// A value that is there, whatever it is, `null` included.
+fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
 }
 
 /// Parses one request line (without its newline).

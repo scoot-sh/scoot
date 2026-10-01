@@ -62,6 +62,13 @@ const USAGE_ERROR: u8 = 2;
 fn main() -> ExitCode {
     use print::warn;
 
+    // A command of an `exec` module is started through this binary, which
+    // arms its end with the bar's and becomes the command
+    // (`modules::exec::guard`): it never reaches the CLI.
+    #[cfg(feature = "exec")]
+    if let Some(code) = modules::exec::guard::run(std::env::args_os().skip(1)) {
+        return code;
+    }
     let command = match cli::parse(std::env::args_os().skip(1)) {
         Ok(command) => command,
         Err(error) => {
@@ -146,7 +153,7 @@ fn run_msg(msg: cli::Msg) -> ExitCode {
             };
             send(
                 &control::protocol::Request::Set {
-                    id: Cow::Borrowed(id),
+                    id: Cow::Owned(id),
                     value,
                 },
                 false,

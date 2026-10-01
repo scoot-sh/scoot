@@ -251,9 +251,9 @@ The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
 without it) holds every option above; `--config PATH` reads another file
 instead. A flag given replaces the file's value for its own option; a
 missing file is the defaults. Runs until the compositor goes away (exit
-status 1, saying why) or it is killed; SIGTERM and SIGINT end it at once,
-which is harmless: it keeps no state. The compositor removes the bars with
-the connection.
+status 1, saying why) or it is killed; SIGTERM and SIGINT end it at once:
+it keeps no state, and the compositor removes the bars with the connection.
+An `exec` module's command ends with it.
 
 --check validates instead of running: it reads the config file, applies the
 flags over it, starts the placed modules and loads the font, exactly as a
@@ -293,9 +293,11 @@ start-up and removes when it stops:
     toggle     hide if shown, show if hidden
     version    the daemon's version and protocol, as JSON
     kill       stop the daemon, once its reply is sent
-    set        a JSON value for module ID (no module takes one yet, so this
-               is refused loudly for every id today; the forward hook for
-               the modules that will take one)
+    set        a JSON value for the `push` module ID, which the config
+               defines (`[push.ID]`): a string (the text), an object
+               `{\"text\": ..., \"class\": ..., \"tooltip\": ...}` or null
+               (clears it). Any other module, an id that is not placed and a
+               value the module refuses are loud errors, never a silent ok
 
 `query`, `version`, `reload`, `hide`, `show` and `toggle` print the reply (the
 last three say `{\"type\":\"bar\",\"visible\":false}`, what is now the case); `kill` and `set` print
@@ -330,10 +332,11 @@ pub enum Msg {
     Toggle,
     Version,
     Kill,
-    /// A value for module `id` (the registry id, so a misspelled one is
-    /// refused here): the raw JSON, validated but otherwise unread.
+    /// A value for module `id` (a well-formed id; whether a module of that
+    /// name is placed is the daemon's to say, since a config names its own):
+    /// the raw JSON, validated but otherwise unread.
     Set {
-        id: &'static str,
+        id: String,
         value: String,
     },
 }
@@ -570,8 +573,8 @@ pub enum MsgError {
     /// `set` without its module id, or without its JSON value.
     NeedsId,
     NeedsValue,
-    /// No module of that id in this build.
-    UnknownModule(String),
+    /// Not the shape of a module id.
+    BadModuleId(String),
     /// The value is not JSON.
     BadJson(String),
 }
@@ -595,20 +598,12 @@ impl fmt::Display for MsgError {
                 f,
                 "`scootbar msg set ID` needs a JSON value (try `scootbar msg --help`)"
             ),
-            Self::UnknownModule(id) => {
-                write!(
-                    f,
-                    "no module `{}` in this build (it has:",
-                    id.escape_debug()
-                )?;
-                if REGISTRY.is_empty() {
-                    write!(f, " none")?;
-                }
-                for spec in REGISTRY {
-                    write!(f, " {}", spec.id)?;
-                }
-                write!(f, ")")
-            }
+            Self::BadModuleId(id) => write!(
+                f,
+                "`{}` is not a module id (1 to {} letters, digits, `-` and `_`)",
+                id.escape_debug(),
+                crate::modules::custom::MAX_NAME
+            ),
             Self::BadJson(error) => write!(f, "the value is not JSON: {error}"),
         }
     }
@@ -803,13 +798,13 @@ fn msg(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
             argument: text(extra).unwrap_or_else(|lossy| lossy),
         });
     }
-    let Some(spec) = modules::find(&id) else {
-        return Err(Error::Msg(MsgError::UnknownModule(id)));
-    };
+    if !crate::modules::custom::well_formed(&id) {
+        return Err(Error::Msg(MsgError::BadModuleId(id)));
+    }
     if let Err(error) = serde_json::from_str::<serde::de::IgnoredAny>(&value) {
         return Err(Error::Msg(MsgError::BadJson(error.to_string())));
     }
-    Ok(Command::Msg(Msg::Set { id: spec.id, value }))
+    Ok(Command::Msg(Msg::Set { id, value }))
 }
 
 /// The next argument as UTF-8, `None` when there is none: `Err` is its

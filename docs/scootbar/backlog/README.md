@@ -101,7 +101,8 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 
 ### M4 — Interactive, and readable by agents
 - [Pointer input and interactions](resolved/pointer-and-interactions-done.md) (medium): click, scroll and hover, `exec` and `scoot = "quit"` actions — RESOLVED 2026-09-30
-- [`exec`, `push` and `button` modules](exec-push-button-modules.md) (medium): launcher and power buttons
+- [`exec`, `push` and `button` modules](resolved/exec-push-button-modules-done.md) (medium): launcher and power buttons — RESOLVED 2026-09-30
+- [Keep an unchanged `exec` command across a reload](exec-keep-across-reload.md) (low)
 - [Agent interface](agent-interface.md) (medium): `invoke`, `layout`, `subscribe`
 - [Appearance follow-ups](appearance-followups.md) (low): hover token, per-module state colors, dot indicators, inactive-workspace colors
 
