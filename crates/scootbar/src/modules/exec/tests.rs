@@ -362,22 +362,33 @@ fn a_child_that_exited_is_reaped_not_left_a_zombie() {
 
 #[test]
 fn a_child_holds_none_of_the_callers_descriptors() {
+    // Not "nothing above stdio": this process may itself have been started
+    // with descriptors open (a CI runner does), which every child inherits.
+    let _serial = crate::testfds::serialize();
     let dir = Dir::new("fds");
     let out = dir.file("fds");
     let held = std::fs::File::open("/dev/null").expect("open");
     let fd = rustix::io::fcntl_dupfd_cloexec(&held, 100).expect("dup");
+    let inherited = crate::testfds::inheritable();
     let script = format!(
         "ls /proc/self/fd > {}; echo listed; sleep 30",
         out.display()
     );
     let mut harness = module(&script, Format::Text);
     until(&mut harness, "listed", |h| shows(h, "listed"));
-    let fds: Vec<i32> = fs::read_to_string(&out)
+    let fds: std::collections::BTreeSet<i32> = fs::read_to_string(&out)
         .expect("listing")
         .lines()
         .filter_map(|l| l.trim().parse().ok())
         .collect();
-    assert!(fds.iter().all(|&n| n <= 3), "{fds:?}");
+    use std::os::fd::AsRawFd;
+    assert!(!fds.contains(&fd.as_raw_fd()), "fd leaked: {fds:?}");
+    let allowed = crate::testfds::allowed_in_child(&inherited);
+    let extra: Vec<_> = fds.difference(&allowed).collect();
+    assert!(
+        extra.is_empty(),
+        "the child holds {extra:?} beyond {allowed:?}: {fds:?}"
+    );
     drop(fd);
 }
 

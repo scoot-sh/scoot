@@ -599,14 +599,18 @@ arguments of at most 4096 bytes. `format` says how a line is read: `text`
   nothing between lines.
 - **Restarts**: when the command exits it is started again after 1 s, then 2,
   4, ... up to 60 s; a run that lasted 30 s or more starts the sequence
-  over. A command that cannot start (no such program) takes the same path.
+  over. A command that cannot start (no such program) takes the same path,
+  and the one warning says why: `exit status: 127, command not found`, or
+  `126, not executable`; any other reason (`125`) is on the line before it.
   Each restart is said on stderr, throttled to one warning a second per
   module, so a restart that follows another warning within the second is
   silent.
 - **Children**: reaped the moment they exit (a pidfd wakes the bar, no
   timer, no zombie). Its stdin is `/dev/null`, its stderr is the bar's own
   (its complaints reach the journal), it leads its own process group, and it
-  inherits none of the bar's file descriptors. **The whole process group is
+  inherits none of the file descriptors the bar opens (one a launcher left
+  open when it started the bar reaches it, as it does any child).
+  **The whole process group is
   killed when the module goes**: on a reload (the command is started afresh
   with the new config, whether or not its table changed), and when the
   command exits, so a worker it backgrounded does not pile up across
@@ -623,6 +627,10 @@ arguments of at most 4096 bytes. `format` says how a line is read: `text`
   is a set-user-id program is not covered either (the kernel clears the
   signal on such an `exec`). Commands a pointer binding starts are not
   guarded: a launched application outlives a bar restart on purpose.
+  **The guard needs `/proc`** (it is `/proc/self/exe`): where `/proc` is not
+  mounted no `exec` module can start, and the warning is ``cannot start
+  `/proc/self/exe` to run `sh`: No such file or directory (the bar runs each
+  command through itself, which needs /proc mounted)``.
 - **Count**: at most 8 `exec` modules are placed (on any output); each
   holds a child, a `timerfd` and at most two polled fds.
 - **Start-up**: a command is started right after the bar's first frame, not

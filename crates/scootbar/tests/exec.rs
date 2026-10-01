@@ -11,12 +11,15 @@
 
 mod common;
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Output;
 use std::time::{Duration, Instant};
 
-use common::{Reaper, Session, Shot, open_fds, rgb, settled_fds, testfont};
+use common::{
+    Reaper, Session, Shot, allowed_in_child, inheritable_fds, open_fds, rgb, settled_fds, testfont,
+};
 use serde_json::Value;
 
 const BAR: &str = "#102030";
@@ -358,20 +361,132 @@ fn a_command_that_dies_is_started_again_by_the_bar() {
 fn a_command_holds_none_of_the_bars_descriptors() {
     let tables = "[exec.out]\ncommand = [\"sh\", \"-c\", \
                   \"ls /proc/self/fd > DIR/fds; echo 1; sleep 600\"]\n";
+    // What this process was handed by whatever started it (a CI runner may
+    // leave descriptors open): the bar inherits them and so does its
+    // command. Anything else is the bar's own, and must not reach it.
+    let inherited = inheritable_fds("self");
     let Some(mut rig) = Rig::start("exec-fds", "right = [\"out\"]\n", tables) else {
         return;
     };
     rig.wait_text("1");
     let held = settled_fds(rig.pid());
     assert!(held > 6, "the bar holds only {held} descriptors");
-    let fds: Vec<u32> = fs::read_to_string(rig.dir.join("fds"))
+    // The bar holds no descriptor without close-on-exec but those it was
+    // started with, whatever the command below happens to list.
+    let allowed_in_bar: BTreeSet<i32> = inherited.iter().copied().chain(0..=2).collect();
+    let leaky: Vec<_> = inheritable_fds(rig.pid())
+        .difference(&allowed_in_bar)
+        .copied()
+        .collect();
+    assert!(
+        leaky.is_empty(),
+        "the bar holds {leaky:?} without close-on-exec, which no command may inherit"
+    );
+    let fds: BTreeSet<i32> = fs::read_to_string(rig.dir.join("fds"))
         .unwrap()
         .lines()
         .filter_map(|l| l.trim().parse().ok())
         .collect();
+    let allowed = allowed_in_child(&inherited);
+    let extra: Vec<_> = fds.difference(&allowed).collect();
     assert!(
-        fds.iter().all(|&fd| fd <= 3),
-        "inherited {fds:?} (the bar has {held})"
+        extra.is_empty(),
+        "inherited {extra:?} beyond {allowed:?}: {fds:?} (the bar has {held})"
+    );
+}
+
+/// The `SigIgn` mask of `pid`.
+fn ignored_signals(pid: impl std::fmt::Display) -> u64 {
+    fs::read_to_string(format!("/proc/{pid}/status"))
+        .unwrap()
+        .lines()
+        .find_map(|l| l.strip_prefix("SigIgn:"))
+        .and_then(|v| u64::from_str_radix(v.trim(), 16).ok())
+        .expect("SigIgn in /proc/PID/status")
+}
+
+#[test]
+fn a_command_gets_the_default_sigpipe_not_the_bars_ignored_one() {
+    // A Rust program ignores `SIGPIPE`; ignored signals survive `exec`. The
+    // command is what the guard (a Rust program, started through
+    // `/proc/self/exe`) execs, so it would inherit the ignore, and a
+    // `yes | head` in a script would then spin on `EPIPE` instead of ending
+    // by the signal. `std` puts the default back in the child before it
+    // execs; this pins that, so a `std` change cannot silently end it. Only
+    // `SIGPIPE`'s own bit is read: a harness may hand down others (`SIGHUP`
+    // under `nohup`, `SIGQUIT`), and those are not this test's.
+    const SIGPIPE_BIT: u64 = 1 << (13 - 1);
+    let tables = "[exec.out]\ncommand = [\"sh\", \"-c\", \
+                  \"grep SigIgn /proc/self/status > DIR/sigign; echo 1; sleep 600\"]\n";
+    let Some(mut rig) = Rig::start("exec-sigpipe", "right = [\"out\"]\n", tables) else {
+        return;
+    };
+    rig.wait_text("1");
+    let lines = rig.wait_lines("sigign", 1);
+    let command = lines[0]
+        .strip_prefix("SigIgn:")
+        .and_then(|v| u64::from_str_radix(v.trim(), 16).ok())
+        .unwrap_or_else(|| panic!("unreadable: {:?}", lines[0]));
+    assert_eq!(
+        command & SIGPIPE_BIT,
+        0,
+        "the command has SIGPIPE ignored: SigIgn {command:#x}"
+    );
+    // The control: the bar itself does ignore it, so the test would see an
+    // inherited one.
+    assert_ne!(
+        ignored_signals(rig.pid()) & SIGPIPE_BIT,
+        0,
+        "the bar does not ignore SIGPIPE, so this test checks nothing"
+    );
+}
+
+#[test]
+fn a_command_that_is_not_found_is_one_warning_a_restart_naming_it() {
+    let tables = "[exec.out]\ncommand = [\"scootbar-no-such-program\"]\n";
+    let Some(mut rig) = Rig::start("exec-notfound", "right = [\"out\"]\n", tables) else {
+        return;
+    };
+    rig.session
+        .wait_for(&mut rig.bar.0, "the restart warning", |session| {
+            session
+                .bar_stderr()
+                .contains("command not found")
+                .then_some(())
+        });
+    let stderr = rig.session.bar_stderr();
+    // One line says it, from the bar, not a second from the guard before it.
+    assert!(
+        !stderr.contains("cannot run"),
+        "the guard spoke as well:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("exit status: 127, command not found"),
+        "{stderr}"
+    );
+    // And the bar is up, with the module restarting.
+    assert!(rig.bar.0.try_wait().unwrap().is_none());
+}
+
+#[test]
+fn a_command_that_is_not_executable_says_so_once() {
+    let tables = "[exec.out]\ncommand = [\"DIR/not-a-program\"]\n";
+    let Some(mut rig) = Rig::start("exec-noexec", "right = [\"out\"]\n", tables) else {
+        return;
+    };
+    fs::write(rig.dir.join("not-a-program"), "#!/bin/sh\n").unwrap();
+    rig.session
+        .wait_for(&mut rig.bar.0, "the restart warning", |session| {
+            session
+                .bar_stderr()
+                .contains("not executable")
+                .then_some(())
+        });
+    let stderr = rig.session.bar_stderr();
+    assert!(!stderr.contains("cannot run"), "{stderr}");
+    assert!(
+        stderr.contains("exit status: 126, not executable"),
+        "{stderr}"
     );
 }
 

@@ -44,7 +44,8 @@
 //!   exits (so a worker it backgrounded does not pile up over restarts).
 //!   The command's stdin is `/dev/null`, its stderr is the bar's own
 //!   (a script's complaints reach the journal), and it inherits none of
-//!   the bar's descriptors. **It ends with the bar, however the bar ends**:
+//!   the descriptors the bar opens (one a launcher left open when it
+//!   started the bar reaches it, as it does any child). **It ends with the bar, however the bar ends**:
 //!   a clean exit kills the group by `Drop`, and a killed or crashed bar is
 //!   covered by the kernel's parent-death signal, armed by [`guard`].
 //! - **Count**: at most [`super::custom::MAX_EXEC`] are placed; each costs
@@ -209,13 +210,14 @@ impl Exec {
 
     fn try_spawn(&self, now: Instant) -> Result<Running, String> {
         let (program, args) = self.settings.command.split_first().ok_or("no command")?;
-        let mut child = guard::command(program, args)
+        let mut command = guard::command(program, args);
+        let mut child = command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .process_group(0)
             .spawn()
-            .map_err(|e| format!("cannot run `{program}`: {e}"))?;
+            .map_err(|e| guard::spawn_error(&command, program, &e))?;
         let Some(out) = child.stdout.take() else {
             kill_group(&child);
             let _ = child.wait();
@@ -397,8 +399,10 @@ impl Exec {
             }
         }
         if self.may_say(now) {
+            let why = status.code().and_then(guard::meaning).unwrap_or("");
             warn(format_args!(
-                "scootbar: exec module `{}`: the command ended ({status}); starting it again in {}",
+                "scootbar: exec module `{}`: the command ended ({status}{why}); \
+                 starting it again in {}",
                 self.id,
                 human(wait)
             ));

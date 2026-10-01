@@ -43,6 +43,7 @@
 //! `tests/exec.rs`, and its pieces below).
 
 use std::ffi::{OsStr, OsString};
+use std::io;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, ExitCode};
 
@@ -55,8 +56,48 @@ use crate::print::warn;
 /// the command it is given, as the user could).
 pub const MARKER: &str = "__exec-guard";
 
-/// Exit status of a command that could not be run, as a shell says it.
-const CANNOT_RUN: u8 = 127;
+/// The statuses of a guard that could not become the command, which are a
+/// shell's: 127 (no such program) and 126 (found, not executable) are said
+/// by the bar's one warning for the restart ([`meaning`]), and the guard
+/// stays silent so a failed start is one line, not two. Any other failure
+/// has nothing to say it but the guard, which does, and exits 125.
+const NOT_FOUND: u8 = 127;
+const NOT_EXECUTABLE: u8 = 126;
+const NOT_RUN: u8 = 125;
+
+/// What a command's exit `code` says when it is one of the guard's: the
+/// words for the bar's warning (a command that exits with one of them by
+/// itself, as `sh -c missing` does with 127, means the same).
+pub fn meaning(code: i32) -> Option<&'static str> {
+    match u8::try_from(code).ok()? {
+        NOT_FOUND => Some(", command not found"),
+        NOT_EXECUTABLE => Some(", not executable"),
+        NOT_RUN => Some(", could not be run: see the line above"),
+        _ => None,
+    }
+}
+
+/// Why `command` (from [`command`]) could not be started, for the module's
+/// warning about `program`. Through the guard, the process the bar failed to
+/// start is the bar itself at `/proc/self/exe`, not the user's program (the
+/// guard runs that, and says when it cannot), and what is missing when it
+/// is not found is `/proc`: naming the user's program there sent a reader
+/// looking at the wrong thing.
+pub fn spawn_error(command: &Command, program: &str, error: &io::Error) -> String {
+    let started = command.get_program();
+    if started == OsStr::new(program) {
+        return format!("cannot run `{program}`: {error}");
+    }
+    let hint = if error.kind() == io::ErrorKind::NotFound {
+        " (the bar runs each command through itself, which needs /proc mounted)"
+    } else {
+        ""
+    };
+    format!(
+        "cannot start `{}` to run `{program}`: {error}{hint}",
+        started.to_string_lossy()
+    )
+}
 
 /// The command that starts `program args` the way the module wants it: its
 /// stdio and group are set by the caller. Through the guard, except in the
@@ -121,7 +162,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Option<ExitCode> {
     let args: Vec<OsString> = args.collect();
     let Some(plan) = parse(&args) else {
         warn(format_args!("scootbar: {MARKER}: a pid and a program"));
-        return Some(ExitCode::from(CANNOT_RUN));
+        return Some(ExitCode::from(NOT_RUN));
     };
     // Armed first, and the parent checked after: a bar that dies in between
     // is seen by the check, one that dies after is seen by the signal.
@@ -136,11 +177,17 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Option<ExitCode> {
         return Some(ExitCode::FAILURE);
     }
     let error = Command::new(plan.program).args(plan.args).exec();
-    warn(format_args!(
-        "scootbar: cannot run `{}`: {error}",
-        plan.program.to_string_lossy()
-    ));
-    Some(ExitCode::from(CANNOT_RUN))
+    Some(ExitCode::from(match error.kind() {
+        io::ErrorKind::NotFound => NOT_FOUND,
+        io::ErrorKind::PermissionDenied => NOT_EXECUTABLE,
+        _ => {
+            warn(format_args!(
+                "scootbar: cannot run `{}`: {error}",
+                plan.program.to_string_lossy()
+            ));
+            NOT_RUN
+        }
+    }))
 }
 
 #[cfg(test)]

@@ -242,7 +242,8 @@ pinned nixpkgs' tzdata).
   child woken about once a frame, the wait doubling to its cap and a stable
   run resetting it (and never overflowing), a command restarted with a growing
   wait, one that cannot start retried with the module still up, an empty command
-  not a panic, no zombie, none of the caller's descriptors, the whole process
+  not a panic, no zombie, none of the caller's descriptors (beyond what the test process
+  itself inherited), the whole process
   group killed with the module (a backgrounded worker too) and a worker left
   holding the pipe not hanging it; the guard's request line, its reading of
   one (a negative, zero, overflowing or non-UTF-8 pid refused, never a panic)
@@ -261,7 +262,10 @@ pinned nixpkgs' tzdata).
   its command; a flooding child costing the bar no memory, no descriptors and
   under a quarter of a core; a command that dies started again with the
   default delays and nothing left a zombie; a command holding none of the
-  bar's descriptors; a reload replacing the command and killing the old one
+  descriptors the bar opens (and the bar holding no inheritable descriptor
+  beyond what its launcher gave it); a command that is not found or not executable
+  one warning a restart, not two; a command's `SIGPIPE` the default and not the
+  bar's ignored one; a reload replacing the command and killing the old one
   with its workers; a shell-loop command gone after the bar is killed with
   `SIGKILL` and `SIGTERM` (the parent-death signal the guard arms; `SIGHUP`
   and `SIGINT` are measured by hand instead, because a harness started under

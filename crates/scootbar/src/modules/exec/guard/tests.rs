@@ -78,3 +78,50 @@ fn the_unit_tests_start_the_command_directly() {
     let command = command("sleep", &["1".into()]);
     assert_eq!(command.get_program(), "sleep");
 }
+
+#[test]
+fn a_bar_that_cannot_start_the_guard_names_what_it_tried_to_start() {
+    // No /proc: `/proc/self/exe` is not there to run, and the message must
+    // not blame the user's program (which the guard, never started, would
+    // have run).
+    let mut command = guarded("/nonexistent/proc/self/exe", 4242, "sh", &[]);
+    let error = command.spawn().expect_err("no such file");
+    let said = spawn_error(&command, "sh", &error);
+    assert!(
+        said.contains("cannot start `/nonexistent/proc/self/exe`"),
+        "{said}"
+    );
+    assert!(said.contains("to run `sh`"), "{said}");
+    assert!(said.contains("needs /proc mounted"), "{said}");
+    assert!(!said.contains("cannot run `sh`"), "{said}");
+}
+
+#[test]
+fn another_failure_to_start_the_guard_gets_no_proc_hint() {
+    let command = guarded("/proc/self/exe", 1, "sh", &[]);
+    let error = io::Error::from_raw_os_error(rustix::io::Errno::NOMEM.raw_os_error());
+    let said = spawn_error(&command, "sh", &error);
+    assert!(said.starts_with("cannot start `/proc/self/exe`"), "{said}");
+    assert!(!said.contains("/proc mounted"), "{said}");
+}
+
+#[test]
+fn a_command_started_directly_is_named_as_before() {
+    let mut command = direct("scootbar-no-such-program", &[]);
+    let error = command.spawn().expect_err("no such file");
+    let said = spawn_error(&command, "scootbar-no-such-program", &error);
+    assert!(
+        said.starts_with("cannot run `scootbar-no-such-program`: "),
+        "{said}"
+    );
+}
+
+#[test]
+fn the_guards_statuses_have_the_words_a_shells_do() {
+    assert_eq!(meaning(127), Some(", command not found"));
+    assert_eq!(meaning(126), Some(", not executable"));
+    assert!(meaning(125).is_some_and(|m| m.contains("see the line above")));
+    for code in [0, 1, 2, 124, 128, 255, 256, -1] {
+        assert_eq!(meaning(code), None, "{code}");
+    }
+}
