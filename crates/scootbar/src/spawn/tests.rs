@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -232,9 +233,9 @@ fn the_child_leads_its_own_process_group() {
     assert!(pgid.is_some() && pgid == pid, "pgid {pgid:?}, pid {pid:?}");
 }
 
-/// The descriptor numbers a `sh` child sees, with `held` open in this
-/// process (the child's own `ls` opens its directory as 3).
-fn child_fds(dir: &Dir) -> Vec<i32> {
+/// The descriptor numbers a `sh` child sees (its own `ls` opens its
+/// directory as one of them).
+fn child_fds(dir: &Dir) -> BTreeSet<i32> {
     let out = dir.path("out");
     let script = format!("ls /proc/self/fd > {}", out.to_str().expect("utf-8 path"));
     let mut spawner = Spawner::default();
@@ -252,25 +253,42 @@ fn child_fds(dir: &Dir) -> Vec<i32> {
 #[test]
 fn a_child_inherits_none_of_the_callers_descriptors() {
     // A descriptor opened the way `std` and `rustix` open everything here
-    // is close-on-exec, so the child sees only stdio and what it opened
-    // itself. (The running bar's own descriptors are checked by
+    // is close-on-exec, so the child sees only stdio, what this process
+    // itself inherited from whatever started it (a CI runner may leave
+    // some open, and every child gets those), and what it opened itself.
+    // (The running bar's own descriptors are checked by
     // `tests/pointer.rs::a_launched_command_holds_none_of_the_bars_descriptors`.)
+    let _serial = crate::testfds::serialize();
     let dir = Dir::new("fds");
     let file = std::fs::File::open("/dev/null").expect("open");
     let held = rustix::io::fcntl_dupfd_cloexec(&file, 100).expect("dup");
+    let inherited = crate::testfds::inheritable();
     let fds = child_fds(&dir);
     assert!(!fds.contains(&held.as_raw_fd()), "fd leaked: {fds:?}");
-    assert!(fds.iter().all(|&fd| fd <= 3), "{fds:?}");
+    let allowed = crate::testfds::allowed_in_child(&inherited);
+    let extra: Vec<_> = fds.difference(&allowed).collect();
+    assert!(
+        extra.is_empty(),
+        "the child holds {extra:?} beyond {allowed:?}: {fds:?}"
+    );
 }
 
 #[test]
 fn the_fd_check_sees_a_descriptor_that_is_inherited() {
     // The control: a descriptor without close-on-exec does reach the
     // child, so the test above would have failed on one.
+    let _serial = crate::testfds::serialize();
     let dir = Dir::new("fds-control");
     let file = std::fs::File::open("/dev/null").expect("open");
     let leaked = rustix::io::fcntl_dupfd_cloexec(&file, 100).expect("dup");
     rustix::io::fcntl_setfd(&leaked, rustix::io::FdFlags::empty()).expect("clear CLOEXEC");
     let fds = child_fds(&dir);
     assert!(fds.contains(&leaked.as_raw_fd()), "{fds:?}");
+    // And the comparison of the test above names it.
+    let inherited_before_it: std::collections::BTreeSet<i32> = crate::testfds::inheritable()
+        .into_iter()
+        .filter(|&fd| fd != leaked.as_raw_fd())
+        .collect();
+    let allowed = crate::testfds::allowed_in_child(&inherited_before_it);
+    assert!(fds.difference(&allowed).any(|&fd| fd == leaked.as_raw_fd()));
 }

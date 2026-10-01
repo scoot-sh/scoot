@@ -408,8 +408,12 @@ on-click = { scoot = "quit" }                    # a request to scoot's control 
   through a shell**; write `["sh", "-c", "..."]` to use one, and the
   quoting is yours. A string instead of an array is a refusal that says
   so. The command's stdin, stdout and stderr are `/dev/null`, it leads its
-  own process group, and **it inherits none of the bar's file
-  descriptors**. Its environment is the bar's. It is reaped the moment it
+  own process group, and **it inherits none of the file descriptors the
+  bar opens** (every one is close-on-exec). What was open in the bar when it
+  *started* is not the bar's: a launcher (a shell's `exec 4<file`, a
+  service manager, a CI runner) that leaves a descriptor open without
+  close-on-exec hands it to the bar, and the bar hands it on to every
+  command it launches, as to any child. Its environment is the bar's. It is reaped the moment it
   exits (no zombie, no timer), and at most 8 launched commands run at once:
   a ninth is refused with a line on stderr, not queued, so a hung command
   and a flood of clicks cannot fill the process table. The bar does not

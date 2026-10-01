@@ -212,8 +212,10 @@ pinned nixpkgs' tzdata).
   after the pointer left it, is no click (and breaking that fails the test,
   checked); a four-hundred-event scroll flood is a handful of commands, at
   most one per frame, with no zombie left; a command launched by a running
-  bar holds none of its descriptors (the bar holds real ones: Wayland and
-  control sockets, the lock, memfds, the timerfd) and the bar's own count
+  bar holds none of the descriptors the bar opens (the bar holds real ones:
+  Wayland and control sockets, the lock, memfds, the timerfd; what the
+  test process itself was handed by its launcher is allowed through, and the
+  bar holds no descriptor without close-on-exec beyond those) and the bar's own count
   does not move; short commands leave no zombie and a hung one is capped
   at eight, said, and its slot reused; a failing command is one line, not
   thirty; hover tints the clock on a screenshot and only while the pointer

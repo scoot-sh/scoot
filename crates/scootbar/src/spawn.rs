@@ -4,14 +4,19 @@
 //! - **Never through a shell.** The command line is an argument vector
 //!   and is run as one; a user who wants a shell writes `sh -c` and owns
 //!   the quoting.
-//! - **Nothing of the bar's leaks into the child.** Its stdin, stdout and
-//!   stderr are `/dev/null`; every fd the bar holds (the Wayland socket,
+//! - **Nothing the bar opens leaks into the child.** Its stdin, stdout and
+//!   stderr are `/dev/null`; every fd the bar opens (the Wayland socket,
 //!   the control socket and its lock, the shm memfds, the clock's timerfd,
 //!   font and zone files) is `CLOEXEC`, which is what `std` sets on
 //!   everything it opens and what the crate's own `rustix` calls ask for.
+//!   What a launcher left open in the bar at its start (a descriptor
+//!   without `CLOEXEC` that the bar was exec'd with) is not the bar's, and
+//!   reaches every child as it would any process's.
 //!   `tests/pointer.rs::a_launched_command_holds_none_of_the_bars_descriptors`
-//!   lists the fds of a command launched by a running bar, so a future fd
-//!   opened without it fails a test. (`WAYLAND_SOCKET`, the
+//!   checks that the running bar holds no descriptor without `CLOEXEC`
+//!   beyond what its launcher handed it, and lists the fds of a command it
+//!   launched, so a future fd opened without it fails a test.
+//!   (`WAYLAND_SOCKET`, the
 //!   fd number a compositor may have started the bar with, is removed from
 //!   the environment by `wayland-client` when it takes the socket.) The
 //!   child leads its own process group, so a signal to the bar's group

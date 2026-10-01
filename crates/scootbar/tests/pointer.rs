@@ -15,11 +15,14 @@
 
 mod common;
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use common::{PATIENCE, Reaper, Session, Shot, open_fds, rgb, settled_fds};
+use common::{
+    PATIENCE, Reaper, Session, Shot, allowed_in_child, inheritable_fds, open_fds, rgb, settled_fds,
+};
 
 const BAR: &str = "#102030";
 const FG: &str = "#f0f0f0";
@@ -302,6 +305,10 @@ fn a_scroll_flood_is_a_bounded_number_of_commands() {
 #[test]
 fn a_launched_command_holds_none_of_the_bars_descriptors() {
     let bindings = "on-click = { exec = [\"sh\", \"-c\", \"ls /proc/self/fd > DIR/fds\"] }\n";
+    // What this process was handed by whatever started it (a CI runner may
+    // leave descriptors open): the bar inherits them, and so does every
+    // command it launches. Anything else is the bar's own, and must not.
+    let inherited = inheritable_fds("self");
     let Some(mut rig) = Rig::start("ptr-fds", bindings) else {
         return;
     };
@@ -309,13 +316,27 @@ fn a_launched_command_holds_none_of_the_bars_descriptors() {
     // socket and its lock, shm memfds, the clock's timerfd.
     let held = settled_fds(rig.pid());
     assert!(held > 5, "the bar holds only {held} descriptors");
+    // Every one of them is close-on-exec but those it was started with:
+    // the guard against a descriptor the bar opens without it, whatever
+    // the command listing below happens to show.
+    let allowed_in_bar: BTreeSet<i32> = inherited.iter().copied().chain(0..=2).collect();
+    let leaky: Vec<_> = inheritable_fds(rig.pid())
+        .difference(&allowed_in_bar)
+        .copied()
+        .collect();
+    assert!(
+        leaky.is_empty(),
+        "the bar holds {leaky:?} without close-on-exec, which no command may inherit"
+    );
     rig.click(CLOCK, "left");
     let lines = rig.wait_lines("fds", 3);
-    let fds: Vec<u32> = lines.iter().filter_map(|l| l.trim().parse().ok()).collect();
-    // stdio, and the directory `ls` itself reads.
+    let fds: BTreeSet<i32> = lines.iter().filter_map(|l| l.trim().parse().ok()).collect();
+    // Stdio, what the bar inherited, and the directory `ls` itself reads.
+    let allowed = allowed_in_child(&inherited);
+    let extra: Vec<_> = fds.difference(&allowed).collect();
     assert!(
-        fds.iter().all(|&fd| fd <= 3),
-        "inherited: {fds:?} (the bar has {held})"
+        extra.is_empty(),
+        "inherited: {extra:?} beyond {allowed:?}: {fds:?} (the bar has {held})"
     );
     // The bar holds the child's pidfd until its loop reaps it, a turn after
     // the command printed its last line: the count is back to what it was

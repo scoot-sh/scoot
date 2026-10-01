@@ -40,6 +40,8 @@ mod scoot;
 mod snapshots;
 mod spawn;
 #[cfg(test)]
+mod testfds;
+#[cfg(test)]
 mod testfont;
 mod text;
 mod theme;
