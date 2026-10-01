@@ -455,3 +455,73 @@ cargo check --locked --bins in crates/scootbar/fuzz                    ok
 Not verified: a bar on a machine with no `/proc` (the message is tested with a
 nonexistent path, not an unmounted `/proc`), `nix build` (no `nix/` file or
 dependency changed), real hardware.
+
+### After the rebase onto `main` and the delta review (2026-10-01)
+
+The pointer layer was squash-merged (#364, `dcba25615`), so this layer was
+rebased onto it with `git rebase --onto origin/main 3ccd1c35b`: only its own
+seven commits replayed. The one conflict was `daemon`'s help text in `cli.rs`
+(`main` gained `daemon --check`, #370); both texts are kept. Every SHA above
+is therefore from before the rebase. The code is at `f3afb15fe`; this entry is
+the commit after it and changes no code, and everything below was captured at
+`f3afb15fe`.
+
+- **`daemon --check` and `exec`: no command is run.** `--check` calls
+  `modules::start`, and the exec module's `start` only creates and arms a
+  timer; the command is spawned when the loop first wakes the module, which
+  `--check` never runs. Pinned both ways:
+  `tests/check.rs::a_check_never_runs_an_exec_modules_command` (a command that
+  creates a marker; `--check` prints `ok` and, after 500 ms, no marker) and
+  `modules::exec::tests::starting_a_module_runs_no_command`.
+- **A flaky test, a real test-order bug:** `modules::custom::tests::a_name_is_interned_once_and_reused`
+  failed under `cargo test` (all tests in one process) because
+  `interning_is_capped_and_a_known_name_still_resolves` filled the
+  process-wide name table to its cap of 256, so a sibling's `intern` got
+  `None`. nextest never saw it (a process per test). The cap test now fills a
+  table of its own (`intern_in`, which `intern` calls on the process-wide
+  one; no behavior change). The other process-global state in the crate was
+  audited: the interning table was the only mutable static shared by tests
+  (`testfds`' lock, the `AtomicU64` name counters and the thread-local
+  allocation counter are already safe); no test sets an environment variable,
+  the working directory, a signal disposition or a resource limit, and the
+  scratch directories are keyed by process id and a tag no two tests share.
+- **Exit status 125 is not the guard's alone.** `docker run`, GNU `timeout`,
+  `env` and `nice` and `git bisect run` exit 125 themselves, so the warning
+  said "could not be run: see the line above" about a line that was never
+  printed. It now says `125, the command's own or the guard's: any line above
+  says why`, and `cli.md` says the same.
+- **A time bound in `scoot::tests::a_wedged_scoot_costs_a_bounded_wait`**
+  (the pointer layer's) failed 1 of 60 full-binary runs under 6 CPU spinners
+  asserting under 1 s; the real wait is one 250 ms timeout. Now 5 s: it still
+  proves the wait is bounded, which is the claim.
+
+```text
+stress: the unit-test binary run directly (one process, all its tests side by side, as `cargo test`
+runs it), 6 CPU spinners on the 6-vCPU dev VM, `modules::custom::` subset, 60 runs each:
+  before (a7c4b9da8, git archive, own target /dev/shm/t-before):  22 failed / 60
+          (a_name_is_interned_once_and_reused, tests.rs:49: intern returned None)
+  after  (f3afb15fe, own target /dev/shm/t-exec):                  0 failed / 60
+  after, the whole binary (564 tests), 60 runs, same spinners:     0 failed / 60
+  (the whole binary was not run before the fix.)
+
+checks captured at f3afb15fe (git archive, touched fresh, dev VM, own target /dev/shm/t-exec; scoot
+built from this same tree with cargo build -p scoot -p scootbar and beside the test binaries):
+cargo fmt --check -p scootbar                                          ok
+cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
+  (default) | --no-default-features | ... --features clock | ... --features workspaces
+  | ... --features icon-image | ... --features button | ... --features push | ... --features exec
+  | --all-features
+cargo nextest run -p scootbar
+  plain                                                  Summary 655 tests run: 655 passed
+  hostile (bash -c 'exec 4</dev/null 5</dev/null 142</dev/null 145</dev/null;
+           trap "" HUP; exec cargo nextest run -p scootbar')   655 passed
+  SCOOTBAR_REQUIRE_SCOOT=1                               655 passed
+  with the scoot binary moved away (integration skips)   655 run, 655 passed
+cargo test -p scootbar                                   all "test result: ok" (564 in the bin)
+```
+
+Not re-run at this tree: the per-feature `--bin` nextest counts, the sway
+hotplug tests, the runs from `/` with a changed environment, the fuzz crate's
+`cargo check`, `nix build`, and real hardware (none of what changed touches
+them: a test-only change, a warning's wording, one comment-level refactor of
+`intern`).
