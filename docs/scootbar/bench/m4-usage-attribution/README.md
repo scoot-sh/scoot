@@ -11,7 +11,7 @@ sha256 `33aa667cef85...`), `--right clock` with the harness's look
 |---|---|---|---|
 | `base1`-`base3` | `main` before M4, release (`lto = "fat"`, stripped) | `98c4b7a32` | `411ab1bd59ed...` |
 | `tip1`-`tip3` | the M4 stack as it is on `main`, same profile | `c9d2cd361` (`af296989f`'s `crates/`) | `28eaea4a4271...` |
-| `cand1`-`cand3` | this PR: the stack plus the hot-text order file | the PR's tree | `860185c2d678...` |
+| `cand1`-`cand3` | this PR: the stack plus the hot-text order file | the code of `22f9cf279` (the PR's `perf` commit) on `c9d2cd361`: **the runs were made on these files uncommitted; a rebuild from `22f9cf279` is byte-identical** (`cmp`) | `860185c2d678...` (full: `860185c2d678e3c8f42d65c445e73401133f36f37d6000da383638f5b0e1d893`) |
 
 Per run, the files of `/proc/PID/` as they were read (`smaps`, `rollup` =
 `smaps_rollup`, `stat`, `status`, `maps`), `stat.early` (0.5 s after the
@@ -39,8 +39,10 @@ base1 Rss: 3616 kB Pss: 2200 kB ... text-Rss Rss: 960 kB minflt 167 early-minflt
   `Pss_File` and `Pss_Anon`, and the raw `smaps_rollup`.
 - **`redraw.txt`**: `scripts/scootbar-bench/redraw.py` (3000 `set`s a round,
   five rounds), twice each in the order tip, `opt-level = "s"`, `opt-level = 2`,
-  this PR's, tip, ...: one JSON line per run.
-- **`tools/`**: `quick.sh` (the reading), `pagemap-sections.py` (residency by
+  this PR's, tip, ...: one JSON line per run. **`redraw-verdicts.txt`** is the repo's
+  `verdict()` on it (`tools/redraw-verdict.py`): this PR **same** as the tip
+  (margin 4.1 us, +1.6%), `opt-level = "s"` and `2` **regressed**.
+- **`tools/`**: `quick.sh` (the reading), `redraw-verdict.py`, `pagemap-sections.py` (residency by
   ELF section, given `readelf -SW`), `callgrind-functions.py` (the function set
   of a callgrind file).
 

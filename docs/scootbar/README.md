@@ -761,7 +761,10 @@ Asahi M2: 8 cores, **16 KiB pages**, Linux 7.1.13, `schedutil`, on mains), relea
 scootbar (`lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, stripped) built
 per tree in its own target directory, **one headless release `scoot`/`scootctl`**
 (sha256 `33aa667c...`, built from `main` at `c9d2cd361`) for every run, nothing
-else on the box. The tools were `smaps`, `smaps_rollup`, `pagemap` and `stat` of the
+else on the box. **Cache key:** every number below was measured on the uncommitted
+tree (this PR's `crates/scootbar` and `scripts/` files on top of `c9d2cd361`), and
+a rebuild from the PR's code commit (`22f9cf279`) is **byte-identical** to the
+benchmarked binary (sha256 `860185c2d678...`, `cmp`), so the runs stand for it. The tools were `smaps`, `smaps_rollup`, `pagemap` and `stat` of the
 running bar, `valgrind` (callgrind), `qemu-user` (`-d in_asm`) and `lld`: the
 last three fetched into the Nix store for this, and nothing else. The raw files
 are in [`bench/m4-usage-attribution`](bench/m4-usage-attribution/README.md).
@@ -814,7 +817,9 @@ Each build measured the same way: `smaps` 15 to 20 s after the first frame (so t
 `r-xp` `Rss` is exact and repeats to the page), three starts each; the redraw column
 is [`redraw.py`](testing.md#redraw-cost), 3000 `set`s a round, five rounds, run twice in the
 order tip, `opt-level = "s"`, `opt-level = 2`, this PR's, tip, and so on (raw files
-in [`m4-usage-attribution`](bench/m4-usage-attribution/levers.txt)):
+in [`m4-usage-attribution`](bench/m4-usage-attribution/levers.txt); the repo's `verdict()` on the redraw row, each run's
+median a sample and the tip the baseline: this PR **same** (margin 4.1 us, +1.6% in the
+median of rounds), `opt-level = "s"` and `2` **regressed**, +31% and +17%):
 
 | Lever | `.text` (B) | `r-xp` `Rss` (kB) | `Pss_File` (kB) | redraw CPU per set (us), two runs | Kept |
 |---|---|---|---|---|---|

@@ -1,0 +1,3 @@
+cand against tip: runs' medians [82.9, 85.4] against [82.6, 81.4]: same (margin 4.1 us); all 10 rounds: same (margin 21.3 us); median of rounds +1.6%
+opts against tip: runs' medians [107.8, 107.1] against [82.6, 81.4]: REGRESSED (margin 4.1 us); all 10 rounds: REGRESSED (margin 17.7 us); median of rounds +30.7%
+opt2 against tip: runs' medians [96.9, 96.0] against [82.6, 81.4]: REGRESSED (margin 4.1 us); all 10 rounds: same (margin 21.2 us); median of rounds +17.4%
