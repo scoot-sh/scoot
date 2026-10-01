@@ -1187,6 +1187,42 @@ jobs:
           python3 scripts/scootbar-orderfile/orderfile.py check \
             --binary "$RUNNER_TEMP/scootbar-unstripped/release/scootbar" --min-coverage 0.8
 
+      # The contributor's own toolchain, not the Nix one above: the runner's
+      # rustup `stable`, which since Rust 1.90 links x86_64-unknown-linux-gnu
+      # through its bundled rust-lld (rustc adds `-fuse-ld=lld` itself; no
+      # RUSTFLAGS shows it, and the binutils here would take a flag lld
+      # refuses). crates/scootbar/build.rs probes through rustc for exactly
+      # this reason, and the build must pass whichever linker rustc picks.
+      # The step prints what rustc linked with and what the build script
+      # decided, and fails if the order file was passed to lld.
+      - name: Release build with the runner's rustup toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustc +stable -vV
+          cargo +stable --version
+          mkdir -p "$RUNNER_TEMP/rustup-hello"
+          echo 'fn main() {}' >"$RUNNER_TEMP/rustup-hello/hello.rs"
+          rustc +stable --print link-args -o "$RUNNER_TEMP/rustup-hello/hello" \
+            "$RUNNER_TEMP/rustup-hello/hello.rs" | tr ' ' '\n' | tr -d '"' >"$RUNNER_TEMP/rustup-hello/args"
+          if grep -qE '^-fuse-ld=lld$|gcc-ld' "$RUNNER_TEMP/rustup-hello/args"; then
+            linker=rust-lld
+          else
+            linker="the system linker ($(ld --version | head -n 1))"
+          fi
+          echo "rustc links with: $linker"
+          grep -E 'fuse-ld|gcc-ld' "$RUNNER_TEMP/rustup-hello/args" || true
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/scootbar-rustup"
+          export SCOOTBAR_ORDERFILE_VERBOSE=1
+          cargo +stable build --release --locked -p scootbar 2>&1 | tee "$RUNNER_TEMP/scootbar-rustup.log"
+          decision=$(grep -o 'hot-text order file .*' "$RUNNER_TEMP/scootbar-rustup.log" | head -n 1)
+          echo "the build script: $decision"
+          test -n "$decision"
+          if [ "$linker" = rust-lld ] && echo "$decision" | grep -q '^hot-text order file applied'; then
+            echo "::error title=The order file was passed to rust-lld::lld does not take --section-ordering-file"
+            exit 1
+          fi
+          "$CARGO_TARGET_DIR/release/scootbar" --version
+
       # The fuzz targets (crates/scootbar/fuzz, its own workspace, which no
       # step above compiles) for a fixed budget: a fixed number of runs from
       # a fixed seed, so a run is the same run every time, from the seed
