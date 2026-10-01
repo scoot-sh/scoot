@@ -28,12 +28,10 @@
 # - the unit: Restart=on-failure, ordered after and wanted by
 #   graphical-session.target, and `systemd.enable = false` writes none;
 # - `enable = false` manages nothing; a null package is refused by name;
-# - the real binary accepts every rendered file (config, font and module
-#   checks all pass, then it stops at "cannot connect to the Wayland
-#   compositor", the first thing that needs a compositor) and rejects a file
-#   with an unknown key by name -- the control that shows the check can fail.
-#   There is no `--check` flag: this is what exists, and it exercises the
-#   same `config::load_startup` and font load a real start does.
+# - the real binary accepts every rendered file (`scootbar daemon --check`:
+#   the config, the flags over it, the modules and the font, as a start does
+#   them, with no compositor to fake) and rejects a file with an unknown key
+#   by name -- the control that shows the check can fail.
 {
   lib,
   pkgs,
@@ -511,24 +509,27 @@ runCommand "scootbar-modules"
     [ ! -s "$(dirname "$pickNoto")/warning" ] || { echo "warning on a resolved font"; exit 1; }
     [ "$(readlink -f "$pickNerd")" = "$distractors/share/fonts/opentype/JetBrainsMonoNerdFont-Regular.otf" ] || { echo "Nerd picked $(readlink -f "$pickNerd")"; exit 1; }
 
-    # 3. The real binary. With no compositor, a file it accepts gets past
-    #    the config and the font and stops at the connection; a bad one is
-    #    refused at the file. `WAYLAND_DISPLAY` unset and an empty runtime
-    #    dir, so there is nothing to connect to and no socket to collide.
+    # 3. The real binary, `daemon --check` (its output goes in `got`, not
+    #    `out`, which is $out): what a start does before it
+    #    connects (the file, the font, the modules), with nothing to connect
+    #    to. A bad file is refused at the file, exit 1. An empty runtime dir
+    #    and no `WAYLAND_DISPLAY`: --check touches neither, and the check
+    #    would catch it if that changed.
     export XDG_RUNTIME_DIR=$TMPDIR/run HOME=$TMPDIR/home
     mkdir -p "$XDG_RUNTIME_DIR" "$HOME"
     unset WAYLAND_DISPLAY
     for pair in $files; do
       name=''${pair%%=*}; file=''${pair#*=}
       status=0
-      $scootbar/bin/scootbar daemon --config "$file" 2>$TMPDIR/err || status=$?
-      if [ "$status" != 1 ] || ! grep -q "cannot connect to the Wayland compositor" $TMPDIR/err; then
+      got=$($scootbar/bin/scootbar daemon --check --config "$file" 2>$TMPDIR/err) || status=$?
+      if [ "$status" != 0 ] || [ "$got" != ok ] || [ -s $TMPDIR/err ]; then
         echo "scootbar refused the rendered $name ($file), exit $status:"; cat $TMPDIR/err; cat "$file"; exit 1
       fi
       echo "scootbar accepted: $name"
     done
+    [ -z "$(ls -A "$XDG_RUNTIME_DIR")" ] || { echo "--check left files in the runtime dir:"; ls -A "$XDG_RUNTIME_DIR"; exit 1; }
     status=0
-    $scootbar/bin/scootbar daemon --config "$unknownKey" 2>$TMPDIR/err || status=$?
+    $scootbar/bin/scootbar daemon --check --config "$unknownKey" 2>$TMPDIR/err || status=$?
     if [ "$status" != 1 ] || ! grep -q "unknown field .backgroun." $TMPDIR/err; then
       echo "control failed: the unknown key was not refused (exit $status):"; cat $TMPDIR/err; exit 1
     fi

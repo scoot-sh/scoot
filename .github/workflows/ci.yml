@@ -102,7 +102,8 @@ jobs:
   # `apply-config` from a [wallpaper] section, as the smoke test does.
   #
   #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-appearance-hw-test.sh
-  #                                        -> scootbar=true (scootbar job)
+  #                                        -> scootbar=true (scootbar job, which
+  #                                           also builds the Nix module check)
   #     except its Cargo.toml               -> scoot too, for the flake's
   #     read of its description, as scootbg's
   #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
@@ -160,7 +161,9 @@ jobs:
                 *.md | docs/*) ;;
                 # Needs a real `systemd --user`, which CI has none of: run by hand
                 # (docs/scootbar/testing.md), so a change to it alone runs nothing.
-                scripts/scootbar-unit-test.sh) ;;
+                # The same for the Stylix run (fetches two flakes and builds
+                # Stylix's palette generator; docs/scootbar/testing.md).
+                scripts/scootbar-unit-test.sh | scripts/scootbar-stylix-test.sh) ;;
                 # The backlog tool and its tests: only their own job.
                 scripts/backlog | scripts/test_backlog.py)
                   backlog=true ;;
@@ -1053,6 +1056,14 @@ jobs:
       - name: cargo fmt
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo fmt --check -p scootbar
+
+      # The Nix modules' check (nix/scootbar-tests.nix) runs this crate's own
+      # `daemon --check` over every rendered bar.toml, so a change to the bar
+      # alone must run it: `nix flake check` is in the Linux job, which a
+      # bar-only change does not start. This is also the x86_64-linux build
+      # of `packages.scootbar` and of that check (the runner is x86_64).
+      - name: nix build the scootbar module check (x86_64-linux)
+        run: nix build -L --no-link .#checks.x86_64-linux.scootbar-modules
 
       # The benchmark harness's own logic (configs, the gates, the
       # arithmetic): the standard library only, no compositor or bar.

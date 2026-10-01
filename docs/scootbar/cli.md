@@ -58,6 +58,7 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 | `--spacing` | 0 to 1024 | 0 | Logical pixels between neighbouring modules. |
 | `--clock-format` | a format, at most 256 bytes | `'%-I:%M %P'` | What the clock shows; see [The clock](#the-clock). |
 | `--config` | a path | `$XDG_CONFIG_HOME/scoot/bar.toml` (`~/.config/scoot/bar.toml` without it) | The config file to read instead of the default; see [below](#the-config-file). |
+| `--check` | nothing (a switch) | off | Validate and exit instead of running: see [`--check`](#--check-validate-without-running). |
 
 A malformed or out-of-range value, an unknown flag or a flag given twice is
 a usage error (exit status 2), and nothing starts; so is an unknown module
@@ -136,6 +137,32 @@ dotted key (`bar.height`, `colors.background`, `left`, `clock.format`;
 `output."eDP-1".height` in an output table).
 A bad file refuses to start the daemon (exit status 1); a bad `reload`
 is refused and the running bar stands undisturbed.
+
+### `--check`: validate without running
+
+```sh
+scootbar daemon --check --config ./bar.toml     # prints `ok` and exits 0, or says why and exits 1
+scootbar daemon --check                         # the default file, as a start would read it
+```
+
+Does what a start does before it connects to anything, and stops there: reads
+the config file, applies the other flags over it, starts the placed modules
+and loads the font. It prints `ok` on stdout and exits 0, or prints the
+error a start would print (a bad key, a bad value, a font that cannot load,
+a missing `--config` file) on stderr and exits 1; a flag the file clashes
+with is a usage error, status 2, as at a start. It never connects to the
+compositor and never claims the control socket, so it needs no
+`WAYLAND_DISPLAY` and no runtime directory, and it runs beside a live bar
+without touching it. Its use is a build step or a pre-flight over a file about
+to be installed: the Nix module's check runs it over every rendered file
+(`checks.<system>.scootbar-modules`, [docs/nix.md](../nix.md#the-modules-programsscootbar)).
+Modules that report themselves unavailable at start (the clock without a
+time zone database, say) print their note as a start does and are left out;
+that is not a failure. What the flag costs (aarch64, release, stripped): +2.4 KB of text (code and
+help; 1,200,636 to 1,203,036 bytes), no change in data or bss, the file
+the same size to the byte (segments are page-aligned), and an idle daemon's
+`VmRSS` unchanged within noise (3,360 to 3,376 kB, one 3,552 outlier, five runs each). It moves startup
+code into a function the start also uses; nothing on a per-frame path.
 
 ## `scootbar msg`
 
@@ -871,6 +898,6 @@ opacity = 0.9
 
 | Status | When |
 | --- | --- |
-| 0 | `--help` or `--version` |
-| 1 | no usable font (with a module placed), cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, the compositor went away, `poll(2)` failed, the config file is malformed, or a `msg` command failed (no daemon, or the daemon refused) |
+| 0 | `--help` or `--version`, or `daemon --check` found nothing wrong |
+| 1 | no usable font (with a module placed), cannot connect, the compositor lacks `wl_compositor` v4, `wl_shm` or `zwlr_layer_shell_v1`, the compositor went away, `poll(2)` failed, the config file is malformed (`daemon --check` too), or a `msg` command failed (no daemon, or the daemon refused) |
 | 2 | a usage error |

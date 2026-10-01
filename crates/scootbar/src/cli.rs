@@ -168,6 +168,7 @@ scootbar -- status bar for Wayland
 
 USAGE:
     scootbar daemon [OPTIONS]
+    scootbar daemon --check [OPTIONS]
     scootbar daemon --help
     scootbar msg COMMAND
     scootbar msg --help
@@ -186,6 +187,7 @@ scootbar daemon -- run the bar
 
 USAGE:
     scootbar daemon [OPTIONS]
+    scootbar daemon --check [OPTIONS]
 
 Connects to the compositor named by $WAYLAND_DISPLAY, which must support
 wlr-layer-shell, and gives every output (or the ones --outputs names) a bar: a layer surface (top, by
@@ -252,6 +254,12 @@ missing file is the defaults. Runs until the compositor goes away (exit
 status 1, saying why) or it is killed; SIGTERM and SIGINT end it at once,
 which is harmless: it keeps no state. The compositor removes the bars with
 the connection.
+
+--check validates instead of running: it reads the config file, applies the
+flags over it, starts the placed modules and loads the font, exactly as a
+start does, then exits 0 (printing `ok`) or 1 with the error a start would
+give. It never connects to a compositor or claims a control socket, so it
+runs anywhere: in a build, in CI, over a file about to be installed.
 "
 );
 
@@ -339,6 +347,8 @@ pub struct DaemonCommand {
     pub file: Option<PathBuf>,
     /// The flags over the defaults, without any file.
     pub config: Box<Config>,
+    /// `--check`: validate and exit, never connect.
+    pub check: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -366,6 +376,8 @@ const RIGHT: &str = "--right";
 const PADDING: &str = "--padding";
 const SPACING: &str = "--spacing";
 const CONFIG: &str = "--config";
+/// A switch, not a value flag: the one `daemon` flag that takes nothing.
+const CHECK: &str = "--check";
 #[cfg(feature = "clock")]
 const CLOCK_FORMAT: &str = "--clock-format";
 
@@ -687,6 +699,7 @@ pub struct Given {
 /// `--flag=VALUE`; `--help` alone asks for its page.
 fn daemon(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
     let mut given = Given::default();
+    let mut check = false;
     let mut first = true;
     while let Some(arg) = args.next() {
         let arg = text(arg).map_err(|lossy| Error::Unexpected {
@@ -707,6 +720,19 @@ fn daemon(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
             Some((name, value)) if name.starts_with("--") => (name, Some(OsString::from(value))),
             _ => (arg.as_str(), None),
         };
+        if name == CHECK {
+            if inline.is_some() {
+                return Err(Error::Unexpected {
+                    command: "daemon",
+                    argument: arg,
+                });
+            }
+            if check {
+                return Err(Error::Repeated(CHECK));
+            }
+            check = true;
+            continue;
+        }
         let Some(&flag) = FLAGS.iter().find(|&&flag| flag == name) else {
             return Err(Error::Unexpected {
                 command: "daemon",
@@ -724,6 +750,7 @@ fn daemon(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
         given,
         file,
         config: Box::new(config),
+        check,
     })))
 }
 

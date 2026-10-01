@@ -14,7 +14,7 @@ Filed 2026-09-29. Serves **daily-drive**: a bar nobody can install with one
 line is not iterating with users. It ships with the **first** milestone that
 runs, not after config and modules; every later milestone then lands already
 installable. The NixOS and home-manager modules follow in
-[nix-modules-and-stylix](../nix-modules-and-stylix.md).
+[nix-modules-and-stylix](nix-modules-and-stylix-done.md).
 
 Modeled on how scootbg is packaged in `flake.nix` (its own derivation, overlay
 entry and eval tests in `nix/tests.nix`).

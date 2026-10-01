@@ -650,3 +650,47 @@ fn the_flag_and_the_files_tables_are_checked_together() {
     }
     assert_eq!(base.outputs.select, Select::Named(vec!["HDMI-A-1".into()]));
 }
+
+#[test]
+fn check_is_a_switch_that_takes_no_value_and_may_come_once() {
+    let check = |args: &[&str]| {
+        let mut all = vec!["daemon"];
+        all.extend_from_slice(args);
+        run(&all)
+    };
+    match check(&["--check"]) {
+        Ok(Command::Daemon(command)) => assert!(command.check),
+        other => panic!("{other:?}"),
+    }
+    match check(&["--height", "40", "--check", "--config", "/x.toml"]) {
+        Ok(Command::Daemon(command)) => {
+            assert!(command.check);
+            assert_eq!(command.file, Some("/x.toml".into()));
+            assert_eq!(command.config.bar.height, 40);
+        }
+        other => panic!("{other:?}"),
+    }
+    match run(&["daemon"]) {
+        Ok(Command::Daemon(command)) => assert!(!command.check),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        check(&["--check", "--check"]),
+        Err(Error::Repeated("--check"))
+    );
+    assert!(matches!(
+        check(&["--check=yes"]),
+        Err(Error::Unexpected {
+            command: "daemon",
+            ..
+        })
+    ));
+    // Not a flag of the other commands.
+    assert!(run(&["msg", "--check"]).is_err());
+}
+
+#[test]
+fn the_help_names_check() {
+    assert!(USAGE.contains("scootbar daemon --check"));
+    assert!(DAEMON_HELP.contains("--check validates"));
+}

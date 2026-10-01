@@ -33,7 +33,7 @@ wrong icon size at fractional scale (#1175). So:
 - **A malformed or hostile item can only ever lose itself**: never a panic or a hang.
 - **Icons at exact device pixels**, requesting the size the output needs.
 - The systemd user unit orders the bar so tray apps are not starved of a host
-  ([nix-modules-and-stylix](nix-modules-and-stylix.md)).
+  ([nix-modules-and-stylix](resolved/nix-modules-and-stylix-done.md)).
 
 ## What to decide first
 

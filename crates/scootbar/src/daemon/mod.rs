@@ -127,12 +127,10 @@ impl fmt::Display for Error {
 /// sources ([`MAX_POLL`]), then the control listener and its clients.
 const MAX_FDS: usize = MAX_POLL + 1 + MAX_CONNECTIONS;
 
-/// Runs the bar until the compositor goes away, it cannot go on, or
-/// `scootbar msg kill` stops it. `file` is the config file a `reload`
-/// re-reads; `given` are the daemon flags, overlaid onto every reload as
-/// at start-up, so the precedence (defaults, then the file, then the
-/// flags) holds for the running bar at all times.
-pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Error> {
+/// Everything a start needs before it touches the system: the placed modules
+/// started and the font loaded, or the reason it cannot go on. Shared with
+/// [`check`] so `--check` gives exactly the errors a start does.
+fn prepare(config: &Config) -> Result<Content, Error> {
     let modules = modules::start(
         &config.outputs.to_start(&config.layout),
         &config.modules,
@@ -151,11 +149,26 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
             font::text(config.font.as_deref(), &config.fallback_fonts).map_err(Error::Font)?;
         Some(text)
     };
-    let content = Content {
+    Ok(Content {
         modules,
         text,
         style: config.style(),
-    };
+    })
+}
+
+/// `scootbar daemon --check`: what a start does before it connects, and
+/// nothing after: no compositor, no control socket.
+pub fn check(config: &Config) -> Result<(), Error> {
+    prepare(config).map(drop)
+}
+
+/// Runs the bar until the compositor goes away, it cannot go on, or
+/// `scootbar msg kill` stops it. `file` is the config file a `reload`
+/// re-reads; `given` are the daemon flags, overlaid onto every reload as
+/// at start-up, so the precedence (defaults, then the file, then the
+/// flags) holds for the running bar at all times.
+pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Error> {
+    let content = prepare(&config)?;
     // The control socket first, so a second daemon refuses before it
     // touches the compositor.
     let paths = paths::from_env().map_err(Error::ControlPaths)?;
