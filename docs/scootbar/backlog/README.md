@@ -97,7 +97,6 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [Appearance](resolved/appearance-done.md) (medium): rounded corners, opacity, spacing, pill and circle workspaces, the corner-shaped input region, measured on hardware — RESOLVED 2026-09-30
 - [Icons and fonts](resolved/icons-and-fonts-done.md) (medium): the fallback chain, a glyph, a path or a PNG icon on the clock — RESOLVED 2026-09-30
 - [Multi-output policy](resolved/multi-output-done.md) (medium): `outputs`, `[output."NAME"]` overrides — RESOLVED 2026-09-30
-- [Per-output font size](multi-output-font-size.md) (low)
 - [Visibility and layering](resolved/visibility-and-layering-done.md) (medium): layer, edge, zone or float, `msg hide|show|toggle` — RESOLVED 2026-09-30
 
 ### M4 — Interactive, and readable by agents
@@ -124,6 +123,9 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears
 - [`scootlaunch`: the launcher](launcher.md) (low, pointer)
 - [`scootnotify`: the notification daemon](scootnotify.md) (low, pointer)
+
+### Unscheduled (until someone asks)
+- [Per-output font size](multi-output-font-size.md) (low): deferred 2026-10-01 by the maintainer; left M3
 
 ### Ongoing (no milestone, applies to all)
 - [The resource ratchet](lightest.md) (high)

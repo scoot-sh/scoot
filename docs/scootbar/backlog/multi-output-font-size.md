@@ -4,10 +4,14 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: null
-milestone: "M3"
+milestone: null
 ---
 
 # Per-output font size
+
+**Deferred 2026-10-01, by the maintainer: not scheduled until someone asks for it.** It
+leaves M3 (the milestone is done without it); nothing here is blocked, and the
+design below stands for whoever picks it up.
 
 Filed 2026-09-30, the remainder of [multi-output](resolved/multi-output-done.md). Serves
 **daily-drive**: a 4K panel next to a 1080p one wants a different em, not
