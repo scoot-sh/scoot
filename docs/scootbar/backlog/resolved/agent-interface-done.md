@@ -404,3 +404,52 @@ Not verified: a daemon out of file descriptors with only subscribers open (the
 socket pairs (`with_only_subscribers_left_to_close_the_oldest_is_told_it_was_dropped`),
 not by exhausting a real process's limit; `nix build` (no `nix/` file or
 dependency changed); real hardware.
+
+### After the rebase onto `main` and the delta review (2026-10-01)
+
+The pointer layer was squash-merged (#364) and the exec layer under this one
+rebased onto it, so this layer was rebased onto the exec layer's new tip
+(`git rebase --onto 9b043901a f3afb15fe`). Conflicts, both in what `main`
+gained with `daemon --check` (#370): `cli/tests.rs` and `docs/scootbar/cli.md`'s
+exit-status table; both sides are kept (the `--check` tests and the
+`dropped`/`msg subscribe` exit rows). Every SHA above is from before the
+rebase. The code is at `330eb020d`; this entry is the commit after it and
+changes no code, and everything below was captured at `330eb020d`.
+
+- **`Error::Dropped` named causes that are not true.** Its text said the
+  subscription was dropped "to admit another client, or because it was not
+  read fast enough". The `dropped` line is written only by `Conn::notify_dropped`
+  from `Server::evict`, a subscriber evicted to free a descriptor (reachable
+  only under `EMFILE`, in `free_an_fd`); a subscriber that is too slow never
+  gets the line, its stream just ends. The message now says only "the daemon
+  dropped this subscription: events may have been missed: subscribe again,
+  then query", as `cli.md` does, and
+  `tests/subscribe_status.rs::a_dropped_line_is_printed_and_the_command_fails` asserts
+  that it names no cause. (The cut-line message keeps its parenthesis: a
+  stream that ends mid-line is a subscriber the daemon could not write to.)
+
+```text
+checks captured at 330eb020d (git archive, touched fresh, dev VM, own target /dev/shm/t-exec; scoot
+built from this same tree, beside the test binaries; this layer on the exec layer's 9b043901a):
+cargo fmt --check -p scootbar                                          ok
+cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
+  (default) | --no-default-features | ... --features clock | ... --features workspaces
+  | ... --features icon-image | ... --features button | ... --features push | ... --features exec
+  | --all-features
+cargo nextest run -p scootbar
+  plain                                                  Summary 720 tests run: 720 passed
+  hostile (bash -c 'exec 4</dev/null 5</dev/null 142</dev/null 145</dev/null;
+           trap "" HUP; exec cargo nextest run -p scootbar')   720 passed
+  SCOOTBAR_REQUIRE_SCOOT=1                               720 passed
+  with the scoot binary moved away (integration skips)   720 run, 720 passed
+cargo test -p scootbar                                   all "test result: ok" (614 in the bin)
+stress, the unit-test binary run directly (one process), 6 CPU spinners, 6-vCPU VM:
+  `modules::custom::` subset, 60 runs                    0 failed / 60
+  whole binary (614 tests), 20 runs                      0 failed / 20
+```
+
+Not re-run at this tree: the per-feature `--bin` nextest counts, the sway
+hotplug tests, the runs from `/` with a changed environment, the fuzz crate's
+`cargo check`, `nix build`, and real hardware. The `EMFILE` path that sends
+`dropped` is still tested on the server with socket pairs, not by exhausting a
+real process's limit.
