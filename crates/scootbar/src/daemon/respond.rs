@@ -124,8 +124,6 @@ impl Handler for Responder<'_> {
                     );
                     self.subscription = Some(Kinds::of(&events));
                     self.subscribers += 1;
-                    // The events a new subscriber is owed start now.
-                    self.state.events.rearm();
                 }
             }
             Request::Version => {

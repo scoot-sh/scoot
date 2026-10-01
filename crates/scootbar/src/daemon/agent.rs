@@ -12,6 +12,10 @@
 //!   committed frame used), converted with the scale that frame was drawn at,
 //!   rounded outward so a point inside a rectangle is on the module. A hidden
 //!   or not-yet-configured bar has no rectangle and no modules.
+//!   The reply is `{"type":"layout","outputs":[{"output":"DP-1","origin":
+//!   {"x":0,"y":0},"scale":1.5,"bar":{"x":0,"y":0,"width":1600,"height":28}
+//!   or null,"modules":[{"id":"clock","section":"center","x":..,"y":..,
+//!   "width":..,"height":..}]}]}`, written straight into the reply buffer.
 //! - **`invoke`** runs an action exactly as a click or a scroll would: the
 //!   same [`crate::action::perform`] a pointer press ends in, so what an
 //!   agent does and what a user does cannot diverge.
@@ -29,9 +33,7 @@ use super::surfaces::Objects;
 use super::wayland::State;
 use crate::action::{Action, ModuleAction, Trigger, perform};
 use crate::bar::{Bar, Edge};
-use crate::control::protocol::{
-    ModuleView, OutputLayout, PlacedRect, Point, Rect, Reply, write_reply,
-};
+use crate::control::protocol::{ModuleView, PlacedRect, Point, Rect, Reply, write_reply};
 use crate::density::Scale;
 use crate::modules::{ArgKind, OutputView, Placed, View};
 use crate::outputs::{Outputs, Size};
@@ -171,12 +173,16 @@ fn clamp_i32(value: i64) -> i32 {
 }
 
 /// The `layout` reply: every output's bar and the modules it shows, as last
-/// drawn.
+/// drawn, written straight into `out` (no list built first).
 pub(super) fn write_layout(out: &mut Vec<u8>, state: &State) {
     let start = out.len();
+    out.extend_from_slice(br#"{"type":"layout","outputs":["#);
     let placed = &state.content.modules;
-    let mut layouts = Vec::new();
-    for entry in state.outputs.iter() {
+    let mut failed = false;
+    for (n, entry) in state.outputs.iter().enumerate() {
+        if n > 0 {
+            out.push(b',');
+        }
         let info = entry.output.info();
         let scale = entry.output.scale();
         let bar = entry
@@ -191,61 +197,63 @@ pub(super) fn write_layout(out: &mut Vec<u8>, state: &State) {
                     surface,
                 )
             });
-        let scene = &entry.objects.scene;
-        let mut modules = Vec::new();
+        let origin = Point {
+            x: info.origin.0,
+            y: info.origin.1,
+        };
+        failed |= write_json(out, br#"{"output":"#, &info.name.as_deref());
+        failed |= write_json(out, br#","origin":"#, &origin);
+        failed |= write_json(out, br#","scale":"#, &scale.factor());
+        failed |= write_json(out, br#","bar":"#, &bar);
+        out.extend_from_slice(br#","modules":["#);
         if let Some(bar) = bar {
+            let scene = &entry.objects.scene;
+            let mut first = true;
             for (member, span) in scene.spans().iter().enumerate() {
                 if span.width == 0 {
                     continue;
                 }
-                let Some(module) = scene.module(member).and_then(|m| placed.get(m)) else {
+                let Some(index) = scene.module(member) else {
                     continue;
                 };
-                let Some(section) = scene
-                    .module(member)
-                    .and_then(|index| scene.section_of(index))
+                let (Some(module), Some(section)) = (placed.get(index), scene.section_of(index))
                 else {
                     continue;
                 };
-                modules.push(PlacedRect {
+                if !first {
+                    out.push(b',');
+                }
+                first = false;
+                let rect = PlacedRect {
                     id: module.id,
                     section: section.name(),
                     rect: module_rect(span.x, span.width, scale, bar),
-                });
+                };
+                failed |= write_json(out, b"", &rect);
             }
         }
-        layouts.push(OutputLayout {
-            output: info.name.as_deref(),
-            origin: Point {
-                x: info.origin.0,
-                y: info.origin.1,
-            },
-            scale: scale.factor(),
-            bar,
-            modules,
-        });
+        out.extend_from_slice(b"]}");
+        if failed || out.len() - start > MAX_REPLY {
+            break;
+        }
     }
-    #[derive(serde::Serialize)]
-    struct Layout<'a> {
-        #[serde(rename = "type")]
-        kind: &'static str,
-        outputs: &'a [OutputLayout<'a>],
-    }
-    let reply = Layout {
-        kind: "layout",
-        outputs: &layouts,
-    };
-    if serde_json::to_writer(&mut *out, &reply).is_err() || out.len() - start > MAX_REPLY {
+    if failed || out.len() - start > MAX_REPLY {
         out.truncate(start);
-        write_reply(
-            out,
-            &Reply::Error {
-                message: &format!("the reply would be longer than {MAX_REPLY} bytes"),
-            },
-        );
+        let message = if failed {
+            "internal: reply failed to encode".to_owned()
+        } else {
+            format!("the reply would be longer than {MAX_REPLY} bytes")
+        };
+        write_reply(out, &Reply::Error { message: &message });
         return;
     }
-    out.push(b'\n');
+    out.extend_from_slice(b"]}\n");
+}
+
+/// Writes `prefix` and `value` as JSON; whether it failed.
+fn write_json(out: &mut Vec<u8>, prefix: &[u8], value: &impl serde::Serialize) -> bool {
+    out.extend_from_slice(prefix);
+    serde_json::to_writer(out, value).is_err()
 }
 
 /// The error for a module that is not placed, naming what is.

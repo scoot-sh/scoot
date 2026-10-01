@@ -63,11 +63,6 @@ pub struct Events {
 }
 
 impl Events {
-    /// A subscriber was just admitted: events start from now.
-    pub fn rearm(&mut self) {
-        self.armed = false;
-    }
-
     /// The modules were all replaced (a reload): every one is told again.
     pub fn invalidate(&mut self) {
         self.told.clear();
@@ -87,33 +82,51 @@ impl Events {
             name: name.map(str::to_owned),
         });
     }
+
+    /// Called every loop turn with whether anyone is subscribed and the
+    /// modules' revisions: arms on the first subscriber (what is shown then
+    /// is the baseline), disarms on the last, and says whether a batch may be
+    /// built this turn. **A subscriber joining one already there changes
+    /// nothing**: what is owed to the first stays owed.
+    fn begin(&mut self, subscribed: bool, revisions: impl ExactSizeIterator<Item = u64>) -> bool {
+        if !subscribed {
+            if self.armed {
+                self.armed = false;
+                self.told.clear();
+                self.outputs.clear();
+                self.due = None;
+            }
+            return false;
+        }
+        if !self.armed {
+            self.armed = true;
+            self.told.clear();
+            self.told.extend(revisions);
+            self.outputs.clear();
+            return false;
+        }
+        true
+    }
+
+    /// Whether anything waits to be told, given the modules' revisions.
+    fn pending(&self, revisions: impl ExactSizeIterator<Item = u64>) -> bool {
+        !self.outputs.is_empty()
+            || self.told.len() != revisions.len()
+            || revisions
+                .zip(&self.told)
+                .any(|(revision, told)| revision != *told)
+    }
 }
 
 impl State {
     /// Tells the subscribers what changed since the last batch, at most once
     /// a frame.
     pub fn pump_events(&mut self, server: &mut Server, now: &mut Option<Instant>) {
-        if server.subscribers() == 0 {
-            if self.events.armed {
-                self.events.armed = false;
-                self.events.told.clear();
-                self.events.outputs.clear();
-                self.events.due = None;
-            }
-            return;
-        }
-        if !self.events.armed {
-            // Events start now: what is shown at this moment is the
-            // baseline a subscriber asks `query` for.
-            self.events.armed = true;
-            self.events.told.clear();
-            self.events
-                .told
-                .extend(self.content.modules.iter().map(|p| p.revision));
-            self.events.outputs.clear();
-            return;
-        }
-        if !self.events_pending() {
+        let modules = &self.content.modules;
+        let revisions = || modules.iter().map(|p| p.revision);
+        if !self.events.begin(server.subscribers() > 0, revisions())
+            || !self.events.pending(revisions())
+        {
             return;
         }
         let at = *now.get_or_insert_with(Instant::now);
@@ -122,7 +135,6 @@ impl State {
         }
         self.events.due = Some(at + FRAME);
 
-        let modules = &self.content.modules;
         let reloaded = self.events.told.len() != modules.len();
         let events = &mut self.events;
         events.modules.clear();
@@ -152,27 +164,16 @@ impl State {
             );
         }
         events.told.clear();
-        events.told.extend(modules.iter().map(|p| p.revision));
+        events.told.extend(revisions());
         server.broadcast(EventKind::Module, &events.modules);
         server.broadcast(EventKind::Output, &events.changes);
-    }
-
-    /// Whether anything waits to be told.
-    fn events_pending(&self) -> bool {
-        !self.events.outputs.is_empty()
-            || self.events.told.len() != self.content.modules.len()
-            || self
-                .content
-                .modules
-                .iter()
-                .zip(&self.events.told)
-                .any(|(placed, told)| placed.revision != *told)
     }
 
     /// How long the loop may sleep for a batch held back to its frame:
     /// `None` unless one is held (and then only as long as it must).
     pub fn events_timeout(&self, now: &mut Option<Instant>) -> Option<Duration> {
-        if !self.events.armed || !self.events_pending() {
+        let revisions = self.content.modules.iter().map(|p| p.revision);
+        if !self.events.armed || !self.events.pending(revisions) {
             return None;
         }
         let due = self.events.due?;
@@ -180,3 +181,6 @@ impl State {
         due.checked_duration_since(at).filter(|d| !d.is_zero())
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -55,6 +55,13 @@ impl Rig {
         Some(rig)
     }
 
+    /// The bar's control socket.
+    fn socket(&self) -> PathBuf {
+        self.session
+            .runtime_dir()
+            .join(format!("scootbar-{}.sock", self.session.wayland_display))
+    }
+
     fn msg(&self, args: &[&str]) -> std::process::Output {
         self.session
             .scootbar()
@@ -133,6 +140,45 @@ fn buttons() -> String {
     )
 }
 
+/// Whether the pixel at (`x`, `y`) of `shot` is anything but the bar's
+/// background: drawn ink.
+fn inked(shot: &common::Shot, x: u32, y: u32) -> bool {
+    shot.at(x, y) != rgb(BAR)
+}
+
+/// What is wrong, if anything, with `output`'s `layout` against its
+/// screenshot: a module's rectangle with no ink in it, or a bar column
+/// outside every rectangle with ink in it. Logical to device is
+/// `(x - origin) * scale`, rounded outward.
+fn ink_problem(shot: &common::Shot, output: &Value) -> Option<String> {
+    let scale = output["scale"].as_f64().unwrap();
+    let origin = output["origin"]["x"].as_i64().unwrap() as f64;
+    let rows = (f64::from(HEIGHT) * scale).round() as u32;
+    let mut covered = vec![false; shot.width as usize];
+    for module in output["modules"].as_array().unwrap() {
+        let x = module["x"].as_f64().unwrap();
+        let w = module["width"].as_f64().unwrap();
+        let lo = (((x - origin) * scale).floor().max(0.0)) as u32;
+        let hi = ((((x + w - origin) * scale).ceil()) as u32).min(shot.width);
+        let mut found = false;
+        for column in lo..hi {
+            covered[column as usize] = true;
+            found |= (0..rows).any(|y| inked(shot, column, y));
+        }
+        if !found {
+            return Some(format!("no ink in {module}"));
+        }
+    }
+    for column in 0..shot.width {
+        if !covered[column as usize] && (0..rows).any(|y| inked(shot, column, y)) {
+            return Some(format!(
+                "ink at device column {column}, outside every rect: {output}"
+            ));
+        }
+    }
+    None
+}
+
 #[test]
 fn layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales() {
     let Some(mut rig) = Rig::start(
@@ -160,6 +206,29 @@ fn layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales() {
         .collect();
     scales.sort_by(f64::total_cmp);
     assert_eq!(scales, [1.0, 1.5], "{layout}");
+    // The fidelity rule: what `layout` says agrees with what is drawn. On
+    // each output's own screenshot (device pixels), every module's rectangle
+    // holds ink and the bar holds no ink outside the rectangles.
+    for output in outputs {
+        let name = output["output"].as_str().unwrap();
+        let id = rig
+            .session
+            .scoot_outputs()
+            .iter()
+            .find(|o| o["name"] == name)
+            .map(|o| o["id"].as_u64().unwrap())
+            .unwrap_or_else(|| panic!("scoot has no output `{name}`"));
+        // A frame at another scale may still be on screen just after
+        // start-up, so look until it settles.
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while let Some(problem) = ink_problem(&rig.session.scoot_screenshot(id), output) {
+            assert!(
+                Instant::now() < deadline,
+                "{name}: layout disagrees with the screen: {problem}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
     let mut expected = 0;
     for output in outputs {
         let scale = output["scale"].as_f64().unwrap();
@@ -380,31 +449,54 @@ impl Drop for Subscriber {
 }
 
 #[test]
-fn a_subscriber_hears_a_module_change_once_however_often_it_changed() {
+fn a_stream_of_changes_is_told_at_the_frame_rate() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
     let tables = "[push.status]\nplaceholder = \"0\"\n";
-    let Some(rig) = Rig::start("agent-subscribe", "", 1, tables, "right = [\"status\"]\n") else {
+    let Some(rig) = Rig::start("agent-rate", "", 1, tables, "right = [\"status\"]\n") else {
         return;
     };
     let mut sub = Subscriber::start(&rig, &["module"]);
-    // A burst of sets, as fast as the commands go.
-    for n in 1..=20 {
-        let out = rig.msg(&["set", "status", &format!("\"{n}\"")]);
-        assert!(out.status.success());
-    }
-    // The last text arrives, and the stream is far shorter than the burst.
+    // One connection writes a `set` about every millisecond for 400 ms: a
+    // change on nearly every loop turn, for a frame (16 ms) to coalesce.
+    let mut stream = UnixStream::connect(rig.socket()).unwrap();
     let started = Instant::now();
-    let mut heard = 0;
+    let mut last = 0u32;
+    while started.elapsed() < Duration::from_millis(400) {
+        last += 1;
+        stream
+            .write_all(
+                format!(
+                    "{{\"protocol\":1,\"type\":\"set\",\"id\":\"status\",\"value\":\"{last}\"}}\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        last >= 100,
+        "only {last} sets in {elapsed:?}: the test would prove little"
+    );
+    // The subscriber ends on the last value, having heard far fewer events
+    // than changes: at most one a frame, plus a few for the edges.
+    let mut heard = 0u32;
     loop {
         let event = sub.next();
         assert_eq!(event["type"], "module", "{event}");
-        assert_eq!(event["id"], "status");
         heard += 1;
-        if event["text"] == "20" {
+        if event["text"] == last.to_string().as_str() {
             break;
         }
-        assert!(started.elapsed() < Duration::from_secs(20));
+        assert!(heard < last + 10, "never heard the last value {last}");
     }
-    assert!(heard <= 20, "{heard} events for 20 sets");
+    let frames = u32::try_from(elapsed.as_millis() / 16).unwrap();
+    assert!(heard >= 2, "{heard} events for {last} sets");
+    assert!(
+        heard <= frames + 4,
+        "{heard} events for {last} sets in {elapsed:?} (a frame gate allows about {frames})"
+    );
 }
 
 #[test]

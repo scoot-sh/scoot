@@ -422,22 +422,6 @@ pub struct PlacedRect<'a> {
     pub rect: Rect,
 }
 
-/// One output's bar, as `layout` lists it.
-#[derive(Debug, Serialize)]
-pub struct OutputLayout<'a> {
-    /// `wl_output.name`, if the compositor sent one.
-    pub output: Option<&'a str>,
-    /// The output's origin in the compositor's global logical space.
-    pub origin: Point,
-    /// The scale the bar was last drawn at.
-    pub scale: f64,
-    /// The bar's own rectangle, where the surface is configured; `null`
-    /// while it is not (hidden, not yet configured).
-    pub bar: Option<Rect>,
-    /// The modules with something to show, left to right as drawn.
-    pub modules: Vec<PlacedRect<'a>>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Point {
     pub x: i32,
