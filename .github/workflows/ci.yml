@@ -1223,6 +1223,51 @@ jobs:
           fi
           "$CARGO_TARGET_DIR/release/scootbar" --version
 
+      # The same, with the case that broke the first version of build.rs:
+      # rust-lld doing the real link while the `cc` a build script can see
+      # has a GNU ld that takes --section-ordering-file (binutils 2.43 or
+      # later; the runner's own may be older, and then the step above cannot
+      # tell the two scripts apart). Nixpkgs' gcc goes first on PATH for its
+      # binutils. The step shows the precondition (a trial link with `cc`
+      # passes, rustc's own link with the option is refused) and then that the
+      # build still passes, with the order file skipped.
+      - name: Release build with rust-lld and a binutils that takes the order file
+        run: |
+          cat >"$RUNNER_TEMP/rustup-nixcc.sh" <<'EOF'
+          cc --version | head -n 1
+          "$(cc -print-prog-name=ld)" --version | head -n 1
+          order="$PWD/crates/scootbar/orderfile/hot-text.ld"
+          scratch="$RUNNER_TEMP/rustup-nixcc"
+          mkdir -p "$scratch"
+          if echo 'int main(void) { return 0; }' | cc -x c - -o "$scratch/trial" -Wl,--section-ordering-file="$order" 2>"$scratch/trial.err"; then
+            trial=passes
+          else
+            trial=fails
+          fi
+          echo 'fn main() {}' >"$scratch/hello.rs"
+          if rustc +stable -C link-arg=-Wl,--section-ordering-file="$order" -o "$scratch/hello" "$scratch/hello.rs" 2>"$scratch/real.err"; then
+            real=links
+          else
+            real=is-refused
+          fi
+          echo "a trial link with cc $trial; the real link through rustc $real"
+          grep -m1 -E 'unknown argument|unrecognized option' "$scratch/real.err" || true
+          if [ "$trial" = passes ] && [ "$real" = is-refused ]; then
+            echo "the old trial would have passed and the real link would have failed: this step discriminates"
+          else
+            echo "::warning title=This step does not discriminate::trial $trial, real link $real"
+          fi
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/scootbar-rustup-nixcc"
+          export SCOOTBAR_ORDERFILE_VERBOSE=1
+          cargo +stable build --release --locked -p scootbar 2>&1 | tee "$scratch/build.log"
+          grep -o 'hot-text order file .*' "$scratch/build.log" | head -n 1
+          if [ "$real" = is-refused ] && grep -q 'hot-text order file applied' "$scratch/build.log"; then
+            echo "::error title=The order file was passed to a linker that refuses it::the build above passed only because it did not matter"
+            exit 1
+          fi
+          EOF
+          nix shell --inputs-from . nixpkgs#gcc -c bash -euo pipefail "$RUNNER_TEMP/rustup-nixcc.sh"
+
       # The fuzz targets (crates/scootbar/fuzz, its own workspace, which no
       # step above compiles) for a fixed budget: a fixed number of runs from
       # a fixed seed, so a run is the same run every time, from the seed
