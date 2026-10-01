@@ -26,6 +26,9 @@ scootbar daemon --background '#101014' --foreground '#e0e0e0'
 scootbar daemon --outputs DP-1,eDP-1        # a bar only on those two outputs
 scootbar daemon --config ~/alt-bar.toml    # another file than the default
 scootbar msg query                         # every placed module's state as JSON
+scootbar msg layout                        # where each module is on screen, for a click
+scootbar msg invoke volume raise 5         # run a module's action, as its click would
+scootbar msg subscribe                     # stream changes, one JSON line each
 scootbar msg reload                        # re-read the file and live-apply it
 scootbar msg toggle                        # hide the bar (and release its space), or show it
 scootbar --help                              # and `scootbar daemon --help`, `scootbar msg --help`
@@ -184,7 +187,10 @@ socket with line-framed JSON, one daemon per display: a second daemon
 refuses, saying one already runs.
 
 ```sh
-scootbar msg query                  # every placed module's state as JSON
+scootbar msg query [ID]             # every placed module's state as JSON (or one module's)
+scootbar msg layout                 # each module's rectangle in global logical pixels
+scootbar msg invoke ID ACTION [N] [--output NAME]  # run an action as a click would
+scootbar msg subscribe [module] [output]           # stay connected, print events
 scootbar msg reload                 # re-read the file and live-apply it
 scootbar msg hide                   # destroy the bar's surfaces and buffers, release its space
 scootbar msg show                   # make them again
@@ -201,16 +207,74 @@ with its `id`, `section` (`left`, `center` or `right`), `output` (the
 compositor's `wl_output.name`, `null` where it never sent one), the `text`
 it shows and its `class` (`normal`, `warn`, `urgent`, `muted`), plus `icon`
 where the module shows a glyph icon (absent otherwise, and for a path or image
-icon, which is not text). This is the agent hook: the bar read as data instead of OCR.
+icon, which is not text), `tooltip` (absent while empty) and a
+`value` where it has one (the workspaces module: `{"active": 2, "workspaces": [1, 2, 3]}`
+for that output, `active` `null` when none is). This is the agent hook: the
+bar read as data instead of OCR. `query ID` lists only that module (an id that
+is not placed is an error naming the ones that are). The reply is bounded
+(512 KiB; an agent's bar is a few hundred bytes a module, text and tooltip
+each capped at 256 bytes), and is written from the very state the screen is
+drawn from, so it cannot disagree with a screenshot.
 `reload` re-reads the file and live-applies it — geometry, style, layout,
 modules, the font — after fully validating it first; a bad file is
 refused and the running bar stands. `hide`, `show` and `toggle` are
-[below](#hiding-the-bar). `query`, `version`, `reload`, `hide`, `show` and
-`toggle` print the reply; `kill` and `set` print nothing on success. `set`
+[below](#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
+`toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,
+and `subscribe` prints what the daemon sends until it closes (below). `set`
 writes to a [`push` module](#button-push-and-exec-modules): an id that is not
 placed, a module that takes no value (every one but `push`) and a value it
 refuses are each a loud error naming why, never a silent ok. Without a
 daemon, every command fails saying so (exit status 1).
+
+## The agent interface
+
+What an agent (or a script) uses to read the bar and press it, with no
+screenshot to read and no pixels to hunt. All of it is on the bar's own
+socket, separate from scoot's IPC.
+
+**`layout`** prints, per output, its `output` name, `origin` (in the
+compositor's global logical pixels), `scale`, the `bar` rectangle (`null`
+while the bar is hidden or not yet configured) and the `modules` that show
+something, left to right, each with `id`, `section` and an `x`, `y`,
+`width`, `height` rectangle in the same global logical pixels. It is the
+layout **as last drawn**: the spans the last committed frame used, converted
+with the scale that frame was drawn at and rounded outward, so a pointer
+anywhere on a drawn pixel of a module is inside its rectangle. Aim scoot's
+pointer injection at the middle of a rectangle (`scoot msg click X Y`) and
+the module is pressed; a test clicks the first and last logical pixel of
+every rectangle and one pixel outside it, on two outputs at scales 1 and
+1.5. A hidden bar has no rectangles at all. A module whose text is empty
+takes no space and is not listed.
+
+**`invoke ID ACTION [N] [--output NAME]`** runs an action exactly as a click
+or scroll would: the same code a pointer press ends in, so what an agent does
+and what a user does cannot diverge. `ACTION` is one of the module's own
+actions (`scootbar msg --help`, or the refusal, lists them: the workspaces
+module's `activate N`, `activate-position N`, `previous`, `next`), or a
+trigger (`click`, `right-click`, `middle-click`, `scroll-up`, `scroll-down`),
+which runs the binding configured for it. A scroll's `N` is its steps (1 to
+32, default 1); a module's own action takes the number it asks for. `--output`
+names the output whose module is meant (default: the first that shows it).
+A module that is not placed, an action it does not have (or a trigger it has
+no binding for), a number where none is taken or a missing or out-of-range
+one, and an output that does not show the module are each a named error and
+run nothing. Success prints nothing.
+
+**`subscribe [module] [output]`** keeps the connection open and prints one
+JSON line per event, after one `{"type":"subscribed","events":[...]}` line.
+No kind named is both. A `module` event is a `query` entry with `"type":"module"`,
+sent when that module's view changed, once per output that shows it; an
+`output` event is `{"type":"output","change":"added"|"removed","name":...}`.
+Events are **coalesced to the frame rate**: a module that changes a hundred
+times in a frame is told once, with its latest view, and a batch goes out at
+most every 16 ms (the loop sleeps only until a held batch is due). A reload
+tells every module again. A subscribed connection serves no further requests
+(it gets one error line, however many it sends), at most 4 may be subscribed
+at once (a fifth is refused saying so), and **a subscriber that stops
+reading is disconnected, never buffered**: each batch is one nonblocking
+write, and one the socket cannot take whole ends the connection. With no
+subscriber the daemon does one branch a loop turn. The command exits 0 when
+the daemon closes the connection.
 
 ## Modules
 

@@ -100,7 +100,8 @@ fn paths_refuse_what_they_cannot_serve() {
 #[test]
 fn every_request_round_trips_through_its_line() {
     let requests = [
-        Request::Query,
+        Request::Query { id: None },
+        Request::Layout,
         Request::Reload,
         Request::Hide,
         Request::Show,
@@ -122,7 +123,8 @@ fn every_request_round_trips_through_its_line() {
         assert!(line.ends_with('\n'), "{line}");
         let parsed = protocol::parse(line.trim_end_matches('\n').as_bytes());
         match (request, parsed) {
-            (Request::Query, Ok(Request::Query))
+            (Request::Query { id: None }, Ok(Request::Query { id: None }))
+            | (Request::Layout, Ok(Request::Layout))
             | (Request::Reload, Ok(Request::Reload))
             | (Request::Hide, Ok(Request::Hide))
             | (Request::Show, Ok(Request::Show))
@@ -173,7 +175,7 @@ fn requests_refuse_loudly() {
         ),
         (
             "{\"protocol\":1,\"type\":\"set\",\"value\":1}",
-            "needs an `id`",
+            "need an `id`",
         ),
         (
             "{\"protocol\":1,\"type\":\"set\",\"id\":\"clock\"}",
@@ -187,7 +189,7 @@ fn requests_refuse_loudly() {
     // Unknown fields are ignored, for later arguments' room.
     assert!(matches!(
         protocol::parse(b"{\"protocol\":1,\"type\":\"query\",\"output\":\"DP-1\"}"),
-        Ok(Request::Query)
+        Ok(Request::Query { id: None })
     ));
 }
 
@@ -354,7 +356,7 @@ fn the_server_admits_and_evicts() {
 fn a_client_to_nothing_is_told_to_start_one() {
     let scratch = Scratch::new("client");
     let paths = scratch.paths();
-    let error = super::client::send_to(&paths, &Request::Query)
+    let error = super::client::send_to(&paths, &Request::Query { id: None })
         .unwrap_err()
         .to_string();
     assert!(error.contains("no scootbar daemon is running"), "{error}");

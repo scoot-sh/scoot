@@ -87,6 +87,9 @@ pub struct Info {
     /// `wl_output.scale`: an integer, the fractional scale rounded up.
     pub scale: u32,
     pub rotation: Rotation,
+    /// `wl_output.geometry`'s `x` and `y`: where the output sits in the
+    /// compositor's global logical space (for `layout`'s coordinates).
+    pub origin: (i32, i32),
 }
 
 impl Default for Info {
@@ -96,6 +99,7 @@ impl Default for Info {
             mode: None,
             scale: 1,
             rotation: Rotation::Upright,
+            origin: (0, 0),
         }
     }
 }
@@ -122,6 +126,7 @@ struct Staged {
     mode: Option<Size>,
     scale: Option<u32>,
     rotation: Option<Rotation>,
+    origin: Option<(i32, i32)>,
 }
 
 impl Staged {
@@ -137,6 +142,9 @@ impl Staged {
         }
         if let Some(rotation) = self.rotation.take() {
             info.rotation = rotation;
+        }
+        if let Some(origin) = self.origin.take() {
+            info.origin = origin;
         }
     }
 }
@@ -316,6 +324,11 @@ impl Output {
 
     pub fn stage_rotation(&mut self, rotation: Rotation) {
         self.staged.rotation = Some(rotation);
+    }
+
+    /// A `wl_output.geometry` event's position.
+    pub fn stage_origin(&mut self, x: i32, y: i32) {
+        self.staged.origin = Some((x, y));
     }
 
     /// `wl_output.done`: the staged properties become current. A new scale

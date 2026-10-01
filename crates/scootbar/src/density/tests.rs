@@ -118,3 +118,31 @@ fn broken_scales_are_ignored() {
     preferred.set_fractional(0);
     assert_eq!(preferred.fractional, Some(150));
 }
+
+#[test]
+fn logical_rounds_a_device_length_down_or_up_by_the_scale() {
+    // Integer: exact division.
+    assert_eq!(Scale::Integer(2).logical_floor(7), 3);
+    assert_eq!(Scale::Integer(2).logical_ceil(7), 4);
+    assert_eq!(Scale::Integer(2).logical_floor(8), 4);
+    assert_eq!(Scale::Integer(2).logical_ceil(8), 4);
+    // 1.5: 10 device is 6.67 logical.
+    assert_eq!(Scale::Fractional(180).logical_floor(10), 6);
+    assert_eq!(Scale::Fractional(180).logical_ceil(10), 7);
+    // 1: unchanged.
+    assert_eq!(Scale::Integer(1).logical_floor(37), 37);
+    assert_eq!(Scale::Fractional(120).logical_ceil(37), 37);
+    // The extremes saturate instead of wrapping.
+    assert_eq!(Scale::Fractional(1).logical_floor(u32::MAX), u32::MAX);
+    assert_eq!(Scale::Fractional(1).logical_ceil(u32::MAX), u32::MAX);
+    assert_eq!(Scale::Integer(u32::MAX).logical_ceil(1), 1);
+    assert_eq!(Scale::Integer(0).logical_floor(5), 5, "a zero factor is 1");
+}
+
+#[test]
+fn a_scale_is_a_number() {
+    assert_eq!(Scale::Integer(2).factor(), 2.0);
+    assert_eq!(Scale::Fractional(180).factor(), 1.5);
+    assert_eq!(Scale::Fractional(150).factor(), 1.25);
+    assert_eq!(Scale::Integer(0).factor(), 1.0);
+}

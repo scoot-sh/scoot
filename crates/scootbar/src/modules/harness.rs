@@ -93,6 +93,12 @@ impl Harness {
         view
     }
 
+    /// The module's `value` for the output `name`, as `query` reports it.
+    #[allow(dead_code)]
+    pub fn value_on(&self, name: Option<&str>) -> Option<serde_json::Value> {
+        self.module.value(&OutputView { name })
+    }
+
     /// How many sources the module asks the loop to poll, counted up to
     /// [`MAX_POLL`]: one past what the loop has for all the modules
     /// together, so a module over that shows.

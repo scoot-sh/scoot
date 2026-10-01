@@ -357,3 +357,39 @@ fn modules_still_update_after_a_hotplug_storm() {
         session.bar_stderr()
     );
 }
+
+#[test]
+fn a_subscriber_is_told_an_output_came_and_went() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    let Some(session) = Session::sway("subscribe-outputs", 1) else {
+        return;
+    };
+    let mut bar = Reaper(session.bar(&["--background", BAR]));
+    wait_all_bars(&session, &mut bar, "a bar on the first output");
+    let mut child = session
+        .scootbar()
+        .args(["msg", "subscribe", "output"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap());
+    let mut next = || {
+        let mut line = String::new();
+        lines.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap_or_else(|e| panic!("{line:?}: {e}"))
+    };
+    assert_eq!(next()["type"], "subscribed");
+    let name = plug(&session);
+    let added = next();
+    assert_eq!(added["type"], "output", "{added}");
+    assert_eq!(added["change"], "added", "{added}");
+    assert_eq!(added["name"], name.as_str(), "{added}");
+    unplug(&session, &name);
+    let removed = next();
+    assert_eq!(removed["change"], "removed", "{removed}");
+    assert_eq!(removed["name"], name.as_str(), "{removed}");
+    let _ = child.kill();
+    let _ = child.wait();
+}

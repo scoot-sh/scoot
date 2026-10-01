@@ -173,6 +173,14 @@ pub trait Module {
         Err(SetError::Unsupported)
     }
 
+    /// What the module holds that is not its text, for `query` (`value`):
+    /// the workspaces module's active workspace, a volume's percent. `None`
+    /// (the default) for a module with nothing but its text.
+    fn value(&self, output: &OutputView<'_>) -> Option<Value> {
+        let _ = output;
+        None
+    }
+
     /// Draws the module itself, instead of the loop's plain text draw.
     /// `true` when it drew (the loop then draws nothing more for it this
     /// paint); `false` keeps the default. Only the workspaces module opts

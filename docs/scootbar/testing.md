@@ -254,6 +254,31 @@ pinned nixpkgs' tzdata).
   names across the kinds, the interned name the same `&str` on every read, the
   count placed and defined, a table nothing places never started); the control
   socket reading `"value": null` as a value.
+- **The agent interface** (M4's
+  [agent-interface](backlog/resolved/agent-interface-done.md)): the requests on
+  the wire (`control/subscribe_tests.rs`: `query ID`, `invoke` with its number
+  and output and every refusal, `subscribe` naming kinds, each request
+  round-tripping through its own line); a subscribed connection (answers
+  once, refuses anything further with one line however many arrive, a request
+  pipelined behind the `subscribe` refused in the same write, a client that
+  hangs up ending it, a subscriber that stops reading dropped after what the
+  socket's own buffer took, an event too big for one write ending it, a
+  broadcast reaching only its kind and the others keeping theirs); the layout
+  geometry (`daemon/agent/tests.rs`: top and bottom edges, margins, an origin
+  left of zero, hostile sizes, and the property that every device pixel of a
+  span is inside its rectangle at scales 1, 1.25, 1.5, 1.75, 2, 2.5 and 3); and
+  the worst reply sitting far inside its bound by arithmetic.
+- **The agent interface on a headless scoot** (`tests/agent.rs`): the
+  fidelity test (two outputs at scales 1 and 1.5; every module's rectangle
+  clicked at its first and last logical pixel through scoot's own input
+  injection and the binding runs; one pixel outside, it does not), a hidden
+  bar with no rectangles, `query ID`, `invoke` running each trigger's binding
+  and refusing each wrong ask without running anything, a burst of twenty
+  `set`s heard by a subscriber as the last text in at most twenty events, a
+  subscriber that hangs up leaving the daemon answering, a subscribed
+  connection refused further requests, and the subscriber cap with a slot
+  coming back (`tests/hotplug.rs` adds an `output` subscriber told a
+  plugged and an unplugged output on sway).
 - **On a headless scoot** (`tests/exec.rs`): an `exec` module's output read back
   off a screenshot and `query` agreeing with it; a JSON line's class drawn in
   its token's color; `msg set` changing a `push` module on screen and in
