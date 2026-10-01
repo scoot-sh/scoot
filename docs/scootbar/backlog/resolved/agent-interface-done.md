@@ -125,49 +125,55 @@ is the reference.
 The same bench, dev VM and settings as the entries before it:
 `bench.py run --scope clock-workspaces --compositors scoot --rounds 3
 --settle-secs 20 --idle-secs 120 --switches 40`, **PR 2** (`exec`, `push` and
-`button`, binary sha256 `0fdf25a6...`) against **this PR** (`5aec9c2d...`), four
-runs of each in alternating order (2 and 2 with the order swapped), so the
-rows are the cost of this entry alone. **Dev VM numbers, not the ratchet's
-machine; the run that counts is the maintainer's and is still to do.**
+`button`, binary sha256 `0fdf25a6...`) against **this PR**, so the rows are the
+cost of this entry alone. Runs 1 to 4 are of the first build of this PR
+(`5aec9c2d...`, code `2a138f0e`), in two orders; runs 5 and 6 are of the final
+build (`d925d11b...`, code `883a9039`, which fixes a subscriber bug and streams
+`layout`; the idle path is the same two calls a turn), pr3 first then pr2.
+**Dev VM numbers, not the ratchet's machine; the run that counts is the
+maintainer's and is still to do.**
 
-| Row | PR 2 (4 runs) | this PR (4 runs) | `compare` (per run) |
+| Row | PR 2 (6 runs) | this PR (6 runs) | `compare` (per run) |
 | --- | --- | --- | --- |
-| Size, stripped binary + non-glibc closure | 1,579,720 | 1,645,256 (+4.1%) | same |
-| Bare executable (not gated) | 1,446,624 | 1,512,160 (+4.5%) | |
-| `.text` / `.rodata` / `.eh_frame` | 1,076,328 / 104,191 / 101,252 | 1,110,728 / 106,527 / 103,484 | +3.2% of `.text` |
-| Idle RSS, PSS | 3.5 / 1.9 MiB in every run | 3.5 / 1.9 in every run | same x4 |
-| Idle wakeups per minute | 2 x4 | 2 x4 | same x4 |
-| Idle CPU, 120 s window | 0.8, 0.8, 1.1, 1.2 ms | 1.1, 1.1, 1.2, 0.8 ms | regressed, regressed, regressed, better |
-| CPU while switching workspaces | 4.1, 3.5, 4.7, 4.1 ms | 4.1, 4.2, 4.6, 4.2 ms | same, regressed, same, same |
-| Startup to first frame | 33.9, 40.6, 38.7, 30.5 ms | 32.0, 37.7, 32.2, 35.2 ms | same x4 |
+| Size, stripped binary + non-glibc closure | 1,579,720 | 1,645,256 (+4.1%), both builds | same x6 |
+| Bare executable (not gated) | 1,446,624 | 1,512,160 (+4.5%), both builds | |
+| `.text` / `.rodata` / `.eh_frame` (final) | 1,076,328 / 104,191 / 101,252 | 1,101,512 / 106,527 / 103,300 | +2.3% of `.text` |
+| Idle RSS, PSS | 3.5 / 1.9 MiB in every run | 3.5 (3.4 once) / 1.9 | same x6 |
+| Idle wakeups per minute | 2 x6 | 2 x6 | same x6 |
+| Idle CPU, 120 s window | 0.8, 0.8, 1.1, 1.2, 0.7, 1.1 ms | 1.1, 1.1, 1.2, 0.8, 1.0, 1.1 ms | regressed x4 of 6 runs (1, 2, 3, 5), better (4), same (6) |
+| CPU while switching workspaces | 4.1, 3.5, 4.7, 4.1, 4.4, 4.3 ms | 4.1, 4.2, 4.6, 4.2, 3.9, 3.7 ms | same x4, regressed (2), better x2 (5, 6) |
+| Startup to first frame | 33.9, 40.6, 38.7, 30.5, 39.3, 40.6 ms | 32.0, 37.7, 32.2, 35.2, 27.7, 31.0 ms | same x6 |
 
 - **The CPU rows are noise, not a cost.** They are millisecond counts in a
-  120-second window (about 2 wakeups), and this PR's idle loop adds two
-  branches a turn (`pump_events`, `events_timeout`); the same PR 2 binary
-  measured 0.8, 0.8, 1.1 and 1.2 ms in four runs (and 1.1 and 1.0 in the
-  entry before this one), so a 0.3 ms difference moves both ways across runs.
-  `compare` flagged four of the sixteen row-comparisons regressed (idle CPU
-  in three runs, switching CPU in one) and one better, in different directions
-  on different runs. **This is not waived**: the maintainer's run on the
-  ratchet machine decides it, and `tests/agent.rs`
-  (`an_idle_bar_with_subscribers_and_queries_wakes_for_nothing`) pins the
-  property that matters, **zero wakeups over three idle seconds with two
-  subscribers attached**, and zero again after one change is told.
-- **The binary grew 65 KB** (`.text` 34 KB): the three new requests, the
-  event pump, the layout geometry and `serde_json` writers for the reply
-  types. No new dependency (`Cargo.toml` is unchanged).
+  120-second window (about 2 wakeups), and this PR's idle loop adds two calls a
+  turn (`pump_events`, which returns after one comparison with no subscriber,
+  and `events_timeout`). The same PR 2 binary measured 0.7 to 1.2 ms in six runs
+  (and 1.1 and 1.0 in the entry before this one); `compare` flagged idle CPU
+  regressed in four of six runs, better in one, and the switching CPU regressed
+  once and better twice. **This is not waived**: it is a finding for the
+  maintainer's run on the ratchet machine, where the margin has a quieter floor,
+  and `tests/agent.rs` (`an_idle_bar_with_subscribers_and_queries_wakes_for_nothing`)
+  pins the property that matters, **zero wakeups over three idle seconds with two
+  subscribers attached**, and zero again after one change is told. The
+  difference is under the 1 ms the VM's `/proc` accounting can separate.
+- **The binary grew 65 KB** (`.text` 25 KB), which the 64 KiB segment
+  alignment turns into one step (both builds, whose `.text` differs by 9 KB, have
+  the identical file size): the three new requests, the event pump, the layout
+  geometry and `serde_json` writers for the reply types. No new dependency
+  (`Cargo.toml` is unchanged).
 - Not measured: a subscribed bar under a module changing at the frame rate
-  (the integration test drives twenty `set`s in one burst and asserts at most
-  twenty events and the last text; its allocation-free property is by
-  construction, buffers reused, and not counted by a test).
+  (`a_stream_of_changes_is_told_at_the_frame_rate` drives a change a millisecond
+  for 400 ms and bounds the events by frames; the event path's reuse of its
+  buffers is by construction, not counted by an allocation test).
 
 ## Evidence
 
 On the dev VM (aarch64, 6 vCPUs), the tree in its own directory with its own
 `CARGO_TARGET_DIR` and `CARGO_INCREMENTAL=0`, shipped by `tar` over `ssh`. The
-integration tests ran against the VM's `scoot` (`/var/cargo-target/debug/scoot`,
-built beside, ipc protocol 4) and its `sway`. The code is at `4b864337e` (the commit after
-it is documentation and the backlog only). Raw results:
+integration tests ran against the in-tree `scoot` (built beside, ipc protocol 4)
+and the VM's `sway`. The code is at `883a9039` (the commit after it is
+documentation and the backlog only: `git diff 883a9039 HEAD -- crates` is empty).
+Raw results:
 
 ```text
 cargo fmt --check -p scootbar                                          ok
@@ -175,34 +181,52 @@ cargo clippy -p scootbar --all-targets [FLAGS] -- -D warnings          clean for
   (default) | --no-default-features | --no-default-features --features clock
   | ... --features workspaces | ... --features icon-image | ... --features button
   | ... --features push | ... --features exec | --all-features
-cargo nextest run -p scootbar                  Summary 665 tests run: 665 passed, 0 skipped
-cargo nextest run -p scootbar  (the target dir's scoot moved away)    665 passed (the integration tests skip)
-SCOOTBAR_REQUIRE_SCOOT=1 cargo nextest run -p scootbar --test agent  (scoot moved away)   6/9 tests run: 0 passed, 6 failed (a skip is a failure when required; 3 tests need no scoot)
-SCOOTBAR_REQUIRE_SCOOT=1 cargo test -p scootbar    576 + 10 + 3 + 11 + 8 + 11 + 8 + 4 + 2 + 1 + 4 + 11 + 7 + 9 passed, 0 failed
-cargo nextest run -p scootbar --bin scootbar --all-features                595 passed
-  ... --no-default-features 379 | clock 452 | workspaces 439 | icon-image 397
-  | button 401 | push 404 | exec 421
+SCOOTBAR_REQUIRE_SCOOT=1 SCOOTBAR_REQUIRE_SWAY=1 cargo nextest run -p scootbar
+                                               Summary 671 tests run: 671 passed, 0 skipped
+cargo nextest run -p scootbar  (the target dir's scoot moved away)    671 passed (the integration tests skip)
+SCOOTBAR_REQUIRE_SCOOT=1 cargo nextest run -p scootbar --test agent  (scoot moved away)   6/10 tests run: 0 passed, 6 failed (a skip is a failure when required; 4 tests need no scoot)
+SCOOTBAR_REQUIRE_SCOOT=1 SCOOTBAR_REQUIRE_SWAY=1 cargo test -p scootbar
+                                               582 + 10 + 3 + 11 + 8 + 11 + 8 + 4 + 2 + 1 + 4 + 11 + 7 + 9 passed, 0 failed
+SCOOTBAR_REQUIRE_SCOOT=1 cargo nextest run --workspace --no-fail-fast    3397 tests run: 3397 passed (1 slow), 29 skipped
+cargo nextest run -p scootbar --bin scootbar --all-features                601 passed
+  ... --no-default-features 385 | clock 458 | workspaces 445 | icon-image 403
+  | button 407 | push 410 | exec 427
 ```
 
-`cargo nextest run --workspace` was not run: this change touches no other
-crate (the diff is `crates/scootbar` and `docs/`), and `scoot-ipc` and `scoot` are
-unchanged.
+`scripts/backlog check` reports three problems, all under `docs/backlog/` and
+all present on the exec branch too (`protocol-gaps-general`, `protocol-gaps-niche`
+and `multi-output-foundation-done`); none is a scootbar entry.
 
-**The fidelity test checks what it claims**: with `layout`'s end-of-span
-rounding changed from rounding up to rounding down, `layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales`
-failed (the mutation was reverted; the diff against the commit is empty). It
-asserts the two outputs are at scales 1 and 1.5.
+**Each guard was checked against a mutation**, reverted afterwards (the diff
+against the commit is empty):
 
-The fidelity guarantee is pinned two ways: that test clicks, through scoot's own
-input injection, the first and last logical pixel of every module's rectangle
-(the binding runs, and it is the right module's) and one pixel outside either
-side (it does not), on two outputs; and a pure test checks that for every
-device pixel of a span at eight scales, its logical extent is inside the
-rectangle (`daemon/agent/tests.rs`). `query`'s text is checked against the
-screen in `tests/exec.rs` (the same state).
+| Mutation | Test that failed |
+| --- | --- |
+| `layout`'s end-of-span rounding changed from up to down | `layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales` |
+| every module rectangle shifted 3 pixels right | the same test, by its screenshot comparison (24 s: it looks until its deadline) |
+| the 16 ms gate in `pump_events` removed | `a_stream_of_changes_is_told_at_the_frame_rate` |
+| a joining subscriber re-arms (the bug the first build had) | `a_subscriber_joining_does_not_clear_what_is_owed_to_one_already_there`, `the_first_subscriber_arms_with_what_is_shown_then_as_the_baseline` |
+
+The fidelity rule is pinned three ways: the click test drives scoot's own input
+injection at the first and last logical pixel of every module's rectangle (the
+binding that runs is the right module's) and one pixel outside either side (it
+does not), on two outputs at scales 1 and 1.5 (asserted); the screenshot
+comparison reads each output's own pixels and requires ink in every rectangle
+and none in a bar column outside them; and a pure test checks that for every
+device pixel of a span at eight scales its logical extent is inside the
+rectangle. `query`'s text is checked against the screen in `tests/exec.rs` (the
+same state).
 
 Not verified: real hardware (no `--tty` run: nothing here touches the DRM or
 the VT path), the ratchet on the maintainer's machine, `subscribe` against a
 compositor other than scoot headless and sway (the `output` events are checked
 on sway, `module` events on scoot), and a subscriber under a sustained
-frame-rate stream.
+frame-rate stream for long. A `SCOOTBAR_REQUIRE_SWAY=1` run of `tests/hotplug.rs`
+(8 passed, 0 skipped, `a_subscriber_is_told_an_output_came_and_went` among them)
+was recorded on the commit before the last one; `cargo test` above includes it
+at the final one.
+
+One thing in the first build that review of it found and this one fixes: a
+`subscribe` re-armed the event state, so a change held back by the frame gate
+was forgotten by every subscriber already attached. It is now decided by
+`Events::begin` and `pending`, with unit tests.
