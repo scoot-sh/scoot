@@ -643,8 +643,9 @@ not remeasured here. Rule 2 (no competitor beats scootbar) was not rerun;
 nothing in this stack touches what it compared. **The ratchet's rule 1 fails
 on size and idle memory for this stack, as M3's did; the PRs are drafts.
 Since: the maintainer accepted the size on 2026-10-01 (lightest's
-[Decisions](backlog/lightest.md#decisions)); the idle memory rows remain
-regressed and are tracked by [m4-usage-optimization](backlog/m4-usage-optimization.md);
+[Decisions](backlog/lightest.md#decisions)); the idle memory growth was
+also accepted, and the optimization ticket closed unpursued, the same day
+([m4-usage-optimization](backlog/resolved/m4-usage-optimization-done.md));
 nothing else is waived** ([lightest](backlog/lightest.md#m3-gate-clock-and-workspaces-measured-2026-09-30-does-not-pass)'s 2026-10-01 note; the
 [final stack](#m4-final-stack-the-fix-round-re-measured) re-measured the fixed heads).
 
@@ -737,9 +738,11 @@ Sway (idle CPU in ms: M3 post-fix 0.89; earlier `main` 0.68, earlier #367
 - **The size is accepted** by the maintainer (2026-10-01: "Keep the button
   and exec inside the bar. Accept it. Aim for optimization in usage more than
   pure disk space."; [lightest's Decisions](backlog/lightest.md#decisions)).
-  **The memory rows are not waived**: idle PSS is still +0.1 MiB over
-  `main` on every compositor, and the whole class is tracked by
-  [m4-usage-optimization](backlog/m4-usage-optimization.md). Nothing else is
+  **The memory rows were first left open** (idle PSS is +0.1 MiB over
+  `main` on every compositor) and **then accepted the same day**, with the
+  optimization ticket
+  [m4-usage-optimization](backlog/resolved/m4-usage-optimization-done.md) closed unpursued
+  (lightest's last Decisions bullet). Nothing else is
   waived.
 
 **What could not be settled here:** the PSS step's cause at the fixed tip was not
