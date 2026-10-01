@@ -302,7 +302,11 @@ The review found a false claim and a flaky test; both are fixed in
 checks above ran at an earlier tree, so they are stale for what it touched
 and were re-run at it. The stack was rebased onto `main` at `7a1f9030a` and
 the pointer PR's fixes in between (no file under `crates/` changed by the
-rebase itself).
+rebase itself). **The SHAs below are those the checks were captured at, before
+the second review's rebase** onto the pointer layer's own fixes (`disarm`, and
+descriptor-test changes): `d201a88ed` is now `843930926` and `8e34e3fd3` is
+`f16f848bb`, and what the second review touched in this layer was re-run
+(next section).
 
 - **The false claim: a killed bar left shell-loop commands running for ever**
   (decision 7: the guard, the five-signal measurement before and after, the
@@ -355,3 +359,99 @@ cargo check --locked --bins in crates/scootbar/fuzz                        ok
 Not re-run: the two `nix build` checks of the original run (no `nix/` file
 and no dependency changed), and real hardware beyond the Asahi release builds
 used for the guard's cost.
+
+### After the second review (2026-10-01)
+
+Three findings in this layer, fixed in `8c39b3a53` (the code; this entry is
+the commit after it and changes none). The pointer layer under it changed
+too (its own second-review entry), so this layer was rebased onto it, and
+everything below was captured at `8c39b3a53`.
+
+- **CI was red from the descriptor tests, reproduced first.** Same cause as
+  the pointer layer: `modules::exec::tests::a_child_holds_none_of_the_callers_descriptors`
+  and `tests/exec.rs::a_command_holds_none_of_the_bars_descriptors` asserted
+  every descriptor is at most 3, and CI's test process holds 4, 5, 142 and
+  145 without close-on-exec. At `cdb9936bd` (`git archive` of it, fresh
+  extract) under a launcher that leaves those open and ignores `SIGHUP`
+  (`/dev/shm/hostile.sh` on the VM):
+
+  ```text
+  FAIL modules::exec::tests::a_child_holds_none_of_the_callers_descriptors
+  FAIL spawn::tests::a_child_inherits_none_of_the_callers_descriptors     [0, 1, 142, 145, 2, 3, 4, 5]
+  FAIL scootbar::pointer a_launched_command_holds_none_of_the_bars_descriptors  (the bar has 12)
+  FAIL scootbar::exec a_command_holds_none_of_the_bars_descriptors          (the bar has 14)
+  Summary 633 tests run: 629 passed, 4 failed
+  ```
+
+  (A first run of this reproduction passed the two integration tests: the
+  extract's files were older than artifacts another tree had built in the
+  same target directory, and cargo reused the newer tests. That run is not
+  evidence; this one, from a fresh extract, is.) Both tests now compare
+  with the descriptors the test process would hand a child, as the pointer
+  layer's do, and `tests/exec.rs` also asserts the bar holds no inheritable
+  descriptor beyond what its launcher gave it. The wording in `exec/mod.rs`
+  and `cli.md` (and the testing notes) said the command "inherits none of the
+  bar's descriptors": none the bar opens; a launcher's reach it.
+- **Without `/proc` the message blamed the user's program.** The guard is
+  `/proc/self/exe`; where `/proc` is not mounted no `exec` module can start,
+  and the warning was ``cannot run `sh`: No such file or directory``. It is
+  now ``cannot start `/proc/self/exe` to run `sh`: No such file or
+  directory (the bar runs each command through itself, which needs /proc
+  mounted)`` (`guard::spawn_error`, tested with a nonexistent path, and with
+  another error getting no `/proc` hint); `cli.md` has the sentence.
+- **Two lines per failed start, now one.** The guard printed its own warning
+  and then the module printed the restart. The guard now exits 127 (not found)
+  or 126 (not executable) without a line, and the module's one warning carries
+  the meaning (`exit status: 127, command not found`); any other failure (125)
+  keeps the guard's line and the warning says to look above. *Judgment
+  call, said:* a command that itself exits 127 (`sh -c missing`) reads as
+  "command not found" too, which is the shell's own meaning of the status, and
+  its own message is on stderr already. Tests: `tests/exec.rs`
+  `a_command_that_is_not_found_is_one_warning_a_restart_naming_it` and
+  `..._not_executable_says_so_once`; with the guard made to warn again on 127,
+  the first fails ("the guard spoke as well"), checked and reverted.
+- **`SIGPIPE`, pinned.** `a_command_gets_the_default_sigpipe_not_the_bars_ignored_one`
+  reads the command's `SigIgn` through the running bar (so through the guard,
+  which is what ships; the unit tests start commands directly and would pin
+  `std`'s `Command`, not this) and asserts only `SIGPIPE`'s own bit is clear,
+  with the control that the bar itself has it set. A harness's own ignored
+  signals (`SIGQUIT` was measured) are not this test's business.
+- **Other tests that assume a clean launcher: audited, nothing more found.**
+  The environment and directory reads in tests (grep over `src/` and
+  `tests/`, in the pointer layer's entry) are the same here: `PATH`, the
+  `SCOOTBAR_*` switches, and variables a test sets on the child it starts.
+  The suite also passes from `/` under a launcher with `TZ=Asia/Kathmandu`,
+  `WAYLAND_DISPLAY`, `WAYLAND_SOCKET` and `WAYLAND_DEBUG` set, no `HOME` or
+  `XDG_RUNTIME_DIR`, the open descriptors and the ignored `SIGHUP` (644
+  passed). The integration tests that kill the bar use `SIGKILL` and `SIGTERM`
+  only, bounded, and say why `SIGHUP` and `SIGINT` are not tests (decision 7
+  above). The descriptor-creation grep (the pointer layer's `pipe(2)` finding)
+  has no further hit in this layer: the guard, the exec timer and every file
+  ask for `CLOEXEC`.
+
+```text
+checks captured at 8c39b3a53 (git archive, fresh extract; this layer is on the pointer layer's `4d4556f18`), dev VM, scoot built from the
+stack's tree (/dev/shm/scoot-bin, built at 47b413a99: nothing in the stack changes crates/scoot*),
+own targets in /dev/shm; log: verify-exec-8c39b3a53.log
+cargo fmt --check -p scootbar                                          ok
+cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
+  (default) | --no-default-features | ... --features clock | ... --features workspaces
+  | ... --features icon-image | ... --features button | ... --features push | ... --features exec
+  | --all-features
+SCOOTBAR_TEST_SCOOT=/dev/shm/scoot-bin SCOOTBAR_REQUIRE_SCOOT=1 cargo nextest run -p scootbar
+  plain                                                  Summary 644 tests run: 644 passed, 0 skipped
+  hostile (fds 4 5 142 145 open, SIGHUP ignored)         644 passed
+cargo test -p scootbar, plain and hostile                all "test result: ok" (561 in the bin; 5 more hostile runs of the bin: 561 each)
+from /, TZ=Asia/Kathmandu, WAYLAND_* set, no HOME, hostile   644 passed (nextest), all ok (cargo test)
+nextest, target dir with no scoot, hostile               644 passed (the integration tests skip)
+hostile nextest --bin scootbar: --all-features 580 | --no-default-features 354
+  | clock 427 | workspaces 413 | icon-image 372 | button 376 | push 379 | exec 407
+cargo check --locked --bins in crates/scootbar/fuzz                    ok
+(captured earlier, at 3b34382c1, which differs from 8c39b3a53 only by the pointer layer's pipe fix in
+ modules/tests.rs: the same code also passed under nohup, 644, and plain with no scoot: log verify-exec-3b34382c1.log,
+ and the mutation check of the one-warning test, below)
+```
+
+Not verified: a bar on a machine with no `/proc` (the message is tested with a
+nonexistent path, not an unmounted `/proc`), `nix build` (no `nix/` file or
+dependency changed), real hardware.
