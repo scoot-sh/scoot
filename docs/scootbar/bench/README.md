@@ -28,3 +28,6 @@ its own. The method is in [testing.md](../testing.md#benchmark).
 | [`m3-asahi-clock-rerun`](m3-asahi-clock-rerun/table.md) | the clock | M3 `3211551` | the same, second run |
 | [`m3-asahi-clock-workspaces`](m3-asahi-clock-workspaces/table.md) | clock and workspaces | M3 `3211551` | the same machine; scootbar, yambar (sway only) and Waybar, on scoot and sway |
 | [`m3-asahi-clock-bindfix`](m3-asahi-clock-bindfix/table.md) | the clock | `cbbeffd` (M3 plus the unplaced-workspaces bind fix) | the same machine and harness; scootbar only; a **single run**; release `scootbar` built from that commit, headless `scoot`/`scootctl` release built from the same tree (source identical to `main` at `90a96ca`, no `crates/scoot` change) |
+| [`m3-asahi-clock-workspaces-all`](m3-asahi-clock-workspaces-all/table.md) | clock and workspaces | harness `80241e5f` (scootbar: `main` `90a96ca0`, M3's code) | the same machine; scootbar, yambar (sway only), Waybar, plus **ironbar** (sway only) and **ashell** as informational columns the gate does not count, on scoot and sway; `main`'s bind fix (#363) is not in it |
+
+`m3-asahi-clock-workspaces-all`'s `meta.json` names the harness commit `80241e5f`, which a rebase onto main (after the bind fix) rewrote to `d13d28d3d`; the `scripts/` tree is identical.

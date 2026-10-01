@@ -3,7 +3,7 @@
 benchmark (docs/scootbar/backlog/lightest.md).
 
     scripts/scootbar-bench/bench.py run --out DIR [--compositors scoot,sway]
-        [--bars scootbar,yambar,waybar] [--scope clock|clock-workspaces] [--rounds 5]
+        [--bars scootbar,yambar,waybar,ironbar,ashell] [--scope clock|clock-workspaces] [--rounds 5]
         [--settle-secs 30] [--idle-secs 300] [--switches 240] [--switch-hz 4]
     scripts/scootbar-bench/bench.py report DIR
     scripts/scootbar-bench/bench.py compare DIR BASELINE_DIR
@@ -198,6 +198,8 @@ def cmd_run(a):
     }
     for bar in roster:
         entry = {"version": bar.version, "ran": {}}
+        if bar.informational:
+            entry["informational"] = True
         if bar.store:
             entry["store"] = bar.store
         entry["binaries"] = [{"path": p, "sha256": sha256(os.path.realpath(p))}
@@ -282,7 +284,9 @@ def main():
     r = sub.add_parser("run")
     r.add_argument("--out", required=True)
     r.add_argument("--compositors", default="scoot,sway")
-    r.add_argument("--bars", default=",".join(c.name for c in B.ALL))
+    r.add_argument("--bars", default=",".join(c.name for c in B.ALL if not c.informational),
+                   help="comma-separated; default is scootbar and the ratified competitors "
+                        "(yambar, waybar); ironbar and ashell are informational and opt-in")
     r.add_argument("--scope", default="clock", help=f"one of {', '.join(B.SCOPES)}")
     r.add_argument("--rounds", type=int, default=5, help="startups timed per bar")
     r.add_argument("--settle-secs", type=float, default=30.0)

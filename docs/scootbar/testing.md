@@ -352,7 +352,8 @@ scootbg-mem, and no change to them alone starts it.
 ## Benchmark
 
 `scripts/scootbar-bench/bench.py` measures scootbar against yambar and
-Waybar for the [resource ratchet](backlog/lightest.md). It reuses
+Waybar for the [resource ratchet](backlog/lightest.md), and against ironbar
+and ashell as informational extras (below). It reuses
 `scripts/scootbg-bench`'s runner (the headless compositor and its
 protocol trace, per-run cgroup CPU accounting and `/proc` readings, the
 Size row, the noise rule) and adds the bars, the stage and the rows.
@@ -362,7 +363,9 @@ devenv shell -- cargo build --release -p scootbar
 devenv shell -- cargo build -p scoot -p scootctl     # any profile
 devenv shell -- python3 scripts/scootbar-bench/bench.py run --out /tmp/sbar \
   --scoot target/debug/scoot --scootctl target/debug/scootctl
-# --scope clock (the default, M1's) or clock-workspaces (M3's); --scootbar PATH
+# --scope clock (the default, M1's) or clock-workspaces (M3's);
+# --bars scootbar,yambar,waybar,ironbar,ashell adds the informational pair
+# (the default is the first three); --scootbar PATH
 # and --scootbar-source TREE measure a binary built elsewhere, such as an
 # earlier milestone's for a like-for-like compare
 python3 scripts/scootbar-bench/bench.py report /tmp/sbar            # tables and rule 2, exit 1 on a loss
@@ -387,6 +390,11 @@ Competitors come from the pinned nixpkgs. The scopes:
 | `clock` | M1 | `--right clock` | `clock` on the right | `clock` on the right |
 | `clock-workspaces` | M3 | `--left workspaces --right clock` | `ext/workspaces` (scoot) or `sway/workspaces` (sway) on the left, the clock on the right | on sway, the `i3` module (it speaks sway's IPC) on the left, the clock on the right; **on scoot, nothing** |
 
+| Scope | ironbar 0.19.0 (informational) | ashell 0.10.0 (informational) |
+|---|---|---|
+| `clock` | `clock` in `end` | `Tempo` (its clock) in `right`, `left` and `center` empty |
+| `clock-workspaces` | on sway, `workspaces` in `start` and `clock` in `end`; **on scoot, nothing** (no ext-workspace-v1) | `Workspaces` in `left`, `Tempo` in `right`, on both |
+
 **yambar cannot show workspaces on scoot**: 1.11.0 has no ext-workspace-v1
 module (its workspace modules are `i3`, `river` and `dwl`). The harness does
 not run it there and does not invent a number: the column reads "cannot show
@@ -396,6 +404,34 @@ since the rule does not say what to do when a competitor cannot show the
 scope. That is the conservative reading of "a gate that cannot be judged has
 not been passed"; whether it should instead be waived for that pair is the
 maintainer's call, not the script's. On sway yambar is compared in full.
+**ironbar and ashell are informational** (`--bars` opts them in; the default is
+scootbar, yambar and Waybar, the ratified competitors). Their columns are
+measured and shown (`meta.json` marks them `informational`), a row either wins
+is printed under `Informational, not gated` as a finding, and the gate
+never counts them: not as a loss, not as "no scootbar value", and not as
+"not compared". Promoting them into the rule is the maintainer's call. They run
+only as the nixpkgs binaries (ashell is GPL-3.0-or-later, ironbar MIT; no
+code or config of theirs is copied), each with the config keys the common look
+needs and nothing more:
+
+- **ironbar 0.19.0** (`-c ironbar.json -t ironbar.css`): `position`,
+  `height: 26`, the `workspaces` module in `start` and `clock` (the format) in
+  `end`; the CSS sets DejaVu Sans 14 px and `#bar`'s background and color. It has no
+  ext-workspace-v1 support, so at `clock-workspaces` it is **not run on scoot**
+  ("cannot show this scope", as yambar) and runs on sway through its sway
+  support.
+- **ashell 0.10.0** (`-c ashell.toml`): `[modules]` with `Workspaces` left and
+  `Tempo` (its clock; 0.10.0 has no `Clock` module, and an unknown table is
+  ignored with a warning) right, `center = []` (its default has a window title
+  there), `[tempo] clock_format`, `[appearance] font_name`/`text_color`,
+  `[appearance.bar] surface = "solid"` and `[appearance.background_color]
+  base`. Its bar height and font size are not options, so they are its own. It
+  shows workspaces on both compositors.
+- Neither needed software-rendering variables on the Asahi box's headless
+  sessions (checked: no DRM device open in `/proc/PID/fd`); a box where they
+  failed to start would need `WGPU_BACKEND`/`LIBGL_ALWAYS_SOFTWARE`, which
+  could change their cost, and the run would have to say so.
+
 A scope's bar must also draw: the screenshot check after the idle window
 crops each placed part (a 300-pixel span on the left, center or right of
 the bar) and fails the run if it shows a single color, so a workspaces module

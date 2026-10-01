@@ -18,6 +18,12 @@ exits 1 when either fails:
    show the scope on a compositor at all (yambar has no ext-workspace
    module, so not on scoot): it is named, never given a number.
 
+Bars the ratchet does not name are **informational** (``informational`` in
+``meta.json``: ironbar and ashell): their columns are measured and shown,
+and a row one of them wins is reported, but it is a finding listed apart
+from the gate, never a loss, never "not judged" and never "not compared".
+Promoting one into the rule is the maintainer's call, not the script's.
+
 Rows the ratchet does not gate are shown, marked so: the bare executable
 (size is judged with what it links, as ruled), threads and the switching
 wakeups (context, not a cost the ratchet names).
@@ -79,10 +85,13 @@ def _scale(unit):
 
 def table(meta, runs, compositor):
     """One compositor's table, and the gate's findings:
-    ``(text, losses, ties, unjudged)``."""
+    ``(text, losses, ties, unjudged, info_wins)``. ``info_wins`` are the
+    rows an informational bar beats scootbar on: reported, not gated."""
     bars = list(meta["bars"])
-    lines = ["| Row | " + " | ".join(bars) + " |", "|---|" + "---|" * len(bars)]
-    losses, ties, unjudged = [], [], []
+    info = {n for n in bars if meta["bars"][n].get("informational")}
+    heads = [f"{n} (informational)" if n in info else n for n in bars]
+    lines = ["| Row | " + " | ".join(heads) + " |", "|---|" + "---|" * len(bars)]
+    losses, ties, unjudged, info_wins = [], [], [], []
 
     def emit(label, vals, unit, gated):
         ref = vals.get(REFERENCE)
@@ -97,15 +106,17 @@ def table(meta, runs, compositor):
                     cells.append("n/a")
                 continue
             text = scootbg_report.cell(vals[name], unit)
-            if name != REFERENCE and not ref and gated:
+            counted = name not in info
+            if name != REFERENCE and not ref and gated and counted:
                 unjudged.append((compositor, label, name))
             if name != REFERENCE and ref and gated:
                 verdict, margin = scootbg_report.verdict(ref, vals[name], unit)
                 if verdict == "beaten":
                     text = f"**{text}** (beats scootbar)"
-                    losses.append((compositor, label, name, statistics.median(ref),
-                                   statistics.median(vals[name]), margin))
-                elif verdict == "tie":
+                    (losses if counted else info_wins).append(
+                        (compositor, label, name, statistics.median(ref),
+                         statistics.median(vals[name]), margin))
+                elif verdict == "tie" and counted:
                     ties.append((compositor, label, name))
             cells.append(text)
         suffix = f" ({unit})" if unit and unit != "B" else (" (bytes)" if unit == "B" else "")
@@ -120,7 +131,7 @@ def table(meta, runs, compositor):
         vals = {n: series(runs, compositor, n, row, metric, _scale(unit)) for n in bars}
         if any(vals.values()):
             emit(label, vals, unit, gated)
-    return "\n".join(lines), losses, ties, unjudged
+    return "\n".join(lines), losses, ties, unjudged, info_wins
 
 
 def failures(runs):
@@ -139,10 +150,12 @@ def gate(results_dir):
     out = []
     all_losses = []
     all_unjudged = []
+    all_info = []
     for compositor in meta["compositors"]:
-        text, losses, ties, unjudged = table(meta, runs, compositor)
+        text, losses, ties, unjudged, info_wins = table(meta, runs, compositor)
         all_losses += losses
         all_unjudged += unjudged
+        all_info += info_wins
         out += [f"**On {compositor}** ({meta['compositor_versions'].get(compositor, '')})", "", text, ""]
         for _, label, name in ties:
             out.append(f"- tie: {label}: {name}")
@@ -159,7 +172,11 @@ def gate(results_dir):
         )
         out.append("")
     not_compared = [(c, name, why) for name, b in meta["bars"].items()
-                    for c, why in b.get("cannot_show", {}).items()]
+                    for c, why in b.get("cannot_show", {}).items()
+                    if not b.get("informational")]
+    info_not_shown = [(c, name, why) for name, b in meta["bars"].items()
+                      for c, why in b.get("cannot_show", {}).items()
+                      if b.get("informational")]
     out.append(f"Gate (no competitor beats scootbar): {len(all_losses)} loss(es).")
     for compositor, label, name, ref, other, margin in all_losses:
         out.append(f"- LOSS on {compositor}: {label}: {name} {other:.2f} against "
@@ -176,6 +193,18 @@ def gate(results_dir):
                    "call).")
     for compositor, name, why in not_compared:
         out.append(f"- NOT COMPARED on {compositor}: {name}: {why}")
+    informational = [n for n, b in meta["bars"].items() if b.get("informational")]
+    if informational:
+        out += ["", f"Informational, not gated ({', '.join(informational)}): the ratified "
+                "competitors are yambar and Waybar; these columns are context, and "
+                "promoting them into the rule is the maintainer's call."]
+        out.append(f"{len(all_info)} gated row(s) on which one of them beats scootbar "
+                   "(a finding, counted nowhere).")
+        for compositor, label, name, ref, other, margin in all_info:
+            out.append(f"- FINDING on {compositor}: {label}: {name} {other:.2f} against "
+                       f"scootbar {ref:.2f} (margin {margin:.2f})")
+        for compositor, name, why in info_not_shown:
+            out.append(f"- not shown on {compositor}: {name}: {why}")
     bad = failures(runs)
     if bad:
         out += ["", f"{len(bad)} failed run(s):"]

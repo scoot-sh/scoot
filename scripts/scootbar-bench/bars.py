@@ -11,8 +11,14 @@ has the option (Waybar's ``interval``; yambar and scootbar follow the
 format's finest field).
 
 Competitors are yambar and Waybar, the two the ratchet names ("Clock and
-workspaces are compared with yambar and waybar"); ironbar and ashell (M0's
-"if cheap" pair) can be added the same way. Each runs from the flake's
+workspaces are compared with yambar and waybar"). ironbar and ashell (M0's
+"if cheap" pair) run the same way but are **informational**: their columns
+are measured and shown, and the gate (``tables.py``) neither counts them
+nor fails on them, since the ratified rule does not name them (promoting
+them into it is the maintainer's call). They are only ever run as the
+binaries nixpkgs builds: ashell is GPL-3.0-or-later and ironbar MIT, and
+nothing of theirs is copied; their configs here use only the keys that
+give the look above. Each runs from the flake's
 pinned nixpkgs, as M0's did (the same store paths), and is started
 directly, through nixpkgs' wrapper where it has one (which ``exec``s, so
 the measured process is the bar).
@@ -64,6 +70,9 @@ class Bar:
     nix_attr = None
     # The one this benchmark is about: the others are gated against it.
     reference = False
+    # Measured and shown, but not a competitor the ratchet names: never
+    # counted by the gate (``tables.gate``).
+    informational = False
 
     def __init__(self, store=None, binary=None, version=None):
         self.store = store
@@ -223,7 +232,86 @@ class Waybar(Bar):
         return [self.executable(), "-c", config, "-s", style]
 
 
-ALL = [Scootbar, Yambar, Waybar]
+class Ironbar(Bar):
+    """ironbar 0.19.0 (GTK, MIT). It speaks compositor IPCs, not
+    ext-workspace-v1 (M0: its workspaces module failed to start on scoot), so
+    on scoot it can show the clock only and the workspaces scope is not run
+    there, as for yambar; on sway its sway/i3 support shows them."""
+
+    name = "ironbar"
+    nix_attr = "ironbar"
+    informational = True
+
+    def cannot_show(self, scope, compositor):
+        if shows(scope, "workspaces") and compositor != "sway":
+            return ("ironbar 0.19.0 has no ext-workspace-v1 support (it speaks "
+                    f"compositor IPCs), so it cannot show workspaces on {compositor}")
+        return None
+
+    def write_config(self, directory, font_file, scope, compositor):
+        assert not self.cannot_show(scope, compositor), (scope, compositor)
+        config = os.path.join(directory, "ironbar.json")
+        style = os.path.join(directory, "ironbar.css")
+        modules = {
+            "clock": {"type": "clock", "format": FORMAT},
+            "workspaces": {"type": "workspaces"},
+        }
+        body = {"position": "top", "height": HEIGHT}
+        for part, mods in SCOPES[scope].items():
+            body[{"left": "start", "center": "center", "right": "end"}[part]] = [
+                modules[m] for m in mods]
+        with open(config, "w") as f:
+            json.dump(body, f, indent=1)
+        with open(style, "w") as f:
+            f.write(
+                f'* {{ font-family: "DejaVu Sans"; font-size: {FONT_PX}px; }}\n'
+                f"#bar {{ background-color: #{BACKGROUND}; color: #{FOREGROUND}; }}\n"
+            )
+        return [self.executable(), "-c", config, "-t", style]
+
+
+class Ashell(Bar):
+    """ashell 0.10.0 (iced, GPL-3.0-or-later; only ever run as nixpkgs'
+    binary). It shows workspaces on both compositors. Its bar height and
+    font size are not options (iced theme tokens), so those two are the
+    bar's own; the family, colors, clock format and modules are set."""
+
+    name = "ashell"
+    nix_attr = "ashell"
+    informational = True
+    MODULES = {"workspaces": "Workspaces", "clock": "Tempo"}
+
+    def write_config(self, directory, font_file, scope, compositor):
+        path = os.path.join(directory, "ashell.toml")
+        # Its default layout has a window title in the middle and a system
+        # group on the right; the scope has neither.
+        lists = {part: ", ".join(f'"{self.MODULES[m]}"' for m in SCOPES[scope].get(part, ()))
+                 for part in ("left", "center", "right")}
+        text = (
+            "[modules]\n"
+            f"left = [{lists['left']}]\n"
+            f"center = [{lists['center']}]\n"
+            f"right = [{lists['right']}]\n"
+            "\n"
+            "[tempo]\n"
+            f'clock_format = "{FORMAT}"\n'
+            "\n"
+            "[appearance]\n"
+            'font_name = "DejaVu Sans"\n'
+            f'text_color = "#{FOREGROUND}"\n'
+            "\n"
+            "[appearance.bar]\n"
+            'surface = "solid"\n'
+            "\n"
+            "[appearance.background_color]\n"
+            f'base = "#{BACKGROUND}"\n'
+        )
+        with open(path, "w") as f:
+            f.write(text)
+        return [self.executable(), "-c", path]
+
+
+ALL = [Scootbar, Yambar, Waybar, Ironbar, Ashell]
 
 
 def fontconfig(directory, fonts_dir):
