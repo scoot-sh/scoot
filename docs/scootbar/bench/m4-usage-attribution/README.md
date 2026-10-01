@@ -1,6 +1,6 @@
 # Where M4's idle memory went: the raw evidence (2026-10-01)
 
-For [m4-usage-optimization](../../backlog/m4-usage-optimization.md) and the
+For [m4-usage-optimization](../../backlog/resolved/m4-usage-optimization-done.md) and the
 [README's "M4 usage optimization"](../../README.md#m4-usage-optimization).
 Everything here was read from a running scootbar on the Asahi M2 (Apple M2,
 16 KiB pages, Linux 7.1.13), headless scoot (the pinned release binary,

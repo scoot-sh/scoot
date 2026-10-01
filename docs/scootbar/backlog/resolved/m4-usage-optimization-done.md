@@ -118,13 +118,28 @@ and `pagemap` evidence [`m4-usage-attribution`](../../bench/m4-usage-attribution
   an idle bar runs sit in 14 of 17 64 KiB windows of `.text`, and the kernel maps a
   file's pages 64 KiB at a time.
 - **What landed.** A hot-text order file (`crates/scootbar/orderfile/hot-text.ld`, a GNU
-  ld `--section-ordering-file` of globs) that a `build.rs` hands the linker when a
-  trial link says it takes it, the tool that makes and checks it
+  ld `--section-ordering-file` of globs) that a `build.rs` hands the linker in a release
+  build when a probe through `rustc` (the real link path) says it takes it, the tool that makes and checks it
   (`scripts/scootbar-orderfile/`), and `scripts/scootbar-bench/redraw.py`, the redraw
   benchmark the ticket asked for first. `r-xp` `Rss` 640 kB; idle PSS 1.79 to 1.81 MiB
   against `main`'s 2.04 to 2.06 and the stack's 2.25 on scoot; idle RSS 3.27 to 3.28
   against 3.50 to 3.53 and 3.72; the same binary size, redraw cost, idle CPU, wakeups
   and startup.
+- **Review finding, fixed in the same PR (2026-10-01).** The first `build.rs` probed with
+  `cc` plus the `-C` flags it could read. Since Rust 1.90 rustup's
+  `x86_64-unknown-linux-gnu` links through the bundled rust-lld by default, which
+  rustc selects itself (no `RUSTFLAGS` shows it), so a machine with GNU ld >= 2.43 passed
+  the probe and then failed the real link (`ld.lld: error: unknown argument
+  '--section-ordering-file=...'`), as did `RUSTFLAGS="--codegen link-arg=-fuse-ld=lld"`
+  (an unread spelling), and a decision made for one linker outlived a `PATH` swap to
+  another. A contributor's `cargo build` failing because of an optimization is a
+  user-facing harm; all three were reproduced on the Asahi box at `477854b2e` and fail
+  there (`could not compile scootbar`). The probe now links through `$RUSTC` with the same
+  target, rustflags and configured linker, release builds only, with triggers on
+  everything it rests on; on the fixed tree all three build. Per linker and the design
+  choice (on by default, not opt-in): [the README](../../README.md#the-order-file).
+  The decision costs one 0.12 s probe (aarch64 M2) when `PATH`, the compiler, the linker
+  settings or the rustflags change, and a recompile of scootbar then.
 - **Acceptance bar: met.** Idle RSS, PSS and peak better than `main`'s, heap and idle CPU
   the same (pooled `verdict()` over three runs a side, scoot and sway, `main` re-run
   beside it), wakeups 2 a minute, no other row regressed. The **size row** is

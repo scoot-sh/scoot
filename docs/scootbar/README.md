@@ -874,8 +874,11 @@ mini linker script that puts the listed input sections first in `.text`, in
 order. It lists 449 patterns: the 240 functions an idle bar runs first (one 260
 KB stretch, five windows), then what the workspaces, the pointer, `msg`, `push`
 and a config file run, 520 KB in all. The binary is the same size and the same
-code in another order: **`r-xp` `Rss` 1152 kB to 640 kB, idle PSS 2.25 to 1.8
-MiB, idle RSS 3.72 to 3.28**, and the redraw row is 82.9 and 85.4 against the tip's
+code in another order: **`r-xp` `Rss` 1152 kB to 640 kB** (1152 is the stack's build as the table
+measured it, and the Nix package without the file; a plain `cargo build` of this
+tree with `SCOOTBAR_NO_ORDERFILE=1` reads 1088 kB, a difference of one 64 KiB window
+between two builds that I did not trace; with the file, 640 under cargo and 576 under
+Nix), **idle PSS 2.25 to 1.8 MiB, idle RSS 3.72 to 3.28**, and the redraw row is 82.9 and 85.4 against the tip's
 82.6 and 81.4 us (the rounds of one run span 77 to 85: the same). Under a
 workload that touches more (the redraw run: workspaces, a `push` module, the
 control socket) the bar's RSS is 3.50 MiB against the tip's 3.81.
@@ -899,13 +902,65 @@ build and 446 of 449 in the Nix package's**, whose shipped binary (`nix build
 .#scootbar`) has `r-xp` `Rss` 576 kB against 1152 kB without the file, and
 `nix build .#checks.aarch64-linux.scootbar-modules` passes.
 
-**It is an optimization, never a requirement.** `build.rs` passes the flag only
-after a trial link of an empty program with this file has worked through the
-linker `rustc` will use, with the link arguments `RUSTFLAGS` add (so binutils before
-2.43, lld, mold and gold link as they always did), and stays out of the way on an
-unstable `-Z` flag or `link-self-contained`, on a cross build, off Linux, and with
-`SCOOTBAR_NO_ORDERFILE` set. It adds a build script to a crate that had none: it
-compiles nothing and runs `cc` once.
+**It is an optimization, never a requirement.** A release build is the only one
+that asks (`cargo build`, `cargo test` and rust-analyzer link as they always did,
+and a PATH change does not rebuild them), and it asks by a probe through the
+real link path: `build.rs` runs the `$RUSTC` Cargo uses, with the same `--target`,
+the same `RUSTFLAGS` and the configured linker, to link a one-line program with
+`-C link-arg=-Wl,--section-ordering-file=...`. So `rustc` itself picks the linker
+driver and whether it brings its own `rust-lld` (the default for
+`x86_64-unknown-linux-gnu` since Rust 1.90: rustc adds `-fuse-ld=lld` itself, which
+no `RUSTFLAGS` shows and a build script cannot see by asking `cc`), and every
+spelling of a link flag (`-C`, `-Cx=y`, `--codegen`, `-fuse-ld=` in any form,
+`-Zlinker-features`, `link-self-contained`) means what it means for the bar. If
+the probe links, the flag is passed; if not, the bar links as it always did. The
+decision is made again whenever what it rests on changes: `PATH`, `RUSTC`,
+`RUSTC_LINKER`, `CARGO_TARGET_<TRIPLE>_LINKER` and `_RUSTFLAGS`, the rustflags,
+the linker driver's own file, and the two switches below (a PATH change that
+reaches a different linker would otherwise keep the answer given for the old one,
+and a flag-refusing linker would then fail the real link). The price is that a
+release build after any of those changes recompiles scootbar (about 18 s on the
+M2) and runs a probe that takes 0.12 s (two when the linker refuses, to tell a
+refusal from a broken probe). **Whether the file was applied**, per linker on the
+Asahi M2 (aarch64; GNU ld 2.46, gold 1.16, lld 21.1.8, mold 2.42.1):
+
+| linker | `build.rs` | why |
+|---|---|---|
+| GNU ld (bfd, `cc` default) | applied | takes `--section-ordering-file` from binutils 2.43 |
+| `-fuse-ld=lld`, and `rust-lld` as rustc's default linker | skipped | `unknown argument` (its `--symbol-ordering-file` takes exact names, which the Nix package's do not match) |
+| `-fuse-ld=mold` | skipped | `unknown`: mold has no equivalent of the option (`--section-order` is another mechanism) |
+| `-fuse-ld=gold` | **applied, and no use** | gold accepts the option and reads it as a list of section names, not this file's linker-script syntax: the probe cannot tell a no-op from a use, the build is unharmed, the memory is not saved |
+| GNU ld before 2.43 | skipped | `unrecognized option` (not run: a stand-in `cc` that refuses the option; ld 2.43 is where it appears per the binutils changelog) |
+
+So on a mold, lld or gold box the bar costs about 0.45 MiB more than the numbers
+here; nothing says so unless asked. To see the decision, run
+`SCOOTBAR_ORDERFILE_VERBOSE=1 cargo build --release -p scootbar` (a
+`warning: scootbar@...: scootbar: hot-text order file applied (...)` or `skipped:
+<why>`; it reruns the script when the variable is set or unset), and to see the
+result, `scripts/scootbar-orderfile/orderfile.py check --binary B` on an
+unstripped build (how many patterns match, how many 64 KiB windows the hot code
+spans). A probe that cannot link even without the flag (a broken toolchain) is
+always a `cargo:warning`, in the build's own output, and the real link then
+reports it in its own words. `SCOOTBAR_NO_ORDERFILE=1` skips the file whatever the
+linker says. It adds a build script to a crate that had none: it compiles nothing
+beyond that probe.
+
+**Why on by default, not opt-in.** The opposite default (a build asks with
+`SCOOTBAR_ORDERFILE=1`, which the Nix package and the benchmark and CI release
+builds set) makes a plain build exactly the old build with zero risk, at the cost
+that `cargo install` and a plain `cargo build --release` lose 0.45 MiB, about 7% of
+the bar's RSS, silently and for good. The failures the first version had were all in
+the trial, not in the idea: a `cc` trial under a toolchain that links through
+`rust-lld` (reproduced: `ld.lld: error: unknown argument
+'--section-ordering-file=...'`, `could not compile scootbar`), a `--codegen`
+spelling the flag parser did not read, and a decision that outlived a PATH
+swap. Probing through `rustc` removes the first two by construction (nothing is
+read or guessed; the same program is linked the same way), and the triggers the
+third. What remains is a linker changed in place under an unchanged `PATH` and
+driver file (a binutils downgrade in a directory that stays put), which `cargo clean
+-p scootbar` or `touch crates/scootbar/build.rs` repairs, and a probe that links where the
+bar does not (nothing known). If the maintainers weigh that residue above 0.45 MiB,
+the opt-in is one line, the first check of `decide()`.
 
 **What it does not reach.** `r-xp` is 640 kB, not the 576 the idle set alone
 would give, and `rodata` (hot strings, anonymous sections) is not ordered. The
@@ -920,6 +975,9 @@ breaks a build and never changes what the bar does; it stops saving memory for t
 function. The row that would show it is idle PSS; CI's `check` step fails when
 under 80% of the patterns match a symbol of the release build (not when functions
 are added), and regenerating it is [a command](testing.md#the-hot-text-order-file).
+Between 80% and 100% nobody is told: a developer who wants the number runs `check`
+(a build-time warning would need the build script to read the binary it has not
+linked yet).
 
 #### The ratchet, against `main` before M4
 

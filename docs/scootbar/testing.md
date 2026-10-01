@@ -658,7 +658,11 @@ clock; 3000 `scootbar msg set`s over the control socket, each a different
 one full redraw. It prints the bar's CPU time per set (`/proc/PID/schedstat`)
 for each of five rounds and their median, and the bar's RSS. Run it for each
 build, alternating (A B A B); the unit tests cover its inputs only. A build
-before M4 has no `push` module and cannot be given its config.
+before M4 has no `push` module and cannot be given its config. It does not pin
+the bar or the compositor to a core, so on a machine with unlike cores (the
+Asahi M2's performance and efficiency cores) a round is noisy: the rounds of one
+run span 77 to 85 us there. Compare the medians of several runs per build, not one
+round, and not a single pairing.
 
 ## The hot-text order file
 
@@ -667,10 +671,18 @@ executes, in the order they first run, and `crates/scootbar/build.rs` hands it
 to the linker (GNU ld's `--section-ordering-file`, binutils 2.43 and later), so
 they sit in one stretch of `.text` instead of in every 64 KiB of it. Why it
 matters, what it saves and what it cannot reach:
-[the README](README.md#m4-usage-optimization). `build.rs` passes the flag only
-after a trial link with this file has worked, so another linker (lld, mold,
-gold) or an older binutils links as it always did; `SCOOTBAR_NO_ORDERFILE=1`
-turns it off to see what the layout costs.
+[the README](README.md#m4-usage-optimization). In a release build `build.rs`
+passes the flag only after `rustc` (the one Cargo uses, with the same target,
+`RUSTFLAGS` and linker) has linked a one-line program with it, so a linker
+that takes no such option (lld, which is also `rustc`'s own default on
+`x86_64-unknown-linux-gnu` since Rust 1.90, or mold, or binutils before 2.43)
+links as it always did, and the decision is made again when `PATH`, the
+compiler, the linker settings or the rustflags change. `SCOOTBAR_NO_ORDERFILE=1`
+turns it off to see what the layout costs, and `SCOOTBAR_ORDERFILE_VERBOSE=1`
+makes the build say, as a `cargo:warning`, whether the file was applied and, if
+not, why (per linker, in [the README](README.md#the-order-file)). gold accepts the
+option and does nothing with it; `check` below is how a build is known to have
+the layout.
 
 **Regenerating it** after the code changes much (a new module, or a refactor
 that renames what the bar runs: a function that is no longer listed falls back
@@ -696,7 +708,9 @@ patterns land in an unstripped build made with the file; with `--profile` it
 also runs the idle scenario and lists what ran that no pattern lists. CI runs
 the first on the release build and the tool's unit tests
 (`python3 -m unittest discover -s scripts/scootbar-orderfile -p 'test_*.py'`).
-`build.rs` has unit tests too, which Cargo does not run for a build script:
+`build.rs` has unit tests too (the probe's arguments for every spelling of a link
+flag, that each spelling reaches a linker driver, the triggers that make the decision
+again, a missing or refusing linker), which Cargo does not run for a build script:
 `rustc --edition 2024 --test crates/scootbar/build.rs -o /tmp/t && /tmp/t` (CI
 does).
 
