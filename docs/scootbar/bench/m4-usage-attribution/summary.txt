@@ -1,0 +1,10 @@
+base1 Rss: 3616 kB Pss: 2200 kB Pss_Anon: 448 kB Pss_File: 1544 kB Pss_Shmem: 208 kB text-Rss Rss: 960 kB minflt 167 early-minflt 154
+base2 Rss: 3392 kB Pss: 2093 kB Pss_Anon: 448 kB Pss_File: 1541 kB Pss_Shmem: 104 kB text-Rss Rss: 960 kB minflt 154 early-minflt 154
+base3 Rss: 3616 kB Pss: 2213 kB Pss_Anon: 464 kB Pss_File: 1541 kB Pss_Shmem: 208 kB text-Rss Rss: 960 kB minflt 168 early-minflt 155
+tip1 Rss: 3584 kB Pss: 2285 kB Pss_Anon: 448 kB Pss_File: 1733 kB Pss_Shmem: 104 kB text-Rss Rss: 1152 kB minflt 157 early-minflt 157
+tip2 Rss: 3616 kB Pss: 2303 kB Pss_Anon: 464 kB Pss_File: 1735 kB Pss_Shmem: 104 kB text-Rss Rss: 1152 kB minflt 158 early-minflt 158
+tip3 Rss: 3808 kB Pss: 2391 kB Pss_Anon: 448 kB Pss_File: 1735 kB Pss_Shmem: 208 kB text-Rss Rss: 1152 kB minflt 170 early-minflt 157
+cand1 Rss: 3088 kB Pss: 1775 kB Pss_Anon: 448 kB Pss_File: 1223 kB Pss_Shmem: 104 kB text-Rss Rss: 640 kB minflt 151 early-minflt 151
+cand2 Rss: 3088 kB Pss: 1775 kB Pss_Anon: 448 kB Pss_File: 1223 kB Pss_Shmem: 104 kB text-Rss Rss: 640 kB minflt 149 early-minflt 149
+cand3 Rss: 3296 kB Pss: 1879 kB Pss_Anon: 448 kB Pss_File: 1223 kB Pss_Shmem: 208 kB text-Rss Rss: 640 kB minflt 163 early-minflt 150
+EVIDENCEDONE

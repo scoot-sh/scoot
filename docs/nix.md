@@ -447,6 +447,15 @@ scootbar.override { buildFeatures = [ "icon-image" ]; }
 PNG icons. A bar built without `exec`, `push` or `button` refuses that table
 in the config (an unknown key), naming it.
 
+The package is linked with scootbar's hot-text order file
+(`crates/scootbar/orderfile/hot-text.ld`, which the crate's `build.rs` passes
+to the linker): the functions a running bar executes sit next to each other,
+which is about 0.45 MiB less memory in use at idle (PSS 2.25 to 1.8 MiB, measured on
+the Asahi M2), with the same binary size and the same speed ([why](scootbar/README.md#m4-usage-optimization)). The
+nixpkgs `binutils` takes the option; a build whose linker does not links
+without it and is otherwise the same bar. `SCOOTBAR_NO_ORDERFILE=1` in the
+derivation's `env` turns it off.
+
 ### The modules: `programs.scootbar`
 
 `homeModules.scootbar` (home-manager) and `nixosModules.scootbar` (NixOS)

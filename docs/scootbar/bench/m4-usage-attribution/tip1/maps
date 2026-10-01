@@ -1,0 +1,28 @@
+5d1bb9f90000-5d1bba0ec000 r-xp 00000000 00:24 7969154                    /home/steve/code/m4u/t-tip/release/scootbar
+5d1bba0f4000-5d1bba100000 r--p 00164000 00:24 7969154                    /home/steve/code/m4u/t-tip/release/scootbar
+5d1bba100000-5d1bba104000 rw-p 00170000 00:24 7969154                    /home/steve/code/m4u/t-tip/release/scootbar
+5d1bd1f0c000-5d1bd1f30000 rw-p 00000000 00:00 0                          [heap]
+6d66eec40000-6d66eec74000 rw-s 00000000 00:01 213322                     /memfd:scootbg-wallpaper (deleted)
+6d66eec74000-6d66eed30000 r--p 00000000 00:24 749092                     /nix/store/33wfvwgr4vy0gaznf3wafla7mfni1znw-dejavu-fonts-minimal-2.37/share/fonts/truetype/DejaVuSans.ttf
+6d66eed30000-6d66eeee8000 r-xp 00000000 00:24 476474                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/libc.so.6
+6d66eeee8000-6d66eeefc000 ---p 001b8000 00:24 476474                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/libc.so.6
+6d66eeefc000-6d66eef00000 r--p 001bc000 00:24 476474                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/libc.so.6
+6d66eef00000-6d66eef04000 rw-p 001c0000 00:24 476474                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/libc.so.6
+6d66eef04000-6d66eef10000 rw-p 00000000 00:00 0 
+6d66eef20000-6d66eefb8000 r-xp 00000000 00:24 476481                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/libm.so.6
+6d66eefb8000-6d66eefcc000 ---p 00098000 00:24 476481                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/libm.so.6
+6d66eefcc000-6d66eefd0000 r--p 0009c000 00:24 476481                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/libm.so.6
+6d66eefd0000-6d66eefd4000 rw-p 000a0000 00:24 476481                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/libm.so.6
+6d66eefe0000-6d66ef000000 r-xp 00000000 00:24 473696                     /nix/store/w7dbq2jaa5r43k751jdfkfnwbas10vr8-gcc-15.3.0-libgcc/lib/libgcc_s.so.1
+6d66ef000000-6d66ef00c000 ---p 00020000 00:24 473696                     /nix/store/w7dbq2jaa5r43k751jdfkfnwbas10vr8-gcc-15.3.0-libgcc/lib/libgcc_s.so.1
+6d66ef00c000-6d66ef010000 r--p 0001c000 00:24 473696                     /nix/store/w7dbq2jaa5r43k751jdfkfnwbas10vr8-gcc-15.3.0-libgcc/lib/libgcc_s.so.1
+6d66ef010000-6d66ef014000 rw-p 00020000 00:24 473696                     /nix/store/w7dbq2jaa5r43k751jdfkfnwbas10vr8-gcc-15.3.0-libgcc/lib/libgcc_s.so.1
+6d66ef024000-6d66ef034000 r--p 00000000 00:00 0                          [vvar]
+6d66ef034000-6d66ef038000 r-xp 00000000 00:00 0                          [vdso]
+6d66ef038000-6d66ef064000 r-xp 00000000 00:24 476468                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/ld-linux-aarch64.so.1
+6d66ef064000-6d66ef068000 ---p 00000000 00:00 0 
+6d66ef068000-6d66ef06c000 rw-p 00000000 00:00 0 
+6d66ef06c000-6d66ef074000 rw-p 00000000 00:00 0 
+6d66ef074000-6d66ef078000 r--p 0002c000 00:24 476468                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/ld-linux-aarch64.so.1
+6d66ef078000-6d66ef07c000 rw-p 00030000 00:24 476468                     /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/ld-linux-aarch64.so.1
+7fffef900000-7fffef928000 rw-p 00000000 00:00 0                          [stack]

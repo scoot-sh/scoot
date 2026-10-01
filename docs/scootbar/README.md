@@ -644,7 +644,8 @@ nothing in this stack touches what it compared. **The ratchet's rule 1 fails
 on size and idle memory for this stack, as M3's did; the PRs are drafts.
 Since: the maintainer accepted the size on 2026-10-01 (lightest's
 [Decisions](backlog/lightest.md#decisions)); the idle memory rows remain
-regressed and are tracked by [m4-usage-optimization](backlog/m4-usage-optimization.md);
+regressed and are tracked by [m4-usage-optimization](backlog/resolved/m4-usage-optimization-done.md)
+(resolved since: [M4 usage optimization](#m4-usage-optimization));
 nothing else is waived** ([lightest](backlog/lightest.md#m3-gate-clock-and-workspaces-measured-2026-09-30-does-not-pass)'s 2026-10-01 note; the
 [final stack](#m4-final-stack-the-fix-round-re-measured) re-measured the fixed heads).
 
@@ -739,10 +740,257 @@ Sway (idle CPU in ms: M3 post-fix 0.89; earlier `main` 0.68, earlier #367
   pure disk space."; [lightest's Decisions](backlog/lightest.md#decisions)).
   **The memory rows are not waived**: idle PSS is still +0.1 MiB over
   `main` on every compositor, and the whole class is tracked by
-  [m4-usage-optimization](backlog/m4-usage-optimization.md). Nothing else is
+  [m4-usage-optimization](backlog/resolved/m4-usage-optimization-done.md) (resolved since:
+  [M4 usage optimization](#m4-usage-optimization)). Nothing else is
   waived.
 
 **What could not be settled here:** the PSS step's cause at the fixed tip was not
 re-derived (the PR 1 review's `smaps` finding is for #364); #364 and #366 were not
 re-measured at their fixed heads, only the stack's tip; and idle CPU, one
 sample against two, cannot rule a 0.1 ms cost in or out.
+
+### M4 usage optimization
+
+[m4-usage-optimization](backlog/resolved/m4-usage-optimization-done.md): the maintainer's ruling
+of 2026-10-01 ("Aim for optimization in usage more than pure disk space") sent
+the effort at what the bar holds and wakes for, with `button`, `push`, `exec`,
+the pointer layer and the agent interface still in the default build. This
+section is what was measured, the one change that moved the rows, and every
+lever that was tried and dropped. The machine is the one of every run above (the
+Asahi M2: 8 cores, **16 KiB pages**, Linux 7.1.13, `schedutil`, on mains), release
+scootbar (`lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, stripped) built
+per tree in its own target directory, **one headless release `scoot`/`scootctl`**
+(sha256 `33aa667c...`, built from `main` at `c9d2cd361`) for every run, nothing
+else on the box. The tools were `smaps`, `smaps_rollup`, `pagemap` and `stat` of the
+running bar, `valgrind` (callgrind), `qemu-user` (`-d in_asm`) and `lld`: the
+last three fetched into the Nix store for this, and nothing else. The raw files
+are in [`bench/m4-usage-attribution`](bench/m4-usage-attribution/README.md).
+
+#### Where the memory went
+
+The PR 1 review's finding (the `r-xp` mapping, 960 kB on `main` against 1088 kB at
+#364) holds at the tip, and it is **all of it**. `main` before M4 (`98c4b7a32`)
+against the tip (`c9d2cd361`, which carries #364, #366 and #367), three starts
+each, 20 s after the first frame (the numbers did not differ between starts
+except the `Pss_Shmem` of the shm buffer, 104 or 208 kB by chance):
+
+| | `main` | tip |
+|---|---|---|
+| `scootbar` `r-xp` (headers, `.rela.dyn`, `.text`, `.rodata`, `.eh_frame`): size / `Rss` | 1184 / **960** kB | 1392 / **1152** kB |
+| `scootbar` `r--p` + `rw-p` (relro, `.data`): `Rss` | 64 kB, all private dirty | 64 kB, the same |
+| `Pss_Anon` (heap, stack, the glyph cache) | 448 to 464 kB | 448 to 464 kB |
+| the font, libc, libm, libgcc_s, ld.so | the same | the same |
+| minor faults at the first frame | 154 to 155 | 157 to 158 |
+
+So there is **no new anonymous memory** (the `RssAnon` 0.42 to 0.45 MiB of every run
+is one or two 16 KiB pages of noise), **no new faults** (three more), and nothing
+in the other mappings: **the idle bar's memory step is file pages of its own
+executable.** It does not run much more code: callgrind counts **231
+functions and 244 KB** executed by `main`'s bar from its start through a minute
+of idle, and **232 and 257 KB** at the tip (qemu on the shipped binary: 235 and
+261 KB). Only 11 functions are in the tip's list and not in `main`'s, three of them
+8-byte trait stubs (`Exec`'s `custom_draw` and `on_dispatch`, `tints_on_hover`), the rest
+`pointer_x`, `note_output`, `modules::start` and a few `std` functions; none is from `config::custom`,
+`exec`, the payload or the agent. **The unconfigured modules' code is not run, and
+nothing is built or deserialized for them** (the harness gives the bar flags and no
+config file at all; the `Option<toml::Value>` fields are parse-time temporaries,
+and the heap is the same as `main`'s to the page).
+
+**Why 257 KB of code takes 1152 kB.** On a read fault of a file-backed page the
+kernel maps the cached neighbours too, up to `fault_around_bytes` (64 KiB: four of
+these pages), aligned. rustc lays a crate's functions out in definition order and
+the generics other crates instantiate in name order, so the functions a bar runs
+are spread over the whole `.text`: **14 of its 17 64 KiB windows hold at least one**
+(`pagemap`: every page resident but three windows), and the kernel maps the lot.
+The tip's +192 kB is the +175 KB of new text, which brought its own windows. It
+follows that the **resident text is about the size of the text, however little of
+it runs**, that a cold function moved from one place to another moves nothing
+unless it empties a window, and that what shrinks the number is the hot functions
+being *together*.
+
+#### What was tried
+
+Each build measured the same way: `smaps` 15 to 20 s after the first frame (so the
+`r-xp` `Rss` is exact and repeats to the page), three starts each; the redraw column
+is [`redraw.py`](testing.md#redraw-cost), 3000 `set`s a round, five rounds, run twice in the
+order tip, `opt-level = "s"`, `opt-level = 2`, this PR's, tip, and so on (raw files
+in [`m4-usage-attribution`](bench/m4-usage-attribution/levers.txt)):
+
+| Lever | `.text` (B) | `r-xp` `Rss` (kB) | `Pss_File` (kB) | redraw CPU per set (us), two runs | Kept |
+|---|---|---|---|---|---|
+| `main` before M4, for reference | 932,584 | 960 | 1655 | n/a (no `push`) | |
+| the tip, as merged | 1,107,848 | 1152 | 1843 to 1851 | 82.6, 81.4 | |
+| (a) `opt-level = "s"` for scootbar | 929,160 | 1024 | 1648 to 1654 | **107.8, 107.1 (+31%)** | **no**: per-event CPU |
+| (a) `opt-level = 2` for scootbar | 1,054,984 | 1088 | 1716 | **96.9, 96.0 (+18%)** | **no**: per-event CPU |
+| (b) `opt-level = "s"` for `toml*`, `serde*` alone | 1,092,328 | 1216 | 1844 to 1848 | not run | no: no gain |
+| (b) `codegen-units = 16` for scootbar | 1,154,856 | 1216 | 1907 to 1915 | not run | no: worse |
+| (b) `--sort-section=name` (linker) | n/a | the hot functions in 15 64 KiB windows, were 14 | | | no |
+| gold, `--section-ordering-file`, exact names | | 576 | 1288 to 1291 | | no: gold is deprecated, `rustc` warns of known bugs with Rust |
+| lld, `--symbol-ordering-file`, exact names | | 320 to 576 | 1240 to 1491 | | no: needs lld, and the names do not carry (below) |
+| GNU ld, `--section-ordering-file`, exact names | | 576 to 640 | 1204 to 1264 | | no: the names do not carry (below) |
+| **GNU ld, the same as globs: the order file** | 1,107,848 (the same bytes, in another order) | **640** | **1223** | **82.9, 85.4** | **yes** |
+
+(The gold and lld rows are of the build valgrind can run, rustix on its libc
+backend: indicative, not the shipped binary; the others are the shipped one.)
+
+What each lever of the ticket came to:
+
+- **(a) `opt-level = "s"`**: smaller (`.text` -16%) and 128 kB less resident, **and
+  31% more CPU per redraw** (`opt-level = 2`: 18%), where the harness's rows
+  could never have shown it. A regression in per-event CPU is not acceptable for
+  memory. Dropped, with its numbers.
+- **(b) cold-path outlining.** `#[cold]` puts a function in `.text.unlikely.*`, which
+  the linker keeps apart, and that is all it does: the callees (the 62 KB of
+  monomorphized `toml` deserializers `config::custom` instantiates) stay where
+  they are, and a window empties only when *everything* in it is cold. Not done.
+  **Sharing the three table shapes** (33 to 36 KB of text): that code is not run at
+  idle, so with the order file below it costs no page, and without it the
+  resident text follows the text size, at most those 35 KB out of 1.1 MB (0.03
+  MiB, inside every margin) for a rewrite of the per-kind unknown-key errors.
+  Not implemented. Linker ordering is what worked, below.
+- **(c) Per-module state, buffers, retained config, leaked strings.** The heap is
+  the same as `main`'s to the page (`Pss_Anon` 448 kB), nothing is built for an
+  unconfigured module, and nothing is held after the parse; there was nothing
+  to make lazy.
+- **(d) `madvise`/`munmap` of start-up data.** `rustix`'s `madvise` is an `unsafe fn` and
+  the crate is `#![forbid(unsafe_code)]`: not done, no dependency added.
+- **(e)** the PIE relocations and the relro data, measured and **not taken**, each on
+  top of the order file (against the same file's `Pss`, quick runs): `-C
+  relocation-model=static` (no `.rela.dyn` to read, `.data.rel.ro` read only)
+  **-0.09 MiB** and it gives up the bar's ASLR; `-Wl,-z,pack-relative-relocs`
+  (DT_RELR; `.rela.dyn` 57 KB to 8 KB) **-0.10 to -0.13 MiB**, and the binary then
+  refuses to start on a glibc before 2.36. Neither is for an optimization PR to
+  decide; each is one `RUSTFLAGS` entry.
+
+#### The order file
+
+`crates/scootbar/orderfile/hot-text.ld` is a GNU ld `--section-ordering-file`: a
+mini linker script that puts the listed input sections first in `.text`, in
+order. It lists 449 patterns: the 240 functions an idle bar runs first (one 260
+KB stretch, five windows), then what the workspaces, the pointer, `msg`, `push`
+and a config file run, 520 KB in all. The binary is the same size and the same
+code in another order: **`r-xp` `Rss` 1152 kB to 640 kB, idle PSS 2.25 to 1.8
+MiB, idle RSS 3.72 to 3.28**, and the redraw row is 82.9 and 85.4 against the tip's
+82.6 and 81.4 us (the rounds of one run span 77 to 85: the same). Under a
+workload that touches more (the redraw run: workspaces, a `push` module, the
+control socket) the bar's RSS is 3.50 MiB against the tip's 3.81.
+
+**How it is made, and why it is not a plain symbol list.**
+`scripts/scootbar-orderfile/orderfile.py gen` runs the bar under `qemu-user`
+(`-d in_asm` logs each translation block with its function's name, the first time
+it executes) in four scenarios, the bench's idle clock first, and merges the
+functions in the order they first ran. **The names do not carry between
+builds**: a v0-mangled Rust symbol embeds a hash per crate and `B<n>_`
+back-references that move with those hashes' lengths. Measured on one source,
+**182 of the 235 hot names do not exist in the Nix package's build** (every
+cargo-built crate's hash differs; only `std`, `core` and `alloc`'s agree), while two
+`cargo` builds of one source in two directories are byte-identical. A list of
+exact names (lld's `--symbol-ordering-file` takes no glob) would work for the build
+it was made on and, silently, for no other, the Nix package included. So each
+symbol becomes a **glob** with those two tokens as `*` (`glob()`, unit-tested to
+match both builds' names of one function and not another's), which GNU ld's file
+takes, and `check` reports **449 of 449 patterns matching a symbol in a `cargo`
+build and 446 of 449 in the Nix package's**, whose shipped binary (`nix build
+.#scootbar`) has `r-xp` `Rss` 576 kB against 1152 kB without the file, and
+`nix build .#checks.aarch64-linux.scootbar-modules` passes.
+
+**It is an optimization, never a requirement.** `build.rs` passes the flag only
+after a trial link of an empty program with this file has worked through the
+linker `rustc` will use, with the link arguments `RUSTFLAGS` add (so binutils before
+2.43, lld, mold and gold link as they always did), and stays out of the way on an
+unstable `-Z` flag or `link-self-contained`, on a cross build, off Linux, and with
+`SCOOTBAR_NO_ORDERFILE` set. It adds a build script to a crate that had none: it
+compiles nothing and runs `cc` once.
+
+**What it does not reach.** `r-xp` is 640 kB, not the 576 the idle set alone
+would give, and `rodata` (hot strings, anonymous sections) is not ordered. The
+unlisted functions that run only sometimes (which `Vec` happens to grow, an event
+that arrives in two reads) each cost a window when they do; the tool lists whole
+families of the likeliest (`grow_one`, `smallvec`...) and `check --profile` says what
+an idle bar ran that no pattern lists (nothing, in the build it was made from).
+
+**It decays, gracefully.** A function that is renamed, or inlined differently after a
+change, is no longer listed and goes wherever the linker puts it: the file never
+breaks a build and never changes what the bar does; it stops saving memory for that
+function. The row that would show it is idle PSS; CI's `check` step fails when
+under 80% of the patterns match a symbol of the release build (not when functions
+are added), and regenerating it is [a command](testing.md#the-hot-text-order-file).
+
+#### The ratchet, against `main` before M4
+
+The harness's own run (`bench.py run`, scope clock, the defaults: 5 startup
+rounds, 30 s settle, a 300 s idle window, 240 switches at 4 Hz), **scoot and sway in
+every run**, seven runs in the order `main`, this PR's build, the stack as merged, this PR's,
+`main`, this PR's, `main` (A-B-C-B-A-B-A), 180 s of cool-down between them, so that
+drift shows and each build's runs are neighbours of `main`'s. Raw runs:
+[`m4-usage-*`](bench/README.md); every `compare` as it ran and the pooled
+verdicts, [`m4-usage-compares.md`](bench/m4-usage-compares.md). Medians of each
+run, a build's runs side by side in the order they ran:
+
+| Row, scoot | `main` before M4 (3 runs) | the stack as merged | this PR (3 runs) | pooled verdict, this PR against `main` |
+|---|---|---|---|---|
+| Startup to first frame (ms) | 40.8 / 31.4 / 30.3 | 37.7 | 38.5 / 36.0 / 33.4 | same (margin 37.7) |
+| Idle RSS (MiB) | 3.53 / 3.50 / 3.52 | 3.72 | 3.28 / 3.27 / 3.28 | better (margin 0.176) |
+| Idle PSS (MiB) | 2.06 / 2.04 / 2.04 | 2.25 | 1.81 / 1.79 / 1.81 | better (margin 0.102) |
+| Idle heap, `RssAnon` (MiB) | 0.44 / 0.42 / 0.42 | 0.44 | 0.44 / 0.42 / 0.44 | same (margin 0.0312) |
+| Peak memory, `VmHWM` (MiB) | 3.53 / 3.50 / 3.52 | 3.72 | 3.28 / 3.27 / 3.28 | better (margin 0.176) |
+| Idle wakeups per minute | 2 / 2 / 2 | 2 | 2 / 2 / 2 | same (margin 1) |
+| Idle CPU, 300 s window (ms) | 0.91 / 0.93 / 0.95 | 0.95 | 0.96 / 0.88 / 0.96 | same (margin 0.118) |
+| CPU, 240 workspace switches (ms) | 0.26 / 0.24 / 0.27 | 0.21 | 0.22 / 0.22 / 0.23 | same (margin 0.1) |
+| Size: binary + non-glibc `ldd` closure (B) | 1,383,080 | 1,645,256 | 1,645,256 | REGRESSED (accepted, 2026-10-01) |
+
+| Row, sway | `main` before M4 (3 runs) | the stack as merged | this PR (3 runs) | pooled verdict, this PR against `main` |
+|---|---|---|---|---|
+| Startup to first frame (ms) | 17.4 / 17.6 / 16.9 | 8.9 | 16.7 / 16.6 / 17.1 | same (margin 39.8) |
+| Idle RSS (MiB) | 3.52 / 3.52 / 3.53 | 3.69 | 3.34 / 3.34 / 3.33 | same (margin 0.176) |
+| Idle PSS (MiB) | 2.08 / 2.08 / 2.09 | 2.26 | 1.91 / 1.91 / 1.89 | better (margin 0.104) |
+| Idle heap, `RssAnon` (MiB) | 0.42 / 0.42 / 0.44 | 0.42 | 0.44 / 0.44 / 0.42 | same (margin 0.0312) |
+| Peak memory, `VmHWM` (MiB) | 3.52 / 3.52 / 3.53 | 3.69 | 3.34 / 3.34 / 3.33 | same (margin 0.176) |
+| Idle wakeups per minute | 2 / 2 / 2 | 2 | 2 / 2 / 2 | same (margin 1) |
+| Idle CPU, 300 s window (ms) | 0.85 / 0.67 / 0.65 | 0.82 | 0.80 / 0.65 / 0.73 | same (margin 0.355) |
+| CPU, 240 workspace switches (ms) | 0.23 / 0.23 / 0.22 | 0.15 | 0.18 / 0.17 / 0.23 | same (margin 0.1) |
+| Size: binary + non-glibc `ldd` closure (B) | 1,383,080 | 1,645,256 | 1,645,256 | REGRESSED (accepted, 2026-10-01) |
+
+- **What moved**: idle RSS 3.50 to 3.53 against **3.27 to 3.28 MiB**, idle PSS 2.04 to
+  2.06 against **1.79 to 1.81** (scoot; sway 2.08 to 2.09 against 1.89 to 1.91), peak
+  memory with them. Pooled, scoot's idle RSS, PSS and peak are **better** than `main`'s,
+  and sway's PSS is (RSS and peak there: the same). The stack as merged is what the
+  ticket was about: 3.72 and 2.25 on scoot, regressed by `compare` against every
+  `main` run (RSS, PSS and peak on scoot, PSS on sway).
+- **What did not move**: idle heap (0.42 to 0.44 MiB, one page either way), idle wakeups (2
+  a minute in every run, on both compositors), threads (1), startup, and the CPU of 240
+  switches (0.22 against `main`'s 0.24 to 0.27 ms). **Idle CPU**: scoot 0.91, 0.93, 0.95
+  for `main` and 0.96, 0.88, 0.96 for this PR, pooled **same** (margin 0.118); sway 0.85,
+  0.67, 0.65 and 0.80, 0.65, 0.73, pooled **same** (margin 0.355).
+- **`compare`, pairing by pairing** (nine of this PR's runs against `main`'s,
+  [all in the compares file](bench/m4-usage-compares.md)): every one exits 1 on the
+  **size row** alone, which was 1,383,080 B and is 1,645,256 B with this PR as with the
+  stack (+19.0%, accepted by the maintainer on 2026-10-01, not waived by this PR);
+  two of them, against `main`'s second and third runs, also flag **sway's idle CPU**
+  (0.7 ms against 0.8), a row on which `main`'s own three runs span 0.2 ms and which the
+  pooled verdict calls the same. Against the stack as merged, all three exit 0 with
+  idle RSS, PSS and peak **better** on both compositors.
+
+**The workspaces scope** (`--scope clock-workspaces`, scoot only, one run of each build
+against `main`'s two): idle RSS 3.28, PSS 1.77 for this PR against `main`'s 3.52 to
+3.53 and 2.02, and the stack's 3.72 and 2.22. The CPU of 240 workspace switches, which
+at this scope redraws the workspaces module each time (about 27 ms, not the 0.2 of the clock
+scope), is a finding the clock scope could not show: **the stack as merged costs 29.0 ms
+against `main`'s 27.3 and 27.8 (+5%, margin 1.4: regressed), and this PR's build 27.6,
+`main`'s.** Idle CPU there: 0.84 and 0.91 for `main`, 0.95 for this PR and the
+stack; the one `compare` that flags it (this PR against `main`'s first run, 0.8 against 1.0 ms,
+the 0.1 ms floor) does not against its rerun, and the pooled verdict is the same.
+
+**Is the ticket's bar met?** The acceptance bar was no row worse than `main`'s by more
+than the harness's noise margin on idle RSS, PSS, heap and idle CPU at scope clock, on scoot
+and sway, a pooled `verdict()` over at least three runs for the CPU row, `main`
+re-run beside it. **Met, with a margin the other way** (RSS and PSS better, the rest the same),
+for the build in this PR; wakeups stay at 2 a minute; no other row of the ratchet
+regresses. **The size row regressed against `main` before M4 and stays so**: the
+maintainer accepted that on 2026-10-01 (lightest's Decisions) and the ticket's own
+"Not in this ticket" says so; this PR neither moved nor waived it.
+
+**What this does not settle.** The order file was profiled and measured on
+aarch64 only; x86_64 builds link with it (CI builds and `check`s it there) and
+should save memory by the same mechanism, but that is unmeasured. The workspaces
+scope was measured on scoot only, one run of each build.

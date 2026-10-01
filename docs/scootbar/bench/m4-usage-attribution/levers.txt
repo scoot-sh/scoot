@@ -1,0 +1,66 @@
+Each variant started headless scoot and the bar (quick.sh in this directory: --right clock, the harness's look), 15 to 20 s after the first frame
+read /proc/PID/smaps_rollup and smaps. r-xp Rss is the scootbar executable mapping's; Pss_File is the file-backed total; Pss includes the memfd buffer, which is 104 or 208 kB by chance.
+The `smaps_rollup` of every run, and the `smaps` of each variant's first, are in lever-runs/. The "on top of the order file" variants (nopie, relr) were built with the file as it was then (445 patterns, before the always-listed families and the object sections were added).
+
+## base: main before M4, 98c4b7a32, release as the harness builds it
+  base1: r-xp Rss 960 kB, Rss 3408 kB, Pss 2208 kB, Pss_File 1656 kB, Pss_Anon 448 kB
+  base2: r-xp Rss 960 kB, Rss 3616 kB, Pss 2311 kB, Pss_File 1655 kB, Pss_Anon 448 kB
+  base3: r-xp Rss 960 kB, Rss 3408 kB, Pss 2207 kB, Pss_File 1655 kB, Pss_Anon 448 kB
+
+## tip: c9d2cd361 (the stack on main), same
+  tip1: r-xp Rss 1152 kB, Rss 3600 kB, Pss 2411 kB, Pss_File 1843 kB, Pss_Anon 464 kB
+  tip2: r-xp Rss 1152 kB, Rss 3600 kB, Pss 2403 kB, Pss_File 1851 kB, Pss_Anon 448 kB
+  tip3: r-xp Rss 1152 kB, Rss 3808 kB, Pss 2504 kB, Pss_File 1848 kB, Pss_Anon 448 kB
+
+## opts: tip + [profile.release.package.scootbar] opt-level = "s" (unstripped build)
+  opts1: r-xp Rss 1024 kB, Rss 3472 kB, Pss 2206 kB, Pss_File 1654 kB, Pss_Anon 448 kB
+  opts2: r-xp Rss 1024 kB, Rss 3680 kB, Pss 2310 kB, Pss_File 1654 kB, Pss_Anon 448 kB
+  opts3: r-xp Rss 1024 kB, Rss 3456 kB, Pss 2200 kB, Pss_File 1648 kB, Pss_Anon 448 kB
+
+## opt2: tip + [profile.release.package.scootbar] opt-level = 2 (unstripped build)
+  opt21: r-xp Rss 1088 kB, Rss 3552 kB, Pss 2284 kB, Pss_File 1716 kB, Pss_Anon 464 kB
+  opt22: r-xp Rss 1088 kB, Rss 3536 kB, Pss 2268 kB, Pss_File 1716 kB, Pss_Anon 448 kB
+
+## deps-s: tip + opt-level = "s" for toml, toml_parser, toml_datetime, serde_json, serde_core, serde (unstripped)
+  deps-s1: r-xp Rss 1216 kB, Rss 3680 kB, Pss 2416 kB, Pss_File 1848 kB, Pss_Anon 464 kB
+  deps-s2: r-xp Rss 1216 kB, Rss 3664 kB, Pss 2396 kB, Pss_File 1844 kB, Pss_Anon 448 kB
+  deps-s3: r-xp Rss 1216 kB, Rss 3664 kB, Pss 2398 kB, Pss_File 1846 kB, Pss_Anon 448 kB
+
+## cgu: tip + [profile.release.package.scootbar] codegen-units = 16 (unstripped)
+  cgu1: r-xp Rss 1216 kB, Rss 3664 kB, Pss 2475 kB, Pss_File 1907 kB, Pss_Anon 464 kB
+  cgu2: r-xp Rss 1216 kB, Rss 3872 kB, Pss 2571 kB, Pss_File 1915 kB, Pss_Anon 448 kB
+  cgu3: r-xp Rss 1216 kB, Rss 3648 kB, Pss 2459 kB, Pss_File 1907 kB, Pss_Anon 448 kB
+
+## bfdord: tip + GNU ld --section-ordering-file with the exact mangled names of the tip build (unstripped; not portable to the Nix build, 182 of 235 names differ)
+  bfdord1: r-xp Rss 576 kB, Rss 3040 kB, Pss 1772 kB, Pss_File 1204 kB, Pss_Anon 464 kB
+  bfdord2: r-xp Rss 576 kB, Rss 3024 kB, Pss 1756 kB, Pss_File 1204 kB, Pss_Anon 448 kB
+  bfdord3: r-xp Rss 640 kB, Rss 3280 kB, Pss 1920 kB, Pss_File 1264 kB, Pss_Anon 448 kB
+
+## glob: tip + the same file as globs, an earlier profile (unstripped)
+  glob1: r-xp Rss 640 kB, Rss 3072 kB, Pss 1816 kB, Pss_File 1264 kB, Pss_Anon 448 kB
+  glob2: r-xp Rss 640 kB, Rss 3088 kB, Pss 1820 kB, Pss_File 1268 kB, Pss_Anon 448 kB
+  glob3: r-xp Rss 640 kB, Rss 3296 kB, Pss 1924 kB, Pss_File 1268 kB, Pss_Anon 448 kB
+
+## xtip: tip built with --cfg rustix_use_libc (the variant valgrind can run) + gold --section-ordering-file, exact names (indicative only: not the shipped backend)
+  xtip1: r-xp Rss 576 kB, Rss 3088 kB, Pss 1840 kB, Pss_File 1288 kB, Pss_Anon 448 kB
+  xtip2: r-xp Rss 576 kB, Rss 3104 kB, Pss 1859 kB, Pss_File 1291 kB, Pss_Anon 464 kB
+  xtip3: r-xp Rss 576 kB, Rss 3088 kB, Pss 1843 kB, Pss_File 1291 kB, Pss_Anon 448 kB
+
+## lldplain: the same libc-backend variant linked by lld, no order file (indicative only)
+  lldplain1: r-xp Rss 960 kB, Rss 3664 kB, Pss 2459 kB, Pss_File 1875 kB, Pss_Anon 480 kB
+  lldplain2: r-xp Rss 960 kB, Rss 3680 kB, Pss 2463 kB, Pss_File 1879 kB, Pss_Anon 480 kB
+
+## lldord: the same libc-backend variant, lld --symbol-ordering-file with exact names (indicative only)
+  lldord1: r-xp Rss 320 kB, Rss 3024 kB, Pss 1808 kB, Pss_File 1240 kB, Pss_Anon 464 kB
+  lldord2: r-xp Rss 576 kB, Rss 3472 kB, Pss 2163 kB, Pss_File 1491 kB, Pss_Anon 464 kB
+
+## nopie: on top of the order file: RUSTFLAGS=-C relocation-model=static
+  nopie1: r-xp Rss 576 kB, Rss 2992 kB, Pss 1724 kB, Pss_File 1204 kB, Pss_Anon 416 kB
+  nopie2: r-xp Rss 576 kB, Rss 3008 kB, Pss 1740 kB, Pss_File 1204 kB, Pss_Anon 432 kB
+  nopie3: r-xp Rss 576 kB, Rss 3200 kB, Pss 1828 kB, Pss_File 1204 kB, Pss_Anon 416 kB
+
+## relr: on top of the order file: RUSTFLAGS=-C link-arg=-Wl,-z,pack-relative-relocs
+  relr1: r-xp Rss 512 kB, Rss 2976 kB, Pss 1710 kB, Pss_File 1142 kB, Pss_Anon 464 kB
+  relr2: r-xp Rss 512 kB, Rss 2944 kB, Pss 1688 kB, Pss_File 1136 kB, Pss_Anon 448 kB
+  relr3: r-xp Rss 512 kB, Rss 3152 kB, Pss 1792 kB, Pss_File 1136 kB, Pss_Anon 448 kB
+

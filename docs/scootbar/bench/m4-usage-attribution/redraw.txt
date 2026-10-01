@@ -1,0 +1,9 @@
+tip {"bar": "/home/steve/code/m4u/t-tip/release/scootbar", "sets": 3000, "us_per_set": [84.6, 81.8, 84.0, 75.9, 82.6], "median_us": 82.6, "rss_kb": 3904}
+opts {"bar": "/home/steve/code/m4u/tu-opts/release/scootbar", "sets": 3000, "us_per_set": [110.8, 107.8, 107.2, 107.4, 108.7], "median_us": 107.8, "rss_kb": 3744}
+opt2 {"bar": "/home/steve/code/m4u/tu-opt2/release/scootbar", "sets": 3000, "us_per_set": [97.4, 102.6, 95.0, 96.9, 94.8], "median_us": 96.9, "rss_kb": 3888}
+cand {"bar": "/home/steve/code/m4u/t-cand/release/scootbar", "sets": 3000, "us_per_set": [84.7, 83.8, 81.9, 82.9, 81.4], "median_us": 82.9, "rss_kb": 3584}
+tip {"bar": "/home/steve/code/m4u/t-tip/release/scootbar", "sets": 3000, "us_per_set": [71.6, 83.9, 82.5, 81.4, 81.1], "median_us": 81.4, "rss_kb": 3904}
+opts {"bar": "/home/steve/code/m4u/tu-opts/release/scootbar", "sets": 3000, "us_per_set": [110.4, 107.4, 106.1, 107.1, 107.1], "median_us": 107.1, "rss_kb": 3744}
+opt2 {"bar": "/home/steve/code/m4u/tu-opt2/release/scootbar", "sets": 3000, "us_per_set": [97.6, 95.2, 96.0, 94.4, 97.5], "median_us": 96.0, "rss_kb": 3904}
+cand {"bar": "/home/steve/code/m4u/t-cand/release/scootbar", "sets": 3000, "us_per_set": [85.4, 77.2, 85.5, 83.1, 85.4], "median_us": 85.4, "rss_kb": 3584}
+REDRAWDONE

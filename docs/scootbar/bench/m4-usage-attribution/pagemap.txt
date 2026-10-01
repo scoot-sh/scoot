@@ -1,0 +1,8 @@
+The r-xp mapping of the scootbar executable, one character per 16 KiB page (1 = resident), read from /proc/PID/pagemap 20 s after the first frame (text.pagemap of each run). The kernel's fault-around maps four pages (64 KiB) at a time, aligned: read each row in groups of four. The mapping is the file from offset 0: ELF headers and .rela.dyn (pages 0 to 4), .text, then .rodata, .eh_frame_hdr and .eh_frame; the ELF's section tables put .text at pages 3 to 60 (main) and 4 to 71 (the tip), see `readelf -SW`.
+
+base1 (74 pages, 60 resident = 960 kB):
+  1111 1111 1111 0000 1111 1111 1111 1111 1111 1111 1111 1111 0000 1111 1111 1111 1111 0000 00
+tip1 (87 pages, 72 resident = 1152 kB):
+  1111 1111 1111 1111 0000 1111 1111 1111 1111 1111 1111 1111 1111 1111 1111 0000 1111 1111 1111 1111 0000 000
+cand1 (87 pages, 40 resident = 640 kB):
+  1111 1111 1111 1111 1111 1111 0000 0000 0000 1111 0000 0000 0000 0000 0000 0000 0000 1111 1111 1111 0000 000

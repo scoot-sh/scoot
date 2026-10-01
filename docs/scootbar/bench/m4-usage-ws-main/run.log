@@ -1,0 +1,28 @@
+[15:34:39] scoot scootbar startup r1 ok {'latency_ms': 33.03}
+[15:34:39] scoot scootbar startup r2 ok {'latency_ms': 34.22}
+[15:34:39] scoot scootbar startup r3 ok {'latency_ms': 36.53}
+[15:34:39] scoot scootbar startup r4 ok {'latency_ms': 42.88}
+[15:34:39] scoot scootbar startup r5 ok {'latency_ms': 33.81}
+[15:34:39] scoot scootbar idle    r1 ok {'rss_kb': 3616, 'pss_kb': 2068, 'wakeups_per_min': 2.0, 'idle_cpu_ms': 0.84, 'switch_cpu_ms': 27.29}
+**On scoot** (scoot 0.1.0 (ipc protocol 5))
+
+| Row | scootbar |
+|---|---|
+| Size: stripped binary + non-glibc `ldd` closure (bytes) | 1,383,080 |
+| Bare executable, stripped (bytes) *(not gated)* | 1,249,984 |
+| Startup to first frame (ms) | 34.2 [33.0–42.9] |
+| Idle RSS (MiB) | 3.5 |
+| Idle PSS (MiB) | 2.0 |
+| Idle heap (`RssAnon`) (MiB) | 0.4 |
+| Peak memory (`VmHWM`) (MiB) | 3.5 |
+| Idle wakeups per minute | 2 |
+| Idle CPU in the window (ms) | 0.8 |
+| CPU while switching workspaces (ms) | 27.3 |
+| Wakeups while switching workspaces *(not gated)* | 482 |
+| Threads *(not gated)* | 1 |
+
+Machine, 12 readings around the runs: governor schedutil; cpufreq policy cap below the hardware maximum in 0; current frequency seen 600 to 3204 MHz; a mains supply offline in 0 of them; hwmon temperatures 22 to 26 C.
+
+scootbar's code: 25,643 lines of Rust in `crates/scootbar/src`, 16,564 outside `tests.rs` files; 10 direct dependencies on Linux (ab_glyph, png, rustix, scootbg-mem, serde, serde_json, toml, wayland-client, wayland-protocols, wayland-protocols-wlr).
+
+Gate (no competitor beats scootbar): 0 loss(es).

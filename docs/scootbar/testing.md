@@ -640,6 +640,66 @@ flag when a row has a single idle sample). M3's is
 as the published M1 record, and its table is in the
 [README](README.md#m1-like-for-like-by-the-benchmark-script).
 
+## Redraw cost
+
+The harness has no row for the cost of *drawing*: its bars idle, and its
+switching row redraws two workspace pills. `scripts/scootbar-bench/redraw.py`
+is the row for a change that touches code generation or the paint path (a
+codegen profile, the glyph cache, the compositing loops):
+
+```sh
+python3 scripts/scootbar-bench/redraw.py --scoot target/release/scoot \
+  --scootbar target/release/scootbar --font /path/to/DejaVuSans.ttf   # one JSON line
+```
+
+A headless scoot and a bar with the workspaces, a `push` module and the
+clock; 3000 `scootbar msg set`s over the control socket, each a different
+32-character text and each waited for, so each is one turn of the loop and
+one full redraw. It prints the bar's CPU time per set (`/proc/PID/schedstat`)
+for each of five rounds and their median, and the bar's RSS. Run it for each
+build, alternating (A B A B); the unit tests cover its inputs only. A build
+before M4 has no `push` module and cannot be given its config.
+
+## The hot-text order file
+
+`crates/scootbar/orderfile/hot-text.ld` lists the functions a running bar
+executes, in the order they first run, and `crates/scootbar/build.rs` hands it
+to the linker (GNU ld's `--section-ordering-file`, binutils 2.43 and later), so
+they sit in one stretch of `.text` instead of in every 64 KiB of it. Why it
+matters, what it saves and what it cannot reach:
+[the README](README.md#m4-usage-optimization). `build.rs` passes the flag only
+after a trial link with this file has worked, so another linker (lld, mold,
+gold) or an older binutils links as it always did; `SCOOTBAR_NO_ORDERFILE=1`
+turns it off to see what the layout costs.
+
+**Regenerating it** after the code changes much (a new module, or a refactor
+that renames what the bar runs: a function that is no longer listed falls back
+to wherever the linker put it, so the file decays by degrees, never breaks):
+
+```sh
+CARGO_PROFILE_RELEASE_STRIP=false SCOOTBAR_NO_ORDERFILE=1 cargo build --release -p scootbar
+cargo build --release -p scoot -p scootctl
+scripts/scootbar-orderfile/orderfile.py gen \
+  --scootbar target/release/scootbar --scoot target/release/scoot --scootctl target/release/scootctl \
+  --font /path/to/DejaVuSans.ttf --foot-bin "$(command -v foot)" --fonts-dir /path/to/dejavu
+```
+
+The build it profiles must be the tree's own (the names carry hashes and the
+inlining shifts with the code), unstripped, and without the order file. It runs
+the bar under `qemu-user` (the machine's own architecture) in four scenarios
+(the bench's idle clock across a minute, the same with a longer text, workspaces
+with windows, the pointer and `msg`, and a config with a button and a `push`
+module), reads which functions executed, and writes them as globs, because the
+names embed crate hashes that differ between a `cargo build` and the Nix build.
+`scripts/scootbar-orderfile/orderfile.py check --binary B` says how many
+patterns land in an unstripped build made with the file; with `--profile` it
+also runs the idle scenario and lists what ran that no pattern lists. CI runs
+the first on the release build and the tool's unit tests
+(`python3 -m unittest discover -s scripts/scootbar-orderfile -p 'test_*.py'`).
+`build.rs` has unit tests too, which Cargo does not run for a build script:
+`rustc --edition 2024 --test crates/scootbar/build.rs -o /tmp/t && /tmp/t` (CI
+does).
+
 ## Not covered
 
 - **Real hardware**: every run above is headless and pixman. Suspend and
