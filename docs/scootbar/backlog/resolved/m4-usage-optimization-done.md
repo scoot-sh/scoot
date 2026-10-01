@@ -138,7 +138,7 @@ and `pagemap` evidence [`m4-usage-attribution`](../../bench/m4-usage-attribution
   target, rustflags and configured linker, release builds only, with triggers on
   everything it rests on; on the fixed tree all three build. Per linker and the design
   choice (on by default, not opt-in): [the README](../../README.md#the-order-file).
-  The decision costs one 0.12 s probe (aarch64 M2) when `PATH`, the compiler, the linker
+  The decision costs two 0.12 s links of a one-line program (aarch64 M2, timed by hand) when `PATH`, the compiler, the linker
   settings or the rustflags change, and a recompile of scootbar then.
 - **Acceptance bar: met.** Idle RSS, PSS and peak better than `main`'s, heap and idle CPU
   the same (pooled `verdict()` over three runs a side, scoot and sway, `main` re-run

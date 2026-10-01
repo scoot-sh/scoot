@@ -680,9 +680,9 @@ links as it always did, and the decision is made again when `PATH`, the
 compiler, the linker settings or the rustflags change. `SCOOTBAR_NO_ORDERFILE=1`
 turns it off to see what the layout costs, and `SCOOTBAR_ORDERFILE_VERBOSE=1`
 makes the build say, as a `cargo:warning`, whether the file was applied and, if
-not, why (per linker, in [the README](README.md#the-order-file)). gold accepts the
-option and does nothing with it; `check` below is how a build is known to have
-the layout.
+not, why (per linker, in [the README](README.md#the-order-file); gold takes the
+option but not as an order file, and a second probe with a file that is none
+skips it). `check` below is how a build is known to have the layout.
 
 **Regenerating it** after the code changes much (a new module, or a refactor
 that renames what the bar runs: a function that is no longer listed falls back

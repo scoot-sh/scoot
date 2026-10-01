@@ -920,8 +920,11 @@ the linker driver's own file, and the two switches below (a PATH change that
 reaches a different linker would otherwise keep the answer given for the old one,
 and a flag-refusing linker would then fail the real link). The price is that a
 release build after any of those changes recompiles scootbar (about 18 s on the
-M2) and runs a probe that takes 0.12 s (two when the linker refuses, to tell a
-refusal from a broken probe). **Whether the file was applied**, per linker on the
+M2) and runs the probe: `rustc` compiling and linking the same one-line program
+took 0.12 s there (timed by hand, not inside the script), and the script links it
+twice when the linker takes the option (the file, then a control) and twice when it
+refuses (the file, then a baseline without it, to tell a refusal from a broken
+probe). **Whether the file was applied**, per linker on the
 Asahi M2 (aarch64; GNU ld 2.46, gold 1.16, lld 21.1.8, mold 2.42.1):
 
 | linker | `build.rs` | why |
@@ -929,7 +932,7 @@ Asahi M2 (aarch64; GNU ld 2.46, gold 1.16, lld 21.1.8, mold 2.42.1):
 | GNU ld (bfd, `cc` default) | applied | takes `--section-ordering-file` from binutils 2.43 |
 | `-fuse-ld=lld`, and `rust-lld` as rustc's default linker | skipped | `unknown argument` (its `--symbol-ordering-file` takes exact names, which the Nix package's do not match) |
 | `-fuse-ld=mold` | skipped | `unknown`: mold has no equivalent of the option (`--section-order` is another mechanism) |
-| `-fuse-ld=gold` | **applied, and no use** | gold accepts the option and reads it as a list of section names, not this file's linker-script syntax: the probe cannot tell a no-op from a use, the build is unharmed, the memory is not saved |
+| `-fuse-ld=gold` | skipped (by the control probe) | gold takes the option too, as a list of section names rather than a linker script, and accepts a file that is none; given the real file it laid the bar out differently for no saving (17 64 KiB windows of hot code against 16 without it, GNU ld's is 8), so the build script links a file that is no order file as well and skips a linker that takes that |
 | GNU ld before 2.43 | skipped | `unrecognized option` (not run: a stand-in `cc` that refuses the option; ld 2.43 is where it appears per the binutils changelog) |
 
 So on a mold, lld or gold box the bar costs about 0.45 MiB more than the numbers
