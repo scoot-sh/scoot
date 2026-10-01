@@ -21,8 +21,11 @@
 //! `link-self-contained`) means what it means for the bar. A linker without
 //! the option (binutils before 2.43, lld, mold) fails the probe and the bar
 //! links as it always did, as it does for a file the linker will not read.
-//! gold takes the option as a no-op. The decision is made again whenever
-//! what it rests on changes: see [`triggers`].
+//! A second probe hands it a file that is no order file: gold takes the
+//! option too, as a list of section names, and accepts anything while doing
+//! nothing with ours, so a linker that takes the control as well is skipped.
+//! The decision is made again whenever what it rests on changes: see
+//! [`triggers`].
 //!
 //! Visible, never silent when something is wrong: a probe that cannot link
 //! even without the flag (a broken toolchain, which the real link will report
@@ -202,14 +205,47 @@ fn decide() -> Decision {
         target,
         linker: env::var("RUSTC_LINKER").ok(),
         flags: env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default(),
-        dir: out,
+        dir: out.clone(),
     };
-    let flag = format!("-Wl,--section-ordering-file={path}");
-    match probe.links(Some(&flag)) {
-        Ok(()) => Decision::Apply(flag),
+    // The control: a file that is not an order file at all. GNU ld reads the
+    // option as a linker script and refuses this; gold takes the same option
+    // as a list of section names, accepts anything and does nothing with ours.
+    let control = out.join("not-an-order-file.ld");
+    let control = fs::write(&control, CONTROL).ok().and_then(|()| {
+        control
+            .to_str()
+            .filter(|path| !path.contains(','))
+            .map(String::from)
+    });
+    let Some(control) = control else {
+        return skip("a control file cannot be written");
+    };
+    verdict(&probe, &flag_for(path), &flag_for(&control))
+}
+
+/// The link argument that gives the linker `path` as an order file.
+fn flag_for(path: &str) -> String {
+    format!("-Wl,--section-ordering-file={path}")
+}
+
+/// What is not a linker script, for the control probe.
+const CONTROL: &str = "this is not an order file }}} {{{ .text : ( ;\n";
+
+/// Probes `flag` (the real file), and when the linker takes it, `control` (a
+/// file that is no order file): a linker that takes both is not reading what
+/// it is given, so the real file would do nothing.
+fn verdict(probe: &Probe, flag: &str, control: &str) -> Decision {
+    match probe.links(Some(flag)) {
+        Ok(()) => match probe.links(Some(control)) {
+            Err(_) => Decision::Apply(flag.to_string()),
+            Ok(()) => Decision::Skip(
+                "the linker takes the option but not as an order file: it accepts a file that is none"
+                    .to_string(),
+            ),
+        },
         // Refused. Is it the flag, or the probe?
         Err(refused) => match probe.links(None) {
-            Ok(()) => skip(&format!("the linker does not take the option ({refused})")),
+            Ok(()) => Decision::Skip(format!("the linker does not take the option ({refused})")),
             Err(broken) => Decision::Broken(format!(
                 "a one-line program does not link even without it, so nothing is known about the linker ({broken})"
             )),
@@ -432,6 +468,9 @@ mod tests {
             vec!["-Clink-arg=-fuse-ld=lld".to_string()],
             vec!["--codegen".to_string(), "link-arg=-fuse-ld=lld".to_string()],
             vec!["--codegen=link-arg=-fuse-ld=lld".to_string()],
+            vec!["-C".to_string(), "link-arg=-fuse-ld=mold".to_string()],
+            vec!["-C".to_string(), "link-arg=-fuse-ld=gold".to_string()],
+            vec!["-C".to_string(), "link-arg=-fuse-ld=bfd".to_string()],
         ]
         .iter()
         .enumerate()
@@ -448,13 +487,77 @@ mod tests {
             };
             assert!(p.links(Some("-Wl,--section-ordering-file=/x")).is_err());
             let log = logged(&dir);
+            let wanted = spelling
+                .last()
+                .unwrap()
+                .rsplit('=')
+                .next()
+                .unwrap()
+                .to_string();
             assert!(
-                log.iter().any(|a| a == "-fuse-ld=lld"),
+                log.iter().any(|a| *a == format!("-fuse-ld={wanted}")),
                 "spelling {i} {spelling:?}: {log:?}"
             );
             assert!(log.iter().any(|a| a == "-Wl,--section-ordering-file=/x"));
             let _ = fs::remove_file(dir.join("log"));
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A linker driver that refuses an argument containing `needle` and
+    /// accepts everything else, making its output file.
+    fn picky_linker(dir: &Path, needle: &str) -> PathBuf {
+        let path = dir.join("picky-linker");
+        fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nfor a in \"$@\"; do case \"$a\" in *{needle}*) exit 1;; esac; done\n\
+                 prev=; for a in \"$@\"; do [ \"$prev\" = -o ] && : >\"$a\"; prev=$a; done\nexit 0\n"
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    fn through(linker: &Path, dir: &Path) -> Probe {
+        Probe {
+            flags: ["-C".to_string(), format!("linker={}", linker.display())].join("\x1f"),
+            dir: dir.to_path_buf(),
+            ..probe(&[])
+        }
+    }
+
+    #[test]
+    fn a_linker_that_reads_the_file_gets_it_and_one_that_reads_nothing_does_not() {
+        let dir = scratch("verdict-control");
+        let (good, bad) = (
+            "-Wl,--section-ordering-file=/real",
+            "-Wl,--section-ordering-file=/control",
+        );
+        // GNU ld: takes the real file, refuses a file that is no script.
+        let gnu = picky_linker(&dir, "/control");
+        assert_eq!(
+            verdict(&through(&gnu, &dir), good, bad),
+            Decision::Apply(good.into())
+        );
+        // gold: takes the option, whatever the file: a no-op for ours.
+        let gold = dir.join("gold");
+        fs::copy(fake_linker(&dir, 0), &gold).unwrap();
+        assert!(
+            matches!(verdict(&through(&gold, &dir), good, bad), Decision::Skip(why) if why.contains("not as an order file"))
+        );
+        // lld, mold: refuse the option outright.
+        let lld = picky_linker(&dir, "section-ordering-file");
+        assert!(
+            matches!(verdict(&through(&lld, &dir), good, bad), Decision::Skip(why) if why.contains("does not take the option"))
+        );
+        // A linker that cannot link anything: the probe is broken, say so.
+        let broken = fake_linker(&dir, 1);
+        assert!(matches!(
+            verdict(&through(&broken, &dir), good, bad),
+            Decision::Broken(_)
+        ));
         let _ = fs::remove_dir_all(&dir);
     }
 
