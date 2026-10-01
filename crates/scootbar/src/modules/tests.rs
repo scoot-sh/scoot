@@ -54,7 +54,7 @@ impl Module for Counter {
 }
 
 fn counter() -> (Harness, OwnedFd) {
-    let (read, write) = rustix::pipe::pipe().unwrap();
+    let (read, write) = rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC).unwrap();
     rustix::fs::fcntl_setfl(&read, rustix::fs::OFlags::NONBLOCK).unwrap();
     (Harness::new(Box::new(Counter { read, count: 0 })), write)
 }
@@ -216,7 +216,7 @@ fn unavailable(_: &Settings) -> Init {
 /// The counter as its stand-in: a pipe whose writer is gone, so reading it
 /// finds the end of the file.
 fn counter_stand_in(_: &Settings) -> Box<dyn Module> {
-    let (read, _write) = rustix::pipe::pipe().unwrap();
+    let (read, _write) = rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC).unwrap();
     rustix::fs::fcntl_setfl(&read, rustix::fs::OFlags::NONBLOCK).unwrap();
     Box::new(Counter { read, count: 0 })
 }
@@ -436,7 +436,7 @@ fn a_view_is_bounded_and_cut_on_a_character() {
 
 #[test]
 fn sources_past_the_capacity_are_not_polled() {
-    let (read, _write) = rustix::pipe::pipe().unwrap();
+    let (read, _write) = rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC).unwrap();
     let placeholder = rustix::fs::CWD;
     let mut fds = [
         PollFd::from_borrowed_fd(placeholder, PollFlags::empty()),
@@ -453,7 +453,7 @@ fn sources_past_the_capacity_are_not_polled() {
 
 #[test]
 fn a_change_bumps_the_revision_and_nothing_else_does() {
-    let (read, write) = rustix::pipe::pipe().unwrap();
+    let (read, write) = rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC).unwrap();
     rustix::fs::fcntl_setfl(&read, rustix::fs::OFlags::NONBLOCK).unwrap();
     let mut placed = Placed {
         bindings: Default::default(),
