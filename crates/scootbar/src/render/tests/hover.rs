@@ -310,3 +310,35 @@ fn member_at_holds_the_left_edge_and_not_the_right() {
     assert_eq!(bar.scene.member_at(WIDTH), None);
     assert_eq!(bar.scene.member_at(u32::MAX), None);
 }
+
+#[test]
+fn a_warm_hover_allocates_nothing() {
+    // A hover is the pointer's hot path: a repaint per module entered or
+    // left, at the rate the pointer moves. After the first draw (which
+    // sizes the pooled vectors) nothing is allocated.
+    let mut bar = bar(&[(Section::Left, "1:00"), (Section::Right, "7:07")]);
+    let mut drawn = Drawn::new(2);
+    drawn.draw(&mut bar);
+    let spans = bar.scene.spans().to_vec();
+    // Warm: one hover each way.
+    for span in [spans[0], spans[1]] {
+        bar.scene.set_pointer(Some(middle(span)));
+        drawn.draw(&mut bar);
+    }
+    let ((), allocations) = scootbg_mem::count_allocations(|| {
+        for round in 0..100 {
+            let x = match round % 3 {
+                0 => middle(spans[0]),
+                1 => middle(spans[1]),
+                _ => 0,
+            };
+            bar.scene.set_pointer(Some(x));
+            let _ = bar.scene.stale(&bar.placed, &drawn.shown);
+            let _ = bar.scene.member_at(x);
+            drawn.draw(&mut bar);
+        }
+        bar.scene.set_pointer(None);
+        drawn.draw(&mut bar);
+    });
+    assert_eq!(allocations, 0);
+}

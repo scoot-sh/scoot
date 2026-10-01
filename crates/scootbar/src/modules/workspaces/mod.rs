@@ -81,10 +81,19 @@ mod tests;
 /// The id `--left`, `--center` and `--right` name it by.
 pub const ID: &str = "workspaces";
 
-/// The actions a binding may name (`activate 3`, `previous`, `next`).
+/// The actions a binding may name (`activate 3`, `activate-position 1`,
+/// `previous`, `next`).
 pub const ACTIONS: &[ActionSpec] = &[
+    // By the number shown: what a user means by "workspace 3".
     ActionSpec {
         name: "activate",
+        arg: ArgKind::Required,
+    },
+    // By place in the list as drawn, 1 first: the click's own, exact even
+    // where two items show the same number (an adopted `"2 DP-1"` beside a
+    // native 2).
+    ActionSpec {
+        name: "activate-position",
         arg: ArgKind::Required,
     },
     ActionSpec {
@@ -691,8 +700,10 @@ impl Workspaces {
 
 /// What an `invoke`d action asks of the workspaces.
 enum Op {
-    /// Switch to the workspace showing this number.
+    /// Switch to the first workspace showing this number.
     Activate(i32),
+    /// Switch to the workspace at this place in the list as drawn, 1 first.
+    Position(i32),
     /// Move the active one by the step count: forward or back.
     Step(bool),
 }
@@ -852,8 +863,8 @@ impl Module for Workspaces {
         self.write_view(output, view);
     }
 
-    /// A click on one of this output's pills means `activate` for that
-    /// workspace's number. Anything else (no group here, past the items,
+    /// A click on one of this output's pills means `activate-position` for
+    /// the place it landed on. Anything else (no group here, past the items,
     /// the active pill itself, any other input) means nothing: a scroll
     /// has no default here (`previous` and `next` are for a binding).
     fn on_input(&self, input: &Input<'_>) -> Option<Action> {
@@ -898,14 +909,18 @@ impl Module for Workspaces {
             // Already there: the compositor would no-op, so ask for nothing.
             return None;
         }
+        // By position, not number: two items can show one number, and the
+        // click is for the one it landed on.
+        let position = i32::try_from(hit).unwrap_or(i32::MAX).saturating_add(1);
         Some(Action::Module(ModuleAction::new(
-            "activate",
-            Some(shown_number(ws, hit)),
+            "activate-position",
+            Some(position),
         )))
     }
 
     /// `activate N` switches to the workspace showing number `N` on
-    /// `output`; `previous` and `next` move the active one by `steps`
+    /// `output` (the first, if two show it), `activate-position N` to the
+    /// `N`th as drawn; `previous` and `next` move the active one by `steps`
     /// places, stopping at the ends (no wrap). The view changes when the
     /// compositor answers with a `done`, reported through
     /// [`Module::on_dispatch`], so these never report `Changed`.
@@ -919,19 +934,14 @@ impl Module for Workspaces {
         // or number is an error whatever the compositor is doing.
         let op = match (&*action.name, action.arg) {
             ("activate", Some(number)) => Op::Activate(number),
-            ("activate", None) => return Err(InvokeError::NeedsArg),
+            ("activate-position", Some(position)) => Op::Position(position),
+            ("activate" | "activate-position", None) => return Err(InvokeError::NeedsArg),
             ("previous" | "next", Some(_)) => return Err(InvokeError::NoArg),
             ("previous", None) => Op::Step(false),
             ("next", None) => Op::Step(true),
             _ => return Err(InvokeError::Unknown),
         };
         let shared = self.link.0.borrow();
-        // A dead manager (the compositor sent `finished`) takes no request:
-        // one past it is a protocol error, which would kill the bar. The
-        // module shows the last thing it knew, and nothing is sent.
-        let (Some(manager), true) = (shared.manager.clone(), shared.live) else {
-            return Ok(Update::Unchanged);
-        };
         let Some(group_index) = shared.committed_for(output.name) else {
             return Err(InvokeError::Refused("no workspaces on this output"));
         };
@@ -943,6 +953,13 @@ impl Module for Workspaces {
                 .enumerate()
                 .position(|(index, ws)| shown_number(ws, index) == number)
                 .ok_or(InvokeError::Refused("no workspace has that number here"))?,
+            Op::Position(position) => usize::try_from(position)
+                .ok()
+                .and_then(|position| position.checked_sub(1))
+                .filter(|&index| index < committed.len())
+                .ok_or(InvokeError::Refused(
+                    "no workspace is at that position here",
+                ))?,
             Op::Step(forward) => {
                 let Some(active) = committed.iter().position(|ws| ws.active) else {
                     return Ok(Update::Unchanged);
@@ -956,6 +973,13 @@ impl Module for Workspaces {
                     active.saturating_sub(steps)
                 }
             }
+        };
+        // The action was valid; whether anything can be sent is next. A dead
+        // manager (the compositor sent `finished`) takes no request: one
+        // past it is a protocol error, which would kill the bar. The
+        // module shows the last thing it knew, and nothing is sent.
+        let (Some(manager), true) = (shared.manager.clone(), shared.live) else {
+            return Ok(Update::Unchanged);
         };
         let ws = &committed[target];
         if ws.active {

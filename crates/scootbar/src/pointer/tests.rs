@@ -467,3 +467,34 @@ fn a_clock_that_runs_backwards_does_not_panic() {
             .is_some()
     );
 }
+
+#[test]
+fn the_warm_pointer_allocates_nothing() {
+    // Input is the hot path: every event, from a mouse at 1 kHz or a
+    // touchpad at 120 Hz, goes through here.
+    let (mut pointer, a, _) = focused();
+    let here = target(a, 1);
+    let t0 = Instant::now();
+    let ((), allocations) = scootbg_mem::count_allocations(|| {
+        for round in 0..200u32 {
+            let x = f64::from(round);
+            pointer.enter(a, x, 5.0);
+            pointer.motion(x + 1.0, 6.0);
+            pointer.press(LEFT, Some(here));
+            let _ = pointer.release(LEFT, Some(here));
+            pointer.axis(15.0);
+            pointer.axis_discrete(1);
+            pointer.axis_value120(-120);
+            pointer.axis_stop();
+            pointer.frame();
+            let _ = pointer.scroll_waiting();
+            let _ = pointer.take_scroll(t0 + SCROLL_FRAME * round);
+            let _ = pointer.scroll_wait(t0);
+            pointer.disarm();
+            pointer.forget(a);
+            let _ = pointer.focus();
+            pointer.leave();
+        }
+    });
+    assert_eq!(allocations, 0);
+}

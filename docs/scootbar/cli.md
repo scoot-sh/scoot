@@ -398,8 +398,11 @@ on-click = { scoot = "quit" }                    # a request to scoot's control 
   typo is a refusal naming the key and listing what the module has), and
   optionally take one whole number. The `clock` has none; `workspaces` has
   `activate N` (switch to the workspace showing number `N` on that bar's
-  output), `previous` and `next` (move the active one, stopping at the
-  ends; a scroll of several notches moves that many places).
+  output, the first if two show it), `activate-position N` (the `N`th as
+  drawn, 1 first: what a click on a number means, exact even where two
+  items show one number, such as an adopted `2 DP-1` beside a native 2),
+  `previous` and `next` (move the active one, stopping at the ends; a
+  scroll of several notches moves that many places).
 - **`exec`** is an array, the command then its arguments, at most 32 of
   them of at most 4096 bytes each, none holding a NUL. **It is never run
   through a shell**; write `["sh", "-c", "..."]` to use one, and the
@@ -458,8 +461,9 @@ draws its own pill, and is not tinted either).
 has a binding or a default of its own (today: the workspaces module).
 A clock-only bar with no bindings never takes the pointer, and costs what
 it did before there was any input. A reload that adds or removes bindings
-takes or drops it. A motion event stores two numbers; nothing on an
-input path allocates.
+takes or drops it. A motion event stores two numbers; no pointer event,
+hover repaint or module action allocates (tests count the allocations).
+Launching an `exec` command does, as any process spawn must.
 
 ## Fonts
 
@@ -795,8 +799,9 @@ removes (a surface, a buffer, an input region and pointer events that wake
 the daemon). It was **decided against for now, not measured**: the cost
 that matters (a sensing strip's pages and its pointer wakeups) would only
 be worth paying if the strip could beat a key bind that toggles the bar
-(above), which costs nothing when unused, and pointer input on the bar is
-still minimal (`pointer-and-interactions`). Revisit it with that item.
+(above), which costs nothing when unused. Pointer input on the bar exists
+now ([Pointer input](#pointer-input)), so the strip's cost could be
+measured; it has not been, and the decision stands until it is.
 
 ## Margins
 

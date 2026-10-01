@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::*;
 use crate::modules::{Module, Sources};
 use rustix::event::PollFlags;
@@ -5,7 +7,7 @@ use rustix::event::PollFlags;
 /// A module that counts what it is asked, with two actions.
 #[derive(Default)]
 struct Probe {
-    invoked: Vec<(String, Option<i32>, u32)>,
+    invoked: Vec<(Cow<'static, str>, Option<i32>, u32)>,
     change: bool,
 }
 
@@ -23,7 +25,7 @@ impl Module for Probe {
     ) -> Result<Update, InvokeError> {
         match &*action.name {
             "bump" => {
-                self.invoked.push(("bump".into(), action.arg, steps));
+                self.invoked.push((action.name.clone(), action.arg, steps));
                 Ok(if self.change {
                     Update::Changed
                 } else {
@@ -75,7 +77,7 @@ fn a_module_action_reaches_the_module_with_its_number_and_steps() {
         &mut effects,
     )
     .unwrap();
-    assert_eq!(probe.invoked, [("bump".to_owned(), Some(5), 3)]);
+    assert_eq!(probe.invoked, [("bump".into(), Some(5), 3)]);
     // A click is one step.
     perform(&mut probe, &mut revision, &OUT, &action, None, &mut effects).unwrap();
     assert_eq!(probe.invoked[1].2, 1);
@@ -229,4 +231,35 @@ fn scoot_actions_parse_by_their_config_name() {
     assert_eq!(ScootAction::parse("Quit"), None);
     assert_eq!(ScootAction::parse(""), None);
     assert_eq!(ScootAction::Quit.name(), "quit");
+}
+
+#[test]
+fn carrying_out_a_module_action_allocates_nothing() {
+    // The click and scroll path for a module action: the lookup of the
+    // binding, the call, the revision.
+    let mut probe = Probe::default();
+    probe.invoked.reserve(400);
+    let mut revision = 0;
+    let mut effects = Counting::default();
+    let mut bindings = Bindings::default();
+    bindings.set(
+        Trigger::ScrollDown,
+        Action::Module(ModuleAction::new("bump", Some(2))),
+    );
+    let ((), allocations) = scootbg_mem::count_allocations(|| {
+        for _ in 0..100 {
+            let action = bindings.get(Trigger::ScrollDown).unwrap();
+            // Discarding the result: the probe's push is reserved above.
+            let _ = perform(
+                &mut probe,
+                &mut revision,
+                &OUT,
+                action,
+                Some(3),
+                &mut effects,
+            );
+        }
+    });
+    assert_eq!(allocations, 0);
+    assert_eq!(probe.invoked.len(), 100);
 }

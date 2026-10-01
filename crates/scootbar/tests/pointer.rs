@@ -390,6 +390,7 @@ fn a_failing_command_is_said_once_a_second_and_the_bar_carries_on() {
     let Some(mut rig) = Rig::start("ptr-fail", bindings) else {
         return;
     };
+    let started = Instant::now();
     for _ in 0..30 {
         rig.click(CLOCK, "left");
     }
@@ -400,9 +401,14 @@ fn a_failing_command_is_said_once_a_second_and_the_bar_carries_on() {
         .lines()
         .filter(|l| l.contains("scootbar-test"))
         .count();
-    // Thirty failures in far under a second: one line (and a count on the
-    // next).
-    assert!(said <= 2, "{said} lines: {}", rig.session.bar_stderr());
+    // Thirty failures, at most one line a second: bounded by the time they
+    // took (plus the first, and one for the count that follows).
+    let seconds = started.elapsed().as_secs() + 2;
+    assert!(
+        said as u64 <= seconds,
+        "{said} lines in {seconds} s: {}",
+        rig.session.bar_stderr()
+    );
     assert!(rig.bar.0.try_wait().unwrap().is_none(), "the bar died");
 }
 
