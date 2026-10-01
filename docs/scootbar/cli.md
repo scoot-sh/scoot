@@ -289,9 +289,12 @@ gains it: the click is the same `activate`.
   the compositor sends it nothing about workspaces and it wakes for none of
   it. A `scootbar msg reload` that adds the module binds both then; one
   that removes it stops the manager, destroys its handles and releases the
-  seat and pointer (the descriptor count returns to what it was). A
+  seat and pointer (a seat below version 5 cannot be released and stays
+  bound; the descriptor count returns to what it was). A
   compositor that starts advertising the protocol later is bound at that
-  point if the module is placed.
+  point if the module is placed and nothing was bound before. A
+  compositor that finishes the manager and later re-advertises it is not
+  rebound until a reload removes and re-adds the module.
 - **Without `ext-workspace-v1`** the module shows nothing (one stderr note
   at start-up says the protocol is missing) and takes no space.
   **Without `wl_seat`** clicks do nothing (said too). The bar still starts;

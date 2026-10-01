@@ -13,8 +13,9 @@
 //! scoot sends none), both `capabilities` (the bar only ever sends
 //! `activate`+`commit`, which a compositor without the capability ignores),
 //! and a `finished` manager's objects afterwards (the shared state stops
-//! the module sending anything on them: a request past `finished` is a
-//! protocol error, which would kill the bar).
+//! the module sending anything on them: a request on the manager past
+//! `finished` is a protocol error, which would kill the bar; destroying its
+//! handles stays legal).
 
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, event_created_child};
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_group_handle_v1::{
