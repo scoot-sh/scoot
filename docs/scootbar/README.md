@@ -309,7 +309,7 @@ workspaces module): `daemon/wayland.rs` binds `ext_workspace_manager_v1`
 whenever the `workspaces` feature is compiled in, placed or not, so the bar
 is woken for, and parses, every workspace change it never shows (its open
 descriptors also went from 5 to 8; binding a global opens none, so that is not attributed to this). The harness measured this and did not
-change it; the fix is for the maintainer to schedule. The idle-CPU row is not
+change it. Fixed since: the daemon binds the workspace manager and the seat only while a workspaces module is placed; the switching rows are back to M1's (`bench/m3-asahi-clock-bindfix`, one run, and [lightest](backlog/lightest.md#m3-gate-clock-and-workspaces-measured-2026-09-30-does-not-pass)'s after-the-fix note), and the memory and size rows are not changed by it. The idle-CPU row is not
 called a regression: on scoot it flags in 3 of the 4 pairings and on sway
 in 1 of 4, with values of 0.8 to 1.2 ms against a noise rule built for
 runs with one idle sample each.
