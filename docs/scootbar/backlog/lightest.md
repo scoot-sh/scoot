@@ -288,11 +288,13 @@ stack; nothing is waived, no target moved, no PR touched by this note.**
   [Decisions](#decisions): "Keep the button and exec inside the bar. Accept it.
   Aim for optimization in usage more than pure disk space."). The **memory
   rows are still regressed** and tracked by
-  [m4-usage-optimization](m4-usage-optimization.md); the fixed heads re-measured
+  [m4-usage-optimization](resolved/m4-usage-optimization-done.md); the fixed heads re-measured
   ([the README's final stack](../README.md#m4-final-stack-the-fix-round-re-measured))
   show size and idle PSS flagged against `main` on both compositors, and idle
   RSS, heap, CPU, wakeups, startup and the switching CPU not. **Nothing else is
-  waived**, and no target moved.
+  waived**, and no target moved. (Later the same day the maintainer also
+  accepted the idle memory growth and cancelled the optimization: see the last
+  Decisions bullet.)
 - Not remeasured: rule 2 (competitors), which nothing in this stack touches,
   and what *using* the new modules costs (the dev VM's table in
   [exec-push-button-modules-done](resolved/exec-push-button-modules-done.md)).
@@ -343,5 +345,19 @@ were the maintainer's calls.
   memory rows.** The words are about size and about where optimization effort
   goes; the idle RSS/PSS growth of +0.13 to +0.20 MiB per layer is still a
   regression against M3 post-fix and against `main`, to be worked down as a usage-optimization
-  item ([m4-usage-optimization](m4-usage-optimization.md)). Nothing else in the
+  item ([m4-usage-optimization](resolved/m4-usage-optimization-done.md)). Nothing else in the
   ratchet moves.
+- **M4's idle memory is accepted as it stands; no order-file machinery** (user,
+  2026-10-01, on being shown that a linker order file would buy about 0.25 MiB
+  of idle PSS against pre-M4 `main` and 0.45 MiB against the merged stack, for
+  about 1,700 lines of build script, tooling and CI: "Let's cancel all this.
+  I'm happy with the current size" and "Way too much risk for less than .5mb
+  savings"). This **supersedes** the "not accepted, and not waived" half of the
+  2026-10-01 bullet above: the idle RSS/PSS growth of M4 (+0.11 to +0.20 MiB,
+  idle PSS about 2.24 MiB against `main`'s 2.11) is accepted by the maintainer
+  at the numbers measured in [the README](../README.md#m4-final-stack-the-fix-round-re-measured).
+  [m4-usage-optimization](resolved/m4-usage-optimization-done.md) is closed
+  without a code change; PR #372 was closed unmerged and its branch
+  (`perf/scootbar-m4-usage`) kept for reference. The rule itself is unchanged:
+  a **later** change that grows an idle row beyond the margin fails the ratchet
+  as before. Nothing else is waived.

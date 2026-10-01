@@ -1,10 +1,11 @@
 ---
 title: "Bring M4's idle memory and CPU back down"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M4"
+resolved: "2026-10-01"
 ---
 
 # Bring M4's idle memory and CPU back down
@@ -101,3 +102,41 @@ drift shows.
   dev VM's table in
   [exec-push-button-modules-done](resolved/exec-push-button-modules-done.md#the-ratchet)
   is the record; that is its own measurement.
+
+## Resolution (2026-10-01): not pursued, accepted as it stands
+
+Closed by the maintainer without a code change ("Let's cancel all this. I'm
+happy with the current size"; "Way too much risk for less than .5mb savings";
+[lightest's Decisions](lightest.md#decisions)). PR #372 was closed unmerged;
+its branch `perf/scootbar-m4-usage` is kept for reference. What was learned
+is kept here, so nobody repeats the measurement:
+
+- **Where the idle PSS step goes (measured on the Asahi M2, scoot, clock
+  scope):** all of it is file pages of scootbar's own executable. The `r-xp`
+  mapping is 960 kB resident on `main` before M4 and 1152 kB at the tip; heap,
+  stack and glyph cache (`Pss_Anon` about 448 kB), minor faults (154 to 158)
+  and the code an idle bar runs (231 against 232 functions, 244 against
+  257 KB) did not move, and no unconfigured module's code runs. The kernel maps
+  a file's pages 64 KiB at a time, and rustc spreads the roughly 240 hot
+  functions over 14 of the `.text`'s 17 windows, so resident text follows text
+  size. Lazy initialisation and smaller buffers therefore find nothing.
+- **Levers measured:** `opt-level = "s"` for scootbar: `.text` -16%, `r-xp`
+  1024 kB, but **+31% CPU per redraw** (`verdict()` regressed); `opt-level = 2`:
+  +17%; "s" for the `toml`/`serde` dependencies only, `codegen-units = 16` and
+  `--sort-section=name`: no gain; sharing the three `toml` table shapes and
+  `#[cold]`: moot, that code does not run at idle; `madvise`: needs `unsafe` in a
+  `forbid(unsafe_code)` crate; no-PIE (-0.09 MiB PSS, gives up ASLR) and
+  DT_RELR (-0.10 to -0.13 MiB, needs glibc 2.36 or newer): measured, not taken.
+- **The one lever that worked** was a GNU ld `--section-ordering-file` listing
+  the hot functions (449 glob patterns, first-run order), applied by a build
+  script: idle RSS 3.52 to 3.28 MiB and PSS 2.05 to 1.80 against `main`, 3.72
+  and 2.25 for the stack as merged; every other row the same. It cost about
+  1,700 lines of build script, order-file tool and CI, and the review found it
+  can break a plain `cargo build` on a rustup toolchain that links through
+  rust-lld (rustc injects `-fuse-ld=lld`, which a build script cannot see) and
+  can go stale when the linker changes. It was rejected as too much risk for
+  the saving. A later attempt should be **opt-in** (set by the Nix package
+  only), which removes both risks; the branch has the profile, the pattern
+  list and the redraw benchmark (`scripts/scootbar-bench/redraw.py`).
+- A **redraw benchmark** now exists on that branch for any future codegen
+  trade; it is not on `main`.
