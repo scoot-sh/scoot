@@ -6,11 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# `build.rs` is the crate's only build script, and it compiles nothing and
-# fetches nothing: it hands the linker `orderfile/hot-text.ld` (the functions a
+# `build.rs` is the crate's only build script, and it fetches nothing: in a
+# release build it hands the linker `orderfile/hot-text.ld` (the functions a
 # running bar executes, so they sit together and the kernel maps less of the
-# code at start-up) after a trial link says the linker takes it, and does
-# nothing otherwise. Its header says when it stays out of the way.
+# code at start-up) after `rustc` has linked a one-line probe with it through
+# the real link path, and does nothing otherwise. Its header says when it
+# stays out of the way.
 
 # Linux only, as scootbg: it never runs on a Mac, and does not build there
 # (`scootbg-mem` says so; the macOS CI job leaves it out). The Wayland

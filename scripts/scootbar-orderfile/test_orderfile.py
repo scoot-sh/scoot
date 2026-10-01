@@ -124,5 +124,16 @@ class File(unittest.TestCase):
                 self.assertRegex(line, r"^(\.text : \{|\}|  \*[A-Za-z0-9_*:.-]*\.o\(\.text \.text\.\*\)|  \*\(\.text\.[^\s()]+\))$")
 
 
+class Header(unittest.TestCase):
+    def test_the_header_names_the_scenarios_and_counts_nothing(self):
+        # Counts shift from run to run; a regeneration without a change of
+        # code must not be a diff.
+        a = orderfile.header_lines({"idle": (240, 240), "custom": (417, 120)})
+        b = orderfile.header_lines({"idle": (239, 239), "custom": (400, 99)})
+        self.assertEqual(a, b)
+        self.assertIn("  idle", a)
+        self.assertFalse(any(ch.isdigit() for line in a for ch in line))
+
+
 if __name__ == "__main__":
     unittest.main()
