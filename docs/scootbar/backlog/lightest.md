@@ -283,6 +283,16 @@ stack; nothing is waived, no target moved, no PR touched by this note.**
   pooled verdict (margin 0.265; an earlier two-run reading said regressed); the
   median is +0.14 ms and three runs cannot say whether that is a cost. Redraw
   cost was not measured. The maintainer decides; nothing in the stack changed.
+- **Status after the maintainer's ruling (2026-10-01).** The **size** rows are
+  accepted by the maintainer (the 2026-10-01 bullet under
+  [Decisions](#decisions): "Keep the button and exec inside the bar. Accept it.
+  Aim for optimization in usage more than pure disk space."). The **memory
+  rows are still regressed** and tracked by
+  [m4-usage-optimization](m4-usage-optimization.md); the fixed heads re-measured
+  ([the README's final stack](../README.md#m4-final-stack-the-fix-round-re-measured))
+  show size and idle PSS flagged against `main` on both compositors, and idle
+  RSS, heap, CPU, wakeups, startup and the switching CPU not. **Nothing else is
+  waived**, and no target moved.
 - Not remeasured: rule 2 (competitors), which nothing in this stack touches,
   and what *using* the new modules costs (the dev VM's table in
   [exec-push-button-modules-done](resolved/exec-push-button-modules-done.md)).
@@ -322,3 +332,16 @@ were the maintainer's calls.
   ([nix-package](resolved/nix-package-done.md#evidence)), is 49 MB with no
   font, published on the clock's table in
   [the README](../README.md#baselines).
+- **M4's binary size is accepted; optimize usage, not disk** (user, 2026-10-01:
+  "Keep the button and exec inside the bar. Accept it. Aim for optimization in
+  usage more than pure disk space."). Accepted, at the numbers measured on the
+  Asahi M2 ([the README](../README.md#m4-pointer-input-exec-and-the-agent-interface-on-the-asahi-m2)):
+  `button`, `push` and `exec` stay in the default features and in the bar's
+  binary, and the **size row** (binary plus closure) at 1,383,080 B on `main`
+  to 1,645,256 B at the #367 tip, +19.0%, about +65 KB per layer, is not a
+  regression to be worked down. **Not accepted, and not waived: the idle
+  memory rows.** The words are about size and about where optimization effort
+  goes; the idle RSS/PSS growth of +0.13 to +0.20 MiB per layer is still a
+  regression against M3 post-fix and against `main`, to be worked down as a usage-optimization
+  item ([m4-usage-optimization](m4-usage-optimization.md)). Nothing else in the
+  ratchet moves.

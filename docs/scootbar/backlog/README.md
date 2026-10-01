@@ -105,6 +105,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 - [`exec`, `push` and `button` modules](exec-push-button-modules.md) (medium): launcher and power buttons
 - [Agent interface](agent-interface.md) (medium): `invoke`, `layout`, `subscribe`
 - [Appearance follow-ups](appearance-followups.md) (low): hover token, per-module state colors, dot indicators, inactive-workspace colors
+- [Bring M4's idle memory and CPU back down](m4-usage-optimization.md) (medium): the idle RSS/PSS/heap growth the size ruling did not waive; levers to measure first
 
 ### M5 — Daily-driver modules, one release each
 The [umbrella](data-source-modules.md) holds the rules they share.
