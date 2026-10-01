@@ -93,7 +93,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 
 ### M3 — Configurable
 - [Config file, control socket and reload](resolved/config-cli-and-reload-done.md) (medium): `scootbar msg`, `query` — RESOLVED 2026-09-29
-- [Nix modules and Stylix](nix-modules-and-stylix.md) (medium)
+- [Nix modules and Stylix](resolved/nix-modules-and-stylix-done.md) (medium): `programs.scootbar` for NixOS and home-manager, Stylix defaults with pinned precedence, the restarting user unit, `scootbar daemon --check`; run under a real user manager and a real Stylix — RESOLVED 2026-10-01
 - [Appearance](resolved/appearance-done.md) (medium): rounded corners, opacity, spacing, pill and circle workspaces, the corner-shaped input region, measured on hardware — RESOLVED 2026-09-30
 - [Icons and fonts](resolved/icons-and-fonts-done.md) (medium): the fallback chain, a glyph, a path or a PNG icon on the clock — RESOLVED 2026-09-30
 - [Multi-output policy](resolved/multi-output-done.md) (medium): `outputs`, `[output."NAME"]` overrides — RESOLVED 2026-09-30
