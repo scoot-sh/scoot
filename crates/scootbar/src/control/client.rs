@@ -66,8 +66,7 @@ impl fmt::Display for Error {
             ),
             Self::Dropped => write!(
                 f,
-                "the daemon dropped this subscription (to admit another client, or \
-                 because it was not read fast enough): events may have been missed: \
+                "the daemon dropped this subscription: events may have been missed: \
                  subscribe again, then query"
             ),
             Self::Daemon(message) => write!(f, "daemon: {message}"),

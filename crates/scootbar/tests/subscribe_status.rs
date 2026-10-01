@@ -82,6 +82,9 @@ fn a_dropped_line_is_printed_and_the_command_fails() {
     assert_eq!(stdout, format!("{SUBSCRIBED}{EVENT}{DROPPED}"));
     assert_eq!(output.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("dropped this subscription"), "{stderr}");
+    // The line is sent only to a subscriber evicted at a line boundary; one
+    // that was too slow is never sent it, so the line names no cause.
+    assert!(!stderr.contains("fast enough"), "{stderr}");
     assert!(stderr.contains("subscribe again, then query"), "{stderr}");
 }
 
