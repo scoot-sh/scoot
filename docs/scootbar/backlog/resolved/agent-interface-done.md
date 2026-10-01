@@ -250,8 +250,8 @@ onto `main` at `7a1f9030a` and the two PRs under this one (their own fixes).
   drops a subscriber whose batch the socket cannot take whole, which can leave
   the client a prefix of a line. `control::client::stream_to` now gives `each`
   whole lines only: an unterminated last line is discarded, the command says
-  so on stderr and **exits 1** (a daemon that closes between two lines is still
-  0), and a line past the 16 MiB bound is refused the same way. Four tests
+  so on stderr and **exits 1** (a stream that closes between two lines is still
+  0, which the second review below shows is not "the daemon went away"), and a line past the 16 MiB bound is refused the same way. Four tests
   (`control/tests.rs`, against a scratch socket); with the old behavior put
   back, the three that assert the new outcome fail (`a_line_cut_by_the_connection_ending_is_discarded_and_an_error`,
   `a_first_line_cut_is_discarded_too`, `a_line_with_no_end_past_the_bound_is_refused_not_passed_on`)
@@ -278,8 +278,9 @@ onto `main` at `7a1f9030a` and the two PRs under this one (their own fixes).
   `control/conn.rs` stops handling a connection's requests once
   `OUT_SOFT_LIMIT` (4,096 bytes) of replies are queued and resumes when the
   client reads, and `control/mod.rs` uses no timers: at the cap of 16 the oldest
-  connection is closed to admit a new one (`admit`), which is what bounds a
-  client that never reads. [robustness-and-limits](../robustness-and-limits.md)
+  connection (since the second review, the oldest that is not a subscriber) is
+  closed to admit a new one (`admit`), which is what bounds a client that never
+  reads. [robustness-and-limits](../robustness-and-limits.md)
   still lists "a write-stall deadline that drops a peer that stopped reading" as
   a bound to build: this is the case it describes, and it is not built (the hung
   run held its connection for eight minutes). Left alone here.
@@ -302,3 +303,104 @@ cargo nextest run -p scootbar --bin scootbar --all-features                614 p
   | button 413 | push 416 | exec 440
 cargo check --locked --bins in crates/scootbar/fuzz                        ok
 ```
+
+### After the second review (2026-10-01)
+
+One finding in this layer, fixed in `00131b51e`, and a hardening of two test
+helpers in `44935cf4d` (the code; this entry is the commit after them and
+changes none). The two layers under it changed too, so this one was rebased
+onto them and everything below was captured at `44935cf4d`. **The SHAs in the
+earlier entries are those their checks were captured at, before this rebase**:
+`3f01c5ef7` is now `52001d4b1`, `384e78bdd` is `84b00ff79` and `b6dee9710` is
+`56249798a`.
+
+- **`msg subscribe` exit 0 does not mean "the daemon went away"** (the first
+  review's fix, `3f01c5ef7`, claimed it did: in `--help`, `cli.md`, the
+  `Error::Cut` text and its commit). Measured by the second review: a
+  subscriber the daemon drops by closing it on a full socket (`send_event`
+  failing on a write that took nothing, `WouldBlock` with 0 bytes), or by the
+  cap's `conns.remove(0)` (no exemption for subscribers), ends on a clean
+  newline with exit 0 and nothing on stderr; only a drop mid-write gave 1.
+  So a script could not tell the two apart. Fixed in what can be, documented
+  in what cannot:
+  - **Eviction keeps subscribers.** Closing a client to admit another (the
+    cap, or freeing a descriptor on `EMFILE`) now takes the oldest
+    *non-subscriber*; with `MAX_SUBSCRIBERS` (4) under `MAX_CONNECTIONS` (16)
+    there always is one at the cap (a `const` assertion says so), so a flood of
+    connects no longer ages out an agent's subscription. Only with nothing but
+    subscribers to close (the `EMFILE` path) does one go.
+  - **`{"type":"dropped"}`.** A subscriber that is closed that way gets that
+    line as its last, by one nonblocking write that is never queued;
+    `msg subscribe` prints it and **exits 1**, saying so on stderr. It cannot be
+    sent for the common drop: a subscriber that stopped reading has a full
+    socket (a 19-byte write fails exactly where the batch did), and the daemon
+    never blocks or buffers for it. That drop still ends with no line, and
+    **exit 0 can still mean it**, as can a partial write that happened to stop
+    on a newline. Said so in `--help`, `cli.md` (a new "how a subscription
+    ends" list and an exit-status row) and the code comments; after any end,
+    exit 0 included, subscribe again and `query`.
+  - *For the coordinating session:* the robust form of "the daemon went away"
+    is a positive end-of-stream line sent on clean shutdown (`close_all`
+    already makes one non-blocking attempt per client), with its absence
+    meaning "resubscribe". Not done here: it is a protocol addition, not a
+    fix of this finding.
+  - Tests: `control/subscribe_tests.rs` (a flood closes idle clients and never a
+    subscriber; the oldest *idle* goes first; with only subscribers left the
+    oldest is told `dropped` whole as its last line and the rest are untouched;
+    an idle client is told nothing; a full socket is not waited on),
+    `control/tests.rs` (a `dropped` line is passed on, then an error),
+    `tests/agent.rs` (a subscription on a live bar outlives 48 idle connections
+    and still hears the next change) and the new `tests/subscribe_status.rs`
+    (`msg subscribe` against a socket that writes what it is told: `dropped`
+    printed and exit 1, a cut line exit 1, a plain end exit 0 with nothing said).
+    With the exemption removed, three of them fail (the two unit tests and the
+    live-bar one); with the notice removed, the one for it fails; checked and
+    reverted.
+  - The `broadcast` and `send_event` paths gain no work on the success path, and
+    only the failure path changed in `admit`/`free_an_fd`, so no benchmark was
+    rerun: the loop with no subscriber is still one branch, and an event is still
+    one write per subscriber.
+- **A test helper that could hang instead of fail** (`44935cf4d`): the fake
+  daemon of `control::tests::streamed` and of `tests/subscribe_status.rs` blocks
+  in `accept` inside a `thread::scope` that waits for it, so a client that never
+  connected (a path error) would hang the test. One connection to the still-open
+  listener after the client is done lets the thread end.
+- **Other tests that assume a clean launcher: audited** (the grep and its
+  result are in the pointer layer's entry, whose layer this layer sits on): the
+  new `tests/subscribe_status.rs` needs no compositor and reads no environment
+  but the two variables it sets, and the whole suite passes from `/` under
+  `TZ=Asia/Kathmandu`, `WAYLAND_DISPLAY`/`WAYLAND_SOCKET`/`WAYLAND_DEBUG` set,
+  no `HOME` or `XDG_RUNTIME_DIR`, the open descriptors and the ignored `SIGHUP`.
+
+```text
+checks captured at 44935cf4d (git archive, fresh extract), dev VM, scoot built from the stack's
+tree (/dev/shm/scoot-bin, built at 47b413a99: nothing in the stack changes crates/scoot*),
+own targets in /dev/shm; log: verify-agent-44935cf4d.log
+cargo fmt --check -p scootbar                                          ok
+cargo clippy -p scootbar [FLAGS] --all-targets -- -D warnings          clean for FLAGS in:
+  (default) | --no-default-features | ... --features clock | ... --features workspaces
+  | ... --features icon-image | ... --features button | ... --features push | ... --features exec
+  | --all-features
+SCOOTBAR_TEST_SCOOT=/dev/shm/scoot-bin SCOOTBAR_REQUIRE_SCOOT=1 cargo nextest run -p scootbar
+  plain                                                  Summary 709 tests run: 709 passed, 0 skipped
+  hostile (fds 4 5 142 145 open, SIGHUP ignored)         709 passed
+  under nohup                                            709 passed
+cargo test -p scootbar, plain and hostile                all "test result: ok" (611 in the bin; 5 more hostile runs of the bin: 611 each)
+from /, TZ=Asia/Kathmandu, WAYLAND_* set, no HOME, hostile   709 passed (nextest), all ok (cargo test)
+nextest, target dir with no scoot, hostile               709 passed (the integration tests skip)
+hostile nextest --bin scootbar: --all-features 630 | --no-default-features 403
+  | clock 476 | workspaces 463 | icon-image 421 | button 425 | push 428 | exec 456
+SCOOTBAR_REQUIRE_SWAY=1 cargo test -p scootbar --test hotplug          8 passed (plain and hostile; sway on the VM)
+bash -c 'exec 4</dev/null 5</dev/null 142</dev/null 145</dev/null; exec <bin> <test> --exact'
+  for spawn::tests::a_child_inherits_none_of_the_callers_descriptors and
+  modules::exec::tests::a_child_holds_none_of_the_callers_descriptors   ok, ok (the lead's literal form, as written)
+cargo check --locked --bins in crates/scootbar/fuzz                    ok
+(captured earlier, at the pre-rebase ff9032ba0, which differs from 44935cf4d in the two layers under it and the
+ fake-daemon helper change: the mutation checks above, and verify-agent-ff9032ba0.log)
+```
+
+Not verified: a daemon out of file descriptors with only subscribers open (the
+`EMFILE` path that sends `dropped`) on a live bar: it is tested on the server with
+socket pairs (`with_only_subscribers_left_to_close_the_oldest_is_told_it_was_dropped`),
+not by exhausting a real process's limit; `nix build` (no `nix/` file or
+dependency changed); real hardware.
