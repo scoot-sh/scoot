@@ -125,6 +125,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [`scootnotify`: the notification daemon](scootnotify.md) (low, pointer)
 
 ### Unscheduled (until someone asks)
+- [Gate integration tests on module features, tidy the unit-test script](scootbar-test-gating-and-script-hygiene.md) (low)
 - [Per-output font size](multi-output-font-size.md) (low): deferred 2026-10-01 by the maintainer; left M3
 
 ### Ongoing (no milestone, applies to all)
