@@ -628,5 +628,108 @@ the dev VM's table in
 [exec-push-button-modules-done](backlog/resolved/exec-push-button-modules-done.md#the-ratchet),
 not remeasured here. Rule 2 (no competitor beats scootbar) was not rerun;
 nothing in this stack touches what it compared. **The ratchet's rule 1 fails
-on size and idle memory for this stack, as M3's did; the PRs are drafts
-and nothing is waived** ([lightest](backlog/lightest.md#m3-gate-clock-and-workspaces-measured-2026-09-30-does-not-pass)'s 2026-10-01 note).
+on size and idle memory for this stack, as M3's did; the PRs are drafts.
+Since: the maintainer accepted the size on 2026-10-01 (lightest's
+[Decisions](backlog/lightest.md#decisions)); the idle memory rows remain
+regressed and are tracked by [m4-usage-optimization](backlog/m4-usage-optimization.md);
+nothing else is waived** ([lightest](backlog/lightest.md#m3-gate-clock-and-workspaces-measured-2026-09-30-does-not-pass)'s 2026-10-01 note; the
+[final stack](#m4-final-stack-the-fix-round-re-measured) re-measured the fixed heads).
+
+#### M4 final stack: the fix round, re-measured
+
+The runs above measured earlier heads of the three PRs. A fix round has landed
+since (subscribe `dropped` and eviction, the fake-daemon guard in the tests,
+and the review-driven changes: #364 `3ccd1c35b`, #366 `8e7682f44`, #367
+`d0c4f35d1`), so the stack's tip was measured again: three runs, **`main`, #367's
+tip `d0c4f35d1`, `main` again** (A-B-A, so drift shows), 2026-10-01 on the same
+Asahi M2, **scoot and sway** in every run, the harness's defaults (5 startup
+rounds, 30 s settle, 300 s idle, 240 switches at 4 Hz), `--scope clock --bars
+scootbar`, 180 s of cool-down between runs, each run about 13 minutes. Raw runs:
+[`m4-asahi-final-main`](bench/m4-asahi-final-main/table.md),
+[`-pr367`](bench/m4-asahi-final-pr367/table.md),
+[`-main-rerun`](bench/m4-asahi-final-main-rerun/table.md); every `compare` and the
+pooled verdicts, as run, in
+[`bench/m4-asahi-final-compares.md`](bench/m4-asahi-final-compares.md).
+
+**What differs from the earlier M4 runs, stated plainly:**
+
+- **`main` moved**: it is now `98c4b7a32`, which carries #370 (`scootbar daemon
+  --check`, 251 added lines in `crates/scootbar`) that the #367 tip (merge base
+  `7a1f9030a`) does not. The comparison is #367's tip against a `main` that
+  has a little more code than its own base; the size row (1,383,080 B) and the
+  bare executable (1,249,984 B) are byte-identical to the earlier `main`'s, the
+  Rust line count is not (25,643 against 25,550).
+- **The pinned `scoot` is a different binary** (sha256 `25e6a225a07d...` against the
+  earlier runs' `4e105065f5b2...`), rebuilt from `main` `98c4b7a32`; `crates/scoot`
+  is unchanged between the two mains, but every comparison with
+  `m3-asahi-clock-bindfix` or an earlier `m4-*` run crosses a compositor
+  rebuild. The earlier build directory was gone, so the old binary could not
+  be reused.
+- **The first run began warm**: `main`'s first run started at load average
+  0.44/0.61/0.30 (from a smoke run and the builds just before it); the other
+  two started at 0.00 to 0.12. The A-B-A rerun is what makes it
+  interpretable. The run and the builds shared the box with nothing else (no
+  `scoot`, `sway`, `foot` or bar process, no bench cgroup, before the runs).
+- **#367 has one run**, so its pooled verdict is one sample against two `main`
+  runs; the earlier #367 runs (`b6dee9710`) are not pooled in: the code
+  differs.
+- The harness is the same (`bars.py`, `bench.py`, `machine.py`, `measure.py`,
+  `stage.py`, `tables.py` sha256-identical to the earlier runs'), and the
+  harness ran under the dev shell's tools with a `python3` 3.14.7 from the Nix
+  store (`/nix/store/3fl7bdkdxk2k4nssy1d1161isbzn6bsr-python3-3.14.7`), the box having no
+  `python3` on its `PATH`.
+
+Medians of each run (scoot; the earlier columns are copied from the table
+above, M3 post-fix and the earlier M4 round three):
+
+| Row, scoot | M3 post-fix | earlier M4 `main` (round three) | final `main` | final `main` rerun | earlier #367 (round three) | final #367 `d0c4f35` |
+|---|---|---|---|---|---|---|
+| Startup to first frame (ms) | 31.0 | 29.8 | 31.8 | 29.4 | 38.1 | 29.0 |
+| Idle RSS (MiB) | 3.52 | 3.53 | 3.52 | 3.53 | 3.67 | 3.64 |
+| Idle PSS (MiB) | 2.12 | 2.06 | 2.11 | 2.13 | 2.20 | 2.24 |
+| Idle heap, `RssAnon` (MiB) | 0.42 | 0.44 | 0.42 | 0.44 | 0.45 | 0.42 |
+| Peak memory, `VmHWM` (MiB) | 3.52 | 3.53 | 3.52 | 3.53 | 3.67 | 3.64 |
+| Idle wakeups per minute | 2 | 2 | 2 | 2 | 2 | 2 |
+| Idle CPU, 300 s window (ms) | 1.04 | 0.95 | 0.99 | 0.97 | 1.10 | 0.91 |
+| CPU, 240 workspace switches (ms) | 0.25 | 0.25 | 0.23 | 0.20 | 0.21 | 0.25 |
+| Size: binary + non-glibc `ldd` closure (B) | 1,383,080 | 1,383,080 | 1,383,080 | 1,383,080 | 1,645,256 | **1,645,256** |
+| Bare executable, stripped (B) | 1,249,984 | 1,249,984 | 1,249,984 | 1,249,984 | 1,512,160 | 1,512,160 |
+
+Sway (idle CPU in ms: M3 post-fix 0.89; earlier `main` 0.68, earlier #367
+0.83; final `main` 0.83 and 0.63 on the rerun, final #367 0.76): idle RSS 3.50,
+3.52, 3.64 (final `main`, rerun, #367), PSS 2.15, 2.16, 2.29, heap 0.42,
+0.44, 0.44, wakeups 2 in all (the rerun's sway median is 1.8).
+
+**What the final stack costs against `main`, and what it does not:**
+
+- **Regresses**, by `compare` and by the pooled verdict, on both compositors,
+  against either `main` run: the **size row** (+262,176 B, +19.0%, the same
+  bytes as the earlier run) and **idle PSS** (2.11 and 2.13 to 2.24 on scoot,
+  2.15 and 2.16 to 2.29 on sway). `compare` of the final #367 against
+  M3 post-fix exits **1**, against the final `main` exits **1** (three flags:
+  size and idle PSS on both compositors) and **1** against the rerun (four:
+  the same three, and sway's idle CPU, 0.6 to 0.8 ms, a single-sample row
+  where the two `main` runs themselves differ by 0.2 ms).
+- **Same** on both: startup, idle RSS (+0.11 to 0.13 MiB, inside the 0.18 MiB
+  margin this time), idle heap (0.42 MiB, equal to `main`'s first run), peak
+  memory, idle wakeups, the CPU and wakeups of 240 switches, threads. Idle CPU
+  on scoot is 0.91 ms against `main`'s 0.99 and 0.97 (and 0.93 to 0.95
+  earlier): **not worse**. The fix round does not change the idle numbers:
+  the final #367 against the earlier #367 (`b6dee9710`) exits **0**, and the
+  final `main` against the earlier `main` exits 0 on its rerun and 1 on its
+  first run, the one flag being sway's idle CPU (0.7 to 0.8 ms) in a run that
+  started warm; the rerun, against the first, exits 0 (the A-B-A drift:
+  scoot idle CPU 0.99 to 0.97 ms, sway 0.83 to 0.63 ms, everything else
+  within the margin).
+- **The size is accepted** by the maintainer (2026-10-01: "Keep the button
+  and exec inside the bar. Accept it. Aim for optimization in usage more than
+  pure disk space."; [lightest's Decisions](backlog/lightest.md#decisions)).
+  **The memory rows are not waived**: idle PSS is still +0.1 MiB over
+  `main` on every compositor, and the whole class is tracked by
+  [m4-usage-optimization](backlog/m4-usage-optimization.md). Nothing else is
+  waived.
+
+**What could not be settled here:** the PSS step's cause at the fixed tip was not
+re-derived (the PR 1 review's `smaps` finding is for #364); #364 and #366 were not
+re-measured at their fixed heads, only the stack's tip; and idle CPU, one
+sample against two, cannot rule a 0.1 ms cost in or out.
