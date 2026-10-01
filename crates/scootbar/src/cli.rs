@@ -251,9 +251,9 @@ The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
 without it) holds every option above; `--config PATH` reads another file
 instead. A flag given replaces the file's value for its own option; a
 missing file is the defaults. Runs until the compositor goes away (exit
-status 1, saying why) or it is killed; SIGTERM and SIGINT end it at once,
-which is harmless: it keeps no state. The compositor removes the bars with
-the connection.
+status 1, saying why) or it is killed; SIGTERM and SIGINT end it at once:
+it keeps no state, and the compositor removes the bars with the connection.
+An `exec` module's command ends with it.
 
 --check validates instead of running: it reads the config file, applies the
 flags over it, starts the placed modules and loads the font, exactly as a

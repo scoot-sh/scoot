@@ -244,7 +244,11 @@ pinned nixpkgs' tzdata).
   wait, one that cannot start retried with the module still up, an empty command
   not a panic, no zombie, none of the caller's descriptors, the whole process
   group killed with the module (a backgrounded worker too) and a worker left
-  holding the pipe not hanging it; the config tables
+  holding the pipe not hanging it; the guard's request line, its reading of
+  one (a negative, zero, overflowing or non-UTF-8 pid refused, never a panic)
+  and that only its marker makes the binary a guard (the commands start
+  directly in these tests: `/proc/self/exe` is the test harness there); the
+  config tables
   (`config/custom_tests.rs`: every kind, every refusal naming its dotted key,
   names across the kinds, the interned name the same `&str` on every read, the
   count placed and defined, a table nothing places never started); the control
@@ -258,7 +262,12 @@ pinned nixpkgs' tzdata).
   under a quarter of a core; a command that dies started again with the
   default delays and nothing left a zombie; a command holding none of the
   bar's descriptors; a reload replacing the command and killing the old one
-  with its workers; two hundred `set`s in one write drawn as a handful of
+  with its workers; a shell-loop command gone after the bar is killed with
+  `SIGKILL` and `SIGTERM` (the parent-death signal the guard arms; `SIGHUP`
+  and `SIGINT` are measured by hand instead, because a harness started under
+  `nohup` or as a background job hands the bar those signals ignored, and
+  `kill -SEGV` is no crash test, Rust's handler resumes a signal sent from
+  outside); two hundred `set`s in one write drawn as a handful of
   frames (counted on the protocol trace) and the last standing; and nine
   `exec` modules refused by name.
 

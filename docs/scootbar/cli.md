@@ -574,9 +574,12 @@ Runs a command and shows what it prints, one line per update. **It streams,
 it does not poll**: the command runs once and the bar waits on its output, so
 a script that can wait for an event prints when it has one and the bar does
 nothing in between. There is **no `interval` key**, on purpose: a script
-that has to poll writes `while sleep 60; do ...; done`, which puts the cost
-(a process every minute, whatever it spawns) in a script you can see, not in
-a bar option. `command` is an array, the program and its arguments, **never
+that has to poll writes `while :; do ...; sleep 60; done` (print first, so
+the module shows its line at once, not after the first sleep), which puts the
+cost (a process every minute, whatever it spawns) in a script you can see,
+not in a bar option. A command that prints once and exits (`["date"]`) is a
+poll too: the restart rule below runs it again, backing off to once a
+minute, so write the loop yourself when you want a different rhythm. `command` is an array, the program and its arguments, **never
 run through a shell** (write `["sh", "-c", "..."]` to use one), at most 32
 arguments of at most 4096 bytes. `format` says how a line is read: `text`
 (the line is the text, the default) or `json` (one object per line, below).
@@ -597,7 +600,9 @@ arguments of at most 4096 bytes. `format` says how a line is read: `text`
 - **Restarts**: when the command exits it is started again after 1 s, then 2,
   4, ... up to 60 s; a run that lasted 30 s or more starts the sequence
   over. A command that cannot start (no such program) takes the same path.
-  Each restart is one line on stderr, so at most one a minute at the slowest.
+  Each restart is said on stderr, throttled to one warning a second per
+  module, so a restart that follows another warning within the second is
+  silent.
 - **Children**: reaped the moment they exit (a pidfd wakes the bar, no
   timer, no zombie). Its stdin is `/dev/null`, its stderr is the bar's own
   (its complaints reach the journal), it leads its own process group, and it
@@ -605,8 +610,19 @@ arguments of at most 4096 bytes. `format` says how a line is read: `text`
   killed when the module goes**: on a reload (the command is started afresh
   with the new config, whether or not its table changed), and when the
   command exits, so a worker it backgrounded does not pile up across
-  restarts. If the bar itself is killed its commands are left to find the
-  pipe closed (they are ended by the `SIGPIPE` of their next line).
+  restarts. **The command ends with the bar, however the bar ends**: on a
+  clean exit with the group kill, and on `SIGTERM`, `SIGINT`, `SIGHUP`,
+  `SIGKILL`, a crash or the out-of-memory killer by the kernel's
+  parent-death signal (`SIGKILL`), which the bar arms by starting the
+  command through itself (`scootbar` re-executes as a tiny guard and
+  becomes the command, so there is no extra process). What that does **not**
+  reach is what the command started in turn: a shell loop dies, and the
+  `sleep 60` it was in the middle of runs out its sleep (its next write to
+  the closed pipe ends a writer such as `date` or `curl` with `SIGPIPE`), and
+  a worker the command backgrounded and left is not touched. A command that
+  is a set-user-id program is not covered either (the kernel clears the
+  signal on such an `exec`). Commands a pointer binding starts are not
+  guarded: a launched application outlives a bar restart on purpose.
 - **Count**: at most 8 `exec` modules are placed (on any output); each
   holds a child, a `timerfd` and at most two polled fds.
 - **Start-up**: a command is started right after the bar's first frame, not
@@ -1123,12 +1139,14 @@ opacity = 0.9
   error) ends the daemon with exit status 1 and one line on stderr saying
   why. There is no reconnect; your session's autostart starts it again with
   the compositor.
-- **SIGTERM and SIGINT** end it at once. That is harmless: it keeps no
-  state, and the compositor removes its surfaces with the connection.
-  **SIGHUP keeps its default action** (it ends the daemon) rather than
-  reloading: catching one would need `unsafe` signal registration
-  (rustix has no `signalfd`), which the crate forbids
-  (`#![forbid(unsafe_code)]`), so a reload is `scootbar msg reload`.
+- **SIGTERM and SIGINT** end it at once, running no destructor: it keeps no
+  state, and the compositor removes its surfaces with the connection. Its
+  `exec` commands end with it all the same (the kernel's parent-death
+  signal, see `exec` above); only what such a command started in turn is
+  left to finish. **SIGHUP keeps its default action** (it ends the daemon)
+  rather than reloading: catching one would need `unsafe` signal
+  registration, which the crate forbids (`#![forbid(unsafe_code)]`), so a
+  reload is `scootbar msg reload`.
 - **Vertical bars** (`left` and `right` edges) are not offered: a
   deliberate omission, not a gap. The layout, the modules and the click
   hit-test are horizontal; a vertical bar would be a second layout, not an

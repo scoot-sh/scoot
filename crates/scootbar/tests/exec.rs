@@ -382,7 +382,13 @@ fn a_reload_replaces_the_command_and_kills_the_old_one_with_its_workers() {
         return;
     };
     rig.wait_text("1");
-    assert!(running("sleep 421"));
+    // The worker was forked just before the line was printed: it may not
+    // have exec'd `sleep` yet.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !running("sleep 421") {
+        assert!(Instant::now() < deadline, "the worker is not running");
+        std::thread::sleep(Duration::from_millis(10));
+    }
     let second = "[exec.out]\ncommand = [\"sh\", \"-c\", \"echo 2; sleep 600\"]\n";
     fs::write(&rig.file, config("right = [\"out\"]\n", second)).unwrap();
     let reloaded = rig.reload();
@@ -396,6 +402,62 @@ fn a_reload_replaces_the_command_and_kills_the_old_one_with_its_workers() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Kills the bar with `signal` and waits for its command, a shell loop
+/// that would otherwise run for ever, to be gone.
+fn a_command_ends_with_a_bar_that_dies_of(tag: &str, signal: rustix::process::Signal) {
+    // A shell loop is the command that is not ended by the closing of its
+    // pipe: the shell never writes, `date` and `echo` do, and the shell is
+    // what has to die.
+    let script = format!("while :; do echo 5; sleep 1; done # {tag}");
+    let tables = format!("[exec.out]\ncommand = [\"sh\", \"-c\", \"{script}\"]\n");
+    let Some(mut rig) = Rig::start(tag, "right = [\"out\"]\n", &tables) else {
+        return;
+    };
+    rig.wait_text("5");
+    let cmdline = format!("sh -c {script}");
+    assert!(running(&cmdline), "the loop is not running");
+    let bar = rustix::process::Pid::from_raw(rig.pid() as i32).unwrap();
+    rustix::process::kill_process(bar, signal).unwrap();
+    // Bounded: a bar that inherited the signal as ignored (a harness run
+    // under `nohup` ignores `SIGHUP`, a background job of a shell
+    // `SIGINT`) would otherwise hang this test for ever.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = rig.bar.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the bar is still running after {signal:?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(!status.success(), "the bar exited cleanly: {status}");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while running(&cmdline) {
+        assert!(
+            Instant::now() < deadline,
+            "the loop outlived the bar ({signal:?}): it runs on, reparented"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_command_ends_with_a_bar_that_is_killed() {
+    a_command_ends_with_a_bar_that_dies_of("exec-sigkill", rustix::process::Signal::KILL);
+}
+
+#[test]
+fn a_command_ends_with_a_bar_that_is_terminated() {
+    // `SIGINT`, `SIGHUP` and a crash (`SIGABRT`, what a panic does under
+    // `panic = "abort"`) are the same to the kernel; they are not tests
+    // because a test harness may start with them ignored, which the bar
+    // would inherit (see `docs/scootbar/backlog/resolved/
+    // exec-push-button-modules-done.md`, decision 7, for the measurement).
+    a_command_ends_with_a_bar_that_dies_of("exec-sigterm", rustix::process::Signal::TERM);
 }
 
 #[test]

@@ -391,7 +391,14 @@ fn dropping_the_module_kills_the_command_and_everything_it_started() {
     );
     let mut harness = module(&script, Format::Text);
     until(&mut harness, "started", |h| shows(h, "started"));
-    assert!(running("sleep 311"), "the worker is not running");
+    // The script printed `started` right after it forked the worker, which
+    // may not have exec'd `sleep` yet: wait for it, never look at one moment
+    // (6 runs in 300 failed here under four spinning CPUs).
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !running("sleep 311") {
+        assert!(Instant::now() < deadline, "the worker is not running");
+        std::thread::sleep(Duration::from_millis(10));
+    }
     let pid = pid_in(&pidfile);
     drop(harness);
     let deadline = Instant::now() + Duration::from_secs(5);

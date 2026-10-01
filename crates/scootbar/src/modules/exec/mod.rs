@@ -14,9 +14,12 @@
 //! between, which is the lightest way to run one and the one that cannot
 //! leak or spin the way an interval-polled script does. There is no
 //! `interval` key on purpose: a script that has to poll writes
-//! `while sleep N; do ...; done`, which moves the choice, and its cost,
-//! into a script the user can see. Each line is one update
-//! ([`super::payload`]); the last line of a read is what is shown.
+//! `while :; do ...; sleep N; done` (print first, so the module shows its
+//! first line at once and not after the first sleep), which moves the choice,
+//! and its cost, into a script the user can see. A command that prints once
+//! and exits (`["date"]`) is a poll too, by the restart rule below, backing
+//! off to once a minute. Each line is one update ([`super::payload`]); the
+//! last line of a read is what is shown.
 //!
 //! ## What keeps it bounded
 //!
@@ -32,15 +35,18 @@
 //! - **Restarts**: a command that exits is started again after 1 s, then 2,
 //!   4, ... up to 60 s; a run of 30 s or more starts the sequence over
 //!   ([`backoff`]). One that cannot start (no such program) takes the same
-//!   path. Said on stderr each time (so at most once a minute at the
-//!   slowest).
+//!   path. Said on stderr, at most one warning a second: a restart is
+//!   normally one line, but one that follows another warning inside the
+//!   second is not said.
 //! - **Children**: reaped the moment they exit (the pidfd wakes the loop,
 //!   `try_wait` collects), killed with their whole process group when the
 //!   module is dropped (a reload, a refused start) and when the command
 //!   exits (so a worker it backgrounded does not pile up over restarts).
 //!   The command's stdin is `/dev/null`, its stderr is the bar's own
 //!   (a script's complaints reach the journal), and it inherits none of
-//!   the bar's descriptors.
+//!   the bar's descriptors. **It ends with the bar, however the bar ends**:
+//!   a clean exit kills the group by `Drop`, and a killed or crashed bar is
+//!   covered by the kernel's parent-death signal, armed by [`guard`].
 //! - **Count**: at most [`super::custom::MAX_EXEC`] are placed; each costs
 //!   at most two polled fds and one `timerfd`.
 //!
@@ -48,6 +54,7 @@
 //! line allocates its parse tree.
 
 mod backoff;
+pub mod guard;
 mod lines;
 mod timer;
 
@@ -56,7 +63,7 @@ mod tests;
 
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::process::CommandExt;
-use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStdout, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use rustix::event::PollFlags;
@@ -202,8 +209,7 @@ impl Exec {
 
     fn try_spawn(&self, now: Instant) -> Result<Running, String> {
         let (program, args) = self.settings.command.split_first().ok_or("no command")?;
-        let mut child = Command::new(program)
-            .args(args)
+        let mut child = guard::command(program, args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
