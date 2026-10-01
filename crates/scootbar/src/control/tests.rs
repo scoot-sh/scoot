@@ -412,6 +412,10 @@ fn streamed(name: &str, bytes: Vec<u8>) -> (Vec<String>, Result<(), super::clien
             lines.push(line.to_owned());
             true
         });
+        // A client that never connected (a path error) leaves the daemon
+        // thread in `accept`, which the scope would wait for for ever: one
+        // connection to the still-open listener lets it end.
+        let _ = UnixStream::connect(&paths.socket);
         (lines, result)
     })
 }

@@ -50,13 +50,19 @@ fn subscribed_to_a_daemon_that_sends(tag: &str, bytes: &str) -> Output {
             while stream.read(&mut byte).unwrap() > 0 && byte[0] != b'\n' {}
             let _ = stream.write_all(bytes.as_bytes());
         });
-        Command::new(env!("CARGO_BIN_EXE_scootbar"))
+        let output = Command::new(env!("CARGO_BIN_EXE_scootbar"))
             .args(["msg", "subscribe"])
             .env("XDG_RUNTIME_DIR", &scratch.0)
             .env("WAYLAND_DISPLAY", "fake")
             .stdin(std::process::Stdio::null())
             .output()
-            .unwrap()
+            .unwrap();
+        // A command that failed before connecting (a path error) leaves the
+        // daemon thread in `accept`, which the scope would wait for for ever
+        // and the test would hang instead of fail: one connection to the
+        // still-open listener lets it end.
+        let _ = std::os::unix::net::UnixStream::connect(scratch.0.join("scootbar-fake.sock"));
+        output
     })
 }
 
