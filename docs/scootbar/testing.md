@@ -269,15 +269,18 @@ pinned nixpkgs' tzdata).
   span is inside its rectangle at scales 1, 1.25, 1.5, 1.75, 2, 2.5 and 3); and
   the worst reply sitting far inside its bound by arithmetic.
 - **The agent interface on a headless scoot** (`tests/agent.rs`): the
-  fidelity test (two outputs at scales 1 and 1.5; every module's rectangle
-  clicked at its first and last logical pixel through scoot's own input
-  injection and the binding runs; one pixel outside, it does not), a hidden
+  fidelity test (two outputs at scales 1 and 1.5; each rectangle holds ink on
+  the output's own screenshot and the bar has none outside them; every
+  module's rectangle clicked at its first and last logical pixel through
+  scoot's own input injection and the binding runs; one pixel outside, it
+  does not), a hidden
   bar with no rectangles, `query ID`, `invoke` running each trigger's binding
-  and refusing each wrong ask without running anything, a burst of twenty
-  `set`s heard by a subscriber as the last text in at most twenty events, a
-  subscriber that hangs up leaving the daemon answering, a subscribed
-  connection refused further requests, and the subscriber cap with a slot
-  coming back (`tests/hotplug.rs` adds an `output` subscriber told a
+  and refusing each wrong ask without running anything, a `set` a
+  millisecond for 400 ms heard by a subscriber as the last text in about one
+  event a frame, not one a change (it fails with the gate removed), an idle
+  bar with two subscribers waking for nothing, a subscriber that hangs up
+  leaving the daemon answering, a subscribed connection refused further
+  requests, and the subscriber cap with a slot coming back (`tests/hotplug.rs` adds an `output` subscriber told a
   plugged and an unplugged output on sway).
 - **On a headless scoot** (`tests/exec.rs`): an `exec` module's output read back
   off a screenshot and `query` agreeing with it; a JSON line's class drawn in
