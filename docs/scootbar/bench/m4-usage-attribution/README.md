@@ -51,3 +51,6 @@ What the files say, in short: the `r-xp` mapping is 1184 kB with 960 resident on
 the minor faults at the first frame are 154 and 157; the executed functions
 are 231 and 232, 244 KB and 257 KB; and with the order file the `r-xp`
 `Rss` is 640 kB.
+
+The probe's repros (before and after the review's finding), the per-linker table and the
+Nix reading: [`orderfile-probe.md`](orderfile-probe.md).

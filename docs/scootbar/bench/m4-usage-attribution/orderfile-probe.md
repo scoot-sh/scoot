@@ -24,7 +24,7 @@ with a flag-accepting `cc`, touches `main.rs`, then builds with a `cc` that refu
 
 Also on `<new>`: a debug build then a changed `PATH` is `Finished ... in 0.03s` (no rebuild);
 a release build then a changed `PATH` to the same linker recompiles scootbar (17.7 s) and the
-same `PATH` again does nothing (0.03 s); a refusing `cc` then a accepting one gives
+same `PATH` again does nothing (0.03 s); a refusing `cc` then an accepting one gives
 `hot-text order file applied`.
 
 ## Per linker, at the final tree
