@@ -18,9 +18,15 @@ license.workspace = true
 # module draws a plain bar and needs no font. `icon-image` is the one
 # feature that is not a module: it is an optional decoder (below).
 [features]
-default = ["clock", "workspaces"]
+default = ["clock", "workspaces", "button", "push", "exec"]
 clock = []
 workspaces = []
+# The three modules the config defines by name (`[button.NAME]`,
+# `[push.NAME]`, `[exec.NAME]`): extend the bar without Rust. `push` and
+# `exec` share the update payload (`src/modules/payload.rs`).
+button = []
+push = []
+exec = []
 # PNG icons (`[clock] icon-image`): the `png` decoder, and nothing of it
 # without the feature. Not a module, and not in `default`: the decoder is
 # +115 KB on a 1.48 MB bar (release, `lto = "fat"`, stripped, measured in

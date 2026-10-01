@@ -125,6 +125,14 @@ pill-inset = 0        # the pill's gap from the bar's top and bottom, 0 to 1024
 on-scroll-up = "previous"   # the interaction keys, on every module: see Pointer input
 on-scroll-down = "next"
 
+[button.launcher]     # modules the file defines, placed by name in the lists above
+icon = "\U000f0e65"
+on-click = { exec = ["scootlaunch"] }
+[exec.weather]
+command = ["sh", "-c", "while :; do curl -s 'wttr.in?format=1'; sleep 600; done"]
+[push.status]
+placeholder = "..."
+
 [output."eDP-1"]      # what differs on one output: see Outputs below
 height = 36
 right = ["clock"]
@@ -183,7 +191,7 @@ scootbar msg show                   # make them again
 scootbar msg toggle                 # hide if shown, show if hidden
 scootbar msg version                # the daemon's version and protocol, as JSON
 scootbar msg kill                   # stop the daemon, once its reply is sent
-scootbar msg set ID JSON            # refused: no module takes one yet
+scootbar msg set ID JSON            # write a push module's text, class and tooltip (below)
 ```
 
 `query` prints one JSON object: one entry per placed module per output
@@ -198,12 +206,11 @@ icon, which is not text). This is the agent hook: the bar read as data instead o
 modules, the font — after fully validating it first; a bad file is
 refused and the running bar stands. `hide`, `show` and `toggle` are
 [below](#hiding-the-bar). `query`, `version`, `reload`, `hide`, `show` and
-`toggle` print the reply; `kill` and `set` print nothing on success. `set` is the
-forward hook for the modules that will take a value
-([exec-push-button-modules](backlog/exec-push-button-modules.md)): today
-an unknown id, an unplaced one, or any module at all is a loud error,
-never a silent ok. Without a daemon, every command fails saying so
-(exit status 1).
+`toggle` print the reply; `kill` and `set` print nothing on success. `set`
+writes to a [`push` module](#button-push-and-exec-modules): an id that is not
+placed, a module that takes no value (every one but `push`) and a value it
+refuses are each a loud error naming why, never a silent ok. Without a
+daemon, every command fails saying so (exit status 1).
 
 ## Modules
 
@@ -215,7 +222,10 @@ never a silent ok. Without a daemon, every command fails saying so
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
 lists those that are. Every module takes the five
-[interaction keys](#pointer-input). The `icon-image` feature is not a module: it adds the PNG
+[interaction keys](#pointer-input). Besides these two, the config can define
+modules of its own by name, a [`button`, a `push` and an `exec`
+module](#button-push-and-exec-modules), each a Cargo feature (`button`,
+`push`, `exec`) on by default. The `icon-image` feature is not a module: it adds the PNG
 decoder for [image icons](#icons), and is off by default.
 
 ## Layout
@@ -495,6 +505,133 @@ it did before there was any input. A reload that adds or removes bindings
 takes or drops it. A motion event stores two numbers; no pointer event,
 hover repaint or module action allocates (tests count the allocations).
 Launching an `exec` command does, as any process spawn must.
+
+## Button, push and exec modules
+
+Three modules that extend the bar without writing Rust. Each is defined by a
+table named for its kind and **a name of your choosing**, and the lists then
+place it by that name like any built-in module:
+
+```toml
+left   = ["workspaces", "launcher"]
+right  = ["weather", "status", "clock"]
+
+[button.launcher]
+icon = "\U000f0e65"                         # or icon-path, icon-image: as the clock's
+text = "Apps"                               # shown after the icon
+on-click = { exec = ["scootlaunch"] }
+
+[exec.weather]
+command = ["sh", "-c", "while :; do curl -s 'wttr.in?format=1'; sleep 600; done"]
+format = "text"                             # or "json"
+placeholder = "..."                         # until the first line
+
+[push.status]
+placeholder = ""
+```
+
+A name is 1 to 32 letters, digits, `-` or `_` starting with a letter or digit,
+is not a built-in module's id (`clock`, `workspaces`) and is unique across the
+three kinds; at most 32 modules are defined. Every table also takes `margin`
+(as the clock's) and the five [interaction keys](#pointer-input), so any of
+them can run a command or send `{ scoot = "quit" }` on a click or a scroll.
+A table no list names is never started and costs nothing. These modules are
+named in the config file's lists only: `--left`, `--center` and `--right`
+take the built-in ids. A bad table is refused naming its dotted key
+(`exec.weather.command`), and a bad `reload` changes nothing.
+
+### `button`
+
+An icon and/or text that never changes: a launcher, a power menu, a toggle.
+`text` and the three icon keys (`icon`, `icon-path` with `icon-viewbox`,
+`icon-image`, at most one) are the clock's, with the same refusals. A button
+with neither shows nothing and takes no space. It has no fd and no wakeup.
+`on-click = { exec = ["scootlaunch"] }` is the launcher and
+`on-click = { scoot = "quit" }` log out, in the config
+that is the whole of them.
+
+### `push`
+
+A place anything can write to with `scootbar msg set ID VALUE`, costing
+nothing until it is: no fd of its own beyond the control socket, no timer, no
+thread. `VALUE` is JSON, the [payload](#the-update-payload) below:
+
+```sh
+scootbar msg set status '{"text": "build ok", "class": "normal"}'
+scootbar msg set status '"3 new mails"'      # a JSON string is the text alone
+scootbar msg set status null                 # clears it (the module takes no space)
+```
+
+`set` only changes what the module shows; it cannot run anything. A value
+that is refused (too long, not JSON, a class that does not exist, a
+`version` this bar does not speak) leaves what was shown as it was and is
+answered by name. Several `set`s that arrive in one turn of the loop are
+drawn once; one that changes nothing is not drawn.
+
+### `exec`
+
+Runs a command and shows what it prints, one line per update. **It streams,
+it does not poll**: the command runs once and the bar waits on its output, so
+a script that can wait for an event prints when it has one and the bar does
+nothing in between. There is **no `interval` key**, on purpose: a script
+that has to poll writes `while sleep 60; do ...; done`, which puts the cost
+(a process every minute, whatever it spawns) in a script you can see, not in
+a bar option. `command` is an array, the program and its arguments, **never
+run through a shell** (write `["sh", "-c", "..."]` to use one), at most 32
+arguments of at most 4096 bytes. `format` says how a line is read: `text`
+(the line is the text, the default) or `json` (one object per line, below).
+
+- **What is shown** is the last line of what the bar read at once (an
+  update is a state, so earlier ones in the same read are already stale).
+  A line that is not valid (JSON mode: not JSON, a bad key, a newer
+  `version`) is ignored with one line on stderr, at most one a second, and
+  what was shown stays. A blank line shows nothing.
+- **Bounds**: a line longer than 4096 bytes is **dropped whole**, never
+  truncated, with one warning a second at most: the bar holds one line at
+  most however much the command prints. While output keeps coming the bar
+  reads at most 4 KiB once every 16 ms and does not even poll the pipe in
+  between, so a command printing as fast as it can fills the pipe and
+  blocks (the kernel's back-pressure) and costs the bar about 60 small
+  reads a second and no memory; one that prints once a minute costs
+  nothing between lines.
+- **Restarts**: when the command exits it is started again after 1 s, then 2,
+  4, ... up to 60 s; a run that lasted 30 s or more starts the sequence
+  over. A command that cannot start (no such program) takes the same path.
+  Each restart is one line on stderr, so at most one a minute at the slowest.
+- **Children**: reaped the moment they exit (a pidfd wakes the bar, no
+  timer, no zombie). Its stdin is `/dev/null`, its stderr is the bar's own
+  (its complaints reach the journal), it leads its own process group, and it
+  inherits none of the bar's file descriptors. **The whole process group is
+  killed when the module goes**: on a reload (the command is started afresh
+  with the new config, whether or not its table changed), and when the
+  command exits, so a worker it backgrounded does not pile up across
+  restarts. If the bar itself is killed its commands are left to find the
+  pipe closed (they are ended by the `SIGPIPE` of their next line).
+- **Count**: at most 8 `exec` modules are placed (on any output); each
+  holds a child, a `timerfd` and at most two polled fds.
+- **Start-up**: a command is started right after the bar's first frame, not
+  before it, so a slow `fork` never delays the bar.
+
+### The update payload
+
+What a `push` takes and an `exec` in `json` mode prints per line, scootbar's
+own and **deliberately not Waybar's** (no `alt`, no `percentage`, no class
+lists, nothing to translate), version 1:
+
+```json
+{"version": 1, "text": "72%", "class": "warn", "tooltip": "battery low"}
+```
+
+Every key is optional. `text` and `tooltip` are strings, `class` is one of
+`normal`, `warn`, `urgent` or `muted` (colored by the theme's tokens: the
+`urgent` and `dim` colors and so on), `version` is the shape this was
+written for; a `version` above 1 is refused by name rather than half
+understood, and keys it does not know are ignored, so later versions can add
+some. Text and tooltip are cut at 256 bytes on a character boundary, and
+every control character (a tab, a carriage return, an escape) becomes a
+space, so nothing but printable text reaches the bar. A line or value
+past 4096 bytes, or JSON nested more than 8 deep, is refused. The tooltip is
+carried for [tooltips](backlog/tooltips.md), which are not drawn yet.
 
 ## Fonts
 

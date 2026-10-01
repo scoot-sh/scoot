@@ -68,6 +68,8 @@ use rustix::event::{PollFd, PollFlags};
 use serde_json::Value;
 
 use crate::action::{Action, Bindings, ModuleAction, Trigger};
+pub use class::{Class, MAX_TEXT};
+
 use crate::density::Scale;
 use crate::icon::{Art, Icon};
 use crate::layout::Layout;
@@ -75,10 +77,25 @@ use crate::paint::{Canvas, Span};
 use crate::text::Text;
 use crate::theme::Theme;
 
+#[cfg(feature = "button")]
+pub mod button;
+mod class;
 #[cfg(feature = "clock")]
 pub mod clock;
+pub mod custom;
+#[cfg(feature = "exec")]
+pub mod exec;
 #[cfg(test)]
 pub mod harness;
+// A build with `button` and neither of the others reads only `Shown::text`
+// of it; the rest is `push` and `exec`'s.
+#[cfg(any(feature = "button", feature = "push", feature = "exec"))]
+#[cfg_attr(not(any(feature = "push", feature = "exec")), allow(dead_code))]
+pub mod payload;
+#[cfg(feature = "push")]
+pub mod push;
+#[cfg(any(feature = "push", feature = "exec"))]
+mod shown;
 #[cfg(feature = "workspaces")]
 pub mod workspaces;
 
@@ -150,10 +167,7 @@ pub trait Module {
     }
 
     /// A `scootbar msg set ID JSON` value for this module: the request's
-    /// JSON value. No module takes one yet, so the default refuses; the
-    /// modules that will (the exec ones,
-    /// `docs/scootbar/backlog/exec-push-button-modules.md`) read what they
-    /// accept and answer [`Update`] like any other change.
+    /// JSON value. Only a `push` module takes one, so the default refuses.
     fn on_set(&mut self, value: &Value) -> Result<Update, SetError> {
         let _ = value;
         Err(SetError::Unsupported)
@@ -169,19 +183,23 @@ pub trait Module {
     }
 }
 
-/// Why a `set` value was refused: the module takes none. (The exec
-/// modules, `docs/scootbar/backlog/exec-push-button-modules.md`, add the
-/// refusal for a value they do not accept with their first use.)
+/// Why a `set` value was refused: the module takes none, or took this one
+/// for what it is not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetError {
-    /// This module takes no set value (every module today).
+    /// This module takes no set value (every module but `push`).
     Unsupported,
+    /// A `push` module refused the value: why.
+    #[cfg(feature = "push")]
+    Invalid(payload::Invalid),
 }
 
 impl fmt::Display for SetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unsupported => write!(f, "takes no set value"),
+            #[cfg(feature = "push")]
+            Self::Invalid(why) => write!(f, "{why}"),
         }
     }
 }
@@ -354,18 +372,21 @@ pub fn start(
 ) -> Vec<Placed> {
     let mut placed = Vec::new();
     for (_, id) in layout.placed() {
-        // The command line refuses unknown ids; skipped all the same.
-        let Some(spec) = find(id) else {
-            continue;
+        // A built-in module, or one the config defines by name; the config
+        // and the flags refuse any other id, skipped all the same.
+        let init = match (find(id), settings.custom_named(id)) {
+            (Some(spec), _) => (spec.init)(settings),
+            (None, Some(custom)) => custom.start(),
+            (None, None) => continue,
         };
-        match (spec.init)(settings) {
+        match init {
             Init::Available(module) => placed.push(Placed {
-                id: spec.id,
+                id,
                 module,
-                bindings: settings.bindings_of(spec.id),
+                bindings: settings.bindings_of(id),
                 revision: 0,
             }),
-            Init::Unavailable(why) => warn(spec.id, &why),
+            Init::Unavailable(why) => warn(id, &why),
         }
     }
     placed
@@ -382,9 +403,17 @@ pub struct Settings {
     /// The interaction keys the config sets, by module id: only modules
     /// that bind something are listed.
     pub bindings: Vec<(&'static str, Bindings)>,
+    /// The modules the config defines by name (`[button.NAME]`, ...), placed
+    /// by their names in the layout like the built-in ones.
+    pub custom: Vec<custom::Custom>,
 }
 
 impl Settings {
+    /// The module the config defines as `id`, if it does.
+    pub fn custom_named(&self, id: &str) -> Option<&custom::Custom> {
+        self.custom.iter().find(|custom| custom.id == id)
+    }
+
     /// The bindings module `id` has (none for a module the config leaves
     /// alone).
     pub fn bindings_of(&self, id: &str) -> Bindings {
@@ -459,37 +488,6 @@ pub struct CustomDraw<'r, 'c> {
     pub scale: Scale,
     pub theme: &'r Theme,
 }
-
-/// A state class: how the bar colors a module's view (through the theme's
-/// tokens, `crate::theme`). A module never picks colors itself. The clock
-/// is always `Normal`; the others are the contract's, for the modules that
-/// follow it (battery, volume), and tested through the render.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[allow(dead_code)]
-pub enum Class {
-    #[default]
-    Normal,
-    Warn,
-    Urgent,
-    Muted,
-}
-
-impl Class {
-    /// The class's name in a `query` reply: `normal`, `warn`, `urgent` or
-    /// `muted`.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Normal => "normal",
-            Self::Warn => "warn",
-            Self::Urgent => "urgent",
-            Self::Muted => "muted",
-        }
-    }
-}
-
-/// The most text a view holds, in bytes; more is cut at a character
-/// boundary. Bounds what an untrusted string (a window title) can cost.
-pub const MAX_TEXT: usize = 256;
 
 /// The most fds the bar's loop polls in one turn (`crate::daemon`): the
 /// Wayland connection and every placed module's sources, in fixed arrays

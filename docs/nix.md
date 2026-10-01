@@ -428,8 +428,9 @@ is a demo, for trying the bar on a box with no fonts where it looks: the
 overlay does not provide it, and a system should install `scootbar` and
 give it a font its own font setup provides.
 
-Modules are Cargo features (one per module, `clock` the default; see
-`crates/scootbar/Cargo.toml`), reachable through `.override`:
+Modules are Cargo features (one per module: `clock`, `workspaces`, and the
+three the config defines by name, `button`, `push` and `exec`, all default;
+see `crates/scootbar/Cargo.toml`), reachable through `.override`:
 
 ```nix
 # A bar with no modules: a plain bar, which needs no font.
@@ -442,7 +443,9 @@ scootbar.override { buildFeatures = [ "icon-image" ]; }
 ```
 
 `programs.scootbar.features` (below) is the same list, so `features = [ "clock"
-"workspaces" "icon-image" ]` builds the default bar with PNG icons.
+"workspaces" "button" "push" "exec" "icon-image" ]` builds the default bar with
+PNG icons. A bar built without `exec`, `push` or `button` refuses that table
+in the config (an unknown key), naming it.
 
 ### The modules: `programs.scootbar`
 

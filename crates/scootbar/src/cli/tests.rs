@@ -374,7 +374,7 @@ fn msg_set_takes_an_id_and_json() {
     let id = "workspaces";
     match run(&["msg", "set", id, "{\"on\":true}"]) {
         Ok(Command::Msg(Msg::Set { id: got, value })) => {
-            assert_eq!(got, id);
+            assert_eq!(got, id.to_owned());
             assert_eq!(value, "{\"on\":true}");
         }
         other => panic!("{other:?}"),
@@ -396,10 +396,14 @@ fn msg_refusals_name_what_is_wrong() {
         run(&["msg", "set", "clock"]),
         Err(Error::Msg(MsgError::NeedsValue))
     );
-    let unknown = run(&["msg", "set", "battery", "{}"])
+    // Any well-formed id goes (the daemon knows what is placed); a malformed
+    // one is refused by name.
+    assert!(run(&["msg", "set", "battery", "{}"]).is_ok());
+    let bad = run(&["msg", "set", "no way", "{}"])
         .unwrap_err()
         .to_string();
-    assert!(unknown.contains("battery"), "{unknown}");
+    assert!(bad.contains("no way") && bad.contains("module id"), "{bad}");
+    assert!(run(&["msg", "set", "", "{}"]).is_err());
     // A trailing argument is unexpected, naming the command.
     let extra = run(&["msg", "query", "x"]).unwrap_err().to_string();
     assert!(extra.contains("msg"), "{extra}");

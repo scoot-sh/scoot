@@ -330,10 +330,11 @@ pub enum Msg {
     Toggle,
     Version,
     Kill,
-    /// A value for module `id` (the registry id, so a misspelled one is
-    /// refused here): the raw JSON, validated but otherwise unread.
+    /// A value for module `id` (a well-formed id; whether a module of that
+    /// name is placed is the daemon's to say, since a config names its own):
+    /// the raw JSON, validated but otherwise unread.
     Set {
-        id: &'static str,
+        id: String,
         value: String,
     },
 }
@@ -570,8 +571,8 @@ pub enum MsgError {
     /// `set` without its module id, or without its JSON value.
     NeedsId,
     NeedsValue,
-    /// No module of that id in this build.
-    UnknownModule(String),
+    /// Not the shape of a module id.
+    BadModuleId(String),
     /// The value is not JSON.
     BadJson(String),
 }
@@ -595,20 +596,12 @@ impl fmt::Display for MsgError {
                 f,
                 "`scootbar msg set ID` needs a JSON value (try `scootbar msg --help`)"
             ),
-            Self::UnknownModule(id) => {
-                write!(
-                    f,
-                    "no module `{}` in this build (it has:",
-                    id.escape_debug()
-                )?;
-                if REGISTRY.is_empty() {
-                    write!(f, " none")?;
-                }
-                for spec in REGISTRY {
-                    write!(f, " {}", spec.id)?;
-                }
-                write!(f, ")")
-            }
+            Self::BadModuleId(id) => write!(
+                f,
+                "`{}` is not a module id (1 to {} letters, digits, `-` and `_`)",
+                id.escape_debug(),
+                crate::modules::custom::MAX_NAME
+            ),
             Self::BadJson(error) => write!(f, "the value is not JSON: {error}"),
         }
     }
@@ -803,13 +796,13 @@ fn msg(mut args: impl Iterator<Item = OsString>) -> Result<Command, Error> {
             argument: text(extra).unwrap_or_else(|lossy| lossy),
         });
     }
-    let Some(spec) = modules::find(&id) else {
-        return Err(Error::Msg(MsgError::UnknownModule(id)));
-    };
+    if !crate::modules::custom::well_formed(&id) {
+        return Err(Error::Msg(MsgError::BadModuleId(id)));
+    }
     if let Err(error) = serde_json::from_str::<serde::de::IgnoredAny>(&value) {
         return Err(Error::Msg(MsgError::BadJson(error.to_string())));
     }
-    Ok(Command::Msg(Msg::Set { id: spec.id, value }))
+    Ok(Command::Msg(Msg::Set { id, value }))
 }
 
 /// The next argument as UTF-8, `None` when there is none: `Err` is its

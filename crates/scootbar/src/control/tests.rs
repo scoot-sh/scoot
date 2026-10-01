@@ -111,6 +111,11 @@ fn every_request_round_trips_through_its_line() {
             id: Cow::Borrowed("clock"),
             value: serde_json::json!({"on": true}),
         },
+        // `null` is a value (a push module's way to clear), not an absent one.
+        Request::Set {
+            id: Cow::Borrowed("status"),
+            value: serde_json::Value::Null,
+        },
     ];
     for request in &requests {
         let line = request.line();
@@ -136,6 +141,20 @@ fn every_request_round_trips_through_its_line() {
             }
             (request, parsed) => panic!("{request:?} parsed as {parsed:?}"),
         }
+    }
+}
+
+#[test]
+fn a_set_without_a_value_is_refused_and_with_null_is_not() {
+    let missing = protocol::parse(br#"{"protocol":1,"type":"set","id":"x"}"#);
+    assert!(
+        matches!(missing, Err(protocol::RequestError::NoValue)),
+        "{missing:?}"
+    );
+    let null = protocol::parse(br#"{"protocol":1,"type":"set","id":"x","value":null}"#);
+    match null {
+        Ok(Request::Set { value, .. }) => assert_eq!(value, serde_json::Value::Null),
+        other => panic!("{other:?}"),
     }
 }
 

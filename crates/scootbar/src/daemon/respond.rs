@@ -3,7 +3,7 @@
 //! Every request is answered at once, from the daemon's state: `query`
 //! reads each placed module's view on every output, `reload` re-reads the
 //! config file and live-applies it, `version` and `kill` are what they
-//! sound like, and `set` is refused loudly (no module takes one yet).
+//! sound like, and `set` goes to the module (only `push` takes one).
 //!
 //! A refused `reload` changes nothing: the file is re-read and fully
 //! validated before anything is touched, and the font and the modules are
@@ -248,13 +248,11 @@ impl Responder<'_> {
         Ok(())
     }
 
-    /// A value for module `id`: an unknown id, and any module that takes
-    /// no value (every module today), are loud errors, never a silent ok.
+    /// A value for module `id`: an id that is not placed, and any module
+    /// that takes no value (every one but `push`), are loud errors, never a
+    /// silent ok.
     fn set(&mut self, id: &str, value: &serde_json::Value) -> Result<(), String> {
         let Some(placed) = self.state.content.modules.iter_mut().find(|p| p.id == id) else {
-            if modules::find(id).is_none() {
-                return Err(format!("no module `{id}` in this build"));
-            }
             let mut shows = String::new();
             for placed in &self.state.content.modules {
                 if !shows.is_empty() {

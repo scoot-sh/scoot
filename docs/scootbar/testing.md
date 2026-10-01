@@ -225,6 +225,43 @@ pinned nixpkgs' tzdata).
   by key and changes nothing, and one with a good binding takes the
   pointer. Touch cannot be injected, so it is covered by the pure test.
 
+- **The `button`, `push` and `exec` modules** (M4's
+  [exec-push-button-modules](backlog/resolved/exec-push-button-modules-done.md)):
+  the payload (`modules/payload`: every refusal named and leaving what was
+  shown, the text and tooltip cut at the bound on a character boundary, every
+  control character a space, JSON nested past the depth refused before it is
+  built, a hostile stream of byte strings never panicking, a warm text line
+  allocating nothing, the fuzz corpus replayed); `button` (no fd, no wakeup, no
+  allocation warm), `push` (a flood of sets ends in the last, a refused value
+  changes nothing, a `set` that changes nothing is not a redraw); `exec`
+  against **real children** (`sh`, `printf`, `yes`, `sleep`): the placeholder
+  then the first line, the last line of a read winning, JSON class and
+  tooltip, a bad line ignored, a line with no final newline shown at exit, a
+  line past the bound dropped whole and the next one shown, 256 MiB of
+  unterminated text held in one line's buffer that never grows, a flooding
+  child woken about once a frame, the wait doubling to its cap and a stable
+  run resetting it (and never overflowing), a command restarted with a growing
+  wait, one that cannot start retried with the module still up, an empty command
+  not a panic, no zombie, none of the caller's descriptors, the whole process
+  group killed with the module (a backgrounded worker too) and a worker left
+  holding the pipe not hanging it; the config tables
+  (`config/custom_tests.rs`: every kind, every refusal naming its dotted key,
+  names across the kinds, the interned name the same `&str` on every read, the
+  count placed and defined, a table nothing places never started); the control
+  socket reading `"value": null` as a value.
+- **On a headless scoot** (`tests/exec.rs`): an `exec` module's output read back
+  off a screenshot and `query` agreeing with it; a JSON line's class drawn in
+  its token's color; `msg set` changing a `push` module on screen and in
+  `query`, a refused value naming why and changing nothing, `null` clearing it,
+  and what cannot take a value or is not placed named; a `button` click running
+  its command; a flooding child costing the bar no memory, no descriptors and
+  under a quarter of a core; a command that dies started again with the
+  default delays and nothing left a zombie; a command holding none of the
+  bar's descriptors; a reload replacing the command and killing the old one
+  with its workers; two hundred `set`s in one write drawn as a handful of
+  frames (counted on the protocol trace) and the last standing; and nine
+  `exec` modules refused by name.
+
 ## Snapshots
 
 `src/snapshots/tests.rs` draws fixed scenes and compares every pixel with
@@ -371,8 +408,13 @@ same functions on every `cargo test`. CI builds and runs both targets on
 every scootbar change for a fixed budget (below). Longer runs, and what
 they found, are in [its README](../../crates/scootbar/fuzz/README.md).
 
-Later parsers each land with their target: the config file (M3), the
-`exec` and `push` JSON (M4), a hand-rolled D-Bus message parser (M6).
+A third target, **`payload`**, is the `exec` and `push` update payload (a
+line of text or JSON, and a `msg set` value: refused or accepted without a
+panic, bounded, printable, a refused one changing nothing); its check is
+`src/modules/payload/fuzz.rs`, replayed on every `cargo test` over
+`fuzz/corpus/payload` and `fuzz/regressions/payload`. Later parsers each land
+with their target: the config file (M3), a hand-rolled D-Bus message parser
+(M6).
 
 ## CI
 

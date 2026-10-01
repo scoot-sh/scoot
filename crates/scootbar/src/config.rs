@@ -29,7 +29,12 @@ use crate::theme::Theme;
 #[cfg(test)]
 mod binding_tests;
 mod bindings;
-#[cfg(feature = "clock")]
+mod custom;
+#[cfg(test)]
+mod custom_each_tests;
+#[cfg(all(test, feature = "button", feature = "push", feature = "exec"))]
+mod custom_tests;
+#[cfg(any(feature = "clock", feature = "button"))]
 mod icon;
 #[cfg(all(test, feature = "clock"))]
 mod icon_tests;
@@ -132,6 +137,13 @@ pub enum Error {
         key: &'static str,
         message: String,
     },
+    /// A refusal at a key that is not one of the fixed ones: a module the
+    /// config names (`exec.weather.command`), or a module's icon keys.
+    Named {
+        path: PathBuf,
+        key: String,
+        message: String,
+    },
     /// The same, in an `[output."NAME"]` table.
     Output {
         path: PathBuf,
@@ -153,6 +165,9 @@ impl fmt::Display for Error {
             ),
             Self::Parse { path, error } => write!(f, "{}: {error}", path.display()),
             Self::Value { path, key, message } => {
+                write!(f, "{}: '{key}': {message}", path.display())
+            }
+            Self::Named { path, key, message } => {
                 write!(f, "{}: '{key}': {message}", path.display())
             }
             Self::Output {
@@ -268,6 +283,14 @@ struct File {
     colors: ColorsFile,
     clock: ClockFile,
     workspaces: WorkspacesFile,
+    /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
+    /// defines, placed by their names (`custom`).
+    #[cfg(feature = "button")]
+    button: std::collections::BTreeMap<String, custom::ButtonFile>,
+    #[cfg(feature = "push")]
+    push: std::collections::BTreeMap<String, custom::PushFile>,
+    #[cfg(feature = "exec")]
+    exec: std::collections::BTreeMap<String, custom::ExecFile>,
     /// `"all"` or a list of connector names (validated in `outputs`).
     outputs: Option<toml::Value>,
     /// `[output."NAME"]`: what differs on one output.
@@ -513,8 +536,26 @@ impl File {
                 ),
             ));
         }
-        #[cfg_attr(not(any(feature = "clock", feature = "workspaces")), allow(unused_mut))]
-        let mut margins: Vec<(&'static str, u32)> = Vec::new();
+        // The modules the file defines by name, before the lists that place
+        // them.
+        #[allow(unused_mut)]
+        let mut tables = custom::Tables::default();
+        #[cfg(feature = "button")]
+        {
+            tables.button = Some(&self.button);
+        }
+        #[cfg(feature = "push")]
+        {
+            tables.push = Some(&self.push);
+        }
+        #[cfg(feature = "exec")]
+        {
+            tables.exec = Some(&self.exec);
+        }
+        let defined = custom::read(path, &tables)?;
+        let known = defined.names();
+        #[allow(unused_mut)]
+        let mut margins: Vec<(&'static str, u32)> = defined.margins.clone();
         #[cfg(feature = "clock")]
         if let Some(margin) = self.clock.margin {
             let margin = gap(path, "clock.margin", Some(margin), 0)?;
@@ -538,11 +579,16 @@ impl File {
                 margins,
             },
             &defaults.layout,
+            &known,
         )?;
         let theme = self.theme(path, &defaults.theme)?;
-        let outputs = outputs::policy(path, self.outputs.as_ref(), &self.output)?;
-        #[cfg_attr(not(any(feature = "clock", feature = "workspaces")), allow(unused_mut))]
+        let outputs = outputs::policy(path, self.outputs.as_ref(), &self.output, &known)?;
+        // Only what is placed starts, so only what is placed is counted.
+        check_exec_placed(path, &outputs.to_start(&layout), &defined)?;
+        #[allow(unused_mut)]
         let mut modules = defaults.modules;
+        modules.bindings.extend(defined.bindings);
+        modules.custom = defined.modules;
         #[cfg(feature = "clock")]
         if let Some(format) = &self.clock.format {
             use crate::modules::clock::format::Format;
@@ -605,25 +651,22 @@ impl File {
         {
             let clock = &self.clock;
             let read = bindings::read(
-                path,
                 crate::modules::clock::ID,
-                &bindings::Raw {
-                    keys: [
-                        "clock.on-click",
-                        "clock.on-right-click",
-                        "clock.on-middle-click",
-                        "clock.on-scroll-up",
-                        "clock.on-scroll-down",
-                    ],
-                    values: [
-                        clock.on_click.as_ref(),
-                        clock.on_right_click.as_ref(),
-                        clock.on_middle_click.as_ref(),
-                        clock.on_scroll_up.as_ref(),
-                        clock.on_scroll_down.as_ref(),
-                    ],
-                },
-            )?;
+                [
+                    clock.on_click.as_ref(),
+                    clock.on_right_click.as_ref(),
+                    clock.on_middle_click.as_ref(),
+                    clock.on_scroll_up.as_ref(),
+                    clock.on_scroll_down.as_ref(),
+                ],
+            )
+            .map_err(|(trigger, message)| {
+                value(
+                    path,
+                    CLOCK_KEYS[trigger as usize],
+                    format_args!("{message}"),
+                )
+            })?;
             if !read.is_empty() {
                 modules.bindings.push((crate::modules::clock::ID, read));
             }
@@ -632,25 +675,22 @@ impl File {
         {
             let workspaces = &self.workspaces;
             let read = bindings::read(
-                path,
                 crate::modules::workspaces::ID,
-                &bindings::Raw {
-                    keys: [
-                        "workspaces.on-click",
-                        "workspaces.on-right-click",
-                        "workspaces.on-middle-click",
-                        "workspaces.on-scroll-up",
-                        "workspaces.on-scroll-down",
-                    ],
-                    values: [
-                        workspaces.on_click.as_ref(),
-                        workspaces.on_right_click.as_ref(),
-                        workspaces.on_middle_click.as_ref(),
-                        workspaces.on_scroll_up.as_ref(),
-                        workspaces.on_scroll_down.as_ref(),
-                    ],
-                },
-            )?;
+                [
+                    workspaces.on_click.as_ref(),
+                    workspaces.on_right_click.as_ref(),
+                    workspaces.on_middle_click.as_ref(),
+                    workspaces.on_scroll_up.as_ref(),
+                    workspaces.on_scroll_down.as_ref(),
+                ],
+            )
+            .map_err(|(trigger, message)| {
+                value(
+                    path,
+                    WORKSPACES_KEYS[trigger as usize],
+                    format_args!("{message}"),
+                )
+            })?;
             if !read.is_empty() {
                 modules
                     .bindings
@@ -679,7 +719,13 @@ impl File {
 
     /// The module lists: giving any of the three sets the whole layout, as
     /// the flags do (a part not given is empty).
-    fn layout(&self, path: &Path, gaps: Gaps, defaults: &Layout) -> Result<Layout, Error> {
+    fn layout(
+        &self,
+        path: &Path,
+        gaps: Gaps,
+        defaults: &Layout,
+        known: &[&'static str],
+    ) -> Result<Layout, Error> {
         let Gaps {
             padding,
             spacing,
@@ -696,9 +742,9 @@ impl File {
             }
         } else {
             Layout {
-                left: ids(path, Section::Left, &self.left)?,
-                center: ids(path, Section::Center, &self.center)?,
-                right: ids(path, Section::Right, &self.right)?,
+                left: ids(path, Section::Left, &self.left, known)?,
+                center: ids(path, Section::Center, &self.center, known)?,
+                right: ids(path, Section::Right, &self.right, known)?,
                 padding,
                 spacing,
                 separator,
@@ -741,6 +787,24 @@ impl File {
     }
 }
 
+/// The dotted keys of the built-in modules' interaction keys, by trigger.
+#[cfg(feature = "clock")]
+const CLOCK_KEYS: [&str; 5] = [
+    "clock.on-click",
+    "clock.on-right-click",
+    "clock.on-middle-click",
+    "clock.on-scroll-up",
+    "clock.on-scroll-down",
+];
+#[cfg(feature = "workspaces")]
+const WORKSPACES_KEYS: [&str; 5] = [
+    "workspaces.on-click",
+    "workspaces.on-right-click",
+    "workspaces.on-middle-click",
+    "workspaces.on-scroll-up",
+    "workspaces.on-scroll-down",
+];
+
 /// The layout's spacings, validated: what [`File::layout`] adds to the
 /// module lists.
 struct Gaps {
@@ -765,17 +829,26 @@ fn ids(
     path: &Path,
     section: Section,
     ids: &Option<Vec<String>>,
+    known: &[&'static str],
 ) -> Result<Vec<&'static str>, Error> {
     let mut placed = Vec::new();
     for id in ids.as_ref().map(Vec::as_slice).unwrap_or_default() {
-        let Some(spec) = crate::modules::find(id) else {
+        // A built-in module, or one the file defines (`[button.NAME]`, ...).
+        let found = crate::modules::find(id)
+            .map(|spec| spec.id)
+            .or_else(|| known.iter().copied().find(|name| *name == id));
+        let Some(found) = found else {
             let mut has = String::new();
-            if crate::modules::REGISTRY.is_empty() {
+            if crate::modules::REGISTRY.is_empty() && known.is_empty() {
                 has.push_str(" none");
             }
             for spec in crate::modules::REGISTRY {
                 has.push(' ');
                 has.push_str(spec.id);
+            }
+            for name in known {
+                has.push(' ');
+                has.push_str(name);
             }
             return Err(Error::Value {
                 path: path.to_owned(),
@@ -793,9 +866,35 @@ fn ids(
                 message: format!("at most {} modules", crate::layout::MAX_MODULES),
             });
         }
-        placed.push(spec.id);
+        placed.push(found);
     }
     Ok(placed)
+}
+
+/// At most [`crate::modules::custom::MAX_EXEC`] `exec` modules are placed
+/// (on any output): each holds a child, a `timerfd` and up to two polled
+/// fds.
+fn check_exec_placed(path: &Path, placed: &Layout, defined: &custom::Defined) -> Result<(), Error> {
+    let execs = placed
+        .placed()
+        .filter(|(_, id)| {
+            defined
+                .modules
+                .iter()
+                .any(|custom| custom.id == *id && custom.kind.name() == "exec")
+        })
+        .count();
+    if execs > crate::modules::custom::MAX_EXEC {
+        return Err(value(
+            path,
+            "exec",
+            format_args!(
+                "at most {} exec modules may be placed, not {execs}",
+                crate::modules::custom::MAX_EXEC
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// The dotted key a section's list lives under.

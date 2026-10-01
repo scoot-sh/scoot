@@ -76,6 +76,12 @@ impl Harness {
         self.module.invoke(output, action, steps)
     }
 
+    /// A `scootbar msg set` value, as the daemon hands it over.
+    #[allow(dead_code)]
+    pub fn set(&mut self, value: &serde_json::Value) -> Result<Update, super::SetError> {
+        self.module.on_set(value)
+    }
+
     /// The module's view for an unnamed output.
     pub fn view(&self) -> View {
         self.view_on(None)

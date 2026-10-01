@@ -17,31 +17,26 @@
 //! [`MAX_EXEC_ARGS`] arguments of at most [`MAX_EXEC_ARG`] bytes each, the
 //! first not empty, none holding a NUL.
 
-use std::path::Path;
-
-use super::{Error, value};
 use crate::action::{
     Action, Bindings, MAX_EXEC_ARG, MAX_EXEC_ARGS, ModuleAction, ScootAction, Trigger,
 };
 use crate::modules::{ArgKind, Spec};
 
-/// One module's five values as the file gave them, in [`Trigger::ALL`]'s
-/// order, with the dotted config key each is read at.
-pub struct Raw<'a> {
-    pub keys: [&'static str; 5],
-    pub values: [Option<&'a toml::Value>; 5],
-}
-
-/// What the table `module` binds. `module` is a registry id.
-pub fn read(path: &Path, module: &'static str, raw: &Raw<'_>) -> Result<Bindings, Error> {
+/// What the table of module `module` (a registry id, or a custom module's
+/// name) binds, from its five values as the file gave them, in
+/// [`Trigger::ALL`]'s order. `Err` is the trigger whose value is refused and
+/// why, for the caller to name its key.
+pub fn read(
+    module: &str,
+    values: [Option<&toml::Value>; 5],
+) -> Result<Bindings, (Trigger, String)> {
     let spec = crate::modules::find(module);
     let mut bindings = Bindings::default();
-    for ((trigger, key), given) in Trigger::ALL.into_iter().zip(raw.keys).zip(raw.values) {
+    for (trigger, given) in Trigger::ALL.into_iter().zip(values) {
         let Some(given) = given else {
             continue;
         };
-        let action = action(module, spec, given)
-            .map_err(|message| value(path, key, format_args!("{message}")))?;
+        let action = action(module, spec, given).map_err(|message| (trigger, message))?;
         bindings.set(trigger, action);
     }
     Ok(bindings)

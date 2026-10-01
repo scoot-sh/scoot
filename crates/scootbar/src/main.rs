@@ -146,7 +146,7 @@ fn run_msg(msg: cli::Msg) -> ExitCode {
             };
             send(
                 &control::protocol::Request::Set {
-                    id: Cow::Borrowed(id),
+                    id: Cow::Owned(id),
                     value,
                 },
                 false,
