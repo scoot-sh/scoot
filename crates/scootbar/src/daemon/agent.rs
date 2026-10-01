@@ -9,8 +9,11 @@
 //! - **`layout`** lists each output's bar rectangle and each module's
 //!   rectangle in the compositor's global logical pixels, **as last drawn**:
 //!   the spans are the scene's own (`render::Scene`, the layout the last
-//!   committed frame used), converted with the scale that frame was drawn at,
-//!   rounded outward so a point inside a rectangle is on the module. A hidden
+//!   committed frame used, in device pixels), converted with the output's
+//!   *current* scale (not a scale recorded with the frame: a scale change
+//!   not yet redrawn is the one moment the rectangles and the pixels can
+//!   disagree), rounded outward so a point inside a rectangle is on the
+//!   module. A hidden
 //!   or not-yet-configured bar has no rectangle and no modules.
 //!   The reply is `{"type":"layout","outputs":[{"output":"DP-1","origin":
 //!   {"x":0,"y":0},"scale":1.5,"bar":{"x":0,"y":0,"width":1600,"height":28}

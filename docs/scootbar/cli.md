@@ -237,11 +237,14 @@ compositor's global logical pixels), `scale`, the `bar` rectangle (`null`
 while the bar is hidden or not yet configured) and the `modules` that show
 something, left to right, each with `id`, `section` and an `x`, `y`,
 `width`, `height` rectangle in the same global logical pixels. It is the
-layout **as last drawn**: the spans the last committed frame used, converted
-with the scale that frame was drawn at and rounded outward, so a pointer
-anywhere on a drawn pixel of a module is inside its rectangle. Aim scoot's
-pointer injection at the middle of a rectangle (`scoot msg click X Y`) and
-the module is pressed; a test clicks the first and last logical pixel of
+layout **as last drawn**: the spans (in device pixels) the last committed
+frame used, converted with the output's **current** scale (the reply does not
+record the scale a frame was drawn at, so a scale change that has not been
+redrawn yet is the one moment a rectangle and the pixels can disagree) and
+rounded outward, so a pointer anywhere on a drawn pixel of a module is inside
+its rectangle. Aim scoot's pointer injection at the middle of a rectangle
+(`scoot msg pointer click X Y`, which moves there and presses and releases the
+left button; `right` and `middle` name the others) and the module is pressed; a test clicks the first and last logical pixel of
 every rectangle and one pixel outside it, on two outputs at scales 1 and
 1.5. A hidden bar has no rectangles at all. A module whose text is empty
 takes no space and is not listed.
@@ -262,7 +265,10 @@ run nothing. Success prints nothing.
 
 **`subscribe [module] [output]`** keeps the connection open and prints one
 JSON line per event, after one `{"type":"subscribed","events":[...]}` line.
-No kind named is both. A `module` event is a `query` entry with `"type":"module"`,
+No kind named is both. **There is no snapshot**: a subscription starts from
+now and only changes follow, so to read the state and then follow it,
+**subscribe first, then `query`** (the other order can miss a change between
+the two; this one at worst repeats one the `query` already shows). A `module` event is a `query` entry with `"type":"module"`,
 sent when that module's view changed, once per output that shows it; an
 `output` event is `{"type":"output","change":"added"|"removed","name":...}`.
 Events are **coalesced to the frame rate**: a module that changes a hundred
@@ -273,8 +279,13 @@ tells every module again. A subscribed connection serves no further requests
 at once (a fifth is refused saying so), and **a subscriber that stops
 reading is disconnected, never buffered**: each batch is one nonblocking
 write, and one the socket cannot take whole ends the connection. With no
-subscriber the daemon does one branch a loop turn. The command exits 0 when
-the daemon closes the connection.
+subscriber the daemon does one branch a loop turn. The command prints whole
+lines only, and exits 0 when the daemon closes the connection between two of
+them. A subscriber the daemon dropped can be left a **prefix of a line** (the
+write the socket could not take whole): that line is discarded, never
+printed as if whole, and the command says so on stderr and exits 1, so a
+script can tell "the daemon went away" from "I was dropped and may have
+missed events" (subscribe again, then `query`).
 
 ## Modules
 

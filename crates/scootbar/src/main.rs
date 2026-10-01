@@ -194,7 +194,9 @@ fn run_msg(msg: cli::Msg) -> ExitCode {
 }
 
 /// `subscribe`: prints the daemon's lines as they come, until it closes the
-/// connection (exit status 0, as scootctl's) or stdout does.
+/// connection between two lines (exit status 0, as scootctl's) or stdout
+/// does. A connection that ends inside a line (the daemon dropped the
+/// subscriber mid-write) discards that line and is exit status 1.
 fn subscribe(request: &control::protocol::Request<'_>) -> ExitCode {
     use print::warn;
     let mut stdout_closed = false;
