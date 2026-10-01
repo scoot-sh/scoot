@@ -3,7 +3,7 @@ title: "Brightness module: backlight level, scroll to adjust"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "pointer-and-interactions"
+blocked: null
 milestone: "M5"
 ---
 

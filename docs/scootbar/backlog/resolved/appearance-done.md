@@ -75,7 +75,7 @@ did not look).
 
 **What is not done, and where it went:** the `hover` token and per-module
 token-per-state overrides (they need pointer motion, so
-[pointer-and-interactions](../pointer-and-interactions.md)), dot-style workspace
+[pointer-and-interactions](pointer-and-interactions-done.md)), dot-style workspace
 indicators, colors for inactive workspaces, a disc at any padding, and the
 default margin matching scoot's gap (a product call) are filed together in
 [appearance-followups](../appearance-followups.md). The opt-in animation question

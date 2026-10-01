@@ -9,7 +9,10 @@ composable shell.
 > output (or the ones you list), reserving its space, across outputs coming and going; the flags
 > are in [cli.md](cli.md). Workspaces are one flag away
 > (`--left workspaces`: each output's numbers with the active one
-> marked, click to switch). That is M1's
+> marked, click to switch). Every module answers the pointer: clicks,
+> scrolls and hover run a module action, a command or a request to scoot
+> that the config binds ([pointer input](cli.md#pointer-input), M4's
+> [first step](backlog/resolved/pointer-and-interactions-done.md)). That is M1's
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
 > [module API and clock](backlog/resolved/module-api-and-clock-done.md),
 > and its [Nix package](backlog/resolved/nix-package-done.md), which
@@ -55,6 +58,9 @@ are in [cli.md](cli.md#the-config-file).
   compositor, so the bar idles at 2 wakeups a minute (the target, [ratified](backlog/lightest.md#decisions)); with no module, 0.
 - **Standard protocols first** (`ext-workspace-v1`, layer shell), so it
   runs on other compositors as scootbg does.
+- **Interactive at no cost until used**: a module's `on-click` and
+  `on-scroll-*` keys run an action or a command, hover repaints one module,
+  and a bar with no binding never takes the pointer at all.
 - **Configurable without restarting, and readable as data**: the file
   holds every option, `scootbar msg reload` live-applies an edit, and
   `scootbar msg query` reads each module's state as JSON — for daily
