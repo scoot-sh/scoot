@@ -513,13 +513,29 @@ as the published M1 record, and its table is in the
 
 ## The systemd unit under a real user manager
 
-`scripts/scootbar-unit-test.sh` runs the unit `nixosModules.scootbar` generates
-under the real `systemd --user` against a live headless scoot (nothing drawn on
-a display, no VT taken): it keeps retrying with no compositor, comes up once
-`WAYLAND_DISPLAY` reaches the manager, is restarted after a SIGKILL (and eight in a
-row), and stays stopped after a SIGTERM, `scootbar msg kill` and a stop. It builds
-the unit from this checkout's committed flake with Nix, loads it into the manager's
+`scripts/scootbar-unit-test.sh [--nixos | --home]` runs the unit the module
+generates under the real `systemd --user` against a live headless scoot (nothing
+drawn on a display, no VT taken). `--nixos` (the default) builds it from
+`nixosModules.scootbar`; `--home` builds a real home-manager generation of
+`homeModules.scootbar`, runs its `activate` for real into a scratch home (its
+systemd step finds no manager and skips: your own generation is never touched)
+and runs the unit it linked. It checks that the unit keeps retrying with no
+compositor, comes up once `WAYLAND_DISPLAY` reaches the manager, is restarted after a
+SIGKILL (and eight in a row), stays stopped after a SIGTERM, `scootbar msg kill` and a
+stop (S0 to S7), and starts and stops with `graphical-session.target` (S8: a session
+target that `BindsTo=` it, started with the environment imported first, as docs/nix.md
+shows; the direct start the target refuses is checked too). `--home` adds S9: home-manager's
+own switch tool, sd-switch, restarts the bar when its config changes and leaves it alone when
+only something unrelated in the generation does. It loads the unit into the manager's
 *runtime* directory only (nothing persistent), refuses to run if a `scootbar.service`
-already exists, and removes everything on exit. Needs Linux with a user manager,
-Nix, a built scoot and scootctl, and python3; it prints `RESULT: PASS n FAIL m` and
-exits 1 on a FAIL. It is not run in CI (CI has no user manager).
+exists, if `graphical-session.target` is active or has anything wired to it, or if the
+manager already has a `WAYLAND_DISPLAY`, and removes everything on exit. Needs Linux
+with a user manager, Nix, a built scoot and scootctl, and python3; it prints `RESULT:
+PASS n FAIL m` and exits 1 on a FAIL. It is not run in CI (CI has no user manager); the
+CI `scootbar` job builds the Nix module check on x86_64-linux instead.
+
+`scripts/scootbar-stylix-test.sh` is the Stylix half: real Stylix and home-manager
+(pinned revisions, overridable), themed from a real image, the tokens compared with the
+palette, the file validated by `scootbar daemon --check`, and the bar's background pixel
+checked on a headless scoot. It needs Nix with network, python3 and a built scoot; not run in
+CI (it builds Stylix's palette generator).

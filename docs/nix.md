@@ -490,18 +490,80 @@ reached by a 2 s retry either, measured on systemd 261), so a crash, or a
 start before the compositor's `WAYLAND_DISPLAY` is imported, retries, while
 `scootbar msg kill` and a stop stay stopped (scoot does not supervise its
 clients). `scripts/scootbar-unit-test.sh` runs this unit under a real
-`systemd --user` against a live scoot and checks each of those. The unit
-carries `X-Restart-Triggers` on the config file; home-manager's switch
-restarts it on a new config, while whether NixOS restarts a user unit on
-switch depends on the release (log in again or `systemctl --user restart
-scootbar` otherwise; unverified here). scoot does not start
-`graphical-session.target` itself: a scoot session script imports the
-environment and starts it, as for any compositor:
+`systemd --user` against a live scoot and checks each of those, for the
+NixOS-generated unit (`--nixos`, the default) and for the unit
+home-manager's real generation and `activate` produce (`--home`).
 
-```sh
-dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
-systemctl --user start graphical-session.target
+**Restarting on a new config.** The unit carries `X-Restart-Triggers` on
+the config file, so a changed config is a changed unit file and the switch
+restarts the bar (it starts in milliseconds); an unchanged one leaves the
+running bar alone. Measured under a real user manager with home-manager's
+own switch tool, sd-switch 0.6.4: switching a generation that only adds
+an unrelated option planned `No action scootbar.service (... RestartEq)`
+and left the same `InvocationID` and process; switching to one with
+`bar.height = 40` planned `Stop/Start scootbar.service` and the new bar
+drew the new height (`scripts/scootbar-unit-test.sh --home`, S9; its
+`--dry-run` plan matched what the real run did). NixOS: not run (a
+`nixos-rebuild` is not something to run on a machine for this), read
+instead from the pinned nixpkgs' `switch-to-configuration-ng`
+(`pkgs/by-name/sw/switch-to-configuration-ng/src/main.rs`): for each active
+user unit loaded from `/etc/systemd/user`, `collect_unit_changes` compares
+the old and the new unit file (`compare_units`: a difference outside
+`X-Reload-Triggers` needs a restart) and restarts the changed unit
+(`do_user_switch`), so a `restartTriggers` change restarts the bar on a
+`nixos-rebuild switch`, with the user manager running. That is the source
+of this pin, not a run.
+
+**Starting the bar: the unit, or your session script, not both.** The unit
+starts when `graphical-session.target` is reached, and nothing in a scoot
+session reaches it for you. scoot does not start it. NixOS's
+`nixos-fake-graphical-session.target` exists to do that for sessions that
+do not, but its only users are the X11 session wrapper and `startx`
+(`services/x11/display-managers/default.nix`), never a Wayland session
+entry: `programs.scoot.session.command` is just the `Exec=` line the
+greeter runs. So the session script (`programs.scoot.sessionScript` on the
+home-manager side, which `session.command` points the greeter at) imports
+the environment and starts a target of its own. It cannot start
+`graphical-session.target` directly: that target has
+`RefuseManualStart=yes`, and `systemctl --user start graphical-session.target`
+is refused ("may be requested by dependency only", measured, systemd 261).
+A session target that `BindsTo=` it is the way (the shape of NixOS's own
+fake target), and the script starts that:
+
+```nix
+# home-manager: the target the session script starts
+systemd.user.targets.scoot-session.Unit = {
+  Description = "scoot session";
+  BindsTo = [ "graphical-session.target" ];
+  Wants = [ "graphical-session-pre.target" ];
+  After = [ "graphical-session-pre.target" ];
+};
+programs.scoot.sessionScript = ''
+  systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
+  systemctl --user start scoot-session.target
+  exec foot
+'';
 ```
+
+`import-environment` first, so the bar's first start finds the display (the
+bar retries every two seconds until it can, so the order is not fragile, but
+the first start is clean). Importing into D-Bus-activated apps' environment
+too is `dbus-update-activation-environment --systemd WAYLAND_DISPLAY
+XDG_CURRENT_DESKTOP`. With the target started, `WantedBy=` brings the bar up
+after `graphical-session.target` and `PartOf=` stops it when the target
+stops (`systemctl --user stop scoot-session.target`: measured, S8 of the
+script, the bar came up 0.6 s after the target start and went down with the
+stop). Nothing stops the target for you when scoot exits: the bar then
+retries a compositor that is gone every two seconds until the user manager
+ends with the logout, so stop the target when your session ends (a stop of a
+lingering user's manager is not something this was run against).
+
+The other route: `programs.scootbar.systemd.enable = false`, and start the
+bar from scoot itself, `autostart.commands = [ "spawn scootbar daemon" ]` in
+`programs.scoot.settings` (or a line in the session script). One route per
+program: both start two daemons, and the second one refuses at start-up
+(one daemon per display holds the control socket), which the unit then
+retries every two seconds.
 
 **Stylix, without depending on it.** When `config.lib.stylix` exists and
 `stylix.enable` is on, `settings` gets defaults from it: the five `colors`
@@ -536,8 +598,14 @@ present.
 So `settings.colors.background = "#123456"` replaces that one token and
 keeps the other four from Stylix, and a value you set is never overridden by
 theming (the trouble Waybar's users report). This is pinned by an
-evaluation test, and checked against a real Stylix and home-manager/NixOS
-(see `nix/scootbar-tests.nix`). A native `stylix.targets.scootbar` is not
+evaluation test (`nix/scootbar-tests.nix`, with a stand-in for Stylix), and
+run against the real thing by `scripts/scootbar-stylix-test.sh`: real
+Stylix (`fb28acd`) and home-manager (`efa3ccb`) themed from a real image, the
+five tokens read back equal to base16 `base00/05/0A/03/08` of the generated
+palette, the file accepted by `scootbar daemon --check`, a user value winning
+per key, and the bar's background pixel on a headless scoot equal to `base00`
+(and to the user's color when the user sets one). It is not in CI: it builds
+Stylix's palette generator and fetches two flakes. A native `stylix.targets.scootbar` is not
 provided: that is an upstream Stylix change.
 
 **Checks.** `checks.<system>.scootbar-modules` (Linux; run by CI's
