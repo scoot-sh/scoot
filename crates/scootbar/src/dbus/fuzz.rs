@@ -186,8 +186,9 @@ pub fn read_tooltip(body: &[u8]) -> Result<(String, String, String), ()> {
     let mut reader = Reader::le(body);
     reader.enter_struct()?;
     let name = reader.str()?.to_owned();
-    let full = reader.array_full(8)?;
-    let _ = read_pixmaps(full);
+    if let Ok(elements) = reader.array_raw(8) {
+        let _ = read_pixmaps(elements);
+    }
     let title = reader.str()?.to_owned();
     let text = reader.str()?.to_owned();
     reader.leave_struct();

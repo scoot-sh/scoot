@@ -1530,7 +1530,7 @@ fn fill(item: &mut Item, body: &[u8]) -> bool {
                 Ok(shown) => tooltip = Some(shown),
                 Err(()) => return false,
             },
-            ("IconPixmap", "a(iiay)") => match entries.array_full(8).ok().and_then(|full| read_pixmaps(full).ok()) {
+            ("IconPixmap", "a(iiay)") => match entries.array_raw(8).ok().and_then(|elements| read_pixmaps(elements).ok()) {
                 Some(list) => pixmaps = Some(list),
                 None => return false,
             },
@@ -1577,10 +1577,10 @@ fn read_tooltip_shape(entries: &mut Reader<'_>) -> Result<(String, String, Strin
     let name = entries.str().map_err(|_| {
         eprintln!("TRAYDBG tooltip: name failed");
     })?.to_owned();
-    let full = entries.array_full(8).map_err(|_| {
+    let elements = entries.array_raw(8).map_err(|_| {
         eprintln!("TRAYDBG tooltip: pixmaps array failed");
     })?;
-    read_pixmaps(full).map_err(|_| {
+    read_pixmaps(elements).map_err(|_| {
         eprintln!("TRAYDBG tooltip: pixmaps failed");
     })?;
     let title = entries.str()?.to_owned();

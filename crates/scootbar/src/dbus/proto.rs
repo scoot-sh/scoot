@@ -233,6 +233,7 @@ impl<'a> Message<'a> {
             pos: 0,
             le,
             depth: 0,
+            base: 16,
         };
         let mut sender = None;
         let mut destination = None;
@@ -303,6 +304,7 @@ impl<'a> Message<'a> {
                 pos: 0,
                 le,
                 depth: 0,
+                base: at,
             },
         })
     }
@@ -311,23 +313,44 @@ impl<'a> Message<'a> {
 /// A cursor over message bytes: every read is bounds-checked, aligned as
 /// the type needs, and refused past the end. Containers count depth
 /// against [`MAX_DEPTH`].
+///
+/// Alignment is absolute: `base` is the message offset `buf[0]` sits at,
+/// so padding lands where the sender put it even when this reader covers
+/// a sub-slice (an array's elements, a variant's value). A reader over a
+/// fresh message or body starts at a multiple of 8, for which relative
+/// and absolute padding agree.
 #[derive(Debug)]
 pub struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
     le: bool,
     depth: u8,
+    base: usize,
 }
 
 impl<'a> Reader<'a> {
-    /// A reader over `buf` in little-endian order: what the writer emits,
-    /// and what the tests feed the fuzz check.
+    /// A reader over `buf` in little-endian order, at message offset 0:
+    /// what the writer emits, whole messages, and what the tests feed
+    /// the fuzz check.
     pub fn le(buf: &'a [u8]) -> Self {
         Self {
             buf,
             pos: 0,
             le: true,
             depth: 0,
+            base: 0,
+        }
+    }
+
+    /// A reader over `buf` at message offset `base`: for a sub-slice of a
+    /// message being walked (never a fresh guess).
+    pub fn at(buf: &'a [u8], base: usize) -> Self {
+        Self {
+            buf,
+            pos: 0,
+            le: true,
+            depth: 0,
+            base,
         }
     }
 
@@ -353,7 +376,8 @@ impl<'a> Reader<'a> {
     }
 
     fn align(&mut self, n: usize) -> Result<(), ()> {
-        let pad = (n.saturating_sub(self.pos % n)) % n;
+        let at = self.base.saturating_add(self.pos);
+        let pad = (n.saturating_sub(at % n)) % n;
         if self.pos.saturating_add(pad) > self.buf.len() {
             return Err(());
         }
@@ -466,19 +490,13 @@ impl<'a> Reader<'a> {
         Ok(sig)
     }
 
-    /// An array's full extent (`a...`): the length word and the
-    /// elements, to hand a shape reader that takes the whole array
-    /// (like [`read_pixmaps`]).
-    pub fn array_full(&mut self, element_align: usize) -> Result<&'a [u8], ()> {
-        let start = self.pos;
-        let _ = self.array_raw(element_align)?;
-        Ok(&self.buf[start..self.pos.min(self.buf.len())])
-    }
-
     /// An array's raw elements (`a...`): the length-delimited bytes, to
     /// walk with a sub-reader at the element's alignment. The length is
     /// refused past what is left after the element padding (the padding
-    /// is on the wire but not in the length).
+    /// is on the wire but not in the length). Call this on an
+    /// absolutely-positioned reader only: element padding aligns to the
+    /// message, and a fresh reader over a sub-slice restarts alignment
+    /// at zero.
     pub fn array_raw(&mut self, element_align: usize) -> Result<&'a [u8], ()> {
         self.align(4)?;
         let len = self.u32_raw()? as usize;
@@ -493,6 +511,22 @@ impl<'a> Reader<'a> {
             return Err(());
         }
         self.take(len)
+    }
+
+    /// An array's elements as a sub-reader: [`Reader::array_raw`], then
+    /// positioned at the elements with their message offset, so its own
+    /// alignment lands absolutely. The way arrays are walked everywhere.
+    pub fn elements(&mut self, element_align: usize) -> Result<Reader<'a>, ()> {
+        let raw = self.array_raw(element_align)?;
+        Ok(Reader {
+            buf: raw,
+            pos: 0,
+            le: self.le,
+            depth: self.depth,
+            // Where the elements start in the message: past what this
+            // reader consumed for them.
+            base: self.base + self.pos.saturating_sub(raw.len()),
+        })
     }
 
     /// Enters a struct or dict entry: 8-aligned, depth-counted. Pair with
@@ -517,6 +551,7 @@ impl<'a> Reader<'a> {
             depth: self.depth,
             sig,
             raw: &self.buf[self.pos.min(self.buf.len())..],
+            base: self.base.saturating_add(self.pos.min(self.buf.len())),
         })
     }
 
@@ -529,12 +564,7 @@ impl<'a> Reader<'a> {
         read: impl FnOnce(&str, &mut Reader<'a>) -> Result<T, ()>,
     ) -> Result<T, ()> {
         let value = self.variant_raw()?;
-        let mut scoped = Reader {
-            buf: value.raw,
-            pos: 0,
-            le: self.le,
-            depth: self.depth,
-        };
+        let mut scoped = value.read();
         let out = read(value.sig, &mut scoped)?;
         self.pos = self.pos.saturating_add(scoped.pos);
         Ok(out)
@@ -625,13 +655,7 @@ fn skip_value<'a>(reader: &mut Reader<'a>, bytes: &[u8], at: usize, depth: usize
         b'a' => {
             let (end, _) = complete(bytes, at + 1, depth + 1)?;
             let align = element_alignment(bytes, at + 1)?;
-            let raw = reader.array_raw(align)?;
-            let mut scoped = Reader {
-                buf: raw,
-                pos: 0,
-                le: reader.le,
-                depth: reader.depth,
-            };
+            let mut scoped = reader.elements(align)?;
             // Elements run to the array's end: each is one complete
             // value of the element signature.
             while !scoped.exhausted() {
@@ -667,13 +691,15 @@ fn element_alignment(bytes: &[u8], at: usize) -> Result<usize, ()> {
     }
 }
 
-/// A variant's value, borrowed: its signature and its raw bytes.
+/// A variant's value, borrowed: its signature, its raw bytes, and the
+/// message offset the bytes sit at.
 #[derive(Debug, Clone, Copy)]
 pub struct Variant<'a> {
     le: bool,
     depth: u8,
     sig: &'a str,
     raw: &'a [u8],
+    base: usize,
 }
 
 impl<'a> Variant<'a> {
@@ -682,13 +708,14 @@ impl<'a> Variant<'a> {
     }
 
     /// The value's bytes from here on, to walk with a reader at the
-    /// caller's depth.
+    /// caller's depth and offset.
     pub fn read(&self) -> Reader<'a> {
         Reader {
             buf: self.raw,
             pos: 0,
             le: self.le,
             depth: self.depth,
+            base: self.base,
         }
     }
 }
@@ -880,13 +907,14 @@ pub const MAX_PIXMAP_SIDE: u32 = 256;
 /// set but a flood.
 pub const MAX_PIXMAPS: usize = 64;
 
-/// An `a(iiay)` pixmap list: every entry's dimensions against its bytes.
-/// An oversized or misshapen entry skips itself, never the whole list;
-/// past [`MAX_PIXMAPS`] entries the walk is refused.
-pub fn read_pixmaps(body: &[u8]) -> Result<Vec<Pixmap<'_>>, ()> {
-    let mut reader = Reader::le(body);
-    let raw = reader.array_raw(8)?;
-    let mut scoped = Reader::le(raw);
+/// An `a(iiay)` pixmap list's elements (what [`Reader::array_raw`]
+/// returns, never the length word itself: a fresh reader over the whole
+/// array would align relative to the word, not the message). Every
+/// entry's dimensions against its bytes; an oversized or misshapen entry
+/// skips itself, never the whole list; past [`MAX_PIXMAPS`] entries the
+/// walk is refused.
+pub fn read_pixmaps(elements: &[u8]) -> Result<Vec<Pixmap<'_>>, ()> {
+    let mut scoped = Reader::le(elements);
     let mut pixmaps = Vec::new();
     while !scoped.exhausted() {
         scoped.enter_struct()?;
@@ -910,7 +938,7 @@ pub fn read_pixmaps(body: &[u8]) -> Result<Vec<Pixmap<'_>>, ()> {
             });
         }
     }
-    if !reader.exhausted() {
+    if !scoped.exhausted() {
         return Err(());
     }
     Ok(pixmaps)
