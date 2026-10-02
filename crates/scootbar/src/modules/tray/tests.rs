@@ -51,9 +51,7 @@ fn drive(harness: &mut Harness, fake: &mut Fake, mut done: impl FnMut(&Harness) 
         let a = fake.pump();
         let waited = harness.wait(Duration::from_millis(200));
         let b = fake.pump();
-        if turns % 10 == 0 {
-            eprintln!("TRAYDBG turn {turns}: waited={waited:?} served={a}+{b} calls={}", fake.calls_len());
-        }
+        eprintln!("TRAYDBG turn {turns} {:?}: waited={waited:?} served={a}+{b} calls={}", std::time::Instant::now(), fake.calls_len());
     }
 }
 
