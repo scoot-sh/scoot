@@ -368,3 +368,12 @@ fn the_registry_lists_tray_with_its_actions() {
     let harness = Harness::new(super::stand_in(&crate::modules::Settings::default()));
     assert_eq!(harness.source_count(), 1);
 }
+
+#[test]
+fn debug_fill_direct() {
+    let body = fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30));
+    let mut item = super::Item::new("id".to_owned(), "service".to_owned(), "/StatusNotifierItem".to_owned());
+    assert!(super::fill(&mut item, &body), "fill refused the fake body");
+    assert_eq!(item.title, "Player");
+    assert_eq!(item.icons.len(), 1);
+}
