@@ -281,7 +281,7 @@ fn serve(
             }
             Ok(Some(len)) => {
                 let frame: Vec<u8> = staged.drain(..len).collect();
-                eprintln!("FAKEDBG {:?}: serving {len} bytes", std::time::Instant::now());
+                eprintln!("FAKEDBG: serving {len} staged={}", staged.len());
                 if serve_frame(&mut stream, &frame, &state, &calls, &serial).is_err() {
                     eprintln!("FAKEDBG: serve failed on {}", frame.iter().map(|b| format!("{b:02x}")).collect::<String>());
                     return;
@@ -296,7 +296,7 @@ fn serve(
         match stream.read(&mut chunk) {
             Ok(0) => return,
             Ok(n) => {
-                eprintln!("FAKEDBG {:?}: read {n}", std::time::Instant::now());
+                eprintln!("FAKEDBG: read {n} staged={}", staged.len());
                 staged.extend_from_slice(&chunk[..n]);
                 if staged.len() > 2 * 1024 * 1024 {
                     return;
