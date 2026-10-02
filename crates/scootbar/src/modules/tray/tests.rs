@@ -415,6 +415,10 @@ fn debug_parse_captured() {
             }
             _ => eprintln!("  other"),
         }
-        break;
+        fields.leave_struct();
+        if fields.skip(&sig).is_err() {
+            eprintln!("  ADVANCE FAILED");
+            break;
+        }
     }
 }
