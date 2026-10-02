@@ -368,3 +368,26 @@ fn the_registry_lists_tray_with_its_actions() {
     let harness = Harness::new(super::stand_in(&crate::modules::Settings::default()));
     assert_eq!(harness.source_count(), 1);
 }
+
+#[test]
+fn debug_setup_steps() {
+    use crate::dbus::conn;
+    use crate::dbus::proto::Writer;
+    let (stream, mut fake) = Fake::pair();
+    let _ = &mut fake;
+    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    let mut conn = conn::setup(stream).expect("setup");
+    eprintln!("unique: {}", conn.unique());
+    let mut body = Writer::new();
+    body.str("org.kde.StatusNotifierWatcher");
+    body.u32(5);
+    let bytes = body.take_body().unwrap();
+    let (sig, reply) = conn
+        .roundtrip("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "RequestName", "su", &bytes)
+        .expect("request");
+    eprintln!("request: {sig} {} bytes", reply.len());
+    let (sig, reply) = conn
+        .roundtrip("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames", "", &[])
+        .expect("names");
+    eprintln!("names: {sig} {} bytes", reply.len());
+}
