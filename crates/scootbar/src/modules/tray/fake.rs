@@ -85,7 +85,7 @@ impl Fake {
         let send = bus.try_clone().unwrap();
         let serving = bus.try_clone().unwrap();
         let thread = std::thread::spawn(move || setup_server(serving));
-        let mut fake = Fake {
+        let fake = Fake {
             send,
             bus,
             staged: Vec::new(),

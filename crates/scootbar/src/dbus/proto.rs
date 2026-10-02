@@ -342,18 +342,6 @@ impl<'a> Reader<'a> {
         }
     }
 
-    /// A reader over `buf` at message offset `base`: for a sub-slice of a
-    /// message being walked (never a fresh guess).
-    pub fn at(buf: &'a [u8], base: usize) -> Self {
-        Self {
-            buf,
-            pos: 0,
-            le: true,
-            depth: 0,
-            base,
-        }
-    }
-
     /// Whether every byte is read.
     pub fn exhausted(&self) -> bool {
         self.pos >= self.buf.len()

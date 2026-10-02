@@ -33,7 +33,7 @@ fn text() -> Text {
 
 /// The module on a scripted bus, with no items yet.
 fn started() -> (Harness, Fake) {
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     (Harness::new(start_connected(stream)), fake)
 }
 
@@ -343,6 +343,30 @@ fn host_mode_lists_the_other_watchers_items() {
     // Our host registration reached the other watcher.
     let hosts = fake.hosts();
     assert!(!hosts.is_empty(), "never registered as a host");
+    // A late registration through the other watcher is picked up too.
+    let late = "org.kde.StatusNotifierItem-2-2";
+    fake.add_item(late, ":1.51", fake::item_body("Late", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 0, 255)));
+    fake.send_watcher_registered(late);
+    until_shown(&mut harness, &mut fake, 2);
+    let value = harness.value_on(None).unwrap();
+    assert_eq!(value["items"][1]["title"], "Late");
+}
+
+#[test]
+fn new_status_arrives_with_the_signal() {
+    let (stream, mut fake) = Fake::pair();
+    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    let mut harness = Harness::new(start_connected(stream));
+    until_shown(&mut harness, &mut fake, 1);
+    // The item changed state, then said so: the re-read reports it.
+    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "NeedsAttention", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.send_new_status(OWNER, "NeedsAttention");
+    drive(&mut harness, &mut fake, |harness| {
+        harness
+            .value_on(None)
+            .and_then(|value| value.get("items")?.as_array()?.first()?.get("status")?.as_str().map(str::to_owned))
+            == Some("NeedsAttention".to_owned())
+    });
 }
 
 #[test]
@@ -398,7 +422,6 @@ fn the_registry_lists_tray_with_its_actions() {
 
 #[test]
 fn debug_flush_path() {
-    use crate::modules::Module;
     use rustix::event::PollFlags;
     let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));

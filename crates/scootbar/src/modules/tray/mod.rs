@@ -1459,40 +1459,6 @@ fn is_item_name(name: &str) -> bool {
     name.starts_with("org.kde.StatusNotifierItem") || name.starts_with("org.freedesktop.StatusNotifierItem")
 }
 
-/// Reads a `Get` of `RegisteredStatusNotifierItems` (a variant holding
-/// `as`) into `(service, path)` pairs. Misshapen entries skip
-/// themselves; a misshapen whole is empty.
-fn read_id_list(body: &[u8]) -> Vec<(String, String)> {
-    let mut ids = Vec::new();
-    let mut reader = Reader::le(body);
-    let Ok(value) = reader.variant_raw() else {
-        return ids;
-    };
-    if value.signature() != "as" {
-        return ids;
-    }
-    let mut list = value.read();
-    let Ok(raw) = list.array_raw(4) else {
-        return ids;
-    };
-    let mut entries = Reader::le(raw);
-    while !entries.exhausted() {
-        let Ok(entry) = entries.str() else { break };
-        let Some((service, path)) = entry.split_once('/') else {
-            continue;
-        };
-        let path = format!("/{path}");
-        if check_name(service).is_err() || check_path(&path).is_err() {
-            continue;
-        }
-        if ids.len() >= MAX_ITEMS {
-            break;
-        }
-        ids.push((service.to_owned(), path));
-    }
-    ids
-}
-
 /// Applies a `GetAll` body to the item: sanitized strings and converted
 /// icons. `false` drops the answer (the item keeps its last state).
 fn fill(item: &mut Item, body: &[u8]) -> bool {
