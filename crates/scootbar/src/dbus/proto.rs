@@ -75,8 +75,6 @@ impl Kind {
 pub mod flag {
     /// No reply is wanted (activation calls set it).
     pub const NO_REPLY_EXPECTED: u8 = 0x1;
-    /// Do not start a service to answer (calls that must not wake one).
-    pub const NO_AUTO_START: u8 = 0x2;
 }
 
 /// `RequestName` flags (`org.freedesktop.DBus.RequestName`).
@@ -92,8 +90,6 @@ pub mod request {
 /// `RequestName` replies (`org.freedesktop.DBus.RequestName`).
 pub mod request_reply {
     pub const PRIMARY_OWNER: u32 = 1;
-    pub const IN_QUEUE: u32 = 2;
-    pub const EXISTS: u32 = 3;
     pub const ALREADY_OWNER: u32 = 4;
 }
 
@@ -146,10 +142,7 @@ fn get_u32(at: &[u8], le: bool) -> u32 {
 /// hostile body is refused where it is touched, not here.
 #[derive(Debug)]
 pub struct Message<'a> {
-    /// Little-endian when true, big-endian when false.
-    pub le: bool,
     pub kind: Kind,
-    pub flags: u8,
     pub serial: u32,
     /// The sender's unique name, when the daemon set one.
     pub sender: Option<&'a str>,
@@ -183,7 +176,6 @@ impl<'a> Message<'a> {
             return Err(());
         }
         let kind = Kind::from_byte(frame[1]).ok_or(())?;
-        let flags = frame[2];
         let body_len = get_u32(&frame[4..8], le) as usize;
         let serial = get_u32(&frame[8..12], le);
         if serial == 0 {
@@ -229,9 +221,7 @@ impl<'a> Message<'a> {
         at = at.saturating_add((8usize.saturating_sub(at % 8)) % 8);
         let body = frame.get(at..at.saturating_add(body_len)).ok_or(())?;
         Ok(Self {
-            le,
             kind,
-            flags,
             serial,
             sender,
             destination,
@@ -284,11 +274,6 @@ impl<'a> Reader<'a> {
         self.buf.len().saturating_sub(self.pos)
     }
 
-    /// Where the cursor sits, for a nested body borrowed whole.
-    pub fn position(&self) -> usize {
-        self.pos
-    }
-
     /// The unread bytes, for handing a nested body over whole.
     pub fn rest(&self) -> &'a [u8] {
         &self.buf[self.pos.min(self.buf.len())..]
@@ -331,14 +316,6 @@ impl<'a> Reader<'a> {
         } else {
             full[8 - n..].copy_from_slice(bytes);
             Ok(u64::from_be_bytes(full))
-        }
-    }
-
-    /// Any unsigned integer width the protocol has (1, 2, 4 or 8 bytes).
-    pub fn uint(&mut self, n: usize) -> Result<u64, ()> {
-        match n {
-            1 | 2 | 4 | 8 => self.int(n),
-            _ => Err(()),
         }
     }
 
@@ -522,15 +499,24 @@ fn skip_value<'a>(reader: &mut Reader<'a>, bytes: &[u8], at: usize, depth: usize
             reader.i16()?;
             Ok((at + 1, ()))
         }
+        #[allow(clippy::match_same_arms)]
         b'q' => {
             reader.u16()?;
             Ok((at + 1, ()))
         }
-        b'i' | b'u' => {
+        b'i' => {
+            reader.i32()?;
+            Ok((at + 1, ()))
+        }
+        b'u' => {
             reader.u32()?;
             Ok((at + 1, ()))
         }
-        b'x' | b't' => {
+        b'x' => {
+            reader.i64()?;
+            Ok((at + 1, ()))
+        }
+        b't' => {
             reader.u64()?;
             Ok((at + 1, ()))
         }
@@ -820,6 +806,60 @@ fn complete(bytes: &[u8], at: usize, depth: usize) -> Result<(usize, bool), ()> 
 /// is memory, not time).
 pub const MAX_LIST_NAMES: usize = 4096;
 
+/// One pixmap entry, borrowed: dimensions and the `ARGB32` bytes in
+/// network order (see the spec's icon-pixmap page).
+#[derive(Debug, Clone, Copy)]
+pub struct Pixmap<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: &'a [u8],
+}
+
+/// The longest pixmap side taken, in pixels: icons at requested device
+/// pixels are tens of pixels; past this an entry is skipped, never
+/// scaled (a 512-pixel side is a megabyte of `ARGB32`).
+pub const MAX_PIXMAP_SIDE: u32 = 256;
+
+/// The most pixmap entries walked in one property: more is not an icon
+/// set but a flood.
+pub const MAX_PIXMAPS: usize = 64;
+
+/// An `a(iiay)` pixmap list: every entry's dimensions against its bytes.
+/// An oversized or misshapen entry skips itself, never the whole list;
+/// past [`MAX_PIXMAPS`] entries the walk is refused.
+pub fn read_pixmaps(body: &[u8]) -> Result<Vec<Pixmap<'_>>, ()> {
+    let mut reader = Reader::le(body);
+    let raw = reader.array_raw(8)?;
+    let mut scoped = Reader::le(raw);
+    let mut pixmaps = Vec::new();
+    while !scoped.exhausted() {
+        scoped.enter_struct()?;
+        let width = scoped.u32()?;
+        let height = scoped.u32()?;
+        let pixels = scoped.array_raw(1)?;
+        scoped.leave_struct();
+        let well_shaped = width >= 1
+            && height >= 1
+            && width <= MAX_PIXMAP_SIDE
+            && height <= MAX_PIXMAP_SIDE
+            && pixels.len() == width as usize * height as usize * 4;
+        if well_shaped {
+            if pixmaps.len() >= MAX_PIXMAPS {
+                return Err(());
+            }
+            pixmaps.push(Pixmap {
+                width,
+                height,
+                pixels,
+            });
+        }
+    }
+    if !reader.exhausted() {
+        return Err(());
+    }
+    Ok(pixmaps)
+}
+
 /// Reads the `as` reply of `ListNames` into names. `Err(())` refuses the
 /// shape; the caller drops the reply, never the connection.
 pub fn read_names(signature: &str, body: &[u8]) -> Result<Vec<String>, ()> {
@@ -933,6 +973,7 @@ impl Writer {
     }
 
     /// Whether anything overflowed so far.
+    #[allow(dead_code)]
     pub fn overflowed(&self) -> bool {
         self.overflow
     }
@@ -971,10 +1012,14 @@ impl Writer {
         }
     }
 
+    /// The full basic-type surface the spike prescribes: used by tests
+    /// and future consumers, exercised here by the fuzz check.
+    #[allow(dead_code)]
     pub fn u8(&mut self, value: u8) {
         self.push(&[value]);
     }
 
+    #[allow(dead_code)]
     pub fn u16(&mut self, value: u16) {
         self.pad(2);
         self.push(&value.to_le_bytes());
@@ -990,6 +1035,7 @@ impl Writer {
         self.push(&value.to_le_bytes());
     }
 
+    #[allow(dead_code)]
     pub fn u64(&mut self, value: u64) {
         self.pad(8);
         self.push(&value.to_le_bytes());

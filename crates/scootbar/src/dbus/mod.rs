@@ -17,9 +17,11 @@
 pub mod conn;
 pub mod proto;
 
-/// The shape checks, shared with the tray (pixmap and property walks)
-/// and the fuzz target.
-pub(crate) mod fuzz;
+/// The fuzz target's check, compiled here only for the test that replays
+/// its corpus (`crates/scootbar/fuzz` compiles the file itself). The
+/// pixmap and property walks live in [`proto`], shared with the tray.
+#[cfg(test)]
+mod fuzz;
 
 #[cfg(test)]
 mod tests;

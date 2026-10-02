@@ -14,7 +14,7 @@
 //! signature), walks every shape the tray reads, and round-trips the
 //! writer on input-derived values.
 
-use super::proto::{self, Kind, Message, Reader, Writer};
+use super::proto::{self, Kind, Message, Reader, Writer, read_pixmaps};
 
 #[cfg(test)]
 mod tests;
@@ -103,11 +103,6 @@ fn check_frame(frame: &[u8]) {
         let _ = body.skip(message.signature);
     }
     check_shapes(&message);
-    // Both byte orders parse the same frame the writer emits: re-encode
-    // the header's first 16 bytes big-endian and parse again. (Only the
-    // fixed header is swapped here; the fields stay little-endian, so a
-    // full big-endian message is built in the round-trip test, not here.)
-    let _ = message.le;
 }
 
 /// The body as each shape the tray reads past the header: pixmap arrays,
@@ -130,60 +125,6 @@ fn check_shapes(message: &Message<'_>) {
     if message.kind == Kind::Signal && message.member == Some("NameOwnerChanged") {
         let _ = proto::read_name_owner_changed(body);
     }
-}
-
-/// One pixmap entry, borrowed: dimensions and the `ARGB32` bytes in
-/// network order (see the spec's icon-pixmap page).
-#[derive(Debug, Clone, Copy)]
-pub struct Pixmap<'a> {
-    pub width: u32,
-    pub height: u32,
-    pub pixels: &'a [u8],
-}
-
-/// The longest pixmap side taken, in pixels: icons at requested device
-/// pixels are tens of pixels; past this an entry is skipped, never
-/// scaled (a 512-pixel side is a megabyte of `ARGB32`).
-pub const MAX_PIXMAP_SIDE: u32 = 256;
-
-/// The most pixmap entries walked in one property: more is not an icon
-/// set but a flood.
-pub const MAX_PIXMAPS: usize = 64;
-
-/// An `a(iiay)` pixmap list: every entry's dimensions against its bytes.
-/// An oversized or misshapen entry skips itself, never the whole list;
-/// past [`MAX_PIXMAPS`] entries the walk is refused.
-pub fn read_pixmaps(body: &[u8]) -> Result<Vec<Pixmap<'_>>, ()> {
-    let mut reader = Reader::le(body);
-    let raw = reader.array_raw(8)?;
-    let mut scoped = Reader::le(raw);
-    let mut pixmaps = Vec::new();
-    while !scoped.exhausted() {
-        scoped.enter_struct()?;
-        let width = scoped.u32()?;
-        let height = scoped.u32()?;
-        let pixels = scoped.array_raw(1)?;
-        scoped.leave_struct();
-        let well_shaped = width >= 1
-            && height >= 1
-            && width <= MAX_PIXMAP_SIDE
-            && height <= MAX_PIXMAP_SIDE
-            && pixels.len() == width as usize * height as usize * 4;
-        if well_shaped {
-            if pixmaps.len() >= MAX_PIXMAPS {
-                return Err(());
-            }
-            pixmaps.push(Pixmap {
-                width,
-                height,
-                pixels,
-            });
-        }
-    }
-    if !reader.exhausted() {
-        return Err(());
-    }
-    Ok(pixmaps)
 }
 
 /// An `a{sv}` property dictionary: every entry's key, with known shapes

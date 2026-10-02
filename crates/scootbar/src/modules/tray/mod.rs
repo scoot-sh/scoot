@@ -56,8 +56,7 @@ use super::{
 };
 use crate::action::{ModuleAction, Trigger};
 use crate::dbus::conn::{self, Conn, Event};
-use crate::dbus::fuzz::{Pixmap, read_pixmaps};
-use crate::dbus::proto::{self, Reader, Writer, check_name, check_path, request_reply};
+use crate::dbus::proto::{self, Pixmap, Reader, Writer, check_name, check_path, read_pixmaps, request_reply};
 use crate::icon::tray::TrayIcon;
 use crate::icon::Art;
 use crate::text::Text;
@@ -157,6 +156,7 @@ pub(super) fn stand_in(settings: &super::Settings) -> Box<dyn Module> {
 #[derive(Debug)]
 enum BusAddr {
     Path(PathBuf),
+    #[cfg(test)]
     Stream(std::os::unix::net::UnixStream),
 }
 
@@ -166,6 +166,7 @@ enum BusAddr {
 fn start_with(addr: BusAddr) -> Box<dyn Module> {
     let (path, stream) = match addr {
         BusAddr::Path(path) => (path, None),
+        #[cfg(test)]
         BusAddr::Stream(stream) => (conn::bus_path(), Some(stream)),
     };
     let mut tray = Tray {
@@ -373,11 +374,13 @@ impl Tray {
     /// Connects a stream that is already open (the tests' socketpair end,
     /// or a dialled bus): runs the set-up and enumerates.
     fn connected(&mut self, stream: std::os::unix::net::UnixStream) {
-        match setup(stream) {
+        let Ok(conn) = conn::setup(stream) else {
+            self.wait();
+            return;
+        };
+        match setup(conn) {
             Ok(live) => {
-                let changed = !live.items.is_empty();
                 self.bus = Bus::Live(live);
-                let _ = changed;
             }
             Err(_) => self.wait(),
         }
@@ -385,10 +388,10 @@ impl Tray {
 
     /// Dials the bus and runs the set-up; failures wait.
     fn connect(&mut self) -> Update {
-        let Ok(stream) = std::os::unix::net::UnixStream::connect(&self.path) else {
+        let Ok(conn) = conn::connect(&self.path) else {
             return Update::Unchanged;
         };
-        match setup(stream) {
+        match setup(conn) {
             Ok(live) => {
                 let changed = !live.items.is_empty();
                 self.bus = Bus::Live(live);
@@ -1226,11 +1229,6 @@ impl Live {
     fn at(&self, index: i32) -> Option<&Item> {
         (index >= 0).then(|| self.items.get(index as usize)).flatten()
     }
-
-    /// The watcher's owner in host mode (tracked for `refresh_watcher`).
-    fn watcher_owner(&self) -> Option<String> {
-        self.watcher_owner.clone()
-    }
 }
 
 /// Runs the blocking set-up on an open stream: `Hello` (in `setup`),
@@ -1298,12 +1296,10 @@ impl Fingerprint {
     }
 }
 
-/// Runs the blocking set-up on an open stream: `Hello` (inside
-/// [`conn::setup`]), both watcher names, the match rules, then
-/// enumeration. Blocking, like the volume handshake: a handful of round
-/// trips on a local socket.
-fn setup(stream: std::os::unix::net::UnixStream) -> Result<Live, conn::SetupError> {
-    let mut conn = conn::setup(stream)?;
+/// Runs the blocking set-up on a connected bus: both watcher names,
+/// the match rules, then enumeration. Blocking, like the volume
+/// handshake: a handful of round trips on a local socket.
+fn setup(mut conn: Conn) -> Result<Live, conn::SetupError> {
     // Own the watcher names when free; a name owned elsewhere means host
     // mode against it (the KDE name decides).
     let kde = request_word(&mut conn, WATCHER_KDE)?;
@@ -1392,7 +1388,6 @@ impl Live {
             if !is_item_name(&name) || self.items.len() >= MAX_ITEMS {
                 continue;
             }
-            let id = format!("{name}{ITEM_DEFAULT_PATH}");
             let owner = if name.starts_with(':') {
                 name.clone()
             } else {

@@ -47,7 +47,6 @@ const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 pub const BUS_NAME: &str = "org.freedesktop.DBus";
 pub const BUS_PATH: &str = "/org/freedesktop/DBus";
 pub const BUS_INTERFACE: &str = "org.freedesktop.DBus";
-pub const PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
 
 /// Where the session bus listens: `DBUS_SESSION_BUS_ADDRESS` when it
 /// names a filesystem path (`unix:path=...`, with parameters after `;`
@@ -220,11 +219,8 @@ impl Conn {
         let serial = self.next_serial();
         let mut writer = Writer::new();
         writer.begin_call(serial, destination, path, interface, member, body_sig, flags);
-        let mut message = writer.finish().ok_or(CallError::TooLarge)?;
-        message.extend_from_slice(body);
-        if message.len() > proto::MAX_MESSAGE {
-            return Err(CallError::TooLarge);
-        }
+        writer.raw(body);
+        let message = writer.finish().ok_or(CallError::TooLarge)?;
         if self.waits_for_reply(flags) {
             self.pending.push((serial, token));
         }
@@ -245,11 +241,9 @@ impl Conn {
         let serial = self.next_serial();
         let mut writer = Writer::new();
         writer.begin_return(serial, to_serial, body_sig);
-        if let Some(mut message) = writer.finish() {
-            message.extend_from_slice(body);
-            if message.len() <= proto::MAX_MESSAGE {
-                self.outbox.extend_from_slice(&message);
-            }
+        writer.raw(body);
+        if let Some(message) = writer.finish() {
+            self.outbox.extend_from_slice(&message);
         }
     }
 
@@ -268,11 +262,9 @@ impl Conn {
         let serial = self.next_serial();
         let mut writer = Writer::new();
         writer.begin_signal(serial, path, interface, member, body_sig);
-        if let Some(mut message) = writer.finish() {
-            message.extend_from_slice(body);
-            if message.len() <= proto::MAX_MESSAGE {
-                self.outbox.extend_from_slice(&message);
-            }
+        writer.raw(body);
+        if let Some(message) = writer.finish() {
+            self.outbox.extend_from_slice(&message);
         }
     }
 
@@ -580,75 +572,4 @@ fn expect_line(stream: &mut dyn Read, prefix: &str) -> Result<(), SetupError> {
     }
 }
 
-/// Queues `RequestName(name, flags)` and returns the reply word
-/// ([`proto::request_reply`]).
-pub fn request_name(conn: &mut Conn, name: &str, flags: u32, token: u64) -> Result<u32, CallError> {
-    let mut body = Writer::new();
-    body.str(name);
-    body.u32(flags);
-    let bytes = body.take_body().ok_or(CallError::TooLarge)?;
-    conn.call(BUS_NAME, BUS_PATH, BUS_INTERFACE, "RequestName", "su", &bytes, 0, token)
-}
-
-/// Queues `AddMatch(rule)`, fire-and-forget (no reply is read; the daemon
-/// answers errors on an unmatched rule to no one, and a bad rule is the
-/// author's test failure, caught by the fake bus).
-pub fn add_match(conn: &mut Conn, rule: &str) -> Result<u32, CallError> {
-    let mut body = Writer::new();
-    body.str(rule);
-    let bytes = body.take_body().ok_or(CallError::TooLarge)?;
-    conn.call(
-        BUS_NAME,
-        BUS_PATH,
-        BUS_INTERFACE,
-        "AddMatch",
-        "s",
-        &bytes,
-        proto::flag::NO_REPLY_EXPECTED,
-        0,
-    )
-}
-
-/// Queues `ListNames`.
-pub fn list_names(conn: &mut Conn, token: u64) -> Result<u32, CallError> {
-    conn.call(BUS_NAME, BUS_PATH, BUS_INTERFACE, "ListNames", "", &[], 0, token)
-}
-
-/// Queues `GetNameOwner(name)`.
-pub fn get_name_owner(conn: &mut Conn, name: &str, token: u64) -> Result<u32, CallError> {
-    let mut body = Writer::new();
-    body.str(name);
-    let bytes = body.take_body().ok_or(CallError::TooLarge)?;
-    conn.call(BUS_NAME, BUS_PATH, BUS_INTERFACE, "GetNameOwner", "s", &bytes, 0, token)
-}
-
-/// Queues `Properties.Get(interface, property)` on `destination`/`path`.
-pub fn get_property(
-    conn: &mut Conn,
-    destination: &str,
-    path: &str,
-    interface: &str,
-    property: &str,
-    token: u64,
-) -> Result<u32, CallError> {
-    let mut body = Writer::new();
-    body.str(interface);
-    body.str(property);
-    let bytes = body.take_body().ok_or(CallError::TooLarge)?;
-    conn.call(destination, path, PROPERTIES_INTERFACE, "Get", "ss", &bytes, 0, token)
-}
-
-/// Queues `Properties.GetAll(interface)` on `destination`/`path`.
-pub fn get_all(
-    conn: &mut Conn,
-    destination: &str,
-    path: &str,
-    interface: &str,
-    token: u64,
-) -> Result<u32, CallError> {
-    let mut body = Writer::new();
-    body.str(interface);
-    let bytes = body.take_body().ok_or(CallError::TooLarge)?;
-    conn.call(destination, path, PROPERTIES_INTERFACE, "GetAll", "s", &bytes, 0, token)
-}
 
