@@ -254,6 +254,7 @@ fn icons_draw_from_the_cache() {
     let mut module = start_connected(stream);
     for _ in 0..20 {
         let _ = module.on_ready(0, PollFlags::IN);
+        fake.pump();
         let mut view = crate::modules::View::default();
         module.view(&DP1, &mut view);
         if view.tooltip().contains("Red") {
@@ -300,7 +301,9 @@ fn hostile_items_lose_only_themselves() {
     // errors `NameHasNoOwner`, and the module drops it).
     fake.send_register(OWNER, "org.kde.StatusNotifierItem-9-9");
     for _ in 0..5 {
+        fake.pump();
         harness.wait(Duration::from_millis(200));
+        fake.pump();
     }
     assert!(harness.value_on(None).is_none());
     // A title of controls and 10 KiB of `x`: stripped and cut.
