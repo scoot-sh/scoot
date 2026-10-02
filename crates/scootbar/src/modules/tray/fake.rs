@@ -305,7 +305,7 @@ fn serve(
 /// `busctl` sending it.
 fn sasl(stream: &mut UnixStream) -> Result<(), ()> {
     let mut first = [0u8; 1];
-    stream.read_exact(&mut first).map_err(|_| ())?;
+    read_retry(stream, &mut first)?;
     if first != [0] {
         return Err(());
     }
@@ -330,7 +330,7 @@ fn read_sasl_line(stream: &mut UnixStream) -> Result<String, ()> {
     let mut line = Vec::new();
     let mut byte = [0u8; 1];
     loop {
-        stream.read_exact(&mut byte).map_err(|_| ())?;
+        read_retry(stream, &mut byte)?;
         line.push(byte[0]);
         if line.len() > 512 {
             return Err(());
@@ -340,6 +340,32 @@ fn read_sasl_line(stream: &mut UnixStream) -> Result<String, ()> {
             return String::from_utf8(line).map_err(|_| ());
         }
     }
+}
+
+/// Reads exactly `buf.len()` bytes, retrying timeouts: the server
+/// thread may not be scheduled for a while on a loaded box, and its
+/// 2-second read timeout expires first. Bounded (about a minute), so a
+/// peer that never speaks still fails the test instead of hanging it.
+fn read_retry(stream: &mut UnixStream, mut buf: &mut [u8]) -> Result<(), ()> {
+    for _ in 0..30 {
+        match stream.read(buf) {
+            Ok(0) => return Err(()),
+            Ok(n) => {
+                buf = &mut buf[n..];
+                if buf.is_empty() {
+                    return Ok(());
+                }
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                continue;
+            }
+            Err(_) => return Err(()),
+        }
+    }
+    Err(())
 }
 
 fn next_serial(serial: &Arc<Mutex<u32>>) -> u32 {
