@@ -198,6 +198,10 @@ fn a_click_activates_and_a_scroll_scrolls() {
         harness.invoke(&DP1, &ModuleAction::new("activate", Some(0)), 1),
         Ok(Update::Unchanged)
     );
+    // A queued activation flushes on the next turn, like every call.
+    fake.pump();
+    harness.wait(Duration::from_millis(200));
+    fake.pump();
     let calls = fake.calls();
     let activate = calls.iter().find(|call| call.member == "Activate").expect("no Activate call");
     assert_eq!(activate.destination, SERVICE);
@@ -210,6 +214,9 @@ fn a_click_activates_and_a_scroll_scrolls() {
         harness.invoke(&DP1, &ModuleAction::new("scroll-up", Some(0)), 1000),
         Ok(Update::Unchanged)
     );
+    fake.pump();
+    harness.wait(Duration::from_millis(200));
+    fake.pump();
     let calls = fake.calls();
     let scroll = calls.iter().find(|call| call.member == "Scroll").expect("no Scroll call");
     assert_eq!(scroll.signature, "is");
