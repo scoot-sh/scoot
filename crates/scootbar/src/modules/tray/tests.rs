@@ -123,7 +123,7 @@ fn a_registration_is_answered_and_shown() {
             &fake::solid(4, 4, 255, 200, 30, 30),
         ),
     );
-    let serial = fake.send_register(OWNER, SERVICE);
+    let serial = fake.send_register_to("org.kde.StatusNotifierWatcher", OWNER, SERVICE);
     until_shown(&mut harness, &mut fake, 1);
     // The registration was answered: a return quoting the call. Turns
     // past showing, then the assertion (the closure cannot hold the

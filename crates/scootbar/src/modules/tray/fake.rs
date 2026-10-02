@@ -211,6 +211,13 @@ impl Fake {
     /// the module, as the daemon would deliver it from `sender`. Returns
     /// the call's serial, which the module's answer quotes.
     pub fn send_register(&mut self, sender: &str, service: &str) -> u32 {
+        self.send_register_to(MODULE, sender, service)
+    }
+
+    /// The same, addressed to `dest`: the daemon does not rewrite a
+    /// well-known destination to the unique name, so the module answers
+    /// both (a real bus addresses the watcher name).
+    pub fn send_register_to(&mut self, dest: &str, sender: &str, service: &str) -> u32 {
         let mut body = Writer::new();
         body.str(service);
         let bytes = body.take_body().unwrap();
@@ -221,7 +228,7 @@ impl Fake {
             "/StatusNotifierWatcher",
             "org.kde.StatusNotifierWatcher",
             "RegisterStatusNotifierItem",
-            Some(MODULE),
+            Some(dest),
             sender,
             "s",
             &bytes,

@@ -417,13 +417,10 @@ impl Conn {
                 body: message.body.rest().to_vec(),
             }),
             Kind::MethodCall => {
-                // Addressed elsewhere (a broadcast we did not match):
-                // dropped. What is ours becomes an event for the
-                // consumer's object.
-                let destination = message.destination?;
-                if destination != self.unique {
-                    return None;
-                }
+                // Addressed to us (the daemon only delivers what is ours:
+                // our unique name or a well-known one we own, which it
+                // does not rewrite). The consumer answers what is its
+                // object and errors the rest.
                 Some(Event::MethodCall {
                     sender: message.sender.unwrap_or("").to_owned(),
                     path: message.path.unwrap_or("").to_owned(),
