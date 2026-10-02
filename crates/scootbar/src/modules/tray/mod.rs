@@ -437,7 +437,8 @@ impl Tray {
         }
     }
 
-    /// One turn on the bus: pumps the connection and works each event.
+    /// One turn on the bus: pumps the connection and works each event,
+    /// re-pumping while capped so a burst drains in its turn.
     fn on_bus(&mut self, events: PollFlags) -> Update {
         if events.intersects(PollFlags::HUP | PollFlags::ERR | PollFlags::NVAL) {
             return self.drop_live();
@@ -449,12 +450,18 @@ impl Tray {
             return self.drop_live();
         }
         let mut changed = Update::Unchanged;
-        for event in live.conn.pump() {
-            if live.apply(event) == Update::Changed {
-                changed = Update::Changed;
+        loop {
+            let (events, capped) = live.conn.pump();
+            for event in events {
+                if live.apply(event) == Update::Changed {
+                    changed = Update::Changed;
+                }
+                if live.conn.dead() {
+                    return self.drop_live();
+                }
             }
-            if live.conn.dead() {
-                return self.drop_live();
+            if !capped {
+                break;
             }
         }
         changed

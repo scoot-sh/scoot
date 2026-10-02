@@ -103,7 +103,9 @@ impl Fake {
 
     /// Serves every complete frame waiting: answers calls, records the
     /// rest. Never blocks. Joins the set-up thread first (already past
-    /// `Hello` whenever the module connected). Returns frames served.
+    /// `Hello` whenever the module connected). Flushes before and after,
+    /// so an answer queued while serving leaves in the same turn.
+    /// Returns frames served.
     pub fn pump(&mut self) -> usize {
         if let Some(thread) = self.setup_thread.take() {
             let _ = thread.join();
@@ -118,7 +120,10 @@ impl Fake {
             match self.bus.read(&mut chunk) {
                 Ok(0) => return served,
                 Ok(n) => self.staged.extend_from_slice(&chunk[..n]),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return served,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    self.flush();
+                    return served;
+                }
                 Err(_) => return served,
             }
             while let Ok(Some(len)) = frame_at(&self.staged) {

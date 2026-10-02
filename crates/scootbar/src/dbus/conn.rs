@@ -27,10 +27,12 @@ use std::time::Duration;
 
 use super::proto::{self, Kind, Message, Writer, check_name, frame_at};
 
-/// The most messages [`Conn::pump`] reports per turn: a storm is bounded
-/// reads and bounded work, with the rest staying staged for the next
-/// turn.
-pub const MAX_EVENTS_PER_TURN: usize = 8;
+/// The most messages one [`Conn::pump`] reports: a storm is bounded
+/// reads and bounded work per call. The consumer re-pumps while capped,
+/// so a legitimate burst (thirty items answering at once) still drains
+/// in its turn; a sustained flood grows staging into [`MAX_STAGING`],
+/// which kills the connection instead.
+pub const MAX_EVENTS_PER_TURN: usize = 64;
 
 /// The most calls waiting for a reply: past this `call` is refused and
 /// the consumer tries again after the next turn.
@@ -269,10 +271,10 @@ impl Conn {
     }
 
     /// One turn on the fd: flushes the outbox, reads what is ready, and
-    /// reports up to [`MAX_EVENTS_PER_TURN`] events. Leftovers stay
-    /// staged. Any refusal or I/O error past `WouldBlock` kills the
-    /// connection instead of panicking it.
-    pub fn pump(&mut self) -> Vec<Event> {
+    /// reports up to [`MAX_EVENTS_PER_TURN`] events with whether it
+    /// stopped capped. Leftovers stay staged. Any refusal or I/O error
+    /// past `WouldBlock` kills the connection instead of panicking it.
+    pub fn pump(&mut self) -> (Vec<Event>, bool) {
         let mut events = core::mem::take(&mut self.stashed);
         if self.dead {
             return events;
