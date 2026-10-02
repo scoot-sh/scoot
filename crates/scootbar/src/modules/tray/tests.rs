@@ -55,12 +55,20 @@ fn drive(harness: &mut Harness, fake: &mut Fake, mut done: impl FnMut(&Harness) 
     }
 }
 
-/// Turns until the module shows `count` items.
+/// Turns until the module shows `count` filled-in items: counted and
+/// titled, since properties arrive a turn after the registration.
 fn until_shown(harness: &mut Harness, fake: &mut Fake, count: usize) {
     drive(harness, fake, |harness| {
         harness
             .value_on(None)
-            .and_then(|value| value.get("items")?.as_array().map(|items| items.len() == count))
+            .and_then(|value| {
+                value.get("items")?.as_array().map(|items| {
+                    items.len() == count
+                        && items.iter().all(|item| {
+                            item.get("title").and_then(|title| title.as_str()).is_some_and(|title| !title.is_empty())
+                        })
+                })
+            })
             .unwrap_or(false)
     });
 }
