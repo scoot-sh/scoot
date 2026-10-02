@@ -281,8 +281,13 @@ impl Fake {
         }
         eprintln!("FAKEDBG frame {member} dest={destination} path={path}");
         if path == "/StatusNotifierWatcher" {
-            // Calls at the module's own object come here only in
-            // host-mode tests driving both ends; recorded like item calls.
+            // Calls at the module's own object are recorded like item
+            // calls; calls at the scripted other watcher are answered.
+            if self.state.watcher_owner.as_deref() == Some(destination) {
+                let result = self.serve_watcher(message.serial, serial, member, body);
+                eprintln!("FAKEDBG watcher {member} -> {result:?}");
+                return result;
+            }
             self.calls.push(record(&message));
             return Ok(());
         }
