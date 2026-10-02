@@ -1276,32 +1276,32 @@ impl Writer {
                 return;
             }
             let code = match field {
-                Header::Path(_) => 1,
-                Header::Interface(_) => 2,
-                Header::Member(_) => 3,
-                Header::Error(_) => 4,
-                Header::ReplySerial(_) => 5,
-                Header::Destination(_) => 6,
-                Header::Signature(_) => 8,
+                Field::Path(_) => 1,
+                Field::Interface(_) => 2,
+                Field::Member(_) => 3,
+                Field::Error(_) => 4,
+                Field::ReplySerial(_) => 5,
+                Field::Destination(_) => 6,
+                Field::Signature(_) => 8,
             };
             self.push(&[code]);
             match field {
-                Header::Path(text) => {
+                Field::Path(text) => {
                     self.signature("o");
                     self.str(text);
                 }
-                Header::Interface(text)
-                | Header::Member(text)
-                | Header::Error(text)
-                | Header::Destination(text) => {
+                Field::Interface(text)
+                | Field::Member(text)
+                | Field::Error(text)
+                | Field::Destination(text) => {
                     self.signature("s");
                     self.str(text);
                 }
-                Header::ReplySerial(value) => {
+                Field::ReplySerial(value) => {
                     self.signature("u");
                     self.u32(*value);
                 }
-                Header::Signature(text) => {
+                Field::Signature(text) => {
                     self.signature("g");
                     self.signature(text);
                 }
