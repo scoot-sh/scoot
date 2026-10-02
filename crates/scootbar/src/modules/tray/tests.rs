@@ -42,11 +42,14 @@ fn started() -> (Harness, Fake) {
 /// no timing and no thread past the set-up.
 fn drive(harness: &mut Harness, fake: &mut Fake, mut done: impl FnMut(&Harness) -> bool) {
     let start = std::time::Instant::now();
+    let mut turns = 0;
     while !done(harness) {
         assert!(start.elapsed() < Duration::from_secs(10), "the bus never answered");
+        turns += 1;
         fake.pump();
-        harness.wait(Duration::from_secs(2));
+        let waited = harness.wait(Duration::from_secs(2));
         fake.pump();
+        eprintln!("TRAYDBG turn {turns}: waited={waited:?} value={:?} calls={}", harness.value_on(None), fake.calls_len());
     }
 }
 
