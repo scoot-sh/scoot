@@ -444,33 +444,64 @@ fn debug_dump_hello() {
 }
 
 #[test]
-fn debug_walk_reply() {
+fn debug_walk_live() {
     use crate::dbus::proto::{Reader, frame_at};
+    use std::io::{Read, Write};
     if std::env::var_os("TRAY_DEBUG_BUS").is_none() {
         return;
     }
-    // The exact 89-byte Hello reply bytes, captured from the dev VM's
-    // user bus (dbus-daemon) in debug_dump_hello.
-    const HEX: &str = "6c02010109000000ffffffff3f000000050175000100000007017300140000006f72672e667265656465736b746f702e444275730000000006017300040000003a312e33000000000801670001730000040000003a312e33";
-    let bytes: Vec<u8> = (0..HEX.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&HEX[i..i + 2], 16).unwrap())
-        .collect();
-    eprintln!("len: {}", bytes.len());
-    eprintln!("framed: {:?}", frame_at(&bytes));
-    let mut fields = Reader::le(&bytes[16..16 + 63]);
+    let path = crate::dbus::conn::bus_path();
+    let mut stream = std::os::unix::net::UnixStream::connect(&path).unwrap();
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    stream.write_all(&[0]).unwrap();
+    stream.write_all(b"AUTH EXTERNAL\r\n").unwrap();
+    let mut line = [0u8; 256];
+    let _ = stream.read(&mut line).unwrap();
+    stream.write_all(b"DATA\r\n").unwrap();
+    let _ = stream.read(&mut line).unwrap();
+    stream.write_all(b"BEGIN\r\n").unwrap();
+    let mut writer = crate::dbus::proto::Writer::new();
+    writer.begin_call(1, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "Hello", "", 0);
+    let message = writer.finish().unwrap();
+    stream.write_all(&message).unwrap();
+    let mut reply = vec![0u8; 8192];
+    let n = stream.read(&mut reply).unwrap();
+    reply.truncate(n);
+    let len = frame_at(&reply).expect("frames").expect("whole");
+    eprintln!("first frame len: {len}");
+    let frame = &reply[..len];
+    eprintln!("header: {:02x?}", &frame[..16]);
+    let fields_len = u32::from_le_bytes([frame[12], frame[13], frame[14], frame[15]]) as usize;
+    eprintln!("fields_len: {fields_len}");
+    let mut fields = Reader::le(&frame[16..16 + fields_len]);
     let mut n = 0;
     while !fields.exhausted() {
-        eprintln!("element {n} at {}", 16 + (63 - fields.remaining()));
+        eprintln!("element {n} rel {}", 16 + (fields_len - fields.remaining()));
         n += 1;
-        if n > 6 {
+        if n > 8 {
             break;
         }
-        fields.enter_struct().expect("struct");
+        match fields.enter_struct() {
+            Ok(()) => {}
+            Err(()) => {
+                eprintln!("  ENTER FAILED");
+                break;
+            }
+        }
         let code = fields.u8().expect("code");
-        let sig = fields.signature().expect("sig");
-        eprintln!("  code {code} sig {sig:?} value at {}", 16 + (63 - fields.remaining()));
-        fields.skip(sig).expect("value");
+        let sig = fields.signature().expect("sig").to_owned();
+        eprintln!("  code {code} sig {sig:?} value rel {}", 16 + (fields_len - fields.remaining()));
+        match fields.skip(&sig) {
+            Ok(()) => eprintln!("  value ok, next rel {}", 16 + (fields_len - fields.remaining())),
+            Err(()) => {
+                eprintln!("  VALUE FAILED");
+                break;
+            }
+        }
         fields.leave_struct();
+    }
+    match crate::dbus::proto::Message::parse(frame) {
+        Ok(message) => eprintln!("parsed ok sig={:?} sender={:?} dest={:?}", message.signature, message.sender, message.destination),
+        Err(()) => eprintln!("PARSE REFUSED"),
     }
 }
