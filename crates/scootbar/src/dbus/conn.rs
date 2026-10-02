@@ -307,6 +307,7 @@ impl Conn {
                 Ok(Some(len)) => len,
                 Ok(None) => break,
                 Err(()) => {
+                    crate::print::warn(format_args!("scootbar: tray: dropping a refused bus frame"));
                     self.dead = true;
                     return (events, false);
                 }
@@ -334,6 +335,7 @@ impl Conn {
         while !self.outbox.is_empty() {
             match self.stream.write(&self.outbox) {
                 Ok(0) => {
+                    crate::print::warn(format_args!("scootbar: tray: the bus closed under a write"));
                     self.dead = true;
                     return;
                 }
@@ -341,7 +343,8 @@ impl Conn {
                     self.outbox.drain(..n);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return,
-                Err(_) => {
+                Err(error) => {
+                    crate::print::warn(format_args!("scootbar: tray: bus write failed: {error}"));
                     self.dead = true;
                     return;
                 }
@@ -356,6 +359,7 @@ impl Conn {
         loop {
             match self.stream.read(&mut chunk) {
                 Ok(0) => {
+                    crate::print::warn(format_args!("scootbar: tray: the bus went away"));
                     self.dead = true;
                     return;
                 }
@@ -367,7 +371,8 @@ impl Conn {
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return,
-                Err(_) => {
+                Err(error) => {
+                    crate::print::warn(format_args!("scootbar: tray: bus read failed: {error}"));
                     self.dead = true;
                     return;
                 }

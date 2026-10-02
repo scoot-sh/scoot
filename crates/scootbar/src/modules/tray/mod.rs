@@ -376,11 +376,19 @@ impl Tray {
         self.bus = Bus::Waiting { notify, dir };
     }
 
-    /// Drops the connection and waits again, with nothing shown: a dead
-    /// bus's last icons are not icons.
+    /// Drops the connection with nothing shown (a dead bus's last icons
+    /// are not icons), then dials once more at once: a transient death
+    /// with a live bus heals in the same turn instead of sticking on a
+    /// watch that never fires, and a bus truly gone falls back to
+    /// waiting. One attempt only, so a refusing bus cannot hot-loop the
+    /// bar: the next try waits on the socket's directory like the first.
     fn drop_live(&mut self) -> Update {
-        let had = matches!(self.bus, Bus::Live(_));
+        let had = match &self.bus {
+            Bus::Live(live) => !live.items.is_empty(),
+            Bus::Waiting { .. } => false,
+        };
         self.wait();
+        self.connect();
         if had {
             Update::Changed
         } else {
