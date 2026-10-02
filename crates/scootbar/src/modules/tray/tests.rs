@@ -384,3 +384,16 @@ fn the_registry_lists_tray_with_its_actions() {
     let harness = Harness::new(super::stand_in(&crate::modules::Settings::default()));
     assert_eq!(harness.source_count(), 1);
 }
+
+#[test]
+fn debug_flush_path() {
+    use crate::modules::Module;
+    use rustix::event::PollFlags;
+    let (stream, mut fake) = Fake::pair();
+    let mut module = start_connected(stream);
+    // Init queued two RequestNames; one forced turn must flush them.
+    let _ = module.on_ready(0, PollFlags::OUT);
+    let served = fake.pump();
+    eprintln!("TRAYDBG served after forced flush: {served}");
+    assert_eq!(served, 2);
+}
