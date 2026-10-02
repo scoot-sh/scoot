@@ -651,13 +651,6 @@ impl<'a> Variant<'a> {
         }
     }
 
-    /// The value as a boolean (`b`).
-    pub fn as_bool(&self) -> Result<bool, ()> {
-        if self.sig != "b" {
-            return Err(());
-        }
-        self.read().boolean()
-    }
 }
 
 /// Whether `name` is a usable bus, interface, member or error name:

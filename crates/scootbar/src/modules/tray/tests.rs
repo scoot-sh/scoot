@@ -64,7 +64,7 @@ fn action(name: &'static str, index: i32) -> Option<Action> {
 
 #[test]
 fn an_item_listed_before_start_is_picked_up() {
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
@@ -104,7 +104,7 @@ fn a_path_registration_lands_on_the_sender() {
 
 #[test]
 fn new_icon_re_reads_the_item() {
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
@@ -117,7 +117,7 @@ fn new_icon_re_reads_the_item() {
 
 #[test]
 fn a_crashed_item_disappears_with_its_owner() {
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
@@ -128,7 +128,7 @@ fn a_crashed_item_disappears_with_its_owner() {
 
 #[test]
 fn an_owner_vanishing_drops_the_item_too() {
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
@@ -140,7 +140,7 @@ fn an_owner_vanishing_drops_the_item_too() {
 
 #[test]
 fn a_click_activates_and_a_scroll_scrolls() {
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
@@ -175,7 +175,9 @@ fn a_click_activates_and_a_scroll_scrolls() {
     let calls = fake.calls();
     let activate = calls.iter().find(|call| call.member == "Activate").expect("no Activate call");
     assert_eq!(activate.destination, SERVICE);
+    assert_eq!(activate.path, "/StatusNotifierItem");
     assert_eq!(activate.signature, "ii");
+    assert!(activate.serial > 0);
 
     // A touchpad flood is one bounded call: steps clamp at 64.
     assert_eq!(
@@ -210,9 +212,8 @@ fn a_click_activates_and_a_scroll_scrolls() {
 
 #[test]
 fn icons_draw_from_the_cache() {
-    use crate::modules::Module;
     use rustix::event::PollFlags;
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Red", "Active", 4, 4, &fake::solid(4, 4, 255, 255, 0, 0)));
     // Held directly (not through the harness, which owns opaquely), and
     // woken by hand: the fake answered during the blocking set-up, so a
@@ -270,7 +271,7 @@ fn hostile_items_lose_only_themselves() {
     }
     assert!(harness.value_on(None).is_none());
     // A title of controls and 10 KiB of `x`: stripped and cut.
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     let mut title = String::from("\u{0}ab\u{7f}");
     title.push_str(&"x".repeat(10_000));
     fake.add_item(SERVICE, OWNER, fake::item_body(&title, "Bogus", 4, 4, &fake::solid(4, 4, 255, 0, 0, 255)));
@@ -284,7 +285,7 @@ fn hostile_items_lose_only_themselves() {
     assert_eq!(value["items"][0]["status"], "Passive");
     // A pixmap whose bytes do not match its dimensions: the entry is
     // skipped, the item stays, iconless but clickable.
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Shapeless", "Active", 4, 4, &[1, 2, 3]));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
@@ -293,7 +294,7 @@ fn hostile_items_lose_only_themselves() {
 
 #[test]
 fn past_the_item_cap_registrations_are_ignored() {
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     for n in 0..MAX_ITEMS + 4 {
         let service = format!("org.kde.StatusNotifierItem-1-{n}");
         fake.add_item(&service, OWNER, fake::item_body("Capped", "Active", 2, 2, &fake::solid(2, 2, 255, 9, 9, 9)));
@@ -306,7 +307,7 @@ fn past_the_item_cap_registrations_are_ignored() {
 
 #[test]
 fn host_mode_lists_the_other_watchers_items() {
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     let id = format!("{SERVICE}/StatusNotifierItem");
     fake.set_watcher(":1.99", &[&id]);
     fake.add_item(SERVICE, OWNER, fake::item_body("Hosted", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 255, 0)));
@@ -322,7 +323,7 @@ fn host_mode_lists_the_other_watchers_items() {
 
 #[test]
 fn a_lost_watcher_is_taken_back() {
-    let (stream, mut fake) = Fake::pair();
+    let (stream, fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);

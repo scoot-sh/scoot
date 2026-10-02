@@ -145,7 +145,7 @@ pub fn read_properties(body: &[u8]) -> Result<Vec<(String, String)>, ()> {
                 value.as_str()?;
             }
             ("ItemIsMenu", "b") => {
-                value.as_bool()?;
+                value.read().boolean()?;
             }
             ("WindowId", "u") | ("WindowId", "i") => {
                 value.as_u32()?;
