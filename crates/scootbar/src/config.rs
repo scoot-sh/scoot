@@ -879,8 +879,6 @@ impl File {
                 margins.push((crate::modules::battery::ID, margin));
             }
         }
-            }
-        }
         let layout = self.layout(
             path,
             Gaps {

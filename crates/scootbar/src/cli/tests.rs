@@ -339,6 +339,7 @@ fn the_clock_format_is_checked_when_read() {
 fn the_help_matches_the_build() {
     let has_clock = crate::modules::find("clock").is_some();
     let has_workspaces = crate::modules::find("workspaces").is_some();
+    let has_title = crate::modules::find("window-title").is_some();
     let has_battery = crate::modules::find("battery").is_some();
     let has_brightness = crate::modules::find("brightness").is_some();
     assert_eq!(DAEMON_HELP.contains("--clock-format"), has_clock);
