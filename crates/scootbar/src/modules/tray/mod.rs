@@ -1571,10 +1571,18 @@ fn fill(item: &mut Item, body: &[u8]) -> bool {
 /// the title and the text (the pixmaps are validated and dropped — the
 /// tooltip shows no icon until the tooltips entry lands).
 fn read_tooltip_shape(entries: &mut Reader<'_>) -> Result<(String, String, String), ()> {
-    entries.enter_struct()?;
-    let name = entries.str()?.to_owned();
-    let full = entries.array_full(8)?;
-    read_pixmaps(full)?;
+    entries.enter_struct().map_err(|_| {
+        eprintln!("TRAYDBG tooltip: enter failed");
+    })?;
+    let name = entries.str().map_err(|_| {
+        eprintln!("TRAYDBG tooltip: name failed");
+    })?.to_owned();
+    let full = entries.array_full(8).map_err(|_| {
+        eprintln!("TRAYDBG tooltip: pixmaps array failed");
+    })?;
+    read_pixmaps(full).map_err(|_| {
+        eprintln!("TRAYDBG tooltip: pixmaps failed");
+    })?;
     let title = entries.str()?.to_owned();
     let text = entries.str()?.to_owned();
     entries.leave_struct();
