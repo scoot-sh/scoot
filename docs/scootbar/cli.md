@@ -621,7 +621,8 @@ woken by the kernel's uevents on a netlink socket filtered to the
 
 - **What it shows** is `72%`, in the `warn` class at or below
   `warn-below` (default 20) and `urgent` at or below `urgent-below`
-  (default 10, 0 to 100 each), by level alone. The tooltip names the
+  (default 10, 0 to 100 each), by level alone; `warn-below` must be at
+  least `urgent-below`, else warn is unreachable and the file is refused. The tooltip names the
   state: `Discharging 72%` (`Charging`, `Full`, `Not charging` or
   `Unknown` for a status string no kernel documents, which never refuses
   the battery). Where there is no battery at all (a desktop, a VM) it
