@@ -279,6 +279,7 @@ impl Fake {
         if destination == BUS || destination.is_empty() {
             return self.serve_bus(message.serial, serial, member, body);
         }
+        eprintln!("FAKEDBG frame {member} dest={destination} path={path}");
         if path == "/StatusNotifierWatcher" {
             // Calls at the module's own object come here only in
             // host-mode tests driving both ends; recorded like item calls.
