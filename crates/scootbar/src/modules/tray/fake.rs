@@ -494,10 +494,13 @@ fn serve_bus(
         }
         "RequestName" => {
             let word = state.lock().unwrap().request_word;
+            eprintln!("FAKEDBG: requestname word={word} to={to} serial={serial}");
             let mut out = Writer::new();
             out.u32(word);
             let bytes = out.take_body().ok_or(())?;
-            reply(stream, to, serial, "u", &bytes)
+            let result = reply(stream, to, serial, "u", &bytes);
+            eprintln!("FAKEDBG: requestname reply {result:?}");
+            result
         }
         "AddMatch" => Ok(()),
         "ListNames" => {
