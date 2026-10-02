@@ -101,6 +101,10 @@ fn names_paths_members_and_signatures_validate() {
     ] {
         assert_eq!(check_name(valid), Ok(valid));
     }
+    // Dashes ride along in bus names (never leading, never in member or
+    // interface names, which `check_member` holds).
+    assert_eq!(check_name("a-b.c-d"), Ok("a-b.c-d"));
+    assert_eq!(check_name("-a.b"), Err(()));
     for invalid in ["", "no-dots", ".leading", "trailing.", "has space", "9lives.lead-digit", &"x".repeat(129)] {
         assert_eq!(check_name(invalid), Err(()), "{invalid}");
     }

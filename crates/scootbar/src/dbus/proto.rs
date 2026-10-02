@@ -695,7 +695,9 @@ impl<'a> Variant<'a> {
 
 /// Whether `name` is a usable bus, interface, member or error name:
 /// 1 to [`MAX_NAME`] bytes, a unique name (`:1.42`) or dotted
-/// well-known one of at least two valid elements. Refuses anything else,
+/// well-known one of at least two valid elements. Bus-name elements may
+/// hold dashes (`org.kde.StatusNotifierItem-100-1`); interface and
+/// member names never do (see [`check_member`]). Refuses anything else,
 /// including the empty string.
 pub fn check_name(name: &str) -> Result<&str, ()> {
     if name.is_empty() || name.len() > MAX_NAME {
@@ -719,7 +721,7 @@ pub fn check_name(name: &str) -> Result<&str, ()> {
             Some(first) if first.is_ascii_alphabetic() || first == b'_' => {}
             _ => return Err(()),
         }
-        if !chars.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
+        if !chars.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-') {
             return Err(());
         }
     }
