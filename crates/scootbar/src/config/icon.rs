@@ -59,13 +59,17 @@ pub(super) fn volume(
     let image = table.icon_image.as_deref();
     #[cfg(not(feature = "icon-image"))]
     let image = table.icon_image.as_ref().map(|_| "");
+    #[cfg(feature = "microphone")]
+    let what = if prefix == crate::modules::microphone::ID {
+        "a microphone"
+    } else {
+        "a volume"
+    };
+    #[cfg(not(feature = "microphone"))]
+    let what = "a volume";
     read(
         prefix,
-        if prefix == crate::modules::volume::MIC_ID {
-            "a microphone"
-        } else {
-            "a volume"
-        },
+        what,
         &Keys {
             icon: table.icon.as_deref(),
             icon_path: table.icon_path.as_deref(),

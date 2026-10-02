@@ -6,13 +6,12 @@
 //! packets captured from the Asahi machine pin the parser as golden
 //! vectors.
 
-use std::io::{Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use rustix::event::PollFlags;
 
+use super::fake::*;
 use super::proto::{self, Bounded, Kind};
 use super::{Settings, start_with};
 use crate::action::{Action, ModuleAction, Trigger};
@@ -20,261 +19,6 @@ use crate::icon::path::Vector;
 use crate::icon::raster::Rasterizer;
 use crate::modules::harness::Harness;
 use crate::modules::{Class, InvokeError, OutputView, Update};
-
-// ---------------------------------------------------------------------------
-// The fake server.
-// ---------------------------------------------------------------------------
-
-/// A scripted PulseAudio server: one connection, exact frames, nothing
-/// more. Blocking, with a timeout on every read, so a module that stops
-/// talking fails the test instead of hanging it.
-struct Fake {
-    dir: PathBuf,
-    sock: PathBuf,
-    listener: UnixListener,
-}
-
-struct Conn {
-    stream: UnixStream,
-}
-
-impl Fake {
-    fn bind() -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "scootbar-volume-{}-{}",
-            std::process::id(),
-            nano()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let sock = dir.join("native");
-        let _ = std::fs::remove_file(&sock);
-        let listener = UnixListener::bind(&sock).unwrap();
-        listener.set_nonblocking(false).unwrap();
-        Self { dir, sock, listener }
-    }
-
-    fn accept(&self) -> Conn {
-        let (stream, _) = self.listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .unwrap();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(10)))
-            .unwrap();
-        Conn { stream }
-    }
-}
-
-impl Drop for Fake {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.sock);
-        let _ = std::fs::remove_dir(&self.dir);
-    }
-}
-
-fn nano() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|t| t.as_nanos() as u64)
-        .unwrap_or(n)
-        .wrapping_add(n)
-}
-
-impl Conn {
-    /// The next request: its command, tag and payload.
-    fn frame(&mut self) -> (u32, u32, Vec<u8>) {
-        let mut header = [0u8; 20];
-        self.stream.read_exact(&mut header).unwrap();
-        let len = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as usize;
-        assert!((10..=proto::MAX_FRAME).contains(&len), "bad length {len}");
-        let mut body = vec![0u8; len];
-        self.stream.read_exact(&mut body).unwrap();
-        let mut full = header.to_vec();
-        full.extend_from_slice(&body);
-        let (frame, consumed) = proto::frame_at(&full).unwrap().expect("no frame");
-        assert_eq!(consumed, 20 + len);
-        (frame.cmd, frame.tag, frame.payload.to_vec())
-    }
-
-    fn expect(&mut self, cmd: u32) -> (u32, Vec<u8>) {
-        let (got, tag, payload) = self.frame();
-        assert_eq!(got, cmd, "expected command {cmd}, got {got}");
-        (tag, payload)
-    }
-
-    fn reply(&mut self, tag: u32, payload: &[u8]) {
-        let mut out = vec![0u8; 20 + 10 + payload.len()];
-        let n = proto::encode_into(proto::CMD_REPLY, tag, payload, &mut out).unwrap();
-        self.stream.write_all(&out[..n]).unwrap();
-    }
-
-    fn ack(&mut self, tag: u32) {
-        self.reply(tag, &[]);
-    }
-
-    fn error(&mut self, tag: u32, errno: u32) {
-        let mut writer = proto::Writer::new();
-        writer.put_u32(errno).unwrap();
-        let payload = writer.done().to_vec();
-        let mut out = vec![0u8; 64];
-        let n = proto::encode_into(0, tag, &payload, &mut out).unwrap();
-        self.stream.write_all(&out[..n]).unwrap();
-    }
-
-    fn event(&mut self, change: u32, index: u32) {
-        let mut writer = proto::Writer::new();
-        writer.put_u32(change).unwrap();
-        writer.put_u32(index).unwrap();
-        let payload = writer.done().to_vec();
-        let mut out = vec![0u8; 64];
-        let n = proto::encode_into(proto::CMD_SUBSCRIBE_EVENT, proto::INVALID_INDEX, &payload, &mut out)
-            .unwrap();
-        self.stream.write_all(&out[..n]).unwrap();
-    }
-
-    fn reply_server_info(&mut self, tag: u32, sink: &str, source: &str) {
-        let mut payload = Vec::new();
-        for text in ["PipeAudio", "17.0", "steve", "nixos"] {
-            payload.push(b't');
-            payload.extend_from_slice(text.as_bytes());
-            payload.push(0);
-        }
-        payload.push(b'a');
-        payload.extend_from_slice(&[5, 2, 0, 0, 0xbb, 0x80]);
-        push_str(&mut payload, sink);
-        push_str(&mut payload, source);
-        payload.push(b'L');
-        payload.extend_from_slice(&711939437u32.to_be_bytes());
-        payload.push(b'm');
-        payload.extend_from_slice(&[2, 1, 2]);
-        self.reply(tag, &payload);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn reply_device(
-        &mut self,
-        tag: u32,
-        index: u32,
-        name: &str,
-        desc: &str,
-        vols: &[u32],
-        muted: bool,
-    ) {
-        let mut payload = Vec::new();
-        payload.push(b'L');
-        payload.extend_from_slice(&index.to_be_bytes());
-        push_str(&mut payload, name);
-        push_str(&mut payload, desc);
-        payload.push(b'a');
-        payload.extend_from_slice(&[7, 2, 0, 0, 0xbb, 0x80]);
-        payload.push(b'm');
-        payload.extend_from_slice(&[2, 1, 2]);
-        payload.push(b'L');
-        payload.extend_from_slice(&0xffff_ffffu32.to_be_bytes());
-        payload.push(b'v');
-        payload.push(vols.len() as u8);
-        for volume in vols {
-            payload.extend_from_slice(&volume.to_be_bytes());
-        }
-        payload.push(if muted { b'1' } else { b'0' });
-        self.reply(tag, &payload);
-    }
-
-    /// Asserts nothing arrives within `ms`: the module sent nothing.
-    fn quiet(&mut self, ms: u64) {
-        self.stream
-            .set_read_timeout(Some(Duration::from_millis(ms)))
-            .unwrap();
-        let mut byte = [0u8; 1];
-        let read = self.stream.read(&mut byte);
-        self.stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .unwrap();
-        assert!(read.is_err(), "expected silence, got a frame");
-    }
-}
-
-fn push_str(into: &mut Vec<u8>, text: &str) {
-    into.push(b't');
-    into.extend_from_slice(text.as_bytes());
-    into.push(0);
-}
-
-// ---------------------------------------------------------------------------
-// Driving the module.
-// ---------------------------------------------------------------------------
-
-const SINK: &str = "audio_effect.j413-convolver";
-const SOURCE: &str = "effect_output.j413-mic";
-const DESC: &str = "Convolver";
-const INDEX: u32 = 74;
-const VOL: u32 = 32113;
-const STEP: u32 = 3277;
-
-fn sink_module(sock: PathBuf) -> Harness {
-    Harness::new(start_with(&Settings::default(), Kind::Sink, sock))
-}
-
-fn mic_module(sock: PathBuf) -> Harness {
-    Harness::new(start_with(&Settings::default(), Kind::Source, sock))
-}
-
-/// One turn of the loop, expecting progress: the module asked, answered or
-/// changed, not silence.
-fn wait(harness: &mut Harness) -> Update {
-    harness
-        .wait(Duration::from_secs(5))
-        .expect("the module went quiet")
-}
-
-/// The handshake to a shown level: AUTH, name, server info, subscribe and
-/// the default device, at `VOL`, unmuted. `default` is the name the server
-/// info gives for this kind, `device` the name the device query answers.
-fn handshake(conn: &mut Conn, harness: &mut Harness, kind: Kind, default: &str, device: &str) {
-    let (cmd, tag, _) = conn.frame();
-    assert_eq!(cmd, proto::CMD_AUTH);
-    conn.reply(tag, &[b'L', 0, 0, 0, 35]);
-    wait(harness);
-    let (tag, _) = conn.expect(proto::CMD_SET_CLIENT_NAME);
-    let _ = cmd;
-    conn.ack(tag);
-    wait(harness);
-    let (tag, _) = conn.expect(proto::CMD_GET_SERVER_INFO);
-    conn.reply_server_info(tag, SINK, SOURCE);
-    wait(harness);
-    let (tag, payload) = conn.expect(proto::CMD_SUBSCRIBE);
-    let mut reader = proto::Reader::new(&payload);
-    assert_eq!(reader.get_u32(), Some(kind.subscribe_mask()));
-    conn.ack(tag);
-    wait(harness);
-    let (tag, payload) = conn.expect(kind.get_info());
-    let mut reader = proto::Reader::new(&payload);
-    assert_eq!(reader.get_u32(), Some(proto::INVALID_INDEX));
-    let mut name = Bounded::empty();
-    assert_eq!(
-        reader.get_str(&mut name).map(|s| s.map(str::to_owned)),
-        Some(Some(default.to_owned()))
-    );
-    conn.reply_device(tag, INDEX, device, DESC, &[VOL, VOL], false);
-    assert_eq!(wait(harness), Update::Changed);
-}
-
-/// A set answer and its re-read, ending at the device's new values.
-fn answer_set(conn: &mut Conn, harness: &mut Harness, vols: &[u32], muted: bool) {
-    let (ack, _) = conn.expect(proto::CMD_GET_SERVER_INFO);
-    conn.reply_server_info(ack, SINK, SOURCE);
-    wait(harness);
-    let (tag, _) = conn.expect(Kind::Sink.get_info());
-    conn.reply_device(tag, INDEX, SINK, DESC, vols, muted);
-    wait(harness);
-}
-
-fn view_text(harness: &Harness) -> String {
-    harness.view().text().to_owned()
-}
 
 // ---------------------------------------------------------------------------
 // The waiting state.
@@ -293,7 +37,12 @@ const FAKE_EVENTS: [PollFlags; 6] = [
 fn with_no_server_it_waits_with_nothing_shown() {
     let dir = std::env::temp_dir().join(format!("scootbar-volume-wait-{}", nano()));
     std::fs::create_dir_all(&dir).unwrap();
-    let mut harness = sink_module(dir.join("native"));
+    // Started as the bar starts it, against a path nothing listens on.
+    let mut harness = Harness::new(start_with(
+        &Settings::default(),
+        Kind::Sink,
+        dir.join("native"),
+    ));
     // One source (the directory watch), an empty view and no value.
     assert_eq!(harness.source_count(), 1);
     assert!(harness.view().is_empty());
@@ -326,11 +75,101 @@ fn socket_path_forms() {
     );
     let fallback = super::runtime_dir().join("pulse").join("native");
     assert_eq!(super::socket_path_for(None), fallback);
-    assert_eq!(super::socket_path_for(Some(OsStr::from_bytes(b""))), fallback);
+    assert_eq!(
+        super::socket_path_for(Some(OsStr::from_bytes(b""))),
+        fallback
+    );
     assert_eq!(
         super::socket_path_for(Some(OsStr::from_bytes(b"unix:"))),
         fallback
     );
+}
+
+#[test]
+fn against_a_real_server_when_one_is_there() {
+    let sock = super::socket_path();
+    if !sock.exists() {
+        eprintln!("no sound server at {}: skipping", sock.display());
+        return;
+    }
+    // Read-only: the handshake runs itself and the level shows, but no
+    // set is ever sent (this may run on the developer's live session).
+    let mut harness = sink_module(sock);
+    let mut shown = false;
+    for _ in 0..20 {
+        if !harness.view().is_empty() {
+            shown = true;
+            break;
+        }
+        let _ = harness.wait(Duration::from_secs(1));
+    }
+    assert!(shown, "a server is there but the level never showed");
+    let text = view_text(&harness);
+    assert!(text.ends_with('%'), "unexpected view {text:?}");
+    let value = harness.value_on(None).expect("a shown level has a value");
+    assert!(
+        value.get("volume").is_some()
+            && value.get("muted").is_some()
+            && value.get("sink").is_some(),
+        "unexpected value {value}"
+    );
+}
+
+/// A real set round trip on a real server: gated, because it briefly
+/// changes the developer's own level (up one step and back). Measures the
+/// scroll-to-shown latency the ticket's done-when asks for.
+#[test]
+fn live_raise_and_lower_round_trip() {
+    if std::env::var_os("SCOOTBAR_TEST_LIVE_AUDIO").is_none() {
+        eprintln!("SCOOTBAR_TEST_LIVE_AUDIO unset: skipping");
+        return;
+    }
+    let sock = super::socket_path();
+    assert!(sock.exists(), "no sound server at {}", sock.display());
+    let mut harness = sink_module(sock);
+    let mut shown = false;
+    for _ in 0..20 {
+        if !harness.view().is_empty() {
+            shown = true;
+            break;
+        }
+        let _ = harness.wait(Duration::from_secs(1));
+    }
+    assert!(shown, "a server is there but the level never showed");
+    let before = view_text(&harness);
+    let output = OutputView { name: None };
+    // Up one step, then back: the asserts run after the restore, so a
+    // failure never leaves the level moved.
+    let start = std::time::Instant::now();
+    assert_eq!(
+        harness.invoke(&output, &ModuleAction::new("raise", None), 1),
+        Ok(Update::Unchanged)
+    );
+    let mut raised = false;
+    for _ in 0..100 {
+        if view_text(&harness) != before {
+            raised = true;
+            break;
+        }
+        let _ = harness.wait(Duration::from_millis(50));
+    }
+    let latency = start.elapsed();
+    assert!(raised, "a raise never showed");
+    eprintln!("raise showed in {latency:?}");
+    assert_eq!(
+        harness.invoke(&output, &ModuleAction::new("lower", None), 1),
+        Ok(Update::Unchanged)
+    );
+    let mut restored = false;
+    for _ in 0..100 {
+        if view_text(&harness) == before {
+            restored = true;
+            break;
+        }
+        let _ = harness.wait(Duration::from_millis(50));
+    }
+    assert!(restored, "the level never came back");
+    assert_eq!(view_text(&harness), before);
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +187,9 @@ fn the_handshake_shows_the_level() {
     assert_eq!(view.class(), Class::Normal);
     assert!(view.art().is_some());
     assert_eq!(view.tooltip(), "Convolver: 49%");
+    // One source, whatever the state: the socket while up, the directory
+    // watch while down. No timer, ever.
+    assert_eq!(harness.source_count(), 1);
     assert_eq!(
         harness.value_on(None),
         Some(serde_json::json!({"volume": 49, "muted": false, "sink": SINK}))
@@ -382,10 +224,11 @@ fn raise_sends_an_absolute_set_and_shows_what_the_server_says() {
         harness.invoke(&output, &ModuleAction::new("raise", None), 1),
         Ok(Update::Unchanged)
     );
-    // One absolute set from the shown level: 32113 + 3277.
+    // One absolute set from the shown level: 32113 + 3277, by name (an
+    // index with a name is refused: measured against pipewire-pulse).
     let (tag, payload) = conn.expect(proto::CMD_SET_SINK_VOLUME);
     let mut reader = proto::Reader::new(&payload);
-    assert_eq!(reader.get_u32(), Some(INDEX));
+    assert_eq!(reader.get_u32(), Some(proto::INVALID_INDEX));
     let mut name = Bounded::empty();
     assert_eq!(
         reader.get_str(&mut name).map(|s| s.map(str::to_owned)),
@@ -394,17 +237,34 @@ fn raise_sends_an_absolute_set_and_shows_what_the_server_says() {
     let mut vols = [0; proto::MAX_CHANNELS];
     assert_eq!(reader.get_cvolume(&mut vols), Some(2));
     assert_eq!(vols[..2], [VOL + STEP, VOL + STEP]);
-    // A second raise before the answer coalesces: no second frame.
+    // A second raise before the answer coalesces behind it: nothing
+    // goes out while a set is in flight.
     assert_eq!(
         harness.invoke(&output, &ModuleAction::new("raise", None), 1),
         Ok(Update::Unchanged)
     );
     conn.quiet(200);
+    // Its answer sends the one queued target, the latest absolute level.
     conn.ack(tag);
-    wait(&mut harness);
-    // The answer re-reads, and the server clamped the set: shown is 34000.
-    answer_set(&mut conn, &mut harness, &[34000, 34000], false);
-    assert_eq!(view_text(&harness), "52%");
+    let _ = wait(&mut harness);
+    let (tag, payload) = conn.expect(proto::CMD_SET_SINK_VOLUME);
+    let mut reader = proto::Reader::new(&payload);
+    let _ = reader.get_u32();
+    let _ = reader.get_str(&mut name);
+    assert_eq!(reader.get_cvolume(&mut vols), Some(2));
+    assert_eq!(vols[..2], [VOL + 2 * STEP, VOL + 2 * STEP]);
+    conn.ack(tag);
+    let _ = wait(&mut harness);
+    // That answer re-reads: shown is what the server says.
+    answer_set(
+        &mut conn,
+        &mut harness,
+        Kind::Sink,
+        SINK,
+        &[VOL + 2 * STEP, VOL + 2 * STEP],
+        false,
+    );
+    assert_eq!(view_text(&harness), "59%");
 }
 
 #[test]
@@ -428,8 +288,15 @@ fn at_max_no_set_is_sent() {
     assert_eq!(reader.get_cvolume(&mut vols), Some(2));
     assert_eq!(vols[..2], [65536, 65536]);
     conn.ack(tag);
-    wait(&mut harness);
-    answer_set(&mut conn, &mut harness, &[65536, 65536], false);
+    let _ = wait(&mut harness);
+    answer_set(
+        &mut conn,
+        &mut harness,
+        Kind::Sink,
+        SINK,
+        &[65536, 65536],
+        false,
+    );
     assert_eq!(view_text(&harness), "100%");
     // Already there: nothing is sent.
     assert_eq!(
@@ -459,8 +326,15 @@ fn lower_and_toggle_mute() {
     assert_eq!(reader.get_cvolume(&mut vols), Some(2));
     assert_eq!(vols[..2], [VOL - 2 * STEP, VOL - 2 * STEP]);
     conn.ack(tag);
-    wait(&mut harness);
-    answer_set(&mut conn, &mut harness, &[VOL - 2 * STEP, VOL - 2 * STEP], false);
+    let _ = wait(&mut harness);
+    answer_set(
+        &mut conn,
+        &mut harness,
+        Kind::Sink,
+        SINK,
+        &[VOL - 2 * STEP, VOL - 2 * STEP],
+        false,
+    );
     assert_eq!(view_text(&harness), "39%");
     // Mute: one byte, then the class, the icon slot and the tooltip.
     assert_eq!(
@@ -469,11 +343,20 @@ fn lower_and_toggle_mute() {
     );
     let (tag, payload) = conn.expect(proto::CMD_SET_SINK_MUTE);
     let mut reader = proto::Reader::new(&payload);
-    assert_eq!(reader.get_u32(), Some(INDEX));
+    assert_eq!(reader.get_u32(), Some(proto::INVALID_INDEX));
+    let mut name = Bounded::empty();
+    let _ = reader.get_str(&mut name);
     assert_eq!(reader.get_bool(), Some(true));
     conn.ack(tag);
-    wait(&mut harness);
-    answer_set(&mut conn, &mut harness, &[VOL - 2 * STEP, VOL - 2 * STEP], true);
+    let _ = wait(&mut harness);
+    answer_set(
+        &mut conn,
+        &mut harness,
+        Kind::Sink,
+        SINK,
+        &[VOL - 2 * STEP, VOL - 2 * STEP],
+        true,
+    );
     let view = harness.view();
     assert_eq!(view.class(), Class::Muted);
     assert!(view.art().is_some());
@@ -495,8 +378,15 @@ fn a_sink_change_re_reads_the_tracked_device() {
     let mut conn = fake.accept();
     handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
     conn.event(0x10, INDEX);
-    wait(&mut harness);
-    answer_set(&mut conn, &mut harness, &[40000, 40000], false);
+    let _ = wait(&mut harness);
+    answer_set(
+        &mut conn,
+        &mut harness,
+        Kind::Sink,
+        SINK,
+        &[40000, 40000],
+        false,
+    );
     assert_eq!(view_text(&harness), "61%");
 }
 
@@ -519,11 +409,11 @@ fn a_server_change_rereads_the_defaults() {
     let mut conn = fake.accept();
     handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
     conn.event(0x17, proto::INVALID_INDEX);
-    wait(&mut harness);
+    let _ = wait(&mut harness);
     // New default: the device query names it.
     let (tag, _) = conn.expect(proto::CMD_GET_SERVER_INFO);
     conn.reply_server_info(tag, "other-sink", SOURCE);
-    wait(&mut harness);
+    let _ = wait(&mut harness);
     let (tag, payload) = conn.expect(Kind::Sink.get_info());
     let mut reader = proto::Reader::new(&payload);
     let _ = reader.get_u32();
@@ -544,12 +434,57 @@ fn a_removed_device_clears_the_view() {
     let mut conn = fake.accept();
     handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
     conn.event(0x20, INDEX);
-    wait(&mut harness);
-    let (tag, _) = conn.expect(proto::CMD_GET_SERVER_INFO);
-    conn.reply_server_info(tag, "", SOURCE);
+    // Cleared at the event itself, before the re-read answers.
     assert_eq!(wait(&mut harness), Update::Changed);
     assert!(harness.view().is_empty());
     assert_eq!(harness.value_on(None), None);
+    let (tag, _) = conn.expect(proto::CMD_GET_SERVER_INFO);
+    conn.reply_server_info(tag, "", SOURCE);
+    // Still no default, so no device is asked for: one quiet turn, then
+    // silence.
+    let _ = wait(&mut harness);
+    assert_eq!(harness.wait(Duration::from_millis(300)), None);
+}
+
+#[test]
+fn a_device_gone_before_its_read_clears_the_view() {
+    let fake = Fake::bind();
+    let mut harness = sink_module(fake.sock.clone());
+    let mut conn = fake.accept();
+    handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
+    // The default changes, but its device is gone before the read.
+    conn.event(0x17, proto::INVALID_INDEX);
+    let _ = wait(&mut harness);
+    let (tag, _) = conn.expect(proto::CMD_GET_SERVER_INFO);
+    conn.reply_server_info(tag, "other-sink", SOURCE);
+    let _ = wait(&mut harness);
+    let (tag, _) = conn.expect(Kind::Sink.get_info());
+    conn.error(tag, 5);
+    assert_eq!(wait(&mut harness), Update::Changed);
+    assert!(harness.view().is_empty());
+    assert_eq!(harness.value_on(None), None);
+    // Nothing is asked again unprompted.
+    conn.quiet(300);
+}
+
+#[test]
+fn an_error_for_no_device_is_no_change() {
+    let fake = Fake::bind();
+    let mut harness = sink_module(fake.sock.clone());
+    let mut conn = fake.accept();
+    handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
+    // The tracked device is removed (view cleared at the event), and the
+    // re-read's device query errors too: already nothing shown, so no
+    // change.
+    conn.event(0x20, INDEX);
+    assert_eq!(wait(&mut harness), Update::Changed);
+    let (tag, _) = conn.expect(proto::CMD_GET_SERVER_INFO);
+    conn.reply_server_info(tag, SINK, SOURCE);
+    let _ = wait(&mut harness);
+    let (tag, _) = conn.expect(Kind::Sink.get_info());
+    conn.error(tag, 5);
+    assert_eq!(wait(&mut harness), Update::Unchanged);
+    assert!(harness.view().is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -562,8 +497,9 @@ fn malformed_bytes_drop_the_connection() {
     let mut harness = sink_module(fake.sock.clone());
     let mut conn = fake.accept();
     handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
-    // A length no server may send.
-    conn.stream.write_all(&[0, 0, 0x10, 0]).unwrap();
+    // A full header with a length no server may send (four bytes alone
+    // would only wait for the rest of the header).
+    conn.write_raw(&[0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     let _ = harness.wait(Duration::from_secs(5));
     assert!(harness.view().is_empty());
     // Waiting again: nothing is sent unprompted.
@@ -579,21 +515,20 @@ fn a_missing_default_refuses_sets() {
     let (cmd, tag, _) = conn.frame();
     assert_eq!(cmd, proto::CMD_AUTH);
     conn.reply(tag, &[b'L', 0, 0, 0, 35]);
-    wait(&mut harness);
+    let _ = wait(&mut harness);
     let (tag, _) = conn.expect(proto::CMD_SET_CLIENT_NAME);
-    conn.ack(tag);
-    wait(&mut harness);
+    conn.ack_name(tag);
+    let _ = wait(&mut harness);
     let (tag, _) = conn.expect(proto::CMD_GET_SERVER_INFO);
     conn.reply_server_info(tag, "", SOURCE);
-    wait(&mut harness);
+    let _ = wait(&mut harness);
     let (tag, _) = conn.expect(proto::CMD_SUBSCRIBE);
     conn.ack(tag);
-    wait(&mut harness);
-    // The answer re-reads: still no default, so no device is asked for.
-    let (tag, _) = conn.expect(proto::CMD_GET_SERVER_INFO);
-    conn.reply_server_info(tag, "", SOURCE);
-    wait(&mut harness);
+    let _ = wait(&mut harness);
+    // Subscribed with still no default, so no device is asked for: the
+    // module waits for an event instead of asking again unprompted.
     conn.quiet(300);
+    assert!(harness.view().is_empty());
     let output = OutputView { name: None };
     assert_eq!(
         harness.invoke(&output, &ModuleAction::new("raise", None), 1),
@@ -608,47 +543,100 @@ fn a_missing_default_refuses_sets() {
 #[test]
 fn a_late_server_is_found_on_its_directory() {
     let pending = pending();
-    let mut harness = sink_module(pending.sock.clone());
+    let mut harness = sink_module(pending.sock().clone());
     assert!(harness.view().is_empty());
     // The server appears after the module started watching.
     let fake = pending.listen();
-    assert_eq!(harness.wait(Duration::from_secs(5)), Some(Update::Unchanged));
+    assert_eq!(
+        harness.wait(Duration::from_secs(5)),
+        Some(Update::Unchanged)
+    );
     let mut conn = fake.accept();
     handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
     assert_eq!(view_text(&harness), "49%");
 }
 
-// A fake around an already-bound listener, for the late server.
-struct Pending {
-    dir: PathBuf,
-    sock: PathBuf,
+#[test]
+fn a_server_restart_clears_then_reshows() {
+    let fake = Fake::bind();
+    let sock = fake.sock.clone();
+    let mut harness = sink_module(sock.clone());
+    let mut conn = fake.accept();
+    handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
+    assert_eq!(view_text(&harness), "49%");
+    // The server goes away: closing both ends reads as a hang-up, and a
+    // dead server's last level is not shown as if live. The directory
+    // stays, as a real restart keeps the runtime directory.
+    drop(conn);
+    let sock = fake.kill();
+    assert_eq!(wait(&mut harness), Update::Changed);
+    assert!(harness.view().is_empty());
+    assert_eq!(harness.value_on(None), None);
+    // ... and comes back on the same path: the directory watch finds it
+    // without polling. The module connects on its next turn, so wait for
+    // that before accepting.
+    let fake = Fake::serve(&sock);
+    let _ = harness.wait(Duration::from_secs(5));
+    let mut conn = fake.accept();
+    handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
+    assert_eq!(view_text(&harness), "49%");
 }
 
-fn pending() -> Pending {
-    let dir = std::env::temp_dir().join(format!("scootbar-volume-late-{}", nano()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let sock = dir.join("native");
-    Pending { dir, sock }
-}
-
-impl Pending {
-    fn listen(self) -> Fake {
-        let _ = std::fs::remove_file(&self.sock);
-        let listener = UnixListener::bind(&self.sock).unwrap();
-        Fake {
-            dir: self.dir,
-            sock: self.sock,
-            listener,
-        }
+#[test]
+fn a_scroll_flood_sends_one_set_then_the_latest() {
+    let fake = Fake::bind();
+    let mut harness = sink_module(fake.sock.clone());
+    let mut conn = fake.accept();
+    handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
+    // Fifty notches at a touchpad's rate, no answers: one frame goes
+    // out at once (the first set, for latency), the rest coalesce into
+    // the one queued behind it: an absolute level rather than fifty
+    // accumulated steps, clamped at full scale.
+    let output = OutputView { name: None };
+    for _ in 0..50 {
+        assert_eq!(
+            harness.invoke(&output, &ModuleAction::new("raise", None), 1),
+            Ok(Update::Unchanged)
+        );
     }
+    let (tag, payload) = conn.expect(proto::CMD_SET_SINK_VOLUME);
+    let mut reader = proto::Reader::new(&payload);
+    assert_eq!(reader.get_u32(), Some(proto::INVALID_INDEX));
+    let mut vols = [0; proto::MAX_CHANNELS];
+    let mut name = Bounded::empty();
+    let _ = reader.get_str(&mut name);
+    assert_eq!(reader.get_cvolume(&mut vols), Some(2));
+    assert_eq!(vols[..2], [VOL + STEP, VOL + STEP]);
+    // Its answer sends the one queued target, the latest absolute level.
+    conn.ack(tag);
+    let _ = wait(&mut harness);
+    let (tag, payload) = conn.expect(proto::CMD_SET_SINK_VOLUME);
+    let mut reader = proto::Reader::new(&payload);
+    let _ = reader.get_u32();
+    let _ = reader.get_str(&mut name);
+    assert_eq!(reader.get_cvolume(&mut vols), Some(2));
+    assert_eq!(vols[..2], [65536, 65536]);
+    // Nothing more is queued behind it.
+    conn.quiet(200);
+    conn.ack(tag);
+    let _ = wait(&mut harness);
+    answer_set(
+        &mut conn,
+        &mut harness,
+        Kind::Sink,
+        SINK,
+        &[65536, 65536],
+        false,
+    );
+    assert_eq!(view_text(&harness), "100%");
 }
 
 #[test]
 fn click_and_scroll_have_defaults() {
-    use ab_glyph::{FontArc, FontVec};
     use crate::density::Scale;
     use crate::modules::{ClickCtx, Input};
     use crate::text::Text;
+    use ab_glyph::{FontArc, FontVec};
     let harness = sink_module(PathBuf::from("/nonexistent"));
     let view = harness.view();
     let font = FontArc::new(FontVec::try_from_vec(crate::testfont::build()).unwrap());
@@ -889,7 +877,7 @@ fn cut_replies_are_malformed() {
     many.extend_from_slice(&[b'v', 33, 0]);
     assert!(proto::parse_device_info(&many).is_none());
     // A string without its terminator is malformed.
-    assert!(proto::parse_server_info(&[b't', b'a', b'b']).is_none());
+    assert!(proto::parse_server_info(b"tab").is_none());
 }
 
 #[test]
@@ -905,7 +893,10 @@ fn names_are_bounded_at_a_character() {
     payload.push(0);
     let mut reader = proto::Reader::new(&payload);
     let mut name = Bounded::empty();
-    let text = reader.get_str(&mut name).expect("a string").expect("not null");
+    let text = reader
+        .get_str(&mut name)
+        .expect("a string")
+        .expect("not null");
     assert!(text.len() <= proto::MAX_NAME);
     assert!(text.len() >= proto::MAX_NAME - 4);
     assert!(text.chars().all(|c| c == 'é'));
@@ -950,7 +941,12 @@ fn the_level_icons_parse_and_grow_with_the_level() {
     assert_eq!(PATHS[index(false, 67)], PATHS[3]);
     assert_eq!(PATHS[index(false, 150)], PATHS[3]);
     assert_eq!(
-        [index(true, 0), index(false, 0), index(false, 34), index(false, 67)],
+        [
+            index(true, 0),
+            index(false, 0),
+            index(false, 34),
+            index(false, 67)
+        ],
         [0, 1, 2, 3]
     );
     let mut segs = Vec::new();

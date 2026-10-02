@@ -137,11 +137,15 @@ macro_rules! volume_tail {
 #[cfg(all(feature = "clock", feature = "workspaces", feature = "window-title"))]
 macro_rules! modules {
     () => {
-        concat!("    --left IDS           the modules along the left, center and right,
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty.
-                           Modules: clock", microphone_tail!(), volume_tail!(), ", window-title, workspaces
+                           Modules: clock",
+            microphone_tail!(),
+            volume_tail!(),
+            ", window-title, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -153,7 +157,8 @@ macro_rules! modules {
                            (no padding), _ (spaces) and 0 (zeros). With %S or
                            %T it ticks every second, else once a minute. The
                            zone is $TZ's, else /etc/localtime's
-")
+"
+        )
     };
 }
 #[cfg(all(
@@ -163,10 +168,14 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        concat!("    --left IDS           the modules along the left, center and right,
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                           layout: a section not given is empty. Modules: clock", microphone_tail!(), volume_tail!(), ", workspaces
+                           layout: a section not given is empty. Modules: clock",
+            microphone_tail!(),
+            volume_tail!(),
+            ", workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -178,7 +187,8 @@ macro_rules! modules {
                            (no padding), _ (spaces) and 0 (zeros). With %S or
                            %T it ticks every second, else once a minute. The
                            zone is $TZ's, else /etc/localtime's
-")
+"
+        )
     };
 }
 #[cfg(all(
@@ -188,11 +198,15 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        concat!("    --left IDS           the modules along the left, center and right,
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty.
-                           Modules: clock", microphone_tail!(), volume_tail!(), ", window-title
+                           Modules: clock",
+            microphone_tail!(),
+            volume_tail!(),
+            ", window-title
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -204,7 +218,8 @@ macro_rules! modules {
                            (no padding), _ (spaces) and 0 (zeros). With %S or
                            %T it ticks every second, else once a minute. The
                            zone is $TZ's, else /etc/localtime's
-")
+"
+        )
     };
 }
 #[cfg(all(
@@ -214,10 +229,14 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        concat!("    --left IDS           the modules along the left, center and right,
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                           layout: a section not given is empty. Modules: clock", microphone_tail!(), volume_tail!(), "\n     --padding N          logical pixels either side of each module, 0 to 1024
+                           layout: a section not given is empty. Modules: clock",
+            microphone_tail!(),
+            volume_tail!(),
+            "\n     --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
                            1024 (default 0)
@@ -228,7 +247,8 @@ macro_rules! modules {
                            (no padding), _ (spaces) and 0 (zeros). With %S or
                            %T it ticks every second, else once a minute. The
                            zone is $TZ's, else /etc/localtime's
-")
+"
+        )
     };
 }
 #[cfg(all(
@@ -238,14 +258,19 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        concat!("    --left IDS           the modules along the left, center and right,
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout. Modules: ", microphone_head!(), volume_head!(), "window-title, workspaces
+     --right IDS          sets the whole layout. Modules: ",
+            microphone_head!(),
+            volume_head!(),
+            "window-title, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
                            1024 (default 0)
-")
+"
+        )
     };
 }
 #[cfg(all(
@@ -255,14 +280,19 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        concat!("    --left IDS           the modules along the left, center and right,
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout. Modules: ", microphone_head!(), volume_head!(), "workspaces
+     --right IDS          sets the whole layout. Modules: ",
+            microphone_head!(),
+            volume_head!(),
+            "workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
                            1024 (default 0)
-")
+"
+        )
     };
 }
 #[cfg(all(
@@ -272,14 +302,19 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        concat!("    --left IDS           the modules along the left, center and right,
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout. Modules: ", microphone_head!(), volume_head!(), "window-title
+     --right IDS          sets the whole layout. Modules: ",
+            microphone_head!(),
+            volume_head!(),
+            "window-title
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
                            1024 (default 0)
-")
+"
+        )
     };
 }
 #[cfg(all(

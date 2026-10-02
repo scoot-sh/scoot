@@ -135,6 +135,16 @@ placeholder = ""      # shown when no window is focused (empty takes no space)
 allow-close = false   # a middle click (or the close action) closes the window
 margin = 0            # as the clock's
 
+[volume]
+step = 5              # percent points per scroll notch and per raise, 1 to 50
+max-volume = 100      # the cap a raise stops at: 100 is full scale, to 150 is over-amplification
+on-right-click = { exec = ["pavucontrol"] }   # a mixer, or any command
+margin = 0            # as the clock's
+
+[microphone]          # the default source, same keys as [volume]
+step = 5
+margin = 0
+
 [button.launcher]     # modules the file defines, placed by name in the lists above
 icon = "\U000f0e65"
 on-click = { exec = ["scootlaunch"] }
@@ -218,7 +228,10 @@ icon, which is not text), `tooltip` (absent while empty) and a
 `value` where it has one (the workspaces module: `{"active": 2, "workspaces": [1, 2, 3]}`
 for that output, `active` `null` when none is; the window-title module:
 `{"title": "editor", "app_id": "foot", "fullscreen": false}` for the
-focused window, absent when none is focused).
+focused window, absent when none is focused; the volume module:
+`{"volume": 49, "muted": false, "sink": "alsa_output..."}` for the default
+sink, absent while no server answers (the microphone variant reports
+`"source"` instead of `"sink"`)).
 This is the agent hook: the
 bar read as data instead of OCR. `query ID` lists only that module (an id that
 is not placed is an error naming the ones that are). The reply is bounded
@@ -321,6 +334,8 @@ cannot:
 | `clock` | The local time ([below](#the-clock)) | its timer: once a minute, or once a second with seconds shown (each redraw adds the compositor's release, below) |
 | `workspaces` | Each output's workspace numbers, the active one marked ([below](#workspaces)) | on the compositor's workspace changes: one redraw per batch, however many events it held |
 | `window-title` | The focused window's title on the bar's own output ([below](#window-title)) | on the compositor's toplevel changes: focus at once, retitles at most ten times a second |
+| `volume` | The default sink's level and mute ([below](#volume)) | on the sound server's sink events, and the server's own: one redraw per batch |
+| `microphone` | The default source's level and mute ([below](#volume)) | as `volume`, for sources |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -552,6 +567,41 @@ window activated on it; with none focused the module shows its
   `activated` state, no output events and no requests, and the two lists
   share no client-visible key, so a bar cannot correlate their handles;
   the module binds only the wlr manager.
+
+## Volume
+
+The default sink's level and mute, spoken over the PulseAudio native
+protocol (PipeWire's `pipewire-pulse` answers it, as does PulseAudio
+itself), with no libpulse and no child process: one client on the bar's
+own `poll` loop. The `microphone` module is the same code for the default
+source (its level and mute, the `source` key in `query`), configured under
+`[microphone]`. Each is a Cargo feature (`volume`, `microphone`), both on
+by default.
+
+- **What it shows** is `49%` with the level's icon (muted, low, medium,
+  high; a static `icon`, `icon-path` or `icon-image` in the table replaces
+  all four), in the `muted` class while muted. The tooltip names the
+  device: `Built-in Audio: 49%`, with `(muted)` after it. While no server
+  answers it shows nothing and takes no space.
+- **A click toggles mute, a scroll raises or lowers**, with no binding at
+  all; a binding you set runs instead, as on every module. The module's
+  own actions are `raise`, `lower` and `toggle-mute`, none taking a number
+  (`scootbar msg invoke volume raise` raises one step). A scroll's steps
+  arrive through the scroll itself, one step each. There is no default for
+  a right click: point `on-right-click` at a mixer (`pavucontrol`, or
+  `wpctl`).
+- **`step`** (default 5, 1 to 50) is the percent points per scroll notch
+  and per raise. **`max-volume`** (default 100, 100 to 150) is the cap a
+  raise stops at: 100 is full scale, past it is over-amplification.
+- **Cost.** One socket while the server is up, one inotify watch on its
+  directory while it is not: no timer, no polling, no wakeups with no
+  audio activity. A server that restarts is found when its socket comes
+  back; sets are absolute levels from what is shown (never accumulated
+  steps, so a touchpad flood cannot drift), one in flight at most, and
+  every answered set is re-read, so what the server clamped to is what is
+  shown. The server is `$PULSE_SERVER` when that names a unix socket,
+  else `$XDG_RUNTIME_DIR/pulse/native`; device names from it are untrusted
+  text, kept at 128 bytes.
 
 ## Pointer input
 

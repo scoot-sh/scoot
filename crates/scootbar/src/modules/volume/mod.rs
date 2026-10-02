@@ -56,6 +56,13 @@ use crate::icon::{Art, Icon};
 mod icons;
 pub mod proto;
 
+// The fuzz target's check, compiled here only for the test that replays
+// its corpus (`crates/scootbar/fuzz` compiles the file itself).
+#[cfg(test)]
+mod fuzz;
+
+#[cfg(test)]
+pub(crate) mod fake;
 #[cfg(test)]
 mod tests;
 
@@ -142,10 +149,12 @@ fn icon_eq(a: &Icon, b: &Icon) -> bool {
     }
 }
 
+#[cfg(feature = "volume")]
 pub fn init(settings: &super::Settings) -> Init {
     start(&settings.volume, Kind::Sink)
 }
 
+#[cfg(feature = "microphone")]
 pub fn init_microphone(settings: &super::Settings) -> Init {
     start(&settings.microphone, Kind::Source)
 }
@@ -158,7 +167,7 @@ fn start(settings: &Settings, kind: Kind) -> Init {
 }
 
 /// The same, at an explicit socket path: the tests' fake servers.
-fn start_with(settings: &Settings, kind: Kind, socket: PathBuf) -> Box<dyn Module> {
+pub(crate) fn start_with(settings: &Settings, kind: Kind, socket: PathBuf) -> Box<dyn Module> {
     let step = settings.step.clamp(1, MAX_STEP);
     let max = settings.max_volume.clamp(MIN_MAX_VOLUME, MAX_MAX_VOLUME);
     let mut volume = Volume {
@@ -192,7 +201,7 @@ fn start_with(settings: &Settings, kind: Kind, socket: PathBuf) -> Box<dyn Modul
 
 /// Where the server listens: `$PULSE_SERVER` when it names a unix socket
 /// (`unix:PATH` or a bare path), else `$XDG_RUNTIME_DIR/pulse/native`.
-fn socket_path() -> PathBuf {
+pub(crate) fn socket_path() -> PathBuf {
     socket_path_for(std::env::var_os("PULSE_SERVER").as_deref())
 }
 
@@ -411,7 +420,10 @@ impl Volume {
                 rustix::fs::inotify::add_watch(
                     &fd,
                     &dir,
-                    WatchFlags::CREATE | WatchFlags::MOVED_TO | WatchFlags::DELETE_SELF | WatchFlags::MOVE_SELF,
+                    WatchFlags::CREATE
+                        | WatchFlags::MOVED_TO
+                        | WatchFlags::DELETE_SELF
+                        | WatchFlags::MOVE_SELF,
                 )?;
                 Ok(fd)
             }) {
@@ -427,7 +439,11 @@ impl Volume {
     fn drop_live(&mut self) -> Update {
         let had = self.live.as_ref().is_some_and(|live| live.device.is_some());
         self.watch();
-        if had { Update::Changed } else { Update::Unchanged }
+        if had {
+            Update::Changed
+        } else {
+            Update::Unchanged
+        }
     }
 
     /// The level a scroll or raise moves from: the last set target while
@@ -494,7 +510,11 @@ impl Volume {
         if self.live.is_none() {
             return;
         }
-        if self.live.as_ref().is_some_and(|live| live.outstanding.is_some()) {
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.outstanding.is_some())
+        {
             let Some(live) = self.live.as_mut() else {
                 return;
             };
@@ -509,15 +529,26 @@ impl Volume {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let index = live.device.as_ref().map(|device| device.index).unwrap_or(proto::INVALID_INDEX);
+        // By name, with an invalid index: measured against pipewire-pulse,
+        // which refuses an index with a name (the queries read the same
+        // way). The index the device reply carried is only matched
+        // against subscription events.
         let mut writer = proto::Writer::new();
-        let channels = live.device.as_ref().map(|device| device.channels).unwrap_or(0);
+        let channels = live
+            .device
+            .as_ref()
+            .map(|device| device.channels)
+            .unwrap_or(0);
         let channels = channels.clamp(1, proto::MAX_CHANNELS);
         let volumes = [target; proto::MAX_CHANNELS];
-        let Some(name) = live.device.as_ref().map(|device| device.name.as_str().to_owned()) else {
+        let Some(name) = live
+            .device
+            .as_ref()
+            .map(|device| device.name.as_str().to_owned())
+        else {
             return;
         };
-        let built = writer.put_u32(index).is_some()
+        let built = writer.put_u32(proto::INVALID_INDEX).is_some()
             && writer.put_str(&name).is_some()
             && writer.put_cvolume(&volumes[..channels]).is_some();
         if !built {
@@ -534,7 +565,11 @@ impl Volume {
         if self.live.is_none() {
             return;
         }
-        if self.live.as_ref().is_some_and(|live| live.outstanding.is_some()) {
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.outstanding.is_some())
+        {
             let Some(live) = self.live.as_mut() else {
                 return;
             };
@@ -549,12 +584,16 @@ impl Volume {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let index = live.device.as_ref().map(|device| device.index).unwrap_or(proto::INVALID_INDEX);
-        let Some(name) = live.device.as_ref().map(|device| device.name.as_str().to_owned()) else {
+        // By name, with an invalid index: as the volume set above.
+        let Some(name) = live
+            .device
+            .as_ref()
+            .map(|device| device.name.as_str().to_owned())
+        else {
             return;
         };
         let mut writer = proto::Writer::new();
-        let built = writer.put_u32(index).is_some()
+        let built = writer.put_u32(proto::INVALID_INDEX).is_some()
             && writer.put_str(&name).is_some()
             && writer.put_bool(target).is_some();
         if !built {
@@ -660,9 +699,7 @@ impl Volume {
             };
             let start = live.start;
             match proto::frame_at(&live.read[start..live.end]) {
-                Ok(Some((frame, consumed))) => {
-                    (frame.cmd, frame.tag, start + 30, consumed - 30)
-                }
+                Ok(Some((frame, consumed))) => (frame.cmd, frame.tag, start + 30, consumed - 30),
                 Ok(None) => return Update::Unchanged,
                 Err(()) => return self.drop_live(),
             }
@@ -705,10 +742,16 @@ impl Volume {
             // nothing is shown until an event brings news, and nothing is
             // asked again unprompted, so this cannot loop.
             Expect::Device => {
-                if let Some(live) = self.live.as_mut() {
-                    live.device = None;
-                }
-                self.after_reply(Update::Changed, Follow::Nothing)
+                let changed = if self
+                    .live
+                    .as_mut()
+                    .is_some_and(|live| live.device.take().is_some())
+                {
+                    Update::Changed
+                } else {
+                    Update::Unchanged
+                };
+                self.after_reply(changed, Follow::Nothing)
             }
             // A refused set is answered by a re-read: the server's truth,
             // whatever the set did.
@@ -790,7 +833,10 @@ impl Volume {
                 if let Some(live) = self.live.as_mut() {
                     live.subscribed = true;
                 }
-                Follow::ServerInfo
+                // The defaults are already known (just read before
+                // subscribing); a change meanwhile arrives as an event now
+                // that the subscription is up, so ask for the device.
+                Follow::DeviceQuery
             }
             (Expect::SetVolume, ReplyBody::Ack) => {
                 if let Some(live) = self.live.as_mut() {
@@ -1055,7 +1101,11 @@ impl Module for Volume {
                     .saturating_add(steps.saturating_mul(self.step_raw))
                     .min(self.max_raw);
                 if Some(target) == self.live.as_ref().and_then(|live| live.sent_volume)
-                    || (target == base && self.live.as_ref().is_some_and(|live| live.sent_volume.is_none()))
+                    || (target == base
+                        && self
+                            .live
+                            .as_ref()
+                            .is_some_and(|live| live.sent_volume.is_none()))
                 {
                     return Ok(Update::Unchanged);
                 }
@@ -1066,7 +1116,11 @@ impl Module for Volume {
                 let base = self.base_volume().unwrap_or(0);
                 let target = base.saturating_sub(steps.saturating_mul(self.step_raw));
                 if Some(target) == self.live.as_ref().and_then(|live| live.sent_volume)
-                    || (target == base && self.live.as_ref().is_some_and(|live| live.sent_volume.is_none()))
+                    || (target == base
+                        && self
+                            .live
+                            .as_ref()
+                            .is_some_and(|live| live.sent_volume.is_none()))
                 {
                     return Ok(Update::Unchanged);
                 }
@@ -1127,12 +1181,18 @@ fn parse_reply(expect: Expect, payload: &[u8]) -> Option<ReplyBody> {
             let mut reader = proto::Reader::new(payload);
             reader.get_u32().map(ReplyBody::Auth)
         }
+        // SET_CLIENT_NAME answers its client index (a u32, ignored):
+        // measured against pipewire-pulse, which does not send the empty
+        // ack the other commands do.
         Expect::Name => {
             let mut reader = proto::Reader::new(payload);
             reader.get_u32().map(|_| ReplyBody::Name)
         }
         Expect::Server => proto::parse_server_info(payload).map(ReplyBody::Server),
         Expect::Device => proto::parse_device_info(payload).map(ReplyBody::Device),
+        // An acking reply is empty: anything else answers nothing asked.
+        // (SET_CLIENT_NAME is the exception: it answers a u32, above.
+        // Only AUTH carries a value besides it, the protocol version.)
         Expect::Subscribed | Expect::SetVolume | Expect::SetMute => {
             if payload.is_empty() {
                 Some(ReplyBody::Ack)
@@ -1195,7 +1255,10 @@ fn scan_names(buf: &[u8], want: &[u8]) -> bool {
             return true;
         }
         let (name, tail) = rest.split_at(len);
-        let end = name.iter().position(|byte| *byte == 0).unwrap_or(name.len());
+        let end = name
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(name.len());
         if &name[..end] == want {
             return true;
         }
@@ -1209,7 +1272,25 @@ fn scan_names(buf: &[u8], want: &[u8]) -> bool {
 /// Whether `byte` starts a tagged value: every marker, since a bare
 /// boolean's reply is always empty and never reaches here.
 fn is_tagged(byte: u8) -> bool {
-    matches!(byte, b't' | b'N' | b'L' | b'B' | b'R' | b'r' | b'a' | b'x' | b'1' | b'0' | b'T' | b'U' | b'm' | b'v' | b'P' | b'V' | b'f')
+    matches!(
+        byte,
+        b't' | b'N'
+            | b'L'
+            | b'B'
+            | b'R'
+            | b'r'
+            | b'a'
+            | b'x'
+            | b'1'
+            | b'0'
+            | b'T'
+            | b'U'
+            | b'm'
+            | b'v'
+            | b'P'
+            | b'V'
+            | b'f'
+    )
 }
 
 /// Frames handled per ready turn at most: a flooding server is sixteen

@@ -110,7 +110,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 ### M5 — Daily-driver modules, one release each
 The [umbrella](data-source-modules.md) holds the rules they share.
 - [Window title](resolved/window-title-module-done.md) (medium): the focused window's title per output, click to focus — RESOLVED 2026-10-01
-- [Volume](volume-module.md) (medium)
+- [Volume](resolved/volume-module-done.md) (medium): default sink level and mute, scroll to change, click to mute — RESOLVED 2026-10-02
 - [Volume scan_names test passes for the wrong reason](volume-scan-names-test.md) (medium): review follow-up from PR #376
 - [Volume re-probe a present socket](volume-reprobe-present-socket.md) (medium): review follow-up from PR #376
 - [Network](network-module.md) (medium)

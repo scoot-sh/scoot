@@ -142,7 +142,7 @@ pub fn frame_at(buf: &[u8]) -> Result<Option<(Frame<'_>, usize)>, ()> {
         return Ok(None);
     }
     let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
-    if len < 10 || len > MAX_FRAME {
+    if !(10..=MAX_FRAME).contains(&len) {
         return Err(());
     }
     if buf.len() < 20 + len {
@@ -194,7 +194,10 @@ pub struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     pub fn new(payload: &'a [u8]) -> Self {
-        Self { buf: payload, pos: 0 }
+        Self {
+            buf: payload,
+            pos: 0,
+        }
     }
 
     fn take(&mut self, n: usize) -> Option<&'a [u8]> {
@@ -311,7 +314,10 @@ pub struct Writer {
 
 impl Writer {
     pub fn new() -> Self {
-        Self { buf: [0; 512], len: 0 }
+        Self {
+            buf: [0; 512],
+            len: 0,
+        }
     }
 
     fn push(&mut self, byte: u8) -> Option<()> {
@@ -336,7 +342,11 @@ impl Writer {
     }
 
     pub fn put_bool(&mut self, value: bool) -> Option<()> {
-        self.push(if value { MARK_BOOL_TRUE } else { MARK_BOOL_FALSE })
+        self.push(if value {
+            MARK_BOOL_TRUE
+        } else {
+            MARK_BOOL_FALSE
+        })
     }
 
     pub fn put_str(&mut self, text: &str) -> Option<()> {
@@ -448,7 +458,11 @@ pub struct DeviceInfo {
 impl DeviceInfo {
     /// The loudest channel: what the bar shows and sets from.
     pub fn level(&self) -> u32 {
-        self.volumes[..self.channels].iter().copied().max().unwrap_or(0)
+        self.volumes[..self.channels]
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0)
     }
 }
 
@@ -457,9 +471,8 @@ pub fn parse_device_info(payload: &[u8]) -> Option<DeviceInfo> {
     let index = reader.get_u32()?;
     let mut name = Bounded::empty();
     let mut description = Bounded::empty();
-    if reader.get_str(&mut name)?.is_none() {
-        return None;
-    }
+    // A null name is malformed (the read itself erroring returns above).
+    reader.get_str(&mut name)??;
     // An empty description is shown as the name; a null one is missing,
     // and the name stands in for it too.
     match reader.get_str(&mut description)? {

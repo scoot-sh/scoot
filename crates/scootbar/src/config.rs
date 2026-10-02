@@ -34,7 +34,12 @@ mod custom;
 mod custom_each_tests;
 #[cfg(all(test, feature = "button", feature = "push", feature = "exec"))]
 mod custom_tests;
-#[cfg(any(feature = "clock", feature = "button"))]
+#[cfg(any(
+    feature = "clock",
+    feature = "button",
+    feature = "volume",
+    feature = "microphone"
+))]
 mod icon;
 #[cfg(all(test, feature = "clock"))]
 mod icon_tests;
@@ -520,12 +525,18 @@ struct VolumeFile {
     icon_viewbox: Option<String>,
     /// A PNG file, drawn before the level (instead of `icon`). Only in a
     /// build with the `icon-image` feature: without it the key is unknown.
-    #[cfg(all(any(feature = "volume", feature = "microphone"), feature = "icon-image"))]
+    #[cfg(all(
+        any(feature = "volume", feature = "microphone"),
+        feature = "icon-image"
+    ))]
     #[serde(rename = "icon-image")]
     icon_image: Option<String>,
     /// Without the feature the key is still taken (its value ignored), so
     /// that the refusal can say what is missing, not "unknown field".
-    #[cfg(all(any(feature = "volume", feature = "microphone"), not(feature = "icon-image")))]
+    #[cfg(all(
+        any(feature = "volume", feature = "microphone"),
+        not(feature = "icon-image")
+    ))]
     #[serde(rename = "icon-image")]
     icon_image: Option<serde::de::IgnoredAny>,
     /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
@@ -714,7 +725,7 @@ impl File {
         if let Some(margin) = self.microphone.margin {
             let margin = gap(path, "microphone.margin", Some(margin), 0)?;
             if margin > 0 {
-                margins.push((crate::modules::volume::MIC_ID, margin));
+                margins.push((crate::modules::microphone::ID, margin));
             }
         }
         let layout = self.layout(
@@ -983,7 +994,7 @@ impl File {
             apply_volume(
                 path,
                 "microphone",
-                crate::modules::volume::MIC_ID,
+                crate::modules::microphone::ID,
                 MICROPHONE_KEYS,
                 &self.microphone,
                 &mut modules.microphone,

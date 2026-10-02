@@ -13,7 +13,8 @@ pub const MUTED: &str = "M4 9v6h4l5 4V5L8 9H4zM16.3 9.3L17.9 9.3 19.6 11 21.3 9.
 /// Low: the speaker alone.
 pub const LOW: &str = "M4 9v6h4l5 4V5L8 9H4z";
 /// Medium: the speaker and the first wave.
-pub const MEDIUM: &str = "M4 9v6h4l5 4V5L8 9H4zM16 8.5C18.5 10 18.5 14 16 15.5L14.2 13.9C15.5 13 15.5 11 14.2 10.1z";
+pub const MEDIUM: &str =
+    "M4 9v6h4l5 4V5L8 9H4zM16 8.5C18.5 10 18.5 14 16 15.5L14.2 13.9C15.5 13 15.5 11 14.2 10.1z";
 /// High: the speaker and both waves.
 pub const HIGH: &str = "M4 9v6h4l5 4V5L8 9H4zM16 8.5C18.5 10 18.5 14 16 15.5L14.2 13.9C15.5 13 15.5 11 14.2 10.1zM18.5 6C21.5 9 21.5 15 18.5 18L16.7 16.2C18.5 14.5 18.5 9.5 16.7 7.8z";
 

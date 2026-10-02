@@ -93,6 +93,8 @@ pub mod exec;
 pub mod harness;
 // A build with `button` and neither of the others reads only `Shown::text`
 // of it; the rest is `push` and `exec`'s.
+#[cfg(feature = "microphone")]
+pub mod microphone;
 #[cfg(any(feature = "button", feature = "push", feature = "exec"))]
 #[cfg_attr(not(any(feature = "push", feature = "exec")), allow(dead_code))]
 pub mod payload;
@@ -256,7 +258,12 @@ impl fmt::Display for SetError {
 /// window-title ones so far — constructs none but `Unknown`.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
-    not(any(feature = "workspaces", feature = "window-title", feature = "volume", feature = "microphone")),
+    not(any(
+        feature = "workspaces",
+        feature = "window-title",
+        feature = "volume",
+        feature = "microphone"
+    )),
     allow(dead_code)
 )]
 pub enum InvokeError {
@@ -325,7 +332,12 @@ pub struct ActionSpec {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(
-    not(any(feature = "workspaces", feature = "window-title", feature = "volume", feature = "microphone")),
+    not(any(
+        feature = "workspaces",
+        feature = "window-title",
+        feature = "volume",
+        feature = "microphone"
+    )),
     allow(dead_code)
 )]
 pub enum ArgKind {
@@ -388,9 +400,9 @@ pub const REGISTRY: &[Spec] = &[
     },
     #[cfg(feature = "microphone")]
     Spec {
-        id: volume::MIC_ID,
-        init: volume::init_microphone,
-        actions: volume::ACTIONS,
+        id: microphone::ID,
+        init: microphone::init,
+        actions: microphone::ACTIONS,
         // As above, for the default source.
         #[cfg(test)]
         stand_in: None,
@@ -507,7 +519,7 @@ pub struct Settings {
     #[cfg(feature = "volume")]
     pub volume: volume::Settings,
     #[cfg(feature = "microphone")]
-    pub microphone: volume::Settings,
+    pub microphone: microphone::Settings,
     /// The interaction keys the config sets, by module id: only modules
     /// that bind something are listed.
     pub bindings: Vec<(&'static str, Bindings)>,
@@ -588,7 +600,12 @@ pub struct ClickCtx<'a> {
 /// A pointer input for [`Module::on_input`]. (The workspaces and
 /// window-title modules read it.)
 #[cfg_attr(
-    not(any(feature = "workspaces", feature = "window-title", feature = "volume", feature = "microphone")),
+    not(any(
+        feature = "workspaces",
+        feature = "window-title",
+        feature = "volume",
+        feature = "microphone"
+    )),
     allow(dead_code)
 )]
 pub struct Input<'a> {
