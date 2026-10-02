@@ -165,10 +165,19 @@ fn uint_of(sig: &str, value: &mut Reader<'_>) -> Result<u32, ()> {
     }
 }
 
-/// The variant's value as a signature (`g`).
+/// The variant's value as a signature (`g`): syntax-checked, but not
+/// validated as a complete type — the header's body signature is empty
+/// while there is no body, and the caller decides what that means.
 fn sig_of<'a>(sig: &str, value: &mut Reader<'a>) -> Result<&'a str, ()> {
     match sig {
-        "g" => value.signature(),
+        "g" => {
+            let len = value.u8()? as usize;
+            let bytes = value.take(len)?;
+            if value.take(1)? != [0] {
+                return Err(());
+            }
+            core::str::from_utf8(bytes).map_err(|_| ())
+        }
         _ => Err(()),
     }
 }
@@ -251,7 +260,16 @@ impl<'a> Message<'a> {
                     5 => Header::ReplySerial(uint_of(sig, value)?),
                     6 => Header::Destination(check_name(str_of(sig, value)?)?),
                     7 => Header::Sender(check_name(str_of(sig, value)?)?),
-                    8 => Header::Signature(sig_of(sig, value)?),
+                    8 => Header::Signature({
+                        // The body's signature: empty while there is no
+                        // body (a call like `Hello`), validated otherwise.
+                        let text = sig_of(sig, value)?;
+                        if text.is_empty() {
+                            text
+                        } else {
+                            check_signature(text)?
+                        }
+                    }),
                     // File descriptors are never negotiated by this
                     // client: one on the wire is a peer speaking out of
                     // turn.
