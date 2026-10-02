@@ -457,7 +457,8 @@ impl Tray {
         }
         let _ = dir;
         if bus {
-            self.connect()
+            self.connect();
+            Update::Unchanged
         } else {
             Update::Unchanged
         }
