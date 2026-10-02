@@ -1509,14 +1509,18 @@ fn fill(item: &mut Item, body: &[u8]) -> bool {
     let mut pixmaps: Option<Vec<Pixmap<'_>>> = None;
     while !entries.exhausted() {
         if entries.enter_struct().is_err() {
+            eprintln!("TRAYDBG fill: enter failed");
             return false;
         }
         let Ok(key) = entries.str() else {
+            eprintln!("TRAYDBG fill: key failed");
             return false;
         };
         let Ok(sig) = entries.signature() else {
+            eprintln!("TRAYDBG fill: sig failed at key={key:?}");
             return false;
         };
+        eprintln!("TRAYDBG fill: key={key:?} sig={sig:?}");
         match (key, sig) {
             ("Status", "s") => status = entries.str().ok(),
             ("Title", "s") => title = entries.str().ok(),
