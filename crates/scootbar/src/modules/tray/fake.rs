@@ -282,9 +282,12 @@ impl Fake {
         // An item call: `GetAll`/`Get` are answered from the script;
         // anything else is recorded (activation wants no reply).
         if member == "GetAll" {
+            eprintln!("FAKEDBG getall dest={destination}");
             if let Some(props) = self.state.props.get(destination).cloned() {
+                eprintln!("FAKEDBG getall scripted {} bytes", props.len());
                 return self.reply(message.serial, serial, "a{sv}", &props);
             }
+            eprintln!("FAKEDBG getall unscripted");
         }
         if member == "Get" {
             // A single property, variant-wrapped: answer from the
