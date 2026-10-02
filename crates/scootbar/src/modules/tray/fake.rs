@@ -405,7 +405,13 @@ fn serve_frame(
     calls: &Arc<Mutex<Vec<RecordedCall>>>,
     serial: &Arc<Mutex<u32>>,
 ) -> Result<(), ()> {
-    let message = Message::parse(frame).map_err(|_| ())?;
+    let message = match Message::parse(frame) {
+        Ok(message) => message,
+        Err(()) => {
+            eprintln!("FAKEDBG: parse refused");
+            return Err(());
+        }
+    };
     if message.kind != Kind::MethodCall {
         calls.lock().unwrap().push(record(&message));
         return Ok(());
