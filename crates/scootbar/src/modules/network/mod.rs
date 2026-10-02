@@ -120,8 +120,9 @@ const MAX_SCAN: usize = 32;
 /// reply would spin at the kernel's answer rate. The drop heals without a
 /// resync: rtnetlink state re-converges through the multicast the socket
 /// stays joined to, and generic scans and stations re-queue on the next
-/// roam, association, scan completion or new interface; any later socket
-/// error resyncs from authoritative dumps anyway.
+/// roam, association or new interface (a bare scan notice re-dumps
+/// nothing: it carries no networks); any later socket error resyncs from
+/// authoritative dumps anyway.
 const MAX_DUMP_FAILURES: u8 = 3;
 
 /// The module's options.
@@ -593,14 +594,13 @@ impl Nets {
                 }
                 netlink::NL80211_CMD_NEW_SCAN_RESULTS => {
                     // A bare notice (sequence zero) says a scan finished:
-                    // re-dump. A dump reply (our own sequence) carries the
-                    // entries instead, and must not re-queue, or every
-                    // reply schedules another dump without end.
+                    // it carries no networks, and nothing shown needs one —
+                    // the picker re-dumps when it opens, roam re-dumps for
+                    // its network, the timer re-reads the signal — so the
+                    // notice is one quiet wake, not a dump. A dump reply
+                    // (our own sequence) carries the entries instead.
                     if msg.seq == 0 {
-                        if self.scan_of != 0 {
-                            let of = self.scan_of;
-                            self.queue_scan(of);
-                        }
+                        continue;
                     } else {
                         // Pages append; the next dump resets (see
                         // `pump_genl`).

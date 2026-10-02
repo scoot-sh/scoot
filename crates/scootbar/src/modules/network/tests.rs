@@ -230,17 +230,18 @@ fn a_finished_dump_releases_the_next() {
     let (mut harness, fake) = Fake::start(&Settings::default());
     wifi(&fake, b"Wimbly", -54);
     assert_eq!(drive(&mut harness), Update::Changed);
-    // The scan dump is outstanding (the timer's station waits behind it).
+    // The scan dump is outstanding (its station waits behind it).
     let (_, genl) = fake.sent();
     let scan = scans(&genl);
     assert_eq!(scan.len(), 1);
-    // A new scan finishes while it is in flight: queued behind it.
-    fake.genl(&fake::scan_done());
+    // A roam arrives while it is in flight: its station queues behind
+    // it (its interface re-read is a single, not a dump).
+    fake.genl(&fake::roam(WLAN0));
     assert_eq!(drive(&mut harness), Update::Unchanged);
     let (_, genl) = fake.sent();
     assert!(dumps(&genl).is_empty(), "nothing while busy");
-    // Its terminator releases the queue in order: the timer's station,
-    // then the scan.
+    // Its terminator releases the queue in order: the first station,
+    // then the roam's scan.
     fake.genl(&fake::done_seq(scan[0]));
     assert_eq!(drive(&mut harness), Update::Unchanged);
     let (_, genl) = fake.sent();
@@ -345,14 +346,13 @@ fn the_multicast_mask_joins_whatever_fits() {
 }
 
 #[test]
-fn a_finished_scan_refreshes_the_list() {
+fn a_finished_scan_is_one_quiet_wake() {
     let (mut harness, fake) = Fake::start(&Settings::default());
     wifi(&fake, b"Wimbly", -54);
     assert_eq!(drive(&mut harness), Update::Changed);
     assert!(harness.view().text().starts_with("Wimbly"));
-    // Drain the start-up scan and station: the re-dump below must go out
-    // at once (nothing in flight), resetting the list, so the new page is
-    // all there is.
+    // Drain the start-up scan and station, so any re-dump below would go
+    // out at once and be visible in what the module sends.
     let (_, genl) = fake.sent();
     fake.genl(&fake::done_seq(request_seq(
         &genl,
@@ -365,15 +365,17 @@ fn a_finished_scan_refreshes_the_list() {
         super::netlink::NL80211_CMD_GET_STATION,
     )));
     assert_eq!(drive(&mut harness), Update::Unchanged);
-    // The kernel finished a scan: the module re-dumps, and the new list
-    // (with a stronger Wimbly) is what shows.
+    // The kernel finished a scan: the notice carries no networks and
+    // nothing shown needs one, so nothing is re-dumped — one wake that
+    // changes nothing. Fresh lists come from roam and from opening the
+    // picker, which re-dumps for itself.
     fake.genl(&fake::scan_done());
     assert_eq!(drive(&mut harness), Update::Unchanged);
-    fake.genl(&fake::scan(&[(b"Wimbly", -5000, true)]));
-    assert_eq!(drive(&mut harness), Update::Changed);
-    assert_eq!(harness.view().text(), "Wimbly ▂▄▆█");
-    let value = harness.value_on(None).expect("a value");
-    assert_eq!(value["signal"], -50, "the new page replaced the old");
+    let (_, genl) = fake.sent();
+    assert!(
+        super::netlink::messages(&genl).next().is_none(),
+        "no re-dump on a bare scan notice"
+    );
     let _ = fake.sent();
 }
 
@@ -878,8 +880,9 @@ fn twenty_quiet_seconds_are_quiet() {
 
 /// The joined multicast, against the real kernel: with the mask joining
 /// bit `id - 1`, the socket hears the scan group (a scan completing) and
-/// the mlme group. Best-effort asks NetworkManager for a fresh scan
-/// first; without one the wait is for its periodic background scan.
+/// the mlme group. The wait is for the daemon's periodic background scan —
+/// nothing here asks for one, because a requested rescan would land in the
+/// other live tests' windows (and can roam the radio out from under them).
 /// Read-only and non-disruptive: nothing disconnects, roams or
 /// re-associates, and the socket sends nothing (so any nl80211 message on
 /// it is multicast, not a reply).
@@ -899,12 +902,6 @@ fn multicast_notices_arrive_on_the_joined_groups() {
     );
     assert!(joined, "both groups fit the mask on this machine");
     let genl = genl.expect("nl80211 resolved, so the socket is open");
-    // A fresh scan's completion notice, if NetworkManager allows one.
-    let rescan = std::process::Command::new("nmcli")
-        .args(["device", "wifi", "rescan", "ifname", "wlan0"])
-        .output()
-        .map(|out| out.status.code());
-    eprintln!("live: rescan request: {rescan:?}");
     rustix::fs::fcntl_setfl(&genl, rustix::fs::OFlags::NONBLOCK).expect("nonblocking");
     let mut poll = [rustix::event::PollFd::new(&genl, PollFlags::IN)];
     let second = rustix::time::Timespec {
