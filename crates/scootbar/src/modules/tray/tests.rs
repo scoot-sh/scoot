@@ -408,14 +408,17 @@ fn debug_flush_path() {
     let served = fake.pump();
     eprintln!("TRAYDBG served after forced flush: {served}");
     assert_eq!(served, 2);
-    for i in 0..10 {
+    for i in 0..15 {
         let _ = module.on_ready(0, PollFlags::IN);
         fake.pump();
         let mut view = crate::modules::View::default();
-        module.view(&crate::modules::OutputView { name: None }, &mut view);
+        module.view(&DP1, &mut view);
         eprintln!("TRAYDBG forced turn {i}: tooltip={:?}", view.tooltip());
         if view.tooltip().contains("Player") {
             break;
         }
+    }
+    for call in fake.calls() {
+        eprintln!("TRAYDBG call: {} {} {}", call.destination, call.path, call.member);
     }
 }
