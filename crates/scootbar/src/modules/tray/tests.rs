@@ -104,7 +104,7 @@ fn a_path_registration_lands_on_the_sender() {
 
 #[test]
 fn new_icon_re_reads_the_item() {
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
@@ -117,7 +117,7 @@ fn new_icon_re_reads_the_item() {
 
 #[test]
 fn a_crashed_item_disappears_with_its_owner() {
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
@@ -128,7 +128,7 @@ fn a_crashed_item_disappears_with_its_owner() {
 
 #[test]
 fn an_owner_vanishing_drops_the_item_too() {
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
@@ -323,7 +323,7 @@ fn host_mode_lists_the_other_watchers_items() {
 
 #[test]
 fn a_lost_watcher_is_taken_back() {
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, 1);
