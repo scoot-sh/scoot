@@ -1261,6 +1261,7 @@ fn apply_volume(
     if !read.is_empty() {
         bindings.push((id, read));
     }
+    Ok(())
 }
 #[cfg(feature = "network")]
 const NETWORK_KEYS: [&str; 5] = [
