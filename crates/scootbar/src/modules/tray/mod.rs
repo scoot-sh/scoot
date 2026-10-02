@@ -180,7 +180,11 @@ fn start_with(addr: BusAddr) -> Box<dyn Module> {
     };
     match stream {
         Some(stream) => tray.connected(stream),
-        None => tray.wait(),
+        // Dial now when the bus is there (a local socket: `Hello` is two
+        // round trips); waiting costs nothing when it is not.
+        None => {
+            tray.connect();
+        }
     }
     Box::new(tray)
 }
@@ -396,15 +400,22 @@ impl Tray {
         }
     }
 
-    /// Dials the bus and starts the set-up; failures wait. Nothing is
-    /// shown until the names answer.
+    /// Dials the bus and starts the set-up; failures wait, said once on
+    /// stderr so an empty tray names its reason. Nothing is shown until
+    /// the names answer.
     fn connect(&mut self) -> Update {
         match conn::connect(&self.path) {
             Ok(conn) => {
                 self.bus = Bus::Live(Box::new(setup(conn)));
                 Update::Unchanged
             }
-            Err(_) => Update::Unchanged,
+            Err(error) => {
+                crate::print::warn(format_args!(
+                    "scootbar: tray: no session bus ({error}); waiting for one"
+                ));
+                self.wait();
+                Update::Unchanged
+            }
         }
     }
 
