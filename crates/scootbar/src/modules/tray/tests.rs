@@ -51,7 +51,6 @@ fn drive(harness: &mut Harness, fake: &mut Fake, mut done: impl FnMut(&Harness) 
         let a = fake.pump();
         let waited = harness.wait(Duration::from_millis(200));
         let b = fake.pump();
-        eprintln!("TRAYDBG turn {turns} {:?}: waited={waited:?} served={a}+{b} calls={}", std::time::Instant::now(), fake.calls_len());
     }
 }
 
@@ -432,28 +431,3 @@ fn the_registry_lists_tray_with_its_actions() {
     assert_eq!(harness.source_count(), 1);
 }
 
-#[test]
-fn debug_flush_path() {
-    use rustix::event::PollFlags;
-    let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
-    let mut module = start_connected(stream);
-    // Init queued two RequestNames; forced turns drive the whole chain.
-    let _ = module.on_ready(0, PollFlags::OUT);
-    let served = fake.pump();
-    eprintln!("TRAYDBG served after forced flush: {served}");
-    assert_eq!(served, 2);
-    for i in 0..15 {
-        let _ = module.on_ready(0, PollFlags::IN);
-        fake.pump();
-        let mut view = crate::modules::View::default();
-        module.view(&DP1, &mut view);
-        eprintln!("TRAYDBG forced turn {i}: tooltip={:?}", view.tooltip());
-        if view.tooltip().contains("Player") {
-            break;
-        }
-    }
-    for call in fake.calls() {
-        eprintln!("TRAYDBG call: {} {} {}", call.destination, call.path, call.member);
-    }
-}

@@ -244,7 +244,6 @@ impl Fake {
 
     /// Flushes queued reply bytes; leftovers wait for the next turn.
     fn flush(&mut self) {
-        eprintln!("FAKEDBG flush outbox={}", self.outbox.len());
         while !self.outbox.is_empty() {
             match self.bus.write(&self.outbox) {
                 Ok(n) => {
@@ -279,13 +278,11 @@ impl Fake {
         if destination == BUS || destination.is_empty() {
             return self.serve_bus(message.serial, serial, member, body);
         }
-        eprintln!("FAKEDBG frame {member} dest={destination} path={path}");
         if path == "/StatusNotifierWatcher" {
             // Calls at the module's own object are recorded like item
             // calls; calls at the scripted other watcher are answered.
             if self.state.watcher_owner.as_deref() == Some(destination) {
                 let result = self.serve_watcher(message.serial, serial, member, body);
-                eprintln!("FAKEDBG watcher {member} -> {result:?}");
                 return result;
             }
             self.calls.push(record(&message));
@@ -294,12 +291,9 @@ impl Fake {
         // An item call: `GetAll`/`Get` are answered from the script;
         // anything else is recorded (activation wants no reply).
         if member == "GetAll" {
-            eprintln!("FAKEDBG getall dest={destination}");
             if let Some(props) = self.state.props.get(destination).cloned() {
-                eprintln!("FAKEDBG getall scripted {} bytes", props.len());
                 return self.reply(message.serial, serial, "a{sv}", &props);
             }
-            eprintln!("FAKEDBG getall unscripted");
         }
         if member == "Get" {
             // A single property, variant-wrapped: answer from the
@@ -413,7 +407,6 @@ impl Fake {
                 let Some(bytes) = out.take_body() else {
                     return self.error(to, serial, "org.freedesktop.DBus.Error.Failed");
                 };
-                eprintln!("FAKEDBG names body: {}", bytes.iter().map(|b| format!("{b:02x}")).collect::<String>());
                 self.reply(to, serial, "as", &bytes)
             }
             "GetNameOwner" => {

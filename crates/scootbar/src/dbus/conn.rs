@@ -338,7 +338,6 @@ impl Conn {
     /// [`MAX_STAGING`] or on a real I/O error.
     fn read_ready(&mut self) {
         let mut chunk = [0u8; 8192];
-        eprintln!("CONNDBG read_ready staged={} outbox={}", self.staged.len(), self.outbox.len());
         loop {
             match self.stream.read(&mut chunk) {
                 Ok(0) => {

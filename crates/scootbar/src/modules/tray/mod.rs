@@ -537,12 +537,6 @@ fn scan_names(buf: &[u8], want: &[u8]) -> bool {
 impl Live {
     /// Works one bus event; says whether the view moved.
     fn apply(&mut self, event: Event) -> Update {
-        eprintln!("TRAYDBG apply {}", match &event {
-            Event::Reply { token, signature, .. } => format!("reply token={token} sig={signature}"),
-            Event::CallError { token, name } => format!("error token={token} {name}"),
-            Event::Signal { member, .. } => format!("signal {member}"),
-            Event::MethodCall { member, .. } => format!("call {member}"),
-        });
         match event {
             Event::Reply { token, signature, body } => self.on_reply(token, &signature, &body),
             Event::CallError { token, name } => self.on_error(token, &name),
@@ -588,13 +582,11 @@ impl Live {
         let token = slot as u64;
         match self.conn.call(destination, path, interface, member, body_sig, body, flags, token) {
             Ok(serial) => {
-                eprintln!("TRAYDBG issue {member} serial={serial} token={token}");
                 if wants_reply {
                     self.flights[slot] = Some(Flight { op });
                 }
             }
             Err(_) => {
-                eprintln!("TRAYDBG issue {member} REFUSED");
             }
         }
     }
@@ -625,10 +617,8 @@ impl Live {
     /// Refreshes the item's properties: one `GetAll`, answered later.
     fn refresh(&mut self, id: &str) {
         let Some(item) = self.items.iter().find(|item| item.id == id) else {
-            eprintln!("TRAYDBG refresh: no such item {id}");
             return;
         };
-        eprintln!("TRAYDBG refresh: {}", id);
         let (service, path) = (item.service.clone(), item.path.clone());
         self.issue(&service, &path, ITEM_PROPERTIES, "GetAll", "s", &get_all_body(), 0, Op::Props(id.to_owned()));
     }
@@ -689,10 +679,8 @@ impl Live {
 
         fn on_owner(&mut self, id: &str, signature: &str, body: &[u8]) -> Update {
         let Ok(owner) = proto::read_owner(signature, body) else {
-            eprintln!("TRAYDBG on_owner refused sig={signature:?}");
             return Update::Unchanged;
         };
-        eprintln!("TRAYDBG on_owner {id} -> {owner}");
         let known = self.items.iter().any(|item| item.id == id);
         if !known {
             return Update::Unchanged;
@@ -708,10 +696,8 @@ impl Live {
     /// newcomer with a `GetNameOwner` first.
     fn on_names(&mut self, signature: &str, body: &[u8]) -> Update {
         let Ok(names) = proto::read_names(signature, body) else {
-            eprintln!("TRAYDBG on_names refused sig={signature:?}");
             return Update::Unchanged;
         };
-        eprintln!("TRAYDBG on_names: {names:?}");
         let mut added = false;
         for name in names {
             if !is_item_name(&name) {
@@ -1482,18 +1468,14 @@ fn fill(item: &mut Item, body: &[u8]) -> bool {
     let mut pixmaps: Option<Vec<Pixmap<'_>>> = None;
     while !entries.exhausted() {
         if entries.enter_struct().is_err() {
-            eprintln!("TRAYDBG fill: enter failed");
             return false;
         }
         let Ok(key) = entries.str() else {
-            eprintln!("TRAYDBG fill: key failed");
             return false;
         };
         let Ok(sig) = entries.signature() else {
-            eprintln!("TRAYDBG fill: sig failed at key={key:?}");
             return false;
         };
-        eprintln!("TRAYDBG fill: key={key:?} sig={sig:?}");
         match (key, sig) {
             ("Status", "s") => status = entries.str().ok(),
             ("Title", "s") => title = entries.str().ok(),
@@ -1545,16 +1527,12 @@ fn fill(item: &mut Item, body: &[u8]) -> bool {
 /// tooltip shows no icon until the tooltips entry lands).
 fn read_tooltip_shape(entries: &mut Reader<'_>) -> Result<(String, String, String), ()> {
     entries.enter_struct().map_err(|_| {
-        eprintln!("TRAYDBG tooltip: enter failed");
     })?;
     let name = entries.str().map_err(|_| {
-        eprintln!("TRAYDBG tooltip: name failed");
     })?.to_owned();
     let elements = entries.array_raw(8).map_err(|_| {
-        eprintln!("TRAYDBG tooltip: pixmaps array failed");
     })?;
     read_pixmaps(elements).map_err(|_| {
-        eprintln!("TRAYDBG tooltip: pixmaps failed");
     })?;
     let title = entries.str()?.to_owned();
     let text = entries.str()?.to_owned();
