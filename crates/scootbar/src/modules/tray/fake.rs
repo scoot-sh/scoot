@@ -278,7 +278,7 @@ fn serve(
         match frame_at(&staged) {
             Ok(Some(len)) => {
                 let frame: Vec<u8> = staged.drain(..len).collect();
-                eprintln!("FAKEDBG: serving {len} bytes");
+                eprintln!("FAKEDBG {:?}: serving {len} bytes", std::time::Instant::now());
                 if serve_frame(&mut stream, &frame, &state, &calls, &serial).is_err() {
                     eprintln!("FAKEDBG: serve failed on {}", frame.iter().map(|b| format!("{b:02x}")).collect::<String>());
                     return;

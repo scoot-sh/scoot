@@ -1361,7 +1361,7 @@ fn setup(mut conn: Conn) -> Result<Live, conn::SetupError> {
 
 /// A blocking `RequestName`, answering the reply word.
 fn request_word(conn: &mut Conn, name: &str) -> Result<u32, conn::SetupError> {
-    eprintln!("TRAYDBG: requesting {name}");
+    eprintln!("TRAYDBG {:?}: requesting {name}", std::time::Instant::now());
     let mut body = Writer::new();
     body.str(name);
     body.u32(proto::request::ALLOW_REPLACEMENT | proto::request::DO_NOT_QUEUE);
