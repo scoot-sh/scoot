@@ -3,7 +3,7 @@ title: "Data-source modules (umbrella): rules shared by every module that reads 
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "window-title-module, volume-module, network-module, battery-module, brightness-module, media-module, bluetooth-module, tray"
+blocked: "volume-module, network-module, battery-module, brightness-module, media-module, bluetooth-module, tray"
 milestone: "ongoing"
 ---
 
@@ -12,7 +12,7 @@ milestone: "ongoing"
 Filed 2026-09-29; split into one entry per module 2026-09-29. Serves
 **daily-drive**. This entry holds the rules they share; the work is in:
 
-- [window title](window-title-module.md)
+- [window title](resolved/window-title-module-done.md) — RESOLVED 2026-10-01
 - [battery](battery-module.md)
 - [volume](volume-module.md)
 - [network](network-module.md)

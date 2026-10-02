@@ -299,7 +299,16 @@ impl Scene {
             *revision = placed.revision;
             let width = match text {
                 Some(text) if !view.is_empty() => {
-                    content_width(text, view, em).saturating_add(padding).max(1)
+                    let content = content_width(text, view, em);
+                    // A module with a maximum width (the window title's
+                    // `max-width`) never measures past it, so it yields
+                    // the bar to the other modules; longer text is cut to
+                    // the span, which the module draws (an ellipsis).
+                    let capped = match placed.module.max_width() {
+                        Some(max) => content.min(device(max, scale)),
+                        None => content,
+                    };
+                    capped.saturating_add(padding).max(1)
                 }
                 // Nothing to show, or no font to show it with.
                 _ => 0,
@@ -454,8 +463,9 @@ pub fn paint(
         if span.width == 0 {
             continue;
         }
-        // The one module with its own look draws itself; the rest draw as
-        // plain text.
+        // The modules with their own look draw themselves (the
+        // workspaces pill, a window title longer than its span); the rest
+        // draw as plain text.
         let mut custom = false;
         if let Some(placed) = scene.modules.get(index).and_then(|&m| placed.get(m)) {
             custom = placed.module.custom_draw(&mut CustomDraw {
@@ -467,6 +477,7 @@ pub fn paint(
                 em,
                 baseline,
                 padding,
+                hovered: scene.hover == Some(index),
                 scale: frame.scale,
                 theme: &style.theme,
             });

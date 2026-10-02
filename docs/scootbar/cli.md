@@ -128,6 +128,13 @@ pill-inset = 0        # the pill's gap from the bar's top and bottom, 0 to 1024
 on-scroll-up = "previous"   # the interaction keys, on every module: see Pointer input
 on-scroll-down = "next"
 
+[window-title]
+show-app-id = false   # the app id after the title: "title - app"
+max-width = 480       # the most logical pixels wide the title's span may be
+placeholder = ""      # shown when no window is focused (empty takes no space)
+allow-close = false   # a middle click (or the close action) closes the window
+margin = 0            # as the clock's
+
 [button.launcher]     # modules the file defines, placed by name in the lists above
 icon = "\U000f0e65"
 on-click = { exec = ["scootlaunch"] }
@@ -209,7 +216,10 @@ it shows and its `class` (`normal`, `warn`, `urgent`, `muted`), plus `icon`
 where the module shows a glyph icon (absent otherwise, and for a path or image
 icon, which is not text), `tooltip` (absent while empty) and a
 `value` where it has one (the workspaces module: `{"active": 2, "workspaces": [1, 2, 3]}`
-for that output, `active` `null` when none is). This is the agent hook: the
+for that output, `active` `null` when none is; the window-title module:
+`{"title": "editor", "app_id": "foot", "fullscreen": false}` for the
+focused window, absent when none is focused).
+This is the agent hook: the
 bar read as data instead of OCR. `query ID` lists only that module (an id that
 is not placed is an error naming the ones that are). The reply is bounded
 (512 KiB; an agent's bar is a few hundred bytes a module, text and tooltip
@@ -310,6 +320,7 @@ cannot:
 | --- | --- | --- |
 | `clock` | The local time ([below](#the-clock)) | its timer: once a minute, or once a second with seconds shown (each redraw adds the compositor's release, below) |
 | `workspaces` | Each output's workspace numbers, the active one marked ([below](#workspaces)) | on the compositor's workspace changes: one redraw per batch, however many events it held |
+| `window-title` | The focused window's title on the bar's own output ([below](#window-title)) | on the compositor's toplevel changes: focus at once, retitles at most ten times a second |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -495,6 +506,40 @@ pill-inset = 3
   small dots in place of the numbers), and colors for the inactive
   workspaces or per-state pill colors.
 
+## Window title
+
+The focused window's title on the output the bar is on, spoken over
+`wlr-foreign-toplevel-management-v1`. Each output shows the title of the
+window activated on it; with none focused the module shows its
+`placeholder` (empty by default, taking no space at all).
+
+- **Title and app id.** The title alone, or `title - app` with
+  `window-title.show-app-id`; a window with an empty title shows its app
+  id, so something is shown whenever a window is focused. The full title
+  is the tooltip (and the `query` value's `title`), uncut by the span.
+- **Width.** The span never grows past `window-title.max-width` (default
+  480 logical pixels, 1 to 4096), so the title yields the bar to the other
+  modules; a longer title is cut with an ellipsis by measured pixel
+  width, never counted in characters.
+- **Click to focus.** A left click activates the window (as
+  `scootbar msg invoke window-title activate` does). A middle click closes
+  it only with `window-title.allow-close = true` (off by default: closing
+  a window by an accidental click loses work); naming `close` in a binding
+  with closing off is refused when the file is read. The module's own
+  actions are `activate` and `close`, both taking no number.
+- **Cost.** Event-driven, no polling: the protocol is bound only while
+  the module is placed (a bar with no window-title module is never told a
+  title), and without it the module shows nothing and takes no space. A
+  retitle flood draws about ten times a second — focus, output, close and
+  fullscreen changes always draw at once; only title and app-id text waits
+  — and only this module's span is redrawn. Titles are untrusted text:
+  kept at 256 bytes, control characters stripped before they reach the
+  view (and the glyph cache).
+- **Only the wlr protocol.** `ext-foreign-toplevel-list-v1` has no
+  `activated` state, no output events and no requests, and the two lists
+  share no client-visible key, so a bar cannot correlate their handles;
+  the module binds only the wlr manager.
+
 ## Pointer input
 
 Clicks, scrolls and hover, on every module. The bar never takes the keyboard
@@ -591,7 +636,8 @@ entered. A module with no binding is not tinted (the workspaces module
 draws its own pill, and is not tinted either).
 
 **Cost.** The bar asks the seat for a pointer only while a placed module
-has a binding or a default of its own (today: the workspaces module).
+has a binding or a default of its own (today: the workspaces module's
+click and the window title's click).
 A clock-only bar with no bindings never takes the pointer, and costs what
 it did before there was any input. A reload that adds or removes bindings
 takes or drops it. A motion event stores two numbers; no pointer event,

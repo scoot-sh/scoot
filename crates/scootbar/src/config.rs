@@ -283,6 +283,8 @@ struct File {
     colors: ColorsFile,
     clock: ClockFile,
     workspaces: WorkspacesFile,
+    #[serde(rename = "window-title")]
+    window_title: WindowTitleFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -417,6 +419,49 @@ struct WorkspacesFile {
     #[serde(rename = "on-scroll-up")]
     on_scroll_up: Option<toml::Value>,
     #[cfg(feature = "workspaces")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
+}
+
+/// The window-title module's options. Without the `window-title` feature
+/// there are none, and any key is a loud error naming it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct WindowTitleFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "window-title")]
+    margin: Option<u32>,
+    /// Whether the app id is shown after the title.
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "show-app-id")]
+    show_app_id: Option<bool>,
+    /// The most logical pixels wide the module's span may be.
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "max-width")]
+    max_width: Option<u32>,
+    /// What shows when no window is focused (empty takes no space).
+    #[cfg(feature = "window-title")]
+    placeholder: Option<String>,
+    /// Whether a middle click (or the `close` action) may close the
+    /// focused window. Off by default: an accidental click loses work.
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "allow-close")]
+    allow_close: Option<bool>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "window-title")]
     #[serde(rename = "on-scroll-down")]
     on_scroll_down: Option<toml::Value>,
 }
@@ -570,6 +615,13 @@ impl File {
                 margins.push((crate::modules::workspaces::ID, margin));
             }
         }
+        #[cfg(feature = "window-title")]
+        if let Some(margin) = self.window_title.margin {
+            let margin = gap(path, "window-title.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::window_title::ID, margin));
+            }
+        }
         let layout = self.layout(
             path,
             Gaps {
@@ -697,6 +749,90 @@ impl File {
                     .push((crate::modules::workspaces::ID, read));
             }
         }
+        #[cfg(feature = "window-title")]
+        {
+            use crate::modules::window_title::{DEFAULT_MAX_WIDTH, MAX_MAX_WIDTH};
+            let title = &mut modules.window_title;
+            if let Some(show) = self.window_title.show_app_id {
+                title.show_app_id = show;
+            }
+            if let Some(width) = self.window_title.max_width {
+                if !(1..=MAX_MAX_WIDTH).contains(&width) {
+                    return Err(value(
+                        path,
+                        "window-title.max-width",
+                        format_args!(
+                            "takes a whole number of logical pixels from 1 to {MAX_MAX_WIDTH}, \
+                             not `{width}` (the default is {DEFAULT_MAX_WIDTH})"
+                        ),
+                    ));
+                }
+                title.max_width = width;
+            }
+            if let Some(placeholder) = &self.window_title.placeholder {
+                if placeholder.len() > crate::modules::MAX_TEXT {
+                    return Err(value(
+                        path,
+                        "window-title.placeholder",
+                        format_args!(
+                            "takes at most {} bytes, not {}",
+                            crate::modules::MAX_TEXT,
+                            placeholder.len()
+                        ),
+                    ));
+                }
+                title.placeholder = placeholder.clone();
+            }
+            if let Some(allow) = self.window_title.allow_close {
+                title.allow_close = allow;
+            }
+            let table = &self.window_title;
+            let read = bindings::read(
+                crate::modules::window_title::ID,
+                [
+                    table.on_click.as_ref(),
+                    table.on_right_click.as_ref(),
+                    table.on_middle_click.as_ref(),
+                    table.on_scroll_up.as_ref(),
+                    table.on_scroll_down.as_ref(),
+                ],
+            )
+            .map_err(|(trigger, message)| {
+                value(
+                    path,
+                    WINDOW_TITLE_KEYS[trigger as usize],
+                    format_args!("{message}"),
+                )
+            })?;
+            // A `close` binding with closing off would be a click that
+            // does nothing: refuse it loudly, naming the key.
+            if !title.allow_close {
+                for trigger in crate::action::Trigger::ALL {
+                    let is_close = read.get(trigger).is_some_and(|action| {
+                        *action
+                            == crate::action::Action::Module(crate::action::ModuleAction {
+                                name: std::borrow::Cow::Borrowed("close"),
+                                arg: None,
+                            })
+                    });
+                    if is_close {
+                        return Err(value(
+                            path,
+                            WINDOW_TITLE_KEYS[trigger as usize],
+                            format_args!(
+                                "`close` needs window-title.allow-close = true (closing a window \
+                                 by an accidental click loses work)"
+                            ),
+                        ));
+                    }
+                }
+            }
+            if !read.is_empty() {
+                modules
+                    .bindings
+                    .push((crate::modules::window_title::ID, read));
+            }
+        }
         Ok(Config {
             bar: Bar {
                 edge,
@@ -803,6 +939,14 @@ const WORKSPACES_KEYS: [&str; 5] = [
     "workspaces.on-middle-click",
     "workspaces.on-scroll-up",
     "workspaces.on-scroll-down",
+];
+#[cfg(feature = "window-title")]
+const WINDOW_TITLE_KEYS: [&str; 5] = [
+    "window-title.on-click",
+    "window-title.on-right-click",
+    "window-title.on-middle-click",
+    "window-title.on-scroll-up",
+    "window-title.on-scroll-down",
 ];
 
 /// The layout's spacings, validated: what [`File::layout`] adds to the

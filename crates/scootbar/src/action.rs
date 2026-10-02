@@ -80,8 +80,12 @@ pub struct ModuleAction {
 
 impl ModuleAction {
     /// A module's own default action: a static name, nothing allocated.
-    /// (Only a module with actions calls it: the workspaces module, so far.)
-    #[cfg_attr(not(feature = "workspaces"), allow(dead_code))]
+    /// (Only modules with actions call it: the workspaces and window-title
+    /// modules, so far.)
+    #[cfg_attr(
+        not(any(feature = "workspaces", feature = "window-title")),
+        allow(dead_code)
+    )]
     pub const fn new(name: &'static str, arg: Option<i32>) -> Self {
         Self {
             name: Cow::Borrowed(name),

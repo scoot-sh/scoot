@@ -38,10 +38,24 @@ macro_rules! what_it_shows {
         "A bar on every output, reserving its space, with workspaces."
     };
 }
-#[cfg(all(not(feature = "clock"), not(feature = "workspaces")))]
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title")
+))]
 macro_rules! what_it_shows {
     () => {
         "A bar on every output, reserving its space (built with no modules)."
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    feature = "window-title"
+))]
+macro_rules! what_it_shows {
+    () => {
+        "A bar on every output, reserving its space, with a window title."
     };
 }
 
@@ -60,71 +74,169 @@ macro_rules! idle {
     };
 }
 
-#[cfg(all(feature = "clock", feature = "workspaces"))]
+#[cfg(all(feature = "clock", feature = "workspaces", feature = "window-title"))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                          layout: a section not given is empty. Modules: clock, workspaces
+                           layout: a section not given is empty.
+                           Modules: clock, window-title, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
-                          (default 8)
+                           (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
-                          1024 (default 0)
+                           1024 (default 0)
      --clock-format FMT   the clock, as strftime (default '%-I:%M %P', which
-                          shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
-                          %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
-                          %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
-                          (no padding), _ (spaces) and 0 (zeros). With %S or
-                          %T it ticks every second, else once a minute. The
-                          zone is $TZ's, else /etc/localtime's
+                           shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
+                           %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
+                           %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
+                           (no padding), _ (spaces) and 0 (zeros). With %S or
+                           %T it ticks every second, else once a minute. The
+                           zone is $TZ's, else /etc/localtime's
 "
     };
 }
-#[cfg(all(feature = "clock", not(feature = "workspaces")))]
+#[cfg(all(
+    feature = "clock",
+    feature = "workspaces",
+    not(feature = "window-title")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                          layout: a section not given is empty. Modules: clock
+                           layout: a section not given is empty. Modules: clock, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
-                          (default 8)
+                           (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
-                          1024 (default 0)
+                           1024 (default 0)
      --clock-format FMT   the clock, as strftime (default '%-I:%M %P', which
-                          shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
-                          %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
-                          %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
-                          (no padding), _ (spaces) and 0 (zeros). With %S or
-                          %T it ticks every second, else once a minute. The
-                          zone is $TZ's, else /etc/localtime's
+                           shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
+                           %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
+                           %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
+                           (no padding), _ (spaces) and 0 (zeros). With %S or
+                           %T it ticks every second, else once a minute. The
+                           zone is $TZ's, else /etc/localtime's
 "
     };
 }
-#[cfg(all(not(feature = "clock"), feature = "workspaces"))]
+#[cfg(all(
+    feature = "clock",
+    not(feature = "workspaces"),
+    feature = "window-title"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order (default: the clock in
+     --right IDS          the center). Giving any of the three sets the whole
+                           layout: a section not given is empty.
+                           Modules: clock, window-title
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+     --clock-format FMT   the clock, as strftime (default '%-I:%M %P', which
+                           shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
+                           %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
+                           %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
+                           (no padding), _ (spaces) and 0 (zeros). With %S or
+                           %T it ticks every second, else once a minute. The
+                           zone is $TZ's, else /etc/localtime's
+"
+    };
+}
+#[cfg(all(
+    feature = "clock",
+    not(feature = "workspaces"),
+    not(feature = "window-title")
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order (default: the clock in
+     --right IDS          the center). Giving any of the three sets the whole
+                           layout: a section not given is empty. Modules: clock
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+     --clock-format FMT   the clock, as strftime (default '%-I:%M %P', which
+                           shows 3:07 pm; '%H:%M' for 15:07). Specifiers:
+                           %H %I %k %l %M %S %p %P %a %A %b %h %B %d %e %m %j
+                           %y %Y %u %w %Z %z %R %T %F %D %%, and the flags -
+                           (no padding), _ (spaces) and 0 (zeros). With %S or
+                           %T it ticks every second, else once a minute. The
+                           zone is $TZ's, else /etc/localtime's
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    feature = "workspaces",
+    feature = "window-title"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: window-title, workspaces
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    feature = "workspaces",
+    not(feature = "window-title")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
-                          (default 8)
+                           (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
-                          1024 (default 0)
+                           1024 (default 0)
 "
     };
 }
-#[cfg(all(not(feature = "clock"), not(feature = "workspaces")))]
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    feature = "window-title"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: window-title
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. This build has none, so
      --right IDS          only an empty list is taken
      --padding N          logical pixels either side of each module, 0 to 1024
-                          (default 8)
+                           (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
-                          1024 (default 0)
+                           1024 (default 0)
 "
     };
 }
@@ -153,6 +265,26 @@ macro_rules! workspace_wakes {
 }
 #[cfg(not(feature = "workspaces"))]
 macro_rules! workspace_wakes {
+    () => {
+        ""
+    };
+}
+// What the window-title module is, for the help page.
+#[cfg(feature = "window-title")]
+macro_rules! window_title_help {
+    () => {
+        "Window title (the window-title module):
+    the focused window's title on the output the bar is on (its app id
+    after it, with window-title.show-app-id), cut with an ellipsis past
+    window-title.max-width; a click focuses it, a middle click closes it
+    with window-title.allow-close. Nothing is shown where the compositor
+    has no wlr-foreign-toplevel-management-v1, and clicks do nothing where
+    it has no wl_seat
+"
+    };
+}
+#[cfg(not(feature = "window-title"))]
+macro_rules! window_title_help {
     () => {
         ""
     };
@@ -246,6 +378,7 @@ Modules:
 ",
     modules!(),
     workspaces_help!(),
+    window_title_help!(),
     "
 The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
 without it) holds every option above; `--config PATH` reads another file

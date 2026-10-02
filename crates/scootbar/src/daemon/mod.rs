@@ -42,6 +42,8 @@ mod input;
 mod listen;
 mod respond;
 mod surfaces;
+#[cfg(feature = "window-title")]
+mod toplevel;
 mod wayland;
 #[cfg(feature = "workspaces")]
 mod workspaces;
@@ -190,6 +192,8 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         content,
         #[cfg(feature = "workspaces")]
         config.modules.workspaces.link.clone(),
+        #[cfg(feature = "window-title")]
+        config.modules.window_title.link.clone(),
     )
     .map_err(Error::Wayland)?;
     for interface in missing {
@@ -209,6 +213,19 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         warn(format_args!(
             "scootbar: note: the compositor has no ext_workspace_manager_v1; the \
              workspaces module is left out"
+        ));
+    }
+    #[cfg(feature = "window-title")]
+    if config
+        .outputs
+        .to_start(&config.layout)
+        .placed()
+        .any(|(_, id)| id == crate::modules::window_title::ID)
+        && !wayland.state.title.0.borrow().has_manager()
+    {
+        warn(format_args!(
+            "scootbar: note: the compositor has no zwlr_foreign_toplevel_manager_v1; the \
+             window-title module is left out"
         ));
     }
     if wayland.state.needs_pointer() && wayland.state.globals.seat.is_none() {
