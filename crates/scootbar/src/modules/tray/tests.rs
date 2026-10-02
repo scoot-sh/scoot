@@ -783,10 +783,16 @@ fn debug_dump_item_frames() {
     writer.raw(&body);
     let message = writer.finish().unwrap();
     std::fs::write(dir.join("register.call"), &message).unwrap();
-    // GetAll reply template (reply_to patched by the item script).
+    // GetAll reply template (reply_to patched by the item script), addressed
+    // to TRAY_DUMP_DEST (a daemon drops a destination-less return).
+    let dest = std::env::var_os("TRAY_DUMP_DEST").map(|dest| dest.to_string_lossy().into_owned()).unwrap_or_default();
     let props = fake::item_body("LiveItem", "Active", 4, 4, &fake::solid(4, 4, 255, 30, 200, 30));
     let mut writer = Writer::new();
-    writer.begin_return(100, 0x12345678, "a{sv}");
+    if dest.is_empty() {
+        writer.begin_return(100, 0x12345678, "a{sv}");
+    } else {
+        writer.begin_return_to(100, &dest, 0x12345678, "a{sv}");
+    }
     writer.raw(&props);
     let message = writer.finish().unwrap();
     std::fs::write(dir.join("getall.reply"), &message).unwrap();
