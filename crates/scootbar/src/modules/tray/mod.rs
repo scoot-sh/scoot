@@ -375,14 +375,20 @@ impl Tray {
     /// or a dialled bus): runs the set-up and enumerates.
     fn connected(&mut self, stream: std::os::unix::net::UnixStream) {
         let Ok(conn) = conn::setup(stream) else {
+            eprintln!("TRAYDBG: conn setup failed");
             self.wait();
             return;
         };
+        eprintln!("TRAYDBG: conn ok {}", conn.unique());
         match setup(conn) {
             Ok(live) => {
+                eprintln!("TRAYDBG: live with {} items", live.items.len());
                 self.bus = Bus::Live(live);
             }
-            Err(_) => self.wait(),
+            Err(error) => {
+                eprintln!("TRAYDBG: setup failed {error}");
+                self.wait();
+            }
         }
     }
 
