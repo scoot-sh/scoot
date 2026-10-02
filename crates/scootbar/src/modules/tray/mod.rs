@@ -1099,49 +1099,48 @@ impl Live {
     ) -> Update {
         if path != WATCHER_PATH {
             self.conn
-                .reply_error(serial, "org.freedesktop.DBus.Error.UnknownObject");
+                .reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownObject");
             return Update::Unchanged;
         }
         if interface == ITEM_PROPERTIES {
             return self.on_properties(sender, member, serial, signature, body);
         }
         if interface == "org.freedesktop.DBus.Introspectable" && member == "Introspect" {
-            self.conn.reply_return(serial, "s", &introspect_body());
+            self.conn.reply_return(sender, serial, "s", &introspect_body());
             return Update::Unchanged;
         }
         if interface == "org.freedesktop.DBus.Peer" {
             if member == "Ping" {
-                // PROBE: explicit destination.
-                self.conn.reply_return_to(sender, serial, "", &[]);
+                self.conn.reply_return(sender, serial, "", &[]);
                 eprintln!("DBUGBUS answered ping, outbox={}", self.conn.outbox_len());
                 return Update::Unchanged;
             }
             self.conn
-                .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+                .reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownMethod");
             return Update::Unchanged;
         }
         if interface != WATCHER_KDE && interface != WATCHER_FDO {
             self.conn
-                .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+                .reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownMethod");
             return Update::Unchanged;
         }
         match member {
             "RegisterStatusNotifierItem" => {
                 let Ok(service) = proto::read_string(signature, body) else {
                     self.conn
-                        .reply_error(serial, "org.freedesktop.DBus.Error.InvalidArgs");
+                        .reply_error(sender, serial, "org.freedesktop.DBus.Error.InvalidArgs");
                     return Update::Unchanged;
                 };
                 let Ok((service, path)) = split_service_path(sender, &service) else {
                     self.conn
-                        .reply_error(serial, "org.freedesktop.DBus.Error.InvalidArgs");
+                        .reply_error(sender, serial, "org.freedesktop.DBus.Error.InvalidArgs");
                     return Update::Unchanged;
                 };
-                self.conn.reply_return(serial, "", &[]);
+                self.conn.reply_return(sender, serial, "", &[]);
                 self.add(service, path)
             }
             "RegisterStatusNotifierHost" => {
-                self.conn.reply_return(serial, "", &[]);
+                self.conn.reply_return(sender, serial, "", &[]);
                 if !self.hosts.contains(&sender.to_owned()) {
                     self.hosts.push(sender.to_owned());
                     self.emit_host_registered();
@@ -1150,7 +1149,7 @@ impl Live {
             }
             _ => {
                 self.conn
-                    .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+                    .reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownMethod");
                 Update::Unchanged
             }
         }
@@ -1159,7 +1158,7 @@ impl Live {
     /// Answers `Properties.Get`/`GetAll` on the watcher object.
     fn on_properties(
         &mut self,
-        _sender: &str,
+        sender: &str,
         member: &str,
         serial: u32,
         signature: &str,
@@ -1178,12 +1177,12 @@ impl Live {
         let _ = signature;
         let Some((interface, property)) = read(&mut reader) else {
             self.conn
-                .reply_error(serial, "org.freedesktop.DBus.Error.InvalidArgs");
+                .reply_error(sender, serial, "org.freedesktop.DBus.Error.InvalidArgs");
             return Update::Unchanged;
         };
         if interface != WATCHER_KDE && interface != WATCHER_FDO {
             self.conn
-                .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+                .reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownMethod");
             return Update::Unchanged;
         }
         let mut out = Writer::new();
@@ -1192,23 +1191,23 @@ impl Live {
                 out.variant("a{sv}");
                 let Some(cookie) = out.open_array(8) else {
                     self.conn
-                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                        .reply_error(sender, serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
                 write_watcher_props(self, &mut out);
                 out.close_array(cookie);
                 let Some(bytes) = out.take_body() else {
                     self.conn
-                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                        .reply_error(sender, serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
-                self.conn.reply_return(serial, "a{sv}", &bytes);
+                self.conn.reply_return(sender, serial, "a{sv}", &bytes);
             }
             ("Get", "RegisteredStatusNotifierItems") => {
                 out.variant("as");
                 let Some(cookie) = out.open_array(4) else {
                     self.conn
-                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                        .reply_error(sender, serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
                 for item in &self.items {
@@ -1217,34 +1216,34 @@ impl Live {
                 out.close_array(cookie);
                 let Some(bytes) = out.take_body() else {
                     self.conn
-                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                        .reply_error(sender, serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
-                self.conn.reply_return(serial, "v", &bytes);
+                self.conn.reply_return(sender, serial, "v", &bytes);
             }
             ("Get", "IsStatusNotifierHostRegistered") => {
                 out.variant("b");
                 out.boolean(!self.hosts.is_empty());
                 let Some(bytes) = out.take_body() else {
                     self.conn
-                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                        .reply_error(sender, serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
-                self.conn.reply_return(serial, "v", &bytes);
+                self.conn.reply_return(sender, serial, "v", &bytes);
             }
             ("Get", "ProtocolVersion") => {
                 out.variant("i");
                 out.i32(PROTOCOL_VERSION as i32);
                 let Some(bytes) = out.take_body() else {
                     self.conn
-                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                        .reply_error(sender, serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
-                self.conn.reply_return(serial, "v", &bytes);
+                self.conn.reply_return(sender, serial, "v", &bytes);
             }
             _ => {
                 self.conn
-                    .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+                    .reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownMethod");
             }
         }
         Update::Unchanged

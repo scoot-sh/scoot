@@ -263,22 +263,16 @@ impl Conn {
         }
     }
 
-    /// Queues a method return with an explicit destination (probe).
-    pub fn reply_return_to(&mut self, dest: &str, to_serial: u32, body_sig: &str, body: &[u8]) {
+    /// Queues an error reply for `to_serial`, addressed to `dest` (see
+    /// [`Conn::reply_return`]).
+    pub fn reply_error(&mut self, dest: &str, to_serial: u32, name: &str) {
         let serial = self.next_serial();
         let mut writer = Writer::new();
-        writer.begin_return_to(serial, dest, to_serial, body_sig);
-        writer.raw(body);
-        if let Some(message) = writer.finish() {
-            self.outbox.extend_from_slice(&message);
+        if dest.is_empty() {
+            writer.begin_error(serial, to_serial, name, "");
+        } else {
+            writer.begin_error_to(serial, dest, to_serial, name, "");
         }
-    }
-
-    /// Queues an error reply for `to_serial`.
-    pub fn reply_error(&mut self, to_serial: u32, name: &str) {
-        let serial = self.next_serial();
-        let mut writer = Writer::new();
-        writer.begin_error(serial, to_serial, name, "");
         if let Some(message) = writer.finish() {
             self.outbox.extend_from_slice(&message);
         }
