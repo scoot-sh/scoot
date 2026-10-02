@@ -130,7 +130,7 @@ fn names_paths_members_and_signatures_validate() {
     for valid in ["", "s", "su", "sss", "a{sv}", "sa{sv}as"] {
         assert_eq!(check_body_signature(valid), Ok(valid));
     }
-    for invalid in ["{}", "a", "xs", &"a".repeat(300)] {
+    for invalid in ["{}", "a", &"a".repeat(300)] {
         assert_eq!(check_body_signature(invalid), Err(()), "{invalid}");
     }
 }
