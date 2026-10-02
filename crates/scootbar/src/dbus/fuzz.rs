@@ -137,40 +137,43 @@ pub fn read_properties(body: &[u8]) -> Result<Vec<(String, String)>, ()> {
     while !scoped.exhausted() {
         scoped.enter_struct()?;
         let key = scoped.str()?.to_owned();
-        let value = scoped.variant_raw()?;
-        match (key.as_str(), value.signature()) {
-            ("Status", "s") | ("Title", "s") | ("Id", "s") | ("Category", "s") | ("IconName", "s")
-            | ("OverlayIconName", "s") | ("AttentionIconName", "s") | ("AttentionMovieName", "s")
-            | ("IconThemePath", "s") => {
-                value.as_str()?;
+        // `variant` positions past the value; borrowing it raw would
+        // leave the next entry starting inside this one.
+        let sig = scoped.variant(|sig, value| {
+            match (key.as_str(), sig) {
+                ("Status", "s") | ("Title", "s") | ("Id", "s") | ("Category", "s") | ("IconName", "s")
+                | ("OverlayIconName", "s") | ("AttentionIconName", "s") | ("AttentionMovieName", "s")
+                | ("IconThemePath", "s") => {
+                    value.str()?;
+                }
+                ("ItemIsMenu", "b") => {
+                    value.boolean()?;
+                }
+                ("WindowId", "u") | ("WindowId", "i") => {
+                    value.u32()?;
+                }
+                ("Menu", "o") => {
+                    value.str()?;
+                }
+                ("IconPixmap", "a(iiay)") | ("OverlayIconPixmap", "a(iiay)") | ("AttentionIconPixmap", "a(iiay)") => {
+                    let _ = read_pixmaps(value.rest());
+                }
+                ("ToolTip", "(sa(iiay)ss)") => {
+                    let _ = read_tooltip(value.rest());
+                }
+                _ => {
+                    // Unknown or mistyped: skipped by signature, so a
+                    // future property cannot break the walk.
+                    value.skip(sig)?;
+                }
             }
-            ("ItemIsMenu", "b") => {
-                value.read().boolean()?;
-            }
-            ("WindowId", "u") | ("WindowId", "i") => {
-                value.as_u32()?;
-            }
-            ("Menu", "o") => {
-                value.as_str()?;
-            }
-            ("IconPixmap", "a(iiay)") | ("OverlayIconPixmap", "a(iiay)") | ("AttentionIconPixmap", "a(iiay)") => {
-                let _ = read_pixmaps(value.read().rest());
-            }
-            ("ToolTip", "(sa(iiay)ss)") => {
-                let _ = read_tooltip(value.read().rest());
-            }
-            _ => {
-                // Unknown or mistyped: skipped by signature, so a future
-                // property cannot break the walk.
-                let mut skipping = value.read();
-                skipping.skip(value.signature())?;
-            }
-        }
+            Ok(sig.to_owned())
+        })?;
         scoped.leave_struct();
         if props.len() >= 64 {
             return Err(());
         }
-        props.push((key, value.signature().to_owned()));
+        props.push((key, sig));
     }
     if !reader.exhausted() {
         return Err(());
@@ -183,8 +186,8 @@ pub fn read_tooltip(body: &[u8]) -> Result<(String, String, String), ()> {
     let mut reader = Reader::le(body);
     reader.enter_struct()?;
     let name = reader.str()?.to_owned();
-    let pixmaps = reader.array_raw(8)?;
-    let _ = read_pixmaps(pixmaps);
+    let full = reader.array_full(8)?;
+    let _ = read_pixmaps(full);
     let title = reader.str()?.to_owned();
     let text = reader.str()?.to_owned();
     reader.leave_struct();

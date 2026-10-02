@@ -136,6 +136,43 @@ fn get_u32(at: &[u8], le: bool) -> u32 {
     }
 }
 
+/// A parsed header field, borrowing the frame.
+#[derive(Debug)]
+enum Field<'a> {
+    Path(&'a str),
+    Interface(&'a str),
+    Member(&'a str),
+    Error(&'a str),
+    ReplySerial(u32),
+    Destination(&'a str),
+    Sender(&'a str),
+    Signature(&'a str),
+}
+
+/// The variant's value as a string (`s` or `o`).
+fn str_of<'a>(sig: &str, value: &mut Reader<'a>) -> Result<&'a str, ()> {
+    match sig {
+        "s" | "o" => value.str(),
+        _ => Err(()),
+    }
+}
+
+/// The variant's value as a 32-bit integer (`i`, `u` or `b`).
+fn uint_of(sig: &str, value: &mut Reader<'_>) -> Result<u32, ()> {
+    match sig {
+        "i" | "u" | "b" => value.u32(),
+        _ => Err(()),
+    }
+}
+
+/// The variant's value as a signature (`g`).
+fn sig_of<'a>(sig: &str, value: &mut Reader<'a>) -> Result<&'a str, ()> {
+    match sig {
+        "g" => value.signature(),
+        _ => Err(()),
+    }
+}
+
 /// A parsed message, borrowing the frame. The header's strings are
 /// validated (names bounded by [`MAX_NAME`], paths and signatures by
 /// their own rules); the body is walked lazily through [`Reader`], so a
@@ -200,21 +237,37 @@ impl<'a> Message<'a> {
             fields.align(8)?;
             fields.enter()?;
             let code = fields.u8()?;
-            let value = fields.variant_raw()?;
+            // `variant` positions past the value when the closure
+            // returns; a loop that only borrows the value (through
+            // `variant_raw`) would re-read the next element from inside
+            // this one — right by alignment luck for a `u32`, wrong for
+            // a string.
+            let parsed = fields.variant(|sig, value| {
+                Ok(match code {
+                    1 => Field::Path(check_path(str_of(sig, value)?)?),
+                    2 => Field::Interface(check_name(str_of(sig, value)?)?),
+                    3 => Field::Member(check_member(str_of(sig, value)?)?),
+                    4 => Field::Error(check_name(str_of(sig, value)?)?),
+                    5 => Field::ReplySerial(uint_of(sig, value)?),
+                    6 => Field::Destination(check_name(str_of(sig, value)?)?),
+                    7 => Field::Sender(check_name(str_of(sig, value)?)?),
+                    8 => Field::Signature(sig_of(sig, value)?),
+                    // File descriptors are never negotiated by this
+                    // client: one on the wire is a peer speaking out of
+                    // turn.
+                    _ => return Err(()),
+                })
+            })?;
             fields.leave();
-            match code {
-                1 => path = Some(check_path(value.as_str()?)?),
-                2 => interface = Some(check_name(value.as_str()?)?),
-                3 => member = Some(check_member(value.as_str()?)?),
-                4 => error = Some(check_name(value.as_str()?)?),
-                5 => reply_serial = Some(value.as_u32()?),
-                6 => destination = Some(check_name(value.as_str()?)?),
-                7 => sender = Some(check_name(value.as_str()?)?),
-                8 => signature = check_signature(value.as_signature()?)?,
-                // File descriptors are never negotiated by this client:
-                // one on the wire is a peer speaking out of turn.
-                9 => return Err(()),
-                _ => return Err(()),
+            match parsed {
+                Field::Path(text) => path = Some(text),
+                Field::Interface(text) => interface = Some(text),
+                Field::Member(text) => member = Some(text),
+                Field::Error(text) => error = Some(text),
+                Field::ReplySerial(serial) => reply_serial = Some(serial),
+                Field::Destination(text) => destination = Some(text),
+                Field::Sender(text) => sender = Some(text),
+                Field::Signature(text) => signature = text,
             }
         }
         let mut at = 16usize.saturating_add(fields_len);
@@ -626,40 +679,6 @@ impl<'a> Variant<'a> {
             depth: self.depth,
         }
     }
-
-    /// The value as a string (`s`, `o` or `g`).
-    pub fn as_str(&self) -> Result<&'a str, ()> {
-        match self.sig {
-            "s" | "o" => self.read().string(),
-            "g" => {
-                let mut reader = self.read();
-                let len = reader.u8()? as usize;
-                let bytes = reader.take(len)?;
-                if reader.take(1)? != [0] {
-                    return Err(());
-                }
-                core::str::from_utf8(bytes).map_err(|_| ())
-            }
-            _ => Err(()),
-        }
-    }
-
-    /// The value as a signature (`g`).
-    pub fn as_signature(&self) -> Result<&'a str, ()> {
-        if self.sig != "g" {
-            return Err(());
-        }
-        self.as_str()
-    }
-
-    /// The value as a 32-bit integer (`i`, `u` or `b`).
-    pub fn as_u32(&self) -> Result<u32, ()> {
-        match self.sig {
-            "i" | "u" | "b" => Ok(self.read().int(4)? as u32),
-            _ => Err(()),
-        }
-    }
-
 }
 
 /// Whether `name` is a usable bus, interface, member or error name:
