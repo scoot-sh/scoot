@@ -138,7 +138,7 @@ fn get_u32(at: &[u8], le: bool) -> u32 {
 
 /// A parsed header field, borrowing the frame.
 #[derive(Debug)]
-enum Field<'a> {
+enum Header<'a> {
     Path(&'a str),
     Interface(&'a str),
     Member(&'a str),
@@ -244,14 +244,14 @@ impl<'a> Message<'a> {
             // a string.
             let parsed = fields.variant(|sig, value| {
                 Ok(match code {
-                    1 => Field::Path(check_path(str_of(sig, value)?)?),
-                    2 => Field::Interface(check_name(str_of(sig, value)?)?),
-                    3 => Field::Member(check_member(str_of(sig, value)?)?),
-                    4 => Field::Error(check_name(str_of(sig, value)?)?),
-                    5 => Field::ReplySerial(uint_of(sig, value)?),
-                    6 => Field::Destination(check_name(str_of(sig, value)?)?),
-                    7 => Field::Sender(check_name(str_of(sig, value)?)?),
-                    8 => Field::Signature(sig_of(sig, value)?),
+                    1 => Header::Path(check_path(str_of(sig, value)?)?),
+                    2 => Header::Interface(check_name(str_of(sig, value)?)?),
+                    3 => Header::Member(check_member(str_of(sig, value)?)?),
+                    4 => Header::Error(check_name(str_of(sig, value)?)?),
+                    5 => Header::ReplySerial(uint_of(sig, value)?),
+                    6 => Header::Destination(check_name(str_of(sig, value)?)?),
+                    7 => Header::Sender(check_name(str_of(sig, value)?)?),
+                    8 => Header::Signature(sig_of(sig, value)?),
                     // File descriptors are never negotiated by this
                     // client: one on the wire is a peer speaking out of
                     // turn.
@@ -260,14 +260,14 @@ impl<'a> Message<'a> {
             })?;
             fields.leave();
             match parsed {
-                Field::Path(text) => path = Some(text),
-                Field::Interface(text) => interface = Some(text),
-                Field::Member(text) => member = Some(text),
-                Field::Error(text) => error = Some(text),
-                Field::ReplySerial(serial) => reply_serial = Some(serial),
-                Field::Destination(text) => destination = Some(text),
-                Field::Sender(text) => sender = Some(text),
-                Field::Signature(text) => signature = text,
+                Header::Path(text) => path = Some(text),
+                Header::Interface(text) => interface = Some(text),
+                Header::Member(text) => member = Some(text),
+                Header::Error(text) => error = Some(text),
+                Header::ReplySerial(serial) => reply_serial = Some(serial),
+                Header::Destination(text) => destination = Some(text),
+                Header::Sender(text) => sender = Some(text),
+                Header::Signature(text) => signature = text,
             }
         }
         let mut at = 16usize.saturating_add(fields_len);
@@ -1197,11 +1197,11 @@ impl Writer {
             serial,
             flags,
             &[
-                Field::Path(path),
-                Field::Interface(interface),
-                Field::Member(member),
-                Field::Destination(destination),
-                Field::Signature(body_sig),
+                Header::Path(path),
+                Header::Interface(interface),
+                Header::Member(member),
+                Header::Destination(destination),
+                Header::Signature(body_sig),
             ],
         );
     }
@@ -1212,7 +1212,7 @@ impl Writer {
             2,
             serial,
             0,
-            &[Field::ReplySerial(reply_to), Field::Signature(body_sig)],
+            &[Header::ReplySerial(reply_to), Header::Signature(body_sig)],
         );
     }
 
@@ -1223,9 +1223,9 @@ impl Writer {
             serial,
             0,
             &[
-                Field::Error(error),
-                Field::ReplySerial(reply_to),
-                Field::Signature(body_sig),
+                Header::Error(error),
+                Header::ReplySerial(reply_to),
+                Header::Signature(body_sig),
             ],
         );
     }
@@ -1244,10 +1244,10 @@ impl Writer {
             serial,
             0,
             &[
-                Field::Path(path),
-                Field::Interface(interface),
-                Field::Member(member),
-                Field::Signature(body_sig),
+                Header::Path(path),
+                Header::Interface(interface),
+                Header::Member(member),
+                Header::Signature(body_sig),
             ],
         );
     }
@@ -1276,32 +1276,32 @@ impl Writer {
                 return;
             }
             let code = match field {
-                Field::Path(_) => 1,
-                Field::Interface(_) => 2,
-                Field::Member(_) => 3,
-                Field::Error(_) => 4,
-                Field::ReplySerial(_) => 5,
-                Field::Destination(_) => 6,
-                Field::Signature(_) => 8,
+                Header::Path(_) => 1,
+                Header::Interface(_) => 2,
+                Header::Member(_) => 3,
+                Header::Error(_) => 4,
+                Header::ReplySerial(_) => 5,
+                Header::Destination(_) => 6,
+                Header::Signature(_) => 8,
             };
             self.push(&[code]);
             match field {
-                Field::Path(text) => {
+                Header::Path(text) => {
                     self.signature("o");
                     self.str(text);
                 }
-                Field::Interface(text)
-                | Field::Member(text)
-                | Field::Error(text)
-                | Field::Destination(text) => {
+                Header::Interface(text)
+                | Header::Member(text)
+                | Header::Error(text)
+                | Header::Destination(text) => {
                     self.signature("s");
                     self.str(text);
                 }
-                Field::ReplySerial(value) => {
+                Header::ReplySerial(value) => {
                     self.signature("u");
                     self.u32(*value);
                 }
-                Field::Signature(text) => {
+                Header::Signature(text) => {
                     self.signature("g");
                     self.signature(text);
                 }
