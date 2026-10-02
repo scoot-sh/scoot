@@ -276,6 +276,9 @@ fn serve(
     let mut chunk = [0u8; 8192];
     loop {
         match frame_at(&staged) {
+            Ok(None) if staged.len() >= 16 => {
+                eprintln!("FAKEDBG: incomplete staged={} head={:02x?}", staged.len(), &staged[..16.min(staged.len())]);
+            }
             Ok(Some(len)) => {
                 let frame: Vec<u8> = staged.drain(..len).collect();
                 eprintln!("FAKEDBG {:?}: serving {len} bytes", std::time::Instant::now());
