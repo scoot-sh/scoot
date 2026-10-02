@@ -360,7 +360,10 @@ fn held_titles_refresh_on_a_fixed_period() {
     }
     assert_eq!(harness.dispatch(), Update::Unchanged);
     // Within one more period the held titles draw, once, as the latest.
-    assert_eq!(harness.wait(Duration::from_millis(60)), Some(Update::Changed));
+    assert_eq!(
+        harness.wait(Duration::from_millis(60)),
+        Some(Update::Changed)
+    );
     assert_eq!(harness.view_on(Some("DP-1")).text(), "c");
     assert_eq!(harness.source_count(), 0);
     assert_eq!(harness.dispatch(), Update::Unchanged);
