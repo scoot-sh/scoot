@@ -356,6 +356,7 @@ impl Fake {
                 let Some(bytes) = out.take_body() else {
                     return self.error(to, serial, "org.freedesktop.DBus.Error.Failed");
                 };
+                eprintln!("FAKEDBG names body: {}", bytes.iter().map(|b| format!("{b:02x}")).collect::<String>());
                 self.reply(to, serial, "as", &bytes)
             }
             "GetNameOwner" => {
