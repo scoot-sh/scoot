@@ -948,7 +948,9 @@ impl Writer {
         self.buf.reserve(n);
     }
 
-    fn pad(&mut self, n: usize) {
+    /// Aligns the cursor past the padding for `n`. Crate-visible: the
+    /// tests' fake bus builds headers by hand.
+    pub(crate) fn pad(&mut self, n: usize) {
         if n <= 1 || self.overflow {
             return;
         }

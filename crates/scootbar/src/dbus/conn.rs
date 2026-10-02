@@ -518,9 +518,9 @@ pub fn setup(stream: UnixStream) -> Result<Conn, SetupError> {
     // is what both daemons accept.
     stream.write_all(&[0])?;
     stream.write_all(b"AUTH EXTERNAL\r\n")?;
-    expect_line(&stream, "DATA")?;
+    expect_line(&mut stream, "DATA")?;
     stream.write_all(b"DATA\r\n")?;
-    let ok = read_line(&stream)?;
+    let ok = read_line(&mut stream)?;
     if !ok.starts_with("OK ") {
         return Err(SetupError::Refused("no OK to EXTERNAL"));
     }
@@ -551,11 +551,11 @@ pub fn setup(stream: UnixStream) -> Result<Conn, SetupError> {
 
 /// The bus's next line (to `\r\n`), bounded: a peer that never finishes
 /// a line fails the set-up instead of hanging it.
-fn read_line(stream: &UnixStream) -> Result<String, SetupError> {
+fn read_line(stream: &mut dyn Read) -> Result<String, SetupError> {
     let mut line = Vec::new();
     let mut byte = [0u8; 1];
     loop {
-        match (&stream).read(&mut byte) {
+        match stream.read(&mut byte) {
             Ok(0) => return Err(SetupError::Refused("the bus went quiet")),
             Ok(_) => {}
             Err(error) => return Err(SetupError::Io(error)),
@@ -571,7 +571,7 @@ fn read_line(stream: &UnixStream) -> Result<String, SetupError> {
     }
 }
 
-fn expect_line(stream: &UnixStream, prefix: &str) -> Result<(), SetupError> {
+fn expect_line(stream: &mut dyn Read, prefix: &str) -> Result<(), SetupError> {
     let line = read_line(stream)?;
     if line == prefix || line.starts_with(&format!("{prefix} ")) {
         Ok(())

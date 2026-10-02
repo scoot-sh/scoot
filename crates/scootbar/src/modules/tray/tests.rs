@@ -364,6 +364,6 @@ fn the_registry_lists_tray_with_its_actions() {
     }
     // The stand-in starts the connected module on the scripted bus, so
     // the contract drives the live path on a machine without any bus.
-    let harness = Harness::new(super::stand_in(&Settings::default()));
+    let harness = Harness::new(super::stand_in(&crate::modules::Settings::default()));
     assert_eq!(harness.source_count(), 1);
 }

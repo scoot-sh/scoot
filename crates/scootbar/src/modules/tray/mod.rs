@@ -727,7 +727,7 @@ impl Live {
 
     /// Works the existing watcher's item list (host mode): adds what is
     /// new, drops what left.
-    fn on_watcher_items(&mut self, signature: &str, body: &[u8]) -> Update {
+    fn on_watcher_items(&mut self, _signature: &str, body: &[u8]) -> Update {
         // A `Get` of `RegisteredStatusNotifierItems` answers a variant
         // holding `as`.
         let mut reader = Reader::le(body);
@@ -1129,7 +1129,7 @@ impl Live {
                 "s",
                 &bytes,
                 0,
-                Op::Owner(id),
+                Op::Owner(id.clone()),
             );
         }
         if self.mode == Mode::Owner {
@@ -1659,7 +1659,7 @@ fn convert(id: &str, pixmaps: &[Pixmap<'_>]) -> Vec<Arc<TrayIcon>> {
         .into_iter()
         .filter_map(|pixmap| {
             let key = fnv(id, pixmap.width, pixmap.height, pixmap.pixels);
-            TrayIcon::take(key, pixmap.width, pixmap.height, pixmap.pixels)
+            TrayIcon::take(key, pixmap.width, pixmap.height, pixmap.pixels).map(Arc::new)
         })
         .collect()
 }

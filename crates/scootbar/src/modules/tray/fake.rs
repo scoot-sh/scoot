@@ -544,8 +544,9 @@ fn find_prop(props: &[u8], property: &str) -> Option<Vec<u8>> {
 }
 
 /// Builds an item's `GetAll` body: status, title, one pixmap, tooltip,
-/// menu and `ItemIsMenu`. `argb` is `w × h` `ARGB32` in network order.
-pub fn item_body(title: &str, status: &str, w: u32, h: u32, argb: &[u8]) -> Vec<u8> {
+/// menu and `ItemIsMenu`. `argb` is `width × height` `ARGB32` in
+/// network order.
+pub fn item_body(title: &str, status: &str, width: u32, height: u32, argb: &[u8]) -> Vec<u8> {
     let mut body = Writer::new();
     let Some(cookie) = body.open_array(8) else {
         return Vec::new();
@@ -555,8 +556,8 @@ pub fn item_body(title: &str, status: &str, w: u32, h: u32, argb: &[u8]) -> Vec<
     entry(&mut body, "IconPixmap", "a(iiay)", &|w| {
         if let Some(cookie) = w.open_array(8) {
             w.open_struct();
-            w.u32(w);
-            w.u32(h);
+            w.u32(width);
+            w.u32(height);
             if let Some(cookie) = w.open_array(1) {
                 w.raw(argb);
                 w.close_array(cookie);
