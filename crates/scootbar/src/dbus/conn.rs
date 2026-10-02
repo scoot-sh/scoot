@@ -421,6 +421,7 @@ impl Conn {
                 body: message.body.rest().to_vec(),
             }),
             Kind::MethodCall => {
+                eprintln!("DBUGBUS call {} bytes: {}", frame.len(), frame.iter().map(|b| format!("{b:02x}")).collect::<String>());
                 // Addressed to us (the daemon only delivers what is ours:
                 // our unique name or a well-known one we own, which it
                 // does not rewrite). The consumer answers what is its
