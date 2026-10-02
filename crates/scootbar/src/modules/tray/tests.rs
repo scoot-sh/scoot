@@ -748,6 +748,24 @@ fn debug_dump_item_frames() {
     );
     let message = writer.finish().unwrap();
     std::fs::write(dir.join("hello.call"), &message).unwrap();
+    // Item RequestName (serial 3).
+    let mut body = Writer::new();
+    body.str("org.kde.StatusNotifierItem-777-1");
+    body.u32(0);
+    let body = body.take_body().unwrap();
+    let mut writer = Writer::new();
+    writer.begin_call(
+        3,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+        "su",
+        0,
+    );
+    writer.raw(&body);
+    let message = writer.finish().unwrap();
+    std::fs::write(dir.join("reqname.call"), &message).unwrap();
     // Item Register (serial 2).
     let mut body = Writer::new();
     body.str("org.kde.StatusNotifierItem-777-1");
