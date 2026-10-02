@@ -103,8 +103,8 @@ impl Fake {
 
     /// Serves every complete frame waiting: answers calls, records the
     /// rest. Never blocks. Joins the set-up thread first (already past
-    /// `Hello` whenever the module connected).
-    pub fn pump(&mut self) {
+    /// `Hello` whenever the module connected). Returns frames served.
+    pub fn pump(&mut self) -> usize {
         if let Some(thread) = self.setup_thread.take() {
             let _ = thread.join();
             // Only now that the blocking set-up is over: the thread is
@@ -112,22 +112,24 @@ impl Fake {
             self.nonblocking();
         }
         self.flush();
+        let mut served = 0;
         loop {
             let mut chunk = [0u8; 8192];
             match self.bus.read(&mut chunk) {
-                Ok(0) => return,
+                Ok(0) => return served,
                 Ok(n) => self.staged.extend_from_slice(&chunk[..n]),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return,
-                Err(_) => return,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return served,
+                Err(_) => return served,
             }
             while let Ok(Some(len)) = frame_at(&self.staged) {
                 let frame: Vec<u8> = self.staged.drain(..len).collect();
+                served += 1;
                 if self.serve_frame(&frame).is_err() {
-                    return;
+                    return served;
                 }
             }
             if self.staged.len() > 2 * 1024 * 1024 {
-                return;
+                return served;
             }
         }
     }

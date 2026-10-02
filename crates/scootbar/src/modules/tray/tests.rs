@@ -46,10 +46,10 @@ fn drive(harness: &mut Harness, fake: &mut Fake, mut done: impl FnMut(&Harness) 
     while !done(harness) {
         assert!(start.elapsed() < Duration::from_secs(10), "the bus never answered");
         turns += 1;
-        fake.pump();
+        let served = fake.pump();
         let waited = harness.wait(Duration::from_secs(2));
-        fake.pump();
-        eprintln!("TRAYDBG turn {turns}: waited={waited:?} value={:?} calls={}", harness.value_on(None), fake.calls_len());
+        let served2 = fake.pump();
+        eprintln!("TRAYDBG turn {turns}: waited={waited:?} value={:?} calls={} served={served}+{served2}", harness.value_on(None), fake.calls_len());
     }
 }
 
