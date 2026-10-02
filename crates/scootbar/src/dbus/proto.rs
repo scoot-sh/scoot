@@ -399,6 +399,15 @@ impl<'a> Reader<'a> {
         Ok(sig)
     }
 
+    /// An array's full extent (`a...`): the length word and the
+    /// elements, to hand a shape reader that takes the whole array
+    /// (like [`read_pixmaps`]).
+    pub fn array_full(&mut self, element_align: usize) -> Result<&'a [u8], ()> {
+        let start = self.pos;
+        let _ = self.array_raw(element_align)?;
+        Ok(&self.buf[start..self.pos.min(self.buf.len())])
+    }
+
     /// An array's raw elements (`a...`): the length-delimited bytes, to
     /// walk with a sub-reader at the element's alignment. The length is
     /// refused past what is left.

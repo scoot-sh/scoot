@@ -1584,7 +1584,7 @@ fn fill(item: &mut Item, body: &[u8]) -> bool {
                 Ok(shown) => tooltip = Some(shown),
                 Err(()) => return false,
             },
-            ("IconPixmap", "a(iiay)") => match entries.array_raw(8).ok().and_then(|raw| read_pixmaps(raw).ok()) {
+            ("IconPixmap", "a(iiay)") => match entries.array_full(8).ok().and_then(|full| read_pixmaps(full).ok()) {
                 Some(list) => pixmaps = Some(list),
                 None => return false,
             },
@@ -1627,8 +1627,8 @@ fn fill(item: &mut Item, body: &[u8]) -> bool {
 fn read_tooltip_shape(entries: &mut Reader<'_>) -> Result<(String, String, String), ()> {
     entries.enter_struct()?;
     let name = entries.str()?.to_owned();
-    let raw = entries.array_raw(8)?;
-    read_pixmaps(raw)?;
+    let full = entries.array_full(8)?;
+    read_pixmaps(full)?;
     let title = entries.str()?.to_owned();
     let text = entries.str()?.to_owned();
     entries.leave_struct();
