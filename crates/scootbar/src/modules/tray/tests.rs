@@ -391,9 +391,19 @@ fn debug_flush_path() {
     use rustix::event::PollFlags;
     let (stream, mut fake) = Fake::pair();
     let mut module = start_connected(stream);
-    // Init queued two RequestNames; one forced turn must flush them.
+    // Init queued two RequestNames; forced turns drive the whole chain.
     let _ = module.on_ready(0, PollFlags::OUT);
     let served = fake.pump();
     eprintln!("TRAYDBG served after forced flush: {served}");
     assert_eq!(served, 2);
+    for i in 0..10 {
+        let _ = module.on_ready(0, PollFlags::IN);
+        fake.pump();
+        let mut view = crate::modules::View::default();
+        module.view(&crate::modules::OutputView { name: None }, &mut view);
+        eprintln!("TRAYDBG forced turn {i}: tooltip={:?}", view.tooltip());
+        if view.tooltip().contains("Player") {
+            break;
+        }
+    }
 }
