@@ -582,14 +582,13 @@ impl Live {
             usize::MAX
         };
         let token = slot as u64;
-        match self.conn.call(destination, path, interface, member, body_sig, body, flags, token) {
-            Ok(serial) => {
-                if wants_reply {
-                    self.flights[slot] = Some(Flight { op });
-                }
-            }
-            Err(_) => {
-            }
+        if self
+            .conn
+            .call(destination, path, interface, member, body_sig, body, flags, token)
+            .is_ok()
+            && wants_reply
+        {
+            self.flights[slot] = Some(Flight { op });
         }
     }
 

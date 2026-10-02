@@ -552,7 +552,10 @@ fn read_line(stream: &mut UnixStream) -> Result<String, ()> {
 
 /// Sets the sender header of an outgoing frame: builds the message
 /// header by hand (fixed part plus the fields array with the code-7
-/// entry), the way the daemon does for every message it routes.
+/// entry), the way the daemon does for every message it routes. Nine
+/// arguments: a frame names its kind, serial, object, interface, member,
+/// destination, sender, body and signature, like the header it becomes.
+#[allow(clippy::too_many_arguments)]
 fn frame_with_sender(
     kind: u8,
     serial: u32,

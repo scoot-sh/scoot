@@ -1242,7 +1242,10 @@ impl Writer {
 
     /// Starts a method call header; the caller writes the body next and
     /// ends with [`Writer::finish`]. `body_sig` is the body's whole
-    /// signature (empty while there is no body).
+    /// signature (empty while there is no body). Eight arguments: a call
+    /// names its serial, destination, object, interface, member, body
+    /// and reply wish, like the header it becomes.
+    #[allow(clippy::too_many_arguments)]
     pub fn begin_call(
         &mut self,
         serial: u32,
