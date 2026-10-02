@@ -725,3 +725,57 @@ fn the_watcher_object_answers() {
         );
     }
 }
+
+#[test]
+fn debug_dump_item_frames() {
+    use crate::dbus::proto::Writer;
+    use std::io::Write;
+    if std::env::var_os("TRAY_DUMP_FRAMES").is_none() {
+        return;
+    }
+    let dir = std::env::var_os("TRAY_DUMP_FRAMES").unwrap();
+    let dir = std::path::Path::new(&dir);
+    // Item Hello (serial 1).
+    let mut writer = Writer::new();
+    writer.begin_call(
+        1,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "Hello",
+        "",
+        0,
+    );
+    let message = writer.finish().unwrap();
+    std::fs::write(dir.join("hello.call"), &message).unwrap();
+    // Item Register (serial 2).
+    let mut body = Writer::new();
+    body.str("org.kde.StatusNotifierItem-777-1");
+    let body = body.take_body().unwrap();
+    let mut writer = Writer::new();
+    writer.begin_call(
+        2,
+        "org.kde.StatusNotifierWatcher",
+        "/StatusNotifierWatcher",
+        "org.kde.StatusNotifierWatcher",
+        "RegisterStatusNotifierItem",
+        "s",
+        0,
+    );
+    writer.raw(&body);
+    let message = writer.finish().unwrap();
+    std::fs::write(dir.join("register.call"), &message).unwrap();
+    // GetAll reply template (reply_to patched by the item script).
+    let props = fake::item_body("LiveItem", "Active", 4, 4, &fake::solid(4, 4, 255, 30, 200, 30));
+    let mut writer = Writer::new();
+    writer.begin_return(100, 0x12345678, "a{sv}");
+    writer.raw(&props);
+    let message = writer.finish().unwrap();
+    std::fs::write(dir.join("getall.reply"), &message).unwrap();
+    // Find the reply_to offset for patching.
+    let marker = [5u8, 1, b'u', 0];
+    let at = message.windows(marker.len()).position(|w| w == marker).unwrap() + marker.len();
+    std::fs::write(dir.join("getall.reply_to_at"), at.to_string()).unwrap();
+    let mut out = std::fs::File::create(dir.join("done")).unwrap();
+    let _ = out.write_all(b"done");
+}
