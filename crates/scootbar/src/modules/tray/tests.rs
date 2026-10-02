@@ -393,14 +393,14 @@ fn a_lost_watcher_is_taken_back() {
         harness.value_on(None).and_then(|value| value.get("watcher")?.as_str().map(str::to_owned))
             == Some("host".to_owned())
     });
-    // ...and when it leaves, we ask for the name back.
+    // ...and when it leaves, we take the name back: the fake answers
+    // primary owner, so the mode returns to owner (a `RequestName` to
+    // the bus is answered, never recorded).
     fake.send_name_owner_changed("org.kde.StatusNotifierWatcher", ":1.99", "");
-    for _ in 0..5 {
-        fake.pump();
-        harness.wait(Duration::from_millis(200));
-        fake.pump();
-    }
-    assert!(fake.calls().iter().any(|call| call.member == "RequestName"));
+    drive(&mut harness, &mut fake, |harness| {
+        harness.value_on(None).and_then(|value| value.get("watcher")?.as_str().map(str::to_owned))
+            == Some("owner".to_owned())
+    });
 }
 
 #[test]
