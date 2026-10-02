@@ -54,7 +54,13 @@ fn the_check_runs_on_what_it_is_given() {
     super::dbus(&hello);
     // A `NameOwnerChanged` signal, and a pixmap property.
     let mut signal = Writer::new();
-    signal.begin_signal(9, "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameOwnerChanged", "sss");
+    signal.begin_signal(
+        9,
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameOwnerChanged",
+        "sss",
+    );
     signal.str(":1.7");
     signal.str("");
     signal.str(":1.7");

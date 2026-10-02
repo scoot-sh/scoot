@@ -56,9 +56,11 @@ use super::{
 };
 use crate::action::{ModuleAction, Trigger};
 use crate::dbus::conn::{self, Conn, Event};
-use crate::dbus::proto::{self, Pixmap, Reader, Writer, check_name, check_path, read_pixmaps, request_reply};
-use crate::icon::tray::TrayIcon;
+use crate::dbus::proto::{
+    self, Pixmap, Reader, Writer, check_name, check_path, read_pixmaps, request_reply,
+};
 use crate::icon::Art;
+use crate::icon::tray::TrayIcon;
 use crate::text::Text;
 
 #[cfg(test)]
@@ -196,7 +198,10 @@ struct Tray {
 }
 
 enum Bus {
-    Waiting { notify: Option<Notify>, dir: PathBuf },
+    Waiting {
+        notify: Option<Notify>,
+        dir: PathBuf,
+    },
     Live(Box<Live>),
 }
 
@@ -372,7 +377,11 @@ impl Tray {
     fn drop_live(&mut self) -> Update {
         let had = matches!(self.bus, Bus::Live(_));
         self.wait();
-        if had { Update::Changed } else { Update::Unchanged }
+        if had {
+            Update::Changed
+        } else {
+            Update::Unchanged
+        }
     }
 
     /// Connects a stream that is already open (the tests' socketpair end,
@@ -494,7 +503,9 @@ fn gap(side: usize) -> usize {
 
 /// The bus socket's file name, for the watch scan.
 fn bus_name(path: &Path) -> &[u8] {
-    path.file_name().map(|name| name.as_encoded_bytes()).unwrap_or(b"bus")
+    path.file_name()
+        .map(|name| name.as_encoded_bytes())
+        .unwrap_or(b"bus")
 }
 
 /// The runtime directory, or its conventional fallback.
@@ -538,14 +549,31 @@ impl Live {
     /// Works one bus event; says whether the view moved.
     fn apply(&mut self, event: Event) -> Update {
         match event {
-            Event::Reply { token, signature, body } => self.on_reply(token, &signature, &body),
+            Event::Reply {
+                token,
+                signature,
+                body,
+            } => self.on_reply(token, &signature, &body),
             Event::CallError { token, name } => self.on_error(token, &name),
-            Event::Signal { sender, path, interface, member, signature, body } => {
-                self.on_signal(&sender, &path, &interface, &member, &signature, &body)
-            }
-            Event::MethodCall { sender, path, interface, member, serial, signature, body } => {
-                self.on_call(&sender, &path, &interface, &member, serial, &signature, &body)
-            }
+            Event::Signal {
+                sender,
+                path,
+                interface,
+                member,
+                signature,
+                body,
+            } => self.on_signal(&sender, &path, &interface, &member, &signature, &body),
+            Event::MethodCall {
+                sender,
+                path,
+                interface,
+                member,
+                serial,
+                signature,
+                body,
+            } => self.on_call(
+                &sender, &path, &interface, &member, serial, &signature, &body,
+            ),
         }
     }
 
@@ -584,7 +612,16 @@ impl Live {
         let token = slot as u64;
         if self
             .conn
-            .call(destination, path, interface, member, body_sig, body, flags, token)
+            .call(
+                destination,
+                path,
+                interface,
+                member,
+                body_sig,
+                body,
+                flags,
+                token,
+            )
             .is_ok()
             && wants_reply
         {
@@ -622,7 +659,16 @@ impl Live {
             return;
         };
         let (service, path) = (item.service.clone(), item.path.clone());
-        self.issue(&service, &path, ITEM_PROPERTIES, "GetAll", "s", &get_all_body(), 0, Op::Props(id.to_owned()));
+        self.issue(
+            &service,
+            &path,
+            ITEM_PROPERTIES,
+            "GetAll",
+            "s",
+            &get_all_body(),
+            0,
+            Op::Props(id.to_owned()),
+        );
     }
 
     fn on_reply(&mut self, token: u64, signature: &str, body: &[u8]) -> Update {
@@ -651,9 +697,12 @@ impl Live {
             // `NameHasNoOwner` is an item already gone; anything else
             // leaves the owner unknown (signals still match by sender).
             Op::Owner(id) if name.ends_with("NameHasNoOwner") => self.remove(&id),
-            Op::Owner(_) | Op::Names | Op::WatcherItems | Op::RequestKde | Op::RequestFdo | Op::WatcherOwner => {
-                Update::Unchanged
-            }
+            Op::Owner(_)
+            | Op::Names
+            | Op::WatcherItems
+            | Op::RequestKde
+            | Op::RequestFdo
+            | Op::WatcherOwner => Update::Unchanged,
         }
     }
 
@@ -679,7 +728,7 @@ impl Live {
         }
     }
 
-        fn on_owner(&mut self, id: &str, signature: &str, body: &[u8]) -> Update {
+    fn on_owner(&mut self, id: &str, signature: &str, body: &[u8]) -> Update {
         let Ok(owner) = proto::read_owner(signature, body) else {
             return Update::Unchanged;
         };
@@ -713,7 +762,11 @@ impl Live {
                 self.say_full(&id);
                 continue;
             }
-            self.items.push(Item::new(id.clone(), name.clone(), ITEM_DEFAULT_PATH.to_owned()));
+            self.items.push(Item::new(
+                id.clone(),
+                name.clone(),
+                ITEM_DEFAULT_PATH.to_owned(),
+            ));
             self.sort();
             added = true;
             if name.starts_with(':') {
@@ -722,7 +775,9 @@ impl Live {
             } else {
                 let mut get = Writer::new();
                 get.str(&name);
-                let Some(bytes) = get.take_body() else { continue };
+                let Some(bytes) = get.take_body() else {
+                    continue;
+                };
                 self.issue(
                     conn::BUS_NAME,
                     conn::BUS_PATH,
@@ -737,7 +792,11 @@ impl Live {
         }
         // Newcomers arrive empty and fill in from their `GetAll`: the
         // view moves when one was added, and again when each answers.
-        if added { Update::Changed } else { Update::Unchanged }
+        if added {
+            Update::Changed
+        } else {
+            Update::Unchanged
+        }
     }
 
     /// Works the existing watcher's item list (host mode): adds what is
@@ -779,7 +838,8 @@ impl Live {
                 continue;
             }
             let (service, path) = split_id(id).unwrap_or(("", ""));
-            self.items.push(Item::new(id.clone(), service.to_owned(), path.to_owned()));
+            self.items
+                .push(Item::new(id.clone(), service.to_owned(), path.to_owned()));
             self.sort();
             moved = true;
             let id = id.clone();
@@ -790,7 +850,11 @@ impl Live {
         if self.items.len() != before {
             moved = true;
         }
-        if moved { Update::Changed } else { Update::Unchanged }
+        if moved {
+            Update::Changed
+        } else {
+            Update::Unchanged
+        }
     }
 
     fn on_signal(
@@ -846,7 +910,9 @@ impl Live {
             }
         }
         if gone {
-            self.items.retain(|item| item.service != name && item.owner.as_deref() != Some(name.as_str()));
+            self.items.retain(|item| {
+                item.service != name && item.owner.as_deref() != Some(name.as_str())
+            });
             if self.mode == Mode::Owner {
                 self.emit_unregistered(&name);
             }
@@ -904,7 +970,10 @@ impl Live {
         let Ok(word) = proto::read_request_reply(signature, body) else {
             return Update::Unchanged;
         };
-        let owned = matches!(word, request_reply::PRIMARY_OWNER | request_reply::ALREADY_OWNER);
+        let owned = matches!(
+            word,
+            request_reply::PRIMARY_OWNER | request_reply::ALREADY_OWNER
+        );
         if kde {
             self.match_rules();
             if owned {
@@ -933,7 +1002,13 @@ impl Live {
 
     /// Another watcher's item signals (host mode): a registration we did
     /// not see is picked up; an unregistration drops at once.
-    fn on_watcher_signal(&mut self, sender: &str, member: &str, signature: &str, body: &[u8]) -> Update {
+    fn on_watcher_signal(
+        &mut self,
+        sender: &str,
+        member: &str,
+        signature: &str,
+        body: &[u8],
+    ) -> Update {
         if self.mode != Mode::Host {
             return Update::Unchanged;
         }
@@ -965,11 +1040,17 @@ impl Live {
     /// the status itself — taken at once, with a `GetAll` behind it for
     /// the rest (a lying signal loses nothing).
     fn on_item_signal(&mut self, sender: &str, member: &str) -> Update {
-        let Some(id) = self.items.iter().find(|item| item.owner.as_deref() == Some(sender)).map(|item| item.id.clone()) else {
+        let Some(id) = self
+            .items
+            .iter()
+            .find(|item| item.owner.as_deref() == Some(sender))
+            .map(|item| item.id.clone())
+        else {
             return Update::Unchanged;
         };
         match member {
-            "NewTitle" | "NewIcon" | "NewAttentionIcon" | "NewOverlayIcon" | "NewToolTip" | "NewStatus" => {
+            "NewTitle" | "NewIcon" | "NewAttentionIcon" | "NewOverlayIcon" | "NewToolTip"
+            | "NewStatus" => {
                 self.refresh(&id);
                 Update::Unchanged
             }
@@ -993,7 +1074,8 @@ impl Live {
         body: &[u8],
     ) -> Update {
         if path != WATCHER_PATH {
-            self.conn.reply_error(serial, "org.freedesktop.DBus.Error.UnknownObject");
+            self.conn
+                .reply_error(serial, "org.freedesktop.DBus.Error.UnknownObject");
             return Update::Unchanged;
         }
         if interface == ITEM_PROPERTIES {
@@ -1008,21 +1090,25 @@ impl Live {
                 self.conn.reply_return(serial, "", &[]);
                 return Update::Unchanged;
             }
-            self.conn.reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+            self.conn
+                .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
             return Update::Unchanged;
         }
         if interface != WATCHER_KDE && interface != WATCHER_FDO {
-            self.conn.reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+            self.conn
+                .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
             return Update::Unchanged;
         }
         match member {
             "RegisterStatusNotifierItem" => {
                 let Ok(service) = proto::read_string(signature, body) else {
-                    self.conn.reply_error(serial, "org.freedesktop.DBus.Error.InvalidArgs");
+                    self.conn
+                        .reply_error(serial, "org.freedesktop.DBus.Error.InvalidArgs");
                     return Update::Unchanged;
                 };
                 let Ok((service, path)) = split_service_path(sender, &service) else {
-                    self.conn.reply_error(serial, "org.freedesktop.DBus.Error.InvalidArgs");
+                    self.conn
+                        .reply_error(serial, "org.freedesktop.DBus.Error.InvalidArgs");
                     return Update::Unchanged;
                 };
                 self.conn.reply_return(serial, "", &[]);
@@ -1037,7 +1123,8 @@ impl Live {
                 Update::Unchanged
             }
             _ => {
-                self.conn.reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+                self.conn
+                    .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
                 Update::Unchanged
             }
         }
@@ -1064,11 +1151,13 @@ impl Live {
         };
         let _ = signature;
         let Some((interface, property)) = read(&mut reader) else {
-            self.conn.reply_error(serial, "org.freedesktop.DBus.Error.InvalidArgs");
+            self.conn
+                .reply_error(serial, "org.freedesktop.DBus.Error.InvalidArgs");
             return Update::Unchanged;
         };
         if interface != WATCHER_KDE && interface != WATCHER_FDO {
-            self.conn.reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+            self.conn
+                .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
             return Update::Unchanged;
         }
         let mut out = Writer::new();
@@ -1076,13 +1165,15 @@ impl Live {
             ("GetAll", _) => {
                 out.variant("a{sv}");
                 let Some(cookie) = out.open_array(8) else {
-                    self.conn.reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                    self.conn
+                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
                 write_watcher_props(self, &mut out);
                 out.close_array(cookie);
                 let Some(bytes) = out.take_body() else {
-                    self.conn.reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                    self.conn
+                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
                 self.conn.reply_return(serial, "a{sv}", &bytes);
@@ -1090,7 +1181,8 @@ impl Live {
             ("Get", "RegisteredStatusNotifierItems") => {
                 out.variant("as");
                 let Some(cookie) = out.open_array(4) else {
-                    self.conn.reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                    self.conn
+                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
                 for item in &self.items {
@@ -1098,7 +1190,8 @@ impl Live {
                 }
                 out.close_array(cookie);
                 let Some(bytes) = out.take_body() else {
-                    self.conn.reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                    self.conn
+                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
                 self.conn.reply_return(serial, "v", &bytes);
@@ -1107,7 +1200,8 @@ impl Live {
                 out.variant("b");
                 out.boolean(!self.hosts.is_empty());
                 let Some(bytes) = out.take_body() else {
-                    self.conn.reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                    self.conn
+                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
                 self.conn.reply_return(serial, "v", &bytes);
@@ -1116,13 +1210,15 @@ impl Live {
                 out.variant("i");
                 out.i32(PROTOCOL_VERSION as i32);
                 let Some(bytes) = out.take_body() else {
-                    self.conn.reply_error(serial, "org.freedesktop.DBus.Error.Failed");
+                    self.conn
+                        .reply_error(serial, "org.freedesktop.DBus.Error.Failed");
                     return Update::Unchanged;
                 };
                 self.conn.reply_return(serial, "v", &bytes);
             }
             _ => {
-                self.conn.reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
+                self.conn
+                    .reply_error(serial, "org.freedesktop.DBus.Error.UnknownMethod");
             }
         }
         Update::Unchanged
@@ -1141,7 +1237,8 @@ impl Live {
             self.say_full(&id);
             return Update::Unchanged;
         }
-        self.items.push(Item::new(id.clone(), service.clone(), path));
+        self.items
+            .push(Item::new(id.clone(), service.clone(), path));
         self.sort();
         if service.starts_with(':') {
             self.set_owner(&id, service);
@@ -1173,7 +1270,8 @@ impl Live {
     /// saying so to other hosts in owner mode.
     fn remove(&mut self, id: &str) -> Update {
         let before = self.items.len();
-        self.items.retain(|item| item.id != id && item.service != id);
+        self.items
+            .retain(|item| item.id != id && item.service != id);
         if self.items.len() == before {
             return Update::Unchanged;
         }
@@ -1267,17 +1365,35 @@ impl Live {
         let Some(bytes) = body.take_body() else {
             return;
         };
-        self.fire(&owner, WATCHER_PATH, WATCHER_KDE, "RegisterStatusNotifierHost", "s", &bytes);
+        self.fire(
+            &owner,
+            WATCHER_PATH,
+            WATCHER_KDE,
+            "RegisterStatusNotifierHost",
+            "s",
+            &bytes,
+        );
     }
 
     /// Queues a `ListNames` to pick up what registered before us.
     fn enumerate(&mut self) {
-        if self.flights.iter().any(|flight| {
-            matches!(flight, Some(Flight { op: Op::Names }))
-        }) {
+        if self
+            .flights
+            .iter()
+            .any(|flight| matches!(flight, Some(Flight { op: Op::Names })))
+        {
             return;
         }
-        self.issue(conn::BUS_NAME, conn::BUS_PATH, conn::BUS_INTERFACE, "ListNames", "", &[], 0, Op::Names);
+        self.issue(
+            conn::BUS_NAME,
+            conn::BUS_PATH,
+            conn::BUS_INTERFACE,
+            "ListNames",
+            "",
+            &[],
+            0,
+            Op::Names,
+        );
     }
 
     /// Queues a read of the existing watcher's item list (host mode).
@@ -1293,14 +1409,29 @@ impl Live {
         if owner.is_empty() {
             return;
         }
-        self.issue(&owner, WATCHER_PATH, ITEM_PROPERTIES, "Get", "ss", &bytes, 0, Op::WatcherItems);
+        self.issue(
+            &owner,
+            WATCHER_PATH,
+            ITEM_PROPERTIES,
+            "Get",
+            "ss",
+            &bytes,
+            0,
+            Op::WatcherItems,
+        );
     }
 
     fn emit_registered(&mut self, id: &str) {
         let mut body = Writer::new();
         body.str(id);
         if let Some(bytes) = body.take_body() {
-            self.conn.signal(WATCHER_PATH, WATCHER_KDE, "StatusNotifierItemRegistered", "s", &bytes);
+            self.conn.signal(
+                WATCHER_PATH,
+                WATCHER_KDE,
+                "StatusNotifierItemRegistered",
+                "s",
+                &bytes,
+            );
         }
     }
 
@@ -1308,12 +1439,24 @@ impl Live {
         let mut body = Writer::new();
         body.str(id);
         if let Some(bytes) = body.take_body() {
-            self.conn.signal(WATCHER_PATH, WATCHER_KDE, "StatusNotifierItemUnregistered", "s", &bytes);
+            self.conn.signal(
+                WATCHER_PATH,
+                WATCHER_KDE,
+                "StatusNotifierItemUnregistered",
+                "s",
+                &bytes,
+            );
         }
     }
 
     fn emit_host_registered(&mut self) {
-        self.conn.signal(WATCHER_PATH, WATCHER_KDE, "StatusNotifierHostRegistered", "", &[]);
+        self.conn.signal(
+            WATCHER_PATH,
+            WATCHER_KDE,
+            "StatusNotifierHostRegistered",
+            "",
+            &[],
+        );
     }
 
     /// The `too many items` warning: once per full set, on stderr, never
@@ -1329,7 +1472,9 @@ impl Live {
 
     /// The item index `at` in id order, or `None` past the end.
     fn at(&self, index: i32) -> Option<&Item> {
-        (index >= 0).then(|| self.items.get(index as usize)).flatten()
+        (index >= 0)
+            .then(|| self.items.get(index as usize))
+            .flatten()
     }
 }
 
@@ -1433,8 +1578,7 @@ const MATCH_RULES: [&str; 5] = [
     "type='signal',interface='org.freedesktop.StatusNotifierWatcher'",
 ];
 
-impl Live {
-}
+impl Live {}
 
 /// The `Properties.GetAll` body for the item interface.
 fn get_all_body() -> Vec<u8> {
@@ -1448,7 +1592,8 @@ fn get_all_body() -> Vec<u8> {
 /// behind plain unique names register explicitly and cannot be listed —
 /// the KDE watcher's own limitation.
 fn is_item_name(name: &str) -> bool {
-    name.starts_with("org.kde.StatusNotifierItem") || name.starts_with("org.freedesktop.StatusNotifierItem")
+    name.starts_with("org.kde.StatusNotifierItem")
+        || name.starts_with("org.freedesktop.StatusNotifierItem")
 }
 
 /// Applies a `GetAll` body to the item: sanitized strings and converted
@@ -1484,7 +1629,11 @@ fn fill(item: &mut Item, body: &[u8]) -> bool {
                 Ok(shown) => tooltip = Some(shown),
                 Err(()) => return false,
             },
-            ("IconPixmap", "a(iiay)") => match entries.array_raw(8).ok().and_then(|elements| read_pixmaps(elements).ok()) {
+            ("IconPixmap", "a(iiay)") => match entries
+                .array_raw(8)
+                .ok()
+                .and_then(|elements| read_pixmaps(elements).ok())
+            {
                 Some(list) => pixmaps = Some(list),
                 None => return false,
             },
@@ -1525,14 +1674,10 @@ fn fill(item: &mut Item, body: &[u8]) -> bool {
 /// the title and the text (the pixmaps are validated and dropped — the
 /// tooltip shows no icon until the tooltips entry lands).
 fn read_tooltip_shape(entries: &mut Reader<'_>) -> Result<(String, String, String), ()> {
-    entries.enter_struct().map_err(|_| {
-    })?;
-    let name = entries.str().map_err(|_| {
-    })?.to_owned();
-    let elements = entries.array_raw(8).map_err(|_| {
-    })?;
-    read_pixmaps(elements).map_err(|_| {
-    })?;
+    entries.enter_struct().map_err(|_| {})?;
+    let name = entries.str().map_err(|_| {})?.to_owned();
+    let elements = entries.array_raw(8).map_err(|_| {})?;
+    read_pixmaps(elements).map_err(|_| {})?;
     let title = entries.str()?.to_owned();
     let text = entries.str()?.to_owned();
     entries.leave_struct();
@@ -1551,11 +1696,14 @@ fn convert(id: &str, pixmaps: &[Pixmap<'_>]) -> Vec<Arc<TrayIcon>> {
         .collect();
     kept.sort_by_key(|pixmap| pixmap.width.max(pixmap.height));
     if kept.is_empty() {
-        kept = pixmaps.iter().min_by_key(|pixmap| pixmap.width.max(pixmap.height)).into_iter().collect();
+        kept = pixmaps
+            .iter()
+            .min_by_key(|pixmap| pixmap.width.max(pixmap.height))
+            .into_iter()
+            .collect();
     }
     kept.truncate(MAX_STORED_ICONS);
-    kept
-        .into_iter()
+    kept.into_iter()
         .filter_map(|pixmap| {
             let key = fnv(id, pixmap.width, pixmap.height, pixmap.pixels);
             TrayIcon::take(key, pixmap.width, pixmap.height, pixmap.pixels).map(Arc::new)
@@ -1568,7 +1716,12 @@ fn convert(id: &str, pixmaps: &[Pixmap<'_>]) -> Vec<Arc<TrayIcon>> {
 /// icons makes that a non-event.
 fn fnv(id: &str, width: u32, height: u32, pixels: &[u8]) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
-    for byte in id.bytes().chain(width.to_le_bytes()).chain(height.to_le_bytes()).chain(pixels.iter().copied()) {
+    for byte in id
+        .bytes()
+        .chain(width.to_le_bytes())
+        .chain(height.to_le_bytes())
+        .chain(pixels.iter().copied())
+    {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
@@ -1740,7 +1893,9 @@ impl Module for Tray {
         for item in &live.items {
             if let Some(icon) = item.icon_for(side) {
                 let art = Art::Tray(icon.clone());
-                if let Some(crate::icon::Bitmap::Premultiplied(pixels)) = ctx.text.bitmap(&art, side) {
+                if let Some(crate::icon::Bitmap::Premultiplied(pixels)) =
+                    ctx.text.bitmap(&art, side)
+                {
                     let pixels: &[u8] = pixels;
                     let edge = side as usize;
                     for (gy, row) in pixels.chunks_exact(edge * 4).enumerate() {
@@ -1775,7 +1930,10 @@ impl Module for Tray {
             Trigger::ScrollDown => "scroll-down",
             Trigger::RightClick => return None,
         };
-        Some(crate::action::Action::Module(ModuleAction::new(name, Some(index as i32))))
+        Some(crate::action::Action::Module(ModuleAction::new(
+            name,
+            Some(index as i32),
+        )))
     }
 
     /// Carries out the item actions: `activate`, `secondary` and the two

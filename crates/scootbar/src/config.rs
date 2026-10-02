@@ -1521,11 +1521,7 @@ fn apply_tray(
         ],
     )
     .map_err(|(trigger, message)| {
-        value(
-            path,
-            TRAY_KEYS[trigger as usize],
-            format_args!("{message}"),
-        )
+        value(path, TRAY_KEYS[trigger as usize], format_args!("{message}"))
     })?;
     if !read.is_empty() {
         bindings.push((crate::modules::tray::ID, read));

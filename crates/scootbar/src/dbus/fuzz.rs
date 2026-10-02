@@ -67,7 +67,15 @@ pub fn dbus(data: &[u8]) {
     let take = data.len().min(300);
     let text = core::str::from_utf8(&data[..take]).unwrap_or("");
     let mut writer = Writer::new();
-    writer.begin_call(1, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "Hello", "", 0);
+    writer.begin_call(
+        1,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "Hello",
+        "",
+        0,
+    );
     let _ = writer.finish();
     let mut named = Writer::new();
     named.begin_call(7, text, text, text, text, "s", 0);
@@ -141,8 +149,14 @@ pub fn read_properties(body: &[u8]) -> Result<Vec<(String, String)>, ()> {
         // leave the next entry starting inside this one.
         let sig = scoped.variant(|sig, value| {
             match (key.as_str(), sig) {
-                ("Status", "s") | ("Title", "s") | ("Id", "s") | ("Category", "s") | ("IconName", "s")
-                | ("OverlayIconName", "s") | ("AttentionIconName", "s") | ("AttentionMovieName", "s")
+                ("Status", "s")
+                | ("Title", "s")
+                | ("Id", "s")
+                | ("Category", "s")
+                | ("IconName", "s")
+                | ("OverlayIconName", "s")
+                | ("AttentionIconName", "s")
+                | ("AttentionMovieName", "s")
                 | ("IconThemePath", "s") => {
                     value.str()?;
                 }
@@ -155,7 +169,9 @@ pub fn read_properties(body: &[u8]) -> Result<Vec<(String, String)>, ()> {
                 ("Menu", "o") => {
                     value.str()?;
                 }
-                ("IconPixmap", "a(iiay)") | ("OverlayIconPixmap", "a(iiay)") | ("AttentionIconPixmap", "a(iiay)") => {
+                ("IconPixmap", "a(iiay)")
+                | ("OverlayIconPixmap", "a(iiay)")
+                | ("AttentionIconPixmap", "a(iiay)") => {
                     let _ = read_pixmaps(value.rest());
                 }
                 ("ToolTip", "(sa(iiay)ss)") => {

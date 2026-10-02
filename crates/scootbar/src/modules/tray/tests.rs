@@ -43,7 +43,10 @@ fn started() -> (Harness, Fake) {
 fn drive(harness: &mut Harness, fake: &mut Fake, mut done: impl FnMut(&Harness) -> bool) {
     let start = std::time::Instant::now();
     while !done(harness) {
-        assert!(start.elapsed() < Duration::from_secs(30), "the bus never answered");
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "the bus never answered"
+        );
         // Short waits: the chain converges turn by turn, and idle turns
         // cost little even on a loaded box.
         fake.pump();
@@ -62,7 +65,9 @@ fn until_shown(harness: &mut Harness, fake: &mut Fake, count: usize) {
                 value.get("items")?.as_array().map(|items| {
                     items.len() == count
                         && items.iter().all(|item| {
-                            item.get("title").and_then(|title| title.as_str()).is_some_and(|title| !title.is_empty())
+                            item.get("title")
+                                .and_then(|title| title.as_str())
+                                .is_some_and(|title| !title.is_empty())
                         })
                 })
             })
@@ -78,12 +83,25 @@ fn action(name: &'static str, index: i32) -> Option<Action> {
 #[test]
 fn an_item_listed_before_start_is_picked_up() {
     let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     let value = harness.value_on(None).unwrap();
     assert_eq!(value["watcher"], "owner");
-    assert_eq!(value["items"][0]["id"], format!("{SERVICE}/StatusNotifierItem"));
+    assert_eq!(
+        value["items"][0]["id"],
+        format!("{SERVICE}/StatusNotifierItem")
+    );
     assert_eq!(value["items"][0]["title"], "Player");
     assert_eq!(value["items"][0]["status"], "Active");
     let view = harness.view();
@@ -94,7 +112,17 @@ fn an_item_listed_before_start_is_picked_up() {
 #[test]
 fn a_registration_is_answered_and_shown() {
     let (mut harness, mut fake) = started();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     let serial = fake.send_register(OWNER, SERVICE);
     until_shown(&mut harness, &mut fake, 1);
     // The registration was answered: a return quoting the call. Turns
@@ -107,18 +135,32 @@ fn a_registration_is_answered_and_shown() {
     }
     assert!(
         fake.calls().iter().any(|call| {
-            matches!(call.kind, crate::dbus::proto::Kind::MethodReturn) && call.reply_to == Some(serial)
+            matches!(call.kind, crate::dbus::proto::Kind::MethodReturn)
+                && call.reply_to == Some(serial)
         }),
         "no answer quoting {serial}"
     );
     let value = harness.value_on(None).unwrap();
-    assert_eq!(value["items"][0]["id"], format!("{SERVICE}/StatusNotifierItem"));
+    assert_eq!(
+        value["items"][0]["id"],
+        format!("{SERVICE}/StatusNotifierItem")
+    );
 }
 
 #[test]
 fn a_path_registration_lands_on_the_sender() {
     let (mut harness, mut fake) = started();
-    fake.add_item(":1.60", ":1.60", fake::item_body("Custom", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        ":1.60",
+        ":1.60",
+        fake::item_body(
+            "Custom",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     fake.send_register(":1.60", "/Custom/Item");
     until_shown(&mut harness, &mut fake, 1);
     let value = harness.value_on(None).unwrap();
@@ -128,43 +170,99 @@ fn a_path_registration_lands_on_the_sender() {
 #[test]
 fn new_icon_re_reads_the_item() {
     let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     let before = harness.view().tooltip().to_owned();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player2", "Active", 4, 4, &fake::solid(4, 4, 255, 30, 200, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player2",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 30, 200, 30),
+        ),
+    );
     fake.send_item_signal(OWNER, "NewIcon");
-    drive(&mut harness, &mut fake, |harness| harness.view().tooltip() != before);
+    drive(&mut harness, &mut fake, |harness| {
+        harness.view().tooltip() != before
+    });
     assert!(harness.view().tooltip().contains("Player2"));
 }
 
 #[test]
 fn a_crashed_item_disappears_with_its_owner() {
     let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     fake.send_name_owner_changed(SERVICE, OWNER, "");
-    drive(&mut harness, &mut fake, |harness| harness.value_on(None).is_none());
+    drive(&mut harness, &mut fake, |harness| {
+        harness.value_on(None).is_none()
+    });
     assert!(harness.view().is_empty());
 }
 
 #[test]
 fn an_owner_vanishing_drops_the_item_too() {
     let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     // The unique name itself went away (the service row may linger):
     // matched by owner, dropped all the same.
     fake.send_name_owner_changed(OWNER, OWNER, "");
-    drive(&mut harness, &mut fake, |harness| harness.value_on(None).is_none());
+    drive(&mut harness, &mut fake, |harness| {
+        harness.value_on(None).is_none()
+    });
 }
 
 #[test]
 fn a_click_activates_and_a_scroll_scrolls() {
     let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     let font = text();
@@ -186,7 +284,10 @@ fn a_click_activates_and_a_scroll_scrolls() {
     assert_eq!(input(Trigger::Click, PAD + 1), action("activate", 0));
     assert_eq!(input(Trigger::MiddleClick, PAD + 1), action("secondary", 0));
     assert_eq!(input(Trigger::ScrollUp, PAD + 1), action("scroll-up", 0));
-    assert_eq!(input(Trigger::ScrollDown, PAD + 1), action("scroll-down", 0));
+    assert_eq!(
+        input(Trigger::ScrollDown, PAD + 1),
+        action("scroll-down", 0)
+    );
     assert_eq!(input(Trigger::RightClick, PAD + 1), None);
     // Past the end, and in the gap, is nothing.
     assert_eq!(input(Trigger::Click, 399), None);
@@ -200,7 +301,10 @@ fn a_click_activates_and_a_scroll_scrolls() {
     harness.wait(Duration::from_millis(200));
     fake.pump();
     let calls = fake.calls();
-    let activate = calls.iter().find(|call| call.member == "Activate").expect("no Activate call");
+    let activate = calls
+        .iter()
+        .find(|call| call.member == "Activate")
+        .expect("no Activate call");
     assert_eq!(activate.destination, SERVICE);
     assert_eq!(activate.path, "/StatusNotifierItem");
     assert_eq!(activate.signature, "ii");
@@ -215,7 +319,10 @@ fn a_click_activates_and_a_scroll_scrolls() {
     harness.wait(Duration::from_millis(200));
     fake.pump();
     let calls = fake.calls();
-    let scroll = calls.iter().find(|call| call.member == "Scroll").expect("no Scroll call");
+    let scroll = calls
+        .iter()
+        .find(|call| call.member == "Scroll")
+        .expect("no Scroll call");
     assert_eq!(scroll.signature, "is");
     let mut reader = crate::dbus::proto::Reader::le(&scroll.body);
     assert_eq!(reader.i32().unwrap(), 64);
@@ -244,7 +351,11 @@ fn a_click_activates_and_a_scroll_scrolls() {
 fn icons_draw_from_the_cache() {
     use rustix::event::PollFlags;
     let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Red", "Active", 4, 4, &fake::solid(4, 4, 255, 255, 0, 0)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body("Red", "Active", 4, 4, &fake::solid(4, 4, 255, 255, 0, 0)),
+    );
     // Held directly (not through the harness, which owns opaquely), and
     // woken by hand: the fake answered during the blocking set-up, so a
     // few turns settle it.
@@ -282,7 +393,9 @@ fn icons_draw_from_the_cache() {
     assert!(module.custom_draw(&mut custom));
     // Opaque red, premultiplied: b and g near 0, r and a at max.
     assert!(
-        pixels.chunks_exact(4).any(|p| p[0] < 16 && p[1] < 16 && p[2] > 200 && p[3] > 200),
+        pixels
+            .chunks_exact(4)
+            .any(|p| p[0] < 16 && p[1] < 16 && p[2] > 200 && p[3] > 200),
         "no red icon ink"
     );
 }
@@ -307,7 +420,11 @@ fn hostile_items_lose_only_themselves() {
     let (stream, mut fake) = Fake::pair();
     let mut title = String::from("\u{0}ab\u{7f}");
     title.push_str(&"x".repeat(10_000));
-    fake.add_item(SERVICE, OWNER, fake::item_body(&title, "Bogus", 4, 4, &fake::solid(4, 4, 255, 0, 0, 255)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(&title, "Bogus", 4, 4, &fake::solid(4, 4, 255, 0, 0, 255)),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     let value = harness.value_on(None).unwrap();
@@ -319,7 +436,11 @@ fn hostile_items_lose_only_themselves() {
     // A pixmap whose bytes do not match its dimensions: the entry is
     // skipped, the item stays, iconless but clickable.
     let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Shapeless", "Active", 4, 4, &[1, 2, 3]));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body("Shapeless", "Active", 4, 4, &[1, 2, 3]),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     assert!(harness.value_on(None).is_some());
@@ -330,7 +451,11 @@ fn past_the_item_cap_registrations_are_ignored() {
     let (stream, mut fake) = Fake::pair();
     for n in 0..MAX_ITEMS + 4 {
         let service = format!("org.kde.StatusNotifierItem-1-{n}");
-        fake.add_item(&service, OWNER, fake::item_body("Capped", "Active", 2, 2, &fake::solid(2, 2, 255, 9, 9, 9)));
+        fake.add_item(
+            &service,
+            OWNER,
+            fake::item_body("Capped", "Active", 2, 2, &fake::solid(2, 2, 255, 9, 9, 9)),
+        );
     }
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, MAX_ITEMS);
@@ -343,7 +468,11 @@ fn host_mode_lists_the_other_watchers_items() {
     let (stream, mut fake) = Fake::pair();
     let id = format!("{SERVICE}/StatusNotifierItem");
     fake.set_watcher(":1.99", &[&id]);
-    fake.add_item(SERVICE, OWNER, fake::item_body("Hosted", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 255, 0)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body("Hosted", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 255, 0)),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     let value = harness.value_on(None).unwrap();
@@ -354,7 +483,11 @@ fn host_mode_lists_the_other_watchers_items() {
     assert!(!hosts.is_empty(), "never registered as a host");
     // A late registration through the other watcher is picked up too.
     let late = "org.kde.StatusNotifierItem-2-2";
-    fake.add_item(late, ":1.51", fake::item_body("Late", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 0, 255)));
+    fake.add_item(
+        late,
+        ":1.51",
+        fake::item_body("Late", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 0, 255)),
+    );
     fake.send_watcher_registered(late);
     until_shown(&mut harness, &mut fake, 2);
     let value = harness.value_on(None).unwrap();
@@ -364,30 +497,67 @@ fn host_mode_lists_the_other_watchers_items() {
 #[test]
 fn new_status_arrives_with_the_signal() {
     let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     // The item changed state, then said so: the re-read reports it.
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "NeedsAttention", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "NeedsAttention",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     fake.send_new_status(OWNER, "NeedsAttention");
     drive(&mut harness, &mut fake, |harness| {
-        harness
-            .value_on(None)
-            .and_then(|value| value.get("items")?.as_array()?.first()?.get("status")?.as_str().map(str::to_owned))
-            == Some("NeedsAttention".to_owned())
+        harness.value_on(None).and_then(|value| {
+            value
+                .get("items")?
+                .as_array()?
+                .first()?
+                .get("status")?
+                .as_str()
+                .map(str::to_owned)
+        }) == Some("NeedsAttention".to_owned())
     });
 }
 
 #[test]
 fn a_lost_watcher_is_taken_back() {
     let (stream, mut fake) = Fake::pair();
-    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+        ),
+    );
     let mut harness = Harness::new(start_connected(stream));
     until_shown(&mut harness, &mut fake, 1);
     // Another bar takes the name: we become its host...
     fake.send_name_owner_changed("org.kde.StatusNotifierWatcher", fake::MODULE, ":1.99");
     drive(&mut harness, &mut fake, |harness| {
-        harness.value_on(None).and_then(|value| value.get("watcher")?.as_str().map(str::to_owned))
+        harness
+            .value_on(None)
+            .and_then(|value| value.get("watcher")?.as_str().map(str::to_owned))
             == Some("host".to_owned())
     });
     // ...and when it leaves, we take the name back: the fake answers
@@ -395,7 +565,9 @@ fn a_lost_watcher_is_taken_back() {
     // the bus is answered, never recorded).
     fake.send_name_owner_changed("org.kde.StatusNotifierWatcher", ":1.99", "");
     drive(&mut harness, &mut fake, |harness| {
-        harness.value_on(None).and_then(|value| value.get("watcher")?.as_str().map(str::to_owned))
+        harness
+            .value_on(None)
+            .and_then(|value| value.get("watcher")?.as_str().map(str::to_owned))
             == Some("owner".to_owned())
     });
 }
@@ -428,4 +600,3 @@ fn the_registry_lists_tray_with_its_actions() {
     let harness = Harness::new(super::stand_in(&crate::modules::Settings::default()));
     assert_eq!(harness.source_count(), 1);
 }
-

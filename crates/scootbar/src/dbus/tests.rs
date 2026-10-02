@@ -18,7 +18,9 @@ fn the_bus_address_names_a_path_or_falls_through() {
         std::path::Path::new("/run/user/1000/bus")
     );
     assert_eq!(
-        bus_path_for(Some(OsStr::new("unix:path=/sock,guid=abc;unix:path=/other"))),
+        bus_path_for(Some(OsStr::new(
+            "unix:path=/sock,guid=abc;unix:path=/other"
+        ))),
         std::path::Path::new("/sock")
     );
     // Abstract sockets are not dialled: falls through to the default.
@@ -61,7 +63,15 @@ fn a_call_round_trips_through_framing_and_the_parser() {
 #[test]
 fn a_body_round_trips_typed() {
     let mut writer = Writer::new();
-    writer.begin_call(1, ":1.7", "/StatusNotifierItem", "org.kde.StatusNotifierItem", "Activate", "ii", 0);
+    writer.begin_call(
+        1,
+        ":1.7",
+        "/StatusNotifierItem",
+        "org.kde.StatusNotifierItem",
+        "Activate",
+        "ii",
+        0,
+    );
     writer.i32(100);
     writer.i32(-50);
     let message = writer.finish().unwrap();
@@ -105,13 +115,28 @@ fn names_paths_members_and_signatures_validate() {
     // interface names, which `check_member` holds).
     assert_eq!(check_name("a-b.c-d"), Ok("a-b.c-d"));
     assert_eq!(check_name("-a.b"), Err(()));
-    for invalid in ["", "no-dots", ".leading", "trailing.", "has space", "9lives.lead-digit", &"x".repeat(129)] {
+    for invalid in [
+        "",
+        "no-dots",
+        ".leading",
+        "trailing.",
+        "has space",
+        "9lives.lead-digit",
+        &"x".repeat(129),
+    ] {
         assert_eq!(check_name(invalid), Err(()), "{invalid}");
     }
     for valid in ["/", "/StatusNotifierWatcher", "/org/freedesktop/DBus"] {
         assert_eq!(check_path(valid), Ok(valid));
     }
-    for invalid in ["", "relative", "//double", "/trailing/", "/has space", "/has-dash"] {
+    for invalid in [
+        "",
+        "relative",
+        "//double",
+        "/trailing/",
+        "/has space",
+        "/has-dash",
+    ] {
         assert_eq!(check_path(invalid), Err(()), "{invalid}");
     }
     assert_eq!(check_member("Hello"), Ok("Hello"));
@@ -122,7 +147,18 @@ fn names_paths_members_and_signatures_validate() {
     for valid in ["s", "u", "as", "a{sv}", "a(iiay)", "(sa(iiay)ss)"] {
         assert_eq!(check_signature(valid), Ok(valid));
     }
-    for invalid in ["", "{}", "()", "a", "{ss", "(s", "a{ssv}", "xs", "su", &"(".repeat(40)] {
+    for invalid in [
+        "",
+        "{}",
+        "()",
+        "a",
+        "{ss",
+        "(s",
+        "a{ssv}",
+        "xs",
+        "su",
+        &"(".repeat(40),
+    ] {
         assert_eq!(check_signature(invalid), Err(()), "{invalid}");
     }
     // Body signatures concatenate: empty and sequences pass here, never

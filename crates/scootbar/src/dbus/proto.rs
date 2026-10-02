@@ -229,7 +229,9 @@ impl<'a> Message<'a> {
         }
         let fields_len = get_u32(&frame[12..16], le) as usize;
         let mut fields = Reader {
-            buf: frame.get(16..16usize.saturating_add(fields_len)).ok_or(())?,
+            buf: frame
+                .get(16..16usize.saturating_add(fields_len))
+                .ok_or(())?,
             pos: 0,
             le,
             depth: 0,
@@ -358,7 +360,10 @@ impl<'a> Reader<'a> {
     }
 
     fn take(&mut self, n: usize) -> Result<&'a [u8], ()> {
-        let bytes = self.buf.get(self.pos..self.pos.saturating_add(n)).ok_or(())?;
+        let bytes = self
+            .buf
+            .get(self.pos..self.pos.saturating_add(n))
+            .ok_or(())?;
         self.pos = self.pos.saturating_add(n);
         Ok(bytes)
     }
@@ -574,7 +579,12 @@ impl<'a> Reader<'a> {
 /// signature offset past it. Dict entries and structs need their field
 /// signatures from the enclosing signature, which is why the walk is over
 /// signature bytes rather than wire bytes alone.
-fn skip_value<'a>(reader: &mut Reader<'a>, bytes: &[u8], at: usize, depth: usize) -> Result<(usize, ()), ()> {
+fn skip_value<'a>(
+    reader: &mut Reader<'a>,
+    bytes: &[u8],
+    at: usize,
+    depth: usize,
+) -> Result<(usize, ()), ()> {
     if depth > MAX_DEPTH {
         return Err(());
     }
@@ -833,9 +843,8 @@ fn complete(bytes: &[u8], at: usize, depth: usize) -> Result<(usize, bool), ()> 
     }
     let byte = *bytes.get(at).ok_or(())?;
     match byte {
-        b'y' | b'b' | b'n' | b'q' | b'i' | b'u' | b'x' | b't' | b'd' | b'h' | b's' | b'o' | b'g' => {
-            Ok((at + 1, true))
-        }
+        b'y' | b'b' | b'n' | b'q' | b'i' | b'u' | b'x' | b't' | b'd' | b'h' | b's' | b'o'
+        | b'g' => Ok((at + 1, true)),
         b'v' => Ok((at + 1, false)),
         b'a' => {
             let (end, _) = complete(bytes, at + 1, depth + 1)?;
@@ -980,7 +989,9 @@ pub fn read_request_reply(signature: &str, body: &[u8]) -> Result<u32, ()> {
 
 /// Reads a `NameOwnerChanged(name, old, new)` signal body. Empty owners
 /// are `None` (appeared or vanished).
-pub fn read_name_owner_changed(body: &[u8]) -> Result<(String, Option<String>, Option<String>), ()> {
+pub fn read_name_owner_changed(
+    body: &[u8],
+) -> Result<(String, Option<String>, Option<String>), ()> {
     let mut reader = Reader::le(body);
     let name = reader.str()?;
     let old = reader.str()?;
@@ -1142,7 +1153,8 @@ impl Writer {
         if self.overflow {
             return;
         }
-        self.buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        self.buf
+            .extend_from_slice(&(bytes.len() as u32).to_le_bytes());
         self.buf.extend_from_slice(bytes);
         self.buf.push(0);
     }

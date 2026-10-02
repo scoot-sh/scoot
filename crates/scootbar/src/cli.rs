@@ -420,7 +420,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     not(feature = "network"),
     not(feature = "brightness"),
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -442,7 +443,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     not(feature = "network"),
     not(feature = "brightness"),
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -463,7 +465,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     feature = "network",
     not(feature = "brightness"),
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -485,7 +488,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     feature = "network",
     not(feature = "brightness"),
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -506,7 +510,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     feature = "network",
     not(feature = "brightness"),
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -528,7 +533,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     feature = "network",
     not(feature = "brightness"),
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -549,7 +555,8 @@ macro_rules! modules {
     feature = "microphone",
     feature = "network",
     not(feature = "brightness"),
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -571,7 +578,8 @@ macro_rules! modules {
     feature = "microphone",
     feature = "network",
     not(feature = "brightness"),
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -592,7 +600,8 @@ macro_rules! modules {
     feature = "microphone",
     feature = "network",
     not(feature = "brightness"),
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -614,7 +623,8 @@ macro_rules! modules {
     feature = "microphone",
     feature = "network",
     not(feature = "brightness"),
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -635,7 +645,8 @@ macro_rules! modules {
     feature = "microphone",
     not(feature = "network"),
     not(feature = "brightness"),
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -657,7 +668,8 @@ macro_rules! modules {
     feature = "microphone",
     not(feature = "network"),
     not(feature = "brightness"),
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -678,7 +690,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     not(feature = "network"),
     not(feature = "brightness"),
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -700,7 +713,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     not(feature = "network"),
     not(feature = "brightness"),
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -721,7 +735,8 @@ macro_rules! modules {
     feature = "microphone",
     not(feature = "network"),
     not(feature = "brightness"),
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -743,7 +758,8 @@ macro_rules! modules {
     feature = "microphone",
     not(feature = "network"),
     not(feature = "brightness"),
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -765,7 +781,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     not(feature = "network"),
     feature = "brightness",
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -787,7 +804,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     not(feature = "network"),
     feature = "brightness",
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -808,7 +826,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     feature = "network",
     feature = "brightness",
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -830,7 +849,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     feature = "network",
     feature = "brightness",
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -851,7 +871,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     feature = "network",
     feature = "brightness",
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -873,7 +894,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     feature = "network",
     feature = "brightness",
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -894,7 +916,8 @@ macro_rules! modules {
     feature = "microphone",
     feature = "network",
     feature = "brightness",
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -916,7 +939,8 @@ macro_rules! modules {
     feature = "microphone",
     feature = "network",
     feature = "brightness",
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -937,7 +961,8 @@ macro_rules! modules {
     feature = "microphone",
     feature = "network",
     feature = "brightness",
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -959,7 +984,8 @@ macro_rules! modules {
     feature = "microphone",
     feature = "network",
     feature = "brightness",
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -980,7 +1006,8 @@ macro_rules! modules {
     feature = "microphone",
     not(feature = "network"),
     feature = "brightness",
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -1002,7 +1029,8 @@ macro_rules! modules {
     feature = "microphone",
     not(feature = "network"),
     feature = "brightness",
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -1023,7 +1051,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     not(feature = "network"),
     feature = "brightness",
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -1045,7 +1074,8 @@ macro_rules! modules {
     not(feature = "microphone"),
     not(feature = "network"),
     feature = "brightness",
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -1066,7 +1096,8 @@ macro_rules! modules {
     feature = "microphone",
     not(feature = "network"),
     feature = "brightness",
-    not(feature = "tray")))]
+    not(feature = "tray")
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -1088,7 +1119,8 @@ macro_rules! modules {
     feature = "microphone",
     not(feature = "network"),
     feature = "brightness",
-    feature = "tray"))]
+    feature = "tray"
+))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,

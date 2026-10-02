@@ -137,10 +137,7 @@ pub enum Event {
         body: Vec<u8>,
     },
     /// An error reply for the call that carried `token`.
-    CallError {
-        token: u64,
-        name: String,
-    },
+    CallError { token: u64, name: String },
     /// A signal the match rules asked for.
     Signal {
         sender: String,
@@ -223,7 +220,15 @@ impl Conn {
         }
         let serial = self.next_serial();
         let mut writer = Writer::new();
-        writer.begin_call(serial, destination, path, interface, member, body_sig, flags);
+        writer.begin_call(
+            serial,
+            destination,
+            path,
+            interface,
+            member,
+            body_sig,
+            flags,
+        );
         writer.raw(body);
         let message = writer.finish().ok_or(CallError::TooLarge)?;
         if self.waits_for_reply(flags) {
@@ -263,7 +268,14 @@ impl Conn {
     }
 
     /// Queues a broadcast signal with a pre-marshalled body.
-    pub fn signal(&mut self, path: &str, interface: &str, member: &str, body_sig: &str, body: &[u8]) {
+    pub fn signal(
+        &mut self,
+        path: &str,
+        interface: &str,
+        member: &str,
+        body_sig: &str,
+        body: &[u8],
+    ) {
         let serial = self.next_serial();
         let mut writer = Writer::new();
         writer.begin_signal(serial, path, interface, member, body_sig);
@@ -311,7 +323,8 @@ impl Conn {
         // Capped with whole frames still staged: the consumer re-pumps
         // at once, so a burst drains in its turn instead of stranding
         // past what the next poll wakes for.
-        let capped = events.len() >= MAX_EVENTS_PER_TURN && frame_at(&self.staged).ok().flatten().is_some();
+        let capped =
+            events.len() >= MAX_EVENTS_PER_TURN && frame_at(&self.staged).ok().flatten().is_some();
         (events, capped)
     }
 
@@ -370,12 +383,18 @@ impl Conn {
         match message.kind {
             Kind::MethodReturn | Kind::Error => {
                 let reply_to = message.reply_serial?;
-                let at = self.pending.iter().position(|(serial, _)| *serial == reply_to)?;
+                let at = self
+                    .pending
+                    .iter()
+                    .position(|(serial, _)| *serial == reply_to)?;
                 let (_, token) = self.pending.remove(at);
                 if message.kind == Kind::Error {
                     return Some(Event::CallError {
                         token,
-                        name: message.error.unwrap_or("org.freedesktop.DBus.Error.Failed").to_owned(),
+                        name: message
+                            .error
+                            .unwrap_or("org.freedesktop.DBus.Error.Failed")
+                            .to_owned(),
                     });
                 }
                 Some(Event::Reply {
@@ -430,19 +449,20 @@ impl Conn {
         body_sig: &str,
         body: &[u8],
     ) -> Result<(String, Vec<u8>), SetupError> {
-        let serial = self.call(destination, path, interface, member, body_sig, body, 0, 0).map_err(
-            |error| match error {
+        let serial = self
+            .call(destination, path, interface, member, body_sig, body, 0, 0)
+            .map_err(|error| match error {
                 CallError::Full => SetupError::Refused("the bus never answers"),
                 CallError::TooLarge => SetupError::Refused("the set-up call does not fit"),
-            },
-        )?;
+            })?;
         // The pending table's token is unused here (the serial is known);
         // drop the entry the blocking wait replaces.
         self.pending.pop();
         self.flush_blocking()?;
         loop {
             let frame = self.read_frame_blocking()?;
-            let message = Message::parse(&frame).map_err(|_| SetupError::Refused("a bad set-up reply"))?;
+            let message =
+                Message::parse(&frame).map_err(|_| SetupError::Refused("a bad set-up reply"))?;
             match message.kind {
                 Kind::MethodReturn if message.reply_serial == Some(serial) => {
                     return Ok((message.signature.to_owned(), message.body.rest().to_vec()));
@@ -538,7 +558,9 @@ pub fn setup(stream: UnixStream) -> Result<Conn, SetupError> {
         return Err(SetupError::Refused("Hello answered out of shape"));
     }
     let mut reader = proto::Reader::le(&body);
-    let unique = reader.str().map_err(|_| SetupError::Refused("Hello named nothing"))?;
+    let unique = reader
+        .str()
+        .map_err(|_| SetupError::Refused("Hello named nothing"))?;
     check_name(unique).map_err(|_| SetupError::Refused("Hello named badly"))?;
     conn.unique = unique.to_owned();
     conn.stream.set_read_timeout(None)?;
@@ -577,5 +599,3 @@ fn expect_line(stream: &mut dyn Read, prefix: &str) -> Result<(), SetupError> {
         Err(SetupError::Refused("the bus answered out of turn"))
     }
 }
-
-

@@ -145,7 +145,9 @@ impl Fake {
         if !self.state.names.contains(&service.to_owned()) {
             self.state.names.push(service.to_owned());
         }
-        self.state.owners.insert(service.to_owned(), owner.to_owned());
+        self.state
+            .owners
+            .insert(service.to_owned(), owner.to_owned());
         self.state.props.insert(service.to_owned(), props);
     }
 
@@ -168,12 +170,26 @@ impl Fake {
         body.str(old);
         body.str(new);
         let bytes = body.take_body().unwrap();
-        self.send_signal(BUS, "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameOwnerChanged", "sss", &bytes);
+        self.send_signal(
+            BUS,
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "NameOwnerChanged",
+            "sss",
+            &bytes,
+        );
     }
 
     /// Sends an item signal (`NewIcon` etc.) from `sender`.
     pub fn send_item_signal(&mut self, sender: &str, member: &str) {
-        self.send_signal(sender, "/StatusNotifierItem", "org.kde.StatusNotifierItem", member, "", &[]);
+        self.send_signal(
+            sender,
+            "/StatusNotifierItem",
+            "org.kde.StatusNotifierItem",
+            member,
+            "",
+            &[],
+        );
     }
 
     /// Sends a `NewStatus` with its argument.
@@ -181,7 +197,14 @@ impl Fake {
         let mut body = Writer::new();
         body.str(status);
         let bytes = body.take_body().unwrap();
-        self.send_signal(sender, "/StatusNotifierItem", "org.kde.StatusNotifierItem", "NewStatus", "s", &bytes);
+        self.send_signal(
+            sender,
+            "/StatusNotifierItem",
+            "org.kde.StatusNotifierItem",
+            "NewStatus",
+            "s",
+            &bytes,
+        );
     }
 
     /// Sends a `RegisterStatusNotifierItem(service)` call addressed to
@@ -213,7 +236,14 @@ impl Fake {
         let mut body = Writer::new();
         body.str(service);
         let bytes = body.take_body().unwrap();
-        self.send_signal(&owner, "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher", "StatusNotifierItemRegistered", "s", &bytes);
+        self.send_signal(
+            &owner,
+            "/StatusNotifierWatcher",
+            "org.kde.StatusNotifierWatcher",
+            "StatusNotifierItemRegistered",
+            "s",
+            &bytes,
+        );
     }
 
     /// The frames the module sent, drained.
@@ -249,9 +279,18 @@ impl Fake {
         }
     }
 
-    fn send_signal(&mut self, sender: &str, path: &str, interface: &str, member: &str, sig: &str, body: &[u8]) {
+    fn send_signal(
+        &mut self,
+        sender: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        sig: &str,
+        body: &[u8],
+    ) {
         let serial = self.next_serial();
-        let message = frame_with_sender(4, serial, path, interface, member, None, sender, sig, body);
+        let message =
+            frame_with_sender(4, serial, path, interface, member, None, sender, sig, body);
         self.send.write_all(&message).unwrap();
     }
 
@@ -295,7 +334,11 @@ impl Fake {
             // scripted dictionary where it has one.
             let mut reader = Reader::le(body);
             let (Ok(interface), Ok(property)) = (reader.str(), reader.str()) else {
-                return self.error(message.serial, serial, "org.freedesktop.DBus.Error.InvalidArgs");
+                return self.error(
+                    message.serial,
+                    serial,
+                    "org.freedesktop.DBus.Error.InvalidArgs",
+                );
             };
             let _ = interface;
             if let Some(props) = self.state.props.get(destination) {
@@ -303,7 +346,11 @@ impl Fake {
                     return self.reply(message.serial, serial, "v", &variant);
                 }
             }
-            return self.error(message.serial, serial, "org.freedesktop.DBus.Error.UnknownMethod");
+            return self.error(
+                message.serial,
+                serial,
+                "org.freedesktop.DBus.Error.UnknownMethod",
+            );
         }
         self.calls.push(record(&message));
         Ok(())
@@ -509,7 +556,9 @@ fn sasl(stream: &mut UnixStream) -> Result<(), ()> {
     if data != "DATA" && !data.starts_with("DATA ") {
         return Err(());
     }
-    stream.write_all(b"OK 8d Expedition fake bus guid\r\n").map_err(|_| ())?;
+    stream
+        .write_all(b"OK 8d Expedition fake bus guid\r\n")
+        .map_err(|_| ())?;
     let begin = read_line(stream)?;
     if begin != "BEGIN" {
         return Err(());

@@ -702,10 +702,7 @@ fn a_tray_section_is_refused_loudly() {
         ("[tray]\nwhatever = 1\n", "whatever"),
         // `activate` takes a number.
         ("[tray]\non-click = \"activate\"\n", "tray.on-click"),
-        (
-            "[tray]\non-click = \"frobnicate 0\"\n",
-            "tray.on-click",
-        ),
+        ("[tray]\non-click = \"frobnicate 0\"\n", "tray.on-click"),
         ("[tray]\nmargin = 99999\n", "tray.margin"),
     ] {
         let error = read(text).unwrap_err().to_string();
