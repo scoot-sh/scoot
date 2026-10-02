@@ -1361,6 +1361,7 @@ fn setup(mut conn: Conn) -> Result<Live, conn::SetupError> {
 
 /// A blocking `RequestName`, answering the reply word.
 fn request_word(conn: &mut Conn, name: &str) -> Result<u32, conn::SetupError> {
+    eprintln!("TRAYDBG: requesting {name}");
     let mut body = Writer::new();
     body.str(name);
     body.u32(proto::request::ALLOW_REPLACEMENT | proto::request::DO_NOT_QUEUE);
@@ -1374,9 +1375,14 @@ fn request_word(conn: &mut Conn, name: &str) -> Result<u32, conn::SetupError> {
         "RequestName",
         "su",
         &bytes,
-    )?;
-    proto::read_request_reply(&signature, &reply)
-        .map_err(|_| conn::SetupError::Refused("RequestName answered out of shape"))
+    ).map_err(|error| {
+        eprintln!("TRAYDBG: request {name} failed {error:?}");
+        error
+    })?;
+    let word = proto::read_request_reply(&signature, &reply)
+        .map_err(|_| conn::SetupError::Refused("RequestName answered out of shape"))?;
+    eprintln!("TRAYDBG: request {name} -> {word}");
+    Ok(word)
 }
 
 impl Live {
