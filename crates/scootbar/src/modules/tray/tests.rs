@@ -377,3 +377,30 @@ fn debug_fill_direct() {
     assert_eq!(item.title, "Player");
     assert_eq!(item.icons.len(), 1);
 }
+
+#[test]
+fn debug_walk_body() {
+    use crate::dbus::proto::Reader;
+    let body = fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30));
+    eprintln!("body len: {}", body.len());
+    let mut props = Reader::le(&body);
+    let raw = props.array_raw(8).expect("top array");
+    eprintln!("elements len: {}", raw.len());
+    let mut entries = Reader::le(raw);
+    while !entries.exhausted() {
+        eprintln!("entry at {}", raw.len() - entries.remaining());
+        entries.enter_struct().expect("struct");
+        let key = entries.str().expect("key").to_owned();
+        let sig = entries.signature().expect("sig").to_owned();
+        eprintln!("  key={key:?} sig={sig:?} value at {}", raw.len() - entries.remaining());
+        match entries.skip(&sig) {
+            Ok(()) => eprintln!("  skipped, next at {}", raw.len() - entries.remaining()),
+            Err(()) => {
+                eprintln!("  SKIP FAILED");
+                break;
+            }
+        }
+        entries.leave_struct();
+    }
+    eprintln!("outer exhausted: {}", props.exhausted());
+}
