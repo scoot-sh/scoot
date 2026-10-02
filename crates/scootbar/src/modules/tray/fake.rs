@@ -301,7 +301,6 @@ fn serve(
                     return;
                 }
             }
-            Ok(None) => {}
             Err(()) => {
                 flog!(log, "bad frame, exiting");
                 return;
@@ -405,14 +404,10 @@ fn reply(stream: &mut UnixStream, to: u32, serial: u32, sig: &str, body: &[u8]) 
     let message = match writer.finish() {
         Some(message) => message,
         None => {
-            flog!(log, "reply finish none");
             return Err(());
         }
     };
-    flog!(log, "reply {} bytes: {}", message.len(), message.iter().map(|b| format!("{b:02x}")).collect::<String>());
-    stream.write_all(&message).map_err(|error| {
-        flog!(log, "reply write {error:?}");
-    })
+    stream.write_all(&message).map_err(|_| ())
 }
 
 fn error(stream: &mut UnixStream, to: u32, serial: u32, name: &str) -> Result<(), ()> {
