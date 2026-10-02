@@ -500,6 +500,21 @@ fn debug_walk_live() {
         }
         fields.leave_struct();
     }
+    // The typed values, one by one.
+    {
+        use crate::dbus::proto::{Message, check_name, check_signature};
+        let message = Message::parse(frame).expect("parse");
+        eprintln!("sender raw: {:?}", message.sender);
+        eprintln!("dest raw: {:?}", message.destination);
+        eprintln!("sig raw: {:?}", message.signature);
+        if let Some(sender) = message.sender {
+            eprintln!("sender check: {:?}", check_name(sender));
+        }
+        if let Some(dest) = message.destination {
+            eprintln!("dest check: {:?}", check_name(dest));
+        }
+        eprintln!("sig check: {:?}", check_signature(message.signature));
+    }
     match crate::dbus::proto::Message::parse(frame) {
         Ok(message) => eprintln!("parsed ok sig={:?} sender={:?} dest={:?}", message.signature, message.sender, message.destination),
         Err(()) => eprintln!("PARSE REFUSED"),
