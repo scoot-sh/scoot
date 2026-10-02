@@ -79,6 +79,20 @@ macro_rules! idle {
 // arms of `modules!` a build compiles expand their form, so the unused
 // forms of any one build are allowed here, not at each use.
 #[allow(unused_macros)]
+#[cfg(feature = "brightness")]
+macro_rules! brightness_head {
+    () => {
+        "brightness, "
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "brightness"))]
+macro_rules! brightness_head {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
 #[cfg(feature = "microphone")]
 macro_rules! microphone_head {
     () => {
@@ -170,7 +184,9 @@ macro_rules! modules {
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty.
-                           Modules: clock",
+                           Modules: ",
+            brightness_head!(),
+            "clock",
             microphone_tail!(),
             network_tail!(),
             volume_tail!(),
@@ -201,7 +217,9 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                           layout: a section not given is empty. Modules: clock",
+                           layout: a section not given is empty. Modules: ",
+            brightness_head!(),
+            "clock",
             microphone_tail!(),
             network_tail!(),
             volume_tail!(),
@@ -233,7 +251,9 @@ macro_rules! modules {
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty.
-                           Modules: clock",
+                           Modules: ",
+            brightness_head!(),
+            "clock",
             microphone_tail!(),
             network_tail!(),
             volume_tail!(),
@@ -264,7 +284,9 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                           layout: a section not given is empty. Modules: clock",
+                           layout: a section not given is empty. Modules: ",
+            brightness_head!(),
+            "clock",
             microphone_tail!(),
             network_tail!(),
             volume_tail!(),
@@ -294,6 +316,7 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: ",
+            brightness_head!(),
             microphone_head!(),
             network_head!(),
             volume_head!(),
@@ -317,6 +340,7 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: ",
+            brightness_head!(),
             microphone_head!(),
             network_head!(),
             volume_head!(),
@@ -340,6 +364,7 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: ",
+            brightness_head!(),
             microphone_head!(),
             network_head!(),
             volume_head!(),
@@ -358,7 +383,8 @@ macro_rules! modules {
     not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
-    not(feature = "network")
+    not(feature = "network"),
+    not(feature = "brightness")
 ))]
 macro_rules! modules {
     () => {
@@ -378,7 +404,8 @@ macro_rules! modules {
     not(feature = "window-title"),
     not(feature = "volume"),
     not(feature = "microphone"),
-    feature = "network"
+    feature = "network",
+    not(feature = "brightness")
 ))]
 macro_rules! modules {
     () => {
@@ -398,7 +425,8 @@ macro_rules! modules {
     not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
-    feature = "network"
+    feature = "network",
+    not(feature = "brightness")
 ))]
 macro_rules! modules {
     () => {
@@ -418,7 +446,8 @@ macro_rules! modules {
     not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
-    feature = "network"
+    feature = "network",
+    not(feature = "brightness")
 ))]
 macro_rules! modules {
     () => {
@@ -438,7 +467,8 @@ macro_rules! modules {
     not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
-    feature = "network"
+    feature = "network",
+    not(feature = "brightness")
 ))]
 macro_rules! modules {
     () => {
@@ -458,7 +488,8 @@ macro_rules! modules {
     not(feature = "window-title"),
     feature = "volume",
     feature = "microphone",
-    not(feature = "network")
+    not(feature = "network"),
+    not(feature = "brightness")
 ))]
 macro_rules! modules {
     () => {
@@ -478,7 +509,8 @@ macro_rules! modules {
     not(feature = "window-title"),
     feature = "volume",
     not(feature = "microphone"),
-    not(feature = "network")
+    not(feature = "network"),
+    not(feature = "brightness")
 ))]
 macro_rules! modules {
     () => {
@@ -498,7 +530,8 @@ macro_rules! modules {
     not(feature = "window-title"),
     not(feature = "volume"),
     feature = "microphone",
-    not(feature = "network")
+    not(feature = "network"),
+    not(feature = "brightness")
 ))]
 macro_rules! modules {
     () => {
@@ -509,6 +542,175 @@ macro_rules! modules {
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
                            1024 (default 0)
+"
+    };
+}
+// The same eight builds with the brightness module: it sorts first.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, network
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, network, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, network
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, network, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
 "
     };
 }
@@ -615,6 +817,26 @@ macro_rules! network_help {
         ""
     };
 }
+// What the brightness module is, for the help page.
+#[cfg(feature = "brightness")]
+macro_rules! brightness_help {
+    () => {
+        "Brightness (the brightness module):
+    the panel backlight's level in percent (brightness.device names it
+    where the machine has several); a scroll changes it by brightness.step
+    percent (default 5), and `set` takes the absolute percent, never below
+    the raw floor that keeps the panel lit. Writes need permission (a udev
+    rule or the video group), and are refused naming that without it.
+    Nothing is shown where the machine has no backlight
+"
+    };
+}
+#[cfg(not(feature = "brightness"))]
+macro_rules! brightness_help {
+    () => {
+        ""
+    };
+}
 
 pub const USAGE: &str = concat!(
     "\
@@ -708,6 +930,7 @@ Modules:
     volume_help!(),
     microphone_help!(),
     network_help!(),
+    brightness_help!(),
     "
 The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
 without it) holds every option above; `--config PATH` reads another file
