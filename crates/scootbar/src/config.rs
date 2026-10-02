@@ -285,6 +285,13 @@ struct File {
     workspaces: WorkspacesFile,
     #[serde(rename = "window-title")]
     window_title: WindowTitleFile,
+    /// The volume module's options, and the microphone variant's (the same
+    /// keys under `[microphone]`). Without the feature there are none, and
+    /// any key is a loud error naming it.
+    #[cfg(feature = "volume")]
+    volume: VolumeFile,
+    #[cfg(feature = "microphone")]
+    microphone: VolumeFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -481,6 +488,65 @@ struct WindowTitleFile {
     on_scroll_down: Option<toml::Value>,
 }
 
+/// The volume module's options (and the microphone variant's, under
+/// `[microphone]`). Without the matching feature there are none, and any
+/// key is a loud error naming it.
+#[cfg(any(feature = "volume", feature = "microphone"))]
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct VolumeFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    margin: Option<u32>,
+    /// Percent points per scroll notch and per raise: 1 to 50.
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    step: Option<u32>,
+    /// The cap a raise stops at, in percent: 100 is full scale, past it
+    /// is over-amplification, at most 150.
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    #[serde(rename = "max-volume")]
+    max_volume: Option<u32>,
+    /// One glyph, drawn before the level (instead of the built-in one for
+    /// the level).
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    icon: Option<String>,
+    /// SVG path data, drawn before the level (instead of `icon`).
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn before the level (instead of `icon`). Only in a
+    /// build with the `icon-image` feature: without it the key is unknown.
+    #[cfg(all(any(feature = "volume", feature = "microphone"), feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(any(feature = "volume", feature = "microphone"), not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(any(feature = "volume", feature = "microphone"))]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
+}
+
 impl File {
     /// Validates every value and fills the defaults: `Err` names the
     /// dotted key and says what it takes.
@@ -635,6 +701,20 @@ impl File {
             let margin = gap(path, "window-title.margin", Some(margin), 0)?;
             if margin > 0 {
                 margins.push((crate::modules::window_title::ID, margin));
+            }
+        }
+        #[cfg(feature = "volume")]
+        if let Some(margin) = self.volume.margin {
+            let margin = gap(path, "volume.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::volume::ID, margin));
+            }
+        }
+        #[cfg(feature = "microphone")]
+        if let Some(margin) = self.microphone.margin {
+            let margin = gap(path, "microphone.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::volume::MIC_ID, margin));
             }
         }
         let layout = self.layout(
@@ -886,6 +966,30 @@ impl File {
                     .push((crate::modules::window_title::ID, read));
             }
         }
+        #[cfg(feature = "volume")]
+        {
+            apply_volume(
+                path,
+                "volume",
+                crate::modules::volume::ID,
+                VOLUME_KEYS,
+                &self.volume,
+                &mut modules.volume,
+                &mut modules.bindings,
+            )?;
+        }
+        #[cfg(feature = "microphone")]
+        {
+            apply_volume(
+                path,
+                "microphone",
+                crate::modules::volume::MIC_ID,
+                MICROPHONE_KEYS,
+                &self.microphone,
+                &mut modules.microphone,
+                &mut modules.bindings,
+            )?;
+        }
         Ok(Config {
             bar: Bar {
                 edge,
@@ -1000,6 +1104,95 @@ const WINDOW_TITLE_KEYS: [&str; 5] = [
     "window-title.on-scroll-up",
     "window-title.on-scroll-down",
 ];
+#[cfg(feature = "volume")]
+const VOLUME_KEYS: [&str; 5] = [
+    "volume.on-click",
+    "volume.on-right-click",
+    "volume.on-middle-click",
+    "volume.on-scroll-up",
+    "volume.on-scroll-down",
+];
+#[cfg(feature = "microphone")]
+const MICROPHONE_KEYS: [&str; 5] = [
+    "microphone.on-click",
+    "microphone.on-right-click",
+    "microphone.on-middle-click",
+    "microphone.on-scroll-up",
+    "microphone.on-scroll-down",
+];
+
+/// The `[volume]` (or `[microphone]`) table: `step`, `max-volume`, the
+/// icon keys and the interaction keys, into the module's settings.
+/// `section` is the table's name, for the errors.
+#[cfg(any(feature = "volume", feature = "microphone"))]
+fn apply_volume(
+    path: &Path,
+    section: &'static str,
+    id: &'static str,
+    keys: [&str; 5],
+    table: &VolumeFile,
+    settings: &mut crate::modules::volume::Settings,
+    bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
+) -> Result<(), Error> {
+    use crate::modules::volume::{
+        DEFAULT_MAX_VOLUME, DEFAULT_STEP, MAX_MAX_VOLUME, MAX_STEP, MIN_MAX_VOLUME,
+    };
+    let named = |key: &str, message: String| Error::Named {
+        path: path.to_owned(),
+        key: format!("{section}.{key}"),
+        message,
+    };
+    if let Some(step) = table.step {
+        if !(1..=MAX_STEP).contains(&step) {
+            return Err(named(
+                "step",
+                format!(
+                    "takes a whole number of percent points from 1 to {MAX_STEP}, not `{step}` \
+                     (the default is {DEFAULT_STEP})"
+                ),
+            ));
+        }
+        settings.step = step;
+    }
+    if let Some(max) = table.max_volume {
+        if !(MIN_MAX_VOLUME..=MAX_MAX_VOLUME).contains(&max) {
+            return Err(named(
+                "max-volume",
+                format!(
+                    "takes whole percent from {MIN_MAX_VOLUME} (full scale) to {MAX_MAX_VOLUME} \
+                     (over-amplification), not `{max}` (the default is {DEFAULT_MAX_VOLUME})"
+                ),
+            ));
+        }
+        settings.max_volume = max;
+    }
+    if let Some(icon) = icon::volume(section, table).map_err(|(key, message)| Error::Named {
+        path: path.to_owned(),
+        key,
+        message,
+    })? {
+        settings.icon = Some(icon);
+    }
+    let read = bindings::read(
+        id,
+        [
+            table.on_click.as_ref(),
+            table.on_right_click.as_ref(),
+            table.on_middle_click.as_ref(),
+            table.on_scroll_up.as_ref(),
+            table.on_scroll_down.as_ref(),
+        ],
+    )
+    .map_err(|(trigger, message)| Error::Named {
+        path: path.to_owned(),
+        key: keys[trigger as usize].to_owned(),
+        message,
+    })?;
+    if !read.is_empty() {
+        bindings.push((id, read));
+    }
+    Ok(())
+}
 
 /// The layout's spacings, validated: what [`File::layout`] adds to the
 /// module lists.

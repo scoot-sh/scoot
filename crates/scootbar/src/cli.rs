@@ -74,14 +74,74 @@ macro_rules! idle {
     };
 }
 
+// The module names for the `Modules:` line, each in a head and a tail
+// form so every feature combination's list reads alphabetically. Only the
+// arms of `modules!` a build compiles expand their form, so the unused
+// forms of any one build are allowed here, not at each use.
+#[allow(unused_macros)]
+#[cfg(feature = "microphone")]
+macro_rules! microphone_head {
+    () => {
+        "microphone, "
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "microphone"))]
+macro_rules! microphone_head {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
+#[cfg(feature = "volume")]
+macro_rules! volume_head {
+    () => {
+        "volume, "
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "volume"))]
+macro_rules! volume_head {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
+#[cfg(feature = "microphone")]
+macro_rules! microphone_tail {
+    () => {
+        ", microphone"
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "microphone"))]
+macro_rules! microphone_tail {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
+#[cfg(feature = "volume")]
+macro_rules! volume_tail {
+    () => {
+        ", volume"
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "volume"))]
+macro_rules! volume_tail {
+    () => {
+        ""
+    };
+}
 #[cfg(all(feature = "clock", feature = "workspaces", feature = "window-title"))]
 macro_rules! modules {
     () => {
-        "    --left IDS           the modules along the left, center and right,
+        concat!("    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty.
-                           Modules: clock, window-title, workspaces
+                           Modules: clock", microphone_tail!(), volume_tail!(), ", window-title, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -93,7 +153,7 @@ macro_rules! modules {
                            (no padding), _ (spaces) and 0 (zeros). With %S or
                            %T it ticks every second, else once a minute. The
                            zone is $TZ's, else /etc/localtime's
-"
+")
     };
 }
 #[cfg(all(
@@ -103,10 +163,10 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        "    --left IDS           the modules along the left, center and right,
+        concat!("    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                           layout: a section not given is empty. Modules: clock, workspaces
+                           layout: a section not given is empty. Modules: clock", microphone_tail!(), volume_tail!(), ", workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -118,7 +178,7 @@ macro_rules! modules {
                            (no padding), _ (spaces) and 0 (zeros). With %S or
                            %T it ticks every second, else once a minute. The
                            zone is $TZ's, else /etc/localtime's
-"
+")
     };
 }
 #[cfg(all(
@@ -128,11 +188,11 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        "    --left IDS           the modules along the left, center and right,
+        concat!("    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty.
-                           Modules: clock, window-title
+                           Modules: clock", microphone_tail!(), volume_tail!(), ", window-title
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -144,7 +204,7 @@ macro_rules! modules {
                            (no padding), _ (spaces) and 0 (zeros). With %S or
                            %T it ticks every second, else once a minute. The
                            zone is $TZ's, else /etc/localtime's
-"
+")
     };
 }
 #[cfg(all(
@@ -154,11 +214,10 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        "    --left IDS           the modules along the left, center and right,
+        concat!("    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                           layout: a section not given is empty. Modules: clock
-     --padding N          logical pixels either side of each module, 0 to 1024
+                           layout: a section not given is empty. Modules: clock", microphone_tail!(), volume_tail!(), "\n     --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
                            1024 (default 0)
@@ -169,7 +228,7 @@ macro_rules! modules {
                            (no padding), _ (spaces) and 0 (zeros). With %S or
                            %T it ticks every second, else once a minute. The
                            zone is $TZ's, else /etc/localtime's
-"
+")
     };
 }
 #[cfg(all(
@@ -179,14 +238,14 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        "    --left IDS           the modules along the left, center and right,
+        concat!("    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout. Modules: window-title, workspaces
+     --right IDS          sets the whole layout. Modules: ", microphone_head!(), volume_head!(), "window-title, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
                            1024 (default 0)
-"
+")
     };
 }
 #[cfg(all(
@@ -196,14 +255,14 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        "    --left IDS           the modules along the left, center and right,
+        concat!("    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout. Modules: workspaces
+     --right IDS          sets the whole layout. Modules: ", microphone_head!(), volume_head!(), "workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
                            1024 (default 0)
-"
+")
     };
 }
 #[cfg(all(
@@ -213,26 +272,85 @@ macro_rules! modules {
 ))]
 macro_rules! modules {
     () => {
-        "    --left IDS           the modules along the left, center and right,
+        concat!("    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout. Modules: window-title
+     --right IDS          sets the whole layout. Modules: ", microphone_head!(), volume_head!(), "window-title
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
                            1024 (default 0)
-"
+")
     };
 }
 #[cfg(all(
     not(feature = "clock"),
     not(feature = "workspaces"),
-    not(feature = "window-title")
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone")
 ))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. This build has none, so
      --right IDS          only an empty list is taken
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone")
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -285,6 +403,41 @@ macro_rules! window_title_help {
 }
 #[cfg(not(feature = "window-title"))]
 macro_rules! window_title_help {
+    () => {
+        ""
+    };
+}
+// What the volume module (and its microphone twin) is, for the help page.
+#[cfg(feature = "volume")]
+macro_rules! volume_help {
+    () => {
+        "Volume (the volume module):
+    the default sink's level in percent, dimmed while muted, with an icon
+    for the level (muted, low, medium, high); a scroll changes it by
+    volume.step percent (default 5) up to volume.max-volume (default 100,
+    full scale), a click toggles mute, a right click runs the mixer
+    command the config binds. Nothing is shown where no sound server runs
+"
+    };
+}
+#[cfg(not(feature = "volume"))]
+macro_rules! volume_help {
+    () => {
+        ""
+    };
+}
+#[cfg(feature = "microphone")]
+macro_rules! microphone_help {
+    () => {
+        "Microphone (the microphone module):
+    the default source's level and mute, sharing the volume module's
+    options under [microphone]: a scroll changes it, a click toggles mute.
+    Nothing is shown where no sound server runs
+"
+    };
+}
+#[cfg(not(feature = "microphone"))]
+macro_rules! microphone_help {
     () => {
         ""
     };
@@ -379,6 +532,8 @@ Modules:
     modules!(),
     workspaces_help!(),
     window_title_help!(),
+    volume_help!(),
+    microphone_help!(),
     "
 The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
 without it) holds every option above; `--config PATH` reads another file

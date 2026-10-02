@@ -80,10 +80,10 @@ pub struct ModuleAction {
 
 impl ModuleAction {
     /// A module's own default action: a static name, nothing allocated.
-    /// (Only modules with actions call it: the workspaces and window-title
-    /// modules, so far.)
+    /// (Only modules with actions call it: the workspaces, window-title,
+    /// volume and microphone modules.)
     #[cfg_attr(
-        not(any(feature = "workspaces", feature = "window-title")),
+        not(any(feature = "workspaces", feature = "window-title", feature = "volume", feature = "microphone")),
         allow(dead_code)
     )]
     pub const fn new(name: &'static str, arg: Option<i32>) -> Self {
