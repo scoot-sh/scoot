@@ -1377,9 +1377,14 @@ fn join_mask(scan: u32, mlme: u32) -> (u32, bool) {
     (mask, mask != 0 && bit(scan) != 0 && bit(mlme) != 0)
 }
 
-/// Opens the generic socket and resolves nl80211: first unbound to ask
-/// the controller, then bound with the [`join_mask`] mask where any id
-/// fits it. `joined` is false where neither does (see the module docs).
+/// Opens the generic socket and resolves nl80211: a probe asks the
+/// controller, then it is dropped and a second socket binds with the
+/// [`join_mask`] mask where any id fits it. The drop matters: the probe
+/// held the autobound portid (== pid), and a second bound socket would
+/// get a rover portid instead — the joined socket must autobind to pid
+/// deterministically, which the membership test reads back. `joined` is
+/// false where neither id fits, or where the bind misses (a plain
+/// unicast socket still asks the queries; see the module docs).
 fn genl_socket() -> Result<(Option<OwnedFd>, Family, bool), String> {
     let probe = socket_with(
         AddressFamily::NETLINK,
@@ -1424,6 +1429,7 @@ fn genl_socket() -> Result<(Option<OwnedFd>, Family, bool), String> {
         // No nl80211: link state still works, WiFi does not.
         return Ok((None, family, false));
     }
+    drop(probe);
     let (mask, both) = join_mask(family.scan, family.mlme);
     if mask != 0 {
         let joined = socket_with(
@@ -1437,7 +1443,17 @@ fn genl_socket() -> Result<(Option<OwnedFd>, Family, bool), String> {
             return Ok((Some(fd), family, both));
         }
     }
-    Ok((Some(probe), family, false))
+    // The join missed (or nothing fit): a plain unicast socket still asks
+    // the queries; WiFi notices just do not arrive.
+    let plain = socket_with(
+        AddressFamily::NETLINK,
+        SocketType::RAW,
+        SocketFlags::CLOEXEC,
+        Some(GENERIC),
+    )
+    .and_then(|fd| bind(&fd, &SocketAddrNetlink::new(0, 0)).map(|()| fd))
+    .map_err(|errno| format!("cannot bind the generic netlink socket: {errno}"))?;
+    Ok((Some(plain), family, false))
 }
 
 /// Starts the module on already-open sockets: the tests' way in, with a
