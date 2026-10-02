@@ -667,7 +667,7 @@ fn the_watcher_object_answers() {
             entries.enter_struct().expect("entry");
             keys.push(entries.str().expect("key").to_owned());
             let sig = entries.signature().expect("sig");
-            entries.skip(&sig).expect("value");
+            entries.skip(sig).expect("value");
             entries.leave_struct();
         }
         assert!(reader.exhausted());
