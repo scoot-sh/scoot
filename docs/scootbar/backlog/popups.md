@@ -3,7 +3,7 @@ title: "Popups: sliders, lists and menus as `xdg_popup`s parented to the bar"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "network-module"
+blocked: null
 milestone: "M6"
 ---
 
