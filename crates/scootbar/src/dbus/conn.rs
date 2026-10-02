@@ -277,15 +277,15 @@ impl Conn {
     pub fn pump(&mut self) -> (Vec<Event>, bool) {
         let mut events = core::mem::take(&mut self.stashed);
         if self.dead {
-            return events;
+            return (events, false);
         }
         self.flush();
         if self.dead {
-            return events;
+            return (events, false);
         }
         self.read_ready();
         if self.dead {
-            return events;
+            return (events, false);
         }
         while events.len() < MAX_EVENTS_PER_TURN {
             let consumed = match frame_at(&self.staged) {
@@ -293,7 +293,7 @@ impl Conn {
                 Ok(None) => break,
                 Err(()) => {
                     self.dead = true;
-                    return events;
+                    return (events, false);
                 }
             };
             let frame: Vec<u8> = self.staged.drain(..consumed).collect();
@@ -301,12 +301,16 @@ impl Conn {
                 Some(event) => events.push(event),
                 None => {
                     if self.dead {
-                        return events;
+                        return (events, false);
                     }
                 }
             }
         }
-        events
+        // Capped with whole frames still staged: the consumer re-pumps
+        // at once, so a burst drains in its turn instead of stranding
+        // past what the next poll wakes for.
+        let capped = events.len() >= MAX_EVENTS_PER_TURN && frame_at(&self.staged).ok().flatten().is_some();
+        (events, capped)
     }
 
     /// Writes the outbox until it is empty or the socket would block. A
