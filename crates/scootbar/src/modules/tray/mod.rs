@@ -1823,6 +1823,10 @@ impl Module for Tray {
     /// the directory watch while waiting. No timer, ever: every refresh
     /// is bus-driven, and the wait is an inotify watch.
     fn sources<'fd>(&'fd self, sources: &mut Sources<'_, 'fd>) {
+        eprintln!("DBUGBUS sources bus={}", match &self.bus {
+            Bus::Live(_) => "live",
+            Bus::Waiting { .. } => "waiting",
+        });
         match &self.bus {
             Bus::Live(live) => {
                 let mut flags = PollFlags::IN;
