@@ -566,12 +566,6 @@ fn scan_names(buf: &[u8], want: &[u8]) -> bool {
 impl Live {
     /// Works one bus event; says whether the view moved.
     fn apply(&mut self, event: Event) -> Update {
-        eprintln!("DBUGBUS event {}", match &event {
-            Event::Reply { token, signature, .. } => format!("reply token={token} sig={signature}"),
-            Event::CallError { token, name } => format!("error token={token} {name}"),
-            Event::Signal { member, .. } => format!("signal {member}"),
-            Event::MethodCall { member, .. } => format!("call {member}"),
-        });
         match event {
             Event::Reply {
                 token,
@@ -1112,7 +1106,6 @@ impl Live {
         if interface == "org.freedesktop.DBus.Peer" {
             if member == "Ping" {
                 self.conn.reply_return(sender, serial, "", &[]);
-                eprintln!("DBUGBUS answered ping, outbox={}", self.conn.outbox_len());
                 return Update::Unchanged;
             }
             self.conn
@@ -1834,7 +1827,6 @@ impl Module for Tray {
                 if live.conn.want_write() {
                     flags |= PollFlags::OUT;
                 }
-                eprintln!("DBUGBUS sources flags={flags:?} outbox={}", live.conn.outbox_len());
                 sources.add(live.conn.as_fd(), flags);
             }
             Bus::Waiting { notify, .. } => {
@@ -1846,7 +1838,6 @@ impl Module for Tray {
     }
 
     fn on_ready(&mut self, source: usize, events: PollFlags) -> Update {
-        eprintln!("DBUGBUS on_ready source={source} events={events:?}");
         match &self.bus {
             Bus::Live(_) => {
                 // Source 0 is the bus socket: the only source a live

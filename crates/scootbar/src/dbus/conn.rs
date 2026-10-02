@@ -193,11 +193,6 @@ impl Conn {
         !self.outbox.is_empty()
     }
 
-    /// Queued reply bytes, for tests.
-    pub fn outbox_len(&self) -> usize {
-        self.outbox.len()
-    }
-
     pub fn as_fd(&self) -> BorrowedFd<'_> {
         self.stream.as_fd()
     }
@@ -353,7 +348,6 @@ impl Conn {
     /// real I/O error kills the connection.
     fn flush(&mut self) {
         if !self.outbox.is_empty() {
-            eprintln!("DBUGBUS flush {} bytes: {}", self.outbox.len(), self.outbox.iter().map(|b| format!("{b:02x}")).collect::<String>());
         }
         while !self.outbox.is_empty() {
             match self.stream.write(&self.outbox) {
@@ -442,7 +436,6 @@ impl Conn {
                 body: message.body.rest().to_vec(),
             }),
             Kind::MethodCall => {
-                eprintln!("DBUGBUS call {} bytes: {}", frame.len(), frame.iter().map(|b| format!("{b:02x}")).collect::<String>());
                 // Addressed to us (the daemon only delivers what is ours:
                 // our unique name or a well-known one we own, which it
                 // does not rewrite). The consumer answers what is its
