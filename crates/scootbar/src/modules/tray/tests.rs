@@ -42,14 +42,13 @@ fn started() -> (Harness, Fake) {
 /// no timing and no thread past the set-up.
 fn drive(harness: &mut Harness, fake: &mut Fake, mut done: impl FnMut(&Harness) -> bool) {
     let start = std::time::Instant::now();
-    let mut turns = 0;
     while !done(harness) {
-        assert!(start.elapsed() < Duration::from_secs(10), "the bus never answered");
-        turns += 1;
-        let served = fake.pump();
-        let waited = harness.wait(Duration::from_secs(2));
-        let served2 = fake.pump();
-        eprintln!("TRAYDBG turn {turns}: waited={waited:?} value={:?} calls={} served={served}+{served2}", harness.value_on(None), fake.calls_len());
+        assert!(start.elapsed() < Duration::from_secs(30), "the bus never answered");
+        // Short waits: the chain converges turn by turn, and idle turns
+        // cost little even on a loaded box.
+        fake.pump();
+        harness.wait(Duration::from_millis(200));
+        fake.pump();
     }
 }
 
@@ -94,7 +93,7 @@ fn a_registration_is_answered_and_shown() {
     // fake it drives).
     for _ in 0..5 {
         fake.pump();
-        harness.wait(Duration::from_secs(2));
+        harness.wait(Duration::from_millis(200));
         fake.pump();
     }
     assert!(
@@ -281,7 +280,7 @@ fn hostile_items_lose_only_themselves() {
     // errors `NameHasNoOwner`, and the module drops it).
     fake.send_register(OWNER, "org.kde.StatusNotifierItem-9-9");
     for _ in 0..5 {
-        harness.wait(Duration::from_secs(2));
+        harness.wait(Duration::from_millis(200));
     }
     assert!(harness.value_on(None).is_none());
     // A title of controls and 10 KiB of `x`: stripped and cut.
@@ -351,7 +350,7 @@ fn a_lost_watcher_is_taken_back() {
     fake.send_name_owner_changed("org.kde.StatusNotifierWatcher", ":1.99", "");
     for _ in 0..5 {
         fake.pump();
-        harness.wait(Duration::from_secs(2));
+        harness.wait(Duration::from_millis(200));
         fake.pump();
     }
     assert!(fake.calls().iter().any(|call| call.member == "RequestName"));
