@@ -331,6 +331,48 @@ impl Fake {
         Ok(())
     }
 
+    /// Serves the scripted other watcher's methods (host mode): its item
+    /// list, and host registrations (recorded, never answered — the
+    /// module wants no reply).
+    fn serve_watcher(&mut self, to: u32, serial: u32, member: &str, body: &[u8]) -> Result<(), ()> {
+        match member {
+            "Get" => {
+                let mut reader = Reader::le(body);
+                let (Ok(interface), Ok(property)) = (reader.str(), reader.str()) else {
+                    return self.error(to, serial, "org.freedesktop.DBus.Error.InvalidArgs");
+                };
+                if interface != "org.kde.StatusNotifierWatcher"
+                    || property != "RegisteredStatusNotifierItems"
+                {
+                    return self.error(to, serial, "org.freedesktop.DBus.Error.UnknownMethod");
+                }
+                let mut out = Writer::new();
+                out.variant("as");
+                let Some(cookie) = out.open_array(4) else {
+                    return self.error(to, serial, "org.freedesktop.DBus.Error.Failed");
+                };
+                for id in &self.state.watcher_items {
+                    out.str(id);
+                }
+                out.close_array(cookie);
+                let Some(bytes) = out.take_body() else {
+                    return self.error(to, serial, "org.freedesktop.DBus.Error.Failed");
+                };
+                self.reply(to, serial, "v", &bytes)
+            }
+            "RegisterStatusNotifierHost" => {
+                let mut reader = Reader::le(body);
+                let Ok(service) = reader.str() else {
+                    return self.error(to, serial, "org.freedesktop.DBus.Error.InvalidArgs");
+                };
+                self.state.hosts.push(service.to_owned());
+                // Fire-and-forget: answered to no one.
+                Ok(())
+            }
+            _ => self.error(to, serial, "org.freedesktop.DBus.Error.UnknownMethod"),
+        }
+    }
+
     /// Serves the bus's own methods.
     fn serve_bus(&mut self, to: u32, serial: u32, member: &str, body: &[u8]) -> Result<(), ()> {
         match member {
