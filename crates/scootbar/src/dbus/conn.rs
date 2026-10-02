@@ -252,6 +252,7 @@ impl Conn {
     }
 
     /// Queues a method return for `to_serial` with a pre-marshalled body.
+    /// PROBE: includes an explicit destination; remove if it changes nothing.
     pub fn reply_return(&mut self, to_serial: u32, body_sig: &str, body: &[u8]) {
         let serial = self.next_serial();
         let mut writer = Writer::new();
