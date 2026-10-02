@@ -91,6 +91,8 @@ pub mod custom;
 pub mod exec;
 #[cfg(test)]
 pub mod harness;
+#[cfg(feature = "network")]
+pub mod network;
 // A build with `button` and neither of the others reads only `Shown::text`
 // of it; the rest is `push` and `exec`'s.
 #[cfg(feature = "microphone")]
@@ -254,15 +256,17 @@ impl fmt::Display for SetError {
 }
 
 /// Why a module refused an action: said on stderr, or to the agent that
-/// asked. (A build without a module that has actions — the workspaces and
-/// window-title ones so far — constructs none but `Unknown`.)
+/// asked. (A build without a module that has actions — the workspaces,
+/// window-title, volume, microphone and network ones — constructs none
+/// but `Unknown`.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     not(any(
         feature = "workspaces",
         feature = "window-title",
         feature = "volume",
-        feature = "microphone"
+        feature = "microphone",
+        feature = "network"
     )),
     allow(dead_code)
 )]
@@ -336,7 +340,8 @@ pub struct ActionSpec {
         feature = "workspaces",
         feature = "window-title",
         feature = "volume",
-        feature = "microphone"
+        feature = "microphone",
+        feature = "network"
     )),
     allow(dead_code)
 )]
@@ -406,6 +411,17 @@ pub const REGISTRY: &[Spec] = &[
         // As above, for the default source.
         #[cfg(test)]
         stand_in: None,
+    },
+    #[cfg(feature = "network")]
+    Spec {
+        id: network::ID,
+        init: network::init,
+        actions: network::ACTIONS,
+        // Available on any machine the tests run on: without interfaces
+        // past `lo` it says why, and the stand-in starts the same module
+        // unrefused so the contract still drives it.
+        #[cfg(test)]
+        stand_in: Some(network::stand_in),
     },
 ];
 
@@ -520,6 +536,8 @@ pub struct Settings {
     pub volume: volume::Settings,
     #[cfg(feature = "microphone")]
     pub microphone: microphone::Settings,
+    #[cfg(feature = "network")]
+    pub network: network::Settings,
     /// The interaction keys the config sets, by module id: only modules
     /// that bind something are listed.
     pub bindings: Vec<(&'static str, Bindings)>,

@@ -566,3 +566,55 @@ fn a_microphone_section_is_refused_loudly() {
         assert!(error.contains(key), "{text:?}: {error}");
     }
 }
+
+#[test]
+#[cfg(feature = "network")]
+fn a_network_section_is_read_whole() {
+    let modules = read("").unwrap().modules.network;
+    assert!(modules.interface.is_none());
+    assert!(modules.show_ssid);
+    assert!(modules.menu_command.is_empty());
+    let modules = read(
+        "left = [\"network\"]\n\
+         [network]\n\
+         interface = \"wlan0\"\n\
+         show-ssid = false\n\
+         menu-command = [\"fuzzel\", \"--dmenu\"]\n\
+         on-click = \"menu\"\n",
+    )
+    .unwrap()
+    .modules
+    .network;
+    assert_eq!(modules.interface.as_deref(), Some("wlan0"));
+    assert!(!modules.show_ssid);
+    assert_eq!(modules.menu_command, ["fuzzel", "--dmenu"]);
+}
+
+#[test]
+#[cfg(feature = "network")]
+fn a_network_section_is_refused_loudly() {
+    for (text, key) in [
+        ("[network]\ninterface = \"\"\n", "network.interface"),
+        (
+            "[network]\ninterface = \"0123456789abcdef\"\n",
+            "network.interface",
+        ),
+        ("[network]\nmenu-command = [\"\"]\n", "network.menu-command"),
+        ("[network]\nwhatever = 1\n", "whatever"),
+        ("[network]\non-click = \"raise\"\n", "network.on-click"),
+        ("[network]\non-click = \"menu 2\"\n", "network.on-click"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+    // Type errors come from the TOML layer and name the key without its
+    // section.
+    for (text, key) in [
+        ("[network]\nshow-ssid = \"yes\"\n", "show-ssid"),
+        ("[network]\nmenu-command = \"fuzzel\"\n", "menu-command"),
+        ("[network]\ninterface = 3\n", "interface"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+}

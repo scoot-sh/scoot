@@ -297,6 +297,9 @@ struct File {
     volume: VolumeFile,
     #[cfg(feature = "microphone")]
     microphone: VolumeFile,
+    /// The network module's options. Without the `network` feature there
+    /// are none, and any key is a loud error naming it.
+    network: NetworkFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -558,6 +561,46 @@ struct VolumeFile {
     on_scroll_down: Option<toml::Value>,
 }
 
+/// The network module's options. Without the `network` feature there are
+/// none, and any key is a loud error naming it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct NetworkFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "network")]
+    margin: Option<u32>,
+    /// The interface to show, by name. Absent is the default route's.
+    #[cfg(feature = "network")]
+    interface: Option<String>,
+    /// Whether the SSID is shown (and reported to `query`): the bar is
+    /// visible in screenshots and to an agent's `query`.
+    #[cfg(feature = "network")]
+    #[serde(rename = "show-ssid")]
+    show_ssid: Option<bool>,
+    /// The picker: spawned with the scan's SSIDs on stdin when the
+    /// module is clicked (or its `menu` action runs).
+    #[cfg(feature = "network")]
+    #[serde(rename = "menu-command")]
+    menu_command: Option<Vec<String>>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "network")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "network")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "network")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "network")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "network")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
+}
+
 impl File {
     /// Validates every value and fills the defaults: `Err` names the
     /// dotted key and says what it takes.
@@ -726,6 +769,13 @@ impl File {
             let margin = gap(path, "microphone.margin", Some(margin), 0)?;
             if margin > 0 {
                 margins.push((crate::modules::microphone::ID, margin));
+            }
+        }
+        #[cfg(feature = "network")]
+        if let Some(margin) = self.network.margin {
+            let margin = gap(path, "network.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::network::ID, margin));
             }
         }
         let layout = self.layout(
@@ -1001,6 +1051,15 @@ impl File {
                 &mut modules.bindings,
             )?;
         }
+        #[cfg(feature = "network")]
+        {
+            apply_network(
+                path,
+                &self.network,
+                &mut modules.network,
+                &mut modules.bindings,
+            )?;
+        }
         Ok(Config {
             bar: Bar {
                 edge,
@@ -1201,6 +1260,70 @@ fn apply_volume(
     })?;
     if !read.is_empty() {
         bindings.push((id, read));
+    }
+}
+#[cfg(feature = "network")]
+const NETWORK_KEYS: [&str; 5] = [
+    "network.on-click",
+    "network.on-right-click",
+    "network.on-middle-click",
+    "network.on-scroll-up",
+    "network.on-scroll-down",
+];
+
+/// The `[network]` table: `interface`, `show-ssid`, `menu-command` and
+/// the interaction keys, into the module's settings.
+#[cfg(feature = "network")]
+fn apply_network(
+    path: &Path,
+    table: &NetworkFile,
+    settings: &mut crate::modules::network::Settings,
+    bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
+) -> Result<(), Error> {
+    if let Some(interface) = table.interface.as_deref() {
+        // `IFNAMSIZ` is 16 with the NUL: longer never matches, and empty
+        // never selects.
+        if interface.is_empty() || interface.len() > 15 {
+            return Err(value(
+                path,
+                "network.interface",
+                format_args!("takes an interface name of 1 to 15 bytes, not `{interface}`"),
+            ));
+        }
+        settings.interface = Some(interface.to_owned());
+    }
+    if let Some(show) = table.show_ssid {
+        settings.show_ssid = show;
+    }
+    if let Some(command) = table.menu_command.as_deref() {
+        if command.iter().any(String::is_empty) {
+            return Err(value(
+                path,
+                "network.menu-command",
+                format_args!("takes no empty argument, not `{command:?}`"),
+            ));
+        }
+        settings.menu_command = command.to_owned();
+    }
+    let read = bindings::read(
+        crate::modules::network::ID,
+        [
+            table.on_click.as_ref(),
+            table.on_right_click.as_ref(),
+            table.on_middle_click.as_ref(),
+            table.on_scroll_up.as_ref(),
+            table.on_scroll_down.as_ref(),
+        ],
+    )
+    .map_err(|(trigger, message)| {
+        value(
+            path,
+            NETWORK_KEYS[trigger as usize],
+            format_args!("{message}"),
+        )
+    })?;
+    if !read.is_empty() {
+        bindings.push((crate::modules::network::ID, read));
     }
     Ok(())
 }

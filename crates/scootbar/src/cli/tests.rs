@@ -354,6 +354,10 @@ fn the_help_matches_the_build() {
         has_title
     );
     assert_eq!(DAEMON_HELP.contains("window-title"), has_title);
+    let has_network = crate::modules::find("network").is_some();
+    assert_eq!(DAEMON_HELP.contains("the network module"), has_network);
+    assert_eq!(DAEMON_HELP.contains("network.menu-command"), has_network);
+    assert_eq!(DAEMON_HELP.contains("network"), has_network);
     for flag in super::FLAGS {
         assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
     }
