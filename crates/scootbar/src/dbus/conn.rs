@@ -251,12 +251,19 @@ impl Conn {
         !self.waits_for_reply(flags) || self.pending.len() < MAX_PENDING
     }
 
-    /// Queues a method return for `to_serial` with a pre-marshalled body.
-    /// PROBE: includes an explicit destination; remove if it changes nothing.
-    pub fn reply_return(&mut self, to_serial: u32, body_sig: &str, body: &[u8]) {
+    /// Queues a method return for `to_serial` with a pre-marshalled body,
+    /// addressed to `dest` (the call's sender): dbus-daemon 1.16.2 drops
+    /// a reply with no destination silently (measured 2026-10-02: the
+    /// bytes leave, nothing arrives, no error, no kick), while an
+    /// addressed one arrives. An empty destination is omitted, as before.
+    pub fn reply_return(&mut self, dest: &str, to_serial: u32, body_sig: &str, body: &[u8]) {
         let serial = self.next_serial();
         let mut writer = Writer::new();
-        writer.begin_return(serial, to_serial, body_sig);
+        if dest.is_empty() {
+            writer.begin_return(serial, to_serial, body_sig);
+        } else {
+            writer.begin_return_to(serial, dest, to_serial, body_sig);
+        }
         writer.raw(body);
         if let Some(message) = writer.finish() {
             self.outbox.extend_from_slice(&message);
