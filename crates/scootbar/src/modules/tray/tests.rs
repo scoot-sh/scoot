@@ -391,3 +391,17 @@ fn debug_setup_steps() {
         .expect("names");
     eprintln!("names: {sig} {} bytes", reply.len());
 }
+
+#[test]
+fn debug_real_bus() {
+    use crate::dbus::conn;
+    if std::env::var_os("TRAY_DEBUG_BUS").is_none() {
+        return;
+    }
+    let path = conn::bus_path();
+    eprintln!("dialling {}", path.display());
+    let mut conn = conn::connect(&path).expect("connect");
+    eprintln!("unique: {}", conn.unique());
+    let events = conn.pump();
+    eprintln!("pumped {} events", events.len());
+}
