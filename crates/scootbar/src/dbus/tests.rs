@@ -7,7 +7,8 @@ use std::ffi::OsStr;
 
 use super::conn::bus_path_for;
 use super::proto::{
-    Kind, Message, Writer, check_member, check_name, check_path, check_signature, frame_at,
+    Kind, Message, Writer, check_body_signature, check_member, check_name, check_path,
+    check_signature, frame_at,
 };
 
 #[test]
@@ -114,11 +115,19 @@ fn names_paths_members_and_signatures_validate() {
     for invalid in ["", "has.dot", "has-dash", "9lives"] {
         assert_eq!(check_member(invalid), Err(()), "{invalid}");
     }
-    for valid in ["s", "u", "as", "a{sv}", "a(iiay)", "(sa(iiay)ss)", "sa{sv}as"] {
+    for valid in ["s", "u", "as", "a{sv}", "a(iiay)", "(sa(iiay)ss)"] {
         assert_eq!(check_signature(valid), Ok(valid));
     }
-    for invalid in ["", "{}", "()", "a", "{ss", "(s", "a{ssv}", "xs", &"(".repeat(40)] {
+    for invalid in ["", "{}", "()", "a", "{ss", "(s", "a{ssv}", "xs", "su", &"(".repeat(40)] {
         assert_eq!(check_signature(invalid), Err(()), "{invalid}");
+    }
+    // Body signatures concatenate: empty and sequences pass here, never
+    // as a single type above.
+    for valid in ["", "s", "su", "sss", "a{sv}", "sa{sv}as"] {
+        assert_eq!(check_body_signature(valid), Ok(valid));
+    }
+    for invalid in ["{}", "a", "xs", &"a".repeat(300)] {
+        assert_eq!(check_body_signature(invalid), Err(()), "{invalid}");
     }
 }
 

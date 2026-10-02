@@ -261,14 +261,10 @@ impl<'a> Message<'a> {
                     6 => Header::Destination(check_name(str_of(sig, value)?)?),
                     7 => Header::Sender(check_name(str_of(sig, value)?)?),
                     8 => Header::Signature({
-                        // The body's signature: empty while there is no
-                        // body (a call like `Hello`), validated otherwise.
+                        // The body's signature: a sequence of complete
+                        // types, empty while there is no body.
                         let text = sig_of(sig, value)?;
-                        if text.is_empty() {
-                            text
-                        } else {
-                            check_signature(text)?
-                        }
+                        check_body_signature(text)?
                     }),
                     // File descriptors are never negotiated by this
                     // client: one on the wire is a peer speaking out of
@@ -549,7 +545,7 @@ impl<'a> Reader<'a> {
     /// the fuzz check walks whole bodies with.
     pub fn skip(&mut self, sig: &str) -> Result<(), ()> {
         let bytes = sig.as_bytes();
-        check_signature(sig)?;
+        check_body_signature(sig)?;
         let (at, _) = skip_value(self, bytes, 0, self.depth as usize)?;
         let _ = at;
         Ok(())
@@ -787,6 +783,27 @@ pub fn check_signature(sig: &str) -> Result<&str, ()> {
     let (at, _) = complete(bytes, 0, 0)?;
     if at != bytes.len() {
         return Err(());
+    }
+    Ok(sig)
+}
+
+/// Whether `sig` is a well-formed message-body signature: a sequence of
+/// complete types (empty while there is no body), each within
+/// [`MAX_SIGNATURE`] bytes total and [`MAX_DEPTH`] nesting. A body's
+/// signature concatenates its values' (`su` for a string and a word),
+/// where a variant's holds exactly one.
+pub fn check_body_signature(sig: &str) -> Result<&str, ()> {
+    if sig.len() > MAX_SIGNATURE {
+        return Err(());
+    }
+    let bytes = sig.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        let (next, _) = complete(bytes, at, 0)?;
+        if next == at {
+            return Err(());
+        }
+        at = next;
     }
     Ok(sig)
 }
