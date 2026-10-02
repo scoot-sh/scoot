@@ -677,9 +677,13 @@ fn the_watcher_object_answers() {
         harness.wait(Duration::from_millis(200));
         fake.pump();
     }
+    let calls = fake.calls();
+    for call in &calls {
+        eprintln!("TRAYDBG got {:?} reply_to={:?} member={}", call.kind, call.reply_to, call.member);
+    }
     for serial in [serial, serial2] {
         assert!(
-            fake.calls().iter().any(|call| matches!(call.kind, Kind::Error) && call.reply_to == Some(serial)),
+            calls.iter().any(|call| matches!(call.kind, Kind::Error) && call.reply_to == Some(serial)),
             "no error for {serial}"
         );
     }
