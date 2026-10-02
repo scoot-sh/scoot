@@ -122,6 +122,15 @@ fn a_tunnel_reads_as_vpn() {
     let mut link = Link::default();
     parse_link(&body, &mut link);
     assert!(link.is_tunnel());
+    // SIT (IPv6-in-IPv4) is one by type.
+    let mut body = vec![0u8; 16];
+    body[2..4].copy_from_slice(&ARPHRD_SIT.to_ne_bytes());
+    body[4..8].copy_from_slice(&12u32.to_ne_bytes());
+    body[8..12].copy_from_slice(&IFF_UP.to_ne_bytes());
+    body.extend_from_slice(&named(b"sit0"));
+    let mut link = Link::default();
+    parse_link(&body, &mut link);
+    assert!(link.is_tunnel());
     // A name past 16 bytes is cut, never grown.
     let body = link_body(11, IFF_UP, IF_OPER_UP, b"averylonginterfacename", None);
     let mut link = Link::default();

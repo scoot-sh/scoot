@@ -14,11 +14,12 @@
 //! ## States
 //!
 //! `Offline` shows `offline` (class `warn`); `Eth` shows the interface
-//! name; `Wifi` shows the SSID and bars (`Wimbly ▂▄▆`); `Vpn` shows `VPN`.
-//! A second VPN up beside the shown interface appends `· VPN`. Which
-//! interface is shown is the config's `interface`, else the default
-//! route's (v4 before v6), tracked by index so a rename keeps it; with
-//! neither, the module is `Offline`.
+//! name; `Wifi` shows the SSID and bars (`Wimbly ▂▄▆`); `Vpn` shows `VPN`
+//! (class `normal`: being on a VPN is a state, not a warning — only
+//! `offline` warns). A second VPN up beside the shown interface appends
+//! `· VPN`. Which interface is shown is the config's `interface`, else
+//! the default route's — the first usable, v4 before v6 — tracked by
+//! index so a rename keeps it; with neither, the module is `Offline`.
 //!
 //! ## Signal
 //!
@@ -116,8 +117,11 @@ const MAX_SCAN: usize = 32;
 /// Consecutive failures of the in-flight dump after which it is dropped
 /// rather than re-queued: a dump that fails this often is not transient
 /// (a busy kernel refuses transiently), and re-queueing it on every error
-/// reply would spin at the kernel's answer rate. Later events re-queue
-/// fresh dumps, so the drop heals.
+/// reply would spin at the kernel's answer rate. The drop heals without a
+/// resync: rtnetlink state re-converges through the multicast the socket
+/// stays joined to, and generic scans and stations re-queue on the next
+/// roam, association, scan completion or new interface; any later socket
+/// error resyncs from authoritative dumps anyway.
 const MAX_DUMP_FAILURES: u8 = 3;
 
 /// The module's options.
@@ -294,7 +298,10 @@ impl Nets {
     }
 
     /// The interface the view shows: the config's by name, else the
-    /// default route's by index (v4 before v6).
+    /// default route's — the first usable, v4 before v6. A route that
+    /// points at a down interface (v4 DHCP lost, v6 RA alive) does not
+    /// hide the working one; with none usable, the first present is
+    /// shown (as `Offline`) so the choice stays deterministic.
     fn selected(&self, interface: Option<&str>) -> Option<&Iface> {
         if let Some(name) = interface {
             return self
@@ -302,9 +309,19 @@ impl Nets {
                 .iter()
                 .find(|iface| iface.link.name_str() == name);
         }
-        [self.default4, self.default6]
-            .into_iter()
-            .find_map(|index| self.ifaces.iter().find(|iface| iface.link.index == index))
+        let mut present = None;
+        for index in [self.default4, self.default6] {
+            let Some(iface) = self.ifaces.iter().find(|iface| iface.link.index == index) else {
+                continue;
+            };
+            if present.is_none() {
+                present = Some(iface);
+            }
+            if iface.link.is_up() && !iface.link.is_loopback() && (iface.has_v4 || iface.has_v6) {
+                return Some(iface);
+            }
+        }
+        present
     }
 
     fn state(&self, interface: Option<&str>) -> State {
@@ -373,12 +390,13 @@ impl Nets {
         self.query_wifi(link.index);
     }
 
-    /// Queues a scan dump for `index`, forgetting the previous list: the
-    /// replies append to an empty list, whatever order the test feeds
-    /// them in, and on the wire the request always precedes its replies.
+    /// Queues a scan dump for `index`: the replies append to the list,
+    /// whatever order the tests feed them in, and on the wire the request
+    /// always precedes its replies. The list resets when the dump goes
+    /// out (see `pump_genl`), not here: dumps go out one at a time, so
+    /// resetting here would attribute another radio's in-flight replies
+    /// to this scan.
     fn queue_scan(&mut self, index: u32) {
-        self.scan_of = index;
-        self.scan_n = 0;
         self.genl_dumps.push_back(GenlDump::Scan(index));
     }
 
@@ -872,7 +890,15 @@ impl Network {
         let mut out = Vec::new();
         match dump {
             GenlDump::Interfaces => netlink::interface_request(&mut out, id, seq, 0),
-            GenlDump::Scan(index) => netlink::scan_request(&mut out, id, seq, index),
+            GenlDump::Scan(index) => {
+                // The list resets as the dump goes out: any reply arriving
+                // from here on belongs to this scan (dumps go out one at a
+                // time), and whatever is still arriving belongs to the last
+                // one sent.
+                self.nets.scan_of = index;
+                self.nets.scan_n = 0;
+                netlink::scan_request(&mut out, id, seq, index)
+            }
             GenlDump::Station(index) => netlink::station_request(&mut out, id, seq, index),
         }
         match send(&sock.fd, &out, SendFlags::empty()) {
@@ -1100,6 +1126,17 @@ impl Network {
         if self.menu.is_some() {
             return Ok(Update::Unchanged);
         }
+        // Privacy first: with the SSID hidden the scan list must not
+        // leave the bar, so there is nothing to pick from. Checked before
+        // the command, so a configured command does not suggest otherwise.
+        if !self.show_ssid {
+            crate::print::warn(format_args!(
+                "scootbar: network: the picker stays closed while show-ssid is false"
+            ));
+            return Err(InvokeError::Refused(
+                "ssid hidden: the picker stays closed while show-ssid is false",
+            ));
+        }
         if self.menu_command.is_empty() {
             return Err(InvokeError::Refused("no menu command configured"));
         }
@@ -1308,13 +1345,19 @@ fn route_socket() -> Result<OwnedFd, String> {
 }
 
 /// The multicast mask for the nl80211 `scan`/`mlme` groups: whatever ids
-/// fit the bind mask's 32 bits join (rustix offers no `ADD_MEMBERSHIP`),
-/// and `both` says whether roam and scan notices both arrive promptly.
-/// A group past bit 31, or absent (id 0), simply does not join; the other
-/// still does, and the signal timer covers what is missed.
+/// fit the bind mask join (rustix offers no `ADD_MEMBERSHIP`), and `both`
+/// says whether roam and scan notices both arrive promptly. A group id is
+/// the kernel's 1-based number (`RTNLGRP_LINK` is 1 and its bind bit is 0,
+/// per `linux/rtnetlink.h`), so id `n` joins bit `n - 1`: valid ids are
+/// 1..=32, and 0 (absent) or past 32 simply does not join. The signal
+/// timer covers what a missed group would have said.
 fn join_mask(scan: u32, mlme: u32) -> (u32, bool) {
     fn bit(id: u32) -> u32 {
-        if id != 0 && id < 32 { 1u32 << id } else { 0 }
+        if (1..=32).contains(&id) {
+            1u32 << (id - 1)
+        } else {
+            0
+        }
     }
     let mask = bit(scan) | bit(mlme);
     (mask, mask != 0 && bit(scan) != 0 && bit(mlme) != 0)

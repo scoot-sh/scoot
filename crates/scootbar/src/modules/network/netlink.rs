@@ -63,11 +63,12 @@ const IFLA_LINKINFO: u16 = 18;
 const IFLA_INFO_KIND: u16 = 1;
 
 // Interface flags and hardware types (`ARPHRD_*`, native-endian on the
-// wire; `ARPHRD_LOOPBACK` is public for the live test that pins it).
+// wire, per `linux/if_arp.h`).
 const IFF_UP: u32 = 0x1;
 const IFF_LOOPBACK: u32 = 0x8;
 const ARPHRD_PPP: u16 = 512;
-pub const ARPHRD_LOOPBACK: u16 = 772;
+const ARPHRD_LOOPBACK: u16 = 772;
+const ARPHRD_SIT: u16 = 776;
 const ARPHRD_NONE: u16 = 0xfffe;
 
 // Operational states.
@@ -270,10 +271,13 @@ impl Link {
     }
 
     /// A tunnel of some kind: WireGuard says so, anything headerless
-    /// (`tun`, `tap`, `sit`, Tailscale's) is one by construction, and PPP
-    /// is one by type. What the module shows as VPN.
+    /// (`tun`, `tap`, Tailscale's) is one by construction, PPP and SIT
+    /// (`sit0`, IPv6-in-IPv4) are one by type. What the module shows as VPN.
     pub fn is_tunnel(&self) -> bool {
-        self.kind_str() == "wireguard" || self.arp == ARPHRD_NONE || self.arp == ARPHRD_PPP
+        self.kind_str() == "wireguard"
+            || self.arp == ARPHRD_NONE
+            || self.arp == ARPHRD_PPP
+            || self.arp == ARPHRD_SIT
     }
 
     /// Whether the kernel refused to parse this far: an empty name never

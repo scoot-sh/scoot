@@ -138,6 +138,26 @@ fn a_hidden_ssid_stays_private() {
     let value = harness.value_on(None).expect("a value");
     assert!(value.get("ssid").is_none(), "{value}");
     assert_eq!(value["bars"], 2);
+    // The picker stays closed too, even with a command configured: the
+    // scan list would expose what the bar hides. Nothing spawns.
+    let settings = Settings {
+        show_ssid: false,
+        menu_command: vec!["true".to_owned()],
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    wifi(&fake, b"Wimbly", -72);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let before = harness.source_count();
+    let menu = ModuleAction::new("menu", None);
+    let output = crate::modules::OutputView { name: None };
+    assert_eq!(
+        harness.invoke(&output, &menu, 1),
+        Err(crate::modules::InvokeError::Refused(
+            "ssid hidden: the picker stays closed while show-ssid is false"
+        ))
+    );
+    assert_eq!(harness.source_count(), before, "no menu spawned");
     let _ = fake.sent();
 }
 
@@ -309,14 +329,17 @@ fn dump_bookkeeping_releases_and_requeues() {
 
 #[test]
 fn the_multicast_mask_joins_whatever_fits() {
-    // Both fit: both join.
-    assert_eq!(super::join_mask(20, 22), ((1 << 20) | (1 << 22), true));
-    // One past bit 31: the other still joins, but not both.
-    assert_eq!(super::join_mask(33, 22), (1 << 22, false));
-    assert_eq!(super::join_mask(20, 40), (1 << 20, false));
+    // A group id is the kernel's 1-based number, so id `n` is bit
+    // `n - 1`: both fit, both join.
+    assert_eq!(super::join_mask(20, 22), ((1 << 19) | (1 << 21), true));
+    // Id 32 is the last bit that fits.
+    assert_eq!(super::join_mask(32, 22), ((1 << 31) | (1 << 21), true));
+    // One past 32: the other still joins, but not both.
+    assert_eq!(super::join_mask(33, 22), (1 << 21, false));
+    assert_eq!(super::join_mask(20, 40), (1 << 19, false));
     // Absent (id 0) joins nothing.
     assert_eq!(super::join_mask(0, 0), (0, false));
-    assert_eq!(super::join_mask(0, 22), (1 << 22, false));
+    assert_eq!(super::join_mask(0, 22), (1 << 21, false));
     // Neither fits: nothing joins.
     assert_eq!(super::join_mask(33, 40), (0, false));
 }
@@ -327,13 +350,59 @@ fn a_finished_scan_refreshes_the_list() {
     wifi(&fake, b"Wimbly", -54);
     assert_eq!(drive(&mut harness), Update::Changed);
     assert!(harness.view().text().starts_with("Wimbly"));
+    // Drain the start-up scan and station: the re-dump below must go out
+    // at once (nothing in flight), resetting the list, so the new page is
+    // all there is.
+    let (_, genl) = fake.sent();
+    fake.genl(&fake::done_seq(request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN)));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    fake.genl(&fake::done_seq(
+        request_seq(&genl, super::netlink::NL80211_CMD_GET_STATION),
+    ));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
     // The kernel finished a scan: the module re-dumps, and the new list
-    // (with a stronger Wimbly) is what shows. The text is the same, but
-    // the signal (and the tooltip with it) moved.
+    // (with a stronger Wimbly) is what shows.
     fake.genl(&fake::scan_done());
+    assert_eq!(drive(&mut harness), Update::Unchanged);
     fake.genl(&fake::scan(&[(b"Wimbly", -5000, true)]));
     assert_eq!(drive(&mut harness), Update::Changed);
     assert_eq!(harness.view().text(), "Wimbly ▂▄▆█");
+    let value = harness.value_on(None).expect("a value");
+    assert_eq!(value["signal"], -50, "the new page replaced the old");
+    let _ = fake.sent();
+}
+
+/// The sequence of the newest dump request for `command` in what the
+/// module sent: the tests' way to complete an in-flight dump.
+fn request_seq(genl: &[u8], command: u8) -> u32 {
+    super::netlink::messages(genl)
+        .filter_map(|msg| {
+            super::netlink::genl_of(msg.body)
+                .and_then(|(found, _)| (found == command).then_some(msg.seq))
+        })
+        .last()
+        .expect("the request")
+}
+
+#[test]
+fn two_radios_scans_do_not_mix() {
+    let (mut harness, fake) = Fake::start(&Settings::default());
+    for (index, name, ssid) in [(WLAN0, "wlan0", &b"Wimbly"[..]), (4, "wlan1", &b"FarAway"[..])] {
+        fake.rt(&fake::link(16, index, UP, 6, name, None));
+        fake.rt(&fake::addr(20, index, 2));
+        fake.genl(&fake::interface(index, name, Some(ssid)));
+    }
+    route_via(&fake, WLAN0);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("Wimbly"));
+    // wlan0's scan is in flight (sent first); wlan1's waits behind it.
+    // wlan0's page arrives while wlan1's scan is queued: it still belongs
+    // to wlan0, and wlan1 keeps the SSID its interface named.
+    fake.genl(&fake::scan(&[(b"Wimbly", -5400, true)]));
+    route_via(&fake, 4);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("FarAway"), "{:?}", harness.view().text());
     let _ = fake.sent();
 }
 
@@ -413,6 +482,21 @@ fn a_missing_configured_interface_is_offline() {
     assert_eq!(drive(&mut harness), Update::Changed);
     assert_eq!(harness.view().text(), "offline");
     assert_eq!(harness.view().class(), crate::modules::Class::Warn);
+    let _ = fake.sent();
+}
+
+#[test]
+fn a_usable_v6_default_survives_a_down_v4() {
+    let (mut harness, fake) = Fake::start(&Settings::default());
+    // eth0 carries the v4 default but is down; eth1 carries v6, up.
+    fake.rt(&fake::link(16, ETH0, 0, 2, "eth0", None));
+    fake.rt(&fake::addr(20, ETH0, 2));
+    fake.rt(&fake::link(16, 4, UP, 6, "eth1", None));
+    fake.rt(&fake::addr(20, 4, 10));
+    route_via(&fake, ETH0);
+    fake.rt(&fake::route(24, 10, 4));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(harness.view().text(), "eth1");
     let _ = fake.sent();
 }
 
@@ -781,13 +865,73 @@ fn twenty_quiet_seconds_are_quiet() {
     assert!(wakes <= 4, "only the timer (and a scan) wakes while idle");
 }
 
+/// The joined multicast, against the real kernel: with the mask joining
+/// bit `id - 1`, the socket hears the scan group (a scan completing) and
+/// the mlme group. Best-effort asks NetworkManager for a fresh scan
+/// first; without one the wait is for its periodic background scan.
+/// Read-only and non-disruptive: nothing disconnects, roams or
+/// re-associates, and the socket sends nothing (so any nl80211 message on
+/// it is multicast, not a reply).
+#[test]
+fn multicast_notices_arrive_on_the_joined_groups() {
+    if std::env::var_os("SCOOTBAR_TEST_LIVE_NET").is_none() {
+        return;
+    }
+    let (genl, family, joined) = super::genl_socket().expect("the generic socket opens");
+    if family.id == 0 {
+        eprintln!("live: no nl80211 on this machine, skipping the multicast wait");
+        return;
+    }
+    eprintln!(
+        "live: nl80211 id {} scan {} mlme {} joined {joined}",
+        family.id, family.scan, family.mlme
+    );
+    assert!(joined, "both groups fit the mask on this machine");
+    let genl = genl.expect("nl80211 resolved, so the socket is open");
+    // A fresh scan's completion notice, if NetworkManager allows one.
+    let rescan = std::process::Command::new("nmcli")
+        .args(["device", "wifi", "rescan", "ifname", "wlan0"])
+        .output()
+        .map(|out| out.status.code());
+    eprintln!("live: rescan request: {rescan:?}");
+    rustix::fs::fcntl_setfl(&genl, rustix::fs::OFlags::NONBLOCK).expect("nonblocking");
+    let mut poll = [rustix::event::PollFd::new(&genl, PollFlags::IN)];
+    let second = rustix::time::Timespec {
+        tv_sec: 1,
+        tv_nsec: 0,
+    };
+    let mut buf = [0u8; super::netlink::READ_LEN];
+    let begin = std::time::Instant::now();
+    while begin.elapsed() < Duration::from_secs(150) {
+        match rustix::event::poll(&mut poll, Some(&second)) {
+            Ok(0) | Err(_) => continue,
+            Ok(_) => {}
+        }
+        let Ok((_, n)) = rustix::net::recv(&genl, &mut buf, rustix::net::RecvFlags::empty())
+        else {
+            continue;
+        };
+        for msg in super::netlink::messages(&buf[..n]) {
+            if msg.kind != family.id {
+                continue;
+            }
+            let command = super::netlink::genl_of(msg.body).map(|(command, _)| command);
+            eprintln!("live: multicast command {command:?} after {:?}", begin.elapsed());
+            return;
+        }
+    }
+    panic!("no nl80211 multicast in 150 s on the joined socket");
+}
+
 /// The nl80211 resolve against the real kernel, and the signal-strategy
 /// measurement: `SET_CQM` with RSSI thresholds at the first wireless
 /// interface. The module re-reads the signal on a timer (see
-/// `SIGNAL_SECS`); this test pins why — the refusal it records here.
-/// Needs a radio; without one it says so and passes.
+/// `SIGNAL_SECS`); this test records what the driver answers, refusal or
+/// ack — the timer stands either way (uniform across drivers, no
+/// per-driver branching). Needs a radio; without one it says so and
+/// passes.
 #[test]
-fn the_cqm_probe_is_refused_where_the_module_runs() {
+fn the_cqm_probe_records_the_driver_s_answer() {
     if std::env::var_os("SCOOTBAR_TEST_LIVE_NET").is_none() {
         return;
     }
@@ -886,7 +1030,7 @@ fn the_cqm_probe_is_refused_where_the_module_runs() {
     }
     eprintln!("live: SET_CQM on ifindex {index} answered {errno:?}");
     assert!(
-        matches!(errno, Some(Some(_))),
-        "the driver refuses CQM thresholds, which is why the signal timer exists"
+        errno.is_some(),
+        "the probe got a definitive answer, refusal or ack, which is why the signal timer stands either way"
     );
 }
