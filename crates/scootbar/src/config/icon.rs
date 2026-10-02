@@ -47,6 +47,38 @@ pub(super) fn clock(path: &Path, file: &ClockFile) -> Result<Option<Icon>, Error
     })
 }
 
+/// The volume or microphone table's static icon, if its section gives
+/// one: shown for every level instead of the built-in ones. `prefix` is
+/// the table's name (`volume`, `microphone`).
+#[cfg(any(feature = "volume", feature = "microphone"))]
+pub(super) fn volume(
+    prefix: &str,
+    table: &super::VolumeFile,
+) -> Result<Option<Icon>, (String, String)> {
+    #[cfg(feature = "icon-image")]
+    let image = table.icon_image.as_deref();
+    #[cfg(not(feature = "icon-image"))]
+    let image = table.icon_image.as_ref().map(|_| "");
+    #[cfg(feature = "microphone")]
+    let what = if prefix == crate::modules::microphone::ID {
+        "a microphone"
+    } else {
+        "a volume"
+    };
+    #[cfg(not(feature = "microphone"))]
+    let what = "a volume";
+    read(
+        prefix,
+        what,
+        &Keys {
+            icon: table.icon.as_deref(),
+            icon_path: table.icon_path.as_deref(),
+            icon_viewbox: table.icon_viewbox.as_deref(),
+            icon_image: image,
+        },
+    )
+}
+
 /// The icon the keys of table `prefix` (`clock`, `button.launcher`) name,
 /// if any. `what` is how a message calls the module (`a clock`). `Err` is
 /// the dotted key at fault and why.

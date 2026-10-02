@@ -488,3 +488,81 @@ fn a_window_title_section_is_refused_loudly() {
         .to_string();
     assert!(error.contains("window-title.placeholder"), "{error}");
 }
+
+#[test]
+#[cfg(feature = "volume")]
+fn a_volume_section_is_read_whole() {
+    use crate::modules::volume::{DEFAULT_MAX_VOLUME, DEFAULT_STEP};
+    let modules = read("").unwrap().modules.volume;
+    assert_eq!(modules.step, DEFAULT_STEP);
+    assert_eq!(modules.max_volume, DEFAULT_MAX_VOLUME);
+    assert!(modules.icon.is_none());
+    let modules = read(
+        "left = [\"volume\"]\n\
+         [volume]\n\
+         step = 10\n\
+         max-volume = 120\n\
+         on-click = \"toggle-mute\"\n\
+         on-scroll-up = \"raise\"\n\
+         on-scroll-down = \"lower\"\n",
+    )
+    .unwrap()
+    .modules
+    .volume;
+    assert_eq!(modules.step, 10);
+    assert_eq!(modules.max_volume, 120);
+}
+
+#[test]
+#[cfg(feature = "volume")]
+fn a_volume_section_is_refused_loudly() {
+    for (text, key) in [
+        ("[volume]\nstep = 0\n", "volume.step"),
+        ("[volume]\nstep = 51\n", "volume.step"),
+        ("[volume]\nmax-volume = 99\n", "volume.max-volume"),
+        ("[volume]\nmax-volume = 151\n", "volume.max-volume"),
+        ("[volume]\nwhatever = 1\n", "whatever"),
+        // Another module's action, and a number where none is taken.
+        ("[volume]\non-click = \"activate\"\n", "volume.on-click"),
+        ("[volume]\non-click = \"raise 3\"\n", "volume.on-click"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+}
+
+#[test]
+#[cfg(feature = "microphone")]
+fn a_microphone_section_is_read_whole() {
+    use crate::modules::volume::{DEFAULT_MAX_VOLUME, DEFAULT_STEP};
+    let modules = read("").unwrap().modules.microphone;
+    assert_eq!(modules.step, DEFAULT_STEP);
+    assert_eq!(modules.max_volume, DEFAULT_MAX_VOLUME);
+    let modules = read(
+        "left = [\"microphone\"]\n\
+         [microphone]\n\
+         step = 2\n\
+         on-click = \"toggle-mute\"\n",
+    )
+    .unwrap()
+    .modules
+    .microphone;
+    assert_eq!(modules.step, 2);
+}
+
+#[test]
+#[cfg(feature = "microphone")]
+fn a_microphone_section_is_refused_loudly() {
+    for (text, key) in [
+        ("[microphone]\nstep = 0\n", "microphone.step"),
+        ("[microphone]\nmax-volume = 151\n", "microphone.max-volume"),
+        ("[microphone]\nwhatever = 1\n", "whatever"),
+        (
+            "[microphone]\non-click = \"activate\"\n",
+            "microphone.on-click",
+        ),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+}
