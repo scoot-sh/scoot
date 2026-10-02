@@ -390,6 +390,7 @@ fn debug_flush_path() {
     use crate::modules::Module;
     use rustix::event::PollFlags;
     let (stream, mut fake) = Fake::pair();
+    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut module = start_connected(stream);
     // Init queued two RequestNames; forced turns drive the whole chain.
     let _ = module.on_ready(0, PollFlags::OUT);
