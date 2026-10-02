@@ -615,8 +615,10 @@ impl Live {
     /// Refreshes the item's properties: one `GetAll`, answered later.
     fn refresh(&mut self, id: &str) {
         let Some(item) = self.items.iter().find(|item| item.id == id) else {
+            eprintln!("TRAYDBG refresh: no such item {id}");
             return;
         };
+        eprintln!("TRAYDBG refresh: {}", id);
         let (service, path) = (item.service.clone(), item.path.clone());
         self.issue(&service, &path, ITEM_PROPERTIES, "GetAll", "s", &get_all_body(), 0, Op::Props(id.to_owned()));
     }
@@ -677,8 +679,10 @@ impl Live {
 
         fn on_owner(&mut self, id: &str, signature: &str, body: &[u8]) -> Update {
         let Ok(owner) = proto::read_owner(signature, body) else {
+            eprintln!("TRAYDBG on_owner refused sig={signature:?}");
             return Update::Unchanged;
         };
+        eprintln!("TRAYDBG on_owner {id} -> {owner}");
         let known = self.items.iter().any(|item| item.id == id);
         if !known {
             return Update::Unchanged;
