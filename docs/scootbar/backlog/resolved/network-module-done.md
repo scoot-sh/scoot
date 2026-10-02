@@ -67,17 +67,30 @@ Signal re-reads on a 10 s timerfd armed only while WiFi is shown —
 test) — while connect/disconnect/roam stay events (roam also re-reads
 the interface, so a stale scan cache cannot leave the old SSID shown).
 
-Evidence: `cargo nextest run -p scootbar` 829 pass on the dev VM;
+Evidence: `cargo nextest run -p scootbar` 875 pass on the dev VM (with
+volume and microphone merged underneath);
 clippy `-D warnings` clean on the default, minimal and each-module-alone
 builds; `fmt --check` clean; the feature-matrix `--bin` runs all pass.
 Live on the dev VM (eth0): `ethernet` in ~100 ms, 1 wake in 20 quiet
 seconds. Live on the Asahi box (wlan0, associated): `Wimbly` with bars
-in ~111 ms, 2 wakes in 20 quiet seconds (the timer's own), a 492-byte
+in ~106–120 ms, 2 wakes in 20 quiet seconds (the timer's own), a 492-byte
 scan dump captured into the fuzz corpus. Review of the lane's first
 draft caught a byte-swapped `ifi_type` (broke tun/tap/PPP VPN detection),
 a short `GETLINK` body, and an unbounded dump-retry spin, all fixed with
-live pins. Not run live: forced disconnect/roam (would drop the test
-session's own ssh), suspend/resume, the full bench-ratchet run.
+live pins. Review round two caught an off-by-one multicast mask (group
+ids are 1-based, the bind bit is `id - 1` — the socket had joined the
+wrong groups, so roam notices never arrived; proven by a rescan's
+`TRIGGER_SCAN` arriving 19 ms after the fix, and pinned by a live test
+that reads the subscription back from `/proc/net/netlink`), a
+`show-ssid = false` hole (the picker piped real SSIDs; it now refuses
+with a log line), a two-radio scan-list mixup, an unusable default route
+hiding a working one, and a quiet-test bound the module's own signal
+tick legitimately breaks (it now pins state/SSID stillness instead).
+A bare scan-completion notice re-dumps nothing anymore: it carries no
+networks, and the picker re-dumps when it opens. Not run live: forced
+disconnect/roam (would drop the test session's own ssh), suspend/resume,
+the full bench-ratchet run (module-level numbers published in
+[lightest.md](lightest.md) instead).
 
 The module API needed no changes for this module (`sources`, `on_ready`,
 `view`, `value`, `invoke` as they stand) — but it stays unfrozen until
