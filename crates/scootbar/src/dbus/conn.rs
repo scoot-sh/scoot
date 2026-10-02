@@ -307,7 +307,9 @@ impl Conn {
                 Ok(Some(len)) => len,
                 Ok(None) => break,
                 Err(()) => {
-                    crate::print::warn(format_args!("scootbar: tray: dropping a refused bus frame"));
+                    crate::print::warn(format_args!(
+                        "scootbar: tray: dropping a refused bus frame"
+                    ));
                     self.dead = true;
                     return (events, false);
                 }
@@ -335,7 +337,9 @@ impl Conn {
         while !self.outbox.is_empty() {
             match self.stream.write(&self.outbox) {
                 Ok(0) => {
-                    crate::print::warn(format_args!("scootbar: tray: the bus closed under a write"));
+                    crate::print::warn(format_args!(
+                        "scootbar: tray: the bus closed under a write"
+                    ));
                     self.dead = true;
                     return;
                 }

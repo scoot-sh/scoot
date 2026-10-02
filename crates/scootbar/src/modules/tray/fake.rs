@@ -246,7 +246,17 @@ impl Fake {
         body: &[u8],
     ) -> u32 {
         let serial = self.next_serial();
-        let message = frame_with_sender(1, serial, path, interface, member, Some(dest), sender, sig, body);
+        let message = frame_with_sender(
+            1,
+            serial,
+            path,
+            interface,
+            member,
+            Some(dest),
+            sender,
+            sig,
+            body,
+        );
         self.send.write_all(&message).unwrap();
         serial
     }

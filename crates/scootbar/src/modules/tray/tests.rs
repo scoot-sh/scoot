@@ -606,7 +606,9 @@ fn the_watcher_object_answers() {
     use crate::dbus::proto::{Kind, Writer};
     let (stream, mut fake) = Fake::pair();
     let mut harness = Harness::new(start_connected(stream));
-    drive(&mut harness, &mut fake, |harness| harness.source_count() == 1);
+    drive(&mut harness, &mut fake, |harness| {
+        harness.source_count() == 1
+    });
     // `Ping` answers empty; every reply quotes the call.
     let serial = fake.send_call(
         fake::MODULE,
@@ -682,14 +684,18 @@ fn the_watcher_object_answers() {
         fake.pump();
         calls = fake.calls();
         if [serial, serial2].iter().all(|wanted| {
-            calls.iter().any(|call| matches!(call.kind, Kind::Error) && call.reply_to == Some(*wanted))
+            calls
+                .iter()
+                .any(|call| matches!(call.kind, Kind::Error) && call.reply_to == Some(*wanted))
         }) {
             break;
         }
     }
     for serial in [serial, serial2] {
         assert!(
-            calls.iter().any(|call| matches!(call.kind, Kind::Error) && call.reply_to == Some(serial)),
+            calls
+                .iter()
+                .any(|call| matches!(call.kind, Kind::Error) && call.reply_to == Some(serial)),
             "no error for {serial}"
         );
     }
