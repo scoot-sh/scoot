@@ -278,12 +278,17 @@ fn serve(
         match frame_at(&staged) {
             Ok(Some(len)) => {
                 let frame: Vec<u8> = staged.drain(..len).collect();
+                eprintln!("FAKEDBG: serving {len} bytes");
                 if serve_frame(&mut stream, &frame, &state, &calls, &serial).is_err() {
+                    eprintln!("FAKEDBG: serve failed, exiting");
                     return;
                 }
             }
             Ok(None) => {}
-            Err(()) => return,
+            Err(()) => {
+                eprintln!("FAKEDBG: bad frame, exiting");
+                return;
+            }
         }
         match stream.read(&mut chunk) {
             Ok(0) => return,
