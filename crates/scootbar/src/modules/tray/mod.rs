@@ -197,7 +197,7 @@ struct Tray {
 
 enum Bus {
     Waiting { notify: Option<Notify>, dir: PathBuf },
-    Live(Live),
+    Live(Box<Live>),
 }
 
 /// The inotify watch on the bus socket's directory, while waiting.
@@ -381,7 +381,7 @@ impl Tray {
     fn connected(&mut self, stream: std::os::unix::net::UnixStream) {
         match conn::setup(stream) {
             Ok(conn) => {
-                self.bus = Bus::Live(setup(conn));
+                self.bus = Bus::Live(Box::new(setup(conn)));
             }
             Err(_) => self.wait(),
         }
@@ -552,7 +552,9 @@ impl Live {
     /// Queues a call, tracking its flight. A full table drops the call:
     /// the next signal re-queues it (every refresh is signal-driven, so
     /// nothing is lost but a turn). Calls that want no reply take no
-    /// flight.
+    /// flight. Eight arguments: a call names its destination, object,
+    /// interface, member, body and reply wish, like the header it becomes.
+    #[allow(clippy::too_many_arguments)]
     fn issue(
         &mut self,
         destination: &str,
@@ -592,7 +594,8 @@ impl Live {
     }
 
     /// Fires a call that wants no reply (activation): queued, never
-    /// tracked, never reported.
+    /// tracked, never reported. Eight arguments, as [`Live::issue`].
+    #[allow(clippy::too_many_arguments)]
     fn fire(
         &mut self,
         destination: &str,
@@ -978,7 +981,8 @@ impl Live {
     /// Answers a call on the watcher object (owner mode): registrations,
     /// properties, introspection and ping. Anything else is an error, not
     /// silence (a caller waiting on no reply is the caller's bug, not
-    /// ours to hang on).
+    /// ours to hang on). Eight arguments, as [`Live::issue`].
+    #[allow(clippy::too_many_arguments)]
     fn on_call(
         &mut self,
         sender: &str,
@@ -1329,10 +1333,6 @@ impl Live {
         (index >= 0).then(|| self.items.get(index as usize)).flatten()
     }
 }
-
-/// Runs the blocking set-up on an open stream: `Hello` (in `setup`),
-/// both watcher names, the match rules, then enumeration. Blocking, like
-/// the volume handshake: a handful of round trips on a local socket.
 
 impl Item {
     fn new(id: String, service: String, path: String) -> Self {
@@ -1767,9 +1767,7 @@ impl Module for Tray {
     /// right click means nothing by default: the menu waits on popups,
     /// and silence beats a refusal on every click.
     fn on_input(&self, input: &Input<'_>) -> Option<crate::action::Action> {
-        let Some(live) = self.bus_live() else {
-            return None;
-        };
+        let live = self.bus_live()?;
         let index = Self::hit(input.at.x, input.at.padding, input.at.em, live.items.len())?;
         let name = match input.trigger {
             Trigger::Click => "activate",
@@ -1854,9 +1852,7 @@ impl Module for Tray {
     /// What `query` reports: the mode and the shown items, or nothing
     /// while nothing is shown.
     fn value(&self, _output: &OutputView<'_>) -> Option<serde_json::Value> {
-        let Some(live) = self.bus_live() else {
-            return None;
-        };
+        let live = self.bus_live()?;
         if live.items.is_empty() {
             return None;
         }

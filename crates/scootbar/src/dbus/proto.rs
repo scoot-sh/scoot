@@ -423,7 +423,7 @@ impl<'a> Reader<'a> {
     }
 
     pub fn i64(&mut self) -> Result<i64, ()> {
-        Ok(self.int(8)? as u64 as i64)
+        Ok(self.int(8)? as i64)
     }
 
     pub fn f64(&mut self) -> Result<f64, ()> {
@@ -847,11 +847,9 @@ fn complete(bytes: &[u8], at: usize, depth: usize) -> Result<(usize, bool), ()> 
                 return Err(());
             }
             loop {
-                let next;
-                (at, _) = complete(bytes, at, depth + 1)?;
-                next = at;
-                match bytes.get(next) {
-                    Some(b')') => return Ok((next + 1, false)),
+                at = complete(bytes, at, depth + 1)?.0;
+                match bytes.get(at) {
+                    Some(b')') => return Ok((at + 1, false)),
                     Some(_) => {}
                     None => return Err(()),
                 }
@@ -1070,7 +1068,7 @@ impl Writer {
         let pad = (n.saturating_sub(self.buf.len() % n)) % n;
         self.reserve(pad);
         if !self.overflow {
-            self.buf.extend(core::iter::repeat(0).take(pad));
+            self.buf.extend(core::iter::repeat_n(0, pad));
         }
     }
 
@@ -1204,8 +1202,8 @@ impl Writer {
         if self.overflow {
             return;
         }
-        let len_at = (cookie >> 32) as usize;
-        let data_at = (cookie & 0xffff_ffff) as usize;
+        let len_at = cookie >> 32;
+        let data_at = cookie & 0xffff_ffff;
         let len = self.buf.len().saturating_sub(data_at) as u32;
         if let Some(slot) = self.buf.get_mut(len_at..len_at + 4) {
             slot.copy_from_slice(&len.to_le_bytes());
@@ -1401,9 +1399,7 @@ impl Writer {
         if self.overflow {
             return None;
         }
-        let Some(body_at) = self.body_at else {
-            return None;
-        };
+        let body_at = self.body_at?;
         let len = self.buf.len().saturating_sub(body_at) as u32;
         self.buf[4..8].copy_from_slice(&len.to_le_bytes());
         self.body_at = None;

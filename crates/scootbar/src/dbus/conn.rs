@@ -204,6 +204,9 @@ impl Conn {
     /// marshalled body with signature `body_sig`. `token` comes back on
     /// the reply event. Calls with [`proto::flag::NO_REPLY_EXPECTED`]
     /// take no pending slot (no reply arrives) and report no event.
+    /// Nine arguments: a call names its destination, object, interface,
+    /// member, body and reply wish, like the protocol's own header.
+    #[allow(clippy::too_many_arguments)]
     pub fn call(
         &mut self,
         destination: &str,
@@ -297,13 +300,12 @@ impl Conn {
                 }
             };
             let frame: Vec<u8> = self.staged.drain(..consumed).collect();
-            match self.dispatch(&frame) {
-                Some(event) => events.push(event),
-                None => {
-                    if self.dead {
-                        return (events, false);
-                    }
-                }
+            if let Some(event) = self.dispatch(&frame) {
+                events.push(event);
+                continue;
+            }
+            if self.dead {
+                return (events, false);
             }
         }
         // Capped with whole frames still staged: the consumer re-pumps
@@ -376,22 +378,20 @@ impl Conn {
                         name: message.error.unwrap_or("org.freedesktop.DBus.Error.Failed").to_owned(),
                     });
                 }
-                return Some(Event::Reply {
+                Some(Event::Reply {
                     token,
                     signature: message.signature.to_owned(),
                     body: message.body.rest().to_vec(),
-                });
+                })
             }
-            Kind::Signal => {
-                return Some(Event::Signal {
-                    sender: message.sender.unwrap_or("").to_owned(),
-                    path: message.path.unwrap_or("").to_owned(),
-                    interface: message.interface.unwrap_or("").to_owned(),
-                    member: message.member.unwrap_or("").to_owned(),
-                    signature: message.signature.to_owned(),
-                    body: message.body.rest().to_vec(),
-                });
-            }
+            Kind::Signal => Some(Event::Signal {
+                sender: message.sender.unwrap_or("").to_owned(),
+                path: message.path.unwrap_or("").to_owned(),
+                interface: message.interface.unwrap_or("").to_owned(),
+                member: message.member.unwrap_or("").to_owned(),
+                signature: message.signature.to_owned(),
+                body: message.body.rest().to_vec(),
+            }),
             Kind::MethodCall => {
                 // Addressed elsewhere (a broadcast we did not match):
                 // dropped. What is ours becomes an event for the
@@ -400,7 +400,7 @@ impl Conn {
                 if destination != self.unique {
                     return None;
                 }
-                return Some(Event::MethodCall {
+                Some(Event::MethodCall {
                     sender: message.sender.unwrap_or("").to_owned(),
                     path: message.path.unwrap_or("").to_owned(),
                     interface: message.interface.unwrap_or("").to_owned(),
@@ -408,7 +408,7 @@ impl Conn {
                     serial: message.serial,
                     signature: message.signature.to_owned(),
                     body: message.body.rest().to_vec(),
-                });
+                })
             }
         }
     }

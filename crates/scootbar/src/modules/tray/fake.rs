@@ -216,11 +216,6 @@ impl Fake {
         self.send_signal(&owner, "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher", "StatusNotifierItemRegistered", "s", &bytes);
     }
 
-    /// Frames the module sent so far, without draining.
-    pub fn calls_len(&self) -> usize {
-        self.calls.len()
-    }
-
     /// The frames the module sent, drained.
     pub fn calls(&mut self) -> Vec<RecordedCall> {
         core::mem::take(&mut self.calls)
