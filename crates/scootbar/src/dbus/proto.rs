@@ -1310,7 +1310,14 @@ impl Writer {
 
     /// Starts an error reply for `reply_to` with `error`'s name and an
     /// explicit destination.
-    pub fn begin_error_to(&mut self, serial: u32, dest: &str, reply_to: u32, error: &str, body_sig: &str) {
+    pub fn begin_error_to(
+        &mut self,
+        serial: u32,
+        dest: &str,
+        reply_to: u32,
+        error: &str,
+        body_sig: &str,
+    ) {
         self.begin(
             3,
             serial,

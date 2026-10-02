@@ -1100,7 +1100,8 @@ impl Live {
             return self.on_properties(sender, member, serial, signature, body);
         }
         if interface == "org.freedesktop.DBus.Introspectable" && member == "Introspect" {
-            self.conn.reply_return(sender, serial, "s", &introspect_body());
+            self.conn
+                .reply_return(sender, serial, "s", &introspect_body());
             return Update::Unchanged;
         }
         if interface == "org.freedesktop.DBus.Peer" {

@@ -347,8 +347,7 @@ impl Conn {
     /// Writes the outbox until it is empty or the socket would block. A
     /// real I/O error kills the connection.
     fn flush(&mut self) {
-        if !self.outbox.is_empty() {
-        }
+        if !self.outbox.is_empty() {}
         while !self.outbox.is_empty() {
             match self.stream.write(&self.outbox) {
                 Ok(0) => {

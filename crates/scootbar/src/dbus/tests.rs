@@ -121,7 +121,10 @@ fn every_reply_shape_round_trips() {
     let message = writer.finish().expect("builds");
     let parsed = Message::parse(&message).unwrap();
     assert_eq!(parsed.kind, Kind::Error);
-    assert_eq!(parsed.error, Some("org.freedesktop.DBus.Error.UnknownMethod"));
+    assert_eq!(
+        parsed.error,
+        Some("org.freedesktop.DBus.Error.UnknownMethod")
+    );
 }
 
 #[test]
