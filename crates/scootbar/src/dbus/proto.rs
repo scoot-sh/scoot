@@ -1112,37 +1112,49 @@ impl Writer {
         self.buf.push(0);
     }
 
-    /// Opens an array: 4-aligned, then aligned for `element_align`, with
-    /// the length word left for [`Writer::close_array`]. Returns the
-    /// cookie it takes.
+    /// Opens an array: the 4-aligned length word, then aligned for
+    /// `element_align`, with the elements after. Returns the cookie
+    /// [`Writer::close_array`] takes. The length counts the elements
+    /// only — never the padding between the length word and the first
+    /// element, which is on the wire but not in the length.
     pub fn open_array(&mut self, element_align: usize) -> Option<usize> {
         if self.depth >= MAX_DEPTH {
             self.overflow = true;
             return None;
         }
         self.pad(4);
-        if element_align > 1 {
-            self.pad(element_align);
+        if self.overflow {
+            return None;
         }
+        let len_at = self.buf.len();
         self.reserve(4);
         if self.overflow {
             return None;
         }
-        self.depth += 1;
-        let cookie = self.buf.len();
         self.buf.extend_from_slice(&[0, 0, 0, 0]);
-        Some(cookie)
+        if element_align > 1 {
+            self.pad(element_align);
+        }
+        if self.overflow {
+            return None;
+        }
+        self.depth += 1;
+        // Both offsets in one cookie: the length word's, and the
+        // elements' (lengths stay below 2^32 by the message cap).
+        Some((((len_at as u64) << 32) | (self.buf.len() as u64)) as usize)
     }
 
     /// Closes the array `open_array` opened: the length word takes the
-    /// bytes since.
+    /// elements' bytes since.
     pub fn close_array(&mut self, cookie: usize) {
         self.depth = self.depth.saturating_sub(1);
         if self.overflow {
             return;
         }
-        let len = self.buf.len().saturating_sub(cookie + 4) as u32;
-        if let Some(slot) = self.buf.get_mut(cookie..cookie + 4) {
+        let len_at = (cookie >> 32) as usize;
+        let data_at = (cookie & 0xffff_ffff) as usize;
+        let len = self.buf.len().saturating_sub(data_at) as u32;
+        if let Some(slot) = self.buf.get_mut(len_at..len_at + 4) {
             slot.copy_from_slice(&len.to_le_bytes());
         } else {
             self.overflow = true;
@@ -1262,10 +1274,17 @@ impl Writer {
         // The body length: patched at finish.
         self.buf.extend_from_slice(&[0, 0, 0, 0]);
         self.buf.extend_from_slice(&serial.to_le_bytes());
-        // The fields array: written whole, then its length patched, so no
-        // second pass over the header is needed.
+        // The fields array: the length word, then 8-aligned elements,
+        // written whole with the length patched after, so no second
+        // pass over the header is needed. The length counts the
+        // elements only, never the padding before the first one.
         let array_at = self.buf.len();
         self.buf.extend_from_slice(&[0, 0, 0, 0]);
+        self.pad(8);
+        if self.overflow {
+            return;
+        }
+        let data_at = self.buf.len();
         for field in fields {
             // Each element is a `{BYTE, VARIANT}`: 8-aligned, then the
             // code byte and the variant's signature and value.
@@ -1308,7 +1327,7 @@ impl Writer {
                 return;
             }
         }
-        let fields_len = self.buf.len().saturating_sub(array_at + 4) as u32;
+        let fields_len = self.buf.len().saturating_sub(data_at) as u32;
         if let Some(slot) = self.buf.get_mut(array_at..array_at + 4) {
             slot.copy_from_slice(&fields_len.to_le_bytes());
         } else {
