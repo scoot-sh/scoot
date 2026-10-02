@@ -368,3 +368,20 @@ fn the_registry_lists_tray_with_its_actions() {
     let harness = Harness::new(super::stand_in(&crate::modules::Settings::default()));
     assert_eq!(harness.source_count(), 1);
 }
+
+#[test]
+fn debug_raw_sasl() {
+    use std::io::{Read, Write};
+    use std::time::Duration;
+    let (mut stream, _fake) = Fake::pair();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    stream.write_all(&[0]).unwrap();
+    eprintln!("wrote NUL");
+    stream.write_all(b"AUTH EXTERNAL\r\n").unwrap();
+    eprintln!("wrote AUTH");
+    let mut buf = [0u8; 64];
+    match stream.read(&mut buf) {
+        Ok(n) => eprintln!("read {n}: {:?}", String::from_utf8_lossy(&buf[..n])),
+        Err(error) => eprintln!("read failed: {error:?}"),
+    }
+}
