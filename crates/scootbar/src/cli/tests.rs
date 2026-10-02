@@ -277,16 +277,17 @@ fn the_layout_is_what_is_listed() {
             })
         );
     }
-    let unknown = run(&["daemon", "--left", "battery"]);
+    // A module no build has yet (bluetooth is M6): unknown everywhere.
+    let unknown = run(&["daemon", "--left", "bluetooth"]);
     assert_eq!(
         unknown,
         Err(Error::Modules {
             flag: "--left",
-            error: ModulesError::Unknown("battery".into())
+            error: ModulesError::Unknown("bluetooth".into())
         })
     );
     let message = unknown.unwrap_err().to_string();
-    assert!(message.contains("no module `battery`"), "{message}");
+    assert!(message.contains("no module `bluetooth`"), "{message}");
     assert!(matches!(
         run(&["daemon", "--left", "clock,"]),
         Err(Error::Modules { .. })
@@ -339,8 +340,14 @@ fn the_help_matches_the_build() {
     let has_clock = crate::modules::find("clock").is_some();
     let has_workspaces = crate::modules::find("workspaces").is_some();
     let has_title = crate::modules::find("window-title").is_some();
+    let has_battery = crate::modules::find("battery").is_some();
     assert_eq!(DAEMON_HELP.contains("--clock-format"), has_clock);
-    assert_eq!(DAEMON_HELP.contains("Modules: clock"), has_clock);
+    // Battery sorts first, so with both the list opens with it.
+    if has_clock && has_battery {
+        assert!(DAEMON_HELP.contains("Modules: battery, clock"));
+    } else {
+        assert_eq!(DAEMON_HELP.contains("Modules: clock"), has_clock);
+    }
     assert_eq!(USAGE.contains("a clock"), has_clock);
     assert_eq!(USAGE.contains("workspaces"), has_workspaces);
     assert_eq!(
@@ -354,6 +361,9 @@ fn the_help_matches_the_build() {
         has_title
     );
     assert_eq!(DAEMON_HELP.contains("window-title"), has_title);
+    assert_eq!(DAEMON_HELP.contains("the battery module"), has_battery);
+    assert_eq!(DAEMON_HELP.contains("battery.warn-below"), has_battery);
+    assert_eq!(DAEMON_HELP.contains("battery"), has_battery);
     for flag in super::FLAGS {
         assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
     }

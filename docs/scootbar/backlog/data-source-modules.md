@@ -3,7 +3,7 @@ title: "Data-source modules (umbrella): rules shared by every module that reads 
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "network-module, battery-module, brightness-module, media-module, bluetooth-module, tray"
+blocked: "network-module, brightness-module, media-module, bluetooth-module, tray"
 milestone: "ongoing"
 ---
 

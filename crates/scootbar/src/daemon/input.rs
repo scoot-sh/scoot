@@ -51,7 +51,7 @@ pub struct Throttle {
 impl Throttle {
     /// Whether a failure at `now` may be said; a failure that may not is
     /// counted and reported with the next line that may.
-    fn allow(&mut self, now: Instant) -> Option<u32> {
+    pub(crate) fn allow(&mut self, now: Instant) -> Option<u32> {
         if let Some(last) = self.last {
             if now.saturating_duration_since(last) < WARN_EVERY {
                 self.held = self.held.saturating_add(1);

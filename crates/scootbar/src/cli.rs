@@ -79,6 +79,20 @@ macro_rules! idle {
 // arms of `modules!` a build compiles expand their form, so the unused
 // forms of any one build are allowed here, not at each use.
 #[allow(unused_macros)]
+#[cfg(feature = "battery")]
+macro_rules! battery_head {
+    () => {
+        "battery, "
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "battery"))]
+macro_rules! battery_head {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
 #[cfg(feature = "microphone")]
 macro_rules! microphone_head {
     () => {
@@ -142,7 +156,9 @@ macro_rules! modules {
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty.
-                           Modules: clock",
+                           Modules: ",
+            battery_head!(),
+            "clock",
             microphone_tail!(),
             volume_tail!(),
             ", window-title, workspaces
@@ -172,7 +188,9 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                           layout: a section not given is empty. Modules: clock",
+                           layout: a section not given is empty. Modules: ",
+            battery_head!(),
+            "clock",
             microphone_tail!(),
             volume_tail!(),
             ", workspaces
@@ -203,7 +221,9 @@ macro_rules! modules {
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty.
-                           Modules: clock",
+                           Modules: ",
+            battery_head!(),
+            "clock",
             microphone_tail!(),
             volume_tail!(),
             ", window-title
@@ -233,7 +253,9 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order (default: the clock in
      --right IDS          the center). Giving any of the three sets the whole
-                           layout: a section not given is empty. Modules: clock",
+                           layout: a section not given is empty. Modules: ",
+            battery_head!(),
+            "clock",
             microphone_tail!(),
             volume_tail!(),
             "\n     --padding N          logical pixels either side of each module, 0 to 1024
@@ -262,6 +284,7 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: ",
+            battery_head!(),
             microphone_head!(),
             volume_head!(),
             "window-title, workspaces
@@ -284,6 +307,7 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: ",
+            battery_head!(),
             microphone_head!(),
             volume_head!(),
             "workspaces
@@ -306,6 +330,7 @@ macro_rules! modules {
             "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: ",
+            battery_head!(),
             microphone_head!(),
             volume_head!(),
             "window-title
@@ -322,7 +347,8 @@ macro_rules! modules {
     not(feature = "workspaces"),
     not(feature = "window-title"),
     not(feature = "volume"),
-    not(feature = "microphone")
+    not(feature = "microphone"),
+    not(feature = "battery")
 ))]
 macro_rules! modules {
     () => {
@@ -330,47 +356,9 @@ macro_rules! modules {
      --center IDS         comma-separated, in order. This build has none, so
      --right IDS          only an empty list is taken
      --padding N          logical pixels either side of each module, 0 to 1024
-                           (default 8)
+                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
-                           1024 (default 0)
-"
-    };
-}
-#[cfg(all(
-    not(feature = "clock"),
-    not(feature = "workspaces"),
-    not(feature = "window-title"),
-    feature = "volume",
-    feature = "microphone"
-))]
-macro_rules! modules {
-    () => {
-        "    --left IDS           the modules along the left, center and right,
-     --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout. Modules: microphone, volume
-     --padding N          logical pixels either side of each module, 0 to 1024
-                           (default 8)
-     --spacing N          logical pixels between neighbouring modules, 0 to
-                           1024 (default 0)
-"
-    };
-}
-#[cfg(all(
-    not(feature = "clock"),
-    not(feature = "workspaces"),
-    not(feature = "window-title"),
-    feature = "volume",
-    not(feature = "microphone")
-))]
-macro_rules! modules {
-    () => {
-        "    --left IDS           the modules along the left, center and right,
-     --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout. Modules: volume
-     --padding N          logical pixels either side of each module, 0 to 1024
-                           (default 8)
-     --spacing N          logical pixels between neighbouring modules, 0 to
-                           1024 (default 0)
+                            1024 (default 0)
 "
     };
 }
@@ -379,18 +367,152 @@ macro_rules! modules {
     not(feature = "workspaces"),
     not(feature = "window-title"),
     not(feature = "volume"),
-    feature = "microphone"
+    feature = "microphone",
+    not(feature = "battery")
+))]
+macro_rules! modules {
+    () => {
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: ",
+            battery_head!(),
+            "microphone
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+        )
+    };
+}
+// The same four builds with the battery module: it sorts first.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "battery"
 ))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
-     --right IDS          sets the whole layout. Modules: microphone
+     --right IDS          sets the whole layout. Modules: battery
      --padding N          logical pixels either side of each module, 0 to 1024
-                           (default 8)
+                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
-                           1024 (default 0)
+                            1024 (default 0)
 "
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "battery"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "battery"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "battery"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: battery, microphone
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "battery")
+))]
+macro_rules! modules {
+    () => {
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: ",
+            battery_head!(),
+            "volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+        )
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "battery")
+))]
+macro_rules! modules {
+    () => {
+        concat!(
+            "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: ",
+            battery_head!(),
+            "microphone, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+        )
     };
 }
 #[cfg(feature = "workspaces")]
@@ -473,6 +595,27 @@ macro_rules! microphone_help {
 }
 #[cfg(not(feature = "microphone"))]
 macro_rules! microphone_help {
+    () => {
+        ""
+    };
+}
+// What the battery module is, for the help page.
+#[cfg(feature = "battery")]
+macro_rules! battery_help {
+    () => {
+        "Battery (the battery module):
+    the batteries' charge in percent (`combine` by default, the mean, or
+    the first with batteries = \"first\"), warn at or below
+    battery.warn-below (default 20) and urgent at or below
+    battery.urgent-below (default 10), with battery.on-low run once per
+    downward crossing of the urgent one. Woken by the kernel's uevents,
+    and re-read once a minute while discharging for drivers whose
+    capacity steps are silent. Nothing is shown where there is no battery
+"
+    };
+}
+#[cfg(not(feature = "battery"))]
+macro_rules! battery_help {
     () => {
         ""
     };
@@ -565,6 +708,7 @@ Text:
 Modules:
 ",
     modules!(),
+    battery_help!(),
     workspaces_help!(),
     window_title_help!(),
     volume_help!(),

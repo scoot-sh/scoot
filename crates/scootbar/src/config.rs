@@ -297,6 +297,10 @@ struct File {
     volume: VolumeFile,
     #[cfg(feature = "microphone")]
     microphone: VolumeFile,
+    /// The battery module's options. Without the feature there are none,
+    /// and any key is a loud error naming it.
+    #[cfg(feature = "battery")]
+    battery: BatteryFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -558,6 +562,52 @@ struct VolumeFile {
     on_scroll_down: Option<toml::Value>,
 }
 
+/// The battery module's options. Without the `battery` feature there are
+/// none, and any key is a loud error naming it.
+#[cfg(feature = "battery")]
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct BatteryFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "battery")]
+    margin: Option<u32>,
+    /// The percent at or below which the class turns `warn`.
+    #[cfg(feature = "battery")]
+    #[serde(rename = "warn-below")]
+    warn_below: Option<u32>,
+    /// The percent at or below which the class turns `urgent`, and the
+    /// downward crossing that fires `on-low`.
+    #[cfg(feature = "battery")]
+    #[serde(rename = "urgent-below")]
+    urgent_below: Option<u32>,
+    /// Which batteries the level comes from: `combine` (the mean) or
+    /// `first` (the first in sorted name order).
+    #[cfg(feature = "battery")]
+    batteries: Option<String>,
+    /// The low-battery hook: `{ exec = [...] }`, run once per downward
+    /// crossing of `urgent-below`.
+    #[cfg(feature = "battery")]
+    #[serde(rename = "on-low")]
+    on_low: Option<toml::Value>,
+    /// The interaction keys (`bindings`): a command, since the module
+    /// defines no actions of its own.
+    #[cfg(feature = "battery")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "battery")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "battery")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "battery")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "battery")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
+}
+
 impl File {
     /// Validates every value and fills the defaults: `Err` names the
     /// dotted key and says what it takes.
@@ -726,6 +776,13 @@ impl File {
             let margin = gap(path, "microphone.margin", Some(margin), 0)?;
             if margin > 0 {
                 margins.push((crate::modules::microphone::ID, margin));
+            }
+        }
+        #[cfg(feature = "battery")]
+        if let Some(margin) = self.battery.margin {
+            let margin = gap(path, "battery.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::battery::ID, margin));
             }
         }
         let layout = self.layout(
@@ -1001,6 +1058,15 @@ impl File {
                 &mut modules.bindings,
             )?;
         }
+        #[cfg(feature = "battery")]
+        {
+            apply_battery(
+                path,
+                &self.battery,
+                &mut modules.battery,
+                &mut modules.bindings,
+            )?;
+        }
         Ok(Config {
             bar: Bar {
                 edge,
@@ -1131,6 +1197,112 @@ const MICROPHONE_KEYS: [&str; 5] = [
     "microphone.on-scroll-up",
     "microphone.on-scroll-down",
 ];
+#[cfg(feature = "battery")]
+const BATTERY_KEYS: [&str; 5] = [
+    "battery.on-click",
+    "battery.on-right-click",
+    "battery.on-middle-click",
+    "battery.on-scroll-up",
+    "battery.on-scroll-down",
+];
+
+/// The `[battery]` table: the thresholds, which batteries feed the level,
+/// the low hook and the interaction keys, into the module's settings.
+#[cfg(feature = "battery")]
+fn apply_battery(
+    path: &Path,
+    table: &BatteryFile,
+    settings: &mut crate::modules::battery::Settings,
+    bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
+) -> Result<(), Error> {
+    use crate::modules::battery::{
+        Batteries, DEFAULT_URGENT_BELOW, DEFAULT_WARN_BELOW, MAX_THRESHOLD,
+    };
+    let named = |key: &str, message: String| Error::Named {
+        path: path.to_owned(),
+        key: format!("battery.{key}"),
+        message,
+    };
+    if let Some(below) = table.warn_below {
+        if below > MAX_THRESHOLD {
+            return Err(named(
+                "warn-below",
+                format!(
+                    "takes whole percent from 0 to {MAX_THRESHOLD}, not `{below}` \
+                     (the default is {DEFAULT_WARN_BELOW})"
+                ),
+            ));
+        }
+        settings.warn_below = below;
+    }
+    if let Some(below) = table.urgent_below {
+        if below > MAX_THRESHOLD {
+            return Err(named(
+                "urgent-below",
+                format!(
+                    "takes whole percent from 0 to {MAX_THRESHOLD}, not `{below}` \
+                     (the default is {DEFAULT_URGENT_BELOW})"
+                ),
+            ));
+        }
+        settings.urgent_below = below;
+    }
+    if let Some(text) = &table.batteries {
+        settings.batteries = Batteries::parse(text).ok_or_else(|| {
+            named(
+                "batteries",
+                format!("takes combine or first, not `{}`", text.escape_debug()),
+            )
+        })?;
+    }
+    if let Some(given) = &table.on_low {
+        let toml::Value::Table(hook) = given else {
+            return Err(named(
+                "on-low",
+                "takes `{ exec = [\"command\", \"arg\"] }`, run once per downward crossing \
+                 of battery.urgent-below"
+                    .to_owned(),
+            ));
+        };
+        let mut entries = hook.iter();
+        let (Some((kind, inner)), None) = (entries.next(), entries.next()) else {
+            return Err(named(
+                "on-low",
+                "takes `{ exec = [\"command\", \"arg\"] }`, with one key".to_owned(),
+            ));
+        };
+        if kind != "exec" {
+            return Err(named(
+                "on-low",
+                format!(
+                    "takes `{{ exec = [...] }}`, not `{{{}}}`",
+                    kind.escape_debug()
+                ),
+            ));
+        }
+        let argv = bindings::exec(inner).map_err(|message| named("on-low", message))?;
+        settings.on_low = Some(argv);
+    }
+    let read = bindings::read(
+        crate::modules::battery::ID,
+        [
+            table.on_click.as_ref(),
+            table.on_right_click.as_ref(),
+            table.on_middle_click.as_ref(),
+            table.on_scroll_up.as_ref(),
+            table.on_scroll_down.as_ref(),
+        ],
+    )
+    .map_err(|(trigger, message)| Error::Named {
+        path: path.to_owned(),
+        key: BATTERY_KEYS[trigger as usize].to_owned(),
+        message,
+    })?;
+    if !read.is_empty() {
+        bindings.push((crate::modules::battery::ID, read));
+    }
+    Ok(())
+}
 
 /// The `[volume]` (or `[microphone]`) table: `step`, `max-volume`, the
 /// icon keys and the interaction keys, into the module's settings.

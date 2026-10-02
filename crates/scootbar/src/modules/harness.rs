@@ -78,6 +78,12 @@ impl Harness {
         self.module.invoke(output, action, steps)
     }
 
+    /// An action the module asks the bar to carry out, taken once.
+    #[allow(dead_code)]
+    pub fn take_action(&mut self) -> Option<crate::action::Action> {
+        self.module.take_action()
+    }
+
     /// A `scootbar msg set` value, as the daemon hands it over.
     #[allow(dead_code)]
     pub fn set(&mut self, value: &serde_json::Value) -> Result<Update, super::SetError> {

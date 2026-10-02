@@ -121,7 +121,11 @@ fn module_action(module: &str, spec: Option<&Spec>, text: &str) -> Result<Module
     })
 }
 
-fn exec(given: &toml::Value) -> Result<Vec<String>, String> {
+/// An `{ exec = [...] }` command line, for the interaction keys above and
+/// the battery module's `on-low` hook: an array of at most
+/// [`MAX_EXEC_ARGS`] strings of at most [`MAX_EXEC_ARG`] bytes, the first
+/// not empty, none holding a NUL.
+pub(crate) fn exec(given: &toml::Value) -> Result<Vec<String>, String> {
     let toml::Value::Array(items) = given else {
         return Err("`exec` takes an array of the command and its arguments, \
              such as [\"foot\", \"-e\", \"btop\"]; nothing runs it through a shell, \
