@@ -58,7 +58,7 @@ Value and state track a real battery on the reference machine with the
 measured wakeup behavior recorded, and the module is absent where there is no
 battery.
 
-## What landed (PR #379, 2026-10-02)
+## What landed (PR #378, 2026-10-02)
 
 The `battery` module (`crates/scootbar/src/modules/battery/`, Cargo
 feature `battery`, on by default), reference in
