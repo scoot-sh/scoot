@@ -81,6 +81,8 @@ use crate::paint::{Canvas, Span};
 use crate::text::Text;
 use crate::theme::Theme;
 
+#[cfg(feature = "battery")]
+pub mod battery;
 #[cfg(feature = "brightness")]
 pub mod brightness;
 #[cfg(feature = "button")]
@@ -167,6 +169,16 @@ pub trait Module {
     ) -> Result<Update, InvokeError> {
         let _ = (output, action, steps);
         Err(InvokeError::Unknown)
+    }
+
+    /// An [`Action`] the module asks the bar to carry out, taken once: the
+    /// loop performs it through [`crate::action::perform`] like a binding,
+    /// after the turn's ready sources. The default is none. (The battery
+    /// module's low-battery hook stages its `on-low` command here on a
+    /// downward crossing, so the module itself never spawns: the spawn
+    /// stays bounded and reaped by the bar's [`crate::spawn::Spawner`].)
+    fn take_action(&mut self) -> Option<Action> {
+        None
     }
 
     /// Whether the module answers pointer input with no binding in the
@@ -367,6 +379,16 @@ pub type StandIn = fn(&Settings) -> Box<dyn Module>;
 
 /// Every module this build has, one line each.
 pub const REGISTRY: &[Spec] = &[
+    #[cfg(feature = "battery")]
+    Spec {
+        id: battery::ID,
+        init: battery::init,
+        actions: battery::ACTIONS,
+        // Unavailable on any machine without a battery (a desktop, a VM),
+        // so the contract drives the fixture stand-in there instead.
+        #[cfg(test)]
+        stand_in: Some(battery::stand_in),
+    },
     #[cfg(feature = "clock")]
     Spec {
         id: clock::ID,
@@ -541,6 +563,8 @@ pub fn start(
 /// sections later). A module reads only its own.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Settings {
+    #[cfg(feature = "battery")]
+    pub battery: battery::Settings,
     #[cfg(feature = "clock")]
     pub clock: clock::Settings,
     #[cfg(feature = "window-title")]

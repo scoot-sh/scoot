@@ -114,8 +114,9 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Volume scan_names test passes for the wrong reason](volume-scan-names-test.md) (medium): review follow-up from PR #376
 - [Volume re-probe a present socket](volume-reprobe-present-socket.md) (medium): review follow-up from PR #376
 - [Network](resolved/network-module-done.md) (medium): link state, WiFi name and signal, click to pick — RESOLVED 2026-10-02
-- [Battery](battery-module.md) (medium)
+- [Battery](resolved/battery-module-done.md) (medium): charge level and state, warn and urgent classes, the low hook — RESOLVED 2026-10-02
 - [Brightness](resolved/brightness-module-done.md) (low): backlight level, scroll to adjust — RESOLVED 2026-10-02
+- [Battery: measure unplug and capacity-step uevents](battery-unplug-uevent-measure.md) (medium): needs a human at the Asahi box; review follow-up from PR #383
 
 ### M6 — Infrastructure and the tray
 - [A shared D-Bus client](dbus-client.md) (low): its own spike first
@@ -130,6 +131,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 
 ### Unscheduled (until someone asks)
 - [Gate integration tests on module features, tidy the unit-test script](scootbar-test-gating-and-script-hygiene.md) (low)
+- [drive_placed pidfile-vs-pipe race flakes the exec keep tests](exec-keep-pidfile-race.md) (low): from the battery review (#378)
 - [Per-output font size](multi-output-font-size.md) (low): deferred 2026-10-01 by the maintainer; left M3
 
 ### Ongoing (no milestone, applies to all)
