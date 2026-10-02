@@ -293,12 +293,14 @@ fn serve(
         match stream.read(&mut chunk) {
             Ok(0) => return,
             Ok(n) => {
+                eprintln!("FAKEDBG {:?}: read {n}", std::time::Instant::now());
                 staged.extend_from_slice(&chunk[..n]);
                 if staged.len() > 2 * 1024 * 1024 {
                     return;
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock || error.kind() == std::io::ErrorKind::TimedOut => {
+                eprintln!("FAKEDBG {:?}: read timeout", std::time::Instant::now());
                 continue;
             }
             Err(_) => return,
