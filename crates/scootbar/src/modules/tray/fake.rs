@@ -98,7 +98,6 @@ impl Fake {
             serial: 1000,
             setup_thread: Some(thread),
         };
-        fake.nonblocking();
         (module, fake)
     }
 
@@ -108,6 +107,9 @@ impl Fake {
     pub fn pump(&mut self) {
         if let Some(thread) = self.setup_thread.take() {
             let _ = thread.join();
+            // Only now that the blocking set-up is over: the thread is
+            // gone, so nonblocking touches nothing else.
+            self.nonblocking();
         }
         self.flush();
         loop {
