@@ -97,6 +97,7 @@ fn an_item_listed_before_start_is_picked_up() {
 #[test]
 fn a_registration_is_answered_and_shown() {
     let (mut harness, mut fake) = started();
+    fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let serial = fake.send_register(OWNER, SERVICE);
     until_shown(&mut harness, &mut fake, 1);
     // The registration was answered: a return quoting the call. Turns
@@ -120,6 +121,7 @@ fn a_registration_is_answered_and_shown() {
 #[test]
 fn a_path_registration_lands_on_the_sender() {
     let (mut harness, mut fake) = started();
+    fake.add_item(":1.60", ":1.60", fake::item_body("Custom", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     fake.send_register(":1.60", "/Custom/Item");
     until_shown(&mut harness, &mut fake, 1);
     let value = harness.value_on(None).unwrap();
