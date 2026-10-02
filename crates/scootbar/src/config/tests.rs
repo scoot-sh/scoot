@@ -605,6 +605,12 @@ fn a_battery_section_is_refused_loudly() {
         ("[battery]\nurgent-below = 101\n", "battery.urgent-below"),
         ("[battery]\nbatteries = \"many\"\n", "battery.batteries"),
         ("[battery]\nwhatever = 1\n", "whatever"),
+        // An inverted band (warn below urgent) would never show: refused.
+        (
+            "[battery]\nwarn-below = 5\nurgent-below = 10\n",
+            "battery.warn-below",
+        ),
+        ("[battery]\nurgent-below = 21\n", "battery.warn-below"),
         // The hook takes `{ exec = [...] }`, one key, exec only.
         ("[battery]\non-low = \"notify-send\"\n", "battery.on-low"),
         ("[battery]\non-low = {}\n", "battery.on-low"),

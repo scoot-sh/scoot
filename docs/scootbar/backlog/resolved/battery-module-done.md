@@ -115,11 +115,13 @@ while discharging for drivers whose capacity steps are silent.
   capacity trace. If even unplug is silent, the design is revisited
   (a timer that also covers the plugged states).
 - Known narrow hole, recorded not deferred-harm: unplug-during-suspend
-  while charged leaves the view stale until the next `power_supply`
-  uevent (there is no wake source in the fd set; the discharging timer
-  self-heals within a minute after resume). No user-facing harm follows:
-  the bar shows the last true state, and the first post-resume event or
-  timer corrects it.
+  while the shown state is not Discharging leaves the view stale until
+  the next `power_supply` uevent (there is no wake source in the fd set,
+  and the timer arms from the shown state, so a bar showing Full or
+  Charging arms nothing; only a bar already showing Discharging
+  self-heals on its next tick after resume). No user-facing harm follows:
+  the bar shows the last true state, and the first post-resume event, or
+  the timer of a discharging bar, corrects it.
 
 ### Evidence (dev VM `cargo`, Asahi reference machine)
 
