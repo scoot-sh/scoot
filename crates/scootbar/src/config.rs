@@ -1361,6 +1361,17 @@ fn apply_battery(
         }
         settings.urgent_below = below;
     }
+    // Urgent is checked first, so a warn band below it would never show:
+    // refuse the inversion loudly rather than silently drop a class.
+    if settings.warn_below < settings.urgent_below {
+        return Err(named(
+            "warn-below",
+            format!(
+                "takes at least urgent-below ({}), not `{}` (below it warn is unreachable)",
+                settings.urgent_below, settings.warn_below
+            ),
+        ));
+    }
     if let Some(text) = &table.batteries {
         settings.batteries = Batteries::parse(text).ok_or_else(|| {
             named(
