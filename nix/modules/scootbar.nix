@@ -91,7 +91,8 @@ let
   # Integer division rounds to the nearest pixel; the bar takes 1 to 256.
   pixels = pt: lib.min 256 (lib.max 1 ((pt * 4 + 1) / 3));
 
-  # base16: 00 background, 05 foreground, 0A yellow (the default accent,
+  # base16: 00 background, 05 foreground, 0A yellow (the default accent
+  # and, like the bar's own default, the default hover tint,
   # Catppuccin's `f9e2af` in the bar's own palette), 03 comments (dim),
   # 08 red (urgent).
   palette = config.lib.stylix.colors.withHashtag;
@@ -167,7 +168,7 @@ in
       default = true;
       description = ''
         Take defaults from Stylix when it is in use (`config.lib.stylix`
-        exists and `stylix.enable` is on): the five `colors` tokens from
+        exists and `stylix.enable` is on): the six `colors` tokens from
         its base16 palette and `bar.font` and `bar.font-size` from its
         sans-serif font and desktop size. A value you set in `settings`
         always wins; this only turns the defaults off. Nothing here needs
@@ -250,6 +251,7 @@ in
           background = lib.mkDefault palette.base00;
           foreground = lib.mkDefault palette.base05;
           accent = lib.mkDefault palette.base0A;
+          hover = lib.mkDefault palette.base0A;
           dim = lib.mkDefault palette.base03;
           urgent = lib.mkDefault palette.base08;
         };

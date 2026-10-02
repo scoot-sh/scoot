@@ -86,6 +86,7 @@ fn bar(width: u32, scale: Scale, modules: Vec<Iconic>) -> Image {
             background: gray(0),
             foreground: gray(0xff),
             accent: gray(0xc0),
+            hover: gray(0xc0),
             dim: gray(0x80),
             urgent: gray(0xe0),
         },

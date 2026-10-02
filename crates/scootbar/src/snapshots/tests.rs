@@ -8,6 +8,7 @@ use ab_glyph::{FontArc, FontVec};
 use rustix::event::PollFlags;
 
 use super::{Image, check};
+use crate::action::{Action, Bindings, Trigger};
 use crate::color::Color;
 use crate::density::Scale;
 use crate::layout::Section;
@@ -30,12 +31,22 @@ const NAMES: &[&str] = &[
     "bar-rounded-1.5x-alpha",
     "bar-translucent-1x",
     "bar-separated-1x",
+    "bar-hover-1x",
+    "bar-hover-1.5x",
     "workspaces-pill-1x",
     "workspaces-circle-1x",
     "workspaces-circle-two-digits-1x",
+    "workspaces-pill-hover-1x",
+    "workspaces-colors-1x",
+    "workspaces-dots-1x",
+    "workspaces-disc-1x",
     "workspaces-pill-1.5x",
     "workspaces-circle-1.5x",
     "workspaces-circle-two-digits-1.5x",
+    "workspaces-pill-hover-1.5x",
+    "workspaces-colors-1.5x",
+    "workspaces-dots-1.5x",
+    "workspaces-disc-1.5x",
 ];
 
 const fn gray(v: u8) -> Color {
@@ -130,6 +141,9 @@ struct Look {
     separator: u32,
     /// The middle module's margin.
     margin: u32,
+    /// The pointer over the right module: its text in the `hover` token,
+    /// set apart from the `accent` one, instead of its class's.
+    hover: bool,
 }
 
 impl Default for Look {
@@ -140,6 +154,7 @@ impl Default for Look {
             opacity: u8::MAX,
             separator: 0,
             margin: 0,
+            hover: false,
         }
     }
 }
@@ -151,10 +166,21 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         (Section::Center, "a Z", None, Class::Muted),
         (Section::Right, "09 pm", Some('8'), Class::Warn),
     ];
+    // A hovered bar binds the hovered module, as a bound module is the
+    // only one the pointer tints.
+    let mut bound = Bindings::default();
+    if look.hover {
+        bound.set(Trigger::Click, Action::Exec(vec!["true".into()]));
+    }
     let placed: Vec<Placed> = modules
         .into_iter()
-        .map(|(_, text, icon, class)| Placed {
-            bindings: Default::default(),
+        .enumerate()
+        .map(|(module, (_, text, icon, class))| Placed {
+            bindings: if look.hover && module == 2 {
+                bound.clone()
+            } else {
+                Bindings::default()
+            },
             id: "label",
             module: Box::new(Label { text, icon, class }),
             revision: 0,
@@ -165,6 +191,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
             background: look.background,
             foreground: gray(0xff),
             accent: gray(0xc0),
+            hover: if look.hover { gray(0xe0) } else { gray(0xc0) },
             dim: gray(0x80),
             urgent: gray(0xe0),
         },
@@ -188,7 +215,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         .iter()
         .enumerate()
         .map(|(module, m)| Member {
-            hover: false,
+            hover: look.hover && module == 2,
             module,
             section: if together { Section::Left } else { m.0 },
             margin: if module == 1 { look.margin } else { 0 },
@@ -206,6 +233,12 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
             height: device_height,
         },
     );
+    if look.hover {
+        // Over the right module's middle: it alone draws tinted.
+        let spans = scene.spans();
+        let span = spans[2];
+        scene.set_pointer(Some(span.x + span.width / 2));
+    }
     let mut pixels = vec![0xaa; device_width as usize * device_height as usize * 4];
     let mut canvas = Canvas::new(&mut pixels, device_width, device_height).unwrap();
     let mut record = Record::new(placed.len());
@@ -321,6 +354,38 @@ fn bar_translucent_at_1x() {
     check(
         "bar-translucent-1x",
         "the color plane of the bar at scale 1 over a 0x80 background at opacity 128, premultiplied",
+        &Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+/// The pointer over the bound right module: its `Warn` text in the
+/// `hover` token set apart from the `accent` one, the other modules in
+/// their classes'.
+#[test]
+fn bar_hovered_at_1x() {
+    let look = Look {
+        hover: true,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    check(
+        "bar-hover-1x",
+        "the 160x20 bar at scale 1 with the pointer over its bound right module",
+        &Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+/// The hovered bar at 1.5, where the glyphs' edges land between pixels.
+#[test]
+fn bar_hovered_at_1_5x() {
+    let look = Look {
+        hover: true,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Fractional(180), look);
+    check(
+        "bar-hover-1.5x",
+        "the hovered bar of bar-hover-1x at scale 1.5 (fractional, 240x30 device pixels)",
         &Image::from_xrgb(&pixels, w, h, true),
     );
 }

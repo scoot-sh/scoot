@@ -4,7 +4,7 @@
 
 use super::tests::read;
 #[cfg(feature = "workspaces")]
-use crate::modules::workspaces::Shape;
+use crate::modules::workspaces::{Display, Shape};
 
 #[test]
 fn the_defaults_add_nothing() {
@@ -160,5 +160,93 @@ fn the_workspaces_item_gap_is_a_count_of_spaces() {
     ] {
         let error = read(text).unwrap_err().to_string();
         assert!(error.contains("item-gap"), "{text:?}: {error}");
+    }
+}
+
+#[test]
+#[cfg(feature = "workspaces")]
+fn the_workspaces_state_colors_are_optional_tokens() {
+    let modules = &read("").unwrap().modules.workspaces;
+    assert_eq!(
+        modules.active_color, None,
+        "the pill is the accent by default"
+    );
+    assert_eq!(
+        modules.inactive_color, None,
+        "inactive numbers are the normal class by default"
+    );
+    let config =
+        read("[workspaces]\nactive-color = \"#89b4fa\"\ninactive-color = \"#6c7086\"\n").unwrap();
+    assert_eq!(
+        config
+            .modules
+            .workspaces
+            .active_color
+            .map(|c| c.to_string()),
+        Some("#89b4fa".to_owned())
+    );
+    assert_eq!(
+        config
+            .modules
+            .workspaces
+            .inactive_color
+            .map(|c| c.to_string()),
+        Some("#6c7086".to_owned())
+    );
+    for (text, key) in [
+        ("[workspaces]\nactive-color = \"blue\"\n", "active-color"),
+        ("[workspaces]\nactive-color = \"#12345\"\n", "active-color"),
+        ("[workspaces]\ninactive-color = 1\n", "inactive-color"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+}
+
+#[test]
+#[cfg(feature = "workspaces")]
+fn the_workspaces_display_is_numbers_or_dots() {
+    assert_eq!(
+        read("").unwrap().modules.workspaces.display,
+        Display::Numbers,
+        "numbers by default"
+    );
+    for (name, display) in [("numbers", Display::Numbers), ("dots", Display::Dots)] {
+        let config = read(&format!("[workspaces]\ndisplay = \"{name}\"\n")).unwrap();
+        assert_eq!(config.modules.workspaces.display, display);
+    }
+    for text in [
+        "[workspaces]\ndisplay = \"bars\"\n",
+        "[workspaces]\ndisplay = \"DOTS\"\n",
+        "[workspaces]\ndisplay = 1\n",
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains("display"), "{text:?}: {error}");
+    }
+}
+
+#[test]
+#[cfg(feature = "workspaces")]
+fn the_workspaces_disc_needs_a_circle_of_numbers() {
+    assert!(
+        !read("").unwrap().modules.workspaces.disc,
+        "no grown span by default"
+    );
+    let config = read("[workspaces]\npill-shape = \"circle\"\ndisc = true\n").unwrap();
+    assert!(config.modules.workspaces.disc);
+    for (text, key) in [
+        ("[workspaces]\ndisc = true\n", "workspaces.disc"),
+        (
+            "[workspaces]\npill-shape = \"pill\"\ndisc = true\n",
+            "workspaces.disc",
+        ),
+        (
+            "[workspaces]\npill-shape = \"circle\"\ndisplay = \"dots\"\ndisc = true\n",
+            "workspaces.disc",
+        ),
+        ("[workspaces]\ndisc = \"yes\"\n", "disc"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
     }
 }

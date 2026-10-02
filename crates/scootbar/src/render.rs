@@ -25,7 +25,7 @@
 
 use crate::density::{DENOMINATOR, Scale, scaled_length};
 use crate::layout::{self, Section};
-use crate::modules::{CustomDraw, OutputView, Placed, View};
+use crate::modules::{CustomDraw, Measure, OutputView, Placed, View};
 use crate::outputs::{Frame, Size};
 use crate::paint::{Canvas, Corners, Span};
 use crate::text::Text;
@@ -308,7 +308,15 @@ impl Scene {
                         Some(max) => content.min(device(max, scale)),
                         None => content,
                     };
-                    capped.saturating_add(padding).max(1)
+                    let natural = capped.saturating_add(padding).max(1);
+                    natural.saturating_add(placed.module.span_extra(&Measure {
+                        output: *output,
+                        view,
+                        text,
+                        em,
+                        scale,
+                        height: extent.height,
+                    }))
                 }
                 // Nothing to show, or no font to show it with.
                 _ => 0,
@@ -484,7 +492,7 @@ pub fn paint(
         }
         if !custom {
             let color = if scene.hover == Some(index) {
-                style.theme.accent
+                style.theme.hover
             } else {
                 style.theme.class(view.class())
             };

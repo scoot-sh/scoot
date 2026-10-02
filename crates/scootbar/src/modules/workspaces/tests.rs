@@ -6,12 +6,15 @@
 
 use ab_glyph::{FontArc, FontVec};
 
-use super::{Group, Link, MAX_WORKSPACES, Ws, hit_index, item_span, parse_coord, parse_number};
+use super::{
+    Display, Group, Link, MAX_WORKSPACES, Ws, hit_index, item_span, parse_coord, parse_number,
+};
 use crate::action::{Action, ModuleAction, Trigger};
+use crate::color::Color;
 use crate::density::Scale;
 use crate::modules::harness::Harness;
 use crate::modules::{
-    ClickCtx, CustomDraw, Input, InvokeError, MAX_TEXT, Module, OutputView, Update, find,
+    ClickCtx, CustomDraw, Input, InvokeError, MAX_TEXT, Module, OutputView, Placed, Update, find,
 };
 use crate::paint::{Canvas, Span};
 use crate::testfont;
@@ -42,6 +45,38 @@ fn started_with_gap(item_gap: u32) -> (Harness, Link) {
     let spec = find("workspaces").expect("the workspaces module is built");
     let mut settings = super::super::Settings::default();
     settings.workspaces.item_gap = item_gap;
+    let link = settings.workspaces.link.clone();
+    let harness = Harness::start(spec, &settings).expect("workspaces starts anywhere");
+    (harness, link)
+}
+
+/// A module drawing with `pill`, as `init` starts one: the defaults for
+/// everything a test below does not set.
+fn drawn_module(link: Link, pill: super::Pill) -> super::Workspaces {
+    super::Workspaces {
+        link,
+        pill,
+        item_gap: 1,
+        active_color: None,
+        inactive_color: None,
+        display: super::Display::Numbers,
+        disc: false,
+        seen: 0,
+    }
+}
+
+/// A module showing dots, as `init` starts one.
+fn dots_module(link: Link) -> super::Workspaces {
+    let mut module = drawn_module(link, super::Pill::default());
+    module.display = super::Display::Dots;
+    module
+}
+
+/// The module showing dots, with its shared state to inject batches through.
+fn started_dots() -> (Harness, Link) {
+    let spec = find("workspaces").expect("the workspaces module is built");
+    let mut settings = super::super::Settings::default();
+    settings.workspaces.display = super::Display::Dots;
     let link = settings.workspaces.link.clone();
     let harness = Harness::start(spec, &settings).expect("workspaces starts anywhere");
     (harness, link)
@@ -452,12 +487,7 @@ fn custom_draw_marks_only_the_active_item() {
     let mut pixels = vec![0u8; 400 * 60 * 4];
     let mut canvas = Canvas::new(&mut pixels, 400, 60).unwrap();
     canvas.fill_span(span, theme.background);
-    let module = super::Workspaces {
-        link: link.clone(),
-        pill: super::Pill::default(),
-        item_gap: 1,
-        seen: 0,
-    };
+    let module = drawn_module(link.clone(), super::Pill::default());
     let mut custom = CustomDraw {
         output: DP1,
         view: &view,
@@ -467,9 +497,9 @@ fn custom_draw_marks_only_the_active_item() {
         em: EM,
         baseline,
         padding: PAD,
-        hovered: false,
         scale: Scale::Integer(1),
         theme: &theme,
+        hovered: false,
     };
     assert!(module.custom_draw(&mut custom));
     let at = |x: u32, y: u32| -> [u8; 3] {
@@ -506,12 +536,7 @@ fn without_a_group_custom_draw_keeps_the_plain_draw() {
     let baseline = font.metrics(EM).baseline(60);
     let mut pixels = vec![0u8; 400 * 60 * 4];
     let mut canvas = Canvas::new(&mut pixels, 400, 60).unwrap();
-    let module = super::Workspaces {
-        link: super::Link::default(),
-        pill: super::Pill::default(),
-        item_gap: 1,
-        seen: 0,
-    };
+    let module = drawn_module(super::Link::default(), super::Pill::default());
     let mut custom = CustomDraw {
         output: DP1,
         view: &view,
@@ -521,9 +546,9 @@ fn without_a_group_custom_draw_keeps_the_plain_draw() {
         em: EM,
         baseline,
         padding: PAD,
-        hovered: false,
         scale: Scale::Integer(1),
         theme: &theme,
+        hovered: false,
     };
     assert!(!module.custom_draw(&mut custom));
 }
@@ -532,22 +557,31 @@ fn without_a_group_custom_draw_keeps_the_plain_draw() {
 /// workspace 2 of 2 active: the pixels of a 400x60 bar, and the item's
 /// span.
 fn pill_drawn(pill: super::Pill) -> (Vec<u8>, u32, u32) {
+    let (pixels, start, end) = pill_drawn_look(pill, Theme::default(), false, None, None);
+    (pixels, start, end)
+}
+
+/// [`pill_drawn`] with the tokens, the hover and the state colors: what
+/// the render path passes a module that sets them.
+fn pill_drawn_look(
+    pill: super::Pill,
+    theme: Theme,
+    hovered: bool,
+    active_color: Option<Color>,
+    inactive_color: Option<Color>,
+) -> (Vec<u8>, u32, u32) {
     let (harness, link) = started();
     commit(&link, "DP-1", &[(1, 1, false), (2, 2, true)]);
     let view = harness.view_on(Some("DP-1"));
-    let theme = Theme::default();
     let mut font = text();
     let span = Span { x: 0, width: 400 };
     let baseline = font.metrics(EM).baseline(60);
     let mut pixels = vec![0u8; 400 * 60 * 4];
     let mut canvas = Canvas::new(&mut pixels, 400, 60).unwrap();
     canvas.fill_span(span, theme.background);
-    let module = super::Workspaces {
-        link,
-        pill,
-        item_gap: 1,
-        seen: 0,
-    };
+    let mut module = drawn_module(link, pill);
+    module.active_color = active_color;
+    module.inactive_color = inactive_color;
     let mut custom = CustomDraw {
         output: DP1,
         view: &view,
@@ -557,9 +591,9 @@ fn pill_drawn(pill: super::Pill) -> (Vec<u8>, u32, u32) {
         em: EM,
         baseline,
         padding: PAD,
-        hovered: false,
         scale: Scale::Integer(1),
         theme: &theme,
+        hovered,
     };
     assert!(module.custom_draw(&mut custom));
     let (start, end) = item_span(&text(), "1 2", EM, i64::from(PAD), 1).unwrap();
@@ -642,8 +676,186 @@ fn an_inset_lifts_the_pill_off_the_bar_and_never_past_the_text() {
     );
 }
 
-// ---- the pill's shapes ------------------------------------------------
+#[test]
+fn the_pill_tints_on_hover_like_a_bound_module() {
+    assert!(drawn_module(Link::default(), super::Pill::default()).tints_on_hover());
+}
 
+#[test]
+fn a_hovered_pill_is_the_hover_token_and_the_configured_color_otherwise() {
+    let theme = Theme {
+        hover: Color {
+            r: 0x01,
+            g: 0x02,
+            b: 0x03,
+        },
+        ..Theme::default()
+    };
+    let hovered = [0x01, 0x02, 0x03];
+    let accent = [theme.accent.r, theme.accent.g, theme.accent.b];
+    // The pill's padding, left of the digit: fill, never ink.
+    let fill_at = |pixels: &Vec<u8>| {
+        let (start, _) = item_span(&text(), "1 2", EM, i64::from(PAD), 1).unwrap();
+        at(pixels, start.saturating_sub(2), 30)
+    };
+    let (pixels, ..) = pill_drawn_look(super::Pill::default(), theme, true, None, None);
+    assert_eq!(fill_at(&pixels), hovered, "a hovered pill");
+    // Unhovered with no configured color: the accent, as before.
+    let (pixels, ..) = pill_drawn_look(super::Pill::default(), Theme::default(), false, None, None);
+    assert_eq!(fill_at(&pixels), accent, "a plain pill");
+    // A configured active color wins over the accent, but not the hover.
+    let green = Color {
+        r: 0x00,
+        g: 0xff,
+        b: 0x00,
+    };
+    let (pixels, ..) = pill_drawn_look(super::Pill::default(), theme, false, Some(green), None);
+    assert_eq!(fill_at(&pixels), [0, 0xff, 0], "a configured pill");
+    let (pixels, ..) = pill_drawn_look(super::Pill::default(), theme, true, Some(green), None);
+    assert_eq!(
+        fill_at(&pixels),
+        hovered,
+        "hover wins over the configured color"
+    );
+}
+
+#[test]
+fn inactive_numbers_take_the_configured_color() {
+    let theme = Theme::default();
+    let fg = [theme.foreground.r, theme.foreground.g, theme.foreground.b];
+    let (first, first_end) = item_span(&text(), "1 2", EM, i64::from(PAD), 0).unwrap();
+    let shows = |pixels: &Vec<u8>, color: [u8; 3]| {
+        (first..first_end).any(|x| (0..60).any(|y| at(pixels, x, y) == color))
+    };
+    let (pixels, ..) = pill_drawn_look(super::Pill::default(), theme, false, None, None);
+    assert!(
+        shows(&pixels, fg),
+        "an inactive digit in foreground by default"
+    );
+    let purple = Color {
+        r: 0x80,
+        g: 0x00,
+        b: 0x80,
+    };
+    let (pixels, ..) = pill_drawn_look(super::Pill::default(), theme, false, None, Some(purple));
+    assert!(
+        shows(&pixels, [0x80, 0, 0x80]),
+        "an inactive digit in the configured color"
+    );
+    assert!(
+        !shows(&pixels, fg),
+        "no foreground ink left on inactive digits"
+    );
+}
+
+#[test]
+fn dots_show_a_cell_each_and_clicks_land_by_them() {
+    let (mut harness, link) = started_dots();
+    commit(&link, "DP-1", &[(1, 1, false), (2, 2, true), (3, 3, false)]);
+    assert_eq!(harness.dispatch(), Update::Changed);
+    let view = harness.view_on(Some("DP-1"));
+    assert_eq!(view.text(), "o o o");
+    let font = text();
+    // Each dot's middle switches to it, by position: the middle one is
+    // active, so it asks for nothing.
+    for (item, position) in [(0, 1), (2, 3)] {
+        let (start, end) = item_span(&font, "o o o", EM, i64::from(PAD), item).unwrap();
+        let ctx = ClickCtx {
+            output: DP1,
+            x: (start + end) / 2,
+            view: &view,
+            text: &font,
+            em: EM,
+            padding: PAD,
+            span_width: 400,
+            height: 60,
+            scale: Scale::Integer(1),
+        };
+        assert_eq!(
+            click(&harness, &ctx),
+            Some(activate(position)),
+            "dot {item}"
+        );
+    }
+    let (start, end) = item_span(&font, "o o o", EM, i64::from(PAD), 1).unwrap();
+    let ctx = ClickCtx {
+        output: DP1,
+        x: (start + end) / 2,
+        view: &view,
+        text: &font,
+        em: EM,
+        padding: PAD,
+        span_width: 400,
+        height: 60,
+        scale: Scale::Integer(1),
+    };
+    assert_eq!(
+        click(&harness, &ctx),
+        None,
+        "the active dot is already shown"
+    );
+    // A click in the middle of a gap hits nothing.
+    let (_, first_end) = item_span(&font, "o o o", EM, i64::from(PAD), 0).unwrap();
+    let (second_start, _) = item_span(&font, "o o o", EM, i64::from(PAD), 1).unwrap();
+    let ctx = ClickCtx {
+        output: DP1,
+        x: (first_end + second_start) / 2,
+        view: &view,
+        text: &font,
+        em: EM,
+        padding: PAD,
+        span_width: 400,
+        height: 60,
+        scale: Scale::Integer(1),
+    };
+    assert_eq!(click(&harness, &ctx), None, "a click in a gap");
+}
+
+#[test]
+fn dots_are_discs_in_state_colors_with_no_digits() {
+    let (mut harness, link) = started_dots();
+    commit(&link, "DP-1", &[(1, 1, false), (2, 2, true), (3, 3, false)]);
+    assert_eq!(harness.dispatch(), Update::Changed);
+    let view = harness.view_on(Some("DP-1"));
+    let theme = Theme::default();
+    let accent = [theme.accent.r, theme.accent.g, theme.accent.b];
+    let dim = [theme.dim.r, theme.dim.g, theme.dim.b];
+    let fg = [theme.foreground.r, theme.foreground.g, theme.foreground.b];
+    let mut font = text();
+    let span = Span { x: 0, width: 400 };
+    let baseline = font.metrics(EM).baseline(60);
+    let mut pixels = vec![0u8; 400 * 60 * 4];
+    let mut canvas = Canvas::new(&mut pixels, 400, 60).unwrap();
+    canvas.fill_span(span, theme.background);
+    let module = dots_module(link);
+    let mut custom = CustomDraw {
+        output: DP1,
+        view: &view,
+        canvas: &mut canvas,
+        text: &mut font,
+        span,
+        em: EM,
+        baseline,
+        padding: PAD,
+        scale: Scale::Integer(1),
+        theme: &theme,
+        hovered: false,
+    };
+    assert!(module.custom_draw(&mut custom));
+    // Each dot's middle is its solid fill: the active one accent, the
+    // others dim. No digit is drawn over the active dot, and no text ink
+    // anywhere: dots are fills, not glyphs.
+    for (item, color) in [(0, dim), (1, accent), (2, dim)] {
+        let (start, end) = item_span(&font, "o o o", EM, i64::from(PAD), item).unwrap();
+        assert_eq!(at(&pixels, (start + end) / 2, 30), color, "dot {item}");
+    }
+    assert!(
+        pixels.chunks_exact(4).all(|p| [p[2], p[1], p[0]] != fg),
+        "no text ink in a dots draw"
+    );
+}
+
+// ---- the pill's shapes ------------------------------------------------
 use super::pill::{Pill, Shape};
 use super::{Geometry, hit_target, pill_geometry};
 
@@ -769,15 +981,43 @@ const fn gray(v: u8) -> crate::color::Color {
 
 /// The pill drawn through `custom_draw` on a `width` x `height` (logical)
 /// bar at `scale`, in gray tokens (background 0, accent 0xc0, ink 0xff),
-/// for workspaces `numbers` with the `active`th marked.
+/// for workspaces `numbers` with the `active`th marked. A hovered scene
+/// draws the pill in a hover token of its own (0x40); `colors` sets the
+/// active pill's fill and the inactive numbers' ink instead.
+/// What a shapes snapshot shows beyond the pill, the numbers and the
+/// scale: hovered, state colors, or dots instead of numbers.
+#[derive(Clone, Copy)]
+struct Look {
+    hovered: bool,
+    active_color: Option<Color>,
+    inactive_color: Option<Color>,
+    display: Display,
+}
+
+impl Look {
+    fn plain() -> Self {
+        Self {
+            hovered: false,
+            active_color: None,
+            inactive_color: None,
+            display: Display::Numbers,
+        }
+    }
+}
+
 fn shapes_scene(
     pill: Pill,
     numbers: &[u32],
     active: usize,
     scale: Scale,
     (width, height): (u32, u32),
+    look: Look,
 ) -> crate::snapshots::Image {
-    let (harness, link) = started();
+    let (harness, link) = if look.display == Display::Dots {
+        started_dots()
+    } else {
+        started()
+    };
     let items: Vec<(u32, u32, bool)> = numbers
         .iter()
         .enumerate()
@@ -789,6 +1029,7 @@ fn shapes_scene(
         background: gray(0),
         foreground: gray(0xff),
         accent: gray(0xc0),
+        hover: gray(0x40),
         dim: gray(0x80),
         urgent: gray(0xe0),
     };
@@ -803,12 +1044,10 @@ fn shapes_scene(
     let mut pixels = vec![0u8; (w * h * 4) as usize];
     let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
     canvas.fill_span(span, theme.background);
-    let module = super::Workspaces {
-        link,
-        pill,
-        item_gap: 1,
-        seen: 0,
-    };
+    let mut module = drawn_module(link, pill);
+    module.active_color = look.active_color;
+    module.inactive_color = look.inactive_color;
+    module.display = look.display;
     let mut custom = CustomDraw {
         output: DP1,
         view: &view,
@@ -818,9 +1057,9 @@ fn shapes_scene(
         em,
         baseline,
         padding,
-        hovered: false,
         scale,
         theme: &theme,
+        hovered: look.hovered,
     };
     assert!(module.custom_draw(&mut custom));
     crate::snapshots::Image::from_xrgb(&pixels, w, h, true)
@@ -847,6 +1086,7 @@ fn snapshot_a_pill_at_1x() {
             1,
             Scale::Integer(1),
             BAR_SIZE,
+            Look::plain(),
         ),
     );
 }
@@ -862,6 +1102,7 @@ fn snapshot_a_circle_at_1x() {
             1,
             Scale::Integer(1),
             BAR_SIZE,
+            Look::plain(),
         ),
     );
 }
@@ -877,6 +1118,7 @@ fn snapshot_a_circle_around_two_digits_at_1x() {
             1,
             Scale::Integer(1),
             BAR_SIZE,
+            Look::plain(),
         ),
     );
 }
@@ -892,6 +1134,7 @@ fn snapshot_a_pill_at_1_5x() {
             1,
             Scale::Fractional(180),
             BAR_SIZE,
+            Look::plain(),
         ),
     );
 }
@@ -907,6 +1150,7 @@ fn snapshot_a_circle_at_1_5x() {
             1,
             Scale::Fractional(180),
             BAR_SIZE,
+            Look::plain(),
         ),
     );
 }
@@ -922,6 +1166,85 @@ fn snapshot_a_circle_around_two_digits_at_1_5x() {
             1,
             Scale::Fractional(180),
             BAR_SIZE,
+            Look::plain(),
+        ),
+    );
+}
+
+#[test]
+fn snapshot_a_hovered_pill_at_1x() {
+    crate::snapshots::check(
+        "workspaces-pill-hover-1x",
+        "the pill of workspaces-pill-1x with the pointer over the module: the hover token, not the accent",
+        &shapes_scene(
+            shape(Shape::Pill, 3),
+            &[1, 2, 3],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+            Look {
+                hovered: true,
+                ..Look::plain()
+            },
+        ),
+    );
+}
+
+#[test]
+fn snapshot_a_hovered_pill_at_1_5x() {
+    crate::snapshots::check(
+        "workspaces-pill-hover-1.5x",
+        "the hovered pill of workspaces-pill-hover-1x at scale 1.5",
+        &shapes_scene(
+            shape(Shape::Pill, 3),
+            &[1, 2, 3],
+            1,
+            Scale::Fractional(180),
+            BAR_SIZE,
+            Look {
+                hovered: true,
+                ..Look::plain()
+            },
+        ),
+    );
+}
+
+#[test]
+fn snapshot_state_colors_at_1x() {
+    crate::snapshots::check(
+        "workspaces-colors-1x",
+        "the pill of workspaces-pill-1x with a configured active fill and inactive ink",
+        &shapes_scene(
+            shape(Shape::Pill, 3),
+            &[1, 2, 3],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+            Look {
+                active_color: Some(gray(0x60)),
+                inactive_color: Some(gray(0x40)),
+                ..Look::plain()
+            },
+        ),
+    );
+}
+
+#[test]
+fn snapshot_state_colors_at_1_5x() {
+    crate::snapshots::check(
+        "workspaces-colors-1.5x",
+        "the configured colors of workspaces-colors-1x at scale 1.5",
+        &shapes_scene(
+            shape(Shape::Pill, 3),
+            &[1, 2, 3],
+            1,
+            Scale::Fractional(180),
+            BAR_SIZE,
+            Look {
+                active_color: Some(gray(0x60)),
+                inactive_color: Some(gray(0x40)),
+                ..Look::plain()
+            },
         ),
     );
 }
@@ -1119,5 +1442,224 @@ fn a_number_or_position_no_item_has_is_refused_by_name() {
     assert_eq!(
         ask(&mut harness, &other, "next", None),
         Err(InvokeError::Refused("no workspaces on this output"))
+    );
+}
+
+#[test]
+fn snapshot_dots_at_1x() {
+    crate::snapshots::check(
+        "workspaces-dots-1x",
+        "workspaces 1 2 3 as dots, the active one filled, on a 120x24 bar at scale 1",
+        &shapes_scene(
+            shape(Shape::Pill, 3),
+            &[1, 2, 3],
+            1,
+            Scale::Integer(1),
+            BAR_SIZE,
+            Look {
+                display: Display::Dots,
+                ..Look::plain()
+            },
+        ),
+    );
+}
+
+#[test]
+fn snapshot_dots_at_1_5x() {
+    crate::snapshots::check(
+        "workspaces-dots-1.5x",
+        "the dots of workspaces-dots-1x at scale 1.5",
+        &shapes_scene(
+            shape(Shape::Pill, 3),
+            &[1, 2, 3],
+            1,
+            Scale::Fractional(180),
+            BAR_SIZE,
+            Look {
+                display: Display::Dots,
+                ..Look::plain()
+            },
+        ),
+    );
+}
+
+// ---- the grown span --------------------------------------------------------
+
+use crate::layout::Section;
+use crate::outputs::{Frame, Size};
+use crate::render::{Member, Record, Scene, Style, paint};
+
+/// A started workspaces module with `pill`, `display` and `disc`, and its
+/// shared state: what a reload hands the bar.
+fn started_shaped(pill: super::Pill, display: super::Display, disc: bool) -> (Placed, Link) {
+    let spec = find("workspaces").expect("the workspaces module is built");
+    let mut settings = super::super::Settings::default();
+    settings.workspaces.pill = pill;
+    settings.workspaces.display = display;
+    settings.workspaces.disc = disc;
+    let link = settings.workspaces.link.clone();
+    let placed = match (spec.init)(&settings) {
+        super::Init::Available(module) => Placed {
+            id: super::ID,
+            module,
+            bindings: Default::default(),
+            revision: 0,
+        },
+        super::Init::Unavailable(why) => panic!("workspaces starts anywhere: {why}"),
+    };
+    (placed, link)
+}
+
+/// One workspaces module measured, laid out and painted through the
+/// render path on a `width` x `height` (logical) bar at `scale`: the
+/// module's span and the bar's pixels.
+fn bar_scene(
+    placed: &[Placed],
+    style: &Style,
+    scale: Scale,
+    (width, height): (u32, u32),
+) -> (Vec<Span>, Vec<u8>, u32, u32) {
+    let (w, h) = scale.buffer(Size { width, height }).unwrap();
+    let mut text = text();
+    let members = [Member {
+        module: 0,
+        section: Section::Left,
+        margin: 0,
+        hover: false,
+    }];
+    let mut scene = Scene::with_members(&members);
+    scene.update(
+        placed,
+        &DP1,
+        Some(&text),
+        style,
+        scale,
+        Size {
+            width: w,
+            height: h,
+        },
+    );
+    let mut pixels = vec![0u8; (w * h * 4) as usize];
+    let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
+    let mut record = Record::new(placed.len());
+    paint(
+        &mut canvas,
+        &mut record,
+        &scene,
+        placed,
+        Some(&mut text),
+        style,
+        Frame {
+            size: Size { width, height },
+            scale,
+        },
+        &DP1,
+    );
+    (scene.spans().to_vec(), pixels, w, h)
+}
+
+fn disc_style() -> Style {
+    Style {
+        theme: Theme {
+            background: gray(0),
+            foreground: gray(0xff),
+            accent: gray(0xc0),
+            hover: gray(0x40),
+            dim: gray(0x80),
+            urgent: gray(0xe0),
+        },
+        font_size: 14,
+        padding: 2,
+        spacing: 6,
+        separator: 0,
+        radius: 0,
+        opacity: u8::MAX,
+    }
+}
+
+fn circle(inset: u32) -> super::Pill {
+    super::Pill {
+        shape: super::Shape::Circle,
+        radius: 0,
+        inset,
+    }
+}
+
+#[test]
+fn disc_grows_the_span_to_the_diameter_and_nothing_else() {
+    let style = disc_style();
+    let scale = Scale::Integer(1);
+    let size = (400, 60);
+    // One active workspace: the text is one digit.
+    let (plain, link) = started_shaped(circle(2), super::Display::Numbers, false);
+    commit(&link, "DP-1", &[(2, 1, true)]);
+    let (spans, _, _, _) = bar_scene(&[plain], &style, scale, size);
+    assert_eq!(spans.len(), 1);
+    let natural = spans[0].width;
+    let (grown, link) = started_shaped(circle(2), super::Display::Numbers, true);
+    commit(&link, "DP-1", &[(2, 1, true)]);
+    let (spans, _, _, _) = bar_scene(&[grown], &style, scale, size);
+    assert!(
+        spans[0].width > natural,
+        "the span grew: {} to {}",
+        natural,
+        spans[0].width
+    );
+    // By exactly the disc less the digit: the pill's rows at this height
+    // less the active item's width, measured independently.
+    let font = text();
+    let em = crate::render::em(14, scale);
+    let metrics = font.metrics(em);
+    let line = (metrics.ascent - metrics.descent).ceil().max(0.0) as u32;
+    let rows = circle(2).rows(60, line, scale);
+    let diameter = rows.1 - rows.0;
+    let (_, end) = item_span(&font, "2", em, 0, 0).unwrap();
+    assert_eq!(spans[0].width, natural + diameter - end, "grew to the disc");
+    // No growth without the flag, without a circle, showing dots, with a
+    // wide-enough number, or with no active workspace to fit.
+    let (rect, link) = started_shaped(super::Pill::default(), super::Display::Numbers, true);
+    commit(&link, "DP-1", &[(2, 1, true)]);
+    let (spans, _, _, _) = bar_scene(&[rect], &style, scale, size);
+    assert_eq!(spans[0].width, natural, "a rect never grows");
+    let (dots, link) = started_shaped(circle(2), super::Display::Dots, true);
+    commit(&link, "DP-1", &[(2, 1, true)]);
+    let (spans, _, _, _) = bar_scene(&[dots], &style, scale, size);
+    assert!(spans[0].width <= natural, "dots never grow");
+    let (wide, link) = started_shaped(circle(2), super::Display::Numbers, true);
+    commit(&link, "DP-1", &[(10, 1, true)]);
+    let (spans, _, _, _) = bar_scene(&[wide], &style, scale, size);
+    assert!(
+        spans[0].width <= natural + diameter,
+        "a wide number needs no growth"
+    );
+    let (idle, link) = started_shaped(circle(2), super::Display::Numbers, true);
+    commit(&link, "DP-1", &[(1, 1, false), (2, 2, false)]);
+    let (spans, _, _, _) = bar_scene(&[idle], &style, scale, size);
+    assert!(spans[0].width > 0, "placed");
+}
+
+#[test]
+fn snapshot_a_disc_at_1x() {
+    let style = disc_style();
+    let (placed, link) = started_shaped(circle(2), Display::Numbers, true);
+    commit(&link, "DP-1", &[(2, 1, true)]);
+    let (_, pixels, w, h) = bar_scene(&[placed], &style, Scale::Integer(1), (120, 24));
+    crate::snapshots::check(
+        "workspaces-disc-1x",
+        "a single active workspace in a circle with disc on a 120x24 bar at scale 1: the span grown to the disc",
+        &crate::snapshots::Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+#[test]
+fn snapshot_a_disc_at_1_5x() {
+    let style = disc_style();
+    let (placed, link) = started_shaped(circle(2), Display::Numbers, true);
+    commit(&link, "DP-1", &[(2, 1, true)]);
+    let (_, pixels, w, h) = bar_scene(&[placed], &style, Scale::Fractional(180), (120, 24));
+    crate::snapshots::check(
+        "workspaces-disc-1.5x",
+        "the grown disc of workspaces-disc-1x at scale 1.5",
+        &crate::snapshots::Image::from_xrgb(&pixels, w, h, true),
     );
 }

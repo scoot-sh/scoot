@@ -89,6 +89,7 @@ spacing = 2
 background = "#101014"
 foreground = "#e0e0e0"
 accent = "#f9e2af"
+hover = "#89b4fa"
 dim = "#6c7086"
 urgent = "#f38ba8"
 
@@ -122,6 +123,7 @@ format = "%H:%M"
     assert_eq!(config.theme.background.to_string(), "#101014");
     assert_eq!(config.theme.foreground.to_string(), "#e0e0e0");
     assert_eq!(config.theme.accent.to_string(), "#f9e2af");
+    assert_eq!(config.theme.hover.to_string(), "#89b4fa");
     assert_eq!(config.theme.dim.to_string(), "#6c7086");
     assert_eq!(config.theme.urgent.to_string(), "#f38ba8");
     #[cfg(feature = "clock")]
@@ -187,6 +189,7 @@ fn bad_values_name_their_key() {
         ("[bar]\nfont-size = 0\n", "bar.font-size"),
         ("[bar]\npadding = 2048\n", "bar.padding"),
         ("[colors]\nbackground = \"red\"\n", "colors.background"),
+        ("[colors]\nhover = \"blue\"\n", "colors.hover"),
         ("[colors]\nurgent = \"#12345\"\n", "colors.urgent"),
         ("left = [\"battery\"]\n", "left"),
     ];

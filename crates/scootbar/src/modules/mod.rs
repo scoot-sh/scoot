@@ -208,6 +208,15 @@ pub trait Module {
         false
     }
 
+    /// Device pixels this module's span grows past its measured text, so
+    /// a shape it draws fits: 0 for every module but the workspaces
+    /// circle with `disc`. Cold path: asked when the module is measured
+    /// (a changed view, a new scale or bar size), never per frame.
+    fn span_extra(&self, measure: &Measure<'_>) -> u32 {
+        let _ = measure;
+        0
+    }
+
     /// Whether this running module continues as the config's `custom`
     /// module after a reload: an `exec` whose id and `Settings` did not
     /// change keeps its child, pipe, timer and shown output, instead of
@@ -506,6 +515,23 @@ pub struct OutputView<'a> {
     pub name: Option<&'a str>,
 }
 
+/// What [`Module::span_extra`] may measure with: everything
+/// [`Scene::update`](crate::render::Scene::update) measured the text with.
+pub struct Measure<'a> {
+    /// The output the span is measured for.
+    pub output: OutputView<'a>,
+    /// The view as just filled: what is measured.
+    pub view: &'a View,
+    /// What measures it.
+    pub text: &'a Text,
+    /// The em in device pixels, as measured.
+    pub em: f32,
+    /// The scale measured at.
+    pub scale: Scale,
+    /// The bar's height, device pixels.
+    pub height: u32,
+}
+
 /// Where a pointer input landed in a module's span, and what the module
 /// needs to hit-test it. The workspaces hit test reads it whole; the
 /// window title reads which output was clicked.
@@ -562,9 +588,10 @@ pub struct CustomDraw<'r, 'c> {
     pub baseline: i64,
     /// Device pixels either side of the module's content, as measured.
     pub padding: u32,
-    /// Whether the pointer is over this module's span and tints it: a
-    /// module that draws itself honors the same tint the plain draw
-    /// would, so truncating never changes the look.
+    /// Whether the pointer is over this module's span: the plain draw
+    /// tints with the `hover` token then, and a module that draws itself
+    /// honors the same tint its own way (so truncating never changes the
+    /// look, and neither does who paints it).
     pub hovered: bool,
     /// The scale the bar is drawn at: a module's own logical lengths
     /// (the pill's radius and inset) are device pixels through it.

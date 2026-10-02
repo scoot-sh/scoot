@@ -21,6 +21,10 @@ pub struct Theme {
     pub foreground: Color,
     /// The `warn` class, and a highlight (the active workspace, later).
     pub accent: Color,
+    /// A module with a binding, while the pointer is over it (and the
+    /// workspaces pill then): the `accent` value unless the config sets
+    /// its own, so the tint is the old one by default.
+    pub hover: Color,
     /// The `muted` class.
     pub dim: Color,
     /// The `urgent` class.
@@ -44,6 +48,11 @@ impl Default for Theme {
             background: DEFAULT_BACKGROUND,
             foreground: DEFAULT_FOREGROUND,
             accent: Color {
+                r: 0xf9,
+                g: 0xe2,
+                b: 0xaf,
+            },
+            hover: Color {
                 r: 0xf9,
                 g: 0xe2,
                 b: 0xaf,

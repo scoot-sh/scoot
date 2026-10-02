@@ -325,6 +325,7 @@ struct ColorsFile {
     background: Option<String>,
     foreground: Option<String>,
     accent: Option<String>,
+    hover: Option<String>,
     dim: Option<String>,
     urgent: Option<String>,
 }
@@ -404,6 +405,20 @@ struct WorkspacesFile {
     #[cfg(feature = "workspaces")]
     #[serde(rename = "item-gap")]
     item_gap: Option<u32>,
+    /// What the module shows: `numbers` or `dots`.
+    #[cfg(feature = "workspaces")]
+    display: Option<String>,
+    /// With a `circle` pill: grow the module's own span to the disc.
+    #[cfg(feature = "workspaces")]
+    disc: Option<bool>,
+    /// The active pill's fill, instead of the `accent` token.
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "active-color")]
+    active_color: Option<String>,
+    /// Inactive numbers' ink, instead of the `normal` class's token.
+    #[cfg(feature = "workspaces")]
+    #[serde(rename = "inactive-color")]
+    inactive_color: Option<String>,
     /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
     /// or `{ scoot = "..." }`.
     #[cfg(feature = "workspaces")]
@@ -654,7 +669,7 @@ impl File {
         }
         #[cfg(feature = "workspaces")]
         {
-            use crate::modules::workspaces::Shape;
+            use crate::modules::workspaces::{Display, Shape};
             let pill = &mut modules.workspaces.pill;
             if let Some(text) = &self.workspaces.pill_shape {
                 pill.shape = Shape::parse(text).ok_or_else(|| {
@@ -693,6 +708,44 @@ impl File {
                     ));
                 }
                 modules.workspaces.item_gap = spaces;
+            }
+            modules.workspaces.active_color = color_opt(
+                path,
+                "workspaces.active-color",
+                self.workspaces.active_color.as_ref(),
+            )?;
+            modules.workspaces.inactive_color = color_opt(
+                path,
+                "workspaces.inactive-color",
+                self.workspaces.inactive_color.as_ref(),
+            )?;
+            if let Some(text) = &self.workspaces.display {
+                modules.workspaces.display = Display::parse(text).ok_or_else(|| {
+                    value(
+                        path,
+                        "workspaces.display",
+                        format_args!("takes numbers or dots, not `{}`", text.escape_debug()),
+                    )
+                })?;
+            }
+            if let Some(disc) = self.workspaces.disc {
+                modules.workspaces.disc = disc;
+            }
+            if modules.workspaces.disc {
+                if modules.workspaces.pill.shape != Shape::Circle {
+                    return Err(value(
+                        path,
+                        "workspaces.disc",
+                        "grows the circle to a disc; it needs pill-shape = \"circle\"",
+                    ));
+                }
+                if modules.workspaces.display != Display::Numbers {
+                    return Err(value(
+                        path,
+                        "workspaces.disc",
+                        "grows the circle to a disc; dots have no pill to grow",
+                    ));
+                }
             }
         }
         #[cfg(feature = "clock")]
@@ -897,13 +950,8 @@ impl File {
 
     fn theme(&self, path: &Path, defaults: &Theme) -> Result<Theme, Error> {
         let colors = &self.colors;
-        let color = |key: &'static str, text: Option<&String>, fallback: Color| match text {
-            None => Ok(fallback),
-            Some(text) => Color::parse(text).map_err(|error| Error::Value {
-                path: path.to_owned(),
-                key,
-                message: format!("{text:?}: {error}"),
-            }),
+        let color = |key: &'static str, text: Option<&String>, fallback: Color| {
+            color_opt(path, key, text).map(|color| color.unwrap_or(fallback))
         };
         Ok(Theme {
             background: color(
@@ -917,6 +965,7 @@ impl File {
                 defaults.foreground,
             )?,
             accent: color("colors.accent", colors.accent.as_ref(), defaults.accent)?,
+            hover: color("colors.hover", colors.hover.as_ref(), defaults.hover)?,
             dim: color("colors.dim", colors.dim.as_ref(), defaults.dim)?,
             urgent: color("colors.urgent", colors.urgent.as_ref(), defaults.urgent)?,
         })
@@ -965,6 +1014,23 @@ fn value(path: &Path, key: &'static str, message: impl fmt::Display) -> Error {
         key,
         message: message.to_string(),
     }
+}
+
+/// A color the file names, or `None` when it names none: a bad one is a
+/// loud error naming its key.
+fn color_opt(
+    path: &Path,
+    key: &'static str,
+    text: Option<&String>,
+) -> Result<Option<Color>, Error> {
+    text.map(|text| {
+        Color::parse(text).map_err(|error| Error::Value {
+            path: path.to_owned(),
+            key,
+            message: format!("{text:?}: {error}"),
+        })
+    })
+    .transpose()
 }
 
 /// A `left`/`center`/`right` list: every id must name a module of this

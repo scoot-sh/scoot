@@ -460,6 +460,10 @@ always drew):
 | `pill-radius` | 0 to 1024 | a `rect`'s corner radius, cut back to half its shorter side. Refused with `pill` or `circle`, which are already as round as they fit. |
 | `pill-inset` | 0 to 1024 | the gap from the bar's top and bottom edges, so the pill is shorter than the bar. Cut back so the pill is never shorter than the text's line: the number is drawn in the bar's color over the fill, and a shorter pill would clip it away. |
 | `item-gap` | 1 to 8 (default 1) | the spaces between two numbers: one space is about a third of the font size, so 1 is the old tight row and 4 a roomy one. The pill and the click target of each number follow; a click in the gap hits nothing. The module's text is cut at 256 bytes, so a bigger gap shows fewer workspaces: at 8 spaces about 26 numbered up to 99 (28 single-digit ones), the rest cut off the end. |
+| `display` | `"numbers"` (default), `"dots"` | `dots`: a dot per workspace in place of the numbers — the active one filled like the pill, the rest dim (or the state colors above). Clicks land by the dots' places, exactly as by the numbers'. A `query` still reports the numbers. |
+| `disc` | off by default | with a `circle` pill: grow the module's own span to the disc's diameter, so a single digit is a disc at any `padding`. Refused with any other shape, and showing dots. |
+| `active-color` | a color, unset by default | the active pill's fill instead of `accent`. The pointer's `hover` still wins while it is over the module. |
+| `inactive-color` | a color, unset by default | inactive numbers' ink instead of `fg`. |
 
 ```toml
 # A rounded pill, lifted 4 off the bar's edges
@@ -490,7 +494,8 @@ pill-inset = 3
   number's ink, and cannot pass the module's own span (the numbers plus
   `padding` either side). So on a crowded bar, or one whose `padding` is
   small next to its height, a single digit gets an oval rather than a
-  disc: raise `padding` or the `pill-inset` until it is round.
+  disc: raise `padding` or the `pill-inset` until it is round, or set
+  `disc` to grow the span to the disc instead.
 - **Clicks follow the pill**: a press on the drawn pill of the active
   number does nothing (it is already shown), never a neighbour's switch,
   even where a grown circle overlaps the neighbour's own click area; a press
@@ -501,10 +506,15 @@ pill-inset = 3
   wide on a 1600x28 bar): the default square full-height pill costs 151 ns
   (the plain fill it replaced, 153 ns); a rounded pill inset by a quarter of
   the height costs 6.3 us, and 20 us on 3200x56 (scale 2), once per
-  workspace change.
-- **Not built (their own follow-ups)**: dot-style indicators (a row of
-  small dots in place of the numbers), and colors for the inactive
-  workspaces or per-state pill colors.
+  workspace change. Dots cost one small maximally-rounded fill each, about
+  6 us at a 50-pixel test em (linear in the count: 25/49/100 us for 4/8/16
+  on the dev VM); at real sizes the discs cover an order of magnitude fewer
+  pixels. A grown disc costs its bigger fill, about 8.5 us at the same test
+  scale against 5 us for the plain pill. Neither adds a file descriptor, a
+  timer or a wakeup: idle costs nothing new.
+- **Not built**: urgent and occupied workspace
+  colors wait on the compositor telling the bar which workspace is which
+  (no protocol bit says so today).
 
 ## Window title
 
@@ -629,11 +639,12 @@ places, and an `exec` command runs once however many steps it covers. While
 steps wait the loop sleeps only until the frame is due; with nothing
 waiting it sleeps as before.
 
-**Hover.** A module with a binding is drawn in the `accent` color while
+**Hover.** A module with a binding is drawn in the `hover` color while
 the pointer is over it, and only that module's span is redrawn, on that
 output's bar alone; moving between modules redraws the one left and the one
-entered. A module with no binding is not tinted (the workspaces module
-draws its own pill, and is not tinted either).
+entered. A module with no binding is not tinted. The workspaces module
+tints its active pill the same way (its pill is drawn by the module
+itself, so the tint lands there rather than over its text).
 
 **Cost.** The bar asks the seat for a pointer only while a placed module
 has a binding or a default of its own (today: the workspaces module's
@@ -951,6 +962,7 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
 | `bg` | `#1e1e2e` |
 | `fg` | `#cdd6f4` |
 | `accent` | `#f9e2af` |
+| `hover` | `#f9e2af` (the old tint: a module under the pointer drew `accent`) |
 | `dim` | `#6c7086` |
 | `urgent` | `#f38ba8` |
 

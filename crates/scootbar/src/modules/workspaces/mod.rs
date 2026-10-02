@@ -63,12 +63,13 @@ use wayland_protocols::ext::workspace::v1::client::ext_workspace_handle_v1::ExtW
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::ExtWorkspaceManagerV1;
 
 use super::{
-    ActionSpec, ArgKind, CustomDraw, Init, Input, InvokeError, Module, OutputView, Sources, Update,
-    View,
+    ActionSpec, ArgKind, CustomDraw, Init, Input, InvokeError, Measure, Module, OutputView,
+    Sources, Update, View,
 };
 pub use pill::{Pill, Shape};
 
 use crate::action::{Action, ModuleAction, Trigger};
+use crate::color::Color;
 use crate::density::Scale;
 use crate::paint::Span;
 use crate::print::warn;
@@ -80,6 +81,24 @@ mod tests;
 
 /// The id `--left`, `--center` and `--right` name it by.
 pub const ID: &str = "workspaces";
+
+/// What the module shows: the workspace numbers, or a dot each.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Display {
+    #[default]
+    Numbers,
+    Dots,
+}
+
+impl Display {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "numbers" => Some(Self::Numbers),
+            "dots" => Some(Self::Dots),
+            _ => None,
+        }
+    }
+}
 
 /// The actions a binding may name (`activate 3`, `activate-position 1`,
 /// `previous`, `next`).
@@ -130,6 +149,16 @@ pub struct Settings {
     /// Spaces between the numbers, `1..=`[`MAX_ITEM_GAP`]: one space is about
     /// a third of the font size.
     pub item_gap: u32,
+    /// The active pill's fill, `None` for the `accent` token.
+    pub active_color: Option<Color>,
+    /// Inactive numbers' ink, `None` for the `normal` class's token.
+    pub inactive_color: Option<Color>,
+    /// What the module shows: the numbers, or a dot each (`dots` draws
+    /// itself, and clicks land by the dots' places).
+    pub display: Display,
+    /// With a `circle` pill: grow the module's own span to the disc's
+    /// diameter, so a single digit is a disc at any padding.
+    pub disc: bool,
 }
 
 impl Default for Settings {
@@ -138,6 +167,10 @@ impl Default for Settings {
             link: Link::default(),
             pill: Pill::default(),
             item_gap: 1,
+            active_color: None,
+            inactive_color: None,
+            display: Display::default(),
+            disc: false,
         }
     }
 }
@@ -145,7 +178,12 @@ impl Default for Settings {
 impl PartialEq for Settings {
     fn eq(&self, other: &Self) -> bool {
         // The link is plumbing, equal by construction.
-        self.pill == other.pill && self.item_gap == other.item_gap
+        self.pill == other.pill
+            && self.item_gap == other.item_gap
+            && self.active_color == other.active_color
+            && self.inactive_color == other.inactive_color
+            && self.display == other.display
+            && self.disc == other.disc
     }
 }
 
@@ -652,6 +690,10 @@ pub fn init(settings: &super::Settings) -> Init {
         link: settings.workspaces.link.clone(),
         pill: settings.workspaces.pill,
         item_gap: settings.workspaces.item_gap.clamp(1, MAX_ITEM_GAP),
+        active_color: settings.workspaces.active_color,
+        inactive_color: settings.workspaces.inactive_color,
+        display: settings.workspaces.display,
+        disc: settings.workspaces.disc,
         seen: 0,
     }))
 }
@@ -662,6 +704,10 @@ pub struct Workspaces {
     pill: Pill,
     /// Spaces between two numbers in the view's text.
     item_gap: u32,
+    active_color: Option<Color>,
+    inactive_color: Option<Color>,
+    display: Display,
+    disc: bool,
     seen: u64,
 }
 
@@ -693,8 +739,91 @@ impl Workspaces {
                     let _ = view.text_mut().write_char(' ');
                 }
             }
-            let _ = write!(view.text_mut(), "{number}");
+            // Dots are drawn by `custom_draw`, never as text: the cell is
+            // one ordinary character, so measuring and the hit test walk
+            // the dots' own places.
+            if self.display == Display::Dots {
+                let _ = view.text_mut().write_char('o');
+            } else {
+                let _ = write!(view.text_mut(), "{number}");
+            }
         }
+    }
+
+    /// A dot per committed workspace: the active one filled like the
+    /// pill, the rest dim (or the configured state colors). One fill
+    /// each, at most [`MAX_WORKSPACES`]: the hit test walks the same
+    /// cells the view's text makes, so clicks land on the dots.
+    fn draw_dots(&self, ctx: &mut CustomDraw<'_, '_>, group: &Group) -> bool {
+        let committed = &group.committed[..group.committed_len];
+        if committed.is_empty() {
+            return false;
+        }
+        let full = ctx.view.text();
+        let metrics = ctx.text.metrics(ctx.em);
+        let line = (metrics.ascent - metrics.descent).ceil().max(0.0) as u32;
+        let (top, bottom) = self.pill.rows(ctx.canvas.height(), line, ctx.scale);
+        let middle = top / 2 + bottom / 2;
+        let gap = (ctx.text.advance(' ', ctx.em) * self.item_gap as f32)
+            .round()
+            .max(0.0) as u32;
+        for (index, ws) in committed.iter().enumerate() {
+            let Some((start, end)) =
+                item_span(ctx.text, full, ctx.em, i64::from(ctx.padding), index)
+            else {
+                continue;
+            };
+            let width = end.saturating_sub(start);
+            // No taller than the line, and never into the next dot.
+            let diameter = line.min(width.saturating_add(gap)).max(1);
+            let center = start / 2 + end / 2;
+            let radius = diameter / 2;
+            let x = center.saturating_sub(radius);
+            let y = middle.saturating_sub(radius);
+            let color = if ws.active {
+                if ctx.hovered {
+                    ctx.theme.hover
+                } else {
+                    self.active_color.unwrap_or(ctx.theme.accent)
+                }
+            } else {
+                self.inactive_color.unwrap_or(ctx.theme.dim)
+            };
+            ctx.canvas.fill_pill(
+                Span { x, width: diameter },
+                y,
+                y.saturating_add(diameter),
+                u32::MAX,
+                color,
+            );
+        }
+        true
+    }
+    /// How much wider than its text the module measures with `disc`: the
+    /// disc's diameter less the active number's width (the rest of the
+    /// text stays), so the circle the pill grows into fits the span. 0
+    /// without `disc`, without a circle, showing dots, or with no active
+    /// workspace (nothing is drawn to fit).
+    fn disc_extra(&self, measure: &Measure<'_>) -> u32 {
+        if !self.disc || self.pill.shape != Shape::Circle || self.display != Display::Numbers {
+            return 0;
+        }
+        let mut items = [(0u32, false); MAX_WORKSPACES];
+        let mut count = 0;
+        self.items(&measure.output, &mut items, &mut count);
+        let Some(active) = items[..count].iter().position(|&(_, active)| active) else {
+            return 0;
+        };
+        let full = measure.view.text();
+        let Some((start, end)) = item_span(measure.text, full, measure.em, 0, active) else {
+            return 0;
+        };
+        let metrics = measure.text.metrics(measure.em);
+        let line = (metrics.ascent - metrics.descent).ceil().max(0.0) as u32;
+        let rows = self.pill.rows(measure.height, line, measure.scale);
+        rows.1
+            .saturating_sub(rows.0)
+            .saturating_sub(end.saturating_sub(start))
     }
 }
 
@@ -1036,9 +1165,15 @@ impl Module for Workspaces {
         true
     }
 
-    /// The pill is the module's own look; nothing is tinted over it.
+    /// The pill is the module's own look; it tints with the `hover` token
+    /// like a bound module, through [`Module::custom_draw`].
     fn tints_on_hover(&self) -> bool {
-        false
+        true
+    }
+
+    /// With `disc`, the span the pill grows into (see [`Workspaces::disc_extra`]).
+    fn span_extra(&self, measure: &Measure<'_>) -> u32 {
+        self.disc_extra(measure)
     }
 
     /// The pill behind the active workspace: an accent fill over its item
@@ -1050,6 +1185,11 @@ impl Module for Workspaces {
             return false;
         };
         let group = &shared.groups[index];
+        if self.display == Display::Dots {
+            let drawn = self.draw_dots(ctx, group);
+            drop(shared);
+            return drawn;
+        }
         let active = group.committed[..group.committed_len]
             .iter()
             .position(|ws| ws.active);
@@ -1078,15 +1218,24 @@ impl Module for Workspaces {
         // The borrows end here: the draws below take the canvas and the
         // text, not the shared state.
         drop(shared);
+        // Hover wins over the configured color, which wins over the
+        // accent: the tint is the old one unless something says otherwise.
+        let fill = if ctx.hovered {
+            ctx.theme.hover
+        } else {
+            self.active_color.unwrap_or(ctx.theme.accent)
+        };
         ctx.canvas.fill_pill(
             pill,
             geometry.top,
             geometry.bottom,
             self.pill.radius(ctx.scale),
-            ctx.theme.accent,
+            fill,
         );
         let background = ctx.theme.background;
-        let ink = ctx.theme.class(ctx.view.class());
+        let ink = self
+            .inactive_color
+            .unwrap_or(ctx.theme.class(ctx.view.class()));
         let x = ctx.span.x;
         ctx.text.draw(
             ctx.canvas,
