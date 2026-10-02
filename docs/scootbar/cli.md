@@ -530,10 +530,11 @@ window activated on it; with none focused the module shows its
 - **Cost.** Event-driven, no polling: the protocol is bound only while
   the module is placed (a bar with no window-title module is never told a
   title), and without it the module shows nothing and takes no space. A
-  retitle flood draws at most ten times a second — focus, output and close
-  changes always draw at once, only titles wait — and only this module's
-  span is redrawn. Titles are untrusted text: kept at 256 bytes, control
-  characters stripped before they reach the view (and the glyph cache).
+  retitle flood draws about ten times a second — focus, output, close and
+  fullscreen changes always draw at once; only title and app-id text waits
+  — and only this module's span is redrawn. Titles are untrusted text:
+  kept at 256 bytes, control characters stripped before they reach the
+  view (and the glyph cache).
 - **Only the wlr protocol.** `ext-foreign-toplevel-list-v1` has no
   `activated` state, no output events and no requests, and the two lists
   share no client-visible key, so a bar cannot correlate their handles;

@@ -39,12 +39,14 @@
 //!   it, [`ClickCtx`]) and answers the [`Action`] that input means by
 //!   default, or none. It never acts: the bar carries the action out
 //!   ([`crate::action::perform`]), through [`Module::invoke`], which is
-//!   also what a configured binding (`on-click = "next"`) calls. Only the
-//!   workspaces module has a default (a click on a workspace switches to
-//!   it); a binding in the config replaces it.
+//!   also what a configured binding (`on-click = "next"`) calls. The
+//!   workspaces and window-title modules have defaults (a click on a
+//!   workspace switches to it; a click on a title activates it); a binding
+//!   in the config replaces them.
 //! - **[`Module::custom_draw`]** draws the module itself ([`CustomDraw`]),
-//!   for the one module whose look is not plain text on the bar: the
-//!   workspaces module's pill behind the active workspace.
+//!   for the modules that draw more than plain text: the workspaces
+//!   module's pill behind the active workspace, and the window title's
+//!   ellipsis for a title longer than its span.
 //!
 //! Modules are built once at start-up as trait objects (the only allocation
 //! they cost the loop), and a redraw is a handful of virtual calls.
@@ -122,8 +124,9 @@ pub trait Module {
     /// turn: the loop calls this after every dispatch, before drawing, and
     /// bumps the revision when it says the view changed. A module with no
     /// Wayland objects keeps the default. (The workspaces module's
-    /// `ext-workspace-v1` objects land there, on an fd the module does not
-    /// own, so `sources`/`on_ready` cannot see them.)
+    /// `ext-workspace-v1` objects, and the window title's
+    /// `wlr-foreign-toplevel` ones, land there, on an fd the module does
+    /// not own, so `sources`/`on_ready` cannot see them.)
     fn on_dispatch(&mut self) -> Update {
         Update::Unchanged
     }
@@ -154,9 +157,9 @@ pub trait Module {
     }
 
     /// Whether the module answers pointer input with no binding in the
-    /// config, so the bar needs a pointer for it (the workspaces module's
-    /// click). A bar whose modules neither answer nor are bound takes no
-    /// pointer at all.
+    /// config, so the bar needs a pointer for it (a workspaces click, a
+    /// window-title click). A bar whose modules neither answer nor are
+    /// bound takes no pointer at all.
     fn handles_input(&self) -> bool {
         false
     }
@@ -192,8 +195,9 @@ pub trait Module {
 
     /// Draws the module itself, instead of the loop's plain text draw.
     /// `true` when it drew (the loop then draws nothing more for it this
-    /// paint); `false` keeps the default. Only the workspaces module opts
-    /// in, for its pill behind the active workspace.
+    /// paint); `false` keeps the default. The workspaces and window-title
+    /// modules opt in: the pill behind the active workspace, and the
+    /// title's ellipsis for a title longer than its span.
     fn custom_draw(&self, ctx: &mut CustomDraw<'_, '_>) -> bool {
         let _ = ctx;
         false
@@ -222,10 +226,13 @@ impl fmt::Display for SetError {
 }
 
 /// Why a module refused an action: said on stderr, or to the agent that
-/// asked. (A build without a module that has actions, the workspaces one
-/// so far, constructs none but `Unknown`.)
+/// asked. (A build without a module that has actions — the workspaces and
+/// window-title ones so far — constructs none but `Unknown`.)
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(feature = "workspaces"), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "workspaces", feature = "window-title")),
+    allow(dead_code)
+)]
 pub enum InvokeError {
     /// The module has no such action.
     Unknown,
@@ -291,7 +298,10 @@ pub struct ActionSpec {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(not(feature = "workspaces"), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "workspaces", feature = "window-title")),
+    allow(dead_code)
+)]
 pub enum ArgKind {
     None,
     Required,
@@ -463,8 +473,9 @@ pub struct OutputView<'a> {
 }
 
 /// Where a pointer input landed in a module's span, and what the module
-/// needs to hit-test it.
-#[allow(dead_code)] // Only the workspaces module reads it.
+/// needs to hit-test it. The workspaces hit test reads it whole; the
+/// window title reads which output was clicked.
+#[allow(dead_code)]
 pub struct ClickCtx<'a> {
     /// The output whose bar was clicked.
     pub output: OutputView<'a>,
@@ -487,9 +498,12 @@ pub struct ClickCtx<'a> {
     pub scale: Scale,
 }
 
-/// A pointer input for [`Module::on_input`]. (Only the workspaces module
-/// reads it, so far.)
-#[cfg_attr(not(feature = "workspaces"), allow(dead_code))]
+/// A pointer input for [`Module::on_input`]. (The workspaces and
+/// window-title modules read it.)
+#[cfg_attr(
+    not(any(feature = "workspaces", feature = "window-title")),
+    allow(dead_code)
+)]
 pub struct Input<'a> {
     pub trigger: Trigger,
     pub at: &'a ClickCtx<'a>,
@@ -497,7 +511,8 @@ pub struct Input<'a> {
 
 /// What a module draws itself with, for [`Module::custom_draw`]: the same
 /// canvas, measurer, span and metrics the loop's plain text draw would use.
-#[allow(dead_code)] // Only the workspaces module reads it.
+/// The workspaces and window-title modules' own draws read it.
+#[allow(dead_code)]
 pub struct CustomDraw<'r, 'c> {
     /// The output being drawn.
     pub output: OutputView<'r>,

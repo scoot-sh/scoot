@@ -2,7 +2,8 @@
 //!
 //! One binary. `scootbar daemon` connects to the compositor and gives every
 //! output a bar, a `top`-layer surface along one edge that reserves its
-//! space, showing modules (`modules`: the clock and workspaces, so far).
+//! space, showing modules (`modules`: the clock, workspaces and
+//! window-title, so far).
 //! `scootbar msg` asks the running daemon over its control socket: `query`
 //! reads each module's state as JSON (the agent hook), `reload` re-reads
 //! the config file, and `version` and `kill` are what they sound like. The

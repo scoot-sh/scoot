@@ -463,8 +463,9 @@ pub fn paint(
         if span.width == 0 {
             continue;
         }
-        // The one module with its own look draws itself; the rest draw as
-        // plain text.
+        // The modules with their own look draw themselves (the
+        // workspaces pill, a window title longer than its span); the rest
+        // draw as plain text.
         let mut custom = false;
         if let Some(placed) = scene.modules.get(index).and_then(|&m| placed.get(m)) {
             custom = placed.module.custom_draw(&mut CustomDraw {
