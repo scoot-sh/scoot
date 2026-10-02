@@ -602,7 +602,8 @@ fn a_standing_refusal_is_not_a_connect_loop() {
     conn.error(tag, 2);
     drop(conn);
     let _ = harness.wait(Duration::from_secs(5));
-    // And again refused by a plain close: both waits stay quiet.
+    // A refusal is not a subscribed connection, so it is not probed:
+    // the wait stays quiet. (A close mid-handshake is the next test.)
     assert_eq!(wakeups_over(&mut harness, 500), 0);
     assert_eq!(fake.unaccepted(), 0, "a refusal was probed again");
     assert!(harness.view().is_empty());

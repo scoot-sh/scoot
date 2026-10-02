@@ -612,10 +612,10 @@ by default.
   (one probe, after the watch is armed). A server that refuses the
   handshake (a cookie it does not accept) is not probed again until
   something new happens in the socket's directory, so a standing refusal
-  costs no connect loop; sets are absolute levels from what is shown (never accumulated
-  steps, so a touchpad flood cannot drift), one in flight at most, and
-  every answered set is re-read, so what the server clamped to is what is
-  shown. The server is `$PULSE_SERVER` when that names a unix socket,
+  costs no connect loop. Sets are absolute levels from what is shown
+  (never accumulated steps, so a touchpad flood cannot drift), one in
+  flight at most, and every answered set is re-read, so what the server
+  clamped to is what is shown. The server is `$PULSE_SERVER` when that names a unix socket,
   else `$XDG_RUNTIME_DIR/pulse/native`; device names from it are untrusted
   text, kept at 128 bytes.
 
