@@ -399,7 +399,6 @@ fn debug_parse_captured() {
     let mut fields = Reader::le(&frame[16..16 + fields_len]);
     while !fields.exhausted() {
         eprintln!("element rel {}", 16 + (fields_len - fields.remaining()));
-        fields.align(8).expect("align");
         fields.enter_struct().expect("enter");
         let code = fields.u8().expect("code");
         let sig = fields.signature().expect("sig").to_owned();
