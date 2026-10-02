@@ -405,3 +405,40 @@ fn debug_real_bus() {
     let events = conn.pump();
     eprintln!("pumped {} events", events.len());
 }
+
+#[test]
+fn debug_dump_hello() {
+    use crate::dbus::proto::Writer;
+    use std::io::{Read, Write};
+    if std::env::var_os("TRAY_DEBUG_BUS").is_none() {
+        return;
+    }
+    let path = crate::dbus::conn::bus_path();
+    let mut stream = std::os::unix::net::UnixStream::connect(&path).unwrap();
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    stream.write_all(&[0]).unwrap();
+    stream.write_all(b"AUTH EXTERNAL\r\n").unwrap();
+    let mut line = [0u8; 256];
+    let n = stream.read(&mut line).unwrap();
+    eprintln!("auth1: {:?}", String::from_utf8_lossy(&line[..n]));
+    stream.write_all(b"DATA\r\n").unwrap();
+    let n = stream.read(&mut line).unwrap();
+    eprintln!("auth2: {:?}", String::from_utf8_lossy(&line[..n]));
+    stream.write_all(b"BEGIN\r\n").unwrap();
+    let mut writer = Writer::new();
+    writer.begin_call(1, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "Hello", "", 0);
+    let message = writer.finish().unwrap();
+    eprintln!("hello call bytes: {}", message.len());
+    stream.write_all(&message).unwrap();
+    let mut reply = vec![0u8; 8192];
+    let n = stream.read(&mut reply).unwrap();
+    reply.truncate(n);
+    eprintln!("reply bytes: {n}");
+    eprintln!("reply hex: {}", reply.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let framed = crate::dbus::proto::frame_at(&reply).expect("frames");
+    eprintln!("framed: {framed:?}");
+    match crate::dbus::proto::Message::parse(&reply[..framed.unwrap_or(reply.len())]) {
+        Ok(message) => eprintln!("parsed: kind={:?} serial={} sig={:?} sender={:?}", message.kind, message.serial, message.signature, message.sender),
+        Err(()) => eprintln!("PARSE REFUSED"),
+    }
+}
