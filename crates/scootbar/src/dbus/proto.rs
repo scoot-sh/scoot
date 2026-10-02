@@ -193,7 +193,9 @@ pub struct Message<'a> {
     /// The sender's unique name, when the daemon set one.
     pub sender: Option<&'a str>,
     /// The destination: a unique or well-known name, or absent
-    /// (broadcast signals).
+    /// (broadcast signals). Read by future consumers routing on it;
+    /// the tray answers what is its object regardless.
+    #[allow(dead_code)]
     pub destination: Option<&'a str>,
     pub path: Option<&'a str>,
     pub interface: Option<&'a str>,

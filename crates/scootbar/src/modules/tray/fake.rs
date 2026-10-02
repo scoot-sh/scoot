@@ -234,7 +234,9 @@ impl Fake {
 
     /// Sends any method call addressed to the module, as the daemon would
     /// deliver it from `sender`. Returns the call's serial, which the
-    /// module's answer quotes.
+    /// module's answer quotes. Nine arguments, like the frame it
+    /// becomes (see `frame_with_sender`).
+    #[allow(clippy::too_many_arguments)]
     pub fn send_call(
         &mut self,
         dest: &str,

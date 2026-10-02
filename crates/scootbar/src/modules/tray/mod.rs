@@ -183,7 +183,7 @@ fn start_with(addr: BusAddr) -> Box<dyn Module> {
         // Dial now when the bus is there (a local socket: `Hello` is two
         // round trips); waiting costs nothing when it is not.
         None => {
-            tray.connect();
+            let _ = tray.connect();
         }
     }
     Box::new(tray)
@@ -388,7 +388,7 @@ impl Tray {
             Bus::Waiting { .. } => false,
         };
         self.wait();
-        self.connect();
+        let _ = self.connect();
         if had {
             Update::Changed
         } else {
