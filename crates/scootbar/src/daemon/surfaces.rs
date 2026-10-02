@@ -347,6 +347,11 @@ impl State {
                 .0
                 .borrow_mut()
                 .purge_output(entry.objects.wl_output());
+            #[cfg(feature = "window-title")]
+            self.title
+                .0
+                .borrow_mut()
+                .purge_output(entry.objects.wl_output());
             entry.objects.destroy();
         }
     }
@@ -452,6 +457,12 @@ impl Dispatch<WlOutput, OutputId> for State {
                 #[cfg(feature = "workspaces")]
                 state
                     .workspaces
+                    .0
+                    .borrow_mut()
+                    .note_output_name(entry.objects.wl_output(), &name);
+                #[cfg(feature = "window-title")]
+                state
+                    .title
                     .0
                     .borrow_mut()
                     .note_output_name(entry.objects.wl_output(), &name);

@@ -2,10 +2,12 @@
 //!
 //! A bound `ext_workspace_manager_v1` makes the compositor send the bar
 //! every workspace change, and the daemon wake for and parse each one, so
-//! it is bound only while a workspaces module is placed. The seat is there
+//! it is bound only while a workspaces module is placed. The same holds
+//! for the `zwlr_foreign_toplevel_manager_v1` and the window-title module:
+//! every title change would wake the bar otherwise. The seat is there
 //! for pointer input, so it is bound only while a placed module takes any
-//! (a binding in the config, or the workspaces click: [`State::needs_pointer`]);
-//! the `wl_pointer` itself is `input`'s.
+//! (a binding in the config, or the workspaces and window-title clicks:
+//! [`State::needs_pointer`]); the `wl_pointer` itself is `input`'s.
 //!
 //! The decision is remade at every point that can change it, by
 //! [`State::sync_binds`]: once at connect (from the globals the registry
@@ -20,6 +22,8 @@ use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::{Proxy, QueueHandle};
 #[cfg(feature = "workspaces")]
 use wayland_protocols::ext::workspace::v1::client::ext_workspace_manager_v1::ExtWorkspaceManagerV1;
+#[cfg(feature = "window-title")]
+use wayland_protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1;
 
 use super::wayland::State;
 
@@ -37,6 +41,8 @@ pub struct Binds {
     registry: WlRegistry,
     #[cfg(feature = "workspaces")]
     manager: Option<Offer>,
+    #[cfg(feature = "window-title")]
+    toplevel: Option<Offer>,
     seat: Option<Offer>,
 }
 
@@ -46,6 +52,8 @@ impl Binds {
             registry,
             #[cfg(feature = "workspaces")]
             manager: None,
+            #[cfg(feature = "window-title")]
+            toplevel: None,
             seat: None,
         }
     }
@@ -59,6 +67,16 @@ impl State {
             .modules
             .iter()
             .any(|placed| placed.id == crate::modules::workspaces::ID)
+    }
+
+    /// Whether the window-title module is placed, so it needs the
+    /// toplevel manager.
+    #[cfg(feature = "window-title")]
+    fn wants_title(&self) -> bool {
+        self.content
+            .modules
+            .iter()
+            .any(|placed| placed.id == crate::modules::window_title::ID)
     }
 
     /// Whether anything placed takes pointer input, so it needs the seat.
@@ -82,6 +100,12 @@ impl State {
             self.sync_binds(qh);
             return true;
         }
+        #[cfg(feature = "window-title")]
+        if interface == ZwlrForeignToplevelManagerV1::interface().name {
+            self.binds.toplevel = offer;
+            self.sync_binds(qh);
+            return true;
+        }
         if interface == WlSeat::interface().name {
             self.binds.seat = offer;
         } else {
@@ -96,14 +120,18 @@ impl State {
     pub fn withdraw(&mut self, name: u32) -> bool {
         let mut found = false;
         #[cfg(feature = "workspaces")]
-        let offers = [&mut self.binds.manager, &mut self.binds.seat];
-        #[cfg(not(feature = "workspaces"))]
-        let offers = [&mut self.binds.seat];
-        for offer in offers {
-            if offer.is_some_and(|o| o.name == name) {
-                *offer = None;
-                found = true;
-            }
+        if self.binds.manager.is_some_and(|offer| offer.name == name) {
+            self.binds.manager = None;
+            found = true;
+        }
+        #[cfg(feature = "window-title")]
+        if self.binds.toplevel.is_some_and(|offer| offer.name == name) {
+            self.binds.toplevel = None;
+            found = true;
+        }
+        if self.binds.seat.is_some_and(|offer| offer.name == name) {
+            self.binds.seat = None;
+            found = true;
         }
         found
     }
@@ -131,6 +159,30 @@ impl State {
                 }
             }
         }
+        #[cfg(feature = "window-title")]
+        {
+            let mut shared = self.title.0.borrow_mut();
+            if !self.wants_title() {
+                if shared.has_manager() {
+                    shared.release();
+                }
+            } else if !shared.has_manager() {
+                if let Some(offer) = self.binds.toplevel {
+                    // Version 3 is the newest: `fullscreen` state from 2,
+                    // `parent` from 3.
+                    let manager = self
+                        .binds
+                        .registry
+                        .bind::<ZwlrForeignToplevelManagerV1, _, _>(
+                            offer.name,
+                            offer.version.min(3),
+                            qh,
+                            (),
+                        );
+                    shared.set_manager(manager);
+                }
+            }
+        }
         if self.wants_seat() {
             if self.globals.seat.is_none() {
                 if let Some(offer) = self.binds.seat {
@@ -141,6 +193,12 @@ impl State {
                         (),
                     ));
                 }
+            }
+            // Whatever `activate` rides on: the title module keeps it while
+            // one is bound.
+            #[cfg(feature = "window-title")]
+            if let Some(seat) = &self.globals.seat {
+                self.title.0.borrow_mut().set_seat(seat);
             }
         } else if self.globals.seat.as_ref().is_some_and(|s| s.version() >= 5) {
             // Below version 5 a seat cannot be released: it stays, with its
@@ -155,6 +213,9 @@ impl State {
             if let Some(seat) = self.globals.seat.take() {
                 seat.release();
             }
+            // No seat is bound, so none is kept for `activate` either.
+            #[cfg(feature = "window-title")]
+            self.title.0.borrow_mut().clear_seat();
         }
     }
 }

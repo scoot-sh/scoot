@@ -183,8 +183,8 @@ impl Responder<'_> {
 
     fn apply(
         &mut self,
-        #[cfg(feature = "workspaces")] mut config: Config,
-        #[cfg(not(feature = "workspaces"))] config: Config,
+        #[cfg(any(feature = "workspaces", feature = "window-title"))] mut config: Config,
+        #[cfg(not(any(feature = "workspaces", feature = "window-title")))] config: Config,
     ) -> Result<(), String> {
         // The workspaces link is plumbing, not configuration: the daemon's
         // Wayland dispatch and the module share this run's one, and the
@@ -192,6 +192,13 @@ impl Responder<'_> {
         #[cfg(feature = "workspaces")]
         {
             config.modules.workspaces.link = self.state.workspaces.clone();
+        }
+        // The same for the window-title link: the daemon's
+        // `wlr-foreign-toplevel-management-v1` dispatch and the module
+        // share this run's one.
+        #[cfg(feature = "window-title")]
+        {
+            config.modules.window_title.link = self.state.title.clone();
         }
         // Started first, but said only once the reload is known good (see
         // below): a refused reload stays silent.

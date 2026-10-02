@@ -299,7 +299,16 @@ impl Scene {
             *revision = placed.revision;
             let width = match text {
                 Some(text) if !view.is_empty() => {
-                    content_width(text, view, em).saturating_add(padding).max(1)
+                    let content = content_width(text, view, em);
+                    // A module with a maximum width (the window title's
+                    // `max-width`) never measures past it, so it yields
+                    // the bar to the other modules; longer text is cut to
+                    // the span, which the module draws (an ellipsis).
+                    let capped = match placed.module.max_width() {
+                        Some(max) => content.min(device(max, scale)),
+                        None => content,
+                    };
+                    capped.saturating_add(padding).max(1)
                 }
                 // Nothing to show, or no font to show it with.
                 _ => 0,
@@ -467,6 +476,7 @@ pub fn paint(
                 em,
                 baseline,
                 padding,
+                hovered: scene.hover == Some(index),
                 scale: frame.scale,
                 theme: &style.theme,
             });

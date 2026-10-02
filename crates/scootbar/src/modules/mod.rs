@@ -96,6 +96,8 @@ pub mod payload;
 pub mod push;
 #[cfg(any(feature = "push", feature = "exec"))]
 mod shown;
+#[cfg(feature = "window-title")]
+pub mod window_title;
 #[cfg(feature = "workspaces")]
 pub mod workspaces;
 
@@ -157,6 +159,13 @@ pub trait Module {
     /// pointer at all.
     fn handles_input(&self) -> bool {
         false
+    }
+
+    /// The most logical pixels wide this module's span may be: longer
+    /// content is cut to it, and the module draws the cut (the window
+    /// title's ellipsis). `None` (the default) is whatever it measures.
+    fn max_width(&self) -> Option<u32> {
+        None
     }
 
     /// Whether the bar draws the module in the `accent` token while the
@@ -320,6 +329,17 @@ pub const REGISTRY: &[Spec] = &[
         #[cfg(test)]
         stand_in: None,
     },
+    #[cfg(feature = "window-title")]
+    Spec {
+        id: window_title::ID,
+        init: window_title::init,
+        actions: window_title::ACTIONS,
+        // Available on any machine the tests run on: without a compositor
+        // it starts with an empty view, like a module still waiting for
+        // its first event.
+        #[cfg(test)]
+        stand_in: None,
+    },
 ];
 
 /// The registry entry for `id`.
@@ -406,6 +426,8 @@ pub fn start(
 pub struct Settings {
     #[cfg(feature = "clock")]
     pub clock: clock::Settings,
+    #[cfg(feature = "window-title")]
+    pub window_title: window_title::Settings,
     #[cfg(feature = "workspaces")]
     pub workspaces: workspaces::Settings,
     /// The interaction keys the config sets, by module id: only modules
@@ -491,6 +513,10 @@ pub struct CustomDraw<'r, 'c> {
     pub baseline: i64,
     /// Device pixels either side of the module's content, as measured.
     pub padding: u32,
+    /// Whether the pointer is over this module's span and tints it: a
+    /// module that draws itself honors the same tint the plain draw
+    /// would, so truncating never changes the look.
+    pub hovered: bool,
     /// The scale the bar is drawn at: a module's own logical lengths
     /// (the pill's radius and inset) are device pixels through it.
     pub scale: Scale,

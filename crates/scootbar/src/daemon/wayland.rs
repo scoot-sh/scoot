@@ -110,6 +110,11 @@ pub struct State {
     /// `ext-workspace-v1` dispatch writes it, the module reads it.
     #[cfg(feature = "workspaces")]
     pub workspaces: Link,
+    /// The window-title module's shared state: the daemon's
+    /// `wlr-foreign-toplevel-management-v1` dispatch writes it, the module
+    /// reads it.
+    #[cfg(feature = "window-title")]
+    pub title: crate::modules::window_title::Link,
     /// Which optional globals are offered, bound only while placed.
     pub binds: super::binds::Binds,
     /// The seat's pointer: taken once its capabilities say it has one and
@@ -142,6 +147,7 @@ impl Wayland {
         placement: Placement,
         content: Content,
         #[cfg(feature = "workspaces")] workspaces: Link,
+        #[cfg(feature = "window-title")] title: crate::modules::window_title::Link,
     ) -> Result<(Self, Vec<&'static str>), WaylandError> {
         let conn = Connection::connect_to_env().map_err(WaylandError::Connect)?;
         let (list, queue) = registry_queue_init::<State>(&conn).map_err(WaylandError::Registry)?;
@@ -198,6 +204,8 @@ impl Wayland {
             content,
             #[cfg(feature = "workspaces")]
             workspaces,
+            #[cfg(feature = "window-title")]
+            title,
             binds: super::binds::Binds::new(list.registry().clone()),
             pointer: None,
             seat_pointer: false,

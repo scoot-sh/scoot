@@ -385,3 +385,86 @@ fn a_clock_icon_is_exactly_one_character() {
         assert!(error.contains("clock.icon"), "{bad:?}: {error}");
     }
 }
+
+#[test]
+#[cfg(feature = "window-title")]
+fn a_window_title_section_is_read_whole() {
+    use crate::modules::window_title::DEFAULT_MAX_WIDTH;
+    let modules = read("").unwrap().modules.window_title;
+    assert!(!modules.show_app_id);
+    assert_eq!(modules.max_width, DEFAULT_MAX_WIDTH);
+    assert!(modules.placeholder.is_empty());
+    assert!(!modules.allow_close);
+    let modules = read(
+        "left = [\"window-title\"]\n\
+         [window-title]\n\
+         show-app-id = true\n\
+         max-width = 200\n\
+         placeholder = \"empty\"\n\
+         allow-close = true\n\
+         on-click = \"activate\"\n\
+         on-middle-click = \"close\"\n",
+    )
+    .unwrap()
+    .modules
+    .window_title;
+    assert!(modules.show_app_id);
+    assert_eq!(modules.max_width, 200);
+    assert_eq!(modules.placeholder, "empty");
+    assert!(modules.allow_close);
+}
+
+#[test]
+#[cfg(feature = "window-title")]
+fn a_window_title_section_is_refused_loudly() {
+    for (text, key) in [
+        ("[window-title]\nmax-width = 0\n", "window-title.max-width"),
+        (
+            "[window-title]\nmax-width = 4097\n",
+            "window-title.max-width",
+        ),
+        ("[window-title]\nwhatever = 1\n", "whatever"),
+        (
+            "[window-title]\non-click = \"raise\"\n",
+            "window-title.on-click",
+        ),
+        (
+            "[window-title]\non-click = \"activate 3\"\n",
+            "window-title.on-click",
+        ),
+        (
+            "[window-title]\non-click = \"close\"\n",
+            "window-title.on-click",
+        ),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+    // Type errors come from the TOML layer and name the key without its
+    // section.
+    for (text, key) in [
+        ("[window-title]\nmax-width = -1\n", "max-width"),
+        ("[window-title]\nmax-width = \"200\"\n", "max-width"),
+        ("[window-title]\nshow-app-id = \"yes\"\n", "show-app-id"),
+        ("[window-title]\nallow-close = 1\n", "allow-close"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+    // A `close` binding with closing off is a click that would do nothing.
+    let error = read("[window-title]\non-middle-click = \"close\"\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("window-title.on-middle-click") && error.contains("allow-close"),
+        "{error}"
+    );
+    // ... and allowed with it on.
+    assert!(read("[window-title]\nallow-close = true\non-middle-click = \"close\"\n").is_ok());
+    // A placeholder past the view's bound is refused, not cut silently.
+    let long = "x".repeat(crate::modules::MAX_TEXT + 1);
+    let error = read(&format!("[window-title]\nplaceholder = \"{long}\"\n"))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("window-title.placeholder"), "{error}");
+}

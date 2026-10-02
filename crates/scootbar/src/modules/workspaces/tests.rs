@@ -467,6 +467,7 @@ fn custom_draw_marks_only_the_active_item() {
         em: EM,
         baseline,
         padding: PAD,
+        hovered: false,
         scale: Scale::Integer(1),
         theme: &theme,
     };
@@ -520,6 +521,7 @@ fn without_a_group_custom_draw_keeps_the_plain_draw() {
         em: EM,
         baseline,
         padding: PAD,
+        hovered: false,
         scale: Scale::Integer(1),
         theme: &theme,
     };
@@ -555,6 +557,7 @@ fn pill_drawn(pill: super::Pill) -> (Vec<u8>, u32, u32) {
         em: EM,
         baseline,
         padding: PAD,
+        hovered: false,
         scale: Scale::Integer(1),
         theme: &theme,
     };
@@ -815,6 +818,7 @@ fn shapes_scene(
         em,
         baseline,
         padding,
+        hovered: false,
         scale,
         theme: &theme,
     };
