@@ -71,11 +71,9 @@ fn bar_settings(id: &'static str, settings: &Settings) -> Bar {
 }
 
 fn bar_settings_bound(id: &'static str, settings: &Settings, bindings: Bindings) -> Bar {
-    Bar {
-        custom: vec![table(id, settings)],
-        bindings: vec![(id, bindings)],
-        ..Default::default()
-    }
+    let mut bar = bar_settings(id, settings);
+    bar.bindings = vec![(id, bindings)];
+    bar
 }
 
 fn layout(left: Vec<&'static str>, center: Vec<&'static str>, right: Vec<&'static str>) -> Layout {

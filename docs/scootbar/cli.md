@@ -463,7 +463,7 @@ always drew):
 | `display` | `"numbers"` (default), `"dots"` | `dots`: a dot per workspace in place of the numbers — the active one filled like the pill, the rest dim (or the state colors above). Clicks land by the dots' places, exactly as by the numbers'. A `query` still reports the numbers. |
 | `disc` | off by default | with a `circle` pill: grow the module's own span to the disc's diameter, so a single digit is a disc at any `padding`. Refused with any other shape, and showing dots. |
 | `active-color` | a color, unset by default | the active pill's fill instead of `accent`. The pointer's `hover` still wins while it is over the module. |
-| `inactive-color` | a color, unset by default | inactive numbers' ink instead of `fg`. |
+| `inactive-color` | a color, unset by default | inactive numbers' ink instead of `fg` (inactive dots are `dim` unless set). |
 
 ```toml
 # A rounded pill, lifted 4 off the bar's edges
@@ -513,8 +513,11 @@ pill-inset = 3
   scale against 5 us for the plain pill. Neither adds a file descriptor, a
   timer or a wakeup: idle costs nothing new.
 - **Not built**: urgent and occupied workspace
-  colors wait on the compositor telling the bar which workspace is which
-  (no protocol bit says so today).
+  colors. The protocol has an `urgent` bit (`ext-workspace-v1`), but the bar
+  ignores it (`daemon/workspaces.rs` reads only `Active`) and scoot never
+  sends it (nothing marks a window demanding attention yet: no
+  `xdg_activation` support) — so there is nothing to drive the colors with.
+  The work is read-the-bit plus send-the-bit.
 
 ## Window title
 
@@ -644,7 +647,8 @@ the pointer is over it, and only that module's span is redrawn, on that
 output's bar alone; moving between modules redraws the one left and the one
 entered. A module with no binding is not tinted. The workspaces module
 tints its active pill the same way (its pill is drawn by the module
-itself, so the tint lands there rather than over its text).
+itself, so the tint lands there rather than over its text). Unset,
+`hover` follows a custom `accent`; setting it pins the tint.
 
 **Cost.** The bar asks the seat for a pointer only while a placed module
 has a binding or a default of its own (today: the workspaces module's
@@ -962,7 +966,7 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
 | `bg` | `#1e1e2e` |
 | `fg` | `#cdd6f4` |
 | `accent` | `#f9e2af` |
-| `hover` | `#f9e2af` (the old tint: a module under the pointer drew `accent`) |
+| `hover` | the `accent` value (unset, it follows a custom `accent`: the tint was the accent before it had a token of its own) |
 | `dim` | `#6c7086` |
 | `urgent` | `#f38ba8` |
 

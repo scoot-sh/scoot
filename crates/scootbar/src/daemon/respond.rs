@@ -292,5 +292,5 @@ impl Responder<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "exec"))]
 mod tests;

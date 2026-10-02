@@ -20,7 +20,9 @@ use std::time::Duration;
 
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 
-use super::{Init, MAX_POLL, Module, OutputView, Placed, Settings, Sources, Spec, Update, View};
+#[cfg(feature = "exec")]
+use super::Placed;
+use super::{Init, MAX_POLL, Module, OutputView, Settings, Sources, Spec, Update, View};
 
 pub struct Harness {
     module: Box<dyn Module>,
@@ -147,7 +149,8 @@ impl Harness {
 /// what [`Harness::wait`] is for one module, for a module that lives in a
 /// [`Placed`] (a reload hands the old bar's over), which the harness
 /// cannot take apart. Goes through [`Placed::ready`], so the revision
-/// moves as the loop moves it.
+/// moves as the loop moves it. Only the `exec` reload tests drive one.
+#[cfg(feature = "exec")]
 pub fn drive_placed(placed: &mut Placed, what: &str, mut done: impl FnMut(&Placed) -> bool) {
     let start = std::time::Instant::now();
     let deadline = Duration::from_secs(10);

@@ -953,6 +953,9 @@ impl File {
         let color = |key: &'static str, text: Option<&String>, fallback: Color| {
             color_opt(path, key, text).map(|color| color.unwrap_or(fallback))
         };
+        // Unset, the tint follows a custom accent: it was the accent
+        // before it had a token of its own.
+        let accent = color("colors.accent", colors.accent.as_ref(), defaults.accent)?;
         Ok(Theme {
             background: color(
                 "colors.background",
@@ -964,8 +967,8 @@ impl File {
                 colors.foreground.as_ref(),
                 defaults.foreground,
             )?,
-            accent: color("colors.accent", colors.accent.as_ref(), defaults.accent)?,
-            hover: color("colors.hover", colors.hover.as_ref(), defaults.hover)?,
+            accent,
+            hover: color_opt(path, "colors.hover", colors.hover.as_ref())?.unwrap_or(accent),
             dim: color("colors.dim", colors.dim.as_ref(), defaults.dim)?,
             urgent: color("colors.urgent", colors.urgent.as_ref(), defaults.urgent)?,
         })

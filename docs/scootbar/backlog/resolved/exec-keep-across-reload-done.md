@@ -58,7 +58,8 @@ module's "Children" bullet, and the multi-output reload bullet).
   the one small hook, defaulting to false. Only `exec` overrides it
   (`modules/exec/mod.rs`): an equal [`Settings`] (command, format,
   placeholder and restart key, all in the derived `PartialEq`) keeps the
-  instance. Every other module kind (clock, workspaces, button, push) takes
+  instance. Every other module kind (clock, workspaces, button, push,
+  window-title — which arrived after this landed) takes
   the default and starts fresh.
 - **`modules::start` takes the old bar** (`&mut Vec<Placed>`): a placed id
   whose custom table's `keeps` holds moves over with its child, pipe, timer,

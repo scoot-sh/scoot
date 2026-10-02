@@ -1007,6 +1007,28 @@ impl Module for Workspaces {
         // Relative to the span's start, like `ctx.x`: the content begins
         // past the padding.
         let full = ctx.view.text();
+        // Dots draw no pill: their cells are the targets, so the
+        // numbers' pill geometry must not win first (a grown circle
+        // reaches past the active cell into the gaps).
+        if self.display == Display::Dots {
+            let hit = hit_index(
+                ctx.text,
+                full,
+                ctx.em,
+                ctx.padding,
+                group.committed_len,
+                ctx.x,
+            )?;
+            let ws = &group.committed[hit];
+            if ws.active {
+                return None;
+            }
+            let position = i32::try_from(hit).unwrap_or(i32::MAX).saturating_add(1);
+            return Some(Action::Module(ModuleAction::new(
+                "activate-position",
+                Some(position),
+            )));
+        }
         let active = group.committed[..group.committed_len]
             .iter()
             .position(|ws| ws.active)

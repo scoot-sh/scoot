@@ -812,6 +812,56 @@ fn dots_show_a_cell_each_and_clicks_land_by_them() {
 }
 
 #[test]
+fn dots_with_a_circle_hit_by_the_dots_not_the_grown_pill() {
+    // Dots with a circle pill: the active cell's grown (invisible)
+    // circle reaches into the neighbor's cell. A press there is the
+    // neighbor's: the numbers' pill geometry must not win first.
+    let spec = find("workspaces").expect("the workspaces module is built");
+    let mut settings = super::super::Settings::default();
+    settings.workspaces.display = super::Display::Dots;
+    settings.workspaces.pill = super::Pill {
+        shape: super::Shape::Circle,
+        radius: 0,
+        inset: 0,
+    };
+    let link = settings.workspaces.link.clone();
+    let mut harness = Harness::start(spec, &settings).expect("workspaces starts anywhere");
+    commit(&link, "DP-1", &[(1, 1, true), (2, 2, false)]);
+    assert_eq!(harness.dispatch(), Update::Changed);
+    let view = harness.view_on(Some("DP-1"));
+    assert_eq!(view.text(), "o o");
+    let font = text();
+    // A tall bar: the grown circle outgrows the padded cell.
+    let pill = super::Pill {
+        shape: super::Shape::Circle,
+        radius: 0,
+        inset: 0,
+    };
+    let geometry = pill_geometry(&pill, &font, "o o", EM, PAD, 0, 400, 100, Scale::Integer(1))
+        .expect("the active cell has a pill");
+    let (second, _) = item_span(&font, "o o", EM, i64::from(PAD), 1).unwrap();
+    let cell_start = second.saturating_sub(PAD / 2);
+    assert!(
+        geometry.hi > cell_start,
+        "test setup: the grown pill (to {}) reaches the neighbor cell (from {})",
+        geometry.hi,
+        cell_start,
+    );
+    let ctx = ClickCtx {
+        output: DP1,
+        x: (cell_start + geometry.hi) / 2,
+        view: &view,
+        text: &font,
+        em: EM,
+        padding: PAD,
+        span_width: 400,
+        height: 100,
+        scale: Scale::Integer(1),
+    };
+    assert_eq!(click(&harness, &ctx), Some(activate(2)));
+}
+
+#[test]
 fn dots_are_discs_in_state_colors_with_no_digits() {
     let (mut harness, link) = started_dots();
     commit(&link, "DP-1", &[(1, 1, false), (2, 2, true), (3, 3, false)]);

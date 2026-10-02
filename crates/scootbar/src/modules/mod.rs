@@ -517,6 +517,8 @@ pub struct OutputView<'a> {
 
 /// What [`Module::span_extra`] may measure with: everything
 /// [`Scene::update`](crate::render::Scene::update) measured the text with.
+/// Only a module that grows its span reads it (the workspaces disc).
+#[allow(dead_code)]
 pub struct Measure<'a> {
     /// The output the span is measured for.
     pub output: OutputView<'a>,

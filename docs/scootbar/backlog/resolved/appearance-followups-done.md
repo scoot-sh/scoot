@@ -70,10 +70,11 @@ hover, the pill). All four items, in ticket order, each off by default:
   unchanged (all prior snapshots pass unmodified).
 - **Per-module state colors** (`[workspaces] active-color`, `inactive-color`,
   both unset by default): the active pill's fill and inactive numbers' ink
-  (and inactive dots'). Urgent and occupied colors are **not** built: no
-  protocol bit says which workspace is urgent or has windows
-  (`ext-workspace-v1` carries only `active`; the urgent bit is scoot-side
-  backlog), so there is nothing to drive them with — documented in cli.md.
+  (and inactive dots'). Urgent and occupied colors are **not** built: the
+  protocol has an `urgent` bit, but the bar ignores it
+  (`daemon/workspaces.rs` reads only `Active`) and scoot never sends it
+  (no `xdg_activation` yet) — so there is nothing to drive the colors
+  with. The work is read-the-bit plus send-the-bit; documented in cli.md.
 - **Dots** (`[workspaces] display = "numbers" | "dots"`, default numbers):
   one ordinary `o` cell per workspace in the view text, so measuring and
   the hit test walk the dots' own places unchanged; `custom_draw` fills one

@@ -66,6 +66,23 @@ fn an_empty_file_is_the_defaults() {
 }
 
 #[test]
+fn an_unset_hover_follows_a_custom_accent() {
+    let config = read("[colors]\naccent = \"#89b4fa\"\n").unwrap();
+    assert_eq!(config.theme.accent.to_string(), "#89b4fa");
+    assert_eq!(
+        config.theme.hover.to_string(),
+        "#89b4fa",
+        "an unset hover follows the accent"
+    );
+    let config = read("[colors]\naccent = \"#89b4fa\"\nhover = \"#000000\"\n").unwrap();
+    assert_eq!(
+        config.theme.hover.to_string(),
+        "#000000",
+        "a set hover wins over the accent"
+    );
+}
+
+#[test]
 #[cfg(all(feature = "clock", feature = "workspaces"))]
 fn a_full_file_is_read_whole() {
     let config = read(
