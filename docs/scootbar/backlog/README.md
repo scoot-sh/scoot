@@ -111,6 +111,8 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 The [umbrella](data-source-modules.md) holds the rules they share.
 - [Window title](resolved/window-title-module-done.md) (medium): the focused window's title per output, click to focus — RESOLVED 2026-10-01
 - [Volume](volume-module.md) (medium)
+- [Volume scan_names test passes for the wrong reason](volume-scan-names-test.md) (medium): review follow-up from PR #376
+- [Volume re-probe a present socket](volume-reprobe-present-socket.md) (medium): review follow-up from PR #376
 - [Network](network-module.md) (medium)
 - [Battery](battery-module.md) (medium)
 - [Brightness](brightness-module.md) (low)
