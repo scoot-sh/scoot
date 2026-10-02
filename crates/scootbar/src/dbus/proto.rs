@@ -1354,6 +1354,11 @@ impl Writer {
         }
         let data_at = self.buf.len();
         for field in fields {
+            // A bodiless message omits the signature field, as libdbus
+            // does: an explicitly empty one is refused by strict readers.
+            if matches!(field, Field::Signature(text) if text.is_empty()) {
+                continue;
+            }
             // Each element is a `{BYTE, VARIANT}`: 8-aligned, then the
             // code byte and the variant's signature and value.
             self.pad(8);
