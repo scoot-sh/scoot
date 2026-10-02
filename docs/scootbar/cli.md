@@ -710,8 +710,9 @@ and woken by the kernel's uevents on a netlink socket filtered to the
 ## Battery
 
 The batteries' charge in percent, read from `/sys/class/power_supply`,
-woken by the kernel's uevents on a netlink socket filtered to the
-`power_supply` subsystem. A Cargo feature (`battery`), on by default.
+woken by the kernel's uevents on a netlink socket (group 1). The
+subsystem filter is in userspace: the bar wakes on every kernel uevent
+and drops those that are not `power_supply`. A Cargo feature (`battery`), on by default.
 
 - **What it shows** is `72%`, in the `warn` class at or below
   `warn-below` (default 20) and `urgent` at or below `urgent-below`
@@ -737,12 +738,13 @@ woken by the kernel's uevents on a netlink socket filtered to the
   reaped, never through a shell. The module defines no actions of its
   own, so its five interaction keys take commands only.
 - **Cost.** The uevent socket always (one wake per kernel event, however
-  many datagrams arrive: a storm is drained and re-read once per turn),
-  and a timerfd re-reading once a minute only while discharging, for
-  drivers whose capacity steps emit no uevent (measured: on the Asahi M2
-  at full charge, 90 seconds saw zero uevents of any kind, so the timer
-  is the fallback, not the source). Charging, full and absent batteries
-  own no timer. Sysfs files are read once each into fixed buffers; a
+  many datagrams arrive, whatever their subsystem: a storm is drained and
+  re-read once per turn), and a timerfd re-reading once a minute only
+  while discharging. Only one case was measured: on the Asahi M2 on AC at
+  full charge, 90 seconds saw zero uevents of any kind. Whether capacity
+  steps while discharging, or an unplug, emit uevents is unmeasured, so
+  the discharge timer is there to be safe, not because silence was
+  observed. Charging, full and absent batteries own no timer. Sysfs files are read once each into fixed buffers; a
   capacity past 100 is clamped, an unparsable one skips its battery,
   and a removed battery is one line on stderr, not one per wake.
 

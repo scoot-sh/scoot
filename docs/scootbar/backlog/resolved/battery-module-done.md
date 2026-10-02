@@ -58,7 +58,7 @@ Value and state track a real battery on the reference machine with the
 measured wakeup behavior recorded, and the module is absent where there is no
 battery.
 
-## What landed (PR #378, 2026-10-02)
+## What landed (PR #383, 2026-10-02)
 
 The `battery` module (`crates/scootbar/src/modules/battery/`, Cargo
 feature `battery`, on by default), reference in
@@ -125,13 +125,13 @@ while discharging for drivers whose capacity steps are silent.
 
 ### Evidence (dev VM `cargo`, Asahi reference machine)
 
-- `cargo nextest run -p scootbar`: **849 passed, 0 failed** (25 new
+- `cargo nextest run -p scootbar`: **926 passed, 0 failed** (26 new
   battery tests: fixtures, crafted uevents, storm coalescing,
   timer-only-while-discharging, removal/return, on-low crossings,
   threshold classes, invented statuses, clamped/strict capacities, the
   Asahi file shape, the real-`power_supply` probe which reads sane on the
   Asahi box and reports `Unavailable` on the battery-less dev VM).
-- `cargo test -p scootbar`: all suites ok (736 in the binary, satellites green).
+- `cargo test -p scootbar`: all suites ok (814 in the binary, satellites green).
 - `cargo clippy -p scootbar --all-targets -- -D warnings`: clean on
   default, `--no-default-features`, and each of the 10 features alone
   (incl. `battery`); every no-clock/no-workspaces/no-window-title arm of

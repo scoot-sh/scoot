@@ -12,7 +12,10 @@ use std::time::Duration;
 
 use rustix::event::PollFlags;
 
-use super::{Batteries, Settings, has_power_supply, merge, parse_capacity, read_level, start_with};
+use super::{
+    Batteries, Settings, has_power_supply, merge, parse_capacity, read_level, recv_lost_events,
+    start_with,
+};
 use crate::action::Action;
 use crate::modules::harness::Harness;
 use crate::modules::{Class, Update};
@@ -636,4 +639,14 @@ fn levels_read_like_the_ticket() {
     assert_eq!(level.percent, 100);
     assert_eq!(level.state, super::State::Full);
     assert_eq!(level.count, 1);
+}
+
+/// A netlink overflow (`ENOBUFS`) lost events, so it counts as a power
+/// change; an empty queue (`AGAIN`) does not.
+#[test]
+fn a_lost_event_error_counts_as_a_power_change() {
+    use rustix::io::Errno;
+    assert!(recv_lost_events(Errno::NOBUFS));
+    assert!(recv_lost_events(Errno::INTR));
+    assert!(!recv_lost_events(Errno::AGAIN));
 }

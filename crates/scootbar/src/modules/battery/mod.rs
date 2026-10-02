@@ -2,17 +2,18 @@
 //! and a low-battery hook.
 //!
 //! `/sys/class/power_supply/*` read on change, woken by kernel uevents on
-//! a `NETLINK_KOBJECT_UEVENT` socket filtered to the `power_supply`
-//! subsystem. Whether the driver emits uevents as the capacity changes or
-//! only on plug and unplug was the ticket's measured question: on the
-//! Asahi M2 (AC, Full) 90 s of watching saw zero uevents of any kind, so
-//! the module does not trust uevents alone. A slow timer (once a minute)
+//! a `NETLINK_KOBJECT_UEVENT` socket (group 1). The `power_supply` filter
+//! is in userspace: the bar wakes on every kernel uevent and drops the
+//! rest. Whether the driver emits uevents as the capacity changes or only
+//! on plug and unplug was the ticket's measured question, and only one
+//! case was measured: on the Asahi M2 (AC, Full) 90 s of watching saw zero
+//! uevents of any kind. Discharging and unplug are unmeasured, so the
+//! module does not trust uevents alone: a slow timer (once a minute)
 //! re-reads while discharging and stops when charging or full, with the
-//! rate published ([`DISCHARGE_POLL`], `docs/scootbar/cli.md`). Either arm
-//! alone keeps the level correct; together they are prompt on plug events
-//! and honest on silent capacity steps. The pending human step (an unplug
-//! while watching) decides whether the timer could ever stop entirely; it
-//! cannot, until then.
+//! rate published ([`DISCHARGE_POLL`], `docs/scootbar/cli.md`). The
+//! pending human step (an unplug while watching; see the backlog entry
+//! `battery-unplug-uevent-measure`) decides whether the timer is needed
+//! and whether plugged states need one too.
 //!
 //! ## States
 //!
@@ -421,9 +422,11 @@ impl Battery {
 
     /// Handles the uevent tap: drains every pending datagram (bounded per
     /// turn; leftovers stay readable) and re-reads once when any of them
-    /// is a `power_supply` event. Anything else, and a read error, is
-    /// drained silence: netlink uevent sockets do not disconnect, so there
-    /// is no reconnect path to need.
+    /// is a `power_supply` event. A receive error other than "drained" (the
+    /// kernel reports a netlink overflow as `ENOBUFS`) means events were
+    /// lost, so it counts as a power change. Anything else is drained
+    /// silence: netlink uevent sockets do not disconnect, so there is no
+    /// reconnect path to need.
     fn on_uevent(&mut self) -> Update {
         let mut power = false;
         let mut buf = [0u8; 8192];
@@ -431,8 +434,12 @@ impl Battery {
             match rustix::net::recv(&self.uevent, &mut buf, RecvFlags::empty()) {
                 Ok((_, n)) if has_power_supply(&buf[..n]) => power = true,
                 Ok(_) => {}
-                Err(rustix::io::Errno::AGAIN) => break,
-                Err(_) => break,
+                Err(err) => {
+                    // Drained (AGAIN) or a loss: either way the loop ends,
+                    // and a loss is one more re-read, never a spin.
+                    power |= recv_lost_events(err);
+                    break;
+                }
             }
         }
         if power {
@@ -451,6 +458,13 @@ impl Battery {
             _ => super::Class::Normal,
         }
     }
+}
+
+/// Whether a failed receive means datagrams were lost rather than that the
+/// queue is empty: `AGAIN` is empty, anything else (`ENOBUFS` on a netlink
+/// overflow) may have dropped a `power_supply` event.
+fn recv_lost_events(err: rustix::io::Errno) -> bool {
+    err != rustix::io::Errno::AGAIN
 }
 
 /// Whether the datagram carries a whole `SUBSYSTEM=power_supply` field:

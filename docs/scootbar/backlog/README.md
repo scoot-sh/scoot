@@ -116,6 +116,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Network](resolved/network-module-done.md) (medium): link state, WiFi name and signal, click to pick — RESOLVED 2026-10-02
 - [Battery](resolved/battery-module-done.md) (medium): charge level and state, warn and urgent classes, the low hook — RESOLVED 2026-10-02
 - [Brightness](resolved/brightness-module-done.md) (low): backlight level, scroll to adjust — RESOLVED 2026-10-02
+- [Battery: measure unplug and capacity-step uevents](battery-unplug-uevent-measure.md) (medium): needs a human at the Asahi box; review follow-up from PR #383
 
 ### M6 — Infrastructure and the tray
 - [A shared D-Bus client](dbus-client.md) (low): its own spike first
