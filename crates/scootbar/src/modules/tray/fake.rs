@@ -221,18 +221,32 @@ impl Fake {
         let mut body = Writer::new();
         body.str(service);
         let bytes = body.take_body().unwrap();
-        let serial = self.next_serial();
-        let message = frame_with_sender(
-            1,
-            serial,
+        self.send_call(
+            dest,
+            sender,
             "/StatusNotifierWatcher",
             "org.kde.StatusNotifierWatcher",
             "RegisterStatusNotifierItem",
-            Some(dest),
-            sender,
             "s",
             &bytes,
-        );
+        )
+    }
+
+    /// Sends any method call addressed to the module, as the daemon would
+    /// deliver it from `sender`. Returns the call's serial, which the
+    /// module's answer quotes.
+    pub fn send_call(
+        &mut self,
+        dest: &str,
+        sender: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        sig: &str,
+        body: &[u8],
+    ) -> u32 {
+        let serial = self.next_serial();
+        let message = frame_with_sender(1, serial, path, interface, member, Some(dest), sender, sig, body);
         self.send.write_all(&message).unwrap();
         serial
     }

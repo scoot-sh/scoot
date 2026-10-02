@@ -600,3 +600,87 @@ fn the_registry_lists_tray_with_its_actions() {
     let harness = Harness::new(super::stand_in(&crate::modules::Settings::default()));
     assert_eq!(harness.source_count(), 1);
 }
+
+#[test]
+fn the_watcher_object_answers() {
+    use crate::dbus::proto::{Kind, Writer};
+    let (stream, mut fake) = Fake::pair();
+    let mut harness = Harness::new(start_connected(stream));
+    drive(&mut harness, &mut fake, |harness| harness.source_count() == 1);
+    // `Ping` answers empty; every reply quotes the call.
+    let serial = fake.send_call(
+        fake::MODULE,
+        ":1.60",
+        "/StatusNotifierWatcher",
+        "org.freedesktop.DBus.Peer",
+        "Ping",
+        "",
+        &[],
+    );
+    for _ in 0..5 {
+        fake.pump();
+        harness.wait(Duration::from_millis(200));
+        fake.pump();
+    }
+    let ping = fake
+        .calls()
+        .into_iter()
+        .find(|call| matches!(call.kind, Kind::MethodReturn) && call.reply_to == Some(serial))
+        .expect("no Ping answer");
+    assert_eq!(ping.signature, "");
+    assert!(ping.body.is_empty());
+    // `GetAll` answers the three properties.
+    let mut body = Writer::new();
+    body.str("org.kde.StatusNotifierWatcher");
+    let bytes = body.take_body().unwrap();
+    let serial = fake.send_call(
+        fake::MODULE,
+        ":1.60",
+        "/StatusNotifierWatcher",
+        "org.freedesktop.DBus.Properties",
+        "GetAll",
+        "s",
+        &bytes,
+    );
+    for _ in 0..5 {
+        fake.pump();
+        harness.wait(Duration::from_millis(200));
+        fake.pump();
+    }
+    let gotten = fake
+        .calls()
+        .into_iter()
+        .find(|call| matches!(call.kind, Kind::MethodReturn) && call.reply_to == Some(serial))
+        .expect("no GetAll answer");
+    assert_eq!(gotten.signature, "a{sv}");
+    // Unknown members and objects error, never silence.
+    let serial = fake.send_call(
+        fake::MODULE,
+        ":1.60",
+        "/StatusNotifierWatcher",
+        "org.kde.StatusNotifierWatcher",
+        "Frobnicate",
+        "",
+        &[],
+    );
+    let serial2 = fake.send_call(
+        fake::MODULE,
+        ":1.60",
+        "/Nope",
+        "org.kde.StatusNotifierWatcher",
+        "RegisterStatusNotifierItem",
+        "s",
+        &bytes,
+    );
+    for _ in 0..5 {
+        fake.pump();
+        harness.wait(Duration::from_millis(200));
+        fake.pump();
+    }
+    for serial in [serial, serial2] {
+        assert!(
+            fake.calls().iter().any(|call| matches!(call.kind, Kind::Error) && call.reply_to == Some(serial)),
+            "no error for {serial}"
+        );
+    }
+}
