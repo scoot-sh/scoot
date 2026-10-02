@@ -535,10 +535,18 @@ pub fn setup(stream: UnixStream) -> Result<Conn, SetupError> {
     let unique = reader.str().map_err(|_| SetupError::Refused("Hello named nothing"))?;
     check_name(unique).map_err(|_| SetupError::Refused("Hello named badly"))?;
     conn.unique = unique.to_owned();
+    Ok(conn)
+}
+
+/// Hands a set-up connection to the poll loop: clears the blocking
+/// timeouts and stops blocking. The consumer calls this once its own
+/// blocking set-up (names, matches, enumeration) is done; every call
+/// past it must be ready-driven.
+pub fn make_nonblocking(conn: &mut Conn) -> Result<(), SetupError> {
     conn.stream.set_read_timeout(None)?;
     conn.stream.set_write_timeout(None)?;
     conn.stream.set_nonblocking(true)?;
-    Ok(conn)
+    Ok(())
 }
 
 /// The bus's next line (to `\r\n`), bounded: a peer that never finishes

@@ -1356,6 +1356,9 @@ fn setup(mut conn: Conn) -> Result<Live, conn::SetupError> {
     } else {
         live.join_host_blocking()?;
     }
+    // The set-up is done: the socket joins the poll loop, and every call
+    // past here is ready-driven.
+    conn::make_nonblocking(&mut live.conn)?;
     Ok(live)
 }
 
