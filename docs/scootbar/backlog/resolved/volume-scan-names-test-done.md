@@ -1,10 +1,11 @@
 ---
 title: "Volume: scan_names test passes for the wrong reason"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M5"
+resolved: "2026-10-02"
 ---
 
 # Volume: scan_names test passes for the wrong reason
@@ -32,4 +33,20 @@ malformed-tail-is-interesting.
 ## Not in this ticket
 
 The re-probe behavior the conservative scan exists for — see
-[volume-reprobe-present-socket](volume-reprobe-present-socket.md).
+[volume-reprobe-present-socket](volume-reprobe-present-socket-done.md).
+
+## What landed
+
+Commit `a57fb4cd1`. The fixture writes the name length with `to_ne_bytes()`
+through one `inotify_record` helper. `scan_names_compares_the_names` pins
+the well-formed path (other name, `native`, a longer and a shorter name, both
+orders, a NUL-padded field, empty input) and
+`scan_names_treats_a_malformed_tail_as_interesting` pins the conservative
+`true` (cut header, cut name, `u32::MAX` length, truncated tail after a good
+record).
+
+Evidence (dev VM, tree copied by tar to `/dev/shm/sbvol-src`, own
+`CARGO_TARGET_DIR=/dev/shm/sbvol-target`, `CARGO_PROFILE_DEV_DEBUG=0` because
+the VM's tmpfs was full): `cargo nextest run -p scootbar --bin scootbar` gave
+`793 tests run: 793 passed, 0 skipped`; `cargo clippy -p scootbar --all-targets
+-- -D warnings` clean; `cargo fmt --check -p scootbar` clean (on the Mac).

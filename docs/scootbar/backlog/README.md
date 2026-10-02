@@ -111,8 +111,8 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 The [umbrella](data-source-modules.md) holds the rules they share.
 - [Window title](resolved/window-title-module-done.md) (medium): the focused window's title per output, click to focus — RESOLVED 2026-10-01
 - [Volume](resolved/volume-module-done.md) (medium): default sink level and mute, scroll to change, click to mute — RESOLVED 2026-10-02
-- [Volume scan_names test passes for the wrong reason](volume-scan-names-test.md) (medium): review follow-up from PR #376
-- [Volume re-probe a present socket](volume-reprobe-present-socket.md) (medium): review follow-up from PR #376
+- [Volume scan_names test passes for the wrong reason](resolved/volume-scan-names-test-done.md) (medium): review follow-up from PR #376 — RESOLVED 2026-10-02
+- [Volume re-probe a present socket](resolved/volume-reprobe-present-socket-done.md) (medium): review follow-up from PR #376 — RESOLVED 2026-10-02
 - [Network](resolved/network-module-done.md) (medium): link state, WiFi name and signal, click to pick — RESOLVED 2026-10-02
 - [Battery](battery-module.md) (medium)
 - [Brightness](resolved/brightness-module-done.md) (low): backlight level, scroll to adjust — RESOLVED 2026-10-02
