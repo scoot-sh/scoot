@@ -145,6 +145,13 @@ margin = 0            # as the clock's
 step = 5
 margin = 0
 
+[battery]
+warn-below = 20       # the class turns warn at or below this percent, 0 to 100
+urgent-below = 10     # urgent at or below this percent; the on-low crossing
+batteries = "combine" # the mean, or "first" for the first battery
+on-low = { exec = ["notify-send", "Battery low"] }   # run once per downward crossing of urgent-below
+margin = 0            # as the clock's
+
 [brightness]
 device = "apple-panel-bl"   # the backlight to follow; absent is the first usable one
 step = 5              # percent points per scroll notch and per raise, 1 to 50
@@ -236,7 +243,9 @@ for that output, `active` `null` when none is; the window-title module:
 focused window, absent when none is focused; the volume module:
 `{"volume": 49, "muted": false, "sink": "alsa_output..."}` for the default
 sink, absent while no server answers (the microphone variant reports
-`"source"` instead of `"sink"`); the network module:
+`"source"` instead of `"sink"`); the battery module:
+`{"percent": 72, "state": "discharging", "batteries": 1}`, absent where
+there is no battery; the network module:
 `{"state": "wifi", "ssid": "Wimbly", "signal": -54, "bars": 4,
 "interface": "wlan0", "vpn": false}`, `"ethernet"` and `"vpn"` with the
 interface, or `{"state": "disconnected"}`; the brightness module:
@@ -346,6 +355,7 @@ cannot:
 | `window-title` | The focused window's title on the bar's own output ([below](#window-title)) | on the compositor's toplevel changes: focus at once, retitles at most ten times a second |
 | `volume` | The default sink's level and mute ([below](#volume)) | on the sound server's sink events, and the server's own: one redraw per batch |
 | `microphone` | The default source's level and mute ([below](#volume)) | as `volume`, for sources |
+| `battery` | The batteries' charge and state ([below](#battery)) | on the kernel's power-supply events, and once a minute while discharging |
 | `network` | The shown interface's state: name, SSID and bars, VPN or offline ([below](#network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held |
 | `brightness` | The panel backlight's level ([below](#brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
 
@@ -696,6 +706,44 @@ and woken by the kernel's uevents on a netlink socket filtered to the
   already done. Sysfs values are untrusted text: read once each into
   fixed buffers, digits only, a zero range or a missing file skipping its
   device.
+
+## Battery
+
+The batteries' charge in percent, read from `/sys/class/power_supply`,
+woken by the kernel's uevents on a netlink socket filtered to the
+`power_supply` subsystem. A Cargo feature (`battery`), on by default.
+
+- **What it shows** is `72%`, in the `warn` class at or below
+  `warn-below` (default 20) and `urgent` at or below `urgent-below`
+  (default 10, 0 to 100 each), by level alone. The tooltip names the
+  state: `Discharging 72%` (`Charging`, `Full`, `Not charging` or
+  `Unknown` for a status string no kernel documents, which never refuses
+  the battery). Where there is no battery at all (a desktop, a VM) it
+  shows nothing and takes no space, owning no fd.
+- **Several batteries** are combined by default (`batteries =
+  "combine"`: the mean capacity, discharging winning the state), or the
+  first in sorted name order with `batteries = "first"`. A battery
+  removed at runtime hides the module until one is back; the uevent socket
+  stays as the appearance watch, so a reinsert shows again with no
+  polling. The percentage always comes from `capacity`, never from
+  `charge_now`/`charge_full` (on the reference machine the two disagree
+  by four points at full). No time-remaining is shown: it needs rate
+  smoothing to be honest, and a wrong estimate is worse than none.
+- **`on-low = { exec = [...] }`** runs once per downward crossing of
+  `urgent-below` (and re-arms when the level rises back above, so the next
+  crossing fires again; starting below it is not a crossing). It runs
+  through the bar's own spawner, like a click binding: bounded and
+  reaped, never through a shell. The module defines no actions of its
+  own, so its five interaction keys take commands only.
+- **Cost.** The uevent socket always (one wake per kernel event, however
+  many datagrams arrive: a storm is drained and re-read once per turn),
+  and a timerfd re-reading once a minute only while discharging, for
+  drivers whose capacity steps emit no uevent (measured: on the Asahi M2
+  at full charge, 90 seconds saw zero uevents of any kind, so the timer
+  is the fallback, not the source). Charging, full and absent batteries
+  own no timer. Sysfs files are read once each into fixed buffers; a
+  capacity past 100 is clamped, an unparsable one skips its battery,
+  and a removed battery is one line on stderr, not one per wake.
 
 ## Pointer input
 

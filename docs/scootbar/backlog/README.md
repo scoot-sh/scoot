@@ -114,7 +114,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Volume scan_names test passes for the wrong reason](volume-scan-names-test.md) (medium): review follow-up from PR #376
 - [Volume re-probe a present socket](volume-reprobe-present-socket.md) (medium): review follow-up from PR #376
 - [Network](resolved/network-module-done.md) (medium): link state, WiFi name and signal, click to pick — RESOLVED 2026-10-02
-- [Battery](battery-module.md) (medium)
+- [Battery](resolved/battery-module-done.md) (medium): charge level and state, warn and urgent classes, the low hook — RESOLVED 2026-10-02
 - [Brightness](resolved/brightness-module-done.md) (low): backlight level, scroll to adjust — RESOLVED 2026-10-02
 
 ### M6 — Infrastructure and the tray

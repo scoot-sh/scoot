@@ -339,14 +339,20 @@ fn the_clock_format_is_checked_when_read() {
 fn the_help_matches_the_build() {
     let has_clock = crate::modules::find("clock").is_some();
     let has_workspaces = crate::modules::find("workspaces").is_some();
-    let has_title = crate::modules::find("window-title").is_some();
+    let has_battery = crate::modules::find("battery").is_some();
     let has_brightness = crate::modules::find("brightness").is_some();
     assert_eq!(DAEMON_HELP.contains("--clock-format"), has_clock);
-    // Brightness sorts first, so with both the list opens with it.
-    if has_clock && has_brightness {
-        assert!(DAEMON_HELP.contains("Modules: brightness, clock"));
+    // Battery sorts first, brightness second, so with the clock the list
+    // opens with whichever of them this build has.
+    if has_clock {
+        match (has_battery, has_brightness) {
+            (true, true) => assert!(DAEMON_HELP.contains("Modules: battery, brightness, clock")),
+            (true, false) => assert!(DAEMON_HELP.contains("Modules: battery, clock")),
+            (false, true) => assert!(DAEMON_HELP.contains("Modules: brightness, clock")),
+            (false, false) => assert!(DAEMON_HELP.contains("Modules: clock")),
+        }
     } else {
-        assert_eq!(DAEMON_HELP.contains("Modules: clock"), has_clock);
+        assert!(!DAEMON_HELP.contains("Modules: clock"));
     }
     assert_eq!(USAGE.contains("a clock"), has_clock);
     assert_eq!(USAGE.contains("workspaces"), has_workspaces);
@@ -361,6 +367,9 @@ fn the_help_matches_the_build() {
         has_title
     );
     assert_eq!(DAEMON_HELP.contains("window-title"), has_title);
+    assert_eq!(DAEMON_HELP.contains("the battery module"), has_battery);
+    assert_eq!(DAEMON_HELP.contains("battery.warn-below"), has_battery);
+    assert_eq!(DAEMON_HELP.contains("battery"), has_battery);
     let has_network = crate::modules::find("network").is_some();
     assert_eq!(DAEMON_HELP.contains("the network module"), has_network);
     assert_eq!(DAEMON_HELP.contains("network.menu-command"), has_network);

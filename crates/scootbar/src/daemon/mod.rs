@@ -405,6 +405,45 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 placed.ready(source, *flags);
             }
         }
+        // A module's hook (the battery module's low-battery command):
+        // taken once and carried out like a binding, through the same
+        // effects, so what the loop runs for a module and for a click
+        // cannot diverge.
+        {
+            let state = &mut wayland.state;
+            let modules = &mut state.content.modules;
+            let spawner = &mut state.spawner;
+            let warned = &mut state.warned;
+            for placed in modules.iter_mut() {
+                let Some(hook) = placed.module.take_action() else {
+                    continue;
+                };
+                let id = placed.id;
+                let output = OutputView { name: None };
+                let mut effects = input::Launch {
+                    spawner: &mut *spawner,
+                };
+                if let Err(failure) = crate::action::perform(
+                    &mut *placed.module,
+                    &mut placed.revision,
+                    &output,
+                    &hook,
+                    None,
+                    &mut effects,
+                ) {
+                    if let Some(held) = warned.allow(Instant::now()) {
+                        let more = if held > 0 {
+                            format!(" ({held} more since)")
+                        } else {
+                            String::new()
+                        };
+                        warn(format_args!(
+                            "scootbar: on-low on the {id} module: {failure}{more}"
+                        ));
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -677,3 +677,66 @@ fn a_brightness_section_is_refused_loudly() {
         assert!(error.contains(key), "{text:?}: {error}");
     }
 }
+
+#[test]
+#[cfg(feature = "battery")]
+fn a_battery_section_is_read_whole() {
+    use crate::modules::battery::{Batteries, DEFAULT_URGENT_BELOW, DEFAULT_WARN_BELOW};
+    let modules = read("").unwrap().modules.battery;
+    assert_eq!(modules.warn_below, DEFAULT_WARN_BELOW);
+    assert_eq!(modules.urgent_below, DEFAULT_URGENT_BELOW);
+    assert_eq!(modules.batteries, Batteries::Combine);
+    assert!(modules.on_low.is_none());
+    let modules = read(
+        "left = [\"battery\"]\n\
+         [battery]\n\
+         warn-below = 30\n\
+         urgent-below = 15\n\
+         batteries = \"first\"\n\
+         on-low = { exec = [\"notify-send\", \"low\"] }\n\
+         on-click = { exec = [\"foot\", \"-e\", \"powertop\"] }\n",
+    )
+    .unwrap()
+    .modules
+    .battery;
+    assert_eq!(modules.warn_below, 30);
+    assert_eq!(modules.urgent_below, 15);
+    assert_eq!(modules.batteries, Batteries::First);
+    assert_eq!(
+        modules.on_low,
+        Some(vec!["notify-send".to_owned(), "low".to_owned()])
+    );
+}
+
+#[test]
+#[cfg(feature = "battery")]
+fn a_battery_section_is_refused_loudly() {
+    for (text, key) in [
+        ("[battery]\nwarn-below = 101\n", "battery.warn-below"),
+        ("[battery]\nurgent-below = 101\n", "battery.urgent-below"),
+        ("[battery]\nbatteries = \"many\"\n", "battery.batteries"),
+        ("[battery]\nwhatever = 1\n", "whatever"),
+        // The hook takes `{ exec = [...] }`, one key, exec only.
+        ("[battery]\non-low = \"notify-send\"\n", "battery.on-low"),
+        ("[battery]\non-low = {}\n", "battery.on-low"),
+        (
+            "[battery]\non-low = { exec = [\"a\"], extra = 1 }\n",
+            "battery.on-low",
+        ),
+        (
+            "[battery]\non-low = { scoot = \"quit\" }\n",
+            "battery.on-low",
+        ),
+        (
+            "[battery]\non-low = { exec = \"notify-send\" }\n",
+            "battery.on-low",
+        ),
+        ("[battery]\non-low = { exec = [] }\n", "battery.on-low"),
+        // The module defines no actions of its own: a string names
+        // nothing, and a number has nothing to take it.
+        ("[battery]\non-click = \"raise\"\n", "battery.on-click"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+}
