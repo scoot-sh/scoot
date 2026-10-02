@@ -385,3 +385,19 @@ fn debug_raw_sasl() {
         Err(error) => eprintln!("read failed: {error:?}"),
     }
 }
+
+#[test]
+fn debug_parse_captured() {
+    use crate::dbus::proto::{Message, frame_at};
+    const HEX: &str = "6c01000128000000020000008000000001016f00150000002f6f72672f667265656465736b746f702f4442757300000002017300140000006f72672e667265656465736b746f702e4442757300000000030173000b000000526571756573744e616d65000000000006017300140000006f72672e667265656465736b746f702e444275730000000008016700027375001d0000006f72672e6b64652e5374617475734e6f7469666965725761746368657200000005000000";
+    let bytes: Vec<u8> = (0..HEX.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&HEX[i..i + 2], 16).unwrap())
+        .collect();
+    eprintln!("len: {}", bytes.len());
+    eprintln!("framed: {:?}", frame_at(&bytes));
+    match Message::parse(&bytes) {
+        Ok(message) => eprintln!("parsed ok: {message:?}"),
+        Err(()) => eprintln!("PARSE REFUSED"),
+    }
+}
