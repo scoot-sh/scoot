@@ -339,6 +339,9 @@ impl Conn {
     /// Writes the outbox until it is empty or the socket would block. A
     /// real I/O error kills the connection.
     fn flush(&mut self) {
+        if !self.outbox.is_empty() {
+            eprintln!("DBUGBUS flush {} bytes: {}", self.outbox.len(), self.outbox.iter().map(|b| format!("{b:02x}")).collect::<String>());
+        }
         while !self.outbox.is_empty() {
             match self.stream.write(&self.outbox) {
                 Ok(0) => {
