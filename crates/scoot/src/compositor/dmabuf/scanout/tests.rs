@@ -8,7 +8,7 @@
 use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::{Format, Fourcc, Modifier};
 
-use super::{FormatsKey, ScanoutFeedback, scanout_tranche, single_plane};
+use super::{FormatsKey, ScanoutFeedback, overlay_tranche, scanout_tranche, single_plane};
 
 const TILED: Modifier = Modifier::I915_x_tiled;
 const OTHER_TILED: Modifier = Modifier::I915_y_tiled;
@@ -339,4 +339,116 @@ fn scanout_tranche_cost() {
         advertised.len(),
         plane.iter().count()
     );
+}
+
+/// `apple,dcp`'s overlay plane, in shape: `LINEAR` only, alpha formats and
+/// YUV, no opaque `X` fourcc (`IN_FORMATS` names exactly eight fourccs, of
+/// which Smithay's `Fourcc` names four -- `NV16`, `NV24`, `P010` and `P210`
+/// have no variant, so Smithay's plane list, and this tranche, never hold
+/// them).
+fn dcp_overlay() -> FormatSet {
+    [
+        Fourcc::Argb2101010,
+        Fourcc::Argb8888,
+        Fourcc::Abgr8888,
+        Fourcc::Nv12,
+    ]
+    .into_iter()
+    .map(|code| f(code, Modifier::Linear))
+    .collect()
+}
+
+#[test]
+fn the_overlay_tranche_holds_linear_alpha_formats_and_no_opaque_twin() {
+    // No opaque fallback on the overlay path: an `AR24` buffer is added as
+    // `AR24`, so it is admitted where `AR24` is listed -- and an `XR24`
+    // buffer is refused where only `XR24` is, the exact inverse of the
+    // primary arm's twin mapping.
+    let table = vec![
+        f(Fourcc::Argb8888, Modifier::Linear),
+        f(Fourcc::Xrgb8888, Modifier::Linear),
+    ];
+    assert_eq!(
+        overlay_tranche(&table, &[&dcp_overlay()], &[]),
+        vec![f(Fourcc::Argb8888, Modifier::Linear)],
+        "XR24 is not listed on the overlay, and nothing maps it to AR24"
+    );
+    assert_eq!(
+        overlay_tranche(&table, &[&implicit_plane(&[Fourcc::Xrgb8888])], &[]),
+        vec![f(Fourcc::Xrgb8888, Modifier::Linear)],
+        "no twin mapping: AR24 is refused where only XR24 is listed, while \
+         XR24 itself still takes the implicit-plane LINEAR fallback"
+    );
+    // The primary arm, same inputs: the twin mapping admits AR24 where XR24
+    // is listed, and refuses it where only AR24 is.
+    assert_eq!(
+        scanout_tranche(&table, &implicit_plane(&[Fourcc::Xrgb8888]), &[]),
+        table,
+    );
+}
+
+#[test]
+fn the_overlay_tranche_unions_the_crtc_overlays_and_drops_lost_layouts() {
+    // Two overlays listing different halves: a client may allocate either,
+    // and Smithay assigns whichever fits.
+    let low = plane(&[f(Fourcc::Argb8888, Modifier::Linear)]);
+    let high = plane(&[f(Fourcc::Nv12, Modifier::Linear)]);
+    let table = vec![
+        f(Fourcc::Argb8888, Modifier::Linear),
+        f(Fourcc::Xrgb8888, TILED),
+        f(Fourcc::Nv12, Modifier::Linear),
+    ];
+    assert_eq!(
+        overlay_tranche(&table, &[&low, &high], &[]),
+        vec![
+            f(Fourcc::Argb8888, Modifier::Linear),
+            f(Fourcc::Nv12, Modifier::Linear),
+        ],
+        "tiled XR24 is in neither overlay's list"
+    );
+    // A tiled layout both the client and an overlay agree on is offered --
+    // until the exporter sees GBM lose it, when it is dropped.
+    let tiled = plane(&[f(Fourcc::Xrgb8888, TILED)]);
+    let table = vec![f(Fourcc::Xrgb8888, TILED)];
+    assert_eq!(overlay_tranche(&table, &[&tiled], &[]), table);
+    assert!(
+        overlay_tranche(&table, &[&tiled], &[TILED]).is_empty(),
+        "a lost modifier steers nothing"
+    );
+}
+
+#[test]
+fn implicit_is_never_offered_on_the_overlay_either() {
+    // `Modifier::Invalid` is not a layout a client can allocate: refused on
+    // both arms, whatever the plane lists.
+    let table = vec![f(Fourcc::Argb8888, Modifier::Invalid)];
+    assert!(overlay_tranche(&table, &[&dcp_overlay()], &[]).is_empty());
+}
+
+#[test]
+fn the_overlay_tranche_is_an_ordered_subset_of_the_advertised_table() {
+    // The promise with teeth, overlay arm: every steered pair is already one
+    // the default offers every client, so a client that allocates from it
+    // and then composites imports like any other.
+    let advertised = vec![
+        f(Fourcc::Argb8888, Modifier::Linear),
+        f(Fourcc::Argb8888, TILED),
+        f(Fourcc::Xrgb8888, Modifier::Linear),
+        f(Fourcc::Nv12, Modifier::Linear),
+    ];
+    let tranche = overlay_tranche(&advertised, &[&dcp_overlay()], &[]);
+    assert_eq!(
+        tranche,
+        vec![
+            f(Fourcc::Argb8888, Modifier::Linear),
+            f(Fourcc::Nv12, Modifier::Linear),
+        ]
+    );
+    let positions: Vec<usize> = tranche
+        .iter()
+        .map(|kept| advertised.iter().position(|pair| pair == kept).unwrap())
+        .collect();
+    let mut ordered = positions.clone();
+    ordered.sort();
+    assert_eq!(positions, ordered, "the advertised order, filtered");
 }

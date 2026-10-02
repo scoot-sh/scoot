@@ -242,6 +242,15 @@ impl State {
     /// paths pass [`State::frame_draws_cursor`] (only `--tty` draws one on
     /// screen), and the capture path (`render::capture_cursor`) passes
     /// `true`, because a capture may ask for the pointer on any backend.
+    ///
+    /// `candidate` is the overlay-candidate window this frame may mark
+    /// (`render::overlay_candidate`): its surface elements are built
+    /// `Kind::ScanoutCandidate` instead of `Kind::Unspecified`, so Smithay
+    /// may assign them to an overlay plane. Only the scanout tier passes one
+    /// (the only tier with overlay planes); every other frame path, and the
+    /// capture path's re-render, pass `None`, and a forced composite frame
+    /// never marks (see `overlay_candidate`).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn gather_elements<R>(
         &mut self,
         renderer: &mut R,
@@ -250,6 +259,7 @@ impl State {
         ring_elements: Rings<R>,
         arrangement: Option<&Arrangement>,
         cursor: bool,
+        candidate: Option<WindowId>,
     ) -> (Vec<Elements<R>>, Option<WlSurface>)
     where
         R: Renderer + ImportAll + ImportMem,
@@ -263,6 +273,7 @@ impl State {
             ring_elements,
             arrangement,
             cursor,
+            candidate,
             &mut elements,
         );
         (elements, cursor_surface)
@@ -270,6 +281,8 @@ impl State {
 
     /// [`State::gather_elements`], appended to `out` -- the capture path's
     /// pooled list (`render/capture_cursor.rs`). `out` is expected empty.
+    /// `candidate` is the overlay-candidate window to mark, or `None` (see
+    /// [`State::gather_elements`]); the capture path always passes `None`.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn gather_elements_into<R>(
         &mut self,
@@ -279,6 +292,7 @@ impl State {
         ring_elements: Rings<R>,
         arrangement: Option<&Arrangement>,
         cursor: bool,
+        candidate: Option<WindowId>,
         out: &mut Vec<Elements<R>>,
     ) -> Option<WlSurface>
     where
@@ -376,6 +390,7 @@ impl State {
                     region,
                     scale,
                     self.appearance.corner_radius,
+                    candidate,
                     FloatingRings {
                         elements: floating_rings,
                         spans,
@@ -642,6 +657,13 @@ struct FloatingRings<R: Renderer> {
 /// past its slot (some clients do for good). A fullscreen window is pushed plain,
 /// never wrapped: its corners are the output's corners.
 ///
+/// `candidate` is the overlay-candidate window (`render::overlay_candidate`,
+/// `None` on every tier but the scanout one): when it names this placement,
+/// its elements are built `Kind::ScanoutCandidate` instead of
+/// `Kind::Unspecified`. The `Rounded` wrap never carries the mark -- it
+/// forwards its inner buffer unscissored, so a rounded window reaching a
+/// plane would lose its corners; only the plain paths mark.
+///
 /// Both clip and location are in *this output's* coordinates (the placement
 /// minus the region's origin), which is what the framebuffer and the damage
 /// tracker are in. The first output sits at the origin, so for it this is
@@ -656,6 +678,7 @@ fn window_elements<R>(
     region: Rectangle<i32, Logical>,
     scale: f64,
     configured_radius: i32,
+    candidate: Option<WindowId>,
     floating_rings: FloatingRings<R>,
 ) -> Vec<Elements<R>>
 where
@@ -700,7 +723,14 @@ where
                 break 'draw;
             }
             let location = (render_location - region.loc).to_physical_precise_round(scale);
-            if configured_radius <= 0 {
+            // Whether this placement carries the overlay-candidate mark
+            // (`render::overlay_candidate`): the picked window, still
+            // non-fullscreen (the primary plane owns fullscreen). Only the
+            // plain paths below carry it -- never the `Rounded` wrap, which
+            // forwards its inner buffer unscissored and would hand the plane
+            // the unclipped corners.
+            let marked = candidate.is_some_and(|id| id == placement.id && !placement.fullscreen);
+            if !marked && configured_radius <= 0 {
                 out.extend(
                     AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
                         window,
@@ -721,10 +751,19 @@ where
             // skipped for it. An X window has no xdg popups; its menus are
             // override-redirect windows, drawn above every window instead
             // (see `xwayland/unmanaged.rs`), so the popup walk finds nothing.
+            //
+            // A marked window is gathered surface by surface here rather than
+            // through `AsRenderElements` above, which hardcodes
+            // `Kind::Unspecified`: the mark is the kind.
             let Some(surface) = window.wl_surface() else {
                 break 'draw;
             };
             let surface: &WlSurface = &surface;
+            let kind = if marked {
+                Kind::ScanoutCandidate
+            } else {
+                Kind::Unspecified
+            };
             for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
                 let offset = (geometry.loc + popup_offset - popup.geometry().loc)
                     .to_physical_precise_round(scale);
@@ -735,7 +774,7 @@ where
                         location + offset,
                         scale,
                         1.0,
-                        Kind::Unspecified,
+                        kind,
                     )
                     .into_iter()
                     .map(Elements::Surface),
@@ -752,16 +791,11 @@ where
                 .map_or(1.0, |opacity| opacity as f32 / u32::MAX as f32);
             #[cfg(not(feature = "xwayland"))]
             let alpha = 1.0;
-            let main: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
-                renderer,
-                surface,
-                location,
-                scale,
-                alpha,
-                Kind::Unspecified,
-            );
             // What the client drew, not the slot: a short client's corners are
             // its own, and they are where the ring rounds too (`drawn.rs`).
+            // Hoisted above the main surface tree (it is pure geometry): the
+            // radius decides whether the mark reaches the main elements --
+            // plain only, never rounded.
             let drawn = clamp_to_slot(placement.rect, geometry.size.w, geometry.size.h);
             let clip = clip_rect(to_output_local(drawn, origin), scale);
             // Never rounded while fullscreen: it covers the output edge to edge,
@@ -771,6 +805,14 @@ where
             } else {
                 physical_radius(configured_radius, clip, scale)
             };
+            let main_kind = if marked && radius == 0 {
+                Kind::ScanoutCandidate
+            } else {
+                Kind::Unspecified
+            };
+            let main: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
+                renderer, surface, location, scale, alpha, main_kind,
+            );
             if radius > 0 {
                 out.extend(
                     main.into_iter().map(|element| {

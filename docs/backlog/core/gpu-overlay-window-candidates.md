@@ -70,3 +70,78 @@ without implementing the marking and the capture contract.
 
 Priority stays low: the case it serves (a video in a non-fullscreen
 window) is the rarer one.
+
+## Implementation exists, live proof blocked 2026-09-28
+
+PR `feat/overlay-window-candidates` implements all of the above (capture
+contract first, priority decision, marking, tranche steering). Dev-VM
+verification is green (workspace + `gpu-scanout` nextest, clippy, fmt,
+smoke, benchmarks). The live overlay leg is **blocked**: DP-1 is dark and
+nothing remote wakes it.
+
+- `drm_info` (2026-09-28, kernel 7.1.13): DP-1 `disconnected`, 0 modes,
+  empty EDID; eDP-1 `connected` (2560x1600). Force file reads
+  `unspecified` (pristine).
+- Tried, each verified by read-back: `echo on | sudo tee
+  /sys/kernel/debug/dri/2/DP-1/force` (latched `on`), three synthetic
+  `udevadm trigger --subsystem-match=drm --action=change` reprobes with
+  3-12 s waits (status stayed `disconnected`, modes 0), `dpms` (already
+  `On`; writing it is refused), `dmesg` (no link/HPD activity after any
+  trigger), and a `sudo reboot` (remote-safe; cleared the force latch back
+  to `unspecified`, but the boot-time probe did not wake the monitor
+  either). The monitor has been undriven for ~2 days (standby since
+  2026-09-26); it needs a power-button press. eDP-1 was not touched.
+- Ready for a hands run: `~/fx/overlay/` on the box holds the `gpu-scanout`
+  build of this branch (`overlay-scoot-gpu` ->
+  `/nix/store/4fzgsw8a6mzamsralm4qbabspl4bsn3b-scoot-gpu-0.1.0`,
+  `overlay-scootctl` -> `...-scootctl-0.1.0`; rebuilt after checkout, same
+  hash twice, so it carries this branch) and `t11.sh`, which fails loudly
+  unless DP-1 is `connected` with modes and otherwise runs the whole leg
+  (tiled foot to DP-1, pointer parked, debugfs snapshots, screenshots with
+  and without the cursor over the window).
+
+## Premise update 2026-09-28: two overlays per CRTC, not one
+
+The inventory above was recorded on kernel 7.1.5. On the 7.1.13
+fairydust kernel now running, each CRTC has **one primary, two overlays
+(zpos 1 and 2, fixed) and no cursor plane** (`drm_info`: CRTC 0/eDP-1
+planes 35/40/45, CRTC 1/DP-1 planes 53/58/63; overlay formats unchanged:
+`AR30 AR24 AB24 NV12 NV16 NV24 P010 P210` at `LINEAR`, no `X` fourccs).
+The implementation marks at most one window regardless, and Smithay offers
+the topmost compatible overlay first (front-to-back order), so a lone
+candidate takes zpos 2 (plane 63 on DP-1, 45 on eDP-1) -- expect that,
+not plane 40/58, in `dri/2/state`. The window-vs-cursor priority is
+ unchanged by the second plane (the cursor is tried first by z-order), with
+ room for both once the cursor can ride.
+
+ ## Live proof 2026-10-02: the window rode plane 63
+
+ DP-1 came back (`connected`, 21 modes, kernel 7.1.13, force
+ `unspecified`). One careful run (`/tmp/ovl313.sh`, artifacts in
+ `/tmp/ovl313/`: compositor log, three `dri/2/state` dumps, three
+ screenshots, outputs/windows JSON):
+
+ - Foot could not prove this leg: it allocates tiled buffers at spawn and
+   Mesa never reallocates to `LINEAR` on tranche arrival, so every KMS
+   attempt failed `could not import framebuffer` (5 in the ovl312 log).
+   The run used `ovl-linear` instead, a throwaway client that waits for a
+   tranche containing `(AR24, LINEAR)` and only then allocates a DRM dumb
+   buffer (always `LINEAR`) sized to its configure (source: `/tmp/ovlclient`
+   on the box).
+ - Riding: plane 63 (zpos 2, DP-1) `fb=82`, `AR24` modifier `0x0`,
+   622x696 pitch 2496 — the client's exact buffer. Resized: plane 63
+   `fb=77`, 833x696 pitch 3392. Cursor over the window: plane 63 `fb=0`
+   (ride ends on overlap, as designed).
+ - `could not import framebuffer` count for the whole run: 0. The pick
+   marks `(WindowId(1), …, true, false)`; the client log shows
+   `OVL_TRANCHE_AR24_LINEAR` before every `OVL_READY` (tranche-before-alloc
+   ordering held across all three sizes).
+ - Screenshots parsed and pixel-checked locally: the pattern's white core,
+   magenta field and lime border exact in the riding, resized *and* cursor
+   shots — the capture contract holds in every phase.
+ - The riding build (`/nix/store/89lgs9a4…-scoot-gpu-0.1.0`) is this branch
+   plus only the two temporary `overlay pick` debug lines (verified by
+   diffing its nix source against the branch head; `/tmp/ovl310-pick-debug.patch`
+   is that delta, stale by one `_ => "other"` arm). Box left pristine
+   (VT1, eDP untouched, `/dev/dri/card2` perms restored after a transient
+   `chmod 666` the spawned client needed to `CREATE_DUMB`).

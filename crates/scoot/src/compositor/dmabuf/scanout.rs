@@ -197,16 +197,60 @@ pub(crate) fn scanout_tranche(
     advertised
         .iter()
         .copied()
-        .filter(|format| plane_takes(*format, plane, lost))
+        .filter(|format| plane_takes(*format, plane, lost, true))
         .collect()
 }
 
-/// Whether a client buffer of `format` would pass the primary plane's
-/// format check, per the module doc.
-fn plane_takes(format: Format, plane: &FormatSet, lost: &[Modifier]) -> bool {
-    // What the framebuffer's fourcc is: the primary exports with the opaque
-    // fallback, so an alpha format is added as its opaque twin.
-    let code = get_opaque(format.code).unwrap_or(format.code);
+/// The overlay tranche: every entry of `advertised` that any of the CRTC's
+/// overlay planes would take as a client framebuffer -- minus any explicit
+/// modifier in `lost`. The overlay-candidate window's steering (`OverlayFeedback`):
+/// a client that follows it allocates a layout an overlay can scan out, the
+/// way the scanout tranche does for the primary plane and the covering
+/// window.
+///
+/// The one rule difference from [`scanout_tranche`]: no opaque fallback.
+/// Smithay exports an overlay candidate with `allow_opaque_fallback` set to
+/// false (`try_assign_overlay_plane` -> `element_config(.., false)` at the
+/// pinned rev), so the framebuffer's fourcc is the buffer's own -- an `AR24`
+/// client buffer is added as `AR24`, and the plane must list exactly that.
+/// An opaque twin in the tranche would steer a client into a layout no
+/// overlay takes (overlays take no `X` fourccs on the hardware measured).
+/// Pure, and built only when the plane set changes, like the primary arm.
+pub(crate) fn overlay_tranche(
+    advertised: &[Format],
+    overlays: &[&FormatSet],
+    lost: &[Modifier],
+) -> Vec<Format> {
+    advertised
+        .iter()
+        .copied()
+        .filter(|format| {
+            overlays
+                .iter()
+                .any(|plane| plane_takes(*format, plane, lost, false))
+        })
+        .collect()
+}
+
+/// Whether a client buffer of `format` would pass the plane's format check,
+/// per the module doc.
+///
+/// `opaque_fallback` is whether the plane's exporter maps alpha formats to
+/// their opaque twin: true for the primary plane (`element_config(..,
+/// true)`), false for overlays (`element_config(.., false)`).
+fn plane_takes(
+    format: Format,
+    plane: &FormatSet,
+    lost: &[Modifier],
+    opaque_fallback: bool,
+) -> bool {
+    // What the framebuffer's fourcc is: with the opaque fallback, an alpha
+    // format is added as its opaque twin; without it, the buffer's own.
+    let code = if opaque_fallback {
+        get_opaque(format.code).unwrap_or(format.code)
+    } else {
+        format.code
+    };
     match format.modifier {
         Modifier::Invalid => false,
         Modifier::Linear => {
@@ -265,29 +309,60 @@ pub(crate) fn build(
     lost: &[Modifier],
     device: Option<libc::dev_t>,
 ) -> Option<DmabufFeedback> {
-    let tranche = scanout_tranche(&default.formats, plane, lost);
+    build_with_tranche(
+        default,
+        scanout_tranche(&default.formats, plane, lost),
+        device,
+        "dmabuf feedback: scanout tranche for fullscreen windows",
+    )
+}
+
+/// Builds the per-surface overlay feedback: `default`'s own builder with the
+/// overlay tranche in front of its main tranche, `target_device` naming
+/// `device`, flagged `scanout`. Steered to the overlay-candidate window
+/// (`OverlayFeedback`), so a client that follows it allocates what an
+/// overlay plane takes. `None` under the same three conditions as
+/// [`build`].
+pub(crate) fn build_overlay(
+    default: &DefaultFeedback,
+    overlays: &[&FormatSet],
+    lost: &[Modifier],
+    device: Option<libc::dev_t>,
+) -> Option<DmabufFeedback> {
+    build_with_tranche(
+        default,
+        overlay_tranche(&default.formats, overlays, lost),
+        device,
+        "dmabuf feedback: overlay tranche for the overlay-candidate window",
+    )
+}
+
+/// [`build`] and [`build_overlay`] over a ready tranche: the preference
+/// tranche in front of the default's main tranche, or `None` -- and nothing
+/// ever sent -- when the tranche is empty, the device could not be named, or
+/// the format-table memfd could not be created. `what` names the tranche in
+/// the once-per-build log line.
+fn build_with_tranche(
+    default: &DefaultFeedback,
+    tranche: Vec<Format>,
+    device: Option<libc::dev_t>,
+    what: &str,
+) -> Option<DmabufFeedback> {
     if tranche.is_empty() {
         tracing::info!(
-            "dmabuf feedback: the primary plane takes none of the advertised formats; \
-             no scanout tranche, every surface keeps the default feedback"
+            "{what}: the plane takes none of the advertised formats; \
+             no tranche, every surface keeps the default feedback"
         );
         return None;
     }
     let Some(device) = device else {
-        tracing::warn!(
-            "dmabuf feedback: the display device could not be named; no scanout tranche"
-        );
+        tracing::warn!("{what}: the display device could not be named; no tranche");
         return None;
     };
     // `info!` once per plane set: the line a "why does my fullscreen game
     // composite" report needs, with the table itself at `debug`.
-    tracing::info!(
-        pairs = tranche.len(),
-        lost = lost.len(),
-        device,
-        "dmabuf feedback: scanout tranche for fullscreen windows"
-    );
-    tracing::debug!(table = ?tranche, "dmabuf scanout tranche");
+    tracing::info!(pairs = tranche.len(), device, "{what}");
+    tracing::debug!(table = ?tranche, "{what}");
     match default
         .builder
         .clone()
@@ -301,7 +376,7 @@ pub(crate) fn build(
     {
         Ok(feedback) => Some(feedback),
         Err(error) => {
-            tracing::warn!(%error, "dmabuf scanout feedback could not be built; not steering");
+            tracing::warn!(%error, "{what} could not be built; not steering");
             None
         }
     }
@@ -547,6 +622,231 @@ impl DefaultFeedback {
     }
 }
 
+/// The overlay feedback one output's marked window is steered with, and
+/// which surface currently holds it.
+///
+/// The mirror of [`ScanoutFeedback`] for the overlay-candidate window: where
+/// that tracker steers the covering fullscreen window toward a layout the
+/// primary plane takes, this one steers the marked tiled window toward a
+/// layout an overlay plane takes ([`overlay_tranche`]). `marked` is what the
+/// frame actually marked, not next frame's pick -- the feedback describes
+/// buffers that may ride now -- and a frame that marked nothing holds a
+/// marked-nothing target on the revert hold, so one forced capture frame
+/// never flaps a client's allocations.
+#[derive(Default)]
+pub(crate) struct OverlayFeedback {
+    /// The feedback built for the current plane set, and the key it was
+    /// built for. `feedback` is `None` when nothing can be steered (see
+    /// [`build_overlay`]); that is cached too, so a failure is not retried
+    /// per frame.
+    built: Option<(FormatsKey, Option<DmabufFeedback>)>,
+    /// The surface the overlay feedback was last sent to -- the marked
+    /// window's root surface. Weak: a surface destroyed, or a client gone,
+    /// while it holds the feedback is simply forgotten.
+    target: Option<Weak<WlSurface>>,
+    /// When the target, still wanted, was first seen unmarked. `None` while
+    /// it is marked or there is no target.
+    held_since: Option<Instant>,
+}
+
+impl OverlayFeedback {
+    /// Whether the cached feedback was built for anything but `key`, i.e.
+    /// whether the frame path must call [`install`](Self::install) before
+    /// steering. One comparison, per frame.
+    pub(crate) fn needs_build(&self, key: FormatsKey) -> bool {
+        self.built.as_ref().is_none_or(|(built, _)| *built != key)
+    }
+
+    /// Caches `feedback` as the overlay feedback for `key`, and moves a
+    /// current target onto it: the rebuilt one if there is one (Smithay
+    /// re-sends only if it differs), the default if the new plane set left
+    /// nothing to steer with.
+    pub(crate) fn install(
+        &mut self,
+        key: FormatsKey,
+        feedback: Option<DmabufFeedback>,
+        default: Option<&DmabufFeedback>,
+    ) {
+        match (&feedback, self.live_target()) {
+            (Some(overlay), Some(surface)) => send(&surface, overlay),
+            (None, Some(surface)) => {
+                if let Some(default) = default {
+                    send(&surface, default);
+                }
+                self.target = None;
+                self.held_since = None;
+            }
+            (_, None) => {}
+        }
+        self.built = Some((key, feedback));
+    }
+
+    /// One frame's steering: `marked` is the root surface of the window this
+    /// frame marked an overlay candidate (if any), `default` the feedback to
+    /// revert to. `now` is read only while a transient revert is being held.
+    /// The arms mirror [`ScanoutFeedback::steer`]: a marked surface is sent
+    /// the overlay feedback on change, an unmarked-but-wanted one is held
+    /// for [`REVERT_HOLD`] (a forced capture frame unmarks exactly one
+    /// frame), and anything else reverts at once.
+    pub(crate) fn steer(
+        &mut self,
+        marked: Option<&WlSurface>,
+        default: Option<&DmabufFeedback>,
+        now: impl FnOnce() -> Instant,
+    ) -> Steer {
+        if self
+            .target
+            .as_ref()
+            .is_some_and(|target| !target.is_alive())
+        {
+            // Destroyed, or its client gone: nothing to revert, nothing to
+            // send to.
+            self.target = None;
+            self.held_since = None;
+        }
+        let Some(overlay) = self
+            .built
+            .as_ref()
+            .and_then(|(_, feedback)| feedback.as_ref())
+        else {
+            return Steer::Idle;
+        };
+        let holds = |surface: &WlSurface| self.target.as_ref().is_some_and(|t| t == surface);
+        match marked {
+            Some(surface) => {
+                if holds(surface) {
+                    self.held_since = None;
+                    return Steer::Kept;
+                }
+                let overlay = overlay.clone();
+                self.revert(default);
+                send(surface, &overlay);
+                self.target = Some(surface.downgrade());
+                Steer::Sent
+            }
+            None => {
+                if self.target.is_none() {
+                    return Steer::Idle;
+                }
+                // Unmarked this frame but still the target: hold, do not
+                // flap (a forced capture frame unmarks exactly one frame).
+                // The hold is on the target, not the mark.
+                let now = now();
+                let since = *self.held_since.get_or_insert(now);
+                if now.saturating_duration_since(since) < REVERT_HOLD {
+                    return Steer::Holding;
+                }
+                self.revert(default);
+                Steer::Reverted
+            }
+        }
+    }
+
+    /// The overlay feedback, if `surface` is the one currently steered with
+    /// it -- what a surface asking for feedback for the first time is
+    /// answered with (`DmabufHandler::new_surface_feedback`).
+    pub(crate) fn for_new_surface(&self, surface: &WlSurface) -> Option<DmabufFeedback> {
+        if !self.target.as_ref().is_some_and(|target| target == surface) {
+            return None;
+        }
+        self.built
+            .as_ref()
+            .and_then(|(_, feedback)| feedback.clone())
+    }
+
+    /// Sends the current target (if it is still alive) the default feedback
+    /// and forgets it. The frame path's hold-then-revert and the removal
+    /// path's immediate revert (see
+    /// [`revert_output`](OverlayFeedbacks::revert_output)) share it.
+    pub(crate) fn revert(&mut self, default: Option<&DmabufFeedback>) {
+        self.held_since = None;
+        if let (Some(surface), Some(default)) = (self.live_target(), default) {
+            send(&surface, default);
+        }
+        self.target = None;
+    }
+
+    fn live_target(&self) -> Option<WlSurface> {
+        self.target
+            .as_ref()
+            .and_then(|target| target.upgrade().ok())
+    }
+}
+
+/// One [`OverlayFeedback`] per output that has drawn a scanout frame, in
+/// `State`. An entry is made on an output's first frame (the one
+/// allocation), and removed with its output ([`OverlayFeedbacks::forget`],
+/// on a `--tty` hotplug).
+#[derive(Default)]
+pub(crate) struct OverlayFeedbacks {
+    outputs: Vec<(OutputId, OverlayFeedback)>,
+}
+
+impl OverlayFeedbacks {
+    /// `output`'s tracker, made on first use.
+    pub(crate) fn get_mut(&mut self, output: OutputId) -> &mut OverlayFeedback {
+        let index = match self.outputs.iter().position(|(id, _)| *id == output) {
+            Some(index) => index,
+            None => {
+                self.outputs.push((output, OverlayFeedback::default()));
+                self.outputs.len() - 1
+            }
+        };
+        &mut self.outputs[index].1
+    }
+
+    /// Drops `output`'s tracker, for an output that went away. The caller
+    /// reverts any surface it was steering first (see
+    /// `State::remove_output`), so nothing is left on a tranche built for a
+    /// plane no frame will use again.
+    pub(crate) fn forget(&mut self, output: OutputId) {
+        self.outputs.retain(|(id, _)| *id != output);
+    }
+
+    /// Sends `output`'s current target (if it is still alive) the default
+    /// feedback, for an output that went away. Unlike the frame path's
+    /// hold-then-revert, removal knows the output will never mark again, so
+    /// the revert is immediate -- otherwise the surface would keep a tranche
+    /// built for a plane no frame will use again until something else
+    /// steered it. See `State::remove_output` for the caller.
+    pub(crate) fn revert_output(&mut self, output: OutputId, default: Option<&DmabufFeedback>) {
+        if let Some((_, feedback)) = self.outputs.iter_mut().find(|(id, _)| *id == output) {
+            feedback.revert(default);
+        }
+    }
+
+    /// Rebuilds `output`'s overlay feedback if it was built for anything
+    /// but `key` -- from `formats`, which is only called then -- and moves a
+    /// current target onto the rebuilt one. One comparison on every other
+    /// frame. `default` is what was advertised; with none, nothing can be
+    /// steered and `None` is cached.
+    pub(crate) fn refresh<'a>(
+        &mut self,
+        output: OutputId,
+        key: FormatsKey,
+        default: Option<&DefaultFeedback>,
+        formats: impl FnOnce() -> ScanoutFormats<'a>,
+    ) {
+        let feedback = self.get_mut(output);
+        if !feedback.needs_build(key) {
+            return;
+        }
+        let built = default.and_then(|default| {
+            let formats = formats();
+            build_overlay(default, &formats.overlay, &formats.lost, formats.device)
+        });
+        feedback.install(key, built, default.map(DefaultFeedback::feedback));
+    }
+
+    /// See [`OverlayFeedback::for_new_surface`]; the first output steering
+    /// `surface` answers (a surface is only ever one output's target).
+    pub(crate) fn for_new_surface(&self, surface: &WlSurface) -> Option<DmabufFeedback> {
+        self.outputs
+            .iter()
+            .find_map(|(_, feedback)| feedback.for_new_surface(surface))
+    }
+}
+
 impl State {
     /// One frame's steering for `output` (see [`ScanoutFeedback::steer`]):
     /// the covering window is the core's fullscreen window on that output,
@@ -585,6 +885,46 @@ impl State {
         }
         steer
     }
+
+    /// One frame's overlay steering for `output` (see
+    /// [`OverlayFeedback::steer`]): `candidate` is the window this frame
+    /// marked an overlay candidate (`render::overlay_candidate`), or `None`
+    /// when it marked nothing. Allocation-free: two map lookups and the
+    /// tracker's comparisons.
+    ///
+    /// The root surface of the marked window is what is steered -- looked up
+    /// here rather than at the call site so the surface never outlives the
+    /// window it was read from -- an xdg toplevel's, or the one XWayland
+    /// associated with an X window. A covering fullscreen window is never
+    /// steered, even if named: it owns the primary tranche, and the overlay
+    /// one sending after it would overwrite that feedback on the surface.
+    /// The frame path never names one (the mark excludes fullscreen, and
+    /// covered outputs mark nothing); this is the backstop.
+    pub(crate) fn steer_overlay_feedback(
+        &mut self,
+        output: OutputId,
+        candidate: Option<scoot_core::WindowId>,
+        now: impl FnOnce() -> Instant,
+    ) -> Steer {
+        use smithay::wayland::seat::WaylandFocus;
+
+        let covering = self.world.fullscreen_on(output);
+        let candidate = candidate.filter(|id| Some(*id) != covering);
+        let default = self.dmabuf_default.as_ref().map(DefaultFeedback::feedback);
+        let marked = candidate
+            .and_then(|id| self.windows.get(&id))
+            .and_then(|window| window.wl_surface());
+        let steer = self
+            .overlay_feedback
+            .get_mut(output)
+            .steer(marked.as_deref(), default, now);
+        if matches!(steer, Steer::Sent | Steer::Reverted) {
+            // A transition, never a frame: `Kept`, `Holding` and `Idle`
+            // stay silent.
+            tracing::debug!(?steer, "dmabuf feedback: overlay steering changed");
+        }
+        steer
+    }
 }
 
 /// The harness side of the tier's two calls: installing a scanout feedback
@@ -604,6 +944,7 @@ impl State {
             .refresh(output, key, self.dmabuf_default.as_ref(), || {
                 ScanoutFormats {
                     primary: plane,
+                    overlay: Vec::new(),
                     lost: Vec::new(),
                     device: Some(device),
                 }
@@ -614,5 +955,29 @@ impl State {
         let eligible = self.primary_direct_now().allowed();
         let output = self.outputs.primary_id().expect("a harness output");
         self.steer_scanout_feedback(output, eligible, || now)
+    }
+
+    /// Installing an overlay feedback through the same
+    /// [`OverlayFeedbacks::refresh`] the frame path runs, from overlay plane
+    /// lists the test chooses.
+    pub(crate) fn install_overlay_feedback(
+        &mut self,
+        overlays: &[&FormatSet],
+        device: libc::dev_t,
+        key: FormatsKey,
+    ) {
+        let output = self.outputs.primary_id().expect("a harness output");
+        // A headless session has no primary plane either: an empty list
+        // builds no primary tranche, so only the overlay arm is installed.
+        let empty = FormatSet::default();
+        self.overlay_feedback
+            .refresh(output, key, self.dmabuf_default.as_ref(), || {
+                ScanoutFormats {
+                    primary: &empty,
+                    overlay: overlays.to_vec(),
+                    lost: Vec::new(),
+                    device: Some(device),
+                }
+            });
     }
 }

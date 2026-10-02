@@ -1445,6 +1445,13 @@ impl State {
         {
             self.steer_scanout_feedback(id, false, Instant::now);
             self.scanout_feedback.forget(id);
+            self.overlay_feedback.revert_output(
+                id,
+                self.dmabuf_default
+                    .as_ref()
+                    .map(super::dmabuf::DefaultFeedback::feedback),
+            );
+            self.overlay_feedback.forget(id);
         }
         self.end_floating_grab();
 

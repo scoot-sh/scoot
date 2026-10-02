@@ -1242,6 +1242,20 @@ impl Tty {
         }
     }
 
+    /// The immutable half of [`scanout_mut`](Self::scanout_mut): what
+    /// `render::draw_frame_scanout` reads *before* gathering the frame --
+    /// whether a capture armed a forced composite (which suppresses the
+    /// overlay-candidate mark for that frame) and how many overlay planes
+    /// the CRTC has. Read-only, so gathering after it cannot disturb what
+    /// the frame later takes.
+    #[cfg(feature = "gpu-scanout")]
+    pub(super) fn scanout(&self, id: OutputId) -> Option<&scanout::ScanoutPresenter> {
+        match &self.head(id)?.presenter {
+            Presenter::Gpu(gpu) => Some(gpu),
+            Presenter::Dumb(_) => None,
+        }
+    }
+
     /// Settles the in-flight flip for a `VBlank` on `crtc` -- whichever head
     /// drives it -- and frees the buffer that was showing before that flip.
     ///
