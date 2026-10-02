@@ -383,8 +383,17 @@ fn reply(stream: &mut UnixStream, to: u32, serial: u32, sig: &str, body: &[u8]) 
     let mut writer = Writer::new();
     writer.begin_return(serial, to, sig);
     writer.raw(body);
-    let message = writer.finish().ok_or(())?;
-    stream.write_all(&message).map_err(|_| ())
+    let message = match writer.finish() {
+        Some(message) => message,
+        None => {
+            eprintln!("FAKEDBG: reply finish none");
+            return Err(());
+        }
+    };
+    eprintln!("FAKEDBG: reply {} bytes", message.len());
+    stream.write_all(&message).map_err(|error| {
+        eprintln!("FAKEDBG: reply write {error:?}");
+    })
 }
 
 fn error(stream: &mut UnixStream, to: u32, serial: u32, name: &str) -> Result<(), ()> {
