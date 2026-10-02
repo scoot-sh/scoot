@@ -410,6 +410,7 @@ fn debug_parse_captured() {
             3 => eprintln!("  member: {:?}", check_member(value.str().unwrap_or("<bad>"))),
             6 => eprintln!("  dest: {:?}", check_name(value.str().unwrap_or("<bad>"))),
             8 => {
+                eprintln!("  rest: {:02x?}", value.rest());
                 let inner = value.signature().unwrap_or("<bad>");
                 eprintln!("  sigval: {inner:?} check: {:?}", if inner == "<bad>" { Err(()) } else { check_signature(inner) });
             }
