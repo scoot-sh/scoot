@@ -694,8 +694,10 @@ impl Live {
     /// newcomer with a `GetNameOwner` first.
     fn on_names(&mut self, signature: &str, body: &[u8]) -> Update {
         let Ok(names) = proto::read_names(signature, body) else {
+            eprintln!("TRAYDBG on_names refused sig={signature:?}");
             return Update::Unchanged;
         };
+        eprintln!("TRAYDBG on_names: {names:?}");
         let mut added = false;
         for name in names {
             if !is_item_name(&name) {
