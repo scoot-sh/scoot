@@ -42,15 +42,13 @@ fn started() -> (Harness, Fake) {
 /// no timing and no thread past the set-up.
 fn drive(harness: &mut Harness, fake: &mut Fake, mut done: impl FnMut(&Harness) -> bool) {
     let start = std::time::Instant::now();
-    let mut turns = 0;
     while !done(harness) {
         assert!(start.elapsed() < Duration::from_secs(30), "the bus never answered");
         // Short waits: the chain converges turn by turn, and idle turns
         // cost little even on a loaded box.
-        turns += 1;
-        let a = fake.pump();
-        let waited = harness.wait(Duration::from_millis(200));
-        let b = fake.pump();
+        fake.pump();
+        harness.wait(Duration::from_millis(200));
+        fake.pump();
     }
 }
 

@@ -392,7 +392,7 @@ impl Tray {
     fn connect(&mut self) -> Update {
         match conn::connect(&self.path) {
             Ok(conn) => {
-                self.bus = Bus::Live(setup(conn));
+                self.bus = Bus::Live(Box::new(setup(conn)));
                 Update::Unchanged
             }
             Err(_) => Update::Unchanged,
