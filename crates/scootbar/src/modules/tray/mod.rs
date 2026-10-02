@@ -566,6 +566,12 @@ fn scan_names(buf: &[u8], want: &[u8]) -> bool {
 impl Live {
     /// Works one bus event; says whether the view moved.
     fn apply(&mut self, event: Event) -> Update {
+        eprintln!("DBUGBUS event {}", match &event {
+            Event::Reply { token, signature, .. } => format!("reply token={token} sig={signature}"),
+            Event::CallError { token, name } => format!("error token={token} {name}"),
+            Event::Signal { member, .. } => format!("signal {member}"),
+            Event::MethodCall { member, .. } => format!("call {member}"),
+        });
         match event {
             Event::Reply {
                 token,
