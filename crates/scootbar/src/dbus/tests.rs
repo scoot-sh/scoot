@@ -84,6 +84,47 @@ fn a_body_round_trips_typed() {
 }
 
 #[test]
+fn every_reply_shape_round_trips() {
+    // What `reply_return` and `reply_error` emit (round trip and error,
+    // empty and Bodied): the parser takes them back, against the
+    // signatures a peer validates.
+    for (serial, to, sig, body) in [
+        (9u32, 2u32, "", vec![]),
+        (10, 3, "u", {
+            let mut body = Writer::new();
+            body.u32(1);
+            vec![body.take_body().unwrap(), vec![]].concat()
+        }),
+        (11, 4, "a{sv}", {
+            let mut body = Writer::new();
+            let Some(cookie) = body.open_array(8) else {
+                panic!("fits");
+            };
+            body.close_array(cookie);
+            body.take_body().unwrap()
+        }),
+    ] {
+        let mut writer = Writer::new();
+        writer.begin_return(serial, to, sig);
+        writer.raw(&body);
+        let message = writer.finish().expect("builds");
+        assert_eq!(frame_at(&message), Ok(Some(message.len())));
+        let parsed = Message::parse(&message).unwrap();
+        assert_eq!(parsed.kind, Kind::MethodReturn);
+        assert_eq!(parsed.reply_serial, Some(to));
+        assert_eq!(parsed.signature, sig);
+        assert_eq!(parsed.body.rest(), body.as_slice());
+    }
+    // And an error reply.
+    let mut writer = Writer::new();
+    writer.begin_error(12, 5, "org.freedesktop.DBus.Error.UnknownMethod", "");
+    let message = writer.finish().expect("builds");
+    let parsed = Message::parse(&message).unwrap();
+    assert_eq!(parsed.kind, Kind::Error);
+    assert_eq!(parsed.error, Some("org.freedesktop.DBus.Error.UnknownMethod"));
+}
+
+#[test]
 fn framing_refuses_without_a_panic() {
     // Bad magic, bad version, bad kind.
     for header in [
