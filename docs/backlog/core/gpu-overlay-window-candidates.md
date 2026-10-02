@@ -111,5 +111,37 @@ The implementation marks at most one window regardless, and Smithay offers
 the topmost compatible overlay first (front-to-back order), so a lone
 candidate takes zpos 2 (plane 63 on DP-1, 45 on eDP-1) -- expect that,
 not plane 40/58, in `dri/2/state`. The window-vs-cursor priority is
-unchanged by the second plane (the cursor is tried first by z-order), with
-room for both once the cursor can ride.
+ unchanged by the second plane (the cursor is tried first by z-order), with
+ room for both once the cursor can ride.
+
+ ## Live proof 2026-10-02: the window rode plane 63
+
+ DP-1 came back (`connected`, 21 modes, kernel 7.1.13, force
+ `unspecified`). One careful run (`/tmp/ovl313.sh`, artifacts in
+ `/tmp/ovl313/`: compositor log, three `dri/2/state` dumps, three
+ screenshots, outputs/windows JSON):
+
+ - Foot could not prove this leg: it allocates tiled buffers at spawn and
+   Mesa never reallocates to `LINEAR` on tranche arrival, so every KMS
+   attempt failed `could not import framebuffer` (5 in the ovl312 log).
+   The run used `ovl-linear` instead, a throwaway client that waits for a
+   tranche containing `(AR24, LINEAR)` and only then allocates a DRM dumb
+   buffer (always `LINEAR`) sized to its configure (source: `/tmp/ovlclient`
+   on the box).
+ - Riding: plane 63 (zpos 2, DP-1) `fb=82`, `AR24` modifier `0x0`,
+   622x696 pitch 2496 — the client's exact buffer. Resized: plane 63
+   `fb=77`, 833x696 pitch 3392. Cursor over the window: plane 63 `fb=0`
+   (ride ends on overlap, as designed).
+ - `could not import framebuffer` count for the whole run: 0. The pick
+   marks `(WindowId(1), …, true, false)`; the client log shows
+   `OVL_TRANCHE_AR24_LINEAR` before every `OVL_READY` (tranche-before-alloc
+   ordering held across all three sizes).
+ - Screenshots parsed and pixel-checked locally: the pattern's white core,
+   magenta field and lime border exact in the riding, resized *and* cursor
+   shots — the capture contract holds in every phase.
+ - The riding build (`/nix/store/89lgs9a4…-scoot-gpu-0.1.0`) is this branch
+   plus only the two temporary `overlay pick` debug lines (verified by
+   diffing its nix source against the branch head; `/tmp/ovl310-pick-debug.patch`
+   is that delta, stale by one `_ => "other"` arm). Box left pristine
+   (VT1, eDP untouched, `/dev/dri/card2` perms restored after a transient
+   `chmod 666` the spawned client needed to `CREATE_DUMB`).
