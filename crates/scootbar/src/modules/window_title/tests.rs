@@ -333,6 +333,40 @@ fn a_title_flood_is_one_redraw_then_held_for_the_timer() {
 }
 
 #[test]
+fn held_titles_refresh_on_a_fixed_period() {
+    let (mut harness, link) = started();
+    show(&link, "a", "xterm", true, &["DP-1"]);
+    assert_eq!(harness.dispatch(), Update::Changed);
+    // Held for the flush timer ...
+    {
+        let mut shared = link.0.borrow_mut();
+        retitle(&mut shared, 0, "b");
+    }
+    assert_eq!(harness.dispatch(), Update::Unchanged);
+    assert_eq!(harness.source_count(), 1);
+    // ... and a second title near the deadline does not move it: the
+    // flush still fires on the first period, about 100 ms after the hold
+    // began, rather than 100 ms after this title (which would freeze a
+    // gapless flood until it pauses). Margins: the sleep must land inside
+    // the first period (20 ms of room past it), and the wait must end
+    // before a re-armed deadline would fire (40 ms of room before it); a
+    // timerfd cannot fire early, and the wait's own timeout is
+    // kernel-timed, so only a 20 ms overshoot of the sleep itself —
+    // microseconds of work stand between them — breaks the first side.
+    std::thread::sleep(Duration::from_millis(80));
+    {
+        let mut shared = link.0.borrow_mut();
+        retitle(&mut shared, 0, "c");
+    }
+    assert_eq!(harness.dispatch(), Update::Unchanged);
+    // Within one more period the held titles draw, once, as the latest.
+    assert_eq!(harness.wait(Duration::from_millis(60)), Some(Update::Changed));
+    assert_eq!(harness.view_on(Some("DP-1")).text(), "c");
+    assert_eq!(harness.source_count(), 0);
+    assert_eq!(harness.dispatch(), Update::Unchanged);
+}
+
+#[test]
 fn focus_moves_draw_at_once_even_mid_flood() {
     let (mut harness, link) = started();
     show(&link, "0%", "xterm", true, &["DP-1"]);

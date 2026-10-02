@@ -26,8 +26,10 @@
 //! per turn, and a title-only change past the first in
 //! [`TITLE_INTERVAL`] is held for the flush timer instead (focus, output
 //! and close changes always draw at once: interactive latency is not
-//! capped, only progress readouts are). The timerfd exists only while a
-//! flush is held, so an idle module owns no fd.
+//! capped, only progress readouts are). The timer fires on a fixed period
+//! — later titles do not re-arm it — so a gapless flood refreshes about
+//! ten times a second rather than freezing until it pauses. The timerfd
+//! exists only while a flush is held, so an idle module owns no fd.
 //!
 //! ## Fixed bounds, no allocation past start-up
 //!
@@ -739,8 +741,14 @@ impl WindowTitle {
 
     /// Holds back a title-only change for the flush timer: within
     /// [`TITLE_INTERVAL`] of the last title draw it costs no redraw.
-    /// `true` when held (the timer is armed).
+    /// The timer is armed once, for a fixed period after the first held
+    /// change — later titles do not move its deadline, so a gapless flood
+    /// still refreshes about ten times a second instead of freezing until
+    /// it pauses. `true` when held (the timer is armed).
     fn hold_back(&mut self) -> bool {
+        if self.armed {
+            return true;
+        }
         if self.flush.is_none() {
             match Flush::new() {
                 Ok(flush) => self.flush = Some(flush),
@@ -817,6 +825,9 @@ impl Module for WindowTitle {
         }
         self.seen_gen = generation;
         self.last_title = Some(now);
+        // Nothing is held back: a still-armed flush would redraw what is
+        // already drawn when it fires, so it is defused.
+        self.armed = false;
         Update::Changed
     }
 
