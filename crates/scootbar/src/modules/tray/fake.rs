@@ -69,7 +69,14 @@ pub struct Fake {
     state: Arc<Mutex<State>>,
     calls: Arc<Mutex<Vec<RecordedCall>>>,
     serial: Arc<Mutex<u32>>,
+    log: Arc<Mutex<Vec<String>>>,
     thread: Option<std::thread::JoinHandle<()>>,
+}
+
+macro_rules! flog {
+    ($log:expr, $($arg:tt)*) => {
+        $log.lock().unwrap().push(format!($($arg)*));
+    };
 }
 
 impl Fake {
@@ -90,11 +97,13 @@ impl Fake {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let serial = Arc::new(Mutex::new(1000u32));
         let write = bus.try_clone().unwrap();
+        let log = Arc::new(Mutex::new(Vec::new()));
         let thread = std::thread::spawn({
             let state = Arc::clone(&state);
             let calls = Arc::clone(&calls);
             let serial = Arc::clone(&serial);
-            move || serve(bus, state, calls, serial)
+            let log = Arc::clone(&log);
+            move || serve(bus, state, calls, serial, log)
         });
         (
             module,
@@ -103,6 +112,7 @@ impl Fake {
                 state,
                 calls,
                 serial,
+                log,
                 thread: Some(thread),
             },
         )
@@ -216,6 +226,9 @@ impl Drop for Fake {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        for line in self.log.lock().unwrap().iter() {
+            eprintln!("FAKELOG: {line}");
+        }
     }
 }
 
@@ -268,6 +281,7 @@ fn serve(
     state: Arc<Mutex<State>>,
     calls: Arc<Mutex<Vec<RecordedCall>>>,
     serial: Arc<Mutex<u32>>,
+    log: Arc<Mutex<Vec<String>>>,
 ) {
     if sasl(&mut stream).is_err() {
         return;
@@ -277,33 +291,33 @@ fn serve(
     loop {
         match frame_at(&staged) {
             Ok(None) => {
-                eprintln!("FAKEDBG: none staged={}", staged.len());
+                flog!(log, "none staged={}", staged.len());
             }
             Ok(Some(len)) => {
                 let frame: Vec<u8> = staged.drain(..len).collect();
-                eprintln!("FAKEDBG: serving {len} staged={}", staged.len());
-                if serve_frame(&mut stream, &frame, &state, &calls, &serial).is_err() {
-                    eprintln!("FAKEDBG: serve failed on {}", frame.iter().map(|b| format!("{b:02x}")).collect::<String>());
+                flog!(log, "serving {len} staged={}", staged.len());
+                if serve_frame(&mut stream, &frame, &state, &calls, &serial, &log).is_err() {
+                    flog!(log, "serve failed on {}", frame.iter().map(|b| format!("{b:02x}")).collect::<String>());
                     return;
                 }
             }
             Ok(None) => {}
             Err(()) => {
-                eprintln!("FAKEDBG: bad frame, exiting");
+                flog!(log, "bad frame, exiting");
                 return;
             }
         }
         match stream.read(&mut chunk) {
             Ok(0) => return,
             Ok(n) => {
-                eprintln!("FAKEDBG: read {n} staged={}", staged.len());
+                flog!(log, "read {n} staged={}", staged.len());
                 staged.extend_from_slice(&chunk[..n]);
                 if staged.len() > 2 * 1024 * 1024 {
                     return;
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock || error.kind() == std::io::ErrorKind::TimedOut => {
-                eprintln!("FAKEDBG {:?}: read timeout", std::time::Instant::now());
+                flog!(log, "{:?}: read timeout", std::time::Instant::now());
                 continue;
             }
             Err(_) => return,
@@ -391,13 +405,13 @@ fn reply(stream: &mut UnixStream, to: u32, serial: u32, sig: &str, body: &[u8]) 
     let message = match writer.finish() {
         Some(message) => message,
         None => {
-            eprintln!("FAKEDBG: reply finish none");
+            flog!(log, "reply finish none");
             return Err(());
         }
     };
-    eprintln!("FAKEDBG: reply {} bytes: {}", message.len(), message.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    flog!(log, "reply {} bytes: {}", message.len(), message.iter().map(|b| format!("{b:02x}")).collect::<String>());
     stream.write_all(&message).map_err(|error| {
-        eprintln!("FAKEDBG: reply write {error:?}");
+        flog!(log, "reply write {error:?}");
     })
 }
 
@@ -418,11 +432,12 @@ fn serve_frame(
     state: &Arc<Mutex<State>>,
     calls: &Arc<Mutex<Vec<RecordedCall>>>,
     serial: &Arc<Mutex<u32>>,
+    log: &Arc<Mutex<Vec<String>>>,
 ) -> Result<(), ()> {
     let message = match Message::parse(frame) {
         Ok(message) => message,
         Err(()) => {
-            eprintln!("FAKEDBG: parse refused");
+            flog!(log, "parse refused");
             return Err(());
         }
     };
@@ -438,7 +453,7 @@ fn serve_frame(
     );
     let body = message.body.rest();
     if destination == BUS || destination.is_empty() {
-        return serve_bus(stream, message.serial, serial, member, body, state);
+        return serve_bus(stream, message.serial, serial, member, body, state, log);
     }
     if path == "/StatusNotifierWatcher" {
         // Calls at the module's own object come here only in host-mode
@@ -498,6 +513,7 @@ fn serve_bus(
     member: &str,
     body: &[u8],
     state: &Arc<Mutex<State>>,
+    log: &Arc<Mutex<Vec<String>>>,
 ) -> Result<(), ()> {
     match member {
         "Hello" => {
@@ -508,12 +524,12 @@ fn serve_bus(
         }
         "RequestName" => {
             let word = state.lock().unwrap().request_word;
-            eprintln!("FAKEDBG: requestname word={word} to={to} serial={serial}");
+            flog!(log, "requestname word={word} to={to} serial={serial}");
             let mut out = Writer::new();
             out.u32(word);
             let bytes = out.take_body().ok_or(())?;
             let result = reply(stream, to, serial, "u", &bytes);
-            eprintln!("FAKEDBG: requestname reply {result:?}");
+            flog!(log, "requestname reply {result:?}");
             result
         }
         "AddMatch" => Ok(()),
