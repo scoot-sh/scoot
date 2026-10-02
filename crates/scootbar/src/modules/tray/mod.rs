@@ -374,10 +374,13 @@ impl Tray {
     /// Connects a stream that is already open (the tests' socketpair end,
     /// or a dialled bus): runs the set-up and enumerates.
     fn connected(&mut self, stream: std::os::unix::net::UnixStream) {
-        let Ok(conn) = conn::setup(stream) else {
-            eprintln!("TRAYDBG: conn setup failed");
-            self.wait();
-            return;
+        let conn = match conn::setup(stream) {
+            Ok(conn) => conn,
+            Err(error) => {
+                eprintln!("TRAYDBG: conn setup failed {error:?}");
+                self.wait();
+                return;
+            }
         };
         eprintln!("TRAYDBG: conn ok {}", conn.unique());
         match setup(conn) {
