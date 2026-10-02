@@ -1188,7 +1188,6 @@ impl Live {
         let mut out = Writer::new();
         match (member, property.as_str()) {
             ("GetAll", _) => {
-                out.variant("a{sv}");
                 let Some(cookie) = out.open_array(8) else {
                     self.conn
                         .reply_error(sender, serial, "org.freedesktop.DBus.Error.Failed");

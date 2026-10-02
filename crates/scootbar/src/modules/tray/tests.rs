@@ -655,6 +655,31 @@ fn the_watcher_object_answers() {
         .find(|call| matches!(call.kind, Kind::MethodReturn) && call.reply_to == Some(serial))
         .expect("no GetAll answer");
     assert_eq!(gotten.signature, "a{sv}");
+    // The body is the bare dictionary (no variant wrapper: the header
+    // already says `a{sv}`, and the daemon drops a mismatch with us).
+    {
+        use crate::dbus::proto::Reader;
+        let mut reader = Reader::le(&gotten.body);
+        let raw = reader.array_raw(8).expect("a dictionary");
+        let mut entries = Reader::le(raw);
+        let mut keys = Vec::new();
+        while !entries.exhausted() {
+            entries.enter_struct().expect("entry");
+            keys.push(entries.str().expect("key").to_owned());
+            let sig = entries.signature().expect("sig");
+            entries.skip(&sig).expect("value");
+            entries.leave_struct();
+        }
+        assert!(reader.exhausted());
+        assert_eq!(
+            keys,
+            [
+                "RegisteredStatusNotifierItems",
+                "IsStatusNotifierHostRegistered",
+                "ProtocolVersion"
+            ]
+        );
+    }
     // Unknown members and objects error, never silence.
     let serial = fake.send_call(
         fake::MODULE,
