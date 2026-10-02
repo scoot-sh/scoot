@@ -115,7 +115,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Volume re-probe a present socket](volume-reprobe-present-socket.md) (medium): review follow-up from PR #376
 - [Network](resolved/network-module-done.md) (medium): link state, WiFi name and signal, click to pick — RESOLVED 2026-10-02
 - [Battery](battery-module.md) (medium)
-- [Brightness](brightness-module.md) (low)
+- [Brightness](resolved/brightness-module-done.md) (low): backlight level, scroll to adjust — RESOLVED 2026-10-02
 
 ### M6 — Infrastructure and the tray
 - [A shared D-Bus client](dbus-client.md) (low): its own spike first

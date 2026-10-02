@@ -145,6 +145,11 @@ margin = 0            # as the clock's
 step = 5
 margin = 0
 
+[brightness]
+device = "apple-panel-bl"   # the backlight to follow; absent is the first usable one
+step = 5              # percent points per scroll notch and per raise, 1 to 50
+margin = 0            # as the clock's
+
 [button.launcher]     # modules the file defines, placed by name in the lists above
 icon = "\U000f0e65"
 on-click = { exec = ["scootlaunch"] }
@@ -234,7 +239,9 @@ sink, absent while no server answers (the microphone variant reports
 `"source"` instead of `"sink"`); the network module:
 `{"state": "wifi", "ssid": "Wimbly", "signal": -54, "bars": 4,
 "interface": "wlan0", "vpn": false}`, `"ethernet"` and `"vpn"` with the
-interface, or `{"state": "disconnected"}`).
+interface, or `{"state": "disconnected"}`; the brightness module:
+`{"percent": 49, "device": "apple-panel-bl"}`, absent where there is no
+backlight).
 This is the agent hook: the
 bar read as data instead of OCR. `query ID` lists only that module (an id that
 is not placed is an error naming the ones that are). The reply is bounded
@@ -340,6 +347,7 @@ cannot:
 | `volume` | The default sink's level and mute ([below](#volume)) | on the sound server's sink events, and the server's own: one redraw per batch |
 | `microphone` | The default source's level and mute ([below](#volume)) | as `volume`, for sources |
 | `network` | The shown interface's state: name, SSID and bars, VPN or offline ([below](#network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held |
+| `brightness` | The panel backlight's level ([below](#brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -652,6 +660,42 @@ no daemon and no child process: two netlink sockets on the bar's own
   machine has no network interface — interfaces that appear later (a
   plugged-in dongle) are picked up by `scootbar msg reload`. Interface names and SSIDs are
   untrusted text: sanitized once, at parse time.
+
+## Brightness
+
+The panel backlight's level in percent, read from `/sys/class/backlight`
+and woken by the kernel's uevents on a netlink socket filtered to the
+`backlight` subsystem. A Cargo feature (`brightness`), on by default.
+
+- **What it shows** is `49%` (`251` of `509` on the reference machine, an
+  M2 Air). The tooltip names the device: `apple-panel-bl: 49%`. Where
+  there is no backlight at all (a desktop, a VM) it shows nothing and
+  takes no space, owning no fd.
+- **A scroll raises or lowers**, with no binding at all; a binding you set
+  runs instead, as on every module. The module's own actions are `raise`
+  and `lower`, neither taking a number (a scroll's steps arrive through
+  the scroll itself, one step each), and `set`, taking the absolute
+  percent (`scootbar msg invoke brightness set 50`). There is no default
+  for a click: there is nothing to toggle.
+- **`device`** names the backlight where the machine has several
+  (`intel_backlight` beside `acpi_video0`); absent is the first usable one
+  in sorted name order. **`step`** (default 5, 1 to 50) is the percent
+  points per scroll notch and per raise.
+- **Writes need permission**: the bar writes the raw value to the device's
+  `brightness` file directly (no daemon, no child; logind's `SetBrightness`
+  waits for the shared D-Bus client), and a udev rule for the backlight
+  class or the `video` group grants it. Without it the action is refused
+  naming that. Every write is an absolute level from what is shown (never
+  accumulated steps, so a touchpad flood cannot drift), re-read before the
+  call returns, and never below raw 1: 0 blanks the panel on the drivers
+  measured, and the bar never darkens its own screen past what a scroll
+  can bring back.
+- **Cost.** The uevent socket, and nothing else: no timer, no polling, no
+  wakeups with no backlight activity. A uevent storm drains into one
+  re-read per turn; the uevent a write itself emits finds the re-read
+  already done. Sysfs values are untrusted text: read once each into
+  fixed buffers, digits only, a zero range or a missing file skipping its
+  device.
 
 ## Pointer input
 

@@ -154,6 +154,29 @@ No new dependencies (the Cargo feature adds none); the release binary is
 bench runner under a compositor, which this lane did not have — the rows
 above are the module's published cost until that run happens.
 
+## M5 brightness: module-level cost (measured 2026-10-02, full bench pending)
+
+The [brightness module](resolved/brightness-module-done.md) adds one netlink uevent
+socket to the poll set, and nothing else: no timer exists anywhere in it
+(re-reads happen on a backlight uevent, or synchronously inside the
+`invoke` that wrote), so there is no periodic wakeup by construction. The
+contract test holds every module to the loop's source budget (1 source
+here, of 63), and the module's own test pins that count. Idle wakeups,
+live through the module harness: 0 in quiet seconds on any machine (no
+event, no wake; a driver that chatters uevents is drained into one
+re-read per turn, as the storm test pins). Memory is fixed shapes: two
+small stack buffers per file read, one 8 KiB drain buffer per turn, the
+device name kept once. No new dependencies (the Cargo feature adds none);
+the release binary is 1,708,768 bytes on aarch64 (the dev VM), +65,528
+against the network module's 1,643,240 on the same box and profile, and
+links only libc, libm and libgcc_s. The level itself is cross-checked two
+ways on the Asahi M2: the bar's rounding (107 of 509 shows 21%) agrees
+with `brightnessctl`'s independent 21%, and the module's tests pass there
+against the real backlight. No full `scripts/scootbar-bench` run (idle
+RSS/PSS/jiffies/size rows): it needs the bench runner under a
+compositor, which this lane did not have — the rows above are the
+module's published cost until that run happens.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

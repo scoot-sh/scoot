@@ -81,6 +81,8 @@ use crate::paint::{Canvas, Span};
 use crate::text::Text;
 use crate::theme::Theme;
 
+#[cfg(feature = "brightness")]
+pub mod brightness;
 #[cfg(feature = "button")]
 pub mod button;
 mod class;
@@ -257,7 +259,7 @@ impl fmt::Display for SetError {
 
 /// Why a module refused an action: said on stderr, or to the agent that
 /// asked. (A build without a module that has actions — the workspaces,
-/// window-title, volume, microphone and network ones — constructs none
+/// window-title, volume, microphone, network and brightness ones — constructs none
 /// but `Unknown`.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
@@ -266,7 +268,8 @@ impl fmt::Display for SetError {
         feature = "window-title",
         feature = "volume",
         feature = "microphone",
-        feature = "network"
+        feature = "network",
+        feature = "brightness"
     )),
     allow(dead_code)
 )]
@@ -341,7 +344,8 @@ pub struct ActionSpec {
         feature = "window-title",
         feature = "volume",
         feature = "microphone",
-        feature = "network"
+        feature = "network",
+        feature = "brightness"
     )),
     allow(dead_code)
 )]
@@ -422,6 +426,17 @@ pub const REGISTRY: &[Spec] = &[
         // unrefused so the contract still drives it.
         #[cfg(test)]
         stand_in: Some(network::stand_in),
+    },
+    #[cfg(feature = "brightness")]
+    Spec {
+        id: brightness::ID,
+        init: brightness::init,
+        actions: brightness::ACTIONS,
+        // Unavailable on any machine without a backlight (a desktop, a
+        // VM), so the stand-in starts the same module on a fixture
+        // backlight and the contract still drives it there.
+        #[cfg(test)]
+        stand_in: Some(brightness::stand_in),
     },
 ];
 
@@ -538,6 +553,8 @@ pub struct Settings {
     pub microphone: microphone::Settings,
     #[cfg(feature = "network")]
     pub network: network::Settings,
+    #[cfg(feature = "brightness")]
+    pub brightness: brightness::Settings,
     /// The interaction keys the config sets, by module id: only modules
     /// that bind something are listed.
     pub bindings: Vec<(&'static str, Bindings)>,
@@ -615,14 +632,15 @@ pub struct ClickCtx<'a> {
     pub scale: Scale,
 }
 
-/// A pointer input for [`Module::on_input`]. (The workspaces and
-/// window-title modules read it.)
+/// A pointer input for [`Module::on_input`]. (The workspaces,
+/// window-title, volume, microphone and brightness modules read it.)
 #[cfg_attr(
     not(any(
         feature = "workspaces",
         feature = "window-title",
         feature = "volume",
-        feature = "microphone"
+        feature = "microphone",
+        feature = "brightness"
     )),
     allow(dead_code)
 )]

@@ -300,6 +300,9 @@ struct File {
     /// The network module's options. Without the `network` feature there
     /// are none, and any key is a loud error naming it.
     network: NetworkFile,
+    /// The brightness module's options. Without the `brightness` feature
+    /// there are none, and any key is a loud error naming it.
+    brightness: BrightnessFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -601,6 +604,40 @@ struct NetworkFile {
     on_scroll_down: Option<toml::Value>,
 }
 
+/// The brightness module's options. Without the `brightness` feature there
+/// are none, and any key is a loud error naming it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct BrightnessFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "brightness")]
+    margin: Option<u32>,
+    /// The backlight to follow, by class-directory name. Absent is the
+    /// first usable device in sorted name order.
+    #[cfg(feature = "brightness")]
+    device: Option<String>,
+    /// Percent points per scroll notch and per raise.
+    #[cfg(feature = "brightness")]
+    step: Option<u32>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "brightness")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "brightness")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "brightness")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "brightness")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "brightness")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
+}
+
 impl File {
     /// Validates every value and fills the defaults: `Err` names the
     /// dotted key and says what it takes.
@@ -776,6 +813,13 @@ impl File {
             let margin = gap(path, "network.margin", Some(margin), 0)?;
             if margin > 0 {
                 margins.push((crate::modules::network::ID, margin));
+            }
+        }
+        #[cfg(feature = "brightness")]
+        if let Some(margin) = self.brightness.margin {
+            let margin = gap(path, "brightness.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::brightness::ID, margin));
             }
         }
         let layout = self.layout(
@@ -1060,6 +1104,15 @@ impl File {
                 &mut modules.bindings,
             )?;
         }
+        #[cfg(feature = "brightness")]
+        {
+            apply_brightness(
+                path,
+                &self.brightness,
+                &mut modules.brightness,
+                &mut modules.bindings,
+            )?;
+        }
         Ok(Config {
             bar: Bar {
                 edge,
@@ -1325,6 +1378,74 @@ fn apply_network(
     })?;
     if !read.is_empty() {
         bindings.push((crate::modules::network::ID, read));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "brightness")]
+const BRIGHTNESS_KEYS: [&str; 5] = [
+    "brightness.on-click",
+    "brightness.on-right-click",
+    "brightness.on-middle-click",
+    "brightness.on-scroll-up",
+    "brightness.on-scroll-down",
+];
+
+/// The `[brightness]` table: `device`, `step` and the interaction keys,
+/// into the module's settings.
+#[cfg(feature = "brightness")]
+fn apply_brightness(
+    path: &Path,
+    table: &BrightnessFile,
+    settings: &mut crate::modules::brightness::Settings,
+    bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
+) -> Result<(), Error> {
+    use crate::modules::brightness::{DEFAULT_STEP, MAX_STEP};
+    if let Some(device) = table.device.as_deref() {
+        // Empty never selects; a name that could escape the class
+        // directory never reaches it (the module skips it), so refuse it
+        // here, where the key is named.
+        if device.is_empty() || device.contains('/') || device.contains('\0') {
+            return Err(value(
+                path,
+                "brightness.device",
+                format_args!("takes a backlight name, not `{device}`"),
+            ));
+        }
+        settings.device = Some(device.to_owned());
+    }
+    if let Some(step) = table.step {
+        if !(1..=MAX_STEP).contains(&step) {
+            return Err(value(
+                path,
+                "brightness.step",
+                format_args!(
+                    "takes a whole number of percent points from 1 to {MAX_STEP}, not `{step}` \
+                     (the default is {DEFAULT_STEP})"
+                ),
+            ));
+        }
+        settings.step = step;
+    }
+    let read = bindings::read(
+        crate::modules::brightness::ID,
+        [
+            table.on_click.as_ref(),
+            table.on_right_click.as_ref(),
+            table.on_middle_click.as_ref(),
+            table.on_scroll_up.as_ref(),
+            table.on_scroll_down.as_ref(),
+        ],
+    )
+    .map_err(|(trigger, message)| {
+        value(
+            path,
+            BRIGHTNESS_KEYS[trigger as usize],
+            format_args!("{message}"),
+        )
+    })?;
+    if !read.is_empty() {
+        bindings.push((crate::modules::brightness::ID, read));
     }
     Ok(())
 }

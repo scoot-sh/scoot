@@ -208,7 +208,7 @@ fn bad_values_name_their_key() {
         ("[colors]\nbackground = \"red\"\n", "colors.background"),
         ("[colors]\nhover = \"blue\"\n", "colors.hover"),
         ("[colors]\nurgent = \"#12345\"\n", "colors.urgent"),
-        ("left = [\"battery\"]\n", "left"),
+        ("left = [\"bluetooth\"]\n", "left"),
     ];
     for (text, key) in cases {
         let error = read(text).unwrap_err().to_string();
@@ -568,6 +568,28 @@ fn a_microphone_section_is_refused_loudly() {
 }
 
 #[test]
+#[cfg(feature = "brightness")]
+fn a_brightness_section_is_read_whole() {
+    use crate::modules::brightness::DEFAULT_STEP;
+    let modules = read("").unwrap().modules.brightness;
+    assert!(modules.device.is_none());
+    assert_eq!(modules.step, DEFAULT_STEP);
+    let modules = read(
+        "left = [\"brightness\"]\n\
+         [brightness]\n\
+         device = \"apple-panel-bl\"\n\
+         step = 10\n\
+         on-scroll-up = \"raise\"\n\
+         on-click = { exec = [\"foot\", \"-e\", \"light\"] }\n",
+    )
+    .unwrap()
+    .modules
+    .brightness;
+    assert_eq!(modules.device.as_deref(), Some("apple-panel-bl"));
+    assert_eq!(modules.step, 10);
+}
+
+#[test]
 #[cfg(feature = "network")]
 fn a_network_section_is_read_whole() {
     let modules = read("").unwrap().modules.network;
@@ -613,6 +635,43 @@ fn a_network_section_is_refused_loudly() {
         ("[network]\nshow-ssid = \"yes\"\n", "show-ssid"),
         ("[network]\nmenu-command = \"fuzzel\"\n", "menu-command"),
         ("[network]\ninterface = 3\n", "interface"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+}
+
+#[test]
+#[cfg(feature = "brightness")]
+fn a_brightness_section_is_refused_loudly() {
+    for (text, key) in [
+        ("[brightness]\ndevice = \"\"\n", "brightness.device"),
+        (
+            "[brightness]\ndevice = \"../escape\"\n",
+            "brightness.device",
+        ),
+        ("[brightness]\nstep = 0\n", "brightness.step"),
+        ("[brightness]\nstep = 51\n", "brightness.step"),
+        ("[brightness]\nwhatever = 1\n", "whatever"),
+        // `raise` takes no number, `set` takes one.
+        (
+            "[brightness]\non-click = \"raise 2\"\n",
+            "brightness.on-click",
+        ),
+        ("[brightness]\non-click = \"set\"\n", "brightness.on-click"),
+        (
+            "[brightness]\non-click = \"frobnicate\"\n",
+            "brightness.on-click",
+        ),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+    // Type errors come from the TOML layer and name the key without its
+    // section.
+    for (text, key) in [
+        ("[brightness]\nstep = \"five\"\n", "step"),
+        ("[brightness]\ndevice = 3\n", "device"),
     ] {
         let error = read(text).unwrap_err().to_string();
         assert!(error.contains(key), "{text:?}: {error}");
