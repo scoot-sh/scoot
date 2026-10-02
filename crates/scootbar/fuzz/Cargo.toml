@@ -60,6 +60,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "dbus"
+path = "fuzz_targets/dbus.rs"
+test = false
+doc = false
+bench = false
+
 # Only symbols, for readable crash stacks.
 [profile.release]
 debug = 1

@@ -245,6 +245,15 @@ impl Text {
         self.advance(' ', em).round().max(0.0) as u32
     }
 
+    /// The bitmap of `art` at `side` device pixels, made and cached on
+    /// first use ([`crate::icon`]). The tray draws its items itself
+    /// (one module, many icons), through this rather than [`Text::draw`].
+    /// `None` for a size of 0 or past the cache's bound, which draws
+    /// nothing.
+    pub fn bitmap(&mut self, art: &Art, side: u32) -> Option<icon::Bitmap<'_>> {
+        self.icons.get(art, side)
+    }
+
     /// Draws `art`, a square [`Text::art_side`] on a side, its left edge
     /// at `x` and centered vertically in the canvas, clipped to `clip`. A
     /// path icon is tinted `color`; an image is drawn as it is.

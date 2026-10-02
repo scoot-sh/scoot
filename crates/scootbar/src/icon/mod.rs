@@ -31,6 +31,8 @@ pub mod cache;
 pub mod image;
 pub mod path;
 pub mod raster;
+pub mod sample;
+pub mod tray;
 
 use std::sync::Arc;
 
@@ -68,6 +70,9 @@ pub enum Art {
     Vector(Arc<Vector>),
     #[cfg(feature = "icon-image")]
     Image(Arc<image::Image>),
+    /// A tray item's pixmap: premultiplied pixels from the bus, drawn
+    /// as they are (never tinted).
+    Tray(Arc<tray::TrayIcon>),
 }
 
 impl Art {
@@ -77,6 +82,7 @@ impl Art {
             Self::Vector(vector) => vector.id(),
             #[cfg(feature = "icon-image")]
             Self::Image(image) => image.id(),
+            Self::Tray(icon) => icon.id(),
         }
     }
 }

@@ -106,6 +106,8 @@ pub mod payload;
 pub mod push;
 #[cfg(any(feature = "push", feature = "exec"))]
 mod shown;
+#[cfg(feature = "tray")]
+pub mod tray;
 #[cfg(any(feature = "volume", feature = "microphone"))]
 pub mod volume;
 #[cfg(feature = "window-title")]
@@ -218,8 +220,11 @@ pub trait Module {
 
     /// Device pixels this module's span grows past its measured text, so
     /// a shape it draws fits: 0 for every module but the workspaces
-    /// circle with `disc`. Cold path: asked when the module is measured
-    /// (a changed view, a new scale or bar size), never per frame.
+    /// circle with `disc`, and the tray, whose view holds no text and
+    /// whose icons size the span alone (the render gives an otherwise
+    /// empty view room for its `span_extra`, and none without it). Cold
+    /// path: asked when the module is measured (a changed view, a new
+    /// scale or bar size), never per frame.
     fn span_extra(&self, measure: &Measure<'_>) -> u32 {
         let _ = measure;
         0
@@ -259,7 +264,7 @@ impl fmt::Display for SetError {
 
 /// Why a module refused an action: said on stderr, or to the agent that
 /// asked. (A build without a module that has actions — the workspaces,
-/// window-title, volume, microphone, network and brightness ones — constructs none
+/// window-title, volume, microphone, network, brightness and tray ones — constructs none
 /// but `Unknown`.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
@@ -269,7 +274,8 @@ impl fmt::Display for SetError {
         feature = "volume",
         feature = "microphone",
         feature = "network",
-        feature = "brightness"
+        feature = "brightness",
+        feature = "tray"
     )),
     allow(dead_code)
 )]
@@ -345,7 +351,8 @@ pub struct ActionSpec {
         feature = "volume",
         feature = "microphone",
         feature = "network",
-        feature = "brightness"
+        feature = "brightness",
+        feature = "tray"
     )),
     allow(dead_code)
 )]
@@ -437,6 +444,18 @@ pub const REGISTRY: &[Spec] = &[
         // backlight and the contract still drives it there.
         #[cfg(test)]
         stand_in: Some(brightness::stand_in),
+    },
+    #[cfg(feature = "tray")]
+    Spec {
+        id: tray::ID,
+        init: tray::init,
+        actions: tray::ACTIONS,
+        // Available on any machine the tests run on (without a bus it
+        // waits on the socket's directory with an empty view), and the
+        // stand-in starts the same module on the scripted bus, so the
+        // contract drives the connected path everywhere.
+        #[cfg(test)]
+        stand_in: Some(tray::stand_in),
     },
 ];
 
@@ -555,6 +574,8 @@ pub struct Settings {
     pub network: network::Settings,
     #[cfg(feature = "brightness")]
     pub brightness: brightness::Settings,
+    #[cfg(feature = "tray")]
+    pub tray: tray::Settings,
     /// The interaction keys the config sets, by module id: only modules
     /// that bind something are listed.
     pub bindings: Vec<(&'static str, Bindings)>,
@@ -633,14 +654,15 @@ pub struct ClickCtx<'a> {
 }
 
 /// A pointer input for [`Module::on_input`]. (The workspaces,
-/// window-title, volume, microphone and brightness modules read it.)
+/// window-title, volume, microphone, brightness and tray modules read it.)
 #[cfg_attr(
     not(any(
         feature = "workspaces",
         feature = "window-title",
         feature = "volume",
         feature = "microphone",
-        feature = "brightness"
+        feature = "brightness",
+        feature = "tray"
     )),
     allow(dead_code)
 )]

@@ -677,3 +677,38 @@ fn a_brightness_section_is_refused_loudly() {
         assert!(error.contains(key), "{text:?}: {error}");
     }
 }
+
+#[test]
+#[cfg(feature = "tray")]
+fn a_tray_section_is_read_whole() {
+    let modules = read("").unwrap().modules.tray;
+    assert_eq!(modules, crate::modules::tray::Settings::default());
+    let config = read(
+        "left = [\"tray\"]\n\
+         [tray]\n\
+         on-click = \"activate 0\"\n\
+         on-scroll-up = \"scroll-up 1\"\n",
+    )
+    .unwrap();
+    assert!(config.layout.left.contains(&"tray"));
+    let bindings = config.modules.bindings_of("tray");
+    assert!(!bindings.is_empty());
+}
+
+#[test]
+#[cfg(feature = "tray")]
+fn a_tray_section_is_refused_loudly() {
+    for (text, key) in [
+        ("[tray]\nwhatever = 1\n", "whatever"),
+        // `activate` takes a number.
+        ("[tray]\non-click = \"activate\"\n", "tray.on-click"),
+        (
+            "[tray]\non-click = \"frobnicate 0\"\n",
+            "tray.on-click",
+        ),
+        ("[tray]\nmargin = 99999\n", "tray.margin"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+}

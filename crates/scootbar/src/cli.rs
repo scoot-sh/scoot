@@ -135,6 +135,20 @@ macro_rules! volume_head {
     };
 }
 #[allow(unused_macros)]
+#[cfg(feature = "tray")]
+macro_rules! tray_head {
+    () => {
+        "tray, "
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "tray"))]
+macro_rules! tray_head {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
 #[cfg(feature = "microphone")]
 macro_rules! microphone_tail {
     () => {
@@ -176,6 +190,20 @@ macro_rules! volume_tail {
         ""
     };
 }
+#[allow(unused_macros)]
+#[cfg(feature = "tray")]
+macro_rules! tray_tail {
+    () => {
+        ", tray"
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "tray"))]
+macro_rules! tray_tail {
+    () => {
+        ""
+    };
+}
 #[cfg(all(feature = "clock", feature = "workspaces", feature = "window-title"))]
 macro_rules! modules {
     () => {
@@ -189,6 +217,7 @@ macro_rules! modules {
             "clock",
             microphone_tail!(),
             network_tail!(),
+            tray_tail!(),
             volume_tail!(),
             ", window-title, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -222,6 +251,7 @@ macro_rules! modules {
             "clock",
             microphone_tail!(),
             network_tail!(),
+            tray_tail!(),
             volume_tail!(),
             ", workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -256,6 +286,7 @@ macro_rules! modules {
             "clock",
             microphone_tail!(),
             network_tail!(),
+            tray_tail!(),
             volume_tail!(),
             ", window-title
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -289,6 +320,7 @@ macro_rules! modules {
             "clock",
             microphone_tail!(),
             network_tail!(),
+            tray_tail!(),
             volume_tail!(),
             "\n     --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
@@ -319,6 +351,7 @@ macro_rules! modules {
             brightness_head!(),
             microphone_head!(),
             network_head!(),
+            tray_head!(),
             volume_head!(),
             "window-title, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -343,6 +376,7 @@ macro_rules! modules {
             brightness_head!(),
             microphone_head!(),
             network_head!(),
+            tray_head!(),
             volume_head!(),
             "workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -367,6 +401,7 @@ macro_rules! modules {
             brightness_head!(),
             microphone_head!(),
             network_head!(),
+            tray_head!(),
             volume_head!(),
             "window-title
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -384,8 +419,8 @@ macro_rules! modules {
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
-    not(feature = "brightness")
-))]
+    not(feature = "brightness"),
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -398,6 +433,28 @@ macro_rules! modules {
 "
     };
 }
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
 #[cfg(all(
     not(feature = "clock"),
     not(feature = "workspaces"),
@@ -405,8 +462,8 @@ macro_rules! modules {
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
-    not(feature = "brightness")
-))]
+    not(feature = "brightness"),
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -419,6 +476,28 @@ macro_rules! modules {
 "
     };
 }
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: network, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
 #[cfg(all(
     not(feature = "clock"),
     not(feature = "workspaces"),
@@ -426,8 +505,8 @@ macro_rules! modules {
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
-    not(feature = "brightness")
-))]
+    not(feature = "brightness"),
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -440,6 +519,28 @@ macro_rules! modules {
 "
     };
 }
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: network, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
 #[cfg(all(
     not(feature = "clock"),
     not(feature = "workspaces"),
@@ -447,13 +548,35 @@ macro_rules! modules {
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
-    not(feature = "brightness")
-))]
+    not(feature = "brightness"),
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: microphone, network
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, network, tray
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -468,13 +591,35 @@ macro_rules! modules {
     feature = "volume",
     feature = "microphone",
     feature = "network",
-    not(feature = "brightness")
-))]
+    not(feature = "brightness"),
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: microphone, network, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    not(feature = "brightness"),
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, network, tray, volume
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -489,13 +634,35 @@ macro_rules! modules {
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
-    not(feature = "brightness")
-))]
+    not(feature = "brightness"),
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: microphone, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, tray, volume
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -510,13 +677,35 @@ macro_rules! modules {
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
-    not(feature = "brightness")
-))]
+    not(feature = "brightness"),
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: tray, volume
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -531,13 +720,35 @@ macro_rules! modules {
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
-    not(feature = "brightness")
-))]
+    not(feature = "brightness"),
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: microphone
+     --padding N          logical pixels either side of each module, 0 to 1024
+                           (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                           1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    not(feature = "brightness"),
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, tray
      --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -553,8 +764,8 @@ macro_rules! modules {
     not(feature = "volume"),
     not(feature = "microphone"),
     not(feature = "network"),
-    feature = "brightness"
-))]
+    feature = "brightness",
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -567,6 +778,28 @@ macro_rules! modules {
 "
     };
 }
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
 #[cfg(all(
     not(feature = "clock"),
     not(feature = "workspaces"),
@@ -574,8 +807,8 @@ macro_rules! modules {
     not(feature = "volume"),
     not(feature = "microphone"),
     feature = "network",
-    feature = "brightness"
-))]
+    feature = "brightness",
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -588,6 +821,28 @@ macro_rules! modules {
 "
     };
 }
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, network, tray
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
 #[cfg(all(
     not(feature = "clock"),
     not(feature = "workspaces"),
@@ -595,8 +850,8 @@ macro_rules! modules {
     feature = "volume",
     not(feature = "microphone"),
     feature = "network",
-    feature = "brightness"
-))]
+    feature = "brightness",
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
@@ -609,6 +864,28 @@ macro_rules! modules {
 "
     };
 }
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    feature = "network",
+    feature = "brightness",
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, network, tray, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
 #[cfg(all(
     not(feature = "clock"),
     not(feature = "workspaces"),
@@ -616,13 +893,35 @@ macro_rules! modules {
     not(feature = "volume"),
     feature = "microphone",
     feature = "network",
-    feature = "brightness"
-))]
+    feature = "brightness",
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: brightness, microphone, network
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, network, tray
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -637,13 +936,35 @@ macro_rules! modules {
     feature = "volume",
     feature = "microphone",
     feature = "network",
-    feature = "brightness"
-))]
+    feature = "brightness",
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: brightness, microphone, network, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network",
+    feature = "brightness",
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, network, tray, volume
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -658,13 +979,35 @@ macro_rules! modules {
     feature = "volume",
     feature = "microphone",
     not(feature = "network"),
-    feature = "brightness"
-))]
+    feature = "brightness",
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: brightness, microphone, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, tray, volume
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -679,13 +1022,35 @@ macro_rules! modules {
     feature = "volume",
     not(feature = "microphone"),
     not(feature = "network"),
-    feature = "brightness"
-))]
+    feature = "brightness",
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: brightness, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    not(feature = "microphone"),
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, tray, volume
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -700,13 +1065,35 @@ macro_rules! modules {
     not(feature = "volume"),
     feature = "microphone",
     not(feature = "network"),
-    feature = "brightness"
-))]
+    feature = "brightness",
+    not(feature = "tray")))]
 macro_rules! modules {
     () => {
         "    --left IDS           the modules along the left, center and right,
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: brightness, microphone
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+// The same build with the tray module: it sorts after network.
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    not(feature = "network"),
+    feature = "brightness",
+    feature = "tray"))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: brightness, microphone, tray
      --padding N          logical pixels either side of each module, 0 to 1024
                             (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
@@ -837,6 +1224,26 @@ macro_rules! brightness_help {
         ""
     };
 }
+// What the tray module is, for the help page.
+#[cfg(feature = "tray")]
+macro_rules! tray_help {
+    () => {
+        "Tray (the tray module):
+    the StatusNotifierItem watcher and host: applications' icons at exact
+    device pixels, a click activates, a middle click secondarily, a scroll
+    scrolls, and `activate N` takes the item index. The bar owns the
+    watcher name when free and hosts against whoever does otherwise.
+    Item menus wait on the popups entry. Nothing is shown where no item
+    is registered
+"
+    };
+}
+#[cfg(not(feature = "tray"))]
+macro_rules! tray_help {
+    () => {
+        ""
+    };
+}
 
 pub const USAGE: &str = concat!(
     "\
@@ -931,6 +1338,7 @@ Modules:
     microphone_help!(),
     network_help!(),
     brightness_help!(),
+    tray_help!(),
     "
 The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
 without it) holds every option above; `--config PATH` reads another file

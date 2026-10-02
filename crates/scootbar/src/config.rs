@@ -303,6 +303,9 @@ struct File {
     /// The brightness module's options. Without the `brightness` feature
     /// there are none, and any key is a loud error naming it.
     brightness: BrightnessFile,
+    /// The tray module's options. Without the `tray` feature there are
+    /// none, and any key is a loud error naming it.
+    tray: TrayFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -638,6 +641,33 @@ struct BrightnessFile {
     on_scroll_down: Option<toml::Value>,
 }
 
+/// The tray module's options. Without the `tray` feature there are none,
+/// and any key is a loud error naming it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct TrayFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "tray")]
+    margin: Option<u32>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "tray")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "tray")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "tray")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "tray")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "tray")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
+}
+
 impl File {
     /// Validates every value and fills the defaults: `Err` names the
     /// dotted key and says what it takes.
@@ -820,6 +850,13 @@ impl File {
             let margin = gap(path, "brightness.margin", Some(margin), 0)?;
             if margin > 0 {
                 margins.push((crate::modules::brightness::ID, margin));
+            }
+        }
+        #[cfg(feature = "tray")]
+        if let Some(margin) = self.tray.margin {
+            let margin = gap(path, "tray.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::tray::ID, margin));
             }
         }
         let layout = self.layout(
@@ -1112,6 +1149,10 @@ impl File {
                 &mut modules.brightness,
                 &mut modules.bindings,
             )?;
+        }
+        #[cfg(feature = "tray")]
+        {
+            apply_tray(path, &self.tray, &mut modules.bindings)?;
         }
         Ok(Config {
             bar: Bar {
@@ -1446,6 +1487,48 @@ fn apply_brightness(
     })?;
     if !read.is_empty() {
         bindings.push((crate::modules::brightness::ID, read));
+    }
+    Ok(())
+}
+
+/// The dotted interaction keys of `[tray]`, in [`Trigger`] order: what a
+/// bad binding names.
+#[cfg(feature = "tray")]
+const TRAY_KEYS: [&str; 5] = [
+    "tray.on-click",
+    "tray.on-right-click",
+    "tray.on-middle-click",
+    "tray.on-scroll-up",
+    "tray.on-scroll-down",
+];
+
+/// The `[tray]` table: the interaction keys into the module's bindings.
+/// The module holds no options of its own.
+#[cfg(feature = "tray")]
+fn apply_tray(
+    path: &Path,
+    table: &TrayFile,
+    bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
+) -> Result<(), Error> {
+    let read = bindings::read(
+        crate::modules::tray::ID,
+        [
+            table.on_click.as_ref(),
+            table.on_right_click.as_ref(),
+            table.on_middle_click.as_ref(),
+            table.on_scroll_up.as_ref(),
+            table.on_scroll_down.as_ref(),
+        ],
+    )
+    .map_err(|(trigger, message)| {
+        value(
+            path,
+            TRAY_KEYS[trigger as usize],
+            format_args!("{message}"),
+        )
+    })?;
+    if !read.is_empty() {
+        bindings.push((crate::modules::tray::ID, read));
     }
     Ok(())
 }
