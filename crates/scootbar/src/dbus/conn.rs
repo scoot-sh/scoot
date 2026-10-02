@@ -433,9 +433,14 @@ impl Conn {
         // The pending table's token is unused here (the serial is known);
         // drop the entry the blocking wait replaces.
         self.pending.pop();
+        eprintln!("CONNDBG: roundtrip {serial} flushing {} outbox", self.outbox.len());
         self.flush_blocking()?;
         loop {
-            let frame = self.read_frame_blocking()?;
+            eprintln!("CONNDBG: roundtrip {serial} reading, staged {}", self.staged.len());
+            let frame = self.read_frame_blocking().map_err(|error| {
+                eprintln!("CONNDBG: roundtrip {serial} read failed {error:?}");
+                error
+            })?;
             let message = Message::parse(&frame).map_err(|_| SetupError::Refused("a bad set-up reply"))?;
             match message.kind {
                 Kind::MethodReturn if message.reply_serial == Some(serial) => {
