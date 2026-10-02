@@ -47,3 +47,14 @@ as a dropped connection, never a panic. Licence-check anything pulled in.
 
 One consumer (start with [scootnotify](scootnotify.md) or the
 [tray](tray.md)) runs on it and its idle cost is recorded.
+
+## Spike outcome (2026-10-02, ticket stays open)
+
+The spike is done; the client is not. Measured in
+[../spikes/dbus-client.md](../spikes/dbus-client.md): a hand-rolled
+minimal client beats `zbus` 5 (1,448,032 B, 86 crates, mandatory async
+runtime, 4 threads) and libdbus (686,368 B plus `libdbus-1.so.3`) on
+every row — 332,456 B, zero dependencies, 1 thread — while all three idle
+at zero wakeups. Verdict: hand-rolled, built with the tray (no consumer
+exists yet), shape and bounds decided in the record. The done state above
+is unchanged.
