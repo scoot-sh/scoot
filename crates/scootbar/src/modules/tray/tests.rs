@@ -672,14 +672,20 @@ fn the_watcher_object_answers() {
         "s",
         &bytes,
     );
-    for _ in 0..5 {
+    // Turns until both errors arrive back (an answer takes a few
+    // ready-driven turns each way).
+    let start = std::time::Instant::now();
+    let mut calls = Vec::new();
+    while start.elapsed() < Duration::from_secs(30) {
         fake.pump();
         harness.wait(Duration::from_millis(200));
         fake.pump();
-    }
-    let calls = fake.calls();
-    for call in &calls {
-        eprintln!("TRAYDBG got {:?} reply_to={:?} member={}", call.kind, call.reply_to, call.member);
+        calls = fake.calls();
+        if [serial, serial2].iter().all(|wanted| {
+            calls.iter().any(|call| matches!(call.kind, Kind::Error) && call.reply_to == Some(*wanted))
+        }) {
+            break;
+        }
     }
     for serial in [serial, serial2] {
         assert!(
