@@ -244,8 +244,12 @@ enum Op {
     /// The existing watcher's `RegisteredStatusNotifierItems` (host
     /// mode): diff it against what is shown.
     WatcherItems,
-    /// Re-acquiring the KDE watcher name after its owner vanished.
-    Request,
+    /// The KDE watcher name's answer.
+    RequestKde,
+    /// The freedesktop twin's answer (best effort, ignored past owning).
+    RequestFdo,
+    /// The KDE watcher name's owner (host mode): read its list next.
+    WatcherOwner,
 }
 
 /// One item: who it is, what it shows, and its converted icons.
@@ -372,39 +376,24 @@ impl Tray {
     }
 
     /// Connects a stream that is already open (the tests' socketpair end,
-    /// or a dialled bus): runs the set-up and enumerates.
+    /// or a dialled bus): `Hello` is the only blocking call, and the
+    /// names, matches and enumeration follow ready-driven.
     fn connected(&mut self, stream: std::os::unix::net::UnixStream) {
-        let conn = match conn::setup(stream) {
-            Ok(conn) => conn,
-            Err(error) => {
-                eprintln!("TRAYDBG: conn setup failed {error:?}");
-                self.wait();
-                return;
+        match conn::setup(stream) {
+            Ok(conn) => {
+                self.bus = Bus::Live(setup(conn));
             }
-        };
-        eprintln!("TRAYDBG: conn ok {}", conn.unique());
-        match setup(conn) {
-            Ok(live) => {
-                eprintln!("TRAYDBG: live with {} items", live.items.len());
-                self.bus = Bus::Live(live);
-            }
-            Err(error) => {
-                eprintln!("TRAYDBG: setup failed {error}");
-                self.wait();
-            }
+            Err(_) => self.wait(),
         }
     }
 
-    /// Dials the bus and runs the set-up; failures wait.
+    /// Dials the bus and starts the set-up; failures wait. Nothing is
+    /// shown until the names answer.
     fn connect(&mut self) -> Update {
-        let Ok(conn) = conn::connect(&self.path) else {
-            return Update::Unchanged;
-        };
-        match setup(conn) {
-            Ok(live) => {
-                let changed = !live.items.is_empty();
-                self.bus = Bus::Live(live);
-                if changed { Update::Changed } else { Update::Unchanged }
+        match conn::connect(&self.path) {
+            Ok(conn) => {
+                self.bus = Bus::Live(setup(conn));
+                Update::Unchanged
             }
             Err(_) => Update::Unchanged,
         }
@@ -635,7 +624,9 @@ impl Live {
             Op::Owner(id) => self.on_owner(&id, signature, body),
             Op::Names => self.on_names(signature, body),
             Op::WatcherItems => self.on_watcher_items(signature, body),
-            Op::Request => self.on_request_reply(signature, body),
+            Op::RequestKde => self.on_request_reply(true, signature, body),
+            Op::RequestFdo => self.on_request_reply(false, signature, body),
+            Op::WatcherOwner => self.on_watcher_owner_reply(signature, body),
         }
     }
 
@@ -650,7 +641,9 @@ impl Live {
             // `NameHasNoOwner` is an item already gone; anything else
             // leaves the owner unknown (signals still match by sender).
             Op::Owner(id) if name.ends_with("NameHasNoOwner") => self.remove(&id),
-            Op::Owner(_) | Op::Names | Op::WatcherItems | Op::Request => Update::Unchanged,
+            Op::Owner(_) | Op::Names | Op::WatcherItems | Op::RequestKde | Op::RequestFdo | Op::WatcherOwner => {
+                Update::Unchanged
+            }
         }
     }
 
@@ -883,7 +876,7 @@ impl Live {
                     "su",
                     &bytes,
                     0,
-                    Op::Request,
+                    Op::RequestKde,
                 );
             }
             return Update::Changed;
@@ -893,24 +886,39 @@ impl Live {
         Update::Changed
     }
 
-    /// Works a re-acquire answer: ours again means owner mode, anything
-    /// else host mode against whoever has it.
-    fn on_request_reply(&mut self, signature: &str, body: &[u8]) -> Update {
+    /// Works a watcher-name answer: ours means owner mode (matches,
+    /// then enumeration); anyone else's means host mode against them
+    /// (matches, then their list). The freedesktop twin is best effort:
+    /// owned is nice, owned elsewhere changes nothing.
+    fn on_request_reply(&mut self, kde: bool, signature: &str, body: &[u8]) -> Update {
         let Ok(word) = proto::read_request_reply(signature, body) else {
             return Update::Unchanged;
         };
-        match word {
-            request_reply::PRIMARY_OWNER | request_reply::ALREADY_OWNER => {
+        let owned = matches!(word, request_reply::PRIMARY_OWNER | request_reply::ALREADY_OWNER);
+        if kde {
+            self.match_rules();
+            if owned {
                 self.mode = Mode::Owner;
                 self.enumerate();
-                Update::Changed
-            }
-            _ => {
+            } else {
                 self.mode = Mode::Host;
-                self.refresh_watcher();
-                Update::Changed
+                self.read_watcher_owner();
             }
+            return Update::Changed;
         }
+        Update::Unchanged
+    }
+
+    /// Reads who owns the KDE watcher name (host mode): their list and
+    /// our host registration follow.
+    fn on_watcher_owner_reply(&mut self, signature: &str, body: &[u8]) -> Update {
+        let Ok(owner) = proto::read_owner(signature, body) else {
+            return Update::Unchanged;
+        };
+        self.watcher_owner = Some(owner);
+        self.register_host();
+        self.refresh_watcher();
+        Update::Unchanged
     }
 
     /// Another watcher's item signals (host mode): a registration we did
@@ -1177,6 +1185,80 @@ impl Live {
         self.items.sort_by(|a, b| a.id.cmp(&b.id));
     }
 
+    /// Queues a `RequestName` for the KDE name or its twin.
+    fn request(&mut self, name: &str, op: Op) {
+        let mut body = Writer::new();
+        body.str(name);
+        body.u32(proto::request::ALLOW_REPLACEMENT | proto::request::DO_NOT_QUEUE);
+        let Some(bytes) = body.take_body() else {
+            return;
+        };
+        self.issue(
+            conn::BUS_NAME,
+            conn::BUS_PATH,
+            conn::BUS_INTERFACE,
+            "RequestName",
+            "su",
+            &bytes,
+            0,
+            op,
+        );
+    }
+
+    /// Installs the match rules: owner changes, item signals on both
+    /// interfaces, and the other watcher's item signals for host mode.
+    /// Answered to no one (duplicates error silently into the kept rule).
+    fn match_rules(&mut self) {
+        for rule in MATCH_RULES {
+            let mut body = Writer::new();
+            body.str(rule);
+            let Some(bytes) = body.take_body() else {
+                continue;
+            };
+            self.fire(
+                conn::BUS_NAME,
+                conn::BUS_PATH,
+                conn::BUS_INTERFACE,
+                "AddMatch",
+                "s",
+                &bytes,
+            );
+        }
+    }
+
+    /// Queues a read of the KDE watcher name's owner (host mode).
+    fn read_watcher_owner(&mut self) {
+        let mut body = Writer::new();
+        body.str(WATCHER_KDE);
+        let Some(bytes) = body.take_body() else {
+            return;
+        };
+        self.issue(
+            conn::BUS_NAME,
+            conn::BUS_PATH,
+            conn::BUS_INTERFACE,
+            "GetNameOwner",
+            "s",
+            &bytes,
+            0,
+            Op::WatcherOwner,
+        );
+    }
+
+    /// Registers our host with the existing watcher (host mode): no
+    /// reply wanted, flushed with the rest.
+    fn register_host(&mut self) {
+        let Some(owner) = self.watcher_owner.clone() else {
+            return;
+        };
+        let mut body = Writer::new();
+        body.str(self.conn.unique());
+        let Some(bytes) = body.take_body() else {
+            return;
+        };
+        self.fire(&owner, WATCHER_PATH, WATCHER_KDE, "RegisterStatusNotifierHost", "s", &bytes);
+    }
+
     /// Queues a `ListNames` to pick up what registered before us.
     fn enumerate(&mut self) {
         if self.flights.iter().any(|flight| {
@@ -1305,219 +1387,46 @@ impl Fingerprint {
     }
 }
 
-/// Runs the blocking set-up on a connected bus: both watcher names,
-/// the match rules, then enumeration. Blocking, like the volume
-/// handshake: a handful of round trips on a local socket.
-fn setup(mut conn: Conn) -> Result<Live, conn::SetupError> {
-    // Own the watcher names when free; a name owned elsewhere means host
-    // mode against it (the KDE name decides).
-    let kde = request_word(&mut conn, WATCHER_KDE)?;
-    let _ = request_word(&mut conn, WATCHER_FDO);
-    let owner = matches!(kde, request_reply::PRIMARY_OWNER | request_reply::ALREADY_OWNER);
-    // The match rules: owner changes, item signals on both interfaces,
-    // and the other watcher's item signals for host mode.
-    for rule in [
-        "type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',\
-         member='NameOwnerChanged',path='/org/freedesktop/DBus'",
-        "type='signal',interface='org.kde.StatusNotifierItem'",
-        "type='signal',interface='org.freedesktop.StatusNotifierItem'",
-        "type='signal',interface='org.kde.StatusNotifierWatcher'",
-        "type='signal',interface='org.freedesktop.StatusNotifierWatcher'",
-    ] {
-        let mut body = Writer::new();
-        body.str(rule);
-        let Some(bytes) = body.take_body() else {
-            return Err(conn::SetupError::Refused("a match rule does not fit"));
-        };
-        conn.call(
-            conn::BUS_NAME,
-            conn::BUS_PATH,
-            conn::BUS_INTERFACE,
-            "AddMatch",
-            "s",
-            &bytes,
-            proto::flag::NO_REPLY_EXPECTED,
-            0,
-        )
-        .map_err(|_| conn::SetupError::Refused("the set-up call does not fit"))?;
-    }
+/// Starts the bus live: queues both watcher names and returns at once.
+/// Nothing here blocks past `Hello` (inside [`conn::setup`]): the names
+/// are answered later, through [`Live::on_request_reply`], which installs
+/// the match rules and enumerates. The module joins the bar on the first
+/// frame either way, filling in as the bus answers.
+fn setup(conn: Conn) -> Live {
     let mut live = Live {
         conn,
-        mode: if owner { Mode::Owner } else { Mode::Host },
+        // Host until the KDE name answers otherwise: registrations reach
+        // whoever owns the name, so nothing is answered prematurely.
+        mode: Mode::Host,
         watcher_owner: None,
         items: Vec::new(),
         flights: Vec::new(),
+        // Our own host is first: `IsStatusNotifierHostRegistered` holds
+        // from the start in owner mode.
         hosts: Vec::new(),
         said_full: false,
     };
-    if owner {
-        live.hosts.push(live.conn.unique().to_owned());
-        live.enumerate_blocking()?;
-    } else {
-        live.join_host_blocking()?;
-    }
-    // The set-up is done: the socket joins the poll loop, and every call
-    // past here is ready-driven.
-    conn::make_nonblocking(&mut live.conn)?;
-    Ok(live)
+    live.hosts.push(live.conn.unique().to_owned());
+    live.request(WATCHER_KDE, Op::RequestKde);
+    live.request(WATCHER_FDO, Op::RequestFdo);
+    live
 }
 
-/// A blocking `RequestName`, answering the reply word.
-fn request_word(conn: &mut Conn, name: &str) -> Result<u32, conn::SetupError> {
-    eprintln!("TRAYDBG {:?}: requesting {name}", std::time::Instant::now());
-    let mut body = Writer::new();
-    body.str(name);
-    body.u32(proto::request::ALLOW_REPLACEMENT | proto::request::DO_NOT_QUEUE);
-    let Some(bytes) = body.take_body() else {
-        return Err(conn::SetupError::Refused("the set-up call does not fit"));
-    };
-    let (signature, reply) = conn.roundtrip(
-        conn::BUS_NAME,
-        conn::BUS_PATH,
-        conn::BUS_INTERFACE,
-        "RequestName",
-        "su",
-        &bytes,
-    ).map_err(|error| {
-        eprintln!("TRAYDBG: request {name} failed {error:?}");
-        error
-    })?;
-    let word = proto::read_request_reply(&signature, &reply)
-        .map_err(|_| conn::SetupError::Refused("RequestName answered out of shape"))?;
-    eprintln!("TRAYDBG: request {name} -> {word}");
-    Ok(word)
-}
+/// The match rules: owner changes, item signals on both interfaces, and
+/// the other watcher's item signals for host mode. Installed once the
+/// names answer (and again on every re-acquire: a new connection has no
+/// rules, and re-adding to the same one errors silently into the kept
+/// rule).
+const MATCH_RULES: [&str; 5] = [
+    "type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',\
+     member='NameOwnerChanged',path='/org/freedesktop/DBus'",
+    "type='signal',interface='org.kde.StatusNotifierItem'",
+    "type='signal',interface='org.freedesktop.StatusNotifierItem'",
+    "type='signal',interface='org.kde.StatusNotifierWatcher'",
+    "type='signal',interface='org.freedesktop.StatusNotifierWatcher'",
+];
 
 impl Live {
-    /// The blocking enumeration (owner mode): `ListNames`, then each
-    /// newcomer's owner and properties, answered at once.
-    fn enumerate_blocking(&mut self) -> Result<(), conn::SetupError> {
-        let (signature, reply) = self.conn.roundtrip(
-            conn::BUS_NAME,
-            conn::BUS_PATH,
-            conn::BUS_INTERFACE,
-            "ListNames",
-            "",
-            &[],
-        )?;
-        let names = proto::read_names(&signature, &reply)
-            .map_err(|_| conn::SetupError::Refused("ListNames answered out of shape"))?;
-        for name in names {
-            if !is_item_name(&name) || self.items.len() >= MAX_ITEMS {
-                continue;
-            }
-            let owner = if name.starts_with(':') {
-                name.clone()
-            } else {
-                let mut get = Writer::new();
-                get.str(&name);
-                let Some(bytes) = get.take_body() else { continue };
-                let Ok((_, reply)) = self.conn.roundtrip(
-                    conn::BUS_NAME,
-                    conn::BUS_PATH,
-                    conn::BUS_INTERFACE,
-                    "GetNameOwner",
-                    "s",
-                    &bytes,
-                ) else {
-                    continue;
-                };
-                let Ok(owner) = proto::read_owner("s", &reply) else {
-                    continue;
-                };
-                owner
-            };
-            if let Some(mut item) = self.read_item(&name, ITEM_DEFAULT_PATH, &owner) {
-                item.owner = Some(owner);
-                self.items.push(item);
-            }
-        }
-        self.sort();
-        Ok(())
-    }
-
-    /// The blocking join (host mode): who owns the watcher, their item
-    /// list, each item's properties — then our host registration, queued
-    /// for the first pump's flush.
-    fn join_host_blocking(&mut self) -> Result<(), conn::SetupError> {
-        let mut get = Writer::new();
-        get.str(WATCHER_KDE);
-        let Some(bytes) = get.take_body() else {
-            return Err(conn::SetupError::Refused("the set-up call does not fit"));
-        };
-        let Ok((_, reply)) = self.conn.roundtrip(
-            conn::BUS_NAME,
-            conn::BUS_PATH,
-            conn::BUS_INTERFACE,
-            "GetNameOwner",
-            "s",
-            &bytes,
-        ) else {
-            return Ok(());
-        };
-        let Ok(owner) = proto::read_owner("s", &reply) else {
-            return Ok(());
-        };
-        self.watcher_owner = Some(owner.clone());
-        let mut get = Writer::new();
-        get.str(WATCHER_KDE);
-        get.str("RegisteredStatusNotifierItems");
-        let Some(bytes) = get.take_body() else {
-            return Err(conn::SetupError::Refused("the set-up call does not fit"));
-        };
-        let Ok((_, reply)) = self.conn.roundtrip(&owner, WATCHER_PATH, ITEM_PROPERTIES, "Get", "ss", &bytes)
-        else {
-            return Ok(());
-        };
-        for (service, path) in read_id_list(&reply) {
-            if self.items.len() >= MAX_ITEMS {
-                break;
-            }
-            let id = format!("{service}{path}");
-            if let Some(mut item) = self.read_item(&service, &path, "") {
-                // The owner resolves on the first signal (or not at
-                // all: calls go to the service name either way).
-                let _ = "";
-                item.owner = None;
-                let _ = id;
-                self.items.push(item);
-            }
-        }
-        self.sort();
-        // Our host registration: no reply wanted, flushed later.
-        let mut body = Writer::new();
-        body.str(self.conn.unique());
-        if let Some(bytes) = body.take_body() {
-            let _ = self.conn.call(
-                &owner,
-                WATCHER_PATH,
-                WATCHER_KDE,
-                "RegisterStatusNotifierHost",
-                "s",
-                &bytes,
-                proto::flag::NO_REPLY_EXPECTED,
-                0,
-            );
-        }
-        Ok(())
-    }
-
-    /// One item's properties, blocking: `None` where the item does not
-    /// answer in shape (half-registered, or gone already).
-    fn read_item(&mut self, service: &str, path: &str, _owner_hint: &str) -> Option<Item> {
-        let mut item = Item::new(format!("{service}{path}"), service.to_owned(), path.to_owned());
-        let (signature, reply) = self
-            .conn
-            .roundtrip(service, path, ITEM_PROPERTIES, "GetAll", "s", &get_all_body())
-            .ok()?;
-        if signature != "a{sv}" {
-            return None;
-        }
-        if !fill(&mut item, &reply) {
-            return None;
-        }
-        Some(item)
-    }
 }
 
 /// The `Properties.GetAll` body for the item interface.

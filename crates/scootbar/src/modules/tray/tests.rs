@@ -33,23 +33,26 @@ fn text() -> Text {
 
 /// The module on a scripted bus, with no items yet.
 fn started() -> (Harness, Fake) {
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     (Harness::new(start_connected(stream)), fake)
 }
 
-/// Turns of the loop until `done` holds, or the test fails: what the
-/// daemon's loop does with real bus traffic.
-fn drive(harness: &mut Harness, mut done: impl FnMut(&Harness) -> bool) {
+/// Turns of the loop until `done` holds, or the test fails: the fake
+/// bus served synchronously between the module's own turns, so there is
+/// no timing and no thread past the set-up.
+fn drive(harness: &mut Harness, fake: &mut Fake, mut done: impl FnMut(&Harness) -> bool) {
     let start = std::time::Instant::now();
     while !done(harness) {
         assert!(start.elapsed() < Duration::from_secs(10), "the bus never answered");
+        fake.pump();
         harness.wait(Duration::from_secs(2));
+        fake.pump();
     }
 }
 
 /// Turns until the module shows `count` items.
-fn until_shown(harness: &mut Harness, count: usize) {
-    drive(harness, |harness| {
+fn until_shown(harness: &mut Harness, fake: &mut Fake, count: usize) {
+    drive(harness, fake, |harness| {
         harness
             .value_on(None)
             .and_then(|value| value.get("items")?.as_array().map(|items| items.len() == count))
@@ -64,10 +67,10 @@ fn action(name: &'static str, index: i32) -> Option<Action> {
 
 #[test]
 fn an_item_listed_before_start_is_picked_up() {
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     let value = harness.value_on(None).unwrap();
     assert_eq!(value["watcher"], "owner");
     assert_eq!(value["items"][0]["id"], format!("{SERVICE}/StatusNotifierItem"));
@@ -82,9 +85,9 @@ fn an_item_listed_before_start_is_picked_up() {
 fn a_registration_is_answered_and_shown() {
     let (mut harness, mut fake) = started();
     let serial = fake.send_register(OWNER, SERVICE);
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     // The registration was answered: a return quoting the call.
-    drive(&mut harness, |_| {
+    drive(&mut harness, &mut fake, |_| {
         fake.calls().iter().any(|call| {
             matches!(call.kind, crate::dbus::proto::Kind::MethodReturn) && call.reply_to == Some(serial)
         })
@@ -97,7 +100,7 @@ fn a_registration_is_answered_and_shown() {
 fn a_path_registration_lands_on_the_sender() {
     let (mut harness, mut fake) = started();
     fake.send_register(":1.60", "/Custom/Item");
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     let value = harness.value_on(None).unwrap();
     assert_eq!(value["items"][0]["id"], ":1.60/Custom/Item");
 }
@@ -107,11 +110,11 @@ fn new_icon_re_reads_the_item() {
     let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     let before = harness.view().tooltip().to_owned();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player2", "Active", 4, 4, &fake::solid(4, 4, 255, 30, 200, 30)));
     fake.send_item_signal(OWNER, "NewIcon");
-    drive(&mut harness, |harness| harness.view().tooltip() != before);
+    drive(&mut harness, &mut fake, |harness| harness.view().tooltip() != before);
     assert!(harness.view().tooltip().contains("Player2"));
 }
 
@@ -120,9 +123,9 @@ fn a_crashed_item_disappears_with_its_owner() {
     let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     fake.send_name_owner_changed(SERVICE, OWNER, "");
-    drive(&mut harness, |harness| harness.value_on(None).is_none());
+    drive(&mut harness, &mut fake, |harness| harness.value_on(None).is_none());
     assert!(harness.view().is_empty());
 }
 
@@ -131,19 +134,19 @@ fn an_owner_vanishing_drops_the_item_too() {
     let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     // The unique name itself went away (the service row may linger):
     // matched by owner, dropped all the same.
     fake.send_name_owner_changed(OWNER, OWNER, "");
-    drive(&mut harness, |harness| harness.value_on(None).is_none());
+    drive(&mut harness, &mut fake, |harness| harness.value_on(None).is_none());
 }
 
 #[test]
 fn a_click_activates_and_a_scroll_scrolls() {
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     let font = text();
     let view = harness.view_on(DP1.name);
     let input = |trigger, x| {
@@ -213,7 +216,7 @@ fn a_click_activates_and_a_scroll_scrolls() {
 #[test]
 fn icons_draw_from_the_cache() {
     use rustix::event::PollFlags;
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Red", "Active", 4, 4, &fake::solid(4, 4, 255, 255, 0, 0)));
     // Held directly (not through the harness, which owns opaquely), and
     // woken by hand: the fake answered during the blocking set-up, so a
@@ -271,12 +274,12 @@ fn hostile_items_lose_only_themselves() {
     }
     assert!(harness.value_on(None).is_none());
     // A title of controls and 10 KiB of `x`: stripped and cut.
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     let mut title = String::from("\u{0}ab\u{7f}");
     title.push_str(&"x".repeat(10_000));
     fake.add_item(SERVICE, OWNER, fake::item_body(&title, "Bogus", 4, 4, &fake::solid(4, 4, 255, 0, 0, 255)));
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     let value = harness.value_on(None).unwrap();
     let shown = value["items"][0]["title"].as_str().unwrap();
     assert!(!shown.chars().any(char::is_control));
@@ -285,34 +288,34 @@ fn hostile_items_lose_only_themselves() {
     assert_eq!(value["items"][0]["status"], "Passive");
     // A pixmap whose bytes do not match its dimensions: the entry is
     // skipped, the item stays, iconless but clickable.
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Shapeless", "Active", 4, 4, &[1, 2, 3]));
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     assert!(harness.value_on(None).is_some());
 }
 
 #[test]
 fn past_the_item_cap_registrations_are_ignored() {
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     for n in 0..MAX_ITEMS + 4 {
         let service = format!("org.kde.StatusNotifierItem-1-{n}");
         fake.add_item(&service, OWNER, fake::item_body("Capped", "Active", 2, 2, &fake::solid(2, 2, 255, 9, 9, 9)));
     }
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, MAX_ITEMS);
+    until_shown(&mut harness, &mut fake, MAX_ITEMS);
     let value = harness.value_on(None).unwrap();
     assert_eq!(value["items"].as_array().unwrap().len(), MAX_ITEMS);
 }
 
 #[test]
 fn host_mode_lists_the_other_watchers_items() {
-    let (stream, fake) = Fake::pair();
+    let (stream, mut fake) = Fake::pair();
     let id = format!("{SERVICE}/StatusNotifierItem");
     fake.set_watcher(":1.99", &[&id]);
     fake.add_item(SERVICE, OWNER, fake::item_body("Hosted", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 255, 0)));
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     let value = harness.value_on(None).unwrap();
     assert_eq!(value["watcher"], "host");
     assert_eq!(value["items"][0]["title"], "Hosted");
@@ -326,16 +329,16 @@ fn a_lost_watcher_is_taken_back() {
     let (stream, mut fake) = Fake::pair();
     fake.add_item(SERVICE, OWNER, fake::item_body("Player", "Active", 4, 4, &fake::solid(4, 4, 255, 200, 30, 30)));
     let mut harness = Harness::new(start_connected(stream));
-    until_shown(&mut harness, 1);
+    until_shown(&mut harness, &mut fake, 1);
     // Another bar takes the name: we become its host...
     fake.send_name_owner_changed("org.kde.StatusNotifierWatcher", fake::MODULE, ":1.99");
-    drive(&mut harness, |harness| {
+    drive(&mut harness, &mut fake, |harness| {
         harness.value_on(None).and_then(|value| value.get("watcher")?.as_str().map(str::to_owned))
             == Some("host".to_owned())
     });
     // ...and when it leaves, we ask for the name back.
     fake.send_name_owner_changed("org.kde.StatusNotifierWatcher", ":1.99", "");
-    drive(&mut harness, |_| {
+    drive(&mut harness, &mut fake, |_| {
         fake.calls().iter().any(|call| call.member == "RequestName")
     });
 }
@@ -367,59 +370,4 @@ fn the_registry_lists_tray_with_its_actions() {
     // the contract drives the live path on a machine without any bus.
     let harness = Harness::new(super::stand_in(&crate::modules::Settings::default()));
     assert_eq!(harness.source_count(), 1);
-}
-
-#[test]
-fn debug_raw_sasl() {
-    use std::io::{Read, Write};
-    use std::time::Duration;
-    let (mut stream, _fake) = Fake::pair();
-    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    stream.write_all(&[0]).unwrap();
-    eprintln!("wrote NUL");
-    stream.write_all(b"AUTH EXTERNAL\r\n").unwrap();
-    eprintln!("wrote AUTH");
-    let mut buf = [0u8; 64];
-    match stream.read(&mut buf) {
-        Ok(n) => eprintln!("read {n}: {:?}", String::from_utf8_lossy(&buf[..n])),
-        Err(error) => eprintln!("read failed: {error:?}"),
-    }
-}
-#[test]
-fn debug_parse_captured() {
-    use crate::dbus::proto::{Reader, check_member, check_name, check_path, check_signature, frame_at};
-    const HEX: &str = "6c01000128000000020000008000000001016f00150000002f6f72672f667265656465736b746f702f4442757300000002017300140000006f72672e667265656465736b746f702e4442757300000000030173000b000000526571756573744e616d65000000000006017300140000006f72672e667265656465736b746f702e444275730000000008016700027375001d0000006f72672e6b64652e5374617475734e6f7469666965725761746368657200000005000000";
-    let bytes: Vec<u8> = (0..HEX.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&HEX[i..i + 2], 16).unwrap())
-        .collect();
-    let len = frame_at(&bytes).expect("frames").expect("whole");
-    let frame = &bytes[..len];
-    let fields_len = u32::from_le_bytes([frame[12], frame[13], frame[14], frame[15]]) as usize;
-    let mut fields = Reader::le(&frame[16..16 + fields_len]);
-    while !fields.exhausted() {
-        eprintln!("element rel {}", 16 + (fields_len - fields.remaining()));
-        fields.enter_struct().expect("enter");
-        let code = fields.u8().expect("code");
-        let sig = fields.signature().expect("sig").to_owned();
-        eprintln!("  code {code} sig {sig:?}");
-        let mut value = Reader::le(fields.rest());
-        match code {
-            1 => eprintln!("  path: {:?}", check_path(value.str().unwrap_or("<bad>"))),
-            2 => eprintln!("  iface: {:?}", check_name(value.str().unwrap_or("<bad>"))),
-            3 => eprintln!("  member: {:?}", check_member(value.str().unwrap_or("<bad>"))),
-            6 => eprintln!("  dest: {:?}", check_name(value.str().unwrap_or("<bad>"))),
-            8 => {
-                eprintln!("  rest: {:02x?}", value.rest());
-                let inner = value.signature().unwrap_or("<bad>");
-                eprintln!("  sigval: {inner:?} check: {:?}", if inner == "<bad>" { Err(()) } else { check_signature(inner) });
-            }
-            _ => eprintln!("  other"),
-        }
-        fields.leave_struct();
-        if fields.skip(&sig).is_err() {
-            eprintln!("  ADVANCE FAILED");
-            break;
-        }
-    }
 }
