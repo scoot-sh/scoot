@@ -142,6 +142,7 @@ fn prepare(config: &Config) -> Result<Content, Error> {
     let modules = modules::start(
         &config.outputs.to_start(&config.layout),
         &config.modules,
+        &mut Vec::new(),
         &mut |id, why| {
             warn(format_args!(
                 "scootbar: note: the {id} module is unavailable, and left out: {why}"

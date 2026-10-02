@@ -102,9 +102,9 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 ### M4 — Interactive, and readable by agents
 - [Pointer input and interactions](resolved/pointer-and-interactions-done.md) (medium): click, scroll and hover, `exec` and `scoot = "quit"` actions — RESOLVED 2026-09-30
 - [`exec`, `push` and `button` modules](resolved/exec-push-button-modules-done.md) (medium): launcher and power buttons — RESOLVED 2026-09-30
-- [Keep an unchanged `exec` command across a reload](exec-keep-across-reload.md) (low)
+- [Keep an unchanged `exec` command across a reload](resolved/exec-keep-across-reload-done.md) (low): unchanged tables keep their child — RESOLVED 2026-10-01
 - [Agent interface](resolved/agent-interface-done.md) (medium): `invoke`, `layout`, `subscribe` — RESOLVED 2026-09-30
-- [Appearance follow-ups](appearance-followups.md) (low): hover token, per-module state colors, dot indicators, inactive-workspace colors
+- [Appearance follow-ups](resolved/appearance-followups-done.md) (low): hover token, per-module state colors, dot indicators, inactive-workspace colors — RESOLVED 2026-10-01
 - [Bring M4's idle memory and CPU back down](resolved/m4-usage-optimization-done.md) — RESOLVED 2026-10-01, not pursued: the maintainer accepted the idle memory as it stands; the measured cause and levers are kept in the entry
 
 ### M5 — Daily-driver modules, one release each

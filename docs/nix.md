@@ -571,9 +571,10 @@ program: both start two daemons, and the second one refuses at start-up
 retries every two seconds.
 
 **Stylix, without depending on it.** When `config.lib.stylix` exists and
-`stylix.enable` is on, `settings` gets defaults from it: the five `colors`
+`stylix.enable` is on, `settings` gets defaults from it: the six `colors`
 tokens from the base16 palette (`background` base00, `foreground` base05,
-`accent` base0A, `dim` base03, `urgent` base08), `bar.font` from
+`accent` base0A, `hover` base0A like the bar's own default, `dim` base03,
+`urgent` base08), `bar.font` from
 `stylix.fonts.sansSerif` and `bar.font-size` from `stylix.fonts.sizes.desktop`
 (points, converted to the bar's pixels at 4/3 and clamped to 1 to 256). The
 font is a **file path**: scootbar has no fontconfig, so a build step finds
@@ -601,12 +602,12 @@ present.
    default.
 
 So `settings.colors.background = "#123456"` replaces that one token and
-keeps the other four from Stylix, and a value you set is never overridden by
+keeps the other five from Stylix, and a value you set is never overridden by
 theming (the trouble Waybar's users report). This is pinned by an
 evaluation test (`nix/scootbar-tests.nix`, with a stand-in for Stylix), and
 run against the real thing by `scripts/scootbar-stylix-test.sh`: real
 Stylix (`fb28acd`) and home-manager (`efa3ccb`) themed from a real image, the
-five tokens read back equal to base16 `base00/05/0A/03/08` of the generated
+six tokens read back equal to base16 `base00/05/0A/0A/03/08` of the generated
 palette, the file accepted by `scootbar daemon --check`, a user value winning
 per key, and the bar's background pixel on a headless scoot equal to `base00`
 (and to the user's color when the user sets one). It is not in CI: it builds

@@ -440,6 +440,55 @@ fn long_titles_are_kept_whole_in_state_but_bounded() {
 }
 
 #[test]
+fn a_hovered_title_is_the_hover_token_not_the_accent() {
+    use super::super::{Init, View};
+    let settings = super::super::Settings::default();
+    let link = settings.window_title.link.clone();
+    show(&link, "app 12", "", true, &["DP-1"]);
+    // The module itself, on the same shared state: what the bar draws.
+    let module = match super::init(&settings) {
+        Init::Available(module) => module,
+        Init::Unavailable(why) => panic!("window-title unavailable: {why}"),
+    };
+    let mut view = View::default();
+    module.view(&DP1, &mut view);
+    let theme = Theme {
+        hover: crate::color::Color {
+            r: 0x01,
+            g: 0x02,
+            b: 0x03,
+        },
+        ..Theme::default()
+    };
+    let mut font = text();
+    let baseline = font.metrics(EM).baseline(60);
+    let mut pixels = vec![0u8; 60 * 400 * 4];
+    let mut canvas = Canvas::new(&mut pixels, 400, 60).unwrap();
+    // Narrow enough to truncate: the module draws itself, hovered.
+    let mut custom = CustomDraw {
+        output: DP1,
+        view: &view,
+        canvas: &mut canvas,
+        text: &mut font,
+        span: Span { x: 0, width: 100 },
+        em: EM,
+        baseline,
+        padding: PAD,
+        hovered: true,
+        scale: Scale::Integer(1),
+        theme: &theme,
+    };
+    assert!(module.custom_draw(&mut custom));
+    // Title ink in the hover token, which differs from the accent here.
+    assert!(
+        pixels
+            .chunks_exact(4)
+            .any(|p| [p[2], p[1], p[0]] == [0x01, 0x02, 0x03]),
+        "no hover-token ink in a hovered truncated title"
+    );
+}
+
+#[test]
 fn truncation_cuts_with_an_ellipsis_by_pixels_not_chars() {
     use super::super::{Init, View};
     let settings = super::super::Settings::default();

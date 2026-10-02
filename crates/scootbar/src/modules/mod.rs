@@ -49,7 +49,9 @@
 //!   ellipsis for a title longer than its span.
 //!
 //! Modules are built once at start-up as trait objects (the only allocation
-//! they cost the loop), and a redraw is a handful of virtual calls.
+//! they cost the loop), and a redraw is a handful of virtual calls. A
+//! reload builds them again, except an `exec` whose table did not change:
+//! it moves over with its child ([`Module::keeps`], through [`start`]).
 //!
 //! ## Adding one
 //!
@@ -105,6 +107,9 @@ pub mod workspaces;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, feature = "exec"))]
+mod keep_tests;
 
 /// A module, once available.
 pub trait Module {
@@ -200,6 +205,25 @@ pub trait Module {
     /// title's ellipsis for a title longer than its span.
     fn custom_draw(&self, ctx: &mut CustomDraw<'_, '_>) -> bool {
         let _ = ctx;
+        false
+    }
+
+    /// Device pixels this module's span grows past its measured text, so
+    /// a shape it draws fits: 0 for every module but the workspaces
+    /// circle with `disc`. Cold path: asked when the module is measured
+    /// (a changed view, a new scale or bar size), never per frame.
+    fn span_extra(&self, measure: &Measure<'_>) -> u32 {
+        let _ = measure;
+        0
+    }
+
+    /// Whether this running module continues as the config's `custom`
+    /// module after a reload: an `exec` whose id and `Settings` did not
+    /// change keeps its child, pipe, timer and shown output, instead of
+    /// starting over. Every other module declines (the default), so it is
+    /// started fresh.
+    fn keeps(&self, custom: &custom::Custom) -> bool {
+        let _ = custom;
         false
     }
 }
@@ -400,16 +424,35 @@ impl Placed {
     }
 }
 
-/// Starts every module `layout` places, in its order. An unavailable one
-/// is said on stderr (through `warn`) and left out: it takes no space and
-/// no fd.
+/// Starts every module `layout` places, in its order. An `exec` whose id
+/// and table did not change is kept instead: `old` is the running bar's
+/// modules, and a kept one moves over with its child, pipe, timer and
+/// shown output (its bindings refreshed); what is left in `old` is for
+/// the caller to drop, which kills a removed `exec`'s whole group. An
+/// unavailable one is said on stderr (through `warn`) and left out: it
+/// takes no space and no fd.
 pub fn start(
     layout: &Layout,
     settings: &Settings,
+    old: &mut Vec<Placed>,
     warn: &mut dyn FnMut(&str, &str),
 ) -> Vec<Placed> {
     let mut placed = Vec::new();
     for (_, id) in layout.placed() {
+        // A kept `exec`: the same id for the same table, wherever the
+        // lists place it now (a move between sections or outputs keeps it
+        // running, by the id rather than the position).
+        if let Some(custom) = settings.custom_named(id) {
+            if let Some(at) = old
+                .iter()
+                .position(|kept| kept.id == id && kept.module.keeps(custom))
+            {
+                let mut kept = old.remove(at);
+                kept.bindings = settings.bindings_of(id);
+                placed.push(kept);
+                continue;
+            }
+        }
         // A built-in module, or one the config defines by name; the config
         // and the flags refuse any other id, skipped all the same.
         let init = match (find(id), settings.custom_named(id)) {
@@ -472,6 +515,25 @@ pub struct OutputView<'a> {
     pub name: Option<&'a str>,
 }
 
+/// What [`Module::span_extra`] may measure with: everything
+/// [`Scene::update`](crate::render::Scene::update) measured the text with.
+/// Only a module that grows its span reads it (the workspaces disc).
+#[allow(dead_code)]
+pub struct Measure<'a> {
+    /// The output the span is measured for.
+    pub output: OutputView<'a>,
+    /// The view as just filled: what is measured.
+    pub view: &'a View,
+    /// What measures it.
+    pub text: &'a Text,
+    /// The em in device pixels, as measured.
+    pub em: f32,
+    /// The scale measured at.
+    pub scale: Scale,
+    /// The bar's height, device pixels.
+    pub height: u32,
+}
+
 /// Where a pointer input landed in a module's span, and what the module
 /// needs to hit-test it. The workspaces hit test reads it whole; the
 /// window title reads which output was clicked.
@@ -528,9 +590,10 @@ pub struct CustomDraw<'r, 'c> {
     pub baseline: i64,
     /// Device pixels either side of the module's content, as measured.
     pub padding: u32,
-    /// Whether the pointer is over this module's span and tints it: a
-    /// module that draws itself honors the same tint the plain draw
-    /// would, so truncating never changes the look.
+    /// Whether the pointer is over this module's span: the plain draw
+    /// tints with the `hover` token then, and a module that draws itself
+    /// honors the same tint its own way (so truncating never changes the
+    /// look, and neither does who paints it).
     pub hovered: bool,
     /// The scale the bar is drawn at: a module's own logical lengths
     /// (the pill's radius and inset) are device pixels through it.

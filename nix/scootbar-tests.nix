@@ -214,8 +214,9 @@ let
         background = "#123456";
         foreground = "#234567";
         accent = "#345678";
-        dim = "#456789";
-        urgent = "#56789a";
+        hover = "#456789";
+        dim = "#56789a";
+        urgent = "#6789ab";
       };
       bar.font = "/user/font.ttf";
       bar.font-size = 20;
@@ -331,7 +332,7 @@ let
       settingsOf plain == {
         bar.font = dejavuFile;
       };
-    "Stylix on: five colors from base16, the font FILE, the size in pixels" =
+    "Stylix on: six colors from base16, the font FILE, the size in pixels" =
       let
         s = settingsOf themed;
       in
@@ -339,6 +340,7 @@ let
         background = "#101010";
         foreground = "#e0e0e0";
         accent = "#ffff00";
+        hover = "#ffff00";
         dim = "#303030";
         urgent = "#ff0000";
       }
@@ -356,12 +358,13 @@ let
         background = "#123456";
         foreground = "#234567";
         accent = "#345678";
-        dim = "#456789";
-        urgent = "#56789a";
+        hover = "#456789";
+        dim = "#56789a";
+        urgent = "#6789ab";
       }
       && s.bar.font == "/user/font.ttf"
       && s.bar."font-size" == 20;
-    "user beats Stylix beats plain: one user token keeps the other four Stylix's" =
+    "user beats Stylix beats plain: one user token keeps the other five Stylix's" =
       lib.all
         (
           token:
@@ -379,6 +382,7 @@ let
           "background"
           "foreground"
           "accent"
+          "hover"
           "dim"
           "urgent"
         ];

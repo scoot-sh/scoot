@@ -993,7 +993,7 @@ impl Module for WindowTitle {
         len += ELLIPSIS.len_utf8();
         let shown = std::str::from_utf8(&kept[..len]).unwrap_or("");
         let color = if ctx.hovered {
-            ctx.theme.accent
+            ctx.theme.hover
         } else {
             ctx.theme.class(ctx.view.class())
         };

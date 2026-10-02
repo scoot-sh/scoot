@@ -11,6 +11,13 @@ fn each_class_maps_to_its_token() {
 }
 
 #[test]
+fn hover_is_the_old_tint_until_set() {
+    // The hover tint was the accent before it had a token of its own, so
+    // the default keeps it: setting `[colors] hover` is what changes it.
+    assert_eq!(Theme::default().hover, Theme::default().accent);
+}
+
+#[test]
 fn the_classes_are_told_apart_by_default() {
     let theme = Theme::default();
     let mut colors = [

@@ -117,6 +117,23 @@ The rule applies as ever: none of these rows may regress the clock-scope
 numbers above, and a look that costs real CPU or memory is off by default
 (they all are: the default look is flush, square and opaque).
 
+## M4 follow-ups: hover, state colors, dots, disc (measured 2026-10-02)
+
+The [appearance follow-ups](resolved/appearance-followups-done.md) draw nothing the
+existing looks do not: the `hover` token and the workspaces state colors
+(`active-color`, `inactive-color`) recolor the same fills, and dots and
+the grown disc are small maximally-rounded fills of the kind the pill
+costs above. Micro-measured in release on the dev VM (x86_64, seven-segment
+test font at a 50-pixel em, so the discs are ~50 device pixels — several
+times real size): a dots redraw costs about 6 us per dot (25/49/100 us for
+4/8/16 workspaces, linear, one fill each, no allocation), and a grown disc
+about 8.5 us against 5 us for the plain pill it replaces, once per
+workspace change. None of the four adds a file descriptor, a timer or a
+wakeup — the contract test holds every module to the loop's source budget,
+and these add no sources — so idle RSS, wakeups and jiffies are unchanged
+by construction. No full hardware run: there is no new row for the bench
+to regress, only recolored and bounded fills.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

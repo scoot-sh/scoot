@@ -487,9 +487,12 @@ fn start_places_what_the_layout_lists_in_order() {
         right: Vec::new(),
         ..Layout::default()
     };
-    let placed = start(&empty, &Settings::default(), &mut |id, why| {
-        said.push(format!("{id}: {why}"))
-    });
+    let placed = start(
+        &empty,
+        &Settings::default(),
+        &mut Vec::new(),
+        &mut |id, why| said.push(format!("{id}: {why}")),
+    );
     assert!(placed.is_empty());
     #[cfg(feature = "clock")]
     {
@@ -497,9 +500,12 @@ fn start_places_what_the_layout_lists_in_order() {
             right: vec!["clock"],
             ..empty.clone()
         };
-        let placed = start(&layout, &Settings::default(), &mut |id, why| {
-            said.push(format!("{id}: {why}"))
-        });
+        let placed = start(
+            &layout,
+            &Settings::default(),
+            &mut Vec::new(),
+            &mut |id, why| said.push(format!("{id}: {why}")),
+        );
         assert_eq!(placed.len(), 1);
         assert_eq!(placed[0].id, "clock");
     }
