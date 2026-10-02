@@ -390,7 +390,7 @@ fn reply(stream: &mut UnixStream, to: u32, serial: u32, sig: &str, body: &[u8]) 
             return Err(());
         }
     };
-    eprintln!("FAKEDBG: reply {} bytes", message.len());
+    eprintln!("FAKEDBG: reply {} bytes: {}", message.len(), message.iter().map(|b| format!("{b:02x}")).collect::<String>());
     stream.write_all(&message).map_err(|error| {
         eprintln!("FAKEDBG: reply write {error:?}");
     })
