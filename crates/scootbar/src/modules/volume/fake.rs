@@ -57,6 +57,19 @@ impl Fake {
         Conn { stream }
     }
 
+    /// How many connections arrived that nobody accepted: what a module
+    /// that re-probes a refusing server would have piled up.
+    pub fn unaccepted(&self) -> usize {
+        let listener = self.listener.as_ref().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut count = 0;
+        while listener.accept().is_ok() {
+            count += 1;
+        }
+        listener.set_nonblocking(false).unwrap();
+        count
+    }
+
     /// Serves `sock` again: the restart test's server coming back on the
     /// same path (the directory is remade: dropping the old server removed
     /// it).

@@ -15,7 +15,11 @@
 //! `Waiting` owns an inotify fd on the socket's directory and shows
 //! nothing; any arrival, move-in or disappearance there re-probes the
 //! socket path, so a server starting, stopping or restarting is found
-//! without polling. `Live` owns the connected socket and sends one request
+//! without polling. A connection dropped after its subscription is
+//! answered also probes the socket once at once, since a restart that
+//! keeps the path names no new event; one dropped earlier (a refused
+//! cookie) waits for an event, so a standing refusal is never a connect
+//! loop. `Live` owns the connected socket and sends one request
 //! at a time (`AUTH`, name, server info, subscribe, the default device),
 //! because replies arrive in order and one outstanding request is all the
 //! matching needed. Anything the connection says that does not parse, and
@@ -436,9 +440,23 @@ impl Volume {
 
     /// Drops the connection and waits again, with nothing shown: a dead
     /// server's last level is not a level.
+    ///
+    /// A connection that got as far as the subscription had a server that
+    /// was up and agreed to talk, so its drop may be a restart that kept
+    /// the socket path: no `CREATE` will name it, and the watch alone would
+    /// strand the module beside a live server. The socket is probed once,
+    /// after the watch is armed (probing first could miss an appearance in
+    /// between). A connection dropped *before* that (refused cookie, closed
+    /// during the handshake) is not probed: connecting again would only be
+    /// refused again, once per drop, so a standing refusal waits for a real
+    /// event on the directory instead of looping.
     fn drop_live(&mut self) -> Update {
         let had = self.live.as_ref().is_some_and(|live| live.device.is_some());
+        let reached_subscription = self.live.as_ref().is_some_and(|live| live.subscribed);
         self.watch();
+        if reached_subscription {
+            self.connect();
+        }
         if had {
             Update::Changed
         } else {
@@ -650,7 +668,9 @@ impl Volume {
     /// other names cost one scan of the read bytes, never a connect.
     fn on_notify(&mut self, events: PollFlags) -> Update {
         if events.intersects(PollFlags::HUP | PollFlags::ERR | PollFlags::NVAL) {
+            // A watch armed afresh may have missed the socket's arrival.
             self.watch();
+            self.connect();
             return Update::Unchanged;
         }
         let mut native = false;
@@ -667,13 +687,17 @@ impl Volume {
                     }
                     Err(_) => {
                         self.watch();
+                        self.connect();
                         return Update::Unchanged;
                     }
                 }
             }
         }
+        // A watch that moved into a directory that just appeared may have
+        // missed the socket being created in it: probe, as for a name.
         if best_watch_dir(&self.socket) != self.watch_dir {
             self.watch();
+            native = true;
         }
         if native {
             self.connect();

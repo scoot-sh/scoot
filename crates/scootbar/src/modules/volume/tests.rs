@@ -556,6 +556,90 @@ fn a_late_server_is_found_on_its_directory() {
     assert_eq!(view_text(&harness), "49%");
 }
 
+/// Turns of the loop the module takes over `ms`: wakeups, which must be
+/// zero with nothing going on.
+fn wakeups_over(harness: &mut Harness, ms: u64) -> usize {
+    let end = std::time::Instant::now() + Duration::from_millis(ms);
+    let mut wakes = 0;
+    loop {
+        let left = end.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return wakes;
+        }
+        if harness.wait(left).is_some() {
+            wakes += 1;
+        }
+    }
+}
+
+#[test]
+fn a_drop_with_the_socket_still_present_reconnects() {
+    let fake = Fake::bind();
+    let mut harness = sink_module(fake.sock.clone());
+    let mut conn = fake.accept();
+    handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
+    assert_eq!(view_text(&harness), "49%");
+    // The connection drops but the listener and its path stay, so no
+    // CREATE or MOVED_TO ever names the socket.
+    drop(conn);
+    assert_eq!(wait(&mut harness), Update::Changed);
+    assert!(harness.view().is_empty());
+    // The drop probed the present socket: a new connection is already
+    // waiting, and the handshake runs on it.
+    let mut conn = fake.accept();
+    handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
+    assert_eq!(view_text(&harness), "49%");
+    assert_eq!(wakeups_over(&mut harness, 500), 0);
+}
+
+#[test]
+fn a_standing_refusal_is_not_a_connect_loop() {
+    let fake = Fake::bind();
+    let mut harness = sink_module(fake.sock.clone());
+    // Refused by an error to AUTH, as a wrong cookie is.
+    let mut conn = fake.accept();
+    let (tag, _) = conn.expect(proto::CMD_AUTH);
+    conn.error(tag, 2);
+    drop(conn);
+    let _ = harness.wait(Duration::from_secs(5));
+    // A refusal is not a subscribed connection, so it is not probed:
+    // the wait stays quiet. (A close mid-handshake is the next test.)
+    assert_eq!(wakeups_over(&mut harness, 500), 0);
+    assert_eq!(fake.unaccepted(), 0, "a refusal was probed again");
+    assert!(harness.view().is_empty());
+    assert_eq!(harness.source_count(), 1);
+}
+
+#[test]
+fn a_server_that_closes_during_the_handshake_is_not_a_connect_loop() {
+    let fake = Fake::bind();
+    let mut harness = sink_module(fake.sock.clone());
+    drop(fake.accept());
+    let _ = harness.wait(Duration::from_secs(5));
+    assert_eq!(wakeups_over(&mut harness, 500), 0);
+    assert_eq!(fake.unaccepted(), 0, "a refusal was probed again");
+    assert_eq!(harness.source_count(), 1);
+}
+
+#[test]
+fn a_refusal_ends_at_the_next_event_on_the_directory() {
+    let fake = Fake::bind();
+    let mut harness = sink_module(fake.sock.clone());
+    let mut conn = fake.accept();
+    let (tag, _) = conn.expect(proto::CMD_AUTH);
+    conn.error(tag, 2);
+    drop(conn);
+    let _ = harness.wait(Duration::from_secs(5));
+    assert_eq!(wakeups_over(&mut harness, 200), 0);
+    // The server restarts with a socket that now accepts the cookie.
+    let sock = fake.kill();
+    let fake = Fake::serve(&sock);
+    let _ = harness.wait(Duration::from_secs(5));
+    let mut conn = fake.accept();
+    handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
+    assert_eq!(view_text(&harness), "49%");
+}
+
 #[test]
 fn a_server_restart_clears_then_reshows() {
     let fake = Fake::bind();
@@ -906,24 +990,63 @@ fn names_are_bounded_at_a_character() {
 // The directory watch.
 // ---------------------------------------------------------------------------
 
+/// One inotify record as the kernel writes it: a native-endian header
+/// (watch, mask, cookie, name length) and the NUL-padded name.
+fn inotify_record(name: &str) -> Vec<u8> {
+    let mut rec = Vec::new();
+    rec.extend_from_slice(&1u32.to_ne_bytes());
+    rec.extend_from_slice(&0x100u32.to_ne_bytes());
+    rec.extend_from_slice(&0u32.to_ne_bytes());
+    rec.extend_from_slice(&(name.len() as u32 + 1).to_ne_bytes());
+    rec.extend_from_slice(name.as_bytes());
+    rec.push(0);
+    rec
+}
+
 #[test]
-fn scan_names_finds_native() {
-    // One record for another name, one for native.
-    let mut buf = Vec::new();
-    for name in ["pulse", "native"] {
-        buf.extend_from_slice(&1u32.to_ne_bytes());
-        buf.extend_from_slice(&0x100u32.to_ne_bytes());
-        buf.extend_from_slice(&0u32.to_ne_bytes());
-        buf.extend_from_slice(&(name.len() as u32 + 1).to_be_bytes());
-        buf.extend_from_slice(name.as_bytes());
-        buf.push(0);
-    }
-    // Big-endian length: not a record, but the scan is conservative.
-    assert!(super::scan_names(&buf, b"native"));
-    // Cut mid-record: malformed, so conservative too.
-    assert!(super::scan_names(&buf[..30], b"native"));
+fn scan_names_compares_the_names() {
+    // Well-formed records only: the answer is the name comparison, not
+    // the conservative malformed-tail path.
+    let other = inotify_record("pulse");
+    let native = inotify_record("native");
+    assert!(!super::scan_names(&other, b"native"));
+    assert!(super::scan_names(&native, b"native"));
+    assert!(!super::scan_names(&inotify_record("nativer"), b"native"));
+    assert!(!super::scan_names(&inotify_record("nativ"), b"native"));
+    let both = [other.clone(), native.clone()].concat();
+    assert!(super::scan_names(&both, b"native"));
+    let both = [native, other.clone()].concat();
+    assert!(super::scan_names(&both, b"native"));
+    // Nothing read is nothing named.
     assert!(!super::scan_names(&[], b"native"));
-    assert!(super::scan_names(&[0u8; 10], b"native"));
+    // A name field longer than its text (the kernel pads to a multiple
+    // of the header's alignment) ends at the first NUL.
+    let mut padded = Vec::new();
+    padded.extend_from_slice(&[0u8; 12]);
+    padded.extend_from_slice(&16u32.to_ne_bytes());
+    padded.extend_from_slice(b"native\0\0\0\0\0\0\0\0\0\0");
+    assert!(super::scan_names(&padded, b"native"));
+    padded.splice(16..22, *b"pulse\0");
+    assert!(!super::scan_names(&padded, b"native"));
+}
+
+#[test]
+fn scan_names_treats_a_malformed_tail_as_interesting() {
+    let other = inotify_record("pulse");
+    // Cut mid-header and mid-name.
+    assert!(super::scan_names(&other[..10], b"native"));
+    assert!(super::scan_names(&other[..other.len() - 1], b"native"));
+    // A garbage length far past the bytes read (the old fixture's
+    // accident, now on purpose).
+    let mut huge = other.clone();
+    huge[12..16].copy_from_slice(&u32::MAX.to_ne_bytes());
+    assert!(super::scan_names(&huge, b"native"));
+    // A well-formed record for another name, then a truncated header.
+    let tail = [other.clone(), vec![0u8; 7]].concat();
+    assert!(super::scan_names(&tail, b"native"));
+    // ... and then a record cut mid-name.
+    let cut = [other.clone(), inotify_record("native")[..20].to_vec()].concat();
+    assert!(super::scan_names(&cut, b"native"));
 }
 
 // ---------------------------------------------------------------------------
