@@ -878,22 +878,25 @@ fn twenty_quiet_seconds_are_quiet() {
     assert!(wakes <= 4, "only the timer (and a scan) wakes while idle");
 }
 
-/// The joined multicast, against the real kernel: with the mask joining
-/// bit `id - 1`, the socket hears the scan group (a scan completing) and
-/// the mlme group. The wait is for the daemon's periodic background scan —
-/// nothing here asks for one, because a requested rescan would land in the
-/// other live tests' windows (and can roam the radio out from under them).
-/// Read-only and non-disruptive: nothing disconnects, roams or
-/// re-associates, and the socket sends nothing (so any nl80211 message on
-/// it is multicast, not a reply).
+/// The joined multicast, against the real kernel: the socket the module
+/// listens on is subscribed to exactly the `scan`/`mlme` groups, read
+/// back from the kernel itself (`/proc/net/netlink` names each socket's
+/// port and mask, no privileges needed). A requested rescan was already
+/// seen arriving as a scan-group notice on the corrected mask during
+/// development (a `TRIGGER_SCAN` 19 ms after `nmcli device wifi rescan`,
+/// where the old off-by-one mask heard nothing for minutes) — but a
+/// rescan can roam the radio out from under the other live tests running
+/// beside this one, so this test asserts the subscription, which is
+/// deterministic, and only listens opportunistically: five seconds for
+/// ambient traffic, reported, never failed on.
 #[test]
-fn multicast_notices_arrive_on_the_joined_groups() {
+fn multicast_membership_matches_the_mask() {
     if std::env::var_os("SCOOTBAR_TEST_LIVE_NET").is_none() {
         return;
     }
     let (genl, family, joined) = super::genl_socket().expect("the generic socket opens");
     if family.id == 0 {
-        eprintln!("live: no nl80211 on this machine, skipping the multicast wait");
+        eprintln!("live: no nl80211 on this machine, skipping the multicast check");
         return;
     }
     eprintln!(
@@ -902,35 +905,58 @@ fn multicast_notices_arrive_on_the_joined_groups() {
     );
     assert!(joined, "both groups fit the mask on this machine");
     let genl = genl.expect("nl80211 resolved, so the socket is open");
+    let (mask, _) = super::join_mask(family.scan, family.mlme);
+    let table = std::fs::read_to_string("/proc/net/netlink").unwrap_or_default();
+    if table.is_empty() {
+        eprintln!("live: no /proc/net/netlink here, skipping the membership check");
+        return;
+    }
+    // `sk Eth Pid Groups ...`: our process's generic sockets (protocol
+    // 16) and their masks, in hex.
+    let ours = std::process::id();
+    let mut masks = Vec::new();
+    for line in table.lines().skip(1) {
+        let mut fields = line.split_whitespace();
+        let (Some(protocol), Some(pid), Some(groups)) =
+            (fields.nth(1), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        if protocol == "16" && pid.parse::<u32>().ok() == Some(ours) {
+            masks.push(groups.to_owned());
+        }
+    }
+    eprintln!("live: our generic masks: {masks:?}, want {mask:08x}");
+    assert!(
+        masks.iter().any(|groups| {
+            u32::from_str_radix(groups.trim_start_matches('0'), 16).ok() == Some(mask)
+        }),
+        "the kernel holds our scan/mlme subscription"
+    );
+    // Opportunistic: five seconds for ambient traffic on the joined
+    // socket. Reported, never failed on — background scans are rare on a
+    // stable link.
     rustix::fs::fcntl_setfl(&genl, rustix::fs::OFlags::NONBLOCK).expect("nonblocking");
     let mut poll = [rustix::event::PollFd::new(&genl, PollFlags::IN)];
-    let second = rustix::time::Timespec {
-        tv_sec: 1,
+    let wait = rustix::time::Timespec {
+        tv_sec: 5,
         tv_nsec: 0,
     };
     let mut buf = [0u8; super::netlink::READ_LEN];
-    let begin = std::time::Instant::now();
-    while begin.elapsed() < Duration::from_secs(150) {
-        match rustix::event::poll(&mut poll, Some(&second)) {
-            Ok(0) | Err(_) => continue,
-            Ok(_) => {}
-        }
-        let Ok((_, n)) = rustix::net::recv(&genl, &mut buf, rustix::net::RecvFlags::empty()) else {
-            continue;
-        };
-        for msg in super::netlink::messages(&buf[..n]) {
-            if msg.kind != family.id {
-                continue;
+    if let Ok(ready) = rustix::event::poll(&mut poll, Some(&wait)) {
+        if ready > 0 {
+            if let Ok((_, n)) = rustix::net::recv(&genl, &mut buf, rustix::net::RecvFlags::empty())
+            {
+                for msg in super::netlink::messages(&buf[..n]) {
+                    if msg.kind == family.id {
+                        let command = super::netlink::genl_of(msg.body).map(|(command, _)| command);
+                        eprintln!("live: ambient multicast command {command:?}");
+                    }
+                }
             }
-            let command = super::netlink::genl_of(msg.body).map(|(command, _)| command);
-            eprintln!(
-                "live: multicast command {command:?} after {:?}",
-                begin.elapsed()
-            );
-            return;
         }
     }
-    panic!("no nl80211 multicast in 150 s on the joined socket");
+    eprintln!("live: five quiet seconds on the joined socket");
 }
 
 /// The nl80211 resolve against the real kernel, and the signal-strategy
