@@ -1294,6 +1294,20 @@ impl Writer {
         );
     }
 
+    /// Starts a method return with an explicit destination (probe).
+    pub fn begin_return_to(&mut self, serial: u32, dest: &str, reply_to: u32, body_sig: &str) {
+        self.begin(
+            2,
+            serial,
+            0,
+            &[
+                Field::ReplySerial(reply_to),
+                Field::Destination(dest),
+                Field::Signature(body_sig),
+            ],
+        );
+    }
+
     /// Starts an error reply for `reply_to` with `error`'s name.
     pub fn begin_error(&mut self, serial: u32, reply_to: u32, error: &str, body_sig: &str) {
         self.begin(
