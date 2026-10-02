@@ -239,6 +239,7 @@ impl Fake {
 
     /// Flushes queued reply bytes; leftovers wait for the next turn.
     fn flush(&mut self) {
+        eprintln!("FAKEDBG flush outbox={}", self.outbox.len());
         while !self.outbox.is_empty() {
             match self.bus.write(&self.outbox) {
                 Ok(n) => {
