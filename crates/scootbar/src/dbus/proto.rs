@@ -463,22 +463,20 @@ impl<'a> Reader<'a> {
 
     /// An array's raw elements (`a...`): the length-delimited bytes, to
     /// walk with a sub-reader at the element's alignment. The length is
-    /// refused past what is left.
+    /// refused past what is left after the element padding (the padding
+    /// is on the wire but not in the length).
     pub fn array_raw(&mut self, element_align: usize) -> Result<&'a [u8], ()> {
         self.align(4)?;
         let len = self.u32_raw()? as usize;
-        if len > self.remaining() {
-            return Err(());
-        }
         if element_align > 1 {
             let pad = (element_align.saturating_sub(self.pos % element_align)) % element_align;
             if pad > self.remaining() {
                 return Err(());
             }
             self.pos += pad;
-            if len > self.remaining() {
-                return Err(());
-            }
+        }
+        if len > self.remaining() {
+            return Err(());
         }
         self.take(len)
     }
