@@ -377,8 +377,8 @@ fn next_serial(serial: &Arc<Mutex<u32>>) -> u32 {
 fn reply(stream: &mut UnixStream, to: u32, serial: u32, sig: &str, body: &[u8]) -> Result<(), ()> {
     let mut writer = Writer::new();
     writer.begin_return(serial, to, sig);
-    let mut message = writer.finish().ok_or(())?;
-    message.extend_from_slice(body);
+    writer.raw(body);
+    let message = writer.finish().ok_or(())?;
     stream.write_all(&message).map_err(|_| ())
 }
 
