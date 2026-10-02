@@ -1197,11 +1197,11 @@ impl Writer {
             serial,
             flags,
             &[
-                Header::Path(path),
-                Header::Interface(interface),
-                Header::Member(member),
-                Header::Destination(destination),
-                Header::Signature(body_sig),
+                Field::Path(path),
+                Field::Interface(interface),
+                Field::Member(member),
+                Field::Destination(destination),
+                Field::Signature(body_sig),
             ],
         );
     }
@@ -1212,7 +1212,7 @@ impl Writer {
             2,
             serial,
             0,
-            &[Header::ReplySerial(reply_to), Header::Signature(body_sig)],
+            &[Field::ReplySerial(reply_to), Field::Signature(body_sig)],
         );
     }
 
@@ -1223,9 +1223,9 @@ impl Writer {
             serial,
             0,
             &[
-                Header::Error(error),
-                Header::ReplySerial(reply_to),
-                Header::Signature(body_sig),
+                Field::Error(error),
+                Field::ReplySerial(reply_to),
+                Field::Signature(body_sig),
             ],
         );
     }
@@ -1244,10 +1244,10 @@ impl Writer {
             serial,
             0,
             &[
-                Header::Path(path),
-                Header::Interface(interface),
-                Header::Member(member),
-                Header::Signature(body_sig),
+                Field::Path(path),
+                Field::Interface(interface),
+                Field::Member(member),
+                Field::Signature(body_sig),
             ],
         );
     }
