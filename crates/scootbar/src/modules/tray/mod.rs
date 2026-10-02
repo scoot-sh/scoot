@@ -1823,16 +1823,13 @@ impl Module for Tray {
     /// the directory watch while waiting. No timer, ever: every refresh
     /// is bus-driven, and the wait is an inotify watch.
     fn sources<'fd>(&'fd self, sources: &mut Sources<'_, 'fd>) {
-        eprintln!("DBUGBUS sources bus={}", match &self.bus {
-            Bus::Live(_) => "live",
-            Bus::Waiting { .. } => "waiting",
-        });
         match &self.bus {
             Bus::Live(live) => {
                 let mut flags = PollFlags::IN;
                 if live.conn.want_write() {
                     flags |= PollFlags::OUT;
                 }
+                eprintln!("DBUGBUS sources flags={flags:?} outbox={}", live.conn.outbox_len());
                 sources.add(live.conn.as_fd(), flags);
             }
             Bus::Waiting { notify, .. } => {
@@ -1844,6 +1841,7 @@ impl Module for Tray {
     }
 
     fn on_ready(&mut self, source: usize, events: PollFlags) -> Update {
+        eprintln!("DBUGBUS on_ready source={source} events={events:?}");
         match &self.bus {
             Bus::Live(_) => {
                 // Source 0 is the bus socket: the only source a live
