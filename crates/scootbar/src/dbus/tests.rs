@@ -93,7 +93,7 @@ fn every_reply_shape_round_trips() {
         (10, 3, "u", {
             let mut body = Writer::new();
             body.u32(1);
-            vec![body.take_body().unwrap(), vec![]].concat()
+            body.take_body().unwrap()
         }),
         (11, 4, "a{sv}", {
             let mut body = Writer::new();
