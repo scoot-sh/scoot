@@ -442,3 +442,35 @@ fn debug_dump_hello() {
         Err(()) => eprintln!("PARSE REFUSED"),
     }
 }
+
+#[test]
+fn debug_walk_reply() {
+    use crate::dbus::proto::{Reader, frame_at};
+    if std::env::var_os("TRAY_DEBUG_BUS").is_none() {
+        return;
+    }
+    // The exact 89-byte Hello reply bytes, captured from the dev VM's
+    // user bus (dbus-daemon) in debug_dump_hello.
+    const HEX: &str = "6c02010109000000ffffffff3f000000050175000100000007017300140000006f72672e667265656465736b746f702e444275730000000006017300040000003a312e33000000000801670001730000040000003a312e33";
+    let bytes: Vec<u8> = (0..HEX.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&HEX[i..i + 2], 16).unwrap())
+        .collect();
+    eprintln!("len: {}", bytes.len());
+    eprintln!("framed: {:?}", frame_at(&bytes));
+    let mut fields = Reader::le(&bytes[16..16 + 63]);
+    let mut n = 0;
+    while !fields.exhausted() {
+        eprintln!("element {n} at {}", 16 + (63 - fields.remaining()));
+        n += 1;
+        if n > 6 {
+            break;
+        }
+        fields.enter_struct().expect("struct");
+        let code = fields.u8().expect("code");
+        let sig = fields.signature().expect("sig");
+        eprintln!("  code {code} sig {sig:?} value at {}", 16 + (63 - fields.remaining()));
+        fields.skip(sig).expect("value");
+        fields.leave_struct();
+    }
+}
