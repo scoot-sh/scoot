@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use wayland_client::{Connection, QueueHandle};
 
+use super::Content;
 use super::agent;
 use super::wayland::State;
 use crate::cli::Given;
@@ -22,7 +23,7 @@ use crate::config::{self, Config};
 use crate::control::protocol::{PROTOCOL_VERSION, Reply, Request, write_reply};
 use crate::control::{Handler, Kinds, MAX_SUBSCRIBERS};
 use crate::font;
-use crate::modules::{self, Update, View};
+use crate::modules::{self, Placed, Update, View};
 use crate::policy::Placement;
 use crate::print::warn;
 
@@ -193,44 +194,30 @@ impl Responder<'_> {
         {
             config.modules.workspaces.link = self.state.workspaces.clone();
         }
+        #[cfg(feature = "window-title")]
         // The same for the window-title link: the daemon's
         // `wlr-foreign-toplevel-management-v1` dispatch and the module
         // share this run's one.
-        #[cfg(feature = "window-title")]
         {
             config.modules.window_title.link = self.state.title.clone();
         }
-        // Started first, but said only once the reload is known good (see
-        // below): a refused reload stays silent.
-        let mut notes = Vec::new();
-        let modules = modules::start(
-            &config.outputs.to_start(&config.layout),
-            &config.modules,
-            &mut |id, why| {
-                notes.push(format!(
-                    "the {id} module is unavailable, and left out: {why}"
-                ));
-            },
-        );
-        // The font next: a font that vanished since validation refuses
-        // the reload with the running bar untouched. The notes above are
-        // said only now, once the reload is known good, so a refused
+        // Said only once the reload is known good (see below): a refused
         // reload stays silent.
-        let text = if modules.is_empty() {
-            None
-        } else {
-            let text = font::text(config.font.as_deref(), &config.fallback_fonts)
-                .map_err(|error| error.to_string())?;
-            Some(text)
-        };
+        let mut notes = Vec::new();
+        let content = Self::stage(&config, &mut self.state.content.modules, &mut |id, why| {
+            notes.push(format!(
+                "the {id} module is unavailable, and left out: {why}"
+            ));
+        })?;
         for note in notes {
             warn(format_args!("scootbar: note: {note}"));
         }
-        self.state.content.modules = modules;
-        // Every module is a new one: subscribers are told them all.
+        // The swap drops what the new bar did not keep: a removed `exec`'s
+        // group dies with its module here.
+        self.state.content = content;
+        // The placement is rebuilt whether or not a module was kept, so
+        // subscribers are told every module.
         self.state.events.invalidate();
-        self.state.content.text = text;
-        self.state.content.style = config.style();
         // New placement, new style, new font: every output is placed again
         // from scratch (its bar, its modules, its scene and buffers, and
         // whether it has a bar at all; `State::replace_placement`). The
@@ -255,6 +242,38 @@ impl Responder<'_> {
         Ok(())
     }
 
+    /// What a reload swaps in. The font comes first: a font that vanished
+    /// since validation refuses the reload with the running bar untouched
+    /// — nothing is started, nothing is moved out of `old`, nothing is
+    /// killed. Only then are the modules started, with `old` handed over
+    /// so an unchanged `exec` keeps its child. `Err` leaves `old` exactly
+    /// as it was; `Ok` leaves what was not kept in `old` for the caller to
+    /// drop (which kills a removed `exec`'s group).
+    ///
+    /// Whether a font is needed is the layout's answer, not the started
+    /// modules': every placed module starts unless the process is out of
+    /// file descriptors, and then the bar is past refusing a reload.
+    fn stage(
+        config: &Config,
+        old: &mut Vec<Placed>,
+        warn: &mut dyn FnMut(&str, &str),
+    ) -> Result<Content, String> {
+        let placing = config.outputs.to_start(&config.layout);
+        let text = if placing.placed().next().is_none() {
+            None
+        } else {
+            let text = font::text(config.font.as_deref(), &config.fallback_fonts)
+                .map_err(|error| error.to_string())?;
+            Some(text)
+        };
+        let modules = modules::start(&placing, &config.modules, old, warn);
+        Ok(Content {
+            modules,
+            text,
+            style: config.style(),
+        })
+    }
+
     /// A value for module `id`: an id that is not placed, and any module
     /// that takes no value (every one but `push`), are loud errors, never a
     /// silent ok.
@@ -272,3 +291,6 @@ impl Responder<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

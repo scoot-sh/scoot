@@ -81,7 +81,12 @@ fn a_name_is_the_same_str_on_every_read() {
 fn a_table_no_list_places_is_defined_but_not_started() {
     let config = read("center = []\n[push.idle]\n").unwrap();
     assert_eq!(config.modules.custom.len(), 1);
-    let started = crate::modules::start(&config.layout, &config.modules, &mut |_, _| {});
+    let started = crate::modules::start(
+        &config.layout,
+        &config.modules,
+        &mut Vec::new(),
+        &mut |_, _| {},
+    );
     assert!(started.is_empty());
 }
 

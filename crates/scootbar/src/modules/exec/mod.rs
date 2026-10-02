@@ -463,4 +463,14 @@ impl Module for Exec {
     fn view(&self, _: &OutputView<'_>, view: &mut View) {
         self.shown.write(view);
     }
+
+    /// Continues as the config's `custom` module when it is the same
+    /// table: an equal [`Settings`] (command, format, placeholder and
+    /// restart key) means the running child, pipe, timer and shown output
+    /// are still what the config asks for, so the reload keeps them
+    /// instead of starting over. Any other kind, or a changed table,
+    /// declines, and the old instance is dropped (killing its group).
+    fn keeps(&self, custom: &super::custom::Custom) -> bool {
+        matches!(&custom.kind, super::custom::Kind::Exec(settings) if settings == &self.settings)
+    }
 }

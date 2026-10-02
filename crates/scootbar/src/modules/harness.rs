@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 
-use super::{Init, MAX_POLL, Module, OutputView, Settings, Sources, Spec, Update, View};
+use super::{Init, MAX_POLL, Module, OutputView, Placed, Settings, Sources, Spec, Update, View};
 
 pub struct Harness {
     module: Box<dyn Module>,
@@ -140,5 +140,39 @@ impl Harness {
             }
         }
         Some(update)
+    }
+}
+
+/// Turns of the loop for `placed`, until `done` holds, or the test fails:
+/// what [`Harness::wait`] is for one module, for a module that lives in a
+/// [`Placed`] (a reload hands the old bar's over), which the harness
+/// cannot take apart. Goes through [`Placed::ready`], so the revision
+/// moves as the loop moves it.
+pub fn drive_placed(placed: &mut Placed, what: &str, mut done: impl FnMut(&Placed) -> bool) {
+    let start = std::time::Instant::now();
+    let deadline = Duration::from_secs(10);
+    while !done(placed) {
+        assert!(start.elapsed() < deadline, "never {what}: {}", placed.id);
+        let placeholder = rustix::fs::CWD;
+        let mut fds: [PollFd<'_>; MAX_POLL] =
+            std::array::from_fn(|_| PollFd::from_borrowed_fd(placeholder, PollFlags::empty()));
+        let mut owners = [(0, 0); MAX_POLL];
+        let mut len = 0;
+        let mut sources = Sources::new(&mut fds, &mut owners, &mut len, 0);
+        placed.module.sources(&mut sources);
+        let timeout = Timespec {
+            tv_sec: 0,
+            tv_nsec: 50_000_000,
+        };
+        let ready = poll(&mut fds[..len], Some(&timeout)).expect("poll");
+        if ready == 0 {
+            continue;
+        }
+        let revents: Vec<PollFlags> = fds[..len].iter().map(PollFd::revents).collect();
+        for (flags, &(_, source)) in revents.iter().zip(&owners) {
+            if !flags.is_empty() {
+                placed.ready(source, *flags);
+            }
+        }
     }
 }

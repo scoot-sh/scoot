@@ -753,8 +753,9 @@ arguments of at most 4096 bytes. `format` says how a line is read: `text`
   inherits none of the file descriptors the bar opens (one a launcher left
   open when it started the bar reaches it, as it does any child).
   **The whole process group is
-  killed when the module goes**: on a reload (the command is started afresh
-  with the new config, whether or not its table changed), and when the
+  killed when the module goes**: on a reload that changed its table or
+  removed it (one whose table is unchanged keeps its child, pipe, timer
+  and shown output, wherever the lists place it now), and when the
   command exits, so a worker it backgrounded does not pile up across
   restarts. **The command ends with the bar, however the bar ends**: on a
   clean exit with the group kill, and on `SIGTERM`, `SIGINT`, `SIGHUP`,
@@ -1082,7 +1083,8 @@ right = ["clock"]
   holds (`radius` is 0 to half the height at the file level).
 - **A reload** re-places every output: one the list now leaves out loses
   its bar (and its zone), one it now includes gets one, and a bar whose
-  geometry changed is made again. Modules are restarted as at any reload.
+  geometry changed is made again. Modules are restarted as at any reload,
+  except an `exec` whose table is unchanged, which keeps its child (above).
 - **`hide`/`show`** keep to the list: a shown bar is made only on a selected
   output. The two reasons a bar can be absent (hidden, not selected) are
   independent, so a `show` after a reload that changed the list makes the
