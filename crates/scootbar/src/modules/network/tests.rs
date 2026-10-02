@@ -354,12 +354,16 @@ fn a_finished_scan_refreshes_the_list() {
     // at once (nothing in flight), resetting the list, so the new page is
     // all there is.
     let (_, genl) = fake.sent();
-    fake.genl(&fake::done_seq(request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN)));
+    fake.genl(&fake::done_seq(request_seq(
+        &genl,
+        super::netlink::NL80211_CMD_GET_SCAN,
+    )));
     assert_eq!(drive(&mut harness), Update::Unchanged);
     let (_, genl) = fake.sent();
-    fake.genl(&fake::done_seq(
-        request_seq(&genl, super::netlink::NL80211_CMD_GET_STATION),
-    ));
+    fake.genl(&fake::done_seq(request_seq(
+        &genl,
+        super::netlink::NL80211_CMD_GET_STATION,
+    )));
     assert_eq!(drive(&mut harness), Update::Unchanged);
     // The kernel finished a scan: the module re-dumps, and the new list
     // (with a stronger Wimbly) is what shows.
@@ -388,7 +392,10 @@ fn request_seq(genl: &[u8], command: u8) -> u32 {
 #[test]
 fn two_radios_scans_do_not_mix() {
     let (mut harness, fake) = Fake::start(&Settings::default());
-    for (index, name, ssid) in [(WLAN0, "wlan0", &b"Wimbly"[..]), (4, "wlan1", &b"FarAway"[..])] {
+    for (index, name, ssid) in [
+        (WLAN0, "wlan0", &b"Wimbly"[..]),
+        (4, "wlan1", &b"FarAway"[..]),
+    ] {
         fake.rt(&fake::link(16, index, UP, 6, name, None));
         fake.rt(&fake::addr(20, index, 2));
         fake.genl(&fake::interface(index, name, Some(ssid)));
@@ -402,7 +409,11 @@ fn two_radios_scans_do_not_mix() {
     fake.genl(&fake::scan(&[(b"Wimbly", -5400, true)]));
     route_via(&fake, 4);
     assert_eq!(drive(&mut harness), Update::Changed);
-    assert!(harness.view().text().starts_with("FarAway"), "{:?}", harness.view().text());
+    assert!(
+        harness.view().text().starts_with("FarAway"),
+        "{:?}",
+        harness.view().text()
+    );
     let _ = fake.sent();
 }
 
@@ -907,8 +918,7 @@ fn multicast_notices_arrive_on_the_joined_groups() {
             Ok(0) | Err(_) => continue,
             Ok(_) => {}
         }
-        let Ok((_, n)) = rustix::net::recv(&genl, &mut buf, rustix::net::RecvFlags::empty())
-        else {
+        let Ok((_, n)) = rustix::net::recv(&genl, &mut buf, rustix::net::RecvFlags::empty()) else {
             continue;
         };
         for msg in super::netlink::messages(&buf[..n]) {
@@ -916,7 +926,10 @@ fn multicast_notices_arrive_on_the_joined_groups() {
                 continue;
             }
             let command = super::netlink::genl_of(msg.body).map(|(command, _)| command);
-            eprintln!("live: multicast command {command:?} after {:?}", begin.elapsed());
+            eprintln!(
+                "live: multicast command {command:?} after {:?}",
+                begin.elapsed()
+            );
             return;
         }
     }

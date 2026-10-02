@@ -392,11 +392,23 @@ impl Nets {
 
     /// Queues a scan dump for `index`: the replies append to the list,
     /// whatever order the tests feed them in, and on the wire the request
-    /// always precedes its replies. The list resets when the dump goes
-    /// out (see `pump_genl`), not here: dumps go out one at a time, so
-    /// resetting here would attribute another radio's in-flight replies
-    /// to this scan.
+    /// always precedes its replies. A re-dump of the same scan supersedes
+    /// its list and resets it; a concurrent scan for another radio only
+    /// enqueues — resetting here would attribute the in-flight radio's
+    /// replies to the newcomer (the send resets again if the index moved,
+    /// see `pump_genl`).
     fn queue_scan(&mut self, index: u32) {
+        let pending = self
+            .genl_busy
+            .is_some_and(|(_, dump)| matches!(dump, GenlDump::Scan(_)))
+            || self
+                .genl_dumps
+                .iter()
+                .any(|dump| matches!(dump, GenlDump::Scan(_)));
+        if index == self.scan_of || !pending {
+            self.scan_of = index;
+            self.scan_n = 0;
+        }
         self.genl_dumps.push_back(GenlDump::Scan(index));
     }
 
@@ -891,12 +903,14 @@ impl Network {
         match dump {
             GenlDump::Interfaces => netlink::interface_request(&mut out, id, seq, 0),
             GenlDump::Scan(index) => {
-                // The list resets as the dump goes out: any reply arriving
-                // from here on belongs to this scan (dumps go out one at a
-                // time), and whatever is still arriving belongs to the last
-                // one sent.
-                self.nets.scan_of = index;
-                self.nets.scan_n = 0;
+                // The list resets if the scan moved to another radio: any
+                // reply arriving from here on belongs to this dump (dumps
+                // go out one at a time), while a re-dump of the same scan
+                // already reset at queue time and keeps appending.
+                if self.nets.scan_of != index {
+                    self.nets.scan_of = index;
+                    self.nets.scan_n = 0;
+                }
                 netlink::scan_request(&mut out, id, seq, index)
             }
             GenlDump::Station(index) => netlink::station_request(&mut out, id, seq, index),
