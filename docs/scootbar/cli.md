@@ -231,7 +231,10 @@ for that output, `active` `null` when none is; the window-title module:
 focused window, absent when none is focused; the volume module:
 `{"volume": 49, "muted": false, "sink": "alsa_output..."}` for the default
 sink, absent while no server answers (the microphone variant reports
-`"source"` instead of `"sink"`)).
+`"source"` instead of `"sink"`); the network module:
+`{"state": "wifi", "ssid": "Wimbly", "signal": -54, "bars": 4,
+"interface": "wlan0", "vpn": false}`, `"ethernet"` and `"vpn"` with the
+interface, or `{"state": "disconnected"}`).
 This is the agent hook: the
 bar read as data instead of OCR. `query ID` lists only that module (an id that
 is not placed is an error naming the ones that are). The reply is bounded
@@ -336,6 +339,7 @@ cannot:
 | `window-title` | The focused window's title on the bar's own output ([below](#window-title)) | on the compositor's toplevel changes: focus at once, retitles at most ten times a second |
 | `volume` | The default sink's level and mute ([below](#volume)) | on the sound server's sink events, and the server's own: one redraw per batch |
 | `microphone` | The default source's level and mute ([below](#volume)) | as `volume`, for sources |
+| `network` | The shown interface's state: name, SSID and bars, VPN or offline ([below](#network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -602,6 +606,52 @@ by default.
   shown. The server is `$PULSE_SERVER` when that names a unix socket,
   else `$XDG_RUNTIME_DIR/pulse/native`; device names from it are untrusted
   text, kept at 128 bytes.
+
+## Network
+
+Link state, WiFi name and signal, spoken over rtnetlink and nl80211 with
+no daemon and no child process: two netlink sockets on the bar's own
+`poll` loop. A Cargo feature (`network`), on by default.
+
+- **What it shows** is one interface's state: the default route's (the
+  first usable, v4 before v6), or `network.interface` by name. Ethernet shows the name
+  (`eth0`); WiFi shows the SSID and bars (`Wimbly ▂▄▆█`, four at −55 dBm
+  and better, one at −78 and worse); a tunnel shows `VPN` (in the normal
+  class: being on a VPN is not a warning, only `offline` warns); anything
+  without an address shows `offline`, in the `warn` class. A second VPN
+  up beside the shown interface appends `· VPN`. The tooltip adds the
+  signal (`Wimbly · −54 dBm on wlan0`). Before the first event it shows
+  nothing and takes no space.
+- **A click opens the picker**, with no binding at all: `network.menu-command`
+  is spawned with the cached scan's SSIDs on stdin (one per line), a
+  dmenu-style launcher fed from the scan list. Connecting is the
+  command's own business, for example
+  `menu-command = ["sh", "-c", "fuzzel --dmenu | xargs -d '\\n' -r -n1 nmcli device wifi connect"]`
+  (no shell sees the SSID: it travels by pipe into `xargs`, which passes
+  it as one argument). With `show-ssid = false` the picker refuses to
+  open instead: the scan list would expose the SSIDs the bar hides. The module's own action is `menu`, taking no
+  number (`scootbar msg invoke network menu`); it is refused naming why
+  with no command configured or no networks seen. Native popups replace
+  this picker later (see [popups](backlog/popups.md)).
+- **`interface`** (1 to 15 bytes, a kernel interface name) pins what is
+  shown; absent is the default route's, tracked by index so a rename
+  keeps it. **`show-ssid`** (default true) hides the SSID when false —
+  the bar shows `WiFi ▂▄▆`, and `query` omits the SSID — because the bar
+  is visible in screenshots and to an agent's `query`.
+- **`query`** reports `{"state": "wifi", "ssid": "Wimbly", "signal": -54,
+  "bars": 4, "interface": "wlan0", "vpn": false}`, `"ethernet"` and
+  `"vpn"` with the interface, or `{"state": "disconnected"}`.
+- **Cost.** Event-driven, no polling: link, address, route and (where the
+  kernel lets the socket join them) `scan`/`mlme` multicast groups; a
+  flapping link drains into one redraw per turn. Signal strength has no
+  event on drivers without CQM thresholds, so a timer re-reads it every
+  10 seconds — armed only while a WiFi network is shown, nowhere else —
+  and connect, disconnect and roam stay events. Idle wakeups are only
+  real network events. A missed burst, a dead socket or a resume
+  re-dumps everything; `Unavailable` (and nothing shown) where the
+  machine has no network interface — interfaces that appear later (a
+  plugged-in dongle) are picked up by `scootbar msg reload`. Interface names and SSIDs are
+  untrusted text: sanitized once, at parse time.
 
 ## Pointer input
 

@@ -113,7 +113,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Volume](resolved/volume-module-done.md) (medium): default sink level and mute, scroll to change, click to mute — RESOLVED 2026-10-02
 - [Volume scan_names test passes for the wrong reason](volume-scan-names-test.md) (medium): review follow-up from PR #376
 - [Volume re-probe a present socket](volume-reprobe-present-socket.md) (medium): review follow-up from PR #376
-- [Network](network-module.md) (medium)
+- [Network](resolved/network-module-done.md) (medium): link state, WiFi name and signal, click to pick — RESOLVED 2026-10-02
 - [Battery](battery-module.md) (medium)
 - [Brightness](brightness-module.md) (low)
 

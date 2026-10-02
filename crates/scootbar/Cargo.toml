@@ -18,7 +18,7 @@ license.workspace = true
 # module draws a plain bar and needs no font. `icon-image` is the one
 # feature that is not a module: it is an optional decoder (below).
 [features]
-default = ["clock", "workspaces", "window-title", "volume", "microphone", "button", "push", "exec"]
+default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "button", "push", "exec"]
 clock = []
 workspaces = []
 window-title = []
@@ -26,6 +26,8 @@ window-title = []
 # which shares the code): a native PulseAudio-protocol client, no libpulse.
 volume = []
 microphone = []
+# Link state, WiFi name and signal over rtnetlink and nl80211, no daemon.
+network = []
 # The three modules the config defines by name (`[button.NAME]`,
 # `[push.NAME]`, `[exec.NAME]`): extend the bar without Rust. `push` and
 # `exec` share the update payload (`src/modules/payload.rs`).

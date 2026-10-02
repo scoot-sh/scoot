@@ -11,7 +11,7 @@ resolved: "2026-10-02"
 # Volume module
 
 Filed 2026-09-29. Serves **daily-drive**, and is one of the two modules
-(with [network](network-module.md)) that must exercise the module API before it
+(with [network](network-module-done.md)) that must exercise the module API before it
 is frozen.
 
 ## Source

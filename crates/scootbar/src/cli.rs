@@ -93,6 +93,20 @@ macro_rules! microphone_head {
     };
 }
 #[allow(unused_macros)]
+#[cfg(feature = "network")]
+macro_rules! network_head {
+    () => {
+        "network, "
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "network"))]
+macro_rules! network_head {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
 #[cfg(feature = "volume")]
 macro_rules! volume_head {
     () => {
@@ -121,6 +135,20 @@ macro_rules! microphone_tail {
     };
 }
 #[allow(unused_macros)]
+#[cfg(feature = "network")]
+macro_rules! network_tail {
+    () => {
+        ", network"
+    };
+}
+#[allow(unused_macros)]
+#[cfg(not(feature = "network"))]
+macro_rules! network_tail {
+    () => {
+        ""
+    };
+}
+#[allow(unused_macros)]
 #[cfg(feature = "volume")]
 macro_rules! volume_tail {
     () => {
@@ -144,6 +172,7 @@ macro_rules! modules {
                            layout: a section not given is empty.
                            Modules: clock",
             microphone_tail!(),
+            network_tail!(),
             volume_tail!(),
             ", window-title, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -174,6 +203,7 @@ macro_rules! modules {
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty. Modules: clock",
             microphone_tail!(),
+            network_tail!(),
             volume_tail!(),
             ", workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -205,6 +235,7 @@ macro_rules! modules {
                            layout: a section not given is empty.
                            Modules: clock",
             microphone_tail!(),
+            network_tail!(),
             volume_tail!(),
             ", window-title
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -235,6 +266,7 @@ macro_rules! modules {
      --right IDS          the center). Giving any of the three sets the whole
                            layout: a section not given is empty. Modules: clock",
             microphone_tail!(),
+            network_tail!(),
             volume_tail!(),
             "\n     --padding N          logical pixels either side of each module, 0 to 1024
                            (default 8)
@@ -263,6 +295,7 @@ macro_rules! modules {
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: ",
             microphone_head!(),
+            network_head!(),
             volume_head!(),
             "window-title, workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -285,6 +318,7 @@ macro_rules! modules {
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: ",
             microphone_head!(),
+            network_head!(),
             volume_head!(),
             "workspaces
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -307,6 +341,7 @@ macro_rules! modules {
      --center IDS         comma-separated, in order. Giving any of the three
      --right IDS          sets the whole layout. Modules: ",
             microphone_head!(),
+            network_head!(),
             volume_head!(),
             "window-title
      --padding N          logical pixels either side of each module, 0 to 1024
@@ -322,7 +357,8 @@ macro_rules! modules {
     not(feature = "workspaces"),
     not(feature = "window-title"),
     not(feature = "volume"),
-    not(feature = "microphone")
+    not(feature = "microphone"),
+    not(feature = "network")
 ))]
 macro_rules! modules {
     () => {
@@ -330,9 +366,29 @@ macro_rules! modules {
      --center IDS         comma-separated, in order. This build has none, so
      --right IDS          only an empty list is taken
      --padding N          logical pixels either side of each module, 0 to 1024
-                           (default 8)
+                            (default 8)
      --spacing N          logical pixels between neighbouring modules, 0 to
-                           1024 (default 0)
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    not(feature = "microphone"),
+    feature = "network"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: network
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
 "
     };
 }
@@ -341,7 +397,68 @@ macro_rules! modules {
     not(feature = "workspaces"),
     not(feature = "window-title"),
     feature = "volume",
-    feature = "microphone"
+    not(feature = "microphone"),
+    feature = "network"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: network, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    not(feature = "volume"),
+    feature = "microphone",
+    feature = "network"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, network
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    feature = "network"
+))]
+macro_rules! modules {
+    () => {
+        "    --left IDS           the modules along the left, center and right,
+     --center IDS         comma-separated, in order. Giving any of the three
+     --right IDS          sets the whole layout. Modules: microphone, network, volume
+     --padding N          logical pixels either side of each module, 0 to 1024
+                            (default 8)
+     --spacing N          logical pixels between neighbouring modules, 0 to
+                            1024 (default 0)
+"
+    };
+}
+#[cfg(all(
+    not(feature = "clock"),
+    not(feature = "workspaces"),
+    not(feature = "window-title"),
+    feature = "volume",
+    feature = "microphone",
+    not(feature = "network")
 ))]
 macro_rules! modules {
     () => {
@@ -360,7 +477,8 @@ macro_rules! modules {
     not(feature = "workspaces"),
     not(feature = "window-title"),
     feature = "volume",
-    not(feature = "microphone")
+    not(feature = "microphone"),
+    not(feature = "network")
 ))]
 macro_rules! modules {
     () => {
@@ -379,7 +497,8 @@ macro_rules! modules {
     not(feature = "workspaces"),
     not(feature = "window-title"),
     not(feature = "volume"),
-    feature = "microphone"
+    feature = "microphone",
+    not(feature = "network")
 ))]
 macro_rules! modules {
     () => {
@@ -477,6 +596,25 @@ macro_rules! microphone_help {
         ""
     };
 }
+// What the network module is, for the help page.
+#[cfg(feature = "network")]
+macro_rules! network_help {
+    () => {
+        "Network (the network module):
+    the default route's interface (or network.interface), by name when it
+    is ethernet, the SSID and signal bars when it is WiFi, VPN when it is
+    a tunnel, and offline when it has no address; a click opens the picker
+    (network.menu-command with the scan's SSIDs on stdin). Nothing is
+    shown where the machine has no network interface
+"
+    };
+}
+#[cfg(not(feature = "network"))]
+macro_rules! network_help {
+    () => {
+        ""
+    };
+}
 
 pub const USAGE: &str = concat!(
     "\
@@ -569,6 +707,7 @@ Modules:
     window_title_help!(),
     volume_help!(),
     microphone_help!(),
+    network_help!(),
     "
 The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
 without it) holds every option above; `--config PATH` reads another file

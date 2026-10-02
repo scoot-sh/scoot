@@ -1170,7 +1170,7 @@ jobs:
           fuzz=$(nix build --inputs-from . nixpkgs#cargo-fuzz --no-link --print-out-paths)
           export PATH="$fuzz/bin:$PATH"
           scratch="$RUNNER_TEMP/scootbar-fuzz"
-          mkdir -p "$scratch/format" "$scratch/tzif" "$scratch/payload" "$scratch/volume" "$scratch/artifacts"
+          mkdir -p "$scratch/format" "$scratch/tzif" "$scratch/payload" "$scratch/volume" "$scratch/network" "$scratch/artifacts"
           cd crates/scootbar
           # cargo-fuzz has no `--locked` to pass on, so the fuzz workspace's
           # own lock file is held to it here: a stale one fails the step
@@ -1194,6 +1194,7 @@ jobs:
           run tzif -runs=5000000 -max_len=70000
           run payload -runs=2000000 -max_len=5000
           run volume -runs=2000000 -max_len=70000
+          run network -runs=2000000 -max_len=70000
 
       - name: Save the cargo cache
         # Same condition as the Linux job's save; see the comment there.

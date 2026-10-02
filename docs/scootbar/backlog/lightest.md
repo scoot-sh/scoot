@@ -134,6 +134,26 @@ and these add no sources — so idle RSS, wakeups and jiffies are unchanged
 by construction. No full hardware run: there is no new row for the bench
 to regress, only recolored and bounded fills.
 
+## M5 network: module-level cost (measured 2026-10-02, full bench pending)
+
+The [network module](resolved/network-module-done.md) adds two netlink
+sockets to the poll set, a `timerfd` only while a WiFi network is shown (10 s
+signal re-read), a pidfd only while its picker runs, and a 5 s one-shot
+retry timer only after a resync — no polling anywhere. The contract test
+holds every module to the loop's source budget (5 sources at most here, of
+63). Idle wakeups, live through the module harness: 1 in 20 quiet seconds
+on ethernet (dev VM, aarch64), 2 in 20 quiet seconds on WiFi (Asahi M2, three
+runs: exactly the timer's two ticks; one earlier run caught a background
+scan completing, a real event). A scan-heavy window adds real-event wakes
+against the same bound (the live test allows 4). Memory is fixed shapes: two
+64 KiB read buffers, a 32-entry scan array, outboxes of a few hundred bytes
+of dump requests, SSIDs sanitized once at parse time into ≤32-byte strings.
+No new dependencies (the Cargo feature adds none); the release binary is
+1,643,240 bytes on aarch64 and links only libc, libm and libgcc_s. No full
+`scripts/scootbar-bench` run (idle RSS/PSS/jiffies/size rows): it needs the
+bench runner under a compositor, which this lane did not have — the rows
+above are the module's published cost until that run happens.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`
