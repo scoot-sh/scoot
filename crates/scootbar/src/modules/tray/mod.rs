@@ -580,12 +580,15 @@ impl Live {
         };
         let token = slot as u64;
         match self.conn.call(destination, path, interface, member, body_sig, body, flags, token) {
-            Ok(_) => {
+            Ok(serial) => {
+                eprintln!("TRAYDBG issue {member} serial={serial} token={token}");
                 if wants_reply {
                     self.flights[slot] = Some(Flight { op });
                 }
             }
-            Err(_) => {}
+            Err(_) => {
+                eprintln!("TRAYDBG issue {member} REFUSED");
+            }
         }
     }
 
