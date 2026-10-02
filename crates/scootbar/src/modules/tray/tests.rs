@@ -86,12 +86,20 @@ fn a_registration_is_answered_and_shown() {
     let (mut harness, mut fake) = started();
     let serial = fake.send_register(OWNER, SERVICE);
     until_shown(&mut harness, &mut fake, 1);
-    // The registration was answered: a return quoting the call.
-    drive(&mut harness, &mut fake, |_| {
+    // The registration was answered: a return quoting the call. Turns
+    // past showing, then the assertion (the closure cannot hold the
+    // fake it drives).
+    for _ in 0..5 {
+        fake.pump();
+        harness.wait(Duration::from_secs(2));
+        fake.pump();
+    }
+    assert!(
         fake.calls().iter().any(|call| {
             matches!(call.kind, crate::dbus::proto::Kind::MethodReturn) && call.reply_to == Some(serial)
-        })
-    });
+        }),
+        "no answer quoting {serial}"
+    );
     let value = harness.value_on(None).unwrap();
     assert_eq!(value["items"][0]["id"], format!("{SERVICE}/StatusNotifierItem"));
 }
@@ -338,9 +346,12 @@ fn a_lost_watcher_is_taken_back() {
     });
     // ...and when it leaves, we ask for the name back.
     fake.send_name_owner_changed("org.kde.StatusNotifierWatcher", ":1.99", "");
-    drive(&mut harness, &mut fake, |_| {
-        fake.calls().iter().any(|call| call.member == "RequestName")
-    });
+    for _ in 0..5 {
+        fake.pump();
+        harness.wait(Duration::from_secs(2));
+        fake.pump();
+    }
+    assert!(fake.calls().iter().any(|call| call.member == "RequestName"));
 }
 
 #[test]
