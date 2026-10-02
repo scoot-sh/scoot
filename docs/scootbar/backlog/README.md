@@ -109,7 +109,7 @@ Walking skeleton: every piece exists once, end to end, so later steps only add.
 
 ### M5 — Daily-driver modules, one release each
 The [umbrella](data-source-modules.md) holds the rules they share.
-- [Window title](window-title-module.md) (medium)
+- [Window title](resolved/window-title-module-done.md) (medium): the focused window's title per output, click to focus — RESOLVED 2026-10-01
 - [Volume](volume-module.md) (medium)
 - [Network](network-module.md) (medium)
 - [Battery](battery-module.md) (medium)
