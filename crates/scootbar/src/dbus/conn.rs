@@ -193,6 +193,11 @@ impl Conn {
         !self.outbox.is_empty()
     }
 
+    /// Queued reply bytes, for tests.
+    pub fn outbox_len(&self) -> usize {
+        self.outbox.len()
+    }
+
     pub fn as_fd(&self) -> BorrowedFd<'_> {
         self.stream.as_fd()
     }

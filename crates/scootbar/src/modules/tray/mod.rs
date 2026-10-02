@@ -1106,6 +1106,7 @@ impl Live {
         if interface == "org.freedesktop.DBus.Peer" {
             if member == "Ping" {
                 self.conn.reply_return(serial, "", &[]);
+                eprintln!("DBUGBUS answered ping, outbox={}", self.conn.outbox_len());
                 return Update::Unchanged;
             }
             self.conn
