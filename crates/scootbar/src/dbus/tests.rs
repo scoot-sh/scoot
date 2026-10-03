@@ -740,21 +740,43 @@ fn discarding_a_flood_is_bounded_a_pump_at_a_time() {
         daemon
     });
     // The priming pump reads the header and starts the skip; the measured
-    // pump is mid-skip, so what it consumes is exactly what it read.
+    // pump is mid-skip, so what it consumes is exactly what it read. The
+    // measured pump must see data: a sender stalled by a loaded box (or
+    // small kernel buffers) leaves the socket dry, and a dry pump
+    // honestly reports uncapped — wait those out instead of measuring
+    // them (seen 2026-10-03: CI failed the capped assert with the sender
+    // starved, product paths untouched).
     let (events, _) = conn.pump();
     assert!(events.is_empty());
     assert!(conn.discard_pending() > 0, "the skip never started");
-    let before = conn.discard_pending();
-    let (events, capped) = conn.pump();
-    assert!(events.is_empty());
-    // Bounded work, and the poll woken for the rest.
-    let read = before - conn.discard_pending();
+    let (capped, read) = {
+        let start = Instant::now();
+        loop {
+            assert!(
+                start.elapsed() < Duration::from_secs(20),
+                "the sender never caught up"
+            );
+            let before = conn.discard_pending();
+            let (events, capped) = conn.pump();
+            let read = before.saturating_sub(conn.discard_pending());
+            assert!(events.is_empty());
+            if read > 0 && (capped || conn.discard_pending() == 0) {
+                break (capped, read);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    // Bounded work, and the poll woken for the rest (unless the flood
+    // drained whole in the measured pump: then nothing is left to wake
+    // for, and the drain below is already done).
     assert!(
         read <= Conn::DISCARD_BUDGET + 8192,
         "{read} bytes in one pump"
     );
-    assert!(capped, "the poll is woken for the rest");
-    assert!(conn.has_staged_work());
+    if conn.discard_pending() > 0 {
+        assert!(capped, "the poll is woken for the rest");
+        assert!(conn.has_staged_work());
+    }
     // It drains, bounded a pump, and the connection lives.
     let mut pumps = 1;
     let mut longest = Duration::ZERO;
