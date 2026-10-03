@@ -66,4 +66,27 @@ fn the_check_runs_on_what_it_is_given() {
     signal.str(":1.7");
     let body = signal.finish().unwrap();
     super::dbus(&body);
+    // BlueZ shapes in the forms the bluetooth module reads: a managed
+    // set, an added and a removed object, and a property change.
+    let managed = super::super::bluez::build::small_world();
+    super::dbus(&managed);
+    let added = super::super::bluez::build::added("/org/bluez/hci0/dev_11_22_33_44_55_66", &|b| {
+        super::super::bluez::build::iface(b, super::super::bluez::DEVICE, &|p| {
+            super::super::bluez::build::device_props(p, Some(true), Some("Headset"), None)
+        })
+    });
+    super::dbus(&added);
+    let removed = super::super::bluez::build::removed(
+        "/org/bluez/hci0/dev_11_22_33_44_55_66",
+        &[super::super::bluez::DEVICE],
+    );
+    super::dbus(&removed);
+    let changed = super::super::bluez::build::changed(
+        super::super::bluez::DEVICE,
+        &|p| {
+            super::super::bluez::build::entry(p, "Connected", "b", &|w| w.boolean(true));
+        },
+        &[],
+    );
+    super::dbus(&changed);
 }

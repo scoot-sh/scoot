@@ -452,6 +452,112 @@ CPU), the soak, and a real Spotify, Firefox or Chromium as the player (mpv
 and two stubs only; the stubs and mpv name themselves differently and one
 sends artists as lists, neither of which proves a browser's habits).
 
+## M6 bluetooth: module-level cost (measured 2026-10-03)
+
+The [bluetooth module](../cli.md#bluetooth) is the third consumer of
+the [D-Bus client](resolved/dbus-client-done.md), the first on the
+system bus, on its own connection. By construction: the bus socket is one
+source in the poll set (with `OUT` only while a write or staged messages
+wait), or one inotify watch on the socket's directory while there is no
+bus; a one-shot timer exists only while an object waits out the 50 ms
+floor between reads of it, while a set re-read waits out its own, while a
+change of text waits out the 100 ms between draws, or (30 s) after the bus
+kept dropping the bar; a pidfd only while the picker runs; no thread, no
+polling. The bus filters what reaches the bar: `NameOwnerChanged` of
+exactly `org.bluez` and the object-manager and `PropertiesChanged`
+signals under `/org/bluez`, so anything else on the system bus never
+wakes it (a test against a real `dbus-daemon` sends both, and fails when
+the namespace filter is removed). No new dependency (`Cargo.lock` is
+unchanged). The contract test holds the module to the loop's source
+budget (4 sources at most while live: the bus, the two timers and the
+picker's pidfd, of 63).
+
+**Method.** Release builds (`lto = "fat"`, stripped) of `main` at
+`6d19daafd` (the claim commits only; the tree is the merge base), of the
+branch at code commit (the PR's head) with the default features, and of
+the same with the default features minus `bluetooth`, each built on the
+dev VM (aarch64, rustc 1.97.1) with its own target dir; a headless `scoot`
+(an existing release build, used read-only), a private `dbus-daemon`
+1.16.2 as the *system* bus (`DBUS_SYSTEM_BUS_ADDRESS`), and BlueZ a raw
+Perl peer (an independent marshaller: `scripts/bluez.pl`, fixtures
+marshalled by the module's own test builders). One bar per run, sampled
+from `/proc/PID` after 14 s of settling and again 60 s later (`VmRSS`,
+`Pss`, voluntary context switches, fds), **one run per row**, on a VM
+other agents were building and testing on. Wakeup counts are per process
+and exact for the window; RSS and PSS differences under about 130 kB are
+not resolved by one run. The scripts and raw logs are in
+[`bench/m6-bluetooth-vm`](../bench/m6-bluetooth-vm/README.md).
+
+| Row | RSS kB | PSS kB | wakeups in 60 s | fds |
+|---|---|---|---|---|
+| `main`, no module placed | 3880 | 2325 | 0 | 7 |
+| branch, bluetooth built, no module placed | 3896 | 2329 | 0 | 7 |
+| branch, bluetooth feature off, no module placed | 3888 | 2321 | 0 | 7 |
+| `main`, clock | 4312 | 2534 | 2 | 8 |
+| branch, bluetooth feature off, clock | 4312 | 2534 | 2 | 8 |
+| branch, bluetooth built and not placed, clock | 4316 | 2525 | 2 | 8 |
+| bluetooth alone, **no bus** | 4160 | 2409 | **0** | 8 |
+| bluetooth alone, bus, **no BlueZ** | 4168 | 2412 | **0** | 8 |
+| bluetooth alone, bus, BlueZ idle (adapter on, one device connected) | 4388 | 2541 | **0** | 8 |
+| bluetooth and clock, bus, BlueZ idle | 4392 | 2545 | 2 (the clock's) | 9 |
+
+How to read it. **Zero wakeups** with no bus, with a bus and no BlueZ,
+and with an idle BlueZ showing `Headset 72%` throughout: nothing in the
+module's idle state wakes the bar, and the only wakeups in the rows with
+a clock are the clock's two a minute. One thread throughout. Placing the
+module costs the font every module needs (3880 to 4160 kB, with the
+clock's 4312 for comparison). The connected device shown costs about 220
+kB RSS over a bus with no BlueZ (4168 to 4388 kB: its name's glyphs
+rasterized and cached, and the draw). With the feature built but not
+placed RSS is +16 kB over `main` with no module placed (3896 against
+3880; the feature-off build is +8) and +4 kB with the clock (4316 against
+4312): within what one run resolves.
+
+**A runaway BlueZ.** One stub signalling `Connected` 10,000 times as fast
+as its loop runs (`flood`, in the PR): about 2,000 bar wakeups, 0.03
+CPU-seconds, RSS flat at 4416 kB, then silence; the final state is
+correct. The unit test pins the draw side (at most two draws for 400
+alternating flips in milliseconds). Work per wake is bounded (4 pumps of
+64 events), a read of an object is at most one in flight and 20 a second,
+and the cost is BlueZ's to pay in its own signals.
+
+**Binary** (aarch64, stripped), measured with `readelf` because the file
+size alone is quantized to 64 KiB steps:
+
+| Build | file bytes | `.text` | `.text`+`.rodata`+`.eh_frame*`+`.gcc_except_table`+`.data*` |
+|---|---|---|---|
+| `main` (`6d19daafd`) | 1,970,912 | 1,520,328 | 1,860,499 |
+| branch, default minus `bluetooth` | 1,970,912 (+0) | 1,523,176 (+2,848) | 1,863,531 (+3,032) |
+| branch, default (bluetooth on) | 2,036,448 (+65,536) | 1,581,576 (+58,400) | 1,929,755 (+66,224) |
+
+The bluetooth module costs about 57 KB of `.text` and 65 KB of loaded
+sections over the feature off (the BlueZ readers, the link and the
+module); the feature built but off costs 3.0 KB of loaded sections
+(edits outside the module that a bluetooth-off build still carries: the
+config and help text), which does not cross a 64 KiB boundary on disk
+here. `ldd` still shows only libc, libm and libgcc_s, and `Cargo.lock`
+is byte-identical to `main`'s.
+
+**Which rows of the rules regress.** Rule 1 (no row regresses against the
+previous milestone beyond noise, except a row the new module adds): the
+stripped binary size row regresses by 65,536 B on disk (+3.3%, 66,224 B
+or +3.6% of loaded sections). Idle wakeups, jiffies, fds and threads do
+not regress in any row, with the module placed or not, and idle RSS and
+PSS are within what one run resolves. The size row is the same shape as
+every module before it, and the rule's own exception covers only a row
+the module adds, so it is a regression for the maintainer to waive or
+not. **No waiver is claimed here.**
+
+**Not measured**, and the rows above do not claim them: rule 2 for the
+bluetooth module (Waybar's bluetooth module beside scootbar's at the same
+scope; yambar has none), the Asahi M2 and real hardware (this lane had
+the dev VM only; a real adapter and headset need a human at the Asahi
+box: filed as [bluetooth-real-hardware](../backlog/bluetooth-real-hardware.md)),
+the full `scripts/scootbar-bench` rows (startup, switching CPU), the
+soak, and a real BlueZ (the peer is scripted; its fixtures are
+marshalled by the module's own builders, and busctl verified them
+independently).
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

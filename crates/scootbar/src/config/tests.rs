@@ -208,7 +208,7 @@ fn bad_values_name_their_key() {
         ("[colors]\nbackground = \"red\"\n", "colors.background"),
         ("[colors]\nhover = \"blue\"\n", "colors.hover"),
         ("[colors]\nurgent = \"#12345\"\n", "colors.urgent"),
-        ("left = [\"bluetooth\"]\n", "left"),
+        ("left = [\"wifi\"]\n", "left"),
     ];
     for (text, key) in cases {
         let error = read(text).unwrap_err().to_string();
@@ -880,4 +880,61 @@ fn a_media_section_is_refused_loudly() {
 fn a_media_section_without_the_feature_is_refused() {
     let error = read("[media]\nplayer = \"mpv\"\n").unwrap_err().to_string();
     assert!(error.contains("player"), "{error}");
+}
+
+#[test]
+#[cfg(feature = "bluetooth")]
+fn a_bluetooth_section_is_read_whole() {
+    let modules = read("").unwrap().modules.bluetooth;
+    assert_eq!(modules, crate::modules::bluetooth::Settings::default());
+    assert!(modules.menu_command.is_empty());
+    let config = read(
+        "left = [\"bluetooth\"]\n\
+         [bluetooth]\n\
+         menu-command = [\"fuzzel\", \"--dmenu\"]\n\
+         on-click = \"toggle\"\n\
+         on-right-click = \"menu\"\n",
+    )
+    .unwrap();
+    assert!(config.layout.left.contains(&"bluetooth"));
+    assert_eq!(config.modules.bluetooth.menu_command, ["fuzzel", "--dmenu"]);
+    assert!(!config.modules.bindings_of("bluetooth").is_empty());
+}
+
+#[test]
+#[cfg(feature = "bluetooth")]
+fn a_bluetooth_section_is_refused_loudly() {
+    for (text, key) in [
+        (
+            "[bluetooth]\nmenu-command = [\"\"]\n",
+            "bluetooth.menu-command",
+        ),
+        ("[bluetooth]\nwhatever = 1\n", "whatever"),
+        // The actions take no number, and there is no `pair`.
+        (
+            "[bluetooth]\non-click = \"toggle 2\"\n",
+            "bluetooth.on-click",
+        ),
+        ("[bluetooth]\non-click = \"pair\"\n", "bluetooth.on-click"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+    // Type errors come from the TOML layer and name the key without its
+    // section.
+    let error = read("[bluetooth]\nmenu-command = \"fuzzel\"\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("menu-command"), "{error}");
+}
+
+/// Without the feature the section is a loud error naming the key, as the
+/// missing flag would be.
+#[test]
+#[cfg(not(feature = "bluetooth"))]
+fn a_bluetooth_section_without_the_feature_is_refused() {
+    let error = read("[bluetooth]\nmenu-command = [\"fuzzel\"]\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("menu-command"), "{error}");
 }

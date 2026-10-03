@@ -328,6 +328,9 @@ struct File {
     /// The media module's options. Without the `media` feature there are
     /// none, and any key is a loud error naming it.
     media: MediaFile,
+    /// The bluetooth module's options. Without the `bluetooth` feature
+    /// there are none, and any key is a loud error naming it.
+    bluetooth: BluetoothFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -995,6 +998,13 @@ impl File {
                 margins.push((crate::modules::media::ID, margin));
             }
         }
+        #[cfg(feature = "bluetooth")]
+        if let Some(margin) = self.bluetooth.margin {
+            let margin = gap(path, "bluetooth.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::bluetooth::ID, margin));
+            }
+        }
         let layout = self.layout(
             path,
             Gaps {
@@ -1302,6 +1312,15 @@ impl File {
         #[cfg(feature = "media")]
         {
             apply_media(path, &self.media, &mut modules.media, &mut modules.bindings)?;
+        }
+        #[cfg(feature = "bluetooth")]
+        {
+            apply_bluetooth(
+                path,
+                &self.bluetooth,
+                &mut modules.bluetooth,
+                &mut modules.bindings,
+            )?;
         }
         Ok(Config {
             bar: Bar {
@@ -1873,6 +1892,89 @@ fn apply_media(
         bindings.push((crate::modules::media::ID, read));
     }
     Ok(())
+}
+
+#[cfg(feature = "bluetooth")]
+const BLUETOOTH_KEYS: [&str; 5] = [
+    "bluetooth.on-click",
+    "bluetooth.on-right-click",
+    "bluetooth.on-middle-click",
+    "bluetooth.on-scroll-up",
+    "bluetooth.on-scroll-down",
+];
+
+/// The `[bluetooth]` table: `menu-command` and the interaction keys,
+/// into the module's settings.
+#[cfg(feature = "bluetooth")]
+fn apply_bluetooth(
+    path: &Path,
+    table: &BluetoothFile,
+    settings: &mut crate::modules::bluetooth::Settings,
+    bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
+) -> Result<(), Error> {
+    if let Some(command) = table.menu_command.as_deref() {
+        if command.iter().any(String::is_empty) {
+            return Err(value(
+                path,
+                "bluetooth.menu-command",
+                format_args!("takes no empty argument, not `{command:?}`"),
+            ));
+        }
+        settings.menu_command = command.to_owned();
+    }
+    let read = bindings::read(
+        crate::modules::bluetooth::ID,
+        [
+            table.on_click.as_ref(),
+            table.on_right_click.as_ref(),
+            table.on_middle_click.as_ref(),
+            table.on_scroll_up.as_ref(),
+            table.on_scroll_down.as_ref(),
+        ],
+    )
+    .map_err(|(trigger, message)| {
+        value(
+            path,
+            BLUETOOTH_KEYS[trigger as usize],
+            format_args!("{message}"),
+        )
+    })?;
+    if !read.is_empty() {
+        bindings.push((crate::modules::bluetooth::ID, read));
+    }
+    Ok(())
+}
+
+/// The bluetooth module's options. Without the `bluetooth` feature there
+/// are none, and any key is a loud error naming it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct BluetoothFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "bluetooth")]
+    margin: Option<u32>,
+    /// The picker: spawned with the device list on stdin when the
+    /// module's `menu` action runs.
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "menu-command")]
+    menu_command: Option<Vec<String>>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
 }
 
 /// The layout's spacings, validated: what [`File::layout`] adds to the

@@ -1,12 +1,13 @@
-//! The shared D-Bus client: the session (and later system) bus over one
-//! multiplexed connection, on a poll-loop fd.
+//! The shared D-Bus client: the session and system buses over one
+//! multiplexed connection each, on a poll-loop fd.
 //!
 //! The spike's verdict (`docs/scootbar/spikes/dbus-client.md`): a
 //! hand-rolled minimal client wins on every measured row (332,456 B,
 //! zero dependencies, 1 thread) and is the only option fitting the bar's
 //! doctrine (one single-threaded `poll(2)` loop, no async runtime, no C
 //! library). Its first consumer is the tray and its second the media
-//! module (MPRIS); notifications and BlueZ come later. Each consumer holds
+//! module (MPRIS), both on the session bus; its third is the bluetooth
+//! module (BlueZ) on the system bus. Each consumer holds
 //! its own connection so far (a second fd, no shared state between
 //! modules): the one shared connection the spike imagined (pending calls by
 //! serial, consumer callbacks by match rule, `NameOwnerChanged` tracked
@@ -23,8 +24,12 @@
 // one of them has the other's readers unused.
 #![cfg_attr(not(all(feature = "tray", feature = "media")), allow(dead_code))]
 
+/// The bluetooth module's BlueZ shapes, over [`proto`]. Compiled in
+/// tests whatever the features, as the fuzz check reads them.
+#[cfg(any(feature = "bluetooth", test))]
+pub mod bluez;
 pub mod conn;
-#[cfg(feature = "media")]
+#[cfg(any(feature = "media", feature = "bluetooth"))]
 pub mod link;
 /// The media module's MPRIS shapes, over [`proto`]. Compiled in tests
 /// whatever the features, as the fuzz check reads them.

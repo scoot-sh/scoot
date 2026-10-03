@@ -5,7 +5,7 @@
 
 use std::ffi::OsStr;
 
-use super::conn::bus_path_for;
+use super::conn::{bus_path_for, system_bus_path_for};
 use super::proto::{
     Kind, Message, Writer, check_body_signature, check_interface, check_member, check_name,
     check_path, check_signature, frame_at,
@@ -47,6 +47,34 @@ fn the_bus_address_names_a_path_or_is_refused() {
         let path = bus_path_for(address).unwrap();
         assert!(path.ends_with("bus"), "{}", path.display());
         assert!(path.is_absolute());
+    }
+}
+
+#[test]
+fn the_system_bus_address_names_a_path_or_falls_back() {
+    use super::conn::SYSTEM_BUS_PATH;
+    use std::path::PathBuf;
+    let path = |text| system_bus_path_for(Some(OsStr::new(text)));
+    assert_eq!(
+        path("unix:path=/run/dbus/system_bus_socket"),
+        PathBuf::from(SYSTEM_BUS_PATH)
+    );
+    assert_eq!(path("unix:path=/sock,guid=abc"), PathBuf::from("/sock"));
+    // Escapes decoded, as on the session bus.
+    assert_eq!(path("unix:path=/tmp/a%20b"), PathBuf::from("/tmp/a b"));
+    // Set but with no path: the socket, not a refusal (the system bus has
+    // a fixed place).
+    for address in [
+        "unix:abstract=/tmp/dbus-XXXX,guid=abc",
+        "tcp:host=localhost,port=1",
+        "unix:path=",
+        "garbage",
+    ] {
+        assert_eq!(path(address), PathBuf::from(SYSTEM_BUS_PATH), "{address}");
+    }
+    // Not set, or empty: the socket.
+    for address in [None, Some(OsStr::new(""))] {
+        assert_eq!(system_bus_path_for(address), PathBuf::from(SYSTEM_BUS_PATH));
     }
 }
 

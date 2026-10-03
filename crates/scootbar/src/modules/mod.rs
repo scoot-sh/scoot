@@ -83,6 +83,8 @@ use crate::theme::Theme;
 
 #[cfg(feature = "battery")]
 pub mod battery;
+#[cfg(feature = "bluetooth")]
+pub mod bluetooth;
 #[cfg(feature = "brightness")]
 pub mod brightness;
 #[cfg(feature = "button")]
@@ -505,6 +507,18 @@ pub const REGISTRY: &[Spec] = &[
         #[cfg(test)]
         stand_in: Some(media::stand_in),
     },
+    #[cfg(feature = "bluetooth")]
+    Spec {
+        id: bluetooth::ID,
+        init: bluetooth::init,
+        actions: bluetooth::ACTIONS,
+        // Available on any machine the tests run on (without a system
+        // bus it waits on the socket's directory with an empty view),
+        // and the stand-in starts the same module on a scripted bus, so
+        // the contract drives the connected path everywhere.
+        #[cfg(test)]
+        stand_in: Some(bluetooth::stand_in),
+    },
     #[cfg(feature = "tray")]
     Spec {
         id: tray::ID,
@@ -622,6 +636,8 @@ pub fn start(
 pub struct Settings {
     #[cfg(feature = "battery")]
     pub battery: battery::Settings,
+    #[cfg(feature = "bluetooth")]
+    pub bluetooth: bluetooth::Settings,
     #[cfg(feature = "clock")]
     pub clock: clock::Settings,
     #[cfg(feature = "window-title")]

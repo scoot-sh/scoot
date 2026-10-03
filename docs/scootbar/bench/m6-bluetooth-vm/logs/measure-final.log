@@ -1,0 +1,52 @@
+=== rows 1-8 from runall ===
+=== main, no module placed
+t0 rss_kb=3880 hwm_kb=3880 pss_kb=2325 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3880 hwm_kb=3880 pss_kb=2325 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+binary_bytes=1970912
+=== branch (bluetooth built), no module placed
+t0 rss_kb=3896 hwm_kb=3896 pss_kb=2329 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3896 hwm_kb=3896 pss_kb=2329 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+binary_bytes=2036448
+=== branch, bluetooth feature off, no module placed
+t0 rss_kb=3888 hwm_kb=3888 pss_kb=2321 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3888 hwm_kb=3888 pss_kb=2314 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+binary_bytes=1970912
+=== main, clock
+t0 rss_kb=4132 hwm_kb=4132 pss_kb=2438 threads=1 fds=8 vol=5 nonvol=1 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4312 hwm_kb=4312 pss_kb=2534 threads=1 fds=8 vol=7 nonvol=1 utime_ticks=0 stime_ticks=0
+binary_bytes=1970912
+=== branch, bluetooth feature off, clock
+t0 rss_kb=4136 hwm_kb=4136 pss_kb=2446 threads=1 fds=8 vol=7 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4312 hwm_kb=4312 pss_kb=2534 threads=1 fds=8 vol=9 nonvol=0 utime_ticks=0 stime_ticks=0
+binary_bytes=1970912
+=== branch, bluetooth built and not placed, clock
+t0 rss_kb=4140 hwm_kb=4140 pss_kb=2446 threads=1 fds=8 vol=7 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4316 hwm_kb=4316 pss_kb=2525 threads=1 fds=8 vol=9 nonvol=0 utime_ticks=0 stime_ticks=0
+binary_bytes=2036448
+=== bluetooth alone, no bus
+t0 rss_kb=4160 hwm_kb=4160 pss_kb=2395 threads=1 fds=8 vol=5 nonvol=2 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4160 hwm_kb=4160 pss_kb=2409 threads=1 fds=8 vol=5 nonvol=2 utime_ticks=0 stime_ticks=0
+binary_bytes=2036448
+=== bluetooth alone, bus, no BlueZ
+t0 rss_kb=4168 hwm_kb=4168 pss_kb=2416 threads=1 fds=8 vol=10 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4168 hwm_kb=4168 pss_kb=2412 threads=1 fds=8 vol=10 nonvol=0 utime_ticks=0 stime_ticks=0
+binary_bytes=2036448
+=== rerun b-bluez2 ===
+t0 rss_kb=4388 hwm_kb=4388 pss_kb=2541 threads=1 fds=8 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4388 hwm_kb=4388 pss_kb=2541 threads=1 fds=8 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
+query: {"type":"modules","modules":[{"id":"bluetooth","section":"left","output":"headless","text":"Headset 72%","class":"normal","tooltip":"Bluetooth: Headset 72%","value":{"adapters":1,"battery":72,"connected":1,"device":"Headset","powered":true,"state":"connected"}}]}
+
+=== rerun b-clock2 ===
+t0 rss_kb=4392 hwm_kb=4392 pss_kb=2545 threads=1 fds=9 vol=14 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4392 hwm_kb=4392 pss_kb=2545 threads=1 fds=9 vol=16 nonvol=0 utime_ticks=0 stime_ticks=0
+query: {"type":"modules","modules":[{"id":"bluetooth","section":"left","output":"headless","text":"Headset 72%","class":"normal","tooltip":"Bluetooth: Headset 72%","value":{"adapters":1,"battery":72,"connected":1,"device":"Headset","powered":true,"state":"connected"}},{"id":"clock","section":"right","output":"headless","text":"6:41 am","class":"normal"}]}
+
+=== rerun b-flood2 ===
+t0 rss_kb=4416 hwm_kb=4416 pss_kb=2569 threads=1 fds=8 vol=2082 nonvol=8 utime_ticks=1 stime_ticks=2
+t60 rss_kb=4416 hwm_kb=4416 pss_kb=2569 threads=1 fds=8 vol=2082 nonvol=8 utime_ticks=1 stime_ticks=2
+query: {"type":"modules","modules":[{"id":"bluetooth","section":"left","output":"headless","text":"Headset 72%","class":"normal","tooltip":"Bluetooth: Headset 72%","value":{"adapters":1,"battery":72,"connected":1,"device":"Headset","powered":true,"state":"connected"}}]}
+
+=== binaries ===
+/tmp/bt-bins/scootbar-main 1970912
+/tmp/bt-bins/scootbar-off 1970912
+/tmp/bt-bins/scootbar-on 2036448

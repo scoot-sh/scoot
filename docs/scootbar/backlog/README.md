@@ -125,6 +125,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Popups](resolved/popups-done.md) (done), [Tooltips](resolved/tooltips-done.md) (done), [A native WiFi list popup](popup-network-list.md) (low)
 - [Media (MPRIS)](resolved/media-module-done.md) (low): now playing and play/pause, next, previous over MPRIS — RESOLVED 2026-10-03
 - [Bluetooth](bluetooth-module.md) (low)
+- [Bluetooth: real adapter and headset validation](bluetooth-real-hardware.md) (medium): what the VM cannot prove — real power toggles, Battery1 pacing, real `GetManagedObjects` scale, Waybar beside it
 - [Move the tray onto `dbus::link`](tray-onto-dbus-link.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)

@@ -165,6 +165,10 @@ player = "spotify"    # the player to prefer when several run; absent is the one
 max-width = 320       # the most logical pixels wide the module's span may be, 1 to 4096
 margin = 0            # as the clock's
 
+[bluetooth]
+menu-command = ["fuzzel", "--dmenu"]   # the device picker, fed the device list on stdin
+margin = 0            # as the clock's
+
 [button.launcher]     # modules the file defines, placed by name in the lists above
 icon = "\U000f0e65"
 on-click = { exec = ["scootlaunch"] }
@@ -258,7 +262,10 @@ there is no battery; the network module:
 "interface": "wlan0", "vpn": false}`, `"ethernet"` and `"vpn"` with the
 interface, or `{"state": "disconnected"}`; the brightness module:
 `{"percent": 49, "device": "apple-panel-bl"}`, absent where there is no
-backlight).
+backlight; the bluetooth module: `{"state": "connected", "adapters": 1,
+"powered": true, "connected": 1, "device": "Headset", "battery": 72}`
+(`state` is `off`, `on` or `connected`; `battery` only when BlueZ reports
+one), absent where there is no adapter).
 This is the agent hook: the
 bar read as data instead of OCR. `query ID` lists only that module (an id that
 is not placed is an error naming the ones that are). The reply is bounded
@@ -368,6 +375,7 @@ cannot:
 | `brightness` | The panel backlight's level ([below](#brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
 | `tray` | The applications' tray icons, StatusNotifierItem ([below](#tray)) | on the session bus's traffic: item registrations, icon changes, owners vanishing |
 | `media` | What the players on the session bus are playing, and their controls, over MPRIS ([below](#media)) | on the bus's MPRIS traffic only: a player appearing or vanishing, its track or state changing |
+| `bluetooth` | The adapter's power and the connected devices over BlueZ, on the system bus ([below](#bluetooth)) | on the bus's BlueZ traffic only: BlueZ appearing or leaving, an adapter or device coming or going, power, connection, name or charge changing |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -1019,6 +1027,120 @@ Cargo feature (`media`), on by default; the smallest build
   maintainer waived this row on 2026-10-03 (this row only) and `media`
   stays in `default`. The table and its method are in the
   [resource ratchet](backlog/lightest.md#m6-media-module-level-cost-measured-2026-10-03).
+
+## Bluetooth
+
+The adapter's power and the connected devices, spoken over BlueZ
+(`org.bluez`) on the **system bus** through the bar's own D-Bus client
+(see [Tray](#tray)): no `zbus`, no libdbus, no thread, no polling. The
+system bus is `DBUS_SYSTEM_BUS_ADDRESS` when it names a filesystem path,
+else `/run/dbus/system_bus_socket` (`src/dbus/conn.rs`); the client
+authenticates the same `EXTERNAL` way on both. A Cargo feature
+(`bluetooth`), on by default; the smallest build (`--no-default-features`)
+has none of it.
+
+- **What it shows** is the first connected device's name in path order
+  (with its charge when BlueZ reports one: `Headset 72%`), `on` while an
+  adapter is powered with nothing connected, and `off`, in the `muted`
+  class, while every adapter is off. Adapter power dominates a device that
+  still claims to be connected (its disconnect is on its way). With no
+  adapter, or no BlueZ at all, the module shows nothing and takes no
+  space. The tooltip lists every connected device with its charge.
+- **Which device.** Several may be connected; the one shown is the first
+  in path order, so the choice is the same every run. The toggle goes to
+  the first adapter in path order.
+- **A click toggles the first adapter's power, with no binding at all**:
+  one `Set` of `Adapter1.Powered` that wants no reply (the state changes
+  on the bar when BlueZ says so, as a signal); nothing happens with no
+  adapter. The module's actions are `toggle` and `menu`, neither taking a
+  number (`scootbar msg invoke bluetooth toggle`).   `menu` opens the
+  picker, a dmenu-style command fed the device list (see below); it is
+  refused naming why with no command configured, no system bus, no
+  adapter, or no devices seen yet.
+- **Picking a device** is `bluetooth.menu-command`, spawned with the
+  device list on stdin (one per line, a connected device marked
+  `(connected)`), a dmenu-style launcher fed from the held set, e.g.
+  `menu-command = ["sh", "-c", "fuzzel --dmenu | ..."]`. Connecting is the
+  command's own business; the bar never reads the choice back. The picker
+  is the interim path, as the network module's is: a native list waits for
+  the popups to grow one (see the network module's entry).
+- **`query`** reports `{"state": "connected", "adapters": 1, "powered":
+  true, "connected": 1, "device": "Headset", "battery": 72}` (`state` is
+  `off`, `on` or `connected`; `device` is the device shown; `battery`
+  only when BlueZ reports one), and nothing while there is no adapter.
+- **Options.** `[bluetooth]` takes `menu-command` (no empty argument),
+  `margin` and the five [interaction keys](#pointer-input). The charge is
+  shown only when BlueZ reports it (`Battery1`); it is never polled.
+- **A run of changes is drawn ten times a second at most**, as the media
+  module's: the first change after a quiet spell is drawn in the turn it
+  arrives, the rest wait for one 100 ms timer; the module appearing (a
+  first adapter) or emptying (the last one gone, BlueZ leaving, the bus
+  lost) is never held.
+- **Idle cost: nothing.** The bus does the filtering: the bar asks for
+  `NameOwnerChanged` of exactly `org.bluez` and for the object-manager
+  and `PropertiesChanged` signals under `/org/bluez`, so anything else on
+  the system bus never wakes the bar (tested against a real
+  `dbus-daemon`). A power or connection change is one signal carrying the
+  value (no round trip); an object whose signal only invalidates a shown
+  property is read once (`GetAll`), no oftener than every 50 ms. With no
+  system bus the module waits on the socket's directory (one inotify
+  watch); a bus that goes away drops everything at once and dials once
+  more, and one that keeps dropping the bar is left alone for 30 seconds
+  (the [tray's](#tray) rules, in `src/dbus/link.rs`).
+- **Bounds, for a hostile or missing BlueZ.** Anything on the system bus
+  can own `org.bluez` when BlueZ itself is absent and say anything. What
+  the code guarantees: it cannot crash or hang the bar or grow it without
+  bound; only the bus's own `NameOwnerChanged` is believed, every other
+  signal only from the tracked owner of `org.bluez` (checked per signal),
+  and only for a held path (a signal for an unknown path re-reads the set
+  once on a 50 ms timer instead of trusting it). (One inherited gap: the
+  D-Bus client matches a method reply by serial alone, so a forged
+  `GetNameOwner` or `GetAll` reply could re-point or set held state if the
+  bus delivers unsolicited replies; untested whether `dbus-daemon` does,
+  tracked in `tray-review-hardening.md`.) A hostile peer costs the bar the
+  work of its own signals and no more (connect/disconnect storms are drawn
+  ten times a second at most); it holds at most one of 8 adapter slots or
+  64 device slots, and a newcomer to a full room is ignored, said once.
+  What it *can* still do is cost visibility, boundedly: full tables hide a
+  later object until a slot frees. Names (`Name`, else `Alias`, else the
+  path's last element) are cleaned (controls stripped) and cut to 120 bytes
+  where they are stored. A `GetManagedObjects` answer past 1 MiB is skipped
+  whole and the module keeps showing its last state: one retry on the
+  coalesce timer, then it reads again at the next signal (never asking at
+  once for the same oversized answer in a loop); an answer that does not
+  parse is dropped whole; a read that
+  errors leaves the last state and is read again at the next signal; one
+  that never answers is forgotten after 30 seconds when its slot is
+  wanted; a property of the wrong type is skipped alone; dictionaries past
+  128 entries, interfaces past 32 of one object, and overlong name lists
+  are refused. The parser (`src/dbus/bluez.rs`, `std` only) is fuzzed with
+  the D-Bus client's (`crates/scootbar/fuzz`, target `dbus`), and the
+  module is exercised against a scripted bus and a fake BlueZ on a real
+  `dbus-daemon`.
+- **Cost.** One fd (the bus socket, with `OUT` only while a write or a
+  staged message waits), or one inotify fd while there is no bus, and a
+  one-shot timer only while an object waits out its 50 ms floor between
+  reads, while a set re-read waits out its own, or while a change of text
+  waits out its 100 ms between draws, or (30 s) after the bus kept
+  dropping the bar; a pidfd only while the picker runs.
+  Measured (dev VM, one 60 s idle window per row): **zero wakeups** with no
+  bus, with a bus and no BlueZ, and with an idle BlueZ (adapter on, one
+  device connected, no traffic: the bar shows `Headset 72%` throughout);
+  one thread throughout; RSS 4168 kB with a bus and no BlueZ, 4388 kB with
+  the idle BlueZ (placing the module costs the font every module needs:
+  3880 kB with no module placed, 4312 kB with the clock). A burst of
+  10,000 connection signals in under a second (an independent raw-socket
+  peer, `bench/m6-bluetooth-vm/scripts/bluez.pl`) costs about 2,000
+  wakeups and 0.03 CPU-seconds, RSS flat, and then silence: the draws are
+  held at ten a second and identical signals draw nothing (the unit test
+  pins at most two draws for 400 alternating flips). The binary:
+  **+65,536 B on disk (1,970,912 to 2,036,448, +3.3%) and +66,224 B of
+  loaded sections (+3.6%, of which `.text` +58,400 B)** against `main`;
+  the feature built but off is +3,032 B loaded and no more on disk. The
+  size row is the same shape as every module before it, and the rule's own
+  exception covers only a row the module adds, so it is a regression for
+  the maintainer to waive or not. The table and its method are in the
+  [resource ratchet](backlog/lightest.md#m6-bluetooth-module-level-cost-measured-2026-10-03).
 
 
 ## Pointer input
