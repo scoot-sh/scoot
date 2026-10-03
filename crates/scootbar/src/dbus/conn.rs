@@ -273,16 +273,42 @@ struct Pending {
     sent: Instant,
 }
 
+/// What an over-cap reply (header only) answers: the unknown case is
+/// silent where the unreadable-fields case still drops unknown (see
+/// [`Conn::unknown_reply`]) — there the serial cannot even be read,
+/// while here it was read and matches nothing waiting.
+#[derive(Debug, PartialEq, Eq)]
+enum Oversize {
+    /// The call it answers, leaving the pending table.
+    Matched(u64),
+    /// Its serial matches a pending call, but its sender is not the
+    /// callee: refused like a normal-size forgery (warned once, flight
+    /// kept), never a mass release of everything waiting.
+    Refused,
+    /// It answers nothing waiting (not a reply, no serial, or a serial
+    /// matching no pending call): silent.
+    Unknown,
+}
+
 /// Whether a reply from `sender` may answer the call made of `callee`:
 /// the bus answers its own calls, a unique name answers calls made of
 /// it, and anything may answer a call made of a well-known name (who
-/// holds it now is the bus's business, not this client's). No sender
-/// header at all (a scripted peer; never a daemon, which always sets
-/// one) is nothing to check against.
+/// holds it now is the bus's business, not this client's). The bus's own
+/// name is accepted for any callee: a unique-name owner that disconnects
+/// mid-call is answered by the daemon itself (measured 2026-10-03 on
+/// dbus-daemon 1.16.2: an `Error.NoReply` from `org.freedesktop.DBus`),
+/// and a peer cannot send as the bus — the daemon stamps `sender` itself
+/// (measured the same day: a hand-framed reply claiming the bus's name
+/// arrived stamped with the forger's unique name, and was refused). No
+/// sender header at all (a scripted peer; never a daemon, which always
+/// sets one) is nothing to check against.
 fn sender_matches(callee: &str, sender: Option<&str>) -> bool {
     let Some(sender) = sender else {
         return true;
     };
+    if sender == BUS_NAME {
+        return true;
+    }
     if callee == BUS_NAME {
         return sender == BUS_NAME;
     }
@@ -597,8 +623,16 @@ impl Conn {
                 }
                 let dropped = if known {
                     match Self::oversize_reply(&mut self.pending, &rest[..prefix]) {
-                        Some(token) => Some(token),
-                        None => Self::unknown_reply(&self.pending, rest[1]),
+                        Oversize::Matched(token) => Some(token),
+                        // A forged over-cap reply is refused like a
+                        // normal-size one (warned once, flight kept), never
+                        // a mass release of everything waiting.
+                        Oversize::Refused => {
+                            self.refuse_forged();
+                            None
+                        }
+                        // It answers nothing waiting: silent.
+                        Oversize::Unknown => None,
                     }
                 } else {
                     Self::unknown_reply(&self.pending, rest[1])
@@ -656,22 +690,44 @@ impl Conn {
         }
     }
 
-    /// The token of the call an over-cap reply (header only) answers, and
-    /// the call leaves the pending table. A reply from anyone but the
-    /// callee answers nothing (see [`Conn::dispatch`]).
-    fn oversize_reply(pending: &mut Vec<Pending>, prefix: &[u8]) -> Option<u64> {
-        let message = Message::parse_header(prefix).ok()?;
+    /// What an over-cap reply (header only) answers: the call's token,
+    /// leaving the pending table, when its serial matches a pending call
+    /// from its sender; [`Oversize::Refused`] when the serial matches but
+    /// the sender is not the callee; [`Oversize::Unknown`] when it answers
+    /// nothing waiting.
+    fn oversize_reply(pending: &mut Vec<Pending>, prefix: &[u8]) -> Oversize {
+        let message = match Message::parse_header(prefix) {
+            Ok(message) => message,
+            Err(_) => return Oversize::Unknown,
+        };
         if !matches!(message.kind, Kind::MethodReturn | Kind::Error) {
-            return None;
+            return Oversize::Unknown;
         }
-        let reply_to = message.reply_serial?;
-        let at = pending
+        let Some(reply_to) = message.reply_serial else {
+            return Oversize::Unknown;
+        };
+        let Some(at) = pending
             .iter()
-            .position(|waiting| waiting.serial == reply_to)?;
+            .position(|waiting| waiting.serial == reply_to)
+        else {
+            return Oversize::Unknown;
+        };
         if !sender_matches(&pending[at].callee, message.sender) {
-            return None;
+            return Oversize::Refused;
         }
-        Some(pending.remove(at).token)
+        Oversize::Matched(pending.remove(at).token)
+    }
+
+    /// Refuses a reply from anyone but the callee (dbus-daemon delivers an
+    /// unsolicited one to the destination; dbus-broker does not): warned
+    /// once, and the flight stays for the real answer.
+    fn refuse_forged(&mut self) {
+        if !self.said_forged {
+            self.said_forged = true;
+            crate::print::warn(format_args!(
+                "scootbar: dbus: refusing a reply from a peer that was not called"
+            ));
+        }
     }
 
     /// Writes the outbox until it is empty or the socket would block. A
@@ -768,12 +824,7 @@ impl Conn {
                     // delivers an unsolicited one to the destination;
                     // dbus-broker does not): refused, and the flight stays
                     // for the real answer.
-                    if !self.said_forged {
-                        self.said_forged = true;
-                        crate::print::warn(format_args!(
-                            "scootbar: dbus: refusing a reply from a peer that was not called"
-                        ));
-                    }
+                    self.refuse_forged();
                     return None;
                 }
                 let token = self.pending.remove(at).token;

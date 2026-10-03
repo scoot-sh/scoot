@@ -617,13 +617,18 @@ fn an_over_cap_reply_past_the_fields_read_is_an_unknown_drop() {
 }
 
 /// A big-endian over-cap header is read big-endian: the fields length is
-/// not garbage, the skip is by the real prefix, and the reply the fields
-/// would name (which the little-endian-only parser cannot) is an unknown
-/// drop, not a stuck flight.
+/// not garbage and the skip is by the real prefix. The reply the fields
+/// would name (which the little-endian-only parser cannot match to a
+/// call) is skipped silently — like a normal-size big-endian message,
+/// which is framed but never parsed — and the flight stays for the real
+/// answer: not a stuck flight, and not a mass release either.
 #[test]
-fn a_big_endian_over_cap_reply_is_an_unknown_drop() {
+fn a_big_endian_over_cap_reply_is_skipped_silently_and_the_flight_stays() {
     let (mut conn, daemon) = connected();
     let first = conn.call("a.b", "/", "a.b", "Big", "", &[], 0, 7).unwrap();
+    let second = conn
+        .call("a.b", "/", "a.b", "Small", "", &[], 0, 8)
+        .unwrap();
     let _ = conn.pump();
     // A valid over-cap reply, then byte-swapped to big-endian: the flag
     // and every header word.
@@ -634,21 +639,25 @@ fn a_big_endian_over_cap_reply_is_an_unknown_drop() {
         bytes[word[0]..word[1]].reverse();
     }
     let fields = u32::from_be_bytes(bytes[12..16].try_into().unwrap()) as usize;
-    let prefix = 16 + fields + (8 - (16 + fields) % 8) % 8;
     // Small fields, read right: the skip is knowable, the sender is not.
     assert!(fields <= 64 * 1024, "{fields}");
-    // Joined first, so the pumps below are deterministic; a clone stays
-    // open, so the writer finishing is not an EOF.
-    let _held = daemon.try_clone().unwrap();
-    let sender = send_later(daemon, bytes[..prefix + 64 * 1024].to_vec());
-    sender.join().unwrap();
-    let mut events = Vec::new();
-    for _ in 0..5 {
-        events.extend(conn.pump().0);
+    bytes.extend(small_reply(101, second));
+    let sender = send_later(daemon, bytes);
+    // Silent, and the flight stayed: the only event is the real answer.
+    let (events, _) = pump_events(&mut conn, 1);
+    // The sender blocks until everything is read: drain past what the
+    // assertion needs before joining it (on old code the wait above ends
+    // at the drop, with most of the flood still unread).
+    let start = Instant::now();
+    while conn.discard_pending() > 0 {
+        assert!(start.elapsed() < Duration::from_secs(20), "never drained");
+        let _ = conn.pump();
     }
+    sender.join().unwrap();
     assert!(
-        matches!(events.as_slice(), [Event::Dropped { token }] if *token == conn::DROPPED_UNKNOWN),
-        "{events:?}"
+        matches!(&events[0], Event::Reply { token: 8, body, .. } if body.len() == 7),
+        "{:?}",
+        events[0]
     );
     assert!(!conn.dead());
 }
