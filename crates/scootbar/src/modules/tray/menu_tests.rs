@@ -745,6 +745,31 @@ fn menu_actions_refuse_loudly() {
 }
 
 #[test]
+fn a_menu_follows_its_item_across_a_name_change() {
+    let (mut harness, mut fake) = started();
+    until_shown(&mut harness, &mut fake);
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("menu", Some(0)), 1),
+        Ok(Update::Changed)
+    );
+    until_rows(&mut harness, &mut fake, &root_rows());
+    // The well-known name changes hands: the open menu follows the new
+    // owner (one re-read), and only the new owner's updates move it.
+    fake.send_name_owner_changed(SERVICE, OWNER, ":1.60");
+    drive(&mut harness, &mut fake, |harness| rows(harness).is_some());
+    turns(&mut harness, &mut fake, 3);
+    assert_eq!(fake.layout_count(SERVICE, MENU), 2);
+    fake.send_layout_updated(OWNER, MENU, 2);
+    turns(&mut harness, &mut fake, 2);
+    assert_eq!(fake.layout_count(SERVICE, MENU), 2);
+    fake.send_layout_updated(":1.60", MENU, 2);
+    drive(&mut harness, &mut fake, |harness| rows(harness).is_some());
+    turns(&mut harness, &mut fake, 3);
+    assert_eq!(fake.layout_count(SERVICE, MENU), 3);
+    until_rows(&mut harness, &mut fake, &root_rows());
+}
+
+#[test]
 fn an_item_vanishing_closes_its_menu() {
     let (mut harness, mut fake) = started();
     until_shown(&mut harness, &mut fake);
