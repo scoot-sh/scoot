@@ -1107,6 +1107,14 @@ jobs:
             echo "--- $module alone"
             cargo clippy -p scootbar --no-default-features --features "$module" --all-targets -- -D warnings
           done
+          # `popup` is not a module but a bar facility a module's content
+          # rides on, so it is also built with each module: with `clock`
+          # (which has none) it had dead code that "each alone" never saw.
+          for module in $SCOOTBAR_MODULES; do
+            [ "$module" = popup ] && continue
+            echo "--- popup and $module"
+            cargo clippy -p scootbar --no-default-features --features "popup,$module" --all-targets -- -D warnings
+          done
 
       # Both runners on the default build, for the reason the Linux job
       # gives. Then the unit tests of every other feature set: every module
