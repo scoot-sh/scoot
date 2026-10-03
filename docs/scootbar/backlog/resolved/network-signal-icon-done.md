@@ -81,6 +81,6 @@ clippy matrix clean (default, none, each module alone, popup+each,
 network+each, all-features); live on real `wlan0` (−55 dBm, level 4):
 `wsig-icon.png` (strength glyph + SSID), `wsig-ssid-only.png` (SSID alone),
 `wsig-popup.png` (glyph row, selected). Ratchet: release `.text`
-1,595,848 → 1,595,792 (−56 B), file size unchanged; idle RSS 5936 vs
+1,599,176 → 1,599,112 (−64 B), file size unchanged; idle RSS 5936 vs
 5872–5888 kB and wakeups ~10–16/20 s both before and after (same band:
 the 10 s signal timer plus the box's netlink chatter).
