@@ -22,6 +22,7 @@ use super::{
     MIN_REFRESH_GAP, PROTOCOL_VERSION, WATCHER_FDO, WATCHER_KDE, WATCHER_PATH,
 };
 use crate::dbus::conn::{self, Conn, Event};
+use crate::dbus::link::Session;
 use crate::dbus::proto::{self, Reader, Writer, check_name, check_path, request_reply};
 
 /// A live bus: the connection, the mode, the items in id order, and the
@@ -115,6 +116,16 @@ pub(super) fn split_announced(sender: &str, announced: &str) -> Result<(String, 
 pub(super) fn split_id(id: &str) -> Option<(&str, &str)> {
     let slash = id.find('/')?;
     Some((&id[..slash], &id[slash..]))
+}
+
+impl Session for Live {
+    fn conn(&self) -> &Conn {
+        &self.conn
+    }
+
+    fn conn_mut(&mut self) -> &mut Conn {
+        &mut self.conn
+    }
 }
 
 impl Live {

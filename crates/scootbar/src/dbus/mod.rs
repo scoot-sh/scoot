@@ -7,10 +7,10 @@
 //! doctrine (one single-threaded `poll(2)` loop, no async runtime, no C
 //! library). Its first consumer is the tray and its second the media
 //! module (MPRIS); notifications and BlueZ come later. Each consumer holds
-//! its own connection so far (a second fd, no shared state between
-//! modules): the one shared connection the spike imagined (pending calls by
-//! serial, consumer callbacks by match rule, `NameOwnerChanged` tracked
-//! centrally) is not built, and each consumer matches the signals it wants.
+//! its own connection (a second fd, no shared state between modules): one
+//! shared connection was considered and decided against (the spike records
+//! why: failure isolation, match rules that do not union, no measured
+//! pressure), and each consumer matches the signals it wants.
 //!
 //! [`proto`] is the wire (framing, marshalling, shape readers; `std`
 //! only, fuzzed); [`mpris`] is the media module's shape readers over it
@@ -24,7 +24,7 @@
 #![cfg_attr(not(all(feature = "tray", feature = "media")), allow(dead_code))]
 
 pub mod conn;
-#[cfg(feature = "media")]
+#[cfg(any(feature = "tray", feature = "media"))]
 pub mod link;
 /// The media module's MPRIS shapes, over [`proto`]. Compiled in tests
 /// whatever the features, as the fuzz check reads them.
