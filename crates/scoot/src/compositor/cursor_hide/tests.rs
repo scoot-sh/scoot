@@ -53,6 +53,20 @@ const WINDOW_BGRA: [u8; 4] = [0x20, 0x20, 0xE0, 0xFF];
 const CURSOR_AT: (i32, i32) = (101, 103);
 const CURSOR_BGRA: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
 
+/// What the fixture passes for `cursor_theme` so every pixel assertion below
+/// describes the compositor's own drawn arrow whatever the machine running
+/// the suite has installed.
+///
+/// A deliberately unresolvable name, not `None`: `None` means "follow
+/// `$XCURSOR_THEME`, then `default`", under which a host theme's arrow --
+/// transparent at the sampled pixel on e.g. Adwaita -- reads back the
+/// window behind it instead of white. The same pattern as
+/// `cursor::tests::NO_THEME`; the themed path is covered hermetically in
+/// `cursor/theme/tests.rs`. Passed by value (not via the process
+/// environment) so parallel `cargo test` threads cannot race on it, and the
+/// same under `nextest`.
+const NO_THEME: Option<&str> = Some("scoot-test-no-such-theme");
+
 /// Steps the test client performs.
 enum Step {
     /// Map a toplevel and draw `WINDOW_BGRA` at its configured size.
@@ -508,6 +522,7 @@ impl Fixture {
     fn hide_after() -> Self {
         let appearance = Appearance {
             cursor_hide_after_ms: TIMEOUT.as_millis() as u64,
+            cursor_theme: NO_THEME.map(str::to_owned),
             ..Appearance::default()
         };
         let mut fixture = Harness::headless(appearance, CANVAS);
@@ -804,7 +819,10 @@ fn unlocking_re_arms_over_a_cover() {
 
 #[test]
 fn a_zero_timeout_is_a_disabled_feature() {
-    let appearance = Appearance::default();
+    let appearance = Appearance {
+        cursor_theme: NO_THEME.map(str::to_owned),
+        ..Appearance::default()
+    };
     assert_eq!(appearance.cursor_hide_after_ms, 0, "off unless configured");
     let mut fixture = Harness::headless(appearance, CANVAS);
     fixture.state.frame_cursor_for_test = Some(true);
