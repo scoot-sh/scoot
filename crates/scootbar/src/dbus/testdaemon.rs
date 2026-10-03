@@ -47,22 +47,47 @@ impl Daemon {
             COUNT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).expect("a private directory for the daemon");
-        let child = Command::new("dbus-daemon")
-            .args(["--session", "--nofork", "--address"])
-            .arg(format!("unix:path={}", dir.join("bus").display()))
+        // Its own minimal config, not the installed `session.conf`: that
+        // one includes site files and service directories that differ
+        // between machines (a nix-provided daemon on an Ubuntu runner),
+        // and a test of the client should not depend on them.
+        let path = dir.join("bus");
+        let config = dir.join("bus.conf");
+        std::fs::write(
+            &config,
+            format!(
+                "<busconfig><type>session</type><auth>EXTERNAL</auth>\
+                 <listen>unix:path={}</listen>\
+                 <policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/>\
+                 <allow eavesdrop=\"true\"/><allow own=\"*\"/></policy></busconfig>",
+                path.display()
+            ),
+        )
+        .expect("a config for the daemon");
+        let log = std::fs::File::create(dir.join("daemon.log")).expect("a log for the daemon");
+        let mut child = Command::new("dbus-daemon")
+            .arg("--nofork")
+            .arg("--print-address=1")
+            .arg("--config-file")
+            .arg(&config)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(log)
             .spawn()
             .expect("dbus-daemon starts");
-        let daemon = Self { child, dir };
-        for _ in 0..500 {
-            if daemon.path().exists() {
-                return Some(daemon);
-            }
-            std::thread::sleep(Duration::from_millis(10));
+        // It prints its address once it listens; EOF first means it died,
+        // and its stderr says why.
+        let mut address = String::new();
+        let stdout = child.stdout.take().expect("piped");
+        let read = std::io::BufRead::read_line(&mut std::io::BufReader::new(stdout), &mut address);
+        if read.is_err() || address.is_empty() || !path.exists() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let why = std::fs::read_to_string(dir.join("daemon.log")).unwrap_or_default();
+            let _ = std::fs::remove_dir_all(&dir);
+            panic!("dbus-daemon never listened (printed {address:?}); its stderr: {why}");
         }
-        panic!("dbus-daemon never made its socket");
+        Some(Self { child, dir })
     }
 
     /// The bus socket.
