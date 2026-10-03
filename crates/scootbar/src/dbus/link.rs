@@ -255,7 +255,7 @@ impl<S: Session> Link<S> {
             .parent()
             .filter(|parent| parent.is_dir())
             .map(Path::to_path_buf)
-            .unwrap_or_else(conn::runtime_dir);
+            .unwrap_or_else(crate::control::paths::runtime_dir);
         let notify = rustix::fs::inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK)
             .ok()
             .and_then(|fd| {

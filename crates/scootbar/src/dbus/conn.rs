@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::proto::{self, Kind, Message, Writer, check_name, frame_at, frame_header};
+use crate::control::paths::runtime_dir;
 
 /// The most messages one [`Conn::pump`] reports: a storm is bounded
 /// reads and bounded work per call. The consumer re-pumps while capped,
@@ -137,20 +138,6 @@ fn unescape(value: &[u8]) -> Vec<u8> {
 /// The session bus's path from the environment.
 pub fn bus_path() -> Result<PathBuf, ()> {
     bus_path_for(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").as_deref())
-}
-
-/// The runtime directory, or its conventional fallback.
-pub fn runtime_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
-    PathBuf::from(format!("/run/user/{}", rustix_uid()))
-}
-
-fn rustix_uid() -> u32 {
-    rustix::process::getuid().as_raw()
 }
 
 /// Why the blocking set-up failed: `Refused` is the bus saying no (or

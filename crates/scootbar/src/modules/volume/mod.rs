@@ -54,7 +54,7 @@ use super::{
     ActionSpec, ArgKind, Init, Input, InvokeError, Module, OutputView, Sources, Update, View,
 };
 use crate::action::{ModuleAction, Trigger};
-use crate::dbus::conn::runtime_dir;
+use crate::control::paths::runtime_dir;
 use crate::icon::path::{Vector, ViewBox};
 use crate::icon::{Art, Icon};
 
