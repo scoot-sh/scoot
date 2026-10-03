@@ -1,10 +1,11 @@
 ---
 title: "System tray (StatusNotifierItem)"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M6"
+resolved: "2026-10-03"
 ---
 
 # System tray
@@ -52,7 +53,36 @@ wrong icon size at fractional scale (#1175). So:
 An item appears, clicks work, a crashed item disappears, and the module's
 memory and wakeups are measured and published.
 
-## Status (2026-10-02): the first version landed (PR #388), menus remain
+## Status (2026-10-03): menus landed, entry resolved (PR #405)
+
+Menus are built: `menu N` and a right click open the item's menu in a
+popup (an `ItemIsMenu` item opens on a left click instead of
+`Activate`); the DBusMenu client reads `GetLayout` (bounded depth and
+property list), sends `Event clicked` and `AboutToShow`, and honors the
+update signals, accepted only from the item's owner; a layout update
+while open re-fills the popup and the item vanishing closes it. Rows
+map to text and buttons (mnemonics stripped, toggles as text prefixes,
+separators as gaps, disabled rows as plain text, submenus drilling in
+place with a back row; icons in items not drawn). A hostile menu
+(huge, deep, malformed, flooding updates) loses only itself. An item
+with no menu falls back to `ContextMenu`. The reference is
+[`docs/scootbar/cli.md`](../cli.md#tray) (Menus, Bounds).
+
+Checked live (a private `dbus-daemon`, `scoot --headless`, a jeepney
+item serving a real menu): `menu 0` and a real right-click open it,
+`menu-drill`/`menu-back` walk a submenu, `menu-select` reaches the item
+as `Event clicked` and closes it, a `LayoutUpdated` re-fills a changed
+label, and a `kill -9`'d item closes everything. Screenshots in the
+implementer's report. Cost: `.text` +17,744 B (+0.9%, file bytes
+unchanged), idle tray with one menu item RSS 4,420 kB closed and
+4,592 kB open, zero wakeups either way — recorded for the maintainer,
+no waiver claimed.
+
+What remains moved to its own entries: [themed icon
+names](tray-icon-themes.md), [abstract
+sockets](tray-abstract-socket.md), [real
+apps](tray-real-apps.md), [runaway
+redraws](tray-redraw-coalesce.md).
 
 Everything in "Done when" is met and the entry stays open only for the
 menus, which have their prerequisite now: [popups](resolved/popups-done.md)

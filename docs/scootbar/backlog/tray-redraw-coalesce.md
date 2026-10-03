@@ -9,7 +9,7 @@ milestone: "M6"
 
 # Tray: coalesce a runaway item's redraws
 
-Filed 2026-10-03, split out of [tray](tray.md) when its menus landed.
+Filed 2026-10-03, split out of [tray](resolved/tray-done.md) when its menus landed.
 Serves **daily-drive**: a buggy app should not cost the bar a redraw
 per announcement.
 
@@ -36,4 +36,4 @@ floor window the same way.
 
 ## Not in this ticket
 
-The floor itself (stays); menus ([tray](tray.md) landed them).
+The floor itself (stays); menus ([tray](resolved/tray-done.md) landed them).

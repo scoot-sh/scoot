@@ -75,7 +75,7 @@ notes it could not reach Reddit or Hacker News), the failures that recur are
   [ratchet](lightest.md), and no per-event allocation on the hot path.
 - **Busy loops from polled scripts** (Waybar #5303, #4987): see the streaming
   rule in [exec-push-button-modules](resolved/exec-push-button-modules-done.md).
-- **Tray failures** (the largest single group): see [tray](tray.md).
+- **Tray failures** (the largest single group): see [tray](resolved/tray-done.md).
 - **Zero outputs** and a compositor restart mid-session.
 
 ## Failure of the world around it

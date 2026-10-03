@@ -9,7 +9,7 @@ milestone: "M6"
 
 # Tray: session buses on abstract sockets
 
-Filed 2026-10-03, split out of [tray](tray.md) when its menus landed.
+Filed 2026-10-03, split out of [tray](resolved/tray-done.md) when its menus landed.
 Serves **daily-drive** on machines whose session bus is not a
 filesystem path (what `dbus-launch` makes: `unix:abstract=...`).
 
@@ -36,4 +36,4 @@ bluetooth modules share the rule through the same client.
 
 ## Not in this ticket
 
-Everything else in [tray](tray.md); the system bus (a fixed path).
+Everything else in [tray](resolved/tray-done.md); the system bus (a fixed path).

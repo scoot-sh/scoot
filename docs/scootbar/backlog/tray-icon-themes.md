@@ -9,7 +9,7 @@ milestone: "M6"
 
 # Tray: themed icon names
 
-Filed 2026-10-03, split out of [tray](tray.md) when its menus landed.
+Filed 2026-10-03, split out of [tray](resolved/tray-done.md) when its menus landed.
 Serves **daily-drive**: most GTK and Ayatana apps send only `IconName`.
 
 ## The gap
@@ -24,7 +24,7 @@ real-world desktop a large fraction of tray icons are invisible.
 
 ## What to do
 
-- Measure first, per the [tray](tray.md) "what to decide" rule: an
+- Measure first, per the [tray](resolved/tray-done.md) "what to decide" rule: an
   icon-theme lookup (hicolor search across `$XDG_DATA_DIRS`) plus an
   image decoder (PNG at least, SVG would pull a renderer) against the
   [resource ratchet](lightest.md), before enabling by default. Pixmaps
@@ -36,4 +36,4 @@ real-world desktop a large fraction of tray icons are invisible.
 
 ## Not in this ticket
 
-Menus (landed with [tray](tray.md)); tooltip icons.
+Menus (landed with [tray](resolved/tray-done.md)); tooltip icons.

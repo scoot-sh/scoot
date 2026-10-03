@@ -179,7 +179,7 @@ module's published cost until that run happens.
 
 ## M6 tray and the D-Bus client: module-level cost (measured 2026-10-02)
 
-The [tray](tray.md) is the [shared D-Bus client's](resolved/dbus-client-done.md)
+The [tray](resolved/tray-done.md) is the [shared D-Bus client's](resolved/dbus-client-done.md)
 first consumer, so this is the cost of both. By construction: the bus
 socket is one source in the poll set (with `OUT` only while a write waits
 or staged messages wait their turn), or one inotify watch on the socket's

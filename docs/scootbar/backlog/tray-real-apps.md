@@ -9,7 +9,7 @@ milestone: "M6"
 
 # Tray: real Qt, GTK and Electron apps
 
-Filed 2026-10-03, split out of [tray](tray.md) when its menus landed.
+Filed 2026-10-03, split out of [tray](resolved/tray-done.md) when its menus landed.
 Serves **daily-drive**: the items tried so far are an independent
 marshaller's (jeepney), not real apps.
 
