@@ -266,6 +266,13 @@ the rule's own exception covers only a row the module adds,
 so this is a regression for the maintainer to waive or not, as the M3 gate
 entry below was.
 
+**Maintainer's ruling (2026-10-02, given in chat): the stripped-binary size
+regression is waived.** It covers the tray's +131,072 B on disk (+112,496 B of
+loaded sections) in the default build, and only that row. Nothing else is
+waived: no other row regresses beyond what one run resolves, and the
+unplaced-tray idle RSS reading stays a one-run observation, not an accepted
+cost. `tray` stays in the default features by the same decision.
+
 **A runaway item.** One item re-announcing its icon as fast as the bar
 re-reads it, for 20 s (`flood.sh` in the PR): the bar read it 434 times
 (the 50 ms floor), used 0.14 CPU-seconds (0.7% of a core), made about 68
