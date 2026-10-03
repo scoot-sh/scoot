@@ -1,9 +1,10 @@
 ---
 title: "drive_placed pidfile-vs-pipe race flakes the exec keep tests"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # drive_placed pidfile-vs-pipe race flakes the exec keep tests
@@ -56,3 +57,7 @@ exit at once), and the 10 s deadline staying the bound.
 The `on-low` hook path (battery) and the daemon's hook drain: they stage
 through `take_action`, not through `drive_placed`, and are covered by
 harness tests that assert staged actions directly.
+
+## Resolution (2026-10-03, PR #402)
+
+Landed as `test(scootbar): wait on shown text in exec keep respawn waits` (`ae430886`). Chose waiting on `pid changed && text == later` (pidfile as identity check only) over a harness drain turn, which could only narrow the gap. Pinned by a new test with a 1 s pidfile-vs-line gap (fails deterministically under the old wait with the exact CI signature, passes under the new). Review re-derived determinism per script + reproduced the pin failure; empty findings. CI green.
