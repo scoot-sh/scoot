@@ -1,9 +1,10 @@
 ---
 title: "The first pointer move after a client ends a popup grab lands at the old position (an IPC click misses)"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # The first pointer move after a client ends a popup grab lands at the old position (an IPC click misses)
@@ -74,3 +75,7 @@ two moves after an Escape).
 A grab the compositor dismissed (a click outside, the session lock): not
 tested here, and probably unaffected, since `dismiss_popup_grab` unsets the
 pointer grab.
+
+## Resolution (2026-10-03, PR #396)
+
+Landed as `fix(scoot): unset the seat pointer grab when a client-ended popup grab settles` (`71a16421`). `settle_popup_grab` now unsets the seat pointer grab serial-guarded before the keyboard refresh. Pinned by `the_first_pointer_move_after_a_client_ended_grab_is_delivered_as_asked` (fails on base with the filed stale-position tail, passes on fix); popup/input/layer_shell subsets green, full suite delta exactly the new test, clippy/fmt clean, CI green.
