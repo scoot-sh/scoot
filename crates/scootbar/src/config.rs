@@ -619,6 +619,11 @@ struct NetworkFile {
     #[cfg(feature = "network")]
     #[serde(rename = "menu-command")]
     menu_command: Option<Vec<String>>,
+    /// Connecting: spawned with the chosen SSID as its last argument when
+    /// the list's `connect N` action runs, never through a shell.
+    #[cfg(feature = "network")]
+    #[serde(rename = "connect-command")]
+    connect_command: Option<Vec<String>>,
     /// One glyph, drawn before the text in every state (instead of the
     /// per-state ones below).
     #[cfg(feature = "network")]
@@ -1698,9 +1703,9 @@ const NETWORK_KEYS: [&str; 5] = [
     "network.on-scroll-down",
 ];
 
-/// The `[network]` table: `interface`, `show-ssid`, `menu-command`, the
-/// icon keys and `show-text`, and the interaction keys, into the module's
-/// settings.
+/// The `[network]` table: `interface`, `show-ssid`, `menu-command`,
+/// `connect-command`, the icon keys and `show-text`, and the interaction
+/// keys, into the module's settings.
 #[cfg(feature = "network")]
 fn apply_network(
     path: &Path,
@@ -1732,6 +1737,16 @@ fn apply_network(
             ));
         }
         settings.menu_command = command.to_owned();
+    }
+    if let Some(command) = table.connect_command.as_deref() {
+        if command.iter().any(String::is_empty) {
+            return Err(value(
+                path,
+                "network.connect-command",
+                format_args!("takes no empty argument, not `{command:?}`"),
+            ));
+        }
+        settings.connect_command = command.to_owned();
     }
     let icons = icon::network(table).map_err(|(key, message)| Error::Named {
         path: path.to_owned(),

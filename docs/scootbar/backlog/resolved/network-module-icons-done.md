@@ -45,7 +45,7 @@ volume module's contract tests.
 ## Not in this ticket
 
 The native WiFi list popup
-([popup-network-list](popup-network-list.md)); nl80211/VPN detection
+([popup-network-list](popup-network-list-done.md)); nl80211/VPN detection
 changes; layout beyond prepending/only-icon.
 
 ## Resolution (2026-10-03, PR #401)

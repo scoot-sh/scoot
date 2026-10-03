@@ -36,8 +36,10 @@
 //! Click (the `menu` action) spawns `menu-command` with the cached scan's
 //! SSIDs on stdin — a dmenu-style launcher, fed from the scan list — and
 //! reaps it by pidfd. Connecting is the command's own business (the docs
-//! show the `nmcli` wrapping); native popups replace it in M6, which is
-//! why the bar never reads the choice back.
+//! show the `nmcli` wrapping); the native list is the alternative
+//! (`on-click = "popup"` for the rows, `connect-command` with the chosen
+//! SSID as its last argument), which is why the bar never reads the
+//! picker's choice back.
 //!
 //! ## Shape
 //!
@@ -95,11 +97,26 @@ use netlink::{
 /// The id `--left`, `--center` and `--right` name it by.
 pub const ID: &str = "network";
 
-/// The one action a binding or an agent may name: open the picker.
-pub const ACTIONS: &[ActionSpec] = &[ActionSpec {
-    name: "menu",
-    arg: ArgKind::None,
-}];
+/// The actions a binding or an agent may name: open the picker (`menu`),
+/// connect to the scan's `N`th network (`connect N`), and open the native
+/// list (`popup`, with `on-click = "popup"`).
+pub const ACTIONS: &[ActionSpec] = &[
+    ActionSpec {
+        name: "menu",
+        arg: ArgKind::None,
+    },
+    ActionSpec {
+        name: "connect",
+        arg: ArgKind::Required,
+    },
+    // The native list (`on-click = "popup"`): the bar carries it out, the
+    // module only draws it (`Module::popup`).
+    #[cfg(feature = "popup")]
+    ActionSpec {
+        name: crate::action::POPUP,
+        arg: ArgKind::None,
+    },
+];
 
 /// Seconds between signal re-reads while a WiFi network is shown. The
 /// published rate: one wakeup per interval then, none otherwise.
@@ -138,6 +155,10 @@ pub struct Settings {
     /// The picker: spawned with the scan's SSIDs on stdin. Empty runs
     /// nothing, and the click is refused saying so.
     pub menu_command: Vec<String>,
+    /// Connecting: spawned with the chosen SSID as its last argument,
+    /// never through a shell. Empty runs nothing, and the choice is
+    /// refused saying so.
+    pub connect_command: Vec<String>,
     /// A static icon, when the config sets the icon keys: shown in every
     /// state for which no per-state icon is set.
     pub icon: Option<Icon>,
@@ -159,6 +180,7 @@ impl Default for Settings {
             interface: None,
             show_ssid: true,
             menu_command: Vec::new(),
+            connect_command: Vec::new(),
             icon: None,
             icon_ethernet: None,
             icon_wifi: None,
@@ -757,7 +779,9 @@ struct Sock {
     buf: [u8; READ_LEN],
 }
 
-/// A running menu picker, for the reap.
+/// A running menu picker, for the reap. A running `connect` command is
+/// the same shape (a child with its pidfd), kept apart so the two never
+/// share a slot.
 struct Menu {
     child: Child,
     pidfd: Option<OwnedFd>,
@@ -765,12 +789,14 @@ struct Menu {
 
 /// Which source `sources` added at `index`: the two sockets, then the
 /// signal timer while armed, then the menu's pidfd while one runs, then
-/// the reopen timer while the sockets are gone.
+/// the connect command's pidfd while one runs, then the reopen timer
+/// while the sockets are gone.
 enum Source {
     Rt,
     Genl,
     Timer,
     Menu,
+    Connect,
     Retry,
 }
 
@@ -778,6 +804,7 @@ pub struct Network {
     interface: Option<String>,
     show_ssid: bool,
     menu_command: Vec<String>,
+    connect_command: Vec<String>,
     icon: Option<Icon>,
     icon_ethernet: Option<Icon>,
     icon_wifi: Option<Icon>,
@@ -791,6 +818,14 @@ pub struct Network {
     timer_for: u32,
     retry: Option<OwnedFd>,
     menu: Option<Menu>,
+    connect: Option<Menu>,
+    /// What the popup showed, in displayed order: the raw SSID bytes of
+    /// each row, so `connect N` names what the user saw, never whatever
+    /// the scan holds at `N` now. Written when the popup is filled
+    /// (`Module::popup`), read when a row is chosen. Fixed shapes, no
+    /// allocation.
+    popup_scan: [([u8; 32], u8); MAX_SCAN],
+    popup_n: usize,
     /// Whether the degraded-WiFi warning was said: once per process, not
     /// per resync.
     said_degraded: bool,
@@ -820,6 +855,16 @@ impl Network {
         if self.menu.as_ref().is_some_and(|menu| menu.pidfd.is_some()) {
             if at == 0 {
                 return Some(Source::Menu);
+            }
+            at -= 1;
+        }
+        if self
+            .connect
+            .as_ref()
+            .is_some_and(|connect| connect.pidfd.is_some())
+        {
+            if at == 0 {
+                return Some(Source::Connect);
             }
             at -= 1;
         }
@@ -1126,11 +1171,13 @@ impl Network {
     /// flush, and the timer fires one if no event flushes first.
     fn resync(&mut self) {
         let menu = self.menu.take();
+        let connect = self.connect.take();
         let said = self.said_degraded;
         let settings = Settings {
             interface: self.interface.clone(),
             show_ssid: self.show_ssid,
             menu_command: self.menu_command.clone(),
+            connect_command: self.connect_command.clone(),
             icon: self.icon.clone(),
             icon_ethernet: self.icon_ethernet.clone(),
             icon_wifi: self.icon_wifi.clone(),
@@ -1141,6 +1188,7 @@ impl Network {
         match open_inner(&settings) {
             Ok(mut fresh) => {
                 fresh.menu = menu;
+                fresh.connect = connect;
                 fresh.said_degraded = said;
                 fresh.warn_degraded();
                 initial_dumps(&mut fresh.nets);
@@ -1167,6 +1215,7 @@ impl Network {
                 self.nets = Nets::default();
                 self.timer = None;
                 self.menu = menu;
+                self.connect = connect;
                 self.arm_retry();
             }
         }
@@ -1350,27 +1399,104 @@ impl Network {
     /// Reaps the menu when it exited: by pidfd where there is one, by
     /// `try_wait` everywhere. Returns whether a menu is still running.
     fn reap_menu(&mut self) -> bool {
-        let Some(menu) = self.menu.as_mut() else {
-            return false;
+        reap_child(&mut self.menu)
+    }
+
+    /// Reaps the connect command when it exited, as above. Returns whether
+    /// one is still running.
+    fn reap_connect(&mut self) -> bool {
+        reap_child(&mut self.connect)
+    }
+
+    /// Connects to the popup's `N`th row: spawns `connect-command` with
+    /// the SSID as its last argument, never through a shell. `N` names
+    /// what the popup showed when it was filled (the snapshot), not
+    /// whatever the scan holds there now: a scan that moved underneath is
+    /// refused rather than connected to the wrong network, as is one that
+    /// no longer shows it at all. One connect at a time; a second while
+    /// one runs is refused. SSIDs are attacker-controlled radio data
+    /// (arbitrary bytes, up to 32, possibly non-UTF-8 or control
+    /// characters): they travel sanitized (as the picker's stdin does)
+    /// and as one argument, so no byte in them starts a command.
+    fn open_connect(&mut self, arg: Option<i32>) -> Result<Update, InvokeError> {
+        let n = match arg {
+            Some(n) if n >= 0 => n as usize,
+            Some(_) => return Err(InvokeError::Refused("no such network")),
+            None => return Err(InvokeError::NeedsArg),
         };
-        if let Some(pidfd) = menu.pidfd.as_ref() {
-            let mut expirations = [0u8; 8];
-            match rustix::io::read(pidfd, &mut expirations) {
-                Ok(_) => {}
-                Err(Errno::AGAIN) => {
-                    let _ = menu.child.try_wait();
-                    return true;
-                }
-                Err(_) => {}
-            }
+        let Some((ssid, len)) = self
+            .popup_scan
+            .get(..self.popup_n)
+            .and_then(|shown| shown.get(n).copied().filter(|(_, len)| *len > 0))
+        else {
+            return Err(InvokeError::Refused("no such network"));
+        };
+        let ssid = &ssid[..len as usize];
+        // The choice is what the popup showed: the scan must still hold
+        // it, else the rows moved under the click.
+        let stale = !self.nets.scan[..self.nets.scan_n]
+            .iter()
+            .any(|bss| bss.ssid_len == len && &bss.ssid[..len as usize] == ssid);
+        if stale {
+            return Err(InvokeError::Refused(
+                "that network is no longer seen; open the list again",
+            ));
         }
-        match menu.child.try_wait() {
-            Ok(Some(_)) | Err(_) => {
-                self.menu = None;
-                false
-            }
-            Ok(None) => true,
+        if self.connect_command.is_empty() {
+            return Err(InvokeError::Refused("no connect command configured"));
         }
+        if self.connect.is_some() {
+            return Err(InvokeError::Refused("a connect is already running"));
+        }
+        let line = netlink::sanitize(ssid);
+        if line.is_empty() {
+            return Err(InvokeError::Refused("no such network"));
+        }
+        let mut command = Command::new(&self.connect_command[0]);
+        command.args(&self.connect_command[1..]);
+        command.arg(line);
+        command.stdin(Stdio::null());
+        command.stdout(Stdio::inherit());
+        command.stderr(Stdio::inherit());
+        let child = command
+            .spawn()
+            .map_err(|_| InvokeError::Refused("cannot start the connect command"))?;
+        let pidfd = rustix::process::pidfd_open(
+            rustix::process::Pid::from_child(&child),
+            rustix::process::PidfdFlags::empty(),
+        )
+        .ok();
+        // Without pidfds (pre-5.3 kernels) the child is reaped
+        // opportunistically on every ready turn instead.
+        self.connect = Some(Menu { child, pidfd });
+        self.reap_connect();
+        Ok(Update::Unchanged)
+    }
+}
+
+/// Reaps the child in `slot` when it exited: by pidfd where there is
+/// one, by `try_wait` everywhere. Returns whether one is still running.
+fn reap_child(slot: &mut Option<Menu>) -> bool {
+    let Some(menu) = slot.as_mut() else {
+        return false;
+    };
+    if let Some(pidfd) = menu.pidfd.as_ref() {
+        let mut expirations = [0u8; 8];
+        match rustix::io::read(pidfd, &mut expirations) {
+            Ok(_) => {}
+            Err(Errno::AGAIN) => {
+                let _ = menu.child.try_wait();
+                return true;
+            }
+            Err(_) => {}
+        }
+    }
+    match menu.child.try_wait() {
+        Ok(Some(_)) | Err(_) => {
+            *slot = None;
+            false
+        }
+        Ok(None) => true,
     }
 }
 
@@ -1451,6 +1577,7 @@ fn open_inner(settings: &Settings) -> Result<Network, String> {
         interface: settings.interface.clone(),
         show_ssid: settings.show_ssid,
         menu_command: settings.menu_command.clone(),
+        connect_command: settings.connect_command.clone(),
         icon: settings.icon.clone(),
         icon_ethernet: settings.icon_ethernet.clone(),
         icon_wifi: settings.icon_wifi.clone(),
@@ -1470,6 +1597,9 @@ fn open_inner(settings: &Settings) -> Result<Network, String> {
         timer_for: 0,
         retry: None,
         menu: None,
+        connect: None,
+        popup_scan: [([0; 32], 0); MAX_SCAN],
+        popup_n: 0,
         said_degraded: false,
     })
 }
@@ -1620,6 +1750,7 @@ fn start_with(settings: &Settings, rt: OwnedFd, genl: OwnedFd, family: u16) -> B
         interface: settings.interface.clone(),
         show_ssid: settings.show_ssid,
         menu_command: settings.menu_command.clone(),
+        connect_command: settings.connect_command.clone(),
         icon: settings.icon.clone(),
         icon_ethernet: settings.icon_ethernet.clone(),
         icon_wifi: settings.icon_wifi.clone(),
@@ -1639,6 +1770,9 @@ fn start_with(settings: &Settings, rt: OwnedFd, genl: OwnedFd, family: u16) -> B
         timer_for: 0,
         retry: None,
         menu: None,
+        connect: None,
+        popup_scan: [([0; 32], 0); MAX_SCAN],
+        popup_n: 0,
         said_degraded: true,
     })
 }
@@ -1659,15 +1793,27 @@ impl Module for Network {
                 sources.add(pidfd.as_fd(), PollFlags::IN);
             }
         }
+        if let Some(connect) = self.connect.as_ref() {
+            if let Some(pidfd) = connect.pidfd.as_ref() {
+                sources.add(pidfd.as_fd(), PollFlags::IN);
+            }
+        }
         if let Some(retry) = self.retry.as_ref() {
             sources.add(retry.as_fd(), PollFlags::IN);
         }
     }
 
     fn on_ready(&mut self, source: usize, events: PollFlags) -> Update {
-        // Without pidfds the menu is reaped on every turn instead.
+        // Without pidfds the children are reaped on every turn instead.
         if self.menu.as_ref().is_some_and(|menu| menu.pidfd.is_none()) {
             self.reap_menu();
+        }
+        if self
+            .connect
+            .as_ref()
+            .is_some_and(|connect| connect.pidfd.is_none())
+        {
+            self.reap_connect();
         }
         let before = self.fingerprint();
         match self.source_at(source) {
@@ -1690,6 +1836,9 @@ impl Module for Network {
             }
             Some(Source::Menu) => {
                 self.reap_menu();
+            }
+            Some(Source::Connect) => {
+                self.reap_connect();
             }
             Some(Source::Retry) => {
                 if let Some(retry) = self.retry.as_ref() {
@@ -1789,13 +1938,86 @@ impl Module for Network {
         steps: u32,
     ) -> Result<Update, InvokeError> {
         let _ = steps;
-        if action.arg.is_some() {
-            return Err(InvokeError::NoArg);
-        }
-        match &*action.name {
-            "menu" => self.open_menu(),
+        match (&*action.name, action.arg) {
+            ("menu", None) => self.open_menu(),
+            ("menu", Some(_)) => Err(InvokeError::NoArg),
+            ("connect", Some(_)) => self.open_connect(action.arg),
+            ("connect", None) => Err(InvokeError::NeedsArg),
             _ => Err(InvokeError::Unknown),
         }
+    }
+
+    /// The native list: one row per named network in scan order, the
+    /// associated one selected. Records what it showed (the raw SSIDs in
+    /// displayed order), so `connect N` names what the user saw. Nothing
+    /// while the SSID is hidden (as the picker: the scan list must not
+    /// leave the bar) or no network is seen: no popup, which also closes
+    /// an open one.
+    #[cfg(feature = "popup")]
+    fn popup(&mut self, _output: &OutputView<'_>, content: &mut crate::popup::Content) -> bool {
+        if !self.show_ssid {
+            return false;
+        }
+        let mut n = 0;
+        for bss in &self.nets.scan[..self.nets.scan_n] {
+            if bss.ssid_len == 0 || n >= MAX_SCAN {
+                continue;
+            }
+            let raw = &bss.ssid[..bss.ssid_len as usize];
+            let line = netlink::sanitize(raw);
+            if line.is_empty() {
+                continue;
+            }
+            let selected = bss.associated;
+            // The row names the network and its bars, formatted without
+            // allocating (this refill sizes the popup's reused buffers;
+            // the scroll and draw paths allocate nothing).
+            let bars = bss.signal.map(netlink::bars_for).unwrap_or(0);
+            let pushed = match bars {
+                1 => content.button(
+                    format_args!("{line} ▂"),
+                    "connect",
+                    Some(n as i32),
+                    selected,
+                    true,
+                ),
+                2 => content.button(
+                    format_args!("{line} ▂▄"),
+                    "connect",
+                    Some(n as i32),
+                    selected,
+                    true,
+                ),
+                3 => content.button(
+                    format_args!("{line} ▂▄▆"),
+                    "connect",
+                    Some(n as i32),
+                    selected,
+                    true,
+                ),
+                4.. => content.button(
+                    format_args!("{line} ▂▄▆█"),
+                    "connect",
+                    Some(n as i32),
+                    selected,
+                    true,
+                ),
+                _ => content.button(
+                    format_args!("{line}"),
+                    "connect",
+                    Some(n as i32),
+                    selected,
+                    true,
+                ),
+            };
+            if !pushed {
+                break;
+            }
+            self.popup_scan[n] = (bss.ssid, bss.ssid_len);
+            n += 1;
+        }
+        self.popup_n = n;
+        !content.is_empty()
     }
 
     /// Its view carries a tooltip.

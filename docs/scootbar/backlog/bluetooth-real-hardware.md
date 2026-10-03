@@ -50,4 +50,4 @@ one) still has to see, with a real adapter and a real headset:
 ## Not in this ticket
 
 No protocol work: BlueZ is used as documented. No new popup widgets (the
-native device list stays `popup-network-list.md`'s sibling decision).
+native device list stays `resolved/popup-network-list-done.md`'s sibling decision).

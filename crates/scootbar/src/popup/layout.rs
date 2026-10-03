@@ -111,6 +111,23 @@ impl Layout {
         &self.rows
     }
 
+    /// How tall the content is, in device pixels: the last row and the
+    /// edge below it. Past the visible height (what a configure smaller
+    /// than asked leaves) the popup scrolls to it.
+    pub fn total_height(&self) -> u32 {
+        let edge = self.frame.saturating_add(self.pad / 2);
+        match self.rows.last() {
+            Some(row) => row.y1.saturating_add(edge),
+            None => self.height,
+        }
+    }
+
+    /// How far down the content may scroll, in device pixels: the content
+    /// past the visible height, or zero where it all fits.
+    pub fn max_scroll(&self) -> u32 {
+        self.total_height().saturating_sub(self.height)
+    }
+
     /// The widget under `(x, y)` (device pixels in the popup), if any.
     pub fn hit(&self, x: i64, y: i64) -> Option<usize> {
         let inside = x >= i64::from(self.frame)

@@ -671,6 +671,33 @@ real hardware, the full `scripts/scootbar-bench` rows, the soak, a real
 Qt, GTK or Electron app as the item, yambar (rule 2 stays as the M6 tray
 round left it: passed against Waybar, open against yambar).
 
+## M6 network popup list (measured 2026-10-03)
+
+The [native WiFi list](../cli.md#network) (PR #403) adds scrolling, an
+ellipsis cut and a closing button to the [popup](../cli.md#popups), and
+`connect N` to the network module. Release builds (`lto = "fat"`,
+stripped) on the dev VM, `main` at `d9dfe4d23` against the branch's code,
+the network module placed, the popup closed:
+
+| Row | `main` | branch |
+| --- | --- | --- |
+| stripped file | 2,101,984 B | 2,101,984 B (+0) |
+| `.text` | 1,581,224 B | 1,589,544 B (+8,320, +0.5%) |
+| loaded sections | 1,942,155 B | 1,949,759 B (+7,604, +0.4%) |
+| idle RSS (60 s) | 4792 kB | 4796 kB (+4, within one run) |
+| idle wakeups (60 s) | 0 | 0 |
+| fds / threads | 9 / 1 | 9 / 1 |
+
+`ldd` still shows only libc, libm and libgcc_s, and `Cargo.lock` is
+unchanged. The popup-open rows were not measured (the dev VM has no
+scan to show). The independent review audited the method but did not
+rebuild release to re-measure.
+
+**Maintainer's ruling (2026-10-03, given in chat): the `.text` growth of
+the network popup list is waived.** It covers `.text` +8,320 B (+0.5%)
+and the loaded sections' +7,604 B, and only that row; the file does not
+grow. Nothing else is waived.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

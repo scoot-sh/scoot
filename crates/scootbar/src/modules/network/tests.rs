@@ -1237,3 +1237,310 @@ fn the_cqm_probe_records_the_driver_s_answer() {
         "the probe got a definitive answer, refusal or ack, which is why the signal timer stands either way"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The native list (`popup`) and `connect N`.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "popup")]
+mod popup_list {
+    use super::*;
+    use crate::popup::{Content, Kind as Widget};
+
+    /// A wireless interface associated to `ssid`, seeing `others` beside
+    /// it (SSID, signal dBm): one scan page, the associated first.
+    fn wifi_many(fake: &Fake, ssid: &[u8], signal: i8, others: &[(&[u8], i8)]) {
+        fake.rt(&fake::link(16, WLAN0, UP, 6, "wlan0", Some("nl80211")));
+        fake.rt(&fake::addr(20, WLAN0, 2));
+        fake.rt(&fake::route(24, 2, WLAN0));
+        fake.genl(&fake::interface(WLAN0, "wlan0", Some(ssid)));
+        let mut nets: Vec<(&[u8], i32, bool)> = vec![(ssid, i32::from(signal) * 100, true)];
+        nets.extend(
+            others
+                .iter()
+                .map(|(ssid, signal)| (*ssid, i32::from(*signal) * 100, false)),
+        );
+        fake.genl(&fake::scan(&nets));
+        fake.genl(&fake::station(signal));
+    }
+
+    fn content_of(harness: &mut Harness) -> (bool, Content) {
+        let mut content = Content::default();
+        let shown = harness.popup(&mut content);
+        (shown, content)
+    }
+
+    fn connect(n: i32) -> ModuleAction {
+        ModuleAction::new("connect", Some(n))
+    }
+
+    #[test]
+    fn the_popup_lists_the_scan_with_the_associated_selected() {
+        let (mut harness, fake) = Fake::start(&Settings::default());
+        wifi_many(&fake, b"Wimbly", -50, &[(b"Cafe", -60), (b"Far", -72)]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let (shown, content) = content_of(&mut harness);
+        assert!(shown);
+        let widgets = content.widgets();
+        assert_eq!(widgets.len(), 3);
+        assert_eq!(content.label(&widgets[0]), "Wimbly ▂▄▆█");
+        assert_eq!(content.label(&widgets[1]), "Cafe ▂▄▆");
+        assert_eq!(content.label(&widgets[2]), "Far ▂▄");
+        for (n, widget) in widgets.iter().enumerate() {
+            assert_eq!(
+                widget.kind,
+                Widget::Button {
+                    action: "connect",
+                    arg: Some(n as i32),
+                    selected: n == 0,
+                    closes: true,
+                },
+                "row {n}"
+            );
+        }
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn unnamed_networks_are_not_rows() {
+        let (mut harness, fake) = Fake::start(&Settings::default());
+        wifi_many(&fake, b"Wimbly", -50, &[(b"", -60)]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let (shown, content) = content_of(&mut harness);
+        assert!(shown);
+        assert_eq!(content.widgets().len(), 1);
+        assert_eq!(content.label(&content.widgets()[0]), "Wimbly ▂▄▆█");
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn no_list_while_the_ssid_is_hidden_or_nothing_is_seen() {
+        let settings = Settings {
+            show_ssid: false,
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi_many(&fake, b"Wimbly", -50, &[]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let (shown, content) = content_of(&mut harness);
+        assert!(!shown);
+        assert!(content.is_empty());
+        let (mut harness, _fake) = Fake::start(&Settings::default());
+        let (shown, content) = content_of(&mut harness);
+        assert!(!shown);
+        assert!(content.is_empty());
+    }
+
+    #[test]
+    fn connect_takes_a_number_and_needs_a_command() {
+        let (mut harness, fake) = Fake::start(&Settings::default());
+        wifi_many(&fake, b"Wimbly", -50, &[]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let mut content = Content::default();
+        assert!(harness.popup(&mut content));
+        let output = crate::modules::OutputView { name: None };
+        // No number is refused before anything runs.
+        assert_eq!(
+            harness.invoke(&output, &ModuleAction::new("connect", None), 1),
+            Err(crate::modules::InvokeError::NeedsArg)
+        );
+        // Past the end, and below zero, name no network.
+        for bad in [1, 99, -1, i32::MIN] {
+            assert_eq!(
+                harness.invoke(&output, &connect(bad), 1),
+                Err(crate::modules::InvokeError::Refused("no such network")),
+                "connect {bad}"
+            );
+        }
+        // Nothing configured: refused naming why, and nothing runs.
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Err(crate::modules::InvokeError::Refused(
+                "no connect command configured"
+            ))
+        );
+        assert_eq!(harness.source_count(), 3);
+        let unknown = ModuleAction::new("bogus", None);
+        assert_eq!(
+            harness.invoke(&output, &unknown, 1),
+            Err(crate::modules::InvokeError::Unknown)
+        );
+        let _ = fake.sent();
+    }
+
+    /// The `connect-command` records what it was given: the SSID as one
+    /// argument (`$0` after `sh -c`'s script), written to `file`.
+    fn recording(dir: &std::path::Path) -> (Vec<String>, std::path::PathBuf) {
+        let file = dir.join("ssid");
+        (
+            vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                format!("echo \"$0\" > {}", file.display()),
+            ],
+            file,
+        )
+    }
+
+    fn tempdir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "scootbar-network-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn connect_spawns_the_command_with_the_ssid_as_one_argument() {
+        let dir = tempdir("connect");
+        let (command, file) = recording(&dir);
+        let settings = Settings {
+            connect_command: command,
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi_many(&fake, b"Wimbly", -50, &[]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let mut content = Content::default();
+        assert!(harness.popup(&mut content));
+        let output = crate::modules::OutputView { name: None };
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Ok(Update::Unchanged)
+        );
+        let _ = drive(&mut harness);
+        // The SSID alone (not the row's label with its bars), as one
+        // argument.
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\n");
+        // Reaped: no source past the sockets and the timer.
+        assert_eq!(harness.source_count(), 3);
+        std::fs::remove_dir_all(&dir).ok();
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn an_attacker_ssid_reaches_the_command_as_data_not_as_code() {
+        // The shell target is a fixed short path: the whole evil SSID
+        // must fit the radio's 32 bytes on every machine, whatever its
+        // temp directory is. (Only this test uses it; cleaned first and
+        // last.)
+        let shell_target = std::path::PathBuf::from("/tmp/pnl-evil-P");
+        std::fs::remove_file(&shell_target).ok();
+        let dir = tempdir("evil");
+        let (command, file) = recording(&dir);
+        let settings = Settings {
+            connect_command: command,
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        // Shell metacharacters, controls and non-UTF-8: the sanitizer
+        // keeps the first (they are data) and folds the rest. The touch
+        // targets the fixed path, so a shell would leave it there.
+        // (`\xff` is built as a byte: it is not a string escape.)
+        let mut evil = format!("a;b$(touch {})", shell_target.display()).into_bytes();
+        evil.push(0x01);
+        evil.push(0xff);
+        assert!(evil.len() <= 32, "the SSID fits the radio: {}", evil.len());
+        wifi_many(&fake, &evil, -60, &[]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let mut content = Content::default();
+        assert!(harness.popup(&mut content));
+        assert_eq!(content.widgets().len(), 1);
+        let output = crate::modules::OutputView { name: None };
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Ok(Update::Unchanged)
+        );
+        let _ = drive(&mut harness);
+        let line = crate::modules::network::netlink::sanitize(&evil);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{line}\n"));
+        // Through a shell, `$(touch ...)` would have run: nothing was
+        // created beside the recording.
+        assert!(
+            !shell_target.exists(),
+            "the SSID ran as a command: {:?}",
+            std::fs::read_dir(&dir).unwrap().collect::<Vec<_>>()
+        );
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_file(&shell_target).ok();
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn connect_names_what_the_popup_showed_not_what_moved_under_it() {
+        let dir = tempdir("stale");
+        let (command, file) = recording(&dir);
+        let settings = Settings {
+            connect_command: command,
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi_many(&fake, b"Alpha", -50, &[(b"Beta", -60)]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let mut content = Content::default();
+        assert!(harness.popup(&mut content));
+        assert_eq!(content.widgets().len(), 2);
+        // The radio roams: the scan is Beta alone now, before the popup
+        // is refilled.
+        fake.genl(&fake::roam(WLAN0));
+        fake.genl(&fake::scan(&[(b"Beta", -6000, true)]));
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let output = crate::modules::OutputView { name: None };
+        // Row 0 showed Alpha, which is gone: refused, not connected to
+        // whatever row 0 holds now.
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Err(crate::modules::InvokeError::Refused(
+                "that network is no longer seen; open the list again"
+            ))
+        );
+        assert!(!file.exists(), "a stale row connected");
+        // Row 1 showed Beta, still there: connects to Beta.
+        assert_eq!(
+            harness.invoke(&output, &connect(1), 1),
+            Ok(Update::Unchanged)
+        );
+        let _ = drive(&mut harness);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Beta\n");
+        // Refilled, the list is Beta alone, and row 0 is Beta again
+        // (-60 dBm is three bars).
+        let mut content = Content::default();
+        assert!(harness.popup(&mut content));
+        assert_eq!(content.widgets().len(), 1);
+        assert_eq!(content.label(&content.widgets()[0]), "Beta ▂▄▆");
+        std::fs::remove_dir_all(&dir).ok();
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn a_second_connect_while_one_runs_is_refused() {
+        // Never exits on its own: the second connect finds it running.
+        let settings = Settings {
+            connect_command: vec!["sleep".to_owned(), "30".to_owned()],
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi_many(&fake, b"Wimbly", -50, &[]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let mut content = Content::default();
+        assert!(harness.popup(&mut content));
+        let output = crate::modules::OutputView { name: None };
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Ok(Update::Unchanged)
+        );
+        assert_eq!(harness.source_count(), 4);
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Err(crate::modules::InvokeError::Refused(
+                "a connect is already running"
+            ))
+        );
+        let _ = fake.sent();
+    }
+}

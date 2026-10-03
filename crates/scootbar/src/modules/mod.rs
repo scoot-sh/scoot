@@ -203,11 +203,12 @@ pub trait Module {
     /// module's view changes while it is open, so a level moved elsewhere
     /// moves the slider. `false` (the default) means no popup, and closes an
     /// open one: a module that loses what it shows (the sound server went)
-    /// takes its popup with it. Pure and cheap: it only reads the module.
-    /// What an interaction does is a module action by name
-    /// ([`Module::invoke`]), never a callback.
+    /// takes its popup with it. Cheap: it only reads the module, besides
+    /// recording what a choosing action names (the network list's snapshot
+    /// of what it showed). What an interaction does is a module action by
+    /// name ([`Module::invoke`]), never a callback.
     #[cfg(feature = "popup")]
-    fn popup(&self, output: &OutputView<'_>, content: &mut crate::popup::Content) -> bool {
+    fn popup(&mut self, output: &OutputView<'_>, content: &mut crate::popup::Content) -> bool {
         let _ = (output, content);
         false
     }
