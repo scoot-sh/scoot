@@ -22,6 +22,7 @@ use super::{
     MIN_REFRESH_GAP, PROTOCOL_VERSION, WATCHER_FDO, WATCHER_KDE, WATCHER_PATH,
 };
 use crate::dbus::conn::{self, Conn, Event};
+use crate::dbus::link::Session;
 use crate::dbus::proto::{self, Reader, Writer, check_name, check_path, request_reply};
 
 /// A live bus: the connection, the mode, the items in id order, and the
@@ -115,6 +116,16 @@ pub(super) fn split_announced(sender: &str, announced: &str) -> Result<(String, 
 pub(super) fn split_id(id: &str) -> Option<(&str, &str)> {
     let slash = id.find('/')?;
     Some((&id[..slash], &id[slash..]))
+}
+
+impl Session for Live {
+    fn conn(&self) -> &Conn {
+        &self.conn
+    }
+
+    fn conn_mut(&mut self) -> &mut Conn {
+        &mut self.conn
+    }
 }
 
 impl Live {
@@ -382,7 +393,22 @@ impl Live {
     /// answered with nothing usable. An item that sent one loses that
     /// update only (it keeps its last state, and is read again at its
     /// next signal); a bus question that did is simply unanswered.
+    /// [`conn::DROPPED_UNKNOWN`] instead of a token: the skipped reply's
+    /// header was not read, so no call can be named. Some call lost its
+    /// answer: free what expired by age, and let every item waiting on
+    /// an answer ask again at its next signal (one more `GetAll` each,
+    /// behind the refresh floor), instead of staying stuck till a reap.
     pub(super) fn on_dropped(&mut self, token: u64) -> Update {
+        if token == conn::DROPPED_UNKNOWN {
+            self.reap();
+            for item in &mut self.items {
+                if item.fetching {
+                    item.fetching = false;
+                    item.stale = true;
+                }
+            }
+            return Update::Unchanged;
+        }
         let Some(flight) = self.flights.get_mut(token as usize).and_then(Option::take) else {
             return Update::Unchanged;
         };
@@ -620,6 +646,12 @@ impl Live {
         }
         if name == WATCHER_FDO {
             return Update::Unchanged;
+        }
+        if new.is_none() {
+            // A host that went away is not a host anymore (our own entry
+            // dies with the connection, which drops the whole session, so
+            // only a peer's can be pruned here).
+            self.hosts.retain(|host| host != &name);
         }
         // An item's service or owner changed hands: gone means dropped
         // (a crash without unregistering), new means re-read.
@@ -1202,6 +1234,15 @@ impl Live {
     /// Whether one more item is taken: under the total cap, and under the
     /// per-service one, counted by the service's name and by whoever
     /// registered it (one peer owning many names is still one peer).
+    ///
+    /// Decided, not changed (`tray-review-hardening`): a peer registering
+    /// items under another app's service name crowds that name out — the
+    /// count is by service OR registrant, and the victim's own later
+    /// registrations count against the squatter's 8. That is the
+    /// pre-existing semantics, and the per-registrant half is what bounds
+    /// it: a peer spraying many names still holds 8 items at most, so the
+    /// damage is one name's slots, never the tray's 32. Counting by AND
+    /// instead would let one peer hold 8 under every name on the bus.
     pub(super) fn has_room(&self, service: &str, registrant: &str) -> bool {
         self.items.len() < MAX_ITEMS
             && self

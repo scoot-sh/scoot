@@ -205,3 +205,38 @@ for exactly the type set the tray needs (`a(iiay)`, `a{sv}`, `(sa(iiay)ss)`,
 - **The set-up is the one blocking part** (auth and `Hello`, three round
   trips): bounded to 2 s *in total*, not per read.
 - Costs, recorded where the ratchet keeps them, not repeated here.
+
+## One connection per consumer: decided (2026-10-03)
+
+The record's shape said one multiplexed connection per bar process, with
+pending calls by serial, consumer callbacks by match rule, and central
+`NameOwnerChanged` tracking. What landed instead is one connection per
+consumer (the tray's, then the media module's, now both on the same
+`link` lifecycle), and that is the decision, not a halfway state:
+
+- **Measured cost of a second connection is one fd and a few kilobytes.**
+  The tray's rows and the media module's rows each show 8 fds alone (one
+  of them the bus socket) and zero idle wakeups with no bus, a bus with
+  nothing on it, and a bus with items or players. There is no pressure to
+  share on any measured row.
+- **Failure isolation.** A poison message that ends the connection (a
+  header that is no message, a bus that stops reading past the outbox
+  cap) drops one consumer's session — its pending calls, its tracked
+  names — and the other never notices. A shared connection would take
+  both sessions down together, and couple their retry states.
+- **The match rules do not union.** The media module's zero-wakeup rows
+  depend on the bus filtering to its two narrow rules (MPRIS namespace
+  owner changes, one object's `PropertiesChanged`); the tray needs five
+  broad ones. A shared connection would work every one of the tray's
+  signals through the media module's pump too — parsing and discarding
+  another consumer's traffic on every wake — for no measured gain.
+- **What sharing would need** (pending table keyed by consumer as well
+  as serial, match-rule reference counting across consumers, one owner
+  map and one re-acquisition policy for two different name sets) is
+  shared mutable state between modules the project does not otherwise
+  have, built for a third consumer (notifications, BlueZ) to complicate
+  further.
+
+Revisit if a measured row says otherwise (fds, memory, wakeups under a
+real multi-consumer load); until then a consumer is a connection, and
+the multiplexing the record imagined stays unbuilt.

@@ -9,8 +9,9 @@ use std::time::Duration;
 use ab_glyph::{FontArc, FontVec};
 
 use super::fake::{self, Fake};
-use super::{BusAddr, ID, MAX_ITEMS, Settings, start_connected, start_with};
+use super::{ID, MAX_ITEMS, Settings, start_connected, start_with};
 use crate::action::{Action, ModuleAction, Trigger};
+use crate::dbus::link::Addr;
 use crate::density::Scale;
 use crate::modules::harness::Harness;
 use crate::modules::{ClickCtx, CustomDraw, Input, InvokeError, OutputView, Update, find};
@@ -601,7 +602,7 @@ fn waiting_without_a_bus_costs_nothing_and_shows_nothing() {
         std::thread::current().id()
     ));
     let _ = std::fs::remove_file(&path);
-    let harness = Harness::new(super::start_with(super::BusAddr::Path(path)));
+    let harness = Harness::new(super::start_with(super::Addr::Path(path)));
     assert!(harness.source_count() <= 1);
     assert!(harness.view().is_empty());
     assert!(harness.value_on(None).is_none());
@@ -1019,8 +1020,7 @@ fn a_bus_that_keeps_dropping_us_is_not_redialled_forever() {
     });
     let mut harness = Harness::new(start_with_path(path.clone()));
     // Turns until the third dial (a deadline, not a count: a loaded
-    // machine is slow, not wrong), then a second more for a fourth that
-    // must not come.
+    // machine is slow, not wrong).
     let start = std::time::Instant::now();
     while accepted.load(Ordering::SeqCst) < 3 {
         assert!(
@@ -1030,56 +1030,28 @@ fn a_bus_that_keeps_dropping_us_is_not_redialled_forever() {
         );
         harness.wait(Duration::from_millis(20));
     }
-    let settle = std::time::Instant::now();
-    while settle.elapsed() < Duration::from_secs(1) {
+    // The latch waits before the fourth: the gap from the third dial is
+    // the link's retry wait, never a hot loop (which would dial in
+    // milliseconds) and never nothing.
+    let latched = std::time::Instant::now();
+    while accepted.load(Ordering::SeqCst) < 4 {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{} dials",
+            accepted.load(Ordering::SeqCst)
+        );
         harness.wait(Duration::from_millis(20));
     }
-    // The first dial and the redials after each death, until the third
-    // quick one: three, and then nothing (a transient death still heals,
-    // so not one).
-    assert_eq!(accepted.load(Ordering::SeqCst), 3);
+    assert!(
+        latched.elapsed() >= Duration::from_millis(200),
+        "the fourth dial came {:?} after the third: no wait",
+        latched.elapsed()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 fn start_with_path(path: std::path::PathBuf) -> Box<dyn crate::modules::Module> {
-    start_with(BusAddr::Path(path))
-}
-
-/// One inotify event as the kernel lays it out: the header, then the
-/// name padded with NULs.
-fn inotify_event(name: &str) -> Vec<u8> {
-    let mut padded = name.as_bytes().to_vec();
-    padded.push(0);
-    while !padded.len().is_multiple_of(8) {
-        padded.push(0);
-    }
-    let mut event = vec![0u8; 12];
-    event.extend_from_slice(&(padded.len() as u32).to_ne_bytes());
-    event.extend_from_slice(&padded);
-    event
-}
-
-/// The directory watch wakes for every name created beside the bus
-/// socket: only the socket's own name may cost a connect attempt, and
-/// every other name (the runtime directory sees many) costs a scan of
-/// the bytes and nothing else, not a connect and a warning each.
-#[test]
-fn the_directory_scan_matches_only_the_bus_name() {
-    use super::scan_names;
-    assert!(scan_names(&inotify_event("bus"), b"bus"));
-    assert!(!scan_names(&inotify_event("wayland-1"), b"bus"));
-    assert!(!scan_names(&inotify_event("business"), b"bus"));
-    // Several events in one read: the match may be any of them.
-    let mut two = inotify_event("pipewire-0");
-    two.extend(inotify_event("wayland-1"));
-    assert!(!scan_names(&two, b"bus"));
-    two.extend(inotify_event("bus"));
-    assert!(scan_names(&two, b"bus"));
-    // Nothing read, and bytes cut short: nothing to do, and the
-    // conservative answer.
-    assert!(!scan_names(&[], b"bus"));
-    assert!(scan_names(&inotify_event("bus")[..10], b"bus"));
-    assert!(scan_names(&inotify_event("wayland-1")[..20], b"bus"));
+    start_with(Addr::Path(path))
 }
 
 /// What a watcher announces: the id form (KDE's, and ours), and what a
@@ -1349,6 +1321,118 @@ fn a_bus_that_kept_dropping_us_is_tried_again_later() {
         );
         harness.wait(Duration::from_millis(50));
     }
-    assert!(start.elapsed() >= super::RETRY_AFTER_QUICK_DEATHS);
+    // The fourth dial waited out the link's retry (300 ms in tests):
+    // a floor a slow box can only grow, never shrink past.
+    assert!(
+        start.elapsed() >= Duration::from_millis(200),
+        "the fourth dial came after {:?}: no wait",
+        start.elapsed()
+    );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A reply skipped unread names no call: the unknown drop frees what
+/// expired by age and lets every item waiting on an answer ask again at
+/// its next signal, instead of staying stuck till a reap.
+#[test]
+fn an_unknown_drop_releases_every_item_waiting_on_an_answer() {
+    use super::item::Item;
+    use super::watcher::{Flight, Op, setup};
+    use crate::dbus::conn::{self, Event};
+    use crate::dbus::testdaemon;
+    let (client, mut daemon_end) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut live = setup(conn::setup(client).unwrap());
+    let _daemon = server.join().unwrap();
+    // An item mid-read: a Props flight out, the answer not yet back.
+    let id = "org.example.App/StatusNotifierItem".to_owned();
+    live.items.push(Item::new(
+        id.clone(),
+        "org.example.App".to_owned(),
+        "/StatusNotifierItem".to_owned(),
+        ":1.9".to_owned(),
+    ));
+    live.items[0].fetching = true;
+    live.flights.push(Some(Flight { op: Op::Props(id) }));
+    let _ = live.apply(Event::Dropped {
+        token: conn::DROPPED_UNKNOWN,
+    });
+    assert!(!live.items[0].fetching);
+    assert!(live.items[0].stale);
+}
+
+/// A host that disconnects is no longer a host: its entry is pruned when
+/// its owner name goes away, so a later re-registration announces again
+/// instead of being swallowed as a duplicate.
+#[test]
+fn a_host_that_disconnects_is_pruned() {
+    use super::WATCHER_KDE;
+    use super::watcher::setup;
+    use crate::dbus::conn;
+    use crate::dbus::proto::Writer;
+    use crate::dbus::testdaemon;
+    let (client, mut daemon_end) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut live = setup(conn::setup(client).unwrap());
+    let _daemon = server.join().unwrap();
+    // A peer registers as host: answered and recorded beside our own.
+    let _ = live.on_call(
+        ":1.9",
+        "/StatusNotifierWatcher",
+        WATCHER_KDE,
+        "RegisterStatusNotifierHost",
+        7,
+        "",
+        &[],
+    );
+    assert_eq!(live.hosts.len(), 2);
+    // The peer goes away: the bus says its name has no owner anymore.
+    let mut body = Writer::new();
+    body.str(":1.9");
+    body.str(":1.9");
+    body.str("");
+    let _ = live.on_name_owner_changed("sss", &body.take_body().unwrap());
+    assert_eq!(live.hosts.len(), 1);
+    assert!(live.hosts.iter().all(|host| host != ":1.9"));
+}
+
+/// The per-service cap counts by service OR registrant: a peer
+/// squatting another app's service name crowds that name out (kept
+/// deliberately: by AND, one peer could hold 8 under every name), while
+/// an unrelated name and registrant are unaffected, and the squatter's
+/// own further names are refused too.
+#[test]
+fn the_per_service_cap_counts_service_or_registrant() {
+    use super::MAX_PER_SERVICE;
+    use super::item::Item;
+    use super::watcher::setup;
+    use crate::dbus::conn;
+    use crate::dbus::testdaemon;
+    let (client, mut daemon_end) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut live = setup(conn::setup(client).unwrap());
+    let _daemon = server.join().unwrap();
+    // Eight items under the victim's name, all from one peer.
+    for n in 0..MAX_PER_SERVICE {
+        live.items.push(Item::new(
+            format!("org.victim.App{n}/StatusNotifierItem"),
+            "org.victim.App".to_owned(),
+            "/StatusNotifierItem".to_owned(),
+            ":1.9".to_owned(),
+        ));
+    }
+    // The victim's own next item under its name is crowded out, and so is
+    // the squatter's under any other name; an unrelated pair fits.
+    assert!(!live.has_room("org.victim.App", ":1.1"));
+    assert!(!live.has_room("org.other.App", ":1.9"));
+    assert!(live.has_room("org.other.App", ":1.1"));
 }

@@ -851,7 +851,10 @@ socket is one more source in the `poll` loop), which is the
   dropped). A flood of signals (the match rule has no sender, so any peer
   may send what the bar listens for) is read up to 1 MiB staged and the
   rest left in the socket, 256 events a wake with the bar's other sources
-  between, and costs the connection nothing. Titles are cut to 128 bytes
+   between, and costs the connection nothing; while an over-cap message
+   is discarded, one turn reads at most 256 KiB more (the poll is woken
+   for the rest), so a sender that outruns the reader holds one turn,
+   not the bar. Titles are cut to 128 bytes
   with controls stripped; at most 32 items, 8 from one service or one registrant, 8 pixmap
   entries each; one `GetAll` in flight per item however many signals it
   sends; a call nobody answers is forgotten after 30 seconds when its slot
@@ -865,17 +868,18 @@ socket is one more source in the `poll` loop), which is the
   one-shot timer only while an item waits out its 50 ms floor between
   reads or after the bus kept dropping the bar. Measured (dev VM, one
   60 s idle window per row): **zero wakeups** with no bus, with a bus and
-  no items, and with one and with eight items on it; RSS 4028 kB with the
-  tray alone and no bus or no items, 4224 kB with one item, 4256 kB with
-  eight (differences under about 130 kB are within one run's resolution).
-  The binary: **+131,072 B on disk (1,774,304 to 1,905,376, +7.4%) and
-  +112,496 B of loaded sections (+6.7%, of which `.text` +96,896 B)**
-  against `main`, and the feature built but *off* is not free either:
-  +65,536 B on disk, +3,312 B loaded (shared edits). An item that
+  no items, and with one and with eight items on it; RSS 4156 kB with the
+  tray alone and no bus or no items, 4352 kB with one item, 4388 kB with
+  eight (differences under about 130 kB are within one run's resolution;
+  level with the same tree's `main` in every row). The binary: **no byte
+  on disk and +2,144 B of `.text` (+0.1%)** against `main` (1,970,912 B
+  on disk both sides). An item that
   re-announces its icon continuously is read at most every 50 ms (0.7% of
   a core measured, against 9.7% with no floor). The table and its method
   are in the
-  [resource ratchet](backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
+  [resource ratchet](backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02);
+  the hardening and link rows are in
+  [the same file](backlog/lightest.md#m6-tray-hardening-and-one-bus-lifecycle-measured-2026-10-03).
 
 ## Media
 
@@ -953,12 +957,15 @@ Cargo feature (`media`), on by default; the smallest build
 - **Bounds, for a hostile or broken player.** Anything on the session bus
   can claim a player name and say anything. What the code guarantees: it
   cannot crash or hang the bar or another player, or grow the bar without
-  bound; only the bus's own `NameOwnerChanged` is believed, and a
-  `PropertiesChanged` only from the connection that owns a held name. (One
-  inherited gap: the D-Bus client matches a method reply by serial alone, so
-  a forged `GetNameOwner` or `GetAll` reply could re-point or set a held
-  player's state if the bus delivers unsolicited replies; untested whether
-  `dbus-daemon` does, tracked in `tray-review-hardening.md`.) A hostile peer costs the bar the work of its own
+   bound; only the bus's own `NameOwnerChanged` is believed, and a
+   `PropertiesChanged` only from the connection that owns a held name. (Method
+   replies are matched by serial *and* sender: measured 2026-10-03,
+   `dbus-daemon` 1.16.2 delivers an unsolicited reply from a peer that was
+   not the callee, while `dbus-broker` 37 does not, so a reply whose sender
+   is not the callee is refused whenever the callee is known — the bus's
+   own calls, or a unique name's. What remains is a call made of a
+   well-known name, whose holder the client cannot know: a forged answer
+   to one of those is accepted, like any peer's own claim to the name.) A hostile peer costs the bar the work of its own
   signals and no more (a flood of positions about 0.6% of a core at 500 a
   second, measured; title and state changes are drawn ten times a second at
   most); it holds at most one of 8 slots, one a connection. What it *can*

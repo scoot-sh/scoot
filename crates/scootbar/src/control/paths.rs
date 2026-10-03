@@ -71,6 +71,30 @@ impl fmt::Display for PathError {
 
 impl std::error::Error for PathError {}
 
+/// The runtime directory: `$XDG_RUNTIME_DIR`, or its conventional
+/// fallback. Unlike [`resolve`]'s directory, unset here falls back
+/// instead of erroring: the session bus, the pulse socket and a
+/// directory watch all wait on the fallback rather than refuse. One
+/// helper for all three (the D-Bus client, the tray and the volume
+/// module), so the fallback cannot drift between them.
+#[cfg_attr(
+    not(any(
+        feature = "tray",
+        feature = "media",
+        feature = "volume",
+        feature = "microphone"
+    )),
+    allow(dead_code)
+)]
+pub fn runtime_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+        if !dir.is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    PathBuf::from(format!("/run/user/{}", rustix::process::getuid().as_raw()))
+}
+
 /// The paths for this process's environment.
 pub fn from_env() -> Result<Paths, PathError> {
     resolve(
