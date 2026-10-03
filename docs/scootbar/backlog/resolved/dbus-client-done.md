@@ -59,7 +59,7 @@ every row — 332,456 B, zero dependencies, 1 thread — while all three idle
 at zero wakeups. Verdict: hand-rolled, built with the tray (no consumer
 exists yet), shape and bounds decided in the record.
 
-## Resolution (2026-10-02, with the [tray](../tray.md), PR PRNUM)
+## Resolution (2026-10-02, with the [tray](../tray.md), PR #388)
 
 Built where the spike said to: with the tray, its first consumer. The
 client is `crates/scootbar/src/dbus/` and adds **no dependency** (the Cargo

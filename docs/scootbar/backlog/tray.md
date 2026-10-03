@@ -52,7 +52,7 @@ wrong icon size at fractional scale (#1175). So:
 An item appears, clicks work, a crashed item disappears, and the module's
 memory and wakeups are measured and published.
 
-## Status (2026-10-02): the first version landed (PR PRNUM), menus remain
+## Status (2026-10-02): the first version landed (PR #388), menus remain
 
 Everything in "Done when" is met and the entry stays open only for the
 menus, which have their prerequisite now: [popups](resolved/popups-done.md)
