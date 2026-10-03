@@ -5,15 +5,16 @@
 //! a `NETLINK_KOBJECT_UEVENT` socket (group 1). The `power_supply` filter
 //! is in userspace: the bar wakes on every kernel uevent and drops the
 //! rest. Whether the driver emits uevents as the capacity changes or only
-//! on plug and unplug was the ticket's measured question, and only one
-//! case was measured: on the Asahi M2 (AC, Full) 90 s of watching saw zero
-//! uevents of any kind. Discharging and unplug are unmeasured, so the
-//! module does not trust uevents alone: a slow timer (once a minute)
-//! re-reads while discharging and stops when charging or full, with the
-//! rate published ([`DISCHARGE_POLL`], `docs/scootbar/cli.md`). The
-//! pending human step (an unplug while watching; see the backlog entry
-//! `battery-unplug-uevent-measure`) decides whether the timer is needed
-//! and whether plugged states need one too.
+//! on plug and unplug was the ticket's measured question, and it is
+//! answered on the Asahi M2 (`macsmc-battery`): plug and unplug each emit
+//! a burst of `power_supply` uevents, and capacity steps while discharging
+//! emit none (five steps over 62 minutes, zero uevents; AC at Full is
+//! silent too). So a uevent is how a running module learns it has started
+//! discharging, and a slow timer (once a minute) is how it sees the steps:
+//! it re-reads while discharging and stops when charging or full, with the
+//! rate published ([`DISCHARGE_POLL`], `docs/scootbar/cli.md`). Other
+//! drivers may differ; the measurement is in
+//! `docs/scootbar/backlog/resolved/battery-unplug-uevent-measure-done.md`.
 //!
 //! ## States
 //!

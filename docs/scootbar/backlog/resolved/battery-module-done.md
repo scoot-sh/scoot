@@ -114,6 +114,10 @@ while discharging for drivers whose capacity steps are silent.
   steps and the unplug/replug each produced a uevent, and paste the
   capacity trace. If even unplug is silent, the design is revisited
   (a timer that also covers the plugged states).
+- **Measured 2026-10-02, no longer open**: plug and unplug each emit a
+  uevent burst, and capacity steps while discharging emit none (five
+  steps over 62 minutes). The module is correct as built; see
+  [battery-unplug-uevent-measure-done.md](battery-unplug-uevent-measure-done.md).
 - Known narrow hole, recorded not deferred-harm: unplug-during-suspend
   while the shown state is not Discharging leaves the view stale until
   the next `power_supply` uevent (there is no wake source in the fd set,
