@@ -39,7 +39,7 @@ pub const REQUESTS_HELP: &str = "\
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
     subscribe [EVENT...]          stream events until killed (default: output;
-                                    known events: output, keyboard)
+                                    known events: output, keyboard, workspace)
 ";
 
 /// The action grammar both clients print in their `--help`. Same single-owner
@@ -81,7 +81,7 @@ REQUESTS:
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
     subscribe [EVENT...]          stream events until killed (default: output;
-                                    known events: output, keyboard)
+                                    known events: output, keyboard, workspace)
 
 ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
@@ -264,9 +264,10 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                 match name.as_str() {
                     "output" => events.push(EventKind::Output),
                     "keyboard" => events.push(EventKind::Keyboard),
+                    "workspace" => events.push(EventKind::Workspace),
                     other => {
                         return Err(Error::Unknown(format!(
-                            "event {other} (known events: output, keyboard)"
+                            "event {other} (known events: output, keyboard, workspace)"
                         )));
                     }
                 }
@@ -584,7 +585,7 @@ mod tests {
                 scoot_ipc::PROTOCOL_VERSION
             )
         );
-        // And the shape the ticket fixes: `scoot 0.1.0 (ipc protocol 5)`,
+        // And the shape the ticket fixes: `scoot 0.1.0 (ipc protocol 7)`,
         // one line, no trailing newline (`print_line` adds it).
         assert!(version_string().starts_with("scoot "));
         assert!(!version_string().ends_with('\n'));
@@ -678,6 +679,24 @@ mod tests {
             Ok(Msg {
                 request: Request::Subscribe {
                     events: vec![EventKind::Output, EventKind::Keyboard]
+                },
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["subscribe", "workspace"]),
+            Ok(Msg {
+                request: Request::Subscribe {
+                    events: vec![EventKind::Workspace]
+                },
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["subscribe", "output", "workspace"]),
+            Ok(Msg {
+                request: Request::Subscribe {
+                    events: vec![EventKind::Output, EventKind::Workspace]
                 },
                 out: None,
             })

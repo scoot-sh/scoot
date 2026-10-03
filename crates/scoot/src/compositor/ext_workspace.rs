@@ -608,6 +608,13 @@ impl State {
         }
         ext.changes = changes;
         ext.current = current;
+        // Last, once the ext-workspace state is published: workspace
+        // occupancy is a snapshot of its own over the same choke point --
+        // every window open/close/move and every output add/remove ends
+        // here. Gated on a `Workspace` subscriber existing (one walk,
+        // nothing built without one), and only marks: the frame tick
+        // carries the marks out, at most one event per output per tick.
+        self.refresh_workspace_snapshots();
     }
 
     /// Takes output `id`'s group away from every manager, for an output that

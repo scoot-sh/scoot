@@ -1440,6 +1440,7 @@ impl State {
         self.stop_captures_on(id);
         self.gamma_control.forget_output(id);
         self.retire_workspace_group(id);
+        self.forget_workspace_output(id);
         self.leave_removed_output(id);
         #[cfg(feature = "gpu-scanout")]
         {
@@ -1706,11 +1707,16 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
     state.service_captures();
     state.settle_idle_waiters();
     state.settle_shots();
+    // Before the subscriber tails drain, so a part-written occupancy event
+    // retries on this same tick: at most one event per output per tick,
+    // however many applies marked it in between (see `ipc/workspace.rs`).
+    state.flush_workspace_events();
     state.settle_subscribers();
     if state.needs_render
         || !state.pending_idle.is_empty()
         || state.shots_draining()
         || state.subscribers_draining()
+        || state.workspace_events_pending()
     {
         TimeoutAction::ToDuration(FRAME_INTERVAL)
     } else {

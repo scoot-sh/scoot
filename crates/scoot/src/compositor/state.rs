@@ -375,6 +375,19 @@ pub struct State {
     /// instead of reporting the whole unsubscribed interval as one change.
     /// Starts at the keymap's own initial group, 0.
     pub(super) last_keyboard_layout: u32,
+    /// What `workspace` subscribers were last sent, one full occupancy
+    /// snapshot per output -- see `ipc/workspace.rs`. Updated when the tick
+    /// carries the snapshots out, synced without emitting when a
+    /// subscription starts, and pruned when an output is removed, so the
+    /// per-refresh diff always runs against what subscribers were told.
+    pub(super) workspace_published: Vec<scoot_ipc::WorkspaceSnapshot>,
+    /// Snapshots that changed since they were last sent, waiting for the
+    /// frame tick to carry them -- at most one per output, however many
+    /// applies marked them in between. See `ipc/workspace.rs`.
+    pub(super) workspace_pending: Vec<scoot_ipc::WorkspaceSnapshot>,
+    /// Scratch for one output's window counts, reused across refreshes so
+    /// the steady state allocates nothing -- see `ipc/workspace.rs`.
+    pub(super) workspace_counts: Vec<usize>,
     /// The session-default output scale, resolved from `[output] scale` (see
     /// `output_scale.rs`), set at startup and re-applied live by a config
     /// reload (see `reload.rs`) -- except under `--nested`, where it stays
@@ -1218,6 +1231,9 @@ impl State {
             origin_names: HashMap::new(),
             subscribers: Vec::new(),
             last_keyboard_layout: 0,
+            workspace_published: Vec::new(),
+            workspace_pending: Vec::new(),
+            workspace_counts: Vec::new(),
             default_scale: scale,
             output_entries: OutputEntries::default(),
             mixed_scales: false,

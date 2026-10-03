@@ -245,6 +245,34 @@ impl World {
         Some((output.id, loc.workspace, origin))
     }
 
+    /// How many windows sit on each of one output's workspaces, in workspace
+    /// order -- what a bar's occupancy indicator reads, and what IPC's
+    /// `workspace` event publishes. Writes one count per workspace into
+    /// `counts` (cleared first) and answers the output's active workspace
+    /// index, so one call carries the whole snapshot. Counts every window
+    /// the core placed there, tiled and floating alike -- the same set
+    /// [`World::window_workspace`] locates, so this always agrees with a
+    /// `windows` listing built from that.
+    ///
+    /// A per-refresh path (every `apply` with an occupancy subscriber),
+    /// never per frame: it walks each workspace's columns and floating
+    /// layer once, filling the caller's buffer rather than allocating, so
+    /// a steady state costs no allocation at all. `None` for an output
+    /// this core doesn't know about, leaving `counts` cleared.
+    pub fn workspace_window_counts(&self, id: OutputId, counts: &mut Vec<usize>) -> Option<usize> {
+        counts.clear();
+        let output = self.outputs.iter().find(|o| o.id == id)?;
+        counts.extend(output.workspaces.iter().map(|workspace| {
+            workspace
+                .columns
+                .iter()
+                .map(|column| column.windows.len())
+                .sum::<usize>()
+                + workspace.floating.len()
+        }));
+        Some(output.active)
+    }
+
     /// [`World::origin_revision`]'s value: what a shell publishing
     /// per-workspace names compares (beside the workspace count) to learn
     /// the tags changed without rebuilding them.

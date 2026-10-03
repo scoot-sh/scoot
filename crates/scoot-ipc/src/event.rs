@@ -29,7 +29,7 @@
 //!   Open another connection for requests -- requests pipeline, so one is
 //!   enough for any number of them.
 //! - **Filtering is by kind, not by field.** The subscription names event
-//!   kinds (`output`, `keyboard`); the server sends every event of those
+//!   kinds (`output`, `keyboard`, `workspace`); the server sends every event of those
 //!   kinds,
 //!   and the client filters or debounces further itself. Standby cycles
 //!   fire removal/restore pairs routinely -- that is accepted, and stated
@@ -46,7 +46,9 @@ use serde::{Deserialize, Serialize};
 /// [`EventKind::Output`] covers output removed/restored/changed -- see
 /// [`OutputRemoved`], [`OutputRestored`] and [`OutputChanged`].
 /// [`EventKind::Keyboard`] covers the active keyboard layout changing -- see
-/// [`KeyboardLayout`]. Adding a kind is additive on
+/// [`KeyboardLayout`].
+/// [`EventKind::Workspace`] covers workspace occupancy changing -- see
+/// [`WorkspaceSnapshot`]. Adding a kind is additive on
 /// the request half, like adding an action: a client that never names it
 /// sends -- and a server decodes -- byte-for-byte what it did before, and
 /// an older server meets the new name with an ordinary `Error`, not a kill.
@@ -70,6 +72,15 @@ pub enum EventKind {
     /// `XKB_DEFAULT_OPTIONS` the session started with, e.g.
     /// `grp:caps_toggle`).
     Keyboard,
+    /// Workspace occupancy changed on an output: which workspaces hold
+    /// windows, as a full per-output snapshot -- see [`WorkspaceSnapshot`].
+    /// What a bar's workspace module draws (dimming the empty ones) without
+    /// polling `windows`, and what tells an agent "workspace 3 now has
+    /// windows". No standard Wayland protocol reports occupancy to an
+    /// unfocused client -- `ext-workspace-v1` carries the list, positions
+    /// and the one `active` bit, but no "holds windows" bit, and no other
+    /// standard protocol maps a toplevel to a workspace.
+    Workspace,
 }
 
 /// An output was removed: its workspaces were adopted onto a remaining
@@ -213,4 +224,38 @@ pub struct KeyboardLayout {
     pub name: String,
     /// The active group, 0-based.
     pub index: u32,
+}
+
+/// One output's workspace occupancy: which workspaces hold windows.
+///
+/// What an [`EventKind::Workspace`] subscription carries when it changes,
+/// one event per output whose snapshot moved. A **full snapshot** rather
+/// than a delta: every event names every workspace of the output, so a
+/// subscriber that missed one is never wrong -- it just shows the latest.
+///
+/// `active` is the output's active workspace and `counts[i]` the number of
+/// windows on its `i`-th workspace, both 0-based in the numbering `windows`
+/// and `focus-workspace-index` speak. Counts rather than a plain occupied
+/// flag: a bar derives the flag (`counts[i] > 0`), while an agent reads how
+/// many windows each workspace holds -- and the extra bytes are one small
+/// integer per workspace.
+///
+/// Fires at most once per output per frame tick, however fast windows open,
+/// close or move: changes mark the snapshot dirty and the tick sends the
+/// latest, so a client opening and closing windows at its maximum rate is
+/// one event per tick, not an event stream. A fresh subscription starts
+/// silent -- read `windows` once for the baseline, then apply snapshots
+/// after it -- so subscribing never replays the whole unsubscribed interval
+/// as one change.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSnapshot {
+    /// The output's id, as `outputs` reports it.
+    pub output: u64,
+    /// Its connector name (`DP-1` under `--tty`, `headless-2` otherwise) --
+    /// the same string `outputs` names it by.
+    pub name: String,
+    /// The output's active workspace, 0-based.
+    pub active: usize,
+    /// One entry per workspace, in order: how many windows sit on it.
+    pub counts: Vec<usize>,
 }
