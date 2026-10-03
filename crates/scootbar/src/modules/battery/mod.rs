@@ -9,7 +9,7 @@
 //! answered on the Asahi M2 (`macsmc-battery`): plug and unplug each emit
 //! a burst of `power_supply` uevents, and capacity steps while discharging
 //! emit none (five steps over 62 minutes, zero uevents; AC at Full is
-//! silent too). So a uevent is how the module learns it has started
+//! silent too). So a uevent is how a running module learns it has started
 //! discharging, and a slow timer (once a minute) is how it sees the steps:
 //! it re-reads while discharging and stops when charging or full, with the
 //! rate published ([`DISCHARGE_POLL`], `docs/scootbar/cli.md`). Other

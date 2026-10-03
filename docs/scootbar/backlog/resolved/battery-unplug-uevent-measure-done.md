@@ -65,8 +65,8 @@ millisecond timestamps ran beside a 15 s sampler of `online`, `status`,
 |---|---|
 | Unplug, 19:46:54 | 8 in 0.5 s (4 `macsmc-ac`, 3 `macsmc-battery`, 1 `tps6598x`) |
 | Plug in, 19:47:50 | 16 in 1.4 s |
-| Unplug, 19:48:16 | 11 |
-| Plug in, 20:50:10 | 17 in 2 s |
+| Unplug, 19:48:16 | 11 in 0.5 s |
+| Plug in, 20:50:10 | 17 in 1.5 s |
 | Capacity steps while discharging | **0**, over five steps |
 | AC at `Full`, idle | 0 (the earlier Test 14 result) |
 
@@ -81,17 +81,18 @@ and 20:50:10:
 | 20:42:08 | 97 → 96 |
 | 20:48:38 | 96 → 95 |
 
-That is 62 minutes on battery (19:48:20 to 20:50:23) at about 340 mA, a step
-every 6 to 6.5 minutes once they start. Two things worth knowing:
+That is 62 minutes on battery (19:48:16 to 20:50:10, by the uevent times) at
+about 340 mA (two manual `current_now` reads, 337 and 343 mA; the sampler
+did not log current), a step every 6 to 6.5 minutes once they start. Two things worth knowing:
 
-- **The first step lags the real charge.** The SMC held `capacity` at 100
-  until `charge_now / charge_full` had fallen to about 94.6% (about 35
-  minutes in). A freshly full battery shows 100 for a long time.
+- **The first step lags the real charge.** `capacity` was still 100 when a
+  manual read at about 20:19 showed `charge_now / charge_full` at 94.6%; the
+  first step came at 20:23:07, about 35 minutes in. A freshly full battery shows 100 for a long time.
 - The load was the idle machine's own; no extra load was applied.
 
 **Decision.** Unplug and plug are reliable and capacity steps are silent, so
 the ticket's own rule applies: the current design is right. A uevent is how
-the module learns it has started discharging (it arms the timer from the
+a running module learns it has started discharging (it arms the timer from the
 shown state), and the one-minute timer while discharging is the only thing
 that sees the steps. The stale-state worry this ticket was filed for (a
 silent unplug leaving a bar showing `Full` or `Charging` with no timer and
@@ -108,5 +109,5 @@ this one evidently does so on SMC power events and not on gauge ticks. That
 is an inference from the logs, not from the driver source.
 
 **Evidence.** Raw logs, not committed: `events.log` (52 uevent lines
-across the four bursts) and `samples.log` (about 240 samples), captured on
+across the four bursts) and `samples.log` (257 samples), captured on
 the machine under `~/unplug-test/`. The tables above are read from them.
