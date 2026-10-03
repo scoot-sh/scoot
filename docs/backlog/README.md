@@ -469,7 +469,8 @@ Project-wide, not tied to one binary; the bar's own Nix package is
   — RESOLVED 2026-09-16, together with the `--tty` entry above that had
   independently (and wrongly) filed the same failure as a compositor bug.
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
-- [scootbg-mem fd-close test races on fd reuse](./testing/scootbg-mem-fd-close-test-race.md) — medium: 1 in 60, failed PR #332's CI.
+- [scootbg-mem fd-close test races on fd reuse](./resolved/scootbg-mem-fd-close-test-race-done.md)
+  — RESOLVED 2026-10-03 (already landed in #331): the dev+ino identity check was in the tree 4 minutes before the ticket was filed; verified with 46 green suite runs plus mutation checks.
 - [cursor_hide tests read the host cursor theme](./testing/cursor-hide-tests-theme-hermetic.md) — low: fail on the Asahi box, pass with the theme unset.
 - [Dispatch flood tests die on fd-pressure kills under a pressured process table](./resolved/dispatch-flood-fd-pressure-flake-done.md)
   — RESOLVED 2026-09-20 (test-only): both dispatch halves run under the icon test's treatment (raised `RLIMIT_NOFILE` ceiling with verified headroom — 896 free for the 512-retaining fill, 384 for the fd-less single-pixel flood — plus budget-cause pinning by message); the single-pixel flood now takes the shared `FD_FLOOD_LOCK`. The `immed`   twin reproduces identically and is left for a follow-up per the ticket's scope.

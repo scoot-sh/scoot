@@ -1,9 +1,10 @@
 ---
 title: "scootbg-mem: closing_the_fd_keeps_the_pages test races on fd-number reuse"
-status: "open"
-area: "testing"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # scootbg-mem: closing_the_fd_keeps_the_pages test races on fd-number reuse
@@ -21,3 +22,7 @@ Assert on identity, not on the fd number: compare the fd's `fstat` inode/dev (or
 ## Not in this ticket
 
 Any product change: this is test hygiene only.
+
+## Resolution (2026-10-03, already landed)
+
+No code change needed: PR #331 (`21561385`, merged 2026-09-29 12:46 -0400) fixed this ~4 minutes before the ticket was filed (`27b4876b`). `crates/scootbg-mem/src/shm/tests.rs:105-121` already fstats the memfd before `close_fd` and compares dev+ino, treating a reused fd number as a pass. Verified with 46 green `cargo test -p scootbg-mem` suite runs across thread counts plus mutation checks (no-op `close_fd` fails, leaked-fd fails).
