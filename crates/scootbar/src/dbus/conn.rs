@@ -44,6 +44,12 @@ pub const MAX_EVENTS_PER_TURN: usize = 64;
 /// the consumer tries again after the next turn.
 pub const MAX_PENDING: usize = 64;
 
+/// [`Event::Dropped`] with this instead of a token: the skipped reply
+/// answers some call, and the table cannot say which. No flight carries
+/// it (slots are small indexes), so matching on it is matching on the
+/// unknown.
+pub const DROPPED_UNKNOWN: u64 = u64::MAX;
+
 /// Reads stop once this much is staged, leaving the rest in the kernel's
 /// socket buffer (the sender backs up, not the bar): one whole capped
 /// message and a read's worth, so the largest message still completes.
@@ -239,6 +245,11 @@ pub enum Event {
     /// The reply to the call that carried `token` was past
     /// [`proto::MAX_MESSAGE`], and was skipped unread: the call is
     /// answered, with nothing the client can use. The connection lives.
+    ///
+    /// [`DROPPED_UNKNOWN`] instead of a token: the skipped reply's header
+    /// fields were past what is read (or not little-endian), so no call
+    /// can be named. Some call lost its answer; the consumer re-reads or
+    /// gives up.
     Dropped { token: u64 },
     /// A signal the match rules asked for.
     Signal {
@@ -290,6 +301,18 @@ fn sender_matches(callee: &str, sender: Option<&str>) -> bool {
         return sender == callee;
     }
     true
+}
+
+/// The header fields' length of a framed message, in its own byte order:
+/// the frame is validated, so the flag is `l` or `B`, and a big-endian
+/// length read as little-endian is garbage.
+fn fields_len(header: &[u8]) -> u32 {
+    let bytes = [header[12], header[13], header[14], header[15]];
+    if header[0] == b'l' {
+        u32::from_le_bytes(bytes)
+    } else {
+        u32::from_be_bytes(bytes)
+    }
 }
 
 /// The connection: the socket, the staging buffers, the pending-call
@@ -570,7 +593,7 @@ impl Conn {
             if total > proto::MAX_MESSAGE {
                 // Valid, and more than this client takes: skipped whole as
                 // its bytes arrive. A reply says which call lost its answer.
-                let fields = u32::from_le_bytes([rest[12], rest[13], rest[14], rest[15]]) as usize;
+                let fields = fields_len(rest) as usize;
                 let prefix = 16 + fields + (8 - (16 + fields) % 8) % 8;
                 let known = fields <= MAX_OVERSIZE_FIELDS;
                 if known && rest.len() < prefix {
@@ -584,9 +607,12 @@ impl Conn {
                     ));
                 }
                 let dropped = if known {
-                    Self::oversize_reply(&mut self.pending, &rest[..prefix])
+                    match Self::oversize_reply(&mut self.pending, &rest[..prefix]) {
+                        Some(token) => Some(token),
+                        None => Self::unknown_reply(&self.pending, rest[1]),
+                    }
                 } else {
-                    None
+                    Self::unknown_reply(&self.pending, rest[1])
                 };
                 self.discard = total;
                 if let Some(token) = dropped {
@@ -625,6 +651,20 @@ impl Conn {
         let n = self.discard.min(self.staged.len());
         self.staged.drain(..n);
         self.discard -= n;
+    }
+
+    /// The token for a reply skipped unread: no call can be named, so the
+    /// unknown one, and only when the skipped message answers some call
+    /// still waiting (anything else — a call, a signal, or a reply to
+    /// nothing waiting — answers nothing).
+    fn unknown_reply(pending: &[Pending], kind: u8) -> Option<u64> {
+        // MethodReturn | Error: the protocol's own codes, as
+        // `proto::Kind::from_byte` reads them.
+        if (kind == 2 || kind == 3) && !pending.is_empty() {
+            Some(DROPPED_UNKNOWN)
+        } else {
+            None
+        }
     }
 
     /// The token of the call an over-cap reply (header only) answers, and

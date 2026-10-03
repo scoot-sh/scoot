@@ -398,7 +398,22 @@ impl Live {
     /// answered with nothing usable. The player keeps its last state and is
     /// read again at its next signal (`stale` is not honored: asking at
     /// once would fetch the same oversized answer).
+    /// [`conn::DROPPED_UNKNOWN`] instead of a token: the skipped reply's
+    /// header was not read, so no call can be named. Some call lost its
+    /// answer: free what expired by age, and let every player waiting on
+    /// an answer ask again at its next signal, instead of staying stuck
+    /// till a reap.
     fn on_dropped(&mut self, token: u64) {
+        if token == conn::DROPPED_UNKNOWN {
+            self.reap();
+            for player in &mut self.players {
+                if player.asked.is_some() {
+                    player.asked = None;
+                    player.stale = true;
+                }
+            }
+            return;
+        }
         let Some(flight) = self.flights.get_mut(token as usize).and_then(Option::take) else {
             return;
         };

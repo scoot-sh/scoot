@@ -579,6 +579,80 @@ fn an_over_cap_reply_is_skipped_and_the_connection_lives() {
     assert!(!conn.dead());
 }
 
+/// An over-cap reply whose header fields are past what is read is
+/// skipped unread: no call can be named, so the event says the answer
+/// was lost without saying whose, and the consumer re-reads or gives up.
+#[test]
+fn an_over_cap_reply_past_the_fields_read_is_an_unknown_drop() {
+    let (mut conn, daemon) = connected();
+    let first = conn.call("a.b", "/", "a.b", "Big", "", &[], 0, 7).unwrap();
+    let _ = conn.pump();
+    // A reply header by hand: fields past MAX_OVERSIZE_FIELDS, a body to
+    // the spec's scale. Only the prefix and a piece of the body are sent:
+    // enough to skip by, never the whole message.
+    let (body_len, fields_len) = (2 * 1024 * 1024u32, 100_000u32);
+    let mut m = vec![b'l', 2, 0, 1];
+    m.extend_from_slice(&body_len.to_le_bytes());
+    m.extend_from_slice(&5u32.to_le_bytes());
+    m.extend_from_slice(&fields_len.to_le_bytes());
+    let prefix = 16 + fields_len as usize + (8 - (16 + fields_len as usize) % 8) % 8;
+    m.resize(prefix + 64 * 1024, 0);
+    // The whole piece fits the socket buffers: joined first, the pumps
+    // below are deterministic, not a race with the writer. A clone stays
+    // open meanwhile, so the writer finishing is not an EOF (which would
+    // kill the connection before it is worked).
+    let _held = daemon.try_clone().unwrap();
+    let sender = send_later(daemon, m);
+    sender.join().unwrap();
+    let mut events = Vec::new();
+    for _ in 0..5 {
+        events.extend(conn.pump().0);
+    }
+    assert!(
+        matches!(events.as_slice(), [Event::Dropped { token }] if *token == conn::DROPPED_UNKNOWN),
+        "{events:?}"
+    );
+    let _ = first;
+    assert!(!conn.dead());
+}
+
+/// A big-endian over-cap header is read big-endian: the fields length is
+/// not garbage, the skip is by the real prefix, and the reply the fields
+/// would name (which the little-endian-only parser cannot) is an unknown
+/// drop, not a stuck flight.
+#[test]
+fn a_big_endian_over_cap_reply_is_an_unknown_drop() {
+    let (mut conn, daemon) = connected();
+    let first = conn.call("a.b", "/", "a.b", "Big", "", &[], 0, 7).unwrap();
+    let _ = conn.pump();
+    // A valid over-cap reply, then byte-swapped to big-endian: the flag
+    // and every header word.
+    let mut bytes = oversized_reply(100, first, super::proto::MAX_MESSAGE + 4096);
+    assert!(bytes.len() > super::proto::MAX_MESSAGE);
+    bytes[0] = b'B';
+    for word in [[4, 8], [8, 12], [12, 16]] {
+        bytes[word[0]..word[1]].reverse();
+    }
+    let fields = u32::from_be_bytes(bytes[12..16].try_into().unwrap()) as usize;
+    let prefix = 16 + fields + (8 - (16 + fields) % 8) % 8;
+    // Small fields, read right: the skip is knowable, the sender is not.
+    assert!(fields <= 64 * 1024, "{fields}");
+    // Joined first, so the pumps below are deterministic; a clone stays
+    // open, so the writer finishing is not an EOF.
+    let _held = daemon.try_clone().unwrap();
+    let sender = send_later(daemon, bytes[..prefix + 64 * 1024].to_vec());
+    sender.join().unwrap();
+    let mut events = Vec::new();
+    for _ in 0..5 {
+        events.extend(conn.pump().0);
+    }
+    assert!(
+        matches!(events.as_slice(), [Event::Dropped { token }] if *token == conn::DROPPED_UNKNOWN),
+        "{events:?}"
+    );
+    assert!(!conn.dead());
+}
+
 #[test]
 fn an_over_cap_call_or_signal_is_skipped_with_no_event() {
     let (mut conn, daemon) = connected();
