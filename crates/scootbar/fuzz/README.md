@@ -103,3 +103,5 @@ devenv shell -- nix shell --inputs-from . nixpkgs#cargo-fuzz --command bash -c '
 | 2026-09-29 | see the PR | `tzif` | 113,636,649 | 301 s | none |
 | 2026-10-02 | `crates/` tree `6960f3fd6564` | `dbus` (CI budget: `-runs=1000000 -seed=1 -max_len=70000`) | 1,000,000 | 32 s | none |
 | 2026-10-02 | `crates/` tree `6960f3fd6564` | `dbus` (`-max_total_time=600 -max_len=70000`, seed 1, on the corpus the run above grew) | 15,262,874 | 601 s | none |
+| 2026-10-02 | `crates/` tree `7bc1a04525c8` | `dbus` (`-runs=1000000 -seed=1 -max_len=70000`) | 1,000,000 | 8 s | none |
+| 2026-10-02 | `crates/` tree `7bc1a04525c8` | `dbus` (`-max_total_time=600 -max_len=70000`, seed 1) | 34,432,616 | 601 s | none |

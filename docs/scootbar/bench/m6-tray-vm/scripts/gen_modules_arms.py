@@ -1,3 +1,9 @@
+# NOTE: a record of how the `modules!` arms of src/cli.rs were regenerated
+# once (the tray made them 64). It hardcodes the six optional modules of that
+# day (volume, microphone, network, brightness, battery, tray), needs a
+# python3 the dev shell does not carry, and does not apply to `popup`, which
+# is a feature and not a module (the arms were unaffected by it). Edit the
+# `cfgorder` list to the modules of the day, or write the arms by hand.
 # Regenerates the 64 `modules!` arms of crates/scootbar/src/cli.rs (builds with
 # no clock, workspaces or window-title: one arm per subset of the six optional
 # modules, alphabetical in the listing). Usage: python3 gen_modules_arms.py < cli.rs > cli.new.rs

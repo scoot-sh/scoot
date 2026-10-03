@@ -1,30 +1,34 @@
 === nextest run -p scootbar --no-fail-fast
-     Summary [  28.648s] 981 tests run: 981 passed, 0 skipped
+     Summary [  22.896s] 1046 tests run: 1046 passed, 2 skipped
 === test -p scootbar
-test result: ok. 869 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.48s
+test result: ok. 918 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.98s
 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
 test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.29s
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.15s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
 === nextest run -p scootbar --bin scootbar --no-default-features --no-fail-fast
-     Summary [   3.093s] 409 tests run: 409 passed, 0 skipped
+     Summary [   0.916s] 412 tests run: 412 passed, 0 skipped
 === nextest run -p scootbar --bin scootbar --no-default-features --features tray --no-fail-fast
-     Summary [   4.791s] 459 tests run: 459 passed, 0 skipped
+     Summary [   4.066s] 480 tests run: 480 passed, 0 skipped
 === nextest run -p scootbar --bin scootbar --no-default-features --features tray,clock --no-fail-fast
-     Summary [   5.204s] 532 tests run: 532 passed, 0 skipped
+     Summary [   5.126s] 553 tests run: 553 passed, 0 skipped
 === nextest run -p scootbar --bin scootbar --no-default-features --features tray,network,volume --no-fail-fast
-     Summary [   5.922s] 553 tests run: 553 passed, 0 skipped
+     Summary [   6.854s] 577 tests run: 577 passed, 0 skipped
 === nextest run -p scootbar --bin scootbar --no-default-features --features clock --no-fail-fast
-     Summary [   4.637s] 482 tests run: 482 passed, 0 skipped
+     Summary [   1.009s] 485 tests run: 485 passed, 0 skipped
+=== nextest run -p scootbar --bin scootbar --no-default-features --features tray,popup,volume,microphone --no-fail-fast
+     Summary [  10.251s] 556 tests run: 556 passed, 0 skipped

@@ -853,16 +853,21 @@ socket is one more source in the `poll` loop), which is the
   not the bar. The bus
   set-up (auth and `Hello`) is blocking, bounded to 2 seconds in total.
   The parser is fuzzed (`crates/scootbar/fuzz`, target `dbus`).
-- **Cost.** One fd (the bus socket, with `OUT` only while a write waits),
-  or one inotify fd while there is no bus, and a one-shot timer only while
-  an item waits out its 50 ms floor between reads. Measured in a 60 s idle
-  window on the dev VM: **zero wakeups** with no bus, with a bus and no
-  items, and with one and with eight items on it; RSS 3956 kB with the tray
-  alone and no bus, +12 kB with a bus, +180 kB for the first item and about
-  +11 kB for each further one; the stripped binary is +131,072 B with the
-  feature (1,839,840 B against 1,708,768 B). An item that re-announces its
-  icon continuously is read at most every 50 ms (0.55% of a core measured,
-  against 9.7% with no floor). The table and its method are in the
+- **Cost.** One fd (the bus socket, with `OUT` only while a write or a
+  staged message waits), or one inotify fd while there is no bus, and a
+  one-shot timer only while an item waits out its 50 ms floor between
+  reads or after the bus kept dropping the bar. Measured (dev VM, one
+  60 s idle window per row): **zero wakeups** with no bus, with a bus and
+  no items, and with one and with eight items on it; RSS 4028 kB with the
+  tray alone and no bus or no items, 4224 kB with one item, 4256 kB with
+  eight (differences under about 130 kB are within one run's resolution).
+  The binary: **+131,072 B on disk (1,774,304 to 1,905,376, +7.4%) and
+  +112,496 B of loaded sections (+6.7%, of which `.text` +96,896 B)**
+  against `main`, and the feature built but *off* is not free either:
+  +65,536 B on disk, +3,312 B loaded (shared edits). An item that
+  re-announces its icon continuously is read at most every 50 ms (0.7% of
+  a core measured, against 9.7% with no floor). The table and its method
+  are in the
   [resource ratchet](backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
 
 ## Pointer input

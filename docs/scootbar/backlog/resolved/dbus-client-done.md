@@ -69,9 +69,11 @@ are unchanged).
 - **`proto.rs`**, `std` only (the fuzz crate compiles it by `#[path]`): the
   framing, a bounds-checked `Reader` and `Writer`, the signature walk, and
   the shape readers the tray uses (`read_item_props`, `read_pixmaps`,
-  `read_names`, ...). Bounds: a message past 1 MiB, nesting past 32, a name
-  past 128 bytes, a signature past 255, a pixmap side past 256 pixels and
-  128 properties an answer are each refused, never a panic.
+  `read_names`, ...). Bounds: nesting past 32, a name past the spec's 255
+  bytes, a path past 1024, a signature past 255, a pixmap side past 256
+  pixels and 128 properties an answer are each refused, never a panic. A
+  message past 1 MiB is not refused with the connection: it is skipped
+  whole (below), up to the spec's 128 MiB.
   Little-endian only: a big-endian message is framed (skipped whole) and
   dropped.
 - **`conn.rs`**: auth (EXTERNAL with the empty initial response, per the
@@ -80,9 +82,12 @@ are unchanged).
   wanted: no bus times a call out by default, measured on a stock
   `dbus-daemon` for 400 s and on `dbus-broker` for 130 s, so only a client
   library's own timeout would, and this client has none), signals and incoming calls
-  as owned events, 64 events a turn, staging and outbox capped at 2 MiB (a
-  bus that stops reading drops the connection), and the blocking set-up
-  bounded to 2 s in total. The socket is one `poll(2)` source; there is no
+  as owned events, 64 events a turn, reads stopped at a 1 MiB watermark
+  (a flood backs up in the socket and is worked a few pumps a wake; the
+  poll is woken with `OUT` meanwhile), a message past 1 MiB skipped whole
+  as it arrives with `Event::Dropped` for the call it answered, the
+  outbox capped at 2 MiB (a bus that stops reading drops the connection),
+  and the blocking set-up bounded to 2 s in total. The socket is one `poll(2)` source; there is no
   thread and no timer.
 - **Tests**: unit tests for the wire, the writer and the bounds; a fixture
   marshalled by sd-bus, which found the one real wire bug in the inherited
@@ -115,15 +120,41 @@ branch, never merged), each pinned by a test that fails without the fix:
   every reconnect), the outbox was unbounded, a bus that dropped the bar at
   once was redialled in a tight loop (41 dials in 2 s in the test), and a
   scroll down sent the same sign as a scroll up.
+- **Review round 2 (the draft's bounds were the wrong kind).** A valid
+  message past 1 MiB (an item's 512 by 512 pixmap: SNI has no way to ask
+  for a size, and the comment that said "tens of KiB" was wrong) killed
+  the connection, and three such deaths latched the tray off for the
+  session; a 2 MiB call to the bar and a signal flood (read without being
+  worked, staging passed its cap) did the same. Now skipped and
+  watermarked, the latch retries on a timer, and a flood no longer moves a
+  megabyte per message (cutting the front of the staging buffer per frame
+  was quadratic). Real-daemon tests send each (a 512 by 512 `GetAll`
+  answer, a 1.3 MiB call to the bar, 60,000 signals) and assert the other
+  item is still shown, the daemon still names the same owner of the
+  watcher name, and a newcomer registers.
+- **Review round 2 (a hostile item can lose only itself).** A unicast
+  `NameOwnerChanged` from any peer removed an item (only the bus's is
+  believed now), as did a host-mode announcement from a peer that was not
+  the watcher; a well-known name that changed hands kept its old owner, so
+  the old owner leaving took the new owner's item; one bad name failed the
+  whole `ListNames` reply (and names were capped at 128, not the spec's
+  255, and refused a leading dash); a denied `RequestName` was silent; the
+  per-service cap counted a service string, not who registered it; paths
+  were capped at 1 MiB; unknown header fields refused a message; interface
+  names took dashes; abstract session addresses fell through to another
+  bus; `array_raw`'s cookie truncated on 32-bit.
 - `tray` was named in two dead-code allow lists for variants it never
   constructs (the `tray,clock` build failed clippy), and its icon types
   were compiled into builds without the feature.
 
 **Idle cost with its consumer running** is the tray's, published in
 [lightest.md](../lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02):
-the binary is **+131,072 B** (1,708,768 to 1,839,840 stripped, aarch64),
-and with the tray placed and an item on the bus the bar's idle wakeups are
-the clock's alone and its RSS is within 0.2 MiB of the bar without it.
+with the tray placed, an item on the bus and nothing else going on, **zero
+idle wakeups** (the clock's two a minute are the only ones in a layout
+that has a clock), RSS 4028 kB with the tray alone and 4224 kB with one
+item. The binary is **+131,072 B on disk (+7.4%) and +112,496 B of loaded
+sections over `main`** (`.text` +96,896 B); the feature built but off is
++65,536 B on disk and +3,312 B loaded, not free.
 
 **Not built** (the tray's entry lists what it waits on): the system bus
 (`connect` takes a path, and only the session address is read), anything

@@ -1,5 +1,5 @@
-start rss_kb=4032 vol=205 nonvol=8 utime=0 stime=1 fds=10 staged_ok=1
-end rss_kb=4032 vol=1439 nonvol=169 utime=5 stime=6 fds=10 staged_ok=1
-getalls answered: 436
+start rss_kb=4096 vol=211 nonvol=0 utime=1 stime=1 fds=10 staged_ok=1
+end rss_kb=4096 vol=1564 nonvol=0 utime=5 stime=11 fds=10 staged_ok=1
+getalls answered: 434
 bar alive: yes
-{"type":"modules","modules":[{"id":"tray","section":"left","output":"headless","text":"","class":"normal","tooltip":"item-1","value":{"items":[{"id":"org.kde.StatusNotifierItem-9-1/StatusNotifierItem"
+{"type":"modules","modules":[{"id":"tray","section":"left","output":"headless","text":"","class":"normal","tooltip":"item-1","value":{"items":[{"id":"org.kde.St
