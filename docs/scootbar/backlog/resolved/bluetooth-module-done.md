@@ -1,10 +1,11 @@
 ---
 title: "Bluetooth module: adapter and device state over BlueZ"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M6"
+resolved: "2026-10-03"
 ---
 
 # Bluetooth module

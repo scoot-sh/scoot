@@ -9,14 +9,15 @@ milestone: "M6"
 
 # Bluetooth module: real adapter and headset validation
 
-Filed 2026-10-03 as the follow-up the `bluetooth-module` ticket requires.
+Filed 2026-10-03 as the follow-up the `bluetooth-module` ticket requires
+([resolved](resolved/bluetooth-module-done.md)).
 Serves **daily-drive**: the module merged on VM evidence only (no machine
 involved had a Bluetooth adapter), and showing the wrong thing next to a
 real headset is a daily-use failure, not a test gap.
 
 ## The gap
 
-What the VM proves (see `bluetooth-module.md`'s resolution): the wire
+What the VM proves (see the [resolution](resolved/bluetooth-module-done.md)): the wire
 readers against hostile shapes, the state machine against a scripted bus
 and a fake BlueZ on a real `dbus-daemon`, the match-rule filtering, the
 toggle's `Set`, the draw throttle, the oversize answer keeping the last

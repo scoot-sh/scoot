@@ -3,7 +3,7 @@ title: "Data-source modules (umbrella): rules shared by every module that reads 
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "bluetooth-module, tray"
+blocked: "tray"
 milestone: "ongoing"
 ---
 
@@ -18,7 +18,7 @@ Filed 2026-09-29; split into one entry per module 2026-09-29. Serves
 - [network](resolved/network-module-done.md) — RESOLVED 2026-10-02
 - [brightness](resolved/brightness-module-done.md) — RESOLVED 2026-10-02
 - [media (MPRIS)](resolved/media-module-done.md)
-- [bluetooth](bluetooth-module.md)
+- [bluetooth](resolved/bluetooth-module-done.md) — RESOLVED 2026-10-03
 - [system tray](tray.md)
 
 **Not built in, by decision**: CPU, memory, temperature and disk
