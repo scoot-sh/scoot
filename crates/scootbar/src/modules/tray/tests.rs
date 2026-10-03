@@ -747,12 +747,13 @@ fn the_watcher_object_answers() {
 /// A `GetAll` body marshalled by sd-bus, not by this crate's `Writer`
 /// (`busctl call ... GetAll a{sv} ...`, captured with `dbus-monitor
 /// --binary` on a private `dbus-daemon`; `fixtures/README.md` has the
-/// command). A fixture the crate wrote itself proves only that the
-/// writer and the reader agree; this one carries the padding of a
-/// marshaller written by someone else: an `a(iiay)` after a string at
-/// an odd offset, the tooltip struct with its own pixmap array, and an
-/// unknown property whose variant holds an `a{sv}` of 8-aligned arrays
-/// and structs, none of which start at a multiple of 8.
+/// command). D-Bus alignment is fully specified, so this is not a second
+/// opinion on the padding: it holds shapes this crate's own tests did not
+/// think to write. An unknown property whose variant holds an `a{sv}` of
+/// 8-aligned arrays and structs, none of them starting at a multiple of
+/// 8, was misread by the reader until this fixture met it; the same body
+/// has an `a(iiay)` after a string at an odd offset and the tooltip
+/// struct with its own pixmap array.
 #[test]
 fn a_getall_marshalled_by_sd_bus_is_read_whole() {
     use crate::dbus::proto::Message;

@@ -175,15 +175,23 @@ their owners, and the watcher name is re-taken when it is lost), a marshaller
 for exactly the type set the tray needs (`a(iiay)`, `a{sv}`, `(sa(iiay)ss)`,
 `as`, the basic types and variants). Where it moved:
 
-- **Wire finding 4 (the daemon validates the wire) was half right.** The
-  daemons validate *a* wire, but a message marshalled by a peer with another
-  padding habit still reaches the parser, and the tray's own reader got
-  array padding wrong inside variants until it met sd-bus's marshalling
-  (`src/dbus/fixtures/`, which says how it was captured). A fixture the
-  crate's own `Writer` produced could not have shown it.
-- **dbus-daemon 1.16 times a call out after 25 s; dbus-broker does not**,
-  so the pending table expires its own calls by age when its slots are
-  wanted (no timer: an idle bar stays at zero wakeups).
+- **Wire finding 4 stands as written** (the daemons validate the wire, so
+  the threat is valid-but-hostile shapes, not malformed bytes). The one
+  wire bug the build found was the reader's, not the protocol's: an
+  8-aligned array inside a variant that starts off an 8-byte boundary, a
+  shape none of the crate's own tests wrote, so the reader padded it
+  relative to the variant instead of the message. A message marshalled by
+  sd-bus held that shape (`src/dbus/fixtures/`, which says how it was
+  captured), and now the test suite does.
+- **No bus times a call out by default.** Measured with a peer that owns a
+  name and never replies (`bench/m6-tray-vm/logs/call-timeouts.txt`): a
+  stock dbus-daemon 1.16.2 `session.conf` returned nothing in 400 s (its
+  `reply_timeout` limit, which a config can set, did answer at the 5 s
+  configured in the test), and the VM's dbus-broker nothing in 130 s; the
+  25 s everyone remembers is libdbus's and sd-bus's own client timeout. A
+  client with none, as this one, must forget its own calls, so the pending
+  table expires them by age when its slots are wanted (no timer: an idle
+  bar stays at zero wakeups).
 - **The 1 MiB message bound held** (pixmaps at device pixels are tens of
   KiB; the tray refuses a side past 256 pixels). Menu layouts, the
   unbounded one, wait on popups.

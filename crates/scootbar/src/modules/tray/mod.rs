@@ -126,8 +126,9 @@ pub const MAX_ITEMS: usize = 32;
 /// path after path loses its own extras, not everyone else's slots.
 const MAX_PER_SERVICE: usize = 8;
 /// A call unanswered this long is forgotten when its slot is wanted
-/// (dbus-daemon's own call timeout is 25 s; dbus-broker has none, so an
-/// item that never answers `GetAll` would hold a slot for good).
+/// (no bus times a call out by default: a stock dbus-daemon session.conf
+/// and dbus-broker were both measured at minutes without one, so an item
+/// that never answers `GetAll` would hold a slot for good).
 const FLIGHT_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 /// The longest side of a stored pixmap entry, in pixels: entries past it
 /// are left for the icon cache to scale from the single smallest kept.

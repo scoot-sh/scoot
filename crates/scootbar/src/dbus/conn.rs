@@ -292,9 +292,12 @@ impl Conn {
 
     /// Forgets the calls sent more than `max_age` ago and returns their
     /// tokens, so the consumer frees what it tracked under them. A peer
-    /// that never answers (dbus-daemon times a call out after 25 s;
-    /// dbus-broker does not) would otherwise hold a slot for the life of
-    /// the connection, and enough of them would starve every other call.
+    /// that never answers would otherwise hold a slot for the life of
+    /// the connection, and enough of them would starve every other call:
+    /// no bus answers for it by default (measured: a stock dbus-daemon
+    /// session.conf has no reply timeout, dbus-broker has none, and only a
+    /// configured daemon limit does), and this client has no timeout of
+    /// its own to fall back on.
     /// A reply that arrives late is dropped like any unknown serial.
     /// Called when the table is full, never on a timer: an idle bar
     /// stays at zero wakeups.

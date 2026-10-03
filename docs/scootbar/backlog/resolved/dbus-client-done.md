@@ -77,7 +77,9 @@ are unchanged).
 - **`conn.rs`**: auth (EXTERNAL with the empty initial response, per the
   spike's finding 1), `Hello`, calls with a pending table by serial (64
   at most; a call unanswered for 30 s is forgotten when its slot is
-  wanted: dbus-broker never times a call out), signals and incoming calls
+  wanted: no bus times a call out by default, measured on a stock
+  `dbus-daemon` for 400 s and on `dbus-broker` for 130 s, so only a client
+  library's own timeout would, and this client has none), signals and incoming calls
   as owned events, 64 events a turn, staging and outbox capped at 2 MiB (a
   bus that stops reading drops the connection), and the blocking set-up
   bounded to 2 s in total. The socket is one `poll(2)` source; there is no
@@ -95,7 +97,8 @@ branch, never merged), each pinned by a test that fails without the fix:
 - `array_raw` padded array elements relative to the reader's start, not to
   the message, so an `a(...)` inside a variant that does not start 8-aligned was
   misread: a correct answer with an unknown property holding one was
-  refused whole. Pinned by a `GetAll` from sd-bus.
+  refused whole. None of the crate's own tests wrote that shape; a
+  `GetAll` marshalled by sd-bus did, and pins it.
 - The fuzz target walked a *copy* of the module's property walk, so the
   fuzzed code was not the shipped code; there is one now (`read_item_props`).
 - `scan_names` returned true at the end of every buffer, so every file
@@ -105,7 +108,7 @@ branch, never merged), each pinned by a test that fails without the fix:
   showed an app that registered after it started (the fake bus sent the
   bare name, agreeing with the bug).
 - A `GetAll` per signal and a shared 64-slot table: an item that never
-  answers (dbus-broker has no call timeout) or one that is loud could
+  answers (no bus answers for it) or one that is loud could
   starve every other call. One call in flight per item, a 50 ms floor
   between reads, expiry by age, and a per-service item cap.
 - The set-up's timeout was per read (a stopped daemon cost 5 s a step on

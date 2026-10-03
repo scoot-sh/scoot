@@ -154,8 +154,8 @@ impl Fake {
     }
 
     /// Scripts an item that is listed and owned but never answers
-    /// `GetAll` (the call is recorded): a hung app. dbus-broker never
-    /// times a call out, so the module must not depend on a reply.
+    /// `GetAll` (the call is recorded): a hung app. No bus answers for it by
+    /// default, so the module must not depend on a reply.
     pub fn add_silent(&mut self, service: &str, owner: &str) {
         if !self.state.names.contains(&service.to_owned()) {
             self.state.names.push(service.to_owned());

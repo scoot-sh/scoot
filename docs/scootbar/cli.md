@@ -828,7 +828,8 @@ socket is one more source in the `poll` loop), which is the
   with controls stripped; at most 32 items, 8 from one service, 8 pixmap
   entries each; one `GetAll` in flight per item however many signals it
   sends; a call nobody answers is forgotten after 30 seconds when its slot
-  is wanted (dbus-broker never times a call out). A refused frame, or a
+  is wanted (no bus times a call out by default, measured on a stock
+  `dbus-daemon` and on `dbus-broker`; only a client library does). A refused frame, or a
   bus that stops reading, drops the connection and not the bar. The bus
   set-up (auth and `Hello`) is blocking, bounded to 2 seconds in total.
   The parser is fuzzed (`crates/scootbar/fuzz`, target `dbus`).
