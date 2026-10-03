@@ -889,9 +889,9 @@ Cargo feature (`media`), on by default; the smallest build
 - **What it shows** is `artist - title` (or whichever of the two the player
   sent, or the player's name when it sent neither) with a play or pause
   icon for the state, cut to `max-width` with an ellipsis measured in
-  pixels, in the `muted` class while paused. The module's tooltip text is the
-  uncut line, `mpv (playing): Ada - Song` (whether and how the bar draws a
-  module's tooltip is the tooltips feature's, not this module's). Several artists are joined with a
+  pixels, in the `muted` class while paused. The tooltip over the module (after the bar's
+  `tooltip-delay`, as every module's; see [Tooltips](#tooltips)) is the uncut
+  line with the player's name: `mpv (playing): Ada - Song`. Several artists are joined with a
   comma. **A stopped player shows nothing**, and with no player the module
   takes no space; start playback from the player.
 - **Which player.** Several may run. Of the ones that are playing or
@@ -1320,7 +1320,7 @@ There is no flag for it: the config file only.
   tooltip is the one its view already carried (the window title's full title,
   uncut by the span; the network's interface, SSID and signal; the battery's
   `Charging 80%`; the volume and microphone's device and level; the
-  brightness's device; the tray's item titles; a `push` or `exec` module's
+  brightness's device; the tray's item titles; the media module's player and line; a `push` or `exec` module's
   `tooltip` key, [the update payload](#the-update-payload)). A module with no
   tooltip, or whose tooltip is empty right now, shows none and arms nothing:
   the clock, workspaces and `button` modules have none. A new module's tooltip

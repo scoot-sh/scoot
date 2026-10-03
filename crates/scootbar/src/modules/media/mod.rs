@@ -479,6 +479,12 @@ impl Module for Media {
         Ok(Update::Unchanged)
     }
 
+    /// Its view carries a tooltip: the uncut line and the player's name.
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        true
+    }
+
     /// A click plays or pauses with no binding at all.
     fn handles_input(&self) -> bool {
         true

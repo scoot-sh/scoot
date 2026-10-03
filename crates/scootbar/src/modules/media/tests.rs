@@ -1525,3 +1525,17 @@ fn a_waiting_player_takes_the_place_of_a_held_one_that_stops() {
     settle_for(&mut harness, &mut fake, 300);
     assert!(held(&harness).contains(&pname(3)));
 }
+
+/// The tooltip is on screen only for a module that says it has one
+/// (`Module::tooltips`: the bar takes a pointer for tooltips from that alone):
+/// a playing player's view carries one, so the module must say so.
+#[cfg(feature = "popup")]
+#[test]
+fn a_playing_players_tooltip_is_reachable() {
+    let (mut harness, mut fake) = up();
+    fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
+    settle(&mut harness, &mut fake);
+    let view = harness.view_on(Some("DP-1"));
+    assert_eq!(view.tooltip(), "mpv (playing): Ada - Song");
+    assert!(harness.tooltips(), "a tooltip nobody can hover to");
+}

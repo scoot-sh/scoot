@@ -161,9 +161,10 @@ logs are `bench/m6-media-vm/logs/` and the command lines are in its README.
 **Not verified**: a real browser or Spotify as the player; the Asahi M2 and
 the full `scripts/scootbar-bench`; `nix build` of the package and the Nix
 module check; a competitor's media module (Waybar's `mpris` is not in the
-nixpkgs build on the box); the tooltip on screen (whether the bar draws a
-module's tooltip is the tooltips feature's: this module only fills the
-tooltip text, `mpv (playing): Ada - Song`, which `query` shows).
+nixpkgs build on the box); the tooltip on screen with a player behind it (the module says it has
+one, `Module::tooltips`, pinned by a test that fails without it, and the
+bar's tooltip tests are module-agnostic; no run hovered the media module with
+a player playing).
 
 ## Left
 
