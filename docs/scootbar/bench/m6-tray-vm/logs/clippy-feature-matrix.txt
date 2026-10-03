@@ -1,0 +1,32 @@
+=== --no-default-features	OK
+=== --no-default-features --features clock	OK
+=== --no-default-features --features workspaces	OK
+=== --no-default-features --features window-title	OK
+=== --no-default-features --features volume	OK
+=== --no-default-features --features microphone	OK
+=== --no-default-features --features network	OK
+=== --no-default-features --features brightness	OK
+=== --no-default-features --features battery	OK
+=== --no-default-features --features tray	OK
+=== --no-default-features --features button	OK
+=== --no-default-features --features push	OK
+=== --no-default-features --features exec	OK
+=== --no-default-features --features icon-image	OK
+=== --no-default-features --features popup	OK
+=== --no-default-features --features tray,clock	OK
+=== --no-default-features --features tray,workspaces	OK
+=== --no-default-features --features tray,window-title	OK
+=== --no-default-features --features tray,volume	OK
+=== --no-default-features --features tray,microphone	OK
+=== --no-default-features --features tray,network	OK
+=== --no-default-features --features tray,brightness	OK
+=== --no-default-features --features tray,battery	OK
+=== --no-default-features --features tray,button	OK
+=== --no-default-features --features tray,push	OK
+=== --no-default-features --features tray,exec	OK
+=== --no-default-features --features tray,icon-image	OK
+=== --no-default-features --features tray,popup	OK
+=== 	OK
+=== --features icon-image	OK
+=== --no-default-features --features tray,network,battery	OK
+=== --no-default-features --features tray,popup,volume,microphone	OK

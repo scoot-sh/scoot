@@ -18,7 +18,7 @@ license.workspace = true
 # module draws a plain bar and needs no font. `icon-image` is the one
 # feature that is not a module: it is an optional decoder (below).
 [features]
-default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "button", "push", "exec", "popup"]
+default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "tray", "button", "push", "exec", "popup"]
 clock = []
 workspaces = []
 window-title = []
@@ -42,6 +42,10 @@ battery = []
 # and a build without it has none of it, nor `xdg_wm_base`
 # (docs/scootbar/backlog/resolved/popups-done.md).
 popup = []
+# The system tray: StatusNotifierItem watcher and host over the shared
+# hand-rolled D-Bus client, pixmap icons first
+# (docs/scootbar/backlog/tray.md).
+tray = []
 # The three modules the config defines by name (`[button.NAME]`,
 # `[push.NAME]`, `[exec.NAME]`): extend the bar without Rust. `push` and
 # `exec` share the update payload (`src/modules/payload.rs`).

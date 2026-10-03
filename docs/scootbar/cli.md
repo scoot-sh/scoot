@@ -360,6 +360,7 @@ cannot:
 | `battery` | The batteries' charge and state ([below](#battery)) | on the kernel's power-supply events, and once a minute while discharging |
 | `network` | The shown interface's state: name, SSID and bars, VPN or offline ([below](#network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held |
 | `brightness` | The panel backlight's level ([below](#brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
+| `tray` | The applications' tray icons, StatusNotifierItem ([below](#tray)) | on the session bus's traffic: item registrations, icon changes, owners vanishing |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -760,6 +761,114 @@ and drops those that are not `power_supply`. A Cargo feature (`battery`), on by 
   absent batteries own no timer. Sysfs files are read once each into fixed buffers; a
   capacity past 100 is clamped, an unparsable one skips its battery,
   and a removed battery is one line on stderr, not one per wake.
+
+## Tray
+
+The applications' tray icons: the StatusNotifierItem watcher and host over
+the session bus, one icon per item, drawn at the output's real device
+pixels. A Cargo feature (`tray`), on by default; the smallest build
+(`--no-default-features`) has none of it. It speaks D-Bus through the
+bar's own client (`src/dbus`: no `zbus`, no libdbus, no thread; its
+socket is one more source in the `poll` loop), which is the
+[spike's](spikes/dbus-client.md) hand-rolled choice.
+
+- **The bar is the watcher.** It owns `org.kde.StatusNotifierWatcher` (and
+  the `org.freedesktop` twin) when they are free, answers apps'
+  registrations itself, and re-takes the name if its owner leaves. Where
+  another process already owns it (a desktop's own tray), the bar hosts
+  against that watcher instead: its items still appear, a click still
+  works, and the bar takes over when that owner goes. Items that
+  registered before the bar started are found by listing the bus's names
+  at connect (an item behind a plain unique name registers explicitly, and
+  is only seen if it registers after the bar is up: the KDE watcher's own
+  limit). With no session bus the module shows nothing and waits on the
+  bus socket's directory (one inotify watch, no polling), and a bus that
+  dies mid-run drops every icon at once and dials once more. A bus that
+  takes the bar in and drops it within five seconds, three times running,
+  is not dialled again at once (a refusing bus must not spin the bar): it
+  is tried once more after 30 seconds, and again each time that try dies
+  the same way, or as soon as its socket is made anew. Only the bus's own
+  `NameOwnerChanged` is believed (a peer's, addressed to the bar, removes
+  nothing), and when hosting only the watcher hosted against speaks for it.
+  The address is `DBUS_SESSION_BUS_ADDRESS`'s `unix:path=` (`%xx` escapes
+  decoded), else `$XDG_RUNTIME_DIR/bus` when it is not set; an address
+  with no path (`unix:abstract=`, `tcp:`, `autolaunch:`) is refused with a
+  line on stderr and no tray, not replaced by another bus that happens to
+  be at the default place. A bus that refuses the bar the watcher name (a
+  policy that denies `own`) is said once on stderr, and the bar hosts.
+- **What is drawn.** An item's `IconPixmap` (raw `ARGB32` over the bus),
+  picked at the output's device size from the entries sent and scaled
+  only when none matches, from the shared icon cache: a steady bar
+  re-reads nothing. An item whose `Status` is `Passive` (the spec's "hide
+  me"), or that sends only an icon *name* (themed icons need an icon-theme
+  lookup and an image decoder, which this build does not have), is tracked
+  and reachable by index but takes no room. Attention and overlay icons,
+  tooltip icons and `IconThemePath` are read for shape and not drawn. The
+  tooltip over the module lists the shown items' titles.
+- **Clicks, with no binding at all**: a left click is `activate`, a middle
+  click `secondary` (the spec's `SecondaryActivate`), a scroll `wheel-up`
+  or `wheel-down`, each on the item under the pointer. A right click does
+  nothing by default; the item's menu (`ContextMenu`, the DBusMenu
+  protocol) is not built: [popups](#popups) exist to draw one in, but the
+  DBusMenu client that reads a layout (`GetLayout`, `Event`,
+  `AboutToShow`, the update signals) and maps it onto popup content does
+  not. The module's actions all take the item's index (`scootbar msg invoke tray activate
+  0`), in the order `query` lists them: `activate`, `secondary`,
+  `wheel-up`, `wheel-down`, and `menu`, which is refused saying menus are
+  not built.
+  (The wheel actions are not called `scroll-up` and `scroll-down`: those
+  are the names of the interaction keys, and `msg invoke` reads them as
+  those.) `Activate` and `SecondaryActivate` are sent with position `(0,
+  0)` (a bar has no screen coordinates to give), and a wheel action sends
+  `Scroll(n, "vertical")` with `n` the notch count clamped to 64, positive
+  for `wheel-up` and negative for `wheel-down`: the sign is KDE's (a Qt
+  wheel's), and hosts disagree (Waybar sends GTK's, up negative); no item
+  was checked against it. Bound to a key (`on-scroll-up = "wheel-up 0"`)
+  the notch count of the scroll itself is what is sent.
+- **`query`** reports `{ "watcher": "owner" | "host", "items": [{ "id",
+  "title", "status", "shown" }] }` while any item is tracked, and nothing
+  while none is.
+- **Margin and keys.** `[tray]` takes `margin` and the five
+  [interaction keys](#pointer-input) (`on-click`, `on-right-click`,
+  `on-middle-click`, `on-scroll-up`, `on-scroll-down`); the module has no
+  options of its own. A binding replaces the default for its trigger, as
+  on every module.
+- **Bounds, for a hostile or broken item.** Everything an item says is
+  untrusted bytes from a same-user peer: a message past 1 MiB (the spec
+  allows 128 MiB, and SNI cannot ask an item for a size, so a 512 by 512
+  pixmap is just over) is skipped whole as it arrives: the answer is
+  dropped, the item keeps its last state and is read again at its next
+  signal, and the connection lives; a header that is no message, or past
+  128 MiB, ends the connection. Nesting past 32 and pixmaps past 256
+  pixels a side are refused the same way (the entry, or the answer, is
+  dropped). A flood of signals (the match rule has no sender, so any peer
+  may send what the bar listens for) is read up to 1 MiB staged and the
+  rest left in the socket, 256 events a wake with the bar's other sources
+  between, and costs the connection nothing. Titles are cut to 128 bytes
+  with controls stripped; at most 32 items, 8 from one service or one registrant, 8 pixmap
+  entries each; one `GetAll` in flight per item however many signals it
+  sends; a call nobody answers is forgotten after 30 seconds when its slot
+  is wanted (no bus times a call out by default, measured on a stock
+  `dbus-daemon` and on `dbus-broker`; only a client library does). A bus that stops reading drops the connection, and
+  not the bar. The bus
+  set-up (auth and `Hello`) is blocking, bounded to 2 seconds in total.
+  The parser is fuzzed (`crates/scootbar/fuzz`, target `dbus`).
+- **Cost.** One fd (the bus socket, with `OUT` only while a write or a
+  staged message waits), or one inotify fd while there is no bus, and a
+  one-shot timer only while an item waits out its 50 ms floor between
+  reads or after the bus kept dropping the bar. Measured (dev VM, one
+  60 s idle window per row): **zero wakeups** with no bus, with a bus and
+  no items, and with one and with eight items on it; RSS 4028 kB with the
+  tray alone and no bus or no items, 4224 kB with one item, 4256 kB with
+  eight (differences under about 130 kB are within one run's resolution).
+  The binary: **+131,072 B on disk (1,774,304 to 1,905,376, +7.4%) and
+  +112,496 B of loaded sections (+6.7%, of which `.text` +96,896 B)**
+  against `main`, and the feature built but *off* is not free either:
+  +65,536 B on disk, +3,312 B loaded (shared edits). An item that
+  re-announces its icon continuously is read at most every 50 ms (0.7% of
+  a core measured, against 9.7% with no floor). The table and its method
+  are in the
+  [resource ratchet](backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
 
 ## Pointer input
 

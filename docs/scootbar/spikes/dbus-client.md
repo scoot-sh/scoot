@@ -1,6 +1,6 @@
 # D-Bus client spike: hand-rolled vs `zbus` vs libdbus
 
-Measured 2026-10-02 for [a-shared-d-bus-client](../backlog/dbus-client.md).
+Measured 2026-10-02 for [a-shared-d-bus-client](../backlog/resolved/dbus-client-done.md).
 Three throwaway binaries doing the ticket's own job — own a well-known
 name, install match rules, receive a signal — one per option, timed and
 sized on real buses. The spike crates are removed after; this file is the
@@ -8,12 +8,11 @@ record (as with the [config-parser spike](config-parser.md)).
 
 **Outcome: a hand-rolled minimal client wins on every measured row, and it
 is the only option that fits the bar's doctrine** (one single-threaded
-`poll(2)` loop, no async runtime, no C library outside libc/libm). **Build
-it with the tray, not now**: no consumer exists yet (volume speaks the
-PulseAudio protocol, network speaks netlink), so the client would land as
-dead code. The shape below is decided so the tray entry can start without
-re-measuring. The [ticket](../backlog/dbus-client.md) stays open: its done
-state needs a consumer running on the client.
+`poll(2)` loop, no async runtime, no C library outside libc/libm). **It was
+built with the tray**, as this record said to, since a client with no
+consumer is dead code; the [ticket](../backlog/resolved/dbus-client-done.md)
+records what landed ([What landed](#what-landed), below) and the cost the
+bar pays for it is in the [resource ratchet](../backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
 
 ## What was run
 
@@ -167,3 +166,42 @@ consumer lands (the NixOS lib output ships no COPYING file; checked
   complete in one round trip; the bar's frame budget is unaffected either
   way), `zbus`/`libdbus` on the broker bus, suspend/resume with the bus
   down (the tray entry owns that test: reconnect + re-acquire + re-match).
+
+## What landed
+
+The shape below held: one connection, a poll-loop fd, a pending-call table
+by serial, central `NameOwnerChanged` tracking (the tray's items vanish with
+their owners, and the watcher name is re-taken when it is lost), a marshaller
+for exactly the type set the tray needs (`a(iiay)`, `a{sv}`, `(sa(iiay)ss)`,
+`as`, the basic types and variants). Where it moved:
+
+- **Wire finding 4 stands as written** (the daemons validate the wire, so
+  the threat is valid-but-hostile shapes, not malformed bytes). The one
+  wire bug the build found was the reader's, not the protocol's: an
+  8-aligned array inside a variant that starts off an 8-byte boundary, a
+  shape none of the crate's own tests wrote, so the reader padded it
+  relative to the variant instead of the message. A message marshalled by
+  sd-bus held that shape (`src/dbus/fixtures/`, which says how it was
+  captured), and now the test suite does.
+- **No bus times a call out by default.** Measured with a peer that owns a
+  name and never replies (`bench/m6-tray-vm/logs/call-timeouts.txt`): a
+  stock dbus-daemon 1.16.2 `session.conf` returned nothing in 400 s (its
+  `reply_timeout` limit, which a config can set, did answer at the 5 s
+  configured in the test), and the VM's dbus-broker nothing in 130 s; the
+  25 s everyone remembers is libdbus's and sd-bus's own client timeout. A
+  client with none, as this one, must forget its own calls, so the pending
+  table expires them by age when its slots are wanted (no timer: an idle
+  bar stays at zero wakeups).
+- **The 1 MiB bound held, but not as a refusal.** The record's premise
+  (pixmaps at requested device pixels are tens of KiB) was wrong: SNI has
+  no way to request a size, so an item may send a 512 by 512 pixmap, which
+  is a valid message just over 1 MiB, and the first build killed the
+  connection on it (and the tray stayed off for the session). A message
+  past the cap, up to the spec's 128 MiB, is now skipped whole as it
+  arrives, a reply says which call lost its answer, and only a header that
+  is no message ends the connection; a flood is read only up to a
+  watermark. Menu layouts, the other unbounded one, wait on the tray's own
+  DBusMenu client (popups exist).
+- **The set-up is the one blocking part** (auth and `Hello`, three round
+  trips): bounded to 2 s *in total*, not per read.
+- Costs, recorded where the ratchet keeps them, not repeated here.

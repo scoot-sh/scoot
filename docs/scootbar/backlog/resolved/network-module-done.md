@@ -20,7 +20,7 @@ hardest test of the module API.
 - **WiFi SSID and signal**: nl80211 over generic netlink (resolve the family id,
   subscribe to the `mlme`/`scan` multicast groups, query the current
   connection). Or the network daemon's D-Bus (NetworkManager, iwd) through the
-  [shared client](dbus-client.md).
+  [shared client](dbus-client-done.md).
 - **Signal strength changes have no natural event.** Options to measure:
   connection-quality (CQM) RSSI thresholds where the driver supports them, a
   slow timer only while the module is visible and connected, or showing

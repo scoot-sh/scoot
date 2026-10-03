@@ -31,6 +31,10 @@ pub mod cache;
 pub mod image;
 pub mod path;
 pub mod raster;
+#[cfg(any(feature = "icon-image", feature = "tray"))]
+pub mod sample;
+#[cfg(feature = "tray")]
+pub mod tray;
 
 use std::sync::Arc;
 
@@ -39,8 +43,11 @@ use path::Vector;
 
 /// The largest icon drawn, in device pixels on a side.
 pub const MAX_SIDE: u32 = 512;
-/// Cached bitmaps at most.
-pub const MAX_ENTRIES: usize = 16;
+/// Cached bitmaps at most. With the tray, one per drawn item and output
+/// (32 items on two outputs, with room for the other modules' icons): past
+/// the bound the whole cache is dropped, so a tray over it would
+/// re-scale every icon on every frame.
+pub const MAX_ENTRIES: usize = if cfg!(feature = "tray") { 80 } else { 16 };
 /// Bytes of cached bitmaps at most (a full-size image icon is 1 MiB).
 pub const MAX_ARENA: usize = 4 * 1024 * 1024;
 
@@ -68,6 +75,10 @@ pub enum Art {
     Vector(Arc<Vector>),
     #[cfg(feature = "icon-image")]
     Image(Arc<image::Image>),
+    /// A tray item's pixmap: premultiplied pixels from the bus, drawn
+    /// as they are (never tinted).
+    #[cfg(feature = "tray")]
+    Tray(Arc<tray::TrayIcon>),
 }
 
 impl Art {
@@ -77,6 +88,8 @@ impl Art {
             Self::Vector(vector) => vector.id(),
             #[cfg(feature = "icon-image")]
             Self::Image(image) => image.id(),
+            #[cfg(feature = "tray")]
+            Self::Tray(icon) => icon.id(),
         }
     }
 }

@@ -15,7 +15,7 @@ design pass when it starts. Serves **daily-drive**.
 Its own binary, not a bar module. Outline, from the planning:
 
 - Owns `org.freedesktop.Notifications` on the session bus via the shared
-  [D-Bus client](dbus-client.md).
+  [D-Bus client](resolved/dbus-client-done.md).
 - Popups are layer-shell `overlay` surfaces created on demand and destroyed
   when empty, so an idle daemon holds no surface. Drawn with
   [`scootui`](extract-scootui.md).

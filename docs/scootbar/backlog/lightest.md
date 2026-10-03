@@ -177,6 +177,131 @@ RSS/PSS/jiffies/size rows): it needs the bench runner under a
 compositor, which this lane did not have — the rows above are the
 module's published cost until that run happens.
 
+## M6 tray and the D-Bus client: module-level cost (measured 2026-10-02)
+
+The [tray](tray.md) is the [shared D-Bus client's](resolved/dbus-client-done.md)
+first consumer, so this is the cost of both. By construction: the bus
+socket is one source in the poll set (with `OUT` only while a write waits
+or staged messages wait their turn), or one inotify watch on the socket's
+directory while there is no bus; a one-shot timer exists only while an
+item waits out the 50 ms floor between reads of it, or (30 s) after the
+bus kept dropping the bar, and not otherwise; no thread, no polling. No
+new dependency (`Cargo.lock` is unchanged). The contract test holds the
+module to the loop's source budget (2 sources at most, of 63).
+
+**Method.** Release builds (`lto = "fat"`, stripped) of `origin/main`
+(`a60852c2e`) and of the branch at code commit `6a2662cd7` (`crates/` tree
+`7bc1a04525c8`), each `git archive`d to the dev VM (aarch64, 6 CPUs, rustc
+1.97.1) and built with its own target dir; a headless `scoot` (an existing
+release build, used read-only), a private `dbus-daemon` 1.16.2, and the
+items real D-Bus peers: Python scripts on `jeepney`, an independent
+marshaller, each owning an item name, registering, and answering `GetAll`
+with a pixmap. One bar per run, sampled from `/proc/PID` after 14 s of
+settling and again 60 s later (`VmRSS`, `Pss`, voluntary context switches,
+fds), **one run per row**, on a VM with load about 0 to 1 from other work.
+Wakeup counts are per process and exact for the window; the RSS and PSS
+differences under about 130 kB are not resolved by one run (two rounds of
+this table, a different commit apart, disagreed by that much on the
+unplaced rows). The scripts and raw logs are in
+[`bench/m6-tray-vm`](../bench/m6-tray-vm/README.md).
+
+| Row | RSS kB | PSS kB | wakeups in 60 s | fds |
+|---|---|---|---|---|
+| `main`, no module placed | 3636 | 2083 | 0 | 7 |
+| branch, tray built, no module placed | 3764 | 2211 | 0 | 7 |
+| `main`, clock | 4056 | 2293 | 2 | 8 |
+| branch, tray feature off, clock | 4044 | 2292 | 2 | 8 |
+| branch, tray built and not placed, clock | 4172 | 2420 | 2 | 8 |
+| branch, tray alone, **no bus** | 4028 | 2292 | **0** | 8 |
+| branch, tray alone, bus, no items | 4028 | 2291 | **0** | 8 |
+| branch, tray alone, bus, 1 item | 4224 | 2484 | **0** | 8 |
+| branch, tray alone, bus, 8 items | 4256 | 2507 | **0** | 8 |
+| branch, tray and clock, bus, 1 item | 4264 | 2433 | 2 (the clock's) | 9 |
+
+How to read it. **Zero wakeups**, tray alone, with no bus, a bus and no
+items, and a bus with one and with eight items on it: nothing in the
+tray's idle state wakes the bar, and the only wakeups in the rows with a
+clock are the clock's two a minute (its tick and the compositor's buffer
+release). One thread throughout. Against the same layout without the tray
+placed, the first item costs about 90 kB RSS (4172 to 4264, with the
+clock) or about 200 kB (4028 to 4224, tray alone), and each of seven more
+about 5 kB (the 8-item row is 32 kB over the 1-item row); those deltas are
+at or under what one run resolves, so read them as "tens to a couple of
+hundred kB", not as a model. With the tray built but not placed, RSS was
+about 125 kB over `main` in this round (3636 to 3764, 4056 to 4172) and
+level with it in the first round: the larger binary's pages, or noise.
+
+**Binary** (aarch64, stripped), measured on the three builds with `size`
+and `readelf` because the file size alone is quantized to 64 KiB steps:
+
+| Build | file bytes | `.text` | `.text`+`.rodata`+`.eh_frame*`+`.gcc_except_table`+`.data*` |
+|---|---|---|---|
+| `main` `a60852c2e` | 1,774,304 | 1,360,520 | 1,680,819 |
+| branch, `--features` default minus `tray` | 1,839,840 (+65,536) | 1,363,400 (+2,880) | 1,684,131 (+3,312) |
+| branch, default (tray on) | 1,905,376 (+131,072) | 1,457,416 (+96,896) | 1,793,315 (+112,496) |
+
+So the **feature off is not free and not byte-identical to `main`**: it
+costs about 3.3 KB of loaded sections (edits outside the tray module that
+a tray-off build still carries: `render.rs`'s span for an icon-only
+module, the resampling filter moved out of `image.rs` into the shared
+`sample.rs`, the help and config text; not bisected further), which
+crosses a 64 KiB boundary on disk, so the file is 65,536 B larger. The **tray on
+costs about 94 KB of `.text`, 109 KB of loaded sections over the feature
+off** (112 KB, +6.7%, over `main`), which the file size shows as another
+65,536. `ldd` still shows only libc, libm and libgcc_s, and `Cargo.lock`
+is byte-identical to `main`'s. The feature is in `default`, the way every
+module is, which the maintainer decided knowing the above; the smallest
+build (`--no-default-features`) has none of it, and that is where the row
+is bought back.
+
+**Which rows of the rules regress.** Rule 1 (no row regresses against the
+previous milestone beyond noise, except a row the new module adds): the
+stripped binary size row regresses by 131,072 B on disk (+7.4%, 112,496 B
+or +6.7% of loaded sections), and tray built but unplaced regresses idle
+RSS by about 125 kB in one of two rounds (within what a single run
+resolves). Idle wakeups, jiffies, fds and threads do not regress in any
+row, with the tray placed or not. The binary row is the same shape as
+every module before it (brightness was +65,528 B over the network build);
+the rule's own exception covers only a row the module adds,
+so this is a regression for the maintainer to waive or not, as the M3 gate
+entry below was.
+
+**Maintainer's ruling (2026-10-02, given in chat): the stripped-binary size
+regression is waived.** It covers the tray's +131,072 B on disk (+112,496 B of
+loaded sections) in the default build, and only that row. Nothing else is
+waived: no other row regresses beyond what one run resolves, and the
+unplaced-tray idle RSS reading stays a one-run observation, not an accepted
+cost. `tray` stays in the default features by the same decision.
+
+**A runaway item.** One item re-announcing its icon as fast as the bar
+re-reads it, for 20 s (`flood.sh` in the PR): the bar read it 434 times
+(the 50 ms floor), used 0.14 CPU-seconds (0.7% of a core), made about 68
+wakeups a second, and its RSS did not move. Without the floor (the first
+version of the module) the same item was read 20,354 times in 20 s and cost
+1.93 CPU-seconds (9.7% of a core) and 1,850 wakeups a second, which is what
+put the floor in. Many such items are bounded by the 32-item cap. A flood
+of 60,000 signals from a peer that is not an item costs the connection
+nothing (a real-daemon test), at the price of the bar working through them.
+
+**Against Waybar** (rule 2), the same harness, nixpkgs' Waybar 0.15.0 with
+only a `tray` module and the same item on the same private bus, measured
+in the first round (not repeated; nothing about it depends on this
+commit): RSS 49,528 kB, PSS 42,607 kB, 7 to 8 threads, 14 fds, against
+scootbar's 4.0 to 4.2 MB, 2.3 to 2.5 MB, 1 thread and 8 fds with the tray
+alone and one item. Its main thread made no context switch in the 60 s
+either (23 and 23; the other threads' counters are not comparable, one
+thread exited in the window). scootbar is about a twelfth of Waybar's RSS,
+and nothing is behind it on a row both have. Yambar's tray is not measured
+(no build of it on the box).
+
+**Not measured**, and the rows above do not claim them: the Asahi M2 and
+real hardware (this lane had the dev VM only; nothing here depends on a
+GPU or a display); the full `scripts/scootbar-bench` rows (startup,
+switching CPU), which need the bench runner under a compositor; the soak
+(suspend and resume, DPMS, days of uptime) for growth; a real Qt, GTK or
+Electron app as the item; yambar. Rule 2 for the tray is therefore passed
+against Waybar and **open against yambar**.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

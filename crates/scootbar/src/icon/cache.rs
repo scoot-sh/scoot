@@ -76,6 +76,8 @@ impl Cache {
             Art::Vector(vector) => self.raster.fill(vector, side, out),
             #[cfg(feature = "icon-image")]
             Art::Image(image) => image.scale_into(side, out),
+            #[cfg(feature = "tray")]
+            Art::Tray(icon) => icon.scale_into(side, out),
         }
         self.entries.push(Entry {
             id,

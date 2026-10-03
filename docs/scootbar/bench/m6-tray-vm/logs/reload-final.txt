@@ -1,0 +1,21 @@
+before reload:
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-300-1", true], ["org.kde.StatusNotifierItem-300-2", true]]}
+owners of the watcher name: org.freedesktop.StatusNotifierWatcher(pid 2921628) org.kde.StatusNotifierWatcher(pid 2921628) 
+{"type":"ok"}
+after reload 1:
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-300-1", true], ["org.kde.StatusNotifierItem-300-2", true]]}
+owners of the watcher name: org.freedesktop.StatusNotifierWatcher(pid 2921628) org.kde.StatusNotifierWatcher(pid 2921628) 
+{"type":"ok"}
+after reload 2:
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-300-1", true], ["org.kde.StatusNotifierItem-300-2", true]]}
+owners of the watcher name: org.freedesktop.StatusNotifierWatcher(pid 2921628) org.kde.StatusNotifierWatcher(pid 2921628) 
+{"type":"ok"}
+after reload 3:
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-300-1", true], ["org.kde.StatusNotifierItem-300-2", true]]}
+owners of the watcher name: org.freedesktop.StatusNotifierWatcher(pid 2921628) org.kde.StatusNotifierWatcher(pid 2921628) 
+fds of the bar: 9
+{"type":"ok"}
+after moving the tray in the config:
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-300-1", true], ["org.kde.StatusNotifierItem-300-2", true]]}
+owners: org.freedesktop.StatusNotifierWatcher(pid 2921628) org.kde.StatusNotifierWatcher(pid 2921628) 
+bar.log:

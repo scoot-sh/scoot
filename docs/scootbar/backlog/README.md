@@ -119,8 +119,8 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Battery: unplug and capacity-step uevents](resolved/battery-unplug-uevent-measure-done.md) (medium): plug and unplug emit uevents, capacity steps do not, so the discharge timer stays — RESOLVED 2026-10-02
 
 ### M6 — Infrastructure and the tray
-- [A shared D-Bus client](dbus-client.md) (low): its own spike first
-- [System tray](tray.md) (medium): the watcher is core infrastructure
+- [A shared D-Bus client](resolved/dbus-client-done.md) (low): hand-rolled, built with the tray — RESOLVED 2026-10-02
+- [System tray](tray.md) (medium): the watcher is core infrastructure; first version landed 2026-10-02, menus remain (popups exist now)
 - [Popups](resolved/popups-done.md) (done), [Tooltips](tooltips.md) (low), [A native WiFi list popup](popup-network-list.md) (low)
 - [Media (MPRIS)](media-module.md) (low), [Bluetooth](bluetooth-module.md) (low)
 

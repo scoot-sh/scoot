@@ -1,0 +1,23 @@
+--- 1. both bars up, no items: A owns, B hosts (empty tray is no value)
+null
+null
+--- 2. an item registers after both are up: shown in BOTH
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-1-1", "item-0", true]]}
+{"watcher": "host", "items": [["org.kde.StatusNotifierItem-1-1", "item-0", true]]}
+--- 3. kill -9 bar A (the watcher owner)
+twobar.sh: line 33: 2921570 Killed                     XDG_RUNTIME_DIR=$T/$n WAYLAND_DISPLAY=$wd $BIN daemon --font $FONT --config $T/bar.toml > $T/out/bar-$n.log 2>&1
+B after A died:
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-1-1", "item-0", true]]}
+as 1 "org.kde.StatusNotifierItem-1-1/StatusNotifierItem"
+org.kde.StatusNotifierWatcher  2921572 scootbar-tray dev  :1.1          session-49043.scope 49043   -
+--- 4. a second item registers with B as owner
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-1-1", "item-0", true], ["org.kde.StatusNotifierItem-1-2", "item-0", true]]}
+--- 5. bar A restarts: hosts against B, lists both
+{"watcher": "host", "items": [["org.kde.StatusNotifierItem-1-1", "item-0", true], ["org.kde.StatusNotifierItem-1-2", "item-0", true]]}
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-1-1", "item-0", true], ["org.kde.StatusNotifierItem-1-2", "item-0", true]]}
+--- 6. kill -9 item 1: gone from both
+twobar.sh: line 24: 2921578 Killed                     $PY /tmp/tray-takeover-run/item.py org.kde.StatusNotifierItem-1-1 $T/out/i1.log $T/out/f1 0 > $T/out/i1.out 2>&1
+{"watcher": "host", "items": [["org.kde.StatusNotifierItem-1-2", "item-0", true]]}
+{"watcher": "owner", "items": [["org.kde.StatusNotifierItem-1-2", "item-0", true]]}
+bar-a.log:
+bar-b.log:

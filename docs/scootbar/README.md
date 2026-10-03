@@ -27,8 +27,11 @@ composable shell.
 > benchmark script ([testing.md](testing.md)). M0, the
 > measuring milestone, is done: the competitor baselines below, and the
 > font rasterizer and clock choices, recorded in
-> [the dependency record](backlog/resolved/dependencies-done.md). The
-> plan, milestone by milestone, is the [backlog](backlog/README.md).
+> [the dependency record](backlog/resolved/dependencies-done.md). M6's
+> first step is a system tray (the StatusNotifierItem watcher and host, on
+> a hand-rolled D-Bus client: [the module](cli.md#tray); its menus are the
+> remaining step). The plan, milestone by milestone, is the
+> [backlog](backlog/README.md).
 
 ```sh
 scootbar daemon --font /path/to/DejaVuSans.ttf &            # 3:07 pm, centered

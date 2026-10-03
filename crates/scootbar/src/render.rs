@@ -318,6 +318,26 @@ impl Scene {
                         height: extent.height,
                     }))
                 }
+                // An icon-only module (the tray: its view holds no text,
+                // its icons are drawn by `custom_draw` and sized by
+                // `span_extra`) still takes room for its icons. Empty in
+                // every other way is still no space: `span_extra` is 0
+                // with nothing shown.
+                Some(text) => {
+                    let extra = placed.module.span_extra(&Measure {
+                        output: *output,
+                        view,
+                        text,
+                        em,
+                        scale,
+                        height: extent.height,
+                    });
+                    if extra == 0 {
+                        0
+                    } else {
+                        padding.saturating_add(extra).max(1)
+                    }
+                }
                 // Nothing to show, or no font to show it with.
                 _ => 0,
             };

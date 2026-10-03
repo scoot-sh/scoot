@@ -67,6 +67,12 @@ impl Harness {
         self.module.on_input(input)
     }
 
+    /// The device pixels the module's span grows past its measured text.
+    #[allow(dead_code)]
+    pub fn span_extra(&self, measure: &super::Measure<'_>) -> u32 {
+        self.module.span_extra(measure)
+    }
+
     /// A module action, as a binding, a default or an agent runs it.
     #[allow(dead_code)]
     pub fn invoke(
