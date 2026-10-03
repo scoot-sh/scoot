@@ -52,6 +52,13 @@ struct Fixture {
 
 impl Fixture {
     fn with_config(contents: &str) -> Self {
+        Self::with_config_scale_size(contents, 1.0, CANVAS, CANVAS)
+    }
+
+    /// [`with_config`] starting at `scale` on a `width`x`height` output --
+    /// what a session whose config already asked for that scale starts with,
+    /// rather than the scale-1.0 square every other test assumes.
+    fn with_config_scale_size(contents: &str, scale: f64, width: i32, height: i32) -> Self {
         let mut event_loop: EventLoop<'static, State> =
             EventLoop::try_new().expect("an event loop");
         let display: Display<State> = Display::new().expect("a wayland display");
@@ -61,11 +68,11 @@ impl Fixture {
             Config::default(),
             Keybindings::default(),
             Appearance::default(),
-            1.0,
+            scale,
             test_renderer(),
         )
         .expect("a compositor state with a wayland socket");
-        headless::init(&mut state, CANVAS, CANVAS).expect("a headless backend");
+        headless::init(&mut state, width, height).expect("a headless backend");
 
         let dir = tempfile::tempdir().expect("a temp dir");
         let path = dir.path().join("config.toml");
@@ -419,6 +426,66 @@ fn reload_applies_output_scale_and_halves_the_logical_geometry() {
     assert!(
         fixture.state.needs_render,
         "a scale change reloaded without requesting a render"
+    );
+}
+
+/// The ticket's pin (`usable-area-shrinks-after-rescale`): 1280 / 1.5 is
+/// 853.33, so the `Space` geometry (`ceil`, what `OutputAdded` files at
+/// startup) is 854 wide while the layer map's non-exclusive zone (`round`)
+/// is 853. A session started at 1.0 and reloaded to 1.5 must file what a
+/// session started at 1.5 files: `usable` == `rect` == 854x480, with no bar
+/// mapped.
+#[test]
+fn a_fractional_scale_reload_files_the_startup_usable_area() {
+    const WIDTH: i32 = 1280;
+    const HEIGHT: i32 = 720;
+    const SCALE: &str = "[output]\nscale = 1.5\n";
+
+    fn geometry_and_usable(fixture: &Fixture) -> ((i32, i32), (i32, i32)) {
+        let output = fixture
+            .state
+            .outputs
+            .primary()
+            .expect("the headless output")
+            .clone();
+        let geometry = fixture
+            .state
+            .space
+            .output_geometry(&output)
+            .expect("the mapped output's geometry");
+        let usable = fixture.state.world.usable_areas();
+        assert_eq!(usable.len(), 1, "one output, one usable area");
+        (
+            (geometry.size.w, geometry.size.h),
+            (usable[0].w, usable[0].h),
+        )
+    }
+
+    // A session started at the new scale: `OutputAdded` files the `ceil`
+    // geometry before any zone exists, so the two agree.
+    let started = Fixture::with_config_scale_size(SCALE, 1.5, WIDTH, HEIGHT);
+    let (started_rect, started_usable) = geometry_and_usable(&started);
+    assert_eq!(started_rect, (854, 480), "the ceil geometry at 1.5");
+    assert_eq!(
+        started_usable, started_rect,
+        "a fresh session reports usable == rect"
+    );
+
+    // Started at 1.0, then reloaded to 1.5: the reload path must file the
+    // same rectangles, not the layer map's rounded zone.
+    let mut reloaded = Fixture::with_config_scale_size("", 1.0, WIDTH, HEIGHT);
+    reloaded.rewrite(SCALE);
+    let response = reloaded.reload();
+    assert_eq!(
+        applied(&response),
+        &[field::SCALE.to_owned()],
+        "the new scale should apply: {response:?}"
+    );
+    let (reloaded_rect, reloaded_usable) = geometry_and_usable(&reloaded);
+    assert_eq!(
+        (reloaded_rect, reloaded_usable),
+        (started_rect, started_usable),
+        "the reload must file what startup files"
     );
 }
 

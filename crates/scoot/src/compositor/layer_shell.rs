@@ -83,8 +83,8 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{IsAlive, Logical, Point};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::{
-    Anchor, KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, LayerSurfaceCachedState,
-    WlrLayerShellHandler, WlrLayerShellState,
+    Anchor, ExclusiveZone, KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface,
+    LayerSurfaceCachedState, WlrLayerShellHandler, WlrLayerShellState,
 };
 use smithay::wayland::shell::xdg::PopupSurface;
 
@@ -538,24 +538,51 @@ impl State {
             let Some((id, output)) = self.outputs.at(index) else {
                 continue;
             };
+            let geometry = self.space.output_geometry(&output);
             // The zone is output-local; the core's rectangles are global. The
             // translation is what makes "one output at (0, 0)" a fact about
             // the setup rather than an assumption baked into the arithmetic.
-            let origin = self
-                .space
-                .output_geometry(&output)
-                .map(|geometry| geometry.loc)
-                .unwrap_or_default();
-            // The guard is gone by the end of the statement
-            // (`non_exclusive_zone` answers by value), so the
-            // `handle_event` below never runs under a layer-map lock.
-            let zone = layer_map_for_output(&output).non_exclusive_zone();
-            let area = Rect::new(
-                origin.x.saturating_add(zone.loc.x),
-                origin.y.saturating_add(zone.loc.y),
-                zone.size.w,
-                zone.size.h,
-            );
+            let origin = geometry.map(|geometry| geometry.loc).unwrap_or_default();
+            // The guard is gone by the end of the statement (both answer by
+            // value), so the `handle_event` below never runs under a
+            // layer-map lock.
+            let map = layer_map_for_output(&output);
+            let zone = map.non_exclusive_zone();
+            let reserved = map.layers().any(Self::reserves_space);
+            drop(map);
+            // With nothing reserved, the usable area is the whole output --
+            // the `Space` geometry, not the layer map's zone. The two round
+            // `physical / scale` differently at fractional scales (the
+            // `Space` takes `ceil`, the layer map `round`, both verified
+            // against the pinned Smithay's `desktop/space/mod.rs` and
+            // `desktop/wayland/layer.rs`): at 1.5 a 1280-wide output is 854
+            // logical pixels to one and 853 to the other. Filing the zone
+            // made every reload onto such a scale (and every map or commit
+            // of a reservation-free layer surface) shrink `usable` one pixel
+            // below `rect`, while a session started at that scale -- which
+            // files the geometry through `OutputAdded` before any zone
+            // exists -- reported the two equal. With a bar mapped the zone
+            // stands: it is the reservation, legitimately smaller.
+            let area = if reserved {
+                Rect::new(
+                    origin.x.saturating_add(zone.loc.x),
+                    origin.y.saturating_add(zone.loc.y),
+                    zone.size.w,
+                    zone.size.h,
+                )
+            } else {
+                geometry.map_or(
+                    Rect::new(origin.x, origin.y, zone.size.w, zone.size.h),
+                    |geometry| {
+                        Rect::new(
+                            geometry.loc.x,
+                            geometry.loc.y,
+                            geometry.size.w,
+                            geometry.size.h,
+                        )
+                    },
+                )
+            };
             // Nothing to do when it hasn't moved -- and this is the common
             // case, since every commit a bar makes comes through here while
             // its exclusive zone stays exactly the same.
@@ -569,6 +596,40 @@ impl State {
         if changed {
             self.apply();
         }
+    }
+
+    /// Whether `layer` reserves output space: an explicit exclusive zone on
+    /// an edge Smithay's `arrange` narrows the non-exclusive zone for.
+    ///
+    /// This mirrors the pinned Smithay's shrink decision
+    /// (`LayerMap::arrange` with `effective_exclusive_edge`,
+    /// `src/desktop/wayland/layer.rs`): only `ExclusiveZone::Exclusive` with
+    /// an edge -- the explicit one, or the one the anchor implies (one
+    /// anchored side, or three, whose complement takes the edge) -- narrows
+    /// the zone. Anything else (`0`, `-1`, or an exclusive zone with no
+    /// usable edge, which Smithay demotes to `Neutral`) leaves the zone the
+    /// whole output, so [`State::refresh_layer_zone`] files the output
+    /// geometry instead. The catch-all is deliberately non-panicking, unlike
+    /// Smithay's `unreachable!`: no client-set anchor may take the compositor
+    /// down, whatever Smithay does with it.
+    fn reserves_space(layer: &LayerSurface) -> bool {
+        Self::reserves_space_state(&layer.cached_state())
+    }
+
+    /// The [`reserves_space`](Self::reserves_space) decision as a pure
+    /// function of the committed protocol state, so the anchor/edge matrix
+    /// is unit-testable without a live surface.
+    fn reserves_space_state(data: &LayerSurfaceCachedState) -> bool {
+        if !matches!(data.exclusive_zone, ExclusiveZone::Exclusive(_)) {
+            return false;
+        }
+        if data.exclusive_edge.is_some() {
+            return true;
+        }
+        // The anchor-implied edge (`implied_exclusive_edge_for_anchor` at
+        // the pinned rev): one anchored side names its own edge, three name
+        // the missing side's, and anything else names none.
+        matches!(data.anchor.bits().count_ones(), 1 | 3)
     }
 
     /// The output containing `position`, in the same global logical
@@ -862,4 +923,70 @@ fn neutralize_pending_anchor(surface: &WlSurface) {
             .pending()
             .anchor = Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT;
     });
+}
+
+#[cfg(test)]
+mod reserves_space_tests {
+    //! The [`super::State::reserves_space_state`] matrix: which committed
+    //! protocol states narrow Smithay's non-exclusive zone (and so keep
+    //! filing that zone) and which leave it the whole output (and so file
+    //! the output geometry instead). Pure states, no live surface.
+
+    use super::*;
+
+    fn state(zone: ExclusiveZone, anchor: Anchor, edge: Option<Anchor>) -> LayerSurfaceCachedState {
+        LayerSurfaceCachedState {
+            exclusive_zone: zone,
+            anchor,
+            exclusive_edge: edge,
+            ..LayerSurfaceCachedState::default()
+        }
+    }
+
+    #[test]
+    fn only_an_edged_exclusive_zone_reserves_space() {
+        use ExclusiveZone::{DontCare, Exclusive, Neutral};
+        // The bar: three anchored sides imply the fourth as the edge.
+        let bar = Anchor::TOP | Anchor::LEFT | Anchor::RIGHT;
+        assert!(State::reserves_space_state(&state(
+            Exclusive(30),
+            bar,
+            None
+        )));
+        // One anchored side names its own edge.
+        assert!(State::reserves_space_state(&state(
+            Exclusive(30),
+            Anchor::LEFT,
+            None
+        )));
+        // An explicit edge wins over an anchor that implies none ...
+        assert!(State::reserves_space_state(&state(
+            Exclusive(30),
+            Anchor::empty(),
+            Some(Anchor::TOP)
+        )));
+        // ... and over one that implies another.
+        assert!(State::reserves_space_state(&state(
+            Exclusive(30),
+            bar,
+            Some(Anchor::BOTTOM)
+        )));
+        // No exclusive zone, no reservation.
+        assert!(!State::reserves_space_state(&state(Neutral, bar, None)));
+        assert!(!State::reserves_space_state(&state(DontCare, bar, None)));
+        // An exclusive zone Smithay demotes to `Neutral` -- no edge, and
+        // none implied by zero, two or four anchored sides -- reserves
+        // nothing either.
+        for anchor in [
+            Anchor::empty(),
+            Anchor::TOP | Anchor::LEFT,
+            Anchor::TOP | Anchor::BOTTOM,
+            Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+        ] {
+            assert!(
+                !State::reserves_space_state(&state(Exclusive(30), anchor, None)),
+                "anchor {anchor:?} implies no edge"
+            );
+        }
+    }
 }
