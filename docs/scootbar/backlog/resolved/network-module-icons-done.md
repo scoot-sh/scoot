@@ -1,9 +1,10 @@
 ---
 title: "Network module: icon keys per state, and an icon-only mode"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # Network module: icon keys per state, and an icon-only mode
@@ -46,3 +47,7 @@ volume module's contract tests.
 The native WiFi list popup
 ([popup-network-list](popup-network-list.md)); nl80211/VPN detection
 changes; layout beyond prepending/only-icon.
+
+## Resolution (2026-10-03, PR #401)
+
+Landed as `feat(scootbar): network module icon keys per state and icon-only mode` (`c82cb983`). Static `icon`/`icon-path`/`icon-image` plus per-state `icon-ethernet/wifi/vpn/offline` (per-state wins, falls back to `icon`); `show-text = false` draws icon-only with text in tooltip; `query` shape unchanged. Review: no blocking findings (2 CI bin failures reproduced identically on clean base — media timing race + media contract culprit, both pre-existing; the one CI `keep_tests` failure on the PR flaked green on rerun). CI green.
