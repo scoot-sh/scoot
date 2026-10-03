@@ -1108,11 +1108,15 @@ has none of it.
   bound; only the bus's own `NameOwnerChanged` is believed, every other
   signal only from the tracked owner of `org.bluez` (checked per signal),
   and only for a held path (a signal for an unknown path re-reads the set
-  once on a 50 ms timer instead of trusting it). (One inherited gap: the
-  D-Bus client matches a method reply by serial alone, so a forged
-  `GetNameOwner` or `GetAll` reply could re-point or set held state if the
-  bus delivers unsolicited replies; untested whether `dbus-daemon` does,
-  tracked in `tray-review-hardening.md`.) A hostile peer costs the bar the
+  once on a 50 ms timer instead of trusting it). (Method replies are
+  matched by serial *and* sender: measured 2026-10-03, `dbus-daemon`
+  1.16.2 delivers an unsolicited reply from a peer that was not the
+  callee, while `dbus-broker` 37 does not, so a reply whose sender is not
+  the callee is refused whenever the callee is known — the bus's own
+  calls, or a unique name's. What remains is a call made of the
+  well-known `org.bluez`, whose holder the client cannot know: a forged
+  answer to one of those is accepted, like any peer's own claim to the
+  name.) A hostile peer costs the bar the
   work of its own signals and no more (connect/disconnect storms are drawn
   ten times a second at most); it holds at most one of 8 adapter slots or
   64 device slots, and a newcomer to a full room is ignored, said once.
