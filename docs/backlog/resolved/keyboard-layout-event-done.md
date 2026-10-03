@@ -1,9 +1,10 @@
 ---
 title: "Keyboard layout: an IPC query and `subscribe` event, so a bar can show it"
-status: "open"
-area: "ipc"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # Keyboard layout in IPC
@@ -36,3 +37,7 @@ so the state exists inside scoot).
 ## Not in this ticket
 
 Layout switching UI, per-window layouts.
+
+## Resolution (2026-10-03, PR #404)
+
+Landed as `feat(scoot-ipc,scootctl,scoot): keyboard layout query and subscribe event` (`4f9160c7`). Read from Smithay seat-keyboard xkb state (effective group + layout name); no switch mechanism exists, so read-only with no click action. Protocol 5→6 (new reply variants); detection in `State::key_with` funnel; zero-cost gate with no subscriber; shared emit tail. Pinned by 7 new tests; bench shows no hot-path regression. Review verified the bump necessity + old-client degradation + version sites; empty findings. CI green.

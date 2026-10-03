@@ -273,7 +273,8 @@ falsify. Read `flexwm` there as `scoot`.
 ### IPC / computer use
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
 - [A coalesced `workspace` event on `subscribe`](./ipc/workspace-snapshot-event.md) — medium, filed 2026-09-29 (scootbar planning): occupied workspaces for a bar, which no standard protocol carries
-- [Keyboard layout in IPC](./ipc/keyboard-layout-event.md) — low, filed 2026-09-29 (scootbar research): no standard protocol tells a client the active layout
+- [Keyboard layout in IPC](./resolved/keyboard-layout-event-done.md)
+  — RESOLVED 2026-10-03 in #404: `keyboard` query + `keyboard` subscribe event (protocol 6), read-only
 - [Switch a specific output's workspace](./ipc/workspace-switch-targeted-output.md) — medium, filed 2026-09-29: `focus-workspace-index` and `ext-workspace` `activate` only reach the focused output
 - [IPC bundle: usable rect, focus-workspace-index, ambient locked](./resolved/protocol-bundle-resolved.md) — RESOLVED 2026-09-15, no bump needed
 - [No cap on concurrent IPC connections, and a half-closed client leaks one](./resolved/ipc-connection-cap-resolved.md) — RESOLVED 2026-09-16: 64 connections, refused with a reason past that, and a write-stall deadline that drops a peer which has stopped reading
