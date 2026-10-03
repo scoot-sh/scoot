@@ -239,12 +239,33 @@ pub enum Event {
 }
 
 /// A call waiting for its reply: the serial it went out with, the
-/// consumer's token, and when it was sent (for [`Conn::expire`]).
+/// destination it was made of (a reply from anyone else is refused),
+/// the consumer's token, and when it was sent (for [`Conn::expire`]).
 #[derive(Debug)]
 struct Pending {
     serial: u32,
+    callee: String,
     token: u64,
     sent: Instant,
+}
+
+/// Whether a reply from `sender` may answer the call made of `callee`:
+/// the bus answers its own calls, a unique name answers calls made of
+/// it, and anything may answer a call made of a well-known name (who
+/// holds it now is the bus's business, not this client's). No sender
+/// header at all (a scripted peer; never a daemon, which always sets
+/// one) is nothing to check against.
+fn sender_matches(callee: &str, sender: Option<&str>) -> bool {
+    let Some(sender) = sender else {
+        return true;
+    };
+    if callee == BUS_NAME {
+        return sender == BUS_NAME;
+    }
+    if callee.starts_with(':') {
+        return sender == callee;
+    }
+    true
 }
 
 /// The connection: the socket, the staging buffers, the pending-call
@@ -269,6 +290,8 @@ pub struct Conn {
     backlog: bool,
     /// An over-cap message was said once, not per message.
     said_oversize: bool,
+    /// A refused forged reply was said once, not per message.
+    said_forged: bool,
     /// Signals that arrived during the blocking set-up, delivered on the
     /// first [`Conn::pump`].
     stashed: Vec<Event>,
@@ -332,6 +355,7 @@ impl Conn {
         if self.waits_for_reply(flags) {
             self.pending.push(Pending {
                 serial,
+                callee: destination.to_owned(),
                 token,
                 sent: Instant::now(),
             });
@@ -580,7 +604,8 @@ impl Conn {
     }
 
     /// The token of the call an over-cap reply (header only) answers, and
-    /// the call leaves the pending table.
+    /// the call leaves the pending table. A reply from anyone but the
+    /// callee answers nothing (see [`Conn::dispatch`]).
     fn oversize_reply(pending: &mut Vec<Pending>, prefix: &[u8]) -> Option<u64> {
         let message = Message::parse_header(prefix).ok()?;
         if !matches!(message.kind, Kind::MethodReturn | Kind::Error) {
@@ -590,6 +615,9 @@ impl Conn {
         let at = pending
             .iter()
             .position(|waiting| waiting.serial == reply_to)?;
+        if !sender_matches(&pending[at].callee, message.sender) {
+            return None;
+        }
         Some(pending.remove(at).token)
     }
 
@@ -669,9 +697,10 @@ impl Conn {
         }
     }
 
-    /// Sorts one frame into an event: replies by the pending table,
-    /// signals and incoming calls owned, anything else dropped. A refused
-    /// frame kills the connection.
+    /// Sorts one frame into an event: replies by the pending table (and
+    /// refused when their sender is not the callee), signals and incoming
+    /// calls owned, anything else dropped. A refused frame kills the
+    /// connection.
     fn dispatch(&mut self, frame: &[u8]) -> Option<Event> {
         let message = Message::parse(frame).ok()?;
         match message.kind {
@@ -681,6 +710,19 @@ impl Conn {
                     .pending
                     .iter()
                     .position(|pending| pending.serial == reply_to)?;
+                if !sender_matches(&self.pending[at].callee, message.sender) {
+                    // A reply from anyone but the callee (dbus-daemon
+                    // delivers an unsolicited one to the destination;
+                    // dbus-broker does not): refused, and the flight stays
+                    // for the real answer.
+                    if !self.said_forged {
+                        self.said_forged = true;
+                        crate::print::warn(format_args!(
+                            "scootbar: dbus: refusing a reply from a peer that was not called"
+                        ));
+                    }
+                    return None;
+                }
                 let token = self.pending.remove(at).token;
                 if message.kind == Kind::Error {
                     return Some(Event::CallError {
@@ -755,10 +797,16 @@ impl Conn {
             let message =
                 Message::parse(&frame).map_err(|_| SetupError::Refused("a bad set-up reply"))?;
             match message.kind {
-                Kind::MethodReturn if message.reply_serial == Some(serial) => {
+                Kind::MethodReturn
+                    if message.reply_serial == Some(serial)
+                        && sender_matches(destination, message.sender) =>
+                {
                     return Ok((message.signature.to_owned(), message.body.rest().to_vec()));
                 }
-                Kind::Error if message.reply_serial == Some(serial) => {
+                Kind::Error
+                    if message.reply_serial == Some(serial)
+                        && sender_matches(destination, message.sender) =>
+                {
                     return Err(SetupError::Refused("the bus errored the set-up call"));
                 }
                 Kind::Signal => self.stashed.push(Event::Signal {
@@ -858,6 +906,7 @@ pub fn setup(stream: UnixStream) -> Result<Conn, SetupError> {
         discard: 0,
         backlog: false,
         said_oversize: false,
+        said_forged: false,
         stashed: Vec::new(),
     };
     let (signature, body) = conn.roundtrip(BUS_NAME, BUS_PATH, BUS_INTERFACE, "Hello", "", &[])?;
