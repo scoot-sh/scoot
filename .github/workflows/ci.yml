@@ -1125,8 +1125,11 @@ jobs:
         run: |
           # `dbus-daemon` from the pinned nixpkgs for this step only, as
           # cargo-fuzz is below: the dev shell is every job's, and a tool
-          # one job's tests start does not belong in all of them.
-          dbus=$(nix build --inputs-from . nixpkgs#dbus --no-link --print-out-paths)
+          # one job's tests start does not belong in all of them. `^out`,
+          # because the bare attribute prints two paths (the man output
+          # too), and `$dbus/bin` would be neither.
+          dbus=$(nix build --inputs-from . 'nixpkgs#dbus^out' --no-link --print-out-paths)
+          test -x "$dbus/bin/dbus-daemon"
           export PATH="$dbus/bin:$PATH"
           cargo nextest run -p scootbar --no-fail-fast
           cargo test -p scootbar

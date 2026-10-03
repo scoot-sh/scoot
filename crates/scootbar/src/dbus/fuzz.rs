@@ -57,6 +57,10 @@ pub fn dbus(data: &[u8]) {
         let mut reader = Reader::le(data);
         let _ = reader.skip(sig);
     }
+    // The header alone frames anything, and the header-only parse (what
+    // an over-cap message is skipped by) never reads past what it was given.
+    let _ = proto::frame_header(data);
+    let _ = Message::parse_header(data);
     let _ = proto::read_item_props(data);
     let _ = read_pixmaps(data);
     let _ = proto::read_names("as", data);

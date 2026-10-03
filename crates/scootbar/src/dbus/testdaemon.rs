@@ -27,6 +27,13 @@ impl Daemon {
     /// A private session bus, or `None` (the test skips) without
     /// `dbus-daemon`.
     pub fn spawn() -> Option<Self> {
+        Self::spawn_with("")
+    }
+
+    /// As [`Daemon::spawn`], with `policy` (config XML) added to the
+    /// default policy: a `<deny own=.../>` for the test that wants a bus
+    /// that refuses a name.
+    pub fn spawn_with(policy: &str) -> Option<Self> {
         let found = Command::new("dbus-daemon")
             .arg("--version")
             .stdout(Stdio::null())
@@ -59,8 +66,9 @@ impl Daemon {
                 "<busconfig><type>session</type><auth>EXTERNAL</auth>\
                  <listen>unix:path={}</listen>\
                  <policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/>\
-                 <allow eavesdrop=\"true\"/><allow own=\"*\"/></policy></busconfig>",
-                path.display()
+                 <allow eavesdrop=\"true\"/><allow own=\"*\"/>{}</policy></busconfig>",
+                path.display(),
+                policy
             ),
         )
         .expect("a config for the daemon");

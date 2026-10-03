@@ -55,6 +55,8 @@ struct State {
     props: HashMap<String, Vec<u8>>,
     /// Host registrations the module made in host mode.
     hosts: Vec<String>,
+    /// A policy that denies the bar every name it asks for.
+    deny_names: bool,
     /// `GetAll` calls per item service, answered or not.
     getalls: HashMap<String, usize>,
 }
@@ -153,6 +155,21 @@ impl Fake {
         self.state.props.insert(service.to_owned(), props);
     }
 
+    /// Scripts an item that is owned and answers `GetAll` but is not in
+    /// `ListNames` (an app behind a name the start-up enumeration does not
+    /// look for): only its own registration shows it.
+    pub fn add_unlisted(&mut self, service: &str, owner: &str, props: Vec<u8>) {
+        self.state
+            .owners
+            .insert(service.to_owned(), owner.to_owned());
+        self.state.props.insert(service.to_owned(), props);
+    }
+
+    /// Scripts a bus policy that refuses every `RequestName`.
+    pub fn deny_names(&mut self) {
+        self.state.deny_names = true;
+    }
+
     /// Scripts an item that is listed and owned but never answers
     /// `GetAll` (the call is recorded): a hung app. No bus answers for it by
     /// default, so the module must not depend on a reply.
@@ -179,13 +196,18 @@ impl Fake {
 
     /// Sends `NameOwnerChanged(name, old, new)` from the bus.
     pub fn send_name_owner_changed(&mut self, name: &str, old: &str, new: &str) {
+        self.send_name_owner_changed_from(BUS, name, old, new);
+    }
+
+    /// A `NameOwnerChanged` a peer (not the bus) sent: forged.
+    pub fn send_name_owner_changed_from(&mut self, sender: &str, name: &str, old: &str, new: &str) {
         let mut body = Writer::new();
         body.str(name);
         body.str(old);
         body.str(new);
         let bytes = body.take_body().unwrap();
         self.send_signal(
-            BUS,
+            sender,
             "/org/freedesktop/DBus",
             "org.freedesktop.DBus",
             "NameOwnerChanged",
@@ -280,11 +302,16 @@ impl Fake {
     /// Sends the other watcher's `StatusNotifierItemRegistered(service)`.
     pub fn send_watcher_registered(&mut self, service: &str) {
         let owner = self.state.watcher_owner.clone().unwrap_or_default();
+        self.send_watcher_registered_from(&owner, service);
+    }
+
+    /// The same announcement from `owner`, who may not be the watcher.
+    pub fn send_watcher_registered_from(&mut self, owner: &str, service: &str) {
         let mut body = Writer::new();
         body.str(service);
         let bytes = body.take_body().unwrap();
         self.send_signal(
-            &owner,
+            owner,
             "/StatusNotifierWatcher",
             "org.kde.StatusNotifierWatcher",
             "StatusNotifierItemRegistered",
@@ -480,6 +507,9 @@ impl Fake {
                 out.str(MODULE);
                 let bytes = out.take_body().ok_or(())?;
                 self.reply(to, serial, "s", &bytes)
+            }
+            "RequestName" if self.state.deny_names => {
+                self.error(to, serial, "org.freedesktop.DBus.Error.AccessDenied")
             }
             "RequestName" => {
                 let word = self.state.request_word;
@@ -750,7 +780,19 @@ fn find_prop(props: &[u8], property: &str) -> Option<Vec<u8>> {
 /// menu and `ItemIsMenu`. `argb` is `width × height` `ARGB32` in
 /// network order.
 pub fn item_body(title: &str, status: &str, width: u32, height: u32, argb: &[u8]) -> Vec<u8> {
-    let mut body = Writer::new();
+    item_body_with(Writer::new(), title, status, width, height, argb)
+}
+
+/// [`item_body`] on a writer of the caller's cap: a body past what this
+/// client reads, for the tests that send one.
+pub fn item_body_with(
+    mut body: Writer,
+    title: &str,
+    status: &str,
+    width: u32,
+    height: u32,
+    argb: &[u8],
+) -> Vec<u8> {
     let Some(cookie) = body.open_array(8) else {
         return Vec::new();
     };

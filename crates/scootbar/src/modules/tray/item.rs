@@ -21,6 +21,9 @@ pub(super) struct Item {
     pub(super) service: String,
     /// The object path calls go to.
     pub(super) path: String,
+    /// Who registered it (the sender of the registration, else the
+    /// service): items are capped per registrant as well as per service.
+    pub(super) registrant: String,
     /// The service's unique name: signal matching and vanish tracking.
     /// `None` until the first `GetNameOwner` answers.
     pub(super) owner: Option<String>,
@@ -85,11 +88,12 @@ pub(super) fn clean(text: &str) -> String {
 }
 
 impl Item {
-    pub(super) fn new(id: String, service: String, path: String) -> Self {
+    pub(super) fn new(id: String, service: String, path: String, registrant: String) -> Self {
         Self {
             id,
             service,
             path,
+            registrant,
             owner: None,
             // Active until the item says otherwise: one that omits the
             // property is shown, one that says `Passive` is hidden.

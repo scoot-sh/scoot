@@ -8,9 +8,10 @@
 //! bar started (the bus is enumerated at connect). Where another process
 //! already owns the name, the bar runs as a host against it instead —
 //! items still appear, clicks still work — and takes over when the owner
-//! leaves. Item menus (`ContextMenu`, the DBusMenu protocol) wait on the
-//! [popups entry](../../../../docs/scootbar/backlog/popups.md): the
-//! `menu` action is refused naming that, loudly, not silently.
+//! leaves. Item menus (`ContextMenu`, the DBusMenu protocol) are not built:
+//! [popups](../../../../docs/scootbar/backlog/resolved/popups-done.md) exist
+//! to draw one in, but the DBusMenu client that reads a layout does not,
+//! so the `menu` action is refused saying that, loudly, not silently.
 //!
 //! ## States
 //!
@@ -50,6 +51,10 @@ use std::time::Instant;
 
 use rustix::event::PollFlags;
 use rustix::fs::inotify::{CreateFlags, WatchFlags};
+use rustix::time::{
+    Itimerspec, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags, Timespec, timerfd_create,
+    timerfd_settime,
+};
 
 use super::{
     ActionSpec, ArgKind, Init, Input, InvokeError, Module, OutputView, Sources, Update, View,
@@ -143,10 +148,19 @@ const MAX_ITEM_TEXT: usize = 128;
 /// change as fast as it is read (a buggy app, a hostile one) costs 20
 /// round trips and redraws a second, not a thousand.
 const MIN_REFRESH_GAP: std::time::Duration = std::time::Duration::from_millis(50);
+/// How many [`conn::Conn::pump`]s one wake of the bus socket makes (64
+/// events each): a flood is worked this much a wake, not in one go.
+const MAX_PUMPS_PER_WAKE: usize = 4;
 /// A connection that dies sooner than this after it was made is a quick
 /// death; [`MAX_QUICK_DEATHS`] in a row and the bar stops redialling.
 const QUICK_DEATH: std::time::Duration = std::time::Duration::from_secs(5);
 const MAX_QUICK_DEATHS: u8 = 3;
+/// After [`MAX_QUICK_DEATHS`] the bar tries once more this long on (and
+/// again, each time one try dies quick): short in tests.
+#[cfg(not(test))]
+const RETRY_AFTER_QUICK_DEATHS: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(test)]
+const RETRY_AFTER_QUICK_DEATHS: std::time::Duration = std::time::Duration::from_millis(2000);
 /// A scroll's delta past this magnitude is clamped to it: a touchpad
 /// flood is one bounded call, never an accumulated one.
 const MAX_SCROLL_DELTA: u32 = 64;
@@ -159,7 +173,17 @@ pub struct Settings {}
 #[cfg(feature = "tray")]
 pub fn init(settings: &super::Settings) -> Init {
     let _ = settings;
-    Init::Available(start_with(BusAddr::Path(conn::bus_path())))
+    let addr = match conn::bus_path() {
+        Ok(path) => BusAddr::Path(path),
+        Err(()) => {
+            crate::print::warn(format_args!(
+                "scootbar: tray: DBUS_SESSION_BUS_ADDRESS names no filesystem path \
+                 (abstract and other transports are not dialled); no tray"
+            ));
+            BusAddr::Unusable
+        }
+    };
+    Init::Available(start_with(addr))
 }
 
 /// Tests only: the module started as if the probe had found a bus — a
@@ -180,6 +204,9 @@ pub(super) fn stand_in(settings: &super::Settings) -> Box<dyn Module> {
 #[derive(Debug)]
 enum BusAddr {
     Path(PathBuf),
+    /// The session bus's address names nothing this client dials: the
+    /// module is there, shows nothing, and never connects.
+    Unusable,
     #[cfg(test)]
     Stream(std::os::unix::net::UnixStream),
 }
@@ -189,15 +216,19 @@ enum BusAddr {
 /// waiting costs one inotify fd at most.
 fn start_with(addr: BusAddr) -> Box<dyn Module> {
     let (path, stream) = match addr {
-        BusAddr::Path(path) => (path, None),
+        BusAddr::Path(path) => (Some(path), None),
+        BusAddr::Unusable => (None, None),
         #[cfg(test)]
-        BusAddr::Stream(stream) => (conn::bus_path(), Some(stream)),
+        BusAddr::Stream(stream) => (conn::bus_path().ok(), Some(stream)),
     };
+    let dial = path.is_some();
+    let path = path.unwrap_or_default();
     let mut tray = Tray {
         path,
         bus: Bus::Waiting {
             notify: None,
             dir: PathBuf::new(),
+            retry: None,
         },
         since: None,
         quick_deaths: 0,
@@ -206,9 +237,10 @@ fn start_with(addr: BusAddr) -> Box<dyn Module> {
         Some(stream) => tray.connected(stream),
         // Dial now when the bus is there (a local socket: `Hello` is two
         // round trips); waiting costs nothing when it is not.
-        None => {
+        None if dial => {
             tray.connect();
         }
+        None => {}
     }
     Box::new(tray)
 }
@@ -234,6 +266,11 @@ enum Bus {
     Waiting {
         notify: Option<Notify>,
         dir: PathBuf,
+        /// A one-shot timer, armed only after the bus kept dropping us
+        /// ([`MAX_QUICK_DEATHS`]): one more try after [`RETRY_AFTER_QUICK_DEATHS`],
+        /// so a bus that dislikes one item's answer does not turn the tray
+        /// off for the session.
+        retry: Option<OwnedFd>,
     },
     Live(Box<Live>),
 }
@@ -270,7 +307,11 @@ impl Tray {
                 .ok()
                 .map(|_| Notify { fd })
             });
-        self.bus = Bus::Waiting { notify, dir };
+        self.bus = Bus::Waiting {
+            notify,
+            dir,
+            retry: None,
+        };
     }
 
     /// Drops the connection with nothing shown (a dead bus's last icons
@@ -302,9 +343,11 @@ impl Tray {
                 self.quick_deaths = self.quick_deaths.saturating_add(1);
                 crate::print::warn(format_args!(
                     "scootbar: tray: the bus keeps dropping the connection; \
-                     waiting for it to be restarted"
+                     trying again in {} s, or when it is restarted",
+                    RETRY_AFTER_QUICK_DEATHS.as_secs()
                 ));
             }
+            self.arm_retry();
         } else {
             self.connect();
         }
@@ -346,6 +389,46 @@ impl Tray {
         }
     }
 
+    /// Arms the one-shot retry for a bus that kept dropping us.
+    fn arm_retry(&mut self) {
+        let Bus::Waiting { retry, .. } = &mut self.bus else {
+            return;
+        };
+        let Ok(fd) = timerfd_create(
+            TimerfdClockId::Monotonic,
+            TimerfdFlags::CLOEXEC | TimerfdFlags::NONBLOCK,
+        ) else {
+            return;
+        };
+        let spec = Itimerspec {
+            it_interval: Timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            it_value: Timespec {
+                tv_sec: RETRY_AFTER_QUICK_DEATHS.as_secs() as i64,
+                tv_nsec: i64::from(RETRY_AFTER_QUICK_DEATHS.subsec_nanos()),
+            },
+        };
+        if timerfd_settime(&fd, TimerfdTimerFlags::empty(), &spec).is_ok() {
+            *retry = Some(fd);
+        }
+    }
+
+    /// The retry fired: one more dial, and one more quick death puts the
+    /// bar back to waiting (the count is left one short of the limit).
+    fn on_retry(&mut self) -> Update {
+        if let Bus::Waiting { retry, .. } = &mut self.bus {
+            if let Some(timer) = retry.take() {
+                let mut expirations = [0u8; 8];
+                let _ = rustix::io::read(&timer, &mut expirations);
+            }
+        }
+        self.quick_deaths = MAX_QUICK_DEATHS - 1;
+        self.connect();
+        Update::Unchanged
+    }
+
     /// Handles the directory watch: drains it (else it stays ready) and
     /// probes the socket when its name arrived. Events for other names
     /// cost one scan of the read bytes, never a connect.
@@ -355,7 +438,7 @@ impl Tray {
             return Update::Unchanged;
         }
         let mut bus = false;
-        let Bus::Waiting { notify, dir } = &mut self.bus else {
+        let Bus::Waiting { notify, dir, .. } = &mut self.bus else {
             return Update::Unchanged;
         };
         if let Some(notify) = notify.as_ref() {
@@ -399,7 +482,10 @@ impl Tray {
             return self.drop_live();
         }
         let mut changed = Update::Unchanged;
-        loop {
+        // A bounded number of pumps a wake: a flood backs up in the socket
+        // and is worked a wake at a time (the poll returns at once while
+        // it is readable), so the bar's other sources get their turn.
+        for _ in 0..MAX_PUMPS_PER_WAKE {
             let (events, capped) = live.conn.pump();
             for event in events {
                 if live.apply(event) == Update::Changed {
@@ -496,7 +582,9 @@ impl Module for Tray {
         match &self.bus {
             Bus::Live(live) => {
                 let mut flags = PollFlags::IN;
-                if live.conn.want_write() {
+                // Writable also while staged messages wait their turn: the
+                // poll returns at once and the work goes on, a wake at a time.
+                if live.conn.want_write() || live.conn.has_staged_work() {
                     flags |= PollFlags::OUT;
                 }
                 sources.add(live.conn.as_fd(), flags);
@@ -505,9 +593,12 @@ impl Module for Tray {
                     sources.add(timer.as_fd(), PollFlags::IN);
                 }
             }
-            Bus::Waiting { notify, .. } => {
+            Bus::Waiting { notify, retry, .. } => {
                 if let Some(notify) = notify {
                     sources.add(notify.fd.as_fd(), PollFlags::IN);
+                }
+                if let Some(retry) = retry {
+                    sources.add(retry.as_fd(), PollFlags::IN);
                 }
             }
         }
@@ -526,8 +617,13 @@ impl Module for Tray {
                 }
                 self.on_bus(events)
             }
-            Bus::Waiting { .. } => {
-                let _ = source;
+            Bus::Waiting { notify, retry, .. } => {
+                // The directory watch is source 0 when there is one, then
+                // the retry timer.
+                let retry_source = usize::from(notify.is_some());
+                if retry.is_some() && source == retry_source {
+                    return self.on_retry();
+                }
                 self.on_notify(events)
             }
         }
@@ -614,7 +710,7 @@ impl Module for Tray {
 
     /// A click activates, a middle click secondarily, a scroll scrolls —
     /// each on the item under the pointer, with no binding at all. A
-    /// right click means nothing by default: the menu waits on popups,
+    /// right click means nothing by default: the menu is not built (no DBusMenu client),
     /// and silence beats a refusal on every click.
     fn on_input(&self, input: &Input<'_>) -> Option<crate::action::Action> {
         let live = self.bus_live()?;
@@ -640,7 +736,7 @@ impl Module for Tray {
 
     /// Carries out the item actions: `activate`, `secondary` and the two
     /// scrolls call the item (never blocking the bar); `menu` is refused
-    /// naming the popups entry. Every one takes the item index.
+    /// saying menus are not built. Every one takes the item index.
     fn invoke(
         &mut self,
         _output: &OutputView<'_>,
@@ -682,7 +778,11 @@ impl Module for Tray {
                 body.str("vertical");
                 ("Scroll", "is")
             }
-            _ => return Err(InvokeError::Refused("tray menus wait on the popups entry")),
+            _ => {
+                return Err(InvokeError::Refused(
+                    "tray menus are not built: no DBusMenu client yet",
+                ));
+            }
         };
         let Some(bytes) = body.take_body() else {
             return Err(InvokeError::Refused("the call does not fit"));

@@ -343,10 +343,12 @@ fn a_click_activates_and_a_scroll_scrolls() {
         -3
     );
 
-    // The menu waits on popups: refused loudly, and unknown stays unknown.
+    // The menu is not built: refused loudly, and unknown stays unknown.
     assert_eq!(
         harness.invoke(&DP1, &ModuleAction::new("menu", Some(0)), 1),
-        Err(InvokeError::Refused("tray menus wait on the popups entry"))
+        Err(InvokeError::Refused(
+            "tray menus are not built: no DBusMenu client yet"
+        ))
     );
     assert_eq!(
         harness.invoke(&DP1, &ModuleAction::new("frobnicate", Some(0)), 1),
@@ -764,6 +766,7 @@ fn a_getall_marshalled_by_sd_bus_is_read_whole() {
         "org.example.Fixture/Item".to_owned(),
         "org.example.Fixture".to_owned(),
         "/Item".to_owned(),
+        "org.example.Fixture".to_owned(),
     );
     assert!(super::fill(&mut item, message.body.rest()));
     assert_eq!(item.title, "hello");
@@ -1205,4 +1208,147 @@ fn an_icon_is_drawn_at_the_device_size_a_fractional_scale_makes() {
     assert_eq!(right - left + 1, side, "ink width");
     assert_eq!(bottom - top + 1, side, "ink height");
     assert_eq!(left, PAD, "starts at the padding");
+}
+
+/// Only the bus says who owns what: a signal that says an item's owner
+/// left, from anyone else, is not believed (and neither is one about the
+/// watcher name, which would have the bar re-take it).
+#[test]
+fn a_forged_owner_change_is_not_believed() {
+    let (stream, mut fake) = Fake::pair();
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body("Steady", "Active", 4, 4, &fake::solid(4, 4, 255, 9, 9, 9)),
+    );
+    let mut harness = Harness::new(start_connected(stream));
+    until_shown(&mut harness, &mut fake, 1);
+    fake.send_name_owner_changed_from(":1.66", SERVICE, OWNER, "");
+    fake.send_name_owner_changed_from(":1.66", OWNER, OWNER, "");
+    settle(&mut harness, &mut fake);
+    assert_eq!(
+        harness.value_on(None).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    // The bus itself, saying it, is.
+    fake.send_name_owner_changed(SERVICE, OWNER, "");
+    settle(&mut harness, &mut fake);
+    assert!(harness.value_on(None).is_none());
+}
+
+/// In host mode only the watcher hosted against speaks for it: another
+/// peer announcing an item (or its leaving) changes nothing.
+#[test]
+fn a_host_does_not_believe_a_peer_that_is_not_the_watcher() {
+    let (stream, mut fake) = Fake::pair();
+    let id = format!("{SERVICE}/StatusNotifierItem");
+    fake.set_watcher(":1.99", &[&id]);
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body("Hosted", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 255, 0)),
+    );
+    let late = "org.kde.StatusNotifierItem-2-2";
+    fake.add_item(
+        late,
+        ":1.51",
+        fake::item_body("Late", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 0, 255)),
+    );
+    let mut harness = Harness::new(start_connected(stream));
+    until_shown(&mut harness, &mut fake, 1);
+    fake.send_watcher_registered_from(":1.66", &format!("{late}/StatusNotifierItem"));
+    settle(&mut harness, &mut fake);
+    assert_eq!(
+        harness.value_on(None).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    fake.send_watcher_registered_from(":1.99", &format!("{late}/StatusNotifierItem"));
+    until_shown(&mut harness, &mut fake, 2);
+}
+
+/// A bus that refuses the bar the watcher name does not leave the tray
+/// dead: it hosts against whoever has it, as when the name is owned
+/// elsewhere.
+#[test]
+fn a_denied_watcher_name_falls_back_to_hosting() {
+    let (stream, mut fake) = Fake::pair();
+    fake.deny_names();
+    let id = format!("{SERVICE}/StatusNotifierItem");
+    fake.set_watcher(":1.99", &[&id]);
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body("Hosted", "Active", 4, 4, &fake::solid(4, 4, 255, 0, 255, 0)),
+    );
+    let mut harness = Harness::new(start_connected(stream));
+    until_shown(&mut harness, &mut fake, 1);
+    assert_eq!(harness.value_on(None).unwrap()["watcher"], "host");
+}
+
+/// One registrant owning many names is one peer: it gets the per-service
+/// share, not the whole tray.
+#[test]
+fn one_registrant_cannot_fill_the_tray_with_names() {
+    let (stream, mut fake) = Fake::pair();
+    let pixmap = fake::solid(2, 2, 255, 9, 9, 9);
+    let mut harness = Harness::new(start_connected(stream));
+    for n in 0..12 {
+        let service = format!("org.kde.StatusNotifierItem-8-{n}");
+        fake.add_unlisted(
+            &service,
+            &format!(":1.8{n}"),
+            fake::item_body("Many", "Active", 2, 2, &pixmap),
+        );
+        fake.send_register(":1.77", &service);
+    }
+    settle(&mut harness, &mut fake);
+    settle(&mut harness, &mut fake);
+    let count = harness.value_on(None).unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(count, super::MAX_PER_SERVICE);
+}
+
+/// After the bus keeps dropping the bar it tries again on a timer, one
+/// dial at a time, so one hostile answer cannot turn the tray off for
+/// the session (the latch used to clear only when the socket file was
+/// made anew).
+#[test]
+fn a_bus_that_kept_dropping_us_is_tried_again_later() {
+    use std::os::unix::net::UnixListener;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let dir = std::env::temp_dir().join(format!("scootbar-retry-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("bus");
+    let listener = UnixListener::bind(&path).unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&accepted);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            count.fetch_add(1, Ordering::SeqCst);
+            crate::dbus::testdaemon::serve_setup(&mut stream);
+        }
+    });
+    let mut harness = Harness::new(start_with_path(path));
+    let start = std::time::Instant::now();
+    // The three quick deaths, then (at the retry) a fourth dial.
+    while accepted.load(Ordering::SeqCst) < 4 {
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "{} dials",
+            accepted.load(Ordering::SeqCst)
+        );
+        harness.wait(Duration::from_millis(50));
+    }
+    assert!(start.elapsed() >= super::RETRY_AFTER_QUICK_DEATHS);
+    let _ = std::fs::remove_dir_all(&dir);
 }

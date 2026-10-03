@@ -52,8 +52,9 @@ nothing here reaches the shipped binary.
 
 **In CI**, on every scootbar change, the `scootbar` job builds the targets
 and runs them for a fixed budget: 1,000,000 runs of `format` and
-5,000,000 of `tzif`, 2,000,000 of `payload` and 2,000,000 of `volume`, from `-seed=1`, over the seed corpus and
-`regressions/` (about 40 s). Building them is what keeps the `#[path]`
+5,000,000 of `tzif`, 2,000,000 each of `payload`, `volume` and `network`,
+and 1,000,000 of `dbus`, from `-seed=1`, over the seed corpus and
+`regressions/` (about a minute). Building them is what keeps the `#[path]`
 includes from rotting: a change that compiles in scootbar but not here
 fails there. A finding's input is printed in base64 in the job's log.
 Before building, the step runs `cargo fetch --locked` on this workspace

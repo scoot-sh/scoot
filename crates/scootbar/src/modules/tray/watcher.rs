@@ -127,6 +127,7 @@ impl Live {
                 body,
             } => self.on_reply(token, &signature, &body),
             Event::CallError { token, name } => self.on_error(token, &name),
+            Event::Dropped { token } => self.on_dropped(token),
             Event::Signal {
                 sender,
                 path,
@@ -377,6 +378,22 @@ impl Live {
         }
     }
 
+    /// A reply past the size this client reads was skipped: the call is
+    /// answered with nothing usable. An item that sent one loses that
+    /// update only (it keeps its last state, and is read again at its
+    /// next signal); a bus question that did is simply unanswered.
+    pub(super) fn on_dropped(&mut self, token: u64) -> Update {
+        let Some(flight) = self.flights.get_mut(token as usize).and_then(Option::take) else {
+            return Update::Unchanged;
+        };
+        if let Op::Props(id) = flight.op {
+            // `stale` is not honored: re-reading at once would fetch the
+            // same oversized answer; the next signal asks again.
+            self.finish_fetch(&id);
+        }
+        Update::Unchanged
+    }
+
     pub(super) fn on_error(&mut self, token: u64, name: &str) -> Update {
         let Some(flight) = self.flights.get_mut(token as usize).and_then(Option::take) else {
             return Update::Unchanged;
@@ -388,12 +405,22 @@ impl Live {
             // `NameHasNoOwner` is an item already gone; anything else
             // leaves the owner unknown (signals still match by sender).
             Op::Owner(id) if name.ends_with("NameHasNoOwner") => self.remove(&id),
-            Op::Owner(_)
-            | Op::Names
-            | Op::WatcherItems
-            | Op::RequestKde
-            | Op::RequestFdo
-            | Op::WatcherOwner => Update::Unchanged,
+            // The bus refused the watcher name (a policy that denies
+            // `own`): say so once, and host against whoever has it, as
+            // when it is owned elsewhere, so the tray is not silently dead.
+            Op::RequestKde => {
+                crate::print::warn(format_args!(
+                    "scootbar: tray: the bus refused the watcher name ({name}); \
+                     hosting against another watcher if there is one"
+                ));
+                self.match_rules();
+                self.mode = Mode::Host;
+                self.read_watcher_owner();
+                Update::Unchanged
+            }
+            Op::Owner(_) | Op::Names | Op::WatcherItems | Op::RequestFdo | Op::WatcherOwner => {
+                Update::Unchanged
+            }
         }
     }
 
@@ -449,7 +476,7 @@ impl Live {
             if self.items.iter().any(|item| item.id == id) {
                 continue;
             }
-            if !self.has_room(&name) {
+            if !self.has_room(&name, &name) {
                 self.say_full(&id);
                 continue;
             }
@@ -457,6 +484,7 @@ impl Live {
                 id.clone(),
                 name.clone(),
                 ITEM_DEFAULT_PATH.to_owned(),
+                name.clone(),
             ));
             self.sort();
             added = true;
@@ -525,12 +553,16 @@ impl Live {
                 continue;
             }
             let (service, path) = split_id(id).unwrap_or(("", ""));
-            if !self.has_room(service) {
+            if !self.has_room(service, service) {
                 self.say_full(id);
                 continue;
             }
-            self.items
-                .push(Item::new(id.clone(), service.to_owned(), path.to_owned()));
+            self.items.push(Item::new(
+                id.clone(),
+                service.to_owned(),
+                path.to_owned(),
+                service.to_owned(),
+            ));
             self.sort();
             moved = true;
             let id = id.clone();
@@ -558,6 +590,11 @@ impl Live {
         body: &[u8],
     ) -> Update {
         if interface == conn::BUS_INTERFACE && member == "NameOwnerChanged" {
+            // Only the bus says who owns what: a peer can send this signal
+            // to us, addressed, and it is not believed.
+            if sender != conn::BUS_NAME {
+                return Update::Unchanged;
+            }
             return self.on_name_owner_changed(signature, body);
         }
         if interface == WATCHER_KDE || interface == WATCHER_FDO {
@@ -594,7 +631,7 @@ impl Live {
                     None => gone = true,
                     Some(owner) => {
                         if item.owner.as_deref() != Some(owner) {
-                            refresh.push(item.id.clone());
+                            refresh.push((item.id.clone(), owner.to_owned()));
                         }
                     }
                 }
@@ -609,7 +646,11 @@ impl Live {
             }
             return Update::Changed;
         }
-        for id in refresh {
+        for (id, owner) in refresh {
+            // The name changed hands: signals now come from the new
+            // owner, and the old one vanishing later must not take the
+            // item with it.
+            self.set_owner(&id, owner);
             self.refresh(&id);
         }
         Update::Unchanged
@@ -703,8 +744,9 @@ impl Live {
         if self.mode != Mode::Host {
             return Update::Unchanged;
         }
-        // Our own echoes (we emit these in owner mode) are ignored.
-        if sender == self.conn.unique() {
+        // Only the watcher we host against speaks for it (which also
+        // leaves out our own echoes, emitted in owner mode).
+        if self.watcher_owner.as_deref() != Some(sender) || sender == self.conn.unique() {
             return Update::Unchanged;
         }
         match member {
@@ -715,7 +757,10 @@ impl Live {
                 let Ok((service, path)) = split_announced(sender, &service) else {
                     return Update::Unchanged;
                 };
-                self.add(service, path)
+                // The registrant is not known here (the other watcher
+                // announces, the app registered with it): the service.
+                let registrant = service.clone();
+                self.add(service, path, &registrant)
             }
             "StatusNotifierItemUnregistered" => {
                 let Ok(service) = proto::read_string(signature, body) else {
@@ -804,7 +849,7 @@ impl Live {
                     return Update::Unchanged;
                 };
                 self.conn.reply_return(sender, serial, "", &[]);
-                self.add(service, path)
+                self.add(service, path, sender)
             }
             "RegisterStatusNotifierHost" => {
                 self.conn.reply_return(sender, serial, "", &[]);
@@ -918,18 +963,22 @@ impl Live {
     /// Adds an item (or re-reads one already shown), verifying it with a
     /// `GetNameOwner` first: a registration for a name nobody owns is
     /// answered and dropped.
-    pub(super) fn add(&mut self, service: String, path: String) -> Update {
+    pub(super) fn add(&mut self, service: String, path: String, registrant: &str) -> Update {
         let id = format!("{service}{path}");
         if self.items.iter().any(|item| item.id == id) {
             self.refresh(&id);
             return Update::Unchanged;
         }
-        if !self.has_room(&service) {
+        if !self.has_room(&service, registrant) {
             self.say_full(&id);
             return Update::Unchanged;
         }
-        self.items
-            .push(Item::new(id.clone(), service.clone(), path));
+        self.items.push(Item::new(
+            id.clone(),
+            service.clone(),
+            path,
+            registrant.to_owned(),
+        ));
         self.sort();
         if service.starts_with(':') {
             self.set_owner(&id, service);
@@ -1150,14 +1199,15 @@ impl Live {
         );
     }
 
-    /// Whether one more item from `service` is taken: under the total
-    /// cap, and under the per-service one.
-    pub(super) fn has_room(&self, service: &str) -> bool {
+    /// Whether one more item is taken: under the total cap, and under the
+    /// per-service one, counted by the service's name and by whoever
+    /// registered it (one peer owning many names is still one peer).
+    pub(super) fn has_room(&self, service: &str, registrant: &str) -> bool {
         self.items.len() < MAX_ITEMS
             && self
                 .items
                 .iter()
-                .filter(|item| item.service == service)
+                .filter(|item| item.service == service || item.registrant == registrant)
                 .count()
                 < MAX_PER_SERVICE
     }

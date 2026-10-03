@@ -15,9 +15,13 @@
 //! token the call carried; signals and incoming method calls arrive as
 //! events for the consumer (the tray) to dispatch.
 //!
-//! A refused frame or an I/O error kills the connection ([`Conn::dead`]);
-//! recovery (reconnect, re-acquire, re-match) belongs to the consumer,
-//! which owns the retry policy.
+//! A header that is not a message, or an I/O error, kills the connection
+//! ([`Conn::dead`]); recovery (reconnect, re-acquire, re-match) belongs to
+//! the consumer, which owns the retry policy. A valid message this client
+//! does not take (past [`proto::MAX_MESSAGE`], up to the spec's 128 MiB)
+//! is skipped whole, and a flood is read only as far as
+//! [`READ_WATERMARK`], the rest waiting in the socket: neither costs the
+//! connection, since a peer, not the bus, decides what is sent.
 
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, BorrowedFd};
@@ -25,22 +29,29 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use super::proto::{self, Kind, Message, Writer, check_name, frame_at};
+use super::proto::{self, Kind, Message, Writer, check_name, frame_at, frame_header};
 
 /// The most messages one [`Conn::pump`] reports: a storm is bounded
 /// reads and bounded work per call. The consumer re-pumps while capped,
 /// so a legitimate burst (thirty items answering at once) still drains
-/// in its turn; a sustained flood grows staging into [`MAX_STAGING`],
-/// which kills the connection instead.
+/// in its turn; a sustained flood backs up in the socket ([`READ_WATERMARK`])
+/// and is worked a turn at a time, never a lost connection.
 pub const MAX_EVENTS_PER_TURN: usize = 64;
 
 /// The most calls waiting for a reply: past this `call` is refused and
 /// the consumer tries again after the next turn.
 pub const MAX_PENDING: usize = 64;
 
-/// Staging past this is a dead connection: two whole capped messages the
-/// turns never drained, or garbage no frame accepts.
-const MAX_STAGING: usize = 2 * proto::MAX_MESSAGE;
+/// Reads stop once this much is staged, leaving the rest in the kernel's
+/// socket buffer (the sender backs up, not the bar): one whole capped
+/// message and a read's worth, so the largest message still completes.
+/// A flood is worked a turn at a time, never a lost connection.
+const READ_WATERMARK: usize = proto::MAX_MESSAGE + 64 * 1024;
+
+/// A message past [`proto::MAX_MESSAGE`] has its header fields read, to
+/// learn what it answers, only when they are this small; a message with
+/// larger fields is skipped unread.
+const MAX_OVERSIZE_FIELDS: usize = 64 * 1024;
 
 /// The whole blocking set-up (auth, `Hello`) waits this long at most, in
 /// total, not per read: a daemon that is stopped, or a socket that
@@ -59,32 +70,57 @@ pub const BUS_PATH: &str = "/org/freedesktop/DBus";
 pub const BUS_INTERFACE: &str = "org.freedesktop.DBus";
 
 /// Where the session bus listens: `DBUS_SESSION_BUS_ADDRESS` when it
-/// names a filesystem path (`unix:path=...`, with parameters after `;`
-/// ignored), else the runtime directory's `bus`, else its conventional
-/// fallback. Abstract sockets are not dialled (nothing the bar runs on
-/// serves the session bus on one); an address without a path falls
-/// through to the default. The argument is the address (the env lookup
-/// is the caller's), so tests never touch the environment.
-pub fn bus_path_for(address: Option<&std::ffi::OsStr>) -> PathBuf {
+/// names a filesystem path (`unix:path=...`, `%xx` escapes decoded,
+/// parameters after `,` and further `;`-separated addresses ignored),
+/// else the runtime directory's `bus` when no address is set at all.
+/// An address that is set but has no path (`unix:abstract=...`, `tcp:`,
+/// `autolaunch:`) is `Err(())`: refused, never silently replaced by
+/// another bus that happens to exist at the default place. The argument
+/// is the address (the env lookup is the caller's), so tests never touch
+/// the environment.
+pub fn bus_path_for(address: Option<&std::ffi::OsStr>) -> Result<PathBuf, ()> {
     use std::os::unix::ffi::OsStrExt;
-    if let Some(address) = address {
-        let bytes = address.as_encoded_bytes();
-        for part in bytes.split(|byte| *byte == b';') {
-            let unix = part.strip_prefix(b"unix:").unwrap_or(part);
-            for param in unix.split(|byte| *byte == b',') {
-                if let Some(path) = param.strip_prefix(b"path=") {
-                    if !path.is_empty() {
-                        return PathBuf::from(std::ffi::OsStr::from_bytes(path));
-                    }
+    let Some(address) = address.filter(|address| !address.is_empty()) else {
+        return Ok(runtime_dir().join("bus"));
+    };
+    for part in address.as_encoded_bytes().split(|byte| *byte == b';') {
+        let Some(unix) = part.strip_prefix(b"unix:") else {
+            continue;
+        };
+        for param in unix.split(|byte| *byte == b',') {
+            if let Some(path) = param.strip_prefix(b"path=") {
+                let path = unescape(path);
+                if !path.is_empty() {
+                    return Ok(PathBuf::from(std::ffi::OsStr::from_bytes(&path)));
                 }
             }
         }
     }
-    runtime_dir().join("bus")
+    Err(())
+}
+
+/// A D-Bus address value with its `%xx` escapes decoded (a malformed
+/// escape is kept as it is).
+fn unescape(value: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(value.len());
+    let mut at = 0;
+    while at < value.len() {
+        let hex = |byte: u8| char::from(byte).to_digit(16);
+        if value[at] == b'%' && at + 2 < value.len() {
+            if let (Some(high), Some(low)) = (hex(value[at + 1]), hex(value[at + 2])) {
+                out.push((high * 16 + low) as u8);
+                at += 3;
+                continue;
+            }
+        }
+        out.push(value[at]);
+        at += 1;
+    }
+    out
 }
 
 /// The session bus's path from the environment.
-pub fn bus_path() -> PathBuf {
+pub fn bus_path() -> Result<PathBuf, ()> {
     bus_path_for(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").as_deref())
 }
 
@@ -166,6 +202,10 @@ pub enum Event {
     },
     /// An error reply for the call that carried `token`.
     CallError { token: u64, name: String },
+    /// The reply to the call that carried `token` was past
+    /// [`proto::MAX_MESSAGE`], and was skipped unread: the call is
+    /// answered, with nothing the client can use. The connection lives.
+    Dropped { token: u64 },
     /// A signal the match rules asked for.
     Signal {
         sender: String,
@@ -211,6 +251,14 @@ pub struct Conn {
     /// Set while the blocking set-up runs: every read and write is
     /// bounded by what is left of it.
     deadline: Option<Instant>,
+    /// Bytes of a message past [`proto::MAX_MESSAGE`] still to be
+    /// discarded as they arrive.
+    discard: usize,
+    /// Reads stopped at [`READ_WATERMARK`] with more waiting in the
+    /// socket: the consumer pumps again at once.
+    backlog: bool,
+    /// An over-cap message was said once, not per message.
+    said_oversize: bool,
     /// Signals that arrived during the blocking set-up, delivered on the
     /// first [`Conn::pump`].
     stashed: Vec<Event>,
@@ -349,6 +397,25 @@ impl Conn {
         }
     }
 
+    /// Bytes staged, unprocessed: a flood must never grow it past the
+    /// read watermark.
+    #[cfg(test)]
+    pub fn staged_len(&self) -> usize {
+        self.staged.len()
+    }
+
+    /// The watermark reads stop at.
+    #[cfg(test)]
+    pub const WATERMARK: usize = READ_WATERMARK;
+
+    /// Queues bytes as they are, with no framing or cap of this client's:
+    /// the tests' way to send what a hostile or merely different peer
+    /// would (a valid message past [`proto::MAX_MESSAGE`]).
+    #[cfg(test)]
+    pub fn queue_raw(&mut self, bytes: &[u8]) {
+        self.outbox.extend_from_slice(bytes);
+    }
+
     /// Queues a broadcast signal with a pre-marshalled body.
     pub fn signal(
         &mut self,
@@ -384,33 +451,125 @@ impl Conn {
         if self.dead {
             return (events, false);
         }
+        // The staged bytes are worked through a cursor and cut once at the
+        // end: draining the front per message made a flood of small ones
+        // quadratic (a megabyte moved for every hundred bytes read).
+        let mut staged = core::mem::take(&mut self.staged);
+        let mut at = 0;
+        let dead = self.work_staged(&staged, &mut at, &mut events);
+        staged.drain(..at);
+        self.staged = staged;
+        if dead {
+            return (events, false);
+        }
+        // Capped with whole frames still staged, or reads stopped short of
+        // the socket's end: the consumer re-pumps at once, so a burst
+        // drains in its turn instead of stranding past what the next poll
+        // wakes for.
+        let capped = (events.len() >= MAX_EVENTS_PER_TURN
+            && frame_at(&self.staged).ok().flatten().is_some())
+            || self.backlog;
+        (events, capped)
+    }
+
+    /// Turns the staged bytes from `at` on into events, up to
+    /// [`MAX_EVENTS_PER_TURN`]; `at` moves past what was used. `true`
+    /// when a header that is no message killed the connection.
+    fn work_staged(&mut self, staged: &[u8], at: &mut usize, events: &mut Vec<Event>) -> bool {
         while events.len() < MAX_EVENTS_PER_TURN {
-            let consumed = match frame_at(&self.staged) {
-                Ok(Some(len)) => len,
+            if self.discard > 0 {
+                let n = self.discard.min(staged.len() - *at);
+                *at += n;
+                self.discard -= n;
+                if self.discard > 0 {
+                    break;
+                }
+                continue;
+            }
+            let rest = &staged[*at..];
+            let total = match frame_header(rest) {
+                Ok(Some(total)) => total,
                 Ok(None) => break,
                 Err(()) => {
                     crate::print::warn(format_args!(
-                        "scootbar: dbus: dropping a refused bus frame"
+                        "scootbar: dbus: dropping a bus frame that is not a message"
                     ));
                     self.dead = true;
-                    return (events, false);
+                    return true;
                 }
             };
-            let frame: Vec<u8> = self.staged.drain(..consumed).collect();
-            if let Some(event) = self.dispatch(&frame) {
-                events.push(event);
+            if total > proto::MAX_MESSAGE {
+                // Valid, and more than this client takes: skipped whole as
+                // its bytes arrive. A reply says which call lost its answer.
+                let fields = u32::from_le_bytes([rest[12], rest[13], rest[14], rest[15]]) as usize;
+                let prefix = 16 + fields + (8 - (16 + fields) % 8) % 8;
+                let known = fields <= MAX_OVERSIZE_FIELDS;
+                if known && rest.len() < prefix {
+                    break;
+                }
+                if !self.said_oversize {
+                    self.said_oversize = true;
+                    crate::print::warn(format_args!(
+                        "scootbar: dbus: skipping a {total}-byte message (more than {} are not read)",
+                        proto::MAX_MESSAGE
+                    ));
+                }
+                let dropped = if known {
+                    Self::oversize_reply(&mut self.pending, &rest[..prefix])
+                } else {
+                    None
+                };
+                self.discard = total;
+                if let Some(token) = dropped {
+                    events.push(Event::Dropped { token });
+                }
                 continue;
             }
-            if self.dead {
-                return (events, false);
+            if rest.len() < total {
+                break;
+            }
+            *at += total;
+            if let Some(event) = self.dispatch(&rest[..total]) {
+                events.push(event);
             }
         }
-        // Capped with whole frames still staged: the consumer re-pumps
-        // at once, so a burst drains in its turn instead of stranding
-        // past what the next poll wakes for.
-        let capped =
-            events.len() >= MAX_EVENTS_PER_TURN && frame_at(&self.staged).ok().flatten().is_some();
-        (events, capped)
+        false
+    }
+
+    /// Whether `pump` has more to do without the socket saying so: a whole
+    /// message is staged past the events one turn takes, or reads stopped
+    /// at the watermark. The consumer asks for `OUT` meanwhile, so the poll
+    /// returns at once (a socket is nearly always writable) and the work
+    /// goes on a turn at a time, the bar's other sources between.
+    pub fn has_staged_work(&self) -> bool {
+        if self.backlog {
+            return true;
+        }
+        match frame_header(&self.staged) {
+            Ok(Some(total)) => total > proto::MAX_MESSAGE || self.staged.len() >= total,
+            _ => false,
+        }
+    }
+
+    /// Drops as much of the message being skipped as is staged.
+    fn apply_discard(&mut self) {
+        let n = self.discard.min(self.staged.len());
+        self.staged.drain(..n);
+        self.discard -= n;
+    }
+
+    /// The token of the call an over-cap reply (header only) answers, and
+    /// the call leaves the pending table.
+    fn oversize_reply(pending: &mut Vec<Pending>, prefix: &[u8]) -> Option<u64> {
+        let message = Message::parse_header(prefix).ok()?;
+        if !matches!(message.kind, Kind::MethodReturn | Kind::Error) {
+            return None;
+        }
+        let reply_to = message.reply_serial?;
+        let at = pending
+            .iter()
+            .position(|waiting| waiting.serial == reply_to)?;
+        Some(pending.remove(at).token)
     }
 
     /// Writes the outbox until it is empty or the socket would block. A
@@ -446,11 +605,17 @@ impl Conn {
         }
     }
 
-    /// Reads what is ready into staging, killing the connection past
-    /// [`MAX_STAGING`] or on a real I/O error.
+    /// Reads what is ready into staging, up to [`READ_WATERMARK`], killing
+    /// the connection only on a real I/O error.
     fn read_ready(&mut self) {
         let mut chunk = [0u8; 8192];
+        self.backlog = false;
         loop {
+            if self.staged.len() >= READ_WATERMARK {
+                // Enough for this turn: the rest waits in the socket.
+                self.backlog = true;
+                return;
+            }
             match self.stream.read(&mut chunk) {
                 Ok(0) => {
                     crate::print::warn(format_args!("scootbar: dbus: the bus went away"));
@@ -459,12 +624,10 @@ impl Conn {
                 }
                 Ok(n) => {
                     self.staged.extend_from_slice(&chunk[..n]);
-                    if self.staged.len() > MAX_STAGING {
-                        self.dead = true;
-                        return;
-                    }
+                    self.apply_discard();
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(error) => {
                     crate::print::warn(format_args!("scootbar: dbus: bus read failed: {error}"));
                     self.dead = true;
@@ -613,7 +776,7 @@ impl Conn {
                 Ok(0) => return Err(SetupError::Refused("the bus closed the set-up")),
                 Ok(n) => {
                     self.staged.extend_from_slice(&chunk[..n]);
-                    if self.staged.len() > MAX_STAGING {
+                    if self.staged.len() > READ_WATERMARK {
                         return Err(SetupError::Refused("the set-up never framed"));
                     }
                 }
@@ -660,6 +823,9 @@ pub fn setup(stream: UnixStream) -> Result<Conn, SetupError> {
         pending: Vec::new(),
         dead: false,
         deadline: Some(deadline),
+        discard: 0,
+        backlog: false,
+        said_oversize: false,
         stashed: Vec::new(),
     };
     let (signature, body) = conn.roundtrip(BUS_NAME, BUS_PATH, BUS_INTERFACE, "Hello", "", &[])?;

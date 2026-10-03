@@ -2077,7 +2077,7 @@ macro_rules! tray_help {
     scrolls; its actions (`activate N`, `secondary N`, `wheel-up N`,
     `wheel-down N`) take the item index. The bar owns the
     watcher name when free and hosts against whoever does otherwise.
-    Item menus wait on the popups entry. Nothing is shown where no item
+    Item menus are not built yet (no DBusMenu client). Nothing is shown where no item
     is registered
 "
     };

@@ -7,28 +7,44 @@ use std::ffi::OsStr;
 
 use super::conn::bus_path_for;
 use super::proto::{
-    Kind, Message, Writer, check_body_signature, check_member, check_name, check_path,
-    check_signature, frame_at,
+    Kind, Message, Writer, check_body_signature, check_interface, check_member, check_name,
+    check_path, check_signature, frame_at,
 };
 
 #[test]
-fn the_bus_address_names_a_path_or_falls_through() {
+fn the_bus_address_names_a_path_or_is_refused() {
+    let path = |text| bus_path_for(Some(OsStr::new(text)));
     assert_eq!(
-        bus_path_for(Some(OsStr::new("unix:path=/run/user/1000/bus"))),
-        std::path::Path::new("/run/user/1000/bus")
+        path("unix:path=/run/user/1000/bus"),
+        Ok("/run/user/1000/bus".into())
     );
     assert_eq!(
-        bus_path_for(Some(OsStr::new(
-            "unix:path=/sock,guid=abc;unix:path=/other"
-        ))),
-        std::path::Path::new("/sock")
+        path("unix:path=/sock,guid=abc;unix:path=/other"),
+        Ok("/sock".into())
     );
-    // Abstract sockets are not dialled: falls through to the default.
-    let abstracted = bus_path_for(Some(OsStr::new("unix:abstract=/tmp/dbus-XXXX,guid=abc")));
-    assert!(abstracted.ends_with("bus"));
-    // No address, or one without a path: the runtime default.
-    for address in [None, Some(OsStr::new("")), Some(OsStr::new("autolaunch:"))] {
-        let path = bus_path_for(address);
+    // The address's own escapes are decoded; a broken one is kept.
+    assert_eq!(path("unix:path=/tmp/a%20b%2Fc"), Ok("/tmp/a b/c".into()));
+    assert_eq!(path("unix:path=/tmp/100%"), Ok("/tmp/100%".into()));
+    assert_eq!(path("unix:path=/tmp/%zz"), Ok("/tmp/%zz".into()));
+    // A later address with a path serves when an earlier one has none.
+    assert_eq!(
+        path("unix:abstract=/tmp/dbus-X;unix:path=/second"),
+        Ok("/second".into())
+    );
+    // Set but with no path (abstract, tcp, autolaunch): refused, not
+    // replaced by whatever bus is at the default place.
+    for address in [
+        "unix:abstract=/tmp/dbus-XXXX,guid=abc",
+        "autolaunch:",
+        "tcp:host=localhost,port=1",
+        "unix:path=",
+        "garbage",
+    ] {
+        assert_eq!(path(address), Err(()), "{address}");
+    }
+    // Not set, or empty: the runtime default.
+    for address in [None, Some(OsStr::new(""))] {
+        let path = bus_path_for(address).unwrap();
         assert!(path.ends_with("bus"), "{}", path.display());
         assert!(path.is_absolute());
     }
@@ -155,10 +171,24 @@ fn names_paths_members_and_signatures_validate() {
     ] {
         assert_eq!(check_name(valid), Ok(valid));
     }
-    // Dashes ride along in bus names (never leading, never in member or
-    // interface names, which `check_member` holds).
+    // Dashes ride along in bus names, a leading one too (the spec allows
+    // it and a daemon takes `org.example.-x`), never in member or
+    // interface names, which `check_member` and `check_interface` hold.
     assert_eq!(check_name("a-b.c-d"), Ok("a-b.c-d"));
-    assert_eq!(check_name("-a.b"), Err(()));
+    assert_eq!(check_name("-a.b"), Ok("-a.b"));
+    assert_eq!(check_name("org.example.-lead"), Ok("org.example.-lead"));
+    // The spec's own 255 bytes, not fewer.
+    let longest = format!("org.{}", "x".repeat(251));
+    assert_eq!(longest.len(), 255);
+    assert_eq!(check_name(&longest), Ok(longest.as_str()));
+    assert_eq!(check_name(&format!("{longest}x")), Err(()));
+    assert_eq!(
+        check_interface("org.kde.StatusNotifierItem"),
+        Ok("org.kde.StatusNotifierItem")
+    );
+    for invalid in ["", "nodots", "org.has-dash", ":1.7", "org.9lives", "org..x"] {
+        assert_eq!(check_interface(invalid), Err(()), "{invalid}");
+    }
     for invalid in [
         "",
         "no-dots",
@@ -166,13 +196,17 @@ fn names_paths_members_and_signatures_validate() {
         "trailing.",
         "has space",
         "9lives.lead-digit",
-        &"x".repeat(129),
+        &"x".repeat(256),
     ] {
         assert_eq!(check_name(invalid), Err(()), "{invalid}");
     }
     for valid in ["/", "/StatusNotifierWatcher", "/org/freedesktop/DBus"] {
         assert_eq!(check_path(valid), Ok(valid));
     }
+    // A path is bounded: a few dozen bytes are real, a megabyte is not.
+    let long = format!("/{}", "a".repeat(super::proto::MAX_PATH - 1));
+    assert_eq!(check_path(&long), Ok(long.as_str()));
+    assert_eq!(check_path(&format!("{long}a")), Err(()));
     for invalid in [
         "",
         "relative",
@@ -424,4 +458,267 @@ fn an_item_answer_is_read_typed_and_refused_whole_when_hostile() {
     });
     // 360 KB fits under the message cap; the entry is skipped.
     assert_eq!(read_item_props(&big).unwrap().pixmaps.unwrap().len(), 0);
+}
+
+// A valid message past the size this client reads, and floods: neither
+// may cost the connection (which was an item's `GetAll` with a 512 by 512
+// pixmap turning the tray off for the session).
+
+use super::conn::Event;
+
+/// A valid method return of `len` array bytes, which `Writer`'s own cap
+/// would refuse.
+fn oversized_reply(serial: u32, reply_to: u32, len: usize) -> Vec<u8> {
+    let mut writer = Writer::with_cap(len + 4096);
+    writer.begin_return_to(serial, ":1.7", reply_to, "ay");
+    let cookie = writer.open_array(1).unwrap();
+    writer.raw(&vec![7u8; len]);
+    writer.close_array(cookie);
+    writer.finish().unwrap()
+}
+
+fn small_reply(serial: u32, reply_to: u32) -> Vec<u8> {
+    let mut body = Writer::new();
+    body.str("ok");
+    let body = body.take_body().unwrap();
+    let mut reply = Writer::new();
+    reply.begin_return_to(serial, ":1.7", reply_to, "s");
+    reply.raw(&body);
+    reply.finish().unwrap()
+}
+
+/// Writes `bytes` to the daemon's end in its own thread (the connection
+/// is pumped meanwhile: the socket buffer is smaller than the message).
+fn send_later(mut daemon: UnixStream, bytes: Vec<u8>) -> std::thread::JoinHandle<UnixStream> {
+    std::thread::spawn(move || {
+        daemon.write_all(&bytes).unwrap();
+        daemon
+    })
+}
+
+/// Pumps until `want` events are collected (or fails after 20 s),
+/// returning them and the most ever staged.
+fn pump_events(conn: &mut conn::Conn, want: usize) -> (Vec<Event>, usize) {
+    let start = Instant::now();
+    let mut got = Vec::new();
+    let mut peak = 0;
+    while got.len() < want {
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "{} events",
+            got.len()
+        );
+        assert!(
+            !conn.dead(),
+            "the connection died after {} events",
+            got.len()
+        );
+        let (events, _) = conn.pump();
+        peak = peak.max(conn.staged_len());
+        got.extend(events);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    (got, peak)
+}
+
+#[test]
+fn an_over_cap_reply_is_skipped_and_the_connection_lives() {
+    let (mut conn, daemon) = connected();
+    let first = conn.call("a.b", "/", "a.b", "Big", "", &[], 0, 7).unwrap();
+    let second = conn
+        .call("a.b", "/", "a.b", "Small", "", &[], 0, 8)
+        .unwrap();
+    let _ = conn.pump();
+    let mut bytes = oversized_reply(100, first, super::proto::MAX_MESSAGE + 4096);
+    assert!(bytes.len() > super::proto::MAX_MESSAGE);
+    // Valid to the spec, so framed, and every byte of it discarded.
+    bytes.extend(small_reply(101, second));
+    let sender = send_later(daemon, bytes);
+    let (events, peak) = pump_events(&mut conn, 2);
+    sender.join().unwrap();
+    assert!(
+        matches!(events[0], Event::Dropped { token: 7 }),
+        "{:?}",
+        events[0]
+    );
+    assert!(
+        matches!(&events[1], Event::Reply { token: 8, body, .. } if body.len() == 7),
+        "{:?}",
+        events[1]
+    );
+    // It never sat in staging whole.
+    assert!(peak <= conn::Conn::WATERMARK + 8192, "{peak}");
+    assert!(!conn.dead());
+}
+
+#[test]
+fn an_over_cap_call_or_signal_is_skipped_with_no_event() {
+    let (mut conn, daemon) = connected();
+    let big = |kind: u8| {
+        // A valid header by hand: a call or a signal with a 2 MiB body,
+        // fields larger than the part read of an over-cap message.
+        let (body_len, fields_len) = (2 * 1024 * 1024u32, 100_000u32);
+        let mut m = vec![b'l', kind, 0, 1];
+        m.extend_from_slice(&body_len.to_le_bytes());
+        m.extend_from_slice(&5u32.to_le_bytes());
+        m.extend_from_slice(&fields_len.to_le_bytes());
+        let total = 16 + fields_len as usize + (8 - (16 + fields_len as usize) % 8) % 8;
+        m.resize(total + body_len as usize, 0);
+        m
+    };
+    let mut bytes = big(1);
+    bytes.extend(big(4));
+    let call = conn.call("a.b", "/", "a.b", "M", "", &[], 0, 3).unwrap();
+    bytes.extend(small_reply(9, call));
+    let sender = send_later(daemon, bytes);
+    let (events, _) = pump_events(&mut conn, 1);
+    sender.join().unwrap();
+    assert!(
+        matches!(events[0], Event::Reply { token: 3, .. }),
+        "{:?}",
+        events[0]
+    );
+    assert!(!conn.dead());
+}
+
+#[test]
+fn a_flood_is_worked_a_turn_at_a_time_and_never_kills_the_connection() {
+    let (mut conn, daemon) = connected();
+    // 40,000 NewIcon signals: some 5 MiB, well past what staging holds.
+    let mut bytes = Vec::new();
+    for n in 0..40_000u32 {
+        let mut writer = Writer::new();
+        writer.begin_signal(
+            n + 1,
+            "/StatusNotifierItem",
+            "org.kde.StatusNotifierItem",
+            "NewIcon",
+            "",
+        );
+        bytes.extend(writer.finish().unwrap());
+    }
+    assert!(bytes.len() > 3 * super::proto::MAX_MESSAGE);
+    let sender = send_later(daemon, bytes);
+    let (events, peak) = pump_events(&mut conn, 40_000);
+    sender.join().unwrap();
+    assert_eq!(events.len(), 40_000);
+    assert!(peak <= conn::Conn::WATERMARK + 8192, "{peak}");
+    assert!(!conn.dead());
+}
+
+#[test]
+fn a_header_that_is_not_a_message_still_ends_the_connection() {
+    let (mut conn, daemon) = connected();
+    let sender = send_later(
+        daemon,
+        b"GET / HTTP/1.1\r\n\r\n garbage that frames as nothing".to_vec(),
+    );
+    let start = Instant::now();
+    while !conn.dead() {
+        assert!(start.elapsed() < Duration::from_secs(10));
+        let _ = conn.pump();
+    }
+    sender.join().unwrap();
+    // A length past the spec's own 128 MiB is not a message either.
+    let (mut conn, daemon) = connected();
+    let mut header = vec![b'l', 4, 0, 1];
+    header.extend_from_slice(&(200u32 * 1024 * 1024).to_le_bytes());
+    header.extend_from_slice(&1u32.to_le_bytes());
+    header.extend_from_slice(&0u32.to_le_bytes());
+    let sender = send_later(daemon, header);
+    let start = Instant::now();
+    while !conn.dead() {
+        assert!(start.elapsed() < Duration::from_secs(10));
+        let _ = conn.pump();
+    }
+    sender.join().unwrap();
+}
+
+#[test]
+fn one_name_this_client_does_not_take_does_not_blind_the_list() {
+    use super::proto::read_names;
+    // A name list as a daemon sends it, with names a peer may own: one
+    // past the spec's length, one that is no name. The rest is read.
+    let mut body = Writer::new();
+    let cookie = body.open_array(4).unwrap();
+    for name in [
+        "org.freedesktop.DBus".to_owned(),
+        format!("org.example.{}", "x".repeat(300)),
+        "not a name".to_owned(),
+        "org.example.-lead".to_owned(),
+        "org.kde.StatusNotifierItem-1-1".to_owned(),
+    ] {
+        body.str(&name);
+    }
+    body.close_array(cookie);
+    let names = read_names("as", &body.take_body().unwrap()).unwrap();
+    assert_eq!(
+        names,
+        [
+            "org.freedesktop.DBus",
+            "org.example.-lead",
+            "org.kde.StatusNotifierItem-1-1"
+        ]
+    );
+}
+
+/// A header field code the spec does not give this client is walked past
+/// by its signature, not a refusal of the message.
+#[test]
+fn an_unknown_header_field_is_ignored() {
+    let mut writer = Writer::new();
+    writer.begin_return(2, 1, "s");
+    writer.str("hi");
+    let message = writer.finish().unwrap();
+    let fields_len = u32::from_le_bytes(message[12..16].try_into().unwrap()) as usize;
+    let old_end = 16 + fields_len;
+    let body_at = old_end + (8 - old_end % 8) % 8;
+    let mut fields = message[16..old_end].to_vec();
+    while !(16 + fields.len()).is_multiple_of(8) {
+        fields.push(0);
+    }
+    // `{y, v}` with code 21 and a `u` of 7.
+    fields.extend_from_slice(&[21, 1, b'u', 0, 7, 0, 0, 0]);
+    let mut changed = message[..12].to_vec();
+    changed.extend_from_slice(&(fields.len() as u32).to_le_bytes());
+    changed.extend_from_slice(&fields);
+    while !changed.len().is_multiple_of(8) {
+        changed.push(0);
+    }
+    changed.extend_from_slice(&message[body_at..]);
+    assert_eq!(frame_at(&changed), Ok(Some(changed.len())));
+    let parsed = Message::parse(&changed).expect("an unknown field is not a refusal");
+    assert_eq!(parsed.reply_serial, Some(1));
+    assert_eq!(parsed.signature, "s");
+    assert_eq!(
+        super::proto::read_string(parsed.signature, parsed.body.rest()).as_deref(),
+        Ok("hi")
+    );
+}
+
+/// The header alone says how long a message is, however long: only a
+/// header that is no message, or past the spec's 128 MiB, is refused.
+#[test]
+fn the_header_frames_a_long_message_and_refuses_a_false_one() {
+    use super::proto::{MAX_MESSAGE, MAX_WIRE, frame_header};
+    let header = |body: u32, fields: u32| {
+        let mut h = vec![b'l', 2, 0, 1];
+        h.extend_from_slice(&body.to_le_bytes());
+        h.extend_from_slice(&1u32.to_le_bytes());
+        h.extend_from_slice(&fields.to_le_bytes());
+        h
+    };
+    assert_eq!(frame_header(&header(100, 0)[..10]), Ok(None));
+    assert_eq!(frame_header(&header(100, 0)), Ok(Some(116)));
+    let long = frame_header(&header(MAX_MESSAGE as u32 * 3, 0))
+        .unwrap()
+        .unwrap();
+    assert!(long > MAX_MESSAGE);
+    // The whole-message framing still refuses it: the set-up cannot skip.
+    assert_eq!(frame_at(&header(MAX_MESSAGE as u32 * 3, 0)), Err(()));
+    assert_eq!(frame_header(&header(MAX_WIRE as u32, 0)), Err(()));
+    assert_eq!(frame_header(&header(5, u32::MAX)), Err(()));
+    let mut bad = header(1, 0);
+    bad[3] = 2;
+    assert_eq!(frame_header(&bad), Err(()));
 }

@@ -18,12 +18,16 @@
 //! arrays, megabyte pixmaps). The bounds below answer those, and every
 //! refusal is a dropped message, never a panic:
 //!
-//! - [`MAX_MESSAGE`]: a message past 1 MiB is refused (the spec allows
-//!   128 MiB; the tray's largest legitimate payload, pixmaps at requested
-//!   device pixels, is tens of KiB).
+//! - [`MAX_MESSAGE`]: a message past 1 MiB is not processed (the spec
+//!   allows 128 MiB, [`MAX_WIRE`]; SNI has no way to ask an item for a
+//!   size, so a pixmap past 512 by 512 can legitimately arrive). It is
+//!   *skipped*, not fatal: [`frame_header`] frames it, the connection
+//!   discards its bytes as they arrive and, for a reply, tells the
+//!   consumer which call lost its answer. Only a header that is not a
+//!   message at all, or past the spec's own maximum, ends the connection.
 //! - [`MAX_DEPTH`]: containers nested past 32 deep are refused.
-//! - [`MAX_NAME`]: a bus, interface, member or error name past 128 bytes
-//!   is refused (the volume module's rule for names).
+//! - [`MAX_NAME`]: a bus, interface, member or error name past the spec's
+//!   255 bytes is refused; a path past [`MAX_PATH`] is.
 //! - [`MAX_SIGNATURE`]: a signature past the spec's 255 bytes is refused.
 //!
 //! Strings in a body carry no cap here: they are borrowed, never copied,
@@ -40,16 +44,26 @@
 //! connection) and then dropped by [`Message::parse`]: a big-endian peer
 //! on the bus loses its own messages, nothing else.
 
-/// The most bytes one message holds, header and body: the starting point
-/// the spike set (tray pixmaps at requested device pixels are tens of
-/// KiB; menu layouts are the unbounded one).
+/// The most bytes one message holds that this client processes, header
+/// and body: a 512 by 512 pixmap is just over it, a 256 by 256 one
+/// (the most the tray keeps) a quarter. Past it a message is skipped
+/// whole ([`frame_header`]), never a lost connection.
 pub const MAX_MESSAGE: usize = 1024 * 1024;
+
+/// The most bytes the spec allows one message (128 MiB): a header
+/// claiming more is not a message, and ends the connection.
+pub const MAX_WIRE: usize = 128 * 1024 * 1024;
 
 /// The deepest containers nest, in a signature or on the wire.
 pub const MAX_DEPTH: usize = 32;
 
-/// The longest bus, interface, member or error name taken, in bytes.
-pub const MAX_NAME: usize = 128;
+/// The longest bus, interface, member or error name taken, in bytes (the
+/// spec's own maximum).
+pub const MAX_NAME: usize = 255;
+
+/// The longest object path taken, in bytes: the spec sets none, an item's
+/// is a few dozen.
+pub const MAX_PATH: usize = 1024;
 
 /// The longest signature taken, in bytes (the spec's own maximum).
 pub const MAX_SIGNATURE: usize = 255;
@@ -97,11 +111,12 @@ pub mod request_reply {
     pub const ALREADY_OWNER: u32 = 4;
 }
 
-/// How many bytes frame `buf`'s first message: `Ok(Some(n))` when the
-/// whole message is there, `Ok(None)` when it is incomplete, `Err(())`
-/// when it is refused (bad magic, version, kind, or a length past
-/// [`MAX_MESSAGE`]).
-pub fn frame_at(buf: &[u8]) -> Result<Option<usize>, ()> {
+/// The total length of the message `buf` starts, from its 16-byte header
+/// alone: `Ok(None)` while the header is incomplete, `Err(())` when it is
+/// not a message (bad magic, version or kind, or a length past
+/// [`MAX_WIRE`]). The length may be past [`MAX_MESSAGE`]: the caller
+/// skips such a message rather than buffer it.
+pub fn frame_header(buf: &[u8]) -> Result<Option<usize>, ()> {
     if buf.len() < 16 {
         return Ok(None);
     }
@@ -116,19 +131,32 @@ pub fn frame_at(buf: &[u8]) -> Result<Option<usize>, ()> {
     let le = buf[0] == b'l';
     let body_len = get_u32(&buf[4..8], le) as usize;
     let fields_len = get_u32(&buf[12..16], le) as usize;
-    if body_len > MAX_MESSAGE || fields_len > MAX_MESSAGE {
+    // The spec's own bounds: the fields array at most 64 MiB, the whole
+    // message 128 MiB.
+    if fields_len > MAX_WIRE / 2 || body_len > MAX_WIRE {
         return Err(());
     }
     let mut total = 16usize.saturating_add(fields_len);
     total = total.saturating_add((8usize.saturating_sub(total % 8)) % 8);
     total = total.saturating_add(body_len);
-    if total > MAX_MESSAGE {
+    if total > MAX_WIRE {
         return Err(());
     }
-    if buf.len() < total {
-        return Ok(None);
-    }
     Ok(Some(total))
+}
+
+/// How many bytes frame `buf`'s first message: `Ok(Some(n))` when the
+/// whole message is there, `Ok(None)` when it is incomplete, `Err(())`
+/// when it is refused (a bad header, or a length past [`MAX_MESSAGE`]:
+/// what a caller that cannot skip a message, such as the blocking
+/// set-up, treats as the end).
+pub fn frame_at(buf: &[u8]) -> Result<Option<usize>, ()> {
+    match frame_header(buf)? {
+        None => Ok(None),
+        Some(total) if total > MAX_MESSAGE => Err(()),
+        Some(total) if buf.len() < total => Ok(None),
+        Some(total) => Ok(Some(total)),
+    }
 }
 
 fn get_u32(at: &[u8], le: bool) -> u32 {
@@ -151,6 +179,7 @@ enum Header<'a> {
     Destination(&'a str),
     Sender(&'a str),
     Signature(&'a str),
+    Ignored,
 }
 
 /// The variant's value as a string (`s` or `o`).
@@ -219,6 +248,18 @@ impl<'a> Message<'a> {
     /// refuses it: a bad header, a name past its bound, or a body shorter
     /// than the frame claims.
     pub fn parse(frame: &'a [u8]) -> Result<Self, ()> {
+        Self::parse_with(frame, true)
+    }
+
+    /// Parses the header of a message whose body is not (and will not be)
+    /// buffered: `prefix` is at least the 16 fixed bytes and the fields
+    /// array, and the body reads as empty. For a message past
+    /// [`MAX_MESSAGE`], to learn what it answers before it is skipped.
+    pub fn parse_header(prefix: &'a [u8]) -> Result<Self, ()> {
+        Self::parse_with(prefix, false)
+    }
+
+    fn parse_with(frame: &'a [u8], with_body: bool) -> Result<Self, ()> {
         // Little-endian only: see the module docs.
         let le = match *frame.first().ok_or(())? {
             b'l' => true,
@@ -263,9 +304,9 @@ impl<'a> Message<'a> {
             let parsed = fields.variant(|sig, value| {
                 Ok(match code {
                     1 => Header::Path(check_path(str_of(sig, value)?)?),
-                    2 => Header::Interface(check_name(str_of(sig, value)?)?),
+                    2 => Header::Interface(check_interface(str_of(sig, value)?)?),
                     3 => Header::Member(check_member(str_of(sig, value)?)?),
-                    4 => Header::Error(check_name(str_of(sig, value)?)?),
+                    4 => Header::Error(check_interface(str_of(sig, value)?)?),
                     5 => Header::ReplySerial(uint_of(sig, value)?),
                     6 => Header::Destination(check_name(str_of(sig, value)?)?),
                     7 => Header::Sender(check_name(str_of(sig, value)?)?),
@@ -275,10 +316,14 @@ impl<'a> Message<'a> {
                         let text = sig_of(sig, value)?;
                         check_body_signature(text)?
                     }),
-                    // File descriptors are never negotiated by this
-                    // client: one on the wire is a peer speaking out of
-                    // turn.
-                    _ => return Err(()),
+                    // A code this client does not know (the spec reserves
+                    // the rest for later, and 9 counts file descriptors,
+                    // never negotiated here): walked past by its
+                    // signature, as a reader of a future spec must.
+                    _ => {
+                        value.skip(sig)?;
+                        Header::Ignored
+                    }
                 })
             })?;
             fields.leave();
@@ -291,11 +336,16 @@ impl<'a> Message<'a> {
                 Header::Destination(text) => destination = Some(text),
                 Header::Sender(text) => sender = Some(text),
                 Header::Signature(text) => signature = text,
+                Header::Ignored => {}
             }
         }
         let mut at = 16usize.saturating_add(fields_len);
         at = at.saturating_add((8usize.saturating_sub(at % 8)) % 8);
-        let body = frame.get(at..at.saturating_add(body_len)).ok_or(())?;
+        let body = if with_body {
+            frame.get(at..at.saturating_add(body_len)).ok_or(())?
+        } else {
+            &[]
+        };
         Ok(Self {
             kind,
             serial,
@@ -695,7 +745,7 @@ fn element_alignment(bytes: &[u8], at: usize) -> Result<usize, ()> {
     match *bytes.get(at).ok_or(())? {
         b'y' | b'v' | b'g' => Ok(1),
         b'n' | b'q' => Ok(2),
-        b'b' | b'i' | b'u' | b's' | b'o' | b'a' => Ok(4),
+        b'b' | b'i' | b'u' | b's' | b'o' | b'a' | b'h' => Ok(4),
         b'x' | b't' | b'd' | b'(' | b'{' => Ok(8),
         _ => Err(()),
     }
@@ -755,10 +805,37 @@ pub fn check_name(name: &str) -> Result<&str, ()> {
         elements += 1;
         let mut chars = element.bytes();
         match chars.next() {
-            Some(first) if first.is_ascii_alphabetic() || first == b'_' => {}
+            // A `-` may begin an element of a bus name (the spec allows
+            // it, and a daemon takes `org.example.-x`); a digit may not.
+            Some(first) if first.is_ascii_alphabetic() || first == b'_' || first == b'-' => {}
             _ => return Err(()),
         }
         if !chars.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-') {
+            return Err(());
+        }
+    }
+    if elements < 2 {
+        return Err(());
+    }
+    Ok(name)
+}
+
+/// Whether `name` is a usable interface or error name: dotted, at least
+/// two elements, each of `[A-Za-z0-9_]` and not starting with a digit
+/// (no dashes, unlike a bus name), within [`MAX_NAME`].
+pub fn check_interface(name: &str) -> Result<&str, ()> {
+    if name.is_empty() || name.len() > MAX_NAME {
+        return Err(());
+    }
+    let mut elements = 0;
+    for element in name.split('.') {
+        elements += 1;
+        let mut chars = element.bytes();
+        match chars.next() {
+            Some(first) if first.is_ascii_alphabetic() || first == b'_' => {}
+            _ => return Err(()),
+        }
+        if !chars.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') {
             return Err(());
         }
     }
@@ -790,7 +867,7 @@ pub fn check_path(path: &str) -> Result<&str, ()> {
     if !path.starts_with('/') {
         return Err(());
     }
-    if path.len() > MAX_MESSAGE {
+    if path.len() > MAX_PATH {
         return Err(());
     }
     if path == "/" {
@@ -963,7 +1040,12 @@ pub fn read_names(signature: &str, body: &[u8]) -> Result<Vec<String>, ()> {
     let mut names = Vec::new();
     while !scoped.exhausted() {
         let name = scoped.str()?;
-        check_name(name)?;
+        // One name this client does not take (a daemon accepts what is
+        // valid to it, and a peer can own such a name) is skipped, not
+        // the whole list: start-up enumeration must not be blinded by it.
+        if check_name(name).is_err() {
+            continue;
+        }
         if names.len() >= MAX_LIST_NAMES {
             break;
         }
@@ -1107,9 +1189,10 @@ pub fn read_string(signature: &str, body: &[u8]) -> Result<String, ()> {
 /// A message writer: little-endian, capped at [`MAX_MESSAGE`]. Anything
 /// past a cap sets the overflow, and [`Writer::finish`] returns `None` —
 /// a message that does not fit is never half-sent.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Writer {
     buf: Vec<u8>,
+    cap: usize,
     overflow: bool,
     depth: usize,
     body_at: Option<usize>,
@@ -1127,9 +1210,39 @@ pub enum Field<'a> {
     Signature(&'a str),
 }
 
+/// Where an open array's length word and first element are, for
+/// [`Writer::close_array`] to patch the one from the other.
+#[derive(Debug, Clone, Copy)]
+pub struct ArrayCookie {
+    len_at: usize,
+    data_at: usize,
+}
+
+impl Default for Writer {
+    fn default() -> Self {
+        Self {
+            buf: Vec::new(),
+            cap: MAX_MESSAGE,
+            overflow: false,
+            depth: 0,
+            body_at: None,
+        }
+    }
+}
+
 impl Writer {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A writer capped at `cap` bytes instead of [`MAX_MESSAGE`]: the
+    /// tests' way to make a valid message this client would skip.
+    #[cfg(test)]
+    pub fn with_cap(cap: usize) -> Self {
+        Self {
+            cap,
+            ..Self::default()
+        }
     }
 
     /// Whether anything overflowed so far.
@@ -1142,7 +1255,7 @@ impl Writer {
         if self.overflow {
             return;
         }
-        if self.buf.len().saturating_add(n) > MAX_MESSAGE {
+        if self.buf.len().saturating_add(n) > self.cap {
             self.overflow = true;
             return;
         }
@@ -1259,7 +1372,7 @@ impl Writer {
     /// [`Writer::close_array`] takes. The length counts the elements
     /// only — never the padding between the length word and the first
     /// element, which is on the wire but not in the length.
-    pub fn open_array(&mut self, element_align: usize) -> Option<usize> {
+    pub fn open_array(&mut self, element_align: usize) -> Option<ArrayCookie> {
         if self.depth >= MAX_DEPTH {
             self.overflow = true;
             return None;
@@ -1281,20 +1394,20 @@ impl Writer {
             return None;
         }
         self.depth += 1;
-        // Both offsets in one cookie: the length word's, and the
-        // elements' (lengths stay below 2^32 by the message cap).
-        Some((((len_at as u64) << 32) | (self.buf.len() as u64)) as usize)
+        Some(ArrayCookie {
+            len_at,
+            data_at: self.buf.len(),
+        })
     }
 
     /// Closes the array `open_array` opened: the length word takes the
     /// elements' bytes since.
-    pub fn close_array(&mut self, cookie: usize) {
+    pub fn close_array(&mut self, cookie: ArrayCookie) {
         self.depth = self.depth.saturating_sub(1);
         if self.overflow {
             return;
         }
-        let len_at = cookie >> 32;
-        let data_at = cookie & 0xffff_ffff;
+        let ArrayCookie { len_at, data_at } = cookie;
         let len = self.buf.len().saturating_sub(data_at) as u32;
         if let Some(slot) = self.buf.get_mut(len_at..len_at + 4) {
             slot.copy_from_slice(&len.to_le_bytes());
@@ -1417,6 +1530,32 @@ impl Writer {
             &[
                 Field::Error(error),
                 Field::ReplySerial(reply_to),
+                Field::Signature(body_sig),
+            ],
+        );
+    }
+
+    /// Starts a signal addressed to `dest`: what a peer sends to forge
+    /// one at a single listener (tests).
+    #[cfg(test)]
+    pub fn begin_signal_to(
+        &mut self,
+        serial: u32,
+        dest: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        body_sig: &str,
+    ) {
+        self.begin(
+            4,
+            serial,
+            0,
+            &[
+                Field::Path(path),
+                Field::Interface(interface),
+                Field::Member(member),
+                Field::Destination(dest),
                 Field::Signature(body_sig),
             ],
         );

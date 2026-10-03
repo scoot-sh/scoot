@@ -785,8 +785,17 @@ socket is one more source in the `poll` loop), which is the
   bus socket's directory (one inotify watch, no polling), and a bus that
   dies mid-run drops every icon at once and dials once more. A bus that
   takes the bar in and drops it within five seconds, three times running,
-  is not dialled again until its socket is made anew (a refusing bus must
-  not spin the bar).
+  is not dialled again at once (a refusing bus must not spin the bar): it
+  is tried once more after 30 seconds, and again each time that try dies
+  the same way, or as soon as its socket is made anew. Only the bus's own
+  `NameOwnerChanged` is believed (a peer's, addressed to the bar, removes
+  nothing), and when hosting only the watcher hosted against speaks for it.
+  The address is `DBUS_SESSION_BUS_ADDRESS`'s `unix:path=` (`%xx` escapes
+  decoded), else `$XDG_RUNTIME_DIR/bus` when it is not set; an address
+  with no path (`unix:abstract=`, `tcp:`, `autolaunch:`) is refused with a
+  line on stderr and no tray, not replaced by another bus that happens to
+  be at the default place. A bus that refuses the bar the watcher name (a
+  policy that denies `own`) is said once on stderr, and the bar hosts.
 - **What is drawn.** An item's `IconPixmap` (raw `ARGB32` over the bus),
   picked at the output's device size from the entries sent and scaled
   only when none matches, from the shared icon cache: a steady bar
@@ -800,10 +809,13 @@ socket is one more source in the `poll` loop), which is the
   click `secondary` (the spec's `SecondaryActivate`), a scroll `wheel-up`
   or `wheel-down`, each on the item under the pointer. A right click does
   nothing by default; the item's menu (`ContextMenu`, the DBusMenu
-  protocol) waits on the tray's DBusMenu client (the [popups](#popups) it will draw in exist). The module's
-  actions all take the item's index (`scootbar msg invoke tray activate
+  protocol) is not built: [popups](#popups) exist to draw one in, but the
+  DBusMenu client that reads a layout (`GetLayout`, `Event`,
+  `AboutToShow`, the update signals) and maps it onto popup content does
+  not. The module's actions all take the item's index (`scootbar msg invoke tray activate
   0`), in the order `query` lists them: `activate`, `secondary`,
-  `wheel-up`, `wheel-down`, and `menu`, which is refused (its message names the popups entry).
+  `wheel-up`, `wheel-down`, and `menu`, which is refused saying menus are
+  not built.
   (The wheel actions are not called `scroll-up` and `scroll-down`: those
   are the names of the interaction keys, and `msg invoke` reads them as
   those.) `Activate` and `SecondaryActivate` are sent with position `(0,
@@ -822,15 +834,23 @@ socket is one more source in the `poll` loop), which is the
   options of its own. A binding replaces the default for its trigger, as
   on every module.
 - **Bounds, for a hostile or broken item.** Everything an item says is
-  untrusted bytes from a same-user peer: messages past 1 MiB, nesting past
-  32 and pixmaps past 256 pixels a side are refused (the answer is
-  dropped, the item keeps its last state); titles are cut to 128 bytes
-  with controls stripped; at most 32 items, 8 from one service, 8 pixmap
+  untrusted bytes from a same-user peer: a message past 1 MiB (the spec
+  allows 128 MiB, and SNI cannot ask an item for a size, so a 512 by 512
+  pixmap is just over) is skipped whole as it arrives: the answer is
+  dropped, the item keeps its last state and is read again at its next
+  signal, and the connection lives; a header that is no message, or past
+  128 MiB, ends the connection. Nesting past 32 and pixmaps past 256
+  pixels a side are refused the same way (the entry, or the answer, is
+  dropped). A flood of signals (the match rule has no sender, so any peer
+  may send what the bar listens for) is read up to 1 MiB staged and the
+  rest left in the socket, 256 events a wake with the bar's other sources
+  between, and costs the connection nothing. Titles are cut to 128 bytes
+  with controls stripped; at most 32 items, 8 from one service or one registrant, 8 pixmap
   entries each; one `GetAll` in flight per item however many signals it
   sends; a call nobody answers is forgotten after 30 seconds when its slot
   is wanted (no bus times a call out by default, measured on a stock
-  `dbus-daemon` and on `dbus-broker`; only a client library does). A refused frame, or a
-  bus that stops reading, drops the connection and not the bar. The bus
+  `dbus-daemon` and on `dbus-broker`; only a client library does). A bus that stops reading drops the connection, and
+  not the bar. The bus
   set-up (auth and `Hello`) is blocking, bounded to 2 seconds in total.
   The parser is fuzzed (`crates/scootbar/fuzz`, target `dbus`).
 - **Cost.** One fd (the bus socket, with `OUT` only while a write waits),

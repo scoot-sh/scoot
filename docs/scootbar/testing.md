@@ -26,7 +26,7 @@ devenv shell -- cargo fmt --check -p scootbar
 | `SCOOTBAR_REQUIRE_SCOOT` | no `scoot` is a failure, not a skip, and so is no `foot` on `PATH` for the window-placement check (CI sets it) |
 | `SCOOTBAR_TEST_SWAY` | the `sway` binary to run; default, `sway` on `PATH` |
 | `SCOOTBAR_REQUIRE_SWAY` | no `sway` is a failure, not a skip (CI sets it) |
-| `SCOOTBAR_REQUIRE_DBUS_DAEMON` | no `dbus-daemon` on `PATH` is a failure, not a skip, for the tests that start a private one (`src/dbus/daemon_tests.rs`, `src/modules/tray/daemon_tests.rs`; built with the `tray` feature; CI sets it, with `dbus-daemon` from the pinned nixpkgs for the step) |
+| `SCOOTBAR_REQUIRE_DBUS_DAEMON` | no `dbus-daemon` on `PATH` is a failure, not a skip, for the tests that start a private one (`src/dbus/daemon_tests.rs`, `src/modules/tray/daemon_tests.rs`; built with the `tray` feature; CI sets it, with `dbus-daemon` from the pinned nixpkgs, `nixpkgs#dbus^out`, put on `PATH` for the unit-test step only; the bare attribute prints two paths) |
 | `SCOOTBAR_DEBUG_NO_VIEWPORTER` | read by a **debug** `scootbar` only (compiled out of release builds): leaves `wp_viewporter` unbound, as on a compositor without it, so the integer-scale fallback is tested on compositors that have one |
 | `SCOOTBAR_BLESS` | rewrites the [snapshots](#snapshots) the tests compare instead of comparing them |
 

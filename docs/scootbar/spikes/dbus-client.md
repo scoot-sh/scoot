@@ -192,9 +192,16 @@ for exactly the type set the tray needs (`a(iiay)`, `a{sv}`, `(sa(iiay)ss)`,
   client with none, as this one, must forget its own calls, so the pending
   table expires them by age when its slots are wanted (no timer: an idle
   bar stays at zero wakeups).
-- **The 1 MiB message bound held** (pixmaps at device pixels are tens of
-  KiB; the tray refuses a side past 256 pixels). Menu layouts, the
-  unbounded one, wait on popups.
+- **The 1 MiB bound held, but not as a refusal.** The record's premise
+  (pixmaps at requested device pixels are tens of KiB) was wrong: SNI has
+  no way to request a size, so an item may send a 512 by 512 pixmap, which
+  is a valid message just over 1 MiB, and the first build killed the
+  connection on it (and the tray stayed off for the session). A message
+  past the cap, up to the spec's 128 MiB, is now skipped whole as it
+  arrives, a reply says which call lost its answer, and only a header that
+  is no message ends the connection; a flood is read only up to a
+  watermark. Menu layouts, the other unbounded one, wait on the tray's own
+  DBusMenu client (popups exist).
 - **The set-up is the one blocking part** (auth and `Hello`, three round
   trips): bounded to 2 s *in total*, not per read.
 - Costs, recorded where the ratchet keeps them, not repeated here.
