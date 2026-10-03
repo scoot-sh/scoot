@@ -202,6 +202,8 @@ impl Wayland {
         } else {
             None
         };
+        #[cfg(feature = "popup")]
+        let content_delay = content.tooltip_delay;
         let mut state = State {
             globals: Globals {
                 compositor,
@@ -227,7 +229,7 @@ impl Wayland {
             #[cfg(feature = "popup")]
             seat_keyboard: false,
             #[cfg(feature = "popup")]
-            popup: super::popup::Popups::default(),
+            popup: super::popup::Popups::new(content_delay),
             input: crate::pointer::Pointer::default(),
             spawner: crate::spawn::Spawner::default(),
             warned: super::input::Throttle::default(),

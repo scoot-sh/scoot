@@ -5,7 +5,9 @@
 //! **A pointer only when something needs one.** The bar binds the seat
 //! when the compositor has one, but asks it for a `wl_pointer` only while
 //! a placed module answers pointer input (a binding in the config, or a
-//! default of the module's own: the workspaces module's click). A clock-only
+//! default of the module's own: the workspaces module's click), or, with
+//! tooltips on, a module that can show one (`Module::tooltips`: the battery,
+//! the network, the window title, a `push` or `exec` one). A clock-only
 //! bar with no bindings never takes the pointer, so it costs what it did
 //! before there was any input, and a reload that adds or removes bindings
 //! takes or drops it then ([`State::sync_pointer`]). The bar never takes
@@ -15,7 +17,8 @@
 //! **Events cost almost nothing.** A motion stores two numbers; hover is
 //! worked out once per turn of the loop, when the output's scene is asked
 //! what to draw (`daemon::draw`), so a thousand motions a second are a
-//! thousand stores and one hit test. A press or release resolves the module
+//! thousand stores and one hit test (and, with a pointer on the bar, one more
+//! for the tooltip's hover: `daemon::popup::tooltip`). A press or release resolves the module
 //! under the pointer with the layout the last draw committed (the pixels
 //! the user saw), so a click during a redraw lands on what was on screen.
 //! Nothing here allocates.
@@ -91,7 +94,7 @@ pub(super) fn pointer_x(
 
 impl State {
     /// The module under the pointer, on the layout the last draw committed.
-    fn target(&self) -> Option<Target> {
+    pub(super) fn target(&self) -> Option<Target> {
         let focus = self.input.focus()?;
         let entry = self
             .outputs
@@ -107,7 +110,24 @@ impl State {
 
     /// Whether any placed module answers pointer input.
     pub fn needs_pointer(&self) -> bool {
-        self.content.modules.iter().any(Placed::interactive)
+        self.content.modules.iter().any(Placed::interactive) || self.wants_tooltips()
+    }
+
+    /// Whether tooltips are on and a placed module can have one: the bar
+    /// then takes a pointer (and `xdg_wm_base`) to show it. A bar of modules
+    /// that never have one (a clock) takes neither.
+    pub fn wants_tooltips(&self) -> bool {
+        #[cfg(feature = "popup")]
+        {
+            self.popup.tooltips_on()
+                && self
+                    .content
+                    .modules
+                    .iter()
+                    .any(|placed| placed.module.tooltips())
+        }
+        #[cfg(not(feature = "popup"))]
+        false
     }
 
     /// Takes a `wl_pointer` when a module needs one and the seat has one;
@@ -141,6 +161,8 @@ impl State {
         let Some((trigger, steps)) = self.input.take_scroll(now) else {
             return;
         };
+        #[cfg(feature = "popup")]
+        self.dismiss_tooltip();
         // What is under the pointer now; nothing there drops the steps.
         if let Some(target) = self.target() {
             self.fire(trigger, target, Some(steps), now);
@@ -154,6 +176,20 @@ impl State {
         }
         let now = *now.get_or_insert_with(Instant::now);
         self.input.scroll_wait(now)
+    }
+
+    /// How long the loop may sleep for a tooltip that is due (none, and no
+    /// timeout at all, unless the pointer rests on a module that has one).
+    pub fn tooltip_wait(&self, now: &mut Option<Instant>) -> Option<Duration> {
+        #[cfg(feature = "popup")]
+        {
+            self.tooltip_timeout(now)
+        }
+        #[cfg(not(feature = "popup"))]
+        {
+            let _ = now;
+            None
+        }
     }
 
     /// Runs the action `trigger` means on `target`'s module: the config's
@@ -174,6 +210,7 @@ impl State {
             modules,
             text,
             style,
+            ..
         } = &mut self.content;
         let (Some(text), Some(placed), Some(focus)) =
             (text.as_ref(), modules.get_mut(module), self.input.focus())
@@ -258,6 +295,10 @@ impl State {
     fn button(&mut self, code: u32, pressed: bool, serial: u32, qh: &QueueHandle<Self>) {
         let target = self.target();
         if pressed {
+            // A tooltip is not a popup: a press closes it and goes on to
+            // act (the click is not spent on dismissing it).
+            #[cfg(feature = "popup")]
+            self.dismiss_tooltip();
             let armed = self.input.press(code, target);
             #[cfg(feature = "popup")]
             self.press_for_popups(armed, target, serial, qh);

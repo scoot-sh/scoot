@@ -213,6 +213,15 @@ pub trait Module {
         None
     }
 
+    /// Whether the module may show a tooltip (a `tooltip` in its view), so
+    /// that a bar of modules that never do takes no pointer for it. Static:
+    /// whether it has one *now* is the view's. `false` (the default) is a
+    /// module that writes none.
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        false
+    }
+
     /// Whether the bar draws the module in the `accent` token while the
     /// pointer is over it and it has a binding. A module that draws itself
     /// (workspaces) says no.
@@ -778,9 +787,12 @@ impl View {
         &mut self.text
     }
 
-    /// The tooltip (none while empty), cut at [`MAX_TEXT`] bytes. Drawn
-    /// once `docs/scootbar/backlog/tooltips.md` lands. (The rest of this
-    /// block is the contract the clock does not use: icon, class, tooltip.)
+    /// The tooltip (none while empty), cut at [`MAX_TEXT`] bytes. Shown
+    /// after a hover delay, in a popup under the module (`daemon::popup`,
+    /// and only in a build with the `popup` feature).
+    ///
+    /// (Allowed to be unused: a build with only the clock, or only
+    /// workspaces, has no module that writes one.)
     #[allow(dead_code)]
     pub fn tooltip_mut(&mut self) -> &mut impl Write {
         &mut self.tooltip
@@ -823,7 +835,7 @@ impl View {
         &self.text.0
     }
 
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "popup"), allow(dead_code))]
     pub fn tooltip(&self) -> &str {
         &self.tooltip.0
     }

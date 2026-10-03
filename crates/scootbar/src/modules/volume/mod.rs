@@ -1030,6 +1030,12 @@ impl Volume {
 }
 
 impl Module for Volume {
+    /// Its view carries a tooltip.
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        true
+    }
+
     /// The one fd owned: the socket while connected, the directory watch
     /// while waiting. Zero sources is never: one of the two always is.
     fn sources<'fd>(&'fd self, sources: &mut Sources<'_, 'fd>) {

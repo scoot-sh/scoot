@@ -944,6 +944,12 @@ impl Module for WindowTitle {
         Some(self.max_width)
     }
 
+    /// Its view carries a tooltip.
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        true
+    }
+
     /// A click activates with no binding at all.
     fn handles_input(&self) -> bool {
         true

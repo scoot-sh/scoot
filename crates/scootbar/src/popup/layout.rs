@@ -14,6 +14,12 @@ const MIN_WIDTH_EM: f32 = 13.0;
 /// bar.
 const MAX_LABEL_EM: f32 = 40.0;
 
+/// A tooltip's row height, in ems: tighter than a popup's, which holds a
+/// target to hit.
+const TIP_ROW_EM: f32 = 1.4;
+/// The widest a tooltip's text is wrapped to, in ems.
+pub const TIP_MAX_EM: f32 = 30.0;
+
 /// One row: `y0 .. y1` in device pixels, full width inside the frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Row {
@@ -64,6 +70,41 @@ impl Layout {
         }
         self.height = y.saturating_add(edge);
         self.width = widest.saturating_add(frame.saturating_mul(2));
+    }
+
+    /// Lays a tooltip's lines out: as wide as the widest line (wrapped at
+    /// [`TIP_MAX_EM`] by the caller) and padded, rows tighter than a
+    /// popup's, no minimum width.
+    pub fn compute_tooltip(
+        &mut self,
+        content: &Content,
+        text: &Text,
+        em: f32,
+        pad: u32,
+        frame: u32,
+    ) {
+        let em = if em.is_finite() && em > 0.0 { em } else { 1.0 };
+        let row = (em * TIP_ROW_EM).ceil().max(1.0) as u32;
+        let widest = content
+            .widgets()
+            .iter()
+            .map(|widget| text.measure(None, content.label(widget), em))
+            .max()
+            .unwrap_or(0);
+        self.frame = frame;
+        self.pad = pad;
+        self.rows.clear();
+        let edge = frame.saturating_add(pad / 2);
+        let mut y = edge;
+        for _ in content.widgets() {
+            let y1 = y.saturating_add(row);
+            self.rows.push(Row { y0: y, y1 });
+            y = y1;
+        }
+        self.height = y.saturating_add(edge);
+        self.width = widest
+            .saturating_add(pad.saturating_mul(2))
+            .saturating_add(frame.saturating_mul(2));
     }
 
     pub fn rows(&self) -> &[Row] {

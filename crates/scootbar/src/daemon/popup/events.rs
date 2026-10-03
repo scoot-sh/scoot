@@ -43,10 +43,12 @@ pub(super) fn device(coordinate: f64, scale: Scale) -> i64 {
 }
 
 impl State {
-    /// Closes the popup if it is `id`'s.
+    /// Closes the popup or the tooltip if it is `id`'s.
     fn close_popup_if(&mut self, id: PopupId) {
         if self.popup.open.as_ref().is_some_and(|open| open.id == id) {
             self.popup.close();
+        } else if self.popup.tip.as_ref().is_some_and(|tip| tip.id == id) {
+            self.popup.close_tip();
         }
     }
 
@@ -55,6 +57,21 @@ impl State {
     /// makes it the focus; `leave` ends that; motion, buttons and scroll
     /// while it is the focus are its own.
     pub fn popup_pointer(&mut self, event: &wl_pointer::Event) -> bool {
+        // A tooltip has an empty input region, so the pointer should never
+        // enter it; a compositor that lets it anyway has the tooltip closed
+        // (and held off until the pointer leaves its module), not made the
+        // pointer's focus, which would end the hover that shows it.
+        if let wl_pointer::Event::Enter { surface, .. } = event {
+            if self
+                .popup
+                .tip
+                .as_ref()
+                .is_some_and(|tip| tip.surface == *surface)
+            {
+                self.popup.close_tip();
+                return true;
+            }
+        }
         let Some(open) = self.popup.open.as_mut() else {
             return false;
         };
@@ -173,7 +190,7 @@ impl Dispatch<XdgSurface, PopupId> for State {
         let xdg_surface::Event::Configure { serial } = event else {
             return;
         };
-        let Some(open) = state.popup.open.as_mut().filter(|open| open.id == *id) else {
+        let Some(open) = state.popup.find_mut(*id) else {
             return;
         };
         if &open.xdg != xdg {
@@ -215,7 +232,7 @@ impl Dispatch<XdgPopup, PopupId> for State {
     ) {
         match event {
             xdg_popup::Event::Configure { width, height, .. } => {
-                if let Some(open) = state.popup.open.as_mut().filter(|open| open.id == *id) {
+                if let Some(open) = state.popup.find_mut(*id) {
                     if &open.popup == popup {
                         open.configured = Some(Size {
                             width: u32::try_from(width).unwrap_or(0),
@@ -242,7 +259,7 @@ impl Dispatch<WlBuffer, PopupId> for State {
         _: &QueueHandle<Self>,
     ) {
         if let wl_buffer::Event::Release = event {
-            if let Some(open) = state.popup.open.as_mut().filter(|open| open.id == *id) {
+            if let Some(open) = state.popup.find_mut(*id) {
                 open.pool.released(buffer);
             }
         }

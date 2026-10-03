@@ -4,13 +4,13 @@
 //! published numbers:
 //!
 //! ```sh
-//! cargo nextest run -p scootbar --release --test popup_bench --run-ignored only --no-capture -E 'test(idle)'
+//! cargo test -p scootbar --release --test popup_bench -- --ignored --nocapture idle
 //! cargo test -p scootbar --release --test popup_bench -- --ignored --nocapture cycles
 //! ```
 //!
-//! `cycles` takes minutes with a debug compositor (every step is checked by
-//! screenshot), past nextest's 120 s default, so it runs under `cargo test`
-//! (or give nextest a longer `slow-timeout`).
+//! Both run under `cargo test`, not nextest: nextest ends a test at its 120 s
+//! terminate-after (`.config/nextest.toml`), and `cycles` takes minutes with a
+//! debug compositor (every step is checked by screenshot).
 //!
 //! `idle` is the row every milestone repeats: the volume module placed on a
 //! headless scoot against a live PulseAudio-protocol server, RSS, peak RSS,
@@ -72,11 +72,19 @@ fn rig(tag: &str) -> Option<(Session, Reaper, pulse::Server)> {
     } else {
         "on-click = \"popup\"\n"
     };
+    // Tooltips off, so one never stands where a closed popup is looked for
+    // (volume has a tooltip, and a pointer rests on it). `SCOOTBAR_BENCH_NO_TOOLTIP`
+    // leaves the key out, for a build that predates it.
+    let tooltips = if std::env::var_os("SCOOTBAR_BENCH_NO_TOOLTIP").is_some() {
+        ""
+    } else {
+        "tooltip-delay = 0\n"
+    };
     let file = session.runtime_dir().join("bar.toml");
     fs::write(
         &file,
         format!(
-            "[bar]\nheight = {HEIGHT}\nfont-size = 20\n[colors]\nbackground = \"{BAR}\"\n\
+            "[bar]\nheight = {HEIGHT}\nfont-size = 20\n{tooltips}[colors]\nbackground = \"{BAR}\"\n\
              [volume]\n{click}"
         ),
     )

@@ -34,6 +34,12 @@
 //!    idempotent and destroys the popup before the surface it hangs off,
 //!    so every site that destroys a bar surface calls it first.
 //!
+//! ## Tooltips
+//!
+//! A module's tooltip is the same `xdg_popup` with no grab, no keyboard and no
+//! input region, in a slot of its own, shown after the pointer rests on the
+//! module for `bar.tooltip-delay` (`tooltip`).
+//!
 //! ## The keyboard
 //!
 //! The bar's layer surface asks for no keyboard (`KeyboardInteractivity::
@@ -55,6 +61,7 @@ mod buffers;
 mod events;
 #[cfg(test)]
 mod tests;
+mod tooltip;
 
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Proxy, QueueHandle};
@@ -90,7 +97,13 @@ const MAX_SIDE: u32 = 8192;
 /// refilled into.
 #[derive(Debug, Default)]
 pub struct Popups {
+    /// The click popup (or an `invoke`'s): the one that may hold a grab.
     open: Option<Open>,
+    /// The tooltip, alive only while shown, never with a grab, a keyboard
+    /// or an input region. Never both it and `open` (`tooltip`).
+    tip: Option<Open>,
+    /// When the tooltip shows and goes (`crate::popup::Hover`).
+    hover: popup::Hover,
     next: u64,
     spare: Content,
 }
@@ -102,6 +115,9 @@ struct Open {
     output: OutputId,
     /// The module's index among the placed ones, and its registry id.
     module: usize,
+    /// The module's span on the bar, logical, as the positioner was told
+    /// (`start`, `end`): a tooltip follows the module when it moves.
+    anchor: (u32, u32),
     name: &'static str,
     surface: WlSurface,
     xdg: XdgSurface,
@@ -153,9 +169,61 @@ impl Open {
     }
 }
 
+/// What [`State::build_popup`] makes.
+#[derive(Debug, Clone, Copy)]
+enum Flavor {
+    /// The module's popup, with the grab `serial` asks for (none: no grab).
+    Popup { serial: Option<u32> },
+    /// The module's tooltip, drawn from its view: no grab, no keyboard, and
+    /// no input region, so the pointer and every click go to the bar below.
+    Tooltip,
+}
+
 impl Popups {
+    /// With `delay` before a tooltip shows (zero: no tooltips).
+    pub fn new(delay: std::time::Duration) -> Self {
+        Self {
+            hover: popup::Hover::new(delay),
+            ..Self::default()
+        }
+    }
+
+    /// Whether a popup or a tooltip is up: what keeps `xdg_wm_base` bound.
+    pub fn is_up(&self) -> bool {
+        self.open.is_some() || self.tip.is_some()
+    }
+
+    /// Whether tooltips are on (`bar.tooltip-delay` is not 0).
+    pub fn tooltips_on(&self) -> bool {
+        self.hover.enabled()
+    }
+
+    /// A reload: whatever was hovered is for modules that are gone, and the
+    /// delay may be new.
+    pub fn reset_hover(&mut self, delay: std::time::Duration) {
+        self.hover.reset(delay);
+    }
+
+    /// Whether a click popup is open. A tooltip is not one: it never blocks
+    /// a click, a second click on its module, or an `invoke`.
     pub fn is_open(&self) -> bool {
         self.open.is_some()
+    }
+
+    /// The open popup or tooltip that is `id`'s.
+    fn find_mut(&mut self, id: PopupId) -> Option<&mut Open> {
+        self.open
+            .as_mut()
+            .into_iter()
+            .chain(self.tip.as_mut())
+            .find(|open| open.id == id)
+    }
+
+    /// Closes the tooltip, if shown. Idempotent.
+    pub fn close_tip(&mut self) {
+        if let Some(tip) = self.tip.take() {
+            tip.destroy();
+        }
     }
 
     /// Whether the open popup belongs to this module on this output.
@@ -165,18 +233,22 @@ impl Popups {
             .is_some_and(|open| open.output == output && open.module == module)
     }
 
-    /// Closes it, if open. Idempotent.
+    /// Closes the popup and the tooltip, if open. Idempotent.
     pub fn close(&mut self) {
         if let Some(open) = self.open.take() {
             open.destroy();
         }
+        self.close_tip();
     }
 
-    /// Closes it if it hangs off `output`'s bar: called wherever that
-    /// surface is destroyed, before it is.
+    /// Closes what hangs off `output`'s bar: called wherever that surface is
+    /// destroyed, before it is.
     pub fn close_for(&mut self, output: OutputId) {
         if self.open.as_ref().is_some_and(|open| open.output == output) {
             self.close();
+        }
+        if self.tip.as_ref().is_some_and(|tip| tip.output == output) {
+            self.close_tip();
         }
     }
 
@@ -191,6 +263,18 @@ impl Popups {
     }
 }
 
+/// A module's span on the bar as the positioner is anchored to it: logical
+/// pixels in the layer surface's own coordinates, at least one wide, held to
+/// the bar.
+fn anchor_span(scale: Scale, span: crate::paint::Span, bar_width: u32) -> (u32, u32) {
+    let start = scale.logical_floor(span.x).min(bar_width);
+    let end = scale
+        .logical_ceil(span.end())
+        .min(bar_width)
+        .max(start.saturating_add(1));
+    (start, end)
+}
+
 /// A protocol `int` for a size or a coordinate: saturated.
 fn int(value: u32) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
@@ -198,10 +282,10 @@ fn int(value: u32) -> i32 {
 
 impl State {
     /// Opens the popup of the module shown at scene `member` of `output`'s
-    /// bar, closing any other. `serial` is the input event that asked
-    /// (grabbing the pointer and keyboard for the popup); `None` opens it
-    /// with no grab. `Err` says why not, for stderr or for the agent that
-    /// asked.
+    /// bar, closing any other (and the tooltip). `serial` is the input event
+    /// that asked (grabbing the pointer and keyboard for the popup); `None`
+    /// opens it with no grab. `Err` says why not, for stderr or for the
+    /// agent that asked.
     pub fn open_popup(
         &mut self,
         qh: &QueueHandle<State>,
@@ -210,6 +294,21 @@ impl State {
         serial: Option<u32>,
     ) -> Result<(), String> {
         self.popup.close();
+        let open = self.build_popup(qh, output, member, Flavor::Popup { serial })?;
+        self.popup.open = Some(open);
+        Ok(())
+    }
+
+    /// Makes the popup or tooltip of the module at scene `member` of
+    /// `output`'s bar, not yet stored: the protocol objects, the first
+    /// commit with no buffer.
+    fn build_popup(
+        &mut self,
+        qh: &QueueHandle<State>,
+        output: OutputId,
+        member: usize,
+        flavor: Flavor,
+    ) -> Result<Open, String> {
         let Some(wm) = self.bind_xdg(qh) else {
             return Err("the compositor has no xdg_wm_base, so no popups".to_owned());
         };
@@ -244,18 +343,34 @@ impl State {
         };
         let style = self.content.style;
         let mut content = Content::default();
-        if !placed.module.popup(&OutputView { name }, &mut content) || content.is_empty() {
-            return Err(format!("`{}` has no popup to show now", placed.id));
-        }
         let em = render::em(style.font_size, scale);
         let mut layout = Layout::default();
-        layout.compute(
-            &content,
-            text,
-            em,
-            render::device(style.padding, scale),
-            render::device(1, scale).max(1),
-        );
+        let pad = render::device(style.padding, scale);
+        let frame = render::device(1, scale).max(1);
+        match flavor {
+            Flavor::Popup { .. } => {
+                if !placed.module.popup(&OutputView { name }, &mut content) || content.is_empty() {
+                    return Err(format!("`{}` has no popup to show now", placed.id));
+                }
+                layout.compute(&content, text, em, pad, frame);
+            }
+            Flavor::Tooltip => {
+                let tip = entry
+                    .objects
+                    .scene
+                    .view(member)
+                    .map_or("", |view| view.tooltip());
+                // As wide as the em allows, and never past the bar.
+                let room = render::device(bar_size.width, scale)
+                    .saturating_sub(pad.saturating_add(frame).saturating_mul(2));
+                let wide = ((em * popup::TIP_MAX_EM) as u32).min(room).max(1);
+                content.wrap_tooltip(tip, wide, |line| text.measure(None, line, em));
+                if content.is_empty() {
+                    return Err(format!("`{}` has no tooltip to show now", placed.id));
+                }
+                layout.compute_tooltip(&content, text, em, pad, frame);
+            }
+        }
         let requested = Size {
             width: scale.logical_ceil(layout.width).clamp(1, MAX_SIDE),
             height: scale.logical_ceil(layout.height).clamp(1, MAX_SIDE),
@@ -279,11 +394,7 @@ impl State {
             .map(|viewporter| viewporter.get_viewport(&surface, qh, ()));
         // Anchored to the module's rect on the bar (logical, in the layer
         // surface's own coordinates), opening away from the bar's edge.
-        let start = scale.logical_floor(span.x).min(bar_size.width);
-        let end = scale
-            .logical_ceil(span.end())
-            .min(bar_size.width)
-            .max(start.saturating_add(1));
+        let (start, end) = anchor_span(scale, span, bar_size.width);
         let positioner = wm.create_positioner(qh, ());
         positioner.set_size(int(requested.width), int(requested.height));
         positioner.set_anchor_rect(int(start), 0, int(end - start), int(bar_size.height.max(1)));
@@ -299,19 +410,35 @@ impl State {
         let popup = xdg.get_popup(None, &positioner, qh, id);
         layer.adopt(&popup);
         let mut keyboard = None;
-        if let (Some(serial), Some(seat)) = (serial, self.globals.seat.as_ref()) {
-            popup.grab(seat, serial);
-            if self.seat_keyboard {
-                keyboard = Some(seat.get_keyboard(qh, id));
+        match flavor {
+            Flavor::Popup {
+                serial: Some(serial),
+            } => {
+                if let Some(seat) = self.globals.seat.as_ref() {
+                    popup.grab(seat, serial);
+                    if self.seat_keyboard {
+                        keyboard = Some(seat.get_keyboard(qh, id));
+                    }
+                }
+            }
+            Flavor::Popup { serial: None } => {}
+            Flavor::Tooltip => {
+                // An empty input region: the pointer never enters it and a
+                // click under it lands on the bar. (The region is copied by
+                // the request, so it is destroyed at once.)
+                let region = self.globals.compositor.create_region(qh, ());
+                surface.set_input_region(Some(&region));
+                region.destroy();
             }
         }
         positioner.destroy();
         // No buffer yet: the compositor answers with the configure.
         surface.commit();
-        self.popup.open = Some(Open {
+        Ok(Open {
             id,
             output,
             module,
+            anchor: (start, end),
             name: placed.id,
             surface,
             xdg,
@@ -334,8 +461,7 @@ impl State {
             pool: Pool::default(),
             sent_destination: None,
             sent_scale: 1,
-        });
-        Ok(())
+        })
     }
 
     /// Carries out what a popup interaction asks of its module, through the
@@ -441,65 +567,75 @@ impl State {
                 open.dirty = true;
             }
         }
-        if !open.dirty || !open.mapped {
-            return;
-        }
-        let slot = match open.pool.take(&self.globals, qh, open.id, open.dims) {
-            // Every buffer is held: the release wakes the loop.
-            Ok(None) => return,
-            Ok(Some(slot)) => slot,
-            Err(error) => {
-                warn(format_args!(
-                    "scootbar: cannot draw the {} popup: {error}",
-                    open.name
-                ));
-                self.popup.close();
-                return;
-            }
-        };
-        let Some(mut canvas) =
-            crate::paint::Canvas::new(slot.pixels_mut(), open.dims.0, open.dims.1)
-        else {
+        if !draw_open(open, &self.globals, qh, text, &self.content.style.theme) {
             self.popup.close();
-            return;
-        };
-        popup::paint(
-            &mut canvas,
-            text,
-            &self.content.style.theme,
-            &open.content,
-            &open.layout,
-            &open.interaction,
-            open.em,
-        );
-        let surface = &open.surface;
-        surface.attach(Some(&slot.buffer), 0, 0);
-        match &open.viewport {
-            Some(viewport) => {
-                let size = Size {
-                    width: open.configured.unwrap_or(open.requested).width,
-                    height: open.configured.unwrap_or(open.requested).height,
-                };
-                if open.sent_destination != Some(size) {
-                    viewport.set_destination(int(size.width), int(size.height));
-                    open.sent_destination = Some(size);
-                }
-                if open.sent_scale != 1 {
-                    surface.set_buffer_scale(1);
-                    open.sent_scale = 1;
-                }
+        }
+    }
+}
+
+/// Draws `open` into a free buffer and commits it, if a redraw is owed and
+/// it is mapped. `false` when it cannot be drawn at all (no buffer to be had,
+/// a canvas that cannot be made): the caller closes it.
+fn draw_open(
+    open: &mut Open,
+    globals: &super::wayland::Globals,
+    qh: &QueueHandle<State>,
+    text: &mut crate::text::Text,
+    theme: &crate::theme::Theme,
+) -> bool {
+    if !open.dirty || !open.mapped {
+        return true;
+    }
+    let slot = match open.pool.take(globals, qh, open.id, open.dims) {
+        // Every buffer is held: the release wakes the loop.
+        Ok(None) => return true,
+        Ok(Some(slot)) => slot,
+        Err(error) => {
+            warn(format_args!(
+                "scootbar: cannot draw the {} popup: {error}",
+                open.name
+            ));
+            return false;
+        }
+    };
+    let Some(mut canvas) = crate::paint::Canvas::new(slot.pixels_mut(), open.dims.0, open.dims.1)
+    else {
+        return false;
+    };
+    popup::paint(
+        &mut canvas,
+        text,
+        theme,
+        &open.content,
+        &open.layout,
+        &open.interaction,
+        open.em,
+    );
+    let surface = &open.surface;
+    surface.attach(Some(&slot.buffer), 0, 0);
+    match &open.viewport {
+        Some(viewport) => {
+            let size = open.configured.unwrap_or(open.requested);
+            if open.sent_destination != Some(size) {
+                viewport.set_destination(int(size.width), int(size.height));
+                open.sent_destination = Some(size);
             }
-            None => {
-                let factor = scale.integer();
-                if open.sent_scale != factor {
-                    surface.set_buffer_scale(int(factor));
-                    open.sent_scale = factor;
-                }
+            if open.sent_scale != 1 {
+                surface.set_buffer_scale(1);
+                open.sent_scale = 1;
             }
         }
-        surface.damage_buffer(0, 0, int(open.dims.0), int(open.dims.1));
-        surface.commit();
-        slot.held = true;
-        open.dirty = false;
+        None => {
+            let factor = open.scale.integer();
+            if open.sent_scale != factor {
+                surface.set_buffer_scale(int(factor));
+                open.sent_scale = factor;
+            }
+        }
     }
+    surface.damage_buffer(0, 0, int(open.dims.0), int(open.dims.1));
+    surface.commit();
+    slot.held = true;
+    open.dirty = false;
+    true
 }

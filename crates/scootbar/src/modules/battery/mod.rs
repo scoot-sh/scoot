@@ -657,6 +657,12 @@ impl Module for Battery {
         }
     }
 
+    /// Its view carries a tooltip.
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        true
+    }
+
     /// `72%`, in the level's class; nothing where there is no battery, so
     /// the module hides.
     fn view(&self, _output: &OutputView<'_>, view: &mut View) {

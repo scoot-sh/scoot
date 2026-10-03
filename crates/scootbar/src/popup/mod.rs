@@ -49,15 +49,20 @@
 use std::fmt::{self, Write};
 use std::ops::Range;
 
+mod hover;
 mod interact;
 mod layout;
 mod paint;
+mod wrap;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tip_tests;
 
+pub use hover::{Hover, Key, Step};
 pub use interact::Interaction;
-pub use layout::Layout;
+pub use layout::{Layout, TIP_MAX_EM};
 pub use paint::paint;
 
 /// The most widgets a popup holds: past it a module's extras are dropped,

@@ -480,6 +480,12 @@ fn write_raw(root: &Path, device: &str, raw: u32) -> io::Result<()> {
 }
 
 impl Module for Brightness {
+    /// Its view carries a tooltip.
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        true
+    }
+
     /// The one fd owned: the uevent tap. No timer, ever.
     fn sources<'fd>(&'fd self, sources: &mut Sources<'_, 'fd>) {
         sources.add(self.uevent.as_fd(), PollFlags::IN);
