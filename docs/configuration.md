@@ -467,6 +467,10 @@ behind everything. That's why there's no titlebar-color/font option below:
 this table controls the ring, the background, and the built-in pointer
 cursor.
 
+(Under home-manager with Stylix, `programs.scoot.stylix.enable` defaults
+the ring and background colors, the cursor theme and size from the scheme —
+see [`docs/nix.md`](nix.md#stylix). A value written here always wins.)
+
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `focus_ring_width` | integer (pixels) | `3` | Ring thickness. The ring is drawn around what the window actually draws: normally its whole slot in the layout, but a window that draws less than its slot (a fixed-size dialog, a video player keeping its own size) is ringed where its content ends, not around the empty part of the slot. Clamped at load time to at most half of `gap`, so it can never visually reach a neighboring window. Re-applied live by `scootctl reload` (re-clamped against the reloaded gap). |
@@ -928,6 +932,13 @@ color = "#101014"
 
 A worked example with a wallpaper, ring colors, a bar and a terminal palette is in
 [examples/radial-burst](examples/radial-burst/README.md).
+
+(Under home-manager with Stylix, `programs.scoot.stylix.enable` defaults
+`image` and `mode` from `stylix.image` and `stylix.imageScalingMode` — see
+[`docs/nix.md`](nix.md#stylix). A value written here always wins, except a
+`color` written next to Stylix's `image`: `image` or `color`, never both,
+so that combination is refused — set your own `image`, or turn the Stylix
+defaults off, for a solid color.)
 
 An empty `[wallpaper]` table is a section too: it says "no wallpaper from
 the config" and clears whatever the config set before. For no wallpaper

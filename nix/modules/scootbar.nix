@@ -91,10 +91,15 @@ let
   # Integer division rounds to the nearest pixel; the bar takes 1 to 256.
   pixels = pt: lib.min 256 (lib.max 1 ((pt * 4 + 1) / 3));
 
-  # base16: 00 background, 05 foreground, 0A yellow (the default accent
-  # and, like the bar's own default, the default hover tint,
-  # Catppuccin's `f9e2af` in the bar's own palette), 03 comments (dim),
-  # 08 red (urgent).
+  # base16: 00 background, 05 foreground, 0D blue (the accent and,
+  # like the compositor's focused ring, the hover tint -- the two match
+  # out of the box, as `programs.scoot.stylix.enable` sets that ring to
+  # base0D too), 03 comments (dim), 08 red (urgent). This used to be 0A
+  # yellow (the bar's own default accent, Catppuccin's `f9e2af` in the
+  # bar's own palette); it changed to blue in the scoot Stylix-target
+  # ticket so a themed desktop's highlights and window ring agree
+  # without hand-setting either. The bar's own (unthemed) default is
+  # still yellow -- only the Stylix default moved.
   palette = config.lib.stylix.colors.withHashtag;
 in
 {
@@ -250,8 +255,8 @@ in
         colors = {
           background = lib.mkDefault palette.base00;
           foreground = lib.mkDefault palette.base05;
-          accent = lib.mkDefault palette.base0A;
-          hover = lib.mkDefault palette.base0A;
+          accent = lib.mkDefault palette.base0D;
+          hover = lib.mkDefault palette.base0D;
           dim = lib.mkDefault palette.base03;
           urgent = lib.mkDefault palette.base08;
         };

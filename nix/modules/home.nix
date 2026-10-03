@@ -9,6 +9,18 @@ let
   cfg = config.programs.scoot;
   tomlFormat = pkgs.formats.toml { };
 
+  # Stylix is not an input of this flake: its presence is
+  # `config.lib.stylix` (defined by its palette module whether or not it is
+  # enabled), and `stylix.enable` (false by default in Stylix itself) says
+  # whether it is asked to theme anything. Same detection as
+  # `nix/modules/scootbar.nix`.
+  stylix = config.lib ? stylix && (config.stylix.enable or false);
+
+  # The base16 slots this module reads, as `#rrggbb`. Read here so the
+  # mapping below names slots, not literals; lazy, so untouched without
+  # Stylix (as is everything under the `mkIf` at the bottom).
+  palette = config.lib.stylix.colors.withHashtag;
+
   # Rendered from the user's free-form settings. A value with no TOML
   # representation at all (e.g. a function) fails the option type-check
   # at evaluation time ("not of type 'TOML value'"), so the error aborts
@@ -112,6 +124,26 @@ in
         Free-form scoot configuration, rendered verbatim to TOML.
         An empty set renders a valid minimal file (the compositor runs
         on built-in defaults, exactly as with no file at all).
+      '';
+    };
+
+    # Stylix, without depending on it. Same shape as
+    # `programs.scootbar.stylix.enable` in `nix/modules/scootbar.nix`:
+    # on by default, effective only when Stylix itself is in use (see
+    # the `stylix` detection above); every value below is `lib.mkDefault`
+    # at its own leaf, so a value the user wrote in `settings` wins.
+    # Nothing here needs Stylix, and nothing changes without it.
+    stylix.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Take defaults from Stylix when it is in use (`config.lib.stylix`
+        exists and `stylix.enable` is on): the `[appearance]` ring and
+        background colors from its base16 palette, `cursor_theme` and
+        `cursor_size` from `stylix.cursor`, and `[wallpaper]` `image` and
+        `mode` from `stylix.image` and `stylix.imageScalingMode`. A value
+        you set in `settings` always wins; this only turns the defaults
+        off. Nothing here needs Stylix, and nothing changes without it.
       '';
     };
 
@@ -221,30 +253,90 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    # No assertion that `package` is set: a files-only setup (binary
-    # from elsewhere, e.g. a system package) is legitimate, and with
-    # defaults this still manages a (minimal, valid) config plus the
-    # portals file -- both harmless. `package`'s description states
-    # that null installs no binary.
+  config = lib.mkMerge [
+    (lib.mkIf cfg.enable {
+      # No assertion that `package` is set: a files-only setup (binary
+      # from elsewhere, e.g. a system package) is legitimate, and with
+      # defaults this still manages a (minimal, valid) config plus the
+      # portals file -- both harmless. `package`'s description states
+      # that null installs no binary.
 
-    home.packages =
-      lib.optional (cfg.package != null) cfg.package
-      ++ lib.optional (cfg.wallpaper.enable && cfg.wallpaper.package != null) cfg.wallpaper.package;
+      home.packages =
+        lib.optional (cfg.package != null) cfg.package
+        ++ lib.optional (cfg.wallpaper.enable && cfg.wallpaper.package != null) cfg.wallpaper.package;
 
-    xdg.configFile.${cfg.configFile}.source = configFile;
+      xdg.configFile.${cfg.configFile}.source = configFile;
 
-    xdg.configFile.${scriptPath} = lib.mkIf (cfg.sessionScript != null) {
-      executable = true;
-      text = "#!/bin/sh\n" + cfg.sessionScript;
-    };
+      xdg.configFile.${scriptPath} = lib.mkIf (cfg.sessionScript != null) {
+        executable = true;
+        text = "#!/bin/sh\n" + cfg.sessionScript;
+      };
 
-    # Per-user slot from portals.conf(5), highest precedence; see
-    # resources/scoot-portals.conf for what each backend line means and
-    # why. This closes the remainder handed off by the session-environment
-    # ticket, which this module now owns.
-    xdg.configFile."xdg-desktop-portal/scoot-portals.conf" = lib.mkIf cfg.portals.enable {
-      source = ../../resources/scoot-portals.conf;
-    };
-  };
+      # Per-user slot from portals.conf(5), highest precedence; see
+      # resources/scoot-portals.conf for what each backend line means and
+      # why. This closes the remainder handed off by the session-environment
+      # ticket, which this module now owns.
+      xdg.configFile."xdg-desktop-portal/scoot-portals.conf" = lib.mkIf cfg.portals.enable {
+        source = ../../resources/scoot-portals.conf;
+      };
+    })
+
+    # Stylix defaults, each at its own leaf (`settings.appearance.X`, not
+    # `settings.appearance`), which is what lets the user's one value
+    # replace one default and keep the rest from Stylix: a priority
+    # applies to the whole value it wraps, so wrapping a table would make
+    # the user's one key discard it all. Same rule as `scootbar.nix`.
+    #
+    # The mapping is what Stylix's own compositor targets use for the
+    # same three things (checked against nix-community/stylix at fb28acd,
+    # the rev `nix/scootbar-tests.nix` names): sway's
+    # `modules/sway/hm.nix` (`focused = base0D`, every unfocused border
+    # `base03`, `background = base00`), hyprland's
+    # `modules/hyprland/hm.nix` (`col.active_border = base0D`,
+    # `col.inactive_border = base03`, `misc.background_color = base00`)
+    # and river's `modules/river/hm.nix` (`border-color-focused =
+    # base0D`, `border-color-unfocused = base03`, `background-color =
+    # base00`). There is no niri target at that rev (nor on current
+    # master) to check against. `cursor_color` has no Stylix convention
+    # (Stylix's cursor is name, size and package only), so it is left
+    # alone.
+    (lib.mkIf (cfg.enable && cfg.stylix.enable && stylix) {
+      programs.scoot.settings = {
+        appearance = {
+          focus_ring_active_color = lib.mkDefault palette.base0D;
+          focus_ring_inactive_color = lib.mkDefault palette.base03;
+          background_color = lib.mkDefault palette.base00;
+        }
+        // lib.optionalAttrs (config.stylix.cursor != null) {
+          # The theme's package needs no installing here: Stylix's own
+          # cursor target (`home.pointerCursor`, set by Stylix itself on
+          # the home-manager side) already installs it and puts its
+          # `share/icons` on the lookup path (`~/.icons`,
+          # `$XDG_DATA_HOME/icons`, `$XCURSOR_PATH`), which is where
+          # scoot's `xcursor::CursorTheme::load` searches. This only
+          # names the theme and the size.
+          cursor_theme = lib.mkDefault config.stylix.cursor.name;
+          cursor_size = lib.mkDefault config.stylix.cursor.size;
+        };
+      }
+      // lib.optionalAttrs (config.stylix.image != null) {
+        # Gated on `image`: a `mode` without one is meaningless, and an
+        # unconditional table would turn `wallpaper.enable` (which
+        # follows `settings ? wallpaper`) on for every Stylix user,
+        # installing scootbg where no wallpaper was asked for. The five
+        # `imageScalingMode` values are exactly scootbg's five `mode`
+        # values (`fill | fit | stretch | center | tile`), so the mode
+        # maps one to one. A `color` the user sets themselves does NOT
+        # suppress this: `image` and `color` together are refused by
+        # scoot (fail-safe, the session carries on with
+        # `background_color`, the error in the log naming it) -- set
+        # your own `image`, or turn `stylix.enable` off, for a solid
+        # color under Stylix.
+        wallpaper = {
+          image = lib.mkDefault (toString config.stylix.image);
+          mode = lib.mkDefault config.stylix.imageScalingMode;
+        };
+      };
+    })
+  ];
 }

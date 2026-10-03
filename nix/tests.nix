@@ -39,6 +39,19 @@
 #   demo is a separate derivation running the bare bar; and no input of
 #   `scootbar` names a font (its built closure is checked by
 #   .github/workflows/nix-build.yml).
+# - Stylix for the compositor (`programs.scoot.stylix.enable`, on by
+#   default): the `[appearance]` ring/background colors from base16
+#   (`base0D`/`base03`/`base00`, what Stylix's own sway, hyprland and
+#   river targets use), `cursor_theme`/`cursor_size` from
+#   `stylix.cursor`, `[wallpaper]` `image`/`mode` from `stylix.image` /
+#   `stylix.imageScalingMode` (same five modes as scootbg's); each at
+#   its own leaf so a user value wins per key; either switch off
+#   (`stylix.enable`, `programs.scoot.stylix.enable`) is as if Stylix
+#   were absent; with no `cursor` no cursor keys appear, with no `image`
+#   no `[wallpaper]` table is added (so no scootbg is installed for it);
+#   the cursor package is never installed (Stylix's own cursor target
+#   owns that); and the module evaluates with no Stylix option defined
+#   at all (every pre-existing evaluation below does exactly that).
 {
   lib,
   pkgs,
@@ -74,6 +87,14 @@ let
     options.warnings = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
+    };
+    # `config.lib` is an option in both real module systems. Declared so
+    # the Stylix detection (`config.lib ? stylix`, as in
+    # `nix/modules/scootbar.nix`) has something to ask: without Stylix
+    # it is empty and every Stylix default stays off.
+    options.lib = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
     };
   };
 
@@ -133,6 +154,73 @@ let
         ./modules/home.nix
         baseStubs
         homeStubs
+        ({ config, ... }: { programs.scoot = cfg; })
+      ];
+      specialArgs = { inherit pkgs; };
+    };
+
+  # The things the scoot module reads of Stylix, as Stylix defines them
+  # (checked by hand against nix-community/stylix at fb28acd, the rev
+  # `nix/scootbar-tests.nix` names: `stylix/palette.nix` for `image` and
+  # `imageScalingMode`, `stylix/cursor.nix` for `cursor`, the palette
+  # module for `lib.stylix.colors`). A rename there would pass this file
+  # and miss on a real Stylix; the color, cursor and image reads are the
+  # sites to look at. `image` is a store path, as Stylix's `pathInStore`
+  # coercion makes it.
+  styImage = builtins.toFile "stylix-wallpaper.png" "fake wallpaper";
+  fakeCursorPkg = pkgs.runCommand "fake-cursor-theme" { } ''
+    mkdir -p $out/share/icons/Vanilla-DMZ/cursors
+    : > $out/share/icons/Vanilla-DMZ/cursors/left_ptr
+  '';
+  stylixStub =
+    {
+      enable ? true,
+      cursor ? {
+        name = "Vanilla-DMZ";
+        package = fakeCursorPkg;
+        size = 24;
+      },
+      image ? styImage,
+      mode ? "fill",
+    }:
+    {
+      options.stylix.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+      };
+      options.stylix.cursor = lib.mkOption {
+        type = lib.types.nullOr lib.types.raw;
+        default = null;
+      };
+      options.stylix.image = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+      };
+      options.stylix.imageScalingMode = lib.mkOption {
+        type = lib.types.str;
+        default = "fill";
+      };
+      config = {
+        stylix.enable = enable;
+        stylix.cursor = cursor;
+        stylix.image = image;
+        stylix.imageScalingMode = mode;
+        lib.stylix.colors.withHashtag = {
+          base00 = "#101010";
+          base03 = "#303030";
+          base0D = "#0000ff";
+        };
+      };
+    };
+
+  evalHomeStylix =
+    stub: cfg:
+    lib.evalModules {
+      modules = [
+        ./modules/home.nix
+        baseStubs
+        homeStubs
+        (stylixStub stub)
         ({ config, ... }: { programs.scoot = cfg; })
       ];
       specialArgs = { inherit pkgs; };
@@ -241,6 +329,38 @@ let
     enable = true;
     wallpaper.package = fakeBg;
     settings.wallpaper = "blue";
+  };
+
+  # --- Stylix evaluations under test ---
+  # Themed: colors, cursor and wallpaper from the stub. `package` and
+  # `wallpaper.package` set so the install pins below mean something.
+  hmStylix = evalHomeStylix { } {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+  };
+  # A non-default scaling mode passes through verbatim.
+  hmStylixTile = evalHomeStylix { mode = "tile"; } {
+    enable = true;
+  };
+  # Stylix's own switch off: as if Stylix were absent.
+  hmStylixDisabled = evalHomeStylix { enable = false; } {
+    enable = true;
+  };
+  # The module's own switch off: as if Stylix were absent.
+  hmStylixOptOut = evalHomeStylix { } {
+    enable = true;
+    stylix.enable = false;
+  };
+  # No cursor set (Stylix without one): no cursor keys, colors stay.
+  hmStylixNoCursor = evalHomeStylix { cursor = null; } {
+    enable = true;
+  };
+  # No image set: no `[wallpaper]` table added (and so no scootbg), colors
+  # and cursor stay.
+  hmStylixNoImage = evalHomeStylix { image = null; } {
+    enable = true;
+    wallpaper.package = fakeBg;
   };
 
   # --- the flake's wrappers, overlay and Darwin (only from flake.nix) ---
@@ -681,6 +801,144 @@ let
       true
     )
 
+    # --- Stylix (`programs.scoot.stylix.enable`) ---
+    # On: the ring and background colors from base16, the cursor name
+    # and size from `stylix.cursor`, the wallpaper image and mode from
+    # `stylix.image` / `stylix.imageScalingMode`.
+    (
+      assert allAssertionsHold hmStylix.config;
+      true
+    )
+    (
+      assert
+        hmStylix.config.programs.scoot.settings == {
+          appearance = {
+            focus_ring_active_color = "#0000ff";
+            focus_ring_inactive_color = "#303030";
+            background_color = "#101010";
+            cursor_theme = "Vanilla-DMZ";
+            cursor_size = 24;
+          };
+          wallpaper = {
+            image = "${styImage}";
+            mode = "fill";
+          };
+        };
+      true
+    )
+    # A non-default scaling mode passes through verbatim.
+    (
+      assert hmStylixTile.config.programs.scoot.settings.wallpaper.mode == "tile";
+      true
+    )
+    # Either switch off is as if Stylix were absent: no key appears.
+    (
+      assert hmStylixDisabled.config.programs.scoot.settings == { };
+      true
+    )
+    (
+      assert hmStylixOptOut.config.programs.scoot.settings == { };
+      true
+    )
+    # Every Stylix leaf, one user override at a time: each yields to the
+    # user while the rest stay Stylix's (a leaf defined without mkDefault
+    # would conflict, and fail here).
+    (
+      assert lib.all
+        (
+          leaf:
+          let
+            s =
+              (evalHomeStylix { } {
+                enable = true;
+                settings.${leaf.table}.${leaf.token} = leaf.value;
+              }).config.programs.scoot.settings;
+            t = hmStylix.config.programs.scoot.settings;
+          in
+          s.${leaf.table}.${leaf.token} == leaf.value
+          &&
+            builtins.removeAttrs s.${leaf.table} [ leaf.token ]
+            == builtins.removeAttrs t.${leaf.table} [ leaf.token ]
+        )
+        [
+          {
+            table = "appearance";
+            token = "focus_ring_active_color";
+            value = "#abcdef";
+          }
+          {
+            table = "appearance";
+            token = "focus_ring_inactive_color";
+            value = "#bcdefa";
+          }
+          {
+            table = "appearance";
+            token = "background_color";
+            value = "#cdefab";
+          }
+          {
+            table = "appearance";
+            token = "cursor_theme";
+            value = "Adwaita";
+          }
+          {
+            table = "appearance";
+            token = "cursor_size";
+            value = 32;
+          }
+          {
+            table = "wallpaper";
+            token = "image";
+            value = "/user/wall.png";
+          }
+          {
+            table = "wallpaper";
+            token = "mode";
+            value = "center";
+          }
+        ];
+      true
+    )
+    # No cursor set: no cursor keys, the colors stay.
+    (
+      assert
+        hmStylixNoCursor.config.programs.scoot.settings.appearance == {
+          focus_ring_active_color = "#0000ff";
+          focus_ring_inactive_color = "#303030";
+          background_color = "#101010";
+        };
+      true
+    )
+    # No image set: no `[wallpaper]` table is added, so `wallpaper.enable`
+    # stays off and no scootbg is installed for it.
+    (
+      assert !(hmStylixNoImage.config.programs.scoot.settings ? wallpaper);
+      true
+    )
+    (
+      assert !hmStylixNoImage.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    (
+      assert hmStylixNoImage.config.home.packages == [ ];
+      true
+    )
+    # A Stylix image turns `wallpaper.enable` on (it follows
+    # `settings ? wallpaper`) and installs scootbg beside scoot -- but
+    # never the cursor package, which Stylix's own cursor target owns.
+    (
+      assert hmStylix.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    (
+      assert
+        sorted hmStylix.config.home.packages == sorted [
+          fakePkg
+          fakeBg
+        ];
+      true
+    )
+
     # The representable-but-wrong scoot type (a string for `gap`)
     # type-checks: the refusal happens at session start, fail-safe
     # (whole file discarded for defaults, session still boots) -- NOT
@@ -881,6 +1139,7 @@ let
   hmWallOffToml = hmWallOff.config.xdg.configFile."scoot/config.toml".source;
   hmNoWallToml = hmNoWall.config.xdg.configFile."scoot/config.toml".source;
   hmWallNotTableToml = hmWallNotTable.config.xdg.configFile."scoot/config.toml".source;
+  hmStylixToml = hmStylix.config.xdg.configFile."scoot/config.toml".source;
 in
 assert lib.all (x: x) _pins;
 assert lib.all (x: x) _flakePins;
@@ -986,6 +1245,30 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   assert tomllib.load(open(sys.argv[2],"rb")) == {"wallpaper": "blue"}
   ' ${hmNoWallToml} ${hmWallNotTableToml}
   echo "ok: no [wallpaper] table is added, and a non-table renders as written"
+
+  # 9. Stylix: the rendered file carries the themed appearance, cursor
+  #    and wallpaper (with the injected scootbg `command` beside the
+  #    Stylix image and mode), and nothing else.
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  want = {
+      "appearance": {
+          "focus_ring_active_color": "#0000ff",
+          "focus_ring_inactive_color": "#303030",
+          "background_color": "#101010",
+          "cursor_theme": "Vanilla-DMZ",
+          "cursor_size": 24,
+      },
+      "wallpaper": {
+          "command": sys.argv[2],
+          "image": sys.argv[3],
+          "mode": "fill",
+      },
+  }
+  assert got == want, f"{got} != {want}"
+  ' ${hmStylixToml} '${fakeBg}/bin/scootbg' '${styImage}'
+  echo "ok: Stylix defaults render (appearance, cursor, wallpaper + command)"
 
   touch $out
   echo "scoot-modules: all file-content checks passed"
