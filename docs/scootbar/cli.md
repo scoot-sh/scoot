@@ -952,10 +952,13 @@ Cargo feature (`media`), on by default; the smallest build
   same way (the [tray's](#tray) rules, in `src/dbus/link.rs`).
 - **Bounds, for a hostile or broken player.** Anything on the session bus
   can claim a player name and say anything. What the code guarantees: it
-  cannot crash or hang the bar or another player, grow the bar without bound,
-  or make it believe another player's state (only the bus's own
-  `NameOwnerChanged` is believed, and a `PropertiesChanged` only from the
-  connection that owns a held name); it costs the bar the work of its own
+  cannot crash or hang the bar or another player, or grow the bar without
+  bound; only the bus's own `NameOwnerChanged` is believed, and a
+  `PropertiesChanged` only from the connection that owns a held name. (One
+  inherited gap: the D-Bus client matches a method reply by serial alone, so
+  a forged `GetNameOwner` or `GetAll` reply could re-point or set a held
+  player's state if the bus delivers unsolicited replies; untested whether
+  `dbus-daemon` does, tracked in `tray-review-hardening.md`.) A hostile peer costs the bar the work of its own
   signals and no more (a flood of positions about 0.6% of a core at 500 a
   second, measured; title and state changes are drawn ten times a second at
   most); it holds at most one of 8 slots, one a connection. What it *can*
@@ -964,12 +967,17 @@ Cargo feature (`media`), on by default; the smallest build
   after them fill the waiting list, so a player that arrives behind all of
   those is not shown until a slot frees, and the oldest waiting name is
   forgotten past 16; that is a loss of what the module shows, never of the
-  bar. The rule: when all 8 are held a newcomer takes the place of the
-  oldest *stopped* player whose read has been answered (it shows nothing,
-  and goes to the waiting list itself), else it waits in the list of 16
-  names (the oldest forgotten first). A waiting name is held when a slot
-  frees or when a held player stops (one waiting name for each stop; a
-  player that made room by stopping is not swapped back by that). The second
+  bar. The rule: at most 8 players are held, one a connection. When all 8
+  are held a newcomer takes the place of the oldest *stopped* player whose
+  read has been answered or has errored (it shows nothing; it goes to the
+  waiting list flagged as evicted), else, with no such player, it waits in
+  the list of 16 names (a 17th forgets the oldest; a name is dropped from
+  it when it loses its owner and re-keyed when it changes hands). A freed
+  slot gives each waiting name one attempt to be held (bounded: nothing
+  re-lists the bus), and a held player that stops swaps in one waiting name
+  that was not itself evicted; an evicted name comes back only through a
+  freed slot, so an evicted player that starts playing is not seen until
+  some held player is removed (this matters at 9 or more MPRIS names). The second
   name of a connection waits in the same list, so a connection that releases
   one keeps its player under the other. A connection owning hundreds of
   names is asked about in a window of 8 at a time, and each is held or waits
