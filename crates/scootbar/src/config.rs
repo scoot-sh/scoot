@@ -649,14 +649,18 @@ struct NetworkFile {
     #[serde(rename = "icon-image")]
     icon_image: Option<serde::de::IgnoredAny>,
     /// One glyph each, drawn before the text in that state (instead of
-    /// `icon`): the wired interface, the WiFi network, the tunnel, and no
-    /// network. A state with none shows the static icon.
+    /// `icon`): the wired interface, the tunnel, and no network. A state
+    /// with none shows the static icon.
     #[cfg(feature = "network")]
     #[serde(rename = "icon-ethernet")]
     icon_ethernet: Option<String>,
+    /// One glyph for every WiFi signal level, or four (weakest to
+    /// strongest), picked by the level. Either is drawn before the SSID
+    /// instead of `icon`; without it the SSID stands alone. A static
+    /// `icon-path`/`icon-image` icon has no levels.
     #[cfg(feature = "network")]
     #[serde(rename = "icon-wifi")]
-    icon_wifi: Option<String>,
+    icon_wifi: Option<toml::Value>,
     #[cfg(feature = "network")]
     #[serde(rename = "icon-vpn")]
     icon_vpn: Option<String>,

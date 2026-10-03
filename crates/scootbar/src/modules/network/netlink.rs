@@ -744,7 +744,8 @@ pub fn sanitize(bytes: &[u8]) -> String {
 
 /// Signal bars from dBm, 1 to 4. Measured against the Asahi box: −54 dBm
 /// at arm's length from the AP is 4, the far bedroom at −72 is 2, and a
-/// network that barely associates (−80 and below) is 1.
+/// network that barely associates (−80 and below) is 1. The WiFi icon's
+/// level and `query`'s `bars` (never text: the bar shows the SSID alone).
 pub fn bars_for(signal: i8) -> u8 {
     if signal >= -55 {
         4
@@ -756,9 +757,6 @@ pub fn bars_for(signal: i8) -> u8 {
         1
     }
 }
-
-/// The bar glyphs for `bars`: `▂▄▆█` filled left to right.
-pub const BAR_GLYPHS: [char; 4] = ['▂', '▄', '▆', '█'];
 
 #[cfg(test)]
 mod unit;

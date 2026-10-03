@@ -637,7 +637,10 @@ fn a_network_section_is_read_whole() {
     .network;
     assert_eq!(modules.icon, Some(crate::icon::Icon::Glyph('N')));
     assert_eq!(modules.icon_ethernet, Some(crate::icon::Icon::Glyph('E')));
-    assert_eq!(modules.icon_wifi, Some(crate::icon::Icon::Glyph('W')));
+    assert_eq!(
+        modules.icon_wifi,
+        Some(crate::modules::network::WifiIcon::One('W'))
+    );
     assert_eq!(modules.icon_vpn, Some(crate::icon::Icon::Glyph('V')));
     assert_eq!(modules.icon_offline, Some(crate::icon::Icon::Glyph('O')));
     assert!(!modules.show_text);
@@ -650,6 +653,26 @@ fn a_network_section_is_read_whole() {
     assert!(matches!(modules.icon, Some(crate::icon::Icon::Art(_))));
     let a = read("[network]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
     let b = read("[network]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    assert_eq!(a, b);
+}
+
+#[test]
+#[cfg(feature = "network")]
+fn a_four_glyph_wifi_icon_is_read_whole() {
+    // Four glyphs, weakest to strongest: the level picks one.
+    let modules = read("[network]\nicon-wifi = [\"1\", \"2\", \"3\", \"4\"]\n")
+        .unwrap()
+        .modules
+        .network;
+    assert_eq!(
+        modules.icon_wifi,
+        Some(crate::modules::network::WifiIcon::Levels([
+            '1', '2', '3', '4'
+        ]))
+    );
+    // And two reads of it are equal configs (a reload compares).
+    let a = read("[network]\nicon-wifi = [\"1\", \"2\", \"3\", \"4\"]\n").unwrap();
+    let b = read("[network]\nicon-wifi = [\"1\", \"2\", \"3\", \"4\"]\n").unwrap();
     assert_eq!(a, b);
 }
 
@@ -677,6 +700,25 @@ fn a_network_section_is_refused_loudly() {
             "network.icon-path",
         ),
         ("[network]\nicon-wifi = \"too long\"\n", "network.icon-wifi"),
+        // The 4-glyph array: exactly 4 entries, each one glyph; anything
+        // else is refused naming the key.
+        (
+            "[network]\nicon-wifi = [\"1\", \"2\", \"3\"]\n",
+            "network.icon-wifi",
+        ),
+        (
+            "[network]\nicon-wifi = [\"1\", \"2\", \"3\", \"4\", \"5\"]\n",
+            "network.icon-wifi",
+        ),
+        (
+            "[network]\nicon-wifi = [\"1\", \"too long\", \"3\", \"4\"]\n",
+            "network.icon-wifi",
+        ),
+        (
+            "[network]\nicon-wifi = [\"1\", 2, \"3\", \"4\"]\n",
+            "network.icon-wifi",
+        ),
+        ("[network]\nicon-wifi = 3\n", "network.icon-wifi"),
         (
             "[network]\nicon-viewbox = \"0 0 24 24\"\n",
             "network.icon-viewbox",

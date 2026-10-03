@@ -371,7 +371,7 @@ cannot:
 | `volume` | The default sink's level and mute ([below](#volume)) | on the sound server's sink events, and the server's own: one redraw per batch |
 | `microphone` | The default source's level and mute ([below](#volume)) | as `volume`, for sources |
 | `battery` | The batteries' charge and state ([below](#battery)) | on the kernel's power-supply events, and once a minute while discharging |
-| `network` | The shown interface's state: name, SSID and bars, VPN or offline ([below](#network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held |
+| `network` | The shown interface's state: name, SSID, VPN or offline ([below](#network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held |
 | `brightness` | The panel backlight's level ([below](#brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
 | `tray` | The applications' tray icons, StatusNotifierItem ([below](#tray)) | on the session bus's traffic: item registrations, icon changes, owners vanishing |
 | `media` | What the players on the session bus are playing, and their controls, over MPRIS ([below](#media)) | on the bus's MPRIS traffic only: a player appearing or vanishing, its track or state changing |
@@ -661,8 +661,7 @@ no daemon and no child process: two netlink sockets on the bar's own
 
 - **What it shows** is one interface's state: the default route's (the
   first usable, v4 before v6), or `network.interface` by name. Ethernet shows the name
-  (`eth0`); WiFi shows the SSID and bars (`Wimbly ▂▄▆█`, four at −55 dBm
-  and better, one at −78 and worse); a tunnel shows `VPN` (in the normal
+  (`eth0`); WiFi shows the SSID (`Wimbly`); a tunnel shows `VPN` (in the normal
   class: being on a VPN is not a warning, only `offline` warns); anything
   without an address shows `offline`, in the `warn` class. A second VPN
   up beside the shown interface appends `· VPN`. The tooltip adds the
@@ -672,9 +671,16 @@ no daemon and no child process: two netlink sockets on the bar's own
   most one, as the [clock's](#icons)) for every state, or one glyph each
   in `icon-ethernet`, `icon-wifi`, `icon-vpn` and `icon-offline` — a
   state with its own glyph shows it, any other state the static icon.
+  `icon-wifi` takes four glyphs as well as one
+  (`icon-wifi = ["\U000f091f", "\U000f0922", "\U000f0925", "\U000f0928"]`, weakest to
+  strongest, Nerd Font's wifi-strength-1..4): the level picks one (four at −55 dBm and better, one at −78
+  and worse, as `query`'s `bars` counts them), while a single glyph shows
+  at every level. The four must be exactly four, each one glyph, or the
+  config is refused naming the key. A static `icon-path`/`icon-image`
+  icon stays static: per-level vector or PNG icons are out of scope.
   `show-text = false` draws only the icon, with the text moved into the
   tooltip (the WiFi and tunnel tooltips already name what the text does;
-  the bars are the dBm, coarser).
+  the dBm is the icon's level, finer).
 - **A click opens the picker**, with no binding at all: `network.menu-command`
   is spawned with the cached scan's SSIDs on stdin (one per line), a
   dmenu-style launcher fed from the scan list. Connecting is the
@@ -688,7 +694,9 @@ no daemon and no child process: two netlink sockets on the bar's own
 - **A native list**, opt-in as the volume popup is: `on-click = "popup"`
   opens the scan as a [popup](#popups) list instead of the dmenu picker
   (the click binding wins over the picker's default). Each row names a
-  network, with its bars where the scan carries a signal, and the
+  network, starting with its strength glyph where `icon-wifi` names four
+  glyphs and the scan carries a signal (a row with no signal carries
+  none), and the
   associated one selected; a wheel over the list scrolls it a row a notch
   where the popup is taller than what the compositor configures for it,
   and a row too wide for it is cut with an ellipsis. Selecting a
@@ -710,7 +718,7 @@ no daemon and no child process: two netlink sockets on the bar's own
 - **`interface`** (1 to 15 bytes, a kernel interface name) pins what is
   shown; absent is the default route's, tracked by index so a rename
   keeps it. **`show-ssid`** (default true) hides the SSID when false —
-  the bar shows `WiFi ▂▄▆`, and `query` omits the SSID — because the bar
+  the bar shows `WiFi`, and `query` omits the SSID — because the bar
   is visible in screenshots and to an agent's `query`.
 - **`query`** reports `{"state": "wifi", "ssid": "Wimbly", "signal": -54,
   "bars": 4, "interface": "wlan0", "vpn": false}`, `"ethernet"` and
@@ -1325,8 +1333,9 @@ the dmenu-style launcher are still how a click connects); `on-click =
   is drawn in the bar's own colors (the `bg`, `fg`, `accent` and `dim`
   tokens, one pixel frame) at the output's real scale.
 - **What the network list shows**: one row per named network in scan
-  order (unnamed ones are not rows), each with its bars where the scan
-  carries a signal, and the associated one selected. A wheel over the list
+  order (unnamed ones are not rows), each starting with its strength
+  glyph where `icon-wifi` names four glyphs and the scan carries a
+  signal, and the associated one selected. A wheel over the list
   scrolls it a row a notch where it is taller than what the compositor
   configures for it; a row too wide is cut with an ellipsis, as
   a window title's is. Selecting a row closes the popup and runs
