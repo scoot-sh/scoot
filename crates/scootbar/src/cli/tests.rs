@@ -389,10 +389,43 @@ fn the_help_matches_the_build() {
     if has_network && has_tray {
         assert!(DAEMON_HELP.contains("network, tray"));
     }
+    let has_media = crate::modules::find("media").is_some();
+    assert_eq!(DAEMON_HELP.contains("the media module"), has_media);
+    assert_eq!(DAEMON_HELP.contains("MPRIS"), has_media);
+    assert_eq!(DAEMON_HELP.contains("media.player"), has_media);
+    // Media sorts after the clock, so with both the list names it there.
+    if has_clock && has_media {
+        assert!(DAEMON_HELP.contains("clock, media"));
+    }
     for flag in super::FLAGS {
         assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
     }
     assert!(!DAEMON_HELP.contains("wakes once a minute"));
+}
+
+/// The `Modules:` line names exactly the modules this build has, in
+/// alphabetical order, whichever features it was built with: the hand
+/// generated arms of `modules!` are one per combination, and a missing or
+/// misplaced name is a build whose help lies about what it can place.
+#[test]
+fn the_modules_line_is_the_registry_in_order() {
+    let mut ids: Vec<&str> = crate::modules::REGISTRY
+        .iter()
+        .map(|spec| spec.id)
+        .collect();
+    ids.sort_unstable();
+    // A build with no module says so instead of listing any.
+    let Some(at) = DAEMON_HELP.find("Modules: ") else {
+        assert!(ids.is_empty(), "{ids:?} built, and no Modules: line");
+        assert!(DAEMON_HELP.contains("This build has none"));
+        return;
+    };
+    let line = DAEMON_HELP[at + "Modules: ".len()..]
+        .lines()
+        .next()
+        .unwrap_or("");
+    let listed: Vec<&str> = line.split(", ").collect();
+    assert_eq!(listed, ids, "{line:?}");
 }
 
 #[test]

@@ -124,7 +124,8 @@ pub fn bus_path() -> Result<PathBuf, ()> {
     bus_path_for(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").as_deref())
 }
 
-fn runtime_dir() -> PathBuf {
+/// The runtime directory, or its conventional fallback.
+pub fn runtime_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
         if !dir.is_empty() {
             return PathBuf::from(dir);

@@ -160,6 +160,11 @@ device = "apple-panel-bl"   # the backlight to follow; absent is the first usabl
 step = 5              # percent points per scroll notch and per raise, 1 to 50
 margin = 0            # as the clock's
 
+[media]
+player = "spotify"    # the player to prefer when several run; absent is the one that played last
+max-width = 320       # the most logical pixels wide the module's span may be, 1 to 4096
+margin = 0            # as the clock's
+
 [button.launcher]     # modules the file defines, placed by name in the lists above
 icon = "\U000f0e65"
 on-click = { exec = ["scootlaunch"] }
@@ -362,6 +367,7 @@ cannot:
 | `network` | The shown interface's state: name, SSID and bars, VPN or offline ([below](#network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held |
 | `brightness` | The panel backlight's level ([below](#brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
 | `tray` | The applications' tray icons, StatusNotifierItem ([below](#tray)) | on the session bus's traffic: item registrations, icon changes, owners vanishing |
+| `media` | What the players on the session bus are playing, and their controls, over MPRIS ([below](#media)) | on the bus's MPRIS traffic only: a player appearing or vanishing, its track or state changing |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -871,6 +877,150 @@ socket is one more source in the `poll` loop), which is the
   are in the
   [resource ratchet](backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
 
+## Media
+
+What the players on the session bus are playing, and play/pause, next and
+previous, spoken over MPRIS (`org.mpris.MediaPlayer2.*`: mpv, VLC,
+Spotify, Firefox, Chromium and most others) through the bar's own D-Bus
+client (see [Tray](#tray)): no `zbus`, no libdbus, no thread, no polling. A
+Cargo feature (`media`), on by default; the smallest build
+(`--no-default-features`) has none of it.
+
+- **What it shows** is `artist - title` (or whichever of the two the player
+  sent, or the player's name when it sent neither) with a play or pause
+  icon for the state, cut to `max-width` with an ellipsis measured in
+  pixels, in the `muted` class while paused. The tooltip over the module (after the bar's
+  `tooltip-delay`, as every module's; see [Tooltips](#tooltips)) is the uncut
+  line with the player's name: `mpv (playing): Ada - Song`. Several artists are joined with a
+  comma. **A stopped player shows nothing**, and with no player the module
+  takes no space; start playback from the player.
+- **Which player.** Several may run. Of the ones that are playing or
+  paused, `player` (a short name: `spotify` for
+  `org.mpris.MediaPlayer2.spotify`, and for its second copies, which a
+  player names `.instance` and a suffix: `.instance1234`, `.instance-abc`) is
+  shown if it is among them; else the one that most recently started
+  playing; else, when none plays, the one that played last; a tie (players
+  that never played) is broken by name, so the choice is the same every
+  run. The controls go to the player shown. A connection that owns two MPRIS
+  names is one player (the first name seen; if it releases that one, the
+  other takes over); at most 8 are held (see Bounds for what a ninth does).
+- **Controls, with no binding at all**: a click is `play-pause`, a right
+  click or a scroll down `next`, a middle click or a scroll up `previous`;
+  nothing happens when no player is shown. The module's actions are
+  `play-pause`, `next` and `previous`, none taking a number
+  (`scootbar msg invoke media next`). Each is one call to the player's
+  connection that wants no reply: the track changes on the bar when the
+  player says so, as a signal. An action is refused saying why when there
+  is no bus, no player playing or paused, or the player says it cannot
+  (`CanControl`, `CanGoNext`, `CanGoPrevious` false). **A skip within 250 ms
+  of the last is refused** (a scroll arrives at up to sixty actions a
+  second, and a scroll of thirty steps is one skip, not thirty; a scroll
+  that hits the limit is one line on stderr a second at most, as any failing
+  action): an agent that wants two skips waits for the first to show in
+  `query`.
+- **`query`** reports `{ "player", "bus_name", "status", "title", "artist",
+  "players": [{ "bus_name", "status" }] }` for the player shown (`status` is
+  `playing` or `paused`; `players` lists every one held, stopped included),
+  and nothing while none is.
+- **Options.** `[media]` takes `player` (a name as it is on the bus:
+  letters, digits, `_`, `-` and `.`), `max-width` (default 320 logical
+  pixels, 1 to 4096), `margin` and the five [interaction keys](#pointer-input).
+  The playback position and the volume are never shown (the position has no
+  change signal, so showing it would need a timer), and the art URL a player
+  names is never fetched.
+- **A run of changes is drawn ten times a second at most.** The first
+  change after a quiet spell (a new track) is drawn in the turn it arrives;
+  changes that follow within 100 ms (a title, a state flipping between
+  playing and paused, another player becoming the one shown) wait for one
+  timer, and the bar then shows the latest, however many came; the last
+  change is never lost. The module appearing (a first player) or emptying
+  (the last one gone or stopped, the bus lost) is never held. (The window
+  title's rule, for the same reason: a player that rewrites its title or
+  flaps its state hundreds of times a second is a bug or a title that
+  carries progress.)
+- **Idle cost: nothing.** The bus does the filtering: the bar asks for
+  `NameOwnerChanged` of the `org.mpris.MediaPlayer2` namespace and for
+  `PropertiesChanged` of the Player interface on the one MPRIS object, so an
+  app unrelated to media coming or going, or a player's `Seeked` or
+  position, never wakes the bar (tested against a real `dbus-daemon`). A
+  track change is one signal carrying the value (no round trip); a player
+  that only invalidates a property is read once, no oftener than every
+  50 ms. With no bus the module waits on the bus socket's directory (one
+  inotify watch); a bus that goes away drops every player at once and dials
+  once more, and one that keeps dropping the bar is left alone for 30
+  seconds, said once on stderr and again at each 30 s retry that dies the
+  same way (the [tray's](#tray) rules, in `src/dbus/link.rs`).
+- **Bounds, for a hostile or broken player.** Anything on the session bus
+  can claim a player name and say anything. What the code guarantees: it
+  cannot crash or hang the bar or another player, or grow the bar without
+  bound; only the bus's own `NameOwnerChanged` is believed, and a
+  `PropertiesChanged` only from the connection that owns a held name. (One
+  inherited gap: the D-Bus client matches a method reply by serial alone, so
+  a forged `GetNameOwner` or `GetAll` reply could re-point or set a held
+  player's state if the bus delivers unsolicited replies; untested whether
+  `dbus-daemon` does, tracked in `tray-review-hardening.md`.) A hostile peer costs the bar the work of its own
+  signals and no more (a flood of positions about 0.6% of a core at 500 a
+  second, measured; title and state changes are drawn ten times a second at
+  most); it holds at most one of 8 slots, one a connection. What it *can*
+  still do is cost visibility, boundedly: connections that keep 8 live
+  players (playing or paused) fill the table, and 16 more names announcing
+  after them fill the waiting list, so a player that arrives behind all of
+  those is not shown until a slot frees, and the oldest waiting name is
+  forgotten past 16; that is a loss of what the module shows, never of the
+  bar. The rule: at most 8 players are held, one a connection. When all 8
+  are held a newcomer takes the place of the oldest *stopped* player whose
+  read has been answered or has errored (it shows nothing; it goes to the
+  waiting list flagged as evicted), else, with no such player, it waits in
+  the list of 16 names (a 17th forgets the oldest; a name is dropped from
+  it when it loses its owner and re-keyed when it changes hands). A freed
+  slot gives each waiting name one attempt to be held (bounded: nothing
+  re-lists the bus), and a held player that stops swaps in one waiting name
+  that was not itself evicted; an evicted name comes back only through a
+  freed slot, so an evicted player that starts playing is not seen until
+  some held player is removed (this matters at 9 or more MPRIS names). The second
+  name of a connection waits in the same list, so a connection that releases
+  one keeps its player under the other. A connection owning hundreds of
+  names is asked about in a window of 8 at a time, and each is held or waits
+  by the same rule. Titles and artists are cleaned (controls stripped) and
+  cut to 120 bytes where they are stored. A message past 1 MiB is skipped
+  whole and the player keeps its last state; an answer that does not parse
+  is dropped whole; a read that errors (a timeout, or `UnknownObject` from a
+  player that has the name before it exports the object) leaves the player
+  held, shown as nothing, and read again at its next signal; one that never
+  answers is forgotten after 30 seconds when its slot is wanted; a property
+  of the wrong type is skipped alone; dictionaries past 128 entries are
+  refused. (`ListNames` is read to 4096 names before the MPRIS filter: a bus
+  holding more can hide a player from the start-up listing, though not from
+  its `NameOwnerChanged`.) The parser (`src/dbus/mpris.rs`, `std` only) is
+  fuzzed with the D-Bus client's (`crates/scootbar/fuzz`, target `dbus`), and
+  checked against what sd-bus marshals.
+- **Cost.** One fd (the bus socket, with `OUT` only while a write or a
+  staged message waits), or one inotify fd while there is no bus, and a
+  one-shot timer only while a player waits out its 50 ms floor between reads,
+  while a change of title waits out its 100 ms between draws, or (30 s) after
+  the bus kept dropping the bar.
+  Measured (dev VM, one 60 s idle window per row): **zero wakeups** with no
+  bus, with a bus and no player, with one player paused, with one playing,
+  with eight playing, and with a real mpv (its MPRIS script) playing a file;
+  one thread throughout; RSS 4156 kB with a bus and no player, 4388 kB with
+  one playing player, 4392 kB with eight (differences under about 130 kB
+  are within one run's resolution; the clock alone is 4236 kB). A player
+  that signals constantly pays for itself and no more: a stub signalling its
+  position 500 times a second for 20 s (10,143 signals) cost the bar 0.6% of
+  a core, one sending a new title 480 times a second 0.85%, and one flipping
+  between playing and paused 500 times a second 0.75%, RSS flat in all three
+  (the tests pin that a position draws and reads nothing, and that title and
+  state changes are drawn ten times a second at most). A player that
+  re-sends unchanged metadata (mpv playing its synthetic `lavfi` source
+  does, once a second) wakes the bar once a second and draws nothing. The
+  binary: **+65,536 B on disk (1,905,376 to 1,970,912, +3.4%) and +52,912 B
+  of loaded sections (+2.9%, of which `.text` +45,376 B)** against `main`;
+  the feature built but off is +3,096 B loaded and no more on disk. The
+  maintainer waived this row on 2026-10-03 (this row only) and `media`
+  stays in `default`. The table and its method are in the
+  [resource ratchet](backlog/lightest.md#m6-media-module-level-cost-measured-2026-10-03).
+
+
 ## Pointer input
 
 Clicks, scrolls and hover, on every module. The bar never takes the keyboard
@@ -934,7 +1084,8 @@ on-click = { scoot = "quit" }                    # a request to scoot's control 
   and does nothing. `quit` is the only value.
 - **A key you do not set keeps the module's default**: the workspaces
   module's left click on a number switches to it (as it always did), and
-  nothing else has one. A binding replaces the default.
+  other modules have defaults of their own, which their sections list (the
+  [media module's](#media), for one). A binding replaces the default.
 - **A failing action** (a program that is not there, a full table) is one
   line on stderr, at most one a second, with a count of the ones held back.
   The bar carries on.
@@ -971,7 +1122,7 @@ itself, so the tint lands there rather than over its text). Unset,
 
 **Cost.** The bar asks the seat for a pointer only while a placed module
 has a binding or a default of its own (today: the workspaces module's
-click and the window title's click).
+click, the window title's click and the media module's).
 A clock-only bar with no bindings never takes the pointer, and costs what
 it did before there was any input. A reload that adds or removes bindings
 takes or drops it. A motion event stores two numbers; no pointer event,
@@ -1077,7 +1228,7 @@ There is no flag for it: the config file only.
   tooltip is the one its view already carried (the window title's full title,
   uncut by the span; the network's interface, SSID and signal; the battery's
   `Charging 80%`; the volume and microphone's device and level; the
-  brightness's device; the tray's item titles; a `push` or `exec` module's
+  brightness's device; the tray's item titles; the media module's player and line; a `push` or `exec` module's
   `tooltip` key, [the update payload](#the-update-payload)). A module with no
   tooltip, or whose tooltip is empty right now, shows none and arms nothing:
   the clock, workspaces and `button` modules have none. A new module's tooltip

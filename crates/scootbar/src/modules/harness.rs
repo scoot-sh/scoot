@@ -102,6 +102,12 @@ impl Harness {
         self.module.tooltips()
     }
 
+    /// The module's own draw, as the render loop offers it.
+    #[allow(dead_code)]
+    pub fn custom_draw(&self, ctx: &mut super::CustomDraw<'_, '_>) -> bool {
+        self.module.custom_draw(ctx)
+    }
+
     /// The module's view for an unnamed output.
     pub fn view(&self) -> View {
         self.view_on(None)

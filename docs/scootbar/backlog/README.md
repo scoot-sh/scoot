@@ -123,7 +123,9 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [System tray](tray.md) (medium): the watcher is core infrastructure; first version landed 2026-10-02, menus remain (popups exist now)
 - [Tray D-Bus client: hardening left over from the #388 review](tray-review-hardening.md) (low): a per-pump byte budget while discarding, a stuck flight on an oversize reply with huge header fields, and a few smaller items
 - [Popups](resolved/popups-done.md) (done), [Tooltips](resolved/tooltips-done.md) (done), [A native WiFi list popup](popup-network-list.md) (low)
-- [Media (MPRIS)](media-module.md) (low), [Bluetooth](bluetooth-module.md) (low)
+- [Media (MPRIS)](resolved/media-module-done.md) (low): now playing and play/pause, next, previous over MPRIS — RESOLVED 2026-10-03
+- [Bluetooth](bluetooth-module.md) (low)
+- [Move the tray onto `dbus::link`](tray-onto-dbus-link.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)
 - [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears

@@ -89,7 +89,7 @@ pub struct ModuleAction {
 impl ModuleAction {
     /// A module's own default action: a static name, nothing allocated.
     /// (Only modules with actions call it: the workspaces, window-title,
-    /// volume, microphone, network and tray modules.)
+    /// volume, microphone, network, tray and media modules.)
     #[cfg_attr(
         not(any(
             feature = "workspaces",
@@ -97,7 +97,8 @@ impl ModuleAction {
             feature = "volume",
             feature = "microphone",
             feature = "network",
-            feature = "tray"
+            feature = "tray",
+            feature = "media"
         )),
         allow(dead_code)
     )]

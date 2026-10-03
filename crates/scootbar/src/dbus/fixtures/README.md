@@ -27,3 +27,31 @@ busctl --user call org.example.Fixture /Item org.freedesktop.DBus.Properties \
 The call fails (nobody owns the name); the monitor saw it anyway. Split
 `mon.bin` into messages by each header's lengths and keep the one with
 `GetAll`.
+
+`sdbus-mpris-getall-call.bin` and `sdbus-mpris-changed-signal.bin`: what
+the media module reads of a player, marshalled by sd-bus (`busctl`, systemd
+261) and captured the same way. The first is a call whose body is the
+`a{sv}` a player's `GetAll` answers with (`PlaybackStatus`, a `Metadata`
+dictionary with a track id, a length, an art URL, a title with non-ASCII
+text, two artists and an album, then `Position`, `Volume`, `Rate` and
+three `Can*` flags); the second is a `PropertiesChanged` signal
+(`sa{sv}as`: the status, a position, a `Metadata` of a title and one
+artist, and `CanGoNext` and `Volume` invalidated):
+
+```sh
+busctl --user call org.example.Fixture /org/mpris/MediaPlayer2 \
+  org.freedesktop.DBus.Properties GetAll "a{sv}" 8 \
+  PlaybackStatus s Playing \
+  Metadata "a{sv}" 6 mpris:trackid o /org/mpris/track/1 mpris:length x 215000000 \
+    mpris:artUrl s file:///tmp/cover.jpg xesam:title s "Sønġ ♪" \
+    xesam:artist as 2 Ada Bo xesam:album s Alb \
+  Position x 42000000 Volume d 0.5 CanGoNext b true CanGoPrevious b false \
+  CanControl b true Rate d 1.0
+busctl --user emit /org/mpris/MediaPlayer2 org.freedesktop.DBus.Properties \
+  PropertiesChanged "sa{sv}as" org.mpris.MediaPlayer2.Player 3 \
+  PlaybackStatus s Paused Position x 7 \
+  Metadata "a{sv}" 2 xesam:title s Second xesam:artist as 1 Cy \
+  2 CanGoNext Volume
+```
+
+Both are in the dbus fuzz target's seed corpus too.

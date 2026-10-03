@@ -24,7 +24,7 @@ mod color;
 mod config;
 mod control;
 mod daemon;
-#[cfg(feature = "tray")]
+#[cfg(any(feature = "tray", feature = "media"))]
 mod dbus;
 mod density;
 mod font;

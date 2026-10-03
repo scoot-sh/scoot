@@ -1,0 +1,8 @@
+main at c2fa2df02, the VM scoot of Oct 1 (/var/cargo-target/debug/scoot):
+        FAIL [  12.137s] (29/31) scootbar::tooltip hovering_shows_it_after_the_delay_and_leaving_hides_it_leaving_nothing_behind
+        FAIL [  12.574s] (24/31) scootbar::tooltip a_rapid_hover_in_and_out_leaves_no_tooltip_and_no_leak
+        FAIL [  12.777s] (22/31) scootbar::tooltip a_long_tooltip_wraps_and_stays_on_screen_at_the_right_edge
+        FAIL [  13.496s] (21/31) scootbar::tooltip a_click_closes_it_and_acts_and_it_stays_away_until_the_pointer_leaves
+        FAIL [  13.586s] (10/31) scootbar::popup a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks
+        FAIL [  22.266s] (31/31) scootbar::tooltip no_timer_runs_off_a_module_with_a_tooltip_and_the_bar_is_idle_with_one_shown
+     Summary [  53.618s] 31 tests run: 25 passed, 6 failed, 0 skipped

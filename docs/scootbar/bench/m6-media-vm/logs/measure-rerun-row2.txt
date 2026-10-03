@@ -1,0 +1,7 @@
+# the 'branch (media built), no module placed' row of measure-final.log lost pages to the VM's memory pressure between t0 and t60 (rss 3048 kB at t60); rerun twice, same binary:
+# run 1
+t0 rss_kb=3888 hwm_kb=3888 pss_kb=2327 threads=1 fds=7 vol=6 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3888 hwm_kb=3888 pss_kb=2323 threads=1 fds=7 vol=6 nonvol=0 utime_ticks=0 stime_ticks=0
+# run 2
+t0 rss_kb=3892 hwm_kb=3892 pss_kb=1458 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3892 hwm_kb=3892 pss_kb=1464 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0

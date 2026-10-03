@@ -1,0 +1,60 @@
+--- 1. one playing stub, up before the bar (found by ListNames)
+{"artist": "Ada Lovelace", "bus_name": "org.mpris.MediaPlayer2.stub1", "player": "stub1", "players": [{"bus_name": "org.mpris.MediaPlayer2.stub1", "status": "playing"}], "status": "playing", "title": "Track One"} | text: "Ada Lovelace - Track One"
+900x200, 9338 bytes -> /tmp/media-live-private/out/1-playing.png
+--- playerctl (independent client) sees it too: Playing / Track One
+--- 2. a second stub appears paused: not shown while A plays
+{"artist": "Ada Lovelace", "bus_name": "org.mpris.MediaPlayer2.stub1", "player": "stub1", "players": [{"bus_name": "org.mpris.MediaPlayer2.stub1", "status": "playing"}, {"bus_name": "org.mpris.MediaPlayer2.stub2", "status": "paused"}], "status": "playing", "title": "Track One"} | text: "Ada Lovelace - Track One"
+--- 3. controls: play-pause pauses A (the bar sends it, playerctl reads it back)
+invoke media play-pause: 
+A status by playerctl: Paused
+{"artist": "Ada Lovelace", "bus_name": "org.mpris.MediaPlayer2.stub1", "player": "stub1", "players": [{"bus_name": "org.mpris.MediaPlayer2.stub1", "status": "paused"}, {"bus_name": "org.mpris.MediaPlayer2.stub2", "status": "paused"}], "status": "paused", "title": "Track One"} | text: "Ada Lovelace - Track One"
+900x200, 8849 bytes -> /tmp/media-live-private/out/2-paused.png
+--- 4. next, after the skip gap
+invoke media next: 
+{"artist": "Bo, Cy", "bus_name": "org.mpris.MediaPlayer2.stub1", "player": "stub1", "players": [{"bus_name": "org.mpris.MediaPlayer2.stub1", "status": "paused"}, {"bus_name": "org.mpris.MediaPlayer2.stub2", "status": "paused"}], "status": "paused", "title": "Track Two"} | text: "Bo, Cy - Track Two"
+--- the same skip twice in a hurry is refused, with the reason
+invoke media next: 
+invoke media previous: scootbar: daemon: `media` previous: a skip within 250 ms of the last one is ignored
+A log:
+requestname (1,)
+ready
+getall
+getall
+getall
+PlayPause
+getall
+Next
+Next
+--- 5. B starts playing (playerctl does it): the most recent player is shown
+{"artist": "Ada Lovelace", "bus_name": "org.mpris.MediaPlayer2.stub2", "player": "stub2", "players": [{"bus_name": "org.mpris.MediaPlayer2.stub1", "status": "paused"}, {"bus_name": "org.mpris.MediaPlayer2.stub2", "status": "playing"}], "status": "playing", "title": "Track One"} | text: "Ada Lovelace - Track One"
+900x200, 9338 bytes -> /tmp/media-live-private/out/3-second-player.png
+--- 6. A plays again, and its track becomes the long title (the stub sets it): cut with an ellipsis
+{"artist": "An Artist With A Long Name", "bus_name": "org.mpris.MediaPlayer2.stub1", "player": "stub1", "players": [{"bus_name": "org.mpris.MediaPlayer2.stub1", "status": "playing"}, {"bus_name": "org.mpris.MediaPlayer2.stub2", "status": "playing"}], "status": "playing", "title": "A very long title that goes on and on for far more than a bar can show in one go"} | text: "An Artist With A Long Name - A very long title that goes on and on for far more than a bar can show in one go"
+900x200, 10837 bytes -> /tmp/media-live-private/out/4-long-title.png
+--- 7. kill -9 the shown player (its connection drops, the bus releases its name)
+{"artist": "Ada Lovelace", "bus_name": "org.mpris.MediaPlayer2.stub2", "player": "stub2", "players": [{"bus_name": "org.mpris.MediaPlayer2.stub2", "status": "playing"}], "status": "playing", "title": "Track One"} | text: "Ada Lovelace - Track One"
+900x200, 9263 bytes -> /tmp/media-live-private/out/5-after-kill.png
+/tmp/media-bench-scripts/live.sh: line 63: 3321868 Killed                     $PY $HERE/player.py org.mpris.MediaPlayer2.stub1 $R/out/a.log $R/out/fa Playing > $R/out/a.out 2>&1
+--- 8. kill -9 the other: nothing is shown
+null | text: ""
+900x200, 5408 bytes -> /tmp/media-live-private/out/6-empty.png
+/tmp/media-bench-scripts/live.sh: line 65: 3322151 Killed                     $PY $HERE/player.py org.mpris.MediaPlayer2.stub2 $R/out/b.log $R/out/fb Paused > $R/out/b.out 2>&1
+--- 9. refused with a reason now
+invoke media play-pause: scootbar: daemon: `media` play-pause: no player is playing or paused
+invoke media seek: scootbar: daemon: `media` has no action `seek` (it has: play-pause next previous click right-click middle-click scroll-up scroll-down)
+invoke media next 3: scootbar: daemon: `media` `next` takes no number
+--- 10. two real mpv instances (mpv's own MPRIS script)
+players on the bus: mpv mpv.instance-ICdsOUkN 
+{"artist": "", "bus_name": "org.mpris.MediaPlayer2.mpv.instance-ICdsOUkN", "player": "mpv", "players": [{"bus_name": "org.mpris.MediaPlayer2.mpv", "status": "playing"}, {"bus_name": "org.mpris.MediaPlayer2.mpv.instance-ICdsOUkN", "status": "playing"}], "status": "playing", "title": "Real Two"} | text: "Real Two"
+900x200, 6956 bytes -> /tmp/media-live-private/out/7-two-mpv.png
+--- 11. the bar's play-pause reaches the player it shows, mpv reads it back
+shown player: instance-ICdsOUkN
+invoke media play-pause: 
+statuses: mpv=Playing mpv.instance-ICdsOUkN=Paused
+{"artist": "", "bus_name": "org.mpris.MediaPlayer2.mpv", "player": "mpv", "players": [{"bus_name": "org.mpris.MediaPlayer2.mpv", "status": "playing"}, {"bus_name": "org.mpris.MediaPlayer2.mpv.instance-ICdsOUkN", "status": "paused"}], "status": "playing", "title": "Real One"} | text: "Real One"
+900x200, 7037 bytes -> /tmp/media-live-private/out/8-mpv-paused.png
+--- 12. the other mpv is started from the outside: it becomes the one shown
+{"artist": "", "bus_name": "org.mpris.MediaPlayer2.mpv.instance-ICdsOUkN", "player": "mpv", "players": [{"bus_name": "org.mpris.MediaPlayer2.mpv", "status": "playing"}, {"bus_name": "org.mpris.MediaPlayer2.mpv.instance-ICdsOUkN", "status": "playing"}], "status": "playing", "title": "Real Two"} | text: "Real Two"
+--- 13. both mpv gone:
+null | text: ""
+bar.log:

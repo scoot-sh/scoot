@@ -11,9 +11,10 @@
 //! arrays, megabyte strings), not malformed bytes. The check therefore
 //! frames arbitrary bytes (accept, wait or refuse without a panic),
 //! parses every framed message (header and the body against its declared
-//! signature), walks every shape the tray reads, and round-trips the
-//! writer on input-derived values.
+//! signature), walks every shape the tray and the media module read, and
+//! round-trips the writer on input-derived values.
 
+use super::mpris;
 use super::proto::{self, Kind, Message, Reader, Writer, read_pixmaps};
 
 #[cfg(test)]
@@ -62,6 +63,8 @@ pub fn dbus(data: &[u8]) {
     let _ = proto::frame_header(data);
     let _ = Message::parse_header(data);
     let _ = proto::read_item_props(data);
+    let _ = mpris::read_player_props(data);
+    let _ = mpris::read_properties_changed(data);
     let _ = read_pixmaps(data);
     let _ = proto::read_names("as", data);
     let _ = proto::read_owner("s", data);
@@ -106,7 +109,7 @@ pub fn dbus(data: &[u8]) {
 }
 
 /// One framed message: the header parses, and the body walks against its
-/// declared signature, then as each shape the tray reads. A refusal
+/// declared signature, then as each shape the tray and the media module read. A refusal
 /// anywhere is `None`, never a panic.
 fn check_frame(frame: &[u8]) {
     let Ok(message) = Message::parse(frame) else {
@@ -130,6 +133,10 @@ fn check_shapes(message: &Message<'_>) {
         }
         "a{sv}" => {
             let _ = proto::read_item_props(body);
+            let _ = mpris::read_player_props(body);
+        }
+        "sa{sv}as" => {
+            let _ = mpris::read_properties_changed(body);
         }
         _ => {}
     }

@@ -26,7 +26,7 @@ devenv shell -- cargo fmt --check -p scootbar
 | `SCOOTBAR_REQUIRE_SCOOT` | no `scoot` is a failure, not a skip, and so is no `foot` on `PATH` for the window-placement check (CI sets it) |
 | `SCOOTBAR_TEST_SWAY` | the `sway` binary to run; default, `sway` on `PATH` |
 | `SCOOTBAR_REQUIRE_SWAY` | no `sway` is a failure, not a skip (CI sets it) |
-| `SCOOTBAR_REQUIRE_DBUS_DAEMON` | no `dbus-daemon` on `PATH` is a failure, not a skip, for the tests that start a private one (`src/dbus/daemon_tests.rs`, `src/modules/tray/daemon_tests.rs`; built with the `tray` feature; CI sets it, with `dbus-daemon` from the pinned nixpkgs, `nixpkgs#dbus^out`, put on `PATH` for the unit-test step only; the bare attribute prints two paths) |
+| `SCOOTBAR_REQUIRE_DBUS_DAEMON` | no `dbus-daemon` on `PATH` is a failure, not a skip, for the tests that start a private one (`src/dbus/daemon_tests.rs`, `src/dbus/link/tests.rs`, `src/modules/tray/daemon_tests.rs`, `src/modules/media/daemon_tests.rs`; built with the `tray` or `media` feature; CI sets it, with `dbus-daemon` from the pinned nixpkgs, `nixpkgs#dbus^out`, put on `PATH` for the unit-test step only; the bare attribute prints two paths) |
 | `SCOOTBAR_DEBUG_NO_VIEWPORTER` | read by a **debug** `scootbar` only (compiled out of release builds): leaves `wp_viewporter` unbound, as on a compositor without it, so the integer-scale fallback is tested on compositors that have one |
 | `SCOOTBAR_BLESS` | rewrites the [snapshots](#snapshots) the tests compare instead of comparing them |
 
@@ -502,12 +502,14 @@ panic, bounded, printable, a refused one changing nothing); its check is
 `fuzz/corpus/payload` and `fuzz/regressions/payload`. The **`dbus`**
 target is the hand-rolled D-Bus client's parser (`src/dbus/proto.rs`, `std`
 only): arbitrary bytes framed as a stream, every framed message's header and
-body walked against its declared signature, and the shapes the tray reads
-(an item's `GetAll` through the same `read_item_props` the module calls,
-pixmap lists, name lists, owner changes) walked directly; the writer is
+body walked against its declared signature, and the shapes the tray and the
+media module read (an item's `GetAll` through the same `read_item_props` the
+module calls, a player's `GetAll` and `PropertiesChanged` through
+`src/dbus/mpris.rs`, `std` only like `proto.rs`, pixmap lists, name lists,
+owner changes) walked directly; the writer is
 round-tripped on input-derived values. Its check is `src/dbus/fuzz.rs`,
-replayed on every `cargo test` over `fuzz/corpus/dbus` (which holds a
-message marshalled by sd-bus, not by this crate) and
+replayed on every `cargo test` over `fuzz/corpus/dbus` (which holds messages
+marshalled by sd-bus, not by this crate) and
 `fuzz/regressions/dbus`. Later parsers each land with their target.
 
 ## CI

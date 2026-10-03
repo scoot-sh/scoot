@@ -1,0 +1,106 @@
+tree: 4d220759803bfa01ef963516c12cda4548748238 (crates tree c5a935bdbccedcf7eed359182362b998bbb38aa1; main c2fa2df024123758a6febaba72968d9807e5c72b)
+FAIL nextest default (all integration, scoot+sway required)
+        FAIL [  12.884s] (  97/1171) scootbar::popup a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks
+    test a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 12.87s
+    thread 'a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks' (3519333) panicked at crates/scootbar/tests/popup.rs:144:17:
+        FAIL [  13.589s] ( 109/1171) scootbar::tooltip a_click_closes_it_and_acts_and_it_stays_away_until_the_pointer_leaves
+    test a_click_closes_it_and_acts_and_it_stays_away_until_the_pointer_leaves ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 13.58s
+    thread 'a_click_closes_it_and_acts_and_it_stays_away_until_the_pointer_leaves' (3519481) panicked at crates/scootbar/tests/tooltip.rs:191:17:
+        FAIL [  15.401s] ( 111/1171) scootbar::tooltip a_long_tooltip_wraps_and_stays_on_screen_at_the_right_edge
+    test a_long_tooltip_wraps_and_stays_on_screen_at_the_right_edge ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 15.38s
+    thread 'a_long_tooltip_wraps_and_stays_on_screen_at_the_right_edge' (3519486) panicked at crates/scootbar/tests/tooltip.rs:191:17:
+        FAIL [  17.445s] ( 114/1171) scootbar::tooltip a_rapid_hover_in_and_out_leaves_no_tooltip_and_no_leak
+    test a_rapid_hover_in_and_out_leaves_no_tooltip_and_no_leak ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 17.43s
+    thread 'a_rapid_hover_in_and_out_leaves_no_tooltip_and_no_leak' (3519503) panicked at crates/scootbar/tests/tooltip.rs:191:17:
+        FAIL [  15.574s] ( 125/1171) scootbar::tooltip hovering_shows_it_after_the_delay_and_leaving_hides_it_leaving_nothing_behind
+    test hovering_shows_it_after_the_delay_and_leaving_hides_it_leaving_nothing_behind ... FAILED
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 14 filtered out; finished in 15.56s
+    thread 'hovering_shows_it_after_the_delay_and_leaving_hides_it_leaving_nothing_behind' (3519543) panicked at crates/scootbar/tests/tooltip.rs:191:17:
+FAIL cargo test default
+test a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks ... FAILED
+thread 'a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks' (3524938) panicked at crates/scootbar/tests/popup.rs:144:17:
+test result: FAILED. 15 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.90s
+error: test failed, to rerun pass `-p scootbar --test popup`
+test a_click_closes_it_and_acts_and_it_stays_away_until_the_pointer_leaves ... FAILED
+test a_long_tooltip_wraps_and_stays_on_screen_at_the_right_edge ... FAILED
+test a_rapid_hover_in_and_out_leaves_no_tooltip_and_no_leak ... FAILED
+test hovering_shows_it_after_the_delay_and_leaving_hides_it_leaving_nothing_behind ... FAILED
+test no_timer_runs_off_a_module_with_a_tooltip_and_the_bar_is_idle_with_one_shown ... FAILED
+thread 'a_click_closes_it_and_acts_and_it_stays_away_until_the_pointer_leaves' (3525063) panicked at crates/scootbar/tests/tooltip.rs:191:17:
+thread 'a_long_tooltip_wraps_and_stays_on_screen_at_the_right_edge' (3525064) panicked at crates/scootbar/tests/tooltip.rs:191:17:
+thread 'a_rapid_hover_in_and_out_leaves_no_tooltip_and_no_leak' (3525066) panicked at crates/scootbar/tests/tooltip.rs:191:17:
+thread 'hovering_shows_it_after_the_delay_and_leaving_hides_it_leaving_nothing_behind' (3525117) panicked at crates/scootbar/tests/tooltip.rs:191:17:
+thread 'no_timer_runs_off_a_module_with_a_tooltip_and_the_bar_is_idle_with_one_shown' (3525136) panicked at crates/scootbar/tests/tooltip.rs:191:17:
+test result: FAILED. 10 passed; 5 failed; 0 ignored; 0 measured; 0 filtered out; finished in 39.23s
+error: test failed, to rerun pass `-p scootbar --test tooltip`
+error: 2 targets failed:
+OK   nextest --bin all-features  (Summary [  32.330s] 1047 tests run: 1047 passed, 0 skipped)
+OK   nextest --bin none  (Summary [   2.952s] 415 tests run: 415 passed, 0 skipped)
+OK   nextest --bin clock alone  (Summary [   3.401s] 488 tests run: 488 passed, 0 skipped)
+OK   nextest --bin workspaces alone  (Summary [  20.351s] 493 tests run: 493 passed, 0 skipped)
+OK   nextest --bin window-title alone  (Summary [   3.062s] 438 tests run: 438 passed, 0 skipped)
+OK   nextest --bin volume alone  (Summary [   3.610s] 461 tests run: 461 passed, 0 skipped)
+OK   nextest --bin microphone alone  (Summary [  10.440s] 464 tests run: 464 passed, 0 skipped)
+OK   nextest --bin network alone  (Summary [   3.351s] 466 tests run: 466 passed, 0 skipped)
+OK   nextest --bin brightness alone  (Summary [   2.951s] 440 tests run: 440 passed, 0 skipped)
+OK   nextest --bin battery alone  (Summary [   2.959s] 441 tests run: 441 passed, 0 skipped)
+OK   nextest --bin tray alone  (Summary [   6.468s] 499 tests run: 499 passed, 0 skipped)
+OK   nextest --bin media alone  (Summary [   7.443s] 528 tests run: 528 passed, 0 skipped)
+OK   nextest --bin button alone  (Summary [   2.987s] 437 tests run: 437 passed, 0 skipped)
+OK   nextest --bin push alone  (Summary [   3.042s] 440 tests run: 440 passed, 0 skipped)
+OK   nextest --bin exec alone  (Summary [   3.597s] 477 tests run: 477 passed, 0 skipped)
+OK   nextest --bin popup alone  (Summary [   3.006s] 457 tests run: 457 passed, 0 skipped)
+OK   nextest --bin icon-image alone  (Summary [   3.532s] 433 tests run: 433 passed, 0 skipped)
+OK   clippy default  ()
+OK   clippy none  ()
+OK   clippy clock alone  ()
+OK   clippy workspaces alone  ()
+OK   clippy window-title alone  ()
+OK   clippy volume alone  ()
+OK   clippy microphone alone  ()
+OK   clippy network alone  ()
+OK   clippy brightness alone  ()
+OK   clippy battery alone  ()
+OK   clippy tray alone  ()
+OK   clippy media alone  ()
+OK   clippy button alone  ()
+OK   clippy push alone  ()
+OK   clippy exec alone  ()
+OK   clippy popup alone  ()
+OK   clippy icon-image alone  ()
+OK   clippy media+clock  ()
+OK   clippy media+workspaces  ()
+OK   clippy media+window-title  ()
+OK   clippy media+volume  ()
+OK   clippy media+microphone  ()
+OK   clippy media+network  ()
+OK   clippy media+brightness  ()
+OK   clippy media+battery  ()
+OK   clippy media+tray  ()
+OK   clippy media+button  ()
+OK   clippy media+push  ()
+OK   clippy media+exec  ()
+OK   clippy media+popup  ()
+OK   clippy media+icon-image  ()
+OK   clippy popup+clock  ()
+OK   clippy popup+workspaces  ()
+OK   clippy popup+window-title  ()
+OK   clippy popup+volume  ()
+OK   clippy popup+microphone  ()
+OK   clippy popup+network  ()
+OK   clippy popup+brightness  ()
+OK   clippy popup+battery  ()
+OK   clippy popup+tray  ()
+OK   clippy popup+media  ()
+OK   clippy popup+button  ()
+OK   clippy popup+push  ()
+OK   clippy popup+exec  ()
+OK   clippy popup+icon-image  ()
+OK   clippy default+icon-image  ()
+OK   clippy media,tray,network,battery  ()
+OK   clippy popup,media,volume,microphone  ()
+DONE

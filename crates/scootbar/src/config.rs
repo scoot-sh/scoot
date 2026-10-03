@@ -325,6 +325,9 @@ struct File {
     /// The tray module's options. Without the `tray` feature there are
     /// none, and any key is a loud error naming it.
     tray: TrayFile,
+    /// The media module's options. Without the `media` feature there are
+    /// none, and any key is a loud error naming it.
+    media: MediaFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -738,6 +741,40 @@ struct TrayFile {
     on_scroll_down: Option<toml::Value>,
 }
 
+/// The media module's options. Without the `media` feature there are none,
+/// and any key is a loud error naming it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct MediaFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "media")]
+    margin: Option<u32>,
+    /// The player to prefer, by its short name (`spotify`).
+    #[cfg(feature = "media")]
+    player: Option<String>,
+    /// The most logical pixels wide the module's span may be.
+    #[cfg(feature = "media")]
+    #[serde(rename = "max-width")]
+    max_width: Option<u32>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "media")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "media")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "media")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "media")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "media")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
+}
+
 impl File {
     /// Validates every value and fills the defaults: `Err` names the
     /// dotted key and says what it takes.
@@ -949,6 +986,13 @@ impl File {
             let margin = gap(path, "tray.margin", Some(margin), 0)?;
             if margin > 0 {
                 margins.push((crate::modules::tray::ID, margin));
+            }
+        }
+        #[cfg(feature = "media")]
+        if let Some(margin) = self.media.margin {
+            let margin = gap(path, "media.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::media::ID, margin));
             }
         }
         let layout = self.layout(
@@ -1254,6 +1298,10 @@ impl File {
         #[cfg(feature = "tray")]
         {
             apply_tray(path, &self.tray, &mut modules.bindings)?;
+        }
+        #[cfg(feature = "media")]
+        {
+            apply_media(path, &self.media, &mut modules.media, &mut modules.bindings)?;
         }
         Ok(Config {
             bar: Bar {
@@ -1745,6 +1793,84 @@ fn apply_tray(
     })?;
     if !read.is_empty() {
         bindings.push((crate::modules::tray::ID, read));
+    }
+    Ok(())
+}
+
+/// The dotted interaction keys of `[media]`, in [`Trigger`] order: what a
+/// bad binding names.
+#[cfg(feature = "media")]
+const MEDIA_KEYS: [&str; 5] = [
+    "media.on-click",
+    "media.on-right-click",
+    "media.on-middle-click",
+    "media.on-scroll-up",
+    "media.on-scroll-down",
+];
+
+/// The `[media]` table: `player`, `max-width` and the interaction keys,
+/// into the module's settings and bindings.
+#[cfg(feature = "media")]
+fn apply_media(
+    path: &Path,
+    table: &MediaFile,
+    settings: &mut crate::modules::media::Settings,
+    bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
+) -> Result<(), Error> {
+    use crate::modules::media::{DEFAULT_MAX_WIDTH, MAX_MAX_WIDTH};
+    if let Some(player) = table.player.as_deref() {
+        // The short name of a bus name's element: what a player is called
+        // on the bus is letters, digits, `_` and `-`, with dots between
+        // elements (`vlc`, `org.example.player`); anything else never
+        // matches one.
+        let name_chars = player
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'));
+        if player.is_empty() || player.len() > 200 || !name_chars {
+            return Err(value(
+                path,
+                "media.player",
+                format_args!(
+                    "takes a player's name as on the bus (`spotify` for \
+                     org.mpris.MediaPlayer2.spotify), letters, digits, `_`, `-` and `.`, \
+                     not `{player}`"
+                ),
+            ));
+        }
+        settings.player = Some(player.to_owned());
+    }
+    if let Some(width) = table.max_width {
+        if !(1..=MAX_MAX_WIDTH).contains(&width) {
+            return Err(value(
+                path,
+                "media.max-width",
+                format_args!(
+                    "takes a whole number of logical pixels from 1 to {MAX_MAX_WIDTH}, \
+                     not `{width}` (the default is {DEFAULT_MAX_WIDTH})"
+                ),
+            ));
+        }
+        settings.max_width = width;
+    }
+    let read = bindings::read(
+        crate::modules::media::ID,
+        [
+            table.on_click.as_ref(),
+            table.on_right_click.as_ref(),
+            table.on_middle_click.as_ref(),
+            table.on_scroll_up.as_ref(),
+            table.on_scroll_down.as_ref(),
+        ],
+    )
+    .map_err(|(trigger, message)| {
+        value(
+            path,
+            MEDIA_KEYS[trigger as usize],
+            format_args!("{message}"),
+        )
+    })?;
+    if !read.is_empty() {
+        bindings.push((crate::modules::media::ID, read));
     }
     Ok(())
 }

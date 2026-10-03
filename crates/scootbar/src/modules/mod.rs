@@ -91,10 +91,14 @@ mod class;
 #[cfg(feature = "clock")]
 pub mod clock;
 pub mod custom;
+#[cfg(any(feature = "window-title", feature = "media"))]
+mod ellipsis;
 #[cfg(feature = "exec")]
 pub mod exec;
 #[cfg(test)]
 pub mod harness;
+#[cfg(feature = "media")]
+pub mod media;
 #[cfg(feature = "network")]
 pub mod network;
 // A build with `button` and neither of the others reads only `Shown::text`
@@ -489,6 +493,18 @@ pub const REGISTRY: &[Spec] = &[
         #[cfg(test)]
         stand_in: Some(brightness::stand_in),
     },
+    #[cfg(feature = "media")]
+    Spec {
+        id: media::ID,
+        init: media::init,
+        actions: media::ACTIONS,
+        // Available on any machine the tests run on (without a bus it
+        // waits on the socket's directory with an empty view), and the
+        // stand-in starts the same module on a scripted bus, so the
+        // contract drives the connected path everywhere.
+        #[cfg(test)]
+        stand_in: Some(media::stand_in),
+    },
     #[cfg(feature = "tray")]
     Spec {
         id: tray::ID,
@@ -620,6 +636,8 @@ pub struct Settings {
     pub network: network::Settings,
     #[cfg(feature = "brightness")]
     pub brightness: brightness::Settings,
+    #[cfg(feature = "media")]
+    pub media: media::Settings,
     #[cfg(feature = "tray")]
     pub tray: tray::Settings,
     /// The interaction keys the config sets, by module id: only modules

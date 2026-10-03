@@ -815,3 +815,69 @@ fn without_popups_there_is_no_tooltip_delay_key() {
         .to_string();
     assert!(error.contains("tooltip-delay"), "{error}");
 }
+
+#[test]
+#[cfg(feature = "media")]
+fn a_media_section_is_read_whole() {
+    use crate::modules::media::DEFAULT_MAX_WIDTH;
+    let modules = read("").unwrap().modules.media;
+    assert_eq!(modules, crate::modules::media::Settings::default());
+    assert!(modules.player.is_none());
+    assert_eq!(modules.max_width, DEFAULT_MAX_WIDTH);
+    let config = read(
+        "left = [\"media\"]\n\
+         [media]\n\
+         player = \"spotify\"\n\
+         max-width = 200\n\
+         margin = 4\n\
+         on-click = \"play-pause\"\n\
+         on-scroll-up = \"previous\"\n\
+         on-scroll-down = \"next\"\n\
+         on-middle-click = { exec = [\"foot\", \"-e\", \"ncmpcpp\"] }\n",
+    )
+    .unwrap();
+    assert!(config.layout.left.contains(&"media"));
+    assert_eq!(config.modules.media.player.as_deref(), Some("spotify"));
+    assert_eq!(config.modules.media.max_width, 200);
+    assert!(!config.modules.bindings_of("media").is_empty());
+    // A dotted name is a name (`org.example.Player`).
+    assert!(read("[media]\nplayer = \"org.example.Player\"\n").is_ok());
+}
+
+#[test]
+#[cfg(feature = "media")]
+fn a_media_section_is_refused_loudly() {
+    for (text, key) in [
+        ("[media]\nplayer = \"\"\n", "media.player"),
+        ("[media]\nplayer = \"has space\"\n", "media.player"),
+        ("[media]\nplayer = \"a/b\"\n", "media.player"),
+        ("[media]\nmax-width = 0\n", "media.max-width"),
+        ("[media]\nmax-width = 4097\n", "media.max-width"),
+        ("[media]\nmargin = 99999\n", "media.margin"),
+        ("[media]\nwhatever = 1\n", "whatever"),
+        // The actions take no number, and there is no `seek`.
+        ("[media]\non-click = \"next 2\"\n", "media.on-click"),
+        ("[media]\non-click = \"seek\"\n", "media.on-click"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+    // Type errors come from the TOML layer and name the key without its
+    // section.
+    for (text, key) in [
+        ("[media]\nplayer = 3\n", "player"),
+        ("[media]\nmax-width = \"wide\"\n", "max-width"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text:?}: {error}");
+    }
+}
+
+/// Without the feature the section is a loud error naming the key, as the
+/// missing flag would be.
+#[test]
+#[cfg(not(feature = "media"))]
+fn a_media_section_without_the_feature_is_refused() {
+    let error = read("[media]\nplayer = \"mpv\"\n").unwrap_err().to_string();
+    assert!(error.contains("player"), "{error}");
+}
