@@ -27,7 +27,7 @@
 //! `maximize` halves below (`client_maximize_request`,
 //! `answer_maximize_request`, `tell_maximized`,
 //! `LayoutState::Maximized`). Fullscreen wins while both hold, on the core
-//! and here: the configure carries both bits, and the size is the output's.
+//! and here: the configure carries fullscreen only, and the size is the output's.
 //!
 //! ## While the session is locked
 //!

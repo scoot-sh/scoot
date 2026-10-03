@@ -492,8 +492,8 @@ on the `top` layer stay drawn, clickable and focusable above it, exactly as
 over any tiled window. Other outputs are untouched: maximized is per output.
 
 **Relation to fullscreen.** Fullscreen wins while both hold: a maximized
-window that goes fullscreen covers the whole output edge to edge (told both
-bits, at the output's size), and leaving fullscreen returns it to maximized,
+window that goes fullscreen covers the whole output edge to edge (told fullscreen
+only, at the output's size), and leaving fullscreen returns it to maximized,
 not to the plain strip. Leaving maximized afterwards restores the layout
 exactly.
 

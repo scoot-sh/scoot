@@ -152,12 +152,12 @@ fn fullscreen_wins_while_set_and_leaving_it_returns_to_maximized() {
     });
     assert_eq!(fixture.rect_of(0), BAR_USABLE);
 
-    // Fullscreen on top: both bits on the wire, the output's size.
+    // Fullscreen on top: fullscreen only on the wire, the output's size.
     let covered = fixture.configured(Step::SetFullscreen {
         window: 0,
         output: None,
     });
-    assert!(covered.fullscreen && covered.maximized, "{covered:?}");
+    assert!(covered.fullscreen && !covered.maximized, "{covered:?}");
     assert_eq!((covered.width, covered.height), (CANVAS, CANVAS));
     fixture.done(Step::Draw {
         window: 0,
