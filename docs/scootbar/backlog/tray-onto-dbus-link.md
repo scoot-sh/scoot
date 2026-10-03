@@ -9,7 +9,8 @@ milestone: "M6"
 
 # Move the tray's bus lifecycle onto dbus::link, and decide on one shared connection
 
-Filed 2026-10-03, by the [media module](resolved/media-module-done.md)'s PR.
+Filed 2026-10-03, by the [media module](resolved/media-module-done.md)'s PR
+(#393).
 Serves **daily-drive**: no behavior changes, one less copy of a state
 machine that has to be right.
 

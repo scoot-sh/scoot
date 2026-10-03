@@ -38,7 +38,7 @@ and the module costs nothing with no player.
 
 ## What landed
 
-PR (title `feat(scootbar): media module, now playing and controls over
+PR #393 (`feat(scootbar): media module, now playing and controls over
 MPRIS`), code commit `ee46b8a47` (`crates/` tree
 `958dcf867f66a17ace383ddcff10abb29a53d2ff`); every number below was taken
 at it, on the dev VM, and the raw runs, scripts and screenshots are in
