@@ -9,8 +9,9 @@
 [layout]
 gap = 18
 # The default thirds and half, new columns at half (index 1), plus a full-width
-# column (index 3) that Super+m jumps to below: a stand-in for maximize until scoot
-# has one (docs/backlog/core/maximize.md). `cycle-column-width` steps through all
+# column (index 3): before maximize landed this was Super+m's stand-in
+# (docs/backlog/resolved/maximize-done.md); Super+m is now the real maximize
+# (`toggle-maximize`). `cycle-column-width` steps through all
 # four; nothing un-does the full width but another width.
 column_widths = [0.3333333333333333, 0.5, 0.6666666666666666, 1.0]
 default_column_width = 1

@@ -1409,7 +1409,8 @@ disappears while something is fullscreen, which is the right default for a
 bar. `overlay` stays over fullscreen windows; ask for it on purpose.
 Fullscreen and maximize are different on purpose: a window that should fill
 the screen *with* the bar visible wants scoot's
-[maximize](../backlog/core/maximize.md), which does not exist yet. There is
+[maximize](../backlog/resolved/maximize-done.md) (`Super+m`,
+`toggle-maximize`). There is
 no `background` layer: that is the wallpaper's.
 
 `--exclusive false` (or `exclusive = false`) sends an exclusive zone of -1:

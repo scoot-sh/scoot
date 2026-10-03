@@ -1,12 +1,35 @@
 ---
 title: "A real maximize: fill the usable area (bar visible), distinct from fullscreen"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # A real maximize
+
+RESOLVED 2026-10-03 (PR #391, squash commit `2dd54058`):
+per-window maximized state in `scoot-core` (`world/maximize.rs`) beside
+fullscreen, filling the output's usable area (bar visible, gaps and ring
+kept) while its column is focused, keeping its strip slot and restoring
+scroll and preset exactly on leave. Fullscreen wins while both hold --
+the wire carries fullscreen only then -- and leaving it returns to
+maximized. Moves (workspace/output/consume/expel), sibling focus, and
+float/unfloat end it; column-width actions are ignored while maximized.
+Floating windows may maximize too. Wired to xdg
+`set_maximized`/`unset_maximized` + `Maximized` configure bit, wlr
+`maximized` bit + requests, `_NET_WM_STATE_MAXIMIZED_*` both atoms both
+ways, IPC `toggle-maximize` / `set-maximized ID on|off` + `maximized`
+snapshot field, and `Super+m`. Docs: `protocols.md`, `configuration.md`,
+`ipc.md`.
+
+Evidence: `cargo test -p scoot-core` 254 passed (30 new maximize tests),
+`scoot-ipc`/`scootctl` pass, `check`/`clippy`/`fmt` clean, CI success on
+`e6c1d34` (Linux compositor, gpu-scanout+xwayland, macOS, scootbar jobs).
+Review found the both-bits vs fullscreen-only mismatch; fixed as
+fullscreen-only (`e6c1d34`) before merge. Original entry below, kept
+verbatim.
 
 Filed 2026-09-29 (scootbar planning). Serves **daily-drive** (a window that
 fills the screen but keeps the bar, which fullscreen cannot do) and **computer

@@ -553,7 +553,8 @@ be revisited.
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set
-- [A real maximize](./core/maximize.md) — medium, filed 2026-09-29: fill the usable area with the bar visible, distinct from fullscreen; today no state exists and `set_maximized` does nothing
+- [A real maximize](./resolved/maximize-done.md)
+  — RESOLVED 2026-10-03 (PR #391): per-window maximized state filling the usable area, bar visible; fullscreen wins while both hold
 - [Per-output scale/mode configuration surface](./resolved/per-output-scale-mode-done.md)
   — RESOLVED 2026-09-29: `[[outputs]]` entries by output name set each
   output's scale (live on reload) and mode (startup and replug), proven on

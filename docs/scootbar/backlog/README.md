@@ -147,6 +147,6 @@ hits the wall:
 [workspace snapshot event](../../backlog/ipc/workspace-snapshot-event.md),
 [output-targeted workspace switch](../../backlog/ipc/workspace-switch-targeted-output.md),
 [`urgent` state bit](../../backlog/protocols/ext-workspace-urgent-state.md),
-[a real maximize](../../backlog/core/maximize.md),
+[a real maximize](../../backlog/resolved/maximize-done.md),
 [persistent workspaces (a decision)](../../backlog/core/persistent-workspaces.md),
 [keyboard layout event](../../backlog/ipc/keyboard-layout-event.md).
