@@ -569,8 +569,8 @@ marshalled by the module's own builders, and busctl verified them
 independently).
 ## M6 tray hardening and one bus lifecycle (measured 2026-10-03)
 
-The [tray hardening](../tray-review-hardening.md) and the tray's move onto
-the shared [`link` lifecycle](../tray-onto-dbus-link.md): a per-pump byte
+The [tray hardening](../resolved/tray-review-hardening-done.md) and the tray's move onto
+the shared [`link` lifecycle](../resolved/tray-onto-dbus-link-done.md): a per-pump byte
 budget while discarding an over-cap message, replies refused when their
 sender is not the callee (measured: `dbus-daemon` 1.16.2 delivers a forged
 reply, `dbus-broker` 37 does not), an unknown-drop event that resolves the
