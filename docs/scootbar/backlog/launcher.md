@@ -25,7 +25,7 @@ Its own small binary in the same shell family as the bar and
   keyboard path (no IME at first, stated).
 - **A dmenu mode**: lines on stdin, the selection on stdout. This is what lets
   the bar's pickers (WiFi networks, power menu, audio sinks) work before
-  [popups](popups.md) exist, with no picker code in the bar.
+  [popups](resolved/popups-done.md) exist, with no picker code in the bar.
 - An application list from `.desktop` entries. Parsing them at every open is
   the cost to measure against caching; the launcher must start and show the
   first frame fast, and hold nothing when closed.

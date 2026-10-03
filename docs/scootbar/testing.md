@@ -55,6 +55,19 @@ read TZif files and `zdump` output checked in under
 `src/modules/clock/fixtures/` (`generate.sh` there remakes them from the
 pinned nixpkgs' tzdata).
 
+## The popup test
+
+`tests/popup.rs` drives the volume popup on headless scoot (and one case on
+sway) against a live PulseAudio-protocol server it runs itself
+(`tests/pulse/`, using the module's own `proto.rs`, so the bar finds it
+through `PULSE_SERVER` and no sound server is needed on the machine). The
+popup is read from the compositor's screenshot (its frame and background are
+known colors), the slider's place is found from its pixels, and the server's
+log says what it was asked. Set `SCOOTBAR_POPUP_SHOTS=DIR` and a failure
+(or `Rig::save`) leaves the screenshot there as a PNG. It needs a scoot built
+from the same tree: a popup's destroy is only redrawn with the fix in
+`crates/scoot/src/compositor/handlers.rs`.
+
 ## What covers what
 
 - **Unit tests**, in a `tests.rs` beside each module: flags and their

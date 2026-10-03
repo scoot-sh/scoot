@@ -31,7 +31,7 @@ hardest test of the module API.
 - States: ethernet up, WiFi connected (SSID, bars), disconnected, VPN interface
   present; a class per state.
 - Click opens a picker: in the interim, a dmenu-style launcher fed from the
-  daemon's scan list; natively via [popups](popups.md) later. Connecting is the
+  daemon's scan list; natively via [popups](popups-done.md) later. Connecting is the
   network daemon's job; the bar only asks it.
 - **Privacy option**: hide the SSID (`show-ssid = false`), because the bar is
   visible in screenshots and to an agent's `query`.

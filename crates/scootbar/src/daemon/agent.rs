@@ -288,6 +288,7 @@ pub(super) fn invoke(
     action: &str,
     arg: Option<i32>,
     output: Option<&str>,
+    #[cfg(feature = "popup")] qh: &wayland_client::QueueHandle<State>,
 ) -> Result<(), String> {
     let placed = &state.content.modules;
     let index = placed
@@ -325,6 +326,17 @@ pub(super) fn invoke(
     let output_view = OutputView {
         name: name.as_deref(),
     };
+    // The output a popup would open on, by identity: names are not unique
+    // (a pre-v4 `wl_output` has none).
+    #[cfg(feature = "popup")]
+    let popup_output = state
+        .outputs
+        .iter()
+        .find(|entry| {
+            entry.objects.scene.section_of(index).is_some()
+                && (output.is_none() || entry.output.info().name.as_deref() == output)
+        })
+        .map(|entry| entry.output.id());
 
     let Some(placed) = state.content.modules.get_mut(index) else {
         return Err(not_placed(id, &[]));
@@ -391,9 +403,7 @@ pub(super) fn invoke(
             action.escape_debug()
         ));
     };
-    let mut effects = Launch {
-        spawner: &mut state.spawner,
-    };
+    let mut effects = Launch::new(&mut state.spawner);
     perform(
         &mut **module,
         revision,
@@ -402,5 +412,36 @@ pub(super) fn invoke(
         steps,
         &mut effects,
     )
-    .map_err(|failure| format!("`{id}` {action}: {failure}"))
+    .map_err(|failure| format!("`{id}` {action}: {failure}"))?;
+    #[cfg(feature = "popup")]
+    if effects.popup {
+        return toggle_popup(state, qh, index, popup_output)
+            .map_err(|why| format!("`{id}` {action}: {why}"));
+    }
+    Ok(())
+}
+
+/// `invoke ID popup`: closes the module's popup if it is open, else opens
+/// it, with no grab (an agent has no input serial to grab with), so it
+/// stays until invoked again or any of the usual ends (`daemon::popup`).
+#[cfg(feature = "popup")]
+fn toggle_popup(
+    state: &mut State,
+    qh: &wayland_client::QueueHandle<State>,
+    module: usize,
+    output: Option<crate::outputs::OutputId>,
+) -> Result<(), String> {
+    let id = output.ok_or("the module is not shown on any output")?;
+    let entry = state
+        .outputs
+        .iter()
+        .find(|entry| entry.output.id() == id)
+        .ok_or("that output is gone")?;
+    if state.popup.is_for(id, module) {
+        state.popup.close();
+        return Ok(());
+    }
+    let member = super::popup::Popups::member_of(&entry.objects.scene, module)
+        .ok_or("the module has nothing on the bar to open from")?;
+    state.open_popup(qh, id, member, None)
 }

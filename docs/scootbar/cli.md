@@ -28,6 +28,7 @@ scootbar daemon --config ~/alt-bar.toml    # another file than the default
 scootbar msg query                         # every placed module's state as JSON
 scootbar msg layout                        # where each module is on screen, for a click
 scootbar msg invoke volume raise 5         # run a module's action, as its click would
+scootbar msg invoke volume popup           # open (or close) the volume slider popup
 scootbar msg subscribe                     # stream changes, one JSON line each
 scootbar msg reload                        # re-read the file and live-apply it
 scootbar msg toggle                        # hide the bar (and release its space), or show it
@@ -139,6 +140,7 @@ margin = 0            # as the clock's
 step = 5              # percent points per scroll notch and per raise, 1 to 50
 max-volume = 100      # the cap a raise stops at: 100 is full scale, to 150 is over-amplification
 on-right-click = { exec = ["pavucontrol"] }   # a mixer, or any command
+on-click = "popup"    # a slider popup under the module, instead of mute: see Popups
 margin = 0            # as the clock's
 
 [microphone]          # the default source, same keys as [volume]
@@ -365,7 +367,10 @@ lists those that are. Every module takes the five
 [interaction keys](#pointer-input). Besides these two, the config can define
 modules of its own by name, a [`button`, a `push` and an `exec`
 module](#button-push-and-exec-modules), each a Cargo feature (`button`,
-`push`, `exec`) on by default. The `icon-image` feature is not a module: it adds the PNG
+`push`, `exec`) on by default. The `popup` feature is not a module either:
+it is the [popup](#popups) code the volume and microphone modules use, on
+by default, and a build without it has none of it and does not bind
+`xdg_wm_base`. The `icon-image` feature adds the PNG
 decoder for [image icons](#icons), and is off by default.
 
 ## Layout
@@ -608,7 +613,10 @@ by default.
 - **A click toggles mute, a scroll raises or lowers**, with no binding at
   all; a binding you set runs instead, as on every module. The module's
   own actions are `raise`, `lower` and `toggle-mute`, none taking a number
-  (`scootbar msg invoke volume raise` raises one step). A scroll's steps
+  (`scootbar msg invoke volume raise` raises one step), `set N`, which sets
+  the level to `N` percent (held to 0 and `max-volume`, whatever number is
+  given), and `popup`, which opens the [slider popup](#popups)
+  (`on-click = "popup"`). A scroll's steps
   arrive through the scroll itself, one step each. There is no default for
   a right click: point `on-right-click` at a mixer (`pavucontrol`, or
   `wpctl`).
@@ -653,8 +661,9 @@ no daemon and no child process: two netlink sockets on the bar's own
   it as one argument). With `show-ssid = false` the picker refuses to
   open instead: the scan list would expose the SSIDs the bar hides. The module's own action is `menu`, taking no
   number (`scootbar msg invoke network menu`); it is refused naming why
-  with no command configured or no networks seen. Native popups replace
-  this picker later (see [popups](backlog/popups.md)).
+  with no command configured or no networks seen. The picker stays the
+  network module's: [popups](#popups) are built, and a native list for it
+  is a [separate entry](backlog/popup-network-list.md).
 - **`interface`** (1 to 15 bytes, a kernel interface name) pins what is
   shown; absent is the default route's, tracked by index so a rename
   keeps it. **`show-ssid`** (default true) hides the SSID when false —
@@ -755,8 +764,9 @@ and drops those that are not `power_supply`. A Cargo feature (`battery`), on by 
 ## Pointer input
 
 Clicks, scrolls and hover, on every module. The bar never takes the keyboard
-(its layer surface asks for no keyboard interactivity, so it cannot disturb
-focus), and **touch is ignored**: the bar binds the seat's pointer only, so
+outside a [popup](#popups)'s lifetime (its layer surface asks for no
+keyboard interactivity, so it cannot disturb focus; a popup that grabbed
+takes it, for Escape, while it is open), and **touch is ignored**: the bar binds the seat's pointer only, so
 a touch screen's taps reach nothing here (until a touch design exists,
 they are not translated into clicks).
 
@@ -857,6 +867,84 @@ it did before there was any input. A reload that adds or removes bindings
 takes or drops it. A motion event stores two numbers; no pointer event,
 hover repaint or module action allocates (tests count the allocations).
 Launching an `exec` command does, as any process spawn must.
+
+## Popups
+
+A module's **popup** is a small panel drawn in an `xdg_popup` parented to the
+bar's layer surface (`zwlr_layer_surface_v1.get_popup`), opened under the
+module and gone when closed: nothing of it exists while it is not open, so
+a bar that never opens one costs what it did before. The `popup` Cargo
+feature (on by default) is the code; a build without it has none of it.
+
+**Opt-in.** Nothing opens a popup until the config binds one. The first
+consumer is the volume module (and `microphone`, which shares its code):
+
+```toml
+[volume]
+on-click = "popup"      # the slider, instead of the default mute
+```
+
+Any of the click triggers takes it (`on-right-click = "popup"` keeps the
+click for mute); a scroll cannot (it carries no input serial the popup grab
+needs), and says so on stderr. `scootbar msg invoke volume popup` opens it
+too, **with no grab** (an agent has no input event to grab with): it stays
+until invoked again, or any of the endings below, and takes no keyboard.
+The network module's picker is unchanged: `menu-command` and the dmenu-style
+launcher are still how it works.
+
+- **What the volume popup shows**: the device's name and level (`Built-in
+  Audio  49%`), a slider from 0 to `max-volume`, and a Mute (Unmute) button.
+  Pressing the slider sets that level and dragging it follows the pointer, one
+  `set N` action per new value (the module coalesces a fast drag into the
+  latest, one request in flight); the button runs `toggle-mute` on release.
+  It follows the module, so a level changed elsewhere moves the slider, and it
+  is drawn in the bar's own colors (the `bg`, `fg`, `accent` and `dim`
+  tokens, one pixel frame) at the output's real scale.
+- **Opened on the press, not the release.** The one exception to "clicks
+  fire on release" ([pointer input](#pointer-input)): a compositor may refuse
+  a popup grab whose serial is not a button still held (the protocol allows
+  it, and some compositors check), and a refused grab never sees a click
+  outside or Escape. The release after it does nothing. scoot and sway were
+  measured to accept either, so on those the choice is invisible.
+- **Where it goes.** Anchored to the module's span on the bar, centered under
+  it (above, on a bottom bar), and the compositor slides it along the bar and
+  flips it across it where the output's edge would cut it.
+- **It closes** on: a click anywhere outside it (the compositor's `popup_done`),
+  **Escape**, a press on the bar (so a second click on the module toggles it,
+  and a click on another module closes it without acting), its module
+  having nothing to show (the sound server went away) or leaving the bar, its
+  output being unplugged, the bar being hidden (`msg hide`) or made again,
+  a scale change, a `reload`, and, for a popup that grabbed, the session
+  locking (scoot dismisses popup grabs on lock; one opened with `invoke` has
+  no grab and is not dismissed by it, and is not drawn over the lock screen). Every one leaves the bar running and
+  says nothing on stderr.
+- **The keyboard.** The bar's layer surface asks for no keyboard and still
+  does not. A `wl_keyboard` is taken from the seat **only while a popup that
+  grabbed is open**, to hear Escape (the grab is what gives the popup the
+  keyboard), and released with it. Keybindings of the compositor still win.
+- **Limits.** One popup at a time. A drag ends when the pointer leaves the
+  popup (the compositor's popup grab moves the pointer's focus off it, so
+  nothing more of the drag arrives); past the slider's ends but still over the
+  popup it clamps to them. No keyboard navigation but Escape. A compositor
+  without `xdg_wm_base` refuses `popup` (said on stderr, or to `invoke`);
+  the global is bound while some binding in the config names `popup`, and
+  by an `invoke` for a bar with none; that one stays bound until the next
+  `reload` (the binds are re-decided on a reload and on registry events, not
+  when the popup closes). A bar that never opts in and never invokes binds
+  nothing new, and a click is the mute it always was.
+- **Cost.** Opening and closing are the only costs: one surface, a
+  positioner, two `wl_shm` buffers made on demand and dropped on close, and a
+  keyboard. An open popup that nothing changes makes no wakeups and no system
+  calls; redraws are one per turn of the loop, however many pointer motions
+  arrived, and the popup's own code (content refill, layout, pointer state,
+  paint) allocates nothing once it is open. A slider drag still goes through
+  the volume module's `set` action, which builds one request per distinct value
+  (coalesced to one in flight, as a scroll does). Measured in [the
+  resource ratchet](backlog/resolved/popups-done.md#evidence).
+- **Writing one** is a module's [`Module::popup`](../../crates/scootbar/src/modules/mod.rs)
+  (the content: text, a slider, buttons; a list is a column of buttons) and
+  the actions its widgets name, which are ordinary module actions, so
+  everything a popup does is something a binding or `invoke` could do.
 
 ## Button, push and exec modules
 
@@ -1180,7 +1268,8 @@ Every token has a `[colors]` key; `bg` and `fg` are `--background` and
   beside it, never under it. The zone is set before the bar's first frame
   is drawn: on scoot, windows move out of the way once, when the bar
   connects, and do not jump again when it draws.
-- **It takes no keyboard focus.** Pointer clicks on the workspaces
+- **It takes no keyboard focus** (but for the Escape key of an open
+  [popup](#popups), for as long as it is open). Pointer clicks on the workspaces
   module's numbers switch to them ([above](#workspaces)); anywhere else
   clicks do nothing.
 - **It draws at each output's real device pixels**, fractional scales

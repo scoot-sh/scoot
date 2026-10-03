@@ -15,7 +15,9 @@ composable shell.
 > [first step](backlog/resolved/pointer-and-interactions-done.md)), and
 > the config can define a `button`, a `push` target for `scootbar msg set`
 > and an `exec` module that streams a command's output, with no Rust
-> ([how](cli.md#button-push-and-exec-modules)). That is M1's
+> ([how](cli.md#button-push-and-exec-modules)). A module can open a popup
+> under itself, drawn from its own state: the volume slider is the first
+> ([popups](cli.md#popups)). That is M1's
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its
 > [module API and clock](backlog/resolved/module-api-and-clock-done.md),
 > and its [Nix package](backlog/resolved/nix-package-done.md), which

@@ -40,6 +40,8 @@ mod canvas;
 mod events;
 mod input;
 mod listen;
+#[cfg(feature = "popup")]
+mod popup;
 mod respond;
 mod surfaces;
 #[cfg(feature = "window-title")]
@@ -262,6 +264,10 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 listening.rest(Instant::now());
             }
         }
+        // The popup first: a module whose popup is gone closes it before
+        // anything else is drawn, and a changed module redraws it.
+        #[cfg(feature = "popup")]
+        wayland.state.pump_popup(&wayland.qh);
         draw(&mut wayland.state, &wayland.qh);
         // What changed, to the subscribers (one branch with none).
         wayland.state.pump_events(&mut server, &mut now);
@@ -420,9 +426,7 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
                 };
                 let id = placed.id;
                 let output = OutputView { name: None };
-                let mut effects = input::Launch {
-                    spawner: &mut *spawner,
-                };
+                let mut effects = input::Launch::new(&mut *spawner);
                 if let Err(failure) = crate::action::perform(
                     &mut *placed.module,
                     &mut placed.revision,

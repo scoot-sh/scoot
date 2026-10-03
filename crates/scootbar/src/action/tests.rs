@@ -42,6 +42,7 @@ impl Module for Probe {
 struct Counting {
     execs: Vec<Vec<String>>,
     scoots: Vec<ScootAction>,
+    popups: u32,
     fail: bool,
 }
 
@@ -56,6 +57,10 @@ impl Effects for Counting {
     }
     fn scoot(&mut self, action: ScootAction) -> Result<(), String> {
         self.scoots.push(action);
+        Ok(())
+    }
+    fn popup(&mut self) -> Result<(), String> {
+        self.popups += 1;
         Ok(())
     }
 }
@@ -262,4 +267,47 @@ fn carrying_out_a_module_action_allocates_nothing() {
     });
     assert_eq!(allocations, 0);
     assert_eq!(probe.invoked.len(), 100);
+}
+
+#[test]
+fn the_popup_action_is_the_bars_to_carry_out_not_the_modules() {
+    let mut probe = Probe::default();
+    let mut revision = 7;
+    let mut effects = Counting::default();
+    let action = Action::Module(ModuleAction::new(POPUP, None));
+    perform(&mut probe, &mut revision, &OUT, &action, None, &mut effects).unwrap();
+    assert_eq!(effects.popups, 1);
+    // The module never saw it, and nothing else went out.
+    assert!(probe.invoked.is_empty());
+    assert_eq!(revision, 7);
+    assert!(effects.execs.is_empty() && effects.scoots.is_empty());
+}
+
+/// Effects that refuse a popup, as the default does (a build without
+/// popups, a surface-less test): the refusal is the failure.
+struct NoPopups;
+
+impl Effects for NoPopups {
+    fn exec(&mut self, _: &[String]) -> Result<(), String> {
+        Ok(())
+    }
+    fn scoot(&mut self, _: ScootAction) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[test]
+fn effects_with_no_popups_refuse_the_action_by_default() {
+    let mut probe = Probe::default();
+    let mut revision = 0;
+    let refused = perform(
+        &mut probe,
+        &mut revision,
+        &OUT,
+        &Action::Module(ModuleAction::new(POPUP, None)),
+        None,
+        &mut NoPopups,
+    )
+    .unwrap_err();
+    assert_eq!(refused.to_string(), "this build has no popups");
 }

@@ -29,6 +29,14 @@ use crate::modules::{InvokeError, Module, OutputView, Update};
 #[cfg(test)]
 mod tests;
 
+/// The module action that opens a module's popup (`on-click = "popup"`): a
+/// module whose registry line lists it answers [`Module::popup`], and the
+/// bar, not the module, carries the action out ([`perform`] hands it to
+/// [`Effects::popup`]), because a popup is a surface the bar owns.
+///
+/// [`Module::popup`]: crate::modules::Module::popup
+pub const POPUP: &str = "popup";
+
 /// The most arguments an `exec` command line has.
 pub const MAX_EXEC_ARGS: usize = 32;
 /// The longest any one argument of an `exec` command line is, in bytes.
@@ -148,6 +156,15 @@ impl Bindings {
         }
     }
 
+    /// Whether some trigger is bound to the module action `name`.
+    #[cfg(feature = "popup")]
+    pub fn binds_module_action(&self, name: &str) -> bool {
+        self.0
+            .iter()
+            .flatten()
+            .any(|action| matches!(action, Action::Module(named) if named.name == name))
+    }
+
     /// Whether the config binds nothing.
     pub fn is_empty(&self) -> bool {
         self.0.iter().all(Option::is_none)
@@ -163,6 +180,12 @@ pub trait Effects {
     fn exec(&mut self, argv: &[String]) -> Result<(), String>;
     /// Sends `action` to scoot.
     fn scoot(&mut self, action: ScootAction) -> Result<(), String>;
+    /// Opens (or, when it is open, closes) the popup of the module the
+    /// action is for ([`POPUP`]). The default refuses: a build without
+    /// popups, or a test that has no surface.
+    fn popup(&mut self) -> Result<(), String> {
+        Err("this build has no popups".to_owned())
+    }
 }
 
 /// Why an action did not run: said on stderr by the caller.
@@ -195,6 +218,7 @@ pub fn perform(
     effects: &mut dyn Effects,
 ) -> Result<(), Failed> {
     match action {
+        Action::Module(named) if named.name == POPUP => effects.popup().map_err(Failed::Effect),
         Action::Module(named) => {
             match module
                 .invoke(output, named, steps.unwrap_or(1))

@@ -1153,7 +1153,21 @@ macro_rules! window_title_help {
     };
 }
 // What the volume module (and its microphone twin) is, for the help page.
-#[cfg(feature = "volume")]
+#[cfg(all(feature = "volume", feature = "popup"))]
+macro_rules! volume_help {
+    () => {
+        "Volume (the volume module):
+    the default sink's level in percent, dimmed while muted, with an icon
+    for the level (muted, low, medium, high); a scroll changes it by
+    volume.step percent (default 5) up to volume.max-volume (default 100,
+    full scale), a click toggles mute, a right click runs the mixer
+    command the config binds; bind a click to \"popup\" (on-click =
+    \"popup\") for a slider under the module instead. Nothing is shown
+    where no sound server runs
+"
+    };
+}
+#[cfg(all(feature = "volume", not(feature = "popup")))]
 macro_rules! volume_help {
     () => {
         "Volume (the volume module):

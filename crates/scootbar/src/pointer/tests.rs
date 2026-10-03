@@ -42,6 +42,25 @@ fn a_press_and_release_on_the_same_module_is_a_click() {
 }
 
 #[test]
+fn a_press_says_which_trigger_it_armed_and_none_when_it_armed_nothing() {
+    let (mut pointer, a, _) = focused();
+    let here = target(a, 0);
+    assert_eq!(pointer.press(LEFT, Some(here)), Some(Trigger::Click));
+    // A second button while one is held: a chord, nothing armed.
+    assert_eq!(pointer.press(RIGHT, Some(here)), None);
+    pointer.release(LEFT, Some(here));
+    pointer.release(RIGHT, Some(here));
+    // Over no module, or a button the bar does not answer.
+    assert_eq!(pointer.press(LEFT, None), None);
+    pointer.release(LEFT, None);
+    assert_eq!(pointer.press(0x113, Some(here)), None);
+    assert_eq!(
+        pointer.press(MIDDLE, Some(here)),
+        Some(Trigger::MiddleClick)
+    );
+}
+
+#[test]
 fn each_button_is_its_own_trigger() {
     let (mut pointer, a, _) = focused();
     let here = target(a, 0);

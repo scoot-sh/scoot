@@ -19,7 +19,7 @@ BlueZ is D-Bus: `org.bluez` objects with `PropertiesChanged` signals, through th
   device's name (bounded and sanitized text, like
   [window titles](window-title-module.md)).
 - Click toggles power; picking a device to connect is a menu, through the
-  launcher's dmenu mode or [popups](popups.md), never the bar's own protocol code.
+  launcher's dmenu mode or [popups](resolved/popups-done.md), never the bar's own protocol code.
 - `Unavailable` and zero cost with no adapter or no BlueZ; a device that vanishes
   mid-connect is not an error.
 - Battery level of a connected device only if BlueZ reports it; do not poll.

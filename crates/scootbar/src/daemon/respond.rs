@@ -102,7 +102,15 @@ impl Handler for Responder<'_> {
                 action,
                 arg,
                 output,
-            } => match agent::invoke(self.state, &id, &action, arg, output.as_deref()) {
+            } => match agent::invoke(
+                self.state,
+                &id,
+                &action,
+                arg,
+                output.as_deref(),
+                #[cfg(feature = "popup")]
+                self.qh,
+            ) {
                 Ok(()) => write_reply(out, &Reply::Ok),
                 Err(message) => write_reply(out, &Reply::Error { message: &message }),
             },

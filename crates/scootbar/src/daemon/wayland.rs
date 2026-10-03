@@ -10,6 +10,7 @@
 //! | `wp_fractional_scale_manager_v1` | optional, with `wp_viewporter`: device-pixel sizes at fractional scales |
 //! | `wl_output` (each) | bound as they appear, released as they go |
 //! | `ext_workspace_manager_v1` | optional, bound only while the workspaces module is placed (`binds`): without it the module stays empty (said on stderr when placed) |
+//! | `xdg_wm_base` | optional, bound only while a binding names `popup` (`binds`), or for one popup an `invoke` opens: without it a popup action is refused, saying so |
 //! | `wl_seat` | optional, bound only while a placed module takes pointer input (`binds`: a binding in the config, or the workspaces click): without it the pointer cannot reach the bar, so no click, scroll or hover (said on stderr when a module needs it) |
 //!
 //! Without the two optional ones the bar is drawn at the integer scale
@@ -91,6 +92,11 @@ pub struct Globals {
     /// reaches the bar. The `wl_pointer` itself is taken only while a
     /// module needs one (`input`).
     pub seat: Option<WlSeat>,
+    /// Bound only while a binding names `popup` (`binds`), or for one popup
+    /// an `invoke` opens, and only if the compositor offers it: without it no
+    /// popup opens.
+    #[cfg(feature = "popup")]
+    pub xdg: Option<wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase>,
 }
 
 /// The event-dispatch state.
@@ -122,6 +128,13 @@ pub struct State {
     pub pointer: Option<WlPointer>,
     /// Whether the seat's capabilities include a pointer.
     pub seat_pointer: bool,
+    /// Whether they include a keyboard: which a popup that grabbed takes,
+    /// for Escape, while it is open (`popup`).
+    #[cfg(feature = "popup")]
+    pub seat_keyboard: bool,
+    /// The open popup, if any (`popup`).
+    #[cfg(feature = "popup")]
+    pub popup: super::popup::Popups,
     /// What the pointer is doing (`crate::pointer`).
     pub input: crate::pointer::Pointer,
     /// The commands bindings launched, and reaped.
@@ -197,6 +210,8 @@ impl Wayland {
                 viewporter,
                 fractional_scale,
                 seat: None,
+                #[cfg(feature = "popup")]
+                xdg: None,
             },
             outputs: Outputs::default(),
             placement,
@@ -209,6 +224,10 @@ impl Wayland {
             binds: super::binds::Binds::new(list.registry().clone()),
             pointer: None,
             seat_pointer: false,
+            #[cfg(feature = "popup")]
+            seat_keyboard: false,
+            #[cfg(feature = "popup")]
+            popup: super::popup::Popups::default(),
             input: crate::pointer::Pointer::default(),
             spawner: crate::spawn::Spawner::default(),
             warned: super::input::Throttle::default(),

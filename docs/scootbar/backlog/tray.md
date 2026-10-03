@@ -3,7 +3,7 @@ title: "System tray (StatusNotifierItem)"
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "dbus-client, popups (tray menus)"
+blocked: "dbus-client"
 milestone: "M6"
 ---
 
@@ -14,7 +14,7 @@ here.
 
 A `tray` module implementing the StatusNotifierWatcher and host side over
 D-Bus: list items, draw their icons, click for the primary action, and show
-an item's menu (the DBusMenu protocol) through [popups](popups.md).
+an item's menu (the DBusMenu protocol) through [popups](resolved/popups-done.md).
 
 ## Why this is medium, and what the research says
 

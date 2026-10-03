@@ -68,6 +68,8 @@ mod fuzz;
 #[cfg(test)]
 pub(crate) mod fake;
 #[cfg(test)]
+mod set_tests;
+#[cfg(test)]
 mod tests;
 
 use proto::{Bounded, Change, DeviceInfo, Event, Kind};
@@ -77,9 +79,10 @@ pub const ID: &str = "volume";
 /// The microphone variant's id: the default source's level and mute.
 pub const MIC_ID: &str = "microphone";
 
-/// The actions a binding may name (`raise`, `lower`, `toggle-mute`), and
-/// what `scootbar msg invoke` takes. None takes a number: a scroll's steps
-/// arrive through the scroll itself, and one raise is one step.
+/// The actions a binding may name (`raise`, `lower`, `toggle-mute`, `set`,
+/// `popup`), and what `scootbar msg invoke` takes. Only `set` takes a number
+/// (a percent): a scroll's steps arrive through the scroll itself, and one
+/// raise is one step.
 pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "raise",
@@ -91,6 +94,17 @@ pub const ACTIONS: &[ActionSpec] = &[
     },
     ActionSpec {
         name: "toggle-mute",
+        arg: ArgKind::None,
+    },
+    ActionSpec {
+        name: "set",
+        arg: ArgKind::Required,
+    },
+    // The slider popup (`on-click = "popup"`): the bar carries it out, the
+    // module only draws it (`Module::popup`).
+    #[cfg(feature = "popup")]
+    ActionSpec {
+        name: crate::action::POPUP,
         arg: ArgKind::None,
     },
 ];
@@ -1102,11 +1116,10 @@ impl Module for Volume {
         action: &ModuleAction,
         steps: u32,
     ) -> Result<Update, InvokeError> {
-        if action.arg.is_some() {
-            return Err(InvokeError::NoArg);
-        }
-        match &*action.name {
-            "raise" | "lower" | "toggle-mute" => {}
+        match (&*action.name, action.arg) {
+            ("raise" | "lower" | "toggle-mute", None) | ("set", Some(_)) => {}
+            ("raise" | "lower" | "toggle-mute", Some(_)) => return Err(InvokeError::NoArg),
+            ("set", None) => return Err(InvokeError::NeedsArg),
             _ => return Err(InvokeError::Unknown),
         }
         if self.live.is_none() {
@@ -1124,6 +1137,23 @@ impl Module for Volume {
                 let target = base
                     .saturating_add(steps.saturating_mul(self.step_raw))
                     .min(self.max_raw);
+                if Some(target) == self.live.as_ref().and_then(|live| live.sent_volume)
+                    || (target == base
+                        && self
+                            .live
+                            .as_ref()
+                            .is_some_and(|live| live.sent_volume.is_none()))
+                {
+                    return Ok(Update::Unchanged);
+                }
+                self.set_volume(target);
+                Ok(Update::Unchanged)
+            }
+            "set" => {
+                // A whole percent, held to `0..=max-volume`.
+                let percent = u32::try_from(action.arg.unwrap_or(0)).unwrap_or(0);
+                let base = self.base_volume().unwrap_or(0);
+                let target = proto::from_percent(percent).min(self.max_raw);
                 if Some(target) == self.live.as_ref().and_then(|live| live.sent_volume)
                     || (target == base
                         && self
@@ -1164,6 +1194,31 @@ impl Module for Volume {
 
     /// A click mutes with no binding at all.
     fn handles_input(&self) -> bool {
+        true
+    }
+
+    /// The popup: what the device is and its level as a slider (to
+    /// `max-volume`), and a button for the mute. Nothing while there is no
+    /// device to change, which also closes an open popup (the server went).
+    #[cfg(feature = "popup")]
+    fn popup(&self, _output: &OutputView<'_>, content: &mut crate::popup::Content) -> bool {
+        let Some(device) = self.live.as_ref().and_then(|live| live.device.as_ref()) else {
+            return false;
+        };
+        let percent = proto::to_percent(device.level());
+        let name = if device.description.as_str().is_empty() {
+            device.name.as_str()
+        } else {
+            device.description.as_str()
+        };
+        content.text(format_args!("{name}  {percent}%"));
+        content.slider(percent, proto::to_percent(self.max_raw), "set");
+        content.button(
+            format_args!("{}", if device.muted { "Unmute" } else { "Mute" }),
+            "toggle-mute",
+            None,
+            false,
+        );
         true
     }
 }

@@ -33,6 +33,8 @@ mod outputs;
 mod paint;
 mod pointer;
 mod policy;
+#[cfg(feature = "popup")]
+mod popup;
 mod print;
 mod region;
 mod render;
