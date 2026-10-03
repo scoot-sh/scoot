@@ -744,11 +744,11 @@ and drops those that are not `power_supply`. A Cargo feature (`battery`), on by 
 - **Cost.** The uevent socket always (one wake per kernel event, however
   many datagrams arrive, whatever their subsystem: a storm is drained and
   re-read once per turn), and a timerfd re-reading once a minute only
-  while discharging. Only one case was measured: on the Asahi M2 on AC at
-  full charge, 90 seconds saw zero uevents of any kind. Whether capacity
-  steps while discharging, or an unplug, emit uevents is unmeasured, so
-  the discharge timer is there to be safe, not because silence was
-  observed. Charging, full and absent batteries own no timer. Sysfs files are read once each into fixed buffers; a
+  while discharging. Measured on the Asahi M2: plug and unplug each emit a
+  burst of `power_supply` uevents, and capacity steps while discharging
+  emit none (five steps over 62 minutes, zero uevents), so the discharge
+  timer is what sees them. Other drivers may differ. Charging, full and
+  absent batteries own no timer. Sysfs files are read once each into fixed buffers; a
   capacity past 100 is clamped, an unparsable one skips its battery,
   and a removed battery is one line on stderr, not one per wake.
 
