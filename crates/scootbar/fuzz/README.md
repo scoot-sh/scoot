@@ -1,8 +1,9 @@
 # scootbar's fuzz targets
 
-Four `cargo fuzz` targets over the parsers of outside input: two the
-clock's, one the update payload of the `exec` and `push` modules, and one
-the volume module's PulseAudio-protocol frames. Any
+Six `cargo fuzz` targets over the parsers of outside input: two the
+clock's, one the update payload of the `exec` and `push` modules, one
+the volume module's PulseAudio-protocol frames, one the network module's
+netlink messages, and one the D-Bus client's messages. Any
 panic is a finding: the bar's release profile is `panic = "abort"`, so a
 panic there kills the bar.
 
@@ -30,6 +31,16 @@ compiles `class.rs` and `payload.rs` by `#[path]`, and uses `serde_json`
   `#[path]`; the seed corpus is frames in the shapes the module's own fake
   server speaks, plus real replies captured from pipewire-pulse (see the
   volume module's entry).
+
+- **`dbus`**: arbitrary bytes as D-Bus messages on a stream (the session
+  bus's socket). Framing must accept, wait or refuse without a panic; every
+  framed message's header must parse or refuse; the body is walked against
+  its declared signature and as each shape the tray reads (an item's
+  `GetAll` through `read_item_props`, the same function the module calls,
+  pixmap lists, name lists, owner changes); the writer is round-tripped on
+  input-derived values. It compiles `src/dbus/proto.rs` by `#[path]`; the
+  seed corpus is frames in the shapes the tray's fake bus speaks, plus a
+  `GetAll` marshalled by sd-bus (`src/dbus/fixtures/README.md`).
 
 The first two compile scootbar's own `src/modules/clock/tzif.rs` and `format.rs` by
 `#[path]`, unchanged (`fuzz_targets/common.rs`); they use nothing but

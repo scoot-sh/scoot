@@ -24,6 +24,8 @@ mod color;
 mod config;
 mod control;
 mod daemon;
+#[cfg(feature = "tray")]
+mod dbus;
 mod density;
 mod font;
 mod icon;

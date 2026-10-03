@@ -381,6 +381,14 @@ fn the_help_matches_the_build() {
     );
     assert_eq!(DAEMON_HELP.contains("brightness.step"), has_brightness);
     assert_eq!(DAEMON_HELP.contains("brightness"), has_brightness);
+    let has_tray = crate::modules::find("tray").is_some();
+    assert_eq!(DAEMON_HELP.contains("the tray module"), has_tray);
+    assert_eq!(DAEMON_HELP.contains("StatusNotifierItem"), has_tray);
+    assert_eq!(DAEMON_HELP.contains("tray"), has_tray);
+    // Tray sorts after network, so with both the list names it there.
+    if has_network && has_tray {
+        assert!(DAEMON_HELP.contains("network, tray"));
+    }
     for flag in super::FLAGS {
         assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
     }
