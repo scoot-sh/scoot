@@ -43,6 +43,7 @@ use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::test_support::{self, Harness, wait_for};
 
 mod drawing;
+mod maximize;
 mod neighbours;
 mod occlusion;
 #[cfg(feature = "gpu-scanout")]
@@ -126,6 +127,7 @@ struct Configured {
     width: i32,
     height: i32,
     fullscreen: bool,
+    maximized: bool,
     /// Whether it carried all four `tiled_*` states (xdg_toplevel v2+).
     tiled: bool,
     /// Whether it carried `activated`.
@@ -150,6 +152,11 @@ enum Step {
     },
     /// `xdg_toplevel.unset_fullscreen`, then wait for the answer.
     UnsetFullscreen { window: usize },
+    /// `xdg_toplevel.set_maximized` on the `window`-th toplevel, then wait
+    /// for the configure that answers. Does not ack it.
+    SetMaximized { window: usize },
+    /// `xdg_toplevel.unset_maximized`, then wait for the answer.
+    UnsetMaximized { window: usize },
     /// Ack the newest configure and draw at the size it names.
     Draw { window: usize, color: [u8; 4] },
     /// Ack the newest configure, then draw a `width`x`height` buffer
@@ -456,6 +463,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, Index> for TestClient {
                     .any(|state| state == wanted as u32)
             };
             let fullscreen = has(xdg_toplevel::State::Fullscreen);
+            let maximized = has(xdg_toplevel::State::Maximized);
             let activated = has(xdg_toplevel::State::Activated);
             let tiled = [
                 xdg_toplevel::State::TiledLeft,
@@ -470,6 +478,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, Index> for TestClient {
                 width,
                 height,
                 fullscreen,
+                maximized,
                 tiled,
                 activated,
             };
@@ -790,6 +799,30 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::UnsetFullscreen { window } => {
                 let seen = client.configures[window].len();
                 windows[window].toplevel.unset_fullscreen();
+                let configured = wait_for_configure(&mut queue, &mut client, window, seen)?;
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Configured(
+                    client.configures[window]
+                        .last()
+                        .copied()
+                        .unwrap_or(configured),
+                )
+            }
+            Step::SetMaximized { window } => {
+                let seen = client.configures[window].len();
+                windows[window].toplevel.set_maximized();
+                let configured = wait_for_configure(&mut queue, &mut client, window, seen)?;
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Configured(
+                    client.configures[window]
+                        .last()
+                        .copied()
+                        .unwrap_or(configured),
+                )
+            }
+            Step::UnsetMaximized { window } => {
+                let seen = client.configures[window].len();
+                windows[window].toplevel.unset_maximized();
                 let configured = wait_for_configure(&mut queue, &mut client, window, seen)?;
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Configured(

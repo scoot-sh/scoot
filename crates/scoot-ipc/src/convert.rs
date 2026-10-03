@@ -50,6 +50,11 @@ impl From<Action> for scoot_core::Action {
                 id: scoot_core::WindowId(id),
                 fullscreen,
             },
+            Action::ToggleMaximize => Self::ToggleMaximize,
+            Action::SetMaximized { id, maximized } => Self::SetMaximized {
+                id: scoot_core::WindowId(id),
+                maximized,
+            },
             Action::ToggleFloating => Self::ToggleFloating,
             Action::SetFloating { id, floating } => Self::SetFloating {
                 id: scoot_core::WindowId(id),
@@ -135,6 +140,20 @@ mod tests {
             scoot_core::Action::SetFullscreen {
                 id: scoot_core::WindowId(7),
                 fullscreen: true
+            }
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::ToggleMaximize),
+            scoot_core::Action::ToggleMaximize
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::SetMaximized {
+                id: 7,
+                maximized: true
+            }),
+            scoot_core::Action::SetMaximized {
+                id: scoot_core::WindowId(7),
+                maximized: true
             }
         );
         assert_eq!(

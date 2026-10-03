@@ -56,7 +56,8 @@ impl World {
     /// next [`World::arrange`] will put it.
     ///
     /// `None` for an unknown or tiled window, one waiting for an output, and
-    /// a fullscreen one (which is placed over its whole output, not here).
+    /// a fullscreen or maximized one (which is placed over its whole output
+    /// or usable area, not here).
     /// Says nothing about whether the window shows; `arrange` decides that.
     /// Allocation-free: one walk of the tree to find the window, and the
     /// placement arithmetic.
@@ -72,11 +73,11 @@ impl World {
         })
     }
 
-    /// Where a floating, non-fullscreen window is: the windows a move or a
+    /// Where a floating, non-fullscreen non-maximized window is: the windows a move or a
     /// resize applies to.
     fn floating_location(&self, id: WindowId) -> Option<Location> {
         let window = self.windows.get(&id)?;
-        if window.floating.is_none() || window.fullscreen.is_some() {
+        if window.floating.is_none() || window.fullscreen.is_some() || window.maximized.is_some() {
             return None;
         }
         let loc = self.locate(id)?;

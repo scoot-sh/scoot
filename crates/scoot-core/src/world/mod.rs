@@ -3,7 +3,8 @@
 //! The public surface is spread over a few files by concern:
 //! [`World::handle_event`] lives in `events.rs`, [`World::handle_action`] in
 //! `actions.rs`, and [`World::arrange`] in `arrange.rs`. The tree they all
-//! operate on is in `tree.rs`, fullscreen's rules in `fullscreen.rs` and
+//! operate on is in `tree.rs`, fullscreen's rules in `fullscreen.rs`,
+//! maximized's in `maximize.rs` and
 //! floating's in `floating.rs` (moving and resizing in `floating_move.rs`,
 //! the drawing order in `floating_order.rs`).
 
@@ -14,6 +15,7 @@ mod floating;
 mod floating_move;
 mod floating_order;
 mod fullscreen;
+mod maximize;
 mod reconnect;
 mod tree;
 
@@ -336,7 +338,9 @@ impl World {
     ///
     /// A fullscreen window leaves fullscreen on the way (see
     /// [`Action::ToggleFullscreen`](crate::Action::ToggleFullscreen)); an
-    /// ignored move leaves it alone.
+    /// ignored move leaves it alone. A maximized window leaves maximized on
+    /// the way too (see
+    /// [`Action::ToggleMaximize`](crate::Action::ToggleMaximize)).
     fn move_focused_window_to_output(&mut self, target: OutputId) {
         let Some(t) = self.output_index(target) else {
             return;
@@ -351,6 +355,7 @@ impl World {
             return;
         }
         self.drop_fullscreen(id);
+        self.drop_maximize(id);
         let ws = &self.outputs[loc.output].workspaces[loc.workspace];
         let preset = match loc.slot {
             Slot::Tiled { column, .. } => Some(ws.columns[column].preset),

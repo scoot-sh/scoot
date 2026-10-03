@@ -65,11 +65,16 @@ impl World {
                 if let Some(loc) = self.locate(id) {
                     self.focus_location(loc);
                     self.settle_fullscreen();
+                    self.settle_maximize();
                 }
                 false
             }
             Event::FullscreenRequested { id, fullscreen } => {
                 self.set_fullscreen(id, fullscreen);
+                false
+            }
+            Event::MaximizeRequested { id, maximized } => {
+                self.set_maximize(id, maximized);
                 false
             }
             Event::FloatingRequested { id, floating, size } => {
@@ -319,9 +324,10 @@ impl World {
     /// (which re-scrolls the workspace) or a moved floating window. The
     /// shell applies exactly then, never per frame unconditionally.
     ///
-    /// Not while the window is fullscreen: a frame sized for the whole output
-    /// says nothing about how narrow the window can be in its column, and
-    /// learning from one would widen that column for good once it leaves.
+    /// Not while the window is fullscreen or maximized: a frame sized for the
+    /// whole output (or the usable area) says nothing about how narrow the
+    /// window can be in its column, and learning from one would widen that
+    /// column for good once it leaves.
     ///
     /// Nor while it floats: a floating window's frame is the size it chose,
     /// not a refusal to take one the strip asked for. What it drew is kept
@@ -340,14 +346,15 @@ impl World {
             .map(|floating| (window.drawn, floating.request));
         window.drawn = drawn;
         if window.floating.is_some() {
-            // A fullscreen frame is the output's size by design, not a
-            // window too large for its usable area.
-            if window.fullscreen.is_none() {
+            // A fullscreen or maximized frame is the output's (or usable
+            // area's) size by design, not a window too large for its usable
+            // area.
+            if window.fullscreen.is_none() && window.maximized.is_none() {
                 self.floating_frame(id, actual);
             }
             return self.floating_size(id) != before;
         }
-        if self.is_fullscreen(id) {
+        if self.is_fullscreen(id) || self.is_maximized(id) {
             return false;
         }
         let Some(loc) = self.locate(id) else {

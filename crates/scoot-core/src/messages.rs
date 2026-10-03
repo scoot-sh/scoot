@@ -84,6 +84,23 @@ pub enum Event {
         id: WindowId,
         fullscreen: bool,
     },
+    /// The window asked to enter (`true`) or leave (`false`) maximized:
+    /// on Wayland, the client's own `xdg_toplevel.set_maximized` /
+    /// `unset_maximized`. Also how a platform reports that a window's
+    /// request no longer stands (Wayland discards every toplevel state when
+    /// a window unmaps).
+    ///
+    /// An event rather than an action for the same reason as
+    /// [`Event::FullscreenRequested`]: it is about the window, not an intent
+    /// from a user or an agent at the keyboard, so a shell applies it even
+    /// while it refuses actions. What the same intent from a user or an
+    /// agent looks like is [`Action::SetMaximized`]; both land on the same
+    /// rules, spelled out on [`Action::ToggleMaximize`]. Unknown windows are
+    /// ignored.
+    MaximizeRequested {
+        id: WindowId,
+        maximized: bool,
+    },
     /// The platform decided, when the window first mapped, that it floats
     /// (`true`) or tiles (`false`): from the window's own properties (a
     /// dialog hint, a parent, a fixed size) or a user's window rule.
@@ -279,6 +296,70 @@ pub enum Action {
         id: WindowId,
         fullscreen: bool,
     },
+    /// Put the focused window into maximized, or take it out. With no window
+    /// focused, does nothing.
+    ///
+    /// What maximized means here:
+    ///
+    /// - **The window fills its output's usable area** -- the whole output
+    ///   minus whatever the platform reserved at the edges (a bar's
+    ///   exclusive zone), minus the layout gap -- whenever its column is the
+    ///   focused one of its output's active workspace.
+    ///   [`World::maximized_on`](crate::World::maximized_on) answers "is
+    ///   that happening on this output right now". The bar stays visible:
+    ///   this is the difference from fullscreen, which covers the whole
+    ///   area including the bar's zone. The window keeps its gaps and its
+    ///   focus ring, unlike a fullscreen one.
+    /// - **It keeps its column.** In the scrolling strip the column is as
+    ///   wide as the usable area while its window is maximized, so focusing
+    ///   a neighbouring column scrolls to it the ordinary way, and focusing
+    ///   back fills the usable area again. Focused away, the maximized
+    ///   window keeps its usable-area size and is placed exactly where a
+    ///   tiled column of that width would be -- one ordinary gap from each
+    ///   neighbour, measured within the usable area like every other column
+    ///   -- so it may show partly beside the focused window but never
+    ///   overlaps it.
+    ///   Workspace switching likewise works as it always does.
+    /// - **Leaving restores exactly.** The column's width preset is never
+    ///   touched, and the scroll offset its workspace had on entry is put
+    ///   back on an explicit leave (this action, or the window's own request).
+    /// - **At most one per column, and always that column's focused window.**
+    ///   The other windows stacked in its column are placed invisible while
+    ///   it holds. A window that is not its column's focused window cannot
+    ///   enter (the request is ignored), and anything that moves focus to a
+    ///   sibling in the column -- a vertical focus step, consuming another
+    ///   window into it, focusing a sibling by id -- ends the maximized.
+    /// - **Moving the window ends it**: consume/expel, and carrying it to
+    ///   another workspace or output, each take it out of maximized first
+    ///   (and do not restore the scroll, which described the layout it just
+    ///   left). Moving its column within the strip, or the window within its
+    ///   column, does not. An ignored move (at the strip's edge, an unknown
+    ///   output) changes nothing, maximized included.
+    /// - **Choosing a column width does nothing while maximized.**
+    ///   [`Action::CycleColumnWidth`] and [`Action::SetColumnWidth`] are
+    ///   ignored when the focused window is maximized: the preset they
+    ///   would change is restored untouched on leave, so changing it
+    ///   underneath would be observable only as a surprise.
+    /// - **Fullscreen wins while set.** A window that is both covers its
+    ///   output edge to edge; leaving fullscreen returns to maximized, not
+    ///   to the plain strip. Floating or un-floating a maximized window
+    ///   ends its maximized first, like fullscreen.
+    /// - A window that closes while maximized simply leaves the layout.
+    /// - A floating window can be maximized too: it fills the usable area
+    ///   like a tiled one, and while it is the focused window the rest of
+    ///   its workspace hides except its own floating dialogs -- the same
+    ///   covering rule a fullscreen floating window follows.
+    ToggleMaximize,
+    /// Put one specific window into maximized (`true`) or take it out
+    /// (`false`), by id: what a taskbar asking on the user's behalf sends.
+    /// The same rules as [`Action::ToggleMaximize`]; an unknown id, or a
+    /// window already in the asked-for state, does nothing. It does not
+    /// move focus, so a window in a column that is not focused is maximized
+    /// but does not fill the usable area until its column is focused.
+    SetMaximized {
+        id: WindowId,
+        maximized: bool,
+    },
     /// Float the focused window, or put it back in the scrolling strip. With
     /// no window focused, does nothing.
     ///
@@ -387,8 +468,8 @@ pub enum Action {
     ///   floated.
     ///
     /// Floating windows never change the strip, so this never moves a tiled
-    /// window. An unknown id, a tiled window and a fullscreen one are
-    /// ignored, and so is a window on an output with no usable area.
+    /// window. An unknown id, a tiled window and a fullscreen or maximized
+    /// one are ignored, and so is a window on an output with no usable area.
     MoveFloating {
         id: WindowId,
         x: i32,
@@ -406,8 +487,8 @@ pub enum Action {
     /// they disagree), to the room between the edge that stays and the far
     /// side of the usable area (so a resize never pushes the fixed edge),
     /// and to at least 1. An axis not being resized keeps the size the
-    /// window is placed at. Unknown, tiled and fullscreen windows are
-    /// ignored, like [`Action::MoveFloating`].
+    /// window is placed at. Unknown, tiled, fullscreen and maximized windows
+    /// are ignored, like [`Action::MoveFloating`].
     ResizeFloating {
         id: WindowId,
         size: Size,

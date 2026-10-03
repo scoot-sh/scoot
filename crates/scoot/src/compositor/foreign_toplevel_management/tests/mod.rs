@@ -492,6 +492,10 @@ enum Step {
     SetFullscreen(usize),
     /// `unset_fullscreen` on the `index`-th handle.
     UnsetFullscreen(usize),
+    /// `set_maximized` on the `index`-th handle.
+    SetMaximized(usize),
+    /// `unset_maximized` on the `index`-th handle.
+    UnsetMaximized(usize),
     /// Open and immediately destroy `count` toplevels, in one burst, without
     /// waiting for anything in between.
     ChurnWindows(usize),
@@ -663,8 +667,6 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 .close(),
             Step::RequestIgnoredStates(index) => {
                 let handle = client.handles.get(index).ok_or("no such toplevel handle")?;
-                handle.set_maximized();
-                handle.unset_maximized();
                 handle.set_minimized();
                 handle.unset_minimized();
                 // A rectangle with a negative size, which wlroots answers with
@@ -684,6 +686,16 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 .get(index)
                 .ok_or("no such toplevel handle")?
                 .unset_fullscreen(),
+            Step::SetMaximized(index) => client
+                .handles
+                .get(index)
+                .ok_or("no such toplevel handle")?
+                .set_maximized(),
+            Step::UnsetMaximized(index) => client
+                .handles
+                .get(index)
+                .ok_or("no such toplevel handle")?
+                .unset_maximized(),
             Step::ChurnWindows(count) => {
                 // No configure ack and no wait: the point is the compositor
                 // seeing creation and destruction at the rate a client can

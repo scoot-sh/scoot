@@ -157,6 +157,20 @@ pub struct WindowSnapshot {
     /// had no fullscreen state to report.
     #[serde(default)]
     pub fullscreen: bool,
+    /// Whether the window is maximized (entered by the client itself, by
+    /// `toggle-maximize`, or by a taskbar). A maximized window fills its
+    /// output's usable area -- the full output minus whatever a bar reserved
+    /// at its edges, minus the layout gap -- whenever its column is the
+    /// focused one and no fullscreen window covers the output; focused away,
+    /// it keeps that size and sits in the strip where a column that wide
+    /// would, one ordinary gap from its neighbours. The bar stays visible:
+    /// this is the difference from `fullscreen`, which covers it.
+    ///
+    /// Defaulted like `fullscreen` above, for the same wire reason, so no
+    /// `PROTOCOL_VERSION` bump. `false` from an older server is truthful: it
+    /// had no maximized state to report.
+    #[serde(default)]
+    pub maximized: bool,
     /// Whether the window floats above its workspace's scrolling strip
     /// (floated as it mapped -- a dialog, a transient, a fixed-size window,
     /// or a `[[window_rule]]` -- or by `toggle-floating` / `set-floating`).

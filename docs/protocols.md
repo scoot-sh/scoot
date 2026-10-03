@@ -69,13 +69,13 @@ The rest of this list *is* deliberate:
   thumbnail is commonly requested through, and also not advertised. Stock
   quickshell routes per-window thumbnails here, so it falls back cleanly
   rather than failing.
-- **Maximized and minimized window states.** scoot has no concept of either,
-  so the state bits are never sent and the matching requests do nothing — a
-  taskbar's minimise button is inert rather than lying. (Fullscreen is real:
-  see [Fullscreen](#fullscreen).) The `xdg_toplevel` `wm_capabilities` event
-  still lists `maximize` and `minimize` — Smithay's default set, unchanged
-  here — so a version 5+ client may show those buttons; pressing them does
-  nothing.
+- **Minimized window state.** scoot has no concept of it, so the state bit
+  is never sent and the matching requests do nothing — a taskbar's minimise
+  button is inert rather than lying. (Fullscreen and maximized are both
+  real: see [Fullscreen](#fullscreen) and [Maximized](#maximized).) The
+  `xdg_toplevel` `wm_capabilities` event still lists `minimize` — Smithay's
+  default set, unchanged here — so a version 5+ client may show that button;
+  pressing it does nothing.
 
 ## Per-client limits on what scoot keeps
 
@@ -467,6 +467,54 @@ same for a fullscreen window in either layer:
 - **While focus is anywhere else** it is not in front: a column keeps its
   strip slot as usual, a floating fullscreen window is hidden.
 
+## Maximized
+
+A client's maximize button works: `xdg_toplevel.set_maximized` puts the
+window into scoot's maximized state, and `unset_maximized` takes it out.
+The same state is reachable three more ways — a taskbar's
+`wlr-foreign-toplevel` `set_maximized`, the `Super+m` bind, and IPC
+`toggle-maximize` / `set-maximized ID on|off` ([ipc.md](ipc.md#actions)).
+
+**What the window is told.** Every request is answered with a configure, as
+the protocol requires, even one that changed nothing. Entering sends the
+`maximized` state bit with the output's usable size (the whole output minus
+a bar's exclusive zones, minus the layout gap); leaving sends the bit
+cleared with its column's current tiled size. Unmapping (a null buffer)
+discards the state, as xdg-shell says it must: a window that maps again
+comes back tiled.
+
+**What it fills.** While its column is the focused one of its output's
+active workspace (and no fullscreen window covers the output), a maximized
+window fills that output's usable area: full width and full height of the
+workspace strip, inside the configured gaps, with its focus ring and rounded
+corners kept. Unlike fullscreen it never covers the bar's zone — surfaces
+on the `top` layer stay drawn, clickable and focusable above it, exactly as
+over any tiled window. Other outputs are untouched: maximized is per output.
+
+**Relation to fullscreen.** Fullscreen wins while both hold: a maximized
+window that goes fullscreen covers the whole output edge to edge (told both
+bits, at the output's size), and leaving fullscreen returns it to maximized,
+not to the plain strip. Leaving maximized afterwards restores the layout
+exactly.
+
+**What ends it.** Unmaximize, and the same events that end fullscreen:
+moving the window to another workspace or output, consume/expel, focusing a
+window stacked in the same column, or floating/un-floating it. Choosing a
+column width (`cycle-column-width`, `set-column-width`) does nothing while
+the focused window is maximized: the preset they would change is restored
+untouched on leave. Only a column's focused window can go maximized.
+
+**Floating windows.** A floating window can be maximized too: it fills the
+usable area like a tiled one, told the usable size with the `maximized`
+bit. While it has focus it covers the usable area the way a fullscreen
+floating window covers the output (the strip and the floating windows below
+it hidden, its own dialogs staying up); focused away it is hidden, and its
+dialogs above keep it in place at full size. Moving or resizing a maximized
+floating window does nothing, like a fullscreen one.
+
+**While locked.** A window's own request is honoured; requests on the user's
+behalf — a taskbar, the bind, IPC — are refused like every other action.
+
 ## XWayland (opt-in)
 
 `--xwayland` (or `[xwayland] enabled` in the config file — either one turns
@@ -534,13 +582,19 @@ its startup id by another X client, below.)
   `PPosition`) when the whole window fits inside one output's usable area
   there, and is centred otherwise. It is asked for the size it mapped at,
   or a rule's `size`, and a later size request (`ConfigureRequest`) is
-  honoured as a floating resize, clamped like any. A tiled or fullscreen X
-  window's own size and position requests are answered with the geometry
-  the layout gave it.
+  honoured as a floating resize, clamped like any. A tiled, fullscreen or
+  maximized X window's own size and position requests are answered with the
+  geometry the layout gave it.
 - **Fullscreen** is `_NET_WM_STATE_FULLSCREEN`, both ways: an X app's
   fullscreen button (or the state set before it maps) is the window's own
   request, like `xdg_toplevel.set_fullscreen`, and the property follows the
   layout's answer — including when `Super+f`, a taskbar or IPC changed it.
+- **Maximized** is `_NET_WM_STATE_MAXIMIZED_HORZ` *and*
+  `_NET_WM_STATE_MAXIMIZED_VERT`, both ways: maximized means the pair (one
+  axis alone is not maximized), and both atoms follow the layout's answer.
+  An X app's maximize button (or the pair set before it maps) is the
+  window's own request, like `xdg_toplevel.set_maximized` — including when
+  `Super+m`, a taskbar or IPC changed it.
 - **Menus, tooltips and drop-downs** (override-redirect windows) never
   enter the layout: they are drawn where they put themselves, above every
   window and below the `top` and `overlay` layers, and take the pointer
@@ -551,13 +605,16 @@ its startup id by another X client, below.)
   XWayland behavior scoot works around).
 - **Decorations.** X windows get the focus ring and rounded corners like any
   window. Motif decoration hints are ignored: scoot draws no titlebar for a
-  client to opt out of. X has no equivalent of xdg's tiled states, and
-  scoot sets none (`_NET_WM_STATE_MAXIMIZED_*` would make clients change
-  their chrome for a state they are not in).
+  client to opt out of. X has no equivalent of xdg's tiled states: a plain
+  tiled column sets neither `_NET_WM_STATE_FULLSCREEN` nor
+  `_NET_WM_STATE_MAXIMIZED_*` (which would make clients change their chrome
+  for a state they are not in); a maximized X window sets the pair, like a
+  fullscreen one sets its atom.
 - **Titlebar and border drags** (`_NET_WM_MOVERESIZE`, what a GTK
   headerbar, Chromium or Electron sends) move or resize a floating X
-  window, like [`xdg_toplevel.move`/`.resize`](#floating-windows): a tiled
-  or fullscreen X window's request is ignored and its press stays its own.
+  window, like [`xdg_toplevel.move`/`.resize`](#floating-windows): a tiled,
+  fullscreen or maximized X window's request is ignored and its press stays
+  its own.
   X requests carry no serial, so the rule is restated: the request is
   honoured only while a button press is held -- the pointer's grab is the
   plain press grab, not a menu's, a drag-and-drop's or another drag's --
@@ -1311,7 +1368,13 @@ What a client can ask for:
   optional output is honoured only for the focused window, like the
   client's own hint. Refused while the session is locked, like `activate`
   and `close`.
-- **`set_maximized`, `unset_maximized`, `set_minimized`, `unset_minimized`
+- **`set_maximized` / `unset_maximized`** put that window into maximized
+  and back, by the same rules as the window's own request and `Super+m`
+  (see [Maximized](#maximized)), without moving focus. The `maximized`
+  state bit is reported to every handle version (unlike `fullscreen`, it
+  exists from version 1). Refused while the session is locked, like
+  `set_fullscreen`.
+- **`set_minimized`, `unset_minimized`
   and `set_rectangle` are accepted and do nothing.** `set_rectangle` is a minimise-animation hint scoot reads
   nothing from; unlike wlroots, an invalid rectangle is ignored rather than
   answered with a protocol error, because disconnecting a shell over a number

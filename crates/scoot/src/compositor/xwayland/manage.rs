@@ -44,10 +44,19 @@
 //!   request (and a state set before mapping) reaches the core as its own
 //!   request, the same event an `xdg_toplevel.set_fullscreen` is, and the
 //!   property follows the core's answer on every `apply()`.
+//! - **Maximized** is `_NET_WM_STATE_MAXIMIZED_HORZ` *and*
+//!   `_NET_WM_STATE_MAXIMIZED_VERT` both ways, which is also how Smithay
+//!   reads it: its `is_maximized` (and the client-message dispatch that
+//!   fires `maximize_request`) requires the pair, in either order, so a
+//!   half-maximized window (one axis only, which EWMH allows a client to
+//!   ask) is not maximized. The client's request -- and a state set before
+//!   mapping -- reaches the core as its own request, the same event an
+//!   `xdg_toplevel.set_maximized` is, and both atoms follow the core's
+//!   answer on every `apply()`.
 //! - **No X "tiled" state.** X has no equivalent of xdg's `tiled_*` states;
-//!   `_NET_WM_STATE_MAXIMIZED_*` is the nearest, and setting it would lie to
-//!   clients that change their chrome for maximized windows (a restore
-//!   button, a dropped shadow). Nothing is set.
+//!   a plain tiled column sets neither `FULLSCREEN` nor `MAXIMIZED_*`, so a
+//!   client that changes its chrome for maximized windows sees the plain
+//!   state it should.
 //! - **Decorations.** An X window gets scoot's focus ring and rounded clip
 //!   like any window: both key off the window's place in the layout and its
 //!   drawn geometry (`drawn.rs`), not its protocol. Motif hints
@@ -369,6 +378,15 @@ impl State {
                 fullscreen: true,
             });
         }
+        if window.is_maximized() {
+            // `_NET_WM_STATE_MAXIMIZED_*` (the pair -- see the module doc)
+            // set before mapping: the client's own request, like fullscreen
+            // above.
+            self.world.handle_event(Event::MaximizeRequested {
+                id,
+                maximized: true,
+            });
+        }
         tracing::debug!(
             ?id,
             xid = window.window_id(),
@@ -480,6 +498,7 @@ impl State {
             if (w.is_some() || h.is_some())
                 && self.world.is_floating(id)
                 && !self.world.is_fullscreen(id)
+                && !self.world.is_maximized(id)
             {
                 let current = x11_size(window, scale);
                 let size = Size::new(
@@ -532,6 +551,24 @@ impl State {
         } else if let Err(error) = window.set_fullscreen(before) {
             // Refused or already so: the property states the answer.
             tracing::debug!(?id, %error, "could not restate an X11 window's fullscreen state");
+        }
+    }
+
+    /// `_NET_WM_STATE_MAXIMIZED_*` (the pair) added or removed by the
+    /// client: its own request, like `xdg_toplevel.set_maximized`. Only a
+    /// change re-applies; both atoms follow the core's answer from there.
+    pub(super) fn x11_maximize_request(&mut self, window: &X11Surface, maximized: bool) {
+        let Some(id) = self.id_of_x11(window) else {
+            return;
+        };
+        let before = self.world.is_maximized(id);
+        self.world
+            .handle_event(Event::MaximizeRequested { id, maximized });
+        if self.world.is_maximized(id) != before {
+            self.apply();
+        } else if let Err(error) = window.set_maximized(before) {
+            // Refused or already so: the property states the answer.
+            tracing::debug!(?id, %error, "could not restate an X11 window's maximized state");
         }
     }
 
@@ -648,13 +685,13 @@ impl State {
     }
 }
 
-/// `apply()`'s X half for one placement: the fullscreen property always,
-/// and -- for a visible placement -- the configure, only when it differs
-/// from the one the window last had (so an `apply()` that moved nothing
-/// costs no X traffic). `scale` is the X scale (`State::x11_scale`): the
-/// comparison is in logical pixels, where Smithay keeps `last_configure`,
-/// so a change that moves the X scale re-sends every configure itself (see
-/// `State::refit_xwayland`).
+/// `apply()`'s X half for one placement: the fullscreen and maximized
+/// properties always, and -- for a visible placement -- the configure, only
+/// when it differs from the one the window last had (so an `apply()` that
+/// moved nothing costs no X traffic). `scale` is the X scale
+/// (`State::x11_scale`): the comparison is in logical pixels, where Smithay
+/// keeps `last_configure`, so a change that moves the X scale re-sends every
+/// configure itself (see `State::refit_xwayland`).
 pub(in crate::compositor) fn configure_x11(
     window: &X11Surface,
     placement: &scoot_core::Placement,
@@ -662,6 +699,9 @@ pub(in crate::compositor) fn configure_x11(
 ) {
     if let Err(error) = window.set_fullscreen(placement.fullscreen) {
         tracing::debug!(id = window.window_id(), %error, "could not set an X11 window's fullscreen state");
+    }
+    if let Err(error) = window.set_maximized(placement.maximized) {
+        tracing::debug!(id = window.window_id(), %error, "could not set an X11 window's maximized state");
     }
     if !placement.visible {
         return;

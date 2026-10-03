@@ -2110,6 +2110,7 @@ mod tests {
             rect,
             visible: true,
             fullscreen: false,
+            maximized: false,
             floating: false,
             requested: Some(rect.size()),
         }

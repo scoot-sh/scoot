@@ -135,6 +135,27 @@ pub enum Action {
         id: u64,
         fullscreen: bool,
     },
+    /// Put the focused window into maximized (filling its output's usable
+    /// area, bar visible), or take it out -- the wire half of
+    /// `scoot_core::Action::ToggleMaximize`, whose doc has the rules. With
+    /// no window focused, does nothing. Additive: a client that never sends
+    /// this tag decodes exactly as before, so no `PROTOCOL_VERSION` bump.
+    ToggleMaximize,
+    /// Put one specific window into maximized (`maximized: true`) or take
+    /// it out, by the id `scootctl windows` reports -- the absolute half of
+    /// `ToggleMaximize`, and the wire half of
+    /// `scoot_core::Action::SetMaximized`. Idempotent where the toggle is
+    /// not: an agent that wants a window maximized need not read its state
+    /// first. It does not move focus, so a window in a column that is not
+    /// focused is maximized but does not fill the usable area until its
+    /// column is focused. An unknown id does nothing, and so does a window
+    /// stacked under another in its column (only a column's focused window
+    /// may be maximized). Additive like the toggle: no `PROTOCOL_VERSION`
+    /// bump.
+    SetMaximized {
+        id: u64,
+        maximized: bool,
+    },
     /// Float the focused window above its workspace's scrolling strip, or
     /// put it back in the strip as a column right of the strip's focused one
     /// -- the wire half of `scoot_core::Action::ToggleFloating`, whose doc

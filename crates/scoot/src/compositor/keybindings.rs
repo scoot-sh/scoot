@@ -177,6 +177,9 @@ impl Default for Keybindings {
             // The chord most tiling compositors (i3, sway, Hyprland) put
             // fullscreen on.
             (SUPER, Keysym::f, Bound::Action(Action::ToggleFullscreen)),
+            // Maximize beside it: the window fills the usable area (the bar
+            // stays), rather than covering the whole output like fullscreen.
+            (SUPER, Keysym::m, Bound::Action(Action::ToggleMaximize)),
             // The chords i3 and sway give floating: Shift+Space floats or
             // tiles the focused window, bare Space moves focus between the
             // floating windows and the tiled ones.
@@ -537,6 +540,15 @@ mod tests {
         assert_eq!(
             table.match_key(Keysym::f, SUPER),
             Some(Bound::Action(Action::ToggleFullscreen))
+        );
+    }
+
+    #[test]
+    fn super_m_toggles_maximize_by_default() {
+        let table = Keybindings::default();
+        assert_eq!(
+            table.match_key(Keysym::m, SUPER),
+            Some(Bound::Action(Action::ToggleMaximize))
         );
     }
 

@@ -13,6 +13,10 @@ pub(super) struct WindowState {
     pub(super) learned_min: Size,
     /// `Some` while the window is fullscreen; see [`Fullscreen`].
     pub(super) fullscreen: Option<Fullscreen>,
+    /// `Some` while the window is maximized; see [`Maximized`]. Kept beside
+    /// `fullscreen` rather than folded into it because the two compose:
+    /// fullscreen wins while set, and leaving it returns to maximized.
+    pub(super) maximized: Option<Maximized>,
     /// `Some` while the window floats; see [`Floating`]. Exactly the windows
     /// in some workspace's floating layer have it (or, with no output yet,
     /// windows waiting in `World::unplaced` that will join one).
@@ -114,12 +118,30 @@ pub(super) struct Fullscreen {
     pub(super) view_x: i32,
 }
 
+/// What a maximized window remembers so leaving maximized can put the
+/// layout back exactly as it was.
+///
+/// The same shape as [`Fullscreen`] for the same reason: its column keeps
+/// its place in the strip and its width preset untouched the whole time, so
+/// the only thing entering maximized changes that leaving it has to undo is
+/// the scroll. A window that is both fullscreen and maximized carries both;
+/// leaving fullscreen restores nothing (the strip is still maximized-wide),
+/// and leaving maximized restores the scroll it entered with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Maximized {
+    /// The `view_x` of the window's workspace just before it went
+    /// maximized. Restored on an explicit leave only, like
+    /// [`Fullscreen::view_x`]; a leave forced by the layout drops it.
+    pub(super) view_x: i32,
+}
+
 impl WindowState {
     pub(super) fn new(info: WindowInfo) -> Self {
         Self {
             info,
             learned_min: Size::default(),
             fullscreen: None,
+            maximized: None,
             floating: None,
             drawn: Size::default(),
         }

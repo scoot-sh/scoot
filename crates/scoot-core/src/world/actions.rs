@@ -29,6 +29,7 @@ impl World {
                 other => return self.handle_any_focus(other, presets),
             }
             self.settle_fullscreen();
+            self.settle_maximize();
             return Vec::new();
         }
         self.handle_any_focus(action, presets)
@@ -52,11 +53,21 @@ impl World {
                 self.reshape(|o| moved = o.active_workspace_mut().consume_or_expel(dir));
                 if moved && let Some(id) = focused {
                     self.leave_fullscreen_for_move(id);
+                    self.leave_maximize_for_move(id);
                 }
             }
             Action::CycleColumnWidth => {
-                self.forget_learned_widths();
-                self.reshape(|o| o.active_workspace_mut().cycle_preset(presets));
+                // Ignored while the focused window is maximized: the preset
+                // this would step is restored untouched on leave (see
+                // `Action::ToggleMaximize`), so stepping it underneath would
+                // be observable only as a surprise.
+                if !self
+                    .focused_window()
+                    .is_some_and(|id| self.is_maximized(id))
+                {
+                    self.forget_learned_widths();
+                    self.reshape(|o| o.active_workspace_mut().cycle_preset(presets));
+                }
             }
             Action::SetColumnWidth(index) => {
                 // The range check lives here as well as in `set_preset` so
@@ -66,7 +77,14 @@ impl World {
                 // observable in the arrangement. `reshape`'s own `fix_view`
                 // is idempotent, so it needs no such guard (the ignored
                 // workspace-index path already runs it the same way).
-                if index < presets {
+                //
+                // Ignored while the focused window is maximized, like the
+                // cycling half above.
+                if !self
+                    .focused_window()
+                    .is_some_and(|id| self.is_maximized(id))
+                    && index < presets
+                {
                     self.forget_learned_widths();
                     self.reshape(|o| o.active_workspace_mut().set_preset(index, presets));
                 }
@@ -83,6 +101,7 @@ impl World {
                 self.reshape(|o| moved = o.move_focused_window_to_workspace(dir));
                 if let Some(id) = moved {
                     self.leave_fullscreen_for_move(id);
+                    self.leave_maximize_for_move(id);
                 }
             }
             Action::MoveWindowToWorkspaceIndex(index) => {
@@ -90,6 +109,7 @@ impl World {
                 self.reshape(|o| moved = o.move_focused_window_to_workspace_index(index));
                 if let Some(id) = moved {
                     self.leave_fullscreen_for_move(id);
+                    self.leave_maximize_for_move(id);
                 }
             }
             // Cross-output: these cannot go through `reshape`, which only
@@ -118,6 +138,8 @@ impl World {
             }
             Action::ToggleFullscreen => self.toggle_fullscreen(),
             Action::SetFullscreen { id, fullscreen } => self.set_fullscreen(id, fullscreen),
+            Action::ToggleMaximize => self.toggle_maximize(),
+            Action::SetMaximized { id, maximized } => self.set_maximize(id, maximized),
             Action::ToggleFloating => self.toggle_floating(),
             Action::SetFloating { id, floating } => self.set_floating(id, floating, None),
             Action::ToggleFloatingFocus => self.toggle_floating_focus(),
@@ -134,6 +156,7 @@ impl World {
             Action::Quit => return vec![Effect::Quit],
         }
         self.settle_fullscreen();
+        self.settle_maximize();
         Vec::new()
     }
 
@@ -143,6 +166,18 @@ impl World {
     fn leave_fullscreen_for_move(&mut self, id: WindowId) {
         if self.is_fullscreen(id) {
             self.drop_fullscreen(id);
+            if let Some(loc) = self.locate(id) {
+                self.fix_view(loc.output);
+            }
+        }
+    }
+
+    /// [`World::leave_fullscreen_for_move`]'s half for maximized: the same
+    /// moves that end fullscreen end maximized (see
+    /// [`Action::ToggleMaximize`](crate::Action::ToggleMaximize)).
+    fn leave_maximize_for_move(&mut self, id: WindowId) {
+        if self.is_maximized(id) {
+            self.drop_maximize(id);
             if let Some(loc) = self.locate(id) {
                 self.fix_view(loc.output);
             }

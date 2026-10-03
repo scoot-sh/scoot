@@ -99,29 +99,54 @@ impl World {
     /// hides -- which no longer includes its own dialogs, since they are
     /// drawn above it (PR #242's re-review: a game clicked above its dialog,
     /// then another window focused, hid the dialog under the game).
+    /// `max_covering` is the maximized window filling the usable area, when
+    /// the workspace's focused window is one and no fullscreen window
+    /// outranks it: a floating one covers like `covering` (at the usable
+    /// size, the bar visible), while a tiled one stays under the whole
+    /// layer and hides nothing. `shown_maximized` is the stack index of a
+    /// floating maximized window shown uncovering, `shown_fullscreen`'s
+    /// twin at the usable size.
     pub(super) fn place_floating(
         &self,
         output: &Output,
         ws: &Workspace,
         active: bool,
-        covering: Option<WindowId>,
-        shown_fullscreen: Option<usize>,
+        cover: &FloatCover,
         placements: &mut Vec<Placement>,
     ) {
+        let covering = cover.covering;
+        let shown_fullscreen = cover.shown_fullscreen;
+        let shown_maximized = cover.shown_maximized;
+        // The maximized window the floating layer hides under, if one is a
+        // floating window: one in focus (like `covering` for fullscreen), or
+        // the shown one below the floating focus. A tiled maximized cover
+        // stays under the layer and is not one.
+        let max_cover = cover
+            .max_covering
+            .filter(|id| self.is_floating(*id))
+            .or_else(|| shown_maximized.and_then(|index| ws.floating.get(index).copied()));
+        // The window the layer hides under, fullscreen winning over
+        // maximized: at most one of the two answers is ever `Some` (a
+        // maximized cover is only computed when no fullscreen window covers,
+        // and a shown maximized window holds no fullscreen).
+        let cover = covering.or(max_cover);
         // Whether the window at stack `index` shows; `dialog` is whether it
         // is the covering window's dialog, `above_shown` whether it is drawn
-        // above the shown fullscreen window.
-        let shown = |id: WindowId, index: usize, dialog: bool, above_shown: bool| match covering {
+        // above the shown fullscreen or maximized window.
+        let shown = |id: WindowId, index: usize, dialog: bool, above_shown: bool| match cover {
             // A fullscreen dialog would cover its parent; it waits for focus
-            // like any unfocused fullscreen window.
+            // like any unfocused fullscreen window. A maximized dialog
+            // shows: it fills only the usable area, above its parent.
             Some(covering) => id == covering || (dialog && !self.is_fullscreen(id)),
             None if self.is_fullscreen(id) => shown_fullscreen == Some(index),
-            None => shown_fullscreen.is_none() || above_shown,
+            None if self.is_maximized(id) => shown_maximized == Some(index),
+            None => shown_fullscreen.is_none() && shown_maximized.is_none() || above_shown,
         };
-        if !self.lifts_any(ws, covering) {
+        if !self.lifts_any(ws, cover) {
             for (index, &id) in ws.floating.iter().enumerate() {
-                let dialog = covering.is_some_and(|covering| self.descends_from(id, covering));
-                let above = shown_fullscreen.is_some_and(|s| index > s);
+                let dialog = cover.is_some_and(|covering| self.descends_from(id, covering));
+                let above = shown_fullscreen.is_some_and(|s| index > s)
+                    || shown_maximized.is_some_and(|s| index > s);
                 self.place_floating_window(
                     output,
                     id,
@@ -139,7 +164,7 @@ impl World {
             Ok(scratch) => scratch,
             Err(_) => &mut fresh,
         };
-        self.drawing_order(ws, covering, scratch);
+        self.drawing_order(ws, cover, scratch);
         let mut above = false;
         for &index in &scratch.order {
             let Some(&id) = ws.floating.get(index) else {
@@ -152,7 +177,7 @@ impl World {
                 active && shown(id, index, dialog, above),
                 placements,
             );
-            above |= shown_fullscreen == Some(index);
+            above |= shown_fullscreen == Some(index) || shown_maximized == Some(index);
         }
     }
 
@@ -312,7 +337,8 @@ impl World {
     /// One floating window's placement. `shown` is whether the workspace's
     /// state lets it show; a window that has not drawn (and was asked for no
     /// size), or an output with no usable area, keeps it hidden anyway. A
-    /// fullscreen one is placed over the output's whole area.
+    /// fullscreen one is placed over the output's whole area, a maximized
+    /// one (holding no fullscreen) over its usable area.
     fn place_floating_window(
         &self,
         output: &Output,
@@ -332,6 +358,22 @@ impl World {
                 rect: Rect::new(area.x, area.y, w, h),
                 visible: shown,
                 fullscreen: true,
+                maximized: false,
+                floating: true,
+                requested: Some(Size::new(w, h)),
+            });
+            return;
+        }
+        if window.maximized.is_some() {
+            let usable = output.usable.inset(self.config.gap);
+            let (w, h) = (usable.w.max(1), usable.h.max(1));
+            placements.push(Placement {
+                id,
+                output: output.id,
+                rect: Rect::new(usable.x, usable.y, w, h),
+                visible: shown,
+                fullscreen: false,
+                maximized: true,
                 floating: true,
                 requested: Some(Size::new(w, h)),
             });
@@ -344,10 +386,23 @@ impl World {
             rect: placed.rect,
             visible: shown && placed.sized && placed.fits,
             fullscreen: false,
+            maximized: false,
             floating: true,
             requested: placed.requested,
         });
     }
+}
+
+/// What a workspace's floating layer hides under, as `place_workspace`
+/// measures it: the fullscreen cover and its below-focus twin, plus the
+/// maximized cover and its twin. Bundled so `place_floating` keeps one
+/// window argument rather than four.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct FloatCover {
+    pub(super) covering: Option<WindowId>,
+    pub(super) shown_fullscreen: Option<usize>,
+    pub(super) max_covering: Option<WindowId>,
+    pub(super) shown_maximized: Option<usize>,
 }
 
 /// [`World`]'s field type for the scratch buffers.

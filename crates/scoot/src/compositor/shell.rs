@@ -143,10 +143,11 @@ impl State {
     /// width change narrowed faster than the client acked.
     ///
     /// No frame is reported when the answered configure carried the
-    /// `fullscreen` state (a frame sized for the whole output says nothing
-    /// about the tiled minimum; the core ignores those too, and skipping here
-    /// also skips the event), or -- for a tiled window -- named no size
-    /// (there is nothing to compare against).
+    /// `fullscreen` or `maximized` state (a frame sized for the whole output
+    /// -- or the usable area -- says nothing about the tiled minimum; the
+    /// core ignores those too, and skipping here also skips the event), or
+    /// -- for a tiled window -- named no size (there is nothing to compare
+    /// against).
     ///
     /// A floating window's frames are reported whatever it was asked for
     /// (usually nothing: it chooses its own size), with a zero `requested`
@@ -175,13 +176,14 @@ impl State {
                 (
                     state.size,
                     state.states.contains(xdg_toplevel::State::Fullscreen),
+                    state.states.contains(xdg_toplevel::State::Maximized),
                 )
             })
         });
         let floating = self.world.floating_size(id);
         let requested = match answered {
-            Some((Some(requested), false)) => Size::new(requested.w, requested.h),
-            Some((None, false)) if floating.is_some() => Size::default(),
+            Some((Some(requested), false, false)) => Size::new(requested.w, requested.h),
+            Some((None, false, false)) if floating.is_some() => Size::default(),
             _ => return false,
         };
         let size = window.geometry().size;
@@ -366,6 +368,9 @@ impl State {
         // way a window's fullscreen can change (its own request, a taskbar,
         // the bind, a move or focus change that ends it) ends in this call.
         self.refresh_wlr_fullscreen(&arrangement);
+        // ...and its `maximized` state bit, from the same arrangement: every
+        // way a window's maximized can change ends in this call too.
+        self.refresh_wlr_maximized(&arrangement);
         // The one place workspace changes reach `ext-workspace-v1` clients:
         // every event and action that can add, drop or switch a workspace
         // ends here (see `ext_workspace.rs`). Costs one snapshot compare per

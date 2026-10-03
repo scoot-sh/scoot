@@ -34,6 +34,9 @@ pub(super) struct Props {
     pub(super) dialog: bool,
     /// `_NET_WM_STATE_FULLSCREEN`, set before mapping.
     pub(super) fullscreen: bool,
+    /// `_NET_WM_STATE_MAXIMIZED_HORZ` and `_NET_WM_STATE_MAXIMIZED_VERT`
+    /// (the pair), set before mapping.
+    pub(super) maximized: bool,
     /// `WM_NORMAL_HINTS` with `USPosition` set.
     pub(super) us_position: bool,
     /// `WM_NORMAL_HINTS` minimum and maximum.
@@ -61,6 +64,7 @@ impl Props {
             transient_for: None,
             dialog: false,
             fullscreen: false,
+            maximized: false,
             us_position: false,
             min_max: None,
             startup_id: None,
@@ -88,6 +92,8 @@ struct Atoms {
     window_type_dialog: Atom,
     net_state: Atom,
     net_state_fullscreen: Atom,
+    net_state_maximized_horz: Atom,
+    net_state_maximized_vert: Atom,
     net_active_window: Atom,
     startup_id: Atom,
     wm_protocols: Atom,
@@ -114,6 +120,8 @@ impl XClient {
             window_type_dialog: intern("_NET_WM_WINDOW_TYPE_DIALOG"),
             net_state: intern("_NET_WM_STATE"),
             net_state_fullscreen: intern("_NET_WM_STATE_FULLSCREEN"),
+            net_state_maximized_horz: intern("_NET_WM_STATE_MAXIMIZED_HORZ"),
+            net_state_maximized_vert: intern("_NET_WM_STATE_MAXIMIZED_VERT"),
             net_active_window: intern("_NET_ACTIVE_WINDOW"),
             startup_id: intern("_NET_STARTUP_ID"),
             wm_protocols: intern("WM_PROTOCOLS"),
@@ -204,6 +212,20 @@ impl XClient {
                     self.atoms.net_state,
                     AtomEnum::ATOM,
                     &[self.atoms.net_state_fullscreen],
+                )
+                .expect("a property request");
+        }
+        if props.maximized {
+            self.conn
+                .change_property32(
+                    PropMode::REPLACE,
+                    window,
+                    self.atoms.net_state,
+                    AtomEnum::ATOM,
+                    &[
+                        self.atoms.net_state_maximized_horz,
+                        self.atoms.net_state_maximized_vert,
+                    ],
                 )
                 .expect("a property request");
         }
@@ -340,6 +362,58 @@ impl XClient {
             .expect("the property")
             .value32()
             .is_some_and(|mut atoms| atoms.any(|atom| atom == self.atoms.net_state_fullscreen))
+    }
+
+    /// Adds `_NET_WM_STATE_MAXIMIZED_HORZ` and `_NET_WM_STATE_MAXIMIZED_VERT`
+    /// to a mapped window the EWMH way: a client message to the root naming
+    /// the pair (one axis alone is not maximized -- see `manage.rs`), which
+    /// the window manager answers.
+    pub(super) fn request_maximized(&self, window: Window, maximized: bool) {
+        let event = ClientMessageEvent::new(
+            32,
+            window,
+            self.atoms.net_state,
+            [
+                u32::from(maximized),
+                self.atoms.net_state_maximized_horz,
+                self.atoms.net_state_maximized_vert,
+                1,
+                0,
+            ],
+        );
+        self.conn
+            .send_event(
+                false,
+                self.root,
+                EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY,
+                event,
+            )
+            .expect("a send request");
+        self.conn.flush().expect("the request hit the wire");
+    }
+
+    /// Whether the window's `_NET_WM_STATE` holds the maximized pair, as the
+    /// X server reads it -- what the window manager last set.
+    pub(super) fn is_maximized(&self, window: Window) -> bool {
+        let (horz, vert) = (
+            self.atoms.net_state_maximized_horz,
+            self.atoms.net_state_maximized_vert,
+        );
+        let mut seen = (false, false);
+        if let Some(mut atoms) = self
+            .conn
+            .get_property(false, window, self.atoms.net_state, AtomEnum::ATOM, 0, 64)
+            .expect("a property request")
+            .reply()
+            .expect("the property")
+            .value32()
+        {
+            for atom in &mut atoms {
+                seen.0 |= atom == horz;
+                seen.1 |= atom == vert;
+            }
+        }
+        seen == (true, true)
     }
 
     /// The X server's input focus: which X window keys go to.

@@ -181,8 +181,10 @@ impl CompositorHandler for State {
                 self.note_window_commit(id);
                 // Before the initial configure below: an unmap discarded the
                 // window's toplevel state, and the configure that answers the
-                // re-map must not carry a fullscreen it no longer has.
+                // re-map must not carry a fullscreen or maximized it no
+                // longer has.
                 self.discard_fullscreen_if_unmapped(id);
+                self.discard_maximize_if_unmapped(id);
                 // The window's first commit: whether it floats (see
                 // `floating.rs`). An empty-`Vec` test on every other commit.
                 if !self.awaiting_map.is_empty() {
@@ -464,6 +466,19 @@ impl XdgShellHandler for State {
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         self.client_fullscreen_request(&surface, false, None);
+    }
+
+    /// The window's own maximize request -- see `fullscreen.rs`'s maximize
+    /// half for what it does, and why it is honoured while locked. Smithay
+    /// dispatches these with no output hint (maximizing names no output),
+    /// and its defaults are inert (a bare configure, or nothing), so without
+    /// this a version 5+ client's maximize button does nothing.
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        self.client_maximize_request(&surface, true);
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        self.client_maximize_request(&surface, false);
     }
 
     /// A CSD titlebar drag: honoured for a floating window while the press
