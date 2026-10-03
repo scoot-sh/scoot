@@ -1,9 +1,10 @@
 ---
 title: "cursor_hide tests read the host's XCURSOR theme instead of the built-in arrow"
-status: "open"
-area: "testing"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # cursor_hide tests read the host's XCURSOR theme instead of the built-in arrow
@@ -21,3 +22,7 @@ Pin the theme inside the fixture (unset `XCURSOR_THEME`, point `XCURSOR_PATH` at
 ## Not in this ticket
 
 Any product change: this is test hygiene only.
+
+## Resolution (2026-10-03, PR #394)
+
+Landed as `test(scoot): pin cursor_hide fixtures to the built-in arrow` (`0ccd9963`). Fixture passes `cursor_theme = "scoot-test-no-such-theme"` by value (the `cursor::tests::NO_THEME` pattern) instead of env-pinning, so parallel `cargo test` threads cannot race. Reviewer reproduced the 3 pixel failures on base with a hostile transparent theme and verified 22/22 green hostile+clean on the fix, clippy/fmt clean, CI green.
