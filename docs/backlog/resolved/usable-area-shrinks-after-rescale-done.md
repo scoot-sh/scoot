@@ -1,9 +1,10 @@
 ---
 title: "Usable area is one pixel narrower than the output after a scale reload"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # Usable area is one pixel narrower than the output after a scale reload
@@ -51,3 +52,7 @@ the pinned Smithay's `LayerMap::arrange`.
 ## Not in this ticket
 
 Exclusive zones that legitimately shrink `usable`.
+
+## Resolution (2026-10-03, PR #395)
+
+Landed as `fix(scoot): file the output geometry as usable when no layer reserves space` (`8ac76acc`). Root cause confirmed against pinned Smithay fork `035d447c`: `Space::output_geometry` uses `to_i32_ceil` (854) while `LayerMap` uses `to_i32_round` (853); reload filed `OutputChanged` correctly then overwrote it with the rounded zone. Fix files the Space geometry when no mapped layer has an effective exclusive zone. Pinned by `reload::tests::a_fractional_scale_reload_files_the_startup_usable_area` (fails on base with 853 vs 854) plus a `reserves_space` matrix; 172-test compositor subset green, clippy/fmt clean, CI green.
