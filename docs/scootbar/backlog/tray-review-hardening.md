@@ -39,6 +39,23 @@ Each was measured or read in `crates/scootbar/src/dbus/conn.rs` and
 - **`has_room` counts per service or registrant**, so a peer registering 8
   items under another app's service name can crowd that name out. This is the
   pre-existing semantics, and the per-registrant cap bounds it.
+- **Method replies are matched by serial only** (`Conn::dispatch`,
+  `conn.rs` ~L647-668): `Pending` records no destination, and serials are
+  small and sequential. A peer that can guess one and gets an unsolicited
+  reply delivered could forge a `GetNameOwner`, `GetAll` or `ListNames`
+  answer (the media review showed what that buys: re-pointing a held player
+  name at the forger, or setting a player's displayed state). A forger can
+  already claim its own name, so the extra power is small. Not tested:
+  whether `dbus-daemon` delivers an unsolicited reply to a non-caller at all
+  (the reviewer read the code only). Check that first; if it does, record
+  the callee's destination (or its unique name once known) and refuse a
+  reply from anyone else.
+- **`Conn::dispatch` allocates about six times per event**, which breaks the
+  per-event allocation rule (about 13 µs per `Position` signal at 500 a
+  second, measured by the media implementer). Not a live fault; worth
+  reusing buffers.
+- **`runtime_dir` exists three times** (`conn.rs`, the tray, the volume
+  module); the media work made the `conn.rs` one public.
 - **The fuzz target does not drive the `Conn` skip and discard state
   machine.** The real-daemon and conn-level tests carry that property;
   a fuzz harness over a socket pair would need `conn.rs`'s crate
