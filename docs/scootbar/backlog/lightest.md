@@ -473,8 +473,8 @@ budget (4 sources at most while live: the bus, the two timers and the
 picker's pidfd, of 63).
 
 **Method.** Release builds (`lto = "fat"`, stripped) of `main` at
-`6d19daafd` (the claim commits only; the tree is the merge base), of the
-branch at code commit (the PR's head) with the default features, and of
+`66a4fcfc9` (claim commits only; the tree is the merge base), of the
+branch at code commit `1cde0dbe` with the default features, and of
 the same with the default features minus `bluetooth`, each built on the
 dev VM (aarch64, rustc 1.97.1) with its own target dir; a headless `scoot`
 (an existing release build, used read-only), a private `dbus-daemon`
@@ -526,7 +526,7 @@ size alone is quantized to 64 KiB steps:
 
 | Build | file bytes | `.text` | `.text`+`.rodata`+`.eh_frame*`+`.gcc_except_table`+`.data*` |
 |---|---|---|---|
-| `main` (`6d19daafd`) | 1,970,912 | 1,520,328 | 1,860,499 |
+| `main` (`66a4fcfc9`) | 1,970,912 | 1,520,328 | 1,860,499 |
 | branch, default minus `bluetooth` | 1,970,912 (+0) | 1,523,176 (+2,848) | 1,863,531 (+3,032) |
 | branch, default (bluetooth on) | 2,036,448 (+65,536) | 1,581,576 (+58,400) | 1,929,755 (+66,224) |
 
