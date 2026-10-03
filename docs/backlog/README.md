@@ -272,7 +272,8 @@ falsify. Read `flexwm` there as `scoot`.
 
 ### IPC / computer use
 - [Targeted input injection without moving seat focus](./ipc/targeted-input-injection.md) — the computer-use gap (research)
-- [A coalesced `workspace` event on `subscribe`](./ipc/workspace-snapshot-event.md) — medium, filed 2026-09-29 (scootbar planning): occupied workspaces for a bar, which no standard protocol carries
+- [A coalesced `workspace` event on `subscribe`](./resolved/workspace-snapshot-event-done.md)
+  — RESOLVED 2026-10-03 in #406: per-output `{active, counts[]}` snapshot (protocol 7)
 - [Keyboard layout in IPC](./resolved/keyboard-layout-event-done.md)
   — RESOLVED 2026-10-03 in #404: `keyboard` query + `keyboard` subscribe event (protocol 6), read-only
 - [Switch a specific output's workspace](./ipc/workspace-switch-targeted-output.md) — medium, filed 2026-09-29: `focus-workspace-index` and `ext-workspace` `activate` only reach the focused output

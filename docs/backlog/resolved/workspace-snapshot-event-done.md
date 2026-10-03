@@ -1,9 +1,10 @@
 ---
 title: "A coalesced `workspace` event on `subscribe`, so a bar can show occupied workspaces without polling"
-status: "open"
-area: "ipc"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # A coalesced `workspace` event on `subscribe`
@@ -60,3 +61,7 @@ Benchmark the window-churn path before and after, subscriber attached and not.
 Layout state (focused column, window counts per column), keyboard layout,
 fullscreen and `locked` events. Add a kind when a consumer needs it; each is
 server work on a hot path.
+
+## Resolution (2026-10-03, PR #406)
+
+Landed as `feat(scoot-core,scoot-ipc,scoot,scootctl): workspace occupancy snapshot event on subscribe` (`2ac11cdb`). Counts shape (`{output, name, active, counts[]}`); protocol 6→7. Emission from the `refresh_workspaces` choke point, once per output per tick, one encode per changed snapshot; bench shows no regression. Pinned by 11 tests. Review: mergeable with 3 low notes (sync-skip test gap + comment wording, flush-clone doc wording, one ambiguous sentence — follow-ups). CI green.
