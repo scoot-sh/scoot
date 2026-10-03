@@ -4,7 +4,7 @@
 # themes from a real image (Stylix runs its palette generator on it), builds the
 # home-manager generation and then checks, on the file the generation renders:
 #   T1  the six color tokens are the base16 palette's (background base00, foreground
-#       base05, accent base0A, hover base0A like the bar's own default, dim base03,
+#       base05, accent base0D, hover base0D like the compositor's focused ring, dim base03,
 #       urgent base08), and not the bar's own defaults
 #   T2  bar.font is a store path to a real font file, bar.font-size Stylix's size in pixels
 #   T3  the rendered bar.toml reads back as exactly the evaluated settings
@@ -102,7 +102,7 @@ let
   facts = c: {
     settings = c.config.programs.scootbar.settings;
     palette = builtins.mapAttrs (_: v: v) {
-      inherit (c.config.lib.stylix.colors.withHashtag) base00 base03 base05 base08 base0A;
+      inherit (c.config.lib.stylix.colors.withHashtag) base00 base03 base05 base08 base0A base0D;
     };
     desktopSize = c.config.stylix.fonts.sizes.desktop;
     family = c.config.stylix.fonts.sansSerif.name;
@@ -139,14 +139,14 @@ pyck() { python3 - "$@"; }
 t1() { pyck "$W/themed.json" <<'PY'
 import json, sys
 f = json.load(open(sys.argv[1])); s, p = f["settings"]["colors"], f["palette"]
-want = {"background": p["base00"], "foreground": p["base05"], "accent": p["base0A"], "hover": p["base0A"], "dim": p["base03"], "urgent": p["base08"]}
+want = {"background": p["base00"], "foreground": p["base05"], "accent": p["base0D"], "hover": p["base0D"], "dim": p["base03"], "urgent": p["base08"]}
 bar_defaults = {"background": "#1e1e2e", "foreground": "#cdd6f4"}
 assert s == want, (s, want)
 assert all(s[k] != v for k, v in bar_defaults.items()), "the tokens are the bar's own defaults, not Stylix's"
 assert len(set(s.values())) == 5, ("two tokens share a color beyond hover==accent, so a swapped slot would pass", s)
 PY
 }
-ck "T1 the six color tokens are base16 base00/05/0A/0A/03/08 of the image's palette, not the bar's defaults" t1
+ck "T1 the six color tokens are base16 base00/05/0D/0D/03/08 of the image's palette, not the bar's defaults" t1
 t2() { pyck "$W/themed.json" <<'PY'
 import json, os, sys
 f = json.load(open(sys.argv[1])); bar = f["settings"]["bar"]

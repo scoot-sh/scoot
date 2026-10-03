@@ -5,6 +5,7 @@
 - [GPU tiers from the flake](#gpu-tiers-from-the-flake)
 - [XWayland from the flake](#xwayland-from-the-flake)
 - [Home-manager module](#home-manager-module)
+- [Stylix](#stylix)
 - [NixOS module](#nixos-module)
 - [The wallpaper: scootbg](#the-wallpaper-scootbg)
 - [The status bar: scootbar](#the-status-bar-scootbar)
@@ -198,6 +199,7 @@ programs.scoot = {
 | `portals.enable` | `true` | Install `scoot-portals.conf` to the per-user xdg-desktop-portal lookup path (`~/.config/xdg-desktop-portal/`), so ScreenCast/Screenshot resolve to the `wlr` backend inside a scoot session. Inert outside one (nothing reads it until `XDG_CURRENT_DESKTOP=scoot`). Turn off if you manage portal backends some other way. |
 | `wallpaper.enable` | `settings ? wallpaper` | Install `wallpaper.package` and set `settings.wallpaper.command` to its store path (a `command` you set yourself wins). On whenever `settings` has a `wallpaper` table; `false` leaves both alone, so `[wallpaper]` runs `scootbg` from `PATH`. See [The wallpaper](#the-wallpaper-scootbg). |
 | `wallpaper.package` | flake's own `scootbg` (Linux), `null` (macOS) | The scootbg to install. `null` installs nothing and sets no `command`. |
+| `stylix.enable` | `true` | Whether to take defaults from Stylix when it is in use (below). |
 
 The example above renders byte-for-byte to:
 
@@ -232,6 +234,41 @@ After `home-manager switch`, apply the new settings without re-logging in:
 and re-applies what can move live; the two restart fields are refused with a
 message naming that rather than silently kept (see
 [configuration.md](configuration.md#reloading-the-config)).
+
+## Stylix
+
+When `config.lib.stylix` exists and `stylix.enable` is on,
+`programs.scoot.settings` gets defaults from it — the compositor's half of
+a themed desktop, next to the bar's ([The status bar](#the-status-bar-scootbar)).
+The module never imports Stylix; nothing changes without it, and
+`programs.scoot.stylix.enable = false` turns the defaults off with it
+present. (The NixOS module renders no config file, so there is no NixOS-side
+equivalent: this lives in the home-manager module only.)
+
+| Setting | From | Notes |
+|---|---|---|
+| `appearance.focus_ring_active_color` | base16 `base0D` | The focused ring. Same slot Stylix's own sway, hyprland and river targets use for the focused border (checked against nix-community/stylix at `fb28acd`; there is no niri target there to check against). |
+| `appearance.focus_ring_inactive_color` | base16 `base03` | Every other ring. Same slot those targets use for the unfocused border. |
+| `appearance.background_color` | base16 `base00` | The frame clear color, shown until scootbg's first frame. Same slot those targets use for the background. |
+| `appearance.cursor_theme` | `stylix.cursor.name` | Only when `stylix.cursor` is set. The package needs no installing here: Stylix's own cursor target (`home.pointerCursor`) already installs it and puts its `share/icons` on the lookup path, which is where scoot searches. |
+| `appearance.cursor_size` | `stylix.cursor.size` | Only when `stylix.cursor` is set. |
+| `wallpaper.image` | `stylix.image` | Only when `stylix.image` is set. The store path, as an absolute path, which scoot resolves like any other. Setting it is what turns `wallpaper.enable` on (it follows `settings ? wallpaper`), so scootbg is installed for it. |
+| `wallpaper.mode` | `stylix.imageScalingMode` | Only when `stylix.image` is set (a mode without an image is meaningless, and an unconditional table would install scootbg for every Stylix user). The five values are exactly scootbg's five (`fill`, `fit`, `stretch`, `center`, `tile`), so it maps one to one. |
+
+**Precedence**, highest first, per key: a value you set in `settings`, then
+Stylix's (`lib.mkDefault`), then absent (the compositor's own built-in
+default). So `settings.appearance.background_color = "#123456"` replaces
+that one color and keeps the rest from Stylix. This is pinned by an
+evaluation test (`nix/tests.nix`, with a stand-in for Stylix).
+
+One combination Stylix can produce is invalid: a `wallpaper.color` you set
+yourself plus Stylix's `image`. scoot takes `image` or `color`, never both,
+so it refuses that section — fail-safe (the session carries on with
+`background_color`, the error in the log naming it), but your wallpaper is
+the background color until you resolve it: set your own `image`, or turn
+`programs.scoot.stylix.enable` off, for a solid color under Stylix.
+`cursor_color` has no Stylix convention (Stylix's cursor is name, size and
+package only), so theming leaves it at the compositor's default.
 
 ## NixOS module
 
@@ -573,8 +610,8 @@ retries every two seconds.
 **Stylix, without depending on it.** When `config.lib.stylix` exists and
 `stylix.enable` is on, `settings` gets defaults from it: the six `colors`
 tokens from the base16 palette (`background` base00, `foreground` base05,
-`accent` base0A, `hover` base0A like the bar's own default, `dim` base03,
-`urgent` base08), `bar.font` from
+`accent` base0D, `hover` base0D like the compositor's focused ring, `dim`
+base03, `urgent` base08), `bar.font` from
 `stylix.fonts.sansSerif` and `bar.font-size` from `stylix.fonts.sizes.desktop`
 (points, converted to the bar's pixels at 4/3 and clamped to 1 to 256). The
 font is a **file path**: scootbar has no fontconfig, so a build step finds
@@ -603,11 +640,16 @@ present.
 
 So `settings.colors.background = "#123456"` replaces that one token and
 keeps the other five from Stylix, and a value you set is never overridden by
-theming (the trouble Waybar's users report). This is pinned by an
+theming (the trouble Waybar's users report). **The accent changed**: it used
+to be base0A yellow (the bar's own default accent, Catppuccin Mocha's
+`f9e2af`), and is now base0D blue — the same blue as the compositor's Stylix
+focused ring ([Stylix](#stylix)), so a themed desktop's bar highlights and
+window rings match with neither set by hand. Only the Stylix default moved:
+the bar's own unthemed default is still yellow. This is pinned by an
 evaluation test (`nix/scootbar-tests.nix`, with a stand-in for Stylix), and
 run against the real thing by `scripts/scootbar-stylix-test.sh`: real
 Stylix (`fb28acd`) and home-manager (`efa3ccb`) themed from a real image, the
-six tokens read back equal to base16 `base00/05/0A/0A/03/08` of the generated
+six tokens read back equal to base16 `base00/05/0D/0D/03/08` of the generated
 palette, the file accepted by `scootbar daemon --check`, a user value winning
 per key, and the bar's background pixel on a headless scoot equal to `base00`
 (and to the user's color when the user sets one). It is not in CI: it builds

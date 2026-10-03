@@ -153,6 +153,7 @@ let
           base05 = "#e0e0e0";
           base08 = "#ff0000";
           base0A = "#ffff00";
+          base0D = "#0000ff";
         };
       };
     };
@@ -339,8 +340,8 @@ let
       s.colors == {
         background = "#101010";
         foreground = "#e0e0e0";
-        accent = "#ffff00";
-        hover = "#ffff00";
+        accent = "#0000ff";
+        hover = "#0000ff";
         dim = "#303030";
         urgent = "#ff0000";
       }
@@ -457,7 +458,7 @@ let
       && u.after == [ "graphical-session.target" ]
       && u.unitConfig.StartLimitIntervalSec == 0
       && u.wantedBy == [ "graphical-session.target" ];
-    "nixos: Stylix defaults apply there too" = (settingsOf osThemed).colors.accent == "#ffff00";
+    "nixos: Stylix defaults apply there too" = (settingsOf osThemed).colors.accent == "#0000ff";
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
 
