@@ -609,6 +609,96 @@ fn an_over_cap_call_or_signal_is_skipped_with_no_event() {
     assert!(!conn.dead());
 }
 
+/// A sender that outruns the reader holds one turn, not the bar: while
+/// a 60 MiB message is discarded, one pump reads a bounded amount (the
+/// poll is woken for the rest), the connection lives, and the idle state
+/// asks for nothing after.
+#[test]
+fn discarding_a_flood_is_bounded_a_pump_at_a_time() {
+    use super::conn::Conn;
+    let (client, mut daemon_end) = UnixStream::pair().unwrap();
+    // Buffers big enough to hold megabytes before the first pump, so one
+    // unbounded pump would eat past the budget deterministically.
+    rustix::net::sockopt::set_socket_send_buffer_size(&daemon_end, 4 * 1024 * 1024).unwrap();
+    rustix::net::sockopt::set_socket_recv_buffer_size(&client, 4 * 1024 * 1024).unwrap();
+    let server = std::thread::spawn(move || {
+        super::testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut conn = conn::setup(client).unwrap();
+    let mut daemon = server.join().unwrap();
+    // A valid reply to no pending call (serial 1 is the set-up's): valid
+    // to the spec, so framed, and every byte of it discarded.
+    let total = 60 * 1024 * 1024;
+    let mut writer = Writer::with_cap(total + 4096);
+    writer.begin_return_to(99, ":1.7", 1, "ay");
+    let cookie = writer.open_array(1).unwrap();
+    writer.raw(&vec![7u8; total]);
+    writer.close_array(cookie);
+    let bytes = writer.finish().unwrap();
+    // Fill the buffers deterministically (no race with the first pump):
+    // the skip is already mid-flight when it is measured.
+    daemon.set_nonblocking(true).unwrap();
+    let mut at = 0;
+    while at < bytes.len() {
+        match daemon.write(&bytes[at..]) {
+            Ok(n) => at += n,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("{error}"),
+        }
+    }
+    assert!(
+        at > Conn::DISCARD_BUDGET + 8192,
+        "the buffers hold {at} bytes: too little to tell a bounded pump from an unbounded one"
+    );
+    let sender = std::thread::spawn(move || {
+        daemon.set_nonblocking(false).unwrap();
+        daemon.write_all(&bytes[at..]).unwrap();
+        daemon
+    });
+    // The priming pump reads the header and starts the skip; the measured
+    // pump is mid-skip, so what it consumes is exactly what it read.
+    let (events, _) = conn.pump();
+    assert!(events.is_empty());
+    assert!(conn.discard_pending() > 0, "the skip never started");
+    let before = conn.discard_pending();
+    let (events, capped) = conn.pump();
+    assert!(events.is_empty());
+    // Bounded work, and the poll woken for the rest.
+    let read = before - conn.discard_pending();
+    assert!(
+        read <= Conn::DISCARD_BUDGET + 8192,
+        "{read} bytes in one pump"
+    );
+    assert!(capped, "the poll is woken for the rest");
+    assert!(conn.has_staged_work());
+    // It drains, bounded a pump, and the connection lives.
+    let mut pumps = 1;
+    let mut longest = Duration::ZERO;
+    let start = Instant::now();
+    while conn.discard_pending() > 0 {
+        assert!(start.elapsed() < Duration::from_secs(60), "never drained");
+        let turn = Instant::now();
+        let _ = conn.pump();
+        longest = longest.max(turn.elapsed());
+        pumps += 1;
+    }
+    // One turn never holds the bar for the stream: milliseconds, not the
+    // seconds an unbounded drain takes. The bound is generous (a loaded
+    // box is slow, not wrong); the real number is in the report.
+    assert!(
+        longest < Duration::from_secs(1),
+        "one pump held {longest:?}"
+    );
+    sender.join().unwrap();
+    assert!(!conn.dead());
+    // Idle again: no OUT, no staged work — wakeups must not change.
+    assert!(!conn.want_write());
+    assert!(!conn.has_staged_work());
+    // Sanity: it took many bounded pumps, not one long one.
+    assert!(pumps > 10, "{pumps}");
+}
+
 #[test]
 fn a_flood_is_worked_a_turn_at_a_time_and_never_kills_the_connection() {
     let (mut conn, daemon) = connected();

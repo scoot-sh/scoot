@@ -21,7 +21,9 @@
 //! does not take (past [`proto::MAX_MESSAGE`], up to the spec's 128 MiB)
 //! is skipped whole, and a flood is read only as far as
 //! [`READ_WATERMARK`], the rest waiting in the socket: neither costs the
-//! connection, since a peer, not the bus, decides what is sent.
+//! connection, since a peer, not the bus, decides what is sent. While such
+//! a message is being discarded, one turn reads a bounded amount (a sender
+//! that outruns the reader holds one turn, not the bar).
 
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, BorrowedFd};
@@ -47,6 +49,13 @@ pub const MAX_PENDING: usize = 64;
 /// message and a read's worth, so the largest message still completes.
 /// A flood is worked a turn at a time, never a lost connection.
 const READ_WATERMARK: usize = proto::MAX_MESSAGE + 64 * 1024;
+
+/// The most one [`Conn::pump`] reads while discarding a message past
+/// [`proto::MAX_MESSAGE`]: a sender that outruns the reader holds one
+/// turn this long, and the rest waits in the socket (the poll is woken
+/// for it, see [`Conn::has_staged_work`]). Reads of ordinary messages
+/// are still bounded by [`READ_WATERMARK`] alone.
+const DISCARD_BUDGET_PER_PUMP: usize = 256 * 1024;
 
 /// A message past [`proto::MAX_MESSAGE`] has its header fields read, to
 /// learn what it answers, only when they are this small; a message with
@@ -429,6 +438,17 @@ impl Conn {
         self.staged.len()
     }
 
+    /// Bytes of the over-cap message still to discard: while it is
+    /// nonzero the connection is mid-skip.
+    #[cfg(test)]
+    pub fn discard_pending(&self) -> usize {
+        self.discard
+    }
+
+    /// The per-pump discard budget [`Conn::pump`] stops at.
+    #[cfg(test)]
+    pub const DISCARD_BUDGET: usize = DISCARD_BUDGET_PER_PUMP;
+
     /// The watermark reads stop at.
     #[cfg(test)]
     pub const WATERMARK: usize = READ_WATERMARK;
@@ -631,13 +651,23 @@ impl Conn {
     }
 
     /// Reads what is ready into staging, up to [`READ_WATERMARK`], killing
-    /// the connection only on a real I/O error.
+    /// the connection only on a real I/O error. While a message past
+    /// [`proto::MAX_MESSAGE`] is being discarded, one pump reads at most
+    /// [`DISCARD_BUDGET_PER_PUMP`] more (a sender that outruns the reader
+    /// holds one turn this long); the rest waits in the socket with
+    /// `backlog` set, so the poll returns at once for it.
     fn read_ready(&mut self) {
         let mut chunk = [0u8; 8192];
         self.backlog = false;
+        let mut read = 0;
         loop {
             if self.staged.len() >= READ_WATERMARK {
                 // Enough for this turn: the rest waits in the socket.
+                self.backlog = true;
+                return;
+            }
+            if self.discard > 0 && read >= DISCARD_BUDGET_PER_PUMP {
+                // Enough discarding for this turn.
                 self.backlog = true;
                 return;
             }
@@ -650,6 +680,7 @@ impl Conn {
                 Ok(n) => {
                     self.staged.extend_from_slice(&chunk[..n]);
                     self.apply_discard();
+                    read += n;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return,
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
