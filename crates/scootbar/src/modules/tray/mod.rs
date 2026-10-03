@@ -292,7 +292,7 @@ impl Tray {
             .parent()
             .filter(|parent| parent.is_dir())
             .map(Path::to_path_buf)
-            .unwrap_or_else(runtime_dir);
+            .unwrap_or_else(conn::runtime_dir);
         let notify = rustix::fs::inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK)
             .ok()
             .and_then(|fd| {
@@ -532,16 +532,6 @@ fn bus_name(path: &Path) -> &[u8] {
     path.file_name()
         .map(|name| name.as_encoded_bytes())
         .unwrap_or(b"bus")
-}
-
-/// The runtime directory, or its conventional fallback.
-fn runtime_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
-    PathBuf::from(format!("/run/user/{}", rustix::process::getuid().as_raw()))
 }
 
 /// Whether an inotify buffer holds an event for `want`: whole-field

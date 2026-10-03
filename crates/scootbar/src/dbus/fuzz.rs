@@ -6,6 +6,15 @@
 //! `cargo-fuzz`. A panic is a finding: the bar's release profile is
 //! `panic = "abort"`.
 //!
+//! The `Conn` skip and discard state machine (`conn.rs`) is deliberately
+//! not driven here: it needs the connection's crate dependencies
+//! (`crate::print`, `rustix`), which the fuzz crate does not have, and
+//! compiling it against stubs would fuzz adapted code, not the shipped
+//! code (the failure the client review fixed in the property walk). That
+//! machine is covered by the `conn` tests instead (over-cap replies and
+//! floods through a socketpair, in `super::tests`), which is where its
+//! bounds live.
+//!
 //! The threat model is the spike's: the daemons validate the wire, so a
 //! same-user peer sends valid-but-hostile shapes (deep nesting, huge
 //! arrays, megabyte strings), not malformed bytes. The check therefore

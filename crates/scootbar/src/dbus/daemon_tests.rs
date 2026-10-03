@@ -249,8 +249,7 @@ fn a_forged_peer_reply_is_refused_and_the_real_answer_lands() {
     let _ = victim.pump();
     let Event::MethodCall { sender, .. } = until(&mut callee, |event| {
         matches!(event, Event::MethodCall { .. })
-    })
-    else {
+    }) else {
         unreachable!()
     };
     assert_eq!(sender, victim.unique());
@@ -330,4 +329,81 @@ fn a_forged_bus_reply_is_refused_and_the_real_answer_lands() {
     assert!(names.iter().any(|name| name == victim.unique()));
     let (events, _) = victim.pump();
     assert!(events.is_empty(), "{events:?}");
+}
+
+/// What one signal's dispatch costs, measured so a regression shows:
+/// the six owned pieces (sender, path, interface, member, signature,
+/// body) plus the events vec's first growth. All six are inherent — the
+/// events own their data over a reused buffer — so there is nothing
+/// cheap to take; an idle pump is zero.
+#[test]
+fn a_signal_costs_six_small_allocations() {
+    let Some(daemon) = Daemon::spawn() else {
+        return;
+    };
+    let mut watcher = connect(&daemon);
+    let mut peer = connect(&daemon);
+    // The match, then a barrier proving it is installed (the bus works
+    // one connection's calls in order).
+    let mut rule = Writer::new();
+    rule.str("type='signal',interface='sh.scoot.Alloc'");
+    watcher
+        .call(
+            conn::BUS_NAME,
+            conn::BUS_PATH,
+            conn::BUS_INTERFACE,
+            "AddMatch",
+            "s",
+            &rule.take_body().unwrap(),
+            proto::flag::NO_REPLY_EXPECTED,
+            0,
+        )
+        .unwrap();
+    bus_call(
+        &mut watcher,
+        "GetNameOwner",
+        "s",
+        &string_body("org.freedesktop.DBus"),
+        1,
+    );
+    let _ = watcher.pump();
+    until(&mut watcher, |event| {
+        matches!(event, Event::Reply { token: 1, .. })
+    });
+    let mut ping = || {
+        peer.signal("/p", "sh.scoot.Alloc", "Ping", "s", &string_body("x"));
+        peer.pump();
+    };
+    // Warm: staging keeps its capacity, and one signal is worked.
+    ping();
+    until(&mut watcher, |event| matches!(event, Event::Signal { .. }));
+    // Measured: one more identical signal, already waiting in the
+    // socket before it is counted (polled for, never pumped for).
+    ping();
+    {
+        use rustix::event::{PollFd, PollFlags, Timespec, poll};
+        let fd = watcher.as_fd();
+        let start = std::time::Instant::now();
+        loop {
+            let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+            let timeout = Timespec {
+                tv_sec: 0,
+                tv_nsec: 50_000_000,
+            };
+            let _ = poll(&mut fds, Some(&timeout));
+            if !fds[0].revents().is_empty() {
+                break;
+            }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "no signal"
+            );
+        }
+    }
+    let ((events, _), allocations) = scootbg_mem::count_allocations(|| watcher.pump());
+    assert_eq!(events.len(), 1);
+    assert_eq!(allocations, 7, "six owned pieces and the events vec");
+    // And an idle pump is zero.
+    let (_, idle) = scootbg_mem::count_allocations(|| watcher.pump());
+    assert_eq!(idle, 0, "an idle pump allocates nothing");
 }

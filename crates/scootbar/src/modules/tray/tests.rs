@@ -1378,8 +1378,7 @@ fn an_unknown_drop_releases_every_item_waiting_on_an_answer() {
         ":1.9".to_owned(),
     ));
     live.items[0].fetching = true;
-    live.flights
-        .push(Some(Flight { op: Op::Props(id) }));
+    live.flights.push(Some(Flight { op: Op::Props(id) }));
     live.apply(Event::Dropped {
         token: conn::DROPPED_UNKNOWN,
     });
@@ -1432,9 +1431,9 @@ fn a_host_that_disconnects_is_pruned() {
 /// own further names are refused too.
 #[test]
 fn the_per_service_cap_counts_service_or_registrant() {
+    use super::MAX_PER_SERVICE;
     use super::item::Item;
     use super::watcher::setup;
-    use super::MAX_PER_SERVICE;
     use crate::dbus::conn;
     use crate::dbus::testdaemon;
     let (client, mut daemon_end) = std::os::unix::net::UnixStream::pair().unwrap();
