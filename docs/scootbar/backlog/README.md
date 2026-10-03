@@ -127,7 +127,8 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Bluetooth](resolved/bluetooth-module-done.md) (low) — RESOLVED 2026-10-03
 - [Bluetooth: real adapter and headset validation](bluetooth-real-hardware.md) (medium): what the VM cannot prove — real power toggles, Battery1 pacing, real `GetManagedObjects` scale, Waybar beside it
 - [Move the tray onto `dbus::link`](resolved/tray-onto-dbus-link-done.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection — RESOLVED 2026-10-03
-- [Network: a second radio's empty scan replaces the real one](network-multi-radio-scan.md) (medium): the last interface's scan dump wins, so a dongle or hotspot interface can empty the list (#403 review)
+ - [Network: a second radio's empty scan replaces the real one](network-multi-radio-scan.md) (medium): the last interface's scan dump wins, so a dongle or hotspot interface can empty the list (#403 review)
+ - [Network: WiFi signal as a strength icon, not text bars](network-signal-icon.md) (medium): the icon shows the strength, the text is just the SSID
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)
 - [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears
