@@ -864,8 +864,9 @@ socket is one more source in the `poll` loop), which is the
   128 MiB, ends the connection. Nesting past 32 and pixmaps past 256
   pixels a side are refused the same way (the entry, or the answer, is
   dropped). A flood of signals (the match rule has no sender, so any peer
-  may send what the bar listens for) is read up to 1 MiB staged and the
-  rest left in the socket, 256 events a wake with the bar's other sources
+   may send what the bar listens for) is read up to 1 MiB + 64 KiB staged
+   (the read watermark: one capped message and a read's worth) and the
+   rest left in the socket, 256 events a wake with the bar's other sources
    between, and costs the connection nothing; while an over-cap message
    is discarded, one turn reads at most 256 KiB more (the poll is woken
    for the rest), so a sender that outruns the reader holds one turn,
@@ -884,11 +885,11 @@ socket is one more source in the `poll` loop), which is the
   reads or after the bus kept dropping the bar. Measured (dev VM, one
   60 s idle window per row): **zero wakeups** with no bus, with a bus and
   no items, and with one and with eight items on it; RSS 4156 kB with the
-  tray alone and no bus or no items, 4352 kB with one item, 4388 kB with
-  eight (differences under about 130 kB are within one run's resolution;
-  level with the same tree's `main` in every row). The binary: **no byte
-  on disk and +2,144 B of `.text` (+0.1%)** against `main` (1,970,912 B
-  on disk both sides). An item that
+   tray alone and no bus or no items, 4352 kB with one item, 4388 kB with
+   eight (differences under about 130 kB are within one run's resolution;
+   level with the same tree's `main` in every row). The binary: **no byte
+   on disk and +2,400 B of `.text` (+0.2%)** against `main` (1,970,912 B
+   on disk both sides). An item that
   re-announces its icon continuously is read at most every 50 ms (0.7% of
   a core measured, against 9.7% with no floor). The table and its method
   are in the

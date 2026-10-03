@@ -637,6 +637,20 @@ of `.text` (+0.1%, inside any noise reading of it) and nothing on disk.
 No row is waived here, and none needs to be: there is no regression on
 any row for the maintainer to waive or not.
 
+**Review round (2026-10-03).** The size row re-measured at the
+review-round head (branch code commit `d6415c5cc`, rebuilt byte-identical
+after the docs-only follow-up, same-tree `main` `408946cd5`, same method:
+`git archive`d to the dev VM, own target
+dirs): file 1,970,912 B on both sides (+0); `.text` 1,522,728 against
+1,520,328 (+2,400, +0.2%); loaded sections (`.text`+`.rodata`+`.eh_frame*`+
+`.gcc_except_table`+`.data*`) 1,862,795 against 1,860,499 (+2,296). The
+round's own code (the bus-sender accept, the over-cap refused/unknown
+split) adds 256 B of `.text` over the `4b197e086` row above; the idle
+rows above stand — nothing in the round touches an idle path (the new
+code runs per reply and per over-cap message only). `ldd` still shows
+only libc, libm and libgcc_s, and `Cargo.lock` is byte-identical to
+`main`'s. No row regresses; nothing waived.
+
 **The 60 MiB stream** (the budget's own test, socketpair, debug build on
 the same VM): before the budget one pump read 25,745,728 bytes; after,
 the same stream drains in 1,868 pumps with the longest at 1.70 ms, and

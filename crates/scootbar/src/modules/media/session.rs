@@ -20,9 +20,10 @@
 //! ## What a peer can do
 //!
 //! Anything on the session bus can claim an MPRIS name and say anything. It
-//! cannot crash or hang the bar or grow it without bound (the client matches
-//! a reply by serial alone, so a forged reply to one of our calls is the one
-//! gap, inherited and tracked in `tray-review-hardening`): strings are cleaned and cut where they are stored,
+//! cannot crash or hang the bar or grow it without bound (replies are
+//! matched by serial and sender — a reply from anyone but the callee is
+//! refused whenever the callee is known, and only a call made of a
+//! well-known name may be answered by anyone): strings are cleaned and cut where they are stored,
 //! a reply that does not parse leaves the player's last state, one that errors
 //! leaves the player held and unshown (read again at its next signal), one
 //! that never comes is forgotten, and `NameOwnerChanged` is believed only from
