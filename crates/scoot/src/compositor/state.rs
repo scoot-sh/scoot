@@ -121,6 +121,14 @@ pub struct State {
     /// is a request snapshot, not liveness (`xdisplay` says whether the
     /// server is actually up).
     pub startup_xwayland: bool,
+    /// What the X server draws at a fractional `[output] scale`: `sharp`
+    /// (`ceil`) or `light` (`floor`) -- see
+    /// [`XwaylandFractional`](super::config::XwaylandFractional). Seeded in
+    /// `run` from the config file and re-seeded by every reload that names
+    /// it (see `reload.rs`); what the X-scale chooser reads (see
+    /// `xwayland/scale.rs`). Unconditional -- without the `xwayland` Cargo
+    /// feature nothing reads it, but the reload diff still does.
+    pub xwayland_fractional: super::config::XwaylandFractional,
 
     /// The layout. Everything else here exists to serve it.
     pub world: World,
@@ -1161,6 +1169,7 @@ impl State {
             startup_gpu: None,
             startup_autostart: Vec::new(),
             startup_xwayland: false,
+            xwayland_fractional: super::config::XwaylandFractional::default(),
             world: World::new(config),
             windows: HashMap::new(),
             next_id: 0,

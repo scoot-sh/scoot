@@ -370,7 +370,7 @@ rectangle with the scale of the output the window is on (its `output`),
 never with the first output's. X windows (`--xwayland`) follow the same rule: their
 `rect` is logical and a click at a logical point lands on the X widget
 drawn there, whatever the scale -- the X server's own pixels (`ceil(scale)`
-per logical pixel, see [protocols.md](protocols.md#x-windows-in-the-layout))
+per logical pixel by default, `floor(scale)` with `[xwayland] fractional = "light"`, see [protocols.md](protocols.md#x-windows-in-the-layout))
 are never what an agent reads or sends.
 
 **A pointer lock freezes injected motion, and still answers `ok`.** While a

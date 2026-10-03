@@ -2135,3 +2135,37 @@ fn a_floating_modifier_reload_applies_and_a_bad_one_is_refused() {
     let response = fixture.reload();
     assert!(applied(&response).is_empty() && refused(&response).is_empty());
 }
+
+#[test]
+fn an_xwayland_fractional_reload_applies_and_a_bad_one_is_refused() {
+    use crate::compositor::config::XwaylandFractional;
+
+    let mut fixture = Fixture::with_config("");
+    assert_eq!(fixture.state.xwayland_fractional, XwaylandFractional::Sharp);
+    fixture.rewrite("[xwayland]\nfractional = \"light\"\n");
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &[field::FRACTIONAL.to_owned()],
+        "{response:?}"
+    );
+    assert_eq!(fixture.state.xwayland_fractional, XwaylandFractional::Light);
+    // Not a choice: refused by name, and the session keeps light.
+    fixture.rewrite("[xwayland]\nfractional = \"crisp\"\n");
+    let response = fixture.reload();
+    assert!(applied(&response).is_empty(), "{response:?}");
+    assert_eq!(refused(&response).len(), 1, "{response:?}");
+    assert!(
+        refused(&response)[0].starts_with(field::FRACTIONAL)
+            && refused(&response)[0].contains("crisp"),
+        "{response:?}"
+    );
+    assert_eq!(fixture.state.xwayland_fractional, XwaylandFractional::Light);
+    // Back to a real one: applied; then unchanged: silent.
+    fixture.rewrite("[xwayland]\nfractional = \"sharp\"\n");
+    let response = fixture.reload();
+    assert_eq!(applied(&response), &[field::FRACTIONAL.to_owned()]);
+    assert_eq!(fixture.state.xwayland_fractional, XwaylandFractional::Sharp);
+    let response = fixture.reload();
+    assert!(applied(&response).is_empty() && refused(&response).is_empty());
+}

@@ -68,6 +68,16 @@
 //!   once or never) that no live swap can reach proportionate to its risk
 //!   -- rebuilding any of them mid-session is a restart keeping clients,
 //!   every step fallible mid-flight -- so the refusal stands and says so.
+//! - `[xwayland] fractional`: applied -- the stored choice is swapped and
+//!   the X scale re-chosen through the one chooser
+//!   (`State::refit_xwayland`), exactly like a scale change: the client
+//!   scale, the XSETTINGS toolkits read and every open X window's
+//!   configure follow when the choice moves the X scale, and nothing is
+//!   sent when it does not (scale 1 and integer scales draw the same
+//!   either way). A value that names neither `sharp` nor `light` is refused
+//!   by name and the session keeps its own, like `[floating] modifier`.
+//!   Applies under lock too: only scale numbers move, never client pixels
+//!   (see "While locked" below).
 //! - `[autostart] commands`: the spawn delta applies -- entries the session
 //!   has not seen run once each, in file order, through the same `act` path
 //!   startup drains. New `Spawn` entries only: a reloaded non-spawn action
@@ -179,6 +189,8 @@ mod field {
     pub const GPU: &str = "tty.gpu";
     pub const BACKEND: &str = "renderer.backend";
     pub const XWAYLAND: &str = "xwayland.enabled";
+    /// `[xwayland] fractional`: what X draws at a fractional scale.
+    pub const FRACTIONAL: &str = "xwayland.fractional";
     pub const AUTOSTART: &str = "autostart.commands";
     pub const FLOATING_AUTO: &str = "floating.auto";
     pub const FLOATING_MODIFIER: &str = "floating.modifier";
@@ -248,6 +260,7 @@ impl State {
         self.apply_layout_reload(fresh, &mut report);
         self.apply_appearance_reload(fresh, &mut report);
         self.apply_output_reload(fresh, &mut report);
+        self.apply_xwayland_fractional_reload(fresh, &mut report);
         self.apply_device_reload(fresh, &mut report);
         self.apply_autostart_reload(fresh, &mut report);
         self.apply_floating_reload(fresh, &mut report);
@@ -473,6 +486,30 @@ impl State {
             self.rescale_outputs();
             self.resend_output_scale();
             report.rescaled = true;
+        }
+    }
+
+    /// `[xwayland] fractional`: swapped live and re-applied through the one
+    /// X-scale chooser (`State::refit_xwayland`), exactly like a scale
+    /// change -- see the module doc. Compared against the live choice, and
+    /// what is stored is exactly what was compared, so a second reload
+    /// agrees silently. A reload that moves the X scale needs no `apply()`:
+    /// the logical layout is untouched, and `refit_xwayland` reconfigures
+    /// every managed X window itself.
+    fn apply_xwayland_fractional_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        if let Some(name) = &fresh.invalid_xwayland_fractional {
+            report.refused.push(format!(
+                "{} (`{name}` is not one of sharp or light; kept {})",
+                field::FRACTIONAL,
+                self.xwayland_fractional.name()
+            ));
+            return;
+        }
+        if fresh.xwayland_fractional != self.xwayland_fractional {
+            self.xwayland_fractional = fresh.xwayland_fractional;
+            report.applied.push(field::FRACTIONAL.to_owned());
+            #[cfg(feature = "xwayland")]
+            self.refit_xwayland();
         }
     }
 

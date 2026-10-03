@@ -663,9 +663,12 @@ its startup id by another X client, below.)
   pixels per logical pixel -- so at an integer scale an X app is drawn one
   X pixel per physical pixel, sharp, and at a fractional one (1.5) it is
   drawn at the integer above (2) and scaled down, like a Wayland client
-  rendering at `ceil`. That holds while the whole output layout fits X's
+  rendering at `ceil`. (`[xwayland] fractional = "light"` draws at
+  `floor(scale)` at a non-integer scale instead -- blurry, at about a
+  quarter of the buffer memory; see [configuration.md](configuration.md#xwayland).) That holds while the whole output layout fits X's
   coordinates at that scale: X positions are 16-bit (32767 at most), so
-  when the layout times `ceil(scale)` would be wider or taller than 32767
+  when the layout times the chosen ceiling (`ceil(scale)`, or `floor(scale)`
+  with `fractional = "light"`) would be wider or taller than 32767
   X pixels (eight 3840-pixel outputs at 1.25 would be 49152 at 2) the X
   server draws at the largest integer scale at which it fits instead -- 1
   at worst, blurrier but with every X window addressable -- and says so
@@ -687,8 +690,9 @@ its startup id by another X client, below.)
   the scale in that daemon instead. An X app that
   reads none of them (bare Xlib: `xterm`'s default bitmap fonts, `xclock`,
   Wine, Steam's own UI) draws at scale 1 in X pixels and comes out
-  `ceil(scale)` times smaller: sharp but small, the trade-off every
-  compositor that draws X natively makes. The `Xft.dpi` X resource is not
+  that scale times smaller (`ceil(scale)`; with `fractional = "light"`
+  the X scale is 1, so it comes out full-size but blurry): sharp but small,
+  the trade-off every compositor that draws X natively makes. The `Xft.dpi` X resource is not
   written; an app that reads only that takes `xrdb -merge` (`Xft.dpi:
   192` at scale 2). Coordinates stay logical everywhere scoot speaks them
   -- `scoot msg windows`, `pointer click`, window rules, floating positions
@@ -2282,7 +2286,8 @@ Real limits rather than polish:
   output (see [More than one output](configuration.md#more-than-one-output)),
   so a client choosing its buffer scale from the outputs it has entered
   reaches the same answer.
-- **X apps** (with `--xwayland`) draw at `ceil(scale)` -- the largest
+- **X apps** (with `--xwayland`) draw at `ceil(scale)` -- or at `floor(scale)`
+  at a non-integer scale with `[xwayland] fractional = "light"` -- the largest
   among the outputs, when they differ, since X has one scale for every
   screen -- and are scaled to each output like a client rendering at the
   `wl_output.scale` integer -- see [XWayland](#x-windows-in-the-layout).

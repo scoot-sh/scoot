@@ -321,6 +321,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // the knob warns once and does the same.
     let xwayland = xwayland::resolve(options.xwayland, loaded.xwayland);
     state.startup_xwayland = xwayland;
+    state.xwayland_fractional = loaded.xwayland_fractional;
     if xwayland {
         #[cfg(feature = "xwayland")]
         match xwayland::start(state.loop_handle.clone(), &mut state) {

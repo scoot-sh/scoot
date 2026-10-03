@@ -290,21 +290,74 @@ impl RendererConfig {
     }
 }
 
-/// `[xwayland]`. One field today: `enabled`, whether to run an XWayland
-/// server inside the session so X11-only applications get a `DISPLAY`.
-/// `Option`-everything for the same reason [`LayoutConfig`] is: a partial
-/// table leaves the rest at their defaults.
+/// `[xwayland]`. Two fields: `enabled`, whether to run an XWayland
+/// server inside the session so X11-only applications get a `DISPLAY`;
+/// and `fractional`, what X draws at a fractional `[output] scale`
+/// (see [`XwaylandFractional`]). `Option`-everything for the same reason
+/// [`LayoutConfig`] is: a partial table leaves the rest at their defaults.
 ///
 /// Off unless both the file and the flag agree it is on -- more precisely,
-/// `compositor::run` ORs this with `--xwayland`, since a flag can only say
-/// yes. Needs an `xwayland` Cargo-feature build; without one the knob parses
-/// but warns and the session runs Wayland-only (see `compositor::xwayland`).
-/// Takes effect on restart, like `[tty] gpu` and `[renderer] backend` -- a
-/// reload refuses changes with a message naming that (see `reload.rs`).
+/// `compositor::run` ORs `enabled` with `--xwayland`, since a flag can only
+/// say yes. Needs an `xwayland` Cargo-feature build; without one the knob
+/// parses but warns and the session runs Wayland-only (see
+/// `compositor::xwayland`). `enabled` takes effect on restart, like `[tty]
+/// gpu` and `[renderer] backend` -- a reload refuses changes with a message
+/// naming that (see `reload.rs`); `fractional` re-applies live through the
+/// one X-scale chooser (see `xwayland/scale.rs`).
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct XwaylandConfig {
     enabled: Option<bool>,
+    fractional: Option<String>,
+}
+
+/// `[xwayland] fractional`: what the X server draws at when an `[output]
+/// scale` is fractional (1.25, 1.5, ...). X toolkits scale only by integers,
+/// so at a fractional scale X must draw at a whole one and scoot resamples:
+///
+/// - [`Sharp`](Self::Sharp): X draws at `ceil(scale)` (2 at 1.5) and scoot
+///   scales down -- sharp, at about four times the buffer memory of drawing
+///   at 1. The default, and today's behavior.
+/// - [`Light`](Self::Light): at a non-integer scale X draws at
+///   `floor(scale)` (1 below 2) and scoot scales up -- blurry, at about a
+///   quarter of the memory.
+///
+/// Scale 1 and integer scales draw at themselves either way, byte for byte.
+/// Resolved by [`resolve`](Self::resolve): the named value, or [`Sharp`](Self::Sharp)
+/// when the table or key is absent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum XwaylandFractional {
+    /// X draws at `ceil(scale)` at a fractional scale (the default).
+    #[default]
+    Sharp,
+    /// X draws at `floor(scale)` at a non-integer scale.
+    Light,
+}
+
+impl XwaylandFractional {
+    /// The config-file spelling both ways, for the reload refusal message.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sharp => "sharp",
+            Self::Light => "light",
+        }
+    }
+
+    /// `[xwayland] fractional`, resolved: the named value, or [`Sharp`](Self::Sharp)
+    /// when the table or key is absent. `Err` carries a value that names
+    /// neither `sharp` nor `light` -- startup warns and draws sharp, a
+    /// reload refuses it by name and keeps what the session has (the same
+    /// shape as `[floating] modifier`'s [`drag_modifier`](super::window_rules::drag_modifier)).
+    pub fn resolve(fractional: Option<&str>) -> Result<Self, String> {
+        let Some(name) = fractional else {
+            return Ok(Self::default());
+        };
+        match name.trim() {
+            "sharp" => Ok(Self::Sharp),
+            "light" => Ok(Self::Light),
+            _ => Err(name.to_owned()),
+        }
+    }
 }
 
 /// `[autostart]`. One field: `commands`, a flat list of action strings in
@@ -433,6 +486,15 @@ pub struct LoadedConfig {
     /// `xwayland` Cargo-feature build, and takes effect on restart -- a
     /// reload refuses changes with a message naming that (see `reload.rs`).
     pub xwayland: bool,
+    /// What the X server draws at a fractional `[output] scale`: `sharp`
+    /// (`ceil`) or `light` (`floor`) -- see [`XwaylandFractional`]. Re-applied
+    /// live by a reload through the one X-scale chooser (see
+    /// `xwayland/scale.rs`).
+    pub xwayland_fractional: XwaylandFractional,
+    /// The `[xwayland] fractional` value, when it named neither `sharp` nor
+    /// `light`: startup warned and draws sharp; a reload refuses it by name
+    /// and keeps the session's (see `reload.rs`).
+    pub invalid_xwayland_fractional: Option<String>,
     /// The `[autostart] commands` that parsed, in file order. Entries that
     /// did not parse were already warned about and dropped at load (see
     /// [`AutostartConfig::into_actions`]); an empty `Vec` -- no table, no
@@ -481,6 +543,8 @@ impl LoadedConfig {
             gpu: None,
             renderer: None,
             xwayland: false,
+            xwayland_fractional: XwaylandFractional::default(),
+            invalid_xwayland_fractional: None,
             autostart: Vec::new(),
             floating: FloatingRules::default(),
             skipped_rules: Vec::new(),
@@ -515,7 +579,25 @@ impl LoadedConfig {
         let outputs = OutputEntries::resolve(file.outputs);
         let gpu = file.tty.and_then(|tty| tty.gpu);
         let renderer = file.renderer.unwrap_or_default().into_kind();
-        let xwayland = file.xwayland.unwrap_or_default().enabled.unwrap_or(false);
+        let xwayland = file
+            .xwayland
+            .as_ref()
+            .and_then(|xwayland| xwayland.enabled)
+            .unwrap_or(false);
+        let (xwayland_fractional, invalid_xwayland_fractional) = match XwaylandFractional::resolve(
+            file.xwayland
+                .as_ref()
+                .and_then(|xwayland| xwayland.fractional.as_deref()),
+        ) {
+            Ok(fractional) => (fractional, None),
+            Err(name) => {
+                tracing::warn!(
+                    fractional = %name,
+                    "[xwayland] fractional is not one of sharp or light; X draws sharp at fractional scales"
+                );
+                (XwaylandFractional::default(), Some(name))
+            }
+        };
         let autostart = file.autostart.unwrap_or_default().into_actions();
         let keybindings = keybindings_for(&file.binds, vt);
         let (floating_modifier, invalid_floating_modifier) =
@@ -546,6 +628,8 @@ impl LoadedConfig {
             gpu,
             renderer,
             xwayland,
+            xwayland_fractional,
+            invalid_xwayland_fractional,
             autostart,
             floating,
             skipped_rules,
@@ -708,10 +792,10 @@ pub fn default_config_toml() -> String {
          #\n\
          # Gap, column widths, the output scale, the ring/background/cursor\n\
          # appearance fields, binds, [floating] and [[window_rule]], new\n\
-         # [autostart] spawn entries and [wallpaper] re-apply live with\n\
-         # `scootctl reload`; [tty] gpu, [renderer] backend, [xwayland]\n\
-         # enabled and an [[outputs]] mode take effect on restart and a\n\
-         # reload refuses them with a message.\n",
+         # [autostart] spawn entries, [wallpaper] and [xwayland] fractional\n\
+         # re-apply live with `scootctl reload`; [tty] gpu, [renderer]\n\
+         # backend, [xwayland] enabled and an [[outputs]] mode take effect\n\
+         # on restart and a reload refuses them with a message.\n",
     );
 
     out.push_str("\n[layout]\n");
@@ -816,9 +900,14 @@ pub fn default_config_toml() -> String {
         "# Run an XWayland server inside the session (opt-in X11 support, off\n\
           # by default). --xwayland wins when either names it: the two are OR-ed.\n\
           # Needs an `xwayland` Cargo-feature build; without one the knob warns\n\
-          # and the session runs Wayland-only. Takes effect on restart.\n",
+          # and the session runs Wayland-only. `enabled` takes effect on restart.\n\
+          # `fractional` re-applies live on reload: `sharp` draws X at\n\
+          # ceil(scale) at a fractional scale (sharp, more memory), `light` at\n\
+          # floor(scale) (blurry, about a quarter of the memory); 1 and integer\n\
+          # scales draw at themselves either way.\n",
     );
     out.push_str("# enabled = false\n");
+    out.push_str("# fractional = \"sharp\"\n");
 
     out.push_str("\n[autostart]\n");
     out.push_str("# Action strings to run once each, in file order, at session startup.\n");
@@ -3038,7 +3127,8 @@ mod tests {
         assert_eq!(
             file.xwayland,
             Some(XwaylandConfig {
-                enabled: Some(true)
+                enabled: Some(true),
+                fractional: None,
             })
         );
         assert!(LoadedConfig::from_file(file).xwayland);
@@ -3058,6 +3148,67 @@ mod tests {
     fn deny_unknown_fields_rejects_an_xwayland_typo() {
         assert!(toml::from_str::<FileConfig>("[xwayland]\nenable = true\n").is_err());
         assert!(toml::from_str::<FileConfig>("[xways]\nenabled = true\n").is_err());
+    }
+
+    #[test]
+    fn an_xwayland_fractional_key_round_trips_and_defaults_sharp() {
+        for (toml, want) in [
+            (
+                "[xwayland]\nfractional = \"sharp\"\n",
+                XwaylandFractional::Sharp,
+            ),
+            (
+                "[xwayland]\nfractional = \"light\"\n",
+                XwaylandFractional::Light,
+            ),
+        ] {
+            let file: FileConfig = toml::from_str(toml).expect("valid toml");
+            let loaded = LoadedConfig::from_file(file);
+            assert_eq!(loaded.xwayland_fractional, want, "{toml:?}");
+            assert_eq!(loaded.invalid_xwayland_fractional, None, "{toml:?}");
+        }
+
+        // Missing table, missing key, and no `enabled` all mean sharp --
+        // today's behavior, decided with the user 2026-09-28.
+        for toml in ["", "[xwayland]\n", "[xwayland]\nenabled = true\n"] {
+            let file: FileConfig = toml::from_str(toml).expect("valid toml");
+            let loaded = LoadedConfig::from_file(file);
+            assert_eq!(
+                loaded.xwayland_fractional,
+                XwaylandFractional::Sharp,
+                "{toml:?} should draw sharp"
+            );
+            assert_eq!(loaded.invalid_xwayland_fractional, None, "{toml:?}");
+        }
+    }
+
+    #[test]
+    fn an_xwayland_fractional_that_names_neither_choice_warns_and_draws_sharp() {
+        // Fail-soft like `[floating] modifier`: the session starts sharp
+        // rather than discarding the whole file over one key, and records
+        // the value so a reload can refuse it by name.
+        let file: FileConfig =
+            toml::from_str("[xwayland]\nfractional = \"crisp\"\n").expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.xwayland_fractional, XwaylandFractional::Sharp);
+        assert_eq!(loaded.invalid_xwayland_fractional, Some("crisp".to_owned()));
+    }
+
+    #[test]
+    fn the_emitted_default_config_draws_sharp() {
+        // The emission is commented out, so uncomment the one line the same
+        // way a user would and check it parses to the default.
+        let emitted = default_config_toml();
+        let line = emitted
+            .lines()
+            .find(|line| line.trim() == "# fractional = \"sharp\"")
+            .expect("the emission names the fractional default");
+        let uncommented = line.trim().strip_prefix("# ").expect("a comment");
+        let file: FileConfig =
+            toml::from_str(&format!("[xwayland]\n{uncommented}\n")).expect("valid toml");
+        let loaded = LoadedConfig::from_file(file);
+        assert_eq!(loaded.xwayland_fractional, XwaylandFractional::Sharp);
+        assert_eq!(loaded.invalid_xwayland_fractional, None);
     }
 
     #[test]
