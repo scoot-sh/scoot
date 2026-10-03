@@ -220,3 +220,114 @@ fn calls_replies_signals_and_a_vanishing_peer_between_two_connections() {
     assert_eq!(name, "sh.scoot.Peer");
     assert!(old.is_some() && new.is_none());
 }
+
+// ESTABLISHED 2026-10-03 (this test's first run as a probe): dbus-daemon
+// 1.16.2 delivers an unsolicited METHOD_RETURN (and ERROR) from a peer
+// that was not the callee to the named destination, and dbus-broker 37
+// does not (the forgery never arrived; the real answer did). So the fix
+// below is real, not defence in depth: a reply is refused when its sender
+// is not the callee, whenever the callee is known.
+fn read_string(body: &[u8]) -> String {
+    Reader::le(body).str().unwrap().to_owned()
+}
+
+/// A peer that guesses a pending serial cannot forge its answer: the
+/// forged reply is refused, the flight stays, and the real answer still
+/// lands.
+#[test]
+fn a_forged_peer_reply_is_refused_and_the_real_answer_lands() {
+    let Some(daemon) = Daemon::spawn() else {
+        return;
+    };
+    let mut victim = connect(&daemon);
+    let mut callee = connect(&daemon);
+    let mut forger = connect(&daemon);
+    // The victim calls the callee; the callee holds the call unanswered.
+    let serial = victim
+        .call(callee.unique(), "/", "a.b", "Slow", "", &[], 0, 42)
+        .unwrap();
+    let _ = victim.pump();
+    let Event::MethodCall { sender, .. } = until(&mut callee, |event| {
+        matches!(event, Event::MethodCall { .. })
+    })
+    else {
+        unreachable!()
+    };
+    assert_eq!(sender, victim.unique());
+    // The forger answers it first, return and error alike, quoting the
+    // victim's serial.
+    forger.reply_return(victim.unique(), serial, "s", &string_body("forged"));
+    forger.reply_error(victim.unique(), serial, "org.example.Forged");
+    let _ = forger.pump();
+    // The forger's ListNames round trip proves the daemon processed its
+    // messages in order: both forgeries are already in the victim's
+    // socket before the victim is pumped, so "nothing arrives" is a
+    // refusal, not a race.
+    bus_call(&mut forger, "ListNames", "", &[], 99);
+    let _ = forger.pump();
+    until(&mut forger, |event| {
+        matches!(event, Event::Reply { token: 99, .. })
+    });
+    // While only the forgeries are in flight, nothing arrives: both are
+    // refused, and the flight stays for the real answer.
+    for _ in 0..5 {
+        let (events, _) = victim.pump();
+        assert!(events.is_empty(), "{events:?}");
+    }
+    // The callee answers for real: the real answer lands, whole.
+    callee.reply_return(&sender, serial, "s", &string_body("real"));
+    let _ = callee.pump();
+    let Event::Reply {
+        signature, body, ..
+    } = until(&mut victim, |event| {
+        matches!(event, Event::Reply { token: 42, .. })
+    })
+    else {
+        unreachable!()
+    };
+    assert_eq!(signature, "s");
+    assert_eq!(read_string(&body), "real");
+}
+
+/// The bus's own answer cannot be forged either: a peer's reply to a bus
+/// call is refused, and the bus's real answer still lands. Deterministic
+/// without waiting on the bus: the forgery is sent before the call, so it
+/// is first in the victim's socket, and the bus's answer follows it.
+#[test]
+fn a_forged_bus_reply_is_refused_and_the_real_answer_lands() {
+    let Some(daemon) = Daemon::spawn() else {
+        return;
+    };
+    let mut victim = connect(&daemon);
+    let mut forger = connect(&daemon);
+    // `Hello` is serial 1, so the next call is serial 2: forged first.
+    forger.reply_return(victim.unique(), 2, "s", &string_body("forged"));
+    let _ = forger.pump();
+    let serial = victim
+        .call(
+            conn::BUS_NAME,
+            conn::BUS_PATH,
+            conn::BUS_INTERFACE,
+            "ListNames",
+            "",
+            &[],
+            0,
+            43,
+        )
+        .unwrap();
+    assert_eq!(serial, 2);
+    // The only answer is the bus's own: a list of names, never the
+    // forgery (which is refused, sender against callee).
+    let Event::Reply {
+        signature, body, ..
+    } = until(&mut victim, |event| {
+        matches!(event, Event::Reply { token: 43, .. })
+    })
+    else {
+        unreachable!()
+    };
+    let names = proto::read_names(&signature, &body).unwrap();
+    assert!(names.iter().any(|name| name == victim.unique()));
+    let (events, _) = victim.pump();
+    assert!(events.is_empty(), "{events:?}");
+}
