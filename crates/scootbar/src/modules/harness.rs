@@ -121,8 +121,11 @@ impl Harness {
 
     /// The module's popup content for an unnamed output: whether it has one
     /// now.
-    #[cfg(all(feature = "popup", any(feature = "volume", feature = "microphone")))]
-    pub fn popup(&self, content: &mut crate::popup::Content) -> bool {
+    #[cfg(all(
+        feature = "popup",
+        any(feature = "volume", feature = "microphone", feature = "network")
+    ))]
+    pub fn popup(&mut self, content: &mut crate::popup::Content) -> bool {
         self.module.popup(&OutputView { name: None }, content)
     }
 

@@ -7023,7 +7023,9 @@ macro_rules! network_help {
     network.icon-vpn and network.icon-offline, falling back to
     network.icon; network.show-text = false draws only the icon); a click
     opens the picker
-    (network.menu-command with the scan's SSIDs on stdin). Nothing is
+    (network.menu-command with the scan's SSIDs on stdin), or the native
+    list with on-click = \"popup\" (network.connect-command with the SSID
+    as its last argument). Nothing is
     shown where the machine has no network interface
 "
     };

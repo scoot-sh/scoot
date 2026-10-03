@@ -596,6 +596,7 @@ fn a_network_section_is_read_whole() {
     assert!(modules.interface.is_none());
     assert!(modules.show_ssid);
     assert!(modules.menu_command.is_empty());
+    assert!(modules.connect_command.is_empty());
     assert!(modules.icon.is_none());
     assert!(modules.icon_ethernet.is_none());
     assert!(modules.icon_wifi.is_none());
@@ -608,6 +609,7 @@ fn a_network_section_is_read_whole() {
          interface = \"wlan0\"\n\
          show-ssid = false\n\
          menu-command = [\"fuzzel\", \"--dmenu\"]\n\
+         connect-command = [\"nmcli\", \"device\", \"wifi\", \"connect\"]\n\
          on-click = \"menu\"\n",
     )
     .unwrap()
@@ -616,6 +618,10 @@ fn a_network_section_is_read_whole() {
     assert_eq!(modules.interface.as_deref(), Some("wlan0"));
     assert!(!modules.show_ssid);
     assert_eq!(modules.menu_command, ["fuzzel", "--dmenu"]);
+    assert_eq!(
+        modules.connect_command,
+        ["nmcli", "device", "wifi", "connect"]
+    );
     let modules = read(
         "left = [\"network\"]\n\
          [network]\n\
@@ -657,6 +663,10 @@ fn a_network_section_is_refused_loudly() {
             "network.interface",
         ),
         ("[network]\nmenu-command = [\"\"]\n", "network.menu-command"),
+        (
+            "[network]\nconnect-command = [\"\"]\n",
+            "network.connect-command",
+        ),
         ("[network]\nwhatever = 1\n", "whatever"),
         ("[network]\non-click = \"raise\"\n", "network.on-click"),
         ("[network]\non-click = \"menu 2\"\n", "network.on-click"),
@@ -680,12 +690,25 @@ fn a_network_section_is_refused_loudly() {
     for (text, key) in [
         ("[network]\nshow-ssid = \"yes\"\n", "show-ssid"),
         ("[network]\nmenu-command = \"fuzzel\"\n", "menu-command"),
+        (
+            "[network]\nconnect-command = \"nmcli\"\n",
+            "connect-command",
+        ),
         ("[network]\ninterface = 3\n", "interface"),
         ("[network]\nshow-text = \"yes\"\n", "show-text"),
     ] {
         let error = read(text).unwrap_err().to_string();
         assert!(error.contains(key), "{text:?}: {error}");
     }
+}
+
+#[test]
+#[cfg(all(feature = "network", feature = "popup"))]
+fn a_network_popup_binding_is_accepted() {
+    // Opt-in, as the volume popup is: a click opens the list, and `connect`
+    // takes its row number.
+    read("left = [\"network\"]\n[network]\non-click = \"popup\"\n").unwrap();
+    read("left = [\"network\"]\n[network]\non-click = \"connect 1\"\n").unwrap();
 }
 
 #[test]

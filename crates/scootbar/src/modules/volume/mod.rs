@@ -1198,7 +1198,7 @@ impl Module for Volume {
     /// `max-volume`), and a button for the mute. Nothing while there is no
     /// device to change, which also closes an open popup (the server went).
     #[cfg(feature = "popup")]
-    fn popup(&self, _output: &OutputView<'_>, content: &mut crate::popup::Content) -> bool {
+    fn popup(&mut self, _output: &OutputView<'_>, content: &mut crate::popup::Content) -> bool {
         let Some(device) = self.live.as_ref().and_then(|live| live.device.as_ref()) else {
             return false;
         };
@@ -1214,6 +1214,7 @@ impl Module for Volume {
             format_args!("{}", if device.muted { "Unmute" } else { "Mute" }),
             "toggle-mute",
             None,
+            false,
             false,
         );
         true

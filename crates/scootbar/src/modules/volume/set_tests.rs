@@ -101,7 +101,7 @@ mod popup {
     use super::*;
     use crate::popup::{Content, Kind as Widget};
 
-    fn content_of(harness: &crate::modules::harness::Harness) -> (bool, Content) {
+    fn content_of(harness: &mut crate::modules::harness::Harness) -> (bool, Content) {
         let mut content = Content::default();
         let shown = harness.popup(&mut content);
         (shown, content)
@@ -109,8 +109,8 @@ mod popup {
 
     #[test]
     fn there_is_no_popup_while_there_is_no_device() {
-        let harness = sink_module(std::path::PathBuf::from("/nonexistent"));
-        let (shown, content) = content_of(&harness);
+        let mut harness = sink_module(std::path::PathBuf::from("/nonexistent"));
+        let (shown, content) = content_of(&mut harness);
         assert!(!shown);
         assert!(content.is_empty());
     }
@@ -121,7 +121,7 @@ mod popup {
         let mut harness = sink_module(fake.sock.clone());
         let mut conn = fake.accept();
         handshake(&mut conn, &mut harness, Kind::Sink, SINK, SINK);
-        let (shown, content) = content_of(&harness);
+        let (shown, content) = content_of(&mut harness);
         assert!(shown);
         let widgets = content.widgets();
         assert_eq!(widgets.len(), 3);
@@ -140,7 +140,8 @@ mod popup {
             Widget::Button {
                 action: "toggle-mute",
                 arg: None,
-                selected: false
+                selected: false,
+                closes: false,
             }
         );
     }
@@ -163,7 +164,7 @@ mod popup {
         conn.ack(tag);
         let _ = wait(&mut harness);
         answer_set(&mut conn, &mut harness, Kind::Sink, SINK, &[VOL, VOL], true);
-        let (_, content) = content_of(&harness);
+        let (_, content) = content_of(&mut harness);
         assert_eq!(content.label(&content.widgets()[2]), "Unmute");
     }
 }

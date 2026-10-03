@@ -55,7 +55,8 @@ impl State {
     /// A `wl_pointer` event while a popup is open: whether it was the
     /// popup's (and so is not the bar's). `enter` on the popup's surface
     /// makes it the focus; `leave` ends that; motion, buttons and scroll
-    /// while it is the focus are its own.
+    /// while it is the focus are its own (a wheel over the popup scrolls
+    /// its content, never a module under the bar).
     pub fn popup_pointer(&mut self, event: &wl_pointer::Event) -> bool {
         // A tooltip has an empty input region, so the pointer should never
         // enter it; a compositor that lets it anyway has the tooltip closed
@@ -125,7 +126,60 @@ impl State {
                 }
                 true
             }
-            // Scroll, axis and frame over the popup are not the bar's.
+            // A wheel over the popup scrolls its content a row a notch (a
+            // list taller than the output), grouped by frame as the bar's
+            // own scroll is. Horizontal scroll is ignored, as there.
+            wl_pointer::Event::Axis {
+                axis: WEnum::Value(axis),
+                value,
+                ..
+            } => {
+                if *axis == wl_pointer::Axis::VerticalScroll {
+                    open.wheel.axis(*value);
+                    if !open.framed {
+                        open.flush_wheel();
+                    }
+                }
+                true
+            }
+            wl_pointer::Event::AxisDiscrete {
+                axis: WEnum::Value(axis),
+                discrete,
+            } => {
+                if *axis == wl_pointer::Axis::VerticalScroll {
+                    open.wheel.axis_discrete(*discrete);
+                    if !open.framed {
+                        open.flush_wheel();
+                    }
+                }
+                true
+            }
+            wl_pointer::Event::AxisValue120 {
+                axis: WEnum::Value(axis),
+                value120,
+            } => {
+                if *axis == wl_pointer::Axis::VerticalScroll {
+                    open.wheel.axis_value120(*value120);
+                    if !open.framed {
+                        open.flush_wheel();
+                    }
+                }
+                true
+            }
+            wl_pointer::Event::AxisStop {
+                axis: WEnum::Value(axis),
+                ..
+            } => {
+                if *axis == wl_pointer::Axis::VerticalScroll {
+                    open.wheel.axis_stop();
+                }
+                true
+            }
+            wl_pointer::Event::Frame => {
+                open.flush_wheel();
+                true
+            }
+            // Axis sources and direction: ignored, as on the bar.
             _ => true,
         }
     }

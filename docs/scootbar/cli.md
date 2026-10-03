@@ -684,9 +684,24 @@ no daemon and no child process: two netlink sockets on the bar's own
   it as one argument). With `show-ssid = false` the picker refuses to
   open instead: the scan list would expose the SSIDs the bar hides. The module's own action is `menu`, taking no
   number (`scootbar msg invoke network menu`); it is refused naming why
-  with no command configured or no networks seen. The picker stays the
-  network module's: [popups](#popups) are built, and a native list for it
-  is a [separate entry](backlog/popup-network-list.md).
+  with no command configured or no networks seen.
+- **A native list**, opt-in as the volume popup is: `on-click = "popup"`
+  opens the scan as a [popup](#popups) list instead of the dmenu picker
+  (the click binding wins over the picker's default). Each row names a
+  network, with its bars where the scan carries a signal, and the
+  associated one selected; a wheel over the list scrolls it a row a notch
+  where the popup is taller than what the compositor configures for it,
+  and a row too wide for it is cut with an ellipsis. Selecting a
+  row closes the popup and runs `connect N` (`scootbar msg invoke network
+  connect 1` connects to the list's row 1): `network.connect-command` is
+  spawned with the SSID as its last argument, never through a shell
+  (SSIDs are attacker-controlled radio data, so no byte in one starts a
+  command; a password prompt is the command's own business, as with the
+  picker). `N` names what the list showed: a scan that moved underneath
+  is refused rather than connected to the wrong network. `connect` is
+  refused naming why with no command configured, a row past the list or
+  gone from the scan, or while one runs. With `show-ssid = false` the list
+  stays closed, as the picker does.
 - **`interface`** (1 to 15 bytes, a kernel interface name) pins what is
   shown; absent is the default route's, tracked by index so a rename
   keeps it. **`show-ssid`** (default true) hides the SSID when false —
@@ -1291,8 +1306,10 @@ click for mute); a scroll cannot (it carries no input serial the popup grab
 needs), and says so on stderr. `scootbar msg invoke volume popup` opens it
 too, **with no grab** (an agent has no input event to grab with): it stays
 until invoked again, or any of the endings below, and takes no keyboard.
-The network module's picker is unchanged: `menu-command` and the dmenu-style
-launcher are still how it works.
+The network module's picker is unchanged by default (`menu-command` and
+the dmenu-style launcher are still how a click connects); `on-click =
+"popup"` on the network module opens its native list instead (see
+[Network](#network)).
 
 - **What the volume popup shows**: the device's name and level (`Built-in
   Audio  49%`), a slider from 0 to `max-volume`, and a Mute (Unmute) button.
@@ -1302,6 +1319,14 @@ launcher are still how it works.
   It follows the module, so a level changed elsewhere moves the slider, and it
   is drawn in the bar's own colors (the `bg`, `fg`, `accent` and `dim`
   tokens, one pixel frame) at the output's real scale.
+- **What the network list shows**: one row per named network in scan
+  order (unnamed ones are not rows), each with its bars where the scan
+  carries a signal, and the associated one selected. A wheel over the list
+  scrolls it a row a notch where it is taller than what the compositor
+  configures for it; a row too wide is cut with an ellipsis, as
+  a window title's is. Selecting a row closes the popup and runs
+  `connect N` on the network module. Keyboard navigation (arrows, Enter)
+  is a [separate entry](backlog/popup-list-keyboard.md).
 - **Opened on the press, not the release.** The one exception to "clicks
   fire on release" ([pointer input](#pointer-input)): a compositor may refuse
   a popup grab whose serial is not a button still held (the protocol allows

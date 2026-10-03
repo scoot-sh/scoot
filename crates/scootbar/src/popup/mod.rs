@@ -61,7 +61,7 @@ mod tests;
 mod tip_tests;
 
 pub use hover::{Hover, Key, Step};
-pub use interact::Interaction;
+pub use interact::{Interaction, Wheel};
 pub use layout::{Layout, TIP_MAX_EM};
 pub use paint::paint;
 
@@ -82,11 +82,14 @@ pub enum Kind {
         action: &'static str,
     },
     /// The module action `action` (with `arg`) on release. `selected` marks
-    /// the current choice of a list.
+    /// the current choice of a list. `closes` closes the popup on release:
+    /// a list row that acts and goes away (the network list's), as against
+    /// a button that stays up for another press (the volume popup's mute).
     Button {
         action: &'static str,
         arg: Option<i32>,
         selected: bool,
+        closes: bool,
     },
 }
 
@@ -170,19 +173,22 @@ impl Content {
         )
     }
 
-    /// A button, or a list row.
+    /// A button, or a list row. `closes` closes the popup when the row
+    /// is selected (a list that acts and goes away); `false` leaves it up.
     pub fn button(
         &mut self,
         label: fmt::Arguments<'_>,
         action: &'static str,
         arg: Option<i32>,
         selected: bool,
+        closes: bool,
     ) -> bool {
         self.push(
             Kind::Button {
                 action,
                 arg,
                 selected,
+                closes,
             },
             label,
         )
@@ -190,9 +196,11 @@ impl Content {
 }
 
 /// What an interaction asks of the module: its action `action`, with `arg`.
-/// The daemon performs it ([`crate::action::perform`]).
+/// `closes` closes the popup after the action is carried out (the button's
+/// flag above). The daemon performs it ([`crate::action::perform`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Activate {
     pub action: &'static str,
     pub arg: Option<i32>,
+    pub closes: bool,
 }

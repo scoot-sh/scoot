@@ -17,6 +17,7 @@ composable shell.
 > and an `exec` module that streams a command's output, with no Rust
 > ([how](cli.md#button-push-and-exec-modules)). A module can open a popup
 > under itself, drawn from its own state: the volume slider is the first
+> and the network list the second
 > ([popups](cli.md#popups)), and a module's tooltip is shown under it after
 > a hover delay ([tooltips](cli.md#tooltips)). That is M1's
 > [skeleton](backlog/resolved/skeleton-layer-surface-done.md) and its

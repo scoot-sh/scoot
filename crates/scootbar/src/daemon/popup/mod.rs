@@ -81,7 +81,7 @@ use crate::bar::Edge;
 use crate::density::Scale;
 use crate::modules::OutputView;
 use crate::outputs::{OutputId, Size};
-use crate::popup::{self, Activate, Content, Interaction, Layout};
+use crate::popup::{self, Activate, Content, Interaction, Layout, Wheel};
 use crate::print::warn;
 use crate::render;
 
@@ -137,6 +137,11 @@ struct Open {
     content: Content,
     layout: Layout,
     interaction: Interaction,
+    /// The wheel movement of the frame being read, grouped into rows.
+    wheel: Wheel,
+    /// Whether pointer frames group events (version 5+): older ones flush
+    /// each axis event as its own frame.
+    framed: bool,
     /// The module revision `content` was filled at.
     revision: u64,
     /// A redraw is owed.
@@ -166,6 +171,15 @@ impl Open {
         }
         self.surface.destroy();
         self.pool.clear();
+    }
+
+    /// The frame's wheel movement, if any, as rows: moves the scroll,
+    /// marking a redraw where it moved.
+    fn flush_wheel(&mut self) {
+        let steps = self.wheel.frame();
+        if steps != 0 && self.interaction.scroll_by(&self.layout, steps) {
+            self.dirty = true;
+        }
     }
 }
 
@@ -336,9 +350,10 @@ impl State {
             Scale::Integer(drawn.integer())
         };
         let name = entry.output.info().name.as_deref();
-        let (Some(placed), Some(text)) =
-            (self.content.modules.get(module), self.content.text.as_ref())
-        else {
+        let (Some(placed), Some(text)) = (
+            self.content.modules.get_mut(module),
+            self.content.text.as_ref(),
+        ) else {
             return Err("that module is not placed".to_owned());
         };
         let style = self.content.style;
@@ -434,6 +449,12 @@ impl State {
         positioner.destroy();
         // No buffer yet: the compositor answers with the configure.
         surface.commit();
+        // Frames group a wheel's events from pointer version 5; before it
+        // each axis event is its own frame (as the bar's own scroll does).
+        let framed = self
+            .pointer
+            .as_ref()
+            .is_none_or(|pointer| pointer.version() >= 5);
         Ok(Open {
             id,
             output,
@@ -454,6 +475,8 @@ impl State {
             content,
             layout,
             interaction: Interaction::default(),
+            wheel: Wheel::default(),
+            framed,
             revision: placed.revision,
             dirty: false,
             focused: false,
@@ -465,7 +488,9 @@ impl State {
     }
 
     /// Carries out what a popup interaction asks of its module, through the
-    /// one way an action is carried out ([`action::perform`]).
+    /// one way an action is carried out ([`action::perform`]). A button
+    /// that closes (`closes`) closes the popup after the action runs: the
+    /// action runs first, while the popup still names its module.
     fn activate_popup(&mut self, activate: Activate) {
         let Some(open) = self.popup.open.as_ref() else {
             return;
@@ -502,6 +527,9 @@ impl State {
                 ));
             }
         }
+        if activate.closes {
+            self.popup.close();
+        }
     }
 
     /// Once a turn, after the module events and before the bars draw: closes
@@ -536,7 +564,7 @@ impl State {
         }
         let name = entry.output.info().name.as_deref();
         let (Some(placed), Some(text)) = (
-            self.content.modules.get(open.module),
+            self.content.modules.get_mut(open.module),
             self.content.text.as_mut(),
         ) else {
             self.popup.close();
@@ -563,7 +591,7 @@ impl State {
                 // The popup keeps the size it opened at.
                 open.layout.width = open.dims.0;
                 open.layout.height = open.dims.1;
-                open.interaction.retain(&open.content);
+                open.interaction.retain(&open.content, &open.layout);
                 open.dirty = true;
             }
         }

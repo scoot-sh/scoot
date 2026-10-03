@@ -3,7 +3,7 @@
 
 use ab_glyph::{FontArc, FontVec};
 
-use super::{Activate, Content, Interaction, Kind, Layout, MAX_TEXT, MAX_WIDGETS, paint};
+use super::{Activate, Content, Interaction, Kind, Layout, MAX_TEXT, MAX_WIDGETS, Wheel, paint};
 use crate::paint::Canvas;
 use crate::testfont;
 use crate::text::Text;
@@ -24,8 +24,8 @@ fn sample() -> Content {
     let mut content = Content::default();
     assert!(content.text(format_args!("12 34")));
     assert!(content.slider(40, 100, "set"));
-    assert!(content.button(format_args!("a"), "toggle", None, false));
-    assert!(content.button(format_args!("p"), "pick", Some(7), true));
+    assert!(content.button(format_args!("a"), "toggle", None, false, false));
+    assert!(content.button(format_args!("p"), "pick", Some(7), true, false));
     content
 }
 
@@ -221,7 +221,8 @@ fn a_press_on_a_slider_acts_and_each_new_value_acts_once() {
         down.activate,
         Some(Activate {
             action: "set",
-            arg: Some(25)
+            arg: Some(25),
+            closes: false,
         })
     );
     assert_eq!(state.dragging(), Some((1, 25)));
@@ -260,7 +261,8 @@ fn a_button_fires_on_release_over_the_button_it_was_pressed_on() {
         up.activate,
         Some(Activate {
             action: "pick",
-            arg: Some(7)
+            arg: Some(7),
+            closes: false,
         })
     );
 
@@ -337,7 +339,7 @@ fn content_that_changes_under_a_drag_or_a_hover_drops_what_no_longer_fits() {
     let mut changed = Content::default();
     changed.text(format_args!("gone"));
     changed.text(format_args!("gone"));
-    state.retain(&changed);
+    state.retain(&changed, &layout);
     assert!(!state.is_held());
     // A hover on a row that is gone.
     let mut state = Interaction::default();
@@ -348,8 +350,8 @@ fn content_that_changes_under_a_drag_or_a_hover_drops_what_no_longer_fits() {
         mid(&layout, 3),
     );
     let mut short = Content::default();
-    short.button(format_args!("a"), "toggle", None, false);
-    state.retain(&short);
+    short.button(format_args!("a"), "toggle", None, false, false);
+    state.retain(&short, &layout);
     assert_eq!(state.hover(), None);
     // And a motion with a drag whose widget is gone mid-flight is safe.
     let mut state = Interaction::default();
@@ -357,6 +359,161 @@ fn content_that_changes_under_a_drag_or_a_hover_drops_what_no_longer_fits() {
     let out = state.motion(&changed, &layout, x + 30, mid(&layout, 1));
     assert_eq!(out.activate, None);
     assert!(!state.is_held());
+}
+
+#[test]
+fn a_closing_button_asks_to_close_and_a_plain_one_does_not() {
+    let mut content = Content::default();
+    content.button(format_args!("stay"), "menu", None, false, false);
+    content.button(format_args!("go"), "connect", Some(2), false, true);
+    let layout = laid(&content);
+    let x = i64::from(layout.width / 2);
+    let mut state = Interaction::default();
+    state.press(&content, &layout, x, mid(&layout, 0));
+    let stay = state.release(&content, &layout, x, mid(&layout, 0));
+    assert_eq!(
+        stay.activate.map(|a| (a.action, a.arg, a.closes)),
+        Some(("menu", None, false))
+    );
+    state.press(&content, &layout, x, mid(&layout, 1));
+    let go = state.release(&content, &layout, x, mid(&layout, 1));
+    assert_eq!(
+        go.activate.map(|a| (a.action, a.arg, a.closes)),
+        Some(("connect", Some(2), true))
+    );
+}
+
+/// Ten rows with two visible (the compositor's configure came back
+/// shorter than asked): the scroll, the clamp and what a press hits.
+fn tall() -> (Content, Layout, u32) {
+    let mut content = Content::default();
+    for row in 0..10 {
+        content.button(format_args!("net{row}"), "connect", Some(row), false, true);
+    }
+    let mut layout = laid(&content);
+    let (y0, y1, second_y1) = {
+        let rows = layout.rows();
+        (rows[0].y0, rows[0].y1, rows[1].y1)
+    };
+    let edge = layout.frame + PAD / 2;
+    // Two rows visible, the rest below.
+    layout.height = second_y1 + edge;
+    let row_h = y1 - y0;
+    (content, layout, row_h)
+}
+
+#[test]
+fn scrolling_moves_a_row_a_notch_and_holds_to_what_fits() {
+    let (content, layout, row_h) = tall();
+    assert_eq!(layout.max_scroll(), row_h * 8);
+    let x = i64::from(layout.width / 2);
+    let mut state = Interaction::default();
+    assert_eq!(state.scroll(), 0);
+    // One notch down: one row.
+    assert!(state.scroll_by(&layout, 1));
+    assert_eq!(state.scroll(), row_h);
+    // Past the end clamps to the last row; back past the start to zero.
+    assert!(state.scroll_by(&layout, 100));
+    assert_eq!(state.scroll(), row_h * 8);
+    assert!(!state.scroll_by(&layout, 1));
+    assert!(state.scroll_by(&layout, -100));
+    assert_eq!(state.scroll(), 0);
+    assert!(!state.scroll_by(&layout, -1));
+    assert!(!state.scroll_by(&layout, 0));
+    // Scrolled one row, the first visible row is the second network: a
+    // press at its middle hits row 1, and the release names it.
+    assert!(state.scroll_by(&layout, 1));
+    let y = mid(&layout, 1) - row_h as i64;
+    state.press(&content, &layout, x, y);
+    let up = state.release(&content, &layout, x, y);
+    assert_eq!(
+        up.activate.map(|a| (a.action, a.arg)),
+        Some(("connect", Some(1)))
+    );
+    // What fits needs no scroll.
+    let mut state = Interaction::default();
+    let uncut = laid(&content);
+    assert_eq!(uncut.max_scroll(), 0);
+    assert!(!state.scroll_by(&uncut, 1));
+}
+
+#[test]
+fn a_scrolled_away_press_is_dropped_and_a_new_content_holds_the_scroll() {
+    let (content, layout, _) = tall();
+    let x = i64::from(layout.width / 2);
+    let mut state = Interaction::default();
+    state.press(&content, &layout, x, mid(&layout, 0));
+    // The wheel moves what the press armed on away: the release is
+    // nothing, not a wrong row.
+    assert!(state.scroll_by(&layout, 2));
+    let up = state.release(&content, &layout, x, mid(&layout, 0));
+    assert_eq!(up.activate, None);
+    // A shorter content holds a scroll past its end to what fits.
+    let mut short = Content::default();
+    short.button(format_args!("only"), "connect", Some(0), false, true);
+    let mut shrunk = Layout::default();
+    shrunk.compute(&short, &text(), EM, PAD, FRAME);
+    shrunk.height = shrunk.rows()[0].y1 + shrunk.frame + PAD / 2;
+    assert_eq!(shrunk.max_scroll(), 0);
+    state.retain(&short, &shrunk);
+    assert_eq!(state.scroll(), 0);
+    // Leaving clears the scroll with the rest.
+    assert!(state.scroll_by(&layout, 1));
+    assert!(state.clear());
+    assert_eq!(state.scroll(), 0);
+}
+
+#[test]
+fn a_wheel_groups_a_frame_into_rows() {
+    let mut wheel = Wheel::default();
+    wheel.axis_value120(120);
+    assert_eq!(wheel.frame(), 1);
+    // Two halves of a notch add up; a third waits.
+    wheel.axis_value120(60);
+    wheel.axis_value120(60);
+    assert_eq!(wheel.frame(), 1);
+    wheel.axis_value120(60);
+    assert_eq!(wheel.frame(), 0);
+    wheel.axis_value120(60);
+    assert_eq!(wheel.frame(), 1);
+    // A direction change drops the leftover.
+    wheel.axis_value120(60);
+    assert_eq!(wheel.frame(), 0);
+    wheel.axis_value120(-120);
+    assert_eq!(wheel.frame(), -1);
+    // Continuous pixels, fifteen a notch.
+    wheel.axis(15.0);
+    assert_eq!(wheel.frame(), 1);
+    wheel.axis(7.5);
+    assert_eq!(wheel.frame(), 0);
+    wheel.axis(7.5);
+    assert_eq!(wheel.frame(), 1);
+    // Discrete wins where both arrive in one frame.
+    wheel.axis(150.0);
+    wheel.axis_value120(120);
+    assert_eq!(wheel.frame(), 1);
+    wheel.axis_discrete(2);
+    assert_eq!(wheel.frame(), 2);
+    // Hostile input is nothing.
+    wheel.axis(f64::NAN);
+    wheel.axis(f64::INFINITY);
+    assert_eq!(wheel.frame(), 0);
+    wheel.axis_stop();
+    assert_eq!(wheel.frame(), 0);
+}
+
+#[test]
+fn a_long_label_is_cut_with_an_ellipsis() {
+    let text = text();
+    let mut kept = [0u8; MAX_TEXT];
+    let cut = super::paint::cut;
+    assert_eq!(cut(&text, "Wimbly", EM, 10_000, &mut kept), "Wimbly");
+    let wide = "0".repeat(1000);
+    let shown = cut(&text, &wide, EM, 100, &mut kept);
+    assert!(shown.ends_with('…'), "{shown}");
+    assert!(text.measure(None, shown, EM) <= 100);
+    // Even the ellipsis does not fit: nothing.
+    assert_eq!(cut(&text, &wide, EM, 0, &mut kept), "");
 }
 
 fn render(content: &Content, interaction: &Interaction) -> (Layout, Vec<u8>, u32) {
@@ -493,8 +650,8 @@ fn a_warm_popup_allocates_nothing() {
         content.clear();
         content.text(format_args!("12 34  {level}%"));
         content.slider(level, 100, "set");
-        content.button(format_args!("a"), "toggle", None, false);
-        content.button(format_args!("p"), "pick", Some(7), true);
+        content.button(format_args!("a"), "toggle", None, false, false);
+        content.button(format_args!("p"), "pick", Some(7), true, false);
     };
     fill(&mut shown, 40);
     layout.compute(&shown, &text, EM, PAD, FRAME);
@@ -510,6 +667,8 @@ fn a_warm_popup_allocates_nothing() {
         layout.compute(&shown, &text, EM, PAD, FRAME);
         state.press(&shown, &layout, x, mid(&layout, 1));
         state.release(&shown, &layout, x, mid(&layout, 1));
+        state.scroll_by(&layout, 1);
+        state.scroll_by(&layout, -1);
         let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
         paint(&mut canvas, &mut text, &theme, &shown, &layout, &state, EM);
     }
@@ -525,7 +684,9 @@ fn a_warm_popup_allocates_nothing() {
             state.press(&shown, &layout, x, y);
             state.motion(&shown, &layout, x + 3, y);
             state.release(&shown, &layout, x, y);
-            state.retain(&shown);
+            state.retain(&shown, &layout);
+            state.scroll_by(&layout, 1);
+            state.scroll_by(&layout, -1);
             let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
             paint(&mut canvas, &mut text, &theme, &shown, &layout, &state, EM);
         }
