@@ -127,7 +127,7 @@ fn the_bus_is_asked_for_the_mpris_namespace_and_the_player_interface_only() {
 fn a_player_there_before_the_bar_is_found_and_shown() {
     let (mut harness, mut fake) = up();
     fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
-    assert!(settle(&mut harness, &mut fake));
+    assert!(settle_for(&mut harness, &mut fake, 150));
     let view = harness.view_on(Some("DP-1"));
     assert_eq!(view.text(), "Ada - Song");
     assert_eq!(view.tooltip(), "mpv (playing): Ada - Song");
@@ -150,18 +150,18 @@ fn a_paused_player_is_dimmed_with_its_own_icon_and_a_stopped_one_is_not_shown() 
     settle(&mut harness, &mut fake);
     let play_icon = harness.view().art().cloned();
     fake.properties_changed(":1.20", &build::status_changed("Paused"));
-    assert!(settle(&mut harness, &mut fake));
+    assert!(settle_for(&mut harness, &mut fake, 150));
     let view = harness.view();
     assert_eq!(view.class(), Class::Muted);
     assert_eq!(view.text(), "Ada - Song");
     assert_ne!(view.art().cloned(), play_icon, "pause is not play");
     fake.properties_changed(":1.20", &build::status_changed("Stopped"));
-    assert!(settle(&mut harness, &mut fake));
+    assert!(settle_for(&mut harness, &mut fake, 150));
     assert!(harness.view().is_empty(), "a stopped player shows nothing");
     assert_eq!(harness.value_on(None), None);
     // It returns when it plays again.
     fake.properties_changed(":1.20", &build::status_changed("Playing"));
-    assert!(settle(&mut harness, &mut fake));
+    assert!(settle_for(&mut harness, &mut fake, 150));
     assert_eq!(shown(&harness), "Ada - Song");
 }
 
@@ -182,7 +182,7 @@ fn a_track_change_is_one_signal_and_no_round_trip() {
         &[],
     );
     fake.properties_changed(":1.20", &body);
-    assert!(settle(&mut harness, &mut fake));
+    assert!(settle_for(&mut harness, &mut fake, 150));
     assert_eq!(shown(&harness), "Bo, Cy - Next");
     assert_eq!(fake.getalls(":1.20"), 1, "the signal carried the value");
 }
@@ -237,26 +237,70 @@ fn the_first_change_after_a_quiet_spell_is_drawn_at_once_and_waits_for_no_timer(
 }
 
 #[test]
-fn a_change_of_state_is_never_held_behind_a_change_of_text() {
+fn a_state_change_inside_the_gap_is_held_and_not_lost() {
     let (mut harness, mut fake) = up();
     fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
     settle_for(&mut harness, &mut fake, 200);
     fake.properties_changed(":1.20", &titled(1));
     settle(&mut harness, &mut fake);
     let first = Instant::now();
-    fake.properties_changed(":1.20", &titled(2));
+    fake.properties_changed(":1.20", &build::status_changed("Paused"));
     settle(&mut harness, &mut fake);
     if first.elapsed() < super::DRAW_GAP / 2 {
-        // Within the gap of the draw before it: held for a timer.
-        assert_eq!(harness.source_count(), 2, "the draw timer is armed");
+        assert_eq!(harness.source_count(), 2, "held for the draw timer");
     }
-    // Pausing is drawn at once, with the title that was held.
-    fake.properties_changed(":1.20", &build::status_changed("Paused"));
-    assert!(settle(&mut harness, &mut fake));
+    // The held change is drawn when the timer fires, with the state as it is.
+    assert!(settle_for(&mut harness, &mut fake, 250));
     let view = harness.view();
-    assert_eq!(view.text(), "Ada - T2");
+    assert_eq!(view.text(), "Ada - T1");
     assert_eq!(view.class(), Class::Muted);
     assert_eq!(harness.source_count(), 1, "and nothing is held after it");
+}
+
+#[test]
+fn a_player_flapping_between_playing_and_paused_is_drawn_ten_times_a_second_at_most() {
+    let (mut harness, mut fake) = up();
+    fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
+    settle_for(&mut harness, &mut fake, 150);
+    // One signal a turn, as a player flapping at hundreds a second is heard
+    // when the bar keeps up: a draw each, were they not held.
+    let mut drawn = 0;
+    let start = Instant::now();
+    for n in 0..400 {
+        let status = if n % 2 == 0 { "Paused" } else { "Playing" };
+        fake.properties_changed(":1.20", &build::status_changed(status));
+        fake.pump();
+        if harness.wait(Duration::from_millis(1)) == Some(Update::Changed) {
+            drawn += 1;
+        }
+    }
+    let ceiling = start.elapsed().as_millis() as usize / 100 + 3;
+    assert!(
+        (1..=ceiling).contains(&drawn),
+        "{drawn} draws in {:?}",
+        start.elapsed()
+    );
+    settle_for(&mut harness, &mut fake, 250);
+    // The last signal was Playing (399 is odd): the view ends on it.
+    assert_eq!(harness.view().class(), Class::Normal);
+    assert_eq!(harness.source_count(), 1);
+}
+
+#[test]
+fn the_module_emptying_is_never_held_behind_a_draw() {
+    let (mut harness, mut fake) = up();
+    fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
+    settle_for(&mut harness, &mut fake, 200);
+    fake.properties_changed(":1.20", &titled(1));
+    settle(&mut harness, &mut fake);
+    let first = Instant::now();
+    fake.properties_changed(":1.20", &build::status_changed("Stopped"));
+    let changed = settle(&mut harness, &mut fake);
+    if first.elapsed() < super::DRAW_GAP / 2 {
+        assert!(changed, "the last player stopping empties it at once");
+        assert_eq!(harness.source_count(), 1);
+    }
+    assert!(harness.view().is_empty());
 }
 
 #[test]
@@ -372,10 +416,10 @@ fn a_player_that_appears_and_vanishes_by_the_bus_is_followed() {
     assert!(harness.view().is_empty());
     fake.add_unlisted(VLC, ":1.31", playing("Film", "Studio"));
     fake.name_owner_changed(VLC, "", ":1.31");
-    assert!(settle(&mut harness, &mut fake));
+    assert!(settle_for(&mut harness, &mut fake, 150));
     assert_eq!(shown(&harness), "Studio - Film");
     fake.name_owner_changed(VLC, ":1.31", "");
-    assert!(settle(&mut harness, &mut fake));
+    assert!(settle_for(&mut harness, &mut fake, 150));
     assert!(harness.view().is_empty(), "gone with its owner");
 }
 
@@ -679,7 +723,7 @@ fn a_player_that_never_answers_costs_one_slot_and_is_asked_again_after_the_ttl()
 }
 
 #[test]
-fn a_player_whose_reads_error_is_dropped_and_one_whose_reply_is_garbage_keeps_its_state() {
+fn a_player_whose_reads_error_is_held_unshown_and_one_whose_reply_is_garbage_keeps_its_state() {
     let (mut harness, mut fake) = up();
     fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
     fake.script(
@@ -689,8 +733,10 @@ fn a_player_whose_reads_error_is_dropped_and_one_whose_reply_is_garbage_keeps_it
         Answer::Error("org.freedesktop.DBus.Error.UnknownMethod"),
     );
     settle(&mut harness, &mut fake);
-    let value = harness.value_on(None).unwrap();
-    assert_eq!(value["players"].as_array().unwrap().len(), 1, "{value}");
+    // The erroring one is held, stopped (it shows nothing, and is the first to
+    // make room), not dropped.
+    assert_eq!(held(&harness), [MPV, VLC]);
+    assert_eq!(statuses_of(&harness), ["playing", "stopped"]);
     // A reply of the wrong signature, then one whose bytes are garbage:
     // each is dropped whole.
     for answer in [
@@ -1241,4 +1287,241 @@ fn an_owner_change_with_a_body_that_does_not_parse_is_ignored() {
     );
     assert!(!settle(&mut harness, &mut fake));
     assert_eq!(shown(&harness), "Ada - Song");
+}
+
+/// The bus names of the players held, sorted.
+fn held(harness: &Harness) -> Vec<String> {
+    let Some(value) = harness.value_on(None) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = value["players"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p["bus_name"].as_str().map(str::to_owned))
+        .collect();
+    names.sort();
+    names
+}
+
+/// A player announcing itself by `NameOwnerChanged`.
+fn announce(fake: &mut Fake, name: &str, owner: &str, props: Vec<u8>) {
+    fake.add_unlisted(name, owner, props);
+    fake.name_owner_changed(name, "", owner);
+}
+
+fn pname(i: usize) -> String {
+    format!("org.mpris.MediaPlayer2.p{i}")
+}
+
+fn fill(fake: &mut Fake) {
+    for i in 0..MAX_PLAYERS {
+        announce(
+            fake,
+            &pname(i),
+            &format!(":1.{}", 100 + i),
+            playing("Held", "Ada"),
+        );
+    }
+}
+
+#[test]
+fn a_player_that_found_the_room_full_is_held_when_a_slot_frees() {
+    let (mut harness, mut fake) = up();
+    fill(&mut fake);
+    settle_for(&mut harness, &mut fake, 200);
+    announce(&mut fake, MPV, ":1.20", playing("Late", "Bo"));
+    settle_for(&mut harness, &mut fake, 200);
+    assert_eq!(held(&harness).len(), MAX_PLAYERS);
+    assert!(!held(&harness).contains(&MPV.to_owned()), "no room yet");
+    fake.name_owner_changed(&pname(3), ":1.103", "");
+    settle_for(&mut harness, &mut fake, 300);
+    let now = held(&harness);
+    assert_eq!(now.len(), MAX_PLAYERS);
+    assert!(
+        now.contains(&MPV.to_owned()),
+        "held once a slot freed: {now:?}"
+    );
+    assert!(!now.contains(&pname(3)));
+}
+
+#[test]
+fn names_listed_behind_a_full_room_are_held_when_slots_free() {
+    let (mut harness, mut fake) = up();
+    for i in 0..MAX_PLAYERS + 4 {
+        fake.add_player(
+            &pname(i),
+            &format!(":1.{}", 100 + i),
+            playing("Held", "Ada"),
+        );
+    }
+    settle_for(&mut harness, &mut fake, 300);
+    let first = held(&harness);
+    assert_eq!(first.len(), MAX_PLAYERS);
+    // Every one that left is replaced, from the four that were waiting.
+    for name in first.iter().take(4).cloned().collect::<Vec<_>>() {
+        let owner = format!(
+            ":1.{}",
+            100 + name
+                .trim_start_matches("org.mpris.MediaPlayer2.p")
+                .parse::<usize>()
+                .unwrap()
+        );
+        fake.name_owner_changed(&name, &owner, "");
+    }
+    settle_for(&mut harness, &mut fake, 400);
+    let now = held(&harness);
+    assert_eq!(now.len(), MAX_PLAYERS, "{now:?}");
+    assert_eq!(
+        now.iter().filter(|n| !first.contains(n)).count(),
+        4,
+        "{now:?}"
+    );
+}
+
+#[test]
+fn a_newcomer_takes_the_place_of_the_oldest_stopped_player() {
+    let (mut harness, mut fake) = up();
+    announce(
+        &mut fake,
+        &pname(0),
+        ":1.100",
+        build::get_all("Stopped", Some("Idle"), &[]),
+    );
+    for i in 1..MAX_PLAYERS {
+        announce(
+            &mut fake,
+            &pname(i),
+            &format!(":1.{}", 100 + i),
+            playing("Held", "Ada"),
+        );
+    }
+    settle_for(&mut harness, &mut fake, 300);
+    assert!(held(&harness).contains(&pname(0)));
+    announce(&mut fake, MPV, ":1.20", playing("New", "Bo"));
+    settle_for(&mut harness, &mut fake, 300);
+    let now = held(&harness);
+    assert_eq!(now.len(), MAX_PLAYERS);
+    assert!(now.contains(&MPV.to_owned()), "{now:?}");
+    assert!(
+        !now.contains(&pname(0)),
+        "the stopped one made room: {now:?}"
+    );
+    // It is not lost: it is held again when a slot frees.
+    fake.name_owner_changed(&pname(5), ":1.105", "");
+    settle_for(&mut harness, &mut fake, 300);
+    assert!(held(&harness).contains(&pname(0)), "{:?}", held(&harness));
+}
+
+#[test]
+fn a_connection_releasing_one_name_keeps_its_player_under_the_other() {
+    let (mut harness, mut fake) = up();
+    let second = "org.mpris.MediaPlayer2.mpv.instance7";
+    fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
+    fake.add_player(second, ":1.20", playing("Song", "Ada"));
+    settle_for(&mut harness, &mut fake, 200);
+    assert_eq!(held(&harness), [MPV]);
+    fake.name_owner_changed(MPV, ":1.20", "");
+    settle_for(&mut harness, &mut fake, 300);
+    assert_eq!(
+        held(&harness),
+        [second],
+        "still one player, under its other name"
+    );
+    assert_eq!(shown(&harness), "Ada - Song");
+}
+
+#[test]
+fn the_list_of_waiting_names_is_bounded() {
+    let (mut harness, mut fake) = up();
+    fill(&mut fake);
+    for i in 0..60 {
+        announce(
+            &mut fake,
+            &pname(100 + i),
+            &format!(":1.{}", 300 + i),
+            playing("W", "x"),
+        );
+    }
+    settle_for(&mut harness, &mut fake, 400);
+    assert_eq!(held(&harness).len(), MAX_PLAYERS);
+    // Free every slot: at most the waiting list's worth come in behind them.
+    for i in 0..MAX_PLAYERS {
+        fake.name_owner_changed(&pname(i), &format!(":1.{}", 100 + i), "");
+    }
+    settle_for(&mut harness, &mut fake, 600);
+    let now = held(&harness);
+    assert_eq!(now.len(), MAX_PLAYERS, "{now:?}");
+    assert!(
+        now.iter().all(|n| n.contains(".p1")),
+        "only waiting names: {now:?}"
+    );
+}
+
+#[test]
+fn a_player_whose_first_read_errors_is_kept_and_shown_once_it_says_something() {
+    let (mut harness, mut fake) = up();
+    // It has the name before it exports the object.
+    fake.script(
+        MPV,
+        ":1.20",
+        true,
+        Answer::Error("org.freedesktop.DBus.Error.UnknownObject"),
+    );
+    settle_for(&mut harness, &mut fake, 150);
+    assert!(harness.view().is_empty());
+    // It exports, and signals (a position alone is enough to be read again).
+    fake.set_answer(":1.20", Answer::Props(playing("Song", "Ada")));
+    let position = build::changed(PLAYER, |w| entry(w, "Position", "x", &|w| w.u64(5)), &[]);
+    fake.properties_changed(":1.20", &position);
+    settle_for(&mut harness, &mut fake, 250);
+    assert_eq!(shown(&harness), "Ada - Song");
+    // And it is read once, not on every signal after.
+    let reads = fake.getalls(":1.20");
+    for _ in 0..50 {
+        fake.properties_changed(":1.20", &position);
+    }
+    settle_for(&mut harness, &mut fake, 100);
+    assert_eq!(fake.getalls(":1.20"), reads);
+}
+
+fn statuses_of(harness: &Harness) -> Vec<String> {
+    let value = harness.value_on(None).unwrap();
+    let mut held: Vec<(String, String)> = value["players"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["bus_name"].as_str().unwrap().to_owned(),
+                p["status"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    held.sort();
+    held.into_iter().map(|(_, status)| status).collect()
+}
+
+#[test]
+fn a_waiting_player_takes_the_place_of_a_held_one_that_stops() {
+    let (mut harness, mut fake) = up();
+    fill(&mut fake);
+    settle_for(&mut harness, &mut fake, 200);
+    announce(&mut fake, MPV, ":1.20", playing("Late", "Bo"));
+    settle_for(&mut harness, &mut fake, 200);
+    assert!(!held(&harness).contains(&MPV.to_owned()));
+    // A held player stops: it shows nothing, so the one waiting has its room.
+    fake.properties_changed(":1.103", &build::status_changed("Stopped"));
+    settle_for(&mut harness, &mut fake, 300);
+    let now = held(&harness);
+    assert!(now.contains(&MPV.to_owned()), "{now:?}");
+    assert!(!now.contains(&pname(3)), "{now:?}");
+    assert_eq!(now.len(), MAX_PLAYERS);
+    // The one that stopped is not lost: it is held again when a slot frees,
+    // and it does not swap back by itself.
+    settle_for(&mut harness, &mut fake, 300);
+    assert!(!held(&harness).contains(&pname(3)));
+    fake.name_owner_changed(&pname(5), ":1.105", "");
+    settle_for(&mut harness, &mut fake, 300);
+    assert!(held(&harness).contains(&pname(3)));
 }

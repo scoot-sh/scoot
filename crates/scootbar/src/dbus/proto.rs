@@ -970,7 +970,10 @@ fn complete(bytes: &[u8], at: usize, depth: usize) -> Result<(usize, bool), ()> 
 
 /// The most `ListNames` entries read: a session bus holds dozens; past
 /// this the rest are left out (each is at most 128 bytes, so the bound
-/// is memory, not time).
+/// is memory, not time). The cut is made before a consumer filters the
+/// names (the media module's MPRIS prefix), so a bus holding more than this
+/// many names can hide a later player from the start-up listing; its
+/// `NameOwnerChanged` is still heard.
 pub const MAX_LIST_NAMES: usize = 4096;
 
 /// One pixmap entry, borrowed: dimensions and the `ARGB32` bytes in

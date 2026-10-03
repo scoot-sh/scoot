@@ -468,6 +468,9 @@ macro_rules! modules {
         )
     };
 }
+// One arm per combination of the modules a build may leave out, with no
+// clock, workspaces or window title to end the list: generated, in
+// alphabetical order of the names listed.
 #[cfg(all(
     not(feature = "clock"),
     not(feature = "workspaces"),

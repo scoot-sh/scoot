@@ -15,8 +15,10 @@
 //! Strings come back borrowed and unbounded (a player can send a megabyte
 //! as a title, inside the 1 MiB message the client takes); the consumer
 //! cuts them where it stores them. Counts are bounded here: properties,
-//! metadata entries, artists and invalidated names, so a hostile player's
-//! dictionary of a million one-byte keys is refused whole, never walked.
+//! metadata entries and invalidated names past their limits refuse the whole
+//! answer, so a dictionary of a million one-byte keys is never walked; an
+//! artist list is walked in full (its length is bounded by the 1 MiB
+//! message) and only the first [`MAX_ARTISTS`] are kept.
 //! A property of the wrong type for its name (a `PlaybackStatus` that is
 //! an integer) is skipped like an unknown one: the player loses that
 //! property, not the whole answer. A misshapen body is refused whole

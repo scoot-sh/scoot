@@ -75,6 +75,12 @@ pub(super) struct Player {
     /// A signal arrived while one was in flight: read again when it
     /// answers.
     pub(super) stale: bool,
+    /// Its last read failed (an error, not a refusal to parse): it is read
+    /// again at its next signal.
+    pub(super) unread: bool,
+    /// A read of it has been answered: before that its Stopped is only that
+    /// nothing is known, not that it is stopped.
+    pub(super) read: bool,
 }
 
 impl Player {
@@ -94,6 +100,8 @@ impl Player {
             asked: None,
             last_asked: None,
             stale: false,
+            unread: false,
+            read: false,
         }
     }
 

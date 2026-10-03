@@ -96,6 +96,10 @@ const MAX_PLAYERS: usize = 8;
 /// a peer owning hundreds of MPRIS names is asked about a window at a time,
 /// behind which a real player is still found.
 const LOOKUP_WINDOW: usize = 8;
+/// The names that could not be held (no room, or a second name of a
+/// connection) remembered to be held when a slot frees; the oldest is
+/// forgotten past this.
+const MAX_WAITING: usize = 16;
 /// A call unanswered this long is forgotten when its slot is wanted (no
 /// bus times a call out by default: see `Conn::expire`). Short in tests.
 #[cfg(not(test))]
@@ -109,12 +113,13 @@ const MIN_REFRESH_GAP: Duration = Duration::from_millis(50);
 /// not undone by scrolling back.
 const SKIP_GAP: Duration = Duration::from_millis(250);
 
-/// A change of what a player says it is playing, in a run of them, is drawn
-/// at most this often: the first after a quiet spell at once, the rest held
-/// for one timer. A player that rewrites its title hundreds of times a second
-/// (a bug, or a title that carries progress) costs the bar ten redraws a
-/// second, not hundreds. A player appearing, vanishing, starting or stopping
-/// is never held.
+/// A change of what is shown (a title, a state, another player), in a run of
+/// them, is drawn at most this often: the first after a quiet spell at once,
+/// the rest held for one timer, the latest shown when it fires. A player that
+/// rewrites its title or flaps between playing and paused hundreds of times a
+/// second costs the bar ten redraws a second, not hundreds. The module
+/// appearing or emptying (a first player, the last gone, the bus lost) is
+/// never held.
 const DRAW_GAP: Duration = Duration::from_millis(100);
 
 /// The default `max-width`, in logical pixels.
@@ -211,15 +216,14 @@ struct Media {
     last_skip: Option<Instant>,
     /// When a change was last reported to the bar.
     drawn: Option<Instant>,
-    /// Armed while a change of text waits out [`DRAW_GAP`]: the view the bar
+    /// Armed while a change waits out [`DRAW_GAP`]: the view the bar
     /// asks for when it fires is the latest, whatever came meanwhile.
     held: Option<OneShot>,
 }
 
 /// What the view is drawn from, compared before and after each turn so the
-/// bar redraws on a real change and nothing else: the player shown and its
-/// state (a change of either is never held), and the revision of what it
-/// says (which is).
+/// bar redraws on a real change and nothing else: the player shown, its
+/// state, and the revision of what it says.
 type Shown = Option<(u64, Status, u64)>;
 
 impl Media {
@@ -238,9 +242,10 @@ impl Media {
         Update::Changed
     }
 
-    /// Reports a change of text: at once after a quiet spell, else held for
-    /// one timer ([`DRAW_GAP`] since the last), however many follow.
-    fn text_changed(&mut self) -> Update {
+    /// Reports a change that is not the module appearing or emptying: at once
+    /// after a quiet spell, else held for one timer ([`DRAW_GAP`] since the
+    /// last), however many follow.
+    fn changed(&mut self) -> Update {
         if self.held.is_some() {
             return Update::Unchanged;
         }
@@ -259,19 +264,17 @@ impl Media {
     }
 
     /// What a turn did to the view, from what was shown `before`: the bar
-    /// is told at once of anything but a change of text alone. `dropped` is
-    /// the bus going away, which empties the module.
+    /// is told at once when the module appears or empties (a player arrives,
+    /// the last one leaves, the bus goes: `dropped`), and any other change
+    /// (a title, a state, another player shown) goes through
+    /// [`Media::changed`]'s gap, so a player flapping between playing and
+    /// paused costs ten draws a second like one rewriting its title.
     fn after(&mut self, before: Shown, dropped: bool) -> Update {
         let now = self.shown();
-        let same_player = |a: &Shown, b: &Shown| match (a, b) {
-            (Some((id, status, _)), Some((other, state, _))) => id == other && status == state,
-            (None, None) => true,
-            _ => false,
-        };
-        if dropped || !same_player(&before, &now) {
+        if dropped || before.is_some() != now.is_some() {
             self.draw_now()
         } else if before != now {
-            self.text_changed()
+            self.changed()
         } else {
             Update::Unchanged
         }

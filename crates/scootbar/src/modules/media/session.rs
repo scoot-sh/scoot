@@ -30,9 +30,9 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use super::player::{Player, select};
+use super::player::{Player, Status, select};
 use super::timer::OneShot;
-use super::{FLIGHT_TTL, LOOKUP_WINDOW, MAX_PLAYERS, MIN_REFRESH_GAP};
+use super::{FLIGHT_TTL, LOOKUP_WINDOW, MAX_PLAYERS, MAX_WAITING, MIN_REFRESH_GAP};
 use crate::dbus::conn::{self, Conn, Event};
 use crate::dbus::link::Session;
 use crate::dbus::mpris::{self, NAME_PREFIX, PATH, PLAYER};
@@ -79,6 +79,11 @@ pub(super) struct Live {
     /// hundreds of names costs a window of calls at a time and never
     /// starves a real player listed behind them.
     lookups: VecDeque<String>,
+    /// `(name, owner, evicted)` of players that could not be held (no room,
+    /// or the second name of a connection), at most [`MAX_WAITING`]: held
+    /// when a slot frees, or (unless `evicted`, which made room itself by
+    /// being stopped) when a held player stops.
+    waiting: VecDeque<(String, String, bool)>,
     next_id: u64,
     /// The activity clock: ticks each time a player starts playing.
     tick: u64,
@@ -112,6 +117,7 @@ pub(super) fn start(conn: Conn) -> Live {
         players: Vec::new(),
         flights: Vec::new(),
         lookups: VecDeque::new(),
+        waiting: VecDeque::new(),
         next_id: 0,
         tick: 0,
         scratch: String::new(),
@@ -397,13 +403,17 @@ impl Live {
             return;
         };
         match flight.op {
-            // A name that owns nothing MPRIS answers: not a player. A
-            // player that merely did not answer in time is one, busy: it is
-            // kept and asked again at its next signal.
-            Op::Props(id) if is_timeout(name) => {
+            // An error, of any kind (a busy player's timeout, a player that
+            // has the name before it exports the object): the player stays
+            // held but unread, shows nothing, and is read again at its next
+            // signal. Bounded by the reads' own floor, and the oldest stopped
+            // player is the first to go when the room is wanted.
+            Op::Props(id) => {
                 self.finish_fetch(id);
+                if let Some(player) = self.players.iter_mut().find(|p| p.id == id) {
+                    player.unread = true;
+                }
             }
-            Op::Props(id) => self.remove_id(id),
             Op::Match => {
                 if !self.said_match {
                     self.said_match = true;
@@ -431,7 +441,10 @@ impl Live {
         let Some(player) = self.players.iter_mut().find(|p| p.id == id) else {
             return;
         };
+        player.unread = false;
+        player.read = true;
         player.apply(&props, &mut self.scratch, &mut self.tick);
+        self.admit_waiting();
     }
 
     /// The call is answered: it may be asked again, and whether a signal
@@ -462,18 +475,13 @@ impl Live {
         self.pump_lookups();
     }
 
-    /// Asks the owner of queued names, [`LOOKUP_WINDOW`] at a time. Past
-    /// [`MAX_PLAYERS`] held there is no room for what is behind, so the
-    /// queue is dropped, said once.
+    /// Asks the owner of queued names, [`LOOKUP_WINDOW`] at a time. Full
+    /// or not, every listed name is asked (the queue is bounded by what
+    /// `ListNames` returns): what [`Live::add`] does with the answer when no
+    /// slot is free is its rule, so a name queued behind the held ones is
+    /// not lost to them.
     fn pump_lookups(&mut self) {
         loop {
-            if self.players.len() >= MAX_PLAYERS {
-                if let Some(name) = self.lookups.pop_front() {
-                    self.lookups.clear();
-                    self.say_full(&name);
-                }
-                return;
-            }
             let asking = self
                 .flights
                 .iter()
@@ -507,12 +515,17 @@ impl Live {
         }
     }
 
-    /// Holds the player `name` owned by `owner`, and reads it: a name
+    /// Holds the player `name` owned by `owner`, and reads it. A name
     /// already held changes hands (the new process's state is not the old
-    /// one's), a connection already holding another name is left to it
-    /// (one player a connection), and past [`MAX_PLAYERS`] the newcomer is
-    /// ignored, said once.
+    /// one's). A connection already holding another name is left to it (one
+    /// player a connection), and with [`MAX_PLAYERS`] held a newcomer takes
+    /// the place of the oldest stopped player, if there is one; with none, or
+    /// for the second name of a connection, it waits in a short list
+    /// ([`MAX_WAITING`], the oldest forgotten first) and is held when a slot
+    /// frees: a player never has to restart to be seen because eight others
+    /// were there first.
     fn add(&mut self, name: String, owner: String) {
+        self.waiting.retain(|(waiting, _, _)| *waiting != name);
         if let Some(player) = self.players.iter_mut().find(|p| p.name == name) {
             if player.owner != owner {
                 // A new process: not the old one's state, and not the old
@@ -530,11 +543,34 @@ impl Live {
             return;
         }
         if self.players.iter().any(|p| p.owner == owner) {
+            self.wait(name, owner, false);
             return;
         }
         if self.players.len() >= MAX_PLAYERS {
-            self.say_full(&name);
-            return;
+            // The oldest stopped player (one that has been read: an unread
+            // one is not known to be stopped) shows nothing and is the
+            // cheapest to lose; it waits for a slot like any other.
+            let oldest = self
+                .players
+                .iter()
+                .filter(|p| p.status == Status::Stopped && (p.read || p.unread))
+                .map(|p| p.id)
+                .min();
+            match oldest {
+                Some(id) => {
+                    // Not lost: it waits for a slot like any other.
+                    if let Some(gone) = self.players.iter().find(|p| p.id == id) {
+                        let (name, owner) = (gone.name.clone(), gone.owner.clone());
+                        self.wait(name, owner, true);
+                    }
+                    self.players.retain(|p| p.id != id);
+                }
+                None => {
+                    self.say_full(&name);
+                    self.wait(name, owner, false);
+                    return;
+                }
+            }
         }
         self.next_id += 1;
         let id = self.next_id;
@@ -542,10 +578,46 @@ impl Live {
         self.refresh(id);
     }
 
+    /// Remembers a name that cannot be held now, bounded: past
+    /// [`MAX_WAITING`] the oldest is forgotten.
+    fn wait(&mut self, name: String, owner: String, evicted: bool) {
+        if self.waiting.len() >= MAX_WAITING {
+            self.waiting.pop_front();
+        }
+        self.waiting.push_back((name, owner, evicted));
+    }
+
+    /// A held player stopped: if names wait for room and it (or another
+    /// read, stopped one) can make it, the first that did not itself make
+    /// room by stopping takes the place of the oldest. One name a stop, so a
+    /// run of stops is a run of one-for-one swaps, each consuming a waiting
+    /// name for good.
+    fn admit_waiting(&mut self) {
+        let room_to_make = self
+            .players
+            .iter()
+            .any(|p| p.status == Status::Stopped && (p.read || p.unread));
+        if !room_to_make || self.players.len() < MAX_PLAYERS {
+            return;
+        }
+        if let Some(at) = self.waiting.iter().position(|(_, _, evicted)| !evicted) {
+            if let Some((name, owner, _)) = self.waiting.remove(at) {
+                self.add(name, owner);
+            }
+        }
+    }
+
     fn remove_id(&mut self, id: u64) {
         self.players.retain(|p| p.id != id);
         if self.players.len() < MAX_PLAYERS {
             self.said_full = false;
+        }
+        // Each name that was waiting gets one try at the room.
+        for _ in 0..self.waiting.len() {
+            let Some((name, owner, _)) = self.waiting.pop_front() else {
+                break;
+            };
+            self.add(name, owner);
         }
     }
 
@@ -596,7 +668,8 @@ impl Live {
         }
         let id = self.players[index].id;
         self.players[index].apply(&changed.props, &mut self.scratch, &mut self.tick);
-        if changed.invalidated {
+        self.admit_waiting();
+        if changed.invalidated || self.players[index].unread {
             self.refresh(id);
         }
     }
@@ -616,6 +689,7 @@ impl Live {
         }
         match new {
             None => {
+                self.waiting.retain(|(waiting, _, _)| *waiting != name);
                 if let Some(id) = self.players.iter().find(|p| p.name == name).map(|p| p.id) {
                     self.remove_id(id);
                 }
@@ -623,12 +697,6 @@ impl Live {
             Some(owner) => self.add(name, owner),
         }
     }
-}
-
-/// Whether an error name says the player did not answer in time, not that
-/// it is no player: a bus that times calls out says so this way.
-fn is_timeout(error: &str) -> bool {
-    error.ends_with(".NoReply") || error.ends_with(".Timeout") || error.ends_with(".TimedOut")
 }
 
 /// Whether `name` is a player's well-known name: the MPRIS prefix and
