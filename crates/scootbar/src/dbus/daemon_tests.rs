@@ -257,16 +257,47 @@ fn a_forged_peer_reply_is_refused_and_the_real_answer_lands() {
     // victim's serial.
     forger.reply_return(victim.unique(), serial, "s", &string_body("forged"));
     forger.reply_error(victim.unique(), serial, "org.example.Forged");
+    // Flushes the forgeries out; what this pump reads is discarded, which
+    // is safe only because nothing of the forger's is waited for yet (at
+    // most its own `NameAcquired`, never a reply: both forgeries want
+    // none, and the barrier call below is queued after this pump).
     let _ = forger.pump();
-    // The forger's ListNames round trip proves the daemon processed its
-    // messages in order: both forgeries are already in the victim's
-    // socket before the victim is pumped, so "nothing arrives" is a
-    // refusal, not a race.
+    // The forger's ListNames round trip proves the daemon read its
+    // messages in order. That is not delivery: across connections it says
+    // nothing about the victim's socket, so on its own the "nothing
+    // arrives" below can pass vacuously. A ping the forger sends the
+    // victim afterwards closes it: the daemon dispatches one connection's
+    // messages in order, so the ping lands after both forgeries, and the
+    // victim seeing the ping proves both forgeries are already in its
+    // socket. (No pre-pump on the forger here: `until` flushes on its own
+    // first pump, and discarding a pump on a connection then waited on
+    // loses a reply that arrived between the flush and the read.)
     bus_call(&mut forger, "ListNames", "", &[], 99);
-    let _ = forger.pump();
     until(&mut forger, |event| {
         matches!(event, Event::Reply { token: 99, .. })
     });
+    forger
+        .call(
+            victim.unique(),
+            "/p",
+            "a.b",
+            "Ping",
+            "",
+            &[],
+            proto::flag::NO_REPLY_EXPECTED,
+            0,
+        )
+        .unwrap();
+    // A flush of another connection than the one waited on: the ping has
+    // to leave before the victim can see it, and nothing of the forger's
+    // is waited for.
+    let _ = forger.pump();
+    let Event::MethodCall { member, .. } = until(&mut victim, |event| {
+        matches!(event, Event::MethodCall { .. })
+    }) else {
+        unreachable!()
+    };
+    assert_eq!(member, "Ping");
     // While only the forgeries are in flight, nothing arrives: both are
     // refused, and the flight stays for the real answer.
     for _ in 0..5 {
@@ -286,6 +317,36 @@ fn a_forged_peer_reply_is_refused_and_the_real_answer_lands() {
     };
     assert_eq!(signature, "s");
     assert_eq!(read_string(&body), "real");
+}
+
+/// A unique-name callee that disconnects mid-call is answered by the bus
+/// itself: the daemon synthesizes the error with its own name as the
+/// sender (measured 2026-10-03 on dbus-daemon 1.16.2:
+/// `org.freedesktop.DBus.Error.NoReply` from `org.freedesktop.DBus`).
+/// That is the reply, not a forgery, so the flight resolves through the
+/// error path instead of leaking to the reap.
+#[test]
+fn a_callee_that_disconnects_mid_call_is_answered_by_the_bus() {
+    let Some(daemon) = Daemon::spawn() else {
+        return;
+    };
+    let mut victim = connect(&daemon);
+    let callee = connect(&daemon);
+    victim
+        .call(callee.unique(), "/", "a.b", "Slow", "", &[], 0, 57)
+        .unwrap();
+    // Flushes the call out; what this pump reads is discarded, which is
+    // safe only because nothing of the victim's is waited for yet (at
+    // most its own `NameAcquired`: the callee has not answered, and the
+    // daemon's error comes only after the drop below).
+    let _ = victim.pump();
+    drop(callee);
+    let Event::CallError { name, .. } = until(&mut victim, |event| {
+        matches!(event, Event::CallError { token: 57, .. })
+    }) else {
+        unreachable!()
+    };
+    assert!(!name.is_empty(), "the bus named its error");
 }
 
 /// The bus's own answer cannot be forged either: a peer's reply to a bus
@@ -331,6 +392,144 @@ fn a_forged_bus_reply_is_refused_and_the_real_answer_lands() {
     assert!(events.is_empty(), "{events:?}");
 }
 
+/// A valid method return of `len` array bytes to `dest`, which `Writer`'s
+/// own cap would refuse: the tests' way to have a peer send what the
+/// over-cap skip paths must sort.
+fn over_cap_reply(dest: &str, reply_to: u32, len: usize) -> Vec<u8> {
+    let mut writer = Writer::with_cap(len + 4096);
+    writer.begin_return_to(400, dest, reply_to, "ay");
+    let cookie = writer.open_array(1).unwrap();
+    writer.raw(&vec![7u8; len]);
+    writer.close_array(cookie);
+    writer.finish().unwrap()
+}
+
+/// Flushes everything `forger` queued (a megabyte takes several turns),
+/// then a ping proving its delivery: the daemon dispatches one
+/// connection's messages in order, so the victim seeing the ping proves
+/// everything before it reached the victim's socket. Discarding the
+/// forger's own pumps is safe: nothing of the forger's is ever waited for.
+fn flood_then_ping(forger: &mut Conn, victim_unique: &str, bytes: &[u8]) {
+    forger.queue_raw(bytes);
+    while forger.want_write() {
+        let _ = forger.pump();
+    }
+    forger
+        .call(
+            victim_unique,
+            "/p",
+            "a.b",
+            "Ping",
+            "",
+            &[],
+            proto::flag::NO_REPLY_EXPECTED,
+            0,
+        )
+        .unwrap();
+    while forger.want_write() {
+        let _ = forger.pump();
+    }
+}
+
+/// Pumps `victim` until the forger's ping lands — proving everything sent
+/// before it arrived — and panics on any `Dropped` or forged `Reply`: an
+/// over-cap stranger must be silent, never a release of everything
+/// waiting.
+fn until_ping_without_a_drop(victim: &mut Conn) {
+    let start = std::time::Instant::now();
+    loop {
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "the ping never landed"
+        );
+        let (events, _) = victim.pump();
+        let mut saw_ping = false;
+        for event in events {
+            match event {
+                Event::MethodCall { member, .. } if member == "Ping" => saw_ping = true,
+                Event::Dropped { token } => panic!("an over-cap stranger released {token}"),
+                Event::Reply { token, .. } => panic!("a forgery was accepted for {token}"),
+                _ => {}
+            }
+        }
+        if saw_ping {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+/// A forged reply past what is read is refused like a normal-size one:
+/// silently (no mass release of everything waiting), the flight staying
+/// for the real answer.
+#[test]
+fn an_over_cap_forged_reply_is_refused_silently_and_the_real_answer_lands() {
+    let Some(daemon) = Daemon::spawn() else {
+        return;
+    };
+    let mut victim = connect(&daemon);
+    let mut callee = connect(&daemon);
+    let mut forger = connect(&daemon);
+    // The victim calls the callee; the callee holds the call unanswered.
+    let serial = victim
+        .call(callee.unique(), "/", "a.b", "Slow", "", &[], 0, 42)
+        .unwrap();
+    // Flushes the call out (the wait is on the callee, not this
+    // connection); the callee holding it is the scene the forgery needs.
+    let _ = victim.pump();
+    until(&mut callee, |event| {
+        matches!(event, Event::MethodCall { .. })
+    });
+    // The forger answers the victim's serial with a valid over-cap reply.
+    // The daemon stamps it with the forger's name on delivery.
+    let big = over_cap_reply(victim.unique(), serial, proto::MAX_MESSAGE + 4096);
+    assert!(big.len() > proto::MAX_MESSAGE);
+    flood_then_ping(&mut forger, victim.unique(), &big);
+    until_ping_without_a_drop(&mut victim);
+    // The flight stayed: the real answer still lands, whole.
+    callee.reply_return(victim.unique(), serial, "s", &string_body("real"));
+    let _ = callee.pump();
+    let Event::Reply { body, .. } = until(&mut victim, |event| {
+        matches!(event, Event::Reply { token: 42, .. })
+    }) else {
+        unreachable!()
+    };
+    assert_eq!(read_string(&body), "real");
+}
+
+/// An over-cap reply answering nothing waiting is silent too: with a call
+/// still pending, no unknown drop releases everything.
+#[test]
+fn an_over_cap_reply_to_nothing_waiting_is_silent() {
+    let Some(daemon) = Daemon::spawn() else {
+        return;
+    };
+    let mut victim = connect(&daemon);
+    let mut callee = connect(&daemon);
+    let mut forger = connect(&daemon);
+    let serial = victim
+        .call(callee.unique(), "/", "a.b", "Slow", "", &[], 0, 42)
+        .unwrap();
+    let _ = victim.pump();
+    until(&mut callee, |event| {
+        matches!(event, Event::MethodCall { .. })
+    });
+    // A valid over-cap reply to a serial nothing waits for.
+    let big = over_cap_reply(victim.unique(), 0x1234_5678, proto::MAX_MESSAGE + 4096);
+    assert!(big.len() > proto::MAX_MESSAGE);
+    flood_then_ping(&mut forger, victim.unique(), &big);
+    until_ping_without_a_drop(&mut victim);
+    // Nothing was released: the real answer still lands, whole.
+    callee.reply_return(victim.unique(), serial, "s", &string_body("real"));
+    let _ = callee.pump();
+    let Event::Reply { body, .. } = until(&mut victim, |event| {
+        matches!(event, Event::Reply { token: 42, .. })
+    }) else {
+        unreachable!()
+    };
+    assert_eq!(read_string(&body), "real");
+}
+
 /// What one signal's dispatch costs, measured so a regression shows:
 /// the six owned pieces (sender, path, interface, member, signature,
 /// body) plus the events vec's first growth. All six are inherent — the
@@ -366,7 +565,9 @@ fn a_signal_costs_six_small_allocations() {
         &string_body("org.freedesktop.DBus"),
         1,
     );
-    let _ = watcher.pump();
+    // No pre-pump: `until` flushes the queued calls on its own first
+    // pump, and a discarded pump on the waited-on connection loses a
+    // reply that arrived between the flush and the read.
     until(&mut watcher, |event| {
         matches!(event, Event::Reply { token: 1, .. })
     });

@@ -112,12 +112,22 @@ impl Drop for Daemon {
     }
 }
 
-/// Pumps `conn` until `want` picks an event (returned), or fails the
-/// test after ten seconds: the bus never answered.
+/// Pumps `conn` until `want` picks an event (returned), fails fast when
+/// the connection dies, or fails the test after ten seconds: the bus never
+/// answered. Never discard a pump's events on a connection then waited on
+/// with this: its first pump flushes the queued calls itself, and a reply
+/// that arrived before a discarded pump is consumed by it, leaving this to
+/// wait the whole deadline for an answer that already came (measured
+/// 2026-10-03: a reply sitting in the socket is returned by the discarded
+/// pump and `until` then fails at ten seconds, every time).
+#[track_caller]
 pub fn until(conn: &mut Conn, mut want: impl FnMut(&Event) -> bool) -> Event {
     use rustix::event::{PollFd, PollFlags, Timespec, poll};
     let start = std::time::Instant::now();
     loop {
+        if conn.dead() {
+            panic!("the bus died while waiting for what the test waits for");
+        }
         assert!(
             start.elapsed() < Duration::from_secs(10),
             "the bus never sent what the test waits for"
