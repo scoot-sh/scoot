@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::event::{EventKind, OutputChanged, OutputRemoved, OutputRestored};
+use crate::event::{EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
@@ -264,7 +264,7 @@ pub enum Response {
     /// What a `Subscribe` request answers on success: the event kinds this
     /// connection is now dedicated to, echoed back. Afterwards the
     /// connection carries [`OutputRemoved`]/[`OutputRestored`]/
-    /// [`OutputChanged`] unasked, and any other request on it is
+    /// [`OutputChanged`]/[`KeyboardChanged`] unasked, and any other request on it is
     /// refused with an error.
     ///
     /// A new variant, so this is one of the halves that moved
@@ -297,6 +297,18 @@ pub enum Response {
     /// constant's doc): an older client handed one would fail its decode,
     /// which can only happen to a client new enough to have subscribed.
     OutputChanged(OutputChanged),
+    /// The answer to [`Request::Keyboard`](crate::Request::Keyboard): the
+    /// seat keyboard's currently effective layout -- see [`KeyboardLayout`]
+    /// for what each field means.
+    ///
+    /// A new variant, so this shares the 5 → 6 `PROTOCOL_VERSION` move with
+    /// `KeyboardChanged` below: an older client handed one would fail its
+    /// decode, which can only happen to a client new enough to have asked.
+    Keyboard(KeyboardLayout),
+    /// The active keyboard layout changed; see [`KeyboardLayout`]. Sent only
+    /// to connections subscribed to [`EventKind::Keyboard`], under the same
+    /// version move as `Keyboard` above.
+    KeyboardChanged(KeyboardLayout),
     Error {
         message: String,
     },

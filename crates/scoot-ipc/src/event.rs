@@ -29,21 +29,24 @@
 //!   Open another connection for requests -- requests pipeline, so one is
 //!   enough for any number of them.
 //! - **Filtering is by kind, not by field.** The subscription names event
-//!   kinds (`output` today); the server sends every event of those kinds,
+//!   kinds (`output`, `keyboard`); the server sends every event of those
+//!   kinds,
 //!   and the client filters or debounces further itself. Standby cycles
 //!   fire removal/restore pairs routinely -- that is accepted, and stated
 //!   on each payload, rather than filtered server-side.
 //!
 //! [`Request`]: crate::Request
 //! [`Response`]: crate::Response
+//! [`KeyboardLayout`]: crate::KeyboardLayout
 
 use serde::{Deserialize, Serialize};
 
 /// One class of event a connection can subscribe to.
 ///
-/// Only [`EventKind::Output`] exists today (output removed/restored/changed
-/// -- see [`OutputRemoved`], [`OutputRestored`] and [`OutputChanged`]).
-/// Adding a kind is additive on
+/// [`EventKind::Output`] covers output removed/restored/changed -- see
+/// [`OutputRemoved`], [`OutputRestored`] and [`OutputChanged`].
+/// [`EventKind::Keyboard`] covers the active keyboard layout changing -- see
+/// [`KeyboardLayout`]. Adding a kind is additive on
 /// the request half, like adding an action: a client that never names it
 /// sends -- and a server decodes -- byte-for-byte what it did before, and
 /// an older server meets the new name with an ordinary `Error`, not a kill.
@@ -57,6 +60,16 @@ pub enum EventKind {
     /// adopted workspace range, and the adopter's active workspace before
     /// and after) and the new mode for the third.
     Output,
+    /// The active keyboard layout (xkb group) changed. No standard Wayland
+    /// protocol reports this to an unfocused client -- `wl_keyboard` sends
+    /// the keymap and the modifier group only to the client holding keyboard
+    /// focus, which a bar never does -- so this is the channel a layout
+    /// indicator reads. Read-only: scoot has no layout-switch bind, option
+    /// or action, so nothing here switches the layout; the group moves only
+    /// through the keymap's own mechanics (a toggle key from the
+    /// `XKB_DEFAULT_OPTIONS` the session started with, e.g.
+    /// `grp:caps_toggle`).
+    Keyboard,
 }
 
 /// An output was removed: its workspaces were adopted onto a remaining
@@ -176,4 +189,28 @@ pub struct OutputChanged {
     /// The scale the output keeps running at: a mode change never changes
     /// the scale, so this is the scale to recompute *from*.
     pub scale: f64,
+}
+
+/// The seat keyboard's currently effective layout (xkb group): what
+/// [`Request::Keyboard`](crate::Request::Keyboard) answers with, and what a
+/// [`EventKind::Keyboard`] subscription carries when it changes.
+///
+/// The `index` is the 0-based group -- the same numbering `msg type`
+/// resolves each character in, so an agent reads off which layout its next
+/// `type` will produce. The `name` is the keymap's own name for that group
+/// (`us` reads as `"English (US)"`, `ru` as `"Russian"`), which is what a
+/// bar shows. Both are read live off the compositor's keymap: there is no
+/// scoot-side copy to go stale.
+///
+/// Fires once per change, never per keypress: typing on one layout sends
+/// nothing, and one group switch sends exactly one event. Rapid successive
+/// switches each send their own -- every event names the layout in effect
+/// when it was sent, so a reader that processes them in order ends where
+/// the keyboard is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyboardLayout {
+    /// The keymap's name for the active group (`"English (US)"`).
+    pub name: String,
+    /// The active group, 0-based.
+    pub index: u32,
 }

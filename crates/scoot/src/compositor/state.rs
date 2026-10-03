@@ -363,6 +363,18 @@ pub struct State {
     /// the connection), by the hotplug emitters, and by the accept loop
     /// when a connection leaves; drained on the frame tick.
     pub(super) subscribers: Vec<super::ipc::Subscriber>,
+    /// The effective keyboard layout (xkb group) index the last keyboard
+    /// event left behind -- what `keyboard` change detection compares
+    /// against (see `input.rs`'s `check_keyboard_layout`).
+    ///
+    /// A change detector, not a cache: the query reads the live keymap, so
+    /// this can lag it. It lags whenever no keyboard subscriber exists --
+    /// detection is skipped entirely then (one short walk of the subscriber
+    /// list per key, no keymap read) -- and `Request::Subscribe` refreshes
+    /// it, so the first real change after subscribing emits exactly once
+    /// instead of reporting the whole unsubscribed interval as one change.
+    /// Starts at the keymap's own initial group, 0.
+    pub(super) last_keyboard_layout: u32,
     /// The session-default output scale, resolved from `[output] scale` (see
     /// `output_scale.rs`), set at startup and re-applied live by a config
     /// reload (see `reload.rs`) -- except under `--nested`, where it stays
@@ -1205,6 +1217,7 @@ impl State {
             displaced: HashMap::new(),
             origin_names: HashMap::new(),
             subscribers: Vec::new(),
+            last_keyboard_layout: 0,
             default_scale: scale,
             output_entries: OutputEntries::default(),
             mixed_scales: false,

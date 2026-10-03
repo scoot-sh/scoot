@@ -1,7 +1,7 @@
 //! Injected input: what an agent sends in place of a keyboard and mouse.
 
 use scoot_core::Action;
-use scoot_ipc::{KeyCombo, Modifier, PointerButton};
+use scoot_ipc::{KeyCombo, KeyboardLayout, Modifier, PointerButton};
 use smithay::backend::input::{Axis, AxisSource, ButtonState, InputTime, KeyState};
 use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, Keysym, xkb};
 use smithay::input::pointer::{
@@ -962,6 +962,17 @@ impl State {
         // release). Nothing at all is recorded when nothing has focus: an
         // event no client received is evidence for no one. See
         // `interaction.rs`.
+        //
+        // The layout check lives beside the recording rather than inside the
+        // filter above for the same reason the recording does: an
+        // intercepted key never reached the keyboard state a client decodes
+        // in -- except it did. A group toggle takes effect in the xkb state
+        // whether or not the key is forwarded (the toggle *is* the key's
+        // xkb action, not its delivery), so even a bound toggle moves the
+        // group `msg type` resolves in. Checking here, after `input`
+        // returns, catches every path through this function: tty libinput,
+        // the nested host, and IPC `key`/`type`.
+        self.check_keyboard_layout();
         if transition
             && !outcome.intercepted
             && let Some(client) = recipient
@@ -1036,6 +1047,82 @@ impl State {
             let keymap = unsafe { xkb.keymap() };
             read(keymap, layout)
         })
+    }
+
+    /// The seat keyboard's currently effective layout (xkb group) index, or
+    /// `None` with no keyboard on the seat.
+    ///
+    /// The index half of [`Self::keyboard_layout`]: this one allocates
+    /// nothing, so the per-key change check can call it on every keypress
+    /// without touching the allocator.
+    fn keyboard_layout_index(&mut self) -> Option<xkb::LayoutIndex> {
+        let keyboard = self.seat.get_keyboard()?;
+        Some(self.with_keymap(&keyboard, |_, layout| layout))
+    }
+
+    /// The seat keyboard's currently effective layout: its xkb group index
+    /// and the keymap's name for it. `None` with no keyboard on the seat.
+    ///
+    /// Read live off the keymap every time -- `last_keyboard_layout` is a
+    /// change detector, not a cache, so this is what the `keyboard` query
+    /// answers with. The same group `msg type` resolves in (see
+    /// `with_keymap`), which is the whole point: an agent reads off which
+    /// layout its next `type` will produce.
+    pub(super) fn keyboard_layout(&mut self) -> Option<KeyboardLayout> {
+        let keyboard = self.seat.get_keyboard()?;
+        Some(
+            self.with_keymap(&keyboard, |keymap, layout| KeyboardLayout {
+                name: keymap.layout_get_name(layout).to_owned(),
+                index: layout,
+            }),
+        )
+    }
+
+    /// Re-reads the live group into `last_keyboard_layout` without
+    /// emitting -- what `Request::Subscribe` does on the way in, so the
+    /// per-key check's skipped reads while unsubscribed cannot report the
+    /// unsubscribed interval as one change later.
+    pub(super) fn refresh_keyboard_layout(&mut self) {
+        if let Some(current) = self.keyboard_layout() {
+            self.last_keyboard_layout = current.index;
+        }
+    }
+
+    /// Emits a `keyboard_changed` event if this key moved the effective
+    /// layout (xkb group), and records the new group either way.
+    ///
+    /// Called after every `keyboard.input` in [`State::key_with`] -- the one
+    /// funnel every keyboard source reaches -- so a group toggle is caught
+    /// whichever key carried it. At most one event per key, and none when
+    /// the group did not move: typing on one layout sends nothing, which is
+    /// what "coalesced" means here (a toggle is a deliberate keypress, not
+    /// a per-frame occurrence, so there is no batch to collapse).
+    ///
+    /// Costs nothing with no subscribers: the first check is one short walk
+    /// of the subscriber list, and the keymap is not read at all -- not
+    /// even the index. With an output-only subscriber list the same walk
+    /// finds no keyboard kind among them. `Request::Subscribe` refreshes
+    /// the recorded group, so skipping the read while unsubscribed cannot
+    /// report the unsubscribed interval as one change later.
+    fn check_keyboard_layout(&mut self) {
+        if !self
+            .subscribers
+            .iter()
+            .any(|subscriber| subscriber.wants(scoot_ipc::EventKind::Keyboard))
+        {
+            return;
+        }
+        let Some(index) = self.keyboard_layout_index() else {
+            return;
+        };
+        if index == self.last_keyboard_layout {
+            return;
+        }
+        self.last_keyboard_layout = index;
+        if let Some(current) = self.keyboard_layout() {
+            debug_assert_eq!(current.index, index, "no key ran between the two reads");
+            self.emit_keyboard_changed(current);
+        }
     }
 
     /// Clicking focuses what is under the pointer, which the core then tracks.

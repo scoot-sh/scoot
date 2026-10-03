@@ -112,4 +112,15 @@ pub enum Request {
     Subscribe {
         events: Vec<EventKind>,
     },
+    /// Report the seat keyboard's currently effective layout (xkb group):
+    /// its index and the keymap's name for it -- see
+    /// [`KeyboardLayout`](crate::KeyboardLayout). What a layout indicator
+    /// shows, and what tells an agent which layout the next `type` will
+    /// produce.
+    ///
+    /// Additive like `Reload`: a client that never sends this tag decodes
+    /// exactly as before, so no `PROTOCOL_VERSION` bump for the request
+    /// half. (The reply half is a new `Response` variant, which is why the
+    /// version still moved -- see `Response::Keyboard`.)
+    Keyboard,
 }

@@ -25,6 +25,8 @@ pub const REQUESTS_HELP: &str = "\
     action ACTION [ARGUMENT...]
     reload                          re-read the config file and re-apply
                                     what can be re-applied live
+    keyboard                        the active keyboard layout's name and
+                                    index -- what a layout indicator shows
     screenshot [--output ID] [--out FILE] [--no-cursor]
                                     the pointer is drawn in unless
                                     --no-cursor
@@ -36,7 +38,8 @@ pub const REQUESTS_HELP: &str = "\
     type TEXT                       types text, working out each character's
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
-    subscribe [EVENT...]          stream events until killed (default: output)
+    subscribe [EVENT...]          stream events until killed (default: output;
+                                    known events: output, keyboard)
 ";
 
 /// The action grammar both clients print in their `--help`. Same single-owner
@@ -64,6 +67,8 @@ REQUESTS:
     action ACTION [ARGUMENT...]
     reload                          re-read the config file and re-apply
                                     what can be re-applied live
+    keyboard                        the active keyboard layout's name and
+                                    index -- what a layout indicator shows
     screenshot [--output ID] [--out FILE] [--no-cursor]
                                     the pointer is drawn in unless
                                     --no-cursor
@@ -75,7 +80,8 @@ REQUESTS:
     type TEXT                       types text, working out each character's
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
-    subscribe [EVENT...]          stream events until killed (default: output)
+    subscribe [EVENT...]          stream events until killed (default: output;
+                                    known events: output, keyboard)
 
 ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
@@ -205,6 +211,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "outputs" => Request::Outputs,
         "windows" => Request::Windows,
         "reload" => Request::Reload,
+        "keyboard" => Request::Keyboard,
         "action" => Request::Action(action(&mut args)?),
         "screenshot" => {
             let mut output = None;
@@ -256,9 +263,10 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
             for name in args {
                 match name.as_str() {
                     "output" => events.push(EventKind::Output),
+                    "keyboard" => events.push(EventKind::Keyboard),
                     other => {
                         return Err(Error::Unknown(format!(
-                            "event {other} (known events: output)"
+                            "event {other} (known events: output, keyboard)"
                         )));
                     }
                 }
@@ -611,11 +619,28 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_args(&["keyboard"]),
+            Ok(Command::Msg {
+                request: Request::Keyboard,
+                out: None,
+            })
+        );
+        assert_eq!(
             parse_args(&["version"]),
             Ok(Command::Msg {
                 request: Request::Version,
                 out: None,
             })
+        );
+    }
+
+    #[test]
+    fn usage_names_keyboard_on_its_own_line() {
+        assert!(
+            USAGE
+                .lines()
+                .any(|line| line.trim().starts_with("keyboard")),
+            "--help hides the keyboard verb"
         );
     }
 
@@ -635,6 +660,24 @@ mod tests {
             Ok(Msg {
                 request: Request::Subscribe {
                     events: vec![EventKind::Output]
+                },
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["subscribe", "keyboard"]),
+            Ok(Msg {
+                request: Request::Subscribe {
+                    events: vec![EventKind::Keyboard]
+                },
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["subscribe", "output", "keyboard"]),
+            Ok(Msg {
+                request: Request::Subscribe {
+                    events: vec![EventKind::Output, EventKind::Keyboard]
                 },
                 out: None,
             })

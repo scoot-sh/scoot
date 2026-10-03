@@ -347,6 +347,14 @@ impl State {
             Request::Windows => Response::Windows {
                 windows: self.window_snapshots(),
             },
+            // Session-level like `outputs`: read live off the seat
+            // keyboard's keymap (see `keyboard_layout`), never refused
+            // while locked -- an agent typing a password needs to know
+            // which layout it is typing it in.
+            Request::Keyboard => match self.keyboard_layout() {
+                Some(layout) => Response::Keyboard(layout),
+                None => Response::error("this seat has no keyboard"),
+            },
             // Refused while the session is locked, and it is the only
             // request here that is. `Action` is the one that bypasses input
             // entirely -- `Spawn` would put a new client's window on a locked
