@@ -106,7 +106,7 @@ command list and results are in the PR description.
   `popup_done` it sends, which the click-outside test exercises).
 - **No list widget and no network consumer**: a list is a column of buttons, and
   a native WiFi list needs scrolling and a closing selection, filed as
-  [popup-network-list](../popup-network-list.md).
+  [popup-network-list](popup-network-list-done.md).
 - **A drag ends when the pointer leaves the popup** (the compositor's grab moves
   the focus off it); no scroll over the popup; no keyboard navigation but
   Escape; one popup at a time; a scale change closes it.

@@ -9,12 +9,12 @@ milestone: "M6"
 
 # Keyboard navigation of popup lists (arrows, Enter)
 
-Filed 2026-10-03, from [popup-network-list](popup-network-list.md). Serves
+Filed 2026-10-03, from [popup-network-list](resolved/popup-network-list-done.md). Serves
 **daily-drive** (picking WiFi without a pointer).
 
 ## The gap
 
-[popup-network-list](popup-network-list.md) lands the list with pointer
+[popup-network-list](resolved/popup-network-list-done.md) lands the list with pointer
 scroll and selection only: arrows do nothing and Enter selects nothing in
 a popup, while the popup grab already gives the popup the keyboard for
 Escape (`crates/scootbar/src/daemon/popup/events.rs`, `KEY_ESC`). A list
