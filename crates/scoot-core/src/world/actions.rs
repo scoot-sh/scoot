@@ -1,6 +1,7 @@
 //! Applying what a user or agent asked for.
 
 use super::World;
+use super::output_cycle::neighbour_output;
 use super::tree::Output;
 use crate::messages::{Action, Effect};
 use crate::types::WindowId;
@@ -129,6 +130,25 @@ impl World {
             Action::FocusOutputIndex(index) => {
                 if let Some(id) = self.output_at(index) {
                     self.focus_output(id);
+                }
+            }
+            // The stepping halves of the two above: the neighbour left or
+            // right of the focused output in the geometry-order ring (see
+            // `output_cycle`), wrapping around. With one output --
+            // `neighbour_output` answers `None` -- both do nothing, like an
+            // out-of-range index.
+            Action::FocusOutputDirection(direction) => {
+                if let Some(focused) = self.focused_output()
+                    && let Some(id) = neighbour_output(&self.outputs, focused, direction)
+                {
+                    self.focus_output(id);
+                }
+            }
+            Action::MoveWindowToOutputDirection(direction) => {
+                if let Some(focused) = self.focused_output()
+                    && let Some(id) = neighbour_output(&self.outputs, focused, direction)
+                {
+                    self.move_focused_window_to_output(id);
                 }
             }
             Action::FocusWindowId(id) => {

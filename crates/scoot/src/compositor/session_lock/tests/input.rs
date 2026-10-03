@@ -239,6 +239,12 @@ fn the_cross_output_actions_are_refused_while_locked() {
     for action in [
         scoot_ipc::Action::MoveFocusedWindowToOutput { output: 1 },
         scoot_ipc::Action::FocusOutput { output: 1 },
+        scoot_ipc::Action::FocusOutputDirection {
+            direction: scoot_ipc::Horizontal::Left,
+        },
+        scoot_ipc::Action::MoveWindowToOutputDirection {
+            direction: scoot_ipc::Horizontal::Right,
+        },
     ] {
         let response = fixture.state.handle_request(Request::Action(action));
         assert!(
@@ -255,6 +261,14 @@ fn the_cross_output_actions_are_refused_while_locked() {
     fixture
         .state
         .act(scoot_core::Action::FocusOutput(scoot_core::OutputId(1)));
+    fixture.state.act(scoot_core::Action::FocusOutputDirection(
+        scoot_core::Horizontal::Left,
+    ));
+    fixture
+        .state
+        .act(scoot_core::Action::MoveWindowToOutputDirection(
+            scoot_core::Horizontal::Right,
+        ));
     fixture.settle();
     assert_eq!(
         fixture.state.world.arrange(),

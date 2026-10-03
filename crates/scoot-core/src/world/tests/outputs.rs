@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Action, Vertical, Workspaces};
+use crate::{Action, Horizontal, Vertical, Workspaces};
 
 const SECOND: Rect = Rect::new(1000, 0, 800, 600);
 
@@ -491,4 +491,188 @@ fn rapid_move_focus_move_sequences_stay_consistent() {
     assert_eq!(placement(&world, 1).output, OutputId(1));
     assert_eq!(placement(&world, 2).output, OutputId(1));
     assert_eq!(focused(&world), Some(2));
+}
+
+// -- relative cross-output stepping (Super+comma / Super+period) -----------
+
+/// Three side-by-side outputs with one window each, focused on the first.
+fn three_output_world() -> World {
+    let mut world = world();
+    add_output(&mut world, 2, SECOND);
+    add_output(&mut world, 3, Rect::new(2000, 0, 800, 600));
+    open(&mut world, 1);
+    open_on(&mut world, 2, 2, false);
+    open_on(&mut world, 3, 3, false);
+    world.handle_action(Action::FocusWindowId(WindowId(1)));
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    world
+}
+
+#[test]
+fn cycling_focus_steps_through_every_output_and_wraps() {
+    let mut world = three_output_world();
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    assert_eq!(focused(&world), Some(2));
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(world.focused_output(), Some(OutputId(3)));
+    assert_eq!(focused(&world), Some(3));
+    // Past the rightmost: back to the start, not stuck and not lost.
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    assert_eq!(focused(&world), Some(1));
+    // And the other way: left of the leftmost is the rightmost.
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Left));
+    assert_eq!(world.focused_output(), Some(OutputId(3)));
+    assert_eq!(focused(&world), Some(3));
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Left));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    assert_eq!(focused(&world), Some(2));
+}
+
+#[test]
+fn cycling_focus_with_two_outputs_goes_to_the_other_either_way() {
+    // The two-monitor shape the old defaults named absolutely: either key
+    // now steps across, whichever side is asked for.
+    let mut world = two_output_world();
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Left));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Left));
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+}
+
+#[test]
+fn cycling_focus_with_one_output_does_nothing() {
+    let mut world = world();
+    open(&mut world, 1);
+    let before = world.arrange();
+    for dir in [Horizontal::Left, Horizontal::Right] {
+        world.handle_action(Action::FocusOutputDirection(dir));
+        assert_eq!(world.arrange(), before);
+        assert_eq!(world.focused_output(), Some(OutputId(1)));
+        assert_eq!(focused(&world), Some(1));
+    }
+}
+
+#[test]
+fn cycling_focus_follows_geometry_not_creation_order() {
+    // The middle screen by x arrives last: creation order is 1, 2, 3 but
+    // the ring runs 1, 3, 2. (The platform still packs left to right, so
+    // only the test builds this shape -- it is what placeable outputs will
+    // produce for real.)
+    let mut world = world();
+    add_output(&mut world, 2, Rect::new(2000, 0, 800, 600));
+    add_output(&mut world, 3, SECOND);
+    open(&mut world, 1);
+    open_on(&mut world, 2, 2, false);
+    open_on(&mut world, 3, 3, false);
+    world.handle_action(Action::FocusWindowId(WindowId(1)));
+
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(
+        world.focused_output(),
+        Some(OutputId(3)),
+        "right of 1 is the middle screen by x, not the later creation"
+    );
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(
+        world.focused_output(),
+        Some(OutputId(1)),
+        "right of the rightmost by x wraps to the leftmost"
+    );
+}
+
+#[test]
+fn cycling_focus_onto_an_empty_output_focuses_nothing() {
+    // The same contract `focus-output` keeps: an output with no windows has
+    // no focused window, and the output itself is still the focused one.
+    let mut world = world();
+    add_output(&mut world, 2, SECOND);
+    open(&mut world, 1);
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    assert_eq!(focused(&world), None);
+    assert_eq!(world.arrange().focused, None);
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    assert_eq!(focused(&world), Some(1));
+}
+
+#[test]
+fn cycling_skips_a_removed_output() {
+    // The focused output unplugged mid-cycle is gone from the ring: stepping
+    // from 1 with 2 removed goes straight to 3, and a lone output steps
+    // nowhere.
+    let mut world = three_output_world();
+    world.handle_event(Event::OutputRemoved { id: OutputId(2) });
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    assert_eq!(world.focused_output(), Some(OutputId(3)));
+    world.handle_event(Event::OutputRemoved { id: OutputId(3) });
+    let before = world.arrange();
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Right));
+    world.handle_action(Action::FocusOutputDirection(Horizontal::Left));
+    assert_eq!(world.arrange(), before);
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+}
+
+#[test]
+fn carrying_the_window_cycles_and_wraps_with_it() {
+    // The Shift half: the focused window is carried to the neighbour's
+    // active workspace, visible and focused there, and focus follows -- past
+    // the end of the ring as well as along it.
+    let mut world = three_output_world();
+    for expected in [OutputId(2), OutputId(3), OutputId(1)] {
+        world.handle_action(Action::MoveWindowToOutputDirection(Horizontal::Right));
+        let placed = placement(&world, 1);
+        assert_eq!(placed.output, expected);
+        assert!(placed.visible);
+        assert_eq!(focused(&world), Some(1));
+        assert_eq!(world.focused_output(), Some(expected));
+    }
+    // ...and back the other way, wrapping from the leftmost to the
+    // rightmost.
+    world.handle_action(Action::MoveWindowToOutputDirection(Horizontal::Left));
+    assert_eq!(placement(&world, 1).output, OutputId(3));
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(world.focused_output(), Some(OutputId(3)));
+}
+
+#[test]
+fn carrying_with_one_output_leaves_the_window_where_it_is() {
+    let mut world = world();
+    open(&mut world, 1);
+    let before = world.arrange();
+    for dir in [Horizontal::Left, Horizontal::Right] {
+        world.handle_action(Action::MoveWindowToOutputDirection(dir));
+        assert_eq!(world.arrange(), before);
+        assert_eq!(focused(&world), Some(1));
+    }
+}
+
+#[test]
+fn carrying_onto_an_output_with_a_fullscreen_window_lands_beside_it() {
+    // The carried window joins the target's active workspace as an ordinary
+    // column; the fullscreen window keeps its state, unfocused, underneath
+    // the newly focused arrival.
+    let mut world = two_output_world();
+    world.handle_action(Action::FocusOutput(OutputId(2)));
+    world.handle_action(Action::ToggleFullscreen);
+    assert_eq!(world.fullscreen_on(OutputId(2)), Some(WindowId(2)));
+    world.handle_action(Action::FocusOutput(OutputId(1)));
+
+    world.handle_action(Action::MoveWindowToOutputDirection(Horizontal::Right));
+    let placed = placement(&world, 1);
+    assert_eq!(placed.output, OutputId(2));
+    assert!(placed.visible);
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    assert!(world.is_fullscreen(WindowId(2)));
+    assert_eq!(world.fullscreen_on(OutputId(2)), None);
 }

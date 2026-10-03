@@ -1075,6 +1075,16 @@ fn action_string(action: &Action) -> String {
             format!("move-window-to-output-index {index}")
         }
         Action::FocusOutputIndex(index) => format!("focus-output-index {index}"),
+        // The stepping halves spell as the verbs that parse back to them
+        // (one verb per side, so neither overloads the id forms' argument).
+        Action::FocusOutputDirection(d) => match d {
+            Horizontal::Left => "focus-output-left".to_owned(),
+            Horizontal::Right => "focus-output-right".to_owned(),
+        },
+        Action::MoveWindowToOutputDirection(d) => match d {
+            Horizontal::Left => "move-window-to-output-left".to_owned(),
+            Horizontal::Right => "move-window-to-output-right".to_owned(),
+        },
         Action::CycleColumnWidth => "cycle-column-width".to_owned(),
         Action::SetColumnWidth(index) => format!("set-column-width {index}"),
         Action::ToggleFullscreen => "toggle-fullscreen".to_owned(),

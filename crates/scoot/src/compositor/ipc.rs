@@ -394,6 +394,7 @@ impl State {
                         | scoot_ipc::Action::FocusWorkspaceIndex { .. }
                         | scoot_ipc::Action::FocusOutput { .. }
                         | scoot_ipc::Action::FocusOutputIndex { .. }
+                        | scoot_ipc::Action::FocusOutputDirection { .. }
                         | scoot_ipc::Action::ToggleFloatingFocus
                 ) {
                     self.clicked_layer = None;
@@ -701,19 +702,26 @@ impl State {
     ///   focus action by this function's cut (like every other `Move*` it
     ///   stays on the full path), even though the core follows the window:
     ///   the same line `MoveWindowToWorkspaceIndex` already holds.
-    ///   `MoveFocusedWindowToOutputIndex` stays out for the same reason.
+    ///   `MoveFocusedWindowToOutputIndex` and `MoveWindowToOutputDirection`
+    ///   stay out for the same reason.
     /// - `FocusOutputIndex`: the focused output already is the output at
     ///   that position -- one index plus one `Copy` compare, through the
-    ///   allocation-free `World::output_at`, no workspace lookup. This is
-    ///   what the default `Super+comma` / `Super+period` binds send, so a
-    ///   held key repeating on an already-focused screen must land here
-    ///   rather than paying a full `apply` per repeat.
+    ///   allocation-free `World::output_at`, no workspace lookup. This used
+    ///   to be what the default `Super+comma` / `Super+period` binds sent,
+    ///   so a held key repeating on an already-focused screen landed here
+    ///   rather than paying a full `apply` per repeat; the stepping binds
+    ///   that replaced them stay on the full path instead (see below).
     /// - `FocusColumn` / `FocusWindow`: relative steps whose no-op-ness
     ///   needs the focused column's position in its workspace (and the
     ///   stack position within it), which `World` does not expose.
     ///   Deliberately left on the full path rather than guessed; resolving
     ///   them would mean new core accessors for a socket-speed micro-opt,
     ///   and they keep today's behavior exactly, clear included.
+    /// - `FocusOutputDirection`: the same cut as the column/window steppers
+    ///   -- answering "already there" exactly would mean resolving the
+    ///   geometry ring (a lone output steps nowhere), which `World` does not
+    ///   expose without allocating. Left on the full path rather than
+    ///   guessed, like the steppers above.
     ///
     /// No allocation: an enum match plus, for the workspace variants, two
     /// `Copy` reads off the core.

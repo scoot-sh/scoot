@@ -104,6 +104,8 @@ all. Everything the socket can do is in [docs/ipc.md](docs/ipc.md).
 | `Super+Shift` + direction | Move the column or window |
 | `Super+1`..`9` | Go to workspace 1–9 |
 | `Super+Shift+1`..`9` | Send the window to workspace 1–9 |
+| `Super+,` / `Super+.` | Focus the output left / right, wrapping around every monitor |
+| `Super+Shift+,` / `Super+Shift+.` | Send the window to the output left / right, wrapping |
 | `Super+r` | Cycle the column's width |
 | `Super+f` | Fullscreen |
 | `Super+Shift+Space` | Float the window, or put it back |

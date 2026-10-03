@@ -252,9 +252,9 @@ fn the_output_actions_travel_as_snake_case_with_an_output() {
 
 #[test]
 fn the_positional_output_actions_travel_as_snake_case_with_an_index() {
-    // The same pin for the position-based halves: what the default output
-    // binds send, so a client can name the second screen without knowing its
-    // id.
+    // The same pin for the position-based halves: what the old default
+    // output binds sent, so a client can name the second screen without
+    // knowing its id.
     for (action, tag) in [
         (
             Action::MoveFocusedWindowToOutputIndex { index: 1 },
@@ -266,6 +266,39 @@ fn the_positional_output_actions_travel_as_snake_case_with_an_index() {
         assert_eq!(
             json_of(&request),
             json!({ "type": "action", "action": tag, "index": 1 })
+        );
+        assert_eq!(
+            decode::<Request>(&encode(&request).unwrap()).unwrap(),
+            request
+        );
+    }
+}
+
+#[test]
+fn the_relative_output_actions_travel_as_snake_case_with_a_direction() {
+    // The same pin for the stepping halves: what the default output binds
+    // send now -- a direction, like the column and workspace steppers, so a
+    // client can step across screens without knowing any id or position.
+    for (action, tag, direction) in [
+        (
+            Action::FocusOutputDirection {
+                direction: Horizontal::Left,
+            },
+            "focus_output_direction",
+            "left",
+        ),
+        (
+            Action::MoveWindowToOutputDirection {
+                direction: Horizontal::Right,
+            },
+            "move_window_to_output_direction",
+            "right",
+        ),
+    ] {
+        let request = Request::Action(action);
+        assert_eq!(
+            json_of(&request),
+            json!({ "type": "action", "action": tag, "direction": direction })
         );
         assert_eq!(
             decode::<Request>(&encode(&request).unwrap()).unwrap(),

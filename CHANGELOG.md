@@ -9,6 +9,27 @@ scoot has not cut a numbered release yet; entries are dated.
 
 ## Unreleased
 
+### 2026-10-03 — `Super+comma` / `Super+period` step across every monitor, wrapping
+
+- **The output binds are relative now**: `Super+comma` focuses the output
+  left of the focused one and `Super+period` the one right of it, wrapping
+  around (left of the leftmost is the rightmost); `Super+Shift+comma` /
+  `Super+Shift+period` carry the focused window there and follow it. The
+  ring is geometry order (x, then y), so a third, fourth, … monitor is
+  reachable with no hand-written binds. With one output the keys do
+  nothing; with two, either goes to the other. New actions
+  (`focus-output-left`, `focus-output-right`,
+  `move-window-to-output-left`, `move-window-to-output-right`; wire tags
+  `focus_output_direction` / `move_window_to_output_direction`, no
+  protocol bump).
+- **Behavior change on two monitors**: `Super+comma` used to mean "go to
+  screen 0" and `Super+period` "go to screen 1" (`focus-output-index 0` /
+  `1`); now they step left / right, so from the left monitor `Super+comma`
+  lands on the right one. The old behavior is one bind away
+  (`"super+comma" = "focus-output-index 0"` in `[binds]` overrides the
+  default). The `-index N` and id actions stay for fixed screens
+  ([docs/configuration.md](docs/configuration.md#moving-across-outputs)).
+
 ### 2026-09-29 — a scale and a mode per monitor
 
 - **`[[outputs]]`** in the config file gives one monitor its own scale and

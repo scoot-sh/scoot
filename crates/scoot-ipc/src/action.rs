@@ -96,18 +96,43 @@ pub enum Action {
     /// Move keyboard focus to another output by its position in the output
     /// list (0-based, creation order: the first screen, the second screen)
     /// -- the wire half of `scoot_core::Action::FocusOutputIndex`. What the
-    /// default `Super+comma` / `Super+period` binds send, so they keep
+    /// old default `Super+comma` / `Super+period` binds sent, before those
+    /// binds stepped relatively instead (see `FocusOutputDirection`); the
+    /// actions stay for anyone who wants a fixed screen, so they keep
     /// reaching a monitor that was unplugged and plugged back in (which
     /// comes back under a fresh id). Out of range does nothing, like an
     /// unknown id. Additive like the id form: no `PROTOCOL_VERSION` bump.
     FocusOutputIndex {
         index: usize,
     },
+    /// Move keyboard focus to the output left or right of the focused one,
+    /// wrapping around (left of the leftmost is the rightmost) -- the wire
+    /// half of `scoot_core::Action::FocusOutputDirection`, and what the
+    /// default `Super+comma` / `Super+period` binds send. With one output
+    /// there is nowhere to go, so either direction does nothing; with two,
+    /// either names the other. The ring is geometry order (x, then y), which
+    /// today equals creation order. Additive: a client that never sends this
+    /// tag decodes exactly as before, so no `PROTOCOL_VERSION` bump.
+    FocusOutputDirection {
+        direction: Horizontal,
+    },
+    /// Carry the focused window left or right to the neighbouring output's
+    /// active workspace and follow it there -- the wire half of
+    /// `scoot_core::Action::MoveWindowToOutputDirection`, and what the
+    /// default `Super+Shift+comma` / `Super+Shift+period` binds send. Same
+    /// ring and wrap as `FocusOutputDirection`; with one output the window
+    /// stays where it is. Additive: no `PROTOCOL_VERSION` bump.
+    MoveWindowToOutputDirection {
+        direction: Horizontal,
+    },
     /// Carry the focused window to the *active* workspace of the output at
     /// position `index` in the output list (0-based, creation order), and
     /// follow it there -- the wire half of
-    /// `scoot_core::Action::MoveFocusedWindowToOutputIndex`, and what the
-    /// default `Super+Shift+comma` / `Super+Shift+period` binds send. Out of
+    /// `scoot_core::Action::MoveFocusedWindowToOutputIndex`. What the old
+    /// default `Super+Shift+comma` / `Super+Shift+period` binds sent, before
+    /// those binds carried relatively instead (see
+    /// `MoveWindowToOutputDirection`); the actions stay for anyone who wants
+    /// a fixed screen. Out of
     /// range leaves the window where it is. Additive: no `PROTOCOL_VERSION`
     /// bump.
     MoveFocusedWindowToOutputIndex {
