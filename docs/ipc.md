@@ -46,6 +46,7 @@ compositor running in a VM.
 | `version` | Version and IPC protocol of the running compositor — needs a session. `scootctl --version` (or `scoot --version`) answers locally with no session, printing the binaries' own line (`scoot <version> (ipc protocol <N>)`) so a client can check compatibility before connecting. |
 | `outputs` | Every output's name, rectangle, usable rectangle and scale. |
 | `windows` | Every window: id, app id, title, icon, output, workspace, adoption, focus, popup grab. |
+| `keyboard` | The active keyboard layout's name and index — what a layout indicator shows, and which layout the next `type` will produce. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
 | `reload` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, appearance, keybindings, new autostart spawn entries; an entry's `mode` is refused as `outputs.<name>.mode`, pending a restart) — see [configuration.md](configuration.md#reloading-the-config). Answers `reloaded` with applied-vs-refused field lists, or `error` (running config untouched) when the file cannot load or validate. |
 | `screenshot [--output ID] [--out FILE] [--no-cursor]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it always means the first output (id 1). The pointer is drawn in unless `--no-cursor` — see [The pointer in a screenshot](#the-pointer-in-a-screenshot). |
@@ -56,7 +57,7 @@ compositor running in a VM.
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |
-| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output` today; naming none is refused — bare `scootctl subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). |
+| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output`, `keyboard`; naming none is refused — bare `scootctl subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). A fresh `keyboard` subscription starts silent, so issue one `keyboard` query for the baseline and listen for changes after it. |
 
 ```sh
 scootctl windows
@@ -64,8 +65,10 @@ scootctl action focus-column left
 scootctl reload
 scootctl screenshot --out /tmp/shot.png
 scootctl type "hello"
+scootctl keyboard
 scootctl wait-idle --quiet-ms 200
 scootctl subscribe
+scootctl subscribe keyboard
 ```
 
 ## Actions
@@ -91,7 +94,8 @@ is locked.
 ## `type` vs `key`
 
 **`scootctl type TEXT` types text the way a person would**, on whatever
-keyboard layout the session is running: for each character it finds the key
+keyboard layout the session is running (ask `scootctl keyboard` which one
+that is): for each character it finds the key
 that carries it and holds down whatever modifiers that key's level needs —
 Shift for `A` or `!`, AltGr for a German layout's `@` — so a client receives
 the same key *and* modifier events it would see from a real keyboard, not
@@ -177,6 +181,20 @@ for its modifier only when no key on the layout can hold it.
 | `maximized` | Whether the window is maximized. While its column is focused (and no fullscreen window covers the output) it fills the output's usable area: `rect` equals that usable area minus the layout gap, and every other tiled window on the output reports `visible: false` (floating windows stay above it). Focused away, it keeps that size and sits in the strip where a column that wide would, one ordinary gap from its neighbours. Fullscreen wins while both hold. |
 | `floating` | Whether the window floats above its workspace's strip: a dialog, transient or fixed-size window floated as it mapped, a `[[window_rule]]` match, or `toggle-floating`/`set-floating`. Its `rect` is where it really is: where it was last moved to (by a drag or `move-floating`), else centred on its parent (when that is visible on the same workspace) or its output, inside the output's `usable` area, at the size it drew. It is drawn above, and takes clicks before, every tiled window on its output. A floating window that has not drawn its first frame yet is `visible: false`, as is one on an inactive workspace or under a fullscreen window that covers the output. |
 
+**`keyboard`**, the seat keyboard's currently effective layout (xkb group):
+
+| Field | Meaning |
+| --- | --- |
+| `index` | The active group, 0-based — the same numbering `type` resolves each character in, so an agent reads off which layout its next `type` will produce. |
+| `name` | The keymap's own name for that group (`us` reads as `"English (US)"`, `ru` as `"Russian"`) — what a bar shows. |
+
+Read live off the compositor's keymap on every request: there is no
+scoot-side copy to go stale. Read-only, like the event below — scoot has
+no layout-switch bind, option or action, so nothing over IPC switches the
+layout; the group moves only through the keymap's own mechanics (a toggle
+key from the `XKB_DEFAULT_OPTIONS` the session started with, e.g.
+`grp:caps_toggle`).
+
 Every success reply also carries **`locked`**: the session-lock state it was
 built under. An agent typing a password over IPC learns the unlock landed
 from the very next reply.
@@ -221,8 +239,9 @@ finds it, since neither is ever in effect. A reload that could not load or valid
 ## Events
 
 A connection that wants push notifications subscribes instead of polling.
-`subscribe` names the event kinds it wants (`output` today — the only kind;
-naming none is refused, and bare `scootctl subscribe` sends `output`); the reply echoes the subscription; and
+`subscribe` names the event kinds it wants (`output`, `keyboard` — the two
+kinds; naming none is refused, and bare `scootctl subscribe` sends
+`output`); the reply echoes the subscription; and
 afterwards that connection carries events until the session ends:
 
 ```sh
@@ -231,6 +250,9 @@ $ scootctl subscribe
 {"type":"output_removed","output":2,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":0,"adopter_active":2,"origin":"DP-1"}
 {"type":"output_restored","output":3,"name":"DP-1","adopter":1,"adopted_start":2,"adopted_count":2,"adopter_prev_active":2,"adopter_active":0,"origin":"DP-1","moved":3}
 {"type":"output_changed","output":1,"name":"DP-1","width":2952,"height":1660,"scale":1.5}
+$ scootctl subscribe keyboard
+{"type":"subscribed","events":["keyboard"]}
+{"type":"keyboard_changed","name":"Russian","index":1}
 ```
 
 `scootctl subscribe` prints the answer, then one compact JSON object per
@@ -299,6 +321,24 @@ size; a resize the render target refuses fires nothing.
 | `width` / `height` | The new framebuffer size in physical pixels. |
 | `scale` | The scale the output keeps running at — the scale to recompute *from*. |
 
+**`keyboard_changed`** — the seat keyboard's effective layout (xkb group)
+changed: the same `name` and `index` the `keyboard` query answers with
+(see [What the replies carry](#what-the-replies-carry)), naming the layout
+now in effect. No standard Wayland protocol reports this to an unfocused
+client — `wl_keyboard` sends the keymap and the modifier group only to the
+client holding keyboard focus, which a bar never does — so this event (and
+the query) is the channel a layout indicator reads.
+
+It fires once per change, never per keypress: typing on one layout sends
+nothing, and one group switch sends exactly one event. Rapid successive
+switches each send their own — every event names the layout in effect when
+it was sent, so a reader that processes them in order ends where the
+keyboard is. As with the query, this is read-only: nothing over IPC
+switches the layout, and the bar's click action has nothing to call — the
+group moves only through the keymap's own mechanics (a toggle key from the
+`XKB_DEFAULT_OPTIONS` the session started with). Layout switching UI and
+per-window layouts are out of scope.
+
 A subscriber that stops reading is disconnected rather than buffered
 without bound: past the same 1 MiB queued-reply bound a connection
 observes, or with no byte leaving for the same 10-second stall window, the
@@ -308,8 +348,9 @@ leaves no record behind.
 
 Versioning: the subscription is IPC protocol 5 — the `subscribed`,
 `output_removed` and `output_restored` tags under the 3 → 4 bump, plus the
-`output_changed` tag under 4 → 5. A client that
-never sends `subscribe` never receives any of them. An unknown event kind
+`output_changed` tag under 4 → 5 — and the keyboard half is protocol 6: the
+`keyboard` reply and the `keyboard_changed` tag. A client that
+never sends `subscribe` (or `keyboard`) never receives any of them. An unknown event kind
 in a `subscribe` is answered with an ordinary `error` like any unknown
 request tag, so an older server meets a newer subscriber with an error,
 not a kill.

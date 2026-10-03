@@ -2,9 +2,9 @@
 //! `PROTOCOL_VERSION` bump.
 
 use scoot_ipc::{
-    Action, EventKind, Horizontal, OutputChanged, OutputRemoved, OutputRestored, OutputSnapshot,
-    PROTOCOL_VERSION, PointerButton, Rect, Request, Response, SCREENSHOT_CURSOR_DEFAULT,
-    Screenshot, WindowSnapshot, decode, encode,
+    Action, EventKind, Horizontal, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored,
+    OutputSnapshot, PROTOCOL_VERSION, PointerButton, Rect, Request, Response,
+    SCREENSHOT_CURSOR_DEFAULT, Screenshot, WindowSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -15,6 +15,11 @@ fn json_of<T: serde::Serialize>(value: &T) -> Value {
 fn unit_requests_are_just_a_type() {
     assert_eq!(json_of(&Request::Windows), json!({ "type": "windows" }));
     assert_eq!(json_of(&Request::Reload), json!({ "type": "reload" }));
+    assert_eq!(json_of(&Request::Keyboard), json!({ "type": "keyboard" }));
+    assert_eq!(
+        decode::<Request>(&encode(&Request::Keyboard).unwrap()).unwrap(),
+        Request::Keyboard
+    );
     assert_eq!(
         json_of(&Request::Subscribe {
             events: vec![EventKind::Output]
@@ -446,14 +451,14 @@ fn a_reload_report_round_trips_with_both_lists() {
 
 /// The Phase 4-6 record: the refusal *strings* moved (restart wording, the
 /// autostart spawn delta) while the reply *shape* did not -- so this still
-/// decodes as the same two string lists. (The protocol is at 5 now for the
-/// output-changed event below; these strings are still payload, not wire.)
+/// decodes as the same two string lists. (The protocol is at 6 now for the
+/// keyboard query and event below; these strings are still payload, not wire.)
 /// Strings are payload, not wire format: an older client parses this reply
 /// exactly as it parsed the old strings.
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 5,
+        PROTOCOL_VERSION, 6,
         "no new reply variant or field shipped with the reload completion"
     );
     let response = Response::Reloaded {
@@ -522,6 +527,10 @@ fn every_request_round_trips_on_one_line() {
         Request::Subscribe {
             events: vec![EventKind::Output],
         },
+        Request::Subscribe {
+            events: vec![EventKind::Output, EventKind::Keyboard],
+        },
+        Request::Keyboard,
     ];
     for request in requests {
         let line = encode(&request).unwrap();
@@ -811,6 +820,64 @@ fn a_subscribe_names_its_kinds_and_the_reply_echoes_them() {
     );
 }
 
+/// A keyboard subscription names its kind the same way, and the reply
+/// echoes it back.
+#[test]
+fn a_keyboard_subscribe_names_its_kind_and_the_reply_echoes_it() {
+    let request = Request::Subscribe {
+        events: vec![EventKind::Keyboard],
+    };
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "subscribe", "events": ["keyboard"] })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+
+    let response = Response::Subscribed {
+        events: vec![EventKind::Keyboard],
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({ "type": "subscribed", "events": ["keyboard"] })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+/// The keyboard query's reply and the layout-changed event share one
+/// payload: the active group's index and the keymap's name for it.
+#[test]
+fn a_keyboard_layout_round_trips_as_query_and_event() {
+    let layout = KeyboardLayout {
+        name: "Russian".into(),
+        index: 1,
+    };
+    let response = Response::Keyboard(layout.clone());
+    assert_eq!(
+        json_of(&response),
+        json!({ "type": "keyboard", "name": "Russian", "index": 1 })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+
+    let response = Response::KeyboardChanged(layout);
+    assert_eq!(
+        json_of(&response),
+        json!({ "type": "keyboard_changed", "name": "Russian", "index": 1 })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
 /// An unknown event kind is rejected like an unknown request type: a decode
 /// error the server answers with an ordinary `Error` while it keeps
 /// serving -- never a kill, never a silent misroute. This is the
@@ -831,6 +898,12 @@ fn unknown_event_kinds_are_rejected_like_unknown_request_types() {
         decode::<Request>(r#"{"type":"subscribe","events":["output"]}"#).unwrap(),
         Request::Subscribe {
             events: vec![EventKind::Output]
+        }
+    );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"subscribe","events":["keyboard"]}"#).unwrap(),
+        Request::Subscribe {
+            events: vec![EventKind::Keyboard]
         }
     );
 }

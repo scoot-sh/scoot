@@ -26,6 +26,8 @@ REQUESTS:
     action ACTION [ARGUMENT...]
     reload                          re-read the config file and re-apply
                                     what can be re-applied live
+    keyboard                        the active keyboard layout's name and
+                                    index -- what a layout indicator shows
     screenshot [--output ID] [--out FILE] [--no-cursor]
                                     the pointer is drawn in unless
                                     --no-cursor
@@ -37,7 +39,8 @@ REQUESTS:
     type TEXT                       types text, working out each character's
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
-    subscribe [EVENT...]          stream events until killed (default: output)
+    subscribe [EVENT...]          stream events until killed (default: output;
+                                    known events: output, keyboard)
 
 ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
@@ -959,6 +962,9 @@ mod tests {
             &["pointer", "scroll", "1", "-2"],
             &["key", "super+h"],
             &["type", "hello", "there"],
+            &["keyboard"],
+            &["subscribe"],
+            &["subscribe", "output", "keyboard"],
             &["wait-idle"],
             &["wait-idle", "--quiet-ms", "100", "--timeout-ms", "500"],
             &[],

@@ -17,6 +17,7 @@ use super::listener;
 use super::*;
 
 mod actions;
+mod keyboard;
 
 /// Shrinks how much unread data the kernel will hold for writes to `stream`.
 ///

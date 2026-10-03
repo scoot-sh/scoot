@@ -4,15 +4,16 @@
 //! for the protocol half): `Request::Subscribe` names the [`EventKind`]s,
 //! the reply is `Response::Subscribed`, and afterwards the connection
 //! carries [`Response::OutputRemoved`]/[`Response::OutputRestored`]/
-//! [`Response::OutputChanged`] unasked as outputs come, go and change size.
+//! [`Response::OutputChanged`]/[`Response::KeyboardChanged`] unasked as
+//! outputs come, go and change size and the keyboard layout changes.
 //! This module is the server side of that: who is subscribed, getting events
 //! to them, and dropping subscribers that stop reading.
 //!
 //! The shape mirrors the socket's two existing hand-offs (`PendingIdle`,
 //! `PendingShot`): a subscriber is a clone of its connection's socket --
 //! which shares the file status flags, so it is non-blocking like the
-//! original -- plus the same [`Outbound`] queue a connection uses. Events
-//! are emitted on the event-loop thread from the hotplug paths
+//! original -- plus the same [`Outbound`] queue a connection uses. Output
+//! events are emitted on the event-loop thread from the hotplug paths
 //! (`State::remove_output`, `State::restore_displaced`) and the resize path
 //! (`State::resize_output_of`), which are cold
 //! (a monitor plug cycle or mode change, never per frame), so one encode
@@ -20,7 +21,11 @@
 //! one clone per subscriber is the whole cost, and subscribing costs
 //! nothing per message or frame: the connection loop answers requests
 //! exactly as before, with one boolean check for the dedicated-connection
-//! rule.
+//! rule. Keyboard events are emitted from the same thread but a warmer
+//! path -- the per-key layout check in `State::key_with` -- so the check
+//! itself is gated on a `Keyboard` subscriber existing (one walk of the
+//! subscriber list, no keymap read without one) and the emission only runs
+//! when the group actually changed.
 //!
 //! The backpressure policy, stated once here because a test pins it:
 //!
@@ -49,7 +54,9 @@
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use scoot_ipc::{EventKind, OutputChanged, OutputRemoved, OutputRestored, Response, encode};
+use scoot_ipc::{
+    EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored, Response, encode,
+};
 
 use super::{Outbound, State};
 
@@ -91,6 +98,14 @@ pub(crate) struct Subscriber {
     last_progress: Instant,
 }
 
+impl Subscriber {
+    /// Whether this connection asked for `kind` -- what the per-key layout
+    /// check asks before reading the keymap at all.
+    pub(crate) fn wants(&self, kind: EventKind) -> bool {
+        self.events.contains(&kind)
+    }
+}
+
 impl State {
     /// Subscribes `conn` to `events`, dedicating its connection to them.
     ///
@@ -100,7 +115,7 @@ impl State {
     pub fn subscribe(&mut self, conn: u64, stream: UnixStream, events: Vec<EventKind>) -> Response {
         if events.is_empty() {
             return Response::error(
-                "subscribe names no event kinds; name at least one (\"output\"), \
+                "subscribe names no event kinds; name at least one (\"output\", \"keyboard\"), \
                  or open a connection for requests instead",
             );
         }
@@ -114,6 +129,16 @@ impl State {
             progress: 0,
             last_progress: now,
         });
+        // The layout change detector compares against
+        // `last_keyboard_layout` and
+        // skips its keymap read entirely while unsubscribed, so a stretch
+        // with no keyboard subscriber leaves that record behind the live
+        // group. Refresh it on the way in -- without emitting -- so the
+        // first real change after this emits exactly once instead of
+        // reporting the whole unsubscribed interval as one change.
+        if events.contains(&EventKind::Keyboard) {
+            self.refresh_keyboard_layout();
+        }
         Response::Subscribed { events }
     }
 
@@ -150,7 +175,23 @@ impl State {
         self.emit(EventKind::Output, &line);
     }
 
-    /// The shared tail of all three emitters: one encoded line to every
+    /// Sends a keyboard-layout event to every `Keyboard` subscriber.
+    /// See the module doc for what happens to one that stops reading.
+    ///
+    /// Called from the per-key layout check (`input.rs`), so unlike the
+    /// hotplug emitters above this runs on the input path -- but only when
+    /// the group actually changed (typing on one layout never reaches
+    /// here) and only when a `Keyboard` subscriber exists (the check before
+    /// it already returned otherwise), so the cost is one small encode plus
+    /// one clone per subscriber, a few keypresses per user action at most.
+    pub fn emit_keyboard_changed(&mut self, event: KeyboardLayout) {
+        let Ok(line) = encode(&Response::KeyboardChanged(event)) else {
+            return;
+        };
+        self.emit(EventKind::Keyboard, &line);
+    }
+
+    /// The shared tail of all four emitters: one encoded line to every
     /// subscriber of `kind`.
     ///
     /// `line` is encoded once, outside, and cloned per subscriber -- one
