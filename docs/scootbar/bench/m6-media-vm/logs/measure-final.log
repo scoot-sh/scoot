@@ -1,54 +1,54 @@
 === main, no module placed
-t0 rss_kb=3764 hwm_kb=3764 pss_kb=2198 threads=1 fds=7 vol=5 nonvol=2 utime_ticks=0 stime_ticks=0
-t60 rss_kb=3764 hwm_kb=3764 pss_kb=2198 threads=1 fds=7 vol=5 nonvol=2 utime_ticks=0 stime_ticks=0
+t0 rss_kb=3760 hwm_kb=3760 pss_kb=2195 threads=1 fds=7 vol=4 nonvol=3 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3760 hwm_kb=3760 pss_kb=2197 threads=1 fds=7 vol=4 nonvol=3 utime_ticks=0 stime_ticks=0
 query:
 {"type":"modules","modules":[]}
 
 binary_bytes=1905376
 bar.log lines: 0
 === branch (media built), no module placed
-t0 rss_kb=3824 hwm_kb=3824 pss_kb=2249 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
-t60 rss_kb=3824 hwm_kb=3824 pss_kb=2251 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t0 rss_kb=3824 hwm_kb=3824 pss_kb=2261 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3824 hwm_kb=3824 pss_kb=2259 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
 query:
 {"type":"modules","modules":[]}
 
 binary_bytes=1970912
 bar.log lines: 0
 === branch, media feature off, no module placed
-t0 rss_kb=3824 hwm_kb=3824 pss_kb=2259 threads=1 fds=7 vol=5 nonvol=1 utime_ticks=0 stime_ticks=0
-t60 rss_kb=3824 hwm_kb=3824 pss_kb=2270 threads=1 fds=7 vol=5 nonvol=1 utime_ticks=0 stime_ticks=0
+t0 rss_kb=3824 hwm_kb=3824 pss_kb=2258 threads=1 fds=7 vol=3 nonvol=3 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3824 hwm_kb=3824 pss_kb=2259 threads=1 fds=7 vol=3 nonvol=3 utime_ticks=0 stime_ticks=0
 query:
 {"type":"modules","modules":[]}
 
 binary_bytes=1905376
 bar.log lines: 0
 === main, clock
-t0 rss_kb=4180 hwm_kb=4180 pss_kb=2415 threads=1 fds=8 vol=7 nonvol=0 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4180 hwm_kb=4180 pss_kb=2415 threads=1 fds=8 vol=9 nonvol=0 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4004 hwm_kb=4004 pss_kb=2318 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4180 hwm_kb=4180 pss_kb=2409 threads=1 fds=8 vol=7 nonvol=0 utime_ticks=0 stime_ticks=0
 query:
-{"type":"modules","modules":[{"id":"clock","section":"right","output":"headless","text":"9:04 pm","class":"normal"}]}
+{"type":"modules","modules":[{"id":"clock","section":"right","output":"headless","text":"1:47 am","class":"normal"}]}
 
 binary_bytes=1905376
 bar.log lines: 0
 === branch, media feature off, clock
-t0 rss_kb=4068 hwm_kb=4068 pss_kb=2391 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4244 hwm_kb=4244 pss_kb=2475 threads=1 fds=8 vol=7 nonvol=0 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4052 hwm_kb=4052 pss_kb=2384 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4232 hwm_kb=4232 pss_kb=2472 threads=1 fds=8 vol=7 nonvol=0 utime_ticks=0 stime_ticks=0
 query:
-{"type":"modules","modules":[{"id":"clock","section":"right","output":"headless","text":"9:05 pm","class":"normal"}]}
+{"type":"modules","modules":[{"id":"clock","section":"right","output":"headless","text":"1:48 am","class":"normal"}]}
 
 binary_bytes=1905376
 bar.log lines: 0
 === branch, media built and not placed, clock
-t0 rss_kb=4136 hwm_kb=4136 pss_kb=2455 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4312 hwm_kb=4312 pss_kb=2543 threads=1 fds=8 vol=7 nonvol=0 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4136 hwm_kb=4136 pss_kb=2443 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4312 hwm_kb=4312 pss_kb=2537 threads=1 fds=8 vol=7 nonvol=1 utime_ticks=0 stime_ticks=0
 query:
-{"type":"modules","modules":[{"id":"clock","section":"right","output":"headless","text":"9:06 pm","class":"normal"}]}
+{"type":"modules","modules":[{"id":"clock","section":"right","output":"headless","text":"1:49 am","class":"normal"}]}
 
 binary_bytes=1970912
 bar.log lines: 0
 === media alone, no bus
-t0 rss_kb=4148 hwm_kb=4148 pss_kb=2414 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4148 hwm_kb=4148 pss_kb=2408 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4140 hwm_kb=4140 pss_kb=2401 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4140 hwm_kb=4140 pss_kb=2407 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
 query:
 {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"","class":"normal"}]}
 
@@ -56,57 +56,57 @@ binary_bytes=1970912
 bar.log lines: 1
 scootbar: media: no session bus (bus No such file or directory (os error 2)); waiting for one
 === media alone, bus, no player
-t0 rss_kb=4152 hwm_kb=4152 pss_kb=2411 threads=1 fds=8 vol=11 nonvol=0 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4152 hwm_kb=4152 pss_kb=2404 threads=1 fds=8 vol=11 nonvol=0 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4160 hwm_kb=4160 pss_kb=2410 threads=1 fds=8 vol=10 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4160 hwm_kb=4160 pss_kb=2405 threads=1 fds=8 vol=10 nonvol=0 utime_ticks=0 stime_ticks=0
 query:
 {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"","class":"normal"}]}
 
 binary_bytes=1970912
 bar.log lines: 0
 === media alone, bus, one paused stub
-t0 rss_kb=4388 hwm_kb=4388 pss_kb=2547 threads=1 fds=8 vol=11 nonvol=2 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4388 hwm_kb=4388 pss_kb=2553 threads=1 fds=8 vol=11 nonvol=2 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4392 hwm_kb=4392 pss_kb=2552 threads=1 fds=8 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4392 hwm_kb=4392 pss_kb=2553 threads=1 fds=8 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
 query:
 {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Ada Lovelace - Track One","class":"muted","tooltip":"stub1 (paused): Ada Lovelace - Track One","value":{"artist":"Ada Lovelace","bus_name":"org.mpris.MediaPlayer2.stub1","player":"stub1","players":[{"bus_name":"org.mpris.MediaPlayer2.stub1","status":"paused"}],"status":"paused","title":"Track One"}}]}
 
 binary_bytes=1970912
 bar.log lines: 0
 === media alone, bus, one playing stub
-t0 rss_kb=4392 hwm_kb=4392 pss_kb=2541 threads=1 fds=8 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4392 hwm_kb=4392 pss_kb=2548 threads=1 fds=8 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4392 hwm_kb=4392 pss_kb=2548 threads=1 fds=8 vol=12 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4392 hwm_kb=4392 pss_kb=2552 threads=1 fds=8 vol=12 nonvol=0 utime_ticks=0 stime_ticks=0
 query:
 {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Ada Lovelace - Track One","class":"normal","tooltip":"stub1 (playing): Ada Lovelace - Track One","value":{"artist":"Ada Lovelace","bus_name":"org.mpris.MediaPlayer2.stub1","player":"stub1","players":[{"bus_name":"org.mpris.MediaPlayer2.stub1","status":"playing"}],"status":"playing","title":"Track One"}}]}
 
 binary_bytes=1970912
 bar.log lines: 0
 === media alone, bus, eight playing stubs
-t0 rss_kb=4392 hwm_kb=4392 pss_kb=2548 threads=1 fds=8 vol=28 nonvol=7 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4392 hwm_kb=4392 pss_kb=2546 threads=1 fds=8 vol=28 nonvol=7 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4388 hwm_kb=4388 pss_kb=2542 threads=1 fds=8 vol=29 nonvol=1 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4388 hwm_kb=4388 pss_kb=2543 threads=1 fds=8 vol=29 nonvol=1 utime_ticks=0 stime_ticks=0
 query:
-{"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Ada Lovelace - Track One","class":"normal","tooltip":"stub6 (playing): Ada Lovelace - Track One","value":{"artist":"Ada Lovelace","bus_name":"org.mpris.MediaPlayer2.stub6","player":"stub6","players":[{"bus_name":"org.mpris.MediaPlayer2.stub3","status":"playing"},{"bus_name":"org.mpris.MediaPlayer2.stub4","status":"playing"},{"bus_name":"org.mpris.MediaPlayer2.stub7","status":"playing"},{"bus_name":"org.mpris.MediaPlayer2.stub1","status":"playing"},{"bus_name":"org.mpris.MediaPlayer2.stub5","status":"playing
+{"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Ada Lovelace - Track One","class":"normal","tooltip":"stub6 (playing): Ada Lovelace - Track One","value":{"artist":"Ada Lovelace","bus_name":"org.mpris.MediaPlayer2.stub6","player":"stub6","players":[{"bus_name":"org.mpris.MediaPlayer2.stub1","status":"playing"},{"bus_name":"org.mpris.MediaPlayer2.stub3","status":"playing"},{"bus_name":"org.mpris.MediaPlayer2.stub4","status":"playing"},{"bus_name":"org.mpris.MediaPlayer2.stub5","status":"playing"},{"bus_name":"org.mpris.MediaPlayer2.stub2","status":"playing
 binary_bytes=1970912
 bar.log lines: 0
 === media alone, bus, one real mpv playing a file
-t0 rss_kb=4384 hwm_kb=4384 pss_kb=2544 threads=1 fds=8 vol=18 nonvol=1 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4384 hwm_kb=4384 pss_kb=2541 threads=1 fds=8 vol=18 nonvol=1 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4384 hwm_kb=4384 pss_kb=2541 threads=1 fds=8 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4384 hwm_kb=4384 pss_kb=2544 threads=1 fds=8 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
 query:
 {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Real Song","class":"normal","tooltip":"mpv (playing): Real Song","value":{"artist":"","bus_name":"org.mpris.MediaPlayer2.mpv","player":"mpv","players":[{"bus_name":"org.mpris.MediaPlayer2.mpv","status":"playing"}],"status":"playing","title":"Real Song"}}]}
 
 binary_bytes=1970912
 bar.log lines: 0
 === media alone, bus, mpv playing its lavfi sine (re-sends its metadata each second)
-t0 rss_kb=4384 hwm_kb=4384 pss_kb=2542 threads=1 fds=8 vol=25 nonvol=1 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4384 hwm_kb=4384 pss_kb=2548 threads=1 fds=8 vol=85 nonvol=1 utime_ticks=0 stime_ticks=1
+t0 rss_kb=4384 hwm_kb=4384 pss_kb=2539 threads=1 fds=8 vol=26 nonvol=1 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4384 hwm_kb=4384 pss_kb=2542 threads=1 fds=8 vol=86 nonvol=1 utime_ticks=0 stime_ticks=1
 query:
 {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Real Song","class":"normal","tooltip":"mpv (playing): Real Song","value":{"artist":"","bus_name":"org.mpris.MediaPlayer2.mpv","player":"mpv","players":[{"bus_name":"org.mpris.MediaPlayer2.mpv","status":"playing"}],"status":"playing","title":"Real Song"}}]}
 
 binary_bytes=1970912
 bar.log lines: 0
 === media and clock, bus, one playing stub
-t0 rss_kb=4388 hwm_kb=4388 pss_kb=2544 threads=1 fds=9 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
-t60 rss_kb=4388 hwm_kb=4388 pss_kb=2544 threads=1 fds=9 vol=15 nonvol=0 utime_ticks=0 stime_ticks=0
+t0 rss_kb=4380 hwm_kb=4380 pss_kb=2553 threads=1 fds=9 vol=13 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4380 hwm_kb=4380 pss_kb=2548 threads=1 fds=9 vol=15 nonvol=0 utime_ticks=0 stime_ticks=0
 query:
-{"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Ada Lovelace - Track One","class":"normal","tooltip":"stub1 (playing): Ada Lovelace - Track One","value":{"artist":"Ada Lovelace","bus_name":"org.mpris.MediaPlayer2.stub1","player":"stub1","players":[{"bus_name":"org.mpris.MediaPlayer2.stub1","status":"playing"}],"status":"playing","title":"Track One"}},{"id":"clock","section":"right","output":"headless","text":"9:16 pm","class":"normal"}]}
+{"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Ada Lovelace - Track One","class":"normal","tooltip":"stub1 (playing): Ada Lovelace - Track One","value":{"artist":"Ada Lovelace","bus_name":"org.mpris.MediaPlayer2.stub1","player":"stub1","players":[{"bus_name":"org.mpris.MediaPlayer2.stub1","status":"playing"}],"status":"playing","title":"Track One"}},{"id":"clock","section":"right","output":"headless","text":"1:59 am","class":"normal"}]}
 
 binary_bytes=1970912
 bar.log lines: 0

@@ -1,35 +1,35 @@
-tree: fdb7ddd17cbd9883d37dce64fb443edfbdb377f3 (crates tree 958dcf867f66a17ace383ddcff10abb29a53d2ff)
+tree: 242b2dce75db4491740888bea4af420a2ade328a (crates tree 864d03f35d18ea3a87f2b421744e929d49a280c0)
 FAIL nextest default (all integration, scoot+sway required)
-        FAIL [  16.321s] (  92/1125) scootbar::popup a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks
+        FAIL [   9.984s] (  96/1134) scootbar::popup a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks
     test a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks ... FAILED
-    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 16.29s
-    thread 'a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks' (3251661) panicked at crates/scootbar/tests/popup.rs:144:17:
-     Summary [ 125.677s] 1125 tests run: 1124 passed, 1 failed, 2 skipped
-        FAIL [  16.321s] (  92/1125) scootbar::popup a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 15 filtered out; finished in 9.97s
+    thread 'a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks' (3434691) panicked at crates/scootbar/tests/popup.rs:144:17:
+     Summary [ 103.126s] 1134 tests run: 1133 passed, 1 failed, 2 skipped
+        FAIL [   9.984s] (  96/1134) scootbar::popup a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks
 error: test run failed
 FAIL cargo test default
 test a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks ... FAILED
-thread 'a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks' (3267746) panicked at crates/scootbar/tests/popup.rs:144:17:
-test result: FAILED. 15 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 27.20s
+thread 'a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks' (3440833) panicked at crates/scootbar/tests/popup.rs:144:17:
+test result: FAILED. 15 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.97s
 error: test failed, to rerun pass `-p scootbar --test popup`
 error: 1 target failed:
-OK   nextest --bin all-features  (Summary [  33.863s] 1016 tests run: 1016 passed, 0 skipped)
-OK   nextest --bin none  (Summary [   3.659s] 414 tests run: 414 passed, 0 skipped)
-OK   nextest --bin clock alone  (Summary [   4.624s] 487 tests run: 487 passed, 0 skipped)
-OK   nextest --bin workspaces alone  (Summary [  24.289s] 492 tests run: 492 passed, 0 skipped)
-OK   nextest --bin window-title alone  (Summary [   2.510s] 437 tests run: 437 passed, 0 skipped)
-OK   nextest --bin volume alone  (Summary [   4.058s] 460 tests run: 460 passed, 0 skipped)
-OK   nextest --bin microphone alone  (Summary [  10.647s] 463 tests run: 463 passed, 0 skipped)
-OK   nextest --bin network alone  (Summary [   3.890s] 465 tests run: 465 passed, 0 skipped)
-OK   nextest --bin brightness alone  (Summary [   4.347s] 439 tests run: 439 passed, 0 skipped)
-OK   nextest --bin battery alone  (Summary [   3.287s] 440 tests run: 440 passed, 0 skipped)
-OK   nextest --bin tray alone  (Summary [   8.140s] 498 tests run: 498 passed, 0 skipped)
-OK   nextest --bin media alone  (Summary [   6.555s] 518 tests run: 518 passed, 0 skipped)
-OK   nextest --bin button alone  (Summary [   4.636s] 436 tests run: 436 passed, 0 skipped)
-OK   nextest --bin push alone  (Summary [   3.267s] 439 tests run: 439 passed, 0 skipped)
-OK   nextest --bin exec alone  (Summary [   5.621s] 476 tests run: 476 passed, 0 skipped)
-OK   nextest --bin popup alone  (Summary [   3.361s] 436 tests run: 436 passed, 0 skipped)
-OK   nextest --bin icon-image alone  (Summary [   6.419s] 432 tests run: 432 passed, 0 skipped)
+OK   nextest --bin all-features  (Summary [  33.351s] 1025 tests run: 1025 passed, 0 skipped)
+OK   nextest --bin none  (Summary [   3.036s] 414 tests run: 414 passed, 0 skipped)
+OK   nextest --bin clock alone  (Summary [   3.406s] 487 tests run: 487 passed, 0 skipped)
+OK   nextest --bin workspaces alone  (Summary [  21.391s] 492 tests run: 492 passed, 0 skipped)
+OK   nextest --bin window-title alone  (Summary [   3.087s] 437 tests run: 437 passed, 0 skipped)
+OK   nextest --bin volume alone  (Summary [   2.900s] 460 tests run: 460 passed, 0 skipped)
+OK   nextest --bin microphone alone  (Summary [  10.417s] 463 tests run: 463 passed, 0 skipped)
+OK   nextest --bin network alone  (Summary [   3.505s] 465 tests run: 465 passed, 0 skipped)
+OK   nextest --bin brightness alone  (Summary [   2.005s] 439 tests run: 439 passed, 0 skipped)
+OK   nextest --bin battery alone  (Summary [   2.174s] 440 tests run: 440 passed, 0 skipped)
+OK   nextest --bin tray alone  (Summary [   6.657s] 498 tests run: 498 passed, 0 skipped)
+OK   nextest --bin media alone  (Summary [   7.633s] 527 tests run: 527 passed, 0 skipped)
+OK   nextest --bin button alone  (Summary [   3.126s] 436 tests run: 436 passed, 0 skipped)
+OK   nextest --bin push alone  (Summary [   2.108s] 439 tests run: 439 passed, 0 skipped)
+OK   nextest --bin exec alone  (Summary [   3.757s] 476 tests run: 476 passed, 0 skipped)
+OK   nextest --bin popup alone  (Summary [   3.153s] 436 tests run: 436 passed, 0 skipped)
+OK   nextest --bin icon-image alone  (Summary [   3.667s] 432 tests run: 432 passed, 0 skipped)
 OK   clippy default  ()
 OK   clippy none  ()
 OK   clippy clock alone  ()

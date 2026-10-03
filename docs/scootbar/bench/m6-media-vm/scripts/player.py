@@ -6,7 +6,8 @@
 # without releasing anything (the connection drops), FLAG.long makes the
 # track the long title, FLAG.flood starts
 # signalling Position as fast as it can for 20 s, FLAG.metaflood the same
-# with a different title each time.
+# with a different title each time, FLAG.flapflood alternating the status
+# between Playing and Paused each time.
 # usage: player.py NAME LOG FLAG [Playing|Paused|Stopped]
 import os, sys, time
 import jeepney
@@ -70,6 +71,9 @@ while True:
         n += 1
         if flood == 'pos':
             changed({'Position': ('x', n)})
+        elif flood == 'flap':
+            status = 'Paused' if status == 'Playing' else 'Playing'
+            changed({'PlaybackStatus': ('s', status)})
         else:
             tracks[0] = ('Flood %d' % n, ['Flooder'])
             track = 0
@@ -77,7 +81,7 @@ while True:
         if time.time() > flood_end:
             say('flood sent %d' % n)
             flood = None
-    for suffix in ('track', 'long', 'die', 'flood', 'metaflood'):
+    for suffix in ('track', 'long', 'die', 'flood', 'metaflood', 'flapflood'):
         path = '%s.%s' % (flag, suffix)
         if os.path.exists(path):
             os.unlink(path)
@@ -93,7 +97,7 @@ while True:
                 say('die')
                 os._exit(0)
             else:
-                flood = 'pos' if suffix == 'flood' else 'meta'
+                flood = {'flood': 'pos', 'metaflood': 'meta', 'flapflood': 'flap'}[suffix]
                 flood_end = time.time() + 20
                 n = 0
                 say('flood start %s' % flood)

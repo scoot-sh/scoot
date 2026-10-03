@@ -20,12 +20,12 @@
   [26] .bss              NOBITS          00000000001d09d0 1d09d0 0000f0 00  WA  0   0  8
 == on
 1970912
-  [12] .text             PROGBITS        0000000000016400 016400 16daa8 00  AX  0   0 64
-  [14] .rodata           PROGBITS        0000000000183ec0 183ec0 01f05f 00   A  0   0 64
-  [15] .eh_frame_hdr     PROGBITS        00000000001a2f20 1a2f20 004794 00   A  0   0  4
-  [16] .eh_frame         PROGBITS        00000000001a76b8 1a76b8 020c04 00   A  0   0  8
-  [17] .gcc_except_table PROGBITS        00000000001c82bc 1c82bc 0015a4 00   A  0   0  4
-  [22] .data.rel.ro      PROGBITS        00000000001d2158 1d2158 00d848 00  WA  0   0  8
+  [12] .text             PROGBITS        0000000000016440 016440 16e948 00  AX  0   0 64
+  [14] .rodata           PROGBITS        0000000000184dc0 184dc0 01f05f 00   A  0   0 64
+  [15] .eh_frame_hdr     PROGBITS        00000000001a3e20 1a3e20 0047bc 00   A  0   0  4
+  [16] .eh_frame         PROGBITS        00000000001a85e0 1a85e0 020dcc 00   A  0   0  8
+  [17] .gcc_except_table PROGBITS        00000000001c93ac 1c93ac 0015a4 00   A  0   0  4
+  [22] .data.rel.ro      PROGBITS        00000000001d2128 1d2128 00d878 00  WA  0   0  8
   [25] .data             PROGBITS        00000000001e0000 1e0000 0009d0 00  WA  0   0  8
   [26] .bss              NOBITS          00000000001e09d0 1e09d0 0000f0 00  WA  0   0  8
 == ldd main

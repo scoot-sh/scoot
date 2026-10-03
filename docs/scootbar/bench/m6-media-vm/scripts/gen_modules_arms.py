@@ -7,7 +7,9 @@
 # day, or write the arms by hand. The unit test
 # `cli::tests::the_modules_line_is_the_registry_in_order` checks every build's
 # line against the registry, so a mistake in an arm shows in the feature matrix.
-# The `media_head!`/`media_tail!` macros and their uses in the other `modules!`
+# The regex below consumes the `// One arm per combination...` comment above the
+# arms, so the script writes it back (the first run of it did not, and the
+# comment was restored by hand). The `media_head!`/`media_tail!` macros and their uses in the other `modules!`
 # arms were written by hand. Regenerates the 128 `modules!` arms of crates/scootbar/src/cli.rs (builds with
 # no clock, workspaces or window-title: one arm per subset of the seven optional
 # modules, alphabetical in the listing). Usage: python3 gen_modules_arms.py < cli.rs > cli.new.rs
@@ -31,4 +33,5 @@ for mask in range(1<<len(cfgorder)):
     else:
         mid='     --center IDS         comma-separated, in order. This build has none, so\n     --right IDS          only an empty list is taken\n'
     out.append('#[cfg(all(\n%s\n))]\nmacro_rules! modules {\n    () => {\n        "    --left IDS           the modules along the left, center and right,\n%s     --padding N          logical pixels either side of each module, 0 to 1024\n                            (default 8)\n     --spacing N          logical pixels between neighbouring modules, 0 to\n                            1024 (default 0)\n"\n    };\n}\n'%(body,mid))
-sys.stdout.write(s[:start]+"".join(out)+s[end:])
+comment = "// One arm per combination of the modules a build may leave out, with no\n// clock, workspaces or window title to end the list: generated, in\n// alphabetical order of the names listed.\n"
+sys.stdout.write(s[:start]+comment+"".join(out)+s[end:])

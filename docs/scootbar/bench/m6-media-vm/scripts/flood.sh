@@ -1,8 +1,9 @@
 #!/bin/bash
 # One playing stub signalling as fast as its loop goes for 20 s: Position
-# only (`flood`: a player that reports its position constantly) or a new
-# title each time (`metaflood`: the worst a player can make the bar redraw).
-# usage: flood.sh KIND(flood|metaflood|none) [BIN]
+# only (`flood`: a player that reports its position constantly), a new title
+# each time (`metaflood`) or the status flipping between Playing and Paused
+# each time (`flapflood`): the worst a player can make the bar redraw.
+# usage: flood.sh KIND(flood|metaflood|flapflood|none) [BIN]
 KIND=${1:-flood}; BIN=${2:-/tmp/media-bins/scootbar-on}
 HERE=$(dirname "$0")
 PY=/nix/store/k8ac8wkni66rngy6xfrf37gj7b9dj7hp-python3-3.14.7-env/bin/python3
