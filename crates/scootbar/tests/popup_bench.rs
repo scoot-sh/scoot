@@ -4,13 +4,13 @@
 //! published numbers:
 //!
 //! ```sh
-//! cargo nextest run -p scootbar --release --test popup_bench --run-ignored only --no-capture -E 'test(idle)'
+//! cargo test -p scootbar --release --test popup_bench -- --ignored --nocapture idle
 //! cargo test -p scootbar --release --test popup_bench -- --ignored --nocapture cycles
 //! ```
 //!
-//! `cycles` takes minutes with a debug compositor (every step is checked by
-//! screenshot), past nextest's 120 s default, so it runs under `cargo test`
-//! (or give nextest a longer `slow-timeout`).
+//! Both run under `cargo test`, not nextest: nextest ends a test at its 120 s
+//! terminate-after (`.config/nextest.toml`), and `cycles` takes minutes with a
+//! debug compositor (every step is checked by screenshot).
 //!
 //! `idle` is the row every milestone repeats: the volume module placed on a
 //! headless scoot against a live PulseAudio-protocol server, RSS, peak RSS,

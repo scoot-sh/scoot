@@ -131,8 +131,9 @@ shows the tooltip, then not), the bar's CPU from `/proc/PID/schedstat`:
 **The binary-size row grew**: `.text` +13,440 B (+0.9%) and `.rodata` +320 B.
 The stripped file did not change size only because it is padded in 64 KiB steps
 (the popups entry's +65,536 was one step), so `readelf -S` is the finer number.
-Whether that passes the ratchet's rule is the maintainer's call, not this
-entry's: nothing is claimed waived. The RSS and wakeup rows are within one
+**Waived by the maintainer on 2026-10-03** (this row only; see
+[lightest.md](../lightest.md)); the independent review also judged it within
+rule 1's noise margin. The RSS and wakeup rows are within one
 buffer of themselves (a 1600 x 40 buffer is 250 kB, and the second one a redraw
 racing a release makes or does not decides the mapping count, as in the popups
 entry); the clock-only bar, which has no tooltip, is unchanged on every one of

@@ -38,16 +38,32 @@ popup), then the move or click above. A popup that never grabbed does not
 do it: a tooltip (no grab, an empty input region) shown and then left with
 `pointer_move` delivers the leave properly, in every run of the tooltip tests.
 
+## Mechanism (read from the pinned Smithay fork)
+
+In `src/desktop/wayland/popup/grab.rs` (~556), `PopupPointerGrab::motion` does
+`if has_ended() { handle.unset_grab(self, data, serial, time, true); return; }`:
+it **drops the new motion** and returns, and `unset_grab(restore_focus = true)`
+(`src/input/pointer/mod.rs`, ~763) then re-sends a motion at the grab's stored
+old `location`. scoot's `settle_popup_grab` (`popup.rs`, ~533) clears
+`popup_grab` and refreshes keyboard focus but does **not** unset the seat's
+pointer grab, whereas the compositor-dismissed path `dismiss_popup_grab`
+(`popup.rs`, ~492) does. So a grab the client ended survives until the next
+input, which it eats.
+
+It is not IPC-only: any motion source that goes through `move_absolute`
+(libinput too) hits it once. A real user loses one motion delta, which is
+invisible; but a single absolute IPC `pointer_move`, or an agent's `click x y`,
+is wrong because that move is the whole input. That is why this is `medium`
+and filed under computer use.
+
 ## What to do
 
 Reproduce without scootbar (a client that opens a grabbing popup, destroys it on
 a key, then two IPC `pointer_move`s, with a trace of what its `wl_pointer`
-receives), then find why the first motion after the grab's end carries the old
-position. The suspect is the grab's own state: Smithay's popup pointer grab is
-only unset when the next input reaches it, so the first motion after the client
-destroyed the popup may go through the stale grab, which holds the position the
-grab began at. Pin it with a test in `crates/scoot` that the first move after a
-popup grab ended is delivered as asked.
+receives). The likely fix site is the missing pointer `unset_grab` in
+`settle_popup_grab`, as `dismiss_popup_grab` does. Pin it with a test in
+`crates/scoot` that the first move after a popup grab ended is delivered as
+asked.
 
 Until it is fixed an agent can work around it by moving the pointer once, to
 anywhere, before a `click` that follows a popup's end (the tooltip tests do:
@@ -55,5 +71,6 @@ two moves after an Escape).
 
 ## Not in this ticket
 
-A grab the compositor dismissed (a click outside, the session lock): whether
-those behave the same is part of the reproduction, not assumed here.
+A grab the compositor dismissed (a click outside, the session lock): not
+tested here, and probably unaffected, since `dismiss_popup_grab` unsets the
+pointer grab.

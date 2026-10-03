@@ -273,6 +273,14 @@ waived: no other row regresses beyond what one run resolves, and the
 unplaced-tray idle RSS reading stays a one-run observation, not an accepted
 cost. `tray` stays in the default features by the same decision.
 
+**Maintainer's ruling (2026-10-03, given in chat): the tooltips binary-size
+row is waived.** It covers `.text` +13,440 B (+0.9%) and `.rodata` +320 B in
+the default build (the file's on-disk size is unchanged at 1,905,376 B, padded
+in 64 KiB steps), and only that row. Nothing else is waived. The independent
+review judged the row within rule 1's noise margin, so no waiver was strictly
+needed; the ruling is given regardless. Numbers:
+[tooltips-done](resolved/tooltips-done.md#evidence).
+
 **A runaway item.** One item re-announcing its icon as fast as the bar
 re-reads it, for 20 s (`flood.sh` in the PR): the bar read it 434 times
 (the 50 ms floor), used 0.14 CPU-seconds (0.7% of a core), made about 68

@@ -4,9 +4,12 @@
 //! published numbers:
 //!
 //! ```sh
-//! cargo nextest run -p scootbar --release --test tooltip_bench --run-ignored only --no-capture -E 'test(idle)'
+//! cargo test -p scootbar --release --test tooltip_bench -- --ignored --nocapture idle
 //! cargo test -p scootbar --release --test tooltip_bench -- --ignored --nocapture cycles
 //! ```
+//!
+//! Under `cargo test`, not nextest: `idle` takes minutes and nextest ends a
+//! test at its 120 s terminate-after (`.config/nextest.toml`).
 //!
 //! `idle` is the row every milestone repeats, for three bars (a clock alone,
 //! which has no tooltip and must cost what it did; a `push` module with a

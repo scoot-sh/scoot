@@ -96,13 +96,13 @@ impl Harness {
         self.module.on_set(value)
     }
 
-    /// The module's view for an unnamed output.
     /// Whether the module says it may show a tooltip (`Module::tooltips`).
     #[cfg(feature = "popup")]
     pub fn tooltips(&self) -> bool {
         self.module.tooltips()
     }
 
+    /// The module's view for an unnamed output.
     pub fn view(&self) -> View {
         self.view_on(None)
     }
