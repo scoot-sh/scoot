@@ -347,12 +347,61 @@ fn a_changed_command_format_placeholder_or_restart_key_replaces_it() {
         drop(stale);
         until_gone(pid, "{tag}: the replaced child");
         // The new table starts its own child: a new pid writes the file.
-        drive_placed(&mut new[0], "respawned", |_| pid_in(&pidfile) != pid);
+        // The wait reads the shown text, with the pidfile as the identity
+        // check only (see a_respawn_wait_on_text_survives_a_slow_first_line):
+        // the child writes the pidfile before its first line.
+        drive_placed(&mut new[0], "respawned", |p| {
+            pid_in(&pidfile) != pid && text(p) == later
+        });
         let pid2 = pid_in(&pidfile);
+        assert_ne!(pid2, pid, "{tag}: a new child wrote the pidfile");
         assert_eq!(text(&new[0]), later, "{tag}: the new table's child shows");
         drop(new);
         until_gone(pid2, "{tag}: the replacement child");
     }
+}
+
+#[test]
+fn a_respawn_wait_on_text_survives_a_slow_first_line() {
+    let dir = Dir::new("replace-slow-line");
+    let pidfile = dir.file("pid");
+    let id = intern("replace-slow").unwrap();
+    let script = format!("echo $$ > {}; echo started; sleep 337", pidfile.display());
+    let settings = settings(&script);
+    let placed = layout(vec![id], vec![], vec![]);
+    let mut old = start_fresh(&placed, &bar_settings(id, &settings));
+    drive_placed(&mut old[0], "started", |p| text(p) == "started");
+    let pid = pid_in(&pidfile);
+    // The replacement child writes its pidfile a whole second before its
+    // first line: the pidfile-to-pipe gap the CI flake fell into, widened
+    // from microseconds to a certainty.
+    let changed = Settings {
+        command: vec![
+            "sh".into(),
+            "-c".into(),
+            format!(
+                "echo $$ > {}; sleep 1; echo moved; sleep 337",
+                pidfile.display()
+            ),
+        ],
+        ..settings.clone()
+    };
+    let mut stale = old;
+    let mut new = reload(&placed, &bar_settings(id, &changed), &mut stale);
+    assert_eq!(stale.len(), 1, "the changed table is not kept");
+    drop(stale);
+    until_gone(pid, "the replaced child");
+    // The wait reads the shown text, with the pidfile as the identity
+    // check only: the child writes the pidfile before its first line, so
+    // a pidfile-only wait returns with the placeholder still shown.
+    drive_placed(&mut new[0], "respawned", |p| {
+        pid_in(&pidfile) != pid && text(p) == "moved"
+    });
+    let pid2 = pid_in(&pidfile);
+    assert_ne!(pid2, pid, "a new child wrote the pidfile");
+    assert_eq!(text(&new[0]), "moved", "the new table's child shows");
+    drop(new);
+    until_gone(pid2, "the replacement child");
 }
 
 #[test]
