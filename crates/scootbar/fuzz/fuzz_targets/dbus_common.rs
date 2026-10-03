@@ -1,6 +1,6 @@
-// The tray's D-Bus wire parser, compiled from scootbar's source
-// unchanged: it reaches nothing outside `proto` (which uses nothing but
-// `std`). `fuzz` holds what the target checks, shared with scootbar's
+// The tray's and the media module's D-Bus wire parsers, compiled from
+// scootbar's source unchanged: they reach nothing outside `proto` (which
+// uses nothing but `std`). `fuzz` holds what the target checks, shared with scootbar's
 // stable test that replays the corpus and `regressions/`
 // (`src/dbus/fuzz.rs`).
 
@@ -8,6 +8,12 @@
 #[rustfmt::skip]
 #[path = "../../src/dbus/proto.rs"]
 pub mod proto;
+
+// The media module's MPRIS shapes: `proto` and nothing else, as well.
+#[allow(dead_code)]
+#[rustfmt::skip]
+#[path = "../../src/dbus/mpris.rs"]
+pub mod mpris;
 
 #[rustfmt::skip]
 #[path = "../../src/dbus/fuzz.rs"]

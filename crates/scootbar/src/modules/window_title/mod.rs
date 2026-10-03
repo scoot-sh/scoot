@@ -966,38 +966,13 @@ impl Module for WindowTitle {
         }
         let padding = ctx.padding;
         let available = ctx.span.width.saturating_sub(padding.saturating_mul(2));
-        if ctx.text.measure(None, full, ctx.em) <= available {
-            return false;
-        }
-        const ELLIPSIS: char = '…';
-        let ellipsis = ctx.text.measure(None, "…", ctx.em);
-        if ellipsis > available {
-            // Not even the ellipsis fits: leave the span blank.
-            return true;
-        }
-        // The longest prefix that leaves room for the ellipsis. Advances
-        // are fractional and each glyph starts rounded, so the clip is the
-        // backstop for the last pixel.
-        let budget = available - ellipsis;
         let mut kept = [0u8; MAX_TEXT];
-        let mut len = 0usize;
-        let mut pen = 0.0f32;
-        for c in full.chars().filter(|c| !c.is_control()) {
-            let next = pen + ctx.text.advance(c, ctx.em);
-            if next.round() > budget as f32 {
-                break;
-            }
-            let width = c.len_utf8();
-            if len + width + ELLIPSIS.len_utf8() > kept.len() {
-                break;
-            }
-            c.encode_utf8(&mut kept[len..]);
-            len += width;
-            pen = next;
-        }
-        ELLIPSIS.encode_utf8(&mut kept[len..]);
-        len += ELLIPSIS.len_utf8();
-        let shown = std::str::from_utf8(&kept[..len]).unwrap_or("");
+        let shown = match super::ellipsis::cut(ctx.text, full, ctx.em, available, &mut kept) {
+            super::ellipsis::Cut::Fits => return false,
+            // Not even the ellipsis fits: leave the span blank.
+            super::ellipsis::Cut::Blank => return true,
+            super::ellipsis::Cut::Shown(shown) => shown,
+        };
         let color = if ctx.hovered {
             ctx.theme.hover
         } else {

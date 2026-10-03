@@ -18,7 +18,7 @@ license.workspace = true
 # module draws a plain bar and needs no font. `icon-image` is the one
 # feature that is not a module: it is an optional decoder (below).
 [features]
-default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "tray", "button", "push", "exec", "popup"]
+default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "tray", "media", "button", "push", "exec", "popup"]
 clock = []
 workspaces = []
 window-title = []
@@ -46,6 +46,10 @@ popup = []
 # hand-rolled D-Bus client, pixmap icons first
 # (docs/scootbar/backlog/tray.md).
 tray = []
+# What the players on the session bus are playing, and play/pause, next and
+# previous, over MPRIS: a client of the shared D-Bus client, signals only
+# (docs/scootbar/backlog/resolved/media-module-done.md).
+media = []
 # The three modules the config defines by name (`[button.NAME]`,
 # `[push.NAME]`, `[exec.NAME]`): extend the bar without Rust. `push` and
 # `exec` share the update payload (`src/modules/payload.rs`).
