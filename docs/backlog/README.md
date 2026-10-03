@@ -872,8 +872,8 @@ scale/mode) into one hardware session.
   [scale-aware X windows](./resolved/xwayland-scale-aware-done.md)
   (RESOLVED 2026-09-28: X draws at `ceil(scale)`, toolkits told over
   XSETTINGS, live across a reload; follow-up, low:
-  [choose sharp or light X apps at a fractional scale](./protocols/xwayland-fractional-scale-choice.md),
-  default sharp). The [WM-failure
+  [choose sharp or light X apps at a fractional scale](./resolved/xwayland-fractional-scale-choice-done.md)
+  — RESOLVED 2026-10-03 in #398: `[xwayland] fractional = "sharp" | "light"`, default sharp), The [WM-failure
   pin](./resolved/xwayland-phase1-wm-failure-pin-done.md) is resolved (its
   rival-claimant recipe cannot work: XWayland admits no X client before the
   WM attaches). [Bind startup-id redemption to the spawned

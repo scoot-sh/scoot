@@ -1,9 +1,10 @@
 ---
 title: "XWayland: let the user choose sharp or light X apps at a fractional scale (default sharp)"
-status: "open"
-area: "protocols"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # XWayland: sharp or light X apps at a fractional scale
@@ -45,5 +46,9 @@ reload of the option re-applies live like a scale change (client scale,
 XSETTINGS, configures re-clamped). Scale 1 and integer scales stay
 byte-for-byte unchanged either way; pin that. Tests: the chosen X scale per
 option at 1.25/1.5/2, a live reload between the two, and the memory claim
-(an X window's buffer size) per option. Document it in
+(an X window's buffer size) per option.
+
+## Resolution (2026-10-03, PR #398)
+
+Landed as `feat(scoot): [xwayland] fractional sharp-or-light choice at fractional scales` (`ac9c30cd`). Per-output ceiling (`ceil` sharp / `floor` light, largest wins) feeds the unchanged `fit_x_scale` bound; reload re-applies live via `refit_xwayland`. Review found no blocking issues (4 low: 4 sharp-only doc statements qualified in the follow-up commit, transient double-refit on combined reloads, mixed-scale test gap, trim cosmetic). CI green including the live-XWayland job. Document it in
 `docs/configuration.md` `[xwayland]` and the `[output] scale` row.
