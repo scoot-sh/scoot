@@ -452,6 +452,90 @@ CPU), the soak, and a real Spotify, Firefox or Chromium as the player (mpv
 and two stubs only; the stubs and mpv name themselves differently and one
 sends artists as lists, neither of which proves a browser's habits).
 
+## M6 tray hardening and one bus lifecycle (measured 2026-10-03)
+
+The [tray hardening](../tray-review-hardening.md) and the tray's move onto
+the shared [`link` lifecycle](../tray-onto-dbus-link.md): a per-pump byte
+budget while discarding an over-cap message, replies refused when their
+sender is not the callee (measured: `dbus-daemon` 1.16.2 delivers a forged
+reply, `dbus-broker` 37 does not), an unknown-drop event that resolves the
+flight of a reply skipped unread, a big-endian length read right, pruned
+hosts, and the tray's ~250-line bus-lifecycle copy deleted (one lifecycle
+for both consumers; one connection per consumer stands, decided in the
+[spike](../spikes/dbus-client.md#one-connection-per-consumer-decided-2026-10-03)).
+No behavior change by design; this is the proof.
+
+**Method.** Release builds (`lto = "fat"`, stripped) of `origin/main` at
+`d29a05c5` and of the branch at code commit `4b197e086` (`crates/` tree
+`f288b8c738ad36009f12c41219fd8e52e4c57525`), each `git archive`d to the
+dev VM (aarch64, 6 CPUs, rustc 1.97.1) and built with its own target dir;
+a headless `scoot` (an existing release build, used read-only), a private
+`dbus-daemon` 1.16.2, and the items the same `jeepney` peers as the M6
+tray round. One bar per run, sampled from `/proc/PID` after 14 s of
+settling and again 60 s later (`VmRSS`, `Pss`, voluntary context
+switches, fds), **one run per row**, on a VM other agents were benching
+on (load about 1 to 5 in the windows). Wakeup counts are per process and
+exact for the window; RSS differences under about 130 kB are not resolved
+by one run. Raw logs: the bench scripts are the M6 tray round's
+(`bench/m6-tray-vm/scripts/`, paths adapted); the rows' logs were not
+committed.
+
+| Row | RSS kB | PSS kB | wakeups in 60 s | fds |
+|---|---|---|---|---|
+| `main`, tray alone, **no bus** | 4152 | 2393 | **0** | 8 |
+| branch, tray alone, **no bus** | 4156 | 2393 | **0** | 8 |
+| `main`, tray alone, bus, no items | 4160 | 2404 | **0** | 8 |
+| branch, tray alone, bus, no items | 4156 | 2404 | **0** | 8 |
+| `main`, tray alone, bus, 1 item | 4352 | 2592 | **0** | 8 |
+| branch, tray alone, bus, 1 item | 4352 | 2591 | **0** | 8 |
+| `main`, tray alone, bus, 8 items | 4368 | 2619 | **0** | 8 |
+| branch, tray alone, bus, 8 items | 4388 | 2539 | **0** | 8 |
+
+How to read it. **Zero wakeups** in all eight rows: nothing in the
+hardened paths wakes the bar, and the link's lifecycle idles the same as
+the tray's old copy. Against the same tree's `main`, RSS is level in
+every row (+4, -4, +0 and +20 kB: none resolved by one run). Against the
+M6 tray round's rows the branch reads about 130 kB higher in each (4156
+against 4028 with no bus, 4388 against 4256 with eight items) — that
+round's tree predates the media and tooltips modules, which this tree
+carries built but unplaced, and one run's resolution ends at about that
+number, so read it as "level within what one run resolves", not as a
+model of where the kilobytes went. One thread throughout.
+
+**Binary** (aarch64, stripped), `readelf` sections as in the earlier
+rounds:
+
+| Build | file bytes | `.text` | `.text`+`.rodata`+`.eh_frame*`+`.gcc_except_table`+`.data*` |
+|---|---|---|---|
+| `main` (`d29a05c5`) | 1,970,912 | 1,516,232 | 1,860,499 |
+| branch (`4b197e086`) | 1,970,912 (+0) | 1,518,376 (+2,144) | 1,862,539 (+2,040) |
+
+The hardened client and the deleted copy net to about 2 KB of `.text`
+(+0.1%) and no byte on disk (the file is quantized to 64 KiB steps).
+`ldd` still shows only libc, libm and libgcc_s, and `Cargo.lock` is
+byte-identical to `main`'s.
+
+**Which rows of the rules regress.** Rule 1 (no row regresses beyond
+noise): none does — idle wakeups, RSS, PSS, fds and threads are level
+with the same tree's `main` in every row, and the size row moves 2 KB
+of `.text` (+0.1%, inside any noise reading of it) and nothing on disk.
+No row is waived here, and none needs to be: there is no regression on
+any row for the maintainer to waive or not.
+
+**The 60 MiB stream** (the budget's own test, socketpair, debug build on
+the same VM): before the budget one pump read 25,745,728 bytes; after,
+the same stream drains in 1,868 pumps with the longest at 1.70 ms, and
+the idle state asks for no `OUT`.
+
+**Fuzz.** The `dbus` target at the branch tree, `-s none`,
+`-max_len=70000`, the committed corpus plus regressions: 6,410,554 runs
+in 301 s, no finding.
+
+**Not measured**, and the rows above do not claim them: the Asahi M2 and
+real hardware, the full `scripts/scootbar-bench` rows, the soak, a real
+Qt, GTK or Electron app as the item, yambar (rule 2 stays as the M6 tray
+round left it: passed against Waybar, open against yambar).
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`
