@@ -1357,7 +1357,7 @@ fn an_unknown_drop_releases_every_item_waiting_on_an_answer() {
     ));
     live.items[0].fetching = true;
     live.flights.push(Some(Flight { op: Op::Props(id) }));
-    live.apply(Event::Dropped {
+    let _ = live.apply(Event::Dropped {
         token: conn::DROPPED_UNKNOWN,
     });
     assert!(!live.items[0].fetching);
@@ -1382,7 +1382,7 @@ fn a_host_that_disconnects_is_pruned() {
     let mut live = setup(conn::setup(client).unwrap());
     let _daemon = server.join().unwrap();
     // A peer registers as host: answered and recorded beside our own.
-    live.on_call(
+    let _ = live.on_call(
         ":1.9",
         "/StatusNotifierWatcher",
         WATCHER_KDE,
@@ -1397,7 +1397,7 @@ fn a_host_that_disconnects_is_pruned() {
     body.str(":1.9");
     body.str(":1.9");
     body.str("");
-    live.on_name_owner_changed("sss", &body.take_body().unwrap());
+    let _ = live.on_name_owner_changed("sss", &body.take_body().unwrap());
     assert_eq!(live.hosts.len(), 1);
     assert!(live.hosts.iter().all(|host| host != ":1.9"));
 }
