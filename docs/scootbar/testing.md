@@ -34,7 +34,9 @@ smallest (every module left out) and each feature alone (every feature but
 `default` is in the matrix: the modules, and `icon-image`, the PNG decoder,
 which is not a module and is off by default); unit tests on the default
 build, everything at once (`--all-features`), the smallest and each feature
-alone. The module contract below walks the
+alone; clippy also builds `popup` (a facility, not a module) with each module,
+since a build with it and a module that fills no popup once had dead code that
+"each alone" could not see. The module contract below walks the
 registry of the build it is compiled in, so a module left out of
 `default` is held to it only by these:
 

@@ -38,6 +38,13 @@
 //! extracted: that entry waits for a second binary to need it.
 //!
 //! [`Module::popup`]: crate::modules::Module::popup
+//!
+//! Only the volume code (the `volume` and `microphone` features) fills a
+//! [`Content`] today, so a build with `popup` and neither has the widget
+//! API and nothing that calls it: allowed to be dead there, which is not a
+//! reason to leave `popup` out of such a build.
+
+#![cfg_attr(not(any(feature = "volume", feature = "microphone")), allow(dead_code))]
 
 use std::fmt::{self, Write};
 use std::ops::Range;
