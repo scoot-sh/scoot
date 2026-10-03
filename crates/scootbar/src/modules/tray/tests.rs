@@ -9,8 +9,9 @@ use std::time::Duration;
 use ab_glyph::{FontArc, FontVec};
 
 use super::fake::{self, Fake};
-use super::{BusAddr, ID, MAX_ITEMS, Settings, start_connected, start_with};
+use super::{ID, MAX_ITEMS, Settings, start_connected, start_with};
 use crate::action::{Action, ModuleAction, Trigger};
+use crate::dbus::link::Addr;
 use crate::density::Scale;
 use crate::modules::harness::Harness;
 use crate::modules::{ClickCtx, CustomDraw, Input, InvokeError, OutputView, Update, find};
@@ -601,7 +602,7 @@ fn waiting_without_a_bus_costs_nothing_and_shows_nothing() {
         std::thread::current().id()
     ));
     let _ = std::fs::remove_file(&path);
-    let harness = Harness::new(super::start_with(super::BusAddr::Path(path)));
+    let harness = Harness::new(super::start_with(super::Addr::Path(path)));
     assert!(harness.source_count() <= 1);
     assert!(harness.view().is_empty());
     assert!(harness.value_on(None).is_none());
@@ -1019,8 +1020,7 @@ fn a_bus_that_keeps_dropping_us_is_not_redialled_forever() {
     });
     let mut harness = Harness::new(start_with_path(path.clone()));
     // Turns until the third dial (a deadline, not a count: a loaded
-    // machine is slow, not wrong), then a second more for a fourth that
-    // must not come.
+    // machine is slow, not wrong).
     let start = std::time::Instant::now();
     while accepted.load(Ordering::SeqCst) < 3 {
         assert!(
@@ -1030,56 +1030,28 @@ fn a_bus_that_keeps_dropping_us_is_not_redialled_forever() {
         );
         harness.wait(Duration::from_millis(20));
     }
-    let settle = std::time::Instant::now();
-    while settle.elapsed() < Duration::from_secs(1) {
+    // The latch waits before the fourth: the gap from the third dial is
+    // the link's retry wait, never a hot loop (which would dial in
+    // milliseconds) and never nothing.
+    let latched = std::time::Instant::now();
+    while accepted.load(Ordering::SeqCst) < 4 {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{} dials",
+            accepted.load(Ordering::SeqCst)
+        );
         harness.wait(Duration::from_millis(20));
     }
-    // The first dial and the redials after each death, until the third
-    // quick one: three, and then nothing (a transient death still heals,
-    // so not one).
-    assert_eq!(accepted.load(Ordering::SeqCst), 3);
+    assert!(
+        latched.elapsed() >= Duration::from_millis(200),
+        "the fourth dial came {:?} after the third: no wait",
+        latched.elapsed()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 fn start_with_path(path: std::path::PathBuf) -> Box<dyn crate::modules::Module> {
-    start_with(BusAddr::Path(path))
-}
-
-/// One inotify event as the kernel lays it out: the header, then the
-/// name padded with NULs.
-fn inotify_event(name: &str) -> Vec<u8> {
-    let mut padded = name.as_bytes().to_vec();
-    padded.push(0);
-    while !padded.len().is_multiple_of(8) {
-        padded.push(0);
-    }
-    let mut event = vec![0u8; 12];
-    event.extend_from_slice(&(padded.len() as u32).to_ne_bytes());
-    event.extend_from_slice(&padded);
-    event
-}
-
-/// The directory watch wakes for every name created beside the bus
-/// socket: only the socket's own name may cost a connect attempt, and
-/// every other name (the runtime directory sees many) costs a scan of
-/// the bytes and nothing else, not a connect and a warning each.
-#[test]
-fn the_directory_scan_matches_only_the_bus_name() {
-    use super::scan_names;
-    assert!(scan_names(&inotify_event("bus"), b"bus"));
-    assert!(!scan_names(&inotify_event("wayland-1"), b"bus"));
-    assert!(!scan_names(&inotify_event("business"), b"bus"));
-    // Several events in one read: the match may be any of them.
-    let mut two = inotify_event("pipewire-0");
-    two.extend(inotify_event("wayland-1"));
-    assert!(!scan_names(&two, b"bus"));
-    two.extend(inotify_event("bus"));
-    assert!(scan_names(&two, b"bus"));
-    // Nothing read, and bytes cut short: nothing to do, and the
-    // conservative answer.
-    assert!(!scan_names(&[], b"bus"));
-    assert!(scan_names(&inotify_event("bus")[..10], b"bus"));
-    assert!(scan_names(&inotify_event("wayland-1")[..20], b"bus"));
+    start_with(Addr::Path(path))
 }
 
 /// What a watcher announces: the id form (KDE's, and ours), and what a
@@ -1349,7 +1321,13 @@ fn a_bus_that_kept_dropping_us_is_tried_again_later() {
         );
         harness.wait(Duration::from_millis(50));
     }
-    assert!(start.elapsed() >= super::RETRY_AFTER_QUICK_DEATHS);
+    // The fourth dial waited out the link's retry (300 ms in tests):
+    // a floor a slow box can only grow, never shrink past.
+    assert!(
+        start.elapsed() >= Duration::from_millis(200),
+        "the fourth dial came after {:?}: no wait",
+        start.elapsed()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

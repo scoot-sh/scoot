@@ -1,6 +1,6 @@
-//! A session held across the bus coming and going: the lifecycle the media
-//! module needs and the tray already runs for itself (`modules/tray`,
-//! whose copy of it predates this one and is not moved onto it here).
+//! A session held across the bus coming and going: the lifecycle the
+//! tray and the media module share (one copy: the tray's older one was
+//! moved onto this).
 //!
 //! Two states. **Waiting** owns an inotify fd on the bus socket's
 //! directory (and, only after the bus kept dropping the bar, a one-shot

@@ -6,6 +6,7 @@
 //! zero dependencies, 1 thread) and is the only option fitting the bar's
 //! doctrine (one single-threaded `poll(2)` loop, no async runtime, no C
 //! library). Its first consumer is the tray and its second the media
+//! library). Its first consumer is the tray and its second the media
 //! module (MPRIS), both on the session bus; its third is the bluetooth
 //! module (BlueZ) on the system bus. Each consumer holds
 //! its own connection so far (a second fd, no shared state between
@@ -20,8 +21,8 @@
 //! [`link`] holds a connection across the bus coming and going (waiting on
 //! the socket's directory, redialling, the quick-death latch).
 
-// The tray and the media module each use part of the client; a build with
-// one of them has the other's readers unused.
+// The tray, media and bluetooth modules each use part of the client; a
+// build with one of them has the others' readers unused.
 #![cfg_attr(not(all(feature = "tray", feature = "media")), allow(dead_code))]
 
 /// The bluetooth module's BlueZ shapes, over [`proto`]. Compiled in
@@ -29,7 +30,7 @@
 #[cfg(any(feature = "bluetooth", test))]
 pub mod bluez;
 pub mod conn;
-#[cfg(any(feature = "media", feature = "bluetooth"))]
+#[cfg(any(feature = "tray", feature = "media", feature = "bluetooth"))]
 pub mod link;
 /// The media module's MPRIS shapes, over [`proto`]. Compiled in tests
 /// whatever the features, as the fuzz check reads them.
