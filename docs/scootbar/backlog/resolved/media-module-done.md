@@ -72,7 +72,7 @@ at it, on the dev VM, and the raw runs, scripts and screenshots are in
   and a bus that drops the bar). `conn::runtime_dir` is public and
   `render::art_extent` crate-visible; the window title's pixel ellipsis moved
   to `modules/ellipsis.rs`, behavior unchanged, for both modules. The tray
-  was not moved onto `link` ([tray-onto-dbus-link](../tray-onto-dbus-link.md)).
+  was not moved onto `link` ([tray-onto-dbus-link](../resolved/tray-onto-dbus-link-done.md)).
 - **Hostile or buggy players** cannot crash or hang the bar or another
   player, or grow it without bound (the client matches a reply by serial
   alone, an inherited gap), and hold one of the 8 slots at most (the exact guarantee, and what they
@@ -177,7 +177,7 @@ a player playing).
 
 ## Left
 
-- [tray-onto-dbus-link](../tray-onto-dbus-link.md): the tray's copy of the
+- [tray-onto-dbus-link](../resolved/tray-onto-dbus-link-done.md): the tray's copy of the
   bus lifecycle, and whether the modules should share one connection.
 - Two modules, two connections: with both placed the bar holds two sockets to
   the session bus.
