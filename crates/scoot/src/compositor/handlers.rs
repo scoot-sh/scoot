@@ -551,6 +551,12 @@ impl XdgShellHandler for State {
             &mut self.popup_count,
             &mut self.popup_index,
         );
+        // What the popup covered is drawn again: nothing else asks for a
+        // frame when a client simply destroys its popup (a grabbed one
+        // redraws on the dismissal; one with no grab -- a tooltip, a popup
+        // an agent opened -- has no such path), so it would stay on
+        // screen, stale, until the next unrelated damage.
+        self.request_render();
         // A dismiss under a still pointer changes what the pointer is over
         // with no motion and no `apply()`: without this the cover would
         // stay disarmed (a firing mid-popup cleared the deadline) until

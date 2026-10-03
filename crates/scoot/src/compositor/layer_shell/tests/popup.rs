@@ -1294,6 +1294,44 @@ fn a_layer_parented_popup_configures_maps_and_draws() {
     fixture.disconnect_client();
 }
 
+/// A client that simply destroys a popup it never grabbed with -- a tooltip,
+/// or a menu opened by something with no input event to grab on, an agent's
+/// request through the bar -- leaves its pixels to be taken off the screen.
+/// Nothing else asks for that frame: a grabbed popup is redrawn by the
+/// dismissal, but this one has no such path, so before the destroy asked for
+/// a render itself the popup stayed drawn (stale) until the next unrelated
+/// damage. Measured on a headless session, where a screenshot shows it
+/// (`crates/scootbar/tests/popup.rs`, `invoke_opens_it_without_a_grab...`).
+#[test]
+fn destroying_a_popup_that_never_grabbed_redraws_what_it_covered() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::CreateLayer(LayerSpec::bar(30)));
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    fixture.run(Step::MapPopup {
+        parent: PopupParent::Layer(0),
+        color: POPUP_BGRA,
+        grab: None,
+    });
+    // Drawn once with the popup on it, which spends the pending request.
+    assert!(contains(&fixture.render(), POPUP_BGRA));
+
+    // `pixels` reads the frame the compositor drew by itself, with no
+    // render forced first (`render` would hide the bug by drawing one).
+    fixture.run(Step::DestroyPopup);
+    // Let the frame timer run on its own: `run` settles for only a few
+    // millisecond dispatches, which need not reach the 16 ms frame interval.
+    // A tick with no render pending draws nothing, so this cannot hide the bug.
+    fixture.tick(std::time::Duration::from_millis(200));
+    assert!(
+        !contains(&fixture.pixels(), POPUP_BGRA),
+        "a destroyed popup stayed on screen: no frame was drawn after it went"
+    );
+    fixture.disconnect_client();
+}
+
 // -------------------------------------------------------------------------
 // IPC visibility: which window's popup holds the keyboard
 // -------------------------------------------------------------------------
