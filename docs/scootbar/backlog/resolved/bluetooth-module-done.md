@@ -33,8 +33,8 @@ with Bluetooth off or absent.
 ## Resolution (2026-10-03, PR #399, code commit `1cde0dbe`)
 
 Landed the bluetooth module behind the Cargo feature `bluetooth` (in
-`default`; the numbers below argue neither way, and no waiver is claimed —
-the size row is the maintainer's to waive or not). What the VM proves,
+`default`; the size row's regression was waived by the maintainer on
+2026-10-03, see [lightest.md](../lightest.md#m6-bluetooth-module-level-cost-measured-2026-10-03)). What the VM proves,
 item by item (every code fix below has a test that failed before it;
 `crates/` tree `1cde0dbe`, dev VM aarch64 rustc 1.97.1):
 

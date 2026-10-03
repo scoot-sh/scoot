@@ -42,6 +42,10 @@ one) still has to see, with a real adapter and a real headset:
   scope (yambar has none), and the Asahi idle/RSS rows the VM cannot give.
 - The `menu-command` example in `cli.md` connects something for real
   (the VM only proved the spawn and the list).
+- A refused power toggle: the click sends `Set(Adapter1.Powered)` with no
+  reply asked, so a polkit or rfkill refusal changes nothing and says
+  nothing. Check whether a real setup refuses, and whether the user then
+  needs to be told (today a refusal looks the same as a slow BlueZ).
 
 ## Not in this ticket
 

@@ -546,7 +546,17 @@ not regress in any row, with the module placed or not, and idle RSS and
 PSS are within what one run resolves. The size row is the same shape as
 every module before it, and the rule's own exception covers only a row
 the module adds, so it is a regression for the maintainer to waive or
-not. **No waiver is claimed here.**
+not.
+
+**Maintainer's ruling (2026-10-03, given in chat): the stripped-binary size
+regression of the bluetooth module is waived.** It covers the module's row in
+the default build, and only that row: +65,536 B on disk, +66,224 B of loaded
+sections and +58,400 B of `.text` over `main` as measured above (the
+independent review's own release builds gave the same +65,536 B on disk and
++61,760 B of `.text`, the difference being build-path noise of a few KB
+seen across all of its builds). Nothing else is waived: no other row
+regresses beyond what one run resolves. `bluetooth` stays in the default
+features by the same decision.
 
 **Not measured**, and the rows above do not claim them: rule 2 for the
 bluetooth module (Waybar's bluetooth module beside scootbar's at the same
