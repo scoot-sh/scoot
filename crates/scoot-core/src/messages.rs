@@ -230,6 +230,35 @@ pub enum Action {
     /// empty, which is what "focused" already means on an output with no
     /// windows. An id this core doesn't know does nothing.
     FocusOutput(OutputId),
+    /// Move keyboard focus to the output left or right of the focused one,
+    /// wrapping around: left of the leftmost is the rightmost, and the
+    /// reverse. With one output there is nowhere to go, so either direction
+    /// does nothing; with two, either direction names the other.
+    ///
+    /// The ring is geometry order, not creation order: outputs sort by the x
+    /// of their whole area, then by y, with the position in the output list
+    /// (creation order) breaking ties. The two orders coincide today --
+    /// outputs pack left to right -- and stating the geometry rule is what
+    /// keeps this right once outputs become placeable. The whole area (not
+    /// the usable one) is what sorts, so a bar mapping or unmapping never
+    /// reorders the ring under a held key.
+    ///
+    /// Beside [`Action::FocusOutput`] and [`Action::FocusOutputIndex`]
+    /// rather than replacing either: an id names one specific output for
+    /// the whole session, a position names whatever output sits there now,
+    /// and a direction steps from where focus already is. All three focus
+    /// the target's active workspace's focused window -- or nothing, when
+    /// that workspace holds no windows -- and an unknown target (here: no
+    /// other output, or a focused id the list doesn't hold) does nothing.
+    FocusOutputDirection(Horizontal),
+    /// Carry the focused window left or right to the *active* workspace of
+    /// the neighbouring output, and follow it there -- the stepping half of
+    /// [`Action::MoveFocusedWindowToOutput`]'s mirror, with the same rules
+    /// otherwise (preset carried, floating re-centred, fullscreen left), and
+    /// the same geometry-order ring (and wrap) as
+    /// [`Action::FocusOutputDirection`]. With one output the window stays
+    /// where it is; moving with no window focused likewise does nothing.
+    MoveWindowToOutputDirection(Horizontal),
     /// Move keyboard focus to another output by its position in the output
     /// list (0-based, creation order) -- the first screen, the second screen
     /// -- rather than by [`OutputId`](crate::OutputId).

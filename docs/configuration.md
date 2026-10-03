@@ -178,10 +178,11 @@ What it is **not**, yet, is tracked in
 `docs/backlog/core/multi-output-remainder.md`:
 
 - new windows open on the output under the pointer (falling back to the
-  first output when the pointer is over no output); moving one across
-  outputs, and focusing another output from the keyboard, is bound by
-  default for the first two screens (see [Moving across
-  outputs](#moving-across-outputs)) — positions 2 and up stay manual;
+  first output when the pointer is over no output); stepping across
+  outputs, and carrying a window along, is bound by default
+  (`Super+comma`/`Super+period`, wrapping left and right — see [Moving
+  across outputs](#moving-across-outputs)) — fixed screens stay manual
+  (`focus-output-index N`, or an id);
 - no position setting: outputs line up left to right. Scale and mode are
   set per output in the file ([`[[outputs]]`](#outputs)), not from
   `wlr-randr` or a settings app -- `wlr-output-management` `apply`/`test`
@@ -618,7 +619,7 @@ handles `scootctl action ...` (and its `scoot msg` alias) and a config file's
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
 toggle-floating | set-floating ID on|off | toggle-floating-focus
 move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ```
@@ -629,38 +630,60 @@ can't be expressed this way).
 
 ### Moving across outputs
 
-With more than one output, two actions reach across screens — and the first
-two screens have default binds, promoted from the manual example (bare Super
-focuses, Shift carries the focused window there, the same split the
-workspace digits keep):
+With more than one output, three pairs of actions reach across screens —
+stepping relatively, and naming a screen by position or by id. The relative
+pair has
+the default binds (bare Super focuses, Shift carries the focused window
+there, the same split the workspace digits keep):
 
 ```toml
 [binds]
-"super+comma" = "focus-output-index 0"
-"super+period" = "focus-output-index 1"
-"super+shift+comma" = "move-window-to-output-index 0"
-"super+shift+period" = "move-window-to-output-index 1"
+"super+comma" = "focus-output-left"
+"super+period" = "focus-output-right"
+"super+shift+comma" = "move-window-to-output-left"
+"super+shift+period" = "move-window-to-output-right"
 ```
 
 Those four lines are the defaults: uncommenting them in a file printed by
-`scoot --print-default-config` changes nothing. Positions 2 and up stay
-manual — add your own binds naming those positions, in the same form.
+`scoot --print-default-config` changes nothing. Each steps to the
+neighbouring output in geometry order — left to right by x, then top to
+bottom by y — wrapping around, so with three or more monitors either key
+walks the whole row: left of the leftmost is the rightmost, and the
+reverse. With one output there is nowhere to go, so either direction does
+nothing; with two, either names the other. The geometry rule is stated so
+it stays right once outputs become placeable (today the two orders
+coincide, because outputs pack left to right; see
+`docs/backlog/core/output-position-and-live-mode.md`, which is where
+placing outputs lives).
 
-**Positions, not ids — that is the stability rule.** Output ids are what
-`scootctl outputs` reports: stable for the session and never reused, so a
-monitor that is unplugged and plugged back in comes back as a *new* output
-under a *new* id. The default binds name screen positions instead (0-based
-in creation order, left to right as the outputs are packed), so they keep
-reaching a monitor across a replug: after the return it sits in the same
-position under its fresh id. An explicit bind naming an id (`focus-output
-2`, `move-window-to-output 2`) keeps meaning that exact id — check
-`scootctl outputs` after a replug and bind the new one, or restart the
-session. An unknown id, and an out-of-range position, both do nothing.
+**Behavior change, stated plainly:** on two monitors `Super+comma` used to
+mean "go to screen 0" and `Super+period` "go to screen 1"
+(`focus-output-index 0` / `1`); now they mean "step left / right, wrapping", so from the left
+monitor `Super+comma` lands on the right one. The old behavior is one bind
+away: `"super+comma" = "focus-output-index 0"` in your own `[binds]`
+overrides the default.
+
+**Positions and ids still name fixed screens.** `focus-output-index N`
+and `move-window-to-output-index N` take a 0-based position in creation
+order (the first screen, the second screen); `focus-output ID` and
+`move-window-to-output ID` take the output id `scootctl outputs` reports.
+
+**Stepping needs neither an id nor a position — that is the stability
+rule.** Output ids are what `scootctl outputs` reports: stable for the
+session and never reused, so a monitor that is unplugged and plugged back
+in comes back as a *new* output under a *new* id. The default binds step
+from the focused output instead of naming one at all, so they keep
+reaching every monitor across a replug: after the return it sits in the
+ring under its fresh id. An explicit bind naming an id (`focus-output 2`,
+`move-window-to-output 2`) keeps meaning that exact id — check `scootctl
+outputs` after a replug and bind the new one, or restart the session — and
+a positional bind (`focus-output-index N`) keeps meaning creation-order
+position N. An unknown id, and an out-of-range position, both do nothing.
 `move-window-to-output` carries the focused window to
 that output's active workspace and follows it there; `focus-output` focuses
 that output's active workspace (or nothing, when it holds no windows). An
-unknown id does nothing. Both are refused while the session is locked, like
-every other action.
+unknown id does nothing. All six are refused while the session is locked,
+like every other action.
 
 A returning monitor also gets its windows back: when an output is removed,
 its workspaces (and their windows, in order) are adopted by the remaining
@@ -1016,8 +1039,8 @@ long that is at a real `--tty` login has not been measured yet.
 | `Super+Ctrl+Shift+k` | Move window to workspace up |
 | `Super+1`..`Super+9` | Focus workspace 1–9 directly (index 0–8) |
 | `Super+Shift+1`..`Super+Shift+9` | Move window to workspace 1–9 directly (index 0–8) |
-| `Super+comma` / `Super+period` | Focus output 1 / 2 |
-| `Super+Shift+comma` / `Super+Shift+period` | Move window to output 1 / 2 directly |
+| `Super+comma` / `Super+period` | Focus the output left / right, wrapping around every monitor |
+| `Super+Shift+comma` / `Super+Shift+period` | Move the window to the output left / right, wrapping, and follow it |
 | `Super+r` | Cycle column width |
 | `Super+f` | Toggle fullscreen |
 | `Super+m` | Toggle maximize (fill the usable area, bar visible) |
@@ -1047,8 +1070,7 @@ means anything against the list it was read from.)
 entry like `cycle-column-width`. An index past the end of the list does
 nothing, like a stale workspace index. It has no default bind, by decision:
 the width list is yours to size, so no key family maps onto it the way
-digits map onto workspaces (the same call phase F made for the output
-actions above). Add your own, e.g.:
+digits map onto workspaces. Add your own, e.g.:
 
 ```toml
 [layout]
@@ -1101,10 +1123,11 @@ a Linux-session concept with no meaning there. See
 bind — at startup and on every `scootctl reload`, which layers them back on
 last rather than letting a reloaded file strip the recovery path.
 
-Moving a window across outputs, or focusing another output, is bound by
-default for the first two screens (`Super+comma`/`Super+period` and Shift for the
-carry — see [Moving across outputs](#moving-across-outputs)); positions 2 and
-up are config binds you add yourself.
+Moving a window across outputs, or focusing another output, steps left and
+right through every monitor by default, wrapping around
+(`Super+comma`/`Super+period` and Shift for the carry — see [Moving across
+outputs](#moving-across-outputs)); fixed screens are config binds you add
+yourself (`focus-output-index N`, or an output id).
 
 ## Example `config.toml`
 

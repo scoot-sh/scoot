@@ -42,6 +42,12 @@ impl From<Action> for scoot_core::Action {
             }
             Action::FocusOutput { output } => Self::FocusOutput(scoot_core::OutputId(output)),
             Action::FocusOutputIndex { index } => Self::FocusOutputIndex(index),
+            Action::FocusOutputDirection { direction } => {
+                Self::FocusOutputDirection(direction.into())
+            }
+            Action::MoveWindowToOutputDirection { direction } => {
+                Self::MoveWindowToOutputDirection(direction.into())
+            }
             Action::MoveFocusedWindowToOutputIndex { index } => {
                 Self::MoveFocusedWindowToOutputIndex(index)
             }
@@ -123,6 +129,18 @@ mod tests {
         assert_eq!(
             scoot_core::Action::from(Action::FocusOutputIndex { index: 1 }),
             scoot_core::Action::FocusOutputIndex(1)
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::FocusOutputDirection {
+                direction: Horizontal::Left
+            }),
+            scoot_core::Action::FocusOutputDirection(scoot_core::Horizontal::Left)
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::MoveWindowToOutputDirection {
+                direction: Horizontal::Right
+            }),
+            scoot_core::Action::MoveWindowToOutputDirection(scoot_core::Horizontal::Right)
         );
         assert_eq!(
             scoot_core::Action::from(Action::MoveFocusedWindowToOutputIndex { index: 1 }),

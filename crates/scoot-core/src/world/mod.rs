@@ -16,6 +16,7 @@ mod floating_move;
 mod floating_order;
 mod fullscreen;
 mod maximize;
+mod output_cycle;
 mod reconnect;
 mod tree;
 

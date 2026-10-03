@@ -46,7 +46,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
@@ -81,7 +81,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
@@ -322,6 +322,22 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
         },
         "move-window-to-output-index" => Action::MoveFocusedWindowToOutputIndex {
             index: number("an output index", args.next())?,
+        },
+        // The stepping halves: one verb per side (niri's
+        // `focus-monitor-left` shape), so `focus-output` keeps meaning
+        // exactly one thing -- an output id -- and neither verb overloads
+        // the other's argument.
+        "focus-output-left" => Action::FocusOutputDirection {
+            direction: Horizontal::Left,
+        },
+        "focus-output-right" => Action::FocusOutputDirection {
+            direction: Horizontal::Right,
+        },
+        "move-window-to-output-left" => Action::MoveWindowToOutputDirection {
+            direction: Horizontal::Left,
+        },
+        "move-window-to-output-right" => Action::MoveWindowToOutputDirection {
+            direction: Horizontal::Right,
         },
         "cycle-column-width" => Action::CycleColumnWidth,
         "set-column-width" => Action::SetColumnWidth {
@@ -868,6 +884,52 @@ mod tests {
         );
         assert!(parse_msg_args(&["action", "focus-output-index", "down"]).is_err());
         assert!(parse_msg_args(&["action", "move-window-to-output-index"]).is_err());
+    }
+
+    #[test]
+    fn the_relative_output_actions_take_no_argument() {
+        // One verb per side, no argument: stepping is relative to the
+        // focused output, so there is nothing to name -- and `focus-output`
+        // keeps taking exactly an output id, never a direction.
+        for (verb, action) in [
+            (
+                "focus-output-left",
+                Action::FocusOutputDirection {
+                    direction: Horizontal::Left,
+                },
+            ),
+            (
+                "focus-output-right",
+                Action::FocusOutputDirection {
+                    direction: Horizontal::Right,
+                },
+            ),
+            (
+                "move-window-to-output-left",
+                Action::MoveWindowToOutputDirection {
+                    direction: Horizontal::Left,
+                },
+            ),
+            (
+                "move-window-to-output-right",
+                Action::MoveWindowToOutputDirection {
+                    direction: Horizontal::Right,
+                },
+            ),
+        ] {
+            assert_eq!(
+                parse_msg_args(&["action", verb]),
+                Ok(Msg {
+                    request: Request::Action(action),
+                    out: None,
+                }),
+                "{verb}"
+            );
+        }
+        // ...and neither old verb learned a direction: an id is still an
+        // id.
+        assert!(parse_msg_args(&["action", "focus-output", "left"]).is_err());
+        assert!(parse_msg_args(&["action", "move-window-to-output", "right"]).is_err());
     }
 
     #[test]

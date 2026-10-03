@@ -450,6 +450,13 @@ fn focusing_over_ipc_takes_the_keyboard_back_from_a_clicked_taskbar() {
         // and the form the default binds actually send, so its spend is
         // pinned here rather than trusted to match the id form's.
         scoot_ipc::Action::FocusOutputIndex { index: 0 },
+        // The stepping half, same already-there shape on this fixture (a
+        // lone output steps nowhere) -- and the form the default binds send
+        // now, so its spend is pinned here rather than trusted to match the
+        // other two forms'.
+        scoot_ipc::Action::FocusOutputDirection {
+            direction: scoot_ipc::Horizontal::Left,
+        },
     ];
     for (n, action) in covered.into_iter().enumerate() {
         fixture.click_taskbar();
@@ -1211,6 +1218,171 @@ fn positional_output_actions_reach_outputs_by_position_over_ipc() {
         fixture.state.world.focused_output(),
         Some(OutputId(1)),
         "an out-of-range positional focus moved the focused output"
+    );
+}
+
+#[test]
+fn cycling_focus_wraps_around_outputs_over_ipc() {
+    // The stepping focus through the whole `State` path: IPC conversion,
+    // the lock gate (open session here), `act`, `apply`. Either direction
+    // reaches the other screen on two outputs, and the keyboard follows --
+    // the whole point of the action for a keyboard user stuck on one
+    // screen. Window 2 is carried over first, so each output holds one
+    // window.
+    let mut fixture = drive_two_outputs();
+    let moved = fixture.state.focus.expect("a focused window");
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveFocusedWindowToOutput { output: 2 },
+    ));
+    assert!(matches!(response, Response::Ok { .. }));
+    let other = *fixture
+        .state
+        .windows
+        .keys()
+        .find(|id| **id != moved)
+        .expect("two windows");
+
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::FocusOutputDirection {
+                direction: scoot_ipc::Horizontal::Left,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "stepping left was not served"
+    );
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(1)),
+        "stepping left did not move the focused output"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(other),
+        "stepping left did not focus the other screen's window"
+    );
+    fixture.assert_keyboard_follows_focus("stepping left");
+
+    // Left again: past the first screen wraps back to the last.
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::FocusOutputDirection {
+                direction: scoot_ipc::Horizontal::Left,
+            }));
+    assert!(matches!(response, Response::Ok { locked: false }));
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(2)),
+        "stepping left past the start did not wrap"
+    );
+    assert_eq!(fixture.state.focus, Some(moved));
+    fixture.assert_keyboard_follows_focus("wrapping left");
+
+    // Right from the last screen wraps to the first.
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::FocusOutputDirection {
+                direction: scoot_ipc::Horizontal::Right,
+            }));
+    assert!(matches!(response, Response::Ok { locked: false }));
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(1)),
+        "stepping right from the last screen did not wrap"
+    );
+    assert_eq!(fixture.state.focus, Some(other));
+    fixture.assert_keyboard_follows_focus("wrapping right");
+}
+
+#[test]
+fn carrying_the_window_steps_and_wraps_over_ipc() {
+    // The stepping carry through the whole `State` path: the focused window
+    // moves to the neighbour's active workspace and focus follows it --
+    // past the end of the ring as well as along it.
+    let mut fixture = drive_two_outputs();
+    let focused = fixture.state.focus.expect("a focused window");
+
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveWindowToOutputDirection {
+            direction: scoot_ipc::Horizontal::Right,
+        },
+    ));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "carrying right was not served"
+    );
+    assert_eq!(
+        snapshot_output(&fixture, focused),
+        2,
+        "carrying right did not move the window to the second screen"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(focused),
+        "the carry did not follow the window it carried"
+    );
+    fixture.assert_keyboard_follows_focus("carrying right");
+
+    // Right again: the window wraps back to the first screen.
+    let response = fixture.state.handle_request(Request::Action(
+        scoot_ipc::Action::MoveWindowToOutputDirection {
+            direction: scoot_ipc::Horizontal::Right,
+        },
+    ));
+    assert!(matches!(response, Response::Ok { locked: false }));
+    assert_eq!(
+        snapshot_output(&fixture, focused),
+        1,
+        "carrying right past the end did not wrap the window"
+    );
+    assert_eq!(fixture.state.focus, Some(focused));
+    fixture.assert_keyboard_follows_focus("wrapping the carry right");
+}
+
+#[test]
+fn cycling_focus_leaves_the_pointer_where_it_is() {
+    // The ticket's check-and-pin: `focus-output-index` never moved the
+    // pointer (`apply` re-derives pointer focus only when a cover moved),
+    // and the stepping actions ride that same path -- so the pointer stays
+    // on whatever surface it was over, at the same spot, while keyboard
+    // focus steps across. The taskbar is the surface the pointer can hold:
+    // the fixture's windows map bare (no buffers, so the hit test can never
+    // find them), while the taskbar commits real pixels.
+    let mut fixture = drive_two_outputs();
+    fixture.state.pointer_move(TASKBAR_POINT.0, TASKBAR_POINT.1);
+    fixture.settle();
+    let pointer = fixture.state.seat.get_pointer().expect("a pointer");
+    let location = pointer.current_location();
+    let focus = pointer.current_focus();
+    assert!(focus.is_some(), "the pointer never landed on the taskbar");
+
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::FocusOutputDirection {
+                direction: scoot_ipc::Horizontal::Left,
+            }));
+    assert!(matches!(response, Response::Ok { locked: false }));
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(2)),
+        "the step did not move keyboard focus"
+    );
+
+    let pointer = fixture.state.seat.get_pointer().expect("a pointer");
+    let after = pointer.current_location();
+    assert_eq!(
+        (after.x, after.y),
+        (location.x, location.y),
+        "stepping focus moved the pointer"
+    );
+    assert_eq!(
+        pointer.current_focus(),
+        focus,
+        "stepping focus moved pointer focus"
     );
 }
 

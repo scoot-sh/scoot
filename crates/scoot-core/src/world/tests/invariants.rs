@@ -121,7 +121,7 @@ fn random_action(
             random_window(rng, windows)
         }
     };
-    match rng.below(28) {
+    match rng.below(30) {
         0 => Action::FocusColumn(horizontal),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
@@ -210,6 +210,12 @@ fn random_action(
             1 => usize::MAX / 2,
             other => other,
         }),
+        // The stepping cross-output halves (see
+        // `Action::FocusOutputDirection`): a direction off the same wire,
+        // and the window must survive every step including the wrap (a lone
+        // output steps nowhere).
+        28 => Action::FocusOutputDirection(horizontal),
+        29 => Action::MoveWindowToOutputDirection(horizontal),
         _ => Action::CloseFocused,
     }
 }

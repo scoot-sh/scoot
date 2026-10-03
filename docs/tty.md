@@ -240,8 +240,8 @@ Two limits:
   its workspaces are adopted elsewhere, and when a monitor with a matching
   connector identity returns, the still-open windows move back onto it
   (hand-moved windows stay where the user put them). The default output
-  binds name the first/second screen, so they keep reaching the returned
-  monitor. See
+  binds step relatively from the focused output, so they keep reaching the
+  returned monitor under its fresh id. See
   `docs/backlog/resolved/output-reconnect-restore-done.md`.
 - **Only what the kernel reports is followed.** On the M2 Air with the
   experimental `fairydust` kernel, one quick unplug earlier on 2026-09-25

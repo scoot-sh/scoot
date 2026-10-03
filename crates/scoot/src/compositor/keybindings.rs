@@ -205,39 +205,35 @@ impl Default for Keybindings {
             // from Super+q (close-focused), and a slip shouldn't be able to
             // end the whole session.
             (SUPER_SHIFT, Keysym::e, Bound::Action(Action::Quit)),
-            // Across outputs, for the first two screens -- positions, not ids
-            // (ids are never reused, so a replugged monitor comes back under
-            // a fresh one; positions follow whatever output sits there now,
-            // which is what keeps these binds reaching it -- see
-            // `reconnect.rs` and `docs/configuration.md#moving-across-outputs`).
-            // Ids 3+ stay manual -- no key family maps onto eight outputs the
-            // way digits map onto nine workspaces -- and an explicit bind or
-            // an agent that wants one specific output names its id. Bare
-            // Super focuses, Shift carries the focused window and follows it
-            // there: the same split the workspace digits keep, and the combos
-            // the docs have shown as the manual example since phase F --
-            // promoting them changes no documented spelling, and a user's own
-            // identical bind keeps working by overriding the same combo
-            // through `insert`.
+            // Across outputs, stepping left and right through every screen in
+            // geometry order (x, then y), wrapping around -- needing neither
+            // an id nor a position (ids are never reused, so a replugged
+            // monitor comes back under a fresh one; stepping from the focused
+            // output is what keeps these binds reaching it -- see
+            // `reconnect.rs` and
+            // `docs/configuration.md#moving-across-outputs`). The `-index`
+            // actions stay for fixed screens, bound manually. Bare Super
+            // focuses, Shift carries the focused window and follows it
+            // there: the same split the workspace digits keep.
             (
                 SUPER,
                 Keysym::comma,
-                Bound::Action(Action::FocusOutputIndex(0)),
+                Bound::Action(Action::FocusOutputDirection(Horizontal::Left)),
             ),
             (
                 SUPER,
                 Keysym::period,
-                Bound::Action(Action::FocusOutputIndex(1)),
+                Bound::Action(Action::FocusOutputDirection(Horizontal::Right)),
             ),
             (
                 SUPER_SHIFT,
                 Keysym::comma,
-                Bound::Action(Action::MoveFocusedWindowToOutputIndex(0)),
+                Bound::Action(Action::MoveWindowToOutputDirection(Horizontal::Left)),
             ),
             (
                 SUPER_SHIFT,
                 Keysym::period,
-                Bound::Action(Action::MoveFocusedWindowToOutputIndex(1)),
+                Bound::Action(Action::MoveWindowToOutputDirection(Horizontal::Right)),
             ),
         ];
         // Numbered workspaces, 1-based on the keycap and 0-based in the
@@ -504,32 +500,37 @@ mod tests {
 
     #[test]
     fn output_focus_and_move_are_bound_by_default() {
-        // The documented manual binds, promoted -- as positions, not ids, so
-        // they keep reaching a monitor that was unplugged and plugged back
-        // in: `Super+comma`/`Super+period` focus the first/second screen,
-        // `Super+Shift` carries the focused window there -- the same
-        // bare-focus / Shift-move split the workspace digits keep. Ids 3+
-        // stay manual (no key family maps onto eight outputs the way digits
-        // map onto nine workspaces).
+        // Stepping across every screen in geometry order, wrapping -- bare
+        // Super focuses, Shift carries the focused window and follows it
+        // there: the same bare-focus / Shift-move split the workspace digits
+        // keep. The `-index` halves stay for fixed screens, bound manually.
         let table = Keybindings::default();
         assert_eq!(
             table.match_key(Keysym::comma, SUPER),
-            Some(Bound::Action(Action::FocusOutputIndex(0))),
+            Some(Bound::Action(Action::FocusOutputDirection(
+                Horizontal::Left
+            ))),
             "Super+comma"
         );
         assert_eq!(
             table.match_key(Keysym::period, SUPER),
-            Some(Bound::Action(Action::FocusOutputIndex(1))),
+            Some(Bound::Action(Action::FocusOutputDirection(
+                Horizontal::Right
+            ))),
             "Super+period"
         );
         assert_eq!(
             table.match_key(Keysym::comma, SUPER_SHIFT),
-            Some(Bound::Action(Action::MoveFocusedWindowToOutputIndex(0))),
+            Some(Bound::Action(Action::MoveWindowToOutputDirection(
+                Horizontal::Left
+            ))),
             "Super+Shift+comma"
         );
         assert_eq!(
             table.match_key(Keysym::period, SUPER_SHIFT),
-            Some(Bound::Action(Action::MoveFocusedWindowToOutputIndex(1))),
+            Some(Bound::Action(Action::MoveWindowToOutputDirection(
+                Horizontal::Right
+            ))),
             "Super+Shift+period"
         );
     }
