@@ -1,0 +1,11 @@
+tree under test: fdb7ddd17cbd9883d37dce64fb443edfbdb377f3 with the one change below, made on the VM copy only (crates/scootbar/src/modules/media/session.rs):
+  - the owner-changes rule loses its  ,arg0namespace='org.mpris.MediaPlayer2'  (so the bus sends the bar every name change on it)
+$ cargo nextest run -p scootbar --bin scootbar --no-fail-fast unrelated_bus_traffic the_bus_is_asked
+        FAIL [   0.038s] (1/2) scootbar::bin/scootbar modules::media::tests::the_bus_is_asked_for_the_mpris_namespace_and_the_player_interface_only
+    thread 'modules::media::tests::the_bus_is_asked_for_the_mpris_namespace_and_the_player_interface_only' (3357488) panicked at crates/scootbar/src/modules/media/tests.rs:110:5:
+        FAIL [   0.603s] (2/2) scootbar::bin/scootbar modules::media::daemon_tests::unrelated_bus_traffic_wakes_nothing
+    thread 'modules::media::daemon_tests::unrelated_bus_traffic_wakes_nothing' (3357487) panicked at crates/scootbar/src/modules/media/daemon_tests.rs:365:5:
+    assertion `left == right` failed: the bar woke for traffic that is not a player's
+     Summary [   0.605s] 2 tests run: 0 passed, 2 failed, 995 skipped
+        FAIL [   0.038s] (1/2) scootbar::bin/scootbar modules::media::tests::the_bus_is_asked_for_the_mpris_namespace_and_the_player_interface_only
+        FAIL [   0.603s] (2/2) scootbar::bin/scootbar modules::media::daemon_tests::unrelated_bus_traffic_wakes_nothing

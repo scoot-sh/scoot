@@ -31,7 +31,9 @@ composable shell.
 > [the dependency record](backlog/resolved/dependencies-done.md). M6's
 > first step is a system tray (the StatusNotifierItem watcher and host, on
 > a hand-rolled D-Bus client: [the module](cli.md#tray); its menus are the
-> remaining step). The plan, milestone by milestone, is the
+> remaining step), and its second the media module (what the MPRIS players
+> are playing, with play/pause, next and previous:
+> [the module](cli.md#media)). The plan, milestone by milestone, is the
 > [backlog](backlog/README.md).
 
 ```sh

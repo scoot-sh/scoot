@@ -310,6 +310,135 @@ switching CPU), which need the bench runner under a compositor; the soak
 Electron app as the item; yambar. Rule 2 for the tray is therefore passed
 against Waybar and **open against yambar**.
 
+## M6 media: module-level cost (measured 2026-10-03)
+
+The [media module](resolved/media-module-done.md) is the second consumer of
+the [D-Bus client](resolved/dbus-client-done.md), on its own connection. By
+construction: the bus socket is one source in the poll set (with `OUT` only
+while a write or staged messages wait), or one inotify watch on the socket's
+directory while there is no bus; a one-shot timer exists only while a player
+waits out the 50 ms floor between reads of it, or (30 s) after the bus kept
+dropping the bar; no thread, no polling. The bus filters what reaches the
+bar: `NameOwnerChanged` of the `org.mpris.MediaPlayer2` namespace and
+`PropertiesChanged` of the Player interface on the one MPRIS object, so
+unrelated apps and a player's `Seeked` never wake it (a test against a real
+`dbus-daemon` sends both, and was checked to fail when the namespace filter
+is removed). No new dependency (`Cargo.lock` is unchanged). The contract
+test holds the module to the loop's source budget (2 sources at most, of 63).
+
+**Method.** Release builds (`lto = "fat"`, stripped) of `main` at
+`c2d82cc95` (`crates/` is unchanged through `01c33f09f`, the branch's base),
+of the branch at code commit
+`ee46b8a47` (`crates/` tree `958dcf867f66`) with the default features, and of
+the same with the default features minus `media`, each built on the dev VM
+(aarch64, 6 CPUs, rustc 1.97.1) with its own target dir; a headless `scoot`
+(an existing release build, used read-only), a private `dbus-daemon` 1.16.2,
+and the players real D-Bus peers: Python on `jeepney`, an independent
+marshaller (`player.py`), and a real mpv 0.41.0 with its own MPRIS script.
+One bar per run, sampled from `/proc/PID` after 14 s of settling and again
+60 s later (`VmRSS`, `Pss`, voluntary context switches, fds), **one run per
+row**, on a VM another agent was building and testing on (load 3 to 7 in
+the windows). Wakeup counts are per process and exact for the window; the
+RSS and PSS differences under about 130 kB are not resolved by one run. The
+scripts and raw logs are in [`bench/m6-media-vm`](../bench/m6-media-vm/README.md).
+
+| Row | RSS kB | PSS kB | wakeups in 60 s | fds |
+|---|---|---|---|---|
+| `main`, no module placed | 3764 | 2198 | 0 | 7 |
+| branch, media built, no module placed | 3824 | 2251 | 0 | 7 |
+| branch, media feature off, no module placed | 3824 | 2270 | 0 | 7 |
+| `main`, clock | 4180 | 2415 | 2 | 8 |
+| branch, media feature off, clock | 4244 | 2475 | 2 | 8 |
+| branch, media built and not placed, clock | 4312 | 2543 | 2 | 8 |
+| media alone, **no bus** | 4148 | 2408 | **0** | 8 |
+| media alone, bus, **no player** | 4152 | 2404 | **0** | 8 |
+| media alone, bus, one paused player | 4388 | 2553 | **0** | 8 |
+| media alone, bus, one playing player | 4392 | 2548 | **0** | 8 |
+| media alone, bus, eight playing players | 4392 | 2546 | **0** | 8 |
+| media alone, bus, one real mpv playing a file | 4384 | 2541 | **0** | 8 |
+| media alone, bus, mpv playing its `lavfi` sine | 4384 | 2548 | 60 | 8 |
+| media and clock, bus, one playing player | 4388 | 2544 | 2 (the clock's) | 9 |
+
+How to read it. **Zero wakeups** with no bus, with a bus and no player, with
+one player paused or playing, with eight, and with a real mpv playing a
+file: nothing in the module's idle state wakes the bar, and the only wakeups
+in the rows with a clock are the clock's two a minute. One thread
+throughout. The one row with wakeups is mpv's synthetic `lavfi` source,
+whose duration keeps changing, so its script re-sends its (unchanged)
+metadata about once a second (60 in 60 s; read off `dbus-monitor`): the
+bar parses each, finds nothing changed, draws nothing (one stime tick in
+the window) and the row is the player's traffic, not polling. Placing the
+module costs the font every module needs (3764 to 4148 kB, with the clock's
+4180 for comparison). The first player shown costs about 240 kB RSS over a
+bus with none (4152 to 4388 kB: its title's glyphs rasterized and cached,
+and the draw), and seven more cost nothing this resolves (4392 with one
+playing, 4392 with eight). With the feature built but not placed RSS is +60
+kB over `main` with no module placed (3824 against 3764, the same as the
+feature-off build's +60) and +132 kB with the clock (4312 against 4180,
+against the feature-off build's +64): the first is not the module's code, and
+the second is a little over one run's resolution, and the same sign in the
+earlier of the two runs of this table (+128 kB; `logs/measure-first-run.log`,
+whose 8-player and `lavfi` rows were cut short by the VM reclaiming pages
+under another agent's builds, and whose other RSS values agree with this
+run's within 70 kB).
+
+**A runaway player.** One stub signalling as fast as its loop runs, for
+20 s (`flood.sh`): Position only (10,083 signals): 9,945 bar wakeups, 0.13
+CPU-seconds (0.65% of a core), no redraw, no read, RSS flat at 4216 kB; a new
+title each time (9,737 signals): 9,836 wakeups, 0.20 CPU-seconds (1.0% of a
+core), drawn ten times a second, RSS 4216 to 4224 kB, the last title shown.
+Work per wake is bounded (4 pumps of 64 events), a read of a player is at
+most one in flight and 20 a second, and the cost is the player's to pay in
+its own signals: about 13 microseconds of bar CPU for a position, about 20
+for a title. **Held title changes were the second version**: the first drew
+each change, and the same title flood (10,127 signals) cost 18,754 wakeups
+and 0.79 CPU-seconds (3.95% of a core) with RSS flat, a redraw and the
+compositor's release of the frame it replaced for each; a run of title
+changes is now drawn ten times a second at most behind one timer, as the
+window title's retitles are, and the first change after a quiet spell is
+still drawn in its own turn. (Per signal the client makes six small
+allocations, owning the header strings and the body: `Conn::dispatch`, not
+this module's, and negligible at a player's rates.)
+
+**Binary** (aarch64, stripped), measured with `readelf` because the file
+size alone is quantized to 64 KiB steps:
+
+| Build | file bytes | `.text` | `.text`+`.rodata`+`.eh_frame*`+`.gcc_except_table`+`.data*` |
+|---|---|---|---|
+| `main` | 1,905,376 | 1,457,416 | 1,793,315 |
+| branch, default minus `media` | 1,905,376 (+0) | 1,460,168 (+2,752) | 1,796,571 (+3,256) |
+| branch, default (media on) | 1,970,912 (+65,536) | 1,497,768 (+40,352) | 1,840,731 (+47,416) |
+
+The media module costs about 38 KB of `.text` and 44 KB of loaded sections
+over the feature off (the MPRIS readers, the link and the module); the feature built but off costs 3.3 KB of loaded sections
+(edits outside the module that a media-off build still carries: the
+window title's ellipsis moved into a shared file, the config and help text),
+which does not cross a 64 KiB boundary on disk here. `ldd` still shows only
+libc, libm and libgcc_s, and `Cargo.lock` is byte-identical to `main`'s.
+
+**Which rows of the rules regress.** Rule 1 (no row regresses against the
+previous milestone beyond noise, except a row the new module adds): the
+stripped binary size row regresses by 65,536 B on disk (+3.4%, 47,416 B or
++2.6% of loaded sections). Idle wakeups, jiffies, fds and threads do not
+regress in any row, with the module placed or not, and idle RSS and PSS are
+within what one run resolves (the largest: +68 kB RSS and PSS with the clock
+over the feature off, 4312 against 4244 kB). The size row is the same shape as every module
+before it, and the rule's own exception covers only a row the module adds, so
+this is a regression for the maintainer to waive or not. **Nothing is waived
+here: the maintainer's ruling of 2026-10-02 covers the tray's +131,072 B in
+the default build "and only that row".** `media` is in the default features
+as every module is, awaiting the ruling; leaving it out of `default` is one
+word in `crates/scootbar/Cargo.toml` and takes the row back to `main`'s.
+
+**Not measured**, and the rows above do not claim them: rule 2 for the media
+module (a competitor's equivalent: Waybar's `mpris` module is not in the
+nixpkgs 0.15.0 build on the box, which is built without `libplayerctl`, so
+there was nothing to put beside it; yambar has no MPRIS module), the Asahi M2
+and real hardware, the full `scripts/scootbar-bench` rows (startup, switching
+CPU), the soak, and a real Spotify, Firefox or Chromium as the player (mpv
+and two stubs only; the stubs and mpv name themselves differently and one
+sends artists as lists, neither of which proves a browser's habits).
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

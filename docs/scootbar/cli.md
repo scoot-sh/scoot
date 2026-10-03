@@ -160,6 +160,11 @@ device = "apple-panel-bl"   # the backlight to follow; absent is the first usabl
 step = 5              # percent points per scroll notch and per raise, 1 to 50
 margin = 0            # as the clock's
 
+[media]
+player = "spotify"    # the player to prefer when several run; absent is the one that played last
+max-width = 320       # the most logical pixels wide the module's span may be, 1 to 4096
+margin = 0            # as the clock's
+
 [button.launcher]     # modules the file defines, placed by name in the lists above
 icon = "\U000f0e65"
 on-click = { exec = ["scootlaunch"] }
@@ -362,6 +367,7 @@ cannot:
 | `network` | The shown interface's state: name, SSID and bars, VPN or offline ([below](#network)) | on the kernel's link, address, route and WiFi events: one redraw per batch, however many events it held |
 | `brightness` | The panel backlight's level ([below](#brightness)) | on the kernel's backlight events: one redraw per batch, however many events it held |
 | `tray` | The applications' tray icons, StatusNotifierItem ([below](#tray)) | on the session bus's traffic: item registrations, icon changes, owners vanishing |
+| `media` | What the players on the session bus are playing, and their controls, over MPRIS ([below](#media)) | on the bus's MPRIS traffic only: a player appearing or vanishing, its track or state changing |
 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
@@ -871,6 +877,113 @@ socket is one more source in the `poll` loop), which is the
   are in the
   [resource ratchet](backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
 
+## Media
+
+What the players on the session bus are playing, and play/pause, next and
+previous, spoken over MPRIS (`org.mpris.MediaPlayer2.*`: mpv, VLC,
+Spotify, Firefox, Chromium and most others) through the bar's own D-Bus
+client (see [Tray](#tray)): no `zbus`, no libdbus, no thread, no polling. A
+Cargo feature (`media`), on by default; the smallest build
+(`--no-default-features`) has none of it.
+
+- **What it shows** is `artist - title` (or whichever of the two the player
+  sent, or the player's name when it sent neither) with a play or pause
+  icon for the state, cut to `max-width` with an ellipsis measured in
+  pixels, in the `muted` class while paused. The tooltip carries the
+  uncut line: `mpv (playing): Ada - Song`. Several artists are joined with a
+  comma. **A stopped player shows nothing**, and with no player the module
+  takes no space; start playback from the player.
+- **Which player.** Several may run. Of the ones that are playing or
+  paused, `player` (a short name: `spotify` for
+  `org.mpris.MediaPlayer2.spotify`, and for its second copies, which a
+  player names `.instance` and a suffix: `.instance1234`, `.instance-abc`) is
+  shown if it is among them; else the one that most recently started
+  playing; else, when none plays, the one that played last; a tie (players
+  that never played) is broken by name, so the choice is the same every
+  run. The controls go to the player shown. A connection that owns two MPRIS
+  names is one player (the first name seen); at most 8 are held.
+- **Controls, with no binding at all**: a click is `play-pause`, a right
+  click or a scroll down `next`, a middle click or a scroll up `previous`;
+  nothing happens when no player is shown. The module's actions are
+  `play-pause`, `next` and `previous`, none taking a number
+  (`scootbar msg invoke media next`). Each is one call to the player's
+  connection that wants no reply: the track changes on the bar when the
+  player says so, as a signal. An action is refused saying why when there
+  is no bus, no player playing or paused, or the player says it cannot
+  (`CanControl`, `CanGoNext`, `CanGoPrevious` false). **A skip within 250 ms
+  of the last is refused** (a scroll arrives at up to sixty actions a
+  second, and a scroll of thirty steps is one skip, not thirty; a scroll
+  that hits the limit is one line on stderr a second at most, as any failing
+  action): an agent that wants two skips waits for the first to show in
+  `query`.
+- **`query`** reports `{ "player", "bus_name", "status", "title", "artist",
+  "players": [{ "bus_name", "status" }] }` for the player shown (`status` is
+  `playing` or `paused`; `players` lists every one held, stopped included),
+  and nothing while none is.
+- **Options.** `[media]` takes `player` (a name as it is on the bus:
+  letters, digits, `_`, `-` and `.`), `max-width` (default 320 logical
+  pixels, 1 to 4096), `margin` and the five [interaction keys](#pointer-input).
+  The playback position and the volume are never shown (the position has no
+  change signal, so showing it would need a timer), and the art URL a player
+  names is never fetched.
+- **A run of changes is drawn ten times a second at most.** The first
+  change after a quiet spell (a new track) is drawn in the turn it arrives;
+  title and artist changes that follow within 100 ms wait for one timer,
+  and the bar then shows the latest, however many came. A player
+  appearing, vanishing, starting or stopping is never held. (The window
+  title's rule, for the same reason: a player that rewrites its title
+  hundreds of times a second is a bug or a title that carries progress.)
+- **Idle cost: nothing.** The bus does the filtering: the bar asks for
+  `NameOwnerChanged` of the `org.mpris.MediaPlayer2` namespace and for
+  `PropertiesChanged` of the Player interface on the one MPRIS object, so an
+  app unrelated to media coming or going, or a player's `Seeked` or
+  position, never wakes the bar (tested against a real `dbus-daemon`). A
+  track change is one signal carrying the value (no round trip); a player
+  that only invalidates a property is read once, no oftener than every
+  50 ms. With no bus the module waits on the bus socket's directory (one
+  inotify watch); a bus that goes away drops every player at once and dials
+  once more, and one that keeps dropping the bar is left alone for 30
+  seconds (the [tray's](#tray) rules, in `src/dbus/link.rs`).
+- **Bounds, for a hostile or broken player.** Anything on the session bus
+  can claim a player name and say anything, and can lose only itself. Only
+  the bus's own `NameOwnerChanged` is believed, and a `PropertiesChanged`
+  only from the connection that owns a held name. Titles and artists are
+  cleaned (controls stripped) and cut to 120 bytes where they are stored;
+  at most 8 players, one a connection (a connection owning hundreds of
+  names is asked about in a window of 8 at a time, and hides no real
+  player behind it); a message past 1 MiB is skipped
+  whole and the player keeps its last state; an answer that does not parse
+  is dropped whole, one that errors drops the player (a timeout keeps it, busy),
+  one that never comes
+  is forgotten after 30 seconds when its slot is wanted; a property of the
+  wrong type is skipped alone; dictionaries past 128 entries are refused.
+  The parser (`src/dbus/mpris.rs`, `std` only) is fuzzed with the D-Bus client's
+  (`crates/scootbar/fuzz`, target `dbus`), and checked against what sd-bus
+  marshals.
+- **Cost.** One fd (the bus socket, with `OUT` only while a write or a
+  staged message waits), or one inotify fd while there is no bus, and a
+  one-shot timer only while a player waits out its 50 ms floor between reads.
+  Measured (dev VM, one 60 s idle window per row): **zero wakeups** with no
+  bus, with a bus and no player, with one player paused, with one playing,
+  with eight playing, and with a real mpv (its MPRIS script) playing a file;
+  one thread throughout; RSS 4152 kB with a bus and no player, 4392 kB with
+  one playing player, 4392 kB with eight (differences under about 130 kB
+  are within one run's resolution; the clock alone is 4180 kB). A player
+  that signals constantly pays for itself and no more: a stub signalling its
+  position 500 times a second for 20 s (10,083 signals) cost the bar 0.65% of
+  a core, no redraw and no read, and one sending a new title 490 times a
+  second (9,737 signals) 1.0% of a core, drawn ten times a second, RSS flat
+  in both. A player that re-sends unchanged metadata (mpv playing its
+  synthetic `lavfi` source does, once a second) wakes the bar once a second
+  and draws nothing. The binary: **+65,536 B on disk (1,905,376 to
+  1,970,912, +3.4%) and +47,416 B of loaded sections (+2.6%, of which
+  `.text` +40,352 B)** against `main`; the feature built but off is +3,256 B
+  loaded and no more on disk. This is a regression of the
+  stripped-binary-size row that nobody has waived (the tray's ruling covered
+  the tray's row only): `media` is in `default` until the maintainer says
+  otherwise. The table and its method are in the
+  [resource ratchet](backlog/lightest.md#m6-media-module-level-cost-measured-2026-10-03).
+
 ## Pointer input
 
 Clicks, scrolls and hover, on every module. The bar never takes the keyboard
@@ -934,7 +1047,8 @@ on-click = { scoot = "quit" }                    # a request to scoot's control 
   and does nothing. `quit` is the only value.
 - **A key you do not set keeps the module's default**: the workspaces
   module's left click on a number switches to it (as it always did), and
-  nothing else has one. A binding replaces the default.
+  other modules have defaults of their own, which their sections list (the
+  [media module's](#media), for one). A binding replaces the default.
 - **A failing action** (a program that is not there, a full table) is one
   line on stderr, at most one a second, with a count of the ones held back.
   The bar carries on.
@@ -971,7 +1085,7 @@ itself, so the tint lands there rather than over its text). Unset,
 
 **Cost.** The bar asks the seat for a pointer only while a placed module
 has a binding or a default of its own (today: the workspaces module's
-click and the window title's click).
+click, the window title's click and the media module's).
 A clock-only bar with no bindings never takes the pointer, and costs what
 it did before there was any input. A reload that adds or removes bindings
 takes or drops it. A motion event stores two numbers; no pointer event,

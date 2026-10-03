@@ -1,0 +1,11 @@
+tree: fdb7ddd17cbd9883d37dce64fb443edfbdb377f3 (crates tree 958dcf867f66a17ace383ddcff10abb29a53d2ff)
+--- CI budget: 1,000,000 runs, seed 1, max_len 70000
+     Running `/tmp/media-fuzz-target/aarch64-unknown-linux-gnu/release/dbus -artifact_prefix=/tmp/media-work/crates/scootbar/fuzz/artifacts/dbus/ -seed=1 -timeout=10 -artifact_prefix=/tmp/media-fuzz-scratch/artifacts/ -runs=1000000 -max_len=70000 /tmp/media-fuzz-scratch/dbus fuzz/corpus/dbus fuzz/regressions/dbus`
+WARNING: Failed to find function "__sanitizer_acquire_crash_state".
+INFO: Running with entropic power schedule (0xFF, 100).
+#14	INITED cov: 377 ft: 623 corp: 13/3217b exec/s: 0 rss: 33Mb
+Done 1000000 runs in 45 second(s)
+--- 300 s run from a fresh corpus directory seeded with the repo's
+WARNING: Failed to find function "__sanitizer_acquire_crash_state".
+Done 6388226 runs in 301 second(s)
+FUZZDONE

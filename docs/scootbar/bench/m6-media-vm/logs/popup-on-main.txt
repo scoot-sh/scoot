@@ -1,0 +1,31 @@
+main at 01c33f09f (crates identical to c2d82cc95), the VM scoot of Oct 1 (/var/cargo-target/debug/scoot):
+        PASS [   3.964s] ( 1/27) scootbar::agent a_subscription_outlives_a_flood_of_other_connections
+        PASS [   4.274s] ( 2/27) scootbar::agent a_subscribed_connection_is_refused_further_requests
+        PASS [   4.347s] ( 3/27) scootbar::agent a_hidden_bar_has_no_rectangles
+        PASS [   4.717s] ( 4/27) scootbar::agent a_subscriber_that_hangs_up_leaves_the_daemon_unharmed_and_idle
+        PASS [   5.433s] ( 5/27) scootbar::agent a_stream_of_changes_is_told_at_the_frame_rate
+        PASS [   3.408s] ( 6/27) scootbar::agent only_so_many_connections_may_subscribe_and_a_slot_comes_back
+        PASS [   4.257s] ( 7/27) scootbar::agent invoke_runs_a_module_action_with_its_number
+        PASS [   2.992s] ( 8/27) scootbar::agent query_names_one_module_and_refuses_one_that_is_not_placed
+        PASS [   4.201s] ( 9/27) scootbar::agent invoke_runs_the_binding_a_click_would
+        PASS [  11.008s] (10/27) scootbar::agent an_idle_bar_with_subscribers_and_queries_wakes_for_nothing
+        PASS [   9.797s] (11/27) scootbar::agent layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales
+        PASS [   8.720s] (12/27) scootbar::popup a_bottom_bar_opens_it_above
+        PASS [  10.291s] (13/27) scootbar::popup a_click_on_the_bar_beside_the_module_closes_it_without_acting
+        PASS [  13.043s] (14/27) scootbar::popup a_press_past_either_end_of_the_track_is_the_end
+        FAIL [  15.937s] (15/27) scootbar::popup a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks
+    thread 'a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks' (3360014) panicked at crates/scootbar/tests/popup.rs:144:17:
+        PASS [  17.359s] (16/27) scootbar::popup a_click_opens_the_popup_under_the_module_and_a_second_click_closes_it
+        PASS [   2.703s] (17/27) scootbar::popup on_sway_a_click_opens_it_with_a_grab_and_outside_closes_it
+        PASS [   1.250s] (18/27) scootbar::popup on_sway_it_opens_and_goes_with_its_output
+        PASS [  13.028s] (19/27) scootbar::popup at_the_right_edge_it_slides_back_on_screen
+        PASS [   9.046s] (20/27) scootbar::popup it_opens_on_the_press_and_the_release_that_follows_does_nothing
+        PASS [  16.502s] (21/27) scootbar::popup escape_and_a_click_outside_close_it
+        PASS [  17.558s] (22/27) scootbar::popup it_is_idle_while_open_and_while_closed
+        PASS [  10.044s] (23/27) scootbar::popup the_button_mutes_on_release_and_a_press_that_slides_off_does_nothing
+        PASS [  11.467s] (24/27) scootbar::popup the_keyboard_is_taken_only_while_a_popup_is_open
+        PASS [   9.130s] (25/27) scootbar::popup the_slider_shows_the_level_and_a_drag_sets_it_once_per_value
+        PASS [  11.007s] (26/27) scootbar::popup the_slider_follows_a_level_changed_elsewhere
+        PASS [  20.126s] (27/27) scootbar::popup the_popup_goes_with_its_module_the_bar_hiding_and_a_reload
+     Summary [  47.301s] 27 tests run: 26 passed, 1 failed, 0 skipped
+        FAIL [  15.937s] (15/27) scootbar::popup a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks

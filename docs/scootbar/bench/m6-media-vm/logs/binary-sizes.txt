@@ -1,0 +1,36 @@
+== main
+1905376
+  [12] .text             PROGBITS        0000000000016000 016000 163d08 00  AX  0   0 64
+  [14] .rodata           PROGBITS        0000000000179d40 179d40 01e6d7 00   A  0   0 64
+  [15] .eh_frame_hdr     PROGBITS        0000000000198418 198418 0045fc 00   A  0   0  4
+  [16] .eh_frame         PROGBITS        000000000019ca18 19ca18 01fdf4 00   A  0   0  8
+  [17] .gcc_except_table PROGBITS        00000000001bc80c 1bc80c 0015a4 00   A  0   0  4
+  [22] .data.rel.ro      PROGBITS        00000000001c23c0 1c23c0 00d5e0 00  WA  0   0  8
+  [25] .data             PROGBITS        00000000001d0000 1d0000 0009d0 00  WA  0   0  8
+  [26] .bss              NOBITS          00000000001d09d0 1d09d0 0000f0 00  WA  0   0  8
+== off
+1905376
+  [12] .text             PROGBITS        0000000000016040 016040 1647c8 00  AX  0   0 64
+  [14] .rodata           PROGBITS        000000000017a840 17a840 01e757 00   A  0   0 64
+  [15] .eh_frame_hdr     PROGBITS        0000000000198f98 198f98 004624 00   A  0   0  4
+  [16] .eh_frame         PROGBITS        000000000019d5c0 19d5c0 01ff14 00   A  0   0  8
+  [17] .gcc_except_table PROGBITS        00000000001bd4d4 1bd4d4 0015a4 00   A  0   0  4
+  [22] .data.rel.ro      PROGBITS        00000000001c2390 1c2390 00d610 00  WA  0   0  8
+  [25] .data             PROGBITS        00000000001d0000 1d0000 0009d0 00  WA  0   0  8
+  [26] .bss              NOBITS          00000000001d09d0 1d09d0 0000f0 00  WA  0   0  8
+== on
+1970912
+  [12] .text             PROGBITS        0000000000016400 016400 16daa8 00  AX  0   0 64
+  [14] .rodata           PROGBITS        0000000000183ec0 183ec0 01f05f 00   A  0   0 64
+  [15] .eh_frame_hdr     PROGBITS        00000000001a2f20 1a2f20 004794 00   A  0   0  4
+  [16] .eh_frame         PROGBITS        00000000001a76b8 1a76b8 020c04 00   A  0   0  8
+  [17] .gcc_except_table PROGBITS        00000000001c82bc 1c82bc 0015a4 00   A  0   0  4
+  [22] .data.rel.ro      PROGBITS        00000000001d2158 1d2158 00d848 00  WA  0   0  8
+  [25] .data             PROGBITS        00000000001e0000 1e0000 0009d0 00  WA  0   0  8
+  [26] .bss              NOBITS          00000000001e09d0 1e09d0 0000f0 00  WA  0   0  8
+== ldd main
+libc.so.6 libgcc_s.so.1 libm.so.6 linux-vdso.so.1 /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/ld-linux-aarch64.so.1 
+== ldd off
+libc.so.6 libgcc_s.so.1 libm.so.6 linux-vdso.so.1 /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/ld-linux-aarch64.so.1 
+== ldd on
+libc.so.6 libgcc_s.so.1 libm.so.6 linux-vdso.so.1 /nix/store/6wjykzqf6w3kzfhjc4z7dcd84j0dzsgm-glibc-2.42-84/lib/ld-linux-aarch64.so.1 
