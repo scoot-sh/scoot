@@ -317,14 +317,16 @@ the [D-Bus client](resolved/dbus-client-done.md), on its own connection. By
 construction: the bus socket is one source in the poll set (with `OUT` only
 while a write or staged messages wait), or one inotify watch on the socket's
 directory while there is no bus; a one-shot timer exists only while a player
-waits out the 50 ms floor between reads of it, or (30 s) after the bus kept
-dropping the bar; no thread, no polling. The bus filters what reaches the
+waits out the 50 ms floor between reads of it, while a change of title
+waits out the 100 ms between draws, or (30 s) after the bus kept dropping
+the bar; no thread, no polling. The bus filters what reaches the
 bar: `NameOwnerChanged` of the `org.mpris.MediaPlayer2` namespace and
 `PropertiesChanged` of the Player interface on the one MPRIS object, so
 unrelated apps and a player's `Seeked` never wake it (a test against a real
 `dbus-daemon` sends both, and was checked to fail when the namespace filter
 is removed). No new dependency (`Cargo.lock` is unchanged). The contract
-test holds the module to the loop's source budget (2 sources at most, of 63).
+test holds the module to the loop's source budget (3 sources at most while
+live: the bus and the two timers, of 63).
 
 **Method.** Release builds (`lto = "fat"`, stripped) of `main` at
 `c2d82cc95` (`crates/` is unchanged through `01c33f09f`, the branch's base),
@@ -384,9 +386,12 @@ run's within 70 kB).
 
 **A runaway player.** One stub signalling as fast as its loop runs, for
 20 s (`flood.sh`): Position only (10,083 signals): 9,945 bar wakeups, 0.13
-CPU-seconds (0.65% of a core), no redraw, no read, RSS flat at 4216 kB; a new
-title each time (9,737 signals): 9,836 wakeups, 0.20 CPU-seconds (1.0% of a
-core), drawn ten times a second, RSS 4216 to 4224 kB, the last title shown.
+CPU-seconds (0.65% of a core), RSS flat at 4216 kB (the tests pin that it
+draws nothing and reads nothing); a new title each time (9,737 signals):
+9,836 wakeups, 0.20 CPU-seconds (1.0% of a core), RSS 4216 to 4224 kB, the
+last title shown (the run did not count draws: that they are ten a second is
+pinned by the unit and daemon tests, and the wakeups per signal fell from 1.85
+to 1.01 with the hold).
 Work per wake is bounded (4 pumps of 64 events), a read of a player is at
 most one in flight and 20 a second, and the cost is the player's to pay in
 its own signals: about 13 microseconds of bar CPU for a position, about 20

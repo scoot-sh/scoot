@@ -962,7 +962,9 @@ Cargo feature (`media`), on by default; the smallest build
   marshals.
 - **Cost.** One fd (the bus socket, with `OUT` only while a write or a
   staged message waits), or one inotify fd while there is no bus, and a
-  one-shot timer only while a player waits out its 50 ms floor between reads.
+  one-shot timer only while a player waits out its 50 ms floor between reads,
+  while a change of title waits out its 100 ms between draws, or (30 s) after
+  the bus kept dropping the bar.
   Measured (dev VM, one 60 s idle window per row): **zero wakeups** with no
   bus, with a bus and no player, with one player paused, with one playing,
   with eight playing, and with a real mpv (its MPRIS script) playing a file;
@@ -971,9 +973,9 @@ Cargo feature (`media`), on by default; the smallest build
   are within one run's resolution; the clock alone is 4180 kB). A player
   that signals constantly pays for itself and no more: a stub signalling its
   position 500 times a second for 20 s (10,083 signals) cost the bar 0.65% of
-  a core, no redraw and no read, and one sending a new title 490 times a
-  second (9,737 signals) 1.0% of a core, drawn ten times a second, RSS flat
-  in both. A player that re-sends unchanged metadata (mpv playing its
+  a core, and one sending a new title 490 times a second (9,737 signals)
+  1.0% of a core, RSS flat in both (the tests pin that a position draws and
+  reads nothing, and that title changes are drawn ten times a second). A player that re-sends unchanged metadata (mpv playing its
   synthetic `lavfi` source does, once a second) wakes the bar once a second
   and draws nothing. The binary: **+65,536 B on disk (1,905,376 to
   1,970,912, +3.4%) and +47,416 B of loaded sections (+2.6%, of which
