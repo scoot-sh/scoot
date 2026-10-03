@@ -35,13 +35,15 @@ compiles `class.rs` and `payload.rs` by `#[path]`, and uses `serde_json`
 - **`dbus`**: arbitrary bytes as D-Bus messages on a stream (the session
   bus's socket). Framing must accept, wait or refuse without a panic; every
   framed message's header must parse or refuse; the body is walked against
-  its declared signature and as each shape the tray and the media module
-  read (an item's `GetAll` through `read_item_props`, a player's `GetAll`
-  and `PropertiesChanged` through `read_player_props` and
-  `read_properties_changed`, the same functions the modules call, pixmap
+  its declared signature and as each shape the tray, the media and the
+  bluetooth modules read (an item's `GetAll` through `read_item_props`, a
+  player's `GetAll` and `PropertiesChanged` through `read_player_props` and
+  `read_properties_changed`, a managed set, added and removed interfaces
+  and adapter, device and battery dictionaries and changes through
+  `src/dbus/bluez.rs`, the same functions the modules call, pixmap
   lists, name lists, owner changes); the writer is round-tripped on
-  input-derived values. It compiles `src/dbus/proto.rs` and
-  `src/dbus/mpris.rs` by `#[path]`; the seed corpus is frames in the shapes
+  input-derived values. It compiles `src/dbus/proto.rs`,
+  `src/dbus/mpris.rs` and `src/dbus/bluez.rs` by `#[path]`; the seed corpus is frames in the shapes
   the tray's fake bus speaks, plus a `GetAll` and a `PropertiesChanged`
   marshalled by sd-bus (`src/dbus/fixtures/README.md`).
 

@@ -11,9 +11,10 @@
 //! arrays, megabyte strings), not malformed bytes. The check therefore
 //! frames arbitrary bytes (accept, wait or refuse without a panic),
 //! parses every framed message (header and the body against its declared
-//! signature), walks every shape the tray and the media module read, and
-//! round-trips the writer on input-derived values.
+//! signature), walks every shape the tray, the media and the bluetooth
+//! modules read, and round-trips the writer on input-derived values.
 
+use super::bluez;
 use super::mpris;
 use super::proto::{self, Kind, Message, Reader, Writer, read_pixmaps};
 
@@ -65,6 +66,13 @@ pub fn dbus(data: &[u8]) {
     let _ = proto::read_item_props(data);
     let _ = mpris::read_player_props(data);
     let _ = mpris::read_properties_changed(data);
+    let _ = bluez::read_managed_objects(data);
+    let _ = bluez::read_interfaces_added(data);
+    let _ = bluez::read_interfaces_removed(data);
+    let _ = bluez::read_properties_changed(data);
+    let _ = bluez::read_adapter_all(data);
+    let _ = bluez::read_device_all(data);
+    let _ = bluez::read_battery_all(data);
     let _ = read_pixmaps(data);
     let _ = proto::read_names("as", data);
     let _ = proto::read_owner("s", data);
@@ -109,8 +117,8 @@ pub fn dbus(data: &[u8]) {
 }
 
 /// One framed message: the header parses, and the body walks against its
-/// declared signature, then as each shape the tray and the media module read. A refusal
-/// anywhere is `None`, never a panic.
+/// declared signature, then as each shape the tray, the media and the
+/// bluetooth modules read. A refusal anywhere is `None`, never a panic.
 fn check_frame(frame: &[u8]) {
     let Ok(message) = Message::parse(frame) else {
         return;
@@ -122,9 +130,12 @@ fn check_frame(frame: &[u8]) {
     check_shapes(&message);
 }
 
-/// The body as each shape the tray reads past the header: pixmap arrays,
-/// property dictionaries, tooltips, watch lists, owner changes. Wrong
-/// shapes refuse; right ones walk without a panic.
+/// The body as each shape the tray and the media module read past the
+/// header: pixmap arrays, property dictionaries, tooltips, watch lists,
+/// owner changes; and each shape the bluetooth module reads: managed
+/// objects, added and removed interfaces, adapter, device and battery
+/// dictionaries, property changes. Wrong shapes refuse; right ones walk
+/// without a panic.
 fn check_shapes(message: &Message<'_>) {
     let body = message.body.rest();
     match message.signature {
@@ -134,9 +145,22 @@ fn check_shapes(message: &Message<'_>) {
         "a{sv}" => {
             let _ = proto::read_item_props(body);
             let _ = mpris::read_player_props(body);
+            let _ = bluez::read_adapter_all(body);
+            let _ = bluez::read_device_all(body);
+            let _ = bluez::read_battery_all(body);
         }
         "sa{sv}as" => {
             let _ = mpris::read_properties_changed(body);
+            let _ = bluez::read_properties_changed(body);
+        }
+        "a{oa{sa{sv}}}" => {
+            let _ = bluez::read_managed_objects(body);
+        }
+        "oa{sa{sv}}" => {
+            let _ = bluez::read_interfaces_added(body);
+        }
+        "oas" => {
+            let _ = bluez::read_interfaces_removed(body);
         }
         _ => {}
     }

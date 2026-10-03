@@ -62,7 +62,7 @@ pub trait Session {
 pub enum Addr {
     /// The socket's filesystem path.
     Path(PathBuf),
-    /// The session bus's address names nothing this client dials: never
+    /// The bus's address names nothing this client dials: never
     /// connects, shows nothing, holds no descriptor.
     Unusable,
     /// An already-open stream (the tests' socketpair end).
@@ -84,6 +84,8 @@ enum Bus<S> {
 pub struct Link<S: Session> {
     /// For the lines said on stderr: `media`.
     who: &'static str,
+    /// For the same lines: `session bus`, or `system bus` for BlueZ.
+    bus_name: &'static str,
     path: PathBuf,
     bus: Bus<S>,
     /// Builds the session on a fresh connection.
@@ -100,6 +102,17 @@ impl<S: Session> Link<S> {
     /// the blocking `Hello` is two round trips), or waits on it when it is
     /// not.
     pub fn start(who: &'static str, addr: Addr, start: fn(Conn) -> S) -> Self {
+        Self::start_on(who, "session bus", addr, start)
+    }
+
+    /// As [`Link::start`], on the named bus (`system bus` for BlueZ: only
+    /// the lines said on stderr differ).
+    pub fn start_on(
+        who: &'static str,
+        bus_name: &'static str,
+        addr: Addr,
+        start: fn(Conn) -> S,
+    ) -> Self {
         let (path, stream, dial): (_, Option<UnixStream>, _) = match addr {
             Addr::Path(path) => (path, None, true),
             Addr::Unusable => (PathBuf::new(), None, false),
@@ -115,6 +128,7 @@ impl<S: Session> Link<S> {
         };
         let mut link = Self {
             who,
+            bus_name,
             path,
             bus: Bus::Waiting {
                 notify: None,
@@ -329,8 +343,8 @@ impl<S: Session> Link<S> {
             Ok(conn) => self.adopt(conn),
             Err(error) => {
                 crate::print::warn(format_args!(
-                    "scootbar: {}: no session bus ({error}); waiting for one",
-                    self.who
+                    "scootbar: {}: no {} ({error}); waiting for one",
+                    self.who, self.bus_name
                 ));
                 self.wait();
             }

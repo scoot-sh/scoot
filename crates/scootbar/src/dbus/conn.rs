@@ -124,6 +124,30 @@ pub fn bus_path() -> Result<PathBuf, ()> {
     bus_path_for(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").as_deref())
 }
 
+/// The well-known system bus socket: what BlueZ listens on.
+pub const SYSTEM_BUS_PATH: &str = "/run/dbus/system_bus_socket";
+
+/// Where the system bus listens: `DBUS_SYSTEM_BUS_ADDRESS` when it
+/// names a filesystem path (the same `unix:path=` parsing as the session
+/// bus), else [`SYSTEM_BUS_PATH`]. Unlike the session bus, a set address
+/// with no path falls back to the socket rather than refusing: the system
+/// bus has a fixed place, and a pathless address is a stranger
+/// configuration, not a refusal of another bus. The argument is the
+/// address (the env lookup is the caller's), so tests never touch the
+/// environment.
+pub fn system_bus_path_for(address: Option<&std::ffi::OsStr>) -> PathBuf {
+    let set = address.is_some_and(|address| !address.is_empty());
+    if !set {
+        return PathBuf::from(SYSTEM_BUS_PATH);
+    }
+    bus_path_for(address).unwrap_or_else(|()| PathBuf::from(SYSTEM_BUS_PATH))
+}
+
+/// The system bus's path from the environment.
+pub fn system_bus_path() -> PathBuf {
+    system_bus_path_for(std::env::var_os("DBUS_SYSTEM_BUS_ADDRESS").as_deref())
+}
+
 /// The runtime directory, or its conventional fallback.
 pub fn runtime_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {

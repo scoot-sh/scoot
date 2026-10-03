@@ -1301,6 +1301,12 @@ impl Writer {
         self.push(&value.to_le_bytes());
     }
 
+    #[allow(dead_code)]
+    pub fn i16(&mut self, value: i16) {
+        self.pad(2);
+        self.push(&value.to_le_bytes());
+    }
+
     pub fn u32(&mut self, value: u32) {
         self.pad(4);
         self.push(&value.to_le_bytes());

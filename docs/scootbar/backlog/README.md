@@ -124,7 +124,8 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Tray D-Bus client: hardening left over from the #388 review](tray-review-hardening.md) (low): a per-pump byte budget while discarding, a stuck flight on an oversize reply with huge header fields, and a few smaller items
 - [Popups](resolved/popups-done.md) (done), [Tooltips](resolved/tooltips-done.md) (done), [A native WiFi list popup](popup-network-list.md) (low), [Network module icons](network-module-icons.md) (low, gh #379)
 - [Media (MPRIS)](resolved/media-module-done.md) (low): now playing and play/pause, next, previous over MPRIS — RESOLVED 2026-10-03
-- [Bluetooth](bluetooth-module.md) (low)
+- [Bluetooth](resolved/bluetooth-module-done.md) (low) — RESOLVED 2026-10-03
+- [Bluetooth: real adapter and headset validation](bluetooth-real-hardware.md) (medium): what the VM cannot prove — real power toggles, Battery1 pacing, real `GetManagedObjects` scale, Waybar beside it
 - [Move the tray onto `dbus::link`](tray-onto-dbus-link.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)

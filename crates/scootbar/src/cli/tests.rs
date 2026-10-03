@@ -277,17 +277,17 @@ fn the_layout_is_what_is_listed() {
             })
         );
     }
-    // A module no build has yet (bluetooth is M6): unknown everywhere.
-    let unknown = run(&["daemon", "--left", "bluetooth"]);
+    // A module no build has (bluetooth landed in M6): unknown everywhere.
+    let unknown = run(&["daemon", "--left", "wifi"]);
     assert_eq!(
         unknown,
         Err(Error::Modules {
             flag: "--left",
-            error: ModulesError::Unknown("bluetooth".into())
+            error: ModulesError::Unknown("wifi".into())
         })
     );
     let message = unknown.unwrap_err().to_string();
-    assert!(message.contains("no module `bluetooth`"), "{message}");
+    assert!(message.contains("no module `wifi`"), "{message}");
     assert!(matches!(
         run(&["daemon", "--left", "clock,"]),
         Err(Error::Modules { .. })
@@ -342,15 +342,30 @@ fn the_help_matches_the_build() {
     let has_title = crate::modules::find("window-title").is_some();
     let has_battery = crate::modules::find("battery").is_some();
     let has_brightness = crate::modules::find("brightness").is_some();
+    let has_bluetooth = crate::modules::find("bluetooth").is_some();
     assert_eq!(DAEMON_HELP.contains("--clock-format"), has_clock);
-    // Battery sorts first, brightness second, so with the clock the list
-    // opens with whichever of them this build has.
+    // Battery sorts first, then bluetooth, then brightness, so with the
+    // clock the list opens with whichever of them this build has.
     if has_clock {
-        match (has_battery, has_brightness) {
-            (true, true) => assert!(DAEMON_HELP.contains("Modules: battery, brightness, clock")),
-            (true, false) => assert!(DAEMON_HELP.contains("Modules: battery, clock")),
-            (false, true) => assert!(DAEMON_HELP.contains("Modules: brightness, clock")),
-            (false, false) => assert!(DAEMON_HELP.contains("Modules: clock")),
+        match (has_battery, has_bluetooth, has_brightness) {
+            (true, true, true) => {
+                assert!(DAEMON_HELP.contains("Modules: battery, bluetooth, brightness, clock"))
+            }
+            (true, true, false) => {
+                assert!(DAEMON_HELP.contains("Modules: battery, bluetooth, clock"))
+            }
+            (true, false, true) => {
+                assert!(DAEMON_HELP.contains("Modules: battery, brightness, clock"))
+            }
+            (true, false, false) => assert!(DAEMON_HELP.contains("Modules: battery, clock")),
+            (false, true, true) => {
+                assert!(DAEMON_HELP.contains("Modules: bluetooth, brightness, clock"))
+            }
+            (false, true, false) => assert!(DAEMON_HELP.contains("Modules: bluetooth, clock")),
+            (false, false, true) => {
+                assert!(DAEMON_HELP.contains("Modules: brightness, clock"))
+            }
+            (false, false, false) => assert!(DAEMON_HELP.contains("Modules: clock")),
         }
     } else {
         assert!(!DAEMON_HELP.contains("Modules: clock"));
@@ -396,6 +411,17 @@ fn the_help_matches_the_build() {
     // Media sorts after the clock, so with both the list names it there.
     if has_clock && has_media {
         assert!(DAEMON_HELP.contains("clock, media"));
+    }
+    let has_bluetooth = crate::modules::find("bluetooth").is_some();
+    assert_eq!(DAEMON_HELP.contains("the bluetooth module"), has_bluetooth);
+    assert_eq!(DAEMON_HELP.contains("BlueZ"), has_bluetooth);
+    assert_eq!(
+        DAEMON_HELP.contains("bluetooth.menu-command"),
+        has_bluetooth
+    );
+    // Bluetooth sorts after battery, so with both the list names it there.
+    if has_battery && has_bluetooth {
+        assert!(DAEMON_HELP.contains("battery, bluetooth"));
     }
     for flag in super::FLAGS {
         assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
