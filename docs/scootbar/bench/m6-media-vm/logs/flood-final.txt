@@ -1,6 +1,6 @@
 === none
-before rss_kb=4216 vol=12 nonvol=0 utime=0 stime=0 fds=8
-after_20s rss_kb=4216 vol=12 nonvol=0 utime=0 stime=0 fds=8
+before rss_kb=4208 vol=13 nonvol=0 utime=0 stime=0 fds=8
+after_20s rss_kb=4208 vol=13 nonvol=0 utime=0 stime=0 fds=8
 player log tail:
 requestname (1,)
 ready
@@ -9,32 +9,32 @@ bar alive: yes
 query: {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Ada Lovelace - Track One","class":"normal","tooltip":"stub1 (playing): Ada Lovelace - Track One","value":{"artist":"Ada Lovelace","bus_name":"org.mpris.MediaPlayer2.stub1","player":"stub1","players":[{"bus
 bar.log:
 === flood
-before rss_kb=4216 vol=13 nonvol=0 utime=0 stime=0 fds=8
-after_20s rss_kb=4216 vol=9904 nonvol=1 utime=5 stime=8 fds=8
+before rss_kb=4216 vol=13 nonvol=1 utime=0 stime=0 fds=8
+after_20s rss_kb=4216 vol=10032 nonvol=2 utime=4 stime=8 fds=8
 player log tail:
 getall
 flood start pos
-flood sent 10013
+flood sent 10143
 bar alive: yes
 query: {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Ada Lovelace - Track One","class":"normal","tooltip":"stub1 (playing): Ada Lovelace - Track One","value":{"artist":"Ada Lovelace","bus_name":"org.mpris.MediaPlayer2.stub1","player":"stub1","players":[{"bus
 bar.log:
 === metaflood
-before rss_kb=4212 vol=13 nonvol=1 utime=0 stime=0 fds=8
-after_20s rss_kb=4220 vol=9753 nonvol=1 utime=5 stime=11 fds=9
+before rss_kb=4208 vol=11 nonvol=2 utime=0 stime=0 fds=8
+after_20s rss_kb=4216 vol=9728 nonvol=4 utime=4 stime=13 fds=9
 player log tail:
 getall
 flood start meta
-flood sent 9583
+flood sent 9564
 bar alive: yes
-query: {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Flooder - Flood 9583","class":"normal","tooltip":"stub1 (playing): Flooder - Flood 9583","value":{"artist":"Flooder","bus_name":"org.mpris.MediaPlayer2.stub1","player":"stub1","players":[{"bus_name":"org.m
+query: {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Flooder - Flood 9564","class":"normal","tooltip":"stub1 (playing): Flooder - Flood 9564","value":{"artist":"Flooder","bus_name":"org.mpris.MediaPlayer2.stub1","player":"stub1","players":[{"bus_name":"org.m
 bar.log:
 === flapflood
-before rss_kb=4212 vol=14 nonvol=2 utime=0 stime=0 fds=8
-after_20s rss_kb=4212 vol=10230 nonvol=3 utime=5 stime=10 fds=9
+before rss_kb=4216 vol=13 nonvol=0 utime=0 stime=0 fds=8
+after_20s rss_kb=4216 vol=10071 nonvol=1 utime=5 stime=10 fds=9
 player log tail:
 getall
 flood start flap
-flood sent 10061
+flood sent 9909
 bar alive: yes
 query: {"type":"modules","modules":[{"id":"media","section":"left","output":"headless","text":"Ada Lovelace - Track One","class":"muted","tooltip":"stub1 (paused): Ada Lovelace - Track One","value":{"artist":"Ada Lovelace","bus_name":"org.mpris.MediaPlayer2.stub1","player":"stub1","players":[{"bus_n
 bar.log:

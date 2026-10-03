@@ -39,8 +39,8 @@ and the module costs nothing with no player.
 ## What landed
 
 PR #393 (`feat(scootbar): media module, now playing and controls over
-MPRIS`), code commit `242b2dce7` (`crates/` tree
-`864d03f35d18ea3a87f2b421744e929d49a280c0`); every number below was taken
+MPRIS`), code commit `4d2207598` (`crates/` tree
+`c5a935bdbccedcf7eed359182362b998bbb38aa1`); every number below was taken
 at it, on the dev VM, and the raw runs, scripts and screenshots are in
 [`bench/m6-media-vm`](../../bench/m6-media-vm/README.md). The reference is
 [cli.md](../../cli.md#media); the cost table is in the
@@ -94,7 +94,7 @@ at it, on the dev VM, and the raw runs, scripts and screenshots are in
   steps, or a fling, is one skip); a run of changes (title, state, the player
   shown) is drawn ten times a second at most, the first at once. What was *not* done about a
   player: nothing throttles the work of parsing a flood of Position signals
-  (0.65% of a core at 500 a second, measured), only the pump bounds.
+  (0.6% of a core at 500 a second, measured), only the pump bounds.
 - **Edge cases, each a test** (`modules/media/tests.rs` against a scripted
   bus, `daemon_tests.rs` against a real `dbus-daemon`, `dbus/mpris/tests.rs`
   for the wire): zero players; several (which is shown); one appearing or
@@ -108,35 +108,43 @@ at it, on the dev VM, and the raw runs, scripts and screenshots are in
 
 ## Evidence
 
-All at code commit `242b2dce7` (`crates/` tree `864d03f35d18`), dev VM (aarch64, 6 CPUs, rustc 1.97.1); the
-logs are `bench/m6-media-vm/logs/` and the command lines are in its README.
+All at code commit `4d2207598` (`crates/` tree
+`c5a935bdbccedcf7eed359182362b998bbb38aa1`, rebased onto `main` with the
+tooltips PR; the one later commit changes a test), dev VM (aarch64, 6 CPUs,
+rustc 1.97.1); the logs are `bench/m6-media-vm/logs/` and the command lines
+are in its README.
 
 - `cargo fmt --check -p scootbar`: clean (run on the Mac, the Linux-only
   crate needing only rustfmt).
 - `cargo clippy -p scootbar --all-targets -- -D warnings`: `OK` for the
   default, none, each of the 15 features alone, `media` with each other
   feature, `popup` with each other feature, the default with `icon-image`,
-  and two mixed sets (48 runs; `logs/ci.txt`).
-- `cargo nextest run -p scootbar --bin scootbar` with every feature (1025
-  tests), none (414), and each feature alone (432 to 527; `media` 527), all
+  and two mixed sets (48 runs; `logs/ci.txt`), and again for four sets on the
+  final test-only commit (`logs/final-extra.txt`).
+- `cargo nextest run -p scootbar --bin scootbar` with every feature (1047
+  tests), none (415), and each feature alone (433 to 528; `media` 528), all
   passing, `SCOOTBAR_REQUIRE_DBUS_DAEMON=1`.
 - `cargo nextest run -p scootbar --no-fail-fast` and `cargo test -p scootbar
   --no-fail-fast` with `SCOOTBAR_REQUIRE_DBUS_DAEMON=1 SCOOTBAR_REQUIRE_SCOOT=1
   SCOOTBAR_REQUIRE_SWAY=1 SCOOTBAR_TEST_SCOOT=/var/cargo-target/debug/scoot`:
-  1134 tests, 1133 passed; the one failure, `popup::a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks`,
-  fails the same way on `main` (`01c33f09f`) with the same `scoot`, which is
-  the VM's build of 1 October (`logs/popup-on-main.txt`); CI builds `scoot`
-  from the tree. `agent::layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales`
-  passed here. Both runners fail only that test.
-- Flake loop: the media, link and mpris tests and the two help tests (91
-  tests), 100 runs under `cargo nextest` and 100 under `cargo test`
-  (one process, concurrent), the VM loaded by other work: 200 of 200 pass
-  (`logs/flake.txt`). Two earlier loops found two races in the tests (the
-  link test sent a signal before its match rule was in place, and a daemon
-  test assumed two connections' signals have an order); both are fixed and
-  the loops above are on the fixed tree (the review round's new tests are in it).
+  1171 tests, 1166 passed; the five failures are `popup::a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks`
+  and four of `tooltip::` (hover shows it after the delay, a rapid hover, a
+  long tooltip at the right edge, a click closes it), all of which fail the
+  same way on `main` (`c2fa2df02`) with the same `scoot`, which is the VM's
+  build of 1 October, older than what they expect (`logs/popup-on-main.txt`:
+  six failures there, a fifth `tooltip::` test flaking too); CI builds `scoot`
+  from the tree, so these are not CI results. Both runners fail only those.
+  `agent::layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales`
+  passed here.
+- Flake loop: the media, link and mpris tests and the two help tests (92
+  tests), 100 runs under `cargo nextest` and 100 under `cargo test` (one
+  process, concurrent), the VM loaded by other work: 200 of 200 pass
+  (`logs/flake.txt`). Loops found races in the tests, each fixed and the loop
+  rerun: a link test sending a signal before its match rule was in place, a
+  daemon test assuming two connections' signals have an order, and the title
+  flood test assuming the last title was shown after a fixed 400 ms.
 - Fuzz: `cargo fuzz run -s none dbus` at CI's budget (1,000,000 runs,
-  `-seed=1`, 45 s) and a 300 s run (7,829,996 runs), no finding
+  `-seed=1`, 16 s) and a 300 s run (14,175,036 runs), no finding
   (`logs/fuzz.txt`); the dbus corpus replays in `cargo test`. The
   `fuzz` crate compiles with the new include (`cargo check --locked`).
 - The zero-wakeup claim is not vacuous: with `arg0namespace` removed from the
@@ -145,8 +153,8 @@ logs are `bench/m6-media-vm/logs/` and the command lines are in its README.
 - Idle, 60 s windows, one run per row (`logs/measure-final.log`): **zero
   wakeups** with no bus, a bus and no player, one paused player, one playing,
   eight playing, and a real mpv playing a file; 2 with the clock (its own);
-  one thread; the binary +65,536 B on disk (+3.4%) and +51,704 B of loaded
-  sections (+2.9%) over `main`, `ldd` unchanged (the numbers are in the
+  one thread; the binary +65,536 B on disk (+3.4%) and +52,912 B of loaded
+  sections (+2.9%) over the post-tooltips `main`, `ldd` unchanged (the numbers are in the
   ratchet entry). **The maintainer waived this size row on 2026-10-03** (in
   chat; this row only) and `media` stays in `default`.
 - End to end on headless `scoot` (`logs/live-private.txt`,

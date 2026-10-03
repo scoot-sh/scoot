@@ -328,38 +328,41 @@ is removed). No new dependency (`Cargo.lock` is unchanged). The contract
 test holds the module to the loop's source budget (3 sources at most while
 live: the bus and the two timers, of 63).
 
-**Method.** Release builds (`lto = "fat"`, stripped) of `main` at `01c33f09f`
-(`c2d82cc95`'s `crates/`; the tooltips PR landed after, see the size note below),
-of the branch at code commit `242b2dce7` (`crates/` tree
-`864d03f35d18ea3a87f2b421744e929d49a280c0`) with the default features, and of
-the same with the default features minus `media`, each built on the dev VM
-(aarch64, 6 CPUs, rustc 1.97.1) with its own target dir; a headless `scoot`
-(an existing release build, used read-only), a private `dbus-daemon` 1.16.2,
-and the players real D-Bus peers: Python on `jeepney`, an independent
-marshaller (`player.py`), and a real mpv 0.41.0 with its own MPRIS script. One
-bar per run, sampled from `/proc/PID` after 14 s of settling and again 60 s
-later (`VmRSS`, `Pss`, voluntary context switches, fds), **one run per row**,
-on a VM another agent was building and testing on (load 3 to 7 in the
-windows). Wakeup counts are per process and exact for the window; the RSS and
-PSS differences under about 130 kB are not resolved by one run. The scripts and
-raw logs are in [`bench/m6-media-vm`](../bench/m6-media-vm/README.md).
+**Method.** Release builds (`lto = "fat"`, stripped) of `main` at `c2fa2df02`
+(the tooltips PR merged: its own waived `.text` is in this baseline), of the
+branch at code commit `4d2207598` (`crates/` tree
+`c5a935bdbccedcf7eed359182362b998bbb38aa1`; the commits after it change tests
+only) with the default features, and of the same with the default features
+minus `media`, each built on the dev VM (aarch64, 6 CPUs, rustc 1.97.1) with
+its own target dir; a headless `scoot` (an existing release build, used
+read-only), a private `dbus-daemon` 1.16.2, and the players real D-Bus peers:
+Python on `jeepney`, an independent marshaller (`player.py`), and a real mpv
+0.41.0 with its own MPRIS script. One bar per run, sampled from `/proc/PID`
+after 14 s of settling and again 60 s later (`VmRSS`, `Pss`, voluntary context
+switches, fds), **one run per row**, on a VM another agent was building and
+testing on (load 3 to 7 in the windows). Wakeup counts are per process and
+exact for the window; the RSS and PSS differences under about 130 kB are not
+resolved by one run (PSS also moves with what else maps the binary: the
+media-built row below reads 2323 and 1464 kB in two reruns of the same
+binary, `logs/measure-rerun-row2.txt`). The scripts and raw logs are in
+[`bench/m6-media-vm`](../bench/m6-media-vm/README.md).
 
 | Row | RSS kB | PSS kB | wakeups in 60 s | fds |
 |---|---|---|---|---|
-| `main`, no module placed | 3760 | 2197 | 0 | 7 |
-| branch, media built, no module placed | 3824 | 2259 | 0 | 7 |
-| branch, media feature off, no module placed | 3824 | 2259 | 0 | 7 |
-| `main`, clock | 4180 | 2409 | 2 | 8 |
-| branch, media feature off, clock | 4232 | 2472 | 2 | 8 |
-| branch, media built and not placed, clock | 4312 | 2537 | 2 | 8 |
-| media alone, **no bus** | 4140 | 2407 | **0** | 8 |
-| media alone, bus, **no player** | 4160 | 2405 | **0** | 8 |
-| media alone, bus, one paused player | 4392 | 2553 | **0** | 8 |
-| media alone, bus, one playing player | 4392 | 2552 | **0** | 8 |
-| media alone, bus, eight playing players | 4388 | 2543 | **0** | 8 |
-| media alone, bus, one real mpv playing a file | 4384 | 2544 | **0** | 8 |
-| media alone, bus, mpv playing its `lavfi` sine | 4384 | 2542 | 60 | 8 |
-| media and clock, bus, one playing player | 4380 | 2548 | 2 (the clock's) | 9 |
+| `main`, no module placed | 3816 | 2258 | 0 | 7 |
+| branch, media built, no module placed | 3888 | 2323 | 0 | 7 |
+| branch, media feature off, no module placed | 3828 | 2263 | 0 | 7 |
+| `main`, clock | 4236 | 2476 | 2 | 8 |
+| branch, media feature off, clock | 4248 | 2473 | 2 | 8 |
+| branch, media built and not placed, clock | 4312 | 2533 | 2 | 8 |
+| media alone, **no bus** | 4148 | 2403 | **0** | 8 |
+| media alone, bus, **no player** | 4156 | 2401 | **0** | 8 |
+| media alone, bus, one paused player | 4392 | 2548 | **0** | 8 |
+| media alone, bus, one playing player | 4388 | 2549 | **0** | 8 |
+| media alone, bus, eight playing players | 4392 | 2546 | **0** | 8 |
+| media alone, bus, one real mpv playing a file | 4372 | 2545 | **0** | 8 |
+| media alone, bus, mpv playing its `lavfi` sine | 4376 | 2536 | 60 | 8 |
+| media and clock, bus, one playing player | 4388 | 2541 | 2 (the clock's) | 9 |
 
 How to read it. **Zero wakeups** with no bus, with a bus and no player, with
 one player paused or playing, with eight, and with a real mpv playing a
@@ -370,25 +373,24 @@ whose duration keeps changing, so its script re-sends its (unchanged)
 metadata about once a second (60 in 60 s; read off `dbus-monitor`): the
 bar parses each, finds nothing changed, draws nothing (one stime tick in
 the window) and the row is the player's traffic, not polling. Placing the
-module costs the font every module needs (3760 to 4140 kB, with the clock's
-4180 for comparison). The first player shown costs about 230 kB RSS over a
-bus with none (4160 to 4392 kB: its title's glyphs rasterized and cached,
-and the draw), and seven more cost nothing this resolves (4392 with one
-playing, 4388 with eight). With the feature built but not placed RSS is +64
-kB over `main` with no module placed (3824 against 3760, the same as the
-feature-off build's) and +132 kB with the clock (4312 against 4180, against
-the feature-off build's +52): the first is not the module's code, and the
-second is a little over one run's resolution, with the same sign in the two
-earlier runs of this table on earlier trees of the same module (+128 and +132
-kB).
+module costs the font every module needs (3816 to 4148 kB, with the clock's
+4236 for comparison). The first player shown costs about 230 kB RSS over a
+bus with none (4156 to 4392 kB: its title's glyphs rasterized and cached, and
+the draw), and seven more cost nothing this resolves (4388 with one playing,
+4392 with eight). With the feature built but not placed RSS is +72 kB over
+`main` with no module placed (3888 against 3816; the feature-off build is +12)
+and +76 kB with the clock (4312 against 4236, against the feature-off build's
++12): about 60 kB over the feature off in both, under one run's resolution,
+and the same sign in the earlier runs of this table on earlier trees of the
+same module (+64 and +80 kB).
 
 **A runaway player.** One stub signalling as fast as its loop runs, for
-20 s (`flood.sh`): Position only (10,013 signals): 9,891 bar wakeups, 0.13
-CPU-seconds (0.65% of a core), RSS flat at 4216 kB (the tests pin that it
-draws nothing and reads nothing); a new title each time (9,583 signals):
-9,740 wakeups, 0.16 CPU-seconds (0.8% of a core), RSS 4212 to 4220 kB; the
-status flipping between Playing and Paused each time (10,061 signals): 10,216
-wakeups, 0.15 CPU-seconds (0.75% of a core), RSS flat at 4212 kB. The runs did
+20 s (`flood.sh`): Position only (10,143 signals): 10,019 bar wakeups, 0.12
+CPU-seconds (0.6% of a core), RSS flat at 4216 kB (the tests pin that it draws
+nothing and reads nothing); a new title each time (9,564 signals): 9,717
+wakeups, 0.17 CPU-seconds (0.85% of a core), RSS 4208 to 4216 kB; the status
+flipping between Playing and Paused each time (9,909 signals): 10,058 wakeups,
+0.15 CPU-seconds (0.75% of a core), RSS flat at 4216 kB. The runs did
 not count draws: that they are ten a second is pinned by the unit tests (the
 flap test hears one signal a turn, 400 of them in 10 ms, and counts 400 draws
 without the hold). Work per wake is bounded (4 pumps of 64 events), a read of
@@ -411,11 +413,11 @@ size alone is quantized to 64 KiB steps:
 
 | Build | file bytes | `.text` | `.text`+`.rodata`+`.eh_frame*`+`.gcc_except_table`+`.data*` |
 |---|---|---|---|
-| `main` | 1,905,376 | 1,457,416 | 1,793,315 |
-| branch, default minus `media` | 1,905,376 (+0) | 1,460,168 (+2,752) | 1,796,571 (+3,256) |
-| branch, default (media on) | 1,970,912 (+65,536) | 1,501,512 (+44,096) | 1,845,019 (+51,704) |
+| `main` (`c2fa2df02`) | 1,905,376 | 1,470,856 | 1,807,587 |
+| branch, default minus `media` | 1,905,376 (+0) | 1,473,512 (+2,656) | 1,810,683 (+3,096) |
+| branch, default (media on) | 1,970,912 (+65,536) | 1,516,232 (+45,376) | 1,860,499 (+52,912) |
 
-The media module costs about 41 KB of `.text` and 48 KB of loaded sections
+The media module costs about 43 KB of `.text` and 50 KB of loaded sections
 over the feature off (the MPRIS readers, the link and the module); the feature built but off costs 3.3 KB of loaded sections
 (edits outside the module that a media-off build still carries: the
 window title's ellipsis moved into a shared file, the config and help text),
@@ -424,23 +426,22 @@ libc, libm and libgcc_s, and `Cargo.lock` is byte-identical to `main`'s.
 
 **Which rows of the rules regress.** Rule 1 (no row regresses against the
 previous milestone beyond noise, except a row the new module adds): the
-stripped binary size row regresses by 65,536 B on disk (+3.4%, 51,704 B or
-+2.9% of loaded sections), against a `main` from before the tooltips PR
-(whose own waived row is above: its +13,440 B of `.text` is not in this
-comparison, and the media row is the module's own). Idle wakeups, jiffies,
-fds and threads do not regress in any row, with the module placed or not, and
-idle RSS and PSS are within what one run resolves (the largest: +80 kB RSS
-and +65 kB PSS with the clock over the feature off, 4312 against 4232 kB). The
-size row is the same shape as every module before it, and the rule's own
-exception covers only a row the module adds, so it was a regression for the
-maintainer to waive or not.
+stripped binary size row regresses by 65,536 B on disk (+3.4%, 52,912 B or
++2.9% of loaded sections). Idle wakeups, jiffies, fds and threads do not
+regress in any row, with the module placed or not, and idle RSS and PSS are
+within what one run resolves (the largest: +64 kB RSS with the clock over the
+feature off, 4312 against 4248 kB). The size row is the same shape as every
+module before it, and the rule's own exception covers only a row the module
+adds, so it was a regression for the maintainer to waive or not.
 
 **Maintainer's ruling (2026-10-03, given in chat): the stripped-binary size
-regression of the media module is waived.** It covers the module's +65,536 B
-on disk (+51,704 B of loaded sections, +44,096 B of `.text`) in the default
-build, and only that row. Nothing else is waived: no other row regresses
-beyond what one run resolves. `media` stays in the default features by the
-same decision.
+regression of the media module is waived.** It covers the module's row in the
+default build, and only that row: +65,536 B on disk, +47,416 B of loaded
+sections and +40,352 B of `.text` as measured when the ruling was given, and
+the figures above (+52,912 B and +45,376 B, against the post-tooltips `main`
+and with the review round's code, which added about 5 KB) are the same row.
+Nothing else is waived: no other row regresses beyond what one run resolves.
+`media` stays in the default features by the same decision.
 
 **Not measured**, and the rows above do not claim them: rule 2 for the media
 module (a competitor's equivalent: Waybar's `mpris` module is not in the

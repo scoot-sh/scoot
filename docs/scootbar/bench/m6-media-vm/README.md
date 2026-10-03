@@ -12,15 +12,15 @@ these ran), with that machine's paths in them (a nix `python3` with
 `jeepney`, the nixpkgs mpv built with its MPRIS script, `playerctl`). Read
 them as the method, adapt the paths to rerun.
 
-All against the code commit `242b2dce7`, whose `crates/` tree is
-`864d03f35d18ea3a87f2b421744e929d49a280c0` (`git rev-parse HEAD:crates`; the
-PR's later commit is docs and this directory). The commit is the code commit of the review round; the first round's was
-`ee46b8a47` (tree `958dcf867f66`), and `logs/mutation.txt` and
-`logs/live-*.txt`, `popup-on-main.txt` are from it (the code they exercise,
+All against the code commit `4d2207598`, whose `crates/` tree is
+`c5a935bdbccedcf7eed359182362b998bbb38aa1` (`git rev-parse HEAD:crates`): the
+review round's code, rebased onto `main` with the tooltips PR. Later commits
+change tests (`flake.txt`, `fuzz.txt` and `final-extra.txt` are at the last);
+the first round's code commit was `ee46b8a47` (tree `958dcf867f66`), and
+`logs/mutation.txt` and `logs/live-*.txt` are from it (the code they exercise,
 the match rules and the end-to-end flow, is unchanged); the tree is what the
-evidence is keyed by. `main` for the "before"
-binary is `c2d82cc95`, whose `crates/` is unchanged through `01c33f09f`, the
-branch's base; the "feature off" binary is the branch built with the default
+evidence is keyed by. `main` for the "before" binary is `c2fa2df02` (the
+tooltips PR); the "feature off" binary is the branch built with the default
 features minus `media`. The three were built release (`lto = "fat"`,
 stripped), each source `tar`red to the VM, with their own `CARGO_TARGET_DIR`.
 
@@ -29,7 +29,7 @@ stripped), each source `tar`red to the VM, with their own `CARGO_TARGET_DIR`.
 | `scripts/player.py` | an MPRIS player on `jeepney` (an independent D-Bus marshaller): owns `org.mpris.MediaPlayer2.NAME`, answers `GetAll` and `Get` of the Player interface, handles `PlayPause`, `Next` and `Previous` (and signals the change), and does what flag files ask: change track, take the long title, die without releasing anything, flood `Position` or titles for 20 s |
 | `scripts/measure.sh`, `scripts/runall.sh` | one headless `scoot`, a private `dbus-daemon` (none for `nobus`), one bar, and the players a row names (stubs, or a real mpv with its MPRIS script playing a ten-minute WAV, or mpv's synthetic `lavfi` sine); `/proc/PID` after 14 s and 60 s later. Samples go outside the runtime directory (the bar's inotify watch is on it while there is no bus) |
 | `logs/binary-sizes.txt` | file size and `readelf` section sizes of the `main`, media-off and media-on builds (the file size is quantized to 64 KiB steps), and `ldd` of each: libc, libm and libgcc_s only |
-| `logs/measure-final.log`, `logs/measure-first-run.log` | the fourteen rows of the cost table, and the same table run once before it on the same binaries (its `eight` and `lavfi` rows lost pages to the VM's memory pressure between t0 and t60: `hwm_kb` is the t0 value, `rss_kb` the reclaimed one; the rest agree with the final run within 70 kB) |
+| `logs/measure-final.log`, `logs/measure-rerun-row2.txt` | the fourteen rows of the cost table; the second row lost pages to the VM's memory pressure between t0 and t60 (RSS 3048 kB), so it was rerun twice on the same binary (the table uses the reruns' RSS; PSS read 2323 and 1464 kB, which moves with what else maps the binary) |
 | `scripts/flood.sh`, `logs/flood-final.txt` | one playing stub signalling `Position` (or a new title, or flipping the status) as fast as it can for 20 s, and a quiet baseline: signals sent, bar wakeups, CPU ticks, RSS |
 | `scripts/live.sh`, `logs/live-private.txt`, `logs/live-broker.txt`, `screenshots/` | end to end with `scoot msg screenshot`: a player found by listing the bus, a second one appearing, `playerctl` (an independent client) reading the state the bar's controls changed, the skip refusal, the most recently playing player shown, a long title cut with an ellipsis, a player killed with `kill -9`, the empty module and its refusals, then two real mpv instances. Once on a private `dbus-daemon` and once on the VM's own session bus, which is `dbus-broker` 37 (read-only apart from the names the script's players own for the run: none left after) |
 | `scripts/gen_modules_arms.py` | how the 128 `modules!` arms of `src/cli.rs` were regenerated (a build with no clock, workspaces or window title: one per subset of the seven optional modules of that day). A record, not a tool: it hardcodes those seven, needs a python3 the dev shell lacks, and does not apply to `popup` (a feature, not a module). `cli::tests::the_modules_line_is_the_registry_in_order` checks every build's line against the registry |
@@ -40,14 +40,14 @@ stripped), each source `tar`red to the VM, with their own `CARGO_TARGET_DIR`.
 
 ## What ran against what
 
-- **The two `FAIL`s in `logs/ci.txt`** are one test, `popup::a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks`,
-  under both runners. It fails the same way on `main` with the same
-  binary: the VM's only `scoot` is the build of 1 October
-  (`/var/cargo-target/debug/scoot`), older than what the test expects. CI
-  builds `scoot` from the tree under test, so this is not a CI result. (The
-  other known failure of that binary, `agent::layout_rectangles_...`, passed
-  here.) `logs/popup-on-main.txt` is the test on a `main` build with that
-  `scoot`.
+- **The two `FAIL`s in `logs/ci.txt`** (nextest and `cargo test`) are the
+  same five tests: `popup::a_bar_with_no_popup_binding_binds_nothing_for_popups_until_invoke_asks`
+  and four of `tooltip::`. They fail the same way on `main` with the same
+  binary (`logs/popup-on-main.txt`): the VM's only `scoot` is the build of 1
+  October (`/var/cargo-target/debug/scoot`), older than what those tests
+  expect. CI builds `scoot` from the tree under test, so these are not CI
+  results. (`agent::layout_rectangles_...`, another known failure of that
+  binary, passed here.)
 - **Not run here**: the Asahi M2 and real hardware, the full
   `scripts/scootbar-bench`, a real Spotify, Firefox or Chromium as the
   player, `nix build` of the package and the Nix module check (the VM has

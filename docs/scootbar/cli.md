@@ -955,7 +955,7 @@ Cargo feature (`media`), on by default; the smallest build
   crash or hang the bar or another player, grow it without bound, or make it
   believe another player's state; and it holds at most one of the 8 slots.
   What it can do: cost the bar the work of its own signals (a flood of
-  positions about 0.65% of a core at 500 a second, measured; a flood of
+  positions about 0.6% of a core at 500 a second, measured; a flood of
   titles or state flips is drawn ten times a second at most), and fill the
   slots. Only the bus's own `NameOwnerChanged` is believed, and a
   `PropertiesChanged` only from the connection that owns a held name. Titles
@@ -1095,20 +1095,20 @@ Cargo feature (`media`), on by default; the smallest build
   Measured (dev VM, one 60 s idle window per row): **zero wakeups** with no
   bus, with a bus and no player, with one player paused, with one playing,
   with eight playing, and with a real mpv (its MPRIS script) playing a file;
-  one thread throughout; RSS 4160 kB with a bus and no player, 4392 kB with
-  one playing player, 4388 kB with eight (differences under about 130 kB
-  are within one run's resolution; the clock alone is 4180 kB). A player
+  one thread throughout; RSS 4156 kB with a bus and no player, 4388 kB with
+  one playing player, 4392 kB with eight (differences under about 130 kB
+  are within one run's resolution; the clock alone is 4236 kB). A player
   that signals constantly pays for itself and no more: a stub signalling its
-  position 500 times a second for 20 s (10,013 signals) cost the bar 0.65% of
-  a core, one sending a new title 480 times a second 0.8%, and one flipping
+  position 500 times a second for 20 s (10,143 signals) cost the bar 0.6% of
+  a core, one sending a new title 480 times a second 0.85%, and one flipping
   between playing and paused 500 times a second 0.75%, RSS flat in all three
   (the tests pin that a position draws and reads nothing, and that title and
   state changes are drawn ten times a second at most). A player that
   re-sends unchanged metadata (mpv playing its synthetic `lavfi` source
   does, once a second) wakes the bar once a second and draws nothing. The
-  binary: **+65,536 B on disk (1,905,376 to 1,970,912, +3.4%) and +51,704 B
-  of loaded sections (+2.9%, of which `.text` +44,096 B)** against `main`;
-  the feature built but off is +3,256 B loaded and no more on disk. The
+  binary: **+65,536 B on disk (1,905,376 to 1,970,912, +3.4%) and +52,912 B
+  of loaded sections (+2.9%, of which `.text` +45,376 B)** against `main`;
+  the feature built but off is +3,096 B loaded and no more on disk. The
   maintainer waived this row on 2026-10-03 (this row only) and `media`
   stays in `default`. The table and its method are in the
   [resource ratchet](backlog/lightest.md#m6-media-module-level-cost-measured-2026-10-03).
