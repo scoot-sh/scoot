@@ -39,6 +39,11 @@ impl Module for Counter {
         }
     }
 
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        true
+    }
+
     fn view(&self, output: &OutputView<'_>, view: &mut View) {
         let _ = write!(view.text_mut(), "{}", self.count);
         if let Some(name) = output.name {
@@ -188,6 +193,15 @@ fn check_view(id: &str, harness: &Harness, after: &str) {
             !view.was_cut(),
             "{id}: its view was cut at {MAX_TEXT} bytes, {after}: {:?} / {:?}",
             view.text(),
+            view.tooltip()
+        );
+        // A module whose view carries a tooltip says so: the bar takes a
+        // pointer for tooltips from that alone, so a module that writes one
+        // and does not would have a tooltip nobody can hover to.
+        #[cfg(feature = "popup")]
+        assert!(
+            view.tooltip().is_empty() || harness.tooltips(),
+            "{id}: a tooltip ({:?}) and `Module::tooltips` is false, {after}",
             view.tooltip()
         );
     }

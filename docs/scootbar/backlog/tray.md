@@ -89,8 +89,8 @@ click, and an item killed without unregistering.
   GTK and Ayatana apps) is tracked but not drawn: it needs an icon-theme
   lookup and an image decoder, the "what to decide first" cost, still
   unmeasured. Attention and overlay icons and `IconThemePath` are read for
-  shape and dropped. [Tooltips](tooltips.md) (the title list on the module
-  is what exists).
+  shape and dropped. [Tooltips](resolved/tooltips-done.md) (the shown items' title list is what
+  the module's tooltip shows; an item's own tooltip text is not drawn).
 - **Session buses on abstract sockets** (`unix:abstract=...`, what
   `dbus-launch` makes): the client dials a path only.
 - **Real applications**: the items tried are an independent marshaller's,

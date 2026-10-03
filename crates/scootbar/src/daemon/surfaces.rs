@@ -255,7 +255,10 @@ impl State {
         // A popup is the old modules' (their indices are rebuilt), and its
         // bar may be destroyed below: closed first.
         #[cfg(feature = "popup")]
-        self.popup.close();
+        {
+            self.popup.close();
+            self.popup.reset_hover(self.content.tooltip_delay);
+        }
         // The modules a press or scroll was for are gone with the old ones:
         // nothing stays armed across a reload. The pointer has not moved,
         // and a surface that survives gets no new `enter`, so its focus

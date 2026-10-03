@@ -31,7 +31,7 @@ const BINDING: &str = "on-click = \"popup\"\n";
 
 fn config(extra: &str) -> String {
     format!(
-        "[bar]\nheight = {HEIGHT}\nfont-size = 20\n\
+        "[bar]\nheight = {HEIGHT}\nfont-size = 20\ntooltip-delay = 0\n\
          [colors]\nbackground = \"{BAR}\"\nforeground = \"{FG}\"\naccent = \"{ACCENT}\"\n\
          dim = \"{DIM}\"\n[volume]\n{extra}"
     )

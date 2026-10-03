@@ -54,6 +54,12 @@ impl Module for Push {
         Update::Unchanged
     }
 
+    /// Its view carries a tooltip.
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        true
+    }
+
     fn view(&self, _: &OutputView<'_>, view: &mut View) {
         self.shown.write(view);
     }

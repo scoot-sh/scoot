@@ -72,11 +72,19 @@ fn rig(tag: &str) -> Option<(Session, Reaper, pulse::Server)> {
     } else {
         "on-click = \"popup\"\n"
     };
+    // Tooltips off, so one never stands where a closed popup is looked for
+    // (volume has a tooltip, and a pointer rests on it). `SCOOTBAR_BENCH_NO_TOOLTIP`
+    // leaves the key out, for a build that predates it.
+    let tooltips = if std::env::var_os("SCOOTBAR_BENCH_NO_TOOLTIP").is_some() {
+        ""
+    } else {
+        "tooltip-delay = 0\n"
+    };
     let file = session.runtime_dir().join("bar.toml");
     fs::write(
         &file,
         format!(
-            "[bar]\nheight = {HEIGHT}\nfont-size = 20\n[colors]\nbackground = \"{BAR}\"\n\
+            "[bar]\nheight = {HEIGHT}\nfont-size = 20\n{tooltips}[colors]\nbackground = \"{BAR}\"\n\
              [volume]\n{click}"
         ),
     )

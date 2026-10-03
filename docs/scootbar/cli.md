@@ -104,6 +104,7 @@ font-size = 14        # 1 to 256
 padding = 8           # 0 to 1024
 spacing = 0           # 0 to 1024
 separator = 0         # a line in the gap between modules, 0 to spacing: see Spacing
+tooltip-delay = 500   # ms the pointer rests on a module before its tooltip shows, 0 to 10000; 0 is off: see Tooltips
 
 [colors]
 background = "#1e1e2e"
@@ -1031,7 +1032,8 @@ launcher are still how it works.
   does not. A `wl_keyboard` is taken from the seat **only while a popup that
   grabbed is open**, to hear Escape (the grab is what gives the popup the
   keyboard), and released with it. Keybindings of the compositor still win.
-- **Limits.** One popup at a time. A drag ends when the pointer leaves the
+- **Limits.** One popup at a time (a [tooltip](#tooltips) is not one: it closes
+  when a popup opens, and none shows while one is open). A drag ends when the pointer leaves the
   popup (the compositor's popup grab moves the pointer's focus off it, so
   nothing more of the drag arrives); past the slider's ends but still over the
   popup it clamps to them. No keyboard navigation but Escape. A compositor
@@ -1054,6 +1056,80 @@ launcher are still how it works.
   (the content: text, a slider, buttons; a list is a column of buttons) and
   the actions its widgets name, which are ordinary module actions, so
   everything a popup does is something a binding or `invoke` could do.
+
+## Tooltips
+
+A module's `tooltip` (the line a module's view carries beside its text) is
+shown in a small panel under the module after the pointer has rested on it for
+`bar.tooltip-delay` milliseconds, and gone when the pointer leaves. It is the
+[popup](#popups) machinery without a grab, so the `popup` Cargo feature (on by
+default) is also the code of tooltips, and a build without it has no
+tooltips and refuses the `tooltip-delay` key.
+
+```toml
+[bar]
+tooltip-delay = 300     # ms, 0 to 10000; 0 turns tooltips off (default 500)
+```
+
+There is no flag for it: the config file only.
+
+- **Which modules have one**, with nothing new read to make it: each module's
+  tooltip is the one its view already carried (the window title's full title,
+  uncut by the span; the network's interface, SSID and signal; the battery's
+  `Charging 80%`; the volume and microphone's device and level; the
+  brightness's device; the tray's item titles; a `push` or `exec` module's
+  `tooltip` key, [the update payload](#the-update-payload)). A module with no
+  tooltip, or whose tooltip is empty right now, shows none and arms nothing:
+  the clock, workspaces and `button` modules have none. A new module's tooltip
+  is `tooltip_mut` in its `view` and `Module::tooltips` saying so.
+- **When.** The delay runs from the pointer entering the module (motion
+  within it does not restart it), and a pointer that crosses a module and
+  moves on before the delay shows nothing. Moving to another module hides the
+  tooltip and starts that module's delay over.
+- **It goes** on: the pointer leaving the module or the bar, **any press**
+  (the press then acts as it always does: a tooltip is not a popup, and a
+  click is never spent closing one), **any scroll**, a [popup](#popups)
+  opening, the module's tooltip going empty, its module leaving the bar, its
+  output being unplugged, the bar hidden or made again, a
+  `reload`, and the session locking (the compositor takes it, and it is never
+  drawn over the lock screen). After a press, a scroll or the compositor's
+  taking it away it does **not** come back until the pointer has left that
+  module. A scale change draws it again at the new scale.
+- **One popup at a time, and a click popup wins.** While a popup is open no
+  tooltip shows; a popup opening takes a tooltip down. A pointer that rested
+  on a module while a popup was open, once it closes, gets that module's
+  tooltip after the delay (unless the popup closed on the very module whose
+  tooltip had been due or shown, which stays dismissed until the pointer
+  leaves).
+- **It never takes the keyboard, a grab or a click.** No `wl_keyboard`, no
+  `xdg_popup.grab`, and an empty input region, so the pointer never enters it
+  and nothing under it is hidden from a click.
+- **Where it goes and how big.** Anchored to the module's span like a popup,
+  centered under it (above, on a bottom bar), slid along the bar and flipped
+  across it by the compositor where the output's edge would cut it. Text is
+  wrapped at spaces at 30 ems (never wider than the bar), at most six lines,
+  the last ending in an ellipsis (`…`) where it was cut; a word longer than
+  the line is broken where it fills it. A newline in a tooltip
+  breaks a line (the `push` and `exec` payloads turn control characters,
+  newlines included, into spaces, so theirs wrap only). The frame and colors
+  are the popup's.
+- **While it is shown** a changed tooltip text (a clock-like tooltip) redraws it
+  in place when the new text fits the size it opened at, damage limited to the
+  tooltip's own surface; a text that needs more room, or its module moving
+  along the bar (a neighbor's text grew), makes it again at once with no
+  delay.
+- **Cost.** With nothing hovered there is nothing: no timer file descriptor (the
+  delay is the loop's `poll` timeout, set only while the pointer rests on a
+  module with a tooltip that has not shown) and no wakeup. The bar takes a
+  `wl_pointer` for tooltips only when tooltips are on and a placed module can
+  have one (a bar of a clock alone takes none for them), and binds
+  `xdg_wm_base` when the first tooltip shows (kept until the next `reload` or
+  registry event, as an `invoke`'s is), so a bar nobody hovers binds nothing
+  new. Showing one is a surface, a positioner, an empty region and two
+  `wl_shm` buffers made then and dropped when it goes; a shown tooltip makes
+  no wakeups and no system calls. A failure to show one (no `xdg_wm_base`, no
+  buffer) is silent: a hover is not a request. Numbers: [the resource
+  ratchet](backlog/resolved/tooltips-done.md#evidence).
 
 ## Button, push and exec modules
 
@@ -1209,7 +1285,7 @@ some. Text and tooltip are cut at 256 bytes on a character boundary, and
 every control character (a tab, a carriage return, an escape) becomes a
 space, so nothing but printable text reaches the bar. A line or value
 past 4096 bytes, or JSON nested more than 8 deep, is refused. The tooltip is
-carried for [tooltips](backlog/tooltips.md), which are not drawn yet.
+shown as a [tooltip](#tooltips) where the module has one.
 
 ## Fonts
 

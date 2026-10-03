@@ -314,6 +314,7 @@ impl Canvas {
             modules,
             text,
             style,
+            ..
         } = &mut *content;
         // The frame as drawn: at `scale`, which differs from the frame's
         // own only without a viewport. Measuring, painting and damage all

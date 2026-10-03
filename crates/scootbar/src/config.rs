@@ -56,6 +56,14 @@ pub const DEFAULT_FONT_SIZE: u32 = 14;
 pub const MAX_FONT_SIZE: u32 = 256;
 /// The largest `bar.radius`: half the tallest bar.
 pub const MAX_RADIUS: u32 = MAX_HEIGHT / 2;
+/// The delay before a tooltip shows when `bar.tooltip-delay` is not given,
+/// in milliseconds.
+#[cfg(feature = "popup")]
+pub const DEFAULT_TOOLTIP_DELAY: u32 = 500;
+/// The longest `bar.tooltip-delay`, in milliseconds: ten seconds is already
+/// a tooltip nobody waits for.
+#[cfg(feature = "popup")]
+pub const MAX_TOOLTIP_DELAY: u32 = 10_000;
 /// The largest config file read: a real one is about a kilobyte, so
 /// anything past this is not one. Bounds what a reload buffers.
 pub const MAX_FILE: u64 = 64 * 1024;
@@ -77,6 +85,11 @@ pub struct Config {
     pub radius: u32,
     /// The background's alpha: 255 opaque, 0 transparent.
     pub opacity: u8,
+    /// `bar.tooltip-delay`: how long the pointer rests on a module with a
+    /// tooltip before it shows, in milliseconds; 0 turns tooltips off. No
+    /// flag: config file only.
+    #[cfg(feature = "popup")]
+    pub tooltip_delay: u32,
     pub modules: Settings,
     /// Which outputs get a bar, and their overrides.
     pub outputs: Policy,
@@ -93,6 +106,8 @@ impl Default for Config {
             font_size: DEFAULT_FONT_SIZE,
             radius: 0,
             opacity: u8::MAX,
+            #[cfg(feature = "popup")]
+            tooltip_delay: DEFAULT_TOOLTIP_DELAY,
             modules: Settings::default(),
             outputs: Policy::default(),
         }
@@ -342,6 +357,11 @@ struct BarFile {
     padding: Option<u32>,
     spacing: Option<u32>,
     separator: Option<u32>,
+    /// Without the `popup` feature there is no such key (and so no
+    /// tooltip), and `deny_unknown_fields` refuses it loudly.
+    #[cfg(feature = "popup")]
+    #[serde(rename = "tooltip-delay")]
+    tooltip_delay: Option<u32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -820,6 +840,21 @@ impl File {
                 ));
             }
         };
+        #[cfg(feature = "popup")]
+        let tooltip_delay = match bar.tooltip_delay {
+            None => defaults.tooltip_delay,
+            Some(delay) if delay <= MAX_TOOLTIP_DELAY => delay,
+            Some(delay) => {
+                return Err(value(
+                    path,
+                    "bar.tooltip-delay",
+                    format_args!(
+                        "takes whole milliseconds from 0 (no tooltips) to \
+                         {MAX_TOOLTIP_DELAY}, not `{delay}`"
+                    ),
+                ));
+            }
+        };
         let padding = gap(path, "bar.padding", bar.padding, defaults.layout.padding)?;
         let spacing = gap(path, "bar.spacing", bar.spacing, defaults.layout.spacing)?;
         let separator = gap(path, "bar.separator", bar.separator, 0)?;
@@ -1235,6 +1270,8 @@ impl File {
             font_size,
             radius,
             opacity,
+            #[cfg(feature = "popup")]
+            tooltip_delay,
             modules,
             outputs,
         })

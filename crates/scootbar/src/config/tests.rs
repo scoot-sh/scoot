@@ -778,3 +778,40 @@ fn a_tray_section_is_refused_loudly() {
         assert!(error.contains(key), "{text:?}: {error}");
     }
 }
+
+#[cfg(feature = "popup")]
+#[test]
+fn a_tooltip_delay_defaults_to_half_a_second_and_zero_turns_tooltips_off() {
+    assert_eq!(read("").unwrap().tooltip_delay, 500);
+    assert_eq!(
+        read("[bar]\ntooltip-delay = 250\n").unwrap().tooltip_delay,
+        250
+    );
+    assert_eq!(read("[bar]\ntooltip-delay = 0\n").unwrap().tooltip_delay, 0);
+    assert_eq!(
+        read("[bar]\ntooltip-delay = 10000\n")
+            .unwrap()
+            .tooltip_delay,
+        10_000
+    );
+}
+
+#[cfg(feature = "popup")]
+#[test]
+fn a_tooltip_delay_out_of_range_or_not_a_whole_number_is_refused_naming_the_key() {
+    for bad in ["10001", "-1", "0.5", "\"slow\"", "true"] {
+        let error = read(&format!("[bar]\ntooltip-delay = {bad}\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("tooltip-delay"), "{bad}: {error}");
+    }
+}
+
+#[cfg(not(feature = "popup"))]
+#[test]
+fn without_popups_there_is_no_tooltip_delay_key() {
+    let error = read("[bar]\ntooltip-delay = 250\n")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("tooltip-delay"), "{error}");
+}

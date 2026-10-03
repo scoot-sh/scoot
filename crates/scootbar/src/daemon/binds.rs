@@ -6,9 +6,10 @@
 //! for the `zwlr_foreign_toplevel_manager_v1` and the window-title module:
 //! every title change would wake the bar otherwise. `xdg_wm_base` is bound
 //! only while some binding in the config names `popup` (`on-click =
-//! "popup"`), and let go when none does and no popup is open; a bar that
-//! never opens one has no popup global at all, and `scootbar msg invoke ID
-//! popup` on one binds it, and that bind is kept until the next
+//! "popup"`), and let go when none does and no popup or tooltip is up; a bar
+//! that never opens one has no popup global at all, and `scootbar msg invoke
+//! ID popup` on one binds it (the first tooltip shown does the same), and
+//! that bind is kept until the next
 //! [`State::sync_binds`] (a reload or a registry event), not released when its
 //! popup closes ([`State::bind_xdg`]). The seat is there
 //! for pointer input, so it is bound only while a placed module takes any
@@ -93,7 +94,9 @@ impl State {
     }
 
     /// Whether the config binds a click to a popup, so it needs
-    /// `xdg_wm_base`.
+    /// `xdg_wm_base`. (A tooltip does not: it binds the global when the
+    /// first one shows, as an `invoke` does, so a bar nobody hovers binds
+    /// nothing.)
     #[cfg(feature = "popup")]
     fn wants_xdg(&self) -> bool {
         self.content
@@ -241,7 +244,7 @@ impl State {
         {
             if self.wants_xdg() {
                 let _ = self.bind_xdg(qh);
-            } else if !self.popup.is_open() {
+            } else if !self.popup.is_up() {
                 // No binding names a popup and none is open: let the global go
                 // (`destroy` from the first version). One an `invoke` bound
                 // goes here too, at the next sync after its popup closed.

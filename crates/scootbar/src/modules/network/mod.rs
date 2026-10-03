@@ -1683,6 +1683,12 @@ impl Module for Network {
         }
     }
 
+    /// Its view carries a tooltip.
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        true
+    }
+
     /// A click opens the picker with no binding at all.
     fn handles_input(&self) -> bool {
         true

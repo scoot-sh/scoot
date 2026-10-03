@@ -71,6 +71,22 @@ log says what it was asked. Set `SCOOTBAR_POPUP_SHOTS=DIR` and a failure
 from the same tree: a popup's destroy is only redrawn with the fix in
 `crates/scoot/src/compositor/handlers.rs`.
 
+## The tooltip test
+
+`tests/tooltip.rs` drives tooltips on headless scoot (and one case on sway):
+a `push` module whose tooltip `scootbar msg set` writes, the pointer moved by
+scoot's `pointer_move`, the tooltip read from the screenshot as the popup's
+are. Waits poll the screenshot against a deadline; the few "nothing happens"
+checks sleep a stated number of delays. Two helpers stand beside it:
+`tests/lockclient/` is a real `ext_session_lock_v1` client (one solid-color
+lock surface per output), which is what shows no tooltip is drawn over a
+locked session, and `tests/vpointer/` gives sway the pointer it lacks. Set
+`SCOOTBAR_TOOLTIP_SHOTS=DIR` for a PNG of a failure (or `Rig::save`).
+`tests/tooltip_bench.rs` is the resource measurement (`#[ignore]`, its header
+has the commands). `tests/popup.rs` and `tests/popup_bench.rs` set
+`tooltip-delay = 0`, so a tooltip never stands where they look for a closed
+popup (the volume module has one).
+
 ## What covers what
 
 - **Unit tests**, in a `tests.rs` beside each module: flags and their

@@ -82,6 +82,10 @@ pub struct Content {
     /// The font, with its glyph cache; `None` when no module is placed.
     pub text: Option<Text>,
     pub style: Style,
+    /// How long the pointer rests on a module before its tooltip shows;
+    /// zero is none (`bar.tooltip-delay`).
+    #[cfg(feature = "popup")]
+    pub tooltip_delay: std::time::Duration,
 }
 
 impl std::fmt::Debug for Content {
@@ -164,6 +168,8 @@ fn prepare(config: &Config) -> Result<Content, Error> {
         modules,
         text,
         style: config.style(),
+        #[cfg(feature = "popup")]
+        tooltip_delay: std::time::Duration::from_millis(config.tooltip_delay.into()),
     })
 }
 
@@ -269,6 +275,9 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         #[cfg(feature = "popup")]
         wayland.state.pump_popup(&wayland.qh);
         draw(&mut wayland.state, &wayland.qh);
+        // The tooltip after the draw, so the scene it reads is current.
+        #[cfg(feature = "popup")]
+        wayland.state.pump_tooltip(&wayland.qh, &mut now);
         // What changed, to the subscribers (one branch with none).
         wayland.state.pump_events(&mut server, &mut now);
         flush(&wayland, &mut wants_write)?;
@@ -319,6 +328,7 @@ pub fn run(config: Config, file: Option<PathBuf>, given: Given) -> Result<(), Er
         let timeout = [
             timeout,
             wayland.state.scroll_timeout(&mut now),
+            wayland.state.tooltip_wait(&mut now),
             wayland.state.events_timeout(&mut now),
             wayland.state.spawner.poll_timeout(),
         ]

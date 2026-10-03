@@ -575,6 +575,12 @@ fn scan_names(buf: &[u8], want: &[u8]) -> bool {
 }
 
 impl Module for Tray {
+    /// Its view carries a tooltip.
+    #[cfg(feature = "popup")]
+    fn tooltips(&self) -> bool {
+        true
+    }
+
     /// The bus socket while live (with `OUT` while answers wait), then
     /// the directory watch while waiting. No timer, ever: every refresh
     /// is bus-driven, and the wait is an inotify watch.

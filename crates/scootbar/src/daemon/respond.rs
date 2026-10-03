@@ -279,6 +279,8 @@ impl Responder<'_> {
             modules,
             text,
             style: config.style(),
+            #[cfg(feature = "popup")]
+            tooltip_delay: std::time::Duration::from_millis(config.tooltip_delay.into()),
         })
     }
 

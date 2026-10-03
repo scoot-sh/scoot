@@ -3042,6 +3042,8 @@ impl Given {
             font_size: self.font_size.unwrap_or(defaults.font_size),
             radius: defaults.radius,
             opacity: defaults.opacity,
+            #[cfg(feature = "popup")]
+            tooltip_delay: defaults.tooltip_delay,
             modules,
             outputs: crate::policy::Policy {
                 select: self.outputs.unwrap_or_default(),
