@@ -1352,3 +1352,110 @@ fn a_bus_that_kept_dropping_us_is_tried_again_later() {
     assert!(start.elapsed() >= super::RETRY_AFTER_QUICK_DEATHS);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A reply skipped unread names no call: the unknown drop frees what
+/// expired by age and lets every item waiting on an answer ask again at
+/// its next signal, instead of staying stuck till a reap.
+#[test]
+fn an_unknown_drop_releases_every_item_waiting_on_an_answer() {
+    use super::item::Item;
+    use super::watcher::{Flight, Op, setup};
+    use crate::dbus::conn::{self, Event};
+    use crate::dbus::testdaemon;
+    let (client, mut daemon_end) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut live = setup(conn::setup(client).unwrap());
+    let _daemon = server.join().unwrap();
+    // An item mid-read: a Props flight out, the answer not yet back.
+    let id = "org.example.App/StatusNotifierItem".to_owned();
+    live.items.push(Item::new(
+        id.clone(),
+        "org.example.App".to_owned(),
+        "/StatusNotifierItem".to_owned(),
+        ":1.9".to_owned(),
+    ));
+    live.items[0].fetching = true;
+    live.flights
+        .push(Some(Flight { op: Op::Props(id) }));
+    live.apply(Event::Dropped {
+        token: conn::DROPPED_UNKNOWN,
+    });
+    assert!(!live.items[0].fetching);
+    assert!(live.items[0].stale);
+}
+
+/// A host that disconnects is no longer a host: its entry is pruned when
+/// its owner name goes away, so a later re-registration announces again
+/// instead of being swallowed as a duplicate.
+#[test]
+fn a_host_that_disconnects_is_pruned() {
+    use super::WATCHER_KDE;
+    use super::watcher::setup;
+    use crate::dbus::conn;
+    use crate::dbus::proto::Writer;
+    use crate::dbus::testdaemon;
+    let (client, mut daemon_end) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut live = setup(conn::setup(client).unwrap());
+    let _daemon = server.join().unwrap();
+    // A peer registers as host: answered and recorded beside our own.
+    live.on_call(
+        ":1.9",
+        "/StatusNotifierWatcher",
+        WATCHER_KDE,
+        "RegisterStatusNotifierHost",
+        7,
+        "",
+        &[],
+    );
+    assert_eq!(live.hosts.len(), 2);
+    // The peer goes away: the bus says its name has no owner anymore.
+    let mut body = Writer::new();
+    body.str(":1.9");
+    body.str(":1.9");
+    body.str("");
+    live.on_name_owner_changed("sss", &body.take_body().unwrap());
+    assert_eq!(live.hosts.len(), 1);
+    assert!(live.hosts.iter().all(|host| host != ":1.9"));
+}
+
+/// The per-service cap counts by service OR registrant: a peer
+/// squatting another app's service name crowds that name out (kept
+/// deliberately: by AND, one peer could hold 8 under every name), while
+/// an unrelated name and registrant are unaffected, and the squatter's
+/// own further names are refused too.
+#[test]
+fn the_per_service_cap_counts_service_or_registrant() {
+    use super::item::Item;
+    use super::watcher::setup;
+    use super::MAX_PER_SERVICE;
+    use crate::dbus::conn;
+    use crate::dbus::testdaemon;
+    let (client, mut daemon_end) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut live = setup(conn::setup(client).unwrap());
+    let _daemon = server.join().unwrap();
+    // Eight items under the victim's name, all from one peer.
+    for n in 0..MAX_PER_SERVICE {
+        live.items.push(Item::new(
+            format!("org.victim.App{n}/StatusNotifierItem"),
+            "org.victim.App".to_owned(),
+            "/StatusNotifierItem".to_owned(),
+            ":1.9".to_owned(),
+        ));
+    }
+    // The victim's own next item under its name is crowded out, and so is
+    // the squatter's under any other name; an unrelated pair fits.
+    assert!(!live.has_room("org.victim.App", ":1.1"));
+    assert!(!live.has_room("org.other.App", ":1.9"));
+    assert!(live.has_room("org.other.App", ":1.1"));
+}
