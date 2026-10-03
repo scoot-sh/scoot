@@ -697,7 +697,12 @@ no daemon and no child process: two netlink sockets on the bar's own
   spawned with the SSID as its last argument, never through a shell
   (SSIDs are attacker-controlled radio data, so no byte in one starts a
   command; a password prompt is the command's own business, as with the
-  picker). `N` names what the list showed: a scan that moved underneath
+  picker). The argument is the SSID as the row shows it, the same text
+  the picker is fed: invalid UTF-8 and control characters are replaced
+  with U+FFFD, so a network whose name has such bytes reaches the command
+  under that shown name and the connect fails, never landing on another
+  network. The list holds at most 16 rows (the popup's widget limit): a
+  scan with more shows the first 16, and the picker still lists them all. `N` names what the list showed: a scan that moved underneath
   is refused rather than connected to the wrong network. `connect` is
   refused naming why with no command configured, a row past the list or
   gone from the scan, or while one runs. With `show-ssid = false` the list

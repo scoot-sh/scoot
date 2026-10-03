@@ -75,6 +75,20 @@ needs real hardware), with screenshots.
 Popup-open rows were not measured here (no scan on the VM); the shared
 open-idle machinery is covered by the volume popup's tests.
 
+**Maintainer's ruling (2026-10-03, given in chat): the `.text` growth
+(+8,320 B, +0.5%; the file does not grow) is waived**, recorded in
+[lightest.md](../lightest.md#m6-network-popup-list-measured-2026-10-03).
+
+**Live checks after the PR opened** (head `db544bbbf`): on the Asahi M2
+(real `wlan0`, headless scoot at scale 1.5), a pointer click on the
+module opened the list with the scan (one network in range, so one row),
+a click on the row closed it, and `connect-command` received exactly one
+argument, the SSID. The independent review ran a `mac80211_hwsim` rig on
+the dev VM with three access points, a 32-byte SSID among them: three
+rows drawn with their bars, the long SSID whole, hover highlight live,
+and `connect 0` delivering the SSID as one argument. Scrolling past the
+visible rows has still only been exercised by the unit tests.
+
 Original entry, left as written:
 
 ## The gap
