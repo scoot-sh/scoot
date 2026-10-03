@@ -31,7 +31,7 @@ is 0-509 (`max_brightness`), `scale=linear`. Still open: a second machine.
 ## Writing
 
 Setting the level needs permission: logind's `SetBrightness` over D-Bus (the
-[shared client](dbus-client.md)) needs no setup on a logind session; a udev
+[shared client](dbus-client-done.md)) needs no setup on a logind session; a udev
 rule and the `video` group work elsewhere; `exec` of `brightnessctl` is the
 interim. Ship read-only first and say why writes are gated.
 

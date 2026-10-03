@@ -1,0 +1,82 @@
+# 2026-10-02T14:28:10Z code SHA 9e67c9fbd tree crates=6960f3fd6564; scoot = /var/cargo-target/release/scoot (existing release build, read-only use); VM load: 3.00 3.36 3.26 8/171 2746959
+=== main-none (bin=scootbar-main config=none.toml items=0 bus=yes) load=3.00 3.36 3.26
+t0 rss_kb=3568 hwm_kb=3568 pss_kb=1997 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3568 hwm_kb=3568 pss_kb=2008 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[]}
+
+binary_bytes=1708768
+bar.log lines: 0
+=== tray-none (bin=scootbar-tray config=none.toml items=0 bus=yes) load=3.39 3.47 3.31
+t0 rss_kb=3680 hwm_kb=3680 pss_kb=2136 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3552 hwm_kb=3552 pss_kb=1997 threads=1 fds=7 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[]}
+
+binary_bytes=1839840
+bar.log lines: 0
+=== main-clock (bin=scootbar-main config=clockonly.toml items=0 bus=yes) load=3.61 3.46 3.31
+t0 rss_kb=3936 hwm_kb=3936 pss_kb=2240 threads=1 fds=8 vol=5 nonvol=7 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4112 hwm_kb=4112 pss_kb=2327 threads=1 fds=8 vol=7 nonvol=7 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[{"id":"clock","section":"right","output":"headless","text":"2:31 pm","class":"normal"}]}
+
+binary_bytes=1708768
+bar.log lines: 0
+=== notray-clock (bin=scootbar-notray config=clockonly.toml items=0 bus=yes) load=4.78 3.84 3.46
+t0 rss_kb=4112 hwm_kb=4112 pss_kb=2326 threads=1 fds=8 vol=9 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4112 hwm_kb=4112 pss_kb=2343 threads=1 fds=8 vol=11 nonvol=0 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[{"id":"clock","section":"right","output":"headless","text":"2:33 pm","class":"normal"}]}
+
+binary_bytes=1708768
+bar.log lines: 0
+=== tray-unplaced-clock (bin=scootbar-tray config=clockonly.toml items=0 bus=yes) load=4.98 4.15 3.59
+t0 rss_kb=3936 hwm_kb=3936 pss_kb=2254 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4112 hwm_kb=4112 pss_kb=2349 threads=1 fds=8 vol=7 nonvol=0 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[{"id":"clock","section":"right","output":"headless","text":"2:34 pm","class":"normal"}]}
+
+binary_bytes=1839840
+bar.log lines: 0
+=== tray-only-nobus (bin=scootbar-tray config=trayonly.toml items=0 bus=no) load=2.34 3.58 3.44
+t0 rss_kb=3956 hwm_kb=3956 pss_kb=2210 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3956 hwm_kb=3956 pss_kb=2220 threads=1 fds=8 vol=5 nonvol=0 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[{"id":"tray","section":"left","output":"headless","text":"","class":"normal"}]}
+
+binary_bytes=1839840
+bar.log lines: 1
+scootbar: tray: no session bus (bus No such file or directory (os error 2)); waiting for one
+=== tray-only-bus-0items (bin=scootbar-tray config=trayonly.toml items=0 bus=yes) load=1.00 2.88 3.21
+t0 rss_kb=3968 hwm_kb=3968 pss_kb=2221 threads=1 fds=8 vol=11 nonvol=0 utime_ticks=0 stime_ticks=0
+t60 rss_kb=3968 hwm_kb=3968 pss_kb=2208 threads=1 fds=8 vol=11 nonvol=0 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[{"id":"tray","section":"left","output":"headless","text":"","class":"normal"}]}
+
+binary_bytes=1839840
+bar.log lines: 0
+=== tray-only-bus-1item (bin=scootbar-tray config=trayonly.toml items=1 bus=yes) load=2.72 2.85 3.16
+t0 rss_kb=4148 hwm_kb=4148 pss_kb=2389 threads=1 fds=8 vol=18 nonvol=1 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4148 hwm_kb=4148 pss_kb=2408 threads=1 fds=8 vol=18 nonvol=1 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[{"id":"tray","section":"left","output":"headless","text":"","class":"normal","tooltip":"item-0","value":{"items":[{"id":"org.kde.StatusNotifierItem-2769293-1/StatusNotifierItem","shown":true,"status":"Active","title":"item-0"}],"watcher":"owner"}}]}
+
+binary_bytes=1839840
+bar.log lines: 0
+=== tray-only-bus-8items (bin=scootbar-tray config=trayonly.toml items=8 bus=yes) load=2.90 2.96 3.18
+t0 rss_kb=4224 hwm_kb=4224 pss_kb=2386 threads=1 fds=8 vol=51 nonvol=2 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4224 hwm_kb=4224 pss_kb=2375 threads=1 fds=8 vol=51 nonvol=2 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[{"id":"tray","section":"left","output":"headless","text":"","class":"normal","tooltip":"item-0, item-0, item-0, item-0, item-0, item-0, item-0, item-0","value":{"items":[{"id":"org.kde.StatusNotifierItem-2769810-1/StatusNotifierItem","shown":true,"status":"Active","title":"item-0"},{"id":"org.kde.StatusNotifierItem-2769810-2/StatusNotifierItem","shown":true,"status":"A
+binary_bytes=1839840
+bar.log lines: 0
+=== tray-clock-bus-1item (bin=scootbar-tray config=tray.toml items=1 bus=yes) load=2.64 2.71 3.06
+t0 rss_kb=4196 hwm_kb=4196 pss_kb=2440 threads=1 fds=9 vol=14 nonvol=2 utime_ticks=0 stime_ticks=0
+t60 rss_kb=4196 hwm_kb=4196 pss_kb=2354 threads=1 fds=9 vol=16 nonvol=2 utime_ticks=0 stime_ticks=0
+query:
+{"type":"modules","modules":[{"id":"tray","section":"left","output":"headless","text":"","class":"normal","tooltip":"item-0","value":{"items":[{"id":"org.kde.StatusNotifierItem-2770990-1/StatusNotifierItem","shown":true,"status":"Active","title":"item-0"}],"watcher":"owner"}},{"id":"clock","section":"right","output":"headless","text":"2:40 pm","class":"normal"}]}
+
+binary_bytes=1839840
+bar.log lines: 0
+FINISHED

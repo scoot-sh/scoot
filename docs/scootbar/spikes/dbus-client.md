@@ -1,6 +1,6 @@
 # D-Bus client spike: hand-rolled vs `zbus` vs libdbus
 
-Measured 2026-10-02 for [a-shared-d-bus-client](../backlog/dbus-client.md).
+Measured 2026-10-02 for [a-shared-d-bus-client](../backlog/resolved/dbus-client-done.md).
 Three throwaway binaries doing the ticket's own job — own a well-known
 name, install match rules, receive a signal — one per option, timed and
 sized on real buses. The spike crates are removed after; this file is the
@@ -8,12 +8,11 @@ record (as with the [config-parser spike](config-parser.md)).
 
 **Outcome: a hand-rolled minimal client wins on every measured row, and it
 is the only option that fits the bar's doctrine** (one single-threaded
-`poll(2)` loop, no async runtime, no C library outside libc/libm). **Build
-it with the tray, not now**: no consumer exists yet (volume speaks the
-PulseAudio protocol, network speaks netlink), so the client would land as
-dead code. The shape below is decided so the tray entry can start without
-re-measuring. The [ticket](../backlog/dbus-client.md) stays open: its done
-state needs a consumer running on the client.
+`poll(2)` loop, no async runtime, no C library outside libc/libm). **It was
+built with the tray**, as this record said to, since a client with no
+consumer is dead code; the [ticket](../backlog/resolved/dbus-client-done.md)
+records what landed ([What landed](#what-landed), below) and the cost the
+bar pays for it is in the [resource ratchet](../backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
 
 ## What was run
 
@@ -167,3 +166,27 @@ consumer lands (the NixOS lib output ships no COPYING file; checked
   complete in one round trip; the bar's frame budget is unaffected either
   way), `zbus`/`libdbus` on the broker bus, suspend/resume with the bus
   down (the tray entry owns that test: reconnect + re-acquire + re-match).
+
+## What landed
+
+The shape below held: one connection, a poll-loop fd, a pending-call table
+by serial, central `NameOwnerChanged` tracking (the tray's items vanish with
+their owners, and the watcher name is re-taken when it is lost), a marshaller
+for exactly the type set the tray needs (`a(iiay)`, `a{sv}`, `(sa(iiay)ss)`,
+`as`, the basic types and variants). Where it moved:
+
+- **Wire finding 4 (the daemon validates the wire) was half right.** The
+  daemons validate *a* wire, but a message marshalled by a peer with another
+  padding habit still reaches the parser, and the tray's own reader got
+  array padding wrong inside variants until it met sd-bus's marshalling
+  (`src/dbus/fixtures/`, which says how it was captured). A fixture the
+  crate's own `Writer` produced could not have shown it.
+- **dbus-daemon 1.16 times a call out after 25 s; dbus-broker does not**,
+  so the pending table expires its own calls by age when its slots are
+  wanted (no timer: an idle bar stays at zero wakeups).
+- **The 1 MiB message bound held** (pixmaps at device pixels are tens of
+  KiB; the tray refuses a side past 256 pixels). Menu layouts, the
+  unbounded one, wait on popups.
+- **The set-up is the one blocking part** (auth and `Hello`, three round
+  trips): bounded to 2 s *in total*, not per read.
+- Costs, recorded where the ratchet keeps them, not repeated here.

@@ -177,6 +177,86 @@ RSS/PSS/jiffies/size rows): it needs the bench runner under a
 compositor, which this lane did not have — the rows above are the
 module's published cost until that run happens.
 
+## M6 tray and the D-Bus client: module-level cost (measured 2026-10-02)
+
+The [tray](tray.md) is the [shared D-Bus client's](resolved/dbus-client-done.md)
+first consumer, so this is the cost of both. By construction: the bus
+socket is one source in the poll set (with `OUT` only while a write waits),
+or one inotify watch on the socket's directory while there is no bus; a
+one-shot timer exists only while an item waits out the 50 ms floor between
+reads of it, and not otherwise; no thread, no polling. No new dependency
+(`Cargo.lock` is unchanged). The contract test holds the module to the
+loop's source budget (2 sources at most, of 63).
+
+**Method.** Release builds of `origin/main` (`f4c93a63a`) and of the branch
+at its code commit `9e67c9fbd` (`crates/` tree `6960f3fd6564`) on the dev VM
+(aarch64, 6 CPUs, rustc 1.97.1, `lto = "fat"`, stripped), with a headless
+`scoot` (an existing release build, used read-only), a private
+`dbus-daemon` 1.16.2, and the items real D-Bus peers: Python scripts on
+`jeepney`, an independent marshaller, each owning an item name, registering,
+and answering `GetAll` with a pixmap. One bar per run, sampled from
+`/proc/PID` after 14 s of settling and again 60 s later (`VmRSS`, `Pss`,
+voluntary context switches, jiffies, fds), one run per row. **The VM was
+shared** (load average 1 to 5 from other agents' builds and tests while the
+rows ran), so the wakeup counts, which are per process, are sound and the
+RSS differences under about 0.2 MiB are within what one run can
+resolve. The scripts and raw logs are in
+[`bench/m6-tray-vm`](../bench/m6-tray-vm/README.md).
+
+| Row | RSS kB | PSS kB | wakeups in 60 s | jiffies | fds |
+|---|---|---|---|---|---|
+| `main`, no module placed | 3568 | 2008 | 0 | 0 | 7 |
+| branch (tray built), no module placed | 3552 | 1997 | 0 | 0 | 7 |
+| `main`, clock | 4112 | 2327 | 2 | 0 | 8 |
+| branch with the tray feature off, clock | 4112 | 2343 | 2 | 0 | 8 |
+| branch, clock, tray built and not placed | 4112 | 2349 | 2 | 0 | 8 |
+| branch, tray alone, **no bus** | 3956 | 2220 | **0** | 0 | 8 |
+| branch, tray alone, bus, no items | 3968 | 2208 | **0** | 0 | 8 |
+| branch, tray alone, bus, 1 item | 4148 | 2408 | **0** | 0 | 8 |
+| branch, tray alone, bus, 8 items | 4224 | 2375 | **0** | 0 | 8 |
+| branch, tray and clock, bus, 1 item | 4196 | 2354 | 2 (the clock's) | 0 | 9 |
+
+How to read it. **Zero wakeups**, tray alone, with no bus, a bus and no
+items, and a bus with one and with eight items on it: nothing in the
+tray's idle state wakes the bar, the clock's two a minute (its tick and
+the compositor's buffer release) are the only wakeups in the rows that
+have a clock. A placed module makes the bar load its font: 3568 kB with no module, 4112
+with the clock (+544) and 3956 with the tray alone (+404). On top of that
+the tray costs 12 kB for the bus connection with no items, about 180 kB
+for the first item (the item's state and its icon bitmaps) and about 11 kB
+for each further one (the 8-item row is 76 kB over the 1-item row); one
+thread throughout. **Binary: 1,708,768 B on `main` and on the branch with
+the feature off, 1,839,840 B with it, +131,072 B (+7.7%)**, and `ldd` still
+shows only libc, libm and libgcc_s and `Cargo.lock` is byte-identical to
+`main`'s. The feature is in `default`, the way every module is; the
+smallest build (`--no-default-features`) has none of it, and that is where
+this row is bought back.
+
+**A runaway item.** One item re-announcing its icon as fast as the bar
+re-reads it, for 20 s (`flood.sh` in the PR): the bar read it 436 times
+(the 50 ms floor), used 0.11 CPU-seconds (0.55% of a core), made about 62
+wakeups a second, and its RSS did not move. Without the floor (the first
+version of the module) the same item was read 20,354 times in 20 s and cost
+1.93 CPU-seconds (9.7% of a core) and 1,850 wakeups a second, which is what
+put the floor in. Many such items are bounded by the 32-item cap.
+
+**Against Waybar** (rule 2), the same harness, nixpkgs' Waybar 0.15.0 with
+only a `tray` module and the same item on the same private bus: RSS
+49,528 kB, PSS 42,607 kB, 7 to 8 threads, 14 fds, against scootbar's 4,148
+kB, 2,408 kB, 1 thread and 8 fds with the tray alone and one item. Its main
+thread made no context switch in the 60 s either (23 and 23; the other
+threads' counters are not comparable, one thread exited in the window).
+scootbar is about a twelfth of Waybar's RSS, and nothing is behind it on a
+row both have. Yambar's tray is not measured (no build of it on the box).
+
+**Not measured**, and the rows above do not claim them: the Asahi M2 and
+real hardware (this lane had the dev VM only; nothing here depends on a
+GPU or a display); the full `scripts/scootbar-bench` rows (startup,
+switching CPU), which need the bench runner under a compositor; the soak
+(suspend and resume, DPMS, days of uptime) for growth; a real Qt, GTK or
+Electron app as the item; yambar. Rule 2 for the tray is therefore passed
+against Waybar and **open against yambar**.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

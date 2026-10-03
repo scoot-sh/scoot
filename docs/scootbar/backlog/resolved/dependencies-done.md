@@ -18,7 +18,7 @@ font rasterizer; the clock timer and time zone) and the competitor
 baselines. **Every later entry that picks a dependency adds its own section
 here** (the config parser in
 [config-cli-and-reload](../config-cli-and-reload.md), D-Bus in
-[dbus-client](../dbus-client.md), icons in
+[dbus-client](dbus-client-done.md), icons in
 [icons-and-fonts](icons-and-fonts-done.md)), with its alternatives, numbers
 and licence check.
 

@@ -1,0 +1,55 @@
+--- 1. two items shown (one found by enumeration, one registered)
+{"items": [{"id": "org.kde.StatusNotifierItem-100-1/StatusNotifierItem", "shown": true, "status": "Active", "title": "item-0"}, {"id": "org.kde.StatusNotifierItem-100-2/StatusNotifierItem", "shown": true, "status": "Active", "title": "item-0"}], "watcher": "owner"}
+--- sd-bus reads OUR watcher object (independent parser)
+as 2 "org.kde.StatusNotifierItem-100-1/StatusNotifierItem" "org.kde.StatusNotifierItem-100-2/StatusNotifierItem"
+b true
+i 0
+NAME                                  TYPE      SIGNATURE RESULT/VALUE                                                                                         FLAGS
+org.freedesktop.DBus.Introspectable   interface -         -                                                                                                    -
+.Introspect                           method    -         s                                                                                                    -
+org.freedesktop.DBus.Peer             interface -         -                                                                                                    -
+.Ping                                 method    -         -                                                                                                    -
+org.freedesktop.DBus.Properties       interface -         -                                                                                                    -
+.Get                                  method    ss        v                                                                                                    -
+.GetAll                               method    s         a{sv}                                                                                                -
+org.freedesktop.StatusNotifierWatcher interface -         -                                                                                                    -
+.RegisterStatusNotifierHost           method    s         -                                                                                                    -
+.RegisterStatusNotifierItem           method    s         -                                                                                                    -
+.IsStatusNotifierHostRegistered       property  b         true                                                                                                 emits-change
+--- screenshot 1
+800x200, 5111 bytes -> /tmp/tray-takeover-run/live/out/shot1.png
+bar.log
+i1.log
+i1.out
+i2.log
+i2.out
+shot1.png
+--- 2. click: scootbar msg invoke tray activate 0 / secondary 1 / wheel-up 1 / wheel-down 0 / menu 0
+scootbar: daemon: `tray` menu: tray menus wait on the popups entry
+scootbar: daemon: `tray` activate: no such tray item
+item1 log:
+requestname (1,)
+ready
+getall -> v0
+Activate (0, 0)
+Scroll (-1, 'vertical')
+item2 log:
+requestname (1,)
+register ()
+ready
+getall -> v0
+SecondaryActivate (0, 0)
+Scroll (1, 'vertical')
+--- 3. NewIcon: item 2 changes icon
+newicon 1
+getall -> v1
+{"items": [{"id": "org.kde.StatusNotifierItem-100-1/StatusNotifierItem", "shown": true, "status": "Active", "title": "item-0"}, {"id": "org.kde.StatusNotifierItem-100-2/StatusNotifierItem", "shown": true, "status": "Active", "title": "item-1"}], "watcher": "owner"}
+800x200, 5114 bytes -> /tmp/tray-takeover-run/live/out/shot2.png
+--- 4. crash: kill -9 item 1 (no unregister)
+{"items": [{"id": "org.kde.StatusNotifierItem-100-2/StatusNotifierItem", "shown": true, "status": "Active", "title": "item-1"}], "watcher": "owner"}
+/tmp/tray-takeover-run/live.sh: line 48: 2746144 Killed                     $PY /tmp/tray-takeover-run/item.py org.kde.StatusNotifierItem-100-1 $R/out/i1.log $R/out/flag1 0 noregister > $R/out/i1.out 2>&1
+800x200, 5089 bytes -> /tmp/tray-takeover-run/live/out/shot3.png
+--- 5. watcher name taken by us; kill -9 item 2 -> empty
+null
+/tmp/tray-takeover-run/live.sh: line 51: 2746204 Killed                     $PY /tmp/tray-takeover-run/item.py org.kde.StatusNotifierItem-100-2 $R/out/i2.log $R/out/flag2 90 > $R/out/i2.out 2>&1
+bar.log:

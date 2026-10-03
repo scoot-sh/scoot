@@ -3,7 +3,7 @@ title: "Bluetooth module: adapter and device state over BlueZ"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "dbus-client"
+blocked: null
 milestone: "M6"
 ---
 
@@ -13,7 +13,7 @@ Filed 2026-09-29 (research: Waybar #688 asks for fuller Bluetooth). Serves
 **daily-drive**.
 
 BlueZ is D-Bus: `org.bluez` objects with `PropertiesChanged` signals, through the
-[shared D-Bus client](dbus-client.md). All signals, no polling.
+[shared D-Bus client](resolved/dbus-client-done.md). All signals, no polling.
 
 - Adapter on/off and connected-device count, a state class, and the connected
   device's name (bounded and sanitized text, like

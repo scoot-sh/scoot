@@ -3,7 +3,7 @@ title: "Media module: now playing, play/pause/next over MPRIS"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "dbus-client"
+blocked: null
 milestone: "M6"
 ---
 
@@ -12,7 +12,7 @@ milestone: "M6"
 Filed 2026-09-29. Serves **daily-drive**.
 
 MPRIS players (`org.mpris.MediaPlayer2.*`) on the session bus, through the
-[shared D-Bus client](dbus-client.md): watch `NameOwnerChanged` to learn players
+[shared D-Bus client](resolved/dbus-client-done.md): watch `NameOwnerChanged` to learn players
 appear and vanish, `PropertiesChanged` for track and playback state. All
 signals, no polling; playback position is deliberately not shown (it has no
 change signal and would need a timer).

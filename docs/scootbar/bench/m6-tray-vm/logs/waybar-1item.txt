@@ -1,0 +1,11 @@
+t0 pid=2813045 rss_kb=49528 pss_kb=42607 threads=8 fds=14 vol=23 nonvol=150 utime_ticks=11 stime_ticks=5
+all_threads_vol=218 nonvol=163
+t60 pid=2813045 rss_kb=49656 pss_kb=42618 threads=7 fds=14 vol=23 nonvol=150 utime_ticks=11 stime_ticks=5
+all_threads_vol=193 nonvol=163
+items seen by item scripts: 2
+waybar.log:
+[2026-10-02 15:02:32.041] [info] Using configuration file /tmp/tray-takeover-run/s-waybar-1/waybar.json
+[2026-10-02 15:02:32.045] [info] Unable to receive desktop appearance: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.portal.Desktop was not provided by any .service files
+[2026-10-02 15:02:32.045] [info] Using CSS file /tmp/tray-takeover-run/s-waybar-1/style.css
+[2026-10-02 15:02:32.057] [info] Bar configured (width: 1600, height: 28) for output: headless
+

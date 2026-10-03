@@ -1,0 +1,6 @@
+#988696	REDUCE cov: 544 ft: 1718 corp: 618/109Kb lim: 9779 exec/s: 30896 rss: 33Mb L: 136/1316 MS: 5 ShuffleBytes-InsertRepeatedBytes-ChangeByte-EraseBytes-PersAutoDict- DE: "(dty"-
+#998033	REDUCE cov: 544 ft: 1718 corp: 618/109Kb lim: 9870 exec/s: 31188 rss: 33Mb L: 141/1316 MS: 2 ChangeByte-EraseBytes-
+#999789	REDUCE cov: 544 ft: 1718 corp: 618/109Kb lim: 9883 exec/s: 31243 rss: 33Mb L: 34/1316 MS: 1 EraseBytes-
+#1000000	DONE   cov: 544 ft: 1718 corp: 618/109Kb lim: 9883 exec/s: 31250 rss: 33Mb
+###### End of recommended dictionary. ######
+Done 1000000 runs in 32 second(s)

@@ -26,6 +26,7 @@ devenv shell -- cargo fmt --check -p scootbar
 | `SCOOTBAR_REQUIRE_SCOOT` | no `scoot` is a failure, not a skip, and so is no `foot` on `PATH` for the window-placement check (CI sets it) |
 | `SCOOTBAR_TEST_SWAY` | the `sway` binary to run; default, `sway` on `PATH` |
 | `SCOOTBAR_REQUIRE_SWAY` | no `sway` is a failure, not a skip (CI sets it) |
+| `SCOOTBAR_REQUIRE_DBUS_DAEMON` | no `dbus-daemon` on `PATH` is a failure, not a skip, for the tests that start a private one (`src/dbus/daemon_tests.rs`, `src/modules/tray/daemon_tests.rs`; built with the `tray` feature; CI sets it, with `dbus-daemon` from the pinned nixpkgs for the step) |
 | `SCOOTBAR_DEBUG_NO_VIEWPORTER` | read by a **debug** `scootbar` only (compiled out of release builds): leaves `wp_viewporter` unbound, as on a compositor without it, so the integer-scale fallback is tested on compositors that have one |
 | `SCOOTBAR_BLESS` | rewrites the [snapshots](#snapshots) the tests compare instead of comparing them |
 
@@ -480,9 +481,16 @@ A third target, **`payload`**, is the `exec` and `push` update payload (a
 line of text or JSON, and a `msg set` value: refused or accepted without a
 panic, bounded, printable, a refused one changing nothing); its check is
 `src/modules/payload/fuzz.rs`, replayed on every `cargo test` over
-`fuzz/corpus/payload` and `fuzz/regressions/payload`. Later parsers each land
-with their target: the config file (M3), a hand-rolled D-Bus message parser
-(M6).
+`fuzz/corpus/payload` and `fuzz/regressions/payload`. The **`dbus`**
+target is the hand-rolled D-Bus client's parser (`src/dbus/proto.rs`, `std`
+only): arbitrary bytes framed as a stream, every framed message's header and
+body walked against its declared signature, and the shapes the tray reads
+(an item's `GetAll` through the same `read_item_props` the module calls,
+pixmap lists, name lists, owner changes) walked directly; the writer is
+round-tripped on input-derived values. Its check is `src/dbus/fuzz.rs`,
+replayed on every `cargo test` over `fuzz/corpus/dbus` (which holds a
+message marshalled by sd-bus, not by this crate) and
+`fuzz/regressions/dbus`. Later parsers each land with their target.
 
 ## CI
 
@@ -493,7 +501,7 @@ the change reaches it too (the crate's `Cargo.toml` does):
 
 | Job | What it runs |
 |---|---|
-| `scootbar` | `fmt --check`; the benchmark harness's unit tests; clippy `-D warnings` on the default build, `--no-default-features`, and each module alone (the modules read from `Cargo.toml`, so a new one joins with no workflow change); `cargo nextest run` and `cargo test` of the default build (both: `CLAUDE.md` says why), then `cargo nextest run` of the unit tests with every module, with none, and with each alone; no `libc` crate, and an `ldd` check that the release binary links only libc, libm and libgcc_s (no libEGL, libgbm or libwayland); all five fuzz targets for a fixed budget, 1,000,000 runs of `format`, 5,000,000 of `tzif`, 2,000,000 of `payload`, 2,000,000 of `volume` and 2,000,000 of `network` from seed 1 (about a minute), a finding's input printed in base64, after `cargo fetch --locked` of the fuzz workspace (cargo-fuzz has no `--locked`), so a stale `fuzz/Cargo.lock` fails |
+| `scootbar` | `fmt --check`; the benchmark harness's unit tests; clippy `-D warnings` on the default build, `--no-default-features`, and each module alone (the modules read from `Cargo.toml`, so a new one joins with no workflow change); `cargo nextest run` and `cargo test` of the default build (both: `CLAUDE.md` says why), then `cargo nextest run` of the unit tests with every module, with none, and with each alone; no `libc` crate, and an `ldd` check that the release binary links only libc, libm and libgcc_s (no libEGL, libgbm or libwayland); all six fuzz targets for a fixed budget, 1,000,000 runs of `format`, 5,000,000 of `tzif`, 2,000,000 of `payload`, 2,000,000 of `volume`, 2,000,000 of `network` and 1,000,000 of `dbus` from seed 1 (about a minute), a finding's input printed in base64, after `cargo fetch --locked` of the fuzz workspace (cargo-fuzz has no `--locked`), so a stale `fuzz/Cargo.lock` fails |
 | `scootbar-integration` | the integration tests on headless scoot and sway, with `SCOOTBAR_REQUIRE_SCOOT` and `SCOOTBAR_REQUIRE_SWAY` so a missing compositor fails instead of skipping; also on a compositor-only change |
 
 The bar never runs on a Mac, and does not build there (neither does
