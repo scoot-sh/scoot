@@ -1,10 +1,11 @@
 ---
 title: "Tray D-Bus client: hardening left over from the #388 review"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M6"
+resolved: "2026-10-03"
 ---
 
 # Tray D-Bus client: hardening left over from the #388 review
@@ -73,3 +74,63 @@ staged work absent must still request no `OUT`.
 Tray menus (the tray ticket), icon-name-only items, and the `Scroll`
 direction against a real Qt, GTK or Electron app (needs a real app on
 hardware).
+
+## Resolution (2026-10-03, PR #TBD)
+
+All nine items landed, each with a test that failed first (failures
+quoted below are the pre-fix runs on the dev VM, aarch64):
+
+- **Byte budget.** `Conn::read_ready` reads at most 256 KiB more per pump
+  while discarding an over-cap message, with `backlog` set so the poll
+  returns at once for the rest. Test
+  (`discarding_a_flood_is_bounded_a_pump_at_a_time`, 60 MiB stream):
+  failed first with "25745728 bytes in one pump"; after, the stream
+  drains in 1868 pumps, longest 1.70 ms, and the idle state asks for no
+  `OUT` (`has_staged_work`/`want_write` false).
+- **Stuck flight.** A skipped reply no call can be named emits
+  `Event::Dropped` with `DROPPED_UNKNOWN` (only when the message is a
+  reply to a call still waiting; calls, signals and strays stay silent),
+  and the tray and media modules reap by age and let every waiting item
+  ask again at its next signal. Tests (over-cap fields past 64 KiB,
+  both consumers' release-everything tests): failed first with no event;
+  pass after.
+- **Big-endian header.** The fields length is read in the message's own
+  byte order. Test (byte-swapped over-cap reply): failed first with no
+  event; passes after, as an unknown drop (the parser stays
+  little-endian-only).
+- **`hosts`.** Pruned when the owner name goes away. Test: failed first
+  (nothing ever removed a host entry); passes after.
+- **`has_room`.** Decided and documented on the function: service OR
+  registrant, kept — by AND one peer could hold 8 under every name —
+  with a pinning test (characterization: passes before and after).
+- **Serial-only replies: REAL, fixed properly.** First run as a probe:
+  `dbus-daemon` 1.16.2 delivers an unsolicited `METHOD_RETURN`/`ERROR`
+  from a non-callee peer to the destination (the victim took the forged
+  body as its reply, twice: peer call and bus call), while `dbus-broker`
+  37 does not (the forgery never arrived; the real answer did). So
+  `Pending` records the callee, and `dispatch` (plus the over-cap and
+  set-up paths) refuses a reply whose sender is not it whenever the
+  callee is known — the bus's own calls, or a unique name's; well-known
+  names and sender-less scripted peers are accepted as before, and a
+  refused reply leaves the flight for the real answer. Tests: both
+  failed first (forged body arrived / `read_names` refused the forged
+  body); pass after.
+- **Allocations.** Measured through the counting allocator against a
+  real daemon: six small allocations per signal (sender, path,
+  interface, member, signature, body) plus the events vec's first growth,
+  zero for an idle pump — pinned by
+  `a_signal_costs_six_small_allocations` (stable across reruns). All six
+  are inherent owned data over a reused buffer on a rare path, so
+  nothing was taken; the test is the bound.
+- **`runtime_dir`.** One helper (`conn::runtime_dir`); the tray's and
+  the volume module's copies (identical bodies) are gone. Volume tests
+  pass unchanged in shape.
+- **Fuzz.** Not driven: `conn.rs` needs `crate::print` and `rustix`,
+  and compiling it against stubs would fuzz adapted code, not the
+  shipped code. Said so in `fuzz.rs`; the conn-level socketpair tests
+  above carry the property instead. The `dbus` target ran 6,410,554
+  runs in 301 s with no finding.
+
+Idle wakeups after the budget: re-measured with the link work (same
+harness, same box): zero in all eight tray-alone rows, branch and
+`main` alike — see the ratchet's [new section](../backlog/lightest.md).

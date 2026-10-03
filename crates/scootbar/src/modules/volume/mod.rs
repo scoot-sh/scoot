@@ -54,6 +54,7 @@ use super::{
     ActionSpec, ArgKind, Init, Input, InvokeError, Module, OutputView, Sources, Update, View,
 };
 use crate::action::{ModuleAction, Trigger};
+use crate::control::paths::runtime_dir;
 use crate::icon::path::{Vector, ViewBox};
 use crate::icon::{Art, Icon};
 
@@ -233,16 +234,6 @@ fn socket_path_for(server: Option<&std::ffi::OsStr>) -> PathBuf {
         }
     }
     runtime_dir().join("pulse").join("native")
-}
-
-/// The user's runtime directory, or its conventional fallback.
-fn runtime_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
-    PathBuf::from(format!("/run/user/{}", rustix::process::getuid().as_raw()))
 }
 
 /// The directory to watch for the socket's appearance: its own directory

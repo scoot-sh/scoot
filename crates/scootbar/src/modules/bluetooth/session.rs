@@ -10,9 +10,11 @@
 //! power, connection, name or charge moves. The BlueZ rules are filtered
 //! by the bus to `/org/bluez`, and every one of them is believed only from
 //! the current owner of `org.bluez`: anything on the bus can send these
-//! signals (the client matches a reply by serial alone, so a forged reply
-//! to one of our calls is the one gap, inherited and tracked in
-//! `tray-review-hardening`).
+//! signals. Replies are matched by serial and sender — a reply from anyone
+//! but the callee is refused whenever the callee is known — except calls
+//! made of the well-known `org.bluez` itself, whose holder the client
+//! cannot know: a forged answer to one of those is accepted, like any
+//! peer's own claim to the name.
 //!
 //! The whole set starts from one `GetManagedObjects`; a `GetAll` re-reads
 //! a single interface whose signal invalidated a shown property. A
@@ -86,7 +88,7 @@ struct Refresh {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RefreshIface {
+pub(super) enum RefreshIface {
     Adapter,
     Device,
     Battery,
@@ -98,11 +100,11 @@ pub(super) struct Adapter {
     pub(super) path: String,
     pub(super) powered: bool,
     /// A `GetAll` in flight since, if one is.
-    asked: Option<Instant>,
-    last_asked: Option<Instant>,
+    pub(super) asked: Option<Instant>,
+    pub(super) last_asked: Option<Instant>,
     /// A signal arrived while one was in flight, or the last read
     /// errored: read again.
-    stale: bool,
+    pub(super) stale: bool,
 }
 
 /// One device: its path, whether it is connected, the name shown for it
@@ -137,13 +139,13 @@ pub(super) struct Live {
     /// steady state.
     scratch: String,
     /// A `GetManagedObjects` awaits its answer.
-    managed_in_flight: bool,
+    pub(super) managed_in_flight: bool,
     /// Its answer was dropped or errored, or a signal arrived while one
     /// was in flight: read again, showing the last state meanwhile. A
     /// failed read retries once, on the coalesce timer; past that it
     /// waits for the next signal, never asking at once for the same
     /// oversized answer in a loop.
-    stale_managed: bool,
+    pub(super) stale_managed: bool,
     /// The last `GetManagedObjects` completion succeeded: a stale set
     /// may be re-read at once. After a failure it may not (that loops),
     /// and waits for the timer or the next signal instead.
@@ -406,7 +408,7 @@ impl Live {
     /// object, no oftener than [`MIN_REFRESH_GAP`]. A request while one
     /// is in flight, or too soon, marks the object stale and the answer
     /// (or the timer) asks again.
-    fn refresh(&mut self, id: u64, iface: RefreshIface) {
+    pub(super) fn refresh(&mut self, id: u64, iface: RefreshIface) {
         if !self.exists(id, iface) {
             return;
         }
@@ -554,7 +556,29 @@ impl Live {
     /// answered with nothing usable. The set keeps its last state and is
     /// read again at its next signal (asking at once would fetch the same
     /// oversized answer, so `stale` waits for one).
+    /// [`conn::DROPPED_UNKNOWN`] instead of a token: the skipped reply's
+    /// header was not read, so no call can be named. Some call lost its
+    /// answer: every in-flight read fails the way its own drop would (the
+    /// tray and the media module do the same). Without this a skipped
+    /// `GetManagedObjects` leaves `managed_in_flight` set with nothing
+    /// stale, and the set is never read again.
     fn on_dropped(&mut self, token: u64) {
+        if token == conn::DROPPED_UNKNOWN {
+            if self.managed_in_flight {
+                self.fail_managed();
+            }
+            let mut stale = Vec::new();
+            for flight in self.flights.iter().flatten() {
+                if let Op::Props(refresh) = &flight.op {
+                    stale.push((refresh.id, refresh.iface));
+                }
+            }
+            for (id, iface) in stale {
+                self.finish_fetch(&Refresh { id, iface });
+                self.set_stale(id, iface, true);
+            }
+            return;
+        }
         let Some(flight) = self.flights.get_mut(token as usize).and_then(Option::take) else {
             return;
         };

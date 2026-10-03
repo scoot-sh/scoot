@@ -21,7 +21,9 @@
 //! does not take (past [`proto::MAX_MESSAGE`], up to the spec's 128 MiB)
 //! is skipped whole, and a flood is read only as far as
 //! [`READ_WATERMARK`], the rest waiting in the socket: neither costs the
-//! connection, since a peer, not the bus, decides what is sent.
+//! connection, since a peer, not the bus, decides what is sent. While such
+//! a message is being discarded, one turn reads a bounded amount (a sender
+//! that outruns the reader holds one turn, not the bar).
 
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, BorrowedFd};
@@ -42,11 +44,24 @@ pub const MAX_EVENTS_PER_TURN: usize = 64;
 /// the consumer tries again after the next turn.
 pub const MAX_PENDING: usize = 64;
 
+/// [`Event::Dropped`] with this instead of a token: the skipped reply
+/// answers some call, and the table cannot say which. No flight carries
+/// it (slots are small indexes), so matching on it is matching on the
+/// unknown.
+pub const DROPPED_UNKNOWN: u64 = u64::MAX;
+
 /// Reads stop once this much is staged, leaving the rest in the kernel's
 /// socket buffer (the sender backs up, not the bar): one whole capped
 /// message and a read's worth, so the largest message still completes.
 /// A flood is worked a turn at a time, never a lost connection.
 const READ_WATERMARK: usize = proto::MAX_MESSAGE + 64 * 1024;
+
+/// The most one [`Conn::pump`] reads while discarding a message past
+/// [`proto::MAX_MESSAGE`]: a sender that outruns the reader holds one
+/// turn this long, and the rest waits in the socket (the poll is woken
+/// for it, see [`Conn::has_staged_work`]). Reads of ordinary messages
+/// are still bounded by [`READ_WATERMARK`] alone.
+const DISCARD_BUDGET_PER_PUMP: usize = 256 * 1024;
 
 /// A message past [`proto::MAX_MESSAGE`] has its header fields read, to
 /// learn what it answers, only when they are this small; a message with
@@ -148,20 +163,9 @@ pub fn system_bus_path() -> PathBuf {
     system_bus_path_for(std::env::var_os("DBUS_SYSTEM_BUS_ADDRESS").as_deref())
 }
 
-/// The runtime directory, or its conventional fallback.
-pub fn runtime_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
-    PathBuf::from(format!("/run/user/{}", rustix_uid()))
-}
-
-fn rustix_uid() -> u32 {
-    rustix::process::getuid().as_raw()
-}
-
+/// The runtime directory, homed where every build sees it: [`conn`] is
+/// feature-gated, [`control`](crate::control) is not.
+pub use crate::control::paths::runtime_dir;
 /// Why the blocking set-up failed: `Refused` is the bus saying no (or
 /// speaking out of turn), with what it said.
 #[derive(Debug)]
@@ -230,6 +234,11 @@ pub enum Event {
     /// The reply to the call that carried `token` was past
     /// [`proto::MAX_MESSAGE`], and was skipped unread: the call is
     /// answered, with nothing the client can use. The connection lives.
+    ///
+    /// [`DROPPED_UNKNOWN`] instead of a token: the skipped reply's header
+    /// fields were past what is read (or not little-endian), so no call
+    /// can be named. Some call lost its answer; the consumer re-reads or
+    /// gives up.
     Dropped { token: u64 },
     /// A signal the match rules asked for.
     Signal {
@@ -254,12 +263,71 @@ pub enum Event {
 }
 
 /// A call waiting for its reply: the serial it went out with, the
-/// consumer's token, and when it was sent (for [`Conn::expire`]).
+/// destination it was made of (a reply from anyone else is refused),
+/// the consumer's token, and when it was sent (for [`Conn::expire`]).
 #[derive(Debug)]
 struct Pending {
     serial: u32,
+    callee: String,
     token: u64,
     sent: Instant,
+}
+
+/// What an over-cap reply (header only) answers: the unknown case is
+/// silent where the unreadable-fields case still drops unknown (see
+/// [`Conn::unknown_reply`]) — there the serial cannot even be read,
+/// while here it was read and matches nothing waiting.
+#[derive(Debug, PartialEq, Eq)]
+enum Oversize {
+    /// The call it answers, leaving the pending table.
+    Matched(u64),
+    /// Its serial matches a pending call, but its sender is not the
+    /// callee: refused like a normal-size forgery (warned once, flight
+    /// kept), never a mass release of everything waiting.
+    Refused,
+    /// It answers nothing waiting (not a reply, no serial, or a serial
+    /// matching no pending call): silent.
+    Unknown,
+}
+
+/// Whether a reply from `sender` may answer the call made of `callee`:
+/// the bus answers its own calls, a unique name answers calls made of
+/// it, and anything may answer a call made of a well-known name (who
+/// holds it now is the bus's business, not this client's). The bus's own
+/// name is accepted for any callee: a unique-name owner that disconnects
+/// mid-call is answered by the daemon itself (measured 2026-10-03 on
+/// dbus-daemon 1.16.2: an `Error.NoReply` from `org.freedesktop.DBus`),
+/// and a peer cannot send as the bus — the daemon stamps `sender` itself
+/// (measured the same day: a hand-framed reply claiming the bus's name
+/// arrived stamped with the forger's unique name, and was refused). No
+/// sender header at all (a scripted peer; never a daemon, which always
+/// sets one) is nothing to check against.
+fn sender_matches(callee: &str, sender: Option<&str>) -> bool {
+    let Some(sender) = sender else {
+        return true;
+    };
+    if sender == BUS_NAME {
+        return true;
+    }
+    if callee == BUS_NAME {
+        return sender == BUS_NAME;
+    }
+    if callee.starts_with(':') {
+        return sender == callee;
+    }
+    true
+}
+
+/// The header fields' length of a framed message, in its own byte order:
+/// the frame is validated, so the flag is `l` or `B`, and a big-endian
+/// length read as little-endian is garbage.
+fn fields_len(header: &[u8]) -> u32 {
+    let bytes = [header[12], header[13], header[14], header[15]];
+    if header[0] == b'l' {
+        u32::from_le_bytes(bytes)
+    } else {
+        u32::from_be_bytes(bytes)
+    }
 }
 
 /// The connection: the socket, the staging buffers, the pending-call
@@ -284,6 +352,8 @@ pub struct Conn {
     backlog: bool,
     /// An over-cap message was said once, not per message.
     said_oversize: bool,
+    /// A refused forged reply was said once, not per message.
+    said_forged: bool,
     /// Signals that arrived during the blocking set-up, delivered on the
     /// first [`Conn::pump`].
     stashed: Vec<Event>,
@@ -347,6 +417,7 @@ impl Conn {
         if self.waits_for_reply(flags) {
             self.pending.push(Pending {
                 serial,
+                callee: destination.to_owned(),
                 token,
                 sent: Instant::now(),
             });
@@ -428,6 +499,17 @@ impl Conn {
     pub fn staged_len(&self) -> usize {
         self.staged.len()
     }
+
+    /// Bytes of the over-cap message still to discard: while it is
+    /// nonzero the connection is mid-skip.
+    #[cfg(test)]
+    pub fn discard_pending(&self) -> usize {
+        self.discard
+    }
+
+    /// The per-pump discard budget [`Conn::pump`] stops at.
+    #[cfg(test)]
+    pub const DISCARD_BUDGET: usize = DISCARD_BUDGET_PER_PUMP;
 
     /// The watermark reads stop at.
     #[cfg(test)]
@@ -526,7 +608,7 @@ impl Conn {
             if total > proto::MAX_MESSAGE {
                 // Valid, and more than this client takes: skipped whole as
                 // its bytes arrive. A reply says which call lost its answer.
-                let fields = u32::from_le_bytes([rest[12], rest[13], rest[14], rest[15]]) as usize;
+                let fields = fields_len(rest) as usize;
                 let prefix = 16 + fields + (8 - (16 + fields) % 8) % 8;
                 let known = fields <= MAX_OVERSIZE_FIELDS;
                 if known && rest.len() < prefix {
@@ -540,9 +622,20 @@ impl Conn {
                     ));
                 }
                 let dropped = if known {
-                    Self::oversize_reply(&mut self.pending, &rest[..prefix])
+                    match Self::oversize_reply(&mut self.pending, &rest[..prefix]) {
+                        Oversize::Matched(token) => Some(token),
+                        // A forged over-cap reply is refused like a
+                        // normal-size one (warned once, flight kept), never
+                        // a mass release of everything waiting.
+                        Oversize::Refused => {
+                            self.refuse_forged();
+                            None
+                        }
+                        // It answers nothing waiting: silent.
+                        Oversize::Unknown => None,
+                    }
                 } else {
-                    None
+                    Self::unknown_reply(&self.pending, rest[1])
                 };
                 self.discard = total;
                 if let Some(token) = dropped {
@@ -583,18 +676,58 @@ impl Conn {
         self.discard -= n;
     }
 
-    /// The token of the call an over-cap reply (header only) answers, and
-    /// the call leaves the pending table.
-    fn oversize_reply(pending: &mut Vec<Pending>, prefix: &[u8]) -> Option<u64> {
-        let message = Message::parse_header(prefix).ok()?;
-        if !matches!(message.kind, Kind::MethodReturn | Kind::Error) {
-            return None;
+    /// The token for a reply skipped unread: no call can be named, so the
+    /// unknown one, and only when the skipped message answers some call
+    /// still waiting (anything else — a call, a signal, or a reply to
+    /// nothing waiting — answers nothing).
+    fn unknown_reply(pending: &[Pending], kind: u8) -> Option<u64> {
+        // MethodReturn | Error: the protocol's own codes, as
+        // `proto::Kind::from_byte` reads them.
+        if (kind == 2 || kind == 3) && !pending.is_empty() {
+            Some(DROPPED_UNKNOWN)
+        } else {
+            None
         }
-        let reply_to = message.reply_serial?;
-        let at = pending
+    }
+
+    /// What an over-cap reply (header only) answers: the call's token,
+    /// leaving the pending table, when its serial matches a pending call
+    /// from its sender; [`Oversize::Refused`] when the serial matches but
+    /// the sender is not the callee; [`Oversize::Unknown`] when it answers
+    /// nothing waiting.
+    fn oversize_reply(pending: &mut Vec<Pending>, prefix: &[u8]) -> Oversize {
+        let message = match Message::parse_header(prefix) {
+            Ok(message) => message,
+            Err(_) => return Oversize::Unknown,
+        };
+        if !matches!(message.kind, Kind::MethodReturn | Kind::Error) {
+            return Oversize::Unknown;
+        }
+        let Some(reply_to) = message.reply_serial else {
+            return Oversize::Unknown;
+        };
+        let Some(at) = pending
             .iter()
-            .position(|waiting| waiting.serial == reply_to)?;
-        Some(pending.remove(at).token)
+            .position(|waiting| waiting.serial == reply_to)
+        else {
+            return Oversize::Unknown;
+        };
+        if !sender_matches(&pending[at].callee, message.sender) {
+            return Oversize::Refused;
+        }
+        Oversize::Matched(pending.remove(at).token)
+    }
+
+    /// Refuses a reply from anyone but the callee (dbus-daemon delivers an
+    /// unsolicited one to the destination; dbus-broker does not): warned
+    /// once, and the flight stays for the real answer.
+    fn refuse_forged(&mut self) {
+        if !self.said_forged {
+            self.said_forged = true;
+            crate::print::warn(format_args!(
+                "scootbar: dbus: refusing a reply from a peer that was not called"
+            ));
+        }
     }
 
     /// Writes the outbox until it is empty or the socket would block. A
@@ -631,13 +764,23 @@ impl Conn {
     }
 
     /// Reads what is ready into staging, up to [`READ_WATERMARK`], killing
-    /// the connection only on a real I/O error.
+    /// the connection only on a real I/O error. While a message past
+    /// [`proto::MAX_MESSAGE`] is being discarded, one pump reads at most
+    /// [`DISCARD_BUDGET_PER_PUMP`] more (a sender that outruns the reader
+    /// holds one turn this long); the rest waits in the socket with
+    /// `backlog` set, so the poll returns at once for it.
     fn read_ready(&mut self) {
         let mut chunk = [0u8; 8192];
         self.backlog = false;
+        let mut read = 0;
         loop {
             if self.staged.len() >= READ_WATERMARK {
                 // Enough for this turn: the rest waits in the socket.
+                self.backlog = true;
+                return;
+            }
+            if self.discard > 0 && read >= DISCARD_BUDGET_PER_PUMP {
+                // Enough discarding for this turn.
                 self.backlog = true;
                 return;
             }
@@ -650,6 +793,7 @@ impl Conn {
                 Ok(n) => {
                     self.staged.extend_from_slice(&chunk[..n]);
                     self.apply_discard();
+                    read += n;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return,
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
@@ -662,9 +806,10 @@ impl Conn {
         }
     }
 
-    /// Sorts one frame into an event: replies by the pending table,
-    /// signals and incoming calls owned, anything else dropped. A refused
-    /// frame kills the connection.
+    /// Sorts one frame into an event: replies by the pending table (and
+    /// refused when their sender is not the callee), signals and incoming
+    /// calls owned, anything else dropped. A refused frame kills the
+    /// connection.
     fn dispatch(&mut self, frame: &[u8]) -> Option<Event> {
         let message = Message::parse(frame).ok()?;
         match message.kind {
@@ -674,6 +819,14 @@ impl Conn {
                     .pending
                     .iter()
                     .position(|pending| pending.serial == reply_to)?;
+                if !sender_matches(&self.pending[at].callee, message.sender) {
+                    // A reply from anyone but the callee (dbus-daemon
+                    // delivers an unsolicited one to the destination;
+                    // dbus-broker does not): refused, and the flight stays
+                    // for the real answer.
+                    self.refuse_forged();
+                    return None;
+                }
                 let token = self.pending.remove(at).token;
                 if message.kind == Kind::Error {
                     return Some(Event::CallError {
@@ -748,10 +901,16 @@ impl Conn {
             let message =
                 Message::parse(&frame).map_err(|_| SetupError::Refused("a bad set-up reply"))?;
             match message.kind {
-                Kind::MethodReturn if message.reply_serial == Some(serial) => {
+                Kind::MethodReturn
+                    if message.reply_serial == Some(serial)
+                        && sender_matches(destination, message.sender) =>
+                {
                     return Ok((message.signature.to_owned(), message.body.rest().to_vec()));
                 }
-                Kind::Error if message.reply_serial == Some(serial) => {
+                Kind::Error
+                    if message.reply_serial == Some(serial)
+                        && sender_matches(destination, message.sender) =>
+                {
                     return Err(SetupError::Refused("the bus errored the set-up call"));
                 }
                 Kind::Signal => self.stashed.push(Event::Signal {
@@ -851,6 +1010,7 @@ pub fn setup(stream: UnixStream) -> Result<Conn, SetupError> {
         discard: 0,
         backlog: false,
         said_oversize: false,
+        said_forged: false,
         stashed: Vec::new(),
     };
     let (signature, body) = conn.roundtrip(BUS_NAME, BUS_PATH, BUS_INTERFACE, "Hello", "", &[])?;

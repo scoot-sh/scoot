@@ -579,6 +579,89 @@ fn an_over_cap_reply_is_skipped_and_the_connection_lives() {
     assert!(!conn.dead());
 }
 
+/// An over-cap reply whose header fields are past what is read is
+/// skipped unread: no call can be named, so the event says the answer
+/// was lost without saying whose, and the consumer re-reads or gives up.
+#[test]
+fn an_over_cap_reply_past_the_fields_read_is_an_unknown_drop() {
+    let (mut conn, daemon) = connected();
+    let first = conn.call("a.b", "/", "a.b", "Big", "", &[], 0, 7).unwrap();
+    let _ = conn.pump();
+    // A reply header by hand: fields past MAX_OVERSIZE_FIELDS, a body to
+    // the spec's scale. Only the prefix and a piece of the body are sent:
+    // enough to skip by, never the whole message.
+    let (body_len, fields_len) = (2 * 1024 * 1024u32, 100_000u32);
+    let mut m = vec![b'l', 2, 0, 1];
+    m.extend_from_slice(&body_len.to_le_bytes());
+    m.extend_from_slice(&5u32.to_le_bytes());
+    m.extend_from_slice(&fields_len.to_le_bytes());
+    let prefix = 16 + fields_len as usize + (8 - (16 + fields_len as usize) % 8) % 8;
+    m.resize(prefix + 64 * 1024, 0);
+    // The whole piece fits the socket buffers: joined first, the pumps
+    // below are deterministic, not a race with the writer. A clone stays
+    // open meanwhile, so the writer finishing is not an EOF (which would
+    // kill the connection before it is worked).
+    let _held = daemon.try_clone().unwrap();
+    let sender = send_later(daemon, m);
+    sender.join().unwrap();
+    let mut events = Vec::new();
+    for _ in 0..5 {
+        events.extend(conn.pump().0);
+    }
+    assert!(
+        matches!(events.as_slice(), [Event::Dropped { token }] if *token == conn::DROPPED_UNKNOWN),
+        "{events:?}"
+    );
+    let _ = first;
+    assert!(!conn.dead());
+}
+
+/// A big-endian over-cap header is read big-endian: the fields length is
+/// not garbage and the skip is by the real prefix. The reply the fields
+/// would name (which the little-endian-only parser cannot match to a
+/// call) is skipped silently — like a normal-size big-endian message,
+/// which is framed but never parsed — and the flight stays for the real
+/// answer: not a stuck flight, and not a mass release either.
+#[test]
+fn a_big_endian_over_cap_reply_is_skipped_silently_and_the_flight_stays() {
+    let (mut conn, daemon) = connected();
+    let first = conn.call("a.b", "/", "a.b", "Big", "", &[], 0, 7).unwrap();
+    let second = conn
+        .call("a.b", "/", "a.b", "Small", "", &[], 0, 8)
+        .unwrap();
+    let _ = conn.pump();
+    // A valid over-cap reply, then byte-swapped to big-endian: the flag
+    // and every header word.
+    let mut bytes = oversized_reply(100, first, super::proto::MAX_MESSAGE + 4096);
+    assert!(bytes.len() > super::proto::MAX_MESSAGE);
+    bytes[0] = b'B';
+    for word in [[4, 8], [8, 12], [12, 16]] {
+        bytes[word[0]..word[1]].reverse();
+    }
+    let fields = u32::from_be_bytes(bytes[12..16].try_into().unwrap()) as usize;
+    // Small fields, read right: the skip is knowable, the sender is not.
+    assert!(fields <= 64 * 1024, "{fields}");
+    bytes.extend(small_reply(101, second));
+    let sender = send_later(daemon, bytes);
+    // Silent, and the flight stayed: the only event is the real answer.
+    let (events, _) = pump_events(&mut conn, 1);
+    // The sender blocks until everything is read: drain past what the
+    // assertion needs before joining it (on old code the wait above ends
+    // at the drop, with most of the flood still unread).
+    let start = Instant::now();
+    while conn.discard_pending() > 0 {
+        assert!(start.elapsed() < Duration::from_secs(20), "never drained");
+        let _ = conn.pump();
+    }
+    sender.join().unwrap();
+    assert!(
+        matches!(&events[0], Event::Reply { token: 8, body, .. } if body.len() == 7),
+        "{:?}",
+        events[0]
+    );
+    assert!(!conn.dead());
+}
+
 #[test]
 fn an_over_cap_call_or_signal_is_skipped_with_no_event() {
     let (mut conn, daemon) = connected();
@@ -607,6 +690,118 @@ fn an_over_cap_call_or_signal_is_skipped_with_no_event() {
         events[0]
     );
     assert!(!conn.dead());
+}
+
+/// A sender that outruns the reader holds one turn, not the bar: while
+/// a 60 MiB message is discarded, one pump reads a bounded amount (the
+/// poll is woken for the rest), the connection lives, and the idle state
+/// asks for nothing after.
+#[test]
+fn discarding_a_flood_is_bounded_a_pump_at_a_time() {
+    use super::conn::Conn;
+    let (client, mut daemon_end) = UnixStream::pair().unwrap();
+    // Buffers big enough to hold megabytes before the first pump, so one
+    // unbounded pump would eat past the budget deterministically.
+    rustix::net::sockopt::set_socket_send_buffer_size(&daemon_end, 4 * 1024 * 1024).unwrap();
+    rustix::net::sockopt::set_socket_recv_buffer_size(&client, 4 * 1024 * 1024).unwrap();
+    let server = std::thread::spawn(move || {
+        super::testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut conn = conn::setup(client).unwrap();
+    let mut daemon = server.join().unwrap();
+    // A valid reply to no pending call (serial 1 is the set-up's): valid
+    // to the spec, so framed, and every byte of it discarded.
+    let total = 60 * 1024 * 1024;
+    let mut writer = Writer::with_cap(total + 4096);
+    writer.begin_return_to(99, ":1.7", 1, "ay");
+    let cookie = writer.open_array(1).unwrap();
+    writer.raw(&vec![7u8; total]);
+    writer.close_array(cookie);
+    let bytes = writer.finish().unwrap();
+    // Fill the buffers deterministically (no race with the first pump):
+    // the skip is already mid-flight when it is measured.
+    daemon.set_nonblocking(true).unwrap();
+    let mut at = 0;
+    while at < bytes.len() {
+        match daemon.write(&bytes[at..]) {
+            Ok(n) => at += n,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("{error}"),
+        }
+    }
+    assert!(
+        at > Conn::DISCARD_BUDGET + 8192,
+        "the buffers hold {at} bytes: too little to tell a bounded pump from an unbounded one"
+    );
+    let sender = std::thread::spawn(move || {
+        daemon.set_nonblocking(false).unwrap();
+        daemon.write_all(&bytes[at..]).unwrap();
+        daemon
+    });
+    // The priming pump reads the header and starts the skip; the measured
+    // pump is mid-skip, so what it consumes is exactly what it read. The
+    // measured pump must see data: a sender stalled by a loaded box (or
+    // small kernel buffers) leaves the socket dry, and a dry pump
+    // honestly reports uncapped — wait those out instead of measuring
+    // them (seen 2026-10-03: CI failed the capped assert with the sender
+    // starved, product paths untouched).
+    let (events, _) = conn.pump();
+    assert!(events.is_empty());
+    assert!(conn.discard_pending() > 0, "the skip never started");
+    let (capped, read) = {
+        let start = Instant::now();
+        loop {
+            assert!(
+                start.elapsed() < Duration::from_secs(20),
+                "the sender never caught up"
+            );
+            let before = conn.discard_pending();
+            let (events, capped) = conn.pump();
+            let read = before.saturating_sub(conn.discard_pending());
+            assert!(events.is_empty());
+            if read > 0 && (capped || conn.discard_pending() == 0) {
+                break (capped, read);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    };
+    // Bounded work, and the poll woken for the rest (unless the flood
+    // drained whole in the measured pump: then nothing is left to wake
+    // for, and the drain below is already done).
+    assert!(
+        read <= Conn::DISCARD_BUDGET + 8192,
+        "{read} bytes in one pump"
+    );
+    if conn.discard_pending() > 0 {
+        assert!(capped, "the poll is woken for the rest");
+        assert!(conn.has_staged_work());
+    }
+    // It drains, bounded a pump, and the connection lives.
+    let mut pumps = 1;
+    let mut longest = Duration::ZERO;
+    let start = Instant::now();
+    while conn.discard_pending() > 0 {
+        assert!(start.elapsed() < Duration::from_secs(60), "never drained");
+        let turn = Instant::now();
+        let _ = conn.pump();
+        longest = longest.max(turn.elapsed());
+        pumps += 1;
+    }
+    // One turn never holds the bar for the stream: milliseconds, not the
+    // seconds an unbounded drain takes. The bound is generous (a loaded
+    // box is slow, not wrong); the real number is in the report.
+    assert!(
+        longest < Duration::from_secs(1),
+        "one pump held {longest:?}"
+    );
+    sender.join().unwrap();
+    assert!(!conn.dead());
+    // Idle again: no OUT, no staged work — wakeups must not change.
+    assert!(!conn.want_write());
+    assert!(!conn.has_staged_work());
+    // Sanity: it took many bounded pumps, not one long one.
+    assert!(pumps > 10, "{pumps}");
 }
 
 #[test]

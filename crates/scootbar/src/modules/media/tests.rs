@@ -1539,3 +1539,33 @@ fn a_playing_players_tooltip_is_reachable() {
     assert_eq!(view.tooltip(), "mpv (playing): Ada - Song");
     assert!(harness.tooltips(), "a tooltip nobody can hover to");
 }
+
+/// A reply skipped unread names no call: the unknown drop frees what
+/// expired by age and lets every player waiting on an answer ask again
+/// at its next signal, instead of staying stuck till a reap.
+#[test]
+fn an_unknown_drop_releases_every_player_waiting_on_an_answer() {
+    use super::session;
+    use crate::dbus::conn::{self, Event};
+    use crate::dbus::testdaemon;
+    let (client, mut daemon_end) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut live = session::start(conn::setup(client).unwrap());
+    let _daemon = server.join().unwrap();
+    // A player mid-read: asked, the answer not yet back.
+    let mut player = Player::new(
+        1,
+        "org.mpris.MediaPlayer2.mpv".to_owned(),
+        ":1.9".to_owned(),
+    );
+    player.asked = Some(Instant::now());
+    live.players.push(player);
+    live.apply(Event::Dropped {
+        token: conn::DROPPED_UNKNOWN,
+    });
+    assert!(live.players[0].asked.is_none());
+    assert!(live.players[0].stale);
+}
