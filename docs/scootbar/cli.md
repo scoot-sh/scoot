@@ -667,7 +667,14 @@ no daemon and no child process: two netlink sockets on the bar's own
   without an address shows `offline`, in the `warn` class. A second VPN
   up beside the shown interface appends `· VPN`. The tooltip adds the
   signal (`Wimbly · −54 dBm on wlan0`). Before the first event it shows
-  nothing and takes no space.
+  nothing and takes no space. An icon can stand before the text, or
+  alone: `icon`, `icon-path` with `icon-viewbox`, or `icon-image` (at
+  most one, as the [clock's](#icons)) for every state, or one glyph each
+  in `icon-ethernet`, `icon-wifi`, `icon-vpn` and `icon-offline` — a
+  state with its own glyph shows it, any other state the static icon.
+  `show-text = false` draws only the icon, with the text moved into the
+  tooltip (the WiFi and tunnel tooltips already name what the text does;
+  the bars are the dBm, coarser).
 - **A click opens the picker**, with no binding at all: `network.menu-command`
   is spawned with the cached scan's SSIDs on stdin (one per line), a
   dmenu-style launcher fed from the scan list. Connecting is the
@@ -1658,8 +1665,9 @@ bar's memory, as for any font not on a read-only mount; see
 An icon is drawn before a module's text, `em` device pixels on a side (the size
 of the text, at the output's real scale, so it is sharp at 1.5x and never a
 smaller bitmap stretched), with a space after it when text follows. Three keys
-give one, at most one of them per module; the clock takes them now, and the
-button, volume, network and battery modules will take the same three:
+give one, at most one of them per module; the clock, `button` and volume
+modules take them, the network module takes them plus one glyph per state
+([above](#network)), and the battery module will take the same three:
 
 | Key | Takes | Drawn |
 | --- | --- | --- |

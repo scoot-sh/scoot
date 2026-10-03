@@ -2,7 +2,9 @@
 //! (SVG path data, with `icon-viewbox`) or `icon-image` (a PNG, in a build
 //! with the `icon-image` feature). At most one; each refusal names the key.
 //! The clock and the `button` modules take the same three keys through
-//! [`read`] (the modules that follow, volume, network and battery, will).
+//! [`read`] (the modules that follow, volume, battery, will); volume adds
+//! its static icon through [`volume`], and the network module its static
+//! icon plus one glyph per state through [`network`].
 
 #[cfg(any(feature = "clock", feature = "icon-image"))]
 use std::path::Path;
@@ -77,6 +79,55 @@ pub(super) fn volume(
             icon_image: image,
         },
     )
+}
+
+/// The network table's icons, if its section gives any: the static icon
+/// (shown for every state instead of the per-state ones below) and one
+/// glyph per state (`icon-ethernet`, `icon-wifi`, `icon-vpn`,
+/// `icon-offline`), each falling back to the static one. `Err` is the
+/// dotted key at fault and why.
+#[cfg(feature = "network")]
+pub(super) fn network(table: &super::NetworkFile) -> Result<NetworkIcons, (String, String)> {
+    #[cfg(feature = "icon-image")]
+    let image = table.icon_image.as_deref();
+    #[cfg(not(feature = "icon-image"))]
+    let image = table.icon_image.as_ref().map(|_| "");
+    let icon = read(
+        "network",
+        "a network",
+        &Keys {
+            icon: table.icon.as_deref(),
+            icon_path: table.icon_path.as_deref(),
+            icon_viewbox: table.icon_viewbox.as_deref(),
+            icon_image: image,
+        },
+    )?;
+    // One glyph each, like `icon` itself: a per-state path or picture
+    // would need three keys per state, and the bar draws the static one
+    // wherever a state has none.
+    let glyph = |name: &str, text: Option<&str>| match text {
+        None => Ok(None),
+        Some(text) => parse_glyph(text)
+            .map(|c| Some(Icon::Glyph(c)))
+            .map_err(|message| (format!("network.{name}"), message)),
+    };
+    Ok(NetworkIcons {
+        icon,
+        ethernet: glyph("icon-ethernet", table.icon_ethernet.as_deref())?,
+        wifi: glyph("icon-wifi", table.icon_wifi.as_deref())?,
+        vpn: glyph("icon-vpn", table.icon_vpn.as_deref())?,
+        offline: glyph("icon-offline", table.icon_offline.as_deref())?,
+    })
+}
+
+/// What [`network`] read: the static icon and the per-state glyphs.
+#[cfg(feature = "network")]
+pub(super) struct NetworkIcons {
+    pub icon: Option<Icon>,
+    pub ethernet: Option<Icon>,
+    pub wifi: Option<Icon>,
+    pub vpn: Option<Icon>,
+    pub offline: Option<Icon>,
 }
 
 /// The icon the keys of table `prefix` (`clock`, `button.launcher`) name,

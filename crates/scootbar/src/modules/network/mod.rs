@@ -76,6 +76,7 @@ use super::{
     ActionSpec, ArgKind, Init, Input, InvokeError, Module, OutputView, Sources, Update, View,
 };
 use crate::action::{ModuleAction, Trigger};
+use crate::icon::Icon;
 
 pub mod netlink;
 
@@ -137,6 +138,19 @@ pub struct Settings {
     /// The picker: spawned with the scan's SSIDs on stdin. Empty runs
     /// nothing, and the click is refused saying so.
     pub menu_command: Vec<String>,
+    /// A static icon, when the config sets the icon keys: shown in every
+    /// state for which no per-state icon is set.
+    pub icon: Option<Icon>,
+    /// One glyph per state, when the config sets the per-state keys: the
+    /// wired interface, the WiFi network, the tunnel, and no network.
+    /// Each wins over the static icon for its own state.
+    pub icon_ethernet: Option<Icon>,
+    pub icon_wifi: Option<Icon>,
+    pub icon_vpn: Option<Icon>,
+    pub icon_offline: Option<Icon>,
+    /// Whether the text is drawn beside the icon. `false` draws only the
+    /// icon, with the text moved into the tooltip.
+    pub show_text: bool,
 }
 
 impl Default for Settings {
@@ -145,6 +159,12 @@ impl Default for Settings {
             interface: None,
             show_ssid: true,
             menu_command: Vec::new(),
+            icon: None,
+            icon_ethernet: None,
+            icon_wifi: None,
+            icon_vpn: None,
+            icon_offline: None,
+            show_text: true,
         }
     }
 }
@@ -758,6 +778,12 @@ pub struct Network {
     interface: Option<String>,
     show_ssid: bool,
     menu_command: Vec<String>,
+    icon: Option<Icon>,
+    icon_ethernet: Option<Icon>,
+    icon_wifi: Option<Icon>,
+    icon_vpn: Option<Icon>,
+    icon_offline: Option<Icon>,
+    show_text: bool,
     nets: Nets,
     rt: Option<Sock>,
     genl: Option<Sock>,
@@ -805,6 +831,119 @@ impl Network {
 
     fn state(&self) -> State {
         self.nets.state(self.interface.as_deref())
+    }
+
+    /// The icon for `state`: its per-state glyph when the config sets
+    /// one, else the static icon. `None` where neither is set: without
+    /// any icon the state shows text alone, as before.
+    fn icon_for(&self, state: State) -> Option<&Icon> {
+        let per_state = match state {
+            State::Eth => &self.icon_ethernet,
+            State::Wifi => &self.icon_wifi,
+            State::Vpn => &self.icon_vpn,
+            State::Offline => &self.icon_offline,
+        };
+        per_state.as_ref().or(self.icon.as_ref())
+    }
+
+    /// The text and tooltip for `state`, with the text drawn: what the
+    /// module always showed.
+    fn write_text(&self, view: &mut View, state: State, selected: Option<&Iface>, marker: bool) {
+        match state {
+            State::Offline => {
+                let _ = write!(view.text_mut(), "offline");
+                let _ = write!(view.tooltip_mut(), "No network");
+                view.set_class(crate::modules::Class::Warn);
+            }
+            State::Eth => {
+                let name = selected.map(|iface| iface.link.name_str()).unwrap_or("");
+                let _ = write!(view.text_mut(), "{name}");
+                let _ = write!(view.tooltip_mut(), "{name}");
+            }
+            State::Wifi => {
+                let Some(iface) = selected else {
+                    return;
+                };
+                let bars = netlink::bars_for(iface.signal.unwrap_or(-100));
+                let glyphs = &netlink::BAR_GLYPHS[..bars as usize];
+                if self.show_ssid {
+                    let _ = write!(view.text_mut(), "{} ", iface.ssid);
+                } else {
+                    let _ = write!(view.text_mut(), "WiFi ");
+                }
+                for glyph in glyphs {
+                    let _ = write!(view.text_mut(), "{glyph}");
+                }
+                Self::write_wifi_tooltip(self.show_ssid, iface, view);
+            }
+            State::Vpn => {
+                let name = selected.map(|iface| iface.link.name_str()).unwrap_or("");
+                let _ = write!(view.text_mut(), "VPN");
+                let _ = write!(view.tooltip_mut(), "VPN on {name}");
+            }
+        }
+        if marker {
+            let _ = write!(view.text_mut(), " · VPN");
+        }
+    }
+
+    /// The tooltip for `state` with no text drawn: it carries what the
+    /// text said. Ethernet's tooltip is the text itself; WiFi's and the
+    /// tunnel's already name what the text does (the bars are the dBm,
+    /// coarser); offline's keeps its detail after the text.
+    fn write_tooltip_only(
+        &self,
+        view: &mut View,
+        state: State,
+        selected: Option<&Iface>,
+        marker: bool,
+    ) {
+        match state {
+            State::Offline => {
+                let _ = write!(view.tooltip_mut(), "offline · No network");
+                view.set_class(crate::modules::Class::Warn);
+            }
+            State::Eth => {
+                let name = selected.map(|iface| iface.link.name_str()).unwrap_or("");
+                let _ = write!(view.tooltip_mut(), "{name}");
+            }
+            State::Wifi => {
+                let Some(iface) = selected else {
+                    return;
+                };
+                Self::write_wifi_tooltip(self.show_ssid, iface, view);
+            }
+            State::Vpn => {
+                let name = selected.map(|iface| iface.link.name_str()).unwrap_or("");
+                let _ = write!(view.tooltip_mut(), "VPN on {name}");
+            }
+        }
+        if marker {
+            let _ = write!(view.tooltip_mut(), " · VPN");
+        }
+    }
+
+    /// The WiFi tooltip: the SSID (or `WiFi` where it is hidden), the
+    /// signal and the interface.
+    fn write_wifi_tooltip(show_ssid: bool, iface: &Iface, view: &mut View) {
+        let _ = write!(
+            view.tooltip_mut(),
+            "{} · ",
+            if show_ssid {
+                iface.ssid.as_str()
+            } else {
+                "WiFi"
+            },
+        );
+        match iface.signal {
+            Some(dbm) => {
+                let _ = write!(view.tooltip_mut(), "{dbm} dBm on ");
+            }
+            None => {
+                let _ = write!(view.tooltip_mut(), "no signal on ");
+            }
+        }
+        let _ = write!(view.tooltip_mut(), "{}", iface.link.name_str());
     }
 
     /// What [`Module::view`] would draw: compared before and after each
@@ -992,6 +1131,12 @@ impl Network {
             interface: self.interface.clone(),
             show_ssid: self.show_ssid,
             menu_command: self.menu_command.clone(),
+            icon: self.icon.clone(),
+            icon_ethernet: self.icon_ethernet.clone(),
+            icon_wifi: self.icon_wifi.clone(),
+            icon_vpn: self.icon_vpn.clone(),
+            icon_offline: self.icon_offline.clone(),
+            show_text: self.show_text,
         };
         match open_inner(&settings) {
             Ok(mut fresh) => {
@@ -1306,6 +1451,12 @@ fn open_inner(settings: &Settings) -> Result<Network, String> {
         interface: settings.interface.clone(),
         show_ssid: settings.show_ssid,
         menu_command: settings.menu_command.clone(),
+        icon: settings.icon.clone(),
+        icon_ethernet: settings.icon_ethernet.clone(),
+        icon_wifi: settings.icon_wifi.clone(),
+        icon_vpn: settings.icon_vpn.clone(),
+        icon_offline: settings.icon_offline.clone(),
+        show_text: settings.show_text,
         nets,
         rt: Some(Sock {
             fd: rt,
@@ -1469,6 +1620,12 @@ fn start_with(settings: &Settings, rt: OwnedFd, genl: OwnedFd, family: u16) -> B
         interface: settings.interface.clone(),
         show_ssid: settings.show_ssid,
         menu_command: settings.menu_command.clone(),
+        icon: settings.icon.clone(),
+        icon_ethernet: settings.icon_ethernet.clone(),
+        icon_wifi: settings.icon_wifi.clone(),
+        icon_vpn: settings.icon_vpn.clone(),
+        icon_offline: settings.icon_offline.clone(),
+        show_text: settings.show_text,
         nets,
         rt: Some(Sock {
             fd: rt,
@@ -1563,60 +1720,18 @@ impl Module for Network {
         if !self.nets.seen {
             return;
         }
+        let state = self.state();
+        if let Some(icon) = self.icon_for(state) {
+            view.show_icon(icon);
+        }
         let selected = self.nets.selected(self.interface.as_deref());
         let marker = selected.is_some_and(|iface| self.nets.other_vpn(iface.link.index));
-        match self.state() {
-            State::Offline => {
-                let _ = write!(view.text_mut(), "offline");
-                let _ = write!(view.tooltip_mut(), "No network");
-                view.set_class(crate::modules::Class::Warn);
-            }
-            State::Eth => {
-                let name = selected.map(|iface| iface.link.name_str()).unwrap_or("");
-                let _ = write!(view.text_mut(), "{name}");
-                let _ = write!(view.tooltip_mut(), "{name}");
-            }
-            State::Wifi => {
-                let Some(iface) = selected else {
-                    return;
-                };
-                let bars = netlink::bars_for(iface.signal.unwrap_or(-100));
-                let glyphs = &netlink::BAR_GLYPHS[..bars as usize];
-                if self.show_ssid {
-                    let _ = write!(view.text_mut(), "{} ", iface.ssid);
-                } else {
-                    let _ = write!(view.text_mut(), "WiFi ");
-                }
-                for glyph in glyphs {
-                    let _ = write!(view.text_mut(), "{glyph}");
-                }
-                let _ = write!(
-                    view.tooltip_mut(),
-                    "{} · ",
-                    if self.show_ssid {
-                        iface.ssid.as_str()
-                    } else {
-                        "WiFi"
-                    },
-                );
-                match iface.signal {
-                    Some(dbm) => {
-                        let _ = write!(view.tooltip_mut(), "{dbm} dBm on ");
-                    }
-                    None => {
-                        let _ = write!(view.tooltip_mut(), "no signal on ");
-                    }
-                }
-                let _ = write!(view.tooltip_mut(), "{}", iface.link.name_str());
-            }
-            State::Vpn => {
-                let name = selected.map(|iface| iface.link.name_str()).unwrap_or("");
-                let _ = write!(view.text_mut(), "VPN");
-                let _ = write!(view.tooltip_mut(), "VPN on {name}");
-            }
-        }
-        if marker {
-            let _ = write!(view.text_mut(), " · VPN");
+        if self.show_text {
+            self.write_text(view, state, selected, marker);
+        } else {
+            // Icon only: the text is not drawn, so the tooltip carries
+            // what it said (a state class still colors the icon).
+            self.write_tooltip_only(view, state, selected, marker);
         }
     }
 

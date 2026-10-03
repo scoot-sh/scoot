@@ -38,7 +38,8 @@ mod custom_tests;
     feature = "clock",
     feature = "button",
     feature = "volume",
-    feature = "microphone"
+    feature = "microphone",
+    feature = "network"
 ))]
 mod icon;
 #[cfg(all(test, feature = "clock"))]
@@ -618,6 +619,50 @@ struct NetworkFile {
     #[cfg(feature = "network")]
     #[serde(rename = "menu-command")]
     menu_command: Option<Vec<String>>,
+    /// One glyph, drawn before the text in every state (instead of the
+    /// per-state ones below).
+    #[cfg(feature = "network")]
+    icon: Option<String>,
+    /// SVG path data, drawn before the text in every state (instead of
+    /// `icon`).
+    #[cfg(feature = "network")]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(feature = "network")]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn before the text in every state (instead of
+    /// `icon`). Only in a build with the `icon-image` feature: without it
+    /// the key is unknown.
+    #[cfg(all(feature = "network", feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "network", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
+    /// One glyph each, drawn before the text in that state (instead of
+    /// `icon`): the wired interface, the WiFi network, the tunnel, and no
+    /// network. A state with none shows the static icon.
+    #[cfg(feature = "network")]
+    #[serde(rename = "icon-ethernet")]
+    icon_ethernet: Option<String>,
+    #[cfg(feature = "network")]
+    #[serde(rename = "icon-wifi")]
+    icon_wifi: Option<String>,
+    #[cfg(feature = "network")]
+    #[serde(rename = "icon-vpn")]
+    icon_vpn: Option<String>,
+    #[cfg(feature = "network")]
+    #[serde(rename = "icon-offline")]
+    icon_offline: Option<String>,
+    /// Whether the text is drawn beside the icon (default true): false
+    /// draws only the icon, with the text moved into the tooltip.
+    #[cfg(feature = "network")]
+    #[serde(rename = "show-text")]
+    show_text: Option<bool>,
     /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
     /// or `{ scoot = "..." }`.
     #[cfg(feature = "network")]
@@ -1653,8 +1698,9 @@ const NETWORK_KEYS: [&str; 5] = [
     "network.on-scroll-down",
 ];
 
-/// The `[network]` table: `interface`, `show-ssid`, `menu-command` and
-/// the interaction keys, into the module's settings.
+/// The `[network]` table: `interface`, `show-ssid`, `menu-command`, the
+/// icon keys and `show-text`, and the interaction keys, into the module's
+/// settings.
 #[cfg(feature = "network")]
 fn apply_network(
     path: &Path,
@@ -1686,6 +1732,19 @@ fn apply_network(
             ));
         }
         settings.menu_command = command.to_owned();
+    }
+    let icons = icon::network(table).map_err(|(key, message)| Error::Named {
+        path: path.to_owned(),
+        key,
+        message,
+    })?;
+    settings.icon = icons.icon;
+    settings.icon_ethernet = icons.ethernet;
+    settings.icon_wifi = icons.wifi;
+    settings.icon_vpn = icons.vpn;
+    settings.icon_offline = icons.offline;
+    if let Some(show) = table.show_text {
+        settings.show_text = show;
     }
     let read = bindings::read(
         crate::modules::network::ID,

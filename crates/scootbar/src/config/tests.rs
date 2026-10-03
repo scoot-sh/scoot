@@ -596,6 +596,12 @@ fn a_network_section_is_read_whole() {
     assert!(modules.interface.is_none());
     assert!(modules.show_ssid);
     assert!(modules.menu_command.is_empty());
+    assert!(modules.icon.is_none());
+    assert!(modules.icon_ethernet.is_none());
+    assert!(modules.icon_wifi.is_none());
+    assert!(modules.icon_vpn.is_none());
+    assert!(modules.icon_offline.is_none());
+    assert!(modules.show_text);
     let modules = read(
         "left = [\"network\"]\n\
          [network]\n\
@@ -610,6 +616,35 @@ fn a_network_section_is_read_whole() {
     assert_eq!(modules.interface.as_deref(), Some("wlan0"));
     assert!(!modules.show_ssid);
     assert_eq!(modules.menu_command, ["fuzzel", "--dmenu"]);
+    let modules = read(
+        "left = [\"network\"]\n\
+         [network]\n\
+         icon = \"N\"\n\
+         icon-ethernet = \"E\"\n\
+         icon-wifi = \"W\"\n\
+         icon-vpn = \"V\"\n\
+         icon-offline = \"O\"\n\
+         show-text = false\n",
+    )
+    .unwrap()
+    .modules
+    .network;
+    assert_eq!(modules.icon, Some(crate::icon::Icon::Glyph('N')));
+    assert_eq!(modules.icon_ethernet, Some(crate::icon::Icon::Glyph('E')));
+    assert_eq!(modules.icon_wifi, Some(crate::icon::Icon::Glyph('W')));
+    assert_eq!(modules.icon_vpn, Some(crate::icon::Icon::Glyph('V')));
+    assert_eq!(modules.icon_offline, Some(crate::icon::Icon::Glyph('O')));
+    assert!(!modules.show_text);
+    // A path icon, and two reads of it are equal configs (a reload
+    // compares).
+    let modules = read("[network]\nicon-path = \"M0 0h10v10z\"\n")
+        .unwrap()
+        .modules
+        .network;
+    assert!(matches!(modules.icon, Some(crate::icon::Icon::Art(_))));
+    let a = read("[network]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    let b = read("[network]\nicon-path = \"M0 0h10v10z\"\n").unwrap();
+    assert_eq!(a, b);
 }
 
 #[test]
@@ -625,6 +660,17 @@ fn a_network_section_is_refused_loudly() {
         ("[network]\nwhatever = 1\n", "whatever"),
         ("[network]\non-click = \"raise\"\n", "network.on-click"),
         ("[network]\non-click = \"menu 2\"\n", "network.on-click"),
+        // The icon keys refuse like the clock's: at most one static
+        // icon, one glyph per state, no viewbox without a path.
+        (
+            "[network]\nicon = \"N\"\nicon-path = \"M0 0h10v10z\"\n",
+            "network.icon-path",
+        ),
+        ("[network]\nicon-wifi = \"too long\"\n", "network.icon-wifi"),
+        (
+            "[network]\nicon-viewbox = \"0 0 24 24\"\n",
+            "network.icon-viewbox",
+        ),
     ] {
         let error = read(text).unwrap_err().to_string();
         assert!(error.contains(key), "{text:?}: {error}");
@@ -635,6 +681,7 @@ fn a_network_section_is_refused_loudly() {
         ("[network]\nshow-ssid = \"yes\"\n", "show-ssid"),
         ("[network]\nmenu-command = \"fuzzel\"\n", "menu-command"),
         ("[network]\ninterface = 3\n", "interface"),
+        ("[network]\nshow-text = \"yes\"\n", "show-text"),
     ] {
         let error = read(text).unwrap_err().to_string();
         assert!(error.contains(key), "{text:?}: {error}");

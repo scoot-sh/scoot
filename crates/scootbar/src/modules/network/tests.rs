@@ -11,6 +11,7 @@ use rustix::event::PollFlags;
 use super::Settings;
 use super::fake::{self, Fake};
 use crate::action::ModuleAction;
+use crate::icon::Icon;
 use crate::modules::Update;
 use crate::modules::harness::Harness;
 
@@ -725,6 +726,172 @@ fn a_click_is_the_menu_and_nothing_else_is() {
     );
     assert_eq!(input(Trigger::ScrollUp), None);
     assert_eq!(input(Trigger::RightClick), None);
+}
+
+// ---------------------------------------------------------------------------
+// Icons and the icon-only mode.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn icons_follow_the_state_with_a_static_fallback() {
+    // A static icon plus one glyph each for ethernet and WiFi: a state
+    // with its own glyph shows it, any other state the static one.
+    let settings = Settings {
+        icon: Some(Icon::Glyph('N')),
+        icon_ethernet: Some(Icon::Glyph('E')),
+        icon_wifi: Some(Icon::Glyph('W')),
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    // No route: offline has no per-state glyph, so the static icon.
+    plug(&fake);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "offline");
+    assert_eq!(view.icon(), Some('N'));
+    assert_eq!(view.class(), crate::modules::Class::Warn);
+    // Ethernet: its own glyph wins over the static one.
+    route_via(&fake, ETH0);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "eth0");
+    assert_eq!(view.icon(), Some('E'));
+    // WiFi: its own glyph too.
+    wifi(&fake, b"Wimbly", -54);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "Wimbly ▂▄▆█");
+    assert_eq!(view.icon(), Some('W'));
+    // Routed through the tunnel: no per-state VPN glyph, so the static
+    // one again.
+    fake.rt(&fake::link(16, 9, UP, 6, "wg0", Some("wireguard")));
+    fake.rt(&fake::addr(20, 9, 2));
+    route_via(&fake, 9);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "VPN");
+    assert_eq!(view.icon(), Some('N'));
+    let _ = fake.sent();
+}
+
+#[test]
+fn without_icons_the_states_show_text_alone() {
+    let (mut harness, fake) = Fake::start(&Settings::default());
+    plug(&fake);
+    route_via(&fake, ETH0);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "eth0");
+    assert!(view.icon().is_none() && view.art().is_none());
+    let _ = fake.sent();
+}
+
+#[test]
+fn icon_only_draws_the_icon_with_the_text_in_the_tooltip() {
+    let settings = Settings {
+        icon: Some(Icon::Glyph('N')),
+        icon_wifi: Some(Icon::Glyph('W')),
+        show_text: false,
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    // Offline: the static icon, the text kept in the tooltip.
+    plug(&fake);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('N'));
+    assert_eq!(view.tooltip(), "offline · No network");
+    assert_eq!(view.class(), crate::modules::Class::Warn);
+    // Ethernet beside a VPN: the static icon, both names in the tooltip.
+    fake.rt(&fake::link(16, 9, UP, 6, "wg0", Some("wireguard")));
+    fake.rt(&fake::addr(20, 9, 2));
+    route_via(&fake, ETH0);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('N'));
+    assert_eq!(view.tooltip(), "eth0 · VPN");
+    // WiFi: its own glyph, the SSID and signal in the tooltip (wg0 is
+    // still up beside it, so the marker rides along, as in the text).
+    wifi(&fake, b"Wimbly", -54);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('W'));
+    assert_eq!(view.tooltip(), "Wimbly · -54 dBm on wlan0 · VPN");
+    // Routed through the tunnel: the static icon, the VPN in the tooltip.
+    route_via(&fake, 9);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('N'));
+    assert_eq!(view.tooltip(), "VPN on wg0");
+    let _ = fake.sent();
+}
+
+#[test]
+fn icon_only_keeps_a_hidden_ssid_private() {
+    let settings = Settings {
+        icon: Some(Icon::Glyph('N')),
+        show_ssid: false,
+        show_text: false,
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    wifi(&fake, b"Wimbly", -72);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('N'));
+    assert_eq!(view.tooltip(), "WiFi · -72 dBm on wlan0");
+    let _ = fake.sent();
+}
+
+#[test]
+fn query_reports_the_state_shape_with_icons_set() {
+    // Icons and `show-text` change the view, never the value: the shape
+    // per state, which an agent reads instead of the pixels.
+    let settings = Settings {
+        icon: Some(Icon::Glyph('N')),
+        show_text: false,
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    plug(&fake);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(
+        harness.value_on(None),
+        Some(serde_json::json!({"state": "disconnected"}))
+    );
+    route_via(&fake, ETH0);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(
+        harness.value_on(None),
+        Some(serde_json::json!({"state": "ethernet", "interface": "eth0", "vpn": false}))
+    );
+    wifi(&fake, b"Wimbly", -54);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(
+        harness.value_on(None),
+        Some(serde_json::json!({
+            "state": "wifi",
+            "ssid": "Wimbly",
+            "signal": -54,
+            "bars": 4,
+            "interface": "wlan0",
+            "vpn": false,
+        }))
+    );
+    fake.rt(&fake::link(16, 9, UP, 6, "wg0", Some("wireguard")));
+    fake.rt(&fake::addr(20, 9, 2));
+    route_via(&fake, 9);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(
+        harness.value_on(None),
+        Some(serde_json::json!({"state": "vpn", "interface": "wg0", "vpn": true}))
+    );
+    let _ = fake.sent();
 }
 
 /// The wire against the real kernel: whatever interfaces this machine
