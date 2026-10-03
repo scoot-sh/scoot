@@ -407,6 +407,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [A Nix binary cache for users](./packaging/nix-binary-cache.md) — medium: `nix run` without a cold Smithay compile; distinct from CI's recorded no-store-cache decision
 - [Arch packages](./packaging/arch-package.md), [Debian and Ubuntu packages](./packaging/deb-package.md), [RPM packages](./packaging/rpm-package.md) — low, blocked on the three above
 - [A Stylix target for the compositor](./resolved/scoot-stylix-target-done.md) — medium (M6): window borders, background, cursor and wallpaper from the scheme, the way `programs.scootbar` already themes the bar — RESOLVED 2026-10-03 (PR #407)
+- [Nix: a wallpaper color beside Stylix's image is refused, and only the log says so](packaging/stylix-wallpaper-color-trap.md) (low): from the #407 review
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**
