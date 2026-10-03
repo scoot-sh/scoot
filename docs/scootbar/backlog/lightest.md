@@ -639,17 +639,18 @@ any row for the maintainer to waive or not.
 
 **Review round (2026-10-03).** The size row re-measured at the
 review-round head (branch code commit `d6415c5cc`, rebuilt byte-identical
-after the docs-only follow-up, same-tree `main` `408946cd5`, same method:
-`git archive`d to the dev VM, own target
-dirs): file 1,970,912 B on both sides (+0); `.text` 1,522,728 against
-1,520,328 (+2,400, +0.2%); loaded sections (`.text`+`.rodata`+`.eh_frame*`+
-`.gcc_except_table`+`.data*`) 1,862,795 against 1,860,499 (+2,296). The
-round's own code (the bus-sender accept, the over-cap refused/unknown
-split) adds 256 B of `.text` over the `4b197e086` row above; the idle
-rows above stand — nothing in the round touches an idle path (the new
-code runs per reply and per over-cap message only). `ldd` still shows
-only libc, libm and libgcc_s, and `Cargo.lock` is byte-identical to
-`main`'s. No row regresses; nothing waived.
+after the docs-only follow-ups, same-tree `main` `ff200643a` past the
+bluetooth merge, same method: `git archive`d to the dev VM, own target
+dirs): file 2,036,448 B on both sides (+0); `.text` 1,583,304 against
+1,580,808 (+2,496, +0.2%); loaded sections (`.text`+`.rodata`+`.eh_frame*`+
+`.gcc_except_table`+`.data*`) 1,932,723 against 1,929,755 (+2,968).
+The idle rows above stand — nothing in the round touches an idle path
+(the new code runs per reply and per over-cap message only). `ldd` still
+shows only libc, libm and libgcc_s, and `Cargo.lock` is byte-identical
+to `main`'s. No row regresses; nothing waived. (An earlier measure of
+this round, against the pre-bluetooth `main` `408946cd5`, read
+1,970,912 B / 1,522,728 vs 1,520,328: same shape, smaller tree on both
+sides.)
 
 **The 60 MiB stream** (the budget's own test, socketpair, debug build on
 the same VM): before the budget one pump read 25,745,728 bytes; after,

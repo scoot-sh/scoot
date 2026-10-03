@@ -888,7 +888,7 @@ socket is one more source in the `poll` loop), which is the
    tray alone and no bus or no items, 4352 kB with one item, 4388 kB with
    eight (differences under about 130 kB are within one run's resolution;
    level with the same tree's `main` in every row). The binary: **no byte
-   on disk and +2,400 B of `.text` (+0.2%)** against `main` (1,970,912 B
+   on disk and +2,496 B of `.text` (+0.2%)** against `main` (2,036,448 B
    on disk both sides). An item that
   re-announces its icon continuously is read at most every 50 ms (0.7% of
   a core measured, against 9.7% with no floor). The table and its method
