@@ -1425,26 +1425,24 @@ mod popup_list {
 
     #[test]
     fn an_attacker_ssid_reaches_the_command_as_data_not_as_code() {
-        // Short fixed directory: the whole evil SSID must fit the radio's
-        // 32 bytes, path included. (Only this test uses it.)
-        let dir = std::env::temp_dir().join("pnl-evil");
-        std::fs::remove_dir_all(&dir).ok();
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("ssid");
+        // The shell target is a fixed short path: the whole evil SSID
+        // must fit the radio's 32 bytes on every machine, whatever its
+        // temp directory is. (Only this test uses it; cleaned first and
+        // last.)
+        let shell_target = std::path::PathBuf::from("/tmp/pnl-evil-P");
+        std::fs::remove_file(&shell_target).ok();
+        let dir = tempdir("evil");
+        let (command, file) = recording(&dir);
         let settings = Settings {
-            connect_command: vec![
-                "sh".to_owned(),
-                "-c".to_owned(),
-                format!("echo \"$0\" > {}", file.display()),
-            ],
+            connect_command: command,
             ..Settings::default()
         };
         let (mut harness, fake) = Fake::start(&settings);
         // Shell metacharacters, controls and non-UTF-8: the sanitizer
         // keeps the first (they are data) and folds the rest. The touch
-        // targets the directory, so a shell would leave it there.
+        // targets the fixed path, so a shell would leave it there.
         // (`\xff` is built as a byte: it is not a string escape.)
-        let mut evil = format!("a;b$(touch {}/P)", dir.display()).into_bytes();
+        let mut evil = format!("a;b$(touch {})", shell_target.display()).into_bytes();
         evil.push(0x01);
         evil.push(0xff);
         assert!(evil.len() <= 32, "the SSID fits the radio: {}", evil.len());
@@ -1464,11 +1462,12 @@ mod popup_list {
         // Through a shell, `$(touch ...)` would have run: nothing was
         // created beside the recording.
         assert!(
-            !dir.join("P").exists(),
+            !shell_target.exists(),
             "the SSID ran as a command: {:?}",
             std::fs::read_dir(&dir).unwrap().collect::<Vec<_>>()
         );
         std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_file(&shell_target).ok();
         let _ = fake.sent();
     }
 
