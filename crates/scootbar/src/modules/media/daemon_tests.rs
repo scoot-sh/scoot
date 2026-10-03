@@ -494,7 +494,9 @@ fn a_player_that_rewrites_its_title_constantly_is_drawn_ten_times_a_second() {
         "{drawn} draws in {:?}",
         run.elapsed()
     );
-    assert_eq!(text(&harness), "Ada - T2999");
+    // The last title is shown once the bar has heard it (the daemon may still
+    // hold some of the 3,000): waited for, not assumed.
+    drive(&mut harness, &mut [&mut mpv], |h| text(h) == "Ada - T2999");
 }
 
 /// The bus going away empties the module and an action says why.
