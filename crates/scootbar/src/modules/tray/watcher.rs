@@ -1040,8 +1040,15 @@ impl Live {
         for (id, owner) in refresh {
             // The name changed hands: signals now come from the new
             // owner, and the old one vanishing later must not take the
-            // item with it.
-            self.set_owner(&id, owner);
+            // item with it. An open menu follows the owner too, or its
+            // updates stop arriving.
+            self.set_owner(&id, owner.clone());
+            if self.menu.as_ref().is_some_and(|menu| menu.item == id) {
+                if let Some(menu) = self.menu.as_mut() {
+                    menu.owner = owner;
+                }
+                self.refresh_menu();
+            }
             self.refresh(&id);
         }
         Update::Unchanged
