@@ -215,11 +215,11 @@ impl Pointer {
         self.pending = 0;
     }
 
-    /// A button went down over `target` (`None`: over no module).
-    pub fn press(&mut self, code: u32, target: Option<Target>) {
-        let Some(button) = Button::from_code(code) else {
-            return;
-        };
+    /// A button went down over `target` (`None`: over no module). The
+    /// trigger it armed, if it armed one: none for a chord, a button the bar
+    /// does not answer, or a press over no module.
+    pub fn press(&mut self, code: u32, target: Option<Target>) -> Option<Trigger> {
+        let button = Button::from_code(code)?;
         let chord = self.down != 0;
         self.down |= button.bit();
         // A second button while one is held: a chord is no click.
@@ -228,6 +228,7 @@ impl Pointer {
         } else {
             target.map(|target| Armed { button, target })
         };
+        self.armed.map(|armed| armed.button.trigger())
     }
 
     /// A button went up over `target` (`None`: over no module): the click

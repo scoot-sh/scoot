@@ -51,6 +51,15 @@ three sections), `src/theme.rs` (the color tokens and state classes) and
 `src/render.rs` (views to pixels with per-module repaint and damage), plus
 the seven-segment test font `src/testfont.rs` that pixel tests read back.
 
+[Popups](resolved/popups-done.md) added the widget half, also pure and
+Wayland-free: `src/popup/` (the declarative `Content` a module fills, `Layout`,
+`Interaction`, `paint`), whose only dependencies are `paint`, `text` and `theme`,
+so it moves with them. It is **not** extracted yet, for the reason this entry
+already gives: the popups are the bar's own second consumer of its drawing, not
+a second *binary*, and the seam is cut by the launcher or the notification
+daemon wanting it. Its Wayland half (`src/daemon/popup/`: the `xdg_popup`, its
+buffers, the pointer and keyboard routing) is the bar's and stays there.
+
 `scootbg-mem` is already shared (scootbar depends on it for its buffers,
 and since the clock for mapping a font that is a root-owned, unwritable
 file on a read-only mount).

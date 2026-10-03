@@ -9,7 +9,8 @@
 //! bar with no bindings never takes the pointer, so it costs what it did
 //! before there was any input, and a reload that adds or removes bindings
 //! takes or drops it then ([`State::sync_pointer`]). The bar never takes
-//! the keyboard or touch, so it never disturbs focus and ignores touch.
+//! touch, and the keyboard only for a popup that grabbed, for as long as it
+//! is open (`daemon::popup`), so it never disturbs focus otherwise.
 //!
 //! **Events cost almost nothing.** A motion stores two numbers; hover is
 //! worked out once per turn of the loop, when the output's scene is asked
@@ -208,6 +209,7 @@ impl State {
             bindings,
             revision,
         } = placed;
+        let id: &'static str = id;
         let offered;
         let action: &Action = match bindings.get(trigger) {
             Some(bound) => bound,
@@ -219,17 +221,25 @@ impl State {
                 None => return,
             },
         };
-        let mut effects = Launch {
-            spawner: &mut self.spawner,
-        };
-        if let Err(failure) = action::perform(
+        let mut effects = Launch::new(&mut self.spawner);
+        let performed = action::perform(
             &mut **module,
             revision,
             &output,
             action,
             steps,
             &mut effects,
-        ) {
+        );
+        // A popup bound to a click opens on the press (`State::button`),
+        // never here: what reaches this point asking for one is a scroll,
+        // which carries no input serial a popup grab could use.
+        let performed = match performed {
+            Ok(()) if effects.popup => Err(action::Failed::Effect(
+                "a popup opens from a click, not from a scroll".to_owned(),
+            )),
+            other => other,
+        };
+        if let Err(failure) = performed {
             if let Some(held) = self.warned.allow(now) {
                 let more = if held > 0 {
                     format!(" ({held} more since)")
@@ -244,24 +254,124 @@ impl State {
         }
     }
 
-    /// A press or release at the pointer's place.
-    fn button(&mut self, code: u32, pressed: bool) {
+    /// A press or release at the pointer's place, `serial` the event's.
+    fn button(&mut self, code: u32, pressed: bool, serial: u32, qh: &QueueHandle<Self>) {
         let target = self.target();
         if pressed {
-            self.input.press(code, target);
+            let armed = self.input.press(code, target);
+            #[cfg(feature = "popup")]
+            self.press_for_popups(armed, target, serial, qh);
+            #[cfg(not(feature = "popup"))]
+            let _ = (armed, serial, qh);
         } else if let Some((trigger, target)) = self.input.release(code, target) {
             self.fire(trigger, target, None, Instant::now());
         }
+    }
+
+    /// What a press means to popups, before the release can fire anything:
+    ///
+    /// - **A press on the bar while a popup is open dismisses it**, and the
+    ///   click is spent doing so (disarmed, so the release fires nothing): a
+    ///   second click on the module that opened the popup closes it rather
+    ///   than opening it again, and a click on another module acts through
+    ///   no dismissal.
+    /// - **A popup bound to the click opens on the press, not the release**,
+    ///   the one exception to "clicks fire on release" (`crate::pointer`):
+    ///   a compositor may refuse a popup grab whose serial is not that of a
+    ///   button *still held* (the protocol allows it; Smithay's reference
+    ///   compositor checks it, and KDE and GNOME are known to), and a refused
+    ///   grab is a popup that never takes a click-outside or Escape. Opened
+    ///   here it has the press's serial while the button is down; the release
+    ///   that follows fires nothing. Measured: scoot takes any recent input
+    ///   serial and wlroots (sway) takes any at all (a bogus serial was
+    ///   accepted), so no compositor available here tells press from release,
+    ///   and this is the choice that cannot be the one refused.
+    #[cfg(feature = "popup")]
+    fn press_for_popups(
+        &mut self,
+        armed: Option<Trigger>,
+        target: Option<Target>,
+        serial: u32,
+        qh: &QueueHandle<Self>,
+    ) {
+        if self.popup.is_open() {
+            self.popup.close();
+            self.input.disarm();
+            return;
+        }
+        let (Some(trigger), Some(target)) = (armed, target) else {
+            return;
+        };
+        if !self.binds_popup(trigger, target) {
+            return;
+        }
+        self.input.disarm();
+        if let Err(why) = self.open_popup(qh, target.output, target.member, Some(serial)) {
+            if let Some(held) = self.warned.allow(Instant::now()) {
+                let more = if held > 0 {
+                    format!(" ({held} more since)")
+                } else {
+                    String::new()
+                };
+                warn(format_args!(
+                    "scootbar: {} opening a popup: {why}{more}",
+                    trigger.key()
+                ));
+            }
+        }
+    }
+
+    /// Whether the config binds `trigger` on the module at `target` to its
+    /// popup.
+    #[cfg(feature = "popup")]
+    fn binds_popup(&self, trigger: Trigger, target: Target) -> bool {
+        let Some(entry) = self
+            .outputs
+            .iter()
+            .find(|entry| entry.output.id() == target.output)
+        else {
+            return false;
+        };
+        let Some(placed) = entry
+            .objects
+            .scene
+            .module(target.member)
+            .and_then(|module| self.content.modules.get(module))
+        else {
+            return false;
+        };
+        matches!(
+            placed.bindings.get(trigger),
+            Some(Action::Module(named)) if named.name == action::POPUP
+        )
     }
 }
 
 /// The two ways out of the process, for [`action::perform`] (a pointer press,
 /// and `invoke`).
 pub(super) struct Launch<'a> {
-    pub(super) spawner: &'a mut crate::spawn::Spawner,
+    spawner: &'a mut crate::spawn::Spawner,
+    /// The action asked for the module's popup: the caller (which knows the
+    /// output, the module's place and the input serial) opens it once
+    /// [`action::perform`] returns.
+    pub(super) popup: bool,
+}
+
+impl<'a> Launch<'a> {
+    pub(super) fn new(spawner: &'a mut crate::spawn::Spawner) -> Self {
+        Self {
+            spawner,
+            popup: false,
+        }
+    }
 }
 
 impl Effects for Launch<'_> {
+    fn popup(&mut self) -> Result<(), String> {
+        self.popup = true;
+        Ok(())
+    }
+
     fn exec(&mut self, argv: &[String]) -> Result<(), String> {
         self.spawner.spawn(argv)
     }
@@ -285,6 +395,15 @@ impl Dispatch<WlSeat, ()> for State {
         };
         // Touch and the keyboard are never taken.
         state.seat_pointer = matches!(capabilities, WEnum::Value(caps) if wants_pointer(caps));
+        // The keyboard is not taken here: a popup that grabbed takes it for
+        // its own lifetime, for Escape (`popup`).
+        #[cfg(feature = "popup")]
+        {
+            state.seat_keyboard = matches!(
+                capabilities,
+                WEnum::Value(caps) if caps.contains(wl_seat::Capability::Keyboard)
+            );
+        }
         state.sync_pointer(qh);
     }
 }
@@ -296,9 +415,15 @@ impl Dispatch<WlPointer, ()> for State {
         event: wl_pointer::Event,
         _: &(),
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
         if state.pointer.as_ref() != Some(pointer) {
+            return;
+        }
+        // A popup under the pointer takes its events (and the bar loses
+        // its own focus on the enter).
+        #[cfg(feature = "popup")]
+        if state.popup_pointer(&event) {
             return;
         }
         // Frames group events from version 5; before it there are none, and
@@ -333,8 +458,14 @@ impl Dispatch<WlPointer, ()> for State {
             wl_pointer::Event::Button {
                 button,
                 state: WEnum::Value(pressed),
+                serial,
                 ..
-            } => state.button(button, pressed == wl_pointer::ButtonState::Pressed),
+            } => state.button(
+                button,
+                pressed == wl_pointer::ButtonState::Pressed,
+                serial,
+                qh,
+            ),
             wl_pointer::Event::Axis {
                 axis: WEnum::Value(wl_pointer::Axis::VerticalScroll),
                 value,

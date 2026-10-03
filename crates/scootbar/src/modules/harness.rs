@@ -101,6 +101,13 @@ impl Harness {
         view
     }
 
+    /// The module's popup content for an unnamed output: whether it has one
+    /// now.
+    #[cfg(feature = "popup")]
+    pub fn popup(&self, content: &mut crate::popup::Content) -> bool {
+        self.module.popup(&OutputView { name: None }, content)
+    }
+
     /// The module's `value` for the output `name`, as `query` reports it.
     #[allow(dead_code)]
     pub fn value_on(&self, name: Option<&str>) -> Option<serde_json::Value> {

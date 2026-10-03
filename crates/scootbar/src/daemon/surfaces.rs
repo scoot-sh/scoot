@@ -182,6 +182,12 @@ impl LayerObjects {
         }
     }
 
+    /// Makes `popup` a child of this bar (`zwlr_layer_surface_v1.get_popup`).
+    #[cfg(feature = "popup")]
+    pub(super) fn adopt(&self, popup: &wayland_protocols::xdg::shell::client::xdg_popup::XdgPopup) {
+        self.layer.get_popup(popup);
+    }
+
     /// The fractional-scale object, the viewport and the role first, then
     /// the surface, as the protocols ask.
     pub(super) fn destroy(self) {
@@ -246,6 +252,10 @@ impl State {
         qh: &QueueHandle<Self>,
     ) {
         self.placement = placement;
+        // A popup is the old modules' (their indices are rebuilt), and its
+        // bar may be destroyed below: closed first.
+        #[cfg(feature = "popup")]
+        self.popup.close();
         // The modules a press or scroll was for are gone with the old ones:
         // nothing stays armed across a reload. The pointer has not moved,
         // and a surface that survives gets no new `enter`, so its focus
@@ -256,7 +266,16 @@ impl State {
             let before = entry.objects.bar;
             let effect = Self::place(&self.placement, &self.content.modules, entry);
             if effect != Effect::None || entry.objects.bar == before {
-                Self::apply(&self.globals, &mut self.input, entry, effect, conn, qh);
+                Self::apply(
+                    &self.globals,
+                    &mut self.input,
+                    #[cfg(feature = "popup")]
+                    &mut self.popup,
+                    entry,
+                    effect,
+                    conn,
+                    qh,
+                );
                 continue;
             }
             let Some(layer) = entry.objects.layer.take() else {
@@ -289,7 +308,16 @@ impl State {
     pub fn apply_visibility(&mut self, conn: &Connection, qh: &QueueHandle<Self>) {
         for entry in self.outputs.iter_mut() {
             let effect = entry.output.set_hidden(self.hidden);
-            Self::apply(&self.globals, &mut self.input, entry, effect, conn, qh);
+            Self::apply(
+                &self.globals,
+                &mut self.input,
+                #[cfg(feature = "popup")]
+                &mut self.popup,
+                entry,
+                effect,
+                conn,
+                qh,
+            );
         }
     }
 
@@ -342,6 +370,8 @@ impl State {
             self.events
                 .note_output(false, entry.output.info().name.as_deref());
             self.input.forget(entry.output.id());
+            #[cfg(feature = "popup")]
+            self.popup.close_for(entry.output.id());
             #[cfg(feature = "workspaces")]
             self.workspaces
                 .0
@@ -360,6 +390,7 @@ impl State {
     fn apply(
         globals: &Globals,
         input: &mut Pointer,
+        #[cfg(feature = "popup")] popup: &mut super::popup::Popups,
         entry: &mut Entry<Objects>,
         effect: Effect,
         conn: &Connection,
@@ -385,6 +416,9 @@ impl State {
                 }
             }
             Effect::Destroy => {
+                // A popup hangs off the surface: gone before it.
+                #[cfg(feature = "popup")]
+                popup.close_for(id);
                 if let Some(layer) = objects.layer.take() {
                     layer.destroy();
                 }
@@ -393,6 +427,8 @@ impl State {
                 input.forget(id);
             }
             Effect::DestroyAndRetry => {
+                #[cfg(feature = "popup")]
+                popup.close_for(id);
                 if let Some(layer) = objects.layer.take() {
                     layer.destroy();
                 }
@@ -404,6 +440,8 @@ impl State {
                 conn.display().sync(qh, RoundTrip::Retry(id));
             }
             Effect::DestroyAndGiveUp => {
+                #[cfg(feature = "popup")]
+                popup.close_for(id);
                 if let Some(layer) = objects.layer.take() {
                     layer.destroy();
                 }
@@ -500,7 +538,16 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
             zwlr_layer_surface_v1::Event::Closed => entry.output.closed(),
             _ => Effect::None,
         };
-        Self::apply(&state.globals, &mut state.input, entry, effect, conn, qh);
+        Self::apply(
+            &state.globals,
+            &mut state.input,
+            #[cfg(feature = "popup")]
+            &mut state.popup,
+            entry,
+            effect,
+            conn,
+            qh,
+        );
     }
 }
 
@@ -567,7 +614,16 @@ impl Dispatch<WlCallback, RoundTrip> for State {
                 effect
             }
         };
-        Self::apply(&state.globals, &mut state.input, entry, effect, conn, qh);
+        Self::apply(
+            &state.globals,
+            &mut state.input,
+            #[cfg(feature = "popup")]
+            &mut state.popup,
+            entry,
+            effect,
+            conn,
+            qh,
+        );
     }
 }
 

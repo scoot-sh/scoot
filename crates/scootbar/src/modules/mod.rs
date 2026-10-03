@@ -189,6 +189,21 @@ pub trait Module {
         false
     }
 
+    /// Fills `content` with what this module's popup shows and answers
+    /// whether it has one now: asked when the popup opens (the
+    /// [`POPUP`](crate::action::POPUP) action) and again whenever the
+    /// module's view changes while it is open, so a level moved elsewhere
+    /// moves the slider. `false` (the default) means no popup, and closes an
+    /// open one: a module that loses what it shows (the sound server went)
+    /// takes its popup with it. Pure and cheap: it only reads the module.
+    /// What an interaction does is a module action by name
+    /// ([`Module::invoke`]), never a callback.
+    #[cfg(feature = "popup")]
+    fn popup(&self, output: &OutputView<'_>, content: &mut crate::popup::Content) -> bool {
+        let _ = (output, content);
+        false
+    }
+
     /// The most logical pixels wide this module's span may be: longer
     /// content is cut to it, and the module draws the cut (the window
     /// title's ellipsis). `None` (the default) is whatever it measures.

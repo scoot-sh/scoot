@@ -3,7 +3,7 @@ title: "Tooltips: a module's `tooltip` shown after a hover delay"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "popups"
+blocked: null
 milestone: "M6"
 ---
 

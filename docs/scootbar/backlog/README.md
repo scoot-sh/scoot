@@ -121,7 +121,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 ### M6 — Infrastructure and the tray
 - [A shared D-Bus client](dbus-client.md) (low): its own spike first
 - [System tray](tray.md) (medium): the watcher is core infrastructure
-- [Popups](popups.md) (low), [Tooltips](tooltips.md) (low)
+- [Popups](resolved/popups-done.md) (done), [Tooltips](tooltips.md) (low), [A native WiFi list popup](popup-network-list.md) (low)
 - [Media (MPRIS)](media-module.md) (low), [Bluetooth](bluetooth-module.md) (low)
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)

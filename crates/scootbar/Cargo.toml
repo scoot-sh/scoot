@@ -18,7 +18,7 @@ license.workspace = true
 # module draws a plain bar and needs no font. `icon-image` is the one
 # feature that is not a module: it is an optional decoder (below).
 [features]
-default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "button", "push", "exec"]
+default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "button", "push", "exec", "popup"]
 clock = []
 workspaces = []
 window-title = []
@@ -36,6 +36,12 @@ brightness = []
 # slow re-read while discharging for drivers whose capacity steps are
 # silent (docs/scootbar/backlog/battery-module.md).
 battery = []
+# Popups: a module's declarative content (a slider, buttons) drawn in an
+# `xdg_popup` parented to the bar, opened by a click bound to `popup`. Not a
+# module: the code is the bar's own (`src/popup/`, `src/daemon/popup.rs`),
+# and a build without it has none of it, nor `xdg_wm_base`
+# (docs/scootbar/backlog/resolved/popups-done.md).
+popup = []
 # The three modules the config defines by name (`[button.NAME]`,
 # `[push.NAME]`, `[exec.NAME]`): extend the bar without Rust. `push` and
 # `exec` share the update payload (`src/modules/payload.rs`).
