@@ -163,20 +163,9 @@ pub fn system_bus_path() -> PathBuf {
     system_bus_path_for(std::env::var_os("DBUS_SYSTEM_BUS_ADDRESS").as_deref())
 }
 
-/// The runtime directory, or its conventional fallback.
-pub fn runtime_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
-    PathBuf::from(format!("/run/user/{}", rustix_uid()))
-}
-
-fn rustix_uid() -> u32 {
-    rustix::process::getuid().as_raw()
-}
-
+/// The runtime directory, homed where every build sees it: [`conn`] is
+/// feature-gated, [`control`](crate::control) is not.
+pub use crate::control::paths::runtime_dir;
 /// Why the blocking set-up failed: `Refused` is the bus saying no (or
 /// speaking out of turn), with what it said.
 #[derive(Debug)]

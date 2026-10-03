@@ -73,7 +73,7 @@ fn socket_path_forms() {
         super::socket_path_for(Some(OsStr::from_bytes(b"/tmp/y"))),
         PathBuf::from("/tmp/y")
     );
-    let fallback = crate::dbus::conn::runtime_dir()
+    let fallback = crate::control::paths::runtime_dir()
         .join("pulse")
         .join("native");
     assert_eq!(super::socket_path_for(None), fallback);
