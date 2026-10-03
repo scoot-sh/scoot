@@ -77,6 +77,15 @@ impl std::error::Error for PathError {}
 /// directory watch all wait on the fallback rather than refuse. One
 /// helper for all three (the D-Bus client, the tray and the volume
 /// module), so the fallback cannot drift between them.
+#[cfg_attr(
+    not(any(
+        feature = "tray",
+        feature = "media",
+        feature = "volume",
+        feature = "microphone"
+    )),
+    allow(dead_code)
+)]
 pub fn runtime_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
         if !dir.is_empty() {
