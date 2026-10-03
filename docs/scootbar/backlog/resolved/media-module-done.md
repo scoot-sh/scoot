@@ -81,10 +81,11 @@ at it, on the dev VM, and the raw runs, scripts and screenshots are in
   held name; one player a connection and at most 8 held; a newcomer to a
   full room takes the place of the oldest read, stopped player, else waits
   in a list of 16 and is held when a slot frees or a held player stops (so
-  eight connections do not hide a ninth until it restarts; a second name of a
+  eight connections hide a ninth only until one of them leaves or stops, and
+  only if fewer than 16 names are waiting ahead of it; a second name of a
   connection waits the same way); owners asked about a window of 8 names at
-  a time (a connection owning hundreds of names hides no real player listed
-  behind it); strings cleaned and cut to 120 bytes where stored, through a
+  a time (a connection owning hundreds of names is held once and the rest wait
+  or are forgotten by the same rule); strings cleaned and cut to 120 bytes where stored, through a
   reused buffer; an answer that does not parse is dropped whole, one that
   errors (a timeout, or `UnknownObject` from a player that has the name
   before it exports the object) leaves the player held and unshown, read

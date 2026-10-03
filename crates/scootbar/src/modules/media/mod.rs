@@ -28,8 +28,9 @@
 //!
 //! ## Untrusted bytes
 //!
-//! Anything on the bus can claim a player name and say anything; it can
-//! lose only itself (`session.rs`). Titles and artists are cleaned and cut
+//! Anything on the bus can claim a player name and say anything; it cannot
+//! crash, hang or grow the bar, and can only fill the 8 slots and the waiting
+//! list (`session.rs` says exactly what it can and cannot do). Titles and artists are cleaned and cut
 //! when stored (`player.rs`), and the line drawn is cut to `max-width` with
 //! an ellipsis measured in pixels (the window title's cut, shared). The art
 //! URL a player names is never fetched, the position and volume are never

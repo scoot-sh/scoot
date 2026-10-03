@@ -19,12 +19,18 @@
 //!
 //! ## What a peer can do
 //!
-//! Anything on the session bus can claim an MPRIS name and say anything.
-//! It can lose only itself: at most [`MAX_PLAYERS`] are held and one name
-//! per connection, strings are cleaned and cut where they are stored, a
-//! reply that does not parse leaves the player's last state, one that
-//! errors drops the player, one that never comes is forgotten, and
-//! `NameOwnerChanged` is believed only from the bus. A signal is applied
+//! Anything on the session bus can claim an MPRIS name and say anything. It
+//! cannot crash or hang the bar, grow it without bound, or make it believe
+//! another player's state: strings are cleaned and cut where they are stored,
+//! a reply that does not parse leaves the player's last state, one that errors
+//! leaves the player held and unshown (read again at its next signal), one
+//! that never comes is forgotten, and `NameOwnerChanged` is believed only from
+//! the bus. At most [`MAX_PLAYERS`] are held, one name per connection; a
+//! newcomer to a full room takes the place of the oldest stopped player that
+//! has been read, else waits in a list of [`MAX_WAITING`] (the oldest
+//! forgotten first). What a hostile peer can still do is bounded loss of
+//! visibility: live players filling the table and the list hide a later one
+//! until a slot frees. A signal is applied
 //! only from the connection that owns a held name.
 
 use std::collections::VecDeque;

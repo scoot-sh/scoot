@@ -951,26 +951,30 @@ Cargo feature (`media`), on by default; the smallest build
   seconds, said once on stderr and again at each 30 s retry that dies the
   same way (the [tray's](#tray) rules, in `src/dbus/link.rs`).
 - **Bounds, for a hostile or broken player.** Anything on the session bus
-  can claim a player name and say anything. What that guarantees: it cannot
-  crash or hang the bar or another player, grow it without bound, or make it
-  believe another player's state; and it holds at most one of the 8 slots.
-  What it can do: cost the bar the work of its own signals (a flood of
-  positions about 0.6% of a core at 500 a second, measured; a flood of
-  titles or state flips is drawn ten times a second at most), and fill the
-  slots. Only the bus's own `NameOwnerChanged` is believed, and a
-  `PropertiesChanged` only from the connection that owns a held name. Titles
-  and artists are cleaned (controls stripped) and cut to 120 bytes where
-  they are stored. At most 8 players are held, one a connection. When all 8
-  are held a newcomer takes the place of the oldest *stopped* player that
-  has been read (it shows nothing, and waits for a slot like any other),
-  else waits itself in a list of 16 names (the oldest forgotten first, so
-  more than 16 waiting at once lose the earliest) and is held when a slot
-  frees: eight real or hostile connections cannot hide a later player until
-  it restarts, only until one of them leaves or stops, unless 16 more are
-  waiting ahead of it. The second name of a connection waits the same way, so
-  a connection that releases one keeps its player under the other. A
-  connection owning hundreds of names is asked about in a window of 8 at a
-  time, and hides no real player behind it. A message past 1 MiB is skipped
+  can claim a player name and say anything. What the code guarantees: it
+  cannot crash or hang the bar or another player, grow the bar without bound,
+  or make it believe another player's state (only the bus's own
+  `NameOwnerChanged` is believed, and a `PropertiesChanged` only from the
+  connection that owns a held name); it costs the bar the work of its own
+  signals and no more (a flood of positions about 0.6% of a core at 500 a
+  second, measured; title and state changes are drawn ten times a second at
+  most); it holds at most one of 8 slots, one a connection. What it *can*
+  still do is cost visibility, boundedly: connections that keep 8 live
+  players (playing or paused) fill the table, and 16 more names announcing
+  after them fill the waiting list, so a player that arrives behind all of
+  those is not shown until a slot frees, and the oldest waiting name is
+  forgotten past 16; that is a loss of what the module shows, never of the
+  bar. The rule: when all 8 are held a newcomer takes the place of the
+  oldest *stopped* player whose read has been answered (it shows nothing,
+  and goes to the waiting list itself), else it waits in the list of 16
+  names (the oldest forgotten first). A waiting name is held when a slot
+  frees or when a held player stops (one waiting name for each stop; a
+  player that made room by stopping is not swapped back by that). The second
+  name of a connection waits in the same list, so a connection that releases
+  one keeps its player under the other. A connection owning hundreds of
+  names is asked about in a window of 8 at a time, and each is held or waits
+  by the same rule. Titles and artists are cleaned (controls stripped) and
+  cut to 120 bytes where they are stored. A message past 1 MiB is skipped
   whole and the player keeps its last state; an answer that does not parse
   is dropped whole; a read that errors (a timeout, or `UnknownObject` from a
   player that has the name before it exports the object) leaves the player
@@ -982,111 +986,6 @@ Cargo feature (`media`), on by default; the smallest build
   its `NameOwnerChanged`.) The parser (`src/dbus/mpris.rs`, `std` only) is
   fuzzed with the D-Bus client's (`crates/scootbar/fuzz`, target `dbus`), and
   checked against what sd-bus marshals.
-- **Cost.** One fd (the bus socket, with `OUT` only while a write or a
-  staged message waits), or one inotify fd while there is no bus, and a
-  one-shot timer only while an item waits out its 50 ms floor between
-  reads or after the bus kept dropping the bar. Measured (dev VM, one
-  60 s idle window per row): **zero wakeups** with no bus, with a bus and
-  no items, and with one and with eight items on it; RSS 4028 kB with the
-  tray alone and no bus or no items, 4224 kB with one item, 4256 kB with
-  eight (differences under about 130 kB are within one run's resolution).
-  The binary: **+131,072 B on disk (1,774,304 to 1,905,376, +7.4%) and
-  +112,496 B of loaded sections (+6.7%, of which `.text` +96,896 B)**
-  against `main`, and the feature built but *off* is not free either:
-  +65,536 B on disk, +3,312 B loaded (shared edits). An item that
-  re-announces its icon continuously is read at most every 50 ms (0.7% of
-  a core measured, against 9.7% with no floor). The table and its method
-  are in the
-  [resource ratchet](backlog/lightest.md#m6-tray-and-the-d-bus-client-module-level-cost-measured-2026-10-02).
-
-## Media
-
-What the players on the session bus are playing, and play/pause, next and
-previous, spoken over MPRIS (`org.mpris.MediaPlayer2.*`: mpv, VLC,
-Spotify, Firefox, Chromium and most others) through the bar's own D-Bus
-client (see [Tray](#tray)): no `zbus`, no libdbus, no thread, no polling. A
-Cargo feature (`media`), on by default; the smallest build
-(`--no-default-features`) has none of it.
-
-- **What it shows** is `artist - title` (or whichever of the two the player
-  sent, or the player's name when it sent neither) with a play or pause
-  icon for the state, cut to `max-width` with an ellipsis measured in
-  pixels, in the `muted` class while paused. The module's tooltip text is the
-  uncut line, `mpv (playing): Ada - Song` (whether and how the bar draws a
-  module's tooltip is the tooltips feature's, not this module's). Several artists are joined with a
-  comma. **A stopped player shows nothing**, and with no player the module
-  takes no space; start playback from the player.
-- **Which player.** Several may run. Of the ones that are playing or
-  paused, `player` (a short name: `spotify` for
-  `org.mpris.MediaPlayer2.spotify`, and for its second copies, which a
-  player names `.instance` and a suffix: `.instance1234`, `.instance-abc`) is
-  shown if it is among them; else the one that most recently started
-  playing; else, when none plays, the one that played last; a tie (players
-  that never played) is broken by name, so the choice is the same every
-  run. The controls go to the player shown. A connection that owns two MPRIS
-  names is one player (the first name seen; if it releases that one, the
-  other takes over); at most 8 are held (see Bounds for what a ninth does).
-- **Controls, with no binding at all**: a click is `play-pause`, a right
-  click or a scroll down `next`, a middle click or a scroll up `previous`;
-  nothing happens when no player is shown. The module's actions are
-  `play-pause`, `next` and `previous`, none taking a number
-  (`scootbar msg invoke media next`). Each is one call to the player's
-  connection that wants no reply: the track changes on the bar when the
-  player says so, as a signal. An action is refused saying why when there
-  is no bus, no player playing or paused, or the player says it cannot
-  (`CanControl`, `CanGoNext`, `CanGoPrevious` false). **A skip within 250 ms
-  of the last is refused** (a scroll arrives at up to sixty actions a
-  second, and a scroll of thirty steps is one skip, not thirty; a scroll
-  that hits the limit is one line on stderr a second at most, as any failing
-  action): an agent that wants two skips waits for the first to show in
-  `query`.
-- **`query`** reports `{ "player", "bus_name", "status", "title", "artist",
-  "players": [{ "bus_name", "status" }] }` for the player shown (`status` is
-  `playing` or `paused`; `players` lists every one held, stopped included),
-  and nothing while none is.
-- **Options.** `[media]` takes `player` (a name as it is on the bus:
-  letters, digits, `_`, `-` and `.`), `max-width` (default 320 logical
-  pixels, 1 to 4096), `margin` and the five [interaction keys](#pointer-input).
-  The playback position and the volume are never shown (the position has no
-  change signal, so showing it would need a timer), and the art URL a player
-  names is never fetched.
-- **A run of changes is drawn ten times a second at most.** The first
-  change after a quiet spell (a new track) is drawn in the turn it arrives;
-  changes that follow within 100 ms (a title, a state flipping between
-  playing and paused, another player becoming the one shown) wait for one
-  timer, and the bar then shows the latest, however many came; the last
-  change is never lost. The module appearing (a first player) or emptying
-  (the last one gone or stopped, the bus lost) is never held. (The window
-  title's rule, for the same reason: a player that rewrites its title or
-  flaps its state hundreds of times a second is a bug or a title that
-  carries progress.)
-- **Idle cost: nothing.** The bus does the filtering: the bar asks for
-  `NameOwnerChanged` of the `org.mpris.MediaPlayer2` namespace and for
-  `PropertiesChanged` of the Player interface on the one MPRIS object, so an
-  app unrelated to media coming or going, or a player's `Seeked` or
-  position, never wakes the bar (tested against a real `dbus-daemon`). A
-  track change is one signal carrying the value (no round trip); a player
-  that only invalidates a property is read once, no oftener than every
-  50 ms. With no bus the module waits on the bus socket's directory (one
-  inotify watch); a bus that goes away drops every player at once and dials
-  once more, and one that keeps dropping the bar is left alone for 30
-  seconds (the [tray's](#tray) rules, in `src/dbus/link.rs`).
-- **Bounds, for a hostile or broken player.** Anything on the session bus
-  can claim a player name and say anything, and can lose only itself. Only
-  the bus's own `NameOwnerChanged` is believed, and a `PropertiesChanged`
-  only from the connection that owns a held name. Titles and artists are
-  cleaned (controls stripped) and cut to 120 bytes where they are stored;
-  at most 8 players, one a connection (a connection owning hundreds of
-  names is asked about in a window of 8 at a time, and hides no real
-  player behind it); a message past 1 MiB is skipped
-  whole and the player keeps its last state; an answer that does not parse
-  is dropped whole, one that errors drops the player (a timeout keeps it, busy),
-  one that never comes
-  is forgotten after 30 seconds when its slot is wanted; a property of the
-  wrong type is skipped alone; dictionaries past 128 entries are refused.
-  The parser (`src/dbus/mpris.rs`, `std` only) is fuzzed with the D-Bus client's
-  (`crates/scootbar/fuzz`, target `dbus`), and checked against what sd-bus
-  marshals.
 - **Cost.** One fd (the bus socket, with `OUT` only while a write or a
   staged message waits), or one inotify fd while there is no bus, and a
   one-shot timer only while a player waits out its 50 ms floor between reads,
@@ -1112,6 +1011,7 @@ Cargo feature (`media`), on by default; the smallest build
   maintainer waived this row on 2026-10-03 (this row only) and `media`
   stays in `default`. The table and its method are in the
   [resource ratchet](backlog/lightest.md#m6-media-module-level-cost-measured-2026-10-03).
+
 
 ## Pointer input
 
