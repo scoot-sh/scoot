@@ -6,7 +6,6 @@
 //! zero dependencies, 1 thread) and is the only option fitting the bar's
 //! doctrine (one single-threaded `poll(2)` loop, no async runtime, no C
 //! library). Its first consumer is the tray and its second the media
-//! library). Its first consumer is the tray and its second the media
 //! module (MPRIS), both on the session bus; its third is the bluetooth
 //! module (BlueZ) on the system bus. Each consumer holds
 //! its own connection so far (a second fd, no shared state between

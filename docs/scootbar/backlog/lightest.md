@@ -637,11 +637,16 @@ of `.text` (+0.1%, inside any noise reading of it) and nothing on disk.
 No row is waived here, and none needs to be: there is no regression on
 any row for the maintainer to waive or not.
 
-**Review round (2026-10-03).** The size row re-measured at the
-review-round head (branch code commit `d6415c5cc`, rebuilt byte-identical
-after the docs-only follow-ups, same-tree `main` `ff200643a` past the
-bluetooth merge, same method: `git archive`d to the dev VM, own target
-dirs): file 2,036,448 B on both sides (+0); `.text` 1,583,304 against
+**Review round (2026-10-03).** The size row re-measured on the review
+round's code after its rebase onto the bluetooth merge (the record does
+not say whether that tree already had the round's last code commit,
+`e51dc18d2`, a few lines releasing bluetooth's reads on an unknown drop;
+the later rebase onto #401 touches none of this PR's files), against same-tree `main` `ff200643a`
+past the bluetooth merge, by the same method (`git archive`d to the dev
+VM, own target dirs). An earlier version of this paragraph named the
+pre-rebase commit `d6415c5cc`, which has no bluetooth module and cannot
+have produced these binaries; the 2,036,448 B below shows the measured
+tree carried it. Results: file 2,036,448 B on both sides (+0); `.text` 1,583,304 against
 1,580,808 (+2,496, +0.2%); loaded sections (`.text`+`.rodata`+`.eh_frame*`+
 `.gcc_except_table`+`.data*`) 1,932,723 against 1,929,755 (+2,968).
 The idle rows above stand — nothing in the round touches an idle path
