@@ -324,6 +324,9 @@ enum Step {
     /// Report which of the client's surfaces its own `wl_pointer` was last
     /// told it entered.
     ReportPointer,
+    /// Report every `wl_pointer.motion` position the client has been sent
+    /// so far, surface-local -- where its moves actually landed.
+    ReportPointerMotions,
     /// `ext_session_lock_manager_v1.lock`, and nothing else: no lock surface
     /// is created, because what these tests ask of a lock is only that it
     /// takes input away from everything that is not it. The session is
@@ -382,6 +385,9 @@ enum Ack {
     PopupDone(u32),
     /// [`Step::ReportPointer`]'s answer.
     Pointer(Option<Focused>),
+    /// [`Step::ReportPointerMotions`]'s answer: every motion position so
+    /// far, surface-local.
+    PointerMotions(Vec<(f64, f64)>),
     /// [`Step::ReportKeyboard`]'s answer.
     Keyboard(KeyboardReport),
     /// [`Step::ReportSerials`]'s answer: the input serials this client has
@@ -462,6 +468,11 @@ struct TestClient {
     /// would prove nothing.
     pointer: Option<wl_pointer::WlPointer>,
     pointer_focus: Option<wl_surface::WlSurface>,
+    /// Every `wl_pointer.motion` position received so far, surface-local --
+    /// the only evidence of *where* a move landed rather than which surface
+    /// it entered. Cumulative like `keys` above: a test slices off the tail
+    /// it drove itself.
+    pointer_motions: Vec<(f64, f64)>,
     /// `ext_session_lock_manager_v1`, bound only so [`Step::LockSession`]
     /// can take a lock.
     lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
@@ -603,10 +614,11 @@ impl Dispatch<wl_seat::WlSeat, ()> for TestClient {
     }
 }
 
-/// Only `enter`/`leave`/`button` are recorded: which surface the pointer is
-/// on is the whole question a popup hit test raises, and motion/axis add
-/// nothing to it -- while the button serial is what a toolkit passes to
-/// `xdg_popup.grab` for a click-opened menu.
+/// `enter`/`leave`/`button` decide focus and grab serials; `motion`
+/// positions say where a move landed, which is the whole question a
+/// client-ended popup grab raises (the first move after one must be
+/// delivered as asked, not re-sent at the grab's old location). Axis is
+/// what adds nothing here.
 impl Dispatch<wl_pointer::WlPointer, ()> for TestClient {
     fn event(
         client: &mut Self,
@@ -624,6 +636,11 @@ impl Dispatch<wl_pointer::WlPointer, ()> for TestClient {
                 client.last_pointer_enter_serial = Some(serial);
             }
             wl_pointer::Event::Leave { .. } => client.pointer_focus = None,
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => client.pointer_motions.push((surface_x, surface_y)),
             wl_pointer::Event::Button { serial, .. } => {
                 client.last_button_serial = Some(serial);
             }
@@ -1358,6 +1375,9 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     }
                 }));
             }
+            Step::ReportPointerMotions => {
+                outcome = Ack::PointerMotions(client.pointer_motions.clone());
+            }
             Step::LockSession => {
                 let manager = client
                     .lock_manager
@@ -1487,6 +1507,15 @@ impl Fixture {
             panic!("the pointer probe should report what the client saw");
         };
         focused
+    }
+
+    /// Every `wl_pointer.motion` position the client has been sent so far,
+    /// surface-local -- where its moves actually landed.
+    fn pointer_motions(&mut self) -> Vec<(f64, f64)> {
+        let Ack::PointerMotions(motions) = self.run(Step::ReportPointerMotions) else {
+            panic!("the pointer-motion probe should report what the client saw");
+        };
+        motions
     }
 
     /// Presses and releases one unbound key, so the client is sent a real

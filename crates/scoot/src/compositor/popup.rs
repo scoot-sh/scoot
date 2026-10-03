@@ -526,7 +526,31 @@ impl State {
             self.dismiss_displaced_popup_grab();
             return;
         }
+        // The seat's pointer grab is still the popup's own, and nothing
+        // below reaps it: the focus refresh only moves the *keyboard*, which
+        // is enough there because `PopupKeyboardGrab::set_focus` forwards
+        // and self-unsets on an ended grab. The pointer has no such path --
+        // the next motion through the dead grab hits
+        // `PopupPointerGrab::motion`'s ended branch, which drops that motion
+        // and re-sends the grab's stored old location instead. So the dead
+        // grab is unset here, serial-guarded like `dismiss_popup_grab` so a
+        // press's own grab installed since is never ripped out (a button
+        // through an ended grab already unsets it itself, which is when the
+        // guard reads false and this is a no-op). Before the focus refresh,
+        // like every other unset here: its keyboard cascade restores the
+        // root, and the refresh gets the last word after it.
+        let serial = self
+            .popup_grab
+            .as_ref()
+            .expect("an ended grab was just established above")
+            .serial();
         self.popup_grab = None;
+        if let Some(pointer) = self.seat.get_pointer()
+            && pointer.has_grab(serial)
+        {
+            let time = smithay::backend::input::InputTime::from_millis(self.millis());
+            pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), time);
+        }
         self.refresh_keyboard_focus();
         // The dismissed popup's pixels are gone from the tree; nothing else
         // marks the screen dirty for a destroy.

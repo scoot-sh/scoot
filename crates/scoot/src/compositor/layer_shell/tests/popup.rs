@@ -156,6 +156,68 @@ fn a_popup_grab_moves_the_keyboard_onto_the_popup_and_gives_it_back() {
     fixture.disconnect_client();
 }
 
+/// The first pointer move after the client ends a grabbing popup is
+/// delivered as asked -- not eaten by the dead grab.
+///
+/// `settle_popup_grab` reaps the ended grab from `State`, but the seat's
+/// pointer grab is still the popup's own: the next motion through it hits
+/// `PopupPointerGrab::motion`'s ended branch, which drops that motion and
+/// re-sends the grab's stored old location instead (pinned Smithay fork:
+/// `popup/grab.rs`'s `motion`, `pointer/mod.rs`'s `unset_grab` with
+/// `restore_focus = true`). An agent `click` after a popup's Escape lands
+/// wrong for exactly this reason: the click's move is the whole input. See
+/// `docs/backlog/core/pointer-motion-after-popup-grab-end.md`.
+#[test]
+fn the_first_pointer_move_after_a_client_ended_grab_is_delivered_as_asked() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.press_a_key();
+    // Park the pointer on the window, so the grab's stored location and
+    // the move below are two distinct points on the same surface.
+    fixture.click(ON_WINDOW.0, ON_WINDOW.1);
+    window_with_grabbing_popup(&mut fixture);
+
+    // Eight logical pixels right, still inside the window's own buffer --
+    // integer coordinates, so the surface-local answer is exact.
+    let rect = fixture.window_rect();
+    let parked = (ON_WINDOW.0 - rect.x as f64, ON_WINDOW.1 - rect.y as f64);
+    let second = (ON_WINDOW.0 + 8.0, ON_WINDOW.1);
+    let expected = (second.0 - rect.x as f64, second.1 - rect.y as f64);
+    // The parking click entered the window, which the protocol reports as
+    // `enter` rather than `motion`, so nothing is recorded yet: the count
+    // below is the whole baseline.
+    let seen = fixture.pointer_motions().len();
+
+    // The client ends the grab (Escape-to-close); the compositor did not
+    // dismiss it, so nothing on the wire says `popup_done`.
+    fixture.run(Step::DestroyPopup);
+    assert_eq!(fixture.popup_dones(), 0);
+    assert!(
+        fixture.state.popup_grab.is_none(),
+        "the ended grab should not be held after the popup is gone"
+    );
+
+    fixture.state.pointer_move(second.0, second.1);
+    fixture.settle();
+    let motions = fixture.pointer_motions();
+    assert_eq!(
+        &motions[seen..],
+        &[parked, expected],
+        "reaping the grab restores the old location (like a dismiss does), \
+         and the first move after a client-ended grab lands where it was sent"
+    );
+    assert!(
+        !fixture
+            .state
+            .seat
+            .get_pointer()
+            .expect("a headless seat has a pointer")
+            .is_grabbed(),
+        "reaping the ended grab should take the seat's pointer grab with it"
+    );
+    fixture.disconnect_client();
+}
+
 /// A click over a popup reaches the popup, not the window behind it.
 ///
 /// Pointer hit-testing already walked into popups before any of this landed
