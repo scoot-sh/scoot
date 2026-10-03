@@ -122,7 +122,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [A shared D-Bus client](resolved/dbus-client-done.md) (low): hand-rolled, built with the tray — RESOLVED 2026-10-02
 - [System tray](tray.md) (medium): the watcher is core infrastructure; first version landed 2026-10-02, menus remain (popups exist now)
 - [Tray D-Bus client: hardening left over from the #388 review](tray-review-hardening.md) (low): a per-pump byte budget while discarding, a stuck flight on an oversize reply with huge header fields, and a few smaller items
-- [Popups](resolved/popups-done.md) (done), [Tooltips](resolved/tooltips-done.md) (done), [A native WiFi list popup](popup-network-list.md) (low)
+- [Popups](resolved/popups-done.md) (done), [Tooltips](resolved/tooltips-done.md) (done), [A native WiFi list popup](popup-network-list.md) (low), [Network module icons](network-module-icons.md) (low, gh #379)
 - [Media (MPRIS)](resolved/media-module-done.md) (low): now playing and play/pause, next, previous over MPRIS — RESOLVED 2026-10-03
 - [Bluetooth](bluetooth-module.md) (low)
 - [Move the tray onto `dbus::link`](tray-onto-dbus-link.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection
