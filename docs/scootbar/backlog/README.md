@@ -127,6 +127,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Bluetooth](resolved/bluetooth-module-done.md) (low) — RESOLVED 2026-10-03
 - [Bluetooth: real adapter and headset validation](bluetooth-real-hardware.md) (medium): what the VM cannot prove — real power toggles, Battery1 pacing, real `GetManagedObjects` scale, Waybar beside it
 - [Move the tray onto `dbus::link`](resolved/tray-onto-dbus-link-done.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection — RESOLVED 2026-10-03
+- [Network: a second radio's empty scan replaces the real one](network-multi-radio-scan.md) (medium): the last interface's scan dump wins, so a dongle or hotspot interface can empty the list (#403 review)
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)
 - [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears
@@ -136,6 +137,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 ### Unscheduled (until someone asks)
 - [Gate integration tests on module features, tidy the unit-test script](scootbar-test-gating-and-script-hygiene.md) (low)
 - [drive_placed pidfile-vs-pipe race flakes the exec keep tests](resolved/exec-keep-pidfile-race-done.md) (low) — RESOLVED 2026-10-03 in #402: waits on shown text, pidfile as identity check only
+- [Network: a connect or menu command that never exits blocks the next one](network-child-stuck.md) (low): no timeout or kill, and a reload leaves the child running (#403 review)
 - [Per-output font size](multi-output-font-size.md) (low): deferred 2026-10-01 by the maintainer; left M3
 
 ### Ongoing (no milestone, applies to all)
