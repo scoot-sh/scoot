@@ -31,8 +31,7 @@ composable shell.
 > font rasterizer and clock choices, recorded in
 > [the dependency record](backlog/resolved/dependencies-done.md). M6's
 > first step is a system tray (the StatusNotifierItem watcher and host, on
-> a hand-rolled D-Bus client: [the module](cli.md#tray); its menus are the
-> remaining step), its second the media module (what the MPRIS players
+> a hand-rolled D-Bus client: [the module](cli.md#tray), menus included), its second the media module (what the MPRIS players
 > are playing, with play/pause, next and previous:
 > [the module](cli.md#media)), and its third the bluetooth module (the
 > adapter's power and the connected devices over BlueZ, on the system bus:

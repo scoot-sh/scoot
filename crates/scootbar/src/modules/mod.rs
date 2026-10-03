@@ -213,6 +213,18 @@ pub trait Module {
         false
     }
 
+    /// Whether the last [`Module::invoke`] asked for the popup surface:
+    /// taken once (a second call says `false`), so carrying the action
+    /// out opens the surface and nothing else does. An invoke cannot
+    /// open a surface itself — the bar owns it — so an action that names
+    /// what to show (the tray's `menu N`) sets the request, and the
+    /// daemon opens the module's popup for it. `false` by default.
+    #[cfg(feature = "popup")]
+    fn wants_popup(&mut self) -> bool {
+        let _ = self;
+        false
+    }
+
     /// The most logical pixels wide this module's span may be: longer
     /// content is cut to it, and the module draws the cut (the window
     /// title's ellipsis). `None` (the default) is whatever it measures.

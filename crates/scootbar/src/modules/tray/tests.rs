@@ -286,7 +286,7 @@ fn a_click_activates_and_a_scroll_scrolls() {
     assert_eq!(input(Trigger::MiddleClick, PAD + 1), action("secondary", 0));
     assert_eq!(input(Trigger::ScrollUp, PAD + 1), action("wheel-up", 0));
     assert_eq!(input(Trigger::ScrollDown, PAD + 1), action("wheel-down", 0));
-    assert_eq!(input(Trigger::RightClick, PAD + 1), None);
+    assert_eq!(input(Trigger::RightClick, PAD + 1), action("menu", 0));
     // Past the end, and in the gap, is nothing.
     assert_eq!(input(Trigger::Click, 399), None);
 
@@ -344,12 +344,17 @@ fn a_click_activates_and_a_scroll_scrolls() {
         -3
     );
 
-    // The menu is not built: refused loudly, and unknown stays unknown.
+    // The menu opens (its layout is still in flight: the fake bus was
+    // given no menu to answer with), and unknown stays unknown.
+    #[cfg(feature = "popup")]
     assert_eq!(
         harness.invoke(&DP1, &ModuleAction::new("menu", Some(0)), 1),
-        Err(InvokeError::Refused(
-            "tray menus are not built: no DBusMenu client yet"
-        ))
+        Ok(Update::Changed)
+    );
+    #[cfg(not(feature = "popup"))]
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("menu", Some(0)), 1),
+        Err(InvokeError::Refused("tray menus need the popup feature"))
     );
     assert_eq!(
         harness.invoke(&DP1, &ModuleAction::new("frobnicate", Some(0)), 1),
@@ -613,7 +618,16 @@ fn waiting_without_a_bus_costs_nothing_and_shows_nothing() {
 fn the_registry_lists_tray_with_its_actions() {
     let spec = find(ID).expect("the tray module is built");
     assert_eq!(spec.id, ID);
-    for name in ["activate", "secondary", "wheel-up", "wheel-down", "menu"] {
+    for name in [
+        "activate",
+        "secondary",
+        "wheel-up",
+        "wheel-down",
+        "menu",
+        "menu-select",
+        "menu-drill",
+        "menu-back",
+    ] {
         assert!(spec.action(name).is_some(), "no {name} action");
     }
     // The stand-in starts the connected module on the scripted bus, so

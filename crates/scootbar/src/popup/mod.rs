@@ -39,12 +39,22 @@
 //!
 //! [`Module::popup`]: crate::modules::Module::popup
 //!
-//! Only the volume code (the `volume` and `microphone` features) fills a
-//! [`Content`] today, so a build with `popup` and neither has the widget
-//! API and nothing that calls it: allowed to be dead there, which is not a
-//! reason to leave `popup` out of such a build.
+//! Only the volume code (the `volume` and `microphone` features), the
+//! network list (the `network` feature) and the tray's menus (the `tray`
+//! feature) fill a [`Content`] today, so a build with `popup` and none
+//! of those has the widget API and nothing that calls it: allowed to be
+//! dead there, which is not a reason to leave `popup` out of such a
+//! build.
 
-#![cfg_attr(not(any(feature = "volume", feature = "microphone")), allow(dead_code))]
+#![cfg_attr(
+    not(any(
+        feature = "volume",
+        feature = "microphone",
+        feature = "network",
+        feature = "tray"
+    )),
+    allow(dead_code)
+)]
 
 use std::fmt::{self, Write};
 use std::ops::Range;

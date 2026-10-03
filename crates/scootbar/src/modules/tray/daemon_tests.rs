@@ -28,6 +28,11 @@ struct Item {
     /// Answers `GetAll` with a valid message past what the bar reads (a
     /// 512 by 512 pixmap), built by hand since `Writer` would refuse it.
     oversized: bool,
+    /// Serves a DBusMenu object at `/Menu`: answers `GetLayout` with
+    /// this, records `Event` ids and `AboutToShow`s.
+    layout: Option<Vec<u8>>,
+    events: Vec<i32>,
+    abouts: usize,
 }
 
 impl Item {
@@ -59,6 +64,9 @@ impl Item {
             props: item_body(title, "Active", 4, 4, &solid(4, 4, 255, 30, 200, 30)),
             calls: Vec::new(),
             oversized: false,
+            layout: None,
+            events: Vec::new(),
+            abouts: 0,
         };
         // The name is owned once its reply is read.
         let start = Instant::now();
@@ -87,8 +95,9 @@ impl Item {
     }
 
     /// Serves what arrived: answers `GetAll` (addressed to its sender,
-    /// which the daemon requires), records any other call. Whether the
-    /// `RequestName` reply was among it.
+    /// which the daemon requires), the menu object's `GetLayout` where
+    /// one is scripted, and records `AboutToShow`, `Event` and any
+    /// other call. Whether the `RequestName` reply was among it.
     fn serve_until_reply(&mut self) -> bool {
         let (events, _) = self.conn.pump();
         let mut replied = false;
@@ -97,8 +106,10 @@ impl Item {
                 Event::Reply { token: 1, .. } => replied = true,
                 Event::MethodCall {
                     sender,
+                    path,
                     member,
                     serial,
+                    body,
                     ..
                 } => {
                     if member == "GetAll" && self.oversized {
@@ -119,6 +130,18 @@ impl Item {
                     } else if member == "GetAll" {
                         let props = self.props.clone();
                         self.conn.reply_return(&sender, serial, "a{sv}", &props);
+                    } else if path == "/Menu" && member == "GetLayout" {
+                        if let Some(layout) = self.layout.clone() {
+                            self.conn
+                                .reply_return(&sender, serial, "(u(ia{sv}av))", &layout);
+                        }
+                    } else if path == "/Menu" && member == "AboutToShow" {
+                        self.abouts += 1;
+                    } else if path == "/Menu" && member == "Event" {
+                        let mut reader = crate::dbus::proto::Reader::le(&body);
+                        if let Ok(id) = reader.i32() {
+                            self.events.push(id);
+                        }
                     }
                     self.calls.push(member);
                 }
@@ -127,14 +150,34 @@ impl Item {
         }
         replied
     }
+
+    /// Emits `LayoutUpdated(revision)` on the menu object: what the bar
+    /// re-reads while the menu is open.
+    #[cfg(feature = "popup")]
+    fn send_layout_updated(&mut self, revision: u32) {
+        let mut body = Writer::new();
+        body.u32(revision);
+        let bytes = body.take_body().unwrap();
+        self.conn.signal(
+            "/Menu",
+            "com.canonical.dbusmenu",
+            "LayoutUpdated",
+            "u",
+            &bytes,
+        );
+    }
 }
 
 /// Turns of the bar and of every item, until `done` holds or the test
 /// fails: the real daemon is asynchronous, so this is polling, with a
 /// ten second limit.
-fn drive(harness: &mut Harness, items: &mut [&mut Item], mut done: impl FnMut(&Harness) -> bool) {
+fn drive(
+    harness: &mut Harness,
+    items: &mut [&mut Item],
+    mut done: impl FnMut(&mut Harness) -> bool,
+) {
     let start = Instant::now();
-    while !done(harness) {
+    while !done(&mut *harness) {
         assert!(
             start.elapsed() < Duration::from_secs(10),
             "the bar and the daemon never got there"
@@ -480,4 +523,125 @@ fn a_bus_that_denies_the_watcher_name_does_not_crash_the_tray() {
         app.serve_until_reply();
     }
     assert!(shown(&harness).is_empty());
+}
+
+/// The menu over the real daemon: an item's layout opens from `menu`,
+/// a row click reaches it as `Event clicked`, and an update re-reads.
+/// The item is this client's own connection answering with its own
+/// marshalled bytes; the live jeepney round (an independent marshaller)
+/// is the screenshots in the report, not this test.
+#[cfg(feature = "popup")]
+#[test]
+fn a_menu_opens_clicks_and_updates_over_the_daemon() {
+    use super::fake;
+    use crate::popup::{Content, Kind};
+
+    fn rows(harness: &mut Harness) -> Option<Vec<String>> {
+        let mut content = Content::default();
+        if !harness.popup(&mut content) {
+            return None;
+        }
+        Some(
+            content
+                .widgets()
+                .iter()
+                .map(|widget| {
+                    let label = content.label(widget).to_owned();
+                    match widget.kind {
+                        Kind::Text => format!("text:{label}"),
+                        Kind::Button {
+                            action,
+                            arg,
+                            closes,
+                            ..
+                        } => {
+                            format!(
+                                "button:{action}:{}:{}:{label}",
+                                arg.unwrap_or(-1),
+                                closes as u8
+                            )
+                        }
+                        Kind::Slider { .. } => "slider".to_owned(),
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    fn layout(revision: u32, first: &str) -> Vec<u8> {
+        fake::layout_reply(revision, &|w| {
+            fake::layout_node(w, 0, &|_| {}, &|w| {
+                fake::layout_kid(w, &|w| {
+                    fake::layout_node(
+                        w,
+                        10,
+                        &|w| {
+                            fake::layout_prop(w, "label", "s", &|w| w.str(first));
+                        },
+                        &|_| {},
+                    );
+                });
+            });
+        })
+    }
+
+    let Some(daemon) = Daemon::spawn() else {
+        return;
+    };
+    let mut harness = Harness::new(start_with(Addr::Path(daemon.path())));
+    let mut app = Item::new(&daemon, "org.kde.StatusNotifierItem-6-6", "Dished");
+    app.layout = Some(layout(1, "Open"));
+    drive(&mut harness, &mut [&mut app], |harness| {
+        harness
+            .value_on(None)
+            .is_none_or(|value| value["watcher"] == "owner")
+    });
+    app.register();
+    drive(&mut harness, &mut [&mut app], |harness| {
+        shown(harness) == ["Dished"]
+    });
+    // The menu opens on the layout the item serves.
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("menu", Some(0)), 1),
+        Ok(Update::Changed)
+    );
+    let open = vec!["button:menu-select:10:1:Open".to_owned()];
+    drive(&mut harness, &mut [&mut app], |harness| {
+        rows(harness).as_ref() == Some(&open)
+    });
+    assert!(app.abouts >= 1);
+    // A row click reaches the item as `Event clicked` and closes the
+    // menu.
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("menu-select", Some(10)), 1),
+        Ok(Update::Changed)
+    );
+    drive(&mut harness, &mut [&mut app], |harness| {
+        rows(harness).is_none()
+    });
+    let start = Instant::now();
+    while app.events.is_empty() {
+        assert!(start.elapsed() < Duration::from_secs(10), "no Event");
+        let _ = harness.wait(Duration::from_millis(20));
+        app.serve_until_reply();
+    }
+    assert_eq!(app.events, [10]);
+    // Reopen on a new revision, then an update announced while open
+    // re-fills from the re-read.
+    app.layout = Some(layout(3, "Quit"));
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("menu", Some(0)), 1),
+        Ok(Update::Changed)
+    );
+    let quit = vec!["button:menu-select:10:1:Quit".to_owned()];
+    drive(&mut harness, &mut [&mut app], |harness| {
+        rows(harness).as_ref() == Some(&quit)
+    });
+    app.layout = Some(layout(4, "Shut"));
+    app.send_layout_updated(4);
+    let shut = vec!["button:menu-select:10:1:Shut".to_owned()];
+    drive(&mut harness, &mut [&mut app], |harness| {
+        rows(harness).as_ref() == Some(&shut)
+    });
+    assert!(shown(&harness) == ["Dished"]);
 }

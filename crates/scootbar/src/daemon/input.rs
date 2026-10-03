@@ -194,9 +194,12 @@ impl State {
 
     /// Runs the action `trigger` means on `target`'s module: the config's
     /// binding, else the module's own default. `steps` is a scroll's.
-    fn fire(&mut self, trigger: Trigger, target: Target, steps: Option<u32>, now: Instant) {
+    /// Says whether the module asks for its popup surface now (see
+    /// [`crate::modules::Module::wants_popup`]): the caller opens it, a
+    /// press's serial in hand for the grab.
+    fn fire(&mut self, trigger: Trigger, target: Target, steps: Option<u32>, now: Instant) -> bool {
         let Some(entry) = self.outputs.get_mut(target.output) else {
-            return;
+            return false;
         };
         let scene = &entry.objects.scene;
         let (Some(span), Some(view), Some(module)) = (
@@ -204,7 +207,7 @@ impl State {
             scene.view(target.member),
             scene.module(target.member),
         ) else {
-            return;
+            return false;
         };
         let Content {
             modules,
@@ -215,7 +218,7 @@ impl State {
         let (Some(text), Some(placed), Some(focus)) =
             (text.as_ref(), modules.get_mut(module), self.input.focus())
         else {
-            return;
+            return false;
         };
         let scale = entry.output.scale();
         let x = to_device(focus.x, scale);
@@ -255,7 +258,7 @@ impl State {
                     offered = default;
                     &offered
                 }
-                None => return,
+                None => return false,
             },
         };
         let mut effects = Launch::new(&mut self.spawner);
@@ -288,6 +291,15 @@ impl State {
                     trigger.key()
                 ));
             }
+            return false;
+        }
+        #[cfg(feature = "popup")]
+        {
+            module.wants_popup()
+        }
+        #[cfg(not(feature = "popup"))]
+        {
+            false
         }
     }
 
@@ -305,7 +317,30 @@ impl State {
             #[cfg(not(feature = "popup"))]
             let _ = (armed, serial, qh);
         } else if let Some((trigger, target)) = self.input.release(code, target) {
-            self.fire(trigger, target, None, Instant::now());
+            #[cfg(feature = "popup")]
+            let member = target.member;
+            #[cfg(feature = "popup")]
+            let output = target.output;
+            let wants = self.fire(trigger, target, None, Instant::now());
+            // A module action that names what to show (the tray's
+            // `menu N`) opens its popup on the release, with the
+            // release's serial for the grab. A press with a binding
+            // already opened or closed above; a scroll never asks.
+            #[cfg(feature = "popup")]
+            if wants {
+                if let Err(why) = self.open_popup(qh, output, member, Some(serial)) {
+                    if let Some(held) = self.warned.allow(Instant::now()) {
+                        let more = if held > 0 {
+                            format!(" ({held} more since)")
+                        } else {
+                            String::new()
+                        };
+                        warn(format_args!("scootbar: popup: {why}{more}"));
+                    }
+                }
+            }
+            #[cfg(not(feature = "popup"))]
+            let _ = wants;
         }
     }
 

@@ -133,6 +133,9 @@ struct Open {
     scale: Scale,
     /// The buffer's size in device pixels.
     dims: (u32, u32),
+    /// The grab serial it opened with, if any: a reopen after a resize
+    /// reuses it, so the popup keeps whatever grab the open earned.
+    serial: Option<u32>,
     em: f32,
     content: Content,
     layout: Layout,
@@ -455,6 +458,10 @@ impl State {
             .pointer
             .as_ref()
             .is_none_or(|pointer| pointer.version() >= 5);
+        let serial = match flavor {
+            Flavor::Popup { serial } => serial,
+            Flavor::Tooltip => None,
+        };
         Ok(Open {
             id,
             output,
@@ -471,6 +478,7 @@ impl State {
             configured: None,
             scale,
             dims,
+            serial,
             em,
             content,
             layout,
@@ -588,6 +596,31 @@ impl State {
                     render::device(style.padding, scale),
                     render::device(1, scale).max(1),
                 );
+                // The content outgrew (or shrank past) the surface it
+                // opened at: a menu opens on its `...` line and fills a
+                // turn later, and an xdg_popup cannot change size after
+                // configure. Reopen it at the new size, with the grab
+                // serial the open earned (hover and the scroll position
+                // do not survive: the rows moved anyway). Same size
+                // keeps the surface it has; a reopened popup reads the
+                // same content and revision, so this fires once per size
+                // change, never in a loop.
+                if (open.layout.width, open.layout.height) != open.dims {
+                    let (output, module, serial) = match self.popup.open.as_ref() {
+                        Some(open) => (open.output, open.module, open.serial),
+                        None => return,
+                    };
+                    self.popup.close();
+                    let member = self
+                        .outputs
+                        .iter()
+                        .find(|entry| entry.output.id() == output)
+                        .and_then(|entry| Popups::member_of(&entry.objects.scene, module));
+                    if let Some(member) = member {
+                        let _ = self.open_popup(qh, output, member, serial);
+                    }
+                    return;
+                }
                 // The popup keeps the size it opened at.
                 open.layout.width = open.dims.0;
                 open.layout.height = open.dims.1;

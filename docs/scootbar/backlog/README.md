@@ -130,6 +130,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
  - [Icons on every module that shows a value](module-icons.md) (medium): battery, brightness, bluetooth and media take no icon today; blocked on the WiFi strength-icon form
 - [Network: a second radio's empty scan replaces the real one](network-multi-radio-scan.md) (medium): the last interface's scan dump wins, so a dongle or hotspot interface can empty the list (#403 review)
  - [Network: WiFi signal as a strength icon, not text bars](resolved/network-signal-icon-done.md) (medium): the icon shows the strength, the text is just the SSID
+- [Tray: themed icon names](tray-icon-themes.md) (medium), [Tray: real Qt, GTK and Electron apps](tray-real-apps.md) (medium), [Tray: session buses on abstract sockets](tray-abstract-socket.md) (low), [Tray: coalesce a runaway item's redraws](tray-redraw-coalesce.md) (low): split out of the tray when its menus landed
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)
 - [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears

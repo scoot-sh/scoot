@@ -53,6 +53,13 @@ struct State {
     owners: HashMap<String, String>,
     /// Item service to its `GetAll` body (the `a{sv}` bytes).
     props: HashMap<String, Vec<u8>>,
+    /// (service, menu path, `GetLayout` parent) to its reply body (the
+    /// `(u(ia{sv}av))` bytes).
+    menus: HashMap<(String, String, i32), Vec<u8>>,
+    /// `GetLayout` calls per menu, answered or not.
+    layouts: HashMap<(String, String, i32), usize>,
+    /// Every `GetLayout` call in order: service, menu path, parent.
+    layout_calls: Vec<(String, String, i32)>,
     /// Host registrations the module made in host mode.
     hosts: Vec<String>,
     /// A policy that denies the bar every name it asks for.
@@ -163,6 +170,63 @@ impl Fake {
             .owners
             .insert(service.to_owned(), owner.to_owned());
         self.state.props.insert(service.to_owned(), props);
+    }
+
+    /// Scripts an item's menu: `GetLayout` on `path` is answered with
+    /// `layout` (the `(u(ia{sv}av))` body bytes; see `layout_reply`),
+    /// `AboutToShow` and `Event` are recorded like activations. The
+    /// whole tree (parent 0); [`Fake::add_menu_at`] scripts one lazy
+    /// submenu's answer.
+    #[cfg(feature = "popup")]
+    pub fn add_menu(&mut self, service: &str, path: &str, layout: Vec<u8>) {
+        self.add_menu_at(service, path, 0, layout);
+    }
+
+    /// Scripts the answer to `GetLayout(parent)` on `path`: a lazy
+    /// submenu's children, asked for when it is drilled into.
+    #[cfg(feature = "popup")]
+    pub fn add_menu_at(&mut self, service: &str, path: &str, parent: i32, layout: Vec<u8>) {
+        self.state
+            .menus
+            .insert((service.to_owned(), path.to_owned(), parent), layout);
+    }
+
+    /// Sends a `LayoutUpdated(revision)` signal from `sender` (the
+    /// item's owner) on the menu object at `path`.
+    #[cfg(feature = "popup")]
+    pub fn send_layout_updated(&mut self, sender: &str, path: &str, revision: u32) {
+        let mut body = Writer::new();
+        body.u32(revision);
+        let bytes = body.take_body().unwrap();
+        self.send_signal(
+            sender,
+            path,
+            "com.canonical.dbusmenu",
+            "LayoutUpdated",
+            "u",
+            &bytes,
+        );
+    }
+
+    /// Sends an `ItemsPropertiesUpdated` signal from `sender` on the
+    /// menu object at `path` (empty updates: the bar re-reads either
+    /// way).
+    #[cfg(feature = "popup")]
+    pub fn send_items_updated(&mut self, sender: &str, path: &str) {
+        let mut body = Writer::new();
+        let updates = body.open_array(8).unwrap();
+        body.close_array(updates);
+        let removed = body.open_array(8).unwrap();
+        body.close_array(removed);
+        let bytes = body.take_body().unwrap();
+        self.send_signal(
+            sender,
+            path,
+            "com.canonical.dbusmenu",
+            "ItemsPropertiesUpdated",
+            "a(ia{sv})a(ias)",
+            &bytes,
+        );
     }
 
     /// Scripts a bus policy that refuses every `RequestName`.
@@ -325,6 +389,26 @@ impl Fake {
         self.state.getalls.get(service).copied().unwrap_or(0)
     }
 
+    /// Every `GetLayout` call in order (answered ones are not in
+    /// [`Fake::calls`], like answered `GetAll`s): service, menu path,
+    /// parent.
+    #[cfg(feature = "popup")]
+    pub fn layout_calls(&mut self) -> Vec<(String, String, i32)> {
+        core::mem::take(&mut self.state.layout_calls)
+    }
+
+    /// How many `GetLayout` calls reached the menu at (`service`,
+    /// `path`), answered or not, whatever parent they asked for.
+    #[cfg(feature = "popup")]
+    pub fn layout_count(&self, service: &str, path: &str) -> usize {
+        self.state
+            .layouts
+            .iter()
+            .filter(|((service_at, path_at, _), _)| service_at == service && path_at == path)
+            .map(|(_, count)| count)
+            .sum()
+    }
+
     /// The frames the module sent, drained.
     pub fn calls(&mut self) -> Vec<RecordedCall> {
         core::mem::take(&mut self.calls)
@@ -401,8 +485,23 @@ impl Fake {
             self.calls.push(record(&message));
             return Ok(());
         }
-        // An item call: `GetAll`/`Get` are answered from the script;
-        // anything else is recorded (activation wants no reply).
+        // An item call: `GetAll`/`Get` are answered from the script, a
+        // scripted menu's `GetLayout` too; anything else is recorded
+        // (activation and menu events want no reply).
+        if member == "GetLayout" {
+            let parent = Reader::le(body).i32().unwrap_or(0);
+            let key = (destination.to_owned(), path.to_owned(), parent);
+            *self.state.layouts.entry(key.clone()).or_default() += 1;
+            self.state.layout_calls.push(key.clone());
+            if let Some(layout) = self.state.menus.get(&key).cloned() {
+                return self.reply(message.serial, serial, "(u(ia{sv}av))", &layout);
+            }
+            return self.error(
+                message.serial,
+                serial,
+                "org.freedesktop.DBus.Error.UnknownMethod",
+            );
+        }
         if member == "GetAll" {
             *self
                 .state
@@ -783,6 +882,55 @@ pub fn item_body(title: &str, status: &str, width: u32, height: u32, argb: &[u8]
     item_body_with(Writer::new(), title, status, width, height, argb)
 }
 
+/// [`item_body`] with the menu path and `ItemIsMenu` of the caller's
+/// choosing: `menu` empty is an item with no menu to read.
+#[cfg(feature = "popup")]
+pub fn item_body_menu(
+    title: &str,
+    status: &str,
+    width: u32,
+    height: u32,
+    argb: &[u8],
+    menu: &str,
+    item_is_menu: bool,
+) -> Vec<u8> {
+    let mut body = Writer::new();
+    let Some(cookie) = body.open_array(8) else {
+        return Vec::new();
+    };
+    entry(&mut body, "Status", "s", &|w| w.str(status));
+    entry(&mut body, "Title", "s", &|w| w.str(title));
+    entry(&mut body, "IconPixmap", "a(iiay)", &|w| {
+        if let Some(cookie) = w.open_array(8) {
+            w.open_struct();
+            w.u32(width);
+            w.u32(height);
+            if let Some(cookie) = w.open_array(1) {
+                w.raw(argb);
+                w.close_array(cookie);
+            }
+            w.close_struct();
+            w.close_array(cookie);
+        }
+    });
+    entry(&mut body, "ToolTip", "(sa(iiay)ss)", &|w| {
+        w.open_struct();
+        w.str("");
+        if let Some(cookie) = w.open_array(8) {
+            w.close_array(cookie);
+        }
+        w.str(title);
+        w.str("");
+        w.close_struct();
+    });
+    entry(&mut body, "Menu", "o", &|w| w.str(menu));
+    entry(&mut body, "ItemIsMenu", "b", &|w| {
+        w.boolean(item_is_menu);
+    });
+    body.close_array(cookie);
+    body.take_body().unwrap_or_default()
+}
+
 /// [`item_body`] on a writer of the caller's cap: a body past what this
 /// client reads, for the tests that send one.
 pub fn item_body_with(
@@ -833,6 +981,58 @@ fn entry(body: &mut Writer, key: &str, sig: &str, write: &dyn Fn(&mut Writer)) {
     body.variant(sig);
     write(body);
     body.close_struct();
+}
+
+/// Builds a `GetLayout` reply body: `revision` and the root node `write`
+/// writes (id 0, through [`layout_node`]).
+#[cfg(feature = "popup")]
+pub fn layout_reply(revision: u32, write: &dyn Fn(&mut Writer)) -> Vec<u8> {
+    let mut body = Writer::new();
+    body.open_struct();
+    body.u32(revision);
+    write(&mut body);
+    body.close_struct();
+    body.take_body().unwrap_or_default()
+}
+
+/// One `(ia{sv}av)` node: `props` writes the `a{sv}` entries (each a key,
+/// a variant signature and a value), `kids` the `av` children (each a
+/// variant holding one node, through [`layout_kid`]).
+#[cfg(feature = "popup")]
+pub fn layout_node(
+    writer: &mut Writer,
+    id: i32,
+    props: &dyn Fn(&mut Writer),
+    kids: &dyn Fn(&mut Writer),
+) {
+    writer.open_struct();
+    writer.i32(id);
+    if let Some(cookie) = writer.open_array(8) {
+        props(writer);
+        writer.close_array(cookie);
+    }
+    if let Some(cookie) = writer.open_array(1) {
+        kids(writer);
+        writer.close_array(cookie);
+    }
+    writer.close_struct();
+}
+
+/// One child, variant-wrapped as the wire holds it.
+#[cfg(feature = "popup")]
+pub fn layout_kid(writer: &mut Writer, write: &dyn Fn(&mut Writer)) {
+    writer.variant("(ia{sv}av)");
+    write(writer);
+}
+
+/// One layout property entry.
+#[cfg(feature = "popup")]
+pub fn layout_prop(writer: &mut Writer, key: &str, sig: &str, write: &dyn Fn(&mut Writer)) {
+    writer.open_struct();
+    writer.str(key);
+    writer.variant(sig);
+    write(writer);
+    writer.close_struct();
 }
 
 /// Solid `ARGB32` in network order: one `a` then `r`, `g`, `b` a pixel.
