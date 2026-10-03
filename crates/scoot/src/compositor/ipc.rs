@@ -411,12 +411,16 @@ impl State {
                     self.refresh_keyboard_focus();
                     return self.ok();
                 }
-                // `set-fullscreen` may name a window that is not visible,
-                // which `act`'s `apply` does not configure; it is told here
-                // (see `fullscreen.rs`). The toggle acts on the focused
-                // window, which `apply` always reaches.
-                let told = match &action {
+                // `set-fullscreen`/`set-maximized` may name a window that is
+                // not visible, which `act`'s `apply` does not configure; it
+                // is told here (see `fullscreen.rs`). The toggles act on the
+                // focused window, which `apply` always reaches.
+                let told_fullscreen = match &action {
                     scoot_ipc::Action::SetFullscreen { id, .. } => Some(WindowId(*id)),
+                    _ => None,
+                };
+                let told_maximized = match &action {
+                    scoot_ipc::Action::SetMaximized { id, .. } => Some(WindowId(*id)),
                     _ => None,
                 };
                 // A resize is clamped to the window's own limits, which the
@@ -428,8 +432,11 @@ impl State {
                     self.sync_size_hints(WindowId(*id));
                 }
                 self.act(Action::from(action));
-                if let Some(id) = told {
+                if let Some(id) = told_fullscreen {
                     self.tell_fullscreen(id);
+                }
+                if let Some(id) = told_maximized {
+                    self.tell_maximized(id);
                 }
                 self.ok()
             }
@@ -658,6 +665,7 @@ impl State {
                     focused: arrangement.focused == Some(placement.id),
                     popup_grab: grab_holder == Some(placement.id),
                     fullscreen: placement.fullscreen,
+                    maximized: placement.maximized,
                     floating: placement.floating,
                 }
             })

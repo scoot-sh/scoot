@@ -23,6 +23,12 @@
 //!   (through `layer_shell::above_windows`) to hide the top layer under a
 //!   covering window.
 //!
+//! Maximized rides the same wire with its own bit and requests -- see the
+//! `maximize` halves below (`client_maximize_request`,
+//! `answer_maximize_request`, `tell_maximized`,
+//! `LayoutState::Maximized`). Fullscreen wins while both hold, on the core
+//! and here: the configure carries fullscreen only, and the size is the output's.
+//!
 //! ## While the session is locked
 //!
 //! A client's *own* request is honoured -- the same line `shell.rs` draws for
@@ -70,22 +76,33 @@ pub(super) enum LayoutState {
     Tiled,
     /// Covering its output (or sized to, while focused away).
     Fullscreen,
+    /// Filling its output's usable area (or sized to, while focused away):
+    /// the bar stays visible, and the window keeps its gaps and ring.
+    Maximized,
     /// In a floating layer: neither -- it sizes itself.
     Floating,
 }
 
 impl LayoutState {
-    /// The state a placement puts its window in. Fullscreen wins over
-    /// floating: a floating window that goes fullscreen is fullscreen.
+    /// The state a placement puts its window in. Fullscreen wins over both
+    /// maximized and floating: a maximized window that goes fullscreen is
+    /// fullscreen, and a floating window that goes fullscreen or maximized
+    /// is that.
     pub(super) fn of(placement: &scoot_core::Placement) -> Self {
-        Self::from_core(placement.fullscreen, placement.floating)
+        Self::from_core(
+            placement.fullscreen,
+            placement.maximized,
+            placement.floating,
+        )
     }
 
-    /// The same from the core's two per-window answers, for a window with no
+    /// The same from the core's per-window answers, for a window with no
     /// placement (waiting for an output).
-    pub(super) fn from_core(fullscreen: bool, floating: bool) -> Self {
+    pub(super) fn from_core(fullscreen: bool, maximized: bool, floating: bool) -> Self {
         if fullscreen {
             Self::Fullscreen
+        } else if maximized {
+            Self::Maximized
         } else if floating {
             Self::Floating
         } else {
@@ -95,7 +112,9 @@ impl LayoutState {
 }
 
 /// Puts a toplevel's pending state in step with where the layout has it:
-/// `fullscreen`, tiled on all four edges, or neither (floating) -- exclusive.
+/// `fullscreen`, `maximized`, tiled on all four edges, or none of them
+/// (floating) -- exclusive, except that fullscreen and maximized compose on
+/// the core while this reports the winner (see `LayoutState::of`).
 ///
 /// Tiled is what tells a client its size is the compositor's to choose.
 /// A client that believes it floats may size itself short of its slot --
@@ -107,9 +126,11 @@ impl LayoutState {
 /// its slot is the look the layout means. A floating window *does* float,
 /// and is told so by the absence of all three: `foot` rounds to cells again
 /// and GTK draws its shadow, which is right for a window that sizes itself.
+/// A maximized window is told `maximized`, so clients drop their rounded
+/// corners and shadows for it the way they do for fullscreen.
 ///
-/// Shared by `apply()`'s per-placement configure and the request answer
-/// below, so the two cannot disagree about what the layout puts on the wire,
+/// Shared by `apply()`'s per-placement configure and the request answers
+/// below, so the three cannot disagree about what the layout puts on the wire,
 /// and both send it in the same configure as the size it goes with.
 /// `ToplevelStateSet::set`/`unset` are no-ops for a state already as asked,
 /// so once a window's states are right this manufactures no pending change
@@ -122,6 +143,11 @@ pub(super) fn set_layout_states(state: &mut ToplevelState, layout: LayoutState) 
         state.states.set(xdg_toplevel::State::Fullscreen);
     } else {
         state.states.unset(xdg_toplevel::State::Fullscreen);
+    }
+    if layout == LayoutState::Maximized {
+        state.states.set(xdg_toplevel::State::Maximized);
+    } else {
+        state.states.unset(xdg_toplevel::State::Maximized);
     }
     for tiled in TILED {
         if layout == LayoutState::Tiled {
@@ -276,7 +302,8 @@ impl State {
         before: Option<bool>,
     ) {
         let now = self.world.is_fullscreen(id);
-        let layout = LayoutState::from_core(now, self.world.is_floating(id));
+        let layout =
+            LayoutState::from_core(now, self.world.is_maximized(id), self.world.is_floating(id));
         // The size moves with the bit, as `apply()` pairs them: an
         // invisible window told it is fullscreen is also told the output's
         // size (and its tiled size when it leaves -- or, leaving back to
@@ -308,6 +335,77 @@ impl State {
     pub(super) fn tell_fullscreen(&self, id: WindowId) {
         if let Some(toplevel) = self.window(id).and_then(Window::toplevel) {
             self.answer_fullscreen_request(toplevel, id, None);
+        }
+    }
+
+    /// `xdg_toplevel.set_maximized` (`maximized: true`) or
+    /// `unset_maximized` (`false`): the window's own maximize request.
+    ///
+    /// The same shape as [`State::client_fullscreen_request`], without the
+    /// output hint (maximizing names no output): always answered with a
+    /// configure, applied only when the core changed, and honoured while
+    /// locked for the same reason (it changes that window's own state, and
+    /// the session is as the client left it at unlock).
+    pub(super) fn client_maximize_request(&mut self, surface: &ToplevelSurface, maximized: bool) {
+        let Some(id) = self.id_of(surface.wl_surface()) else {
+            return;
+        };
+        let before = self.world.is_maximized(id);
+        self.world
+            .handle_event(Event::MaximizeRequested { id, maximized });
+        // The already-there fast path the fullscreen request has: a client
+        // repeating a request that changes nothing would otherwise drive a
+        // full `apply` as fast as it can write to its socket.
+        if self.world.is_maximized(id) != before {
+            self.apply();
+        }
+        self.answer_maximize_request(surface, id, Some(before));
+    }
+
+    /// Makes sure the window has been told the core's current answer about
+    /// its maximized state, after `apply()` has run.
+    ///
+    /// The same two cases [`State::answer_fullscreen_request`] covers: a
+    /// window that is not visible gets its state bit set and sent, and a
+    /// request the core did not act on at all is still answered with a
+    /// configure when the client asked for one. `before` is `None` when
+    /// nobody asked -- a taskbar changed the window's state -- and then
+    /// only a real change is sent. Fullscreen wins while both hold (see
+    /// `LayoutState::of`): the size moves with whichever state actually
+    /// flips, like the fullscreen answer.
+    pub(super) fn answer_maximize_request(
+        &self,
+        surface: &ToplevelSurface,
+        id: WindowId,
+        before: Option<bool>,
+    ) {
+        let now = self.world.is_maximized(id);
+        let layout = LayoutState::from_core(
+            self.world.is_fullscreen(id),
+            now,
+            self.world.is_floating(id),
+        );
+        let size = self.world.arrange().get(id).map(|placed| placed.requested);
+        surface.with_pending_state(|state| {
+            let flips = state.states.contains(xdg_toplevel::State::Maximized) != now;
+            if flips && let Some(size) = size {
+                state.size = size.map(|size| (size.w, size.h).into());
+            }
+            set_layout_states(state, layout);
+        });
+        let sent = surface.send_pending_configure().is_some();
+        if !sent && before == Some(now) {
+            surface.send_configure();
+        }
+    }
+
+    /// [`State::answer_maximize_request`] for a window nobody on the wire
+    /// asked about -- after a taskbar or an IPC `set-maximized` changed it,
+    /// which may have been while it was invisible, where `apply()` does not
+    /// reach. Sends only a real change. Unknown ids are ignored.
+    pub(super) fn tell_maximized(&self, id: WindowId) {
+        if let Some(toplevel) = self.window(id).and_then(Window::toplevel) {
+            self.answer_maximize_request(toplevel, id, None);
         }
     }
 
@@ -371,6 +469,35 @@ impl State {
             });
             // After the core has left fullscreen (so the restored states are
             // the tiled ones) and before `apply()` sends the configure.
+            self.restore_layout_state(id);
+            self.apply();
+        }
+    }
+
+    /// Drops a window's maximized when Smithay has discarded its toplevel
+    /// state on unmap -- the same reset
+    /// [`State::discard_fullscreen_if_unmapped`] reads, which discards both
+    /// bits at once. A window holding both is restored by two passes (this
+    /// and that): the first configure out carries the surviving bit, the
+    /// second the tiled states -- a re-map costs two applies, which is what
+    /// keeps each half shaped like the other instead of one combined path
+    /// with two callers' invariants to keep.
+    pub(super) fn discard_maximize_if_unmapped(&mut self, id: WindowId) {
+        if !self.world.is_maximized(id) {
+            return;
+        }
+        let reset = self
+            .window(id)
+            .and_then(Window::toplevel)
+            .is_some_and(|toplevel| !toplevel.is_initial_configure_sent());
+        if reset {
+            self.world.handle_event(Event::MaximizeRequested {
+                id,
+                maximized: false,
+            });
+            // After the core has left maximized (so the restored states are
+            // the tiled -- or still fullscreen -- ones) and before `apply()`
+            // sends the configure.
             self.restore_layout_state(id);
             self.apply();
         }

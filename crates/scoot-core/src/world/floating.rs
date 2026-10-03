@@ -109,15 +109,18 @@ impl World {
     /// module doc and [`Action::ToggleFloating`](crate::Action::ToggleFloating).
     ///
     /// `size` is an initial size to ask a newly floating window for (a
-    /// window rule's); ignored when un-floating. A fullscreen window leaves
-    /// fullscreen first, without restoring the scroll it entered with (the
-    /// layout that scroll described is about to change).
+    /// window rule's); ignored when un-floating. A fullscreen or maximized
+    /// window leaves that state first, without restoring the scroll it
+    /// entered with (the layout that scroll described is about to change).
     pub(super) fn set_floating(&mut self, id: WindowId, floating: bool, size: Option<Size>) {
         if !self.windows.contains_key(&id) || self.is_floating(id) == floating {
             return;
         }
         if self.is_fullscreen(id) {
             self.drop_fullscreen(id);
+        }
+        if self.is_maximized(id) {
+            self.drop_maximize(id);
         }
         let request = size.map(|size| Size::new(size.w.max(0), size.h.max(0)));
         let request = request.filter(|size| size.w > 0 && size.h > 0);
@@ -282,6 +285,14 @@ impl World {
                 if window.fullscreen.is_some() {
                     let area = output.area;
                     Some(Rect::new(area.x, area.y, area.w.max(1), area.h.max(1)))
+                } else if window.maximized.is_some() {
+                    let usable = output.usable.inset(self.config.gap);
+                    Some(Rect::new(
+                        usable.x,
+                        usable.y,
+                        usable.w.max(1),
+                        usable.h.max(1),
+                    ))
                 } else {
                     Some(floating_rect(window, output).rect)
                 }
@@ -322,6 +333,17 @@ impl World {
             }
             let x = usable.x.saturating_add(*start).saturating_sub(ws.view_x);
             return Some(Rect::new(x, area.y, w, h));
+        }
+        if span.maximized.is_some() {
+            // `place_maximized_column`'s frame: the covering column is the
+            // gap-inset usable area, any other maximized column its strip
+            // slot at the usable size.
+            let (w, h) = (usable.w.max(1), usable.h.max(1));
+            if column == ws.focused {
+                return Some(Rect::new(usable.x, usable.y, w, h));
+            }
+            let x = usable.x.saturating_add(*start).saturating_sub(ws.view_x);
+            return Some(Rect::new(x, usable.y, w, h));
         }
         let width = span.width;
         // Saturating, like `place_strip`: see its comment.
@@ -460,9 +482,10 @@ impl World {
     /// `normalize` at the same index (a dialog alone on an inactive
     /// workspace drops it, and the next workspace would slide into the index
     /// if this were decided afterwards) -- and not for a tiled parent
-    /// stacked behind a fullscreen sibling in its column: focusing it would
-    /// break the rule that a fullscreen window is its column's focused one,
-    /// and ending that fullscreen over a dialog closing would be a surprise.
+    /// stacked behind a fullscreen or maximized sibling in its column:
+    /// focusing it would break the rule that such a window is its column's
+    /// focused one, and ending that state over a dialog closing would be a
+    /// surprise.
     /// Focus then stays where the workspace's own flag puts it
     /// (`Workspace::take_floating`): the next floating window, or the strip.
     pub(super) fn refocus_target(
@@ -483,12 +506,11 @@ impl World {
             Slot::Floating { .. } => Some(parent),
             Slot::Tiled { column, index } => {
                 let column = &ws.columns[column];
-                let behind_fullscreen = column.focused != index
-                    && column
-                        .windows
-                        .get(column.focused)
-                        .is_some_and(|&sibling| self.is_fullscreen(sibling));
-                (!behind_fullscreen).then_some(parent)
+                let behind_cover = column.focused != index
+                    && column.windows.get(column.focused).is_some_and(|&sibling| {
+                        self.is_fullscreen(sibling) || self.is_maximized(sibling)
+                    });
+                (!behind_cover).then_some(parent)
             }
         }
     }

@@ -138,6 +138,17 @@ impl XwmHandler for State {
         self.x11_fullscreen_request(&window, false);
     }
 
+    /// `_NET_WM_STATE_MAXIMIZED_*` (the pair -- Smithay only fires this when
+    /// the client names both atoms): the window's own maximize request, like
+    /// the fullscreen pair above.
+    fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_maximize_request(&window, true);
+    }
+
+    fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        self.x11_maximize_request(&window, false);
+    }
+
     /// `_NET_WM_MOVERESIZE` with an edge: an X app's own border drag, under
     /// the same rules as an xdg one -- see `moveresize.rs`.
     fn resize_request(

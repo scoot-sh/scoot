@@ -121,7 +121,7 @@ fn random_action(
             random_window(rng, windows)
         }
     };
-    match rng.below(26) {
+    match rng.below(28) {
         0 => Action::FocusColumn(horizontal),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
@@ -167,6 +167,11 @@ fn random_action(
         15 => Action::SetFullscreen {
             id: random_window(rng, windows),
             fullscreen: rng.chance(60),
+        },
+        26 => Action::ToggleMaximize,
+        27 => Action::SetMaximized {
+            id: random_window(rng, windows),
+            maximized: rng.chance(60),
         },
         16 => Action::ToggleFloating,
         17 => Action::SetFloating {
@@ -280,7 +285,9 @@ impl Step {
     /// windows -- so every tiled window's rect must come out of it exactly
     /// as it went in ("floating windows never change the strip").
     fn floating_only(&self, world: &World) -> bool {
-        let floating = |id: &WindowId| world.is_floating(*id) && !world.is_fullscreen(*id);
+        let floating = |id: &WindowId| {
+            world.is_floating(*id) && !world.is_fullscreen(*id) && !world.is_maximized(*id)
+        };
         // Focusing a floating window elsewhere switches workspace or output,
         // which re-scrolls that strip: not floating-only.
         let here = |id: &WindowId| {
@@ -306,17 +313,19 @@ impl Step {
     }
 
     /// Whether this step, applied to `world`, must leave
-    /// `World::focused_window` alone: `set-floating` on a window that is not
-    /// the focused one (it never moves focus), and a window opening without
-    /// focus -- while some window has focus to keep (a window opening into
-    /// a workspace with nothing on it is that workspace's focus, there being
-    /// nothing else).
+    /// `World::focused_window` alone: `set-floating`/`set-maximized` on a
+    /// window that is not the focused one (neither moves focus), and a window
+    /// opening without focus -- while some window has focus to keep (a window
+    /// opening into a workspace with nothing on it is that workspace's focus,
+    /// there being nothing else).
     fn keeps_focus(&self, world: &World) -> bool {
         if world.focused_window().is_none() {
             return false;
         }
         match self {
-            Step::Action(Action::SetFloating { id, .. }) => world.focused_window() != Some(*id),
+            Step::Action(Action::SetFloating { id, .. } | Action::SetMaximized { id, .. }) => {
+                world.focused_window() != Some(*id)
+            }
             Step::Event(Event::WindowOpened { focus, .. }) => !focus,
             _ => false,
         }
@@ -409,6 +418,10 @@ fn random_step(
         10 => Event::FullscreenRequested {
             id: random_window(rng, &windows),
             fullscreen: rng.chance(60),
+        },
+        13 => Event::MaximizeRequested {
+            id: random_window(rng, &windows),
+            maximized: rng.chance(60),
         },
         // Floating as a window maps: most often the one that just opened,
         // which is the shape a platform produces.
@@ -520,12 +533,17 @@ fn assert_invariants(world: &World) {
             }
             for column in &ws.columns {
                 assert!(!column.windows.is_empty(), "empty column");
-                // A fullscreen window is always its column's focused window
-                // -- and so there is at most one per column.
+                // A fullscreen or maximized window is always its column's
+                // focused window -- and so there is at most one of each per
+                // column.
                 for (index, id) in column.windows.iter().enumerate() {
                     assert!(
                         index == column.focused || !world.is_fullscreen(*id),
                         "fullscreen window {id:?} is not its column's focused one"
+                    );
+                    assert!(
+                        index == column.focused || !world.is_maximized(*id),
+                        "maximized window {id:?} is not its column's focused one"
                     );
                 }
                 assert!(
@@ -636,13 +654,18 @@ fn assert_invariants(world: &World) {
             "{placement:?}"
         );
         assert_eq!(
+            placement.maximized,
+            world.is_maximized(placement.id) && !world.is_fullscreen(placement.id),
+            "{placement:?}"
+        );
+        assert_eq!(
             placement.floating,
             world.is_floating(placement.id),
             "{placement:?}"
         );
         // What the core asks a window for is its rect for everything the
         // layout sizes, and never bigger than the output for a floating one.
-        if !placement.floating || placement.fullscreen {
+        if !placement.floating || placement.fullscreen || placement.maximized {
             assert_eq!(
                 placement.requested,
                 Some(placement.rect.size()),
@@ -652,8 +675,12 @@ fn assert_invariants(world: &World) {
         if let Some(requested) = placement.requested {
             assert!(requested.w >= 1 && requested.h >= 1, "{placement:?}");
         }
-        // A visible floating window lies inside its output's usable area.
-        if placement.floating && placement.visible && !placement.fullscreen {
+        // A visible floating window lies inside its output's usable area --
+        // unless it is maximized: its frame is the gap-inset usable area
+        // floored at 1px an axis, which a degenerate (empty) usable area
+        // cannot contain. The maximized loop below pins that frame instead.
+        if placement.floating && placement.visible && !placement.fullscreen && !placement.maximized
+        {
             let usable = world
                 .outputs
                 .iter()
@@ -725,6 +752,64 @@ fn assert_invariants(world: &World) {
         let focused = output.active_workspace().focused_window();
         let expected = focused.filter(|id| world.is_fullscreen(*id));
         assert_eq!(world.fullscreen_on(output.id), expected);
+    }
+    // And `maximized_on` is exactly "the active workspace's focused window
+    // is maximized and no fullscreen window outranks it".
+    for output in &world.outputs {
+        let focused = output.active_workspace().focused_window();
+        let expected = focused.filter(|id| world.is_maximized(*id) && !world.is_fullscreen(*id));
+        assert_eq!(world.maximized_on(output.id), expected);
+    }
+    // A maximized window fills the usable area exactly while it covers, and
+    // is visible. A floating cover hides what is below it except its own
+    // dialogs (like a fullscreen cover); a tiled one hides the strip but
+    // stays under the whole floating layer.
+    let gap = world.config().gap;
+    for output in &world.outputs {
+        let Some(covering) = world.maximized_on(output.id) else {
+            continue;
+        };
+        assert!(
+            world.fullscreen_on(output.id).is_none(),
+            "fullscreen and maximized cover {covering:?} at once"
+        );
+        let usable = output.usable.inset(gap);
+        // The placement floors degenerate sizes at 1 (like the fullscreen
+        // cover, which never meets one: `random_area` is always real, but a
+        // reported usable area can be empty).
+        let frame = Rect::new(usable.x, usable.y, usable.w.max(1), usable.h.max(1));
+        let covering_floats = world.is_floating(covering);
+        for placement in arrangement
+            .placements
+            .iter()
+            .filter(|p| p.output == output.id)
+        {
+            if placement.id == covering {
+                assert!(placement.visible, "covering {placement:?} is not visible");
+                assert_eq!(placement.rect, frame, "covering {placement:?}");
+            } else if covering_floats
+                && placement.floating
+                && !placement.fullscreen
+                && world.descends_from(placement.id, covering)
+            {
+                // Its own dialogs stay up, above it -- maximized ones too:
+                // they fill only the usable area, above their parent. (A
+                // fullscreen dialog waits for focus instead, like any
+                // unfocused fullscreen window.)
+                if placement.visible {
+                    let at = |id| arrangement.placements.iter().position(|p| p.id == id);
+                    assert!(
+                        at(placement.id) > at(covering),
+                        "{placement:?} under its parent"
+                    );
+                }
+            } else if covering_floats || !placement.floating {
+                assert!(
+                    !placement.visible,
+                    "{placement:?} shows beside {covering:?}"
+                );
+            }
+        }
     }
 }
 

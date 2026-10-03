@@ -20,7 +20,7 @@
 //!   surface that press went to must be the requesting client's -- so a
 //!   client can drag only with its own press, never borrow another's, and a
 //!   stale serial finds no grab. A request from a tiled window (or a
-//!   fullscreen one) is ignored: nothing in the strip is placed by
+//!   fullscreen or maximized one) is ignored: nothing in the strip is placed by
 //!   dragging, and a toolkit whose request goes unanswered simply stays in
 //!   its own drag. A request while locked is ignored too, and so is one on
 //!   a touch serial: only the pointer's grab is checked (scoot has no touch
@@ -512,8 +512,8 @@ impl State {
     ///
     /// Nothing starts while locked, while the pointer is already grabbed (a
     /// menu's popup grab, a drag-and-drop, another button held), over a
-    /// layer surface drawn above windows, or over a tiled or fullscreen
-    /// window.
+    /// layer surface drawn above windows, or over a tiled, fullscreen or
+    /// maximized window.
     pub(in crate::compositor) fn begin_modifier_drag(
         &mut self,
         pointer: &PointerHandle<Self>,
@@ -620,8 +620,8 @@ impl State {
     /// press `start` (installed under `serial`) that its caller has already
     /// checked is the requesting client's -- `client_floating_drag` for an
     /// xdg toplevel, `x11_moveresize_request` for an X window. Only a
-    /// floating window on screen is dragged; a tiled or fullscreen one's
-    /// request is ignored, and its own press carries on.
+    /// floating window on screen is dragged; a tiled, fullscreen or maximized
+    /// one's request is ignored, and its own press carries on.
     pub(in crate::compositor) fn begin_client_drag(
         &mut self,
         pointer: &PointerHandle<Self>,

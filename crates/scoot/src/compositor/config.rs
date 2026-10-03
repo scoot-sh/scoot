@@ -994,6 +994,12 @@ fn action_string(action: &Action) -> String {
             id.0,
             if *fullscreen { "on" } else { "off" }
         ),
+        Action::ToggleMaximize => "toggle-maximize".to_owned(),
+        Action::SetMaximized { id, maximized } => format!(
+            "set-maximized {} {}",
+            id.0,
+            if *maximized { "on" } else { "off" }
+        ),
         Action::ToggleFloating => "toggle-floating".to_owned(),
         Action::SetFloating { id, floating } => format!(
             "set-floating {} {}",
@@ -1787,6 +1793,45 @@ mod tests {
                 Action::SetFullscreen {
                     id: scoot_core::WindowId(7),
                     fullscreen: false,
+                },
+            ),
+        ] {
+            let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
+            let loaded = load_from(&path, true).expect("valid config");
+            assert_eq!(
+                loaded.keybindings.match_key(
+                    keysym_named("F1").unwrap(),
+                    Modifiers {
+                        super_: true,
+                        ..Modifiers::default()
+                    }
+                ),
+                Some(Bound::Action(action.clone())),
+                "{spelling} did not parse through a bind"
+            );
+            assert_eq!(action_string(&action), spelling);
+        }
+    }
+
+    #[test]
+    fn the_maximize_actions_parse_through_a_bind_and_emit_back() {
+        // Like the fullscreen pair above: the toggle is a default bind
+        // (`Super+m`), so `--print-default-config` emits it, and the by-id
+        // form must round-trip too for `action_string` to stay total.
+        for (spelling, action) in [
+            ("toggle-maximize", Action::ToggleMaximize),
+            (
+                "set-maximized 7 on",
+                Action::SetMaximized {
+                    id: scoot_core::WindowId(7),
+                    maximized: true,
+                },
+            ),
+            (
+                "set-maximized 7 off",
+                Action::SetMaximized {
+                    id: scoot_core::WindowId(7),
+                    maximized: false,
                 },
             ),
         ] {
@@ -3376,9 +3421,9 @@ mod tests {
             );
             binds += 1;
         }
-        // "All 43 of them" (see docs/configuration.md): a dropped default
+        // "All 44 of them" (see docs/configuration.md): a dropped default
         // bind must fail loudly here, not just shrink the file.
-        assert_eq!(binds, 43, "a default bind was added or lost");
+        assert_eq!(binds, 44, "a default bind was added or lost");
     }
 
     /// Commented scalar values are pinned to their live defaults, not just

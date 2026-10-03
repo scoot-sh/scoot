@@ -51,7 +51,12 @@
 //!   `Action::SetFullscreen`, the same core rules the client's own request,
 //!   `toggle-fullscreen` and `Super+f` follow (see `fullscreen.rs`), with the
 //!   same output-hint policy as the client's own request.
-//! - **Reports two state bits, `activated` and `fullscreen`.** `activated`
+//! - **Answers `set_maximized`/`unset_maximized`** through
+//!   `Action::SetMaximized`, the same core rules the client's own request,
+//!   `toggle-maximize` and `Super+m` follow (likewise `fullscreen.rs`),
+//!   refused while locked like the fullscreen pair.
+//! - **Reports three state bits, `activated`, `fullscreen` and
+//!   `maximized`.** `activated`
 //!   comes from scoot's real window focus, reconciled in
 //!   [`State::refresh_wlr_activation`] from the same `self.focus` that drives
 //!   `xdg_toplevel`'s own `activated` and the focus ring -- one source of
@@ -60,17 +65,21 @@
 //!   reconciled in [`State::refresh_wlr_fullscreen`] on every `apply`, the
 //!   same flag that puts the bit on the window's own configure. It only
 //!   exists from version 2, so a version 1 handle is never sent it.
+//!   `maximized` comes from the arrangement's `Placement::maximized`,
+//!   reconciled in [`State::refresh_wlr_maximized`] on the same `apply`.
+//!   Unlike `fullscreen` it exists from version 1 (the protocol's `state`
+//!   enum carries it with no `since`), so every handle is sent it.
 //!
-//! What it deliberately does not do: `set_maximized`, `set_minimized` (and
-//! their `unset_` halves) and `set_rectangle` are accepted and ignored.
-//! scoot's core has no concept of maximized or minimized at all -- deciding
-//! what they would *mean* in a scrolling-column layout is layout design, not
-//! wire format, and inventing a meaning here to fill in a protocol enum is
-//! exactly the kind of speculative semantics that would then have to be
-//! unpicked. (Fullscreen was in this list until the core grew a real
-//! fullscreen state, for its own reasons, first.) So the corresponding state
-//! bits are never sent either: a taskbar is told the truth (no window is ever
-//! maximized or minimized) rather than a plausible-looking fiction.
+//! What it deliberately does not do: `set_minimized` (and its `unset_`
+//! half) and `set_rectangle` are accepted and ignored. scoot's core has no
+//! concept of minimized at all -- deciding what it would *mean* in a
+//! scrolling-column layout is layout design, not wire format, and inventing
+//! a meaning here to fill in a protocol enum is exactly the kind of
+//! speculative semantics that would then have to be unpicked. (Fullscreen
+//! and maximized were both in this list until the core grew real states for
+//! them, each for its own reasons, first.) So the `minimized` bit is never
+//! sent either: a taskbar is told the truth (no window is ever minimized)
+//! rather than a plausible-looking fiction.
 //!
 //! `set_rectangle` is a minimize-animation hint. wlroots validates it and
 //! posts `invalid_rectangle` for a negative size because it *uses* the
@@ -233,6 +242,11 @@ struct Toplevel {
     /// `Placement::fullscreen` on every `apply` by
     /// [`State::refresh_wlr_fullscreen`].
     fullscreen: bool,
+    /// Whether this window has been reported as `maximized` -- to every
+    /// handle, since the bit exists from version 1. Compared against
+    /// `Placement::maximized` on every `apply` by
+    /// [`State::refresh_wlr_maximized`].
+    maximized: bool,
     /// The output this window's handles were last told it is on -- the core
     /// id behind the `wl_output` objects the last `output_enter` named.
     ///
@@ -275,25 +289,32 @@ impl Toplevel {
         handle.state(state_array(
             self.activated,
             self.fullscreen,
+            self.maximized,
             handle.version(),
         ));
         handle.done();
     }
 
     /// Sends the full `state` array, closed by `done`, to every handle --
-    /// what either bit changing needs, since the array is always sent whole.
+    /// what any bit changing needs, since the array is always sent whole.
     ///
     /// `fullscreen_only` skips the handles that cannot see the change: a
     /// version 1 handle's array never carries the `fullscreen` bit, so a
     /// change to that bit alone would be an empty-looking `state` + `done`
-    /// for nothing.
+    /// for nothing. (`maximized` exists from version 1, so a maximized
+    /// change is never skipped this way.)
     fn send_state(&self, fullscreen_only: bool) {
         for handle in &self.handles {
             let version = handle.version();
             if fullscreen_only && version < FULLSCREEN_SINCE {
                 continue;
             }
-            handle.state(state_array(self.activated, self.fullscreen, version));
+            handle.state(state_array(
+                self.activated,
+                self.fullscreen,
+                self.maximized,
+                version,
+            ));
             handle.done();
         }
     }
@@ -322,30 +343,38 @@ fn enter_output(handle: &ZwlrForeignToplevelHandleV1, output: &Output, client: &
 }
 
 /// The `state` event's array for one window, as a handle of `version` may be
-/// told it: the `activated` entry, the `fullscreen` entry (version 2 and up
-/// only), both, or nothing.
+/// told it: the `activated` entry, the `maximized` entry, the `fullscreen`
+/// entry (version 2 and up only), all three, or nothing.
 ///
 /// The protocol's array is a list of `zwlr_foreign_toplevel_handle_v1.state`
 /// values, each a `uint` in the host's own byte order -- a `wl_array` is opaque
-/// bytes on the wire and both ends of it run in this machine. `maximized` and
-/// `minimized` are never in it; see the module doc for why.
+/// bytes on the wire and both ends of it run in this machine. `minimized` is
+/// never in it; see the module doc for why.
 ///
 /// The empty case allocates nothing (`Vec::new` has no backing buffer), and
-/// an occupied one is a single allocation of at most eight bytes that the
+/// an occupied one is a single allocation of at most twelve bytes that the
 /// generated `state(Vec<u8>)` signature makes unavoidable. One of those per
 /// handle whose bits actually changed -- at most two windows per focus
-/// change, one per fullscreen change.
-fn state_array(activated: bool, fullscreen: bool, version: u32) -> Vec<u8> {
+/// change, one per fullscreen or maximized change.
+fn state_array(activated: bool, fullscreen: bool, maximized: bool, version: u32) -> Vec<u8> {
     let fullscreen = fullscreen && version >= FULLSCREEN_SINCE;
     let mut array = Vec::new();
-    if activated || fullscreen {
-        array.reserve_exact(4 * (usize::from(activated) + usize::from(fullscreen)));
+    if activated || fullscreen || maximized {
+        array.reserve_exact(
+            4 * (usize::from(activated) + usize::from(fullscreen) + usize::from(maximized)),
+        );
     }
     if activated {
         array.extend_from_slice(&u32::from(ToplevelState::Activated).to_ne_bytes());
     }
     if fullscreen {
         array.extend_from_slice(&u32::from(ToplevelState::Fullscreen).to_ne_bytes());
+    }
+    // Last, so the two orders above never move for a window that is not
+    // maximized: existing clients decode by value, but byte-compare tests
+    // should not shift under them.
+    if maximized {
+        array.extend_from_slice(&u32::from(ToplevelState::Maximized).to_ne_bytes());
     }
     array
 }
@@ -423,13 +452,15 @@ impl State {
         let output = self.output_of_window(id);
         let output_id = output.as_ref().and_then(|o| self.outputs.id_of(o));
         let management = &mut self.foreign_toplevel_management;
-        // Not fullscreen yet either, for the same reason: the core has not
-        // heard of the window, and nothing can have asked for it.
+        // Not fullscreen or maximized yet either, for the same reason: the
+        // core has not heard of the window, and nothing can have asked for
+        // either.
         let mut toplevel = Toplevel {
             title: info.title.clone(),
             app_id: info.app_id.clone(),
             activated: false,
             fullscreen: false,
+            maximized: false,
             output: output_id,
             handles: Vec::new(),
         };
@@ -545,9 +576,10 @@ impl State {
                 continue;
             }
             toplevel.activated = activated;
-            // The whole array, `fullscreen` included: a `state` event
-            // replaces the previous one, so leaving the other bit out would
-            // tell a taskbar a fullscreen window just stopped being one.
+            // The whole array, the other bits included: a `state` event
+            // replaces the previous one, so leaving one out would tell a
+            // taskbar a fullscreen or maximized window just stopped being
+            // one.
             toplevel.send_state(false);
         }
     }
@@ -574,6 +606,32 @@ impl State {
             }
             toplevel.fullscreen = placement.fullscreen;
             toplevel.send_state(true);
+        }
+    }
+
+    /// Brings every window's `maximized` bit back in step with the
+    /// arrangement the core just published.
+    ///
+    /// Called from `shell.rs`'s `apply`, beside the `fullscreen` refresh and
+    /// for the same reason: every way a window's maximized can change ends
+    /// in an `apply`. Costs one map lookup and one `bool` compare per
+    /// window, and sends only for the window whose bit moved -- to every one
+    /// of its handles, since the bit exists from version 1 (see
+    /// [`Toplevel::send_state`]).
+    pub(super) fn refresh_wlr_maximized(&mut self, arrangement: &Arrangement) {
+        for placement in &arrangement.placements {
+            let Some(toplevel) = self
+                .foreign_toplevel_management
+                .toplevels
+                .get_mut(&placement.id)
+            else {
+                continue;
+            };
+            if toplevel.maximized == placement.maximized {
+                continue;
+            }
+            toplevel.maximized = placement.maximized;
+            toplevel.send_state(false);
         }
     }
 
@@ -913,6 +971,37 @@ impl State {
         self.tell_fullscreen(id);
     }
 
+    /// Answers `zwlr_foreign_toplevel_handle_v1.set_maximized` (`true`) and
+    /// `unset_maximized` (`false`).
+    ///
+    /// A taskbar asking on the user's behalf, so it takes the path a user's
+    /// own request takes -- `Action::SetMaximized` through
+    /// [`State::act`](super::State) -- with the same two refusals up front
+    /// as every other request here: an inert handle, and a locked session
+    /// (a window the user cannot see must not be rearranged from behind the
+    /// lock screen). Maximizing names no output, so there is no hint to
+    /// honour, unlike the fullscreen pair above.
+    ///
+    /// `act`'s `apply` configures the window if it is visible; the answer
+    /// after it tells an invisible one too, and sends nothing when nothing
+    /// changed -- unlike the client's own request, nobody asked this window
+    /// for a configure.
+    fn wlr_toplevel_set_maximized(&mut self, id: WindowId, maximized: bool) {
+        if !self.foreign_toplevel_management.toplevels.contains_key(&id) {
+            return;
+        }
+        if self.session_lock.is_locked() {
+            tracing::debug!(
+                ?id,
+                maximized,
+                "ignoring a foreign-toplevel maximize request: the session is locked"
+            );
+            return;
+        }
+        self.act(Action::SetMaximized { id, maximized });
+        self.tell_maximized(id);
+    }
+
     /// Answers `zwlr_foreign_toplevel_handle_v1.close`: ask that window to go.
     ///
     /// The same `xdg_toplevel.close` that `Action::CloseFocused`'s
@@ -1065,14 +1154,18 @@ impl Dispatch2<ZwlrForeignToplevelHandleV1, State> for HandleData {
             zwlr_foreign_toplevel_handle_v1::Request::UnsetFullscreen => {
                 state.wlr_toplevel_set_fullscreen(self.window, false, None)
             }
+            zwlr_foreign_toplevel_handle_v1::Request::SetMaximized => {
+                state.wlr_toplevel_set_maximized(self.window, true)
+            }
+            zwlr_foreign_toplevel_handle_v1::Request::UnsetMaximized => {
+                state.wlr_toplevel_set_maximized(self.window, false)
+            }
             // Accepted and ignored, on purpose -- see the module doc. Listed
             // one by one rather than folded into the catch-all below so that
             // "scoot has nothing to attach this to" stays a decision written
             // down here, and a protocol version that adds a *new* request still
             // lands in the catch-all rather than silently joining this list.
-            zwlr_foreign_toplevel_handle_v1::Request::SetMaximized
-            | zwlr_foreign_toplevel_handle_v1::Request::UnsetMaximized
-            | zwlr_foreign_toplevel_handle_v1::Request::SetMinimized
+            zwlr_foreign_toplevel_handle_v1::Request::SetMinimized
             | zwlr_foreign_toplevel_handle_v1::Request::UnsetMinimized
             | zwlr_foreign_toplevel_handle_v1::Request::SetRectangle { .. } => {}
             // `Destroy` among them: wayland-backend destroys the object itself

@@ -426,6 +426,59 @@ fn fullscreen_follows_net_wm_state_both_ways() {
     );
 }
 
+/// `_NET_WM_STATE_MAXIMIZED_*` (the pair) both ways: the client's request
+/// makes it maximized in the core (filling the usable area, configured to
+/// its size), both atoms follow, and the reverse puts it back; a window
+/// mapping with the pair already set maps maximized.
+#[test]
+fn maximized_follows_net_wm_state_both_ways() {
+    let Some(mut live) = live("maximized_follows_net_wm_state_both_ways") else {
+        return;
+    };
+    let xid = live.x.map(&Props::new(RED));
+    let id = live.managed(xid);
+    live.x.request_maximized(xid, true);
+    eventually(
+        &mut live.fixture,
+        "the core making it maximized",
+        |fixture| fixture.state.world.is_maximized(id),
+    );
+    let placement = live.placement(id);
+    assert!(
+        placement.maximized && !placement.fullscreen,
+        "a maximized X window is not placed maximized: {placement:?}"
+    );
+    live.drain();
+    assert!(live.x.is_maximized(xid), "the atoms did not follow");
+    let geometry = live
+        .x
+        .conn
+        .get_geometry(xid)
+        .expect("a geometry request")
+        .reply()
+        .expect("the geometry");
+    assert_eq!(
+        (i32::from(geometry.width), i32::from(geometry.height)),
+        (placement.rect.w, placement.rect.h)
+    );
+
+    live.x.request_maximized(xid, false);
+    eventually(&mut live.fixture, "the core leaving maximized", |fixture| {
+        !fixture.state.world.is_maximized(id)
+    });
+    live.drain();
+    assert!(!live.x.is_maximized(xid));
+
+    let mut preset = Props::new(BLUE);
+    preset.maximized = true;
+    let preset = live.x.map(&preset);
+    let preset = live.managed(preset);
+    assert!(
+        live.fixture.state.world.is_maximized(preset),
+        "a window mapping with _NET_WM_STATE_MAXIMIZED_* did not map maximized"
+    );
+}
+
 /// `Effect::Close` (the close bind, IPC `close-focused`) asks an X window
 /// to go the ICCCM way: a `WM_DELETE_WINDOW` client message.
 #[test]

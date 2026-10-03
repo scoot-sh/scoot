@@ -19,6 +19,7 @@ fn placed(id: WindowId, output: OutputId, visible: bool, fullscreen: bool) -> Pl
         rect: Rect::new(0, 0, 100, 100),
         visible,
         fullscreen,
+        maximized: false,
         floating: false,
         requested: None,
     }

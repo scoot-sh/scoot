@@ -5,6 +5,7 @@ mod floating_move;
 mod frames;
 mod fullscreen;
 mod invariants;
+mod maximize;
 mod outputs;
 mod reconnect;
 mod reload;

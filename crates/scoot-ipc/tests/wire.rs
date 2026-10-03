@@ -645,6 +645,18 @@ fn a_window_snapshot_from_before_popup_grab_still_decodes() {
 }
 
 #[test]
+fn a_window_snapshot_from_before_maximized_still_decodes() {
+    // `maximized` is additive and defaulted like `fullscreen` before it: an
+    // older server's window snapshot still decodes (as "not maximized"),
+    // which is what keeps the field off the `PROTOCOL_VERSION`-bump list.
+    let snapshot: WindowSnapshot = decode(
+        r#"{"id":1,"app_id":"foot","title":"zsh","output":1,"rect":{"x":0,"y":0,"width":800,"height":600},"visible":true,"focused":true,"fullscreen":false}"#,
+    )
+    .expect("an older server's window snapshot still decodes");
+    assert!(!snapshot.maximized);
+}
+
+#[test]
 fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
     let snapshot = WindowSnapshot {
         id: 1,
@@ -665,6 +677,7 @@ fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
         focused: false,
         popup_grab: true,
         fullscreen: false,
+        maximized: false,
         floating: true,
     };
     assert_eq!(
@@ -683,6 +696,7 @@ fn a_window_snapshot_carries_its_popup_grab_on_the_wire() {
             "focused": false,
             "popup_grab": true,
             "fullscreen": false,
+            "maximized": false,
             "floating": true,
         })
     );

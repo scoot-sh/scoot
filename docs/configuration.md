@@ -612,7 +612,7 @@ handles `scootctl action ...` (and its `scoot msg` alias) and a config file's
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
 toggle-floating | set-floating ID on|off | toggle-floating-focus
 move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ```
@@ -1014,6 +1014,7 @@ long that is at a real `--tty` login has not been measured yet.
 | `Super+Shift+comma` / `Super+Shift+period` | Move window to output 1 / 2 directly |
 | `Super+r` | Cycle column width |
 | `Super+f` | Toggle fullscreen |
+| `Super+m` | Toggle maximize (fill the usable area, bar visible) |
 | `Super+Shift+Space` | Float the focused window, or put it back in the strip |
 | `Super+Space` | Move focus between the floating windows and the strip |
 | `Super` + left-drag | Move a floating window (`[floating] modifier`) |
@@ -1022,7 +1023,7 @@ long that is at a real `--tty` login has not been measured yet.
 | `Super+Return` | Spawn `foot` |
 | `Super+Shift+e` | Quit |
 
-All 43 key bindings (plus the two drags, which are not `[binds]` entries:
+All 44 key bindings (plus the two drags, which are not `[binds]` entries:
 their modifier is `[floating] modifier`) — vim motions (`h`/`j`/`k`/`l`) for direction, Super as
 scoot's own modifier throughout. Quit is deliberately `Super+Shift+e`, not
 `Super+Shift+q`: that combo is one slipped Shift away from `Super+q` (close
@@ -1041,9 +1042,7 @@ entry like `cycle-column-width`. An index past the end of the list does
 nothing, like a stale workspace index. It has no default bind, by decision:
 the width list is yours to size, so no key family maps onto it the way
 digits map onto workspaces (the same call phase F made for the output
-actions above). Add your own, e.g. with a `1.0` entry in the list for a
-column as wide as the screen that still keeps the gaps, the focus ring and
-your bar (`Super+f`, fullscreen, covers all three):
+actions above). Add your own, e.g.:
 
 ```toml
 [layout]
@@ -1052,6 +1051,12 @@ column_widths = [0.3333333333333333, 0.5, 1.0]
 [binds]
 "super+w" = "set-column-width 2"
 ```
+
+(For "a window as large as the screen that still keeps the gaps, the focus
+ring and the bar", that used to be the recipe — a `1.0` entry bound to a
+key. `Super+m` (`toggle-maximize`) is now the real version: it fills the
+usable area exactly, restores the layout on leave, and tells the client it
+is maximized.)
 
 `Super+f` (`toggle-fullscreen`) puts the focused window into fullscreen and
 back. A fullscreen window covers its whole output while its column is the
@@ -1067,6 +1072,21 @@ to another workspace or output, or consuming/expelling it, ends fullscreen;
 so does moving focus to a window stacked in the same column. The same state
 is what a client's own fullscreen button asks for — see
 [protocols.md](protocols.md#fullscreen) for every way in.
+
+`Super+m` (`toggle-maximize`) puts the focused window into maximized and
+back. A maximized window fills its output's usable area — the whole output
+minus a bar's reserved strip, minus the layout gap — while its column is
+the focused one: full width and full height of the workspace strip, inside
+the configured gaps, with its focus ring kept. The bar stays visible, which
+is the difference from fullscreen. Like fullscreen it keeps its place in
+the strip and leaving restores the layout exactly; moving the window to
+another workspace or output, consume/expel, focusing a window stacked in
+the same column, or floating/un-floating it ends maximized. Choosing a
+column width (`cycle-column-width`, `set-column-width`) does nothing while
+the focused window is maximized. Fullscreen wins while both hold: leaving
+fullscreen returns to maximized, not to the plain strip. The same state is
+what a client's own maximize button asks for — see
+[protocols.md](protocols.md#maximized) for every way in.
 
 `--tty` additionally binds `Ctrl+Alt+F1` through `Ctrl+Alt+F12` to VT
 switching — not present under `--headless`/`--nested`, since VT switching is

@@ -46,7 +46,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
@@ -81,7 +81,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
@@ -336,6 +336,20 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
                 other => {
                     return Err(Error::Invalid {
                         what: "fullscreen state",
+                        value: other.to_owned(),
+                    });
+                }
+            },
+        },
+        "toggle-maximize" => Action::ToggleMaximize,
+        "set-maximized" => Action::SetMaximized {
+            id: number("a window id", args.next())?,
+            maximized: match args.next().ok_or(Error::Missing("on or off"))?.as_str() {
+                "on" => true,
+                "off" => false,
+                other => {
+                    return Err(Error::Invalid {
+                        what: "maximized state",
                         value: other.to_owned(),
                     });
                 }
@@ -713,6 +727,34 @@ mod tests {
         assert!(parse_msg_args(&["action", "set-fullscreen", "7", "yes"]).is_err());
         assert!(parse_msg_args(&["action", "set-fullscreen", "on"]).is_err());
         assert!(parse_msg_args(&["action", "set-fullscreen"]).is_err());
+    }
+
+    #[test]
+    fn toggle_maximize_takes_no_argument() {
+        assert_eq!(
+            parse_msg_args(&["action", "toggle-maximize"]),
+            Ok(Msg {
+                request: Request::Action(Action::ToggleMaximize),
+                out: None,
+            })
+        );
+    }
+
+    #[test]
+    fn set_maximized_takes_a_window_id_and_on_or_off() {
+        for (word, maximized) in [("on", true), ("off", false)] {
+            assert_eq!(
+                parse_msg_args(&["action", "set-maximized", "7", word]),
+                Ok(Msg {
+                    request: Request::Action(Action::SetMaximized { id: 7, maximized }),
+                    out: None,
+                })
+            );
+        }
+        assert!(parse_msg_args(&["action", "set-maximized", "7"]).is_err());
+        assert!(parse_msg_args(&["action", "set-maximized", "7", "yes"]).is_err());
+        assert!(parse_msg_args(&["action", "set-maximized", "on"]).is_err());
+        assert!(parse_msg_args(&["action", "set-maximized"]).is_err());
     }
 
     #[test]

@@ -19,7 +19,7 @@
 //! `focus::same_x_client`). When the request names a button (`data[3]`),
 //! it must be the held one; `0` names none and rides whichever is held.
 //! Nothing while the session is locked. The window must be managed,
-//! floating and on screen: a tiled or fullscreen window's request is
+//! floating and on screen: a tiled, fullscreen or maximized window's request is
 //! ignored, as an xdg one is, and its press stays its own.
 //!
 //! So a background X client cannot capture the pointer: with no press
