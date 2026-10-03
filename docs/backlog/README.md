@@ -551,7 +551,8 @@ be revisited.
   surface is the [remainder](./core/multi-output-remainder.md) below (open,
   high: its scale/mode surface landed 2026-09-29; position and a live mode
   change are the [follow-up](./core/output-position-and-live-mode.md)).
-- [Cycle outputs left and right, wrapping](./core/output-cycle-binds.md) — medium, filed 2026-09-29: `Super+,` / `Super+.` reach only screens 1 and 2 today, as absolute positions
+- [Cycle outputs left and right, wrapping](./resolved/output-cycle-binds-done.md)
+  — RESOLVED 2026-10-03 in #400: `focus-output-left/right` + `move-window-to-output-left/right` (wrapping ring in scoot-core); defaults retargeted.
 - [Audit the fork decisions](./core/fork-decisions-audit.md) — low, filed 2026-09-29: for each carried fork commit, was the scoot-side alternative really weighed, and is the record good enough? Feeds the entry below
 - [Which fork changes could live in scoot instead](./core/fork-changes-in-scoot.md) — low, filed 2026-09-29: an investigation, per carried commit, that could shrink the fork debt
 - [Persistent workspaces: a decision](./core/persistent-workspaces.md) — low, filed 2026-09-29 (scootbar research): the top-requested bar feature vs scoot's deliberately dynamic set

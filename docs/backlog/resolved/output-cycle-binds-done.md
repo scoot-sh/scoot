@@ -1,9 +1,10 @@
 ---
 title: "Super+comma / Super+period cycle every monitor left and right, wrapping, not just screens 1 and 2"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # Cycle outputs left and right, in a loop
@@ -74,3 +75,7 @@ identical x positions; a window carried to an output with a fullscreen window.
 ## Not in this ticket
 
 Up/down navigation and directional-by-geometry across a staggered layout.
+
+## Resolution (2026-10-03, PR #400)
+
+Landed as `feat(scoot,scoot-core,scoot-ipc,scootctl): cycle outputs left and right with wrapping binds` (`002a75a0`). Pure `neighbour_output` ring in `scoot-core/src/world/output_cycle.rs` (8 unit tests + 9 World tests); additive wire tags, no protocol bump; CLI verbs `focus-output-left/right`, `move-window-to-output-left/right`. Review re-derived the ring + all read sites, re-ran 271 core + 360 nextest + touched-area subsets + live 3-output IPC verbs — empty findings. CI green.
