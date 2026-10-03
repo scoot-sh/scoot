@@ -19,6 +19,7 @@ use x11rb::protocol::xproto::{ConnectionExt as _, Window as XWindow};
 use super::live::{Live, Shape, live_shaped};
 use super::scale::{managed_at, scaled, toolkit_scale, x_rect, x_screen};
 use super::x11::XClient;
+use crate::compositor::config::XwaylandFractional;
 use crate::compositor::test_support::capture_logs;
 use crate::compositor::xwayland::scale::{Bounds, XScale, fit_x_scale};
 
@@ -393,4 +394,51 @@ fn the_x_scale_is_the_largest_that_fits_x_coordinates() {
         bounds(-300, 0, 200, 450)
     );
     assert_eq!(Bounds::of([]), None);
+}
+
+/// The per-option ceiling (`XwaylandFractional::ceiling`), before the
+/// layout's bound: `sharp` draws at `ceil`, `light` at `floor` below the
+/// next integer up -- 1 below 2, a quarter of the buffer memory -- and the
+/// two agree at 1 and at every integer scale, byte for byte. The integer
+/// beside each scale is what `wl_output.scale` carries for it.
+#[test]
+fn the_fractional_choice_is_ceil_or_floor_before_the_bound() {
+    let (sharp, light) = (XwaylandFractional::Sharp, XwaylandFractional::Light);
+    for (scale, integer, sharp_want, light_want) in [
+        (1.0, 1, 1, 1),
+        (1.25, 2, 2, 1),
+        (1.5, 2, 2, 1),
+        (2.0, 2, 2, 2),
+        (2.5, 3, 3, 2),
+        (3.0, 3, 3, 3),
+        (4.0, 4, 4, 4),
+        // Below 1 floors to 0, which the clamp brings back to 1: X at
+        // scale 1 either way, as before.
+        (0.5, 1, 1, 1),
+    ] {
+        assert_eq!(
+            sharp.ceiling(scale, integer),
+            sharp_want,
+            "sharp at scale {scale}"
+        );
+        assert_eq!(
+            light.ceiling(scale, integer),
+            light_want,
+            "light at scale {scale}"
+        );
+    }
+    // Through the bound unchanged: the chooser takes the ceiling as is, so
+    // at 1.5 a small layout draws sharp at 2 and light at 1.
+    let fits = |scale| XScale { scale, fits: true };
+    let small = bounds(0, 0, 3072, 1728);
+    assert_eq!(
+        fit_x_scale(sharp.ceiling(1.5, 2), small),
+        fits(2),
+        "sharp at 1.5"
+    );
+    assert_eq!(
+        fit_x_scale(light.ceiling(1.5, 2), small),
+        fits(1),
+        "light at 1.5"
+    );
 }

@@ -663,7 +663,9 @@ its startup id by another X client, below.)
   pixels per logical pixel -- so at an integer scale an X app is drawn one
   X pixel per physical pixel, sharp, and at a fractional one (1.5) it is
   drawn at the integer above (2) and scaled down, like a Wayland client
-  rendering at `ceil`. That holds while the whole output layout fits X's
+  rendering at `ceil`. (`[xwayland] fractional = "light"` draws at
+  `floor(scale)` at a non-integer scale instead -- blurry, at about a
+  quarter of the buffer memory; see [configuration.md](configuration.md#xwayland).) That holds while the whole output layout fits X's
   coordinates at that scale: X positions are 16-bit (32767 at most), so
   when the layout times `ceil(scale)` would be wider or taller than 32767
   X pixels (eight 3840-pixel outputs at 1.25 would be 49152 at 2) the X
@@ -2282,7 +2284,8 @@ Real limits rather than polish:
   output (see [More than one output](configuration.md#more-than-one-output)),
   so a client choosing its buffer scale from the outputs it has entered
   reaches the same answer.
-- **X apps** (with `--xwayland`) draw at `ceil(scale)` -- the largest
+- **X apps** (with `--xwayland`) draw at `ceil(scale)` -- or at `floor(scale)`
+  at a non-integer scale with `[xwayland] fractional = "light"` -- the largest
   among the outputs, when they differ, since X has one scale for every
   screen -- and are scaled to each output like a client rendering at the
   `wl_output.scale` integer -- see [XWayland](#x-windows-in-the-layout).

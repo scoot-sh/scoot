@@ -11,6 +11,7 @@ use super::peer::{Ack, Step, peer};
 use super::x11::{XClient, eventually};
 use super::{wait_until, xwayland_on_path};
 use crate::compositor::State;
+use crate::compositor::config::XwaylandFractional;
 use crate::compositor::decorations::{Appearance, Color};
 use crate::compositor::test_support::Harness;
 use crate::compositor::xwayland::SpawnedPid;
@@ -71,15 +72,17 @@ pub(super) fn live_scaled(test: &str, scale: f64) -> Option<Live> {
     )
 }
 
-/// What a fixture's one output (or first of several) looks like, and --
-/// for the benchmark that compares X scales on one output scale only --
-/// the client scale XWayland is given in place of the one scoot derives.
-/// `extra` is more outputs, `(width, height)` in physical pixels, each
-/// added to the right of the last before XWayland starts -- for the suite
-/// about layouts too wide for X at their integer scale.
+/// What a fixture's one output (or first of several) looks like, what
+/// `[xwayland] fractional` the session runs with, and -- for the benchmark
+/// that compares X scales on one output scale only -- the client scale
+/// XWayland is given in place of the one scoot derives. `extra` is more
+/// outputs, `(width, height)` in physical pixels, each added to the right
+/// of the last before XWayland starts -- for the suite about layouts too
+/// wide for X at their integer scale.
 pub(super) struct Shape {
     pub(super) canvas: i32,
     pub(super) scale: f64,
+    pub(super) fractional: XwaylandFractional,
     pub(super) client_scale: Option<f64>,
     pub(super) extra: &'static [(i32, i32)],
 }
@@ -89,6 +92,7 @@ impl Default for Shape {
         Self {
             canvas: CANVAS,
             scale: 1.0,
+            fractional: XwaylandFractional::Sharp,
             client_scale: None,
             extra: &[],
         }
@@ -133,6 +137,9 @@ fn live_built(test: &str, appearance: Appearance, outputs: i32, shape: Shape) ->
     }
     fixture.spawn(peer);
     let handle = fixture.state.loop_handle.clone();
+    // Before the spawn, as `run` seeds it from the config file: what X
+    // draws at a fractional scale for this whole session.
+    fixture.state.xwayland_fractional = shape.fractional;
     let display = super::super::start(handle, &mut fixture.state).expect("XWayland should start");
     // Before the first dispatch, as `start` sets its own.
     if let Some(client_scale) = shape.client_scale

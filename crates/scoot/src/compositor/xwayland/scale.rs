@@ -38,12 +38,13 @@
 //! instead, as Smithay's anvil does, is too late: XWayland has sized its X
 //! screen from the outputs by then, and would have to be re-sent them.)
 //!
-//! # Which scale: `ceil([output] scale)`, the largest over the outputs
+//! # Which scale: the largest over the outputs, sharp or light
 //!
 //! X toolkits scale only by integers (GTK's window scale, Qt's and Java's
-//! device ratio off it), so `S` is an integer, and it is the one scoot
-//! already advertises on `wl_output.scale` -- the largest one, when
-//! `[[outputs]]` gives outputs different scales. The X server has one
+//! device ratio off it), so `S` is an integer, and -- at the default
+//! `[xwayland] fractional = "sharp"` -- it is the one scoot already
+//! advertises on `wl_output.scale`: the largest one, when `[[outputs]]`
+//! gives outputs different scales. The X server has one
 //! scale for every X window on every output, so outputs that disagree
 //! cannot all be matched; the largest keeps X apps sharp on the densest
 //! screen and has the renderer scale them down on the others (the same
@@ -56,7 +57,20 @@
 //! (1.5) X draws at the integer above (2) and the renderer scales it down
 //! to the output, like any Wayland client that renders at `ceil`: sharp
 //! toolkits sized for 2 are right-sized at 1.5, where drawing at 1 and
-//! scaling up blurred every X app. The alternatives, and what they cost,
+//! scaling up blurred every X app.
+//!
+//! `"light"` trades that sharpness for memory: at a non-integer scale X
+//! draws at the integer below (1 below 2) and scoot scales up -- blurry, at
+//! about a quarter of the buffer memory (each X window's buffers are its X
+//! pixels times 4 bytes, held twice: the X server's pixmap and the
+//! shared-memory buffer). Scale 1 and integer scales draw at themselves
+//! either way, byte for byte. The choice is per output, largest wins, like
+//! the sharp one -- every output that is not at the largest is resampled
+//! anyway -- and it flows through the same chooser below, so a reload of
+//! the option re-applies live exactly like a scale change (client scale,
+//! XSETTINGS, configures re-clamped).
+//!
+//! The alternatives, and what they cost,
 //! are in `docs/backlog/resolved/xwayland-scale-aware-done.md`; in short:
 //! the exact fractional scale would put X windows on non-integer logical
 //! positions (every conversion rounds, and a toolkit would still draw at
@@ -76,16 +90,17 @@
 //! 3840-pixel outputs at 1.25 are 24576 logical pixels: 49152 X pixels at
 //! 2 (measured, before this bound existed).
 //!
-//! So `S` is the largest integer from 1 up to `ceil([output] scale)` at
+//! So `S` is the largest integer from 1 up to the outputs' ceiling at
 //! which the whole layout fits -- every output's logical right and bottom
 //! edge times `S` at most 32767, its left and top (an origin can be
 //! negative) times `S` at least -32768: [`fit_x_scale`]. A layout that fits
-//! at its integer is unaffected; a huge one draws X at the largest scale
+//! at its ceiling is unaffected; a huge one draws X at the largest scale
 //! that fits (blurrier, the way X at 1 was, but addressable), logged at
 //! info once per change. One that does not fit even at 1 keeps 1 -- the
 //! limit X always had -- with a warning. The layout moves at runtime, so
 //! [`State::refit_xwayland`] re-chooses at every change to it: an output
-//! added, removed or resized, and a reload of the scale.
+//! added, removed or resized, a reload of the scale, and a reload of
+//! `[xwayland] fractional`.
 //!
 //! # Telling toolkits: XSETTINGS
 //!
@@ -149,6 +164,7 @@ use smithay::xwayland::XWaylandClientData;
 use smithay::xwayland::xwm::settings::Value;
 
 use super::super::State;
+use super::super::config::XwaylandFractional;
 use super::manage::x_rect;
 
 /// The DPI X toolkits assume at scale 1.
@@ -259,6 +275,27 @@ pub(in crate::compositor) fn fit_x_scale(integer_scale: i32, bounds: Option<Boun
     )
 }
 
+impl XwaylandFractional {
+    /// The X scale for one output at fractional scale `scale` (whose
+    /// `wl_output.scale` integer is `integer`, i.e. `ceil(scale)`), before
+    /// the layout's bound ([`fit_x_scale`]): that integer under `sharp`,
+    /// `floor(scale)` at a non-integer scale under `light` -- 1 below 2,
+    /// at about a quarter of the buffer memory -- and the scale itself at
+    /// 1 or an integer either way. Pure, so the per-option choice pins
+    /// without starting a server.
+    pub(in crate::compositor) fn ceiling(self, scale: f64, integer: i32) -> i32 {
+        match self {
+            Self::Sharp => integer,
+            // `floor`, never below 1 (a sub-1 scale floors to 0) and never
+            // above the integer (float dust past one): at an integer scale
+            // both clamps are no-ops, so light draws exactly what sharp
+            // does there.
+            #[allow(clippy::cast_possible_truncation)]
+            Self::Light => (scale.floor() as i32).max(1).min(integer.max(1)),
+        }
+    }
+}
+
 /// The XSETTINGS that tell toolkits to draw at `scale`, as GNOME's settings
 /// daemon names them: GTK's integer window scale; the DPI fonts render at,
 /// scaled (what Qt and non-GTK Xft users read); and the same DPI unscaled,
@@ -297,25 +334,36 @@ impl State {
         self.x11_fit.scale
     }
 
-    /// The X scale the current layout and the outputs' scales call for:
-    /// see the module doc. Two passes over the outputs, no allocation. With
-    /// no output at all (a bare harness) the session default's integer
-    /// stands in, as the one scale an output would be created at.
+    /// The X scale the current layout, the outputs' scales and `[xwayland]
+    /// fractional` call for: see the module doc. Two passes over the
+    /// outputs, no allocation. With no output at all (a bare harness) the
+    /// session default's ceiling stands in, as the one scale an output
+    /// would be created at.
     fn chosen_x11_scale(&self) -> XScale {
-        fit_x_scale(self.outputs_integer_scale(), self.layout_bounds())
+        fit_x_scale(self.outputs_x_ceiling(), self.layout_bounds())
     }
 
-    /// The largest `wl_output.scale` integer over the outputs -- what X
-    /// draws at before the layout's bound (see the module doc). With no
-    /// output at all (a bare harness) the session default's integer stands
-    /// in, as the one scale an output would be created at. One pass, no
-    /// allocation.
-    fn outputs_integer_scale(&self) -> i32 {
+    /// The outputs' X ceiling -- what X draws at before the layout's bound
+    /// (see the module doc): the largest per-output choice, where each
+    /// output chooses `ceil` under `sharp` and `floor` at a non-integer
+    /// scale under `light`. With no output at all (a bare harness) the
+    /// session default's ceiling stands in, as the one scale an output
+    /// would be created at. One pass, no allocation.
+    fn outputs_x_ceiling(&self) -> i32 {
+        let fractional = self.xwayland_fractional;
         self.outputs
             .iter()
-            .map(|output| output.current_scale().integer_scale())
+            .map(|output| {
+                let scale = output.current_scale();
+                fractional.ceiling(scale.fractional_scale(), scale.integer_scale())
+            })
             .max()
-            .unwrap_or_else(|| super::super::output_scale::integer_scale(self.default_scale))
+            .unwrap_or_else(|| {
+                fractional.ceiling(
+                    self.default_scale,
+                    super::super::output_scale::integer_scale(self.default_scale),
+                )
+            })
     }
 
     /// The union of every output's logical rectangle, as the `Space` lays
@@ -346,14 +394,16 @@ impl State {
         }
     }
 
-    /// The outputs or `[output] scale` changed -- an output added, removed
-    /// or resized, a reload of the scale: re-choose the X scale for the
-    /// layout as it now is (see the module doc), and follow it on the X side
-    /// if it moved. Every site that changes the output layout calls this
-    /// once the layout is final and before its `apply()`. Cold: when the X
-    /// scale holds, one pass over the outputs and a compare; when it moves,
-    /// one output re-send each, one XSETTINGS write and one configure per
-    /// managed X window.
+    /// The outputs, `[output] scale` or `[xwayland] fractional` changed --
+    /// an output added, removed or resized, a reload of the scale, a reload
+    /// of the option: re-choose the X scale for the layout as it now is
+    /// (see the module doc), and follow it on the X side if it moved.
+    /// Every site that changes the output layout calls this once the layout
+    /// is final and before its `apply()`; the fractional reload calls it
+    /// with the layout untouched, which then needs no `apply()`. Cold: when
+    /// the X scale holds, one pass over the outputs and a compare; when it
+    /// moves, one output re-send each, one XSETTINGS write and one
+    /// configure per managed X window.
     pub(in crate::compositor) fn refit_xwayland(&mut self) {
         if self.xwayland_client.is_none() {
             // Never spawned: `start` chooses from the layout then.
@@ -417,7 +467,7 @@ impl State {
     /// change.
     fn log_x11_bound(&self) {
         let XScale { scale, fits } = self.x11_fit;
-        let ceiling = x_scale(self.outputs_integer_scale());
+        let ceiling = x_scale(self.outputs_x_ceiling());
         let (width, height) = self.layout_bounds().map_or((0, 0), |bounds| {
             (
                 bounds.right.saturating_sub(bounds.left),

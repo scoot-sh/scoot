@@ -24,10 +24,11 @@ use x11rb::protocol::xproto::{
 };
 
 use super::drop::{centre, grabbed, settle, start_wayland_drag, visible};
-use super::live::{BLUE, BLUE_BGRA, CANVAS, Live, RED, RED_BGRA, live_scaled};
+use super::live::{BLUE, BLUE_BGRA, CANVAS, Live, RED, RED_BGRA, Shape, live_scaled, live_shaped};
 use super::peer::{Ack, CaptureStep, ClipStep, Step};
 use super::x11::{Props, XClient, eventually};
 use super::xdnd::{Inbox, PROXY_NAME, XDND_VERSION, packed};
+use crate::compositor::config::XwaylandFractional;
 use crate::compositor::test_support::pixel;
 
 /// The X server's view of `xid`'s window: root position and size.
@@ -564,6 +565,47 @@ fn a_fractional_scale_draws_x_at_the_integer_above() {
     assert_eq!(live.pixel_at(px, py), RED_BGRA);
 }
 
+/// `[xwayland] fractional = "light"` from startup at 1.5: X draws at 1 --
+/// the window configured at its logical size -- and the window is on
+/// screen where it is placed. No XSETTINGS entry is written, exactly as in
+/// any scale-1 session (see `a_scale_1_session_is_untouched`): a session
+/// that starts at 1 leaves toolkits alone, while a reload down to 1
+/// overwrites the stale ones (see below).
+#[test]
+fn a_light_fractional_draws_x_at_the_integer_below() {
+    let Some(mut live) = live_shaped(
+        "a_light_fractional_draws_x_at_the_integer_below",
+        Shape {
+            scale: 1.5,
+            fractional: XwaylandFractional::Light,
+            ..Shape::default()
+        },
+    ) else {
+        return;
+    };
+    assert_eq!(live.fixture.state.x11_scale(), 1);
+    assert_eq!(toolkit_scale(&live.x), (None, None, None));
+    let (_, _, placement) = managed_at(&mut live, 1);
+    let (cx, cy) = centre(placement.rect);
+    #[allow(clippy::cast_possible_truncation)]
+    let (px, py) = ((cx * 1.5) as i32, (cy * 1.5) as i32);
+    assert_eq!(live.pixel_at(px, py), RED_BGRA);
+}
+
+/// An X window's buffer bytes at an X scale: its X geometry times 4 bytes
+/// a pixel (XRGB8888, in the X server's pixmap and again in the
+/// shared-memory buffer). At 1.5 a window draws at 2 sharp and at 1 light
+/// -- a quarter of the bytes.
+fn buffer_bytes(live: &Live, xid: XWindow, placement: Rect, scale: i32) -> i64 {
+    assert_eq!(
+        x_rect(live, xid),
+        scaled(placement, scale),
+        "the X server does not hold the window at its placement times {scale}"
+    );
+    let (_, _, w, h) = x_rect(live, xid);
+    i64::from(w) * i64::from(h) * 4
+}
+
 /// `[output] scale` reloaded with X windows open: the X scale follows (1 to
 /// 2 and back), every open X window is reconfigured into the new X pixels
 /// at its unchanged-in-kind logical placement, toolkits are told the new
@@ -632,6 +674,138 @@ fn a_runtime_scale_change_rescales_open_x_windows() {
         }
         assert_eq!(pixel, RED_BGRA, "at scale {scale}");
     }
+}
+
+/// A reload of `[xwayland] fractional` re-applies live like a scale
+/// change: sharp to light at 1.5 moves the X scale from 2 to 1 -- toolkits
+/// re-told, every open X window reconfigured into the new X pixels at its
+/// unchanged logical placement, still drawn where it is placed -- and back
+/// to sharp returns it to 2. The window's buffer is a quarter of the bytes
+/// under light.
+#[test]
+fn a_fractional_reload_moves_open_x_windows_between_sharp_and_light() {
+    let Some(mut live) = live_scaled(
+        "a_fractional_reload_moves_open_x_windows_between_sharp_and_light",
+        1.5,
+    ) else {
+        return;
+    };
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    live.fixture.state.config_path = Some(path.clone());
+    let (xid, id, placement) = managed_at(&mut live, 2);
+    let sharp_bytes = buffer_bytes(&live, xid, placement.rect, 2);
+
+    for (fractional, scale, what) in [("light", 1, "light"), ("sharp", 2, "back at sharp")] {
+        fs::write(
+            &path,
+            format!("[output]\nscale = 1.5\n\n[xwayland]\nfractional = \"{fractional}\"\n"),
+        )
+        .expect("a config file");
+        let response = live.fixture.state.handle_request(Request::Reload);
+        assert!(
+            format!("{response:?}").contains("xwayland.fractional"),
+            "the reload did not apply the option: {response:?}"
+        );
+        assert!(
+            !format!("{response:?}").contains("output.scale"),
+            "the reload moved the output scale too: {response:?}"
+        );
+        assert_eq!(live.fixture.state.x11_scale(), scale, "{what}");
+        let expected = if scale == 1 {
+            (Some(1), Some(96 * 1024), Some(96 * 1024))
+        } else {
+            (Some(2), Some(2 * 96 * 1024), Some(96 * 1024))
+        };
+        assert_eq!(toolkit_scale(&live.x), expected, "{what}");
+        let placement = live.placement(id);
+        let want = scaled(placement.rect, scale);
+        let mut seen = (0, 0, 0, 0);
+        eventually(
+            &mut live.fixture,
+            "the X window reconfigured into the new X pixels",
+            |_| {
+                seen = {
+                    let (x, y, w, h) = live.x.root_geometry(xid);
+                    (x, y, w as i32, h as i32)
+                };
+                seen == want
+            },
+        );
+        let bytes = i64::from(want.2) * i64::from(want.3) * 4;
+        if scale == 1 {
+            assert_eq!(
+                bytes * 4,
+                sharp_bytes,
+                "{what}: the light buffer is not a quarter of the sharp one"
+            );
+        } else {
+            assert_eq!(
+                bytes, sharp_bytes,
+                "{what}: the sharp buffer is not what it was"
+            );
+        }
+        // Still drawn where it is placed, at the new X size.
+        let (cx, cy) = centre(placement.rect);
+        #[allow(clippy::cast_possible_truncation)]
+        let (px, py) = ((cx * 1.5) as i32, (cy * 1.5) as i32);
+        let mut pixel = [0; 4];
+        for _ in 0..50 {
+            pixel = live.pixel_at(px, py);
+            if pixel == RED_BGRA {
+                break;
+            }
+            live.drain();
+        }
+        assert_eq!(pixel, RED_BGRA, "{what}");
+    }
+}
+
+/// At an integer scale the choice changes nothing: a reload from sharp to
+/// light at 2.0 reports the new choice, but the X scale, the XSETTINGS, the
+/// window's X geometry and its pixels stay byte for byte.
+#[test]
+fn an_integer_scale_is_unchanged_by_the_fractional_choice() {
+    let Some(mut live) = live_scaled(
+        "an_integer_scale_is_unchanged_by_the_fractional_choice",
+        2.0,
+    ) else {
+        return;
+    };
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    live.fixture.state.config_path = Some(path.clone());
+    let (xid, _, placement) = managed_at(&mut live, 2);
+    let (cx, cy) = centre(placement.rect);
+    #[allow(clippy::cast_possible_truncation)]
+    let (px, py) = (cx as i32 * 2, cy as i32 * 2);
+    let before = (
+        x_rect(&live, xid),
+        toolkit_scale(&live.x),
+        live.pixel_at(px, py),
+    );
+
+    fs::write(
+        &path,
+        "[output]\nscale = 2.0\n\n[xwayland]\nfractional = \"light\"\n",
+    )
+    .expect("a config file");
+    let response = live.fixture.state.handle_request(Request::Reload);
+    assert!(
+        format!("{response:?}").contains("xwayland.fractional"),
+        "the reload did not apply the option: {response:?}"
+    );
+    live.drain();
+    assert_eq!(live.fixture.state.x11_scale(), 2);
+    assert_eq!(
+        (
+            x_rect(&live, xid),
+            toolkit_scale(&live.x),
+            live.pixel_at(px, py)
+        ),
+        before,
+        "the X window moved, was re-told, or redrew at an integer scale"
+    );
 }
 
 /// Wayland to X at scale 2: the window manager tells the X target where the
