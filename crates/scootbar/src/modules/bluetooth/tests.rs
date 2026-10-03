@@ -684,3 +684,57 @@ fn an_oversize_enumeration_keeps_the_last_state() {
     assert!(fake.managed_calls > calls);
     assert_eq!(shown(&harness), "Headset 72%");
 }
+
+/// A skipped reply no call can be named for releases every in-flight
+/// read: without this a skipped `GetManagedObjects` leaves the
+/// enumeration owed forever with nothing stale, and the set is never read
+/// again (and a skipped object read never retries).
+#[test]
+fn an_unknown_drop_releases_every_in_flight_read() {
+    use super::session::{Adapter, RefreshIface, start};
+    use crate::dbus::bluez::NAME;
+    use crate::dbus::conn::{self, Event};
+    use crate::dbus::proto::Writer;
+    use crate::dbus::testdaemon;
+    let (client, mut daemon_end) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        testdaemon::serve_setup(&mut daemon_end);
+        daemon_end
+    });
+    let mut live = start(conn::setup(client).unwrap());
+    let _daemon = server.join().unwrap();
+    // BlueZ appears: the enumeration goes out and stays owed (the
+    // scripted peer never answers; only the flights' state matters here).
+    let mut body = Writer::new();
+    body.str(NAME);
+    body.str("");
+    body.str(":1.bluez");
+    live.apply(Event::Signal {
+        sender: conn::BUS_NAME.to_owned(),
+        path: conn::BUS_PATH.to_owned(),
+        interface: conn::BUS_INTERFACE.to_owned(),
+        member: "NameOwnerChanged".to_owned(),
+        signature: "sss".to_owned(),
+        body: body.take_body().unwrap(),
+    });
+    assert!(live.managed_in_flight);
+    // One adapter, mid-read.
+    live.adapters.push(Adapter {
+        id: 7,
+        path: HCI0.to_owned(),
+        powered: true,
+        asked: None,
+        last_asked: None,
+        stale: false,
+    });
+    live.refresh(7, RefreshIface::Adapter);
+    assert!(live.adapters[0].asked.is_some());
+    // The bus skips some reply past what is read: no call can be named.
+    live.apply(Event::Dropped {
+        token: conn::DROPPED_UNKNOWN,
+    });
+    assert!(!live.managed_in_flight);
+    assert!(live.stale_managed);
+    assert!(live.adapters[0].asked.is_none());
+    assert!(live.adapters[0].stale);
+}
