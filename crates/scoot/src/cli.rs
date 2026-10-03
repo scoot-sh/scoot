@@ -40,7 +40,7 @@ REQUESTS:
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
     subscribe [EVENT...]          stream events until killed (default: output;
-                                    known events: output, keyboard)
+                                    known events: output, keyboard, workspace)
 
 ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
@@ -965,6 +965,7 @@ mod tests {
             &["keyboard"],
             &["subscribe"],
             &["subscribe", "output", "keyboard"],
+            &["subscribe", "workspace"],
             &["wait-idle"],
             &["wait-idle", "--quiet-ms", "100", "--timeout-ms", "500"],
             &[],

@@ -33,6 +33,7 @@ mod outbound;
 mod slots;
 #[cfg(test)]
 mod tests;
+mod workspace;
 
 use std::io::Write;
 use std::os::unix::net::UnixStream;

@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::event::{EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored};
+use crate::event::{
+    EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored, WorkspaceSnapshot,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
@@ -264,8 +266,8 @@ pub enum Response {
     /// What a `Subscribe` request answers on success: the event kinds this
     /// connection is now dedicated to, echoed back. Afterwards the
     /// connection carries [`OutputRemoved`]/[`OutputRestored`]/
-    /// [`OutputChanged`]/[`KeyboardChanged`] unasked, and any other request on it is
-    /// refused with an error.
+    /// [`OutputChanged`]/[`KeyboardChanged`]/[`Workspaces`] unasked, and
+    /// any other request on it is refused with an error.
     ///
     /// A new variant, so this is one of the halves that moved
     /// `PROTOCOL_VERSION` 3 → 4 (see that constant's doc): an older client
@@ -309,6 +311,14 @@ pub enum Response {
     /// to connections subscribed to [`EventKind::Keyboard`], under the same
     /// version move as `Keyboard` above.
     KeyboardChanged(KeyboardLayout),
+    /// One output's workspace occupancy changed; see [`WorkspaceSnapshot`]
+    /// for what each field means and when this fires. Sent only to
+    /// connections subscribed to [`EventKind::Workspace`].
+    ///
+    /// A new variant, so this moves `PROTOCOL_VERSION` 6 → 7 (see that
+    /// constant's doc): an older client handed one would fail its decode,
+    /// which can only happen to a client new enough to have subscribed.
+    Workspaces(WorkspaceSnapshot),
     Error {
         message: String,
     },

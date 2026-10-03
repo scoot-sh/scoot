@@ -4,7 +4,7 @@
 use scoot_ipc::{
     Action, EventKind, Horizontal, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored,
     OutputSnapshot, PROTOCOL_VERSION, PointerButton, Rect, Request, Response,
-    SCREENSHOT_CURSOR_DEFAULT, Screenshot, WindowSnapshot, decode, encode,
+    SCREENSHOT_CURSOR_DEFAULT, Screenshot, WindowSnapshot, WorkspaceSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -451,14 +451,14 @@ fn a_reload_report_round_trips_with_both_lists() {
 
 /// The Phase 4-6 record: the refusal *strings* moved (restart wording, the
 /// autostart spawn delta) while the reply *shape* did not -- so this still
-/// decodes as the same two string lists. (The protocol is at 6 now for the
-/// keyboard query and event below; these strings are still payload, not wire.)
+/// decodes as the same two string lists. (The protocol is at 7 now for the
+/// workspace occupancy event below; these strings are still payload, not wire.)
 /// Strings are payload, not wire format: an older client parses this reply
 /// exactly as it parsed the old strings.
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 6,
+        PROTOCOL_VERSION, 7,
         "no new reply variant or field shipped with the reload completion"
     );
     let response = Response::Reloaded {
@@ -906,6 +906,12 @@ fn unknown_event_kinds_are_rejected_like_unknown_request_types() {
             events: vec![EventKind::Keyboard]
         }
     );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"subscribe","events":["workspace"]}"#).unwrap(),
+        Request::Subscribe {
+            events: vec![EventKind::Workspace]
+        }
+    );
 }
 
 /// The removal payload on the wire: the adopter, the adopted range, and the
@@ -1031,5 +1037,63 @@ fn adoption_events_name_a_missing_adopter_explicitly() {
             adopter_active: None,
             origin: None,
         })
+    );
+}
+
+/// A workspace subscription names its kind the same way, and the reply
+/// echoes it back.
+#[test]
+fn a_workspace_subscribe_names_its_kind_and_the_reply_echoes_it() {
+    let request = Request::Subscribe {
+        events: vec![EventKind::Workspace],
+    };
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "subscribe", "events": ["workspace"] })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+
+    let response = Response::Subscribed {
+        events: vec![EventKind::Workspace],
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({ "type": "subscribed", "events": ["workspace"] })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+/// The occupancy payload on the wire: one output's full snapshot -- its id
+/// and connector name, its active workspace, and one window count per
+/// workspace in the 0-based numbering `windows` speaks. Counts, not a
+/// plain occupied flag: a bar derives the flag, while an agent reads how
+/// many windows each workspace holds.
+#[test]
+fn a_workspace_snapshot_event_round_trips_with_counts() {
+    let response = Response::Workspaces(WorkspaceSnapshot {
+        output: 1,
+        name: "DP-1".into(),
+        active: 0,
+        counts: vec![2, 0, 1],
+    });
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "workspaces",
+            "output": 1,
+            "name": "DP-1",
+            "active": 0,
+            "counts": [2, 0, 1],
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
     );
 }

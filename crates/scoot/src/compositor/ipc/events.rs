@@ -4,8 +4,10 @@
 //! for the protocol half): `Request::Subscribe` names the [`EventKind`]s,
 //! the reply is `Response::Subscribed`, and afterwards the connection
 //! carries [`Response::OutputRemoved`]/[`Response::OutputRestored`]/
-//! [`Response::OutputChanged`]/[`Response::KeyboardChanged`] unasked as
-//! outputs come, go and change size and the keyboard layout changes.
+//! [`Response::OutputChanged`]/[`Response::KeyboardChanged`]/
+//! [`Response::Workspaces`] unasked as
+//! outputs come, go and change size, the keyboard layout changes, and
+//! workspace occupancy moves.
 //! This module is the server side of that: who is subscribed, getting events
 //! to them, and dropping subscribers that stop reading.
 //!
@@ -25,7 +27,12 @@
 //! path -- the per-key layout check in `State::key_with` -- so the check
 //! itself is gated on a `Keyboard` subscriber existing (one walk of the
 //! subscriber list, no keymap read without one) and the emission only runs
-//! when the group actually changed.
+//! when the group actually changed. Workspace occupancy events are the
+//! warmest of the three -- every `apply` re-reads the snapshots -- so the
+//! refresh is gated the same way (one walk, nothing built without a
+//! `Workspace` subscriber) and only *marks* what moved; the frame tick
+//! carries the marks out, at most one event per output per tick (see
+//! `workspace.rs`).
 //!
 //! The backpressure policy, stated once here because a test pins it:
 //!
@@ -115,7 +122,7 @@ impl State {
     pub fn subscribe(&mut self, conn: u64, stream: UnixStream, events: Vec<EventKind>) -> Response {
         if events.is_empty() {
             return Response::error(
-                "subscribe names no event kinds; name at least one (\"output\", \"keyboard\"), \
+                "subscribe names no event kinds; name at least one (\"output\", \"keyboard\", \"workspace\"), \
                  or open a connection for requests instead",
             );
         }
@@ -139,6 +146,16 @@ impl State {
         if events.contains(&EventKind::Keyboard) {
             self.refresh_keyboard_layout();
         }
+        // The occupancy check skips its core reads entirely while
+        // unsubscribed, so a stretch with no workspace subscriber leaves
+        // that record behind the live counts. Sync it on the way in --
+        // without emitting -- so the first real change after this marks
+        // exactly once instead of reporting the whole unsubscribed interval
+        // as one change. A fresh subscription starts silent: read `windows`
+        // once for the baseline.
+        if events.contains(&EventKind::Workspace) {
+            self.sync_workspace_snapshots();
+        }
         Response::Subscribed { events }
     }
 
@@ -147,6 +164,14 @@ impl State {
     /// subscriber leaves no record behind.
     pub(crate) fn drop_subscriber(&mut self, conn: u64) {
         remove_subscriber(conn, &mut self.subscribers);
+        if !self.wants_workspace_events() {
+            // The last workspace subscriber is gone: its marked-but-unsent
+            // snapshots describe a world nobody is listening to, and the
+            // next subscription syncs the record without emitting rather
+            // than replaying them. Cleared, so an unrelated later
+            // subscriber never inherits stale marks.
+            self.workspace_pending.clear();
+        }
     }
 
     /// Sends an output-removed event to every `Output` subscriber.
@@ -191,12 +216,13 @@ impl State {
         self.emit(EventKind::Keyboard, &line);
     }
 
-    /// The shared tail of all four emitters: one encoded line to every
+    /// The shared tail of all five emitters: one encoded line to every
     /// subscriber of `kind`.
     ///
     /// `line` is encoded once, outside, and cloned per subscriber -- one
-    /// small allocation each, on a hotplug path, never per frame.
-    fn emit(&mut self, kind: EventKind, line: &str) {
+    /// small allocation each, on a cold path for the output and keyboard
+    /// emitters, at most once per output per tick for the workspace flush.
+    pub(super) fn emit(&mut self, kind: EventKind, line: &str) {
         if self.subscribers.is_empty() {
             return;
         }

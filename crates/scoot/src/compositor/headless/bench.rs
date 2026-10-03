@@ -70,6 +70,7 @@ mod keys;
 mod outputs;
 mod pointer;
 mod relative;
+mod workspace;
 
 /// The framebuffer each scene renders into. 800 square, matching the
 /// headless-render benchmark recorded in

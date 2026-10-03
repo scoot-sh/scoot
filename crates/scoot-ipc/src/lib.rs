@@ -22,7 +22,9 @@ pub use action::{Action, Horizontal, Vertical};
 #[cfg(unix)]
 pub use client::Client;
 pub use codec::{decode, encode, read_message, read_message_buffered, write_message};
-pub use event::{EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored};
+pub use event::{
+    EventKind, KeyboardLayout, OutputChanged, OutputRemoved, OutputRestored, WorkspaceSnapshot,
+};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
 pub use request::{PointerButton, Request, SCREENSHOT_CURSOR_DEFAULT};
 pub use response::{OutputSnapshot, Rect, Response, Screenshot, WindowSnapshot};
@@ -64,4 +66,8 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// new tags, `Response::Keyboard` and `Response::KeyboardChanged`, under the
 /// same rule -- only a client new enough to ask or subscribe ever receives
 /// one.
-pub const PROTOCOL_VERSION: u32 = 6;
+///
+/// And again 6 → 7 for the workspace occupancy event (2026-10): one new
+/// tag, `Response::Workspaces`, under the same rule -- only a subscriber
+/// ever receives one.
+pub const PROTOCOL_VERSION: u32 = 7;

@@ -269,3 +269,110 @@ fn moving_by_index_with_no_outputs_does_nothing() {
     world.handle_action(Action::MoveWindowToWorkspaceIndex(usize::MAX));
     assert_eq!(world.workspaces(OutputId(1)), None);
 }
+
+// -- `World::workspace_window_counts` -------------------------------------
+
+/// One window per check: the counts are the histogram of
+/// `window_workspace` over every window, with one entry per workspace and
+/// the active index beside it.
+fn assert_counts_agree_with_window_workspace(world: &World, id: OutputId) {
+    let mut counts = Vec::new();
+    let active = world.workspace_window_counts(id, &mut counts);
+    let workspaces = world.workspaces(id).expect("a known output");
+    assert_eq!(active, Some(workspaces.active));
+    assert_eq!(counts.len(), workspaces.count);
+    let mut histogram = vec![0; workspaces.count];
+    for (window, _) in world.windows() {
+        if let Some((output, workspace, _)) = world.window_workspace(window) {
+            if output == id {
+                histogram[workspace] += 1;
+            }
+        }
+    }
+    assert_eq!(counts, histogram);
+}
+
+#[test]
+fn window_counts_follow_open_close_and_move() {
+    let mut world = world();
+    let mut counts = Vec::new();
+    // Empty output: one empty workspace, zero windows, active zero.
+    assert_eq!(
+        world.workspace_window_counts(OutputId(1), &mut counts),
+        Some(0)
+    );
+    assert_eq!(counts, vec![0]);
+
+    open(&mut world, 1);
+    open(&mut world, 2);
+    assert_eq!(
+        world.workspace_window_counts(OutputId(1), &mut counts),
+        Some(0)
+    );
+    assert_eq!(counts, vec![2, 0]);
+    assert_counts_agree_with_window_workspace(&world, OutputId(1));
+
+    // Carry the focused window (2) down: it leaves ws0 for ws1, and the
+    // active index follows it there.
+    world.handle_action(Action::MoveWindowToWorkspace(Vertical::Down));
+    assert_eq!(
+        world.workspace_window_counts(OutputId(1), &mut counts),
+        Some(1)
+    );
+    assert_eq!(counts, vec![1, 1, 0]);
+    assert_counts_agree_with_window_workspace(&world, OutputId(1));
+
+    // Closing a window updates its old workspace, whatever the renumbering
+    // around it does.
+    world.handle_event(Event::WindowClosed { id: WindowId(1) });
+    assert!(
+        world
+            .workspace_window_counts(OutputId(1), &mut counts)
+            .is_some()
+    );
+    assert_counts_agree_with_window_workspace(&world, OutputId(1));
+    assert_eq!(counts.iter().sum::<usize>(), 1);
+}
+
+#[test]
+fn window_counts_include_floating_windows() {
+    let mut world = world();
+    open(&mut world, 1);
+    open(&mut world, 2);
+    world.handle_event(Event::FloatingRequested {
+        id: WindowId(2),
+        floating: true,
+        size: None,
+    });
+    // Floated out of the strip, but still on ws0: the count does not move.
+    let mut counts = Vec::new();
+    assert_eq!(
+        world.workspace_window_counts(OutputId(1), &mut counts),
+        Some(0)
+    );
+    assert_eq!(counts, vec![2, 0]);
+
+    // Carrying it down keeps it floating on the workspace it lands on.
+    world.handle_action(Action::MoveWindowToWorkspace(Vertical::Down));
+    assert!(
+        world
+            .workspace_window_counts(OutputId(1), &mut counts)
+            .is_some()
+    );
+    assert_counts_agree_with_window_workspace(&world, OutputId(1));
+    assert_eq!(counts.iter().sum::<usize>(), 2);
+}
+
+#[test]
+fn window_counts_of_an_unknown_output_are_none_and_cleared() {
+    let mut world = world();
+    open(&mut world, 1);
+    // A dirty buffer in, empty out: `None` leaves nothing behind for the
+    // next caller to misread as a snapshot.
+    let mut counts = vec![9, 9, 9];
+    assert_eq!(
+        world.workspace_window_counts(OutputId(7), &mut counts),
+        None
+    );
+    assert!(counts.is_empty());
+}

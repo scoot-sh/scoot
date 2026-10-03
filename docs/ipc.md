@@ -57,7 +57,7 @@ compositor running in a VM.
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |
-| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output`, `keyboard`; naming none is refused — bare `scootctl subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). A fresh `keyboard` subscription starts silent, so issue one `keyboard` query for the baseline and listen for changes after it. |
+| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output`, `keyboard`, `workspace`; naming none is refused — bare `scootctl subscribe` sends `output`), streaming them until the session ends or drops the subscription — see [Events](#events). A fresh `keyboard` subscription starts silent, so issue one `keyboard` query for the baseline and listen for changes after it. A fresh `workspace` subscription starts silent too — read `windows` once for the baseline and apply snapshots after it. |
 
 ```sh
 scootctl windows
@@ -239,7 +239,8 @@ finds it, since neither is ever in effect. A reload that could not load or valid
 ## Events
 
 A connection that wants push notifications subscribes instead of polling.
-`subscribe` names the event kinds it wants (`output`, `keyboard` — the two
+`subscribe` names the event kinds it wants (`output`, `keyboard`,
+`workspace` — the three
 kinds; naming none is refused, and bare `scootctl subscribe` sends
 `output`); the reply echoes the subscription; and
 afterwards that connection carries events until the session ends:
@@ -253,6 +254,9 @@ $ scootctl subscribe
 $ scootctl subscribe keyboard
 {"type":"subscribed","events":["keyboard"]}
 {"type":"keyboard_changed","name":"Russian","index":1}
+$ scootctl subscribe workspace
+{"type":"subscribed","events":["workspace"]}
+{"type":"workspaces","output":1,"name":"DP-1","active":0,"counts":[2,0,1]}
 ```
 
 `scootctl subscribe` prints the answer, then one compact JSON object per
@@ -346,10 +350,39 @@ compositor shuts the connection down and drops the subscription. Output
 removal never waits for a subscriber. A client that disconnects itself
 leaves no record behind.
 
+**`workspaces`** — one output's workspace occupancy changed: which of its
+workspaces hold windows, as a full snapshot rather than a delta, so a
+subscriber that missed one is never wrong. What a bar's workspace module
+draws (dimming the empty ones) without polling `windows`, and what tells an
+agent "workspace 3 now has windows" the same way. No standard Wayland
+protocol reports this to an unfocused client — `ext-workspace-v1` carries
+the list, positions and the one `active` bit, but no "holds windows" bit,
+and no other standard protocol maps a toplevel to a workspace.
+
+| Field | Meaning |
+| --- | --- |
+| `output` | The output's id, as `outputs` reports it. |
+| `name` | Its connector name (`DP-1` under `--tty`, `headless-2` otherwise) — the same string `outputs` names it by. |
+| `active` | The output's active workspace, 0-based — the same numbering `focus-workspace-index N` takes. |
+| `counts` | One entry per workspace, in order: how many windows sit on it (`counts[i] > 0` is the occupied flag a bar draws; the number itself is what an agent reads). |
+
+One event per output whose snapshot moved — a window opened, closed or
+moved between workspaces, the active workspace switched, or an output
+added (a removed output sends nothing: its removal is already an
+`output_removed`, and there is no occupancy left to report). Coalesced to
+at most one event per output per frame tick, however fast windows churn: a
+client opening and closing windows at its maximum rate is one event per
+tick, not an event stream. A fresh subscription starts silent, like
+`keyboard` — read `windows` once for the baseline (the counts are the
+histogram of each window's `workspace` on its `output`) and apply snapshots
+after it — so subscribing never replays the unsubscribed interval as one
+change.
+
 Versioning: the subscription is IPC protocol 5 — the `subscribed`,
 `output_removed` and `output_restored` tags under the 3 → 4 bump, plus the
-`output_changed` tag under 4 → 5 — and the keyboard half is protocol 6: the
-`keyboard` reply and the `keyboard_changed` tag. A client that
+`output_changed` tag under 4 → 5 — the keyboard half is protocol 6: the
+`keyboard` reply and the `keyboard_changed` tag — and the workspace
+occupancy event is protocol 7: the `workspaces` tag. A client that
 never sends `subscribe` (or `keyboard`) never receives any of them. An unknown event kind
 in a `subscribe` is answered with an ordinary `error` like any unknown
 request tag, so an older server meets a newer subscriber with an error,
