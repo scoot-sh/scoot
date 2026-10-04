@@ -183,6 +183,13 @@ Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
 
 ## scootbar
 
+![A light scoot desktop: scootbar across the top with workspaces, the
+clock, load, CPU, WiFi, volume, battery and launcher buttons; below it
+three translucent terminal columns (fastfetch, Helix on scoot's source,
+btop over lazygit) over an illustration of musical instruments](docs/assets/scootbar-desktop.png)
+
+<sub>Wallpaper: [musical instruments and audio equipment](https://unsplash.com/illustrations/musical-instruments-and-audio-equipment-on-a-white-surface-b6Us5E-BO8w), from Unsplash.</sub>
+
 scoot comes with `scootbar`, a status bar. It shows your workspaces, the
 focused window's title, the clock, volume and microphone, WiFi, bluetooth,
 battery, brightness, what's playing, and a system tray with menus. Clicks,
