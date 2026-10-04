@@ -724,6 +724,26 @@ the power module is waived.** It covers `.text` +43,328 B (+2.6%) and the
 loaded sections' +47,961 B, and only that row; the file does not grow.
 Nothing else is waived.
 
+## M6 icons on exec and push (measured 2026-10-04)
+
+`icon`, `icon-path`, `icon-image` and `show-text` on `[exec.NAME]` and
+`[push.NAME]`, and a per-update `icon` key in the payload (PR #421).
+Release builds (`lto = "fat"`, stripped) on the dev VM, `readelf -S -W`,
+`main` against the branch, re-measured by the review:
+
+| Build | file bytes | `.text` | `.rodata` |
+| --- | --- | --- | --- |
+| `main` `7059028da` | 2,167,520 | 1,695,912 | 134,183 |
+| branch `42eebee9a` | 2,233,056 (+65,536) | 1,702,440 (+6,528) | 134,375 (+192) |
+
+The file grows by one 64 KiB alignment page for about 6.8 KB of code and
+data. Idle, two exec loops and one push placed, 60 s windows: 0 wakeups
+both, RSS level, 13 fds and 1 thread both. `Cargo.lock` unchanged.
+
+**Maintainer's ruling (2026-10-04, given in chat): the size growth of the
+exec and push icons is waived.** It covers `.text` +6,528 B (+0.38%) and
+the file's one-page step, and only those rows. Nothing else is waived.
+
 ## M3 gate: clock and workspaces (measured 2026-09-30, does not pass)
 
 Run on the Asahi M2 by `scripts/scootbar-bench`, release scootbar from `main`

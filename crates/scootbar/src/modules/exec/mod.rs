@@ -481,8 +481,8 @@ impl Module for Exec {
     }
 
     /// Continues as the config's `custom` module when it is the same
-    /// table: an equal [`Settings`] (command, format, placeholder and
-    /// restart key) means the running child, pipe, timer and shown output
+    /// table: an equal [`Settings`] (command, format, placeholder,
+    /// restart key, icon and `show-text`) means the running child, pipe, timer and shown output
     /// are still what the config asks for, so the reload keeps them
     /// instead of starting over. Any other kind, or a changed table,
     /// declines, and the old instance is dropped (killing its group).

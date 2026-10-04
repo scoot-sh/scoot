@@ -128,7 +128,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Bluetooth: real adapter and headset validation](bluetooth-real-hardware.md) (medium): what the VM cannot prove — real power toggles, Battery1 pacing, real `GetManagedObjects` scale, Waybar beside it
 - [Move the tray onto `dbus::link`](resolved/tray-onto-dbus-link-done.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection — RESOLVED 2026-10-03
  - [Icons on every module that shows a value](resolved/module-icons-done.md) (medium): battery, brightness, bluetooth, media and window-title take icons; workspaces takes none — RESOLVED 2026-10-04 in #411
-- [An icon on exec and push modules](payload-icons.md) (low): the last modules without one
+- [**An icon on exec and push modules**](resolved/payload-icons-done.md) — RESOLVED 2026-10-04: `icon`, `icon-path`, `icon-image` and `show-text` on `exec` and `push`, and a per-update `icon` in the payload (version 1, ignored by older bars) ([cli.md](../cli.md#exec))
 - [Separators between groups of modules](separator-groups.md) (low): a line between groups, not every pair
 - [Popups that match rounded windows](popup-corners.md) (low): corners for the popups
 - [The help's module list doubles with every module](resolved/cli-help-matrix-done.md) (medium): 519 macro arms after the power module; build it at run time — RESOLVED 2026-10-04 in #417
