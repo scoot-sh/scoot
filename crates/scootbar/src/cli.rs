@@ -7017,11 +7017,12 @@ macro_rules! network_help {
     () => {
         "Network (the network module):
     the default route's interface (or network.interface), by name when it
-    is ethernet, the SSID and signal bars when it is WiFi, VPN when it is
+    is ethernet, the SSID when it is WiFi, VPN when it is
     a tunnel, and offline when it has no address, with an icon per state
     when configured (network.icon-ethernet, network.icon-wifi,
     network.icon-vpn and network.icon-offline, falling back to
-    network.icon; network.show-text = false draws only the icon); a click
+    network.icon; network.icon-wifi takes one glyph or 4 for the signal
+    levels; network.show-text = false draws only the icon); a click
     opens the picker
     (network.menu-command with the scan's SSIDs on stdin), or the native
     list with on-click = \"popup\" (network.connect-command with the SSID

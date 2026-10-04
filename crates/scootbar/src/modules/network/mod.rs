@@ -14,9 +14,11 @@
 //! ## States
 //!
 //! `Offline` shows `offline` (class `warn`); `Eth` shows the interface
-//! name; `Wifi` shows the SSID and bars (`Wimbly ▂▄▆`); `Vpn` shows `VPN`
+//! name; `Wifi` shows the SSID (`Wimbly`); `Vpn` shows `VPN`
 //! (class `normal`: being on a VPN is a state, not a warning — only
-//! `offline` warns). A second VPN up beside the shown interface appends
+//! `offline` warns). The strength is the WiFi icon's level where
+//! `icon-wifi` names four glyphs, else the tooltip's dBm and `query`'s
+//! `bars`. A second VPN up beside the shown interface appends
 //! `· VPN`. Which interface is shown is the config's `interface`, else
 //! the default route's — the first usable, v4 before v6 — tracked by
 //! index so a rename keeps it; with neither, the module is `Offline`.
@@ -150,7 +152,7 @@ pub struct Settings {
     pub interface: Option<String>,
     /// Whether the SSID is shown (and reported to `query`). The bar is
     /// visible in screenshots and to an agent's `query`; `false` shows
-    /// `WiFi` and the bars instead.
+    /// `WiFi` instead.
     pub show_ssid: bool,
     /// The picker: spawned with the scan's SSIDs on stdin. Empty runs
     /// nothing, and the click is refused saying so.
@@ -163,15 +165,30 @@ pub struct Settings {
     /// state for which no per-state icon is set.
     pub icon: Option<Icon>,
     /// One glyph per state, when the config sets the per-state keys: the
-    /// wired interface, the WiFi network, the tunnel, and no network.
-    /// Each wins over the static icon for its own state.
+    /// wired interface, the tunnel, and no network. Each wins over the
+    /// static icon for its own state.
     pub icon_ethernet: Option<Icon>,
-    pub icon_wifi: Option<Icon>,
+    /// The WiFi icon: one glyph for every signal level, or one glyph per
+    /// level (weakest to strongest), picked by `bars_for(signal)`. Wins
+    /// over the static icon, like the other per-state icons.
+    pub icon_wifi: Option<WifiIcon>,
     pub icon_vpn: Option<Icon>,
     pub icon_offline: Option<Icon>,
     /// Whether the text is drawn beside the icon. `false` draws only the
     /// icon, with the text moved into the tooltip.
     pub show_text: bool,
+}
+
+/// The WiFi icon from `icon-wifi`: one glyph shown at every signal
+/// level, or one glyph per level (weakest to strongest), picked by
+/// [`netlink::bars_for`]. A static `icon-path`/`icon-image` icon has no
+/// levels: per-level vector or PNG icons are out of scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WifiIcon {
+    /// One glyph for every level.
+    One(char),
+    /// One glyph per level, weakest to strongest.
+    Levels([char; 4]),
 }
 
 impl Default for Settings {
@@ -807,7 +824,7 @@ pub struct Network {
     connect_command: Vec<String>,
     icon: Option<Icon>,
     icon_ethernet: Option<Icon>,
-    icon_wifi: Option<Icon>,
+    icon_wifi: Option<WifiIcon>,
     icon_vpn: Option<Icon>,
     icon_offline: Option<Icon>,
     show_text: bool,
@@ -880,15 +897,25 @@ impl Network {
 
     /// The icon for `state`: its per-state glyph when the config sets
     /// one, else the static icon. `None` where neither is set: without
-    /// any icon the state shows text alone, as before.
-    fn icon_for(&self, state: State) -> Option<&Icon> {
-        let per_state = match state {
-            State::Eth => &self.icon_ethernet,
-            State::Wifi => &self.icon_wifi,
-            State::Vpn => &self.icon_vpn,
-            State::Offline => &self.icon_offline,
-        };
-        per_state.as_ref().or(self.icon.as_ref())
+    /// any icon the state shows text alone, as before. The WiFi icon
+    /// with four levels picks its glyph by the signal's `bars_for`
+    /// level (no station reply yet counts as the weakest, as the old
+    /// text bars did).
+    fn icon_for(&self, state: State, signal: Option<i8>) -> Option<Icon> {
+        match state {
+            State::Wifi => match self.icon_wifi {
+                Some(WifiIcon::One(glyph)) => Some(Icon::Glyph(glyph)),
+                Some(WifiIcon::Levels(levels)) => {
+                    // `bars_for` is 1 to 4, so this names a level.
+                    let bars = netlink::bars_for(signal.unwrap_or(-100));
+                    Some(Icon::Glyph(levels[(bars - 1) as usize]))
+                }
+                None => self.icon.clone(),
+            },
+            State::Eth => self.icon_ethernet.clone().or_else(|| self.icon.clone()),
+            State::Vpn => self.icon_vpn.clone().or_else(|| self.icon.clone()),
+            State::Offline => self.icon_offline.clone().or_else(|| self.icon.clone()),
+        }
     }
 
     /// The text and tooltip for `state`, with the text drawn: what the
@@ -909,15 +936,12 @@ impl Network {
                 let Some(iface) = selected else {
                     return;
                 };
-                let bars = netlink::bars_for(iface.signal.unwrap_or(-100));
-                let glyphs = &netlink::BAR_GLYPHS[..bars as usize];
+                // The strength is the icon's level (or the tooltip's dBm):
+                // the text is just the SSID.
                 if self.show_ssid {
-                    let _ = write!(view.text_mut(), "{} ", iface.ssid);
+                    let _ = write!(view.text_mut(), "{}", iface.ssid);
                 } else {
-                    let _ = write!(view.text_mut(), "WiFi ");
-                }
-                for glyph in glyphs {
-                    let _ = write!(view.text_mut(), "{glyph}");
+                    let _ = write!(view.text_mut(), "WiFi");
                 }
                 Self::write_wifi_tooltip(self.show_ssid, iface, view);
             }
@@ -934,8 +958,8 @@ impl Network {
 
     /// The tooltip for `state` with no text drawn: it carries what the
     /// text said. Ethernet's tooltip is the text itself; WiFi's and the
-    /// tunnel's already name what the text does (the bars are the dBm,
-    /// coarser); offline's keeps its detail after the text.
+    /// tunnel's already name what the text does (the dBm is the icon's
+    /// level, finer); offline's keeps its detail after the text.
     fn write_tooltip_only(
         &self,
         view: &mut View,
@@ -1180,7 +1204,7 @@ impl Network {
             connect_command: self.connect_command.clone(),
             icon: self.icon.clone(),
             icon_ethernet: self.icon_ethernet.clone(),
-            icon_wifi: self.icon_wifi.clone(),
+            icon_wifi: self.icon_wifi,
             icon_vpn: self.icon_vpn.clone(),
             icon_offline: self.icon_offline.clone(),
             show_text: self.show_text,
@@ -1580,7 +1604,7 @@ fn open_inner(settings: &Settings) -> Result<Network, String> {
         connect_command: settings.connect_command.clone(),
         icon: settings.icon.clone(),
         icon_ethernet: settings.icon_ethernet.clone(),
-        icon_wifi: settings.icon_wifi.clone(),
+        icon_wifi: settings.icon_wifi,
         icon_vpn: settings.icon_vpn.clone(),
         icon_offline: settings.icon_offline.clone(),
         show_text: settings.show_text,
@@ -1753,7 +1777,7 @@ fn start_with(settings: &Settings, rt: OwnedFd, genl: OwnedFd, family: u16) -> B
         connect_command: settings.connect_command.clone(),
         icon: settings.icon.clone(),
         icon_ethernet: settings.icon_ethernet.clone(),
-        icon_wifi: settings.icon_wifi.clone(),
+        icon_wifi: settings.icon_wifi,
         icon_vpn: settings.icon_vpn.clone(),
         icon_offline: settings.icon_offline.clone(),
         show_text: settings.show_text,
@@ -1870,10 +1894,12 @@ impl Module for Network {
             return;
         }
         let state = self.state();
-        if let Some(icon) = self.icon_for(state) {
-            view.show_icon(icon);
-        }
         let selected = self.nets.selected(self.interface.as_deref());
+        // The WiFi icon's level follows the shown signal.
+        let signal = selected.and_then(|iface| iface.signal);
+        if let Some(icon) = self.icon_for(state, signal) {
+            view.show_icon(&icon);
+        }
         let marker = selected.is_some_and(|iface| self.nets.other_vpn(iface.link.index));
         if self.show_text {
             self.write_text(view, state, selected, marker);
@@ -1969,34 +1995,17 @@ impl Module for Network {
                 continue;
             }
             let selected = bss.associated;
-            // The row names the network and its bars, formatted without
+            // The row names the network; with a 4-glyph `icon-wifi` it
+            // starts with its strength glyph (the popup draws with the
+            // bar's fonts, so the fallback chain covers it), else it is
+            // the SSID alone. A row with no signal carries no glyph
+            // rather than a lying weakest one. Formatted without
             // allocating (this refill sizes the popup's reused buffers;
             // the scroll and draw paths allocate nothing).
             let bars = bss.signal.map(netlink::bars_for).unwrap_or(0);
-            let pushed = match bars {
-                1 => content.button(
-                    format_args!("{line} ▂"),
-                    "connect",
-                    Some(n as i32),
-                    selected,
-                    true,
-                ),
-                2 => content.button(
-                    format_args!("{line} ▂▄"),
-                    "connect",
-                    Some(n as i32),
-                    selected,
-                    true,
-                ),
-                3 => content.button(
-                    format_args!("{line} ▂▄▆"),
-                    "connect",
-                    Some(n as i32),
-                    selected,
-                    true,
-                ),
-                4.. => content.button(
-                    format_args!("{line} ▂▄▆█"),
+            let pushed = match (self.icon_wifi, bars) {
+                (Some(WifiIcon::Levels(levels)), 1..=4) => content.button(
+                    format_args!("{} {line}", levels[(bars - 1) as usize]),
                     "connect",
                     Some(n as i32),
                     selected,

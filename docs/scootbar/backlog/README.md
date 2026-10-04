@@ -129,7 +129,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [Move the tray onto `dbus::link`](resolved/tray-onto-dbus-link-done.md) (low): one copy of the bus lifecycle, and whether the modules should share one connection — RESOLVED 2026-10-03
  - [Icons on every module that shows a value](module-icons.md) (medium): battery, brightness, bluetooth and media take no icon today; blocked on the WiFi strength-icon form
 - [Network: a second radio's empty scan replaces the real one](network-multi-radio-scan.md) (medium): the last interface's scan dump wins, so a dongle or hotspot interface can empty the list (#403 review)
- - [Network: WiFi signal as a strength icon, not text bars](network-signal-icon.md) (medium): the icon shows the strength, the text is just the SSID
+ - [Network: WiFi signal as a strength icon, not text bars](resolved/network-signal-icon-done.md) (medium): the icon shows the strength, the text is just the SSID
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)
 - [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears

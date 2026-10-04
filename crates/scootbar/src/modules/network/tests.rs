@@ -9,6 +9,7 @@ use std::time::Duration;
 use rustix::event::PollFlags;
 
 use super::Settings;
+use super::WifiIcon;
 use super::fake::{self, Fake};
 use crate::action::ModuleAction;
 use crate::icon::Icon;
@@ -107,7 +108,7 @@ fn no_route_is_offline() {
 }
 
 #[test]
-fn wifi_shows_ssid_and_bars() {
+fn wifi_shows_the_ssid_alone() {
     let (mut harness, fake) = Fake::start(&Settings::default());
     plug(&fake);
     route_via(&fake, ETH0);
@@ -115,8 +116,10 @@ fn wifi_shows_ssid_and_bars() {
     assert_eq!(harness.view().text(), "eth0");
     wifi(&fake, b"Wimbly", -54);
     assert_eq!(drive(&mut harness), Update::Changed);
-    // The default route moved to wlan0 with the canned route.
-    assert_eq!(harness.view().text(), "Wimbly ▂▄▆█");
+    // The default route moved to wlan0 with the canned route: the text
+    // is just the SSID, the strength the tooltip's dBm and `query`'s
+    // `bars`.
+    assert_eq!(harness.view().text(), "Wimbly");
     let value = harness.value_on(None).expect("a value");
     assert_eq!(value["state"], "wifi");
     assert_eq!(value["ssid"], "Wimbly");
@@ -135,7 +138,7 @@ fn a_hidden_ssid_stays_private() {
     let (mut harness, fake) = Fake::start(&settings);
     wifi(&fake, b"Wimbly", -72);
     assert_eq!(drive(&mut harness), Update::Changed);
-    assert_eq!(harness.view().text(), "WiFi ▂▄");
+    assert_eq!(harness.view().text(), "WiFi");
     let value = harness.value_on(None).expect("a value");
     assert!(value.get("ssid").is_none(), "{value}");
     assert_eq!(value["bars"], 2);
@@ -428,7 +431,7 @@ fn a_roam_renames_within_the_turn() {
     fake.genl(&fake::roam(WLAN0));
     fake.genl(&fake::scan(&[(b"FarAway", -7800, true)]));
     assert_eq!(drive(&mut harness), Update::Changed);
-    assert_eq!(harness.view().text(), "FarAway ▂");
+    assert_eq!(harness.view().text(), "FarAway");
     let _ = fake.sent();
 }
 
@@ -445,7 +448,7 @@ fn a_roam_asks_the_interface_for_the_new_ssid() {
     fake.genl(&fake::interface(WLAN0, "wlan0", Some(b"FarAway")));
     fake.genl(&fake::station(-78));
     assert_eq!(drive(&mut harness), Update::Changed);
-    assert_eq!(harness.view().text(), "FarAway ▂");
+    assert_eq!(harness.view().text(), "FarAway");
     let _ = fake.sent();
 }
 
@@ -739,7 +742,7 @@ fn icons_follow_the_state_with_a_static_fallback() {
     let settings = Settings {
         icon: Some(Icon::Glyph('N')),
         icon_ethernet: Some(Icon::Glyph('E')),
-        icon_wifi: Some(Icon::Glyph('W')),
+        icon_wifi: Some(WifiIcon::One('W')),
         ..Settings::default()
     };
     let (mut harness, fake) = Fake::start(&settings);
@@ -756,11 +759,11 @@ fn icons_follow_the_state_with_a_static_fallback() {
     let view = harness.view();
     assert_eq!(view.text(), "eth0");
     assert_eq!(view.icon(), Some('E'));
-    // WiFi: its own glyph too.
+    // WiFi: its own glyph too; the text is the SSID alone.
     wifi(&fake, b"Wimbly", -54);
     assert_eq!(drive(&mut harness), Update::Changed);
     let view = harness.view();
-    assert_eq!(view.text(), "Wimbly ▂▄▆█");
+    assert_eq!(view.text(), "Wimbly");
     assert_eq!(view.icon(), Some('W'));
     // Routed through the tunnel: no per-state VPN glyph, so the static
     // one again.
@@ -772,6 +775,54 @@ fn icons_follow_the_state_with_a_static_fallback() {
     assert_eq!(view.text(), "VPN");
     assert_eq!(view.icon(), Some('N'));
     let _ = fake.sent();
+}
+
+#[test]
+fn a_four_glyph_wifi_icon_picks_the_level() {
+    // Weakest to strongest, at every `bars_for` boundary: -55 is still
+    // 4, -56 drops to 3, -68 to 2, -78 to 1.
+    let settings = Settings {
+        icon_wifi: Some(WifiIcon::Levels(['1', '2', '3', '4'])),
+        ..Settings::default()
+    };
+    for (signal, want) in [
+        (-40, '4'),
+        (-55, '4'),
+        (-56, '3'),
+        (-60, '3'),
+        (-67, '3'),
+        (-68, '2'),
+        (-72, '2'),
+        (-77, '2'),
+        (-78, '1'),
+        (-100, '1'),
+    ] {
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi(&fake, b"Wimbly", signal);
+        assert_eq!(drive(&mut harness), Update::Changed, "at {signal} dBm");
+        let view = harness.view();
+        assert_eq!(view.text(), "Wimbly", "at {signal} dBm");
+        assert_eq!(view.icon(), Some(want), "at {signal} dBm");
+        let _ = fake.sent();
+    }
+}
+
+#[test]
+fn a_single_wifi_glyph_shows_at_every_level() {
+    // Backward compatible: one glyph for every signal, as before.
+    let settings = Settings {
+        icon_wifi: Some(WifiIcon::One('W')),
+        ..Settings::default()
+    };
+    for signal in [-54, -60, -72, -80] {
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi(&fake, b"Wimbly", signal);
+        assert_eq!(drive(&mut harness), Update::Changed, "at {signal} dBm");
+        let view = harness.view();
+        assert_eq!(view.text(), "Wimbly", "at {signal} dBm");
+        assert_eq!(view.icon(), Some('W'), "at {signal} dBm");
+        let _ = fake.sent();
+    }
 }
 
 #[test]
@@ -790,7 +841,7 @@ fn without_icons_the_states_show_text_alone() {
 fn icon_only_draws_the_icon_with_the_text_in_the_tooltip() {
     let settings = Settings {
         icon: Some(Icon::Glyph('N')),
-        icon_wifi: Some(Icon::Glyph('W')),
+        icon_wifi: Some(WifiIcon::One('W')),
         show_text: false,
         ..Settings::default()
     };
@@ -1283,9 +1334,11 @@ mod popup_list {
         assert!(shown);
         let widgets = content.widgets();
         assert_eq!(widgets.len(), 3);
-        assert_eq!(content.label(&widgets[0]), "Wimbly ▂▄▆█");
-        assert_eq!(content.label(&widgets[1]), "Cafe ▂▄▆");
-        assert_eq!(content.label(&widgets[2]), "Far ▂▄");
+        // Rows are plain SSIDs: the strength is the bar icon's level,
+        // not text bars.
+        assert_eq!(content.label(&widgets[0]), "Wimbly");
+        assert_eq!(content.label(&widgets[1]), "Cafe");
+        assert_eq!(content.label(&widgets[2]), "Far");
         for (n, widget) in widgets.iter().enumerate() {
             assert_eq!(
                 widget.kind,
@@ -1309,7 +1362,64 @@ mod popup_list {
         let (shown, content) = content_of(&mut harness);
         assert!(shown);
         assert_eq!(content.widgets().len(), 1);
-        assert_eq!(content.label(&content.widgets()[0]), "Wimbly ▂▄▆█");
+        assert_eq!(content.label(&content.widgets()[0]), "Wimbly");
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn the_popup_rows_carry_the_strength_glyph_with_four_levels() {
+        // -50 dBm is level 4, -60 level 3, -72 level 2: each row starts
+        // with its network's glyph. A single glyph (or none) leaves
+        // rows as plain SSIDs, as above.
+        let settings = Settings {
+            icon_wifi: Some(WifiIcon::Levels(['1', '2', '3', '4'])),
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi_many(&fake, b"Wimbly", -50, &[(b"Cafe", -60), (b"Far", -72)]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let (shown, content) = content_of(&mut harness);
+        assert!(shown);
+        let widgets = content.widgets();
+        assert_eq!(widgets.len(), 3);
+        assert_eq!(content.label(&widgets[0]), "4 Wimbly");
+        assert_eq!(content.label(&widgets[1]), "3 Cafe");
+        assert_eq!(content.label(&widgets[2]), "2 Far");
+        for (n, widget) in widgets.iter().enumerate() {
+            assert_eq!(
+                widget.kind,
+                Widget::Button {
+                    action: "connect",
+                    arg: Some(n as i32),
+                    selected: n == 0,
+                    closes: true,
+                },
+                "row {n}"
+            );
+        }
+        // The choice is still the SSID alone, not the row's label with
+        // its glyph.
+        let dir = tempdir("glyph-connect");
+        let (command, file) = recording(&dir);
+        let settings = Settings {
+            icon_wifi: Some(WifiIcon::Levels(['1', '2', '3', '4'])),
+            connect_command: command,
+            ..Settings::default()
+        };
+        let (mut harness, fake) = Fake::start(&settings);
+        wifi_many(&fake, b"Wimbly", -50, &[]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let mut content = Content::default();
+        assert!(harness.popup(&mut content));
+        assert_eq!(content.label(&content.widgets()[0]), "4 Wimbly");
+        let output = crate::modules::OutputView { name: None };
+        assert_eq!(
+            harness.invoke(&output, &connect(0), 1),
+            Ok(Update::Unchanged)
+        );
+        let _ = drive(&mut harness);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\n");
+        std::fs::remove_dir_all(&dir).ok();
         let _ = fake.sent();
     }
 
@@ -1512,7 +1622,7 @@ mod popup_list {
         let mut content = Content::default();
         assert!(harness.popup(&mut content));
         assert_eq!(content.widgets().len(), 1);
-        assert_eq!(content.label(&content.widgets()[0]), "Beta ▂▄▆");
+        assert_eq!(content.label(&content.widgets()[0]), "Beta");
         std::fs::remove_dir_all(&dir).ok();
         let _ = fake.sent();
     }

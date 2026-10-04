@@ -10,6 +10,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
+#[cfg(feature = "network")]
+use crate::modules::network::WifiIcon;
+
 #[cfg(feature = "clock")]
 use super::{ClockFile, Error};
 use crate::icon::path::{Vector, ViewBox};
@@ -84,8 +87,10 @@ pub(super) fn volume(
 /// The network table's icons, if its section gives any: the static icon
 /// (shown for every state instead of the per-state ones below) and one
 /// glyph per state (`icon-ethernet`, `icon-wifi`, `icon-vpn`,
-/// `icon-offline`), each falling back to the static one. `Err` is the
-/// dotted key at fault and why.
+/// `icon-offline`), each falling back to the static one. `icon-wifi`
+/// takes one glyph for every signal level, or four (weakest to
+/// strongest), picked by the level. `Err` is the dotted key at fault and
+/// why.
 #[cfg(feature = "network")]
 pub(super) fn network(table: &super::NetworkFile) -> Result<NetworkIcons, (String, String)> {
     #[cfg(feature = "icon-image")]
@@ -104,7 +109,8 @@ pub(super) fn network(table: &super::NetworkFile) -> Result<NetworkIcons, (Strin
     )?;
     // One glyph each, like `icon` itself: a per-state path or picture
     // would need three keys per state, and the bar draws the static one
-    // wherever a state has none.
+    // wherever a state has none. `icon-wifi` alone takes four glyphs as
+    // well as one (a static path or picture has no levels).
     let glyph = |name: &str, text: Option<&str>| match text {
         None => Ok(None),
         Some(text) => parse_glyph(text)
@@ -114,18 +120,82 @@ pub(super) fn network(table: &super::NetworkFile) -> Result<NetworkIcons, (Strin
     Ok(NetworkIcons {
         icon,
         ethernet: glyph("icon-ethernet", table.icon_ethernet.as_deref())?,
-        wifi: glyph("icon-wifi", table.icon_wifi.as_deref())?,
+        wifi: wifi_icon(table.icon_wifi.as_ref())?,
         vpn: glyph("icon-vpn", table.icon_vpn.as_deref())?,
         offline: glyph("icon-offline", table.icon_offline.as_deref())?,
     })
 }
 
-/// What [`network`] read: the static icon and the per-state glyphs.
+/// The network table's WiFi icon: one glyph for every signal level, or
+/// four (weakest to strongest), picked by the level. `Err` names the key.
+#[cfg(feature = "network")]
+fn wifi_icon(value: Option<&toml::Value>) -> Result<Option<WifiIcon>, (String, String)> {
+    const KEY: &str = "network.icon-wifi";
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    match value {
+        toml::Value::String(text) => parse_glyph(text)
+            .map(|c| Some(WifiIcon::One(c)))
+            .map_err(|message| (KEY.to_owned(), message)),
+        toml::Value::Array(items) => {
+            if items.len() != 4 {
+                return Err((
+                    KEY.to_owned(),
+                    format!(
+                        "takes 4 glyphs (weakest to strongest, one each), not {}",
+                        items.len()
+                    ),
+                ));
+            }
+            let mut levels = ['\0'; 4];
+            for (n, item) in items.iter().enumerate() {
+                let Some(text) = item.as_str() else {
+                    return Err((
+                        KEY.to_owned(),
+                        format!(
+                            "takes 4 glyphs (weakest to strongest, one each): entry {} is {}, not a glyph",
+                            n + 1,
+                            kind(item),
+                        ),
+                    ));
+                };
+                levels[n] = parse_glyph(text)
+                    .map_err(|message| (KEY.to_owned(), format!("entry {} {message}", n + 1)))?;
+            }
+            Ok(Some(WifiIcon::Levels(levels)))
+        }
+        _ => Err((
+            KEY.to_owned(),
+            format!(
+                "takes one glyph, or 4 of them (weakest to strongest): not {}",
+                kind(value),
+            ),
+        )),
+    }
+}
+
+/// What a TOML value is, for a refusal that names the key.
+#[cfg(feature = "network")]
+fn kind(value: &toml::Value) -> &'static str {
+    match value {
+        toml::Value::String(_) => "a string",
+        toml::Value::Integer(_) => "a number",
+        toml::Value::Float(_) => "a number",
+        toml::Value::Boolean(_) => "a boolean",
+        toml::Value::Datetime(_) => "a date",
+        toml::Value::Array(_) => "an array",
+        toml::Value::Table(_) => "a table",
+    }
+}
+
+/// What [`network`] read: the static icon, the per-state glyphs, and
+/// the WiFi icon (one glyph, or one per signal level).
 #[cfg(feature = "network")]
 pub(super) struct NetworkIcons {
     pub icon: Option<Icon>,
     pub ethernet: Option<Icon>,
-    pub wifi: Option<Icon>,
+    pub wifi: Option<crate::modules::network::WifiIcon>,
     pub vpn: Option<Icon>,
     pub offline: Option<Icon>,
 }

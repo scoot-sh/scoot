@@ -3,7 +3,7 @@ title: "Icons on every module that shows a value: battery, brightness, bluetooth
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "network-signal-icon (the per-level icon form and config/icon.rs)"
+blocked: null
 milestone: "M6"
 ---
 
@@ -24,7 +24,7 @@ WiFi and volume, which reads as unfinished.
 
 ## What to do
 
-Use the shape [network-signal-icon](network-signal-icon.md) establishes
+Use the shape [network-signal-icon](resolved/network-signal-icon-done.md) establishes
 (a key that takes one glyph, or one glyph per level, picked by the value),
 so every module's icon keys look the same:
 
