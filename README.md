@@ -35,7 +35,8 @@ project.
 scoot runs on Linux. With [Nix](https://nixos.org):
 
 ```sh
-nix profile add github:scoot-sh/scoot#scoot github:scoot-sh/scoot#scootctl
+nix profile add github:scoot-sh/scoot#scoot github:scoot-sh/scoot#scootctl \
+  github:scoot-sh/scoot#scootbar
 ```
 
 (Older Nix calls it `nix profile install`.)
@@ -47,7 +48,7 @@ sudo apt install pkg-config libwayland-dev libxkbcommon-dev libinput-dev \
   libdrm-dev libdisplay-info-dev libseat-dev libudev-dev libpixman-1-dev \
   libgbm-dev libegl-dev libdbus-1-dev
 git clone https://github.com/scoot-sh/scoot && cd scoot
-cargo build --release -p scoot -p scootctl    # binaries land in target/release/
+cargo build --release -p scoot -p scootctl -p scootbar    # binaries land in target/release/
 ```
 
 The examples below open [foot](https://codeberg.org/dnkl/foot), scoot's
@@ -137,7 +138,7 @@ focus_ring_active_color = "#ffaa00"
 "super+t" = "spawn foot"
 
 [autostart]
-commands = ["spawn waybar"]
+commands = ["spawn scootbar daemon"]
 
 [wallpaper]
 image = "~/Pictures/hills.jpg"
@@ -180,6 +181,31 @@ Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
 - **A macOS version.** On a Mac you can build `scootctl`, to drive scoot
   in a Linux VM.
 
+## scootbar
+
+scoot comes with `scootbar`, a status bar. It shows your workspaces, the
+focused window's title, the clock, volume and microphone, WiFi, bluetooth,
+battery, brightness, what's playing, and a system tray with menus. Clicks,
+scrolls and hover do what you'd expect, the volume slider and the WiFi list
+open as popups under the bar, and you can add your own buttons and modules
+that show a command's output, without writing Rust.
+
+It's light: idle, it uses around 4 to 5 MB of memory and doesn't wake up
+until something changes. It speaks D-Bus, PulseAudio and netlink itself,
+so it needs no GTK and no libpulse, and the binary links nothing beyond
+the C library. It also works on sway, niri, Hyprland and other compositors with
+`wlr-layer-shell`, and scripts and agents can read every module's state
+with `scootbar msg query`.
+
+```sh
+scootbar daemon &
+```
+
+It reads `~/.config/scoot/bar.toml`. Every module, option and popup is in
+[docs/scootbar/cli.md](docs/scootbar/cli.md), and the NixOS and
+home-manager modules (with Stylix colors) in
+[docs/nix.md](docs/nix.md#the-modules-programsscootbar).
+
 ## scootbg
 
 scoot comes with `scootbg`, a small wallpaper daemon. It shows a color or
@@ -205,7 +231,7 @@ It's early. More in [docs/scootbg/README.md](docs/scootbg/README.md).
 | [nix.md](docs/nix.md) | the flake and the NixOS and home-manager modules |
 | [benchmarks.md](docs/benchmarks.md) | measured CPU and memory, next to niri |
 | [scootbg/](docs/scootbg/README.md) | the wallpaper daemon |
-| [scootbar/](docs/scootbar/README.md) | the status bar (early: a clock so far) |
+| [scootbar/cli.md](docs/scootbar/cli.md) | the status bar: every module, option and popup |
 | [development.md](docs/development.md) | building, testing and contributing |
 
 What changed is in [CHANGELOG.md](CHANGELOG.md), and what's next in
