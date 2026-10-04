@@ -92,7 +92,13 @@
 # variant is one more compiled-dependencies derivation, rebuilt only when
 # `Cargo.lock` or a fork rev changes (rare by design: `docs/forks.md`)
 # and substituted from the cache on every other push -- so on a code-only
-# merge they cost one small first-party-crates-only compile each.
+# merge they cost one small first-party-crates-only compile each (measured
+# on 4 M2 cores: 81--96 s per compositor package against 110--132 s for a
+# full-graph rebuild, 4 recompiled crates against 129--136; the client, the
+# wallpaper and the bar recompile their own crates plus a ~10-crate
+# subgraph in 13--39 s). Five dep derivations in all, ~420 MiB each in the
+# store (~130 MB compressed), so a lock change pushes about 690 MB per
+# architecture; code-only merges push only the rebuilt packages.
 # All four stay covered the way they were before any of this existed too
 # (local `nix build .#scoot-gpu`, and likewise).
 #

@@ -196,7 +196,8 @@
           # friends) to differently-featured, differently-hashed units, and
           # the package build recompiles that subgraph. Reading byte-identical
           # here on both sides is what makes the reuse real.
-          scootArgs = features:
+          scootArgs =
+            features:
             "--locked -p scoot"
             + pkgs.lib.optionalString (features != [ ]) (
               " --features " + pkgs.lib.concatStringsSep "," features
@@ -218,8 +219,8 @@
           # so every `.override` feature set reuses this same artifact --
           # up to the small subgraph whose unified features differ between
           # the workspace-wide selection here and a `-p` selection in the
-          # package build (measured: a handful of serde-graph crates, seconds;
-          # the Smithay graph itself is shared and reused).
+          # package build (measured: 9--12 crates, seconds, in the serde and
+          # wayland-client graphs; Smithay is recompiled in no package).
           # On Darwin the base set below is scoped to the two crates that
           # build there: the wallpaper and the bar refuse non-Linux
           # (`compile_error!` in `scootbg-mem`), so a workspace-wide check
@@ -257,11 +258,7 @@
           # build there; see the comment above).
           depsBase = mkDeps {
             pname = "scoot-base";
-            scope =
-              if pkgs.stdenv.hostPlatform.isDarwin then
-                "--locked -p scoot -p scootctl"
-              else
-                "--locked";
+            scope = if pkgs.stdenv.hostPlatform.isDarwin then "--locked -p scoot -p scootctl" else "--locked";
           };
           # The compositor's own set: `-p scoot` (byte-identical to the
           # package build's selection via `scootArgs`) with the link flags.
