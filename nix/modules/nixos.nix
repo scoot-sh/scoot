@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  modulesPath,
   ...
 }:
 
@@ -88,8 +89,13 @@ in
   # is a default module there), where a repeated import is a no-op. The
   # path is pinned-rev: a consumer's nixpkgs predating
   # `services/display-managers/regreet.nix` fails the import loudly,
-  # naming the file.
-  imports = [ "${pkgs.path}/nixos/modules/services/display-managers/regreet.nix" ];
+  # naming the file. Reached through `modulesPath`, never `pkgs`: on
+  # real NixOS `pkgs` is a `_module.args` value, which `imports` cannot
+  # read without infinite recursion (it is computed from the very
+  # modules being imported); `modulesPath` is a `specialArgs` value
+  # every NixOS evaluation provides, and the path it gives is the one
+  # NixOS lists itself, so the repeat import dedups.
+  imports = [ "${modulesPath}/services/display-managers/regreet.nix" ];
 
   options.programs.scoot = {
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";
