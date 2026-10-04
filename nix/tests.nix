@@ -369,6 +369,7 @@ let
       ];
       specialArgs = {
         pkgs = pkgs';
+        modulesPath = "${pkgs'.path}/nixos/modules";
       };
     };
   evalNixosBare = evalNixosWith [ ./modules/nixos.nix ] pkgs;
@@ -509,6 +510,32 @@ let
     };
   # A flake consumer: `enable` and a `[wallpaper]` table, nothing else.
   osFlake = evalNixosWith [ flake.nixosModule ] pkgs { enable = true; };
+  # The flake's NixOS module inside a real NixOS evaluation (nixpkgs' own
+  # `eval-config.nix`: the full module list, `pkgs` from `_module.args`
+  # as every NixOS system gets it). The stub evaluations above hand
+  # `pkgs` in through `specialArgs`, which hides a module reading `pkgs`
+  # where `_module.args` is not yet available -- `imports` above all,
+  # where it is infinite recursion on every real system (the regression
+  # #416 shipped: importing the module failed, greeter or not). Only
+  # options are read, so nothing is built and no root file system is
+  # needed.
+  evalRealNixos =
+    cfg:
+    import "${pkgs.path}/nixos/lib/eval-config.nix" {
+      system = null;
+      modules = [
+        flake.nixosModule
+        {
+          nixpkgs.hostPlatform = system;
+          programs.scoot = cfg;
+        }
+      ];
+    };
+  osRealImported = evalRealNixos { };
+  osRealGreeter = evalRealNixos {
+    enable = true;
+    greeter.enable = true;
+  };
   hmFlake = evalHomeWith flake.homeModule pkgs {
     enable = true;
     settings.wallpaper.color = "#1e1e2e";
@@ -648,6 +675,7 @@ let
       ];
       specialArgs = {
         pkgs = pkgs;
+        modulesPath = "${pkgs.path}/nixos/modules";
       };
     };
   # What a real configuration provides too: nixpkgs' regreet module
@@ -731,6 +759,7 @@ let
     ];
     specialArgs = {
       pkgs = pkgs;
+      modulesPath = "${pkgs.path}/nixos/modules";
     };
   };
 
@@ -1245,6 +1274,20 @@ let
     ++ lib.optionals (withFlake && isLinux) [
       # A flake NixOS consumer who only sets `enable`: scoot and scootbg,
       # the flake's own builds, and every assertion holds.
+      # Merely importing the module into a real NixOS evaluates (the
+      # M2's shape: imported, nothing enabled), and the greeter wires
+      # nixpkgs' own greetd and ReGreet there, not only in the stubs.
+      (
+        assert !osRealImported.config.programs.scoot.enable;
+        assert !osRealImported.config.services.greetd.enable;
+        true
+      )
+      (
+        assert osRealGreeter.config.services.displayManager.regreet.enable;
+        assert osRealGreeter.config.services.greetd.enable;
+        assert osRealGreeter.config.systemd.user.units ? "scoot.service";
+        true
+      )
       (
         assert allAssertionsHold osFlake.config;
         true
