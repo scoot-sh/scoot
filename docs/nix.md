@@ -1,6 +1,8 @@
 # Using scoot from Nix: flake consumption, home-manager, NixOS
 
 - [Consuming the flake](#consuming-the-flake)
+- [Prebuilt binaries: the Cachix cache](#prebuilt-binaries-the-cachix-cache)
+- [Installing from FlakeHub](#installing-from-flakehub)
 - [Platform notes](#platform-notes)
 - [GPU tiers from the flake](#gpu-tiers-from-the-flake)
 - [XWayland from the flake](#xwayland-from-the-flake)
@@ -56,6 +58,105 @@ mirrors six of them (`nix run . -- ...`, `nix run .#scootctl -- ...`,
 `nix run .#scootbar -- daemon --font F`, `nix run .#scootbar-demo`). The
 same packages are also `pkgs.scoot`, `pkgs.scootctl`, `pkgs.scootbg` and
 `pkgs.scootbar` through [the overlay](#the-overlay).
+
+## Prebuilt binaries: the Cachix cache
+
+Every merge to `main` builds and pushes the same set for `x86_64-linux`
+and `aarch64-linux` (`.github/workflows/nix-build.yml`) and pushes them
+to the public Cachix cache **`scoot-sh`**
+(`https://scoot-sh.cachix.org`): `scoot` (the
+GPU-free default), `scoot-gpu-xwayland` (the full build: `gpu-scanout` and
+`xwayland` features plus Xwayland on `PATH`), `scootctl`, `scootbg`,
+`scootbar` and `scootbar-demo`. Without the cache, installing from the
+flake compiles Smithay from scratch (about 5 minutes on 4 cores). Only
+merges to `main` push: manual workflow runs build without publishing --
+their Cachix step carries no auth token at all (only the push-to-`main`
+step receives `CACHIX_AUTH_TOKEN`), so a manual run cannot publish even
+if its build were tampered with -- and pull-request code never reaches a
+cache users trust.
+
+Anything else builds locally from source: a `scootbar.override` feature
+set, or the in-between compositor variants `scoot-gpu` and
+`scoot-xwayland` (left out of CI because each would cost another full
+Smithay compile per push per architecture until
+[crane](backlog/packaging/nix-crane.md) lands).
+
+The flake declares the cache in its own `nixConfig` (`flake.nix`), but a
+flake's `nixConfig` is not silently trusted: Nix asks whether to accept it
+on first use (unless `accept-flake-config` is set), and its substituter
+settings apply only to trusted users. To opt in explicitly — no prompt,
+and works for every user — add the cache to your Nix configuration:
+
+NixOS (`configuration.nix`):
+
+```nix
+nix.settings = {
+  extra-substituters = [ "https://scoot-sh.cachix.org" ];
+  extra-trusted-public-keys = [
+    "scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4prt30ydDcXJXCo="
+  ];
+};
+```
+
+(`extra-` appends to the default `cache.nixos.org` entries; assigning
+`substituters` / `trusted-public-keys` outright would replace them.)
+
+home-manager (`nix.settings` in your home configuration), or any other
+machine directly in `nix.conf` (`/etc/nix/nix.conf` system-wide,
+`~/.config/nix/nix.conf` per user): the same two lines,
+
+```ini
+extra-substituters = https://scoot-sh.cachix.org
+extra-trusted-public-keys = scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4prt30ydDcXJXCo=
+```
+
+What opting in trusts: binaries built by CI from reviewed merges to `main`,
+signed with a Cachix-managed key (the project holds no private signing
+key). A substituter is trusted with binaries — it can serve any store path
+your Nix asks for — so this trusts CI's builds the way installing the
+flake already trusts its source.
+
+## Installing from FlakeHub
+
+The flake is published to FlakeHub as **`scoot-sh/scoot`**
+(`https://flakehub.com/flake/scoot-sh/scoot`), once per merge to `main`
+after both architectures' binaries reach Cachix, so a published version
+always has its binaries cached. With the `fh` CLI:
+
+```sh
+fh add scoot-sh/scoot
+```
+
+which adds the current release as a flake input, or in `flake.nix`
+directly with plain `nix`:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/<your-rev>";
+    scoot.url = "https://flakehub.com/f/scoot-sh/scoot/0.1.*.tar.gz";
+  };
+}
+```
+
+One-off runs work the same way (quote the URL: the `*` is a FlakeHub
+version constraint, not a glob):
+
+```sh
+nix run 'https://flakehub.com/f/scoot-sh/scoot/0.1.*.tar.gz#scoot' -- --headless -- foot
+```
+
+`0.1.*` follows the rolling release: every merge to `main` becomes
+`0.1.<commit count>+rev-<sha>`, and the constraint resolves to the latest
+one. **A rolling version promises nothing beyond "a merge to `main`"**:
+it moves with every merge, until tagged releases arrive (per
+[Independent versions per shipped
+binary](backlog/packaging/independent-versioning.md)). To pin one,
+replace `0.1.*` with the full version from the
+[flake's page](https://flakehub.com/flake/scoot-sh/scoot) or `fh list
+versions scoot-sh/scoot "0.1.*"`. No FlakeHub Cache: resolved store paths
+are off (`include-output-paths: false`), so installs build nothing beyond
+what Cachix serves and evaluate the flake locally like any other input.
 
 ## Platform notes
 

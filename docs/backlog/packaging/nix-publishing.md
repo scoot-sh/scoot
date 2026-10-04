@@ -3,7 +3,7 @@ title: "Publish: binaries on Cachix, the flake on FlakeHub (no FlakeHub Cache)"
 status: "open"
 area: "packaging"
 priority: "medium"
-blocked: "the maintainer's Cachix cache, auth token secret and public key, and a FlakeHub org linked to scoot-sh"
+blocked: null
 ---
 
 # Publish: binaries on Cachix, the flake on FlakeHub (no FlakeHub Cache)
@@ -32,31 +32,17 @@ eventually do cachix and flakehub (without their flakehub cache)."
   code must not reach a cache users trust. The action uploads only paths the
   job built, so nixpkgs paths already on cache.nixos.org are not duplicated.
 - Add an aarch64-linux job on GitHub's arm runners (`ubuntu-24.04-arm`,
-  free for public repos); consider building `scoot-gpu` there and on x86,
-  since the cache removes the reason it was left out.
+  free for public repos); the cached set is `scoot`, `scoot-gpu-xwayland`,
+  `scootctl`, `scootbg`, `scootbar` and `scootbar-demo` on both arches --
+  the in-between variants `scoot-gpu` and `scoot-xwayland` stay out until
+  crane (each would cost another full Smithay compile per push per arch).
 - `flake.nix` `nixConfig.extra-substituters` and
   `extra-trusted-public-keys`; `docs/nix.md`: how NixOS and home-manager
   users trust the cache. Add it to `vm/configuration.nix` and the Asahi box.
 - Cachix-managed signing keys (no private key held by the project).
 
-**Crane, so the cache helps CI and not only installs**
-
-The packages are `buildRustPackage` derivations, which compile the whole
-dependency graph (the `scoot-sh/smithay` fork and the `scoot-sh/wayland-rs`
-`wayland-backend` patch included) inside each package's one derivation. So
-any change to scoot's own code changes the package hash and Smithay
-compiles from scratch again, once per package (`scoot`, `scootctl`,
-`scootbg`), on every merge: Cachix then serves installs of an unchanged
-revision but saves CI nothing. Moving the Rust builds to crane
-(`buildDepsOnly` → a dependency-artifacts derivation keyed on `Cargo.lock`
-and the dependency sources, forks included) puts the compiled dependencies
-in their own store path, which Cachix keeps and every build reuses until
-`Cargo.lock` or a fork rev changes (rare by design: `docs/forks.md`).
-Care points: scootbar's Cargo-feature `.override` (different features,
-different dependency builds), the three compositor packages sharing one
-dependency set, `cargoLock.outputHashes` for the git deps, and every
-`checks.*` and `nix-build.yml` `--version` line still passing. Measure a
-code-only rebuild before and after.
+**Crane, so the cache helps CI and not only installs** — split out to
+[nix-crane](nix-crane.md).
 
 **FlakeHub (the flake, versioned; no FlakeHub Cache)**
 
@@ -70,11 +56,22 @@ code-only rebuild before and after.
   tagged releases on the compositor train's tags once versioning lands.
   Decide and document what a flake version promises.
 
-## Blocked on (the maintainer, outward-facing)
+## Post-merge checklist (the accounts exist; the first `main` run proves it)
 
-1. A public Cachix cache (e.g. `scoot`), an auth token in the repo secret
-   `CACHIX_AUTH_TOKEN`, and the cache's public key.
-2. A FlakeHub account or org linked to `scoot-sh`.
+The provisions are in place: the public `scoot-sh` Cachix cache, the
+`CACHIX_AUTH_TOKEN` org secret scoped to this repo, and the FlakeHub org
+linked to `scoot-sh`. What remains is the first push-to-`main` run, which
+must show:
+
+1. Both `build` legs green (`ubuntu-latest`, `ubuntu-24.04-arm`), the
+   Cachix step uploading (not skipping) the six packages' paths per arch.
+2. The `publish` job green after both legs.
+3. The flake visible at `https://flakehub.com/flake/scoot-sh/scoot` with a
+   `0.1.*` rolling release matching the merge commit (`fh list versions
+   scoot-sh/scoot "0.1.*"`).
+4. A consumer `nix build` with the documented trust config substitutes
+   (not compiles) `.#scoot` on both architectures.
+5. The Asahi box cache still needs adding by hand (out of reach of CI).
 
 ## Not in this ticket
 
