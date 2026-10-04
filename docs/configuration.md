@@ -76,11 +76,21 @@ backend for this session — without it a browser has no screen sharing on
 Wayland and degraded file choosers. But setting it on scoot's children is
 only half: the portal itself is D-Bus activated, so it inherits the **D-Bus
 activation environment**, not the environment of whatever client asked.
-That half belongs to the session script (config is state, the script is
+That half belongs outside the compositor (config is state, the script is
 behavior — scoot itself never touches the bus):
 
+- **A systemd session** (a greeter entry running `scoot-session`, i.e.
+  the NixOS module's `programs.scoot.session.enable` default — see
+  [nix.md](nix.md#what-a-greeter-login-starts)): the launcher owns this
+  import. It brings the login environment into the user manager, waits
+  for the compositor to answer IPC, and then runs the equivalent of the
+  two lines below for `WAYLAND_DISPLAY` and `XDG_CURRENT_DESKTOP` — no
+  session-script line needed.
+- **Anything else** (s6, a seat with no user manager, the webtop
+  target): the session script does it:
+
 ```sh
-# systemd session (the niri/xdpw shape):
+# systemd session started by hand (a session script, not the launcher):
 dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP
 # s6 / seat without a user manager (the webtop target):
 dbus-update-activation-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP

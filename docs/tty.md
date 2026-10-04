@@ -18,6 +18,12 @@ file another process opened. `vm/README.md`'s troubleshooting section has the
 kernel-level reason and two commands that check whether master really is
 held.
 
+Starting scoot from a login screen instead of a VT is the NixOS module's
+session entry: the greeter runs the `scoot-session` launcher, which wires
+`--tty` into the systemd user session around it
+(`graphical-session.target`, the D-Bus activation environment, teardown on
+exit) — see [nix.md](nix.md#what-a-greeter-login-starts).
+
 - [Which DRM device `--tty` drives](#which-drm-device---tty-drives)
 - [Hotplug and host resizes](#hotplug-and-host-resizes)
 - [Which renderer draws the frames](#which-renderer-draws-the-frames)

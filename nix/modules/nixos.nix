@@ -26,13 +26,21 @@ let
   # session list, so on a box that auto-logs-in, adding ANY session
   # package can move the autologin target. If you use autoLogin, pin
   # `services.displayManager.defaultSession` explicitly.
+  #
+  # The entry runs `scoot-session`, not `scoot --tty` directly: the
+  # launcher (`resources/scoot-session`, shipped beside the binary)
+  # imports the login environment into the user manager, starts
+  # `scoot.service`, waits for IPC readiness, imports `WAYLAND_DISPLAY`
+  # and `XDG_CURRENT_DESKTOP` into the manager and the D-Bus activation
+  # environment, and on exit stops the session target so session-bound
+  # units stop. See docs/nix.md for the whole flow.
   sessionPackage =
     (pkgs.writeTextDir "share/wayland-sessions/scoot.desktop" ''
       [Desktop Entry]
       Name=scoot
       Comment=scoot scrolling-tiling Wayland compositor
       Exec=${
-        if cfg.session.command == null then "${cfg.package}/bin/scoot --tty" else cfg.session.command
+        if cfg.session.command == null then "${cfg.package}/bin/scoot-session" else cfg.session.command
       }
       Type=Application
       DesktopNames=scoot
@@ -45,8 +53,44 @@ let
           providedSessions = [ "scoot" ];
         };
       });
+
+  # Whether Stylix's own regreet target would set ReGreet's background
+  # (see the `background` assertion below): Stylix present, with an
+  # image, and its regreet target enabled. Written defensively because
+  # Stylix is an optional import that may be absent entirely (then
+  # `stylix` is `{}`) or predate the regreet target (then `.regreet` is
+  # `{}`) -- every level defaults to off.
+  stylixRegreetBackground =
+    stylix:
+    (stylix.image or null) != null && (((stylix.targets or { }).regreet or { }).enable or false);
+
+  # The user units behind `session.enable`, single-sourced from
+  # `resources/systemd/user/`: `@SCOOT_BIN@` becomes this package's
+  # binary, so the entry above and the service always launch the same
+  # build (including the `scoot-xwayland` wrapper's `PATH` append, when
+  # that is the package). Read at eval, like the desktop file: no
+  # package rebuild when only the units change.
+  sessionUnits = {
+    "scoot.service".text = builtins.replaceStrings [ "@SCOOT_BIN@" ] [ "${cfg.package}/bin/scoot" ] (
+      builtins.readFile ../../resources/systemd/user/scoot.service
+    );
+    # The shutdown target names no binary: no substitution to keep in
+    # step, plain text.
+    "scoot-shutdown.target".text = builtins.readFile ../../resources/systemd/user/scoot-shutdown.target;
+  };
 in
 {
+  # nixpkgs' own ReGreet module, so `services.displayManager.regreet`
+  # exists wherever this module is used -- including standalone
+  # option-only evaluations that never import a full NixOS (like
+  # `nix/tests.nix`): without it, the `greeter.enable` wiring below
+  # would set an undeclared option. Already imported on real NixOS (it
+  # is a default module there), where a repeated import is a no-op. The
+  # path is pinned-rev: a consumer's nixpkgs predating
+  # `services/display-managers/regreet.nix` fails the import loudly,
+  # naming the file.
+  imports = [ "${pkgs.path}/nixos/modules/services/display-managers/regreet.nix" ];
+
   options.programs.scoot = {
     enable = lib.mkEnableOption "scoot, the scrolling-tiling Wayland compositor";
 
@@ -127,14 +171,13 @@ in
           autologin caveat in the module source).
         '';
       };
-
       # Full `Exec=` line for the session entry, NOT just a suffix
       # appended after `--` -- deliberately. The issue-#171 acceptance
       # shape is a wrapper script (`Exec=<wrapper>/bin/scoot-session`,
       # which itself runs `scoot --tty -- ...` plus stderr to a log),
       # and a plain `-- COMMAND` append cannot express a wrapper (it
       # would nest scoot inside scoot). A verbatim string expresses all
-      # three shapes: the bare default (null), the common append (write
+      # three shapes: the launcher default (null), the common append (write
       # the full `scoot --tty -- ...` line, e.g. pointing at the
       # home-manager module's `sessionScript` output), and a wrapper
       # path. It is a string rather than an argv list for the same
@@ -147,6 +190,14 @@ in
       # eval -- copy the example shape. The entry stays additive and
       # default-off whatever the value (see above), so a broken line
       # strands nobody: the other sessions remain.
+      #
+      # A set value bypasses `scoot-session`: only the null default runs
+      # the launcher, so only it gets the session wiring (user-manager
+      # import, `graphical-session.target`, the activation environment,
+      # teardown). A `scoot --tty -- <script>` value still runs exactly
+      # what it says -- a session, just an unwired one -- and startup
+      # programs that want the wiring belong in scoot's `[autostart]`,
+      # which runs inside it (see docs/nix.md).
       command = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
@@ -155,20 +206,67 @@ in
         '';
         description = ''
           Full `Exec=` command line for the login-screen session entry.
-          Null (the default) renders today's bare
-          `<package>/bin/scoot --tty`, so existing configs don't change
-          meaning. Set it to run something inside the session: the usual
-          shape is `<package>/bin/scoot --tty -- <command>`, e.g. the
+          Null (the default) renders `<package>/bin/scoot-session`, the
+          session launcher, so existing configs gain the session wiring
+          (user-manager import, `graphical-session.target`, the D-Bus
+          activation environment, teardown on exit -- see docs/nix.md).
+          Set it to run something else instead: the usual shape is
+          `<package>/bin/scoot --tty -- <command>`, e.g. the
           home-manager module's `sessionScript` output at
           `/home/alice/.config/scoot/session.sh` (for a user `alice`;
           see `programs.scoot.sessionScript` and docs/nix.md, which show
           the pairing together). A wrapper script path (logging,
           environment setup) works too -- that is the gh-issue-#171
-          acceptance shape. A set value replaces the whole line, so
-          dropping `--tty` (or the binary path) breaks the entry loudly
-          at the greeter, not at eval -- copy the example shape. `Exec=`
-          lines get no shell expansion (`~` and `$HOME` arrive
-          literally), so always use an absolute path.
+          acceptance shape. A set value replaces the whole line and
+          bypasses the launcher, so a set entry runs without the session
+          wiring (for wired startup programs, use `[autostart]`
+          instead); dropping `--tty` (or the binary path) breaks the
+          entry loudly at the greeter, not at eval -- copy the example
+          shape. `Exec=` lines get no shell expansion (`~` and `$HOME`
+          arrive literally), so always use an absolute path.
+        '';
+      };
+    };
+
+    greeter = {
+      # Default OFF, explicitly, and more strongly than `session.enable`:
+      # this replaces the login screen (greetd running ReGreet under
+      # cage, via nixpkgs' own `services.displayManager.regreet`), so it
+      # is only ever on when the user sets it. Roll back by turning it
+      # off again (or by booting the previous generation): nothing about
+      # the previous login screen is uninstalled while it is on, only
+      # displaced. See docs/nix.md.
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Log in through ReGreet (greetd + cage, nixpkgs' own
+          `services.displayManager.regreet`), with scoot in its session
+          list. Only ever on when set: this replaces the login screen.
+          Conflicts with GDM and SDDM (refused at eval); anything else
+          that owns the login screen must be turned off by hand.
+        '';
+      };
+
+      # ReGreet's backdrop, when the admin wants it to match the session.
+      # Null (the default) leaves ReGreet's background alone -- which is
+      # also what to do under Stylix with its regreet target enabled:
+      # Stylix then sets the background from `stylix.image` itself, and
+      # setting both is refused at eval. Otherwise, point this at an
+      # image (it is copied to the store) -- usually the same file as
+      # the session wallpaper -- and it becomes ReGreet's
+      # `background.path`. No `fit` knob here: ReGreet's default stands
+      # unless set through `services.displayManager.regreet.settings`
+      # directly (which also wins over this path: leave it null then).
+      background = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        example = "/home/alice/Pictures/hills.jpg";
+        description = ''
+          Background image for the ReGreet login screen
+          (`background.path` in its config). Null leaves it alone (and
+          is required under Stylix with its regreet target, which sets
+          the background from `stylix.image` itself).
         '';
       };
     };
@@ -225,15 +323,14 @@ in
           # nothing (or blanks) to launch. (`builtins.match` returns null
           # on no match, so the second disjunct is false exactly for
           # empty/blank strings.)
-          # (The default null is the empty case that matters -- bare
-          # `--tty`, byte-identical to before -- and never reaches here.)
+          # (The default null -- the launcher entry -- never reaches here.)
           assertion =
             cfg.session.command == null || builtins.match "^[[:space:]]*$" cfg.session.command == null;
           message = ''
             programs.scoot.session.command is set but empty or blank:
-            either leave it null for the default bare
-            `<package>/bin/scoot --tty` entry, or set the full Exec=
-            command line to run.
+            either leave it null for the default
+            `<package>/bin/scoot-session` launcher entry, or set the full
+            Exec= command line to run.
           '';
         }
       ];
@@ -250,6 +347,103 @@ in
       services.displayManager.sessionPackages = lib.optional (
         cfg.session.enable && cfg.package != null
       ) sessionPackage;
+
+      # The launcher's units, beside the entry that starts them. Same
+      # gate and same null guard as the entry: no entry, no units, and
+      # never a unit naming a binary that is not there.
+      systemd.user.units = lib.mkIf (cfg.session.enable && cfg.package != null) sessionUnits;
+    })
+    # The login screen, in its own element (not under `cfg.enable`):
+    # with `enable` off and `greeter.enable` on, the assertions below
+    # must still fire rather than the whole element going quiet.
+    (lib.mkIf cfg.greeter.enable {
+      assertions = [
+        {
+          # A greeter for a compositor that is not installed is
+          # nonsense; without `enable` there is no package for the
+          # greeter's session list to offer.
+          assertion = cfg.enable;
+          message = ''
+            programs.scoot.greeter.enable needs programs.scoot.enable:
+            the greeter lists scoot sessions, so scoot itself must be installed.
+          '';
+        }
+        {
+          # The greeter lists scoot through the session entry (ReGreet
+          # reads `wayland-sessions`, which is what `session.enable`
+          # installs into). Forced on below by default, so this fires
+          # only when the entry was explicitly turned back off.
+          assertion = cfg.session.enable;
+          message = ''
+            programs.scoot.greeter.enable needs
+            programs.scoot.session.enable: without the session entry the
+            greeter has no scoot session to offer.
+          '';
+        }
+        {
+          # The login screen is single-owner: greetd/ReGreet and GDM
+          # cannot both run it. Loud at eval, not two greeters fighting
+          # over the first VT at boot.
+          assertion = !config.services.displayManager.gdm.enable;
+          message = ''
+            programs.scoot.greeter.enable conflicts with GDM
+            (services.displayManager.gdm.enable): turn one of them off.
+            Rolling back is the previous NixOS generation, or this
+            option set back to false.
+          '';
+        }
+        {
+          # Same, for SDDM. Anything else owning the login screen
+          # (lemurs, ly, another greetd setup) must be turned off by
+          # hand -- see docs/nix.md.
+          assertion = !config.services.displayManager.sddm.enable;
+          message = ''
+            programs.scoot.greeter.enable conflicts with SDDM
+            (services.displayManager.sddm.enable): turn one of them off.
+            Rolling back is the previous NixOS generation, or this
+            option set back to false.
+          '';
+        }
+        {
+          # Two owners for one backdrop: an explicit `background` here
+          # and Stylix's regreet target (which sets the same
+          # `background.path` from `stylix.image`) would merge-conflict.
+          # `config.stylix` is unset without Stylix, and `.regreet`
+          # without that target -- both default to off (see the helper
+          # above).
+          assertion = cfg.greeter.background == null || !(stylixRegreetBackground (config.stylix or { }));
+          message = ''
+            programs.scoot.greeter.background is set, but Stylix's
+            regreet target is also setting ReGreet's background from
+            `stylix.image`: unset one of them (leave `background` null
+            and Stylix owns the backdrop, or turn off
+            `stylix.targets.regreet` image theming).
+          '';
+        }
+      ];
+
+      # `session.enable` on by default, so the greeter lists a scoot
+      # session; an explicit `false` there trips the assertion above
+      # instead of yielding a greeter with no scoot in it.
+      programs.scoot.session.enable = lib.mkDefault true;
+
+      # The login screen itself is nixpkgs' own ReGreet module (greetd
+      # running ReGreet under cage) -- this only turns it on and
+      # optionally names its backdrop at plain priority, so a backdrop
+      # set directly under `services.displayManager.regreet.settings`
+      # behaves like any other explicit-against-explicit conflict
+      # instead of being silently shadowed. ReGreet runs under cage,
+      # never inside scoot: hosting a pre-login greeter in the
+      # compositor would need a locked-down scoot profile (no binds, no
+      # IPC socket), which is out of scope -- see docs/nix.md.
+      services.displayManager.regreet = {
+        enable = true;
+        # The whole table or nothing: a `path`-only `mkIf` would leave
+        # an empty `[background]` behind when `background` is null.
+        settings.background = lib.mkIf (cfg.greeter.background != null) {
+          path = toString cfg.greeter.background;
+        };
+      };
     })
   ];
 }

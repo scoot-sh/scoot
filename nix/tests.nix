@@ -17,10 +17,24 @@
 #   default path), the default keeps `scoot/session.sh`;
 # - the session entry is additive (default session untouched) and carries
 #   the `providedSessions` nixpkgs requires of every session package;
-# - `session.command` renders verbatim into `Exec=` (bare `--tty` default
-#   byte-identical, `-- COMMAND` append, wrapper-script path, quoting
+#   with no command it runs the `scoot-session` launcher (the session
+#   wiring: user-manager import, `graphical-session.target`, the
+#   activation environment, teardown), whose user units
+#   (`scoot.service` with `BindsTo`/`Before` the session target and an
+#   `ExecStart` naming the package's binary, plus
+#   `scoot-shutdown.target` conflicting the session targets) are
+#   installed beside the entry and absent with it off;
+# - `session.command` renders verbatim into `Exec=` (launcher default,
+#   `-- COMMAND` append, wrapper-script path, quoting
 #   with spaces/quotes/pipes intact), stays inert with the entry off,
 #   and refuses empty/blank and package-less combinations at eval;
+# - the greeter (Linux only: it imports nixpkgs' own regreet module):
+#   `greeter.enable` turns on `services.displayManager.regreet`, forces
+#   the session entry (and its units) on beside it, leaves the backdrop
+#   alone by default and renders a set one as ReGreet's
+#   `background.path`; off changes nothing; GDM/SDDM, an explicitly
+#   disabled session entry, a missing `enable`, and a Stylix-owned
+#   backdrop are each refused at eval, naming the conflict;
 # - the two settings failure modes behave as documented (see below);
 # - scootbg for `[wallpaper]` (ticket 10): the NixOS
 #   `wallpaper.enable` follows `enable` and installs `wallpaper.package`,
@@ -145,8 +159,117 @@ let
       type = lib.types.nullOr lib.types.str;
       default = null;
     };
+    # The login screens the greeter option is checked against: GDM and
+    # SDDM must be off for greetd/ReGreet (refused at eval). Plain bools
+    # defaulting to off, like the real modules.
+    options.services.displayManager.gdm.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.services.displayManager.sddm.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    # The launcher's user units (`scoot.service`, `scoot-shutdown.target`).
+    # An attrs-of-lineshape, like the real `systemd.user.units`: the pins
+    # below read `.text` out of each.
+    options.systemd.user.units = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            text = lib.mkOption {
+              type = lib.types.nullOr lib.types.lines;
+              default = null;
+            };
+          };
+        }
+      );
+      default = { };
+    };
   };
 
+  # Stand-ins for what nixpkgs' own regreet module
+  # (`services/display-managers/regreet.nix` at the pinned rev, imported
+  # by `nix/modules/nixos.nix` itself) sets and reads. These ride along
+  # in every NixOS evaluation through `evalNixosWith`, greeter or not.
+  # The pins below read `enable` and `settings.background.path` out of
+  # the real module -- so the wiring is checked against nixpkgs' option,
+  # not a copy of it (which is also what catches a future rename like
+  # the `programs.regreet` one this rev already carries as an alias) --
+  # and the module's own assertion (the login user exists) must
+  # evaluate, which is what the `user` default is for (matching nixpkgs
+  # greetd's own `mkDefault "greeter"`). Nothing here is built:
+  # evaluation only.
+  regreetStubs = {
+    options.services.greetd.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.services.greetd.settings = lib.mkOption {
+      type = lib.types.submodule {
+        options.default_session = lib.mkOption {
+          type = lib.types.submodule {
+            options.command = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+            };
+            options.user = lib.mkOption {
+              type = lib.types.str;
+              default = "greeter";
+            };
+          };
+          default = { };
+        };
+      };
+      default = { };
+    };
+    options.services.accounts-daemon.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    options.environment.etc = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options.source = lib.mkOption {
+            type = lib.types.nullOr lib.types.path;
+            default = null;
+          };
+          options.text = lib.mkOption {
+            type = lib.types.nullOr lib.types.lines;
+            default = null;
+          };
+        }
+      );
+      default = { };
+    };
+    options.systemd.tmpfiles.settings = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+    options.fonts.packages = lib.mkOption {
+      type = lib.types.listOf lib.types.package;
+      default = [ ];
+    };
+    options.users.users = lib.mkOption {
+      type = lib.types.attrsOf lib.types.raw;
+      default = { };
+    };
+  };
+
+  # The one Stylix leaf the greeter's `background` assertion reads
+  # (image set, regreet target on). Only the conflict-case evaluation
+  # declares it; every other greeter evaluation runs with no Stylix at
+  # all, which is what proves the `config.stylix or {}` fallback.
+  stylixRegreetStub = {
+    options.stylix.image = lib.mkOption {
+      type = lib.types.nullOr lib.types.raw;
+      default = null;
+    };
+    options.stylix.targets.regreet.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+  };
   evalHome =
     cfg:
     lib.evalModules {
@@ -237,6 +360,11 @@ let
       modules = modules ++ [
         baseStubs
         nixosStubs
+        # Beside our own module, which imports nixpkgs' regreet module
+        # (see `imports` in `nix/modules/nixos.nix`): its surroundings
+        # ride along in every NixOS evaluation, greeter or not, the
+        # same way `nixosStubs` rides along for NixOS-owned options.
+        regreetStubs
         ({ config, ... }: { programs.scoot = cfg; })
       ];
       specialArgs = {
@@ -499,6 +627,113 @@ let
   };
   osOff = evalNixos { enable = false; };
 
+  # --- greeter evaluations under test (Linux only: a system-level
+  # display-manager wiring with no meaning on Darwin) ---
+  #
+  # No explicit regreet import here: `nix/modules/nixos.nix` imports
+  # nixpkgs' own `services/display-managers/regreet.nix` itself (see its
+  # `imports`), so the pins below check agreement with nixpkgs' real
+  # option -- not a copy of it, which is also what catches a future
+  # rename the way this rev's `programs.regreet` alias would need.
+  evalNixosRegreet =
+    cfg: extra:
+    lib.evalModules {
+      modules = [
+        ./modules/nixos.nix
+        baseStubs
+        nixosStubs
+        regreetStubs
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        ({ config, ... }: { programs.scoot = cfg; } // extra)
+      ];
+      specialArgs = {
+        pkgs = pkgs;
+      };
+    };
+  # What a real configuration provides too: nixpkgs' regreet module
+  # refuses a missing login user at eval, so the test user exists.
+  greeterUser = {
+    users.users.greeter = {
+      isNormalUser = true;
+    };
+  };
+  # The greeter on: ReGreet enabled, the session entry forced on, the
+  # launcher's units beside it, no backdrop.
+  osGreeter = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    greeter.enable = true;
+  } greeterUser;
+  # ...with a backdrop: ReGreet's `background.path` is the image.
+  wallpaperImage = builtins.toFile "greeter-bg.png" "fake background";
+  osGreeterBg = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    greeter.enable = true;
+    greeter.background = wallpaperImage;
+  } greeterUser;
+  # ...off: no ReGreet, and (no session entry either) nothing installed.
+  osGreeterOff = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+  } greeterUser;
+  # ...against GDM: refused, naming the conflict.
+  osGreeterGdm = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    greeter.enable = true;
+  } (greeterUser // { services.displayManager.gdm.enable = true; });
+  # ...against SDDM: refused the same way.
+  osGreeterSddm = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    greeter.enable = true;
+  } (greeterUser // { services.displayManager.sddm.enable = true; });
+  # ...with the session entry explicitly off: refused (a greeter with no
+  # scoot to offer).
+  osGreeterNoSession = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    greeter.enable = true;
+    session.enable = false;
+  } greeterUser;
+  # ...without scoot itself: refused.
+  osGreeterNoEnable = evalNixosRegreet {
+    package = fakePkg;
+    greeter.enable = true;
+  } greeterUser;
+  # ...with a backdrop beside Stylix's regreet image theming: refused
+  # (two owners for one backdrop). The stub declares only the one Stylix
+  # leaf the assertion reads; its absence everywhere else is the
+  # no-Stylix case the other evaluations prove.
+  osGreeterStylix = lib.evalModules {
+    modules = [
+      ./modules/nixos.nix
+      baseStubs
+      nixosStubs
+      regreetStubs
+      stylixRegreetStub
+      { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+      (
+        { config, ... }:
+        {
+          programs.scoot = {
+            enable = true;
+            package = fakePkg;
+            greeter.enable = true;
+            greeter.background = wallpaperImage;
+          };
+          stylix.image = styImage;
+          stylix.targets.regreet.enable = true;
+        }
+        // greeterUser
+      )
+    ];
+    specialArgs = {
+      pkgs = pkgs;
+    };
+  };
+
   # --- eval-time structural pins (fail `nix flake check` at eval) ---
   #
   # Note on what these prove: standalone `lib.evalModules` COLLECTS
@@ -664,6 +899,53 @@ let
     # ...including when a command is set but the entry stays off.
     (
       assert osCmdNoSession.config.services.displayManager.sessionPackages == [ ];
+      true
+    )
+
+    # The launcher's units ride with the entry: both installed...
+    (
+      assert osSession.config.systemd.user.units ? "scoot.service";
+      true
+    )
+    (
+      assert osSession.config.systemd.user.units ? "scoot-shutdown.target";
+      true
+    )
+    # ...the service bound to the session target it pulls in, and
+    # ordered before it (so the target activates once the service
+    # starts, and stopping the target stops the service)...
+    (
+      assert lib.hasInfix "BindsTo=graphical-session.target" sessionServiceText;
+      true
+    )
+    (
+      assert lib.hasInfix "Before=graphical-session.target" sessionServiceText;
+      true
+    )
+    # ...launching this package's binary on `--tty` (the same build the
+    # entry names, wrapper included)...
+    (
+      assert contains "ExecStart=${fakePkg}/bin/scoot --tty" sessionServiceText;
+      true
+    )
+    # ...and the shutdown target conflicting the session targets away
+    # (which is what stops session-bound units when scoot exits).
+    (
+      assert lib.hasInfix "Conflicts=graphical-session.target" sessionShutdownText;
+      true
+    )
+    # ...while no entry means no units either (a command with the entry
+    # off, or scoot off entirely).
+    (
+      assert osBin.config.systemd.user.units == { };
+      true
+    )
+    (
+      assert osCmdNoSession.config.systemd.user.units == { };
+      true
+    )
+    (
+      assert osOff.config.systemd.user.units == { };
       true
     )
 
@@ -1131,6 +1413,9 @@ let
   sessionExe = hmFull.config.xdg.configFile."scoot/session.sh".executable;
   desktopPkg = builtins.head osSession.config.services.displayManager.sessionPackages;
   desktopFile = "${desktopPkg}/share/wayland-sessions/scoot.desktop";
+  # The launcher's units, as the entry's configuration renders them.
+  sessionServiceText = osSession.config.systemd.user.units."scoot.service".text;
+  sessionShutdownText = osSession.config.systemd.user.units."scoot-shutdown.target".text;
   cmdDesktopFile = "${builtins.head osSessionCmd.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
   wrapperDesktopFile = "${builtins.head osSessionWrapper.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
   quotingDesktopFile = "${builtins.head osSessionQuoting.config.services.displayManager.sessionPackages}/share/wayland-sessions/scoot.desktop";
@@ -1140,8 +1425,133 @@ let
   hmNoWallToml = hmNoWall.config.xdg.configFile."scoot/config.toml".source;
   hmWallNotTableToml = hmWallNotTable.config.xdg.configFile."scoot/config.toml".source;
   hmStylixToml = hmStylix.config.xdg.configFile."scoot/config.toml".source;
+
+  # --- greeter structural pins (fail `nix flake check` at eval) ---
+  #
+  # Linux only: these import nixpkgs' own regreet module, a system-level
+  # display-manager wiring with no meaning on Darwin (same gating as the
+  # flake/overlay pins below). Each refusal pin also proves the message
+  # names the conflict (the `hasInfix` half), not just that something
+  # fails.
+  _greeterPins = lib.optionals isLinux [
+    # On: every assertion holds (including nixpkgs regreet's own login
+    # user one)...
+    (
+      assert allAssertionsHold osGreeter.config;
+      true
+    )
+    # ...ReGreet enabled through nixpkgs' option (not an alias)...
+    (
+      assert osGreeter.config.services.displayManager.regreet.enable;
+      true
+    )
+    # ...the session entry forced on beside it (what the greeter lists)...
+    (
+      assert builtins.length osGreeter.config.services.displayManager.sessionPackages == 1;
+      true
+    )
+    # ...the launcher's units beside that...
+    (
+      assert osGreeter.config.systemd.user.units ? "scoot.service";
+      true
+    )
+    (
+      assert osGreeter.config.systemd.user.units ? "scoot-shutdown.target";
+      true
+    )
+    # ...and no backdrop by default (ReGreet's own stands, and Stylix
+    # with its regreet target sets it from `stylix.image`).
+    (
+      assert !(osGreeter.config.services.displayManager.regreet.settings ? background);
+      true
+    )
+    # With a backdrop: ReGreet's `background.path` is the image, and
+    # every assertion still holds.
+    (
+      assert allAssertionsHold osGreeterBg.config;
+      true
+    )
+    (
+      assert contains "${
+        wallpaperImage
+      }" osGreeterBg.config.services.displayManager.regreet.settings.background.path;
+      true
+    )
+    # Off changes nothing: no ReGreet, and (no session entry either) no
+    # entry and no units.
+    (
+      assert !osGreeterOff.config.services.displayManager.regreet.enable;
+      true
+    )
+    (
+      assert osGreeterOff.config.services.displayManager.sessionPackages == [ ];
+      true
+    )
+    (
+      assert osGreeterOff.config.systemd.user.units == { };
+      true
+    )
+    (
+      assert allAssertionsHold osGreeterOff.config;
+      true
+    )
+    # Against GDM: exactly one failing assertion, naming the conflict.
+    (
+      assert builtins.length (failing osGreeterGdm.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "conflicts with GDM" (builtins.head (failing osGreeterGdm.config));
+      true
+    )
+    # Against SDDM: the same.
+    (
+      assert builtins.length (failing osGreeterSddm.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "conflicts with SDDM" (builtins.head (failing osGreeterSddm.config));
+      true
+    )
+    # With the session entry explicitly off: refused (a greeter with no
+    # scoot to offer), and the message says so.
+    (
+      assert builtins.length (failing osGreeterNoSession.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "needs\nprograms.scoot.session.enable" (
+        builtins.head (failing osGreeterNoSession.config)
+      );
+      true
+    )
+    # Without scoot itself: refused the same way.
+    (
+      assert builtins.length (failing osGreeterNoEnable.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "needs programs.scoot.enable" (
+        builtins.head (failing osGreeterNoEnable.config)
+      );
+      true
+    )
+    # With a backdrop beside Stylix's regreet image theming: refused
+    # (two owners for one backdrop), naming both switches.
+    (
+      assert builtins.length (failing osGreeterStylix.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "programs.scoot.greeter.background is set" (
+        builtins.head (failing osGreeterStylix.config)
+      );
+      true
+    )
+  ];
 in
 assert lib.all (x: x) _pins;
+assert lib.all (x: x) _greeterPins;
 assert lib.all (x: x) _flakePins;
 runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   set -euo pipefail
@@ -1182,17 +1592,17 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   test "${if sessionExe then "yes" else "no"}" = yes
   echo "ok: session script written executable with shebang"
 
-  # 6. Session .desktop: launches the configured package on --tty,
-  #    names the desktop (which is what sets XDG_CURRENT_DESKTOP when
-  #    launched from a display manager).
-  grep -q "^Exec=${fakePkg}/bin/scoot --tty$" ${desktopFile}
+  # 6. Session .desktop: runs the session launcher from the configured
+  #    package, and names the desktop (which is what sets
+  #    XDG_CURRENT_DESKTOP when launched from a display manager).
+  grep -q "^Exec=${fakePkg}/bin/scoot-session$" ${desktopFile}
   grep -q '^DesktopNames=scoot$' ${desktopFile}
   grep -q '^Type=Application$' ${desktopFile}
-  echo "ok: wayland-session entry points at the package"
+  echo "ok: wayland-session entry runs the session launcher"
 
   # 6b. Default is byte-identical with the option present-but-null: the
   # exact-match `$` anchor above already proves no `-- COMMAND` suffix
-  # (or anything else) leaked into the bare entry.
+  # (or anything else) leaked into the launcher entry.
 
   # 6c. session.command as `-- COMMAND` append renders verbatim.
   grep -q "^Exec=${fakePkg}/bin/scoot --tty -- ${fakePkg}/bin/my-shell$" ${cmdDesktopFile}
@@ -1209,6 +1619,18 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   # metacharacter can hide a mangling).
   grep -F "Exec=${trickyCmd}" ${quotingDesktopFile}
   echo "ok: session.command with quoting-needing characters renders verbatim"
+
+  # 6f. The launcher's units: the service runs this package's binary on
+  # `--tty`, bound to and before the session target it pulls in; the
+  # shutdown target conflicts the session targets away (which is what
+  # stops session-bound units when scoot exits). (These embed the unit
+  # text in single quotes, so the resource files must stay free of
+  # `'` -- keep the prose apostrophe-free.)
+  printf '%s' '${sessionServiceText}' | grep -F -q "ExecStart=${fakePkg}/bin/scoot --tty"
+  printf '%s' '${sessionServiceText}' | grep -F -x -q 'BindsTo=graphical-session.target'
+  printf '%s' '${sessionServiceText}' | grep -F -x -q 'Before=graphical-session.target'
+  printf '%s' '${sessionShutdownText}' | grep -F -x -q 'Conflicts=graphical-session.target graphical-session-pre.target'
+  echo "ok: session user units wire the service to the session target"
 
   # 7. A representable-but-wrong scoot type renders as TOML (it is the
   #    loader, at session start, that refuses it -- fail-safe).

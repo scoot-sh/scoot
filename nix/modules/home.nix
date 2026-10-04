@@ -173,9 +173,11 @@ in
     # NixOS module's `programs.scoot.session.command`: set it to the full
     # `<package>/bin/scoot --tty -- /home/<user>/.config/<that path>`
     # line -- an absolute path, since `Exec=` lines get no shell
-    # expansion -- so the greeter entry runs this script instead of a
-    # bare compositor (see docs/nix.md, which shows the pairing
-    # together). Null writes no file.
+    # expansion -- so the greeter entry runs this script instead of the
+    # `scoot-session` launcher (see docs/nix.md, which shows the pairing
+    # together). That entry runs without the launcher's session wiring;
+    # startup programs that want the wiring belong in `[autostart]`
+    # instead. Null writes no file.
     sessionScript = lib.mkOption {
       type = lib.types.nullOr lib.types.lines;
       default = null;
@@ -194,7 +196,10 @@ in
         module's `programs.scoot.session.command` to the full
         `<package>/bin/scoot --tty -- /home/<user>/.config/<that path>`
         line (an absolute path -- `Exec=` lines get no shell expansion)
-        so the login-screen entry runs it. Null writes no file.
+        so the login-screen entry runs it instead of the `scoot-session`
+        launcher. That entry runs without the launcher's session wiring
+        (no `graphical-session.target`, no activation import); for wired
+        startup programs, use `[autostart]` instead. Null writes no file.
       '';
     };
 

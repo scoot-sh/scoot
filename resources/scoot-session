@@ -1,0 +1,395 @@
+#!/bin/sh
+# scoot-session: log into a whole scoot desktop, not just a compositor.
+#
+# A greeter (greetd, GDM, SDDM -- anything reading `wayland-sessions`)
+# runs this instead of `scoot --tty` directly. It wires the compositor
+# into the systemd user session around it:
+#
+#   1. refuse while a live scoot session is already active for this
+#      user -- but clear a stale one (units active, the lock below
+#      free, compositor silent on IPC: SIGKILL and power loss leave
+#      no trap to run, and the kernel releases the lock) and continue
+#      the login instead of refusing every retry until someone runs
+#      systemctl from a VT;
+#   2. import the login environment into the user manager AND the D-Bus
+#      activation environment, so units the session starts later
+#      inherit it;
+#   3. start `scoot.service` and wait until the compositor answers IPC
+#      (polled with a deadline, never a blind sleep);
+#   4. import `WAYLAND_DISPLAY` and `XDG_CURRENT_DESKTOP` into the user
+#      manager AND the D-Bus activation environment, so units ordered
+#      after `graphical-session.target` (the status bar, portals) see
+#      the display;
+#   5. when scoot exits, stop `graphical-session.target` (via
+#      `scoot-shutdown.target`, which `Conflicts=` it) so session-bound
+#      user services stop instead of leaking into the next login, and
+#      restore the manager environment to its pre-session state.
+#
+# scoot itself never touches the bus -- that is deliberate, and it stays
+# that way: everything bus-shaped happens here, in the launcher, not in
+# the compositor. There is no `--session` flag and no `Type=notify`;
+# readiness is "the IPC socket answers `version`", and the display name
+# is the session's own new Wayland socket (see below), never guessed.
+#
+# Without a systemd user manager (s6, a seat with no manager, the webtop
+# target) this degrades to `exec scoot --tty` with a note on stderr: a
+# session with no session integration, not a failure.
+#
+# Takes no arguments. Startup programs belong in scoot's `[autostart]`
+# (config), which runs inside the wired session -- not on this command
+# line, which a static `scoot.service` could not receive exactly (shell
+# word-splitting would break the quoting a session command needs).
+#
+# Shape follows niri's `niri-session` (refuse-if-active, reset-failed,
+# import, start, shutdown target, unset), reworked for the constraint
+# above -- and where it differs, deliberately: plain `start` (see
+# below), restore-instead-of-unset, a readiness wait niri gets from
+# `Type=notify`. niri is GPL-3.0 and scoot is MIT: this file is written
+# for scoot, not copied from niri.
+set -u
+
+SERVICE=scoot.service
+SHUTDOWN=scoot-shutdown.target
+GRAPHICAL=graphical-session.target
+# How long to wait for the compositor to answer IPC after the service
+# starts, in whole seconds (integer: POSIX `sleep` has no fractions).
+READY_TIMEOUT=60
+
+# The compositor beside this script (`$out/bin` carries both), unless
+# the caller knows better. This is what keeps the XWayland wrapper on
+# PATH: that package wraps `bin/scoot`, and this resolves to the wrapper.
+SCOOT_BIN="${SCOOT_BIN:-$(dirname "$0")/scoot}"
+
+die() {
+    echo "scoot-session: $*" >&2
+    # Leave the manager environment as it was found: anything past the
+    # pre-session capture (below) already imported the login environment
+    # and possibly defaulted the desktop name. The refusal above runs
+    # before any of that (`captured` unset) and must not touch another
+    # session's environment.
+    if [ -n "${captured:-}" ]; then
+        restore_display_env
+    fi
+    exit 1
+}
+
+note() {
+    echo "scoot-session: $*" >&2
+}
+
+# Back to the pre-session state for the two display variables: a
+# lingering manager must not offer the next login this session's
+# display -- but only what this session set goes away. Either variable
+# may have predated it (an ssh-forwarded display, say); then its old
+# value is restored instead of removed.
+restore_display_env() {
+    if [ -n "${prev_display:-}" ]; then
+        systemctl --user set-environment "WAYLAND_DISPLAY=$prev_display" >/dev/null 2>&1 || true
+    else
+        systemctl --user unset-environment WAYLAND_DISPLAY >/dev/null 2>&1 || true
+    fi
+    if [ -n "${prev_desktop:-}" ]; then
+        systemctl --user set-environment "XDG_CURRENT_DESKTOP=$prev_desktop" >/dev/null 2>&1 || true
+    else
+        systemctl --user unset-environment XDG_CURRENT_DESKTOP >/dev/null 2>&1 || true
+    fi
+}
+
+if [ "$#" -ne 0 ]; then
+    die "takes no arguments (startup programs belong in [autostart]); got: $*"
+fi
+
+if [ ! -x "$SCOOT_BIN" ]; then
+    die "no executable compositor at $SCOOT_BIN (set SCOOT_BIN to override)"
+fi
+
+# No user manager: a session with no integration, not a failure.
+if ! systemctl --user list-units >/dev/null 2>&1; then
+    note "no systemd user manager; running $SCOOT_BIN --tty directly with no session integration (no $GRAPHICAL, no D-Bus activation import)"
+    exec "$SCOOT_BIN" --tty
+fi
+
+# IPC readiness probe, shared by the stale-session check below and the
+# readiness wait further down: "answers" means the loop that serves the
+# session is running. Each attempt runs under a timeout: mid-startup
+# the socket can accept a connection it never answers (the loop is not
+# running yet), and a bare client would block in `read` past every
+# deadline around it. (`timeout(1)` is coreutils, always beside
+# systemd; without it the attempt runs bare, as before.)
+if command -v timeout >/dev/null 2>&1; then
+    try_version() { timeout 2 "$SCOOT_BIN" msg version >/dev/null 2>&1; }
+else
+    try_version() { "$SCOOT_BIN" msg version >/dev/null 2>&1; }
+fi
+
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    die "XDG_RUNTIME_DIR is unset; cannot find the compositor's sockets"
+fi
+
+# Liveness lock, held by the live launcher from before the
+# refuse-or-heal check below until it exits. A second login must not
+# judge an IPC-silent session stale: between `start` returning and the
+# compositor answering IPC lies up to a minute of silence, and a live
+# session can be briefly too busy to answer one probe. So silence
+# alone never means death -- only the lock holder may say so. Lock
+# held by another launcher means starting or live: refuse at once,
+# whatever IPC or the units say (the holder takes the lock before
+# importing the environment, well before `start`, so the units may
+# not be active yet). Lock acquired here, with the units active and
+# IPC silent, means stale:
+# heal. The kernel releases the lock on SIGKILL (and every exit
+# closes the fd), which is exactly the stale case healing exists for;
+# power loss leaves the file behind but unlocked.
+# The fd stays open in this launcher until exit and is never closed
+# early: this launcher must not take the lock, release it and race the
+# launcher it just refused. `scoot.service` is spawned by the user
+# manager, not forked from here, so nothing long-lived inherits the
+# fd -- every child this script spawns (`systemctl`, `scoot msg`, the
+# D-Bus tool) is short-lived and exits before the launcher, so
+# inheriting the fd for its own lifetime is harmless. One narrow
+# exception: an in-flight child orphaned by a SIGKILL keeps its
+# inherited fd until it exits (at most ~`timeout 2`), so a login in
+# the second after the kill still refuses once and heals on retry --
+# a single refused retry, never a wedge. (POSIX sh has
+# no `{fd}>` names and no close-on-exec spelling; fd 9 is otherwise
+# unused by this script.) Without `flock(1)` there is no lock to
+# consult, so there is no healing: an active session is refused as
+# live (the pre-healing behaviour), never cleared blind.
+have_lock=0
+have_flock=0
+if command -v flock >/dev/null 2>&1; then
+    have_flock=1
+    exec 9>"$XDG_RUNTIME_DIR/scoot-session.lock" \
+        || die "cannot open $XDG_RUNTIME_DIR/scoot-session.lock"
+    if flock -n 9 2>/dev/null; then
+        have_lock=1
+    fi
+else
+    note "no flock(1) on PATH; stale-session healing disabled (an active session is refused as live)"
+fi
+
+# A lock held by another launcher means a session is starting or
+# live: refuse at once, whatever the units' state. The holder takes
+# the lock before importing the environment, well before `start`, so
+# arriving here while no unit is active yet is the normal shape of a
+# second login racing the first -- without this, both launchers would
+# start and wait on the same service, both importing the display and
+# both tearing down on exit. (Without `flock(1)` there is no lock to
+# consult, so the old refuse-when-active behaviour below stands.)
+if [ "$have_flock" -eq 1 ] && [ "$have_lock" -eq 0 ]; then
+    die "a scoot session is already starting or running for this user"
+fi
+
+if systemctl --user --quiet is-active "$SERVICE" "$GRAPHICAL"; then
+    # A live session refuses: two live scoot sessions for one user on
+    # one seat is still wrong. A stale one -- units left active with
+    # no lock holder by a launcher that died without cleanup (SIGKILL,
+    # power loss: paths no trap can cover, and the kernel already
+    # released the lock) -- is cleared instead, or every later login
+    # would be refused until someone runs systemctl from a VT.
+    # No lock to consult here (`flock(1)` missing: a lock held by
+    # another launcher already refused above, before probing) -- so
+    # refuse an active session as live, never clear blind.
+    if [ "$have_lock" -eq 0 ]; then
+        die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
+    fi
+    # `graphical-session.target` is shared with other desktops, so a
+    # stale clear stops only scoot's own service (and resets its
+    # failed state): an active target with scoot's service never run
+    # is another session's, and the refusal stands. The target itself
+    # is never stopped here -- that would tear down another desktop's
+    # bound services in the same user manager, while a stale-active
+    # target does not hurt the new login (the display variables are
+    # re-imported below). (If that ever misfires -- another desktop
+    # running in this same user manager beside a stale scoot unit --
+    # stop the units by hand: `systemctl --user stop scoot.service
+    # graphical-session.target`, then log in again.)
+    if try_version; then
+        die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
+    fi
+    if systemctl --user --quiet is-active "$SERVICE" || systemctl --user --quiet is-failed "$SERVICE"; then
+        note "found $SERVICE or $GRAPHICAL active but the compositor does not answer IPC; clearing the stale session"
+        systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
+        systemctl --user reset-failed "$SERVICE" >/dev/null 2>&1 || true
+    else
+        die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
+    fi
+fi
+
+# A previous crash leaves the unit in `failed`, which `start` would still
+# honour but `is-active` polling below would misread on the first round.
+systemctl --user reset-failed "$SERVICE" >/dev/null 2>&1 || true
+
+# The Wayland sockets already here (stale ones from dead sessions,
+# another compositor's, another login sharing the directory): the
+# display is whichever socket scoot itself creates below, i.e. one not
+# on this list. Recorded as `name:inode`, space-joined and space-padded
+# and matched with its padding: scoot reuses a stale name by replacing
+# its file, which changes the inode, so a reused name still shows up as
+# new below. (A Wayland socket name never contains a space; an inode
+# never does.)
+snap_before=" "
+for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
+    [ -S "$sock" ] || continue
+    snap_before="$snap_before${sock##*/}:$(stat -c %i "$sock" 2>/dev/null || echo 0) "
+done
+
+# What the manager environment holds for the two display variables
+# before this session: restored on the way out (and on every `die`
+# past this point) -- see `restore_display_env`.
+captured=""
+prev_display=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n 1)
+prev_desktop=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^XDG_CURRENT_DESKTOP=//p' | head -n 1)
+captured=1
+
+# Tear the session down even when this script, not scoot, dies first
+# (a HUP at logout, a TERM around it): stopping the target stops
+# everything bound to it -- the compositor through `BindsTo`, the bar
+# through `PartOf` -- so nothing leaks into the next login.
+# `replace-irreversibly` so teardown wins over stray start jobs.
+# Installed here, right after the environment capture and before
+# `start`: `cleanup` (unlike `die`) restores unconditionally, so any
+# earlier would unset another session's display variables, and any
+# later would leave the readiness wait without a handler -- a scoot
+# that wedges at startup (or a logind SIGTERM then) would leave the
+# service active and refuse every later login. An early `start
+# "$SHUTDOWN"` with no service yet is a harmless no-op (`|| true`).
+cleanup() {
+    systemctl --user start --job-mode=replace-irreversibly "$SHUTDOWN" >/dev/null 2>&1 || true
+    restore_display_env
+}
+trap 'cleanup; exit 129' HUP
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+
+# Who this session is, before anything the session starts could ask: the
+# greeter sets this from the entry's `DesktopNames=scoot`, a hand run
+# usually sets nothing. Default first, import after, so the manager and
+# -- below -- the bus agree with what scoot's own children get (the
+# compositor exports the same default to everything it spawns).
+export XDG_CURRENT_DESKTOP="${XDG_CURRENT_DESKTOP:-scoot}"
+
+# The login environment, whole, into the user manager AND the D-Bus
+# activation environment together (`--systemd` does both -- that is the
+# documented session-import mechanism, and it answers the
+# which-tool question: `systemctl import-environment` alone would leave
+# D-Bus-activated portals behind, which is half the point of this
+# session). A wrong display swept in here (a greeter-owned
+# `WAYLAND_DISPLAY`, say) is corrected by the scoped import below,
+# which runs once the real display is known and overwrites it.
+if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    dbus-update-activation-environment --systemd --all \
+        || die "could not import the login environment (see: journalctl --user)"
+else
+    # No dbus tool: the manager half only. (`import-environment` with
+    # no names is deprecated upstream, but it still works; the scoped
+    # import below then covers the bus half for the two variables that
+    # matter.)
+    systemctl --user import-environment \
+        || die "could not import the login environment into the user manager"
+fi
+
+# Start the service. Plain `start`, deliberately not `--wait`: `--wait`
+# hangs forever on some user managers even for already-active units
+# (measured against systemd 261 on the dev VM: `systemctl --user --wait
+# start` on an active unit never returns, with no job queued), which
+# would wedge every login there. Nothing is lost: a start that fails
+# outright (a missing binary, a bad unit) still exits nonzero at once,
+# and a process that dies right after spawning trips the liveness check
+# on the readiness loop's first round instead.
+systemctl --user start "$SERVICE" || die "$SERVICE failed to start (see: journalctl --user -u $SERVICE)"
+
+# Readiness: the IPC socket answers `version` (see `try_version`
+# above). Poll, with a deadline -- never a blind sleep -- and bail
+# the moment the service itself stops being active (a crash during
+# startup must not burn the whole deadline). `scoot msg version` is
+# the same client agents drive the session with, so "answers" means
+# the loop that serves the session is running.
+end=$(($(date +%s) + READY_TIMEOUT))
+while :; do
+    if try_version; then
+        break
+    fi
+    if ! systemctl --user --quiet is-active "$SERVICE"; then
+        die "$SERVICE stopped while starting (see: journalctl --user -u $SERVICE)"
+    fi
+    if [ "$(date +%s)" -ge "$end" ]; then
+        systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
+        die "$SERVICE did not answer IPC within ${READY_TIMEOUT}s (see: journalctl --user -u $SERVICE)"
+    fi
+    sleep 1
+done
+
+# The display name: the session's own new socket, found by difference,
+# never guessed. scoot binds `wayland-1` through `wayland-32` ignoring
+# the caller's `WAYLAND_DISPLAY` (`compositor/wayland_accept.rs`), so
+# pre-setting the name is not a mechanism -- and neither is the
+# service's `/proc` environment, which cannot work: `set_var` moves
+# `environ` off the initial stack, while `/proc/PID/environ` keeps
+# showing the exec-time copy (measured live: the compositor answers IPC
+# with no `WAYLAND_DISPLAY` in sight there). Exactly one socket new
+# since the pre-start snapshot (by name AND inode, since a reused stale
+# name is a replaced file) must exist: none means the compositor came
+# up without one, and more than one means concurrent sessions -- either
+# way the service is stopped and nothing is imported rather than a
+# guess. A socket that vanishes between discovery and import is the
+# same shape: stop, import nothing.
+count=0
+WAYLAND_DISPLAY=""
+for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
+    [ -S "$sock" ] || continue
+    name=${sock##*/}
+    id=$(stat -c %i "$sock" 2>/dev/null || echo 0)
+    case "$snap_before" in
+        *" $name:$id "*) continue ;;
+    esac
+    count=$((count + 1))
+    WAYLAND_DISPLAY=$name
+done
+if [ "$count" -ne 1 ]; then
+    systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
+    die "found $count new Wayland sockets under \$XDG_RUNTIME_DIR after startup (expected exactly scoot's); stopped the service, nothing imported"
+fi
+if [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then
+    systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
+    die "the new Wayland socket vanished before it could be imported; stopped the service, nothing imported"
+fi
+export WAYLAND_DISPLAY
+
+# The two display variables, into the user manager AND the D-Bus
+# activation environment together (`--systemd` does both): units
+# ordered after the session target inherit them from the manager, and
+# D-Bus-activated portals (which inherit the bus's environment, not any
+# client's) see them on the bus. This overwrites whatever the `--all`
+# sweep above carried for these two names (a greeter-owned display, an
+# unset desktop), so the session's own values win. Scoped to these two
+# because the login half was the place for the whole environment. This
+# is the same two-var line `docs/configuration.md` gives session
+# scripts; here the launcher owns it, so systemd sessions need no script
+# line, and the manual line stays for non-systemd setups.
+if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP \
+        || note "warning: could not update the D-Bus activation environment; portals may miss this session"
+else
+    note "warning: no dbus-update-activation-environment on PATH; the user manager has the display, D-Bus-activated portals may miss this session"
+fi
+
+# The session is up. Wait for it to end: scoot exiting (a `quit` action,
+# a crash) inactivates the service, which ends this wait. One poll a
+# second costs nothing next to a compositor and needs no bus monitor.
+# (`cleanup` and the traps are defined up top, right after the
+# environment capture, so the readiness wait above is covered too.)
+while systemctl --user --quiet is-active "$SERVICE"; do
+    sleep 1
+done
+
+trap - HUP INT TERM
+cleanup
+
+# Propagate the compositor's own exit status when it has one, so a
+# greeter (or a log) sees a crash as a crash.
+status=$(systemctl --user show --property ExecMainStatus --value "$SERVICE" 2>/dev/null) || status=""
+case "$status" in
+    '' | *[!0-9]*) exit 0 ;;
+    *) exit "$status" ;;
+esac
