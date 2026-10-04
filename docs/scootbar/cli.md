@@ -1853,7 +1853,7 @@ icon-charging = "\U000F0084"   # battery-charging
 icon-full = "\U000F0079"       # battery
 
 [brightness]
-icon = ["\U000F00DA", "\U000F00DC", "\U000F00DE", "\U000F00E0"]   # brightness-1, brightness-3, brightness-5, brightness-7: dim to bright
+icon = ["\U000F00DD", "\U000F00DE", "\U000F00DF", "\U000F00E0"]   # brightness-4, brightness-5, brightness-6, brightness-7: dim to bright, a sun at every level
 
 [bluetooth]
 icon-off = "\U000F00B2"        # bluetooth-off

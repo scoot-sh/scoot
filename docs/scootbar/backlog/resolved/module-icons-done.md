@@ -55,7 +55,7 @@ Icon themes (`IconName` lookups, as the tray needs:
 [tray-icon-themes](tray-icon-themes.md) once #405 lands), and colored or
 per-state icon colors (a later theming entry if the maintainer wants one).
 
-## Resolution (2026-10-04, PR #411)
+## Resolution (2026-10-03, PR #411)
 
 Landed as `feat(scootbar): icons on battery, brightness, bluetooth, media
 and window-title`, on the shape `network-signal-icon` establishes (one
@@ -102,13 +102,17 @@ dead-code failures failing identically on main (`brightness+clock`'s
 `Input.at`, `window-title+clock`'s `ArgKind` variants); `fmt --check`
 and `scripts/backlog check` clean (the 3 check problems pre-date this).
 Live on the Asahi M2 (real battery at 100% Full, backlight 107/509,
-wlan0 at −54 dBm, bluetooth on, audio at 49%): `micons-a-top.png`
-(every module placed and iconed, light palette), `micons-b-top.png`
+wlan0 at −54 dBm, bluetooth on, audio at 49%): `micons-icons.png`
+(every module placed and iconed, light palette), `micons-icon-only.png`
 (`show-text = false` on brightness and bluetooth),
-`micons-c-top.png` (the `apple-panel-bl: 21%` tooltip on the icon-only
+`micons-tooltip.png` (the `apple-panel-bl: 21%` tooltip on the icon-only
 brightness). No media player was running on the box, so media hides
 there; none was started. Ratchet (release, Asahi): `.text` 1,609,032 →
 1,622,344 (+13,312 B, +0.8%), file size unchanged at 2,101,984 B both;
 idle with the modules placed 5776 kB RSS and 12–16 wakeups/20 s before
 and after (the iconed bar is 6368 kB: +592 kB is the Nerd Font fallback
 file, the documented cost of any fallback font).
+
+**Maintainer's ruling (2026-10-03, given in chat): the `.text` growth of
+the module icons is waived.** It covers that row only: `.text` +13,312 B
+(+0.8%); the file does not grow. Nothing else is waived.
