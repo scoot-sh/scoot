@@ -57,7 +57,11 @@
 //!
 //! One file in this directory, one line in [`REGISTRY`], one Cargo feature
 //! in `Cargo.toml` (so a build can leave it out), and tests through
-//! [`harness`] in `<id>/tests.rs`. A module whose `init` probes for
+//! [`harness`] in `<id>/tests.rs`. The daemon help's `Modules:` line is
+//! built from [`REGISTRY`] at run time, so it needs nothing more; only a
+//! module with behavior worth documenting adds a `*_help!` section in
+//! `cli.rs` (one `#[cfg]`-gated arm per shape it takes) and one line
+//! assembling it into the daemon help. A module whose `init` probes for
 //! something a test machine may lack (a battery, a backlight) also gives
 //! its registry line a [`Spec::stand_in`], so the contract test in
 //! `tests.rs` exercises it everywhere. A module that answers actions lists

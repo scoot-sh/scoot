@@ -131,7 +131,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 - [An icon on exec and push modules](payload-icons.md) (low): the last modules without one
 - [Separators between groups of modules](separator-groups.md) (low): a line between groups, not every pair
 - [Popups that match rounded windows](popup-corners.md) (low): corners for the popups
-- [The help's module list doubles with every module](cli-help-matrix.md) (medium): 519 macro arms after the power module; build it at run time
+- [The help's module list doubles with every module](resolved/cli-help-matrix-done.md) (medium): 519 macro arms after the power module; build it at run time — RESOLVED 2026-10-04 in #417
 - [Network: a second radio's empty scan replaces the real one](network-multi-radio-scan.md) (medium): the last interface's scan dump wins, so a dongle or hotspot interface can empty the list (#403 review)
  - [Network: WiFi signal as a strength icon, not text bars](resolved/network-signal-icon-done.md) (medium): the icon shows the strength, the text is just the SSID
 - [Tray: themed icon names](tray-icon-themes.md) (medium), [Tray: real Qt, GTK and Electron apps](tray-real-apps.md) (medium), [Tray: session buses on abstract sockets](tray-abstract-socket.md) (low), [Tray: coalesce a runaway item's redraws](tray-redraw-coalesce.md) (low): split out of the tray when its menus landed
