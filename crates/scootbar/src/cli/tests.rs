@@ -431,7 +431,8 @@ fn the_help_matches_the_build() {
     }
     assert_eq!(DAEMON_HELP.contains("the power module"), has_power);
     assert_eq!(DAEMON_HELP.contains("power.lock-command"), has_power);
-    assert_eq!(DAEMON_HELP.contains("power"), has_power);
+    // (Bare "power" collides with the bluetooth text's "adapter's power".)
+    assert_eq!(DAEMON_HELP.contains("power.icon"), has_power);
     // Power sorts after network and before tray, so with them the list
     // names it there.
     if has_network && has_power {
