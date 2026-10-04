@@ -25,8 +25,9 @@ The packages are `buildRustPackage` derivations, which compile the whole
 dependency graph (the `scoot-sh/smithay` fork and the `scoot-sh/wayland-rs`
 `wayland-backend` patch included) inside each package's one derivation. So
 any change to scoot's own code changes the package hash and Smithay
-compiles from scratch again, once per package (`scoot`, `scootctl`,
-`scootbg`), on every merge: Cachix then serves installs of an unchanged
+compiles from scratch again, once per package (`scoot`,
+`scoot-gpu-xwayland`, `scootctl`, `scootbg`, `scootbar`, `scootbar-demo`),
+on every merge: Cachix then serves installs of an unchanged
 revision but saves CI nothing. Moving the Rust builds to crane
 (`buildDepsOnly` → a dependency-artifacts derivation keyed on `Cargo.lock`
 and the dependency sources, forks included) puts the compiled dependencies
