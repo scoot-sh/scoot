@@ -412,7 +412,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Publish: binaries on Cachix, the flake on FlakeHub](resolved/nix-publishing-done.md) (medium) — RESOLVED 2026-10-04 in #410
 - [Nix: crane, so compiled dependencies are cached](./packaging/nix-crane.md) — medium: ready now that Cachix receives pushes
 - [A user-facing docs site, with internal notes moved out of docs/](packaging/docs-site.md) (medium): an outline for the maintainer first
-- [A systemd session for scoot](./packaging/scoot-systemd-session.md) — medium: greeter-started sessions get `graphical-session.target`, the activation environment and a clean shutdown
+- [A systemd session for scoot](resolved/scoot-systemd-session-done.md) (medium) — RESOLVED 2026-10-04 in #416: greeter-started sessions get `graphical-session.target`, the activation environment and a clean shutdown
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**

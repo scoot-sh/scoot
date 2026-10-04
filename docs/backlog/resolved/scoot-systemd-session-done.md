@@ -1,9 +1,10 @@
 ---
 title: "A systemd session for scoot: greeter-started sessions get graphical-session.target, the activation environment and a clean shutdown"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-04"
 ---
 
 # A systemd session for scoot: greeter-started sessions get graphical-session.target, the activation environment and a clean shutdown
@@ -134,3 +135,58 @@ the launcher does the readiness wait and the import:
   that exists (no signal to reuse), and adding bus-adjacent startup
   protocol to the compositor cuts against the kept decision above.
 - xdg-desktop-autostart execution, per above.
+
+## Resolution (PR #416, 2026-10-04)
+
+Landed as designed, with five live-found fixes (each re-verified):
+
+1. Display discovery by `/proc` MainPID environ does not work:
+   `set_var` moves `environ` off the initial stack while
+   `/proc/PID/environ` keeps the exec-time copy (a compositor answering
+   IPC showed no `WAYLAND_DISPLAY` there). Discovery is socket
+   difference instead.
+2. The readiness poll had no per-attempt timeout and wedged on a
+   mid-startup connection the loop never answers (launcher stuck in
+   `do_wait` 01:14 live). Attempts run under `timeout 2`.
+3. `systemctl --user --wait start` hangs forever on systemd 261 user
+   managers even for already-active units, with no job queued (measured
+   twice, including on a trivial active sleep unit). Plain `start` plus
+   the loop's liveness check instead.
+4. Name-only socket snapshots miss stale reuse (scoot rebinds a stale
+   name, same name, new inode — a healthy session was stopped as "0 new
+   sockets"). Snapshots compare name *and* inode, and a vanishing
+   socket is its own refusal.
+5. `die()` paths skipped env restore (a failed run's defaulted desktop
+   leaked into the next run's "pre-session" values). Restore runs on
+   every post-capture exit; the pre-capture refusal never touches
+   another session's environment.
+
+Evidence (dev VM, `ssh -p 2222 dev@localhost`, tree at PR #416 head
+`07b1dfc25` unless noted):
+
+- `nix flake check`: all checks passed (aarch64-linux; includes the new
+  unit/entry/greeter eval pins and all pre-existing pins).
+- Fail-first: new unit pins against the old module fail at eval on
+  `osSession...units ? "scoot.service"` (thrown copy); greeter forcing
+  reverted fails on `allAssertionsHold osGreeter.config`. Restored, both
+  pass.
+- Live login (prebuilt `/var/cargo-target/debug/scoot`, Oct 1 — no Rust
+  changes in this ticket; disk 97%/1.2G free, no rebuild room): units
+  installed to `~/.config/systemd/user`, launcher run over ssh.
+  While running: `scoot.service`, `graphical-session.target` and a
+  `WantedBy` probe unit all `active`; manager env carried
+  `WAYLAND_DISPLAY=wayland-2` + `XDG_CURRENT_DESKTOP=scoot`; the D-Bus
+  activation env carried both; a second launcher run refused with exit
+  1. After `scoot msg action quit`: all four units `inactive`, both
+  manager variables unset, launcher exited.
+- `shellcheck -S warning resources/scoot-session`: clean.
+  `nix fmt -- --check` on touched nix files: clean.
+- nixosTest skipped: 1.2G free cannot build a VM image (brief made it
+  conditional); eval pins are the coverage, matching repo practice (no
+  `nixosTest` anywhere in CI).
+- Greeter scope change mid-work (coordinator): the first "no greeter"
+  decision was replaced by the thin `programs.scoot.greeter.enable`
+  over nixpkgs' `services.displayManager.regreet` (default false, GDM /
+  SDDM refused at eval, Stylix conflict refused at eval after verifying
+  Stylix's own regreet target sets the same `background.path`). Hosting
+  ReGreet inside scoot stays out of scope (locked-down profile).
