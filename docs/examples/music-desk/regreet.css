@@ -1,0 +1,59 @@
+/* The "music desk" look for ReGreet: paper, ink and the headphone blue.
+ *
+ * Copy this beside your NixOS configuration and point
+ * `services.displayManager.regreet.extraCss` at it (see README.md in this
+ * directory for the whole snippet).
+ *
+ * Nothing here is a default: every rule below is opt-in through that option.
+ *
+ * The card rules scope to `frame.background`, not bare `frame`: ReGreet's
+ * login card and its clock card both carry the `background` CSS class, while
+ * the third frame -- the empty notification bar above Reboot/Power Off --
+ * carries none (read against ReGreet 0.5.0's `src/gui/templates.rs`). A bare
+ * `frame` rule also inks that empty bar, leaving a blank card when there is
+ * nothing to report (GTK CSS has no `:empty`). Likewise a bare `label` rule
+ * inks button labels too, so colored buttons would need
+ * `button.suggested-action label` rules of their own; this light look sets
+ * the button text through the button instead.
+ */
+window {
+  font-family: "DroidSansM Nerd Font Propo";
+}
+frame.background {
+  background-color: alpha(#FCFBFB, 0.86);
+  border-radius: 14px;
+  padding: 20px 26px;
+  box-shadow: 0 10px 32px alpha(#1A2032, 0.18);
+  color: #1A2032;
+}
+frame.background > border {
+  border: none;
+}
+label {
+  color: #1A2032;
+}
+button, entry, dropdown > button, combobox > box > button {
+  border-radius: 10px;
+}
+button.suggested-action {
+  background: #3D579A;
+  color: #FCFBFB;
+  border: none;
+  padding: 6px 18px;
+}
+button.suggested-action:hover {
+  background: #5D7AB0;
+}
+button.destructive-action {
+  background: alpha(#FCFBFB, 0.86);
+  color: #EE6F5E;
+  border: 2px solid alpha(#EE6F5E, 0.6);
+  padding: 4px 16px;
+}
+button.destructive-action:hover {
+  background: #EE6F5E;
+  color: #FCFBFB;
+}
+entry:focus-within {
+  outline-color: #3D579A;
+}

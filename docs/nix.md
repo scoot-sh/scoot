@@ -535,10 +535,11 @@ programs.scoot = {
 This is a thin convenience over nixpkgs' own
 `services.displayManager.regreet`: it turns that on (greetd running
 ReGreet under cage — ReGreet runs in cage, never inside scoot), forces
-`session.enable` on so the greeter lists a scoot session, and
-optionally names ReGreet's backdrop. Hosting a pre-login greeter inside
-scoot itself would need a locked-down scoot profile (no binds, no IPC
-socket) and is out of scope — a possible later step, not this option.
+`session.enable` on so the greeter lists a scoot session, confines cage
+to one output (below), and optionally names ReGreet's backdrop. Hosting
+a pre-login greeter inside scoot itself would need a locked-down scoot
+profile (no binds, no IPC socket) and is out of scope — a possible later
+step, not this option.
 
 What it changes, plainly: the machine boots to ReGreet instead of
 whatever login screen it had. It never becomes the default unless set —
@@ -549,6 +550,15 @@ It refuses at eval beside GDM or SDDM (two owners for one login
 screen); anything else owning it (lemurs, ly, a hand-rolled greetd)
 must be turned off by hand.
 
+One screen, not the whole layout: cage spans every output by default
+(nixpkgs' `cageArgs` default `[ "-s" "-d" ]`), so on a multi-output box
+ReGreet's window covers the layout bounding box and the login card lands
+near one screen's edge. This module sets `cageArgs` to `[ "-s" "-d" "-m"
+"last"` instead — cage on a single output, the shape nixpkgs documents
+as its own `cageArgs` example — at `mkDefault` priority, so anything you
+set wins and nixpkgs' spanning default loses. Back to spanning with
+`services.displayManager.regreet.cageArgs = [ "-s" "-d" ];`.
+
 Theming: `greeter.background` becomes ReGreet's `background.path` (the
 file is copied to the store — point it at the same image as the
 session wallpaper to match). There is no `fit` knob here; ReGreet's
@@ -558,6 +568,26 @@ over this path for the backdrop itself: leave `background` null then).
 Under Stylix with its regreet target enabled, leave `background` null:
 Stylix sets the backdrop from `stylix.image` (plus its fit mapping,
 fonts, and GTK CSS) itself, and setting both is refused at eval.
+
+The rest of the styling is nixpkgs' own ReGreet options, and each
+example look ships a stylesheet plus a NixOS snippet to match it:
+[`music-desk`](examples/music-desk/regreet.css) (light),
+[`vinyl-sunset`](examples/vinyl-sunset/regreet.css) (dark, with
+`application_prefer_dark_theme`), and
+[`radial-burst`](examples/radial-burst/regreet.css) (dark, mixed from
+the palette without a live session in front of it). Point
+`services.displayManager.regreet.extraCss` at one, set
+`font.package`/`font.name`/`font.size` to match (the sheets assume
+`DroidSansM Nerd Font Propo` 12 from `pkgs.nerd-fonts.droid-sans-mono`),
+and tune `settings.background.fit` and
+`settings.widget.clock.format` beside them — each look's README has the
+whole snippet. Two GTK4 gotchas the sheets already handle: a bare
+`label` rule also inks button labels, so colored buttons need
+`button.suggested-action label` rules of their own; and the card rules
+scope to `frame.background` rather than bare `frame`, which keeps
+ReGreet's empty notification bar (no CSS class, unlike the login and
+clock cards — read against ReGreet 0.5.0's `src/gui/templates.rs`) from
+drawing a blank card when there is nothing to report.
 
 A complete session, as one config — startup programs as config (the
 wired route: they run inside the session the launcher wires up), the

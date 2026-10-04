@@ -444,6 +444,23 @@ in
       # IPC socket), which is out of scope -- see docs/nix.md.
       services.displayManager.regreet = {
         enable = true;
+        # One screen, not the whole layout: cage spans every output by
+        # default (nixpkgs' `cageArgs` default `[ "-s" "-d" ]`), so on a
+        # multi-output box ReGreet's window covers the layout bounding
+        # box and the login card lands near one screen's edge (seen on a
+        # laptop with an external monitor: 2560x1600 plus 1920x1080 drew
+        # a 4480x1600 window). `-m last` confines cage to a single
+        # output, which is also the shape nixpkgs documents as its
+        # `cageArgs` example. Plain `mkDefault` priority: it beats
+        # nixpkgs' option default, and anything the user sets beats it
+        # (both halves pinned in `nix/tests.nix`). Back to spanning with
+        # `services.displayManager.regreet.cageArgs = [ "-s" "-d" ]`.
+        cageArgs = lib.mkDefault [
+          "-s"
+          "-d"
+          "-m"
+          "last"
+        ];
         # The whole table or nothing: a `path`-only `mkIf` would leave
         # an empty `[background]` behind when `background` is null.
         settings.background = lib.mkIf (cfg.greeter.background != null) {

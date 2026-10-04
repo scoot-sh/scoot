@@ -17,6 +17,7 @@ scootbar or scootbg changes unless you use these files.
 | [`btop.conf`](btop.conf) | btop: a light transparent theme |
 | [`lazygit.yml`](lazygit.yml) | lazygit: the palette, rounded borders |
 | [`load.sh`](load.sh), [`cpu.sh`](cpu.sh) | the bar's `load` and `cpu` modules: load average and CPU percent on stdout |
+| [`regreet.css`](regreet.css) | ReGreet: the login screen in paper, ink and headphone blue (NixOS greeter) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
 modules install it when the settings have a `[wallpaper]` table, from source
@@ -42,6 +43,37 @@ To keep it, copy the files to your config directory (`~/.config/scoot/config.tom
 a copy of the wallpaper. The prompt in the preview runs under
 `STARSHIP_CONFIG` pointing at `starship.toml`, e.g.
 `env STARSHIP_CONFIG=~/.config/starship.toml bash -i`.
+
+## The login screen
+
+On NixOS the greeter can wear this look too. Copy `regreet.css` and
+`docs/assets/wallpapers/music-desk.png` next to your system configuration:
+
+```nix
+programs.scoot = {
+  enable = true;
+  greeter = {
+    enable = true;
+    background = ./music-desk.png;
+  };
+};
+services.displayManager.regreet = {
+  extraCss = ./regreet.css;
+  font = {
+    package = pkgs.nerd-fonts.droid-sans-mono;
+    name = "DroidSansM Nerd Font Propo";
+    size = 12;
+  };
+  settings = {
+    background.fit = "Cover";
+    widget.clock.format = "%-I:%M %P";
+  };
+};
+```
+
+A light look, so no dark-theme switch. See [the greeter
+docs](../../nix.md#the-greeter-regreet-opt-in) for the one-screen default and
+the other knobs.
 
 ## The palette
 

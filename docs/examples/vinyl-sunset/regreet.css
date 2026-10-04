@@ -1,0 +1,70 @@
+/* The "vinyl sunset" look for ReGreet: espresso, cream and sunset orange.
+ * Pair it with `application_prefer_dark_theme = true` (see README.md in this
+ * directory for the whole snippet).
+ *
+ * Copy this beside your NixOS configuration and point
+ * `services.displayManager.regreet.extraCss` at it.
+ *
+ * Nothing here is a default: every rule below is opt-in through that option.
+ *
+ * The card rules scope to `frame.background`, not bare `frame`: ReGreet's
+ * login card and its clock card both carry the `background` CSS class, while
+ * the third frame -- the empty notification bar above Reboot/Power Off --
+ * carries none (read against ReGreet 0.5.0's `src/gui/templates.rs`). A bare
+ * `frame` rule also inks that empty bar, leaving a blank card when there is
+ * nothing to report (GTK CSS has no `:empty`). Likewise a bare `label` rule
+ * inks button labels too, so the colored buttons below name their labels
+ * explicitly.
+ */
+window {
+  font-family: "DroidSansM Nerd Font Propo";
+}
+frame.background {
+  background-color: alpha(#271A1F, 0.84);
+  border-radius: 12px;
+  padding: 20px 26px;
+  box-shadow: 0 10px 32px alpha(#000000, 0.35);
+  color: #F1E3C6;
+}
+frame.background > border {
+  border: none;
+}
+label {
+  color: #F1E3C6;
+}
+button, entry, dropdown > button, combobox > box > button {
+  border-radius: 10px;
+}
+entry, dropdown > button, combobox > box > button, button.image-button {
+  background: alpha(#423F51, 0.75);
+  color: #F1E3C6;
+  border: 1px solid alpha(#604F50, 0.8);
+}
+button.suggested-action {
+  background: #E59560;
+  border: none;
+  padding: 6px 18px;
+}
+button.suggested-action label {
+  color: #271A1F;
+}
+button.suggested-action:hover {
+  background: #FDC58B;
+}
+button.destructive-action {
+  background: alpha(#271A1F, 0.84);
+  border: 2px solid alpha(#C76B47, 0.7);
+  padding: 4px 16px;
+}
+button.destructive-action label {
+  color: #E0866A;
+}
+button.destructive-action:hover {
+  background: #C76B47;
+}
+button.destructive-action:hover label {
+  color: #F6EAD2;
+}
+entry:focus-within {
+  outline-color: #E59560;
+}
