@@ -122,6 +122,69 @@ else
     try_version() { "$SCOOT_BIN" msg version >/dev/null 2>&1; }
 fi
 
+# Telling "the service is not active" from "the manager could not be
+# asked": every NixOS switch re-execs every user manager, and while the
+# manager is gone (a sub-second window) `systemctl --user` cannot be
+# asked at all -- it exits 1, which `is-active --quiet` reads as
+# "inactive", ending the session and orphaning the compositor. So no
+# liveness question here goes through `is-active` or `is-failed`: the
+# primitive is `show -p ActiveState --value`, whose nonzero exit means
+# "could not ask" and whose printed state is the definite answer. (This
+# is also what systemctl(1) in the shipped systemd 261 says to do: its
+# Exit-status section calls the LSB return-code mapping imperfect and
+# says "it is better to not rely on those return values but to look for
+# specific unit states and substates instead." Measured on 261: a
+# known-inactive unit shows `inactive` (rc 0; `is-active` rc 3), an
+# unknown unit shows `inactive` (rc 0; `is-active` rc 4), an unreachable
+# manager fails rc 1 both ways.)
+#
+# service_state <unit>: print the unit's ActiveState; exit 1 when the
+# manager could not be asked (or answered empty, which must never read
+# as idle).
+service_state() {
+    _scoot_state=$(systemctl --user show -p ActiveState --value "$1" 2>/dev/null) || return 1
+    [ -n "$_scoot_state" ] || return 1
+    printf '%s' "$_scoot_state"
+}
+# unit_up <state>: exit 0 when an ActiveState string means the unit is
+# here or on its way up. `activating` counts: measured on 261,
+# `is-active` reports 3 all through `ExecStartPre` while the start job
+# runs, and a unit mid-start is not a stopped unit (the old code died
+# "stopped while starting" if its first readiness poll landed there --
+# masked only because the `version` probe runs first). `reloading`
+# counts the same way: a reloading service is running. Everything else
+# -- `inactive`, `deactivating`, `failed` -- is down, exactly as
+# `is-active` read it before.
+unit_up() {
+    case "$1" in
+        active | activating | reloading) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+# service_up <unit>: exit 0 up, 1 definitely down, 2 the manager could
+# not be asked. Callers retry on 2 (bounded, loudly) and only act on a
+# definite answer.
+service_up() {
+    _scoot_up=$(service_state "$1") || return 2
+    unit_up "$_scoot_up"
+}
+# stop_service: `stop` until the manager answers, bounded. The teardown
+# paths below promise "stopped the service" in their `die` lines; a
+# single unanswered call during a re-exec must not make that a lie (nor
+# orphan the unit). Past the bound the caller still dies -- the next
+# login heals or refuses the leftover -- but says so.
+stop_service() {
+    _scoot_tries=0
+    while ! systemctl --user stop "$SERVICE" >/dev/null 2>&1; do
+        _scoot_tries=$((_scoot_tries + 1))
+        if [ "$_scoot_tries" -ge 5 ]; then
+            return 1
+        fi
+        sleep 1
+    done
+    return 0
+}
+
 if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
     die "XDG_RUNTIME_DIR is unset; cannot find the compositor's sockets"
 fi
@@ -180,7 +243,17 @@ if [ "$have_flock" -eq 1 ] && [ "$have_lock" -eq 0 ]; then
     die "a scoot session is already starting or running for this user"
 fi
 
-if systemctl --user --quiet is-active "$SERVICE" "$GRAPHICAL"; then
+# Three-way liveness, never two-way: if the manager cannot be asked
+# (mid-re-exec), neither "live" nor "stale" is known -- refusing the
+# login is the safe direction (a retry lands past the window), while
+# healing blind could stop a live session and proceeding blind could
+# start a second one over it.
+svc_state=$(service_state "$SERVICE") || svc_state="unknown"
+gfx_state=$(service_state "$GRAPHICAL") || gfx_state="unknown"
+if [ "$svc_state" = "unknown" ] || [ "$gfx_state" = "unknown" ]; then
+    die "cannot reach the systemd user manager; refusing this login rather than judging a session that may be live (retry the login)"
+fi
+if unit_up "$svc_state" || unit_up "$gfx_state"; then
     # A live session refuses: two live scoot sessions for one user on
     # one seat is still wrong. A stale one -- units left active with
     # no lock holder by a launcher that died without cleanup (SIGKILL,
@@ -207,17 +280,27 @@ if systemctl --user --quiet is-active "$SERVICE" "$GRAPHICAL"; then
     if try_version; then
         die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
     fi
-    if systemctl --user --quiet is-active "$SERVICE" || systemctl --user --quiet is-failed "$SERVICE"; then
+    # Re-asked (the manager may have re-execed since the check above):
+    # an unanswerable manager refuses, never heals blind. Heals when the
+    # service is up or failed; a unit stopping on its own
+    # (`deactivating`) is not ours to clear -- refusing one login beats
+    # fighting its teardown (it settles in seconds, the retry proceeds).
+    svc_state=$(service_state "$SERVICE") || svc_state="unknown"
+    if [ "$svc_state" = "unknown" ]; then
+        die "cannot reach the systemd user manager; refusing this login rather than judging a session that may be live (retry the login)"
+    fi
+    if unit_up "$svc_state" || [ "$svc_state" = "failed" ]; then
         note "found $SERVICE or $GRAPHICAL active but the compositor does not answer IPC; clearing the stale session"
-        systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
+        stop_service || note "warning: could not stop $SERVICE; it may still be active (a later login heals or refuses it)"
         systemctl --user reset-failed "$SERVICE" >/dev/null 2>&1 || true
     else
         die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
     fi
 fi
 
-# A previous crash leaves the unit in `failed`, which `start` would still
-# honour but `is-active` polling below would misread on the first round.
+# A previous crash leaves the unit in `failed`, which `start` would
+# still honour: clear the failed state (and the rate-limit counters)
+# so the polls below read the new start, not the old death.
 systemctl --user reset-failed "$SERVICE" >/dev/null 2>&1 || true
 
 # The Wayland sockets already here (stale ones from dead sessions,
@@ -255,7 +338,20 @@ captured=1
 # service active and refuse every later login. An early `start
 # "$SHUTDOWN"` with no service yet is a harmless no-op (`|| true`).
 cleanup() {
-    systemctl --user start --job-mode=replace-irreversibly "$SHUTDOWN" >/dev/null 2>&1 || true
+    # The manager may be mid-re-exec at this very moment (a re-exec
+    # landing on the session wait kills the wait AND this call
+    # together): retry until it answers, bounded, so one unanswered
+    # call never orphans the compositor. Past the bound the manager is
+    # gone with the session, and there is nothing left to stop.
+    _scoot_tries=0
+    while ! systemctl --user start --job-mode=replace-irreversibly "$SHUTDOWN" >/dev/null 2>&1; do
+        _scoot_tries=$((_scoot_tries + 1))
+        if [ "$_scoot_tries" -ge 10 ]; then
+            note "user manager still not answering; could not stop $SHUTDOWN after ${_scoot_tries} tries"
+            break
+        fi
+        sleep 1
+    done
     restore_display_env
 }
 trap 'cleanup; exit 129' HUP
@@ -310,11 +406,18 @@ while :; do
     if try_version; then
         break
     fi
-    if ! systemctl --user --quiet is-active "$SERVICE"; then
+    # Only a definite down state ends the wait early: an unanswerable
+    # manager (mid-re-exec) stays inside the deadline and retries,
+    # loudly enough to explain the pause.
+    service_up "$SERVICE"
+    svc_rc=$?
+    if [ "$svc_rc" -eq 2 ]; then
+        note "user manager not answering while waiting for $SERVICE (re-exec?); retrying"
+    elif [ "$svc_rc" -ne 0 ]; then
         die "$SERVICE stopped while starting (see: journalctl --user -u $SERVICE)"
     fi
     if [ "$(date +%s)" -ge "$end" ]; then
-        systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
+        stop_service || note "warning: could not stop $SERVICE; it may still be active (a later login heals or refuses it)"
         die "$SERVICE did not answer IPC within ${READY_TIMEOUT}s (see: journalctl --user -u $SERVICE)"
     fi
     sleep 1
@@ -347,11 +450,11 @@ for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
     WAYLAND_DISPLAY=$name
 done
 if [ "$count" -ne 1 ]; then
-    systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
+    stop_service || note "warning: could not stop $SERVICE; it may still be active (a later login heals or refuses it)"
     die "found $count new Wayland sockets under \$XDG_RUNTIME_DIR after startup (expected exactly scoot's); stopped the service, nothing imported"
 fi
 if [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then
-    systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
+    stop_service || note "warning: could not stop $SERVICE; it may still be active (a later login heals or refuses it)"
     die "the new Wayland socket vanished before it could be imported; stopped the service, nothing imported"
 fi
 export WAYLAND_DISPLAY
@@ -375,11 +478,34 @@ else
 fi
 
 # The session is up. Wait for it to end: scoot exiting (a `quit` action,
-# a crash) inactivates the service, which ends this wait. One poll a
-# second costs nothing next to a compositor and needs no bus monitor.
+# a crash) inactivates the service, which ends this wait -- but only a
+# definite down state ends it. A poll the manager never answers
+# (mid-re-exec) is not "scoot exited". Unanswered polls are counted, and
+# a re-exec is sub-second, so tens of seconds of silence means the
+# manager went away with the session (logout, shutdown): then exit
+# instead of holding the liveness lock (which would refuse the next
+# login) forever. Cleanup below still runs first -- if the manager
+# answers again its retry stops the compositor; if it never does, the
+# units died with their manager and logind reaps the rest.
 # (`cleanup` and the traps are defined up top, right after the
 # environment capture, so the readiness wait above is covered too.)
-while systemctl --user --quiet is-active "$SERVICE"; do
+MANAGER_SILENCE_LIMIT=30
+silence=0
+while :; do
+    service_up "$SERVICE"
+    svc_rc=$?
+    if [ "$svc_rc" -eq 0 ]; then
+        silence=0
+    elif [ "$svc_rc" -eq 2 ]; then
+        silence=$((silence + 1))
+        note "user manager not answering while watching $SERVICE (${silence}s of ${MANAGER_SILENCE_LIMIT}s; re-exec?); still watching"
+        if [ "$silence" -ge "$MANAGER_SILENCE_LIMIT" ]; then
+            note "$SERVICE state unknown for ${MANAGER_SILENCE_LIMIT}s; assuming the session is gone"
+            break
+        fi
+    else
+        break
+    fi
     sleep 1
 done
 

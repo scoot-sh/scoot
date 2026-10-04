@@ -413,6 +413,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Nix: crane, so compiled dependencies are cached](./resolved/nix-crane-done.md) — medium: was ready once Cachix received pushes — RESOLVED 2026-10-04 in #420
 - [A user-facing docs site, with internal notes moved out of docs/](packaging/docs-site.md) (medium): an outline for the maintainer first
 - [A systemd session for scoot](resolved/scoot-systemd-session-done.md) (medium) — RESOLVED 2026-10-04 in #416: greeter-started sessions get `graphical-session.target`, the activation environment and a clean shutdown
+- [scoot-session ends the login when the user manager re-executes](resolved/session-manager-reexec-done.md) (high) — RESOLVED 2026-10-04 in #425: every NixOS switch re-execs the user manager, and one `is-active` poll inside that window read as "scoot stopped"; the launcher now tells "not active" from "could not ask"
 
 ### Security
 - [Live `wl_shm` pools per client](./resolved/shm-pool-count-cap-done.md) — RESOLVED 2026-09-17: at most 128 live pools per Wayland client (refused with `InvalidStride`, released on destroy/disconnect); the byte total stays open behind an upstream size accessor (proven unknowable at the pinned rev). **But see the entry below: the fd/mapping bound it documents is not the bound it has.**
