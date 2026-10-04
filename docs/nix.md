@@ -383,7 +383,7 @@ programs.scoot = {
   # package defaults to the flake's own scoot build, like above.
   session.enable = true;   # opt-in login-screen entry (default false)
   # Run the home-manager session script from the greeter entry
-  # (pairs with `sessionScript` above; default null is a bare `--tty`):
+  # (pairs with `sessionScript` above; default null is the `scoot-session` launcher):
   # session.command = "${config.programs.scoot.package}/bin/scoot --tty -- /home/alice/.config/scoot/session.sh";
 };
 ```
@@ -419,9 +419,20 @@ With the default entry, picking scoot at the greeter runs
 `<package>/bin/scoot-session`, the session launcher
 (`resources/scoot-session`, shipped beside the binary):
 
-1. It refuses while a scoot session is already active for the user
-   (`scoot.service` or `graphical-session.target`), so a second login
-   cannot fight the first over the user manager.
+1. It refuses while a live scoot session is already active for the
+   user (`scoot.service` or `graphical-session.target` active *and*
+   the compositor answering IPC), so a second login cannot fight the
+   first over the user manager. Units left active by a launcher that
+   died without cleanup (SIGKILL, power loss — paths no trap can
+   cover) are stale, not live: when nothing answers IPC within a
+   short probe, the launcher stops its own units (`scoot.service`,
+   plus `graphical-session.target` only when scoot itself ran in this
+   user manager — an active target with scoot's service never run is
+   another desktop's session, and the refusal stands) and continues
+   the login instead of refusing every retry. If a login ever still
+   refuses while no scoot session is running, run `systemctl --user
+   stop scoot.service graphical-session.target` from any VT or over
+   ssh, then log in again.
 2. It imports the login environment into the systemd user manager and
    the D-Bus activation environment together
    (`dbus-update-activation-environment --systemd --all`), with
