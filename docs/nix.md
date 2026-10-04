@@ -467,7 +467,11 @@ With the default entry, picking scoot at the greeter runs
    target does not hurt the new login (the display variables are
    re-imported below). Without `flock(1)` on `PATH` there is no lock
    to consult, so there is no healing: an active session is refused
-   as live, with a note on stderr. If a login ever still
+   as live, with a note on stderr. When the user manager itself cannot
+   be asked at all -- every NixOS switch re-execs it, unreachable for a
+   fraction of a second -- the launcher refuses the login rather than
+   judging a session it cannot see; retry the login, which lands past
+   the window. If a login ever still
    refuses while no scoot session is running, run `systemctl --user
    stop scoot.service graphical-session.target` from any VT or over
    ssh, then log in again.
@@ -492,6 +496,9 @@ With the default entry, picking scoot at the greeter runs
    activation environment together
    (`dbus-update-activation-environment --systemd` with exactly those
    two, overwriting whatever the first sweep carried for their names).
+   Only the service definitely stopping ends the wait early: a poll
+   the manager never answers (mid-re-exec) is retried inside the
+   deadline, with a log line, never read as "scoot stopped".
 4. Starting `scoot.service` pulls in `graphical-session.target` (the
    unit is `BindsTo`/`Before` it), so units with `WantedBy=` it — the
    status bar below — start once the session exists. The display import
@@ -504,7 +511,14 @@ With the default entry, picking scoot at the greeter runs
    manager go back to their pre-session values (restored, or unset if
    they were unset — the D-Bus activation environment has no unset, so
    the bus keeps the last values the way it does for every session),
-   and nothing leaks into the next login. The launcher exits with the
+   and nothing leaks into the next login. The wait itself tells "the
+   service stopped" from "the manager cannot be asked": unanswered
+   polls are retried with a log line, so a re-exec landing mid-session
+   never ends the login; only tens of seconds of silence -- the manager
+   gone with the session (logout, shutdown) -- ends the wait, freeing
+   the lock for the next login. Teardown retries stopping the session
+   targets until the manager answers (bounded), so one unanswered call
+   never orphans the compositor. The launcher exits with the
    compositor's own status when it has one, so a crash reads as a crash.
 
 The units live in `resources/systemd/user/` (`scoot.service`,
