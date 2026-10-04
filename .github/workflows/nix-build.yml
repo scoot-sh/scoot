@@ -86,7 +86,7 @@
 # `PATH`), `scootctl`, `scootbg`, `scootbar` and `scootbar-demo` -- built,
 # checked (`--version` each, so the artifact runs) and pushed on both
 # architectures. The in-between variants used to be deliberately left out:
-# without crane (docs/backlog/packaging/nix-crane.md) each extra package
+# without crane (docs/backlog/resolved/nix-crane-done.md) each extra package
 # derivation recompiled the whole dependency graph, so each bought one
 # more full Smithay compile per push per architecture. Under crane each
 # variant is one more compiled-dependencies derivation, rebuilt only when

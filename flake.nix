@@ -27,7 +27,7 @@
   # The Rust build library: each package below is a cheap `buildPackage`
   # over a shared `buildDepsOnly` compiled-dependencies derivation, so a
   # code-only change stops recompiling Smithay once per package
-  # (docs/backlog/packaging/nix-crane.md). Pinned by rev like nixpkgs
+  # (docs/backlog/resolved/nix-crane-done.md). Pinned by rev like nixpkgs
   # above (this is crane v0.24.0); it takes no inputs of its own, so the
   # lock gains exactly this one node. `devenv.yaml`/vm revs untouched.
   inputs.crane.url = "github:ipetkov/crane/32daa78aa882b7a43c508d1d5a5ad18a7968d731";
@@ -170,24 +170,67 @@
             doCheck = false;
           };
 
-          # The compiled dependencies, as their own store paths, one per
-          # distinct Cargo feature set -- four in all, and why not fewer:
-          # cargo unifies features across the resolve, so Smithay compiled
-          # with `backend_gbm` or `xwayland` is a different artifact than
-          # Smithay without, and sharing one would recompile Smithay inside
-          # each divergent package build, which is exactly the cost this
-          # removes. The base set is shared by `scoot`, `scootctl`,
-          # `scootbg` and `scootbar` alike: scootbar's feature flags gate
-          # only its own modules' code, and its one dependency-bearing flag
-          # (`icon-image` → `png`) names a crate the base set already
-          # compiles for scoot and scootbg, so every `.override` feature
-          # set reuses this same artifact. On Darwin the base set is
-          # scoped to the two crates that build there: the wallpaper and
-          # the bar refuse non-Linux (`compile_error!` in `scootbg-mem`),
-          # so a workspace-wide check would fail where today nothing
-          # compositor-shaped is ever compiled.
+          # The `-lEGL` link injection, shared by every derivation below that
+          # links it, so the flag string cannot drift between them. Cargo
+          # hashes `RUSTFLAGS` into every unit's fingerprint: a dependency
+          # artifact built without these flags can serve no package built
+          # with them (and vice versa) -- cargo finds no fingerprint for the
+          # differently-flagged units and recompiles the whole graph. So each
+          # artifact below carries exactly the flags of the package builds
+          # that consume it. (Measured on aarch64-linux: without this parity
+          # a code-only `scoot` rebuild recompiled all 129 units.)
+          eglRustflags = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux (
+            toString (
+              map (arg: "-C link-arg=" + arg) [
+                "-Wl,--push-state,--no-as-needed"
+                "-lEGL"
+                "-Wl,--pop-state"
+              ]
+            )
+          );
+
+          # The `-p`/feature selection, shared by each compositor dependency
+          # artifact and the package builds over it, for the same reason:
+          # cargo unifies features over the selected packages, so `-p scoot`
+          # and a workspace-wide selection resolve shared crates (serde and
+          # friends) to differently-featured, differently-hashed units, and
+          # the package build recompiles that subgraph. Reading byte-identical
+          # here on both sides is what makes the reuse real.
+          scootArgs = features:
+            "--locked -p scoot"
+            + pkgs.lib.optionalString (features != [ ]) (
+              " --features " + pkgs.lib.concatStringsSep "," features
+            );
+
+          # The compiled dependencies, as their own store paths -- one per
+          # distinct (Cargo feature set, RUSTFLAGS) pair, five in all, and
+          # why not fewer: cargo unifies features across the resolve, so
+          # Smithay compiled with `backend_gbm` or `xwayland` is a different
+          # artifact than Smithay without, and sharing one would recompile
+          # Smithay inside each divergent package build. The same holds for
+          # the flags above, which is why the compositor's set is separate
+          # from the base set: `scoot` (and the three variants) link libEGL,
+          # while the client, the wallpaper and the bar link nothing beyond
+          # what std links. The base set is shared by `scootctl`, `scootbg`
+          # and `scootbar` alike: scootbar's feature flags gate only its own
+          # modules' code, and its one dependency-bearing flag (`icon-image`
+          # → `png`) names a crate the base set already compiles for scootbg,
+          # so every `.override` feature set reuses this same artifact --
+          # up to the small subgraph whose unified features differ between
+          # the workspace-wide selection here and a `-p` selection in the
+          # package build (measured: a handful of serde-graph crates, seconds;
+          # the Smithay graph itself is shared and reused).
+          # On Darwin the base set below is scoped to the two crates that
+          # build there: the wallpaper and the bar refuse non-Linux
+          # (`compile_error!` in `scootbg-mem`), so a workspace-wide check
+          # would fail where today nothing compositor-shaped is ever
+          # compiled.
           mkDeps =
-            pname: features:
+            {
+              pname,
+              scope,
+              withEglLink ? false,
+            }:
             craneLib.buildDepsOnly (
               craneCommon
               // {
@@ -200,25 +243,54 @@
                 buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
                   import ./vm/compositor-deps.nix pkgs
                 );
-                cargoExtraArgs =
-                  if features != [ ] then
-                    "--locked -p scoot --features " + pkgs.lib.concatStringsSep "," features
-                  # No `-p` scope on Linux: the whole workspace, so one
-                  # artifact covers every default package (Darwin scopes to
-                  # the crates that build there; see the comment above).
-                  else if pkgs.stdenv.hostPlatform.isDarwin then
-                    "--locked -p scoot -p scootctl"
-                  else
-                    "--locked";
+                cargoExtraArgs = scope;
+                # Exactly the flags of the consuming package builds (see
+                # `eglRustflags` above): present here if and only if present
+                # there. Absent entirely when the consumers link nothing --
+                # an empty string would do the same work, but absence keeps
+                # `nix derivation show` honest about what the build sees.
+                env = pkgs.lib.optionalAttrs withEglLink { RUSTFLAGS = eglRustflags; };
               }
             );
-          depsBase = mkDeps "scoot" [ ];
-          depsGpuScanout = mkDeps "scoot-gpu" [ "gpu-scanout" ];
-          depsXwayland = mkDeps "scoot-xwayland" [ "xwayland" ];
-          depsGpuXwayland = mkDeps "scoot-gpu-xwayland" [
-            "gpu-scanout"
-            "xwayland"
-          ];
+          # No `-p` scope on Linux: the whole workspace, so one artifact
+          # covers every default package (Darwin scopes to the crates that
+          # build there; see the comment above).
+          depsBase = mkDeps {
+            pname = "scoot-base";
+            scope =
+              if pkgs.stdenv.hostPlatform.isDarwin then
+                "--locked -p scoot -p scootctl"
+              else
+                "--locked";
+          };
+          # The compositor's own set: `-p scoot` (byte-identical to the
+          # package build's selection via `scootArgs`) with the link flags.
+          # A separate artifact from the base set above, not a scope tweak
+          # of it: flags and scope both enter the fingerprint, so sharing
+          # would recompile one side's graph inside every build.
+          depsScoot = mkDeps {
+            pname = "scoot";
+            scope = scootArgs [ ];
+            withEglLink = true;
+          };
+          depsGpuScanout = mkDeps {
+            pname = "scoot-gpu";
+            scope = scootArgs [ "gpu-scanout" ];
+            withEglLink = true;
+          };
+          depsXwayland = mkDeps {
+            pname = "scoot-xwayland";
+            scope = scootArgs [ "xwayland" ];
+            withEglLink = true;
+          };
+          depsGpuXwayland = mkDeps {
+            pname = "scoot-gpu-xwayland";
+            scope = scootArgs [
+              "gpu-scanout"
+              "xwayland"
+            ];
+            withEglLink = true;
+          };
 
           # Arguments shared by every package build below: sources plus the
           # lock the vendor step needs, with tests off for the reasons
@@ -233,7 +305,7 @@
             cranePackage
             // {
               pname = "scoot";
-              cargoArtifacts = depsBase;
+              cargoArtifacts = depsScoot;
 
               # Just this crate, not the whole workspace: `$out/bin` carries
               # only `scoot` (the `scoot msg` alias is part of that binary,
@@ -244,7 +316,9 @@
               # binary unit enables no features on any shared crate (it
               # depends on bare `scoot-ipc` plus `serde_json`), so the
               # `scoot` unit graph is identical either way.
-              cargoExtraArgs = "--locked -p scoot";
+              # Byte-identical to the `depsScoot` selection via `scootArgs`
+              # (see above): any drift recompiles the dependency graph.
+              cargoExtraArgs = scootArgs [ ];
 
               # Read by CI (`ci.yml` asserts the feature pairs) and kept as
               # plain data: crane consumes the features through
@@ -302,15 +376,9 @@
               # libEGL to link on Darwin anyway -- the compositor is cfg'd
               # out there, so nothing reaches EGL. (Upstream niri, where this
               # trick comes from, is Linux-only and never hits the question.)
-              env.RUSTFLAGS = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux (
-                toString (
-                  map (arg: "-C link-arg=" + arg) [
-                    "-Wl,--push-state,--no-as-needed"
-                    "-lEGL"
-                    "-Wl,--pop-state"
-                  ]
-                )
-              );
+              # Shared with every `buildDepsOnly` artifact that serves a
+              # package built with these flags (see `eglRustflags` above).
+              env.RUSTFLAGS = eglRustflags;
 
               # The workspace's release profile sets `strip = true`, and unlike
               # nixpkgs' cargo hook (which used to export
@@ -457,21 +525,17 @@
               cranePackage
               // {
                 inherit pname cargoArtifacts;
-                cargoExtraArgs = "--locked -p scoot --features " + pkgs.lib.concatStringsSep "," features;
+                # Byte-identical to the serving artifact's selection (each
+                # variant names its own `deps*` artifact built with the same
+                # features through `scootArgs`); see above for why drift
+                # costs the whole dependency graph.
+                cargoExtraArgs = scootArgs features;
                 passthru.cargoBuildFeatures = features;
                 nativeBuildInputs = [ pkgs.pkg-config ];
                 buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
                   import ./vm/compositor-deps.nix pkgs
                 );
-                env.RUSTFLAGS = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux (
-                  toString (
-                    map (arg: "-C link-arg=" + arg) [
-                      "-Wl,--push-state,--no-as-needed"
-                      "-lEGL"
-                      "-Wl,--pop-state"
-                    ]
-                  )
-                );
+                env.RUSTFLAGS = eglRustflags;
                 stripAllList = [ "bin" ];
                 postInstall = ''
                   cp ${./resources/scoot-session} $out/bin/scoot-session
@@ -502,7 +566,7 @@
           scootSpec = {
             pname = "scoot";
             features = [ ];
-            cargoArtifacts = depsBase;
+            cargoArtifacts = depsScoot;
             descriptionSuffix = "";
           };
           gpuSpec = {
