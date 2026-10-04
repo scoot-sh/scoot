@@ -87,7 +87,7 @@ fn main() -> ExitCode {
         }
     };
     match command {
-        cli::Command::Help(topic) => print_out(topic.text()),
+        cli::Command::Help(topic) => print_out(topic.text().as_ref()),
         cli::Command::Version => print_out(&format!("{}\n", cli::version_string())),
         cli::Command::Daemon(command) => run_daemon(*command),
         cli::Command::Msg(msg) => run_msg(msg),

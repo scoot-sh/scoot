@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 
 use super::{
-    Command, DAEMON_HELP, Error, MSG_HELP, ModulesError, Msg, MsgError, Topic, USAGE, parse,
+    Command, Error, MSG_HELP, ModulesError, Msg, MsgError, Topic, USAGE, daemon_help, parse,
     version_string,
 };
 use crate::bar::{Bar, Edge, Layer, MAX_HEIGHT, Margin, MarginError};
@@ -69,7 +69,7 @@ fn help_and_version() {
     assert!(version_string().starts_with("scootbar "));
     assert!(USAGE.contains("scootbar daemon"));
     for flag in super::FLAGS {
-        assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
+        assert!(daemon_help().contains(flag), "{flag} is not documented");
     }
 }
 
@@ -344,113 +344,116 @@ fn the_help_matches_the_build() {
     let has_brightness = crate::modules::find("brightness").is_some();
     let has_bluetooth = crate::modules::find("bluetooth").is_some();
     let has_power = crate::modules::find("power").is_some();
-    assert_eq!(DAEMON_HELP.contains("--clock-format"), has_clock);
+    assert_eq!(daemon_help().contains("--clock-format"), has_clock);
     // Battery sorts first, then bluetooth, then brightness, so with the
     // clock the list opens with whichever of them this build has.
     if has_clock {
         match (has_battery, has_bluetooth, has_brightness) {
             (true, true, true) => {
-                assert!(DAEMON_HELP.contains("Modules: battery, bluetooth, brightness, clock"))
+                assert!(daemon_help().contains("Modules: battery, bluetooth, brightness, clock"))
             }
             (true, true, false) => {
-                assert!(DAEMON_HELP.contains("Modules: battery, bluetooth, clock"))
+                assert!(daemon_help().contains("Modules: battery, bluetooth, clock"))
             }
             (true, false, true) => {
-                assert!(DAEMON_HELP.contains("Modules: battery, brightness, clock"))
+                assert!(daemon_help().contains("Modules: battery, brightness, clock"))
             }
-            (true, false, false) => assert!(DAEMON_HELP.contains("Modules: battery, clock")),
+            (true, false, false) => assert!(daemon_help().contains("Modules: battery, clock")),
             (false, true, true) => {
-                assert!(DAEMON_HELP.contains("Modules: bluetooth, brightness, clock"))
+                assert!(daemon_help().contains("Modules: bluetooth, brightness, clock"))
             }
-            (false, true, false) => assert!(DAEMON_HELP.contains("Modules: bluetooth, clock")),
+            (false, true, false) => assert!(daemon_help().contains("Modules: bluetooth, clock")),
             (false, false, true) => {
-                assert!(DAEMON_HELP.contains("Modules: brightness, clock"))
+                assert!(daemon_help().contains("Modules: brightness, clock"))
             }
-            (false, false, false) => assert!(DAEMON_HELP.contains("Modules: clock")),
+            (false, false, false) => assert!(daemon_help().contains("Modules: clock")),
         }
     } else {
-        assert!(!DAEMON_HELP.contains("Modules: clock"));
+        assert!(!daemon_help().contains("Modules: clock"));
     }
     assert_eq!(USAGE.contains("a clock"), has_clock);
     assert_eq!(USAGE.contains("workspaces"), has_workspaces);
     assert_eq!(
-        DAEMON_HELP.contains("the workspaces module"),
+        daemon_help().contains("the workspaces module"),
         has_workspaces
     );
-    assert_eq!(DAEMON_HELP.contains("ext-workspace-v1"), has_workspaces);
-    assert_eq!(DAEMON_HELP.contains("the window-title module"), has_title);
+    assert_eq!(daemon_help().contains("ext-workspace-v1"), has_workspaces);
+    assert_eq!(daemon_help().contains("the window-title module"), has_title);
     assert_eq!(
-        DAEMON_HELP.contains("wlr-foreign-toplevel-management-v1"),
+        daemon_help().contains("wlr-foreign-toplevel-management-v1"),
         has_title
     );
-    assert_eq!(DAEMON_HELP.contains("window-title"), has_title);
-    assert_eq!(DAEMON_HELP.contains("the battery module"), has_battery);
-    assert_eq!(DAEMON_HELP.contains("battery.warn-below"), has_battery);
-    assert_eq!(DAEMON_HELP.contains("battery"), has_battery);
+    assert_eq!(daemon_help().contains("window-title"), has_title);
+    assert_eq!(daemon_help().contains("the battery module"), has_battery);
+    assert_eq!(daemon_help().contains("battery.warn-below"), has_battery);
+    assert_eq!(daemon_help().contains("battery"), has_battery);
     let has_network = crate::modules::find("network").is_some();
-    assert_eq!(DAEMON_HELP.contains("the network module"), has_network);
-    assert_eq!(DAEMON_HELP.contains("network.menu-command"), has_network);
-    assert_eq!(DAEMON_HELP.contains("network"), has_network);
+    assert_eq!(daemon_help().contains("the network module"), has_network);
+    assert_eq!(daemon_help().contains("network.menu-command"), has_network);
+    assert_eq!(daemon_help().contains("network"), has_network);
     assert_eq!(
-        DAEMON_HELP.contains("the brightness module"),
+        daemon_help().contains("the brightness module"),
         has_brightness
     );
-    assert_eq!(DAEMON_HELP.contains("brightness.step"), has_brightness);
-    assert_eq!(DAEMON_HELP.contains("brightness"), has_brightness);
+    assert_eq!(daemon_help().contains("brightness.step"), has_brightness);
+    assert_eq!(daemon_help().contains("brightness"), has_brightness);
     let has_tray = crate::modules::find("tray").is_some();
-    assert_eq!(DAEMON_HELP.contains("the tray module"), has_tray);
-    assert_eq!(DAEMON_HELP.contains("StatusNotifierItem"), has_tray);
-    assert_eq!(DAEMON_HELP.contains("tray"), has_tray);
+    assert_eq!(daemon_help().contains("the tray module"), has_tray);
+    assert_eq!(daemon_help().contains("StatusNotifierItem"), has_tray);
+    assert_eq!(daemon_help().contains("tray"), has_tray);
     // Tray sorts after network, so with both the list names it there
     // (after power, when the power module is in the build).
     if has_network && has_tray {
         if has_power {
-            assert!(DAEMON_HELP.contains("network, power, tray"));
+            assert!(daemon_help().contains("network, power, tray"));
         } else {
-            assert!(DAEMON_HELP.contains("network, tray"));
+            assert!(daemon_help().contains("network, tray"));
         }
     }
     let has_media = crate::modules::find("media").is_some();
-    assert_eq!(DAEMON_HELP.contains("the media module"), has_media);
-    assert_eq!(DAEMON_HELP.contains("MPRIS"), has_media);
-    assert_eq!(DAEMON_HELP.contains("media.player"), has_media);
+    assert_eq!(daemon_help().contains("the media module"), has_media);
+    assert_eq!(daemon_help().contains("MPRIS"), has_media);
+    assert_eq!(daemon_help().contains("media.player"), has_media);
     // Media sorts after the clock, so with both the list names it there.
     if has_clock && has_media {
-        assert!(DAEMON_HELP.contains("clock, media"));
+        assert!(daemon_help().contains("clock, media"));
     }
     let has_bluetooth = crate::modules::find("bluetooth").is_some();
-    assert_eq!(DAEMON_HELP.contains("the bluetooth module"), has_bluetooth);
-    assert_eq!(DAEMON_HELP.contains("BlueZ"), has_bluetooth);
     assert_eq!(
-        DAEMON_HELP.contains("bluetooth.menu-command"),
+        daemon_help().contains("the bluetooth module"),
+        has_bluetooth
+    );
+    assert_eq!(daemon_help().contains("BlueZ"), has_bluetooth);
+    assert_eq!(
+        daemon_help().contains("bluetooth.menu-command"),
         has_bluetooth
     );
     // Bluetooth sorts after battery, so with both the list names it there.
     if has_battery && has_bluetooth {
-        assert!(DAEMON_HELP.contains("battery, bluetooth"));
+        assert!(daemon_help().contains("battery, bluetooth"));
     }
-    assert_eq!(DAEMON_HELP.contains("the power module"), has_power);
-    assert_eq!(DAEMON_HELP.contains("power.lock-command"), has_power);
+    assert_eq!(daemon_help().contains("the power module"), has_power);
+    assert_eq!(daemon_help().contains("power.lock-command"), has_power);
     // (Bare "power" collides with the bluetooth text's "adapter's power".)
-    assert_eq!(DAEMON_HELP.contains("power.icon"), has_power);
+    assert_eq!(daemon_help().contains("power.icon"), has_power);
     // Power sorts after network and before tray, so with them the list
     // names it there.
     if has_network && has_power {
-        assert!(DAEMON_HELP.contains("network, power"));
+        assert!(daemon_help().contains("network, power"));
     }
     if has_power && has_tray {
-        assert!(DAEMON_HELP.contains("power, tray"));
+        assert!(daemon_help().contains("power, tray"));
     }
     for flag in super::FLAGS {
-        assert!(DAEMON_HELP.contains(flag), "{flag} is not documented");
+        assert!(daemon_help().contains(flag), "{flag} is not documented");
     }
-    assert!(!DAEMON_HELP.contains("wakes once a minute"));
+    assert!(!daemon_help().contains("wakes once a minute"));
 }
 
 /// The `Modules:` line names exactly the modules this build has, in
-/// alphabetical order, whichever features it was built with: the hand
-/// generated arms of `modules!` are one per combination, and a missing or
-/// misplaced name is a build whose help lies about what it can place.
+/// alphabetical order, whichever features it was built with: the line is
+/// built at run time from the registry, and a missing or misplaced name
+/// is a build whose help lies about what it can place.
 #[test]
 fn the_modules_line_is_the_registry_in_order() {
     let mut ids: Vec<&str> = crate::modules::REGISTRY
@@ -459,15 +462,13 @@ fn the_modules_line_is_the_registry_in_order() {
         .collect();
     ids.sort_unstable();
     // A build with no module says so instead of listing any.
-    let Some(at) = DAEMON_HELP.find("Modules: ") else {
+    let help = daemon_help();
+    let Some(at) = help.find("Modules: ") else {
         assert!(ids.is_empty(), "{ids:?} built, and no Modules: line");
-        assert!(DAEMON_HELP.contains("This build has none"));
+        assert!(help.contains("This build has none"));
         return;
     };
-    let line = DAEMON_HELP[at + "Modules: ".len()..]
-        .lines()
-        .next()
-        .unwrap_or("");
+    let line = help[at + "Modules: ".len()..].lines().next().unwrap_or("");
     let listed: Vec<&str> = line.split(", ").collect();
     assert_eq!(listed, ids, "{line:?}");
 }
@@ -917,7 +918,7 @@ fn check_is_a_switch_that_takes_no_value_and_may_come_once() {
 #[test]
 fn the_help_names_check() {
     assert!(USAGE.contains("scootbar daemon --check"));
-    assert!(DAEMON_HELP.contains("--check validates"));
+    assert!(daemon_help().contains("--check validates"));
 }
 
 #[test]
