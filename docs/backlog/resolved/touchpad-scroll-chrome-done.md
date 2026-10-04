@@ -68,7 +68,7 @@ nonzero value).
 
 ## What landed
 
-PR #XXX (`fix/scoot-touchpad-scroll`): `scroll_frame` in
+PR #424 (`fix/scoot-touchpad-scroll`): `scroll_frame` in
 `compositor/input.rs` (pure event-to-frame translation: real source,
 wheel `v120`, finger-zero `stop`, relative direction, `None` for
 nothing-to-send), used by the tty libinput arm, the nested host-pointer
