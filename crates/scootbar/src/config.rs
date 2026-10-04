@@ -37,6 +37,8 @@ mod custom_tests;
 #[cfg(any(
     feature = "clock",
     feature = "button",
+    feature = "push",
+    feature = "exec",
     feature = "volume",
     feature = "microphone",
     feature = "network",

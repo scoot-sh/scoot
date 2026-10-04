@@ -79,6 +79,7 @@ fn a_json_line_sets_all_three_keys() {
             text: "72%".into(),
             class: Class::Warn,
             tooltip: "battery low".into(),
+            icon: None,
         }
     );
 }
@@ -93,6 +94,7 @@ fn every_key_is_optional_and_unknown_ones_are_ignored() {
         text: "old".into(),
         class: Class::Urgent,
         tooltip: "tip".into(),
+        icon: Some('x'),
     };
     parse_line(Format::Json, br#"{"text":"new"}"#, &mut shown).unwrap();
     assert_eq!(
@@ -102,6 +104,15 @@ fn every_key_is_optional_and_unknown_ones_are_ignored() {
             ..Shown::default()
         }
     );
+    // So does a text line: a previous update's icon is cleared with it.
+    let mut shown = Shown {
+        text: "old".into(),
+        class: Class::Urgent,
+        tooltip: "tip".into(),
+        icon: Some('x'),
+    };
+    parse_line(Format::Text, b"new", &mut shown).unwrap();
+    assert_eq!(shown, Shown::text("new"));
 }
 
 #[test]
@@ -204,23 +215,131 @@ fn shown_writes_its_view_and_nothing_cut() {
         text: "72%".into(),
         class: Class::Urgent,
         tooltip: "tip".into(),
+        icon: Some('x'),
     };
     let mut view = View::default();
-    shown.write(&mut view);
+    shown.write_with(&mut view, true, None);
     assert_eq!(
-        (view.text(), view.tooltip(), view.class()),
-        ("72%", "tip", Class::Urgent)
+        (view.text(), view.tooltip(), view.class(), view.icon()),
+        ("72%", "tip", Class::Urgent, Some('x'))
     );
     assert!(!view.was_cut());
     // The widest text a payload can hold fits the view's bound exactly.
     let mut view = View::default();
-    Shown::text(&"x".repeat(MAX_PAYLOAD)).write(&mut view);
+    Shown::text(&"x".repeat(MAX_PAYLOAD)).write_with(&mut view, true, None);
     assert_eq!(view.text().len(), MAX_TEXT);
     assert!(!view.was_cut());
     // An empty one shows nothing, so the module takes no space.
     let mut view = View::default();
-    Shown::default().write(&mut view);
+    Shown::default().write_with(&mut view, true, None);
     assert!(view.is_empty());
+}
+
+#[cfg(any(feature = "push", feature = "exec"))]
+#[test]
+fn shown_with_a_static_icon_and_hidden_text() {
+    use crate::icon::Icon;
+    // The update's glyph wins over the static icon; without one the
+    // static icon shows.
+    let shown = Shown {
+        icon: Some('u'),
+        ..Shown::text("hi")
+    };
+    let mut view = View::default();
+    shown.write_with(&mut view, true, Some(&Icon::Glyph('s')));
+    assert_eq!(view.icon(), Some('u'));
+    let shown = Shown::text("hi");
+    let mut view = View::default();
+    shown.write_with(&mut view, true, Some(&Icon::Glyph('s')));
+    assert_eq!((view.text(), view.icon()), ("hi", Some('s')));
+    // `show-text = false` draws only the icon, with the text moved into
+    // the tooltip where the update named none.
+    let mut view = View::default();
+    shown.write_with(&mut view, false, Some(&Icon::Glyph('s')));
+    assert_eq!(view.text(), "");
+    assert_eq!(view.tooltip(), "hi");
+    assert_eq!(view.icon(), Some('s'));
+    // A named tooltip is kept, not overwritten by the move.
+    let shown = Shown {
+        tooltip: "tip".into(),
+        ..Shown::text("hi")
+    };
+    let mut view = View::default();
+    shown.write_with(&mut view, false, Some(&Icon::Glyph('s')));
+    assert_eq!((view.text(), view.tooltip()), ("", "tip"));
+    // Neither icon: text alone, as before.
+    let mut view = View::default();
+    shown.write_with(&mut view, true, None);
+    assert_eq!(view.text(), "hi");
+    assert!(view.icon().is_none() && view.art().is_none());
+}
+
+#[test]
+fn an_icon_key_sets_the_updates_own_glyph() {
+    let shown = line(Format::Json, r#"{"text":"hot","icon":"x"}"#).unwrap();
+    assert_eq!(shown.icon, Some('x'));
+    // Alone it is still read (the module draws it instead of its static
+    // icon, with whatever text it has, even empty).
+    let shown = line(Format::Json, r#"{"icon":"y"}"#).unwrap();
+    assert_eq!(
+        shown,
+        Shown {
+            icon: Some('y'),
+            ..Shown::default()
+        }
+    );
+    // A string value or a clear carries none.
+    let mut shown = Shown {
+        icon: Some('x'),
+        ..Shown::default()
+    };
+    from_value(&json!("sunny"), &mut shown).unwrap();
+    assert_eq!(shown.icon, None);
+}
+
+#[test]
+fn a_bad_icon_is_refused_by_name_and_changes_nothing() {
+    for (bad, want) in [
+        (r#"{"icon":""}"#, "`icon` takes exactly one character"),
+        (r#"{"icon":"ab"}"#, "`icon` takes exactly one character"),
+        (
+            "{\"icon\":\"\\u0007\"}",
+            "`icon` takes exactly one character",
+        ),
+        (r#"{"icon":5}"#, "`icon` takes a string"),
+        (r#"{"icon":null}"#, "`icon` takes a string"),
+        (r#"{"icon":["x"]}"#, "`icon` takes a string"),
+    ] {
+        let mut shown = Shown::text("kept");
+        let error = parse_line(Format::Json, bad.as_bytes(), &mut shown).unwrap_err();
+        assert!(error.to_string().contains(want), "{bad}: {error}");
+        assert_eq!(shown.text, "kept", "{bad}");
+    }
+}
+
+#[test]
+fn an_older_version_1_parser_ignores_the_icon_key() {
+    // From the code: `from_value` reads only the keys it knows (`version`,
+    // `text`, `tooltip`, `class`, now `icon`) and never looks at the rest,
+    // so a bar from before `icon` existed reads an update carrying one as
+    // if it were not there. Unknown keys besides it are ignored the same
+    // way, whatever their type.
+    let shown = line(
+        Format::Json,
+        r#"{"text":"a","icon":"x","percentage":50,"alt":["x"],"future":{"deep":[1]}}"#,
+    )
+    .unwrap();
+    assert_eq!(shown.text, "a");
+    assert_eq!(shown.icon, Some('x'));
+    // What the old bar showed for that same line: the text alone.
+    let mut old = Shown::text("before");
+    let value: Value = serde_json::from_str(r#"{"text":"a","icon":"x"}"#).unwrap();
+    let map = value.as_object().unwrap();
+    if let Some(text) = map.get("text") {
+        old.text.clear();
+        old.text.push_str(text.as_str().unwrap());
+    }
+    assert_eq!(old, Shown::text("a"));
 }
 
 #[test]

@@ -73,6 +73,7 @@ use rustix::process::{Pid, PidfdFlags, Signal, kill_process_group, pidfd_open};
 
 use super::payload::{Format, Shown, parse_line};
 use super::{Module, OutputView, Sources, Update, View};
+use crate::icon::Icon;
 use crate::print::warn;
 use backoff::Backoff;
 pub use backoff::Restart;
@@ -103,6 +104,14 @@ pub struct Settings {
     /// Shown until the first line (sanitized and bounded as any text).
     pub placeholder: String,
     pub restart: Restart,
+    /// One static glyph (or path or picture) from the icon keys, drawn
+    /// before the text. A JSON line's own `icon` is drawn instead of it
+    /// while set.
+    pub icon: Option<Icon>,
+    /// Whether the text is drawn beside the icon. `false` draws only the
+    /// icon, with the text moved into the tooltip where the line named
+    /// none.
+    pub show_text: bool,
 }
 
 /// A started child and the pipe it is read from.
@@ -467,12 +476,13 @@ impl Module for Exec {
     }
 
     fn view(&self, _: &OutputView<'_>, view: &mut View) {
-        self.shown.write(view);
+        self.shown
+            .write_with(view, self.settings.show_text, self.settings.icon.as_ref());
     }
 
     /// Continues as the config's `custom` module when it is the same
-    /// table: an equal [`Settings`] (command, format, placeholder and
-    /// restart key) means the running child, pipe, timer and shown output
+    /// table: an equal [`Settings`] (command, format, placeholder,
+    /// restart key, icon and `show-text`) means the running child, pipe, timer and shown output
     /// are still what the config asks for, so the reload keeps them
     /// instead of starting over. Any other kind, or a changed table,
     /// declines, and the old instance is dropped (killing its group).

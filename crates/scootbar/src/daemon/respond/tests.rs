@@ -72,6 +72,8 @@ fn a_font_that_vanished_refuses_before_anything_moves() {
             max: Duration::from_millis(80),
             stable: Duration::from_secs(10),
         },
+        icon: None,
+        show_text: true,
     };
     let modules = Bar {
         custom: vec![Custom {

@@ -45,6 +45,8 @@ fn settings(script: &str, format: Format) -> Settings {
         format,
         placeholder: "ph".into(),
         restart: FAST,
+        icon: None,
+        show_text: true,
     }
 }
 
@@ -327,6 +329,8 @@ fn a_command_that_cannot_start_is_retried_and_the_module_stays_up() {
         format: Format::Text,
         placeholder: "ph".into(),
         restart: FAST,
+        icon: None,
+        show_text: true,
     };
     let mut harness = Harness::new(start("test", &settings).expect("starts"));
     let start = Instant::now();
@@ -345,6 +349,8 @@ fn an_empty_command_is_a_refusal_not_a_panic() {
         format: Format::Text,
         placeholder: String::new(),
         restart: FAST,
+        icon: None,
+        show_text: true,
     };
     let mut harness = Harness::new(start("test", &settings).expect("starts"));
     let _ = harness.wait(Duration::from_millis(100));

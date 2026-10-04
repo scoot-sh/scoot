@@ -7,6 +7,8 @@ use crate::modules::{Class, MAX_TEXT};
 fn started(placeholder: &str) -> Harness {
     Harness::new(start(&Settings {
         placeholder: placeholder.into(),
+        icon: None,
+        show_text: true,
     }))
 }
 
@@ -102,4 +104,47 @@ fn a_flood_of_sets_ends_in_the_last() {
         let _ = set(&mut harness, json!(format!("n{}", i % 10))).unwrap();
     }
     assert_eq!(harness.view().text(), "n9");
+}
+
+#[test]
+fn a_static_icon_is_drawn_and_an_updates_glyph_wins() {
+    use crate::icon::Icon;
+    let mut harness = Harness::new(start(&Settings {
+        placeholder: "".into(),
+        icon: Some(Icon::Glyph('s')),
+        show_text: true,
+    }));
+    assert_eq!(harness.view().icon(), Some('s'));
+    let _ = set(&mut harness, json!({"text": "hot", "icon": "u"})).unwrap();
+    let view = harness.view();
+    assert_eq!((view.text(), view.icon()), ("hot", Some('u')));
+    // A line without one falls back to the static icon.
+    let _ = set(&mut harness, json!({"text": "warm"})).unwrap();
+    let view = harness.view();
+    assert_eq!((view.text(), view.icon()), ("warm", Some('s')));
+    // A refused icon changes nothing, static icon included.
+    let before = harness.view().icon();
+    assert!(set(&mut harness, json!({"icon": "two"})).is_err());
+    assert_eq!(harness.view().icon(), before);
+    // The icon reaches `query` as the module's glyph.
+    assert_eq!(harness.view().icon(), Some('s'));
+}
+
+#[test]
+fn show_text_false_draws_only_the_icon() {
+    use crate::icon::Icon;
+    let mut harness = Harness::new(start(&Settings {
+        placeholder: "idle".into(),
+        icon: Some(Icon::Glyph('s')),
+        show_text: false,
+    }));
+    // The placeholder is text like any update, so it hides too, with its
+    // text moved into the tooltip.
+    assert_eq!(harness.view().text(), "");
+    assert_eq!(harness.view().tooltip(), "idle");
+    assert_eq!(harness.view().icon(), Some('s'));
+    let _ = set(&mut harness, json!({"text": "hot", "tooltip": "CPU hot"})).unwrap();
+    let view = harness.view();
+    assert_eq!((view.text(), view.tooltip()), ("", "CPU hot"));
+    assert_eq!(view.icon(), Some('s'));
 }

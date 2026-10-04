@@ -6,17 +6,22 @@
 //! ## The shape, version 1
 //!
 //! ```json
-//! {"version": 1, "text": "72%", "class": "warn", "tooltip": "battery low"}
+//! {"version": 1, "text": "72%", "class": "warn", "tooltip": "battery low", "icon": "󰂁"}
 //! ```
 //!
 //! Every key is optional. `text` and `tooltip` are strings, `class` one of
 //! `normal`, `warn`, `urgent` or `muted` (what the bar colors it with, its
-//! theme's tokens), `version` the shape this was written for. **It is
+//! theme's tokens), `icon` one glyph, drawn before the text instead of the
+//! module's static icon while set, `version` the shape
+//! this was written for. **It is
 //! scootbar's own and deliberately not Waybar's**: no `alt`, `percentage`
 //! or `class` arrays, nothing to translate. Keys it does not know are
 //! ignored, so a later version can add some; a `version` it does not
 //! speak (higher than [`VERSION`]) is refused by name rather than half
-//! understood. As the value of `msg set`, a JSON string alone is the text
+//! understood. An older bar, whose version 1 speaks no `icon`, reads an
+//! update carrying one as if it were not there: the key is unknown to it,
+//! so it is ignored and the text shows as before. As the value of
+//! `msg set`, a JSON string alone is the text
 //! (`scootbar msg set weather '"sunny"'`) and `null` clears the module.
 //!
 //! ## Bounds
@@ -71,12 +76,15 @@ impl Format {
 }
 
 /// What a module shows, as an update last set it. Small and bounded: the
-/// text and the tooltip are each at most [`MAX_TEXT`] bytes.
+/// text and the tooltip are each at most [`MAX_TEXT`] bytes. `icon` is the
+/// update's own glyph, drawn before the text instead of the module's static
+/// icon while set.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Shown {
     pub text: String,
     pub class: Class,
     pub tooltip: String,
+    pub icon: Option<char>,
 }
 
 impl Shown {
@@ -102,6 +110,8 @@ pub enum Invalid {
     Field(&'static str, &'static str),
     /// A `class` that is none of the four.
     Class(String),
+    /// An `icon` that is not exactly one glyph.
+    Icon(String),
     /// A `version` newer than [`VERSION`], or not a whole number.
     Version(String),
 }
@@ -117,6 +127,11 @@ impl fmt::Display for Invalid {
                 f,
                 "`class` takes normal, warn, urgent or muted, not `{}`",
                 class.escape_debug()
+            ),
+            Self::Icon(got) => write!(
+                f,
+                "`icon` takes exactly one character (a glyph from a symbol font), not `{}`",
+                got.escape_debug()
             ),
             Self::Version(got) => write!(
                 f,
@@ -145,6 +160,16 @@ fn set_text(into: &mut String, text: &str) {
     }
 }
 
+/// An update's `icon`: exactly one Unicode character, as a static `icon`
+/// key takes (a symbol font's glyph is one private-use codepoint).
+fn parse_icon(text: &str) -> Result<char, Invalid> {
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) if !c.is_control() => Ok(c),
+        _ => Err(Invalid::Icon(text.to_owned())),
+    }
+}
+
 /// One line of an `exec` module's output (without its newline) read as
 /// `format` into `into`. On `Err`, `into` is untouched.
 pub fn parse_line(format: Format, line: &[u8], into: &mut Shown) -> Result<(), Invalid> {
@@ -159,6 +184,9 @@ pub fn parse_line(format: Format, line: &[u8], into: &mut Shown) -> Result<(), I
             set_text(&mut into.text, &text);
             into.tooltip.clear();
             into.class = Class::Normal;
+            // A line replaces what was shown, it does not merge into it:
+            // a text line carries no icon, so a previous one is cleared.
+            into.icon = None;
             Ok(())
         }
         Format::Json => {
@@ -241,6 +269,12 @@ pub fn from_value(value: &Value, into: &mut Shown) -> Result<(), Invalid> {
                 };
                 shown.class =
                     Class::parse(class).ok_or_else(|| Invalid::Class(class.to_owned()))?;
+            }
+            if let Some(icon) = map.get("icon") {
+                let Some(icon) = icon.as_str() else {
+                    return Err(Invalid::Field("icon", "a string"));
+                };
+                shown.icon = Some(parse_icon(icon)?);
             }
         }
         _ => return Err(Invalid::NotAnObject),
