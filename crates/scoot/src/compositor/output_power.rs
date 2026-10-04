@@ -46,7 +46,8 @@
 //! is no panel to power down, so the request succeeds, the mode is tracked
 //! and reported honestly, and the render work is skipped -- and an IPC
 //! screenshot of a powered-off output is refused rather than answered from
-//! its stale framebuffer.
+//! its stale framebuffer, while a parked `ext-image-copy-capture-v1` frame
+//! due on one fails with `unknown` (see `screencopy.rs`).
 //!
 //! ## Lock, hotplug and VT switching
 //!
@@ -404,7 +405,20 @@ impl State {
     /// to every holder, count the output as blanked if a lock is waiting
     /// (dark is blank), and ask for a render (the power-on repaint, or the
     /// no-op tick that clears the flag when every screen is dark).
-    pub fn set_output_powered(&mut self, id: OutputId, on: bool) {
+    pub(crate) fn set_output_powered(&mut self, id: OutputId, on: bool) {
+        // Both wire paths validate first -- the protocol resolves through
+        // live controls only (`output_of`), IPC against `self.outputs` --
+        // so an unknown id here is a caller bug, not a client spelling.
+        // Loud in debug, a no-op in release, and never a phantom in `off`
+        // that every later re-apply would warn about.
+        if self.outputs.get(id).is_none() {
+            debug_assert!(false, "set_output_powered for an unknown output");
+            tracing::warn!(
+                output = id.0,
+                "ignoring a power change for an unknown output"
+            );
+            return;
+        }
         if !self.output_power.set_off(id, !on) {
             return;
         }

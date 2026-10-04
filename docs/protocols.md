@@ -2067,7 +2067,10 @@ Only `--tty` touches hardware (the connector's DPMS property). Under
 `--headless`/`--nested` there is no panel to power down: the mode is
 tracked and reported honestly, the render work is still skipped, and an IPC
 screenshot of a powered-off output is refused rather than answered from its
-stale framebuffer. Locking blanks the screens that are on and leaves the
+stale framebuffer. A parked `ext-image-copy-capture-v1` frame due on a
+powered-off output fails with `unknown` for the same reason — the client
+may retry once the screen is back on — so neither capture path serves the
+stale frame. Locking blanks the screens that are on and leaves the
 dark ones dark (a powered-off output counts as blanked for lock
 confirmation); unplugging an output fails its power objects, and the
 replugged monitor comes back on under a fresh id; a VT switch back

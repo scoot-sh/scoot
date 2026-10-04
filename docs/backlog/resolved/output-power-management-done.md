@@ -87,8 +87,20 @@ are additive, no `PROTOCOL_VERSION` bump.
 - Render loop skips powered-off outputs wholesale (no draw/present/frame
   callbacks); a pending lock confirms off them (dark is blank).
 - `--tty` hardware: the connector DPMS property; re-applied after every
-  hotplug reconfigure / VT reactivation. Removal fails the output's
-  objects; a replug starts on under a fresh id.
+  hotplug reconfigure / VT reactivation. Deliberately no CRTC-disable
+  fallback, although "What to do" above names one: disabling the CRTC
+  behind Smithay's surface state would fight the next commit on both tiers
+  (see `Tty::set_power`), while a driver without a DPMS property degrades
+  to render-skipping alone, which is still the compositor-side power
+  saving. Removal fails the output's objects; a replug starts on under a
+  fresh id.
+- Captures stay honest about power state on both paths, not just IPC: an
+  IPC screenshot of a powered-off output is refused, and a parked
+  `ext-image-copy-capture-v1` frame due on one fails with `unknown` (the
+  client may retry once the screen is back on) rather than serving the
+  stale framebuffer -- which, across a lock taken while off, would be the
+  pre-lock desktop served while locked. Powering back on under lock resumes
+  drawing locked frames first.
 - 12 protocol/state tests (`output_power/tests.rs`), wire pins for the new
   request tag and `powered` field, CLI parsing tests.
 - Docs: `docs/protocols.md` row + section, `docs/ipc.md` request + field,
