@@ -1,9 +1,10 @@
 ---
 title: "Switch a specific output's workspace, not only the focused output's"
-status: "open"
-area: "ipc"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-04"
 ---
 
 # Switch a specific output's workspace, not only the focused output's
@@ -59,3 +60,7 @@ adopter's list, `docs/protocols.md`).
 ## Not in this ticket
 
 Per-output workspace *creation* or `assign`; those stay ignored.
+
+## Resolution (2026-10-04, PR #409)
+
+Landed as `feat(scoot-core,scoot-ipc,scoot,scootctl): switch a specific output's workspace` (`e01b1daf`). Sibling action `FocusOutputWorkspaceIndex { output, index }` (not an optional field — serde would silently misroute to the focused output on old servers); focus-follows YES including already-active; no protocol bump (stays 7); `debug_assert!(false)` gone. Review verified the serde claim empirically + all read sites + edge cases; one low docs-clarity fix landed in follow-up. CI green.

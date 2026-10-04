@@ -276,7 +276,8 @@ falsify. Read `flexwm` there as `scoot`.
   — RESOLVED 2026-10-03 in #406: per-output `{active, counts[]}` snapshot (protocol 7)
 - [Keyboard layout in IPC](./resolved/keyboard-layout-event-done.md)
   — RESOLVED 2026-10-03 in #404: `keyboard` query + `keyboard` subscribe event (protocol 6), read-only
-- [Switch a specific output's workspace](./ipc/workspace-switch-targeted-output.md) — medium, filed 2026-09-29: `focus-workspace-index` and `ext-workspace` `activate` only reach the focused output
+- [Switch a specific output's workspace](./resolved/workspace-switch-targeted-output-done.md)
+  — RESOLVED 2026-10-04 in #409: `FocusOutputWorkspaceIndex` (sibling tag, focus-follows), `focus-workspace-index N [--output ID]`
 - [IPC bundle: usable rect, focus-workspace-index, ambient locked](./resolved/protocol-bundle-resolved.md) — RESOLVED 2026-09-15, no bump needed
 - [No cap on concurrent IPC connections, and a half-closed client leaks one](./resolved/ipc-connection-cap-resolved.md) — RESOLVED 2026-09-16: 64 connections, refused with a reason past that, and a write-stall deadline that drops a peer which has stopped reading
 - [Screenshot capture and encode run on the event-loop thread](./resolved/screenshot-encode-off-thread-resolved.md) — RESOLVED 2026-09-17 (PR #57): PNG encode moved to a single FIFO worker; per-connection ordering via refused-with-retry, 4 captures max globally, `wait-idle` unchanged
