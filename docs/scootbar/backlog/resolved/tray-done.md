@@ -79,8 +79,14 @@ review fixes included; both built minutes apart with the same
 toolchain): `.text` 1,599,176 → 1,614,760 (**+15,584 B, +1.0%**),
 `.rodata` 129,823 → 130,143 (+320 B), file bytes 2,101,984 on both
 sides (+0); idle tray with one menu item RSS 4,420 kB closed and
-4,592 kB open, zero wakeups either way — recorded for the maintainer,
-no waiver claimed.
+4,592 kB open, zero wakeups either way.
+
+**Maintainer's ruling (2026-10-03, given in chat): the `.text` growth of
+the tray menus is waived.** It covers this row only: `.text` +15,584 B
+(+1.0%) and `.rodata` +320 B; the file does not grow. (The ruling was
+asked on the review's figure of +17,728 B, whose decimals were
+mistranscribed from its own `readelf` hex; the measured growth above is
+smaller, so the ruling covers it.) Nothing else is waived.
 
 What remains moved to its own entries: [themed icon
 names](tray-icon-themes.md), [abstract
