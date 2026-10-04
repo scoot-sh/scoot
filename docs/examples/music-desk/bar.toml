@@ -1,0 +1,85 @@
+# The "music desk" look for scootbar: an edge-to-edge, slightly translucent bar
+# with the workspaces as discs on the left, the clock in the middle, and system
+# modules plus two command-fed modules and launcher buttons on the right.
+#
+#   scootbar daemon --config docs/examples/music-desk/bar.toml
+#
+# This look was tuned with Droid Sans Mono Nerd Font Propo, which has the glyphs
+# the module icons below need. scootbar tries a few well-known fonts; name one
+# if yours is elsewhere (NixOS keeps fonts in the store):
+# [bar]
+# font = "/path/to/DroidSansMNerdFontPropo-Regular.otf"
+# fallback-fonts = ["/path/to/SymbolsNerdFont-Regular.ttf"]
+#
+# The `load` and `cpu` modules run the `load.sh` and `cpu.sh` scripts next to
+# this file: copy both somewhere on your PATH (e.g. ~/.local/bin) first, or
+# point their `command` at wherever you put them.
+
+left = ["workspaces"]
+center = ["clock"]
+right = ["load", "cpu", "network", "volume", "battery", "terminal", "browser", "power"]
+
+[bar]
+height = 40
+margin = 0             # edge to edge: the bar meets the output's edges
+radius = 0
+opacity = 0.7          # translucent: a little more memory (an ARGB buffer) and no opaque region
+font-size = 13
+padding = 10
+spacing = 8
+separator = 1          # a 1 px line in dim, centered in each 8 px gap
+
+[colors]
+background = "#FCFBFB"
+foreground = "#1A2032"
+accent = "#3D579A"
+hover = "#5D7AB0"
+dim = "#C9CBD0"
+urgent = "#EE6F5E"
+
+[workspaces]
+pill-shape = "circle"
+pill-inset = 7
+item-gap = 3           # spaces between the numbers
+margin = 8             # room either side of the module
+disc = true            # grow the span to the disc, so a digit is round at any padding
+inactive-color = "#9AA0B0"
+
+[clock]
+format = "%-I:%M %P"
+icon = "\U000F0150"
+
+[exec.load]
+command = ["load.sh"]
+
+[exec.cpu]
+command = ["cpu.sh"]
+
+[network]
+icon-wifi = ["\U000F091F", "\U000F0922", "\U000F0925", "\U000F0928"]   # weakest to strongest signal
+icon-ethernet = "\U000F0200"
+show-text = false      # the icon alone; the SSID and signal stay in the tooltip
+
+[battery]
+icon = ["\U000F008E", "\U000F007B", "\U000F007E", "\U000F0081", "\U000F0079"]   # empty to full
+icon-charging = "\U000F0084"
+icon-full = "\U000F0079"
+
+[brightness]
+icon = "\U000F05A8"
+
+[bluetooth]
+icon-off = "\U000F00B2"
+icon-on = "\U000F00AF"
+icon-connected = "\U000F00B1"
+
+[button.terminal]
+icon = "\U000F018D"
+on-click = { exec = ["foot", "--font=FiraCode Nerd Font:size=10"] }
+
+[button.browser]
+icon = "\U000F02AF"
+
+[power]
+icon = "\U000F0425"
+on-click = "popup"

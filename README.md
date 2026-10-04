@@ -181,14 +181,24 @@ Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
 - **A macOS version.** On a Mac you can build `scootctl`, to drive scoot
   in a Linux VM.
 
+## Looks
+
+scoot does light and dark, side by side with the same framing. Every color is
+a setting — the bar tokens, scoot's ring and background colors, foot's
+palette — so either look is just a config file. Prefer automatic? The Nix
+modules theme scoot and scootbar from a wallpaper with Stylix
+([docs/nix.md](docs/nix.md#stylix)).
+
+<table>
+<tr>
+<td align="center"><a href="docs/examples/music-desk/"><img src="docs/assets/music-desk-preview.png" alt="scoot with the music desk look: an edge-to-edge translucent bar over three translucent terminal columns"></a><br><b>Light: the <a href="docs/examples/music-desk/">music desk</a> look</b></td>
+<td align="center"><a href="docs/examples/radial-burst/"><img src="docs/assets/radial-burst-preview.png" alt="scoot with the radial burst look: one translucent terminal under a floating translucent bar"></a><br><b>Dark: the <a href="docs/examples/radial-burst/">radial burst</a> look</b></td>
+</tr>
+</table>
+
+<sub>Wallpapers: [musical instruments and audio equipment](https://unsplash.com/illustrations/musical-instruments-and-audio-equipment-on-a-white-surface-b6Us5E-BO8w) by [Alghozy](https://unsplash.com/@artgho), and [colorful radial lines](https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM) by Sufyan pir, both from Unsplash. Each stays under the Unsplash License and is not covered by this repository's MIT license.</sub>
+
 ## scootbar
-
-![A light scoot desktop: scootbar across the top with workspaces, the
-clock, load, CPU, WiFi, volume, battery and launcher buttons; below it
-three translucent terminal columns (fastfetch, Helix on scoot's source,
-btop over lazygit) over an illustration of musical instruments](docs/assets/scootbar-desktop.png)
-
-<sub>Wallpaper: [musical instruments and audio equipment](https://unsplash.com/illustrations/musical-instruments-and-audio-equipment-on-a-white-surface-b6Us5E-BO8w) by [Alghozy](https://unsplash.com/@artgho), from Unsplash. The wallpaper stays under the Unsplash License and is not covered by this repository's MIT license.</sub>
 
 scoot comes with `scootbar`, a status bar. It shows your workspaces, the
 focused window's title, the clock, volume and microphone, WiFi, bluetooth,
