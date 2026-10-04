@@ -292,6 +292,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [`msg type`: dead keys, compose, inactive layouts](./resolved/msg-type-dead-keys-compose-done.md) — RESOLVED 2026-09-18 (PR #121): two-key dead-led sequences from the session-locale compose table (é on `de`, dead-ASCII gaps closed — all 95 ASCII on all fourteen swept Latin layouts); inactive groups, lock/latch levels and `Multi_key` 3-key sequences stay refused
 - [`zwp_tablet_manager_v2` (drawing-tablet input)](./resolved/tablet-v2-done.md)
 - [[nested] pointer clicks never reach layer-shell surfaces](./resolved/layer-shell-pointer-clicks-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #182): the issue's exact `--nested` probes deliver every click shape on current `main` and on the reported rev alike; kept as a wire-level pinning test, no compositor change. Shared root with #183 refuted for the input path.
+- [Touchpad scrolling does not reach Chrome (axis source/v120/stop dropped)](./resolved/touchpad-scroll-chrome-done.md) — RESOLVED 2026-10-04: scrolls forward their real source, wheel `v120`, finger `stop` and relative direction (tty, nested, injected)
 
 ### --tty / backend
 - [Config-file key for the DRM device](./resolved/tty-gpu-config-key-done.md)
