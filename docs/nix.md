@@ -61,13 +61,22 @@ same packages are also `pkgs.scoot`, `pkgs.scootctl`, `pkgs.scootbg` and
 
 ## Prebuilt binaries: the Cachix cache
 
-Every merge to `main` builds `scoot`, `scootctl`, `scootbg`, `scootbar` and
-`scootbar-demo` for `x86_64-linux` and `aarch64-linux`
-(`.github/workflows/nix-build.yml`) and pushes them to the public Cachix
-cache **`scoot-sh`** (`https://scoot-sh.cachix.org`). Without it, installing
-from the flake compiles Smithay from scratch (about 5 minutes on 4 cores).
-Only merges to `main` push: manual workflow runs build without publishing,
+Every merge to `main` builds and pushes the same set for `x86_64-linux`
+and `aarch64-linux` (`.github/workflows/nix-build.yml`) and pushes them
+to the public Cachix cache **`scoot-sh`**
+(`https://scoot-sh.cachix.org`): `scoot` (the
+GPU-free default), `scoot-gpu-xwayland` (the full build: `gpu-scanout` and
+`xwayland` features plus Xwayland on `PATH`), `scootctl`, `scootbg`,
+`scootbar` and `scootbar-demo`. Without the cache, installing from the
+flake compiles Smithay from scratch (about 5 minutes on 4 cores). Only
+merges to `main` push: manual workflow runs build without publishing,
 and pull-request code never reaches a cache users trust.
+
+Anything else builds locally from source: a `scootbar.override` feature
+set, or the in-between compositor variants `scoot-gpu` and
+`scoot-xwayland` (left out of CI because each would cost another full
+Smithay compile per push per architecture until
+[crane](backlog/packaging/nix-crane.md) lands).
 
 The flake declares the cache in its own `nixConfig` (`flake.nix`), but a
 flake's `nixConfig` is not silently trusted: Nix asks whether to accept it

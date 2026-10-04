@@ -41,9 +41,11 @@ dependency set, `cargoLock.outputHashes` for the git deps, and every
 `checks.*` and `nix-build.yml` `--version` line still passing. Measure a
 code-only rebuild before and after.
 
-Once crane lands, reconsider building `scoot-gpu` in `nix-build.yml`: the
-header there explains it was left out because each main-push build pays a
-full Smithay rebuild, which is exactly the cost crane removes.
+Once crane lands, reconsider building `scoot-gpu` and `scoot-xwayland` in
+`nix-build.yml`: the header there explains they were left out because each
+main-push build pays a full Smithay rebuild, which is exactly the cost
+crane removes. (The full build `scoot-gpu-xwayland` is already built and
+cached; it is the two in-between variants that wait on this.)
 
 ## Not in this ticket
 
