@@ -39,6 +39,25 @@ eventually do cachix and flakehub (without their flakehub cache)."
   users trust the cache. Add it to `vm/configuration.nix` and the Asahi box.
 - Cachix-managed signing keys (no private key held by the project).
 
+**Crane, so the cache helps CI and not only installs**
+
+The packages are `buildRustPackage` derivations, which compile the whole
+dependency graph (the `scoot-sh/smithay` fork and the `scoot-sh/wayland-rs`
+`wayland-backend` patch included) inside each package's one derivation. So
+any change to scoot's own code changes the package hash and Smithay
+compiles from scratch again, once per package (`scoot`, `scootctl`,
+`scootbg`), on every merge: Cachix then serves installs of an unchanged
+revision but saves CI nothing. Moving the Rust builds to crane
+(`buildDepsOnly` → a dependency-artifacts derivation keyed on `Cargo.lock`
+and the dependency sources, forks included) puts the compiled dependencies
+in their own store path, which Cachix keeps and every build reuses until
+`Cargo.lock` or a fork rev changes (rare by design: `docs/forks.md`).
+Care points: scootbar's Cargo-feature `.override` (different features,
+different dependency builds), the three compositor packages sharing one
+dependency set, `cargoLock.outputHashes` for the git deps, and every
+`checks.*` and `nix-build.yml` `--version` line still passing. Measure a
+code-only rebuild before and after.
+
 **FlakeHub (the flake, versioned; no FlakeHub Cache)**
 
 - `DeterminateSystems/flakehub-push` after the Cachix push in the same
