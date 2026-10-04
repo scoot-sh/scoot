@@ -3,7 +3,7 @@ title: "Publish: binaries on Cachix, the flake on FlakeHub (no FlakeHub Cache)"
 status: "open"
 area: "packaging"
 priority: "medium"
-blocked: "the maintainer's Cachix cache, auth token secret and public key, and a FlakeHub org linked to scoot-sh"
+blocked: null
 ---
 
 # Publish: binaries on Cachix, the flake on FlakeHub (no FlakeHub Cache)
@@ -39,7 +39,8 @@ eventually do cachix and flakehub (without their flakehub cache)."
   users trust the cache. Add it to `vm/configuration.nix` and the Asahi box.
 - Cachix-managed signing keys (no private key held by the project).
 
-**Crane, so the cache helps CI and not only installs**
+**Crane, so the cache helps CI and not only installs** — split out to
+[nix-crane](nix-crane.md); the reasoning below moved there verbatim.
 
 The packages are `buildRustPackage` derivations, which compile the whole
 dependency graph (the `scoot-sh/smithay` fork and the `scoot-sh/wayland-rs`
