@@ -6,10 +6,11 @@
 # into the systemd user session around it:
 #
 #   1. refuse while a live scoot session is already active for this
-#      user -- but clear a stale one (units active, compositor silent
-#      on IPC: SIGKILL and power loss leave no trap to run) and
-#      continue the login instead of refusing every retry until
-#      someone runs systemctl from a VT;
+#      user -- but clear a stale one (units active, the lock below
+#      free, compositor silent on IPC: SIGKILL and power loss leave
+#      no trap to run, and the kernel releases the lock) and continue
+#      the login instead of refusing every retry until someone runs
+#      systemctl from a VT;
 #   2. import the login environment into the user manager AND the D-Bus
 #      activation environment, so units the session starts later
 #      inherit it;
@@ -121,27 +122,77 @@ else
     try_version() { "$SCOOT_BIN" msg version >/dev/null 2>&1; }
 fi
 
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    die "XDG_RUNTIME_DIR is unset; cannot find the compositor's sockets"
+fi
+
+# Liveness lock, held by the live launcher from before the
+# refuse-or-heal check below until it exits. A second login must not
+# judge an IPC-silent session stale: between `start` returning and the
+# compositor answering IPC lies up to a minute of silence, and a live
+# session can be briefly too busy to answer one probe. So silence
+# alone never means death -- only the lock holder may say so. Lock
+# held by another launcher means live: refuse whatever IPC says. Lock
+# acquired here, with the units active and IPC silent, means stale:
+# heal. The kernel releases the lock on SIGKILL (and every exit
+# closes the fd), which is exactly the stale case healing exists for;
+# power loss leaves the file behind but unlocked.
+# The fd stays open in this launcher until exit and is never closed
+# early: this launcher must not take the lock, release it and race the
+# launcher it just refused. `scoot.service` is spawned by the user
+# manager, not forked from here, so nothing long-lived inherits the
+# fd -- every child this script spawns (`systemctl`, `scoot msg`, the
+# D-Bus tool) is short-lived and exits before the launcher, so
+# inheriting the fd for its own lifetime is harmless. One narrow
+# exception: an in-flight child orphaned by a SIGKILL keeps its
+# inherited fd until it exits (at most ~`timeout 2`), so a login in
+# the second after the kill still refuses once and heals on retry --
+# a single refused retry, never a wedge. (POSIX sh has
+# no `{fd}>` names and no close-on-exec spelling; fd 9 is otherwise
+# unused by this script.) Without `flock(1)` there is no lock to
+# consult, so there is no healing: an active session is refused as
+# live (the pre-healing behaviour), never cleared blind.
+have_lock=0
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"$XDG_RUNTIME_DIR/scoot-session.lock" \
+        || die "cannot open $XDG_RUNTIME_DIR/scoot-session.lock"
+    if flock -n 9 2>/dev/null; then
+        have_lock=1
+    fi
+else
+    note "no flock(1) on PATH; stale-session healing disabled (an active session is refused as live)"
+fi
+
 if systemctl --user --quiet is-active "$SERVICE" "$GRAPHICAL"; then
     # A live session refuses: two live scoot sessions for one user on
-    # one seat is still wrong. A stale one -- units left active by a
-    # launcher that died without cleanup (SIGKILL, power loss: paths no
-    # trap can cover) -- is cleared instead, or every later login would
-    # be refused until someone runs systemctl from a VT.
-    # `graphical-session.target` is shared with other desktops, so it
-    # is stopped only when scoot itself ran in this manager (its
-    # service active or failed): an active target with scoot's service
-    # never run is another session's, and the refusal stands. (If that
-    # ever misfires -- another desktop running in this same user
-    # manager beside a stale scoot unit -- stop the units by hand:
-    # `systemctl --user stop scoot.service graphical-session.target`,
-    # then log in again.)
+    # one seat is still wrong. A stale one -- units left active with
+    # no lock holder by a launcher that died without cleanup (SIGKILL,
+    # power loss: paths no trap can cover, and the kernel already
+    # released the lock) -- is cleared instead, or every later login
+    # would be refused until someone runs systemctl from a VT.
+    # Whoever else holds the lock is live -- starting, or briefly too
+    # busy to answer one probe -- so refuse without probing at all.
+    if [ "$have_lock" -eq 0 ]; then
+        die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
+    fi
+    # `graphical-session.target` is shared with other desktops, so a
+    # stale clear stops only scoot's own service (and resets its
+    # failed state): an active target with scoot's service never run
+    # is another session's, and the refusal stands. The target itself
+    # is never stopped here -- that would tear down another desktop's
+    # bound services in the same user manager, while a stale-active
+    # target does not hurt the new login (the display variables are
+    # re-imported below). (If that ever misfires -- another desktop
+    # running in this same user manager beside a stale scoot unit --
+    # stop the units by hand: `systemctl --user stop scoot.service
+    # graphical-session.target`, then log in again.)
     if try_version; then
         die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
     fi
     if systemctl --user --quiet is-active "$SERVICE" || systemctl --user --quiet is-failed "$SERVICE"; then
         note "found $SERVICE or $GRAPHICAL active but the compositor does not answer IPC; clearing the stale session"
         systemctl --user stop "$SERVICE" >/dev/null 2>&1 || true
-        systemctl --user stop "$GRAPHICAL" >/dev/null 2>&1 || true
+        systemctl --user reset-failed "$SERVICE" >/dev/null 2>&1 || true
     else
         die "a scoot session is already running for this user (found $SERVICE or $GRAPHICAL active)"
     fi
@@ -150,10 +201,6 @@ fi
 # A previous crash leaves the unit in `failed`, which `start` would still
 # honour but `is-active` polling below would misread on the first round.
 systemctl --user reset-failed "$SERVICE" >/dev/null 2>&1 || true
-
-if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
-    die "XDG_RUNTIME_DIR is unset; cannot find the compositor's sockets"
-fi
 
 # The Wayland sockets already here (stale ones from dead sessions,
 # another compositor's, another login sharing the directory): the

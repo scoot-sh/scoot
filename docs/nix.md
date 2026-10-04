@@ -422,14 +422,25 @@ With the default entry, picking scoot at the greeter runs
 1. It refuses while a live scoot session is already active for the
    user (`scoot.service` or `graphical-session.target` active *and*
    the compositor answering IPC), so a second login cannot fight the
-   first over the user manager. Units left active by a launcher that
-   died without cleanup (SIGKILL, power loss — paths no trap can
-   cover) are stale, not live: when nothing answers IPC within a
-   short probe, the launcher stops its own units (`scoot.service`,
-   plus `graphical-session.target` only when scoot itself ran in this
-   user manager — an active target with scoot's service never run is
-   another desktop's session, and the refusal stands) and continues
-   the login instead of refusing every retry. If a login ever still
+   first over the user manager. A second login must not judge an
+   IPC-silent session stale on its own: the launcher holds
+   `scoot-session.lock` under `$XDG_RUNTIME_DIR` from before that
+   check until it exits, so a login arriving during the first's
+   up-to-a-minute startup silence (or against a single slow answer
+   from a busy session) finds the lock held and refuses instead of
+   stopping a live session — lock held means live, whatever IPC says.
+   Units left active with no lock holder by a launcher that died
+   without cleanup (SIGKILL, power loss — the kernel releases the
+   lock, which is the stale case) are stale, not live: when the lock
+   is free and nothing answers IPC within a short probe, the launcher
+   stops `scoot.service` (and resets its failed state) and continues
+   the login instead of refusing every retry. It never stops the
+   shared `graphical-session.target` itself — that target may belong
+   to another desktop in the same user manager, and a stale-active
+   target does not hurt the new login (the display variables are
+   re-imported below). Without `flock(1)` on `PATH` there is no lock
+   to consult, so there is no healing: an active session is refused
+   as live, with a note on stderr. If a login ever still
    refuses while no scoot session is running, run `systemctl --user
    stop scoot.service graphical-session.target` from any VT or over
    ssh, then log in again.
