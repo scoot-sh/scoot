@@ -1,10 +1,11 @@
 ---
 title: "Network: a second radio's empty scan replaces the real one"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M6"
+resolved: "2026-10-04"
 ---
 
 # Network: a second radio's empty scan replaces the real one
@@ -48,3 +49,30 @@ picker reads the same cache and has the same problem.
 
 Merging scans across radios into one list (a network seen by both),
 and choosing which radio a `connect` uses: the command's business.
+
+## Resolution (PR #422)
+
+Filtering, not per-interface storage: only the scan target's dump is
+queued — the shown interface's (the config's, else the default route's)
+where it is a scanning station, else the associated station's, else the
+first idle station's so the picker still works off-network. A 32x32
+per-interface table was rejected for the memory it pins for a switch a
+re-dump serves. AP, AP_VLAN and P2P_GO never qualify (the type comes
+from the interface notice's `NL80211_ATTR_IFTYPE`, checked against
+linux-headers-7.1); guessing AP-ness from empty caches was rejected
+because an idle station's cache is empty too.
+
+Pinned by six scripted-kernel tests (each fails with the fix reverted,
+passes with it; the idle-station one passes both as a no-regression
+pin): the shown radio dumping first, an AP interface's empty cache, a
+dongle plugged in with the popup open, the default route moving, the
+shown radio vanishing, plus the iftype parse unit. Full suite green on
+the dev VM (nextest 1328 passed, clippy matrix clean, flake loop 20x).
+
+Proved live with `mac80211_hwsim` (radios=3: station associated to
+hostapd's TestNet0 with TestNet0/1/2 up, two idle radios, three AP-mode
+interfaces): on main the popup lists one wrong network (TestNet1, the
+associated missing); on the branch all three with TestNet0 selected.
+Ratchet: release file unchanged (2,167,520 B), `.text` +1,856
+(+0.11%), idle with network placed 0 wakeups/60 s and level RSS on both
+— the `.text` row is reported, not waived.
