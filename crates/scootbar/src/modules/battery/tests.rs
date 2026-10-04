@@ -650,3 +650,136 @@ fn a_lost_event_error_counts_as_a_power_change() {
     assert!(recv_lost_events(Errno::INTR));
     assert!(!recv_lost_events(Errno::AGAIN));
 }
+
+#[test]
+fn a_five_glyph_battery_icon_picks_the_level() {
+    use super::BatteryIcon;
+    // Quintiles, empty to full: 19 is still level 0, 20 rises to 1,
+    // and so on to 80 for level 4.
+    let settings = Settings {
+        icon: Some(BatteryIcon::Levels(['0', '1', '2', '3', '4'])),
+        ..Settings::default()
+    };
+    for (capacity, text, want) in [
+        ("0", "0%", '0'),
+        ("19", "19%", '0'),
+        ("20", "20%", '1'),
+        ("39", "39%", '1'),
+        ("40", "40%", '2'),
+        ("59", "59%", '2'),
+        ("60", "60%", '3'),
+        ("79", "79%", '3'),
+        ("80", "80%", '4'),
+        ("100", "100%", '4'),
+    ] {
+        let fixture = (
+            "BAT0",
+            Fixture {
+                present: Some("1"),
+                capacity: Some(capacity),
+                status: Some("Discharging"),
+            },
+        );
+        let (_root, _peer, harness) = started_with(&settings, &[fixture]);
+        let view = harness.view();
+        assert_eq!(view.text(), text, "at {capacity}%");
+        assert_eq!(view.icon(), Some(want), "at {capacity}%");
+    }
+}
+
+#[test]
+fn a_single_battery_glyph_shows_at_every_level() {
+    use super::BatteryIcon;
+    // Backward compatible: one glyph for every level, as a static icon.
+    let settings = Settings {
+        icon: Some(BatteryIcon::One('B')),
+        ..Settings::default()
+    };
+    for capacity in ["5", "50", "100"] {
+        let fixture = (
+            "BAT0",
+            Fixture {
+                present: Some("1"),
+                capacity: Some(capacity),
+                status: Some("Discharging"),
+            },
+        );
+        let (_root, _peer, harness) = started_with(&settings, &[fixture]);
+        let view = harness.view();
+        assert_eq!(view.icon(), Some('B'), "at {capacity}%");
+    }
+}
+
+#[test]
+fn charging_and_full_win_over_the_level() {
+    use super::BatteryIcon;
+    use crate::icon::Icon;
+    let settings = Settings {
+        icon: Some(BatteryIcon::Levels(['0', '1', '2', '3', '4'])),
+        icon_charging: Some(Icon::Glyph('C')),
+        icon_full: Some(Icon::Glyph('F')),
+        ..Settings::default()
+    };
+    let at = |capacity: &'static str, status: &'static str| {
+        let fixture = (
+            "BAT0",
+            Fixture {
+                present: Some("1"),
+                capacity: Some(capacity),
+                status: Some(status),
+            },
+        );
+        let (_root, _peer, harness) = started_with(&settings, &[fixture]);
+        harness.view().icon()
+    };
+    // Charging wins over the level, full over charging's band: a full
+    // battery reports Full, and a charging one at 100 is still
+    // charging, not full.
+    assert_eq!(at("50", "Charging"), Some('C'));
+    assert_eq!(at("100", "Charging"), Some('C'));
+    assert_eq!(at("100", "Full"), Some('F'));
+    // Any other state shows the level: discharging at 100 is the top
+    // glyph, unknown at 5 the bottom one.
+    assert_eq!(at("100", "Discharging"), Some('4'));
+    assert_eq!(at("5", "Not charging"), Some('0'));
+    // Without the per-state glyphs the level shows through everywhere.
+    let plain = Settings {
+        icon: Some(BatteryIcon::Levels(['0', '1', '2', '3', '4'])),
+        ..Settings::default()
+    };
+    let fixture = (
+        "BAT0",
+        Fixture {
+            present: Some("1"),
+            capacity: Some("50"),
+            status: Some("Charging"),
+        },
+    );
+    let (_root, _peer, harness) = started_with(&plain, &[fixture]);
+    assert_eq!(harness.view().icon(), Some('2'));
+}
+
+#[test]
+fn icon_only_draws_the_icon_with_the_text_in_the_tooltip() {
+    use super::BatteryIcon;
+    let settings = Settings {
+        icon: Some(BatteryIcon::Levels(['0', '1', '2', '3', '4'])),
+        show_text: false,
+        ..Settings::default()
+    };
+    let (_root, _peer, harness) = started_with(&settings, &[discharging("72")]);
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('3'));
+    // The tooltip already names the level, so the hidden text is moved
+    // into it.
+    assert_eq!(view.tooltip(), "Discharging 72%");
+}
+
+#[test]
+fn without_icons_the_level_shows_text_alone() {
+    let (_root, _peer, harness) = started_with(&Settings::default(), &[discharging("72")]);
+    let view = harness.view();
+    assert_eq!(view.text(), "72%");
+    assert!(view.icon().is_none() && view.art().is_none());
+}

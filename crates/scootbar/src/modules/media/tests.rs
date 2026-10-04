@@ -1569,3 +1569,75 @@ fn an_unknown_drop_releases_every_player_waiting_on_an_answer() {
     assert!(live.players[0].asked.is_none());
     assert!(live.players[0].stale);
 }
+
+#[test]
+fn config_icons_win_over_the_built_in_vectors_per_state() {
+    use crate::icon::Icon;
+    let settings = Settings {
+        icon_playing: Some(Icon::Glyph('>')),
+        icon_paused: Some(Icon::Glyph('=')),
+        ..Settings::default()
+    };
+    let (mut harness, mut fake) = up_with(&settings);
+    fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
+    settle(&mut harness, &mut fake);
+    let view = harness.view();
+    assert_eq!(view.text(), "Ada - Song");
+    assert_eq!(view.icon(), Some('>'));
+    assert!(view.art().is_none(), "the config glyph replaces the vector");
+    // Paused: its own glyph, dimmed as before.
+    fake.properties_changed(":1.20", &build::status_changed("Paused"));
+    assert!(settle_for(&mut harness, &mut fake, 150));
+    let view = harness.view();
+    assert_eq!(view.text(), "Ada - Song");
+    assert_eq!(view.icon(), Some('='));
+    assert_eq!(view.class(), Class::Muted);
+}
+
+#[test]
+fn a_static_config_icon_replaces_both_built_ins() {
+    use crate::icon::Icon;
+    let settings = Settings {
+        icon: Some(Icon::Glyph('M')),
+        ..Settings::default()
+    };
+    let (mut harness, mut fake) = up_with(&settings);
+    fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
+    settle(&mut harness, &mut fake);
+    assert_eq!(harness.view().icon(), Some('M'));
+    assert!(harness.view().art().is_none());
+    fake.properties_changed(":1.20", &build::status_changed("Paused"));
+    assert!(settle_for(&mut harness, &mut fake, 150));
+    // The static icon shows for both states, dimmed while paused.
+    assert_eq!(harness.view().icon(), Some('M'));
+    assert_eq!(harness.view().class(), Class::Muted);
+}
+
+#[test]
+fn icon_only_draws_the_icon_with_the_text_in_the_tooltip() {
+    use crate::icon::Icon;
+    let settings = Settings {
+        icon_playing: Some(Icon::Glyph('>')),
+        icon_paused: Some(Icon::Glyph('=')),
+        show_text: false,
+        ..Settings::default()
+    };
+    let (mut harness, mut fake) = up_with(&settings);
+    fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
+    settle(&mut harness, &mut fake);
+    let view = harness.view();
+    assert_eq!(view.text(), "");
+    assert_eq!(view.icon(), Some('>'));
+    // The tooltip already names the player, the state and the line.
+    assert_eq!(view.tooltip(), "mpv (playing): Ada - Song");
+}
+
+#[test]
+fn without_config_icons_the_built_ins_show_as_before() {
+    let (mut harness, mut fake) = up();
+    fake.add_player(MPV, ":1.20", playing("Song", "Ada"));
+    settle(&mut harness, &mut fake);
+    let view = harness.view();
+    assert_eq!(view.text(), "Ada - Song");
+    assert!(view.icon().is_none() && view.art().is_some());
+}

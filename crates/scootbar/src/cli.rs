@@ -6928,7 +6928,9 @@ macro_rules! window_title_help {
         "Window title (the window-title module):
     the focused window's title on the output the bar is on (its app id
     after it, with window-title.show-app-id), cut with an ellipsis past
-    window-title.max-width; a click focuses it, a middle click closes it
+    window-title.max-width, with a static icon before it when configured
+    (window-title.icon; window-title.show-text = false draws only the
+    icon); a click focuses it, a middle click closes it
     with window-title.allow-close. Nothing is shown where the compositor
     has no wlr-foreign-toplevel-management-v1, and clicks do nothing where
     it has no wl_seat
@@ -6999,8 +7001,11 @@ macro_rules! battery_help {
     the first with batteries = \"first\"), warn at or below
     battery.warn-below (default 20) and urgent at or below
     battery.urgent-below (default 10), with battery.on-low run once per
-    downward crossing of the urgent one. Woken by the kernel's uevents,
-    and re-read once a minute while discharging for drivers whose
+    downward crossing of the urgent one, with an icon per level when
+    configured (battery.icon takes one glyph or 5 for the charge levels;
+    battery.icon-charging and battery.icon-full for those states;
+    battery.show-text = false draws only the icon). Woken by the kernel's
+    uevents, and re-read once a minute while discharging for drivers whose
     capacity steps are silent. Nothing is shown where there is no battery
 "
     };
@@ -7045,9 +7050,11 @@ macro_rules! brightness_help {
     the panel backlight's level in percent (brightness.device names it
     where the machine has several); a scroll changes it by brightness.step
     percent (default 5), and `set` takes the absolute percent, never below
-    the raw floor that keeps the panel lit. Writes need permission (a udev
-    rule or the video group), and are refused naming that without it.
-    Nothing is shown where the machine has no backlight
+    the raw floor that keeps the panel lit, with an icon per level when
+    configured (brightness.icon takes one glyph or 4 for the levels;
+    brightness.show-text = false draws only the icon). Writes need permission (a udev
+    rule for the backlight class or the video group grants it), and are refused naming that
+    without it. Nothing is shown where the machine has no backlight
 "
     };
 }
@@ -7087,7 +7094,9 @@ macro_rules! media_help {
         "Media (the media module):
     what the players on the session bus (MPRIS) are playing: artist - title
     with a play or pause icon (dimmed while paused), cut to media.max-width
-    (default 320 logical pixels). A click plays or pauses, a right click or
+    (default 320 logical pixels), with an icon per state when configured
+    (media.icon-playing and media.icon-paused, falling back to media.icon;
+    media.show-text = false draws only the icon). A click plays or pauses, a right click or
     a scroll down skips to the next track, a middle click or a scroll up to
     the previous one; its actions are `play-pause`, `next` and `previous`.
     Of several players the one named by media.player is shown if it is
@@ -7112,8 +7121,11 @@ macro_rules! bluetooth_help {
     the adapter's power and the connected devices over BlueZ (the system
     bus): the first connected device's name with its charge when BlueZ
     reports one, `on` while an adapter is powered with nothing connected,
-    and `off` while every adapter is off. A click toggles the first
-    adapter's power; its actions are `toggle` and `menu`, the picker
+    and `off` while every adapter is off, with an icon per state when
+    configured (bluetooth.icon-off, bluetooth.icon-on and
+    bluetooth.icon-connected, falling back to bluetooth.icon;
+    bluetooth.show-text = false draws only the icon). A click toggles the
+    first adapter's power; its actions are `toggle` and `menu`, the picker
     (bluetooth.menu-command with the device list on stdin). Nothing is
     shown with no adapter or no BlueZ, and nothing is polled
 "

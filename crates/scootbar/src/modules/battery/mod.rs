@@ -60,6 +60,7 @@ use rustix::time::{
 
 use super::{ActionSpec, Init, Module, OutputView, Sources, Update, View};
 use crate::action::Action;
+use crate::icon::{Art, Icon};
 
 #[cfg(test)]
 mod tests;
@@ -185,6 +186,40 @@ pub struct Settings {
     /// The `on-low` command line, run once per downward crossing of
     /// `urgent-below`.
     pub on_low: Option<Vec<String>>,
+    /// The battery icon from `icon`: one glyph shown at every level, or
+    /// one glyph per level (empty to full), picked by
+    /// [`level_for`]; or a static path or picture. `icon-full` and
+    /// `icon-charging` win over it for their own states.
+    pub icon: Option<BatteryIcon>,
+    /// One glyph shown while charging, instead of the level's.
+    pub icon_charging: Option<Icon>,
+    /// One glyph shown while full, instead of the level's (or
+    /// charging's: full wins).
+    pub icon_full: Option<Icon>,
+    /// Whether the text is drawn beside the icon. `false` draws only the
+    /// icon, with the text moved into the tooltip (which already names
+    /// the level: `Discharging 72%`).
+    pub show_text: bool,
+}
+
+/// The battery icon from `icon`: one glyph shown at every level, or one
+/// glyph per level (empty to full), picked by [`level_for`]. A static
+/// `icon-path`/`icon-image` icon has no levels: per-level vector or PNG
+/// icons are out of scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BatteryIcon {
+    /// One glyph for every level.
+    One(char),
+    /// One glyph per level, empty to full.
+    Levels([char; 5]),
+    /// A static path or picture, shown at every level.
+    Art(Art),
+}
+
+/// The icon level for `percent`: 0 (empty) to 4 (full), in quintiles
+/// (0–19, 20–39, 40–59, 60–79, 80–100).
+fn level_for(percent: u32) -> usize {
+    (percent.min(100) / 20).min(4) as usize
 }
 
 impl Default for Settings {
@@ -194,6 +229,10 @@ impl Default for Settings {
             urgent_below: DEFAULT_URGENT_BELOW,
             batteries: Batteries::Combine,
             on_low: None,
+            icon: None,
+            icon_charging: None,
+            icon_full: None,
+            show_text: true,
         }
     }
 }
@@ -263,6 +302,10 @@ fn start_with(
         urgent_below: settings.urgent_below.min(MAX_THRESHOLD),
         batteries: settings.batteries,
         on_low: settings.on_low.clone(),
+        icon: settings.icon.clone(),
+        icon_charging: settings.icon_charging.clone(),
+        icon_full: settings.icon_full.clone(),
+        show_text: settings.show_text,
         root: root.to_path_buf(),
         uevent,
         tick: None,
@@ -307,6 +350,10 @@ struct Battery {
     urgent_below: u32,
     batteries: Batteries,
     on_low: Option<Vec<String>>,
+    icon: Option<BatteryIcon>,
+    icon_charging: Option<Icon>,
+    icon_full: Option<Icon>,
+    show_text: bool,
     root: PathBuf,
     uevent: OwnedFd,
     tick: Option<Tick>,
@@ -457,6 +504,30 @@ impl Battery {
             Some(level) if level.percent <= self.urgent_below => super::Class::Urgent,
             Some(level) if level.percent <= self.warn_below => super::Class::Warn,
             _ => super::Class::Normal,
+        }
+    }
+
+    /// The icon for `level`: the full glyph while full, the charging
+    /// glyph while charging, else the level's glyph (or the static path
+    /// or picture). `None` where no icon is set: without any icon the
+    /// level shows text alone, as before.
+    fn icon_for(&self, level: Level) -> Option<Icon> {
+        if level.state == State::Full {
+            if let Some(icon) = &self.icon_full {
+                return Some(icon.clone());
+            }
+        } else if level.state == State::Charging
+            && let Some(icon) = &self.icon_charging
+        {
+            return Some(icon.clone());
+        }
+        match &self.icon {
+            Some(BatteryIcon::One(glyph)) => Some(Icon::Glyph(*glyph)),
+            Some(BatteryIcon::Levels(levels)) => {
+                Some(Icon::Glyph(levels[level_for(level.percent)]))
+            }
+            Some(BatteryIcon::Art(art)) => Some(Icon::Art(art.clone())),
+            None => None,
         }
     }
 }
@@ -664,12 +735,16 @@ impl Module for Battery {
     }
 
     /// `72%`, in the level's class; nothing where there is no battery, so
-    /// the module hides.
+    /// the module hides. With an icon the glyph (or picture) stands
+    /// before the text, or alone with `show-text = false` (the tooltip
+    /// already names the level, so the text is moved into it).
     fn view(&self, _output: &OutputView<'_>, view: &mut View) {
         let Some(level) = self.shown else {
             return;
         };
-        let _ = write!(view.text_mut(), "{}%", level.percent);
+        if self.show_text {
+            let _ = write!(view.text_mut(), "{}%", level.percent);
+        }
         let _ = write!(
             view.tooltip_mut(),
             "{} {}%",
@@ -677,6 +752,9 @@ impl Module for Battery {
             level.percent
         );
         view.set_class(self.class());
+        if let Some(icon) = self.icon_for(level) {
+            view.show_icon(&icon);
+        }
     }
 
     /// What `query` reports: the percent, the state and how many batteries

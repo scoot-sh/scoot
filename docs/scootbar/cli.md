@@ -586,7 +586,11 @@ window activated on it; with none focused the module shows its
 
 - **Title and app id.** The title alone, or `title - app` with
   `window-title.show-app-id`; a window with an empty title shows its app
-  id, so something is shown whenever a window is focused. The full title
+  id, so something is shown whenever a window is focused. A static
+  `window-title.icon` stands before the title whenever a window is focused
+  (never for the placeholder; `window-title.show-text = false` draws only
+  the icon — see [Per-state and per-level
+  icons](#per-state-and-per-level-icons)). The full title
   is the tooltip (and the `query` value's `title`), uncut by the span.
 - **Width.** The span never grows past `window-title.max-width` (default
   480 logical pixels, 1 to 4096), so the title yields the bar to the other
@@ -623,7 +627,7 @@ by default.
 
 - **What it shows** is `49%` with the level's icon (muted, low, medium,
   high; a static `icon`, `icon-path` or `icon-image` in the table replaces
-  all four), in the `muted` class while muted. The tooltip names the
+  all four — see [Icons](#icons)), in the `muted` class while muted. The tooltip names the
   device: `Built-in Audio: 49%`, with `(muted)` after it. While no server
   answers it shows nothing and takes no space.
 - **A click toggles mute, a scroll raises or lowers**, with no binding at
@@ -667,20 +671,12 @@ no daemon and no child process: two netlink sockets on the bar's own
   up beside the shown interface appends `· VPN`. The tooltip adds the
   signal (`Wimbly · −54 dBm on wlan0`). Before the first event it shows
   nothing and takes no space. An icon can stand before the text, or
-  alone: `icon`, `icon-path` with `icon-viewbox`, or `icon-image` (at
-  most one, as the [clock's](#icons)) for every state, or one glyph each
-  in `icon-ethernet`, `icon-wifi`, `icon-vpn` and `icon-offline` — a
-  state with its own glyph shows it, any other state the static icon.
-  `icon-wifi` takes four glyphs as well as one
-  (`icon-wifi = ["\U000f091f", "\U000f0922", "\U000f0925", "\U000f0928"]`, weakest to
-  strongest, Nerd Font's wifi-strength-1..4): the level picks one (four at −55 dBm and better, one at −78
-  and worse, as `query`'s `bars` counts them), while a single glyph shows
-  at every level. The four must be exactly four, each one glyph, or the
-  config is refused naming the key. A static `icon-path`/`icon-image`
-  icon stays static: per-level vector or PNG icons are out of scope.
-  `show-text = false` draws only the icon, with the text moved into the
-  tooltip (the WiFi and tunnel tooltips already name what the text does;
-  the dBm is the icon's level, finer).
+   alone: `icon`, `icon-path` with `icon-viewbox`, or `icon-image` (at
+   most one, as the [clock's](#icons)) for every state, or one glyph each
+   in `icon-ethernet`, `icon-wifi`, `icon-vpn` and `icon-offline` — see
+   [Per-state and per-level icons](#per-state-and-per-level-icons). The
+   WiFi level is four at −55 dBm and better, one at −78 and worse, as
+   `query`'s `bars` counts it.
 - **A click opens the picker**, with no binding at all: `network.menu-command`
   is spawned with the cached scan's SSIDs on stdin (one per line), a
   dmenu-style launcher fed from the scan list. Connecting is the
@@ -742,7 +738,10 @@ and woken by the kernel's uevents on a netlink socket filtered to the
 `backlight` subsystem. A Cargo feature (`brightness`), on by default.
 
 - **What it shows** is `49%` (`251` of `509` on the reference machine, an
-  M2 Air). The tooltip names the device: `apple-panel-bl: 49%`. Where
+  M2 Air), with an icon per level when configured (`brightness.icon`
+  takes one glyph, or 4 for the levels; `brightness.show-text = false`
+  draws only the icon — see [Per-state and per-level
+  icons](#per-state-and-per-level-icons)). The tooltip names the device: `apple-panel-bl: 49%`. Where
   there is no backlight at all (a desktop, a VM) it shows nothing and
   takes no space, owning no fd.
 - **A scroll raises or lowers**, with no binding at all; a binding you set
@@ -784,7 +783,11 @@ and drops those that are not `power_supply`. A Cargo feature (`battery`), on by 
   least `urgent-below`, else warn is unreachable and the file is refused. The tooltip names the
   state: `Discharging 72%` (`Charging`, `Full`, `Not charging` or
   `Unknown` for a status string no kernel documents, which never refuses
-  the battery). Where there is no battery at all (a desktop, a VM) it
+  the battery). An icon stands before the percent when configured
+  (`battery.icon` takes one glyph, or 5 for the charge levels, with
+  `battery.icon-charging` and `battery.icon-full` for those states;
+  `battery.show-text = false` draws only the icon — see [Per-state and
+  per-level icons](#per-state-and-per-level-icons)). Where there is no battery at all (a desktop, a VM) it
   shows nothing and takes no space, owning no fd.
 - **Several batteries** are combined by default (`batteries =
   "combine"`: the mean capacity, discharging winning the state), or the
@@ -962,7 +965,11 @@ Cargo feature (`media`), on by default; the smallest build
 
 - **What it shows** is `artist - title` (or whichever of the two the player
   sent, or the player's name when it sent neither) with a play or pause
-  icon for the state, cut to `max-width` with an ellipsis measured in
+  icon for the state — the built-ins, or `media.icon-playing` and
+  `media.icon-paused` when configured (falling back to `media.icon`;
+  `media.show-text = false` draws only the icon: a stopped player shows
+  nothing, so there is no third key — see [Per-state and per-level
+  icons](#per-state-and-per-level-icons)) — cut to `max-width` with an ellipsis measured in
   pixels, in the `muted` class while paused. The tooltip over the module (after the bar's
   `tooltip-delay`, as every module's; see [Tooltips](#tooltips)) is the uncut
   line with the player's name: `mpv (playing): Ada - Song`. Several artists are joined with a
@@ -1111,7 +1118,11 @@ has none of it.
 - **What it shows** is the first connected device's name in path order
   (with its charge when BlueZ reports one: `Headset 72%`), `on` while an
   adapter is powered with nothing connected, and `off`, in the `muted`
-  class, while every adapter is off. Adapter power dominates a device that
+  class, while every adapter is off, with an icon per state when
+  configured (`bluetooth.icon-off`, `bluetooth.icon-on` and
+  `bluetooth.icon-connected`, falling back to `bluetooth.icon`;
+  `bluetooth.show-text = false` draws only the icon — see [Per-state and
+  per-level icons](#per-state-and-per-level-icons)). Adapter power dominates a device that
   still claims to be connected (its disconnect is on its way). With no
   adapter, or no BlueZ at all, the module shows nothing and takes no
   space. The tooltip lists every connected device with its charge.
@@ -1753,9 +1764,13 @@ bar's memory, as for any font not on a read-only mount; see
 An icon is drawn before a module's text, `em` device pixels on a side (the size
 of the text, at the output's real scale, so it is sharp at 1.5x and never a
 smaller bitmap stretched), with a space after it when text follows. Three keys
-give one, at most one of them per module; the clock, `button` and volume
-modules take them, the network module takes them plus one glyph per state
-([above](#network)), and the battery module will take the same three:
+give one, at most one of them per module; the clock, `button`, volume,
+microphone, network, battery, brightness, bluetooth, media and window-title
+modules take them, and most of those take one glyph per state or level
+besides ([below](#per-state-and-per-level-icons)). The workspaces module
+takes none: its numbers and pill are the content, and an icon would say
+nothing (per-workspace icons would need the compositor to name one, and no
+protocol carries any).
 
 | Key | Takes | Drawn |
 | --- | --- | --- |
@@ -1793,6 +1808,68 @@ error says so. **SVG files are not read** (a renderer is a large dependency and
 an untrusted-markup parser): put the `d` string of a one-color icon in
 `icon-path`, or convert a full-color SVG to PNG ahead of time. How it works, the
 costs and the decisions are in [icons.md](icons.md).
+
+#### Per-state and per-level icons
+
+Where one glyph cannot say it — a charge, a signal, a state — the key takes
+one glyph, or one glyph per level picked by the value, the shape the
+[network module](#network) establishes. Each entry takes exactly one
+character, as `icon` does; an array takes exactly the count named, each one
+glyph; anything else is a config error naming the dotted key. A per-state
+glyph wins over the static icon for its own state (any other state shows
+the static one), and a static path or picture has no levels: per-level
+vector or PNG icons are out of scope.
+
+| Module | Keys | Picks |
+| --- | --- | --- |
+| `network` | `icon-ethernet`, `icon-wifi`, `icon-vpn`, `icon-offline` | the state; `icon-wifi` takes one glyph, or 4 (weakest to strongest), picked by the signal level |
+| `battery` | `icon`, plus `icon-charging` and `icon-full` | `icon` takes one glyph, or 5 (empty to full, quintiles: 0–19, 20–39, 40–59, 60–79, 80–100); charging wins over the level, full over charging |
+| `brightness` | `icon` | one glyph, or 4 (dim to bright, quartiles: 0–24, 25–49, 50–74, 75–100) |
+| `bluetooth` | `icon-off`, `icon-on`, `icon-connected` | the state |
+| `media` | `icon-playing`, `icon-paused` | the state (a stopped player shows nothing, so there is no third key) |
+| `window-title` | `icon` | one static glyph, whenever a window is focused (never for the placeholder) |
+
+`show-text = false` draws only the icon, with the text moved into the
+tooltip — which already names what the text said on every one of these
+modules (the battery's `Discharging 72%`, the brightness's device, the
+bluetooth state and device list, the media line, the full window title, the
+network's SSID and signal) — so an icon can stand alone where the text is
+just a value: brightness and bluetooth especially. Without any icon the
+module shows text alone, as before.
+
+#### Example: Nerd Font icons for every module
+
+Glyphs from a symbol font in the [font chain](#fallback-fonts-and-icons)
+(Nerd Font's Material Design set; each codepoint verified against
+[Pictogrammers/MDI](https://pictogrammers.com/library/mdi/)):
+
+```toml
+[bar]
+fallback-fonts = ["/path/to/SymbolsNerdFont-Regular.ttf"]
+
+[battery]
+icon = ["\U000F008E", "\U000F007B", "\U000F007E", "\U000F0081", "\U000F0079"]   # battery-outline, battery-20, battery-50, battery-80, battery: empty to full
+icon-charging = "\U000F0084"   # battery-charging
+icon-full = "\U000F0079"       # battery
+
+[brightness]
+icon = ["\U000F00DD", "\U000F00DE", "\U000F00DF", "\U000F00E0"]   # brightness-4, brightness-5, brightness-6, brightness-7: dim to bright, a sun at every level
+
+[bluetooth]
+icon-off = "\U000F00B2"        # bluetooth-off
+icon-on = "\U000F00AF"         # bluetooth
+icon-connected = "\U000F00B1"  # bluetooth-connect
+
+[media]
+icon-playing = "\U000F040A"    # play
+icon-paused = "\U000F03E4"     # pause
+
+[window-title]
+icon = "\U000F08C6"            # application
+
+[network]
+icon-wifi = ["\U000F091F", "\U000F0922", "\U000F0925", "\U000F0928"]   # wifi-strength-1..4: weakest to strongest
+```
 
 ## Colors
 

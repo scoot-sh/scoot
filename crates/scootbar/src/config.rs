@@ -39,7 +39,12 @@ mod custom_tests;
     feature = "button",
     feature = "volume",
     feature = "microphone",
-    feature = "network"
+    feature = "network",
+    feature = "battery",
+    feature = "brightness",
+    feature = "bluetooth",
+    feature = "media",
+    feature = "window-title"
 ))]
 mod icon;
 #[cfg(all(test, feature = "clock"))]
@@ -502,6 +507,32 @@ struct WindowTitleFile {
     #[cfg(feature = "window-title")]
     #[serde(rename = "show-app-id")]
     show_app_id: Option<bool>,
+    /// One glyph, drawn before the title whenever a window is focused.
+    #[cfg(feature = "window-title")]
+    icon: Option<String>,
+    /// SVG path data, drawn before the title (instead of `icon`).
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn before the title (instead of `icon`). Only in a
+    /// build with the `icon-image` feature: without it the key is unknown.
+    #[cfg(all(feature = "window-title", feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "window-title", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
+    /// Whether the text is drawn beside the icon (default true): false
+    /// draws only the icon, with the text moved into the tooltip.
+    #[cfg(feature = "window-title")]
+    #[serde(rename = "show-text")]
+    show_text: Option<bool>,
     /// The most logical pixels wide the module's span may be.
     #[cfg(feature = "window-title")]
     #[serde(rename = "max-width")]
@@ -706,6 +737,37 @@ struct BrightnessFile {
     /// Percent points per scroll notch and per raise.
     #[cfg(feature = "brightness")]
     step: Option<u32>,
+    /// One glyph for every level, or four (dim to bright), picked by the
+    /// level. Either is drawn before the percent instead of a static
+    /// icon; without it the percent stands alone. A static
+    /// `icon-path`/`icon-image` icon has no levels.
+    #[cfg(feature = "brightness")]
+    icon: Option<toml::Value>,
+    /// SVG path data, drawn before the percent in every state (instead
+    /// of `icon`).
+    #[cfg(feature = "brightness")]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(feature = "brightness")]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn before the percent (instead of `icon`). Only in
+    /// a build with the `icon-image` feature: without it the key is
+    /// unknown.
+    #[cfg(all(feature = "brightness", feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "brightness", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
+    /// Whether the text is drawn beside the icon (default true): false
+    /// draws only the icon, with the text moved into the tooltip.
+    #[cfg(feature = "brightness")]
+    #[serde(rename = "show-text")]
+    show_text: Option<bool>,
     /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
     /// or `{ scoot = "..." }`.
     #[cfg(feature = "brightness")]
@@ -747,6 +809,47 @@ struct BatteryFile {
     /// `first` (the first in sorted name order).
     #[cfg(feature = "battery")]
     batteries: Option<String>,
+    /// One glyph for every level, or five (empty to full), picked by the
+    /// level. Either is drawn before the percent instead of a static
+    /// icon; without it the percent stands alone. A static
+    /// `icon-path`/`icon-image` icon has no levels.
+    #[cfg(feature = "battery")]
+    icon: Option<toml::Value>,
+    /// SVG path data, drawn before the percent in every state (instead
+    /// of `icon`).
+    #[cfg(feature = "battery")]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(feature = "battery")]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn before the percent in every state (instead of
+    /// `icon`). Only in a build with the `icon-image` feature: without
+    /// it the key is unknown.
+    #[cfg(all(feature = "battery", feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "battery", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
+    /// One glyph, drawn before the percent while charging (instead of
+    /// the level's glyph).
+    #[cfg(feature = "battery")]
+    #[serde(rename = "icon-charging")]
+    icon_charging: Option<String>,
+    /// One glyph, drawn before the percent while full (instead of the
+    /// level's glyph, and instead of the charging one).
+    #[cfg(feature = "battery")]
+    #[serde(rename = "icon-full")]
+    icon_full: Option<String>,
+    /// Whether the text is drawn beside the icon (default true): false
+    /// draws only the icon, with the text moved into the tooltip.
+    #[cfg(feature = "battery")]
+    #[serde(rename = "show-text")]
+    show_text: Option<bool>,
     /// The low-battery hook: `{ exec = [...] }`, run once per downward
     /// crossing of `urgent-below`.
     #[cfg(feature = "battery")]
@@ -813,6 +916,45 @@ struct MediaFile {
     #[cfg(feature = "media")]
     #[serde(rename = "max-width")]
     max_width: Option<u32>,
+    /// One glyph, drawn before the line in both states (instead of the
+    /// per-state ones below, and instead of the built-in play and pause
+    /// vectors).
+    #[cfg(feature = "media")]
+    icon: Option<String>,
+    /// SVG path data, drawn before the line in both states (instead of
+    /// `icon`).
+    #[cfg(feature = "media")]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(feature = "media")]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn before the line in both states (instead of
+    /// `icon`). Only in a build with the `icon-image` feature: without it
+    /// the key is unknown.
+    #[cfg(all(feature = "media", feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "media", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
+    /// One glyph each, drawn before the line in that state (instead of
+    /// `icon`): playing and paused. A state with none shows the static
+    /// icon (a stopped player shows nothing, so there is no third key).
+    #[cfg(feature = "media")]
+    #[serde(rename = "icon-playing")]
+    icon_playing: Option<String>,
+    #[cfg(feature = "media")]
+    #[serde(rename = "icon-paused")]
+    icon_paused: Option<String>,
+    /// Whether the text is drawn beside the icon (default true): false
+    /// draws only the icon, with the text moved into the tooltip.
+    #[cfg(feature = "media")]
+    #[serde(rename = "show-text")]
+    show_text: Option<bool>,
     /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
     /// or `{ scoot = "..." }`.
     #[cfg(feature = "media")]
@@ -1261,6 +1403,18 @@ impl File {
             if let Some(allow) = self.window_title.allow_close {
                 title.allow_close = allow;
             }
+            if let Some(icon) =
+                icon::window_title(&self.window_title).map_err(|(key, message)| Error::Named {
+                    path: path.to_owned(),
+                    key,
+                    message,
+                })?
+            {
+                title.icon = Some(icon);
+            }
+            if let Some(show) = self.window_title.show_text {
+                title.show_text = show;
+            }
             let table = &self.window_title;
             let read = bindings::read(
                 crate::modules::window_title::ID,
@@ -1605,6 +1759,17 @@ fn apply_battery(
         let argv = bindings::exec(inner).map_err(|message| named("on-low", message))?;
         settings.on_low = Some(argv);
     }
+    let icons = icon::battery(table).map_err(|(key, message)| Error::Named {
+        path: path.to_owned(),
+        key,
+        message,
+    })?;
+    settings.icon = icons.icon;
+    settings.icon_charging = icons.charging;
+    settings.icon_full = icons.full;
+    if let Some(show) = table.show_text {
+        settings.show_text = show;
+    }
     let read = bindings::read(
         crate::modules::battery::ID,
         [
@@ -1833,6 +1998,15 @@ fn apply_brightness(
         }
         settings.step = step;
     }
+    let icons = icon::brightness(table).map_err(|(key, message)| Error::Named {
+        path: path.to_owned(),
+        key,
+        message,
+    })?;
+    settings.icon = icons.icon;
+    if let Some(show) = table.show_text {
+        settings.show_text = show;
+    }
     let read = bindings::read(
         crate::modules::brightness::ID,
         [
@@ -1949,6 +2123,17 @@ fn apply_media(
         }
         settings.max_width = width;
     }
+    let icons = icon::media(table).map_err(|(key, message)| Error::Named {
+        path: path.to_owned(),
+        key,
+        message,
+    })?;
+    settings.icon = icons.icon;
+    settings.icon_playing = icons.playing;
+    settings.icon_paused = icons.paused;
+    if let Some(show) = table.show_text {
+        settings.show_text = show;
+    }
     let read = bindings::read(
         crate::modules::media::ID,
         [
@@ -2000,6 +2185,18 @@ fn apply_bluetooth(
         }
         settings.menu_command = command.to_owned();
     }
+    let icons = icon::bluetooth(table).map_err(|(key, message)| Error::Named {
+        path: path.to_owned(),
+        key,
+        message,
+    })?;
+    settings.icon = icons.icon;
+    settings.icon_off = icons.off;
+    settings.icon_on = icons.on;
+    settings.icon_connected = icons.connected;
+    if let Some(show) = table.show_text {
+        settings.show_text = show;
+    }
     let read = bindings::read(
         crate::modules::bluetooth::ID,
         [
@@ -2036,6 +2233,47 @@ struct BluetoothFile {
     #[cfg(feature = "bluetooth")]
     #[serde(rename = "menu-command")]
     menu_command: Option<Vec<String>>,
+    /// One glyph, drawn before the text in every state (instead of the
+    /// per-state ones below).
+    #[cfg(feature = "bluetooth")]
+    icon: Option<String>,
+    /// SVG path data, drawn before the text in every state (instead of
+    /// `icon`).
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn before the text in every state (instead of
+    /// `icon`). Only in a build with the `icon-image` feature: without it
+    /// the key is unknown.
+    #[cfg(all(feature = "bluetooth", feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "bluetooth", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
+    /// One glyph each, drawn before the text in that state (instead of
+    /// `icon`): every adapter off, one powered with nothing connected,
+    /// and a device connected. A state with none shows the static icon.
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "icon-off")]
+    icon_off: Option<String>,
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "icon-on")]
+    icon_on: Option<String>,
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "icon-connected")]
+    icon_connected: Option<String>,
+    /// Whether the text is drawn beside the icon (default true): false
+    /// draws only the icon, with the text moved into the tooltip.
+    #[cfg(feature = "bluetooth")]
+    #[serde(rename = "show-text")]
+    show_text: Option<bool>,
     /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
     /// or `{ scoot = "..." }`.
     #[cfg(feature = "bluetooth")]

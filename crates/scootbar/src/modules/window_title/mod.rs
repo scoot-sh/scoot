@@ -70,6 +70,7 @@ use super::{
     Sources, Update, View,
 };
 use crate::action::{Action, ModuleAction, Trigger};
+use crate::icon::Icon;
 use crate::print::warn;
 
 #[cfg(test)]
@@ -126,6 +127,14 @@ pub struct Settings {
     pub max_width: u32,
     pub placeholder: String,
     pub allow_close: bool,
+    /// One static glyph (or path or picture) from the icon keys, drawn
+    /// before the title whenever a window is focused. Most bars show
+    /// none: the title is the content.
+    pub icon: Option<Icon>,
+    /// Whether the text is drawn beside the icon. `false` draws only the
+    /// icon, with the text moved into the tooltip (which already carries
+    /// the full title).
+    pub show_text: bool,
 }
 
 impl Default for Settings {
@@ -136,6 +145,8 @@ impl Default for Settings {
             max_width: DEFAULT_MAX_WIDTH,
             placeholder: String::new(),
             allow_close: false,
+            icon: None,
+            show_text: true,
         }
     }
 }
@@ -147,6 +158,8 @@ impl PartialEq for Settings {
             && self.max_width == other.max_width
             && self.placeholder == other.placeholder
             && self.allow_close == other.allow_close
+            && self.icon == other.icon
+            && self.show_text == other.show_text
     }
 }
 
@@ -611,6 +624,8 @@ pub fn init(settings: &super::Settings) -> Init {
         max_width: settings.window_title.max_width.clamp(1, MAX_MAX_WIDTH),
         placeholder: settings.window_title.placeholder.clone(),
         allow_close: settings.window_title.allow_close,
+        icon: settings.window_title.icon.clone(),
+        show_text: settings.window_title.show_text,
         seen_gen: 0,
         seen_focus: 0,
         last_title: None,
@@ -627,6 +642,8 @@ pub struct WindowTitle {
     max_width: u32,
     placeholder: String,
     allow_close: bool,
+    icon: Option<Icon>,
+    show_text: bool,
     seen_gen: u64,
     seen_focus: u64,
     /// When a title-only change was last drawn: later ones within
@@ -712,6 +729,12 @@ impl WindowTitle {
                 push_sanitized(view.text_mut(), app_id);
             }
         }
+    }
+
+    /// Whether a window is focused on `output`: the icon's gate (a
+    /// placeholder is not a window).
+    fn has_window(&self, output: &OutputView<'_>) -> bool {
+        self.link.0.borrow().focused_on(output.name).is_some()
     }
 
     /// The full title for the tooltip: what the ellipsis may cut.
@@ -832,8 +855,16 @@ impl Module for WindowTitle {
     }
 
     fn view(&self, output: &OutputView<'_>, view: &mut View) {
-        self.write_text(output, view);
+        if self.show_text {
+            self.write_text(output, view);
+        }
         self.write_tooltip(output, view);
+        // The icon stands for a window, never for the placeholder: a
+        // placeholder is not a window, and with `show-text = false` and
+        // no window the module hides, as with an empty placeholder.
+        if let Some(icon) = self.icon.as_ref().filter(|_| self.has_window(output)) {
+            view.show_icon(icon);
+        }
     }
 
     /// A left click activates the focused window; a middle click closes it

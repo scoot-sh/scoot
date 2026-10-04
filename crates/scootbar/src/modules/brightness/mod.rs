@@ -69,6 +69,7 @@ use super::{
     ActionSpec, ArgKind, Init, Input, InvokeError, Module, OutputView, Sources, Update, View,
 };
 use crate::action::{ModuleAction, Trigger};
+use crate::icon::{Art, Icon};
 
 #[cfg(test)]
 mod tests;
@@ -132,6 +133,34 @@ pub struct Settings {
     /// usable device in sorted name order.
     pub device: Option<String>,
     pub step: u32,
+    /// The brightness icon from `icon`: one glyph shown at every level,
+    /// or one glyph per level (dim to bright), picked by [`level_for`];
+    /// or a static path or picture.
+    pub icon: Option<BrightnessIcon>,
+    /// Whether the text is drawn beside the icon. `false` draws only the
+    /// icon, with the text moved into the tooltip (which already names
+    /// the device and the level).
+    pub show_text: bool,
+}
+
+/// The brightness icon from `icon`: one glyph shown at every level, or
+/// one glyph per level (dim to bright), picked by [`level_for`]. A
+/// static `icon-path`/`icon-image` icon has no levels: per-level vector
+/// or PNG icons are out of scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrightnessIcon {
+    /// One glyph for every level.
+    One(char),
+    /// One glyph per level, dim to bright.
+    Levels([char; 4]),
+    /// A static path or picture, shown at every level.
+    Art(Art),
+}
+
+/// The icon level for `percent`: 0 (dim) to 3 (bright), in quartiles
+/// (0–24, 25–49, 50–74, 75–100).
+fn level_for(percent: u32) -> usize {
+    (percent.min(100) / 25).min(3) as usize
 }
 
 impl Default for Settings {
@@ -139,6 +168,8 @@ impl Default for Settings {
         Self {
             device: None,
             step: DEFAULT_STEP,
+            icon: None,
+            show_text: true,
         }
     }
 }
@@ -214,6 +245,8 @@ fn start_with(
         root: root.to_path_buf(),
         uevent,
         shown: Some(level),
+        icon: settings.icon.clone(),
+        show_text: settings.show_text,
         said_gone: false,
     }))
 }
@@ -240,6 +273,8 @@ struct Brightness {
     root: PathBuf,
     uevent: OwnedFd,
     shown: Option<Level>,
+    icon: Option<BrightnessIcon>,
+    show_text: bool,
     /// Whether the runtime removal was said already: once per
     /// disappearance, not per wake.
     said_gone: bool,
@@ -291,6 +326,18 @@ impl Brightness {
             self.refresh()
         } else {
             Update::Unchanged
+        }
+    }
+
+    /// The icon for `percent`: the level's glyph, or the static glyph,
+    /// path or picture. `None` where no icon is set: without any icon
+    /// the level shows text alone, as before.
+    fn icon_for(&self, percent: u32) -> Option<Icon> {
+        match &self.icon {
+            Some(BrightnessIcon::One(glyph)) => Some(Icon::Glyph(*glyph)),
+            Some(BrightnessIcon::Levels(levels)) => Some(Icon::Glyph(levels[level_for(percent)])),
+            Some(BrightnessIcon::Art(art)) => Some(Icon::Art(art.clone())),
+            None => None,
         }
     }
 
@@ -502,13 +549,20 @@ impl Module for Brightness {
     }
 
     /// `{percent}%`, with the device in the tooltip; nothing where there
-    /// is no backlight, so the module hides.
+    /// is no backlight, so the module hides. With an icon the glyph (or
+    /// picture) stands before the text, or alone with `show-text =
+    /// false` (the tooltip already names the device and the level).
     fn view(&self, _output: &OutputView<'_>, view: &mut View) {
         let Some(level) = self.shown.as_ref() else {
             return;
         };
-        let _ = write!(view.text_mut(), "{}%", level.percent);
+        if self.show_text {
+            let _ = write!(view.text_mut(), "{}%", level.percent);
+        }
         let _ = write!(view.tooltip_mut(), "{}: {}%", level.device, level.percent);
+        if let Some(icon) = self.icon_for(level.percent) {
+            view.show_icon(&icon);
+        }
     }
 
     /// What `query` reports: the percent and the device it is, or nothing
