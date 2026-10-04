@@ -13,7 +13,7 @@ point `[wallpaper] image` at your copy.
 | --- | --- |
 | [`scoot.toml`](scoot.toml) | the compositor: background, ring colors and widths, rounded corners, gaps, the wallpaper |
 | [`bar.toml`](bar.toml) | scootbar: a floating, rounded, translucent bar, workspaces as discs with the focused window's title, the clock, system modules, two command-fed modules, launcher buttons and the power menu |
-| [`foot.ini`](foot.ini) | foot: the palette, 80% opacity, padding and font size (needs a foot with `[colors-dark]` sections, 1.24 or later) |
+| [`foot.ini`](foot.ini) | foot: the palette, 80% opacity, padding and font size (needs a foot with `[colors-dark]` sections, 1.26 or later) |
 | [`starship.toml`](starship.toml) | starship: the prompt in the illustration's palette |
 | [`helix/config.toml`](helix/config.toml) | Helix: relative line numbers, cursor line, the theme below |
 | [`helix/themes/scoot-vinyl.toml`](helix/themes/scoot-vinyl.toml) | Helix: the transparent palette theme |
