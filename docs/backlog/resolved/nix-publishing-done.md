@@ -43,7 +43,7 @@ eventually do cachix and flakehub (without their flakehub cache)."
 - Cachix-managed signing keys (no private key held by the project).
 
 **Crane, so the cache helps CI and not only installs** — split out to
-[nix-crane](nix-crane.md).
+[nix-crane](nix-crane-done.md).
 
 **FlakeHub (the flake, versioned; no FlakeHub Cache)**
 
@@ -90,7 +90,7 @@ SHA; FlakeHub publishes `scoot-sh/scoot` (rolling, public, no output
 paths) after both builds pass; `flake.nix` `nixConfig` names the cache;
 `docs/nix.md` covers trusting it and installing from FlakeHub; the dev VM's
 config names the cache (applied by the maintainer). Crane moved to
-[nix-crane](../packaging/nix-crane.md).
+[nix-crane](nix-crane-done.md).
 
 The first `main` run (37168786109) proved the rest:
 

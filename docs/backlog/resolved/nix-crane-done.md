@@ -1,9 +1,10 @@
 ---
 title: "Nix: crane, so compiled dependencies are cached and CI rebuilds only scoot's crates"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-04"
 ---
 
 # Nix: crane, so compiled dependencies are cached and CI rebuilds only scoot's crates
@@ -52,3 +53,29 @@ cached; it is the two in-between variants that wait on this.)
 
 The Cachix cache and FlakeHub publish themselves
 ([nix-publishing](../resolved/nix-publishing-done.md)).
+
+## Resolution (PR #420, 2026-10-04)
+
+Landed as designed: crane v0.24.0 pinned by rev in `flake.nix`/`flake.lock`
+(one lock node; `devenv.yaml`/vm revs untouched). Four `buildDepsOnly`
+artifacts (base shared by `scoot`, `scootctl`, `scootbg` and every
+`scootbar` `.override`, plus one per compositor feature combination --
+`scootbar`'s flags gate only its own code, and its one dependency-bearing
+flag `icon-image` names a `png` the base set already compiles).
+`outputHashes` kept with the same values, re-keyed by Cargo.lock source
+URL (crane's format); builds prove git vendoring works from a clean store
+with no warnings. Every `checks.*` and `nix-build.yml` check passes
+unchanged (`.override` interface and `cargoBuildFeatures`/
+`cargoBuildNoDefaultFeatures` attrs kept as plain data).
+
+Measured on the Asahi M2 (aarch64, 8 cores): code-only rebuild
+(comment-only `.rs` in `scoot` and in `scootbar`) rebuilt 6 whole-graph
+derivations before (186 s wall; live log shows Smithay recompiled) and
+rebuilds 8 package derivations after while reusing all 4 dependency
+derivations bit-for-bit (267 s wall; zero dependency recompiles in the
+package logs). The dep artifacts are separate ~130 MB store paths the
+workflow's Cachix daemon step uploads with every other built path.
+
+`scoot-gpu` and `scoot-xwayland` joined the cached set in `nix-build.yml`:
+under crane each costs one small first-party-only compile per code-only
+merge, rebuilt fully only on lock/fork changes (rare by design).
