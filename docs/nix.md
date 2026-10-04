@@ -296,7 +296,7 @@ programs.scoot = {
 | `package` | flake's own build (Linux), `null` (macOS) | The binary installed to your profile. `null` installs no binary (files only). |
 | `settings` | `{ }` | Free-form config, rendered verbatim to TOML (see below). Empty renders a valid minimal file: the compositor runs it as pure defaults. |
 | `configFile` | `"scoot/config.toml"` | Where the rendered TOML lands, relative to `$XDG_CONFIG_HOME`. Keep the default unless you pass the same path via `--config` wherever you launch scoot. |
-| `sessionScript` | `null` | Startup script text, written executable beside the rendered config at `<dirOf configFile>/session.sh` (`scoot/session.sh` with the default `configFile`). Launch it with `scoot -- ~/.config/scoot/session.sh` for the default (or `~/.config/<that path>` after a `configFile` override), or exec it from your greetd/startwm entry — on NixOS, that launch line goes in the NixOS module's `session.command` (see below), which is what makes the greeter entry run this script instead of a bare compositor. `null` writes no file. |
+| `sessionScript` | `null` | Startup script text, written executable beside the rendered config at `<dirOf configFile>/session.sh` (`scoot/session.sh` with the default `configFile`). Launch it with `scoot -- ~/.config/scoot/session.sh` for the default (or `~/.config/<that path>` after a `configFile` override), or exec it from your greetd/startwm entry — on NixOS, that launch line goes in the NixOS module's `session.command` (see below), which is what makes the greeter entry run this script instead of the launcher (without the launcher's session wiring; wired startup programs belong in `[autostart]`). `null` writes no file. |
 | `portals.enable` | `true` | Install `scoot-portals.conf` to the per-user xdg-desktop-portal lookup path (`~/.config/xdg-desktop-portal/`), so ScreenCast/Screenshot resolve to the `wlr` backend inside a scoot session. Inert outside one (nothing reads it until `XDG_CURRENT_DESKTOP=scoot`). Turn off if you manage portal backends some other way. |
 | `wallpaper.enable` | `settings ? wallpaper` | Install `wallpaper.package` and set `settings.wallpaper.command` to its store path (a `command` you set yourself wins). On whenever `settings` has a `wallpaper` table; `false` leaves both alone, so `[wallpaper]` runs `scootbg` from `PATH`. See [The wallpaper](#the-wallpaper-scootbg). |
 | `wallpaper.package` | flake's own `scootbg` (Linux), `null` (macOS) | The scootbg to install. `null` installs nothing and sets no `command`. |
@@ -395,25 +395,17 @@ programs.scoot = {
 | `wallpaper.enable` | `enable` and a package available | Install `wallpaper.package` system-wide, so a user's `[wallpaper]` section finds `scootbg` on `PATH` (any user, and a session the greeter starts). On with `enable` whenever there is a package (the flake's modules and overlay provide one), off otherwise; `false` opts out (another wallpaper daemon). |
 | `wallpaper.package` | flake's own `scootbg` build | The scootbg to install. Setting `wallpaper.enable = true` with no package (direct module use without the overlay) is an eval error naming this option; leaving it at its default is not. |
 | `session.enable` | `false` | Add a scoot entry to the display-manager/greetd session menu. |
-| `session.command` | `null` | Full `Exec=` line for the session entry. `null` renders the bare `<package>/bin/scoot --tty` (existing configs unchanged). Set it to run something inside the session — usually `<package>/bin/scoot --tty -- <command>`, e.g. the home-manager `sessionScript` output (`/home/alice/.config/scoot/session.sh` for a user `alice` with defaults), or a wrapper script path that launches scoot itself (logging, environment setup). |
+| `session.command` | `null` | Full `Exec=` line for the session entry. `null` renders `<package>/bin/scoot-session`, the session launcher (below). Set it to run something else instead — usually `<package>/bin/scoot --tty -- <command>`, e.g. the home-manager `sessionScript` output (`/home/alice/.config/scoot/session.sh` for a user `alice` with defaults), or a wrapper script path that launches scoot itself (logging, environment setup). A set value replaces the whole line and bypasses the launcher, so it runs without the session wiring; startup programs that want the wiring belong in `[autostart]` instead. |
+| `greeter.enable` | `false` | Log in through ReGreet (greetd + cage, nixpkgs' own `services.displayManager.regreet`), with scoot in its session list. Only ever on when set: this replaces the login screen. Refused at eval beside GDM or SDDM. |
+| `greeter.background` | `null` | Background image for the ReGreet login screen. Null leaves it alone (required under Stylix with its regreet target, which sets the backdrop from `stylix.image` itself). |
 
 The session entry **adds a session alongside existing ones, never
 replacing the default**: the module writes a `scoot.desktop`
-(`Exec=<package>/bin/scoot --tty` by default, `DesktopNames=scoot` — which is what
-sets `XDG_CURRENT_DESKTOP=scoot` when launched from a display manager)
+(`Exec=<package>/bin/scoot-session` by default,
+`DesktopNames=scoot` — which is what sets
+`XDG_CURRENT_DESKTOP=scoot` when launched from a display manager)
 into `services.displayManager.sessionPackages`, the additive list
-greetd/tuigreet, GDM and SDDM read. With `session.command` set, `Exec=`
-is that string verbatim — the pairing with the home-manager module is
-`session.command = "<package>/bin/scoot --tty --
-/home/alice/.config/scoot/session.sh"` (for a user `alice`; substitute
-your own username), so the greeter starts the compositor with
-your session script instead of a bare one; a wrapper script path works
-the same way (the wrapper launches scoot itself). The value renders
-verbatim, so desktop-entry quoting (spaces, quotes, pipes) is yours to
-get right — copy the example shape. `Exec=` lines get no shell
-expansion (`~` and `$HOME` arrive literally — `~` is additionally
-reserved by the Desktop Entry Spec), so always spell the script out as
-an absolute path, quoted per the spec. It never sets
+greetd/tuigreet, GDM and SDDM read. It never sets
 `services.displayManager.defaultSession` (the pre-select) or
 `services.greetd.settings.default_session` / `initial_session` (what
 actually runs), so enabling it puts scoot in the menu next to your
@@ -421,15 +413,150 @@ existing sessions and switches nothing. `session.enable` still defaults
 to **off**: a login-screen change is a change to your way back into your
 own desktop, and that stays an explicit opt-in.
 
+### What a greeter login starts
+
+With the default entry, picking scoot at the greeter runs
+`<package>/bin/scoot-session`, the session launcher
+(`resources/scoot-session`, shipped beside the binary):
+
+1. It refuses while a scoot session is already active for the user
+   (`scoot.service` or `graphical-session.target`), so a second login
+   cannot fight the first over the user manager.
+2. It imports the login environment into the systemd user manager and
+   the D-Bus activation environment together
+   (`dbus-update-activation-environment --systemd --all`), with
+   `XDG_CURRENT_DESKTOP` defaulted to `scoot` when the greeter did not
+   set one, and starts `scoot.service` (plain `start`: `--wait` hangs
+   forever on some user managers even for active units, measured on
+   systemd 261 — the readiness wait below is what actually gates on the
+   compositor, and a stillborn service trips its liveness check on the
+   first round).
+3. It waits for readiness — the IPC socket answering `scoot msg
+   version`, polled with a deadline (each attempt under a timeout, so a
+   mid-startup connection the loop never answers cannot wedge the
+   wait), never a blind sleep — then takes the session's own new
+   Wayland socket under `$XDG_RUNTIME_DIR` (found by name-and-inode
+   difference against a pre-start snapshot, since scoot reuses a stale
+   name by replacing its file; zero or several new sockets stop the
+   service instead of guessing) and imports `WAYLAND_DISPLAY` and
+   `XDG_CURRENT_DESKTOP` into the user manager *and* the D-Bus
+   activation environment together
+   (`dbus-update-activation-environment --systemd` with exactly those
+   two, overwriting whatever the first sweep carried for their names).
+4. Starting `scoot.service` pulls in `graphical-session.target` (the
+   unit is `BindsTo`/`Before` it), so units with `WantedBy=` it — the
+   status bar below — start once the session exists. The display import
+   lands as soon as the compositor answers, and a unit that starts
+   before it (the bar retries every two seconds) heals on its own.
+5. When scoot exits — a `quit` action, a crash — the launcher starts
+   `scoot-shutdown.target`, which `Conflicts=` the session targets away:
+   everything bound to them (the compositor through `BindsTo`, the bar
+   through `PartOf`) stops, the two display variables in the user
+   manager go back to their pre-session values (restored, or unset if
+   they were unset — the D-Bus activation environment has no unset, so
+   the bus keeps the last values the way it does for every session),
+   and nothing leaks into the next login. The launcher exits with the
+   compositor's own status when it has one, so a crash reads as a crash.
+
+The units live in `resources/systemd/user/` (`scoot.service`,
+`scoot-shutdown.target`) and are installed by `session.enable` with the
+binary path filled in; outside NixOS, copy them to
+`~/.config/systemd/user/` with `@SCOOT_BIN@` replaced by the `scoot`
+binary's path (and `scoot-session` anywhere on `PATH`, with `SCOOT_BIN`
+set if the binary is not beside it). Without a systemd user manager at
+all (s6, the webtop target), the launcher runs `scoot --tty` directly
+with a note: a session with no integration, not a failure.
+
+With `session.command` set, `Exec=` is that string verbatim instead of
+the launcher — the pairing with the home-manager module is
+`session.command = "<package>/bin/scoot --tty --
+/home/alice/.config/scoot/session.sh"` (for a user `alice`; substitute
+your own username), so the greeter starts the compositor with
+your session script instead of a bare one; a wrapper script path works
+the same way (the wrapper launches scoot itself). That entry runs
+without the five steps above — no `graphical-session.target`, no
+activation import, no teardown — so prefer the launcher plus
+`[autostart]` for startup programs (below), and reach for
+`session.command` when the entry itself must be something else.
+The value renders verbatim, so desktop-entry quoting (spaces, quotes,
+pipes) is yours to get right — copy the example shape. `Exec=` lines get no shell
+expansion (`~` and `$HOME` arrive literally — `~` is additionally
+reserved by the Desktop Entry Spec), so always spell the script out as
+an absolute path, quoted per the spec.
+
 One auto-login caveat, verified against the pinned nixpkgs source: with
 no explicit `defaultSession`, NixOS falls back to the head of the
 session list for the autologin target — so on a box that auto-logs-in,
 adding *any* session package can move that target. If you use
 `autoLogin`, pin `services.displayManager.defaultSession` explicitly.
 
-A complete session, as one config — the home-manager side declares the
-config and the startup script, the NixOS side points the greeter entry at
-that script:
+These greeters work with the entry with no scoot-side login-path
+configuration: GDM, SDDM, and greetd with tuigreet or ReGreet (which
+run in their own compositor and list scoot through the
+`wayland-sessions` entry).
+
+### The greeter: ReGreet, opt-in
+
+```nix
+programs.scoot = {
+  enable = true;
+  greeter.enable = true;   # default false: this replaces the login screen
+  # greeter.background = /home/alice/Pictures/hills.jpg;   # optional backdrop
+};
+```
+
+This is a thin convenience over nixpkgs' own
+`services.displayManager.regreet`: it turns that on (greetd running
+ReGreet under cage — ReGreet runs in cage, never inside scoot), forces
+`session.enable` on so the greeter lists a scoot session, and
+optionally names ReGreet's backdrop. Hosting a pre-login greeter inside
+scoot itself would need a locked-down scoot profile (no binds, no IPC
+socket) and is out of scope — a possible later step, not this option.
+
+What it changes, plainly: the machine boots to ReGreet instead of
+whatever login screen it had. It never becomes the default unless set —
+`greeter.enable` defaults to `false` — and rolling back is turning it
+off again or booting the previous NixOS generation (nothing about the
+previous login screen is uninstalled while it is on, only displaced).
+It refuses at eval beside GDM or SDDM (two owners for one login
+screen); anything else owning it (lemurs, ly, a hand-rolled greetd)
+must be turned off by hand.
+
+Theming: `greeter.background` becomes ReGreet's `background.path` (the
+file is copied to the store — point it at the same image as the
+session wallpaper to match). There is no `fit` knob here; ReGreet's
+default stands unless set through
+`services.displayManager.regreet.settings` directly (which also wins
+over this path for the backdrop itself: leave `background` null then).
+Under Stylix with its regreet target enabled, leave `background` null:
+Stylix sets the backdrop from `stylix.image` (plus its fit mapping,
+fonts, and GTK CSS) itself, and setting both is refused at eval.
+
+A complete session, as one config — startup programs as config (the
+wired route: they run inside the session the launcher wires up), the
+NixOS side just adding the entry:
+
+```nix
+# Home configuration:
+programs.scoot = {
+  enable = true;
+  settings = {
+    output.scale = 2.0;
+    binds."super+t" = "spawn foot";
+    autostart.commands = [ "spawn waybar" "spawn foot" ];
+  };
+};
+
+# System configuration:
+programs.scoot = {
+  enable = true;
+  session.enable = true;
+};
+```
+
+The script route still works, unwired — the home-manager side declares
+the startup script, the NixOS side points the greeter entry at it
+instead of the launcher:
 
 ```nix
 # Home configuration (user `alice`):
@@ -453,10 +580,13 @@ programs.scoot = {
 };
 ```
 
-The greeter starts scoot with the session script instead of a bare
-compositor. The script path is absolute (`Exec=` lines get no shell
-expansion), and it is the default `<dirOf configFile>/session.sh` — a
-`configFile` override moves both halves, so keep them paired.
+The greeter starts scoot with the session script instead of the
+launcher: no `graphical-session.target`, no activation import, no
+teardown (the bar's unit never starts — run the bar from the script or
+from `[autostart]` on this route). The script path is absolute
+(`Exec=` lines get no shell expansion), and it is the default `<dirOf
+configFile>/session.sh` — a `configFile` override moves both halves, so
+keep them paired.
 
 The config file itself is per-user, so it stays in the home-manager
 module above — the NixOS module owns the binaries and the login entry,
@@ -658,20 +788,27 @@ the old and the new unit file (`compare_units`: a difference outside
 of this pin, not a run.
 
 **Starting the bar: the unit, or your session script, not both.** The unit
-starts when `graphical-session.target` is reached, and nothing in a scoot
-session reaches it for you. scoot does not start it. NixOS's
-`nixos-fake-graphical-session.target` exists to do that for sessions that
-do not, but its only users are the X11 session wrapper and `startx`
-(`services/x11/display-managers/default.nix`), never a Wayland session
-entry: `programs.scoot.session.command` is just the `Exec=` line the
-greeter runs. So the session script (`programs.scoot.sessionScript` on the
-home-manager side, which `session.command` points the greeter at) imports
-the environment and starts a target of its own. It cannot start
-`graphical-session.target` directly: that target has
-`RefuseManualStart=yes`, and `systemctl --user start graphical-session.target`
-is refused ("may be requested by dependency only", measured, systemd 261).
-A session target that `BindsTo=` it is the way (the shape of NixOS's own
-fake target), and the script starts that:
+starts when `graphical-session.target` is reached. In a greeter-started
+session that target is reached for you: `programs.scoot.session.enable`
+installs the `scoot-session` launcher as the login entry, and the
+launcher starts `scoot.service` (which pulls the target in) and imports
+`WAYLAND_DISPLAY`/`XDG_CURRENT_DESKTOP` once the compositor answers —
+see [NixOS module](#nixos-module). (NixOS's
+`nixos-fake-graphical-session.target` exists for sessions that do not do
+this, but its only users are the X11 session wrapper and `startx`,
+never a Wayland session entry.) When scoot exits, the launcher stops
+the target again, so the bar goes down with the session instead of
+retrying a compositor that is gone every two seconds until logout.
+
+Outside a launcher-started session — a hand-rolled greeter entry, a
+`scoot --tty` from a VT — reach the target the manual way: the session
+script imports the environment and starts a target of its own. It cannot
+start `graphical-session.target` directly: that target has
+`RefuseManualStart=yes`, and `systemctl --user start
+graphical-session.target` is refused ("may be requested by dependency
+only", measured, systemd 261). A session target that `BindsTo=` it is
+the way (the shape of NixOS's own fake target), and the script starts
+that:
 
 ```nix
 # home-manager: the target the session script starts
@@ -696,10 +833,11 @@ XDG_CURRENT_DESKTOP`. With the target started, `WantedBy=` brings the bar up
 after `graphical-session.target` and `PartOf=` stops it when the target
 stops (`systemctl --user stop scoot-session.target`: measured, S8 of the
 script, the bar came up 0.6 s after the target start and went down with the
-stop). Nothing stops the target for you when scoot exits: the bar then
-retries a compositor that is gone every two seconds until the user manager
-ends with the logout, so stop the target when your session ends (a stop of a
-lingering user's manager is not something this was run against).
+stop). Stopping the target when scoot exits is on you on this route — the
+launcher route above does it for you, and without it the bar retries a
+compositor that is gone every two seconds until the user manager ends with
+the logout (a stop of a lingering user's manager is not something this was
+run against).
 
 The other route: `programs.scootbar.systemd.enable = false`, and start the
 bar from scoot itself, `autostart.commands = [ "spawn scootbar daemon" ]` in

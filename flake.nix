@@ -226,6 +226,19 @@
             # suite runs.
             doCheck = false;
 
+            # `scoot-session`, the greeter-started systemd session launcher
+            # (`resources/scoot-session`): beside the binary it launches, so
+            # it finds `scoot` next to itself with no path baked in (and the
+            # `scoot-xwayland` wrapper's `PATH` append survives, since that
+            # is what sits next to it there). A direct store-path reference,
+            # not part of `src`'s fileset: the script changes without
+            # rebuilding the Rust tree, and the tree rebuilds without
+            # re-copying anything but this one file.
+            postInstall = ''
+              cp ${./resources/scoot-session} $out/bin/scoot-session
+              chmod +x $out/bin/scoot-session
+            '';
+
             meta = {
               # Linux builds the whole compositor, so the crate's own
               # description is the honest one; on Darwin the compositor is

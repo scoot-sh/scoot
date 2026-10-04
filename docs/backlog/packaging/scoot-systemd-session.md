@@ -50,22 +50,33 @@ the launcher does the readiness wait and the import:
    packages under `bin/`, installable outside Nix): refuses while a scoot
    session is active for the user (`scoot.service` or
    `graphical-session.target`); imports the login environment into the
-   user manager (`systemctl --user import-environment`, then the scoped
-   `dbus-update-activation-environment --systemd WAYLAND_DISPLAY
-   XDG_CURRENT_DESKTOP` once the display is known — the scoped two-var
-   form, not `--all`, so a login's `SSH_*`/`TERM`/etc. never reach
-   D-Bus-activated apps); starts `scoot.service` (`--wait`, so an
-   immediate failure aborts before anything else) and waits for readiness
+   user manager and the D-Bus activation environment together
+   (`dbus-update-activation-environment --systemd --all`, falling back
+   to `systemctl import-environment` without the bus half when the dbus
+   tool is missing); starts `scoot.service` (plain `start`, not
+   `--wait` — see the evidence record) and waits for readiness
    (`scoot msg version` against the IPC socket with a deadline, plus a
-   service-liveness check each round — no blind sleep); learns
-   `WAYLAND_DISPLAY` exactly (the service's `MainPID` process environment
-   — scoot binds `wayland-1..32` ignoring the caller's `WAYLAND_DISPLAY`,
-   so pre-setting the name is not a mechanism) and refuses to import a
-   display whose socket does not exist; on exit (or on signal) starts
+   service-liveness check each round — no blind sleep, and each attempt
+   under a `timeout` so a mid-startup connection the loop never answers
+   cannot wedge the wait); learns `WAYLAND_DISPLAY` by difference (the
+   session's own new socket under `$XDG_RUNTIME_DIR` against a
+   pre-start snapshot, compared by name *and* inode since a reused
+   stale name is a replaced file — pre-setting the name is not a
+   mechanism since
+   scoot binds `wayland-1..32` ignoring the caller, and the service's
+   `/proc` environment cannot work since `set_var` leaves the exec-time
+   copy `/proc` shows untouched; zero or several new sockets stop the
+   service instead of guessing); on exit (or on signal) starts
    `scoot-shutdown.target`, which `Conflicts=` the session target away so
-   session-bound units stop, and unsets what was imported. Without a
+   session-bound units stop, and restores the two display variables in
+   the user manager to their pre-session values (the bus has no unset,
+   so the activation environment keeps the last values like any
+   session). Without a
    systemd user manager it degrades to `exec scoot --tty` with a note, not
-   a failure.
+   a failure, and it starts the service with plain `start` rather than
+   `--wait` (`--wait` hangs forever on some user managers even for
+   already-active units — measured on systemd 261, with no job queued;
+   the readiness loop's liveness check covers stillborn services).
 2. **`resources/systemd/user/scoot.service`**: `BindsTo`/`Before`
    `graphical-session.target` (+ `Wants`/`After`
    `graphical-session-pre.target`), `ExecStart=<pkg>/bin/scoot --tty`,
@@ -82,6 +93,15 @@ the launcher does the readiness wait and the import:
    the wiring-aware route for startup programs is `[autostart]`).
    `nix/tests.nix` pins the units (`BindsTo`/`Before`, `ExecStart`),
    the entry (`Exec=.../scoot-session`), and the off state.
+   `greeter.enable` (default false) is a thin opt-in over nixpkgs' own
+   `services.displayManager.regreet` (greetd + cage hosting ReGreet):
+   it turns that on, forces `session.enable` on so scoot is listed,
+   and optionally names ReGreet's backdrop (`greeter.background` becoming
+   `background.path`; null under Stylix, whose own regreet target owns
+   the backdrop — setting both is refused). GDM/SDDM beside it are
+   refused at eval; rollback is the previous generation. `nix/tests.nix`
+   imports the real regreet module and pins on/off, the backdrop, and
+   every refusal with its message.
 4. **Home-manager**: no new option — the module manages files, it does
    not launch scoot, so there is nothing to bind; `scootbar-home.nix`'s
    `WantedBy`/`PartOf`/`After graphical-session.target` ordering is
@@ -96,12 +116,15 @@ the launcher does the readiness wait and the import:
 
 ## Not in this ticket
 
-- `programs.scoot.greeter.enable` (greetd + ReGreet-in-scoot, cage-style):
-  decided **no**. A greeter option rewrites the machine's login path, and
-  the never-strand rule plus the no-DM-change/no-reboot constraint on the
-  dev VM mean it would ship untested; any greeter reading
-  `wayland-sessions` already works with the entry above, so nothing is
-  blocked without it.
+- Hosting ReGreet (or any greeter) *inside scoot itself*: that needs a
+  locked-down scoot profile (no binds, no IPC socket) and is out of
+  scope -- a possible later step, said so in `docs/nix.md`. The
+  `greeter.enable` above runs ReGreet under cage, the way nixpkgs runs
+  it, and lists scoot as a session.
+- A `nixosTest` booting greetd+ReGreet: measured against the dev VM's
+  disk budget (see the evidence record) and skipped -- the eval pins
+  above are the coverage, and this repo runs no `nixosTest` anywhere
+  today for the same build-cost reason.
 - Launcher session-command arguments: decided **no**. Forwarding an exact
   argv through a static unit needs shell word-splitting (which breaks the
   quoting `session.command`'s verbatim design exists to preserve) or
