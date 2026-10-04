@@ -60,3 +60,7 @@ through the clock/workspaces/window-title variants), `diff -r` over
 default binary: file size unchanged (2,167,520 bytes), `.text` +1,632
 bytes (+0.10%); idle RSS/wakeups/fds unchanged. fmt, the CI-exact clippy
 matrix (35 runs), nextest (1,321 passed) and `cargo test` all clean.
+
+**Maintainer's ruling (2026-10-04, given in chat): the `.text` growth
+(+1,632 B, +0.10%, the run-time builder on the `--help` path) is waived.**
+It covers that row only; the file does not grow. Nothing else is waived.
