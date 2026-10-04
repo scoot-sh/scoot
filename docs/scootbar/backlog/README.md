@@ -120,7 +120,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
 
 ### M6 — Infrastructure and the tray
 - [A shared D-Bus client](resolved/dbus-client-done.md) (low): hand-rolled, built with the tray — RESOLVED 2026-10-02
-- [System tray](tray.md) (medium): the watcher is core infrastructure; first version landed 2026-10-02, menus remain (popups exist now)
+- [System tray](resolved/tray-done.md) (medium): the watcher is core infrastructure; first version landed 2026-10-02, menus 2026-10-03 in #405 — RESOLVED 2026-10-03
 - [Tray D-Bus client: hardening left over from the #388 review](resolved/tray-review-hardening-done.md) (low): a per-pump byte budget while discarding, a stuck flight on an oversize reply with huge header fields, and a few smaller items — RESOLVED 2026-10-03
 - [Popups](resolved/popups-done.md) (done), [Tooltips](resolved/tooltips-done.md) (done), [A native WiFi list popup](resolved/popup-network-list-done.md) (low), [Keyboard navigation of popup lists](popup-list-keyboard.md) (low), [Network module icons](resolved/network-module-icons-done.md) (low, gh #379) — RESOLVED 2026-10-03 in #401
 - [Media (MPRIS)](resolved/media-module-done.md) (low): now playing and play/pause, next, previous over MPRIS — RESOLVED 2026-10-03
@@ -130,6 +130,7 @@ The [umbrella](data-source-modules.md) holds the rules they share.
  - [Icons on every module that shows a value](module-icons.md) (medium): battery, brightness, bluetooth and media take no icon today; blocked on the WiFi strength-icon form
 - [Network: a second radio's empty scan replaces the real one](network-multi-radio-scan.md) (medium): the last interface's scan dump wins, so a dongle or hotspot interface can empty the list (#403 review)
  - [Network: WiFi signal as a strength icon, not text bars](resolved/network-signal-icon-done.md) (medium): the icon shows the strength, the text is just the SSID
+- [Tray: themed icon names](tray-icon-themes.md) (medium), [Tray: real Qt, GTK and Electron apps](tray-real-apps.md) (medium), [Tray: session buses on abstract sockets](tray-abstract-socket.md) (low), [Tray: coalesce a runaway item's redraws](tray-redraw-coalesce.md) (low): split out of the tray when its menus landed
 
 ### M7 — The rest of the shell (separate products, own backlogs when they start)
 - [Extract `scootui`](extract-scootui.md) (low): when a second consumer appears

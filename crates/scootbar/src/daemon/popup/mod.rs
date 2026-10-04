@@ -19,7 +19,9 @@
 //! 2. **Configure**: the compositor places it and sends the size and an
 //!    `xdg_surface.configure`; the bar acks it and only then draws and
 //!    commits the first buffer. A size that differs from the one asked is
-//!    adopted (a popup is never resized after that).
+//!    adopted. A later refill whose computed size differs reopens the
+//!    popup at the new size with the stored grab serial (a same-size
+//!    refill keeps the surface).
 //! 3. **Redraw**: once per turn of the loop, after the module events are
 //!    in, when something changed: the module's revision moved (a level
 //!    changed elsewhere), the pointer hovered or dragged. The module's
@@ -133,6 +135,9 @@ struct Open {
     scale: Scale,
     /// The buffer's size in device pixels.
     dims: (u32, u32),
+    /// The grab serial it opened with, if any: a reopen after a resize
+    /// reuses it, so the popup keeps whatever grab the open earned.
+    serial: Option<u32>,
     em: f32,
     content: Content,
     layout: Layout,
@@ -287,6 +292,16 @@ fn anchor_span(scale: Scale, span: crate::paint::Span, bar_width: u32) -> (u32, 
         .min(bar_width)
         .max(start.saturating_add(1));
     (start, end)
+}
+
+/// Whether a refilled popup must reopen at a new size: its content's
+/// computed size no longer matches the surface it opened at (an
+/// `xdg_popup` cannot change size after configure). A same-size refill
+/// keeps the surface it has. The caller reopens with the stored grab
+/// serial, and the reopened popup reads the same content and revision,
+/// so this fires once per size change, never in a loop.
+fn resized(layout: &Layout, dims: (u32, u32)) -> bool {
+    (layout.width, layout.height) != dims
 }
 
 /// A protocol `int` for a size or a coordinate: saturated.
@@ -455,6 +470,10 @@ impl State {
             .pointer
             .as_ref()
             .is_none_or(|pointer| pointer.version() >= 5);
+        let serial = match flavor {
+            Flavor::Popup { serial } => serial,
+            Flavor::Tooltip => None,
+        };
         Ok(Open {
             id,
             output,
@@ -471,6 +490,7 @@ impl State {
             configured: None,
             scale,
             dims,
+            serial,
             em,
             content,
             layout,
@@ -588,6 +608,31 @@ impl State {
                     render::device(style.padding, scale),
                     render::device(1, scale).max(1),
                 );
+                // The content outgrew (or shrank past) the surface it
+                // opened at: a menu opens on its `...` line and fills a
+                // turn later, and an xdg_popup cannot change size after
+                // configure. Reopen it at the new size, with the grab
+                // serial the open earned (hover and the scroll position
+                // do not survive: the rows moved anyway). Same size
+                // keeps the surface it has; a reopened popup reads the
+                // same content and revision, so this fires once per size
+                // change, never in a loop.
+                if resized(&open.layout, open.dims) {
+                    let (output, module, serial) = match self.popup.open.as_ref() {
+                        Some(open) => (open.output, open.module, open.serial),
+                        None => return,
+                    };
+                    self.popup.close();
+                    let member = self
+                        .outputs
+                        .iter()
+                        .find(|entry| entry.output.id() == output)
+                        .and_then(|entry| Popups::member_of(&entry.objects.scene, module));
+                    if let Some(member) = member {
+                        let _ = self.open_popup(qh, output, member, serial);
+                    }
+                    return;
+                }
                 // The popup keeps the size it opened at.
                 open.layout.width = open.dims.0;
                 open.layout.height = open.dims.1;

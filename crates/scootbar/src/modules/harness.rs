@@ -123,10 +123,22 @@ impl Harness {
     /// now.
     #[cfg(all(
         feature = "popup",
-        any(feature = "volume", feature = "microphone", feature = "network")
+        any(
+            feature = "volume",
+            feature = "microphone",
+            feature = "network",
+            feature = "tray"
+        )
     ))]
     pub fn popup(&mut self, content: &mut crate::popup::Content) -> bool {
         self.module.popup(&OutputView { name: None }, content)
+    }
+
+    /// Whether the last invoke asked for the popup surface, taken once
+    /// (see [`super::Module::wants_popup`]).
+    #[cfg(all(feature = "popup", feature = "tray"))]
+    pub fn wants_popup(&mut self) -> bool {
+        self.module.wants_popup()
     }
 
     /// The module's `value` for the output `name`, as `query` reports it.

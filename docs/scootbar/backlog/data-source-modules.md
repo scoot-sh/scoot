@@ -3,7 +3,7 @@ title: "Data-source modules (umbrella): rules shared by every module that reads 
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "tray"
+blocked: null
 milestone: "ongoing"
 ---
 
@@ -19,7 +19,7 @@ Filed 2026-09-29; split into one entry per module 2026-09-29. Serves
 - [brightness](resolved/brightness-module-done.md) — RESOLVED 2026-10-02
 - [media (MPRIS)](resolved/media-module-done.md)
 - [bluetooth](resolved/bluetooth-module-done.md) — RESOLVED 2026-10-03
-- [system tray](tray.md)
+- [system tray](resolved/tray-done.md)
 
 **Not built in, by decision**: CPU, memory, temperature and disk
 ([system-stats-decision](system-stats-decision.md)). **Keyboard layout**, the most

@@ -411,9 +411,7 @@ fn over_cap_reply(dest: &str, reply_to: u32, len: usize) -> Vec<u8> {
 /// forger's own pumps is safe: nothing of the forger's is ever waited for.
 fn flood_then_ping(forger: &mut Conn, victim_unique: &str, bytes: &[u8]) {
     forger.queue_raw(bytes);
-    while forger.want_write() {
-        let _ = forger.pump();
-    }
+    drain_with_deadline(forger);
     forger
         .call(
             victim_unique,
@@ -426,7 +424,23 @@ fn flood_then_ping(forger: &mut Conn, victim_unique: &str, bytes: &[u8]) {
             0,
         )
         .unwrap();
+    drain_with_deadline(forger);
+}
+
+/// Flushes everything `forger` queued (a megabyte takes several turns),
+/// bounded: a dead daemon must fail the test, not spin the drain until
+/// the CI job times out.
+fn drain_with_deadline(forger: &mut Conn) {
+    let start = std::time::Instant::now();
     while forger.want_write() {
+        assert!(
+            !forger.dead(),
+            "the bus died while flushing what the forger queued"
+        );
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "the forger never flushed what it queued"
+        );
         let _ = forger.pump();
     }
 }
@@ -438,6 +452,9 @@ fn flood_then_ping(forger: &mut Conn, victim_unique: &str, bytes: &[u8]) {
 fn until_ping_without_a_drop(victim: &mut Conn) {
     let start = std::time::Instant::now();
     loop {
+        if victim.dead() {
+            panic!("the bus died while waiting for what the test waits for");
+        }
         assert!(
             start.elapsed() < std::time::Duration::from_secs(10),
             "the ping never landed"

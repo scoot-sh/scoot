@@ -418,6 +418,14 @@ pub(super) fn invoke(
         return toggle_popup(state, qh, index, popup_output)
             .map_err(|why| format!("`{id}` {action}: {why}"));
     }
+    // A module action that names what to show (the tray's `menu N`)
+    // opens its popup: opening, not toggling, so `menu 0` then `menu 1`
+    // switches instead of closing.
+    #[cfg(feature = "popup")]
+    if module.wants_popup() {
+        return open_menu_popup(state, qh, index, popup_output)
+            .map_err(|why| format!("`{id}` {action}: {why}"));
+    }
     Ok(())
 }
 
@@ -439,6 +447,31 @@ fn toggle_popup(
         .ok_or("that output is gone")?;
     if state.popup.is_for(id, module) {
         state.popup.close();
+        return Ok(());
+    }
+    let member = super::popup::Popups::member_of(&entry.objects.scene, module)
+        .ok_or("the module has nothing on the bar to open from")?;
+    state.open_popup(qh, id, member, None)
+}
+
+/// Opens the module's popup for an action that names what to show (the
+/// tray's `menu N`): an already-open popup for the module stays (its
+/// revision moved, so it re-fills), any other opens anew, with no grab
+/// like any agent-opened popup.
+#[cfg(feature = "popup")]
+fn open_menu_popup(
+    state: &mut State,
+    qh: &wayland_client::QueueHandle<State>,
+    module: usize,
+    output: Option<crate::outputs::OutputId>,
+) -> Result<(), String> {
+    let id = output.ok_or("the module is not shown on any output")?;
+    let entry = state
+        .outputs
+        .iter()
+        .find(|entry| entry.output.id() == id)
+        .ok_or("that output is gone")?;
+    if state.popup.is_for(id, module) {
         return Ok(());
     }
     let member = super::popup::Popups::member_of(&entry.objects.scene, module)

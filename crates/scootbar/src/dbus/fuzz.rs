@@ -73,6 +73,9 @@ pub fn dbus(data: &[u8]) {
     let _ = proto::frame_header(data);
     let _ = Message::parse_header(data);
     let _ = proto::read_item_props(data);
+    let _ = proto::read_menu_layout("(u(ia{sv}av))", data);
+    let _ = proto::read_layout_updated("u", data);
+    let _ = proto::read_layout_updated("ui", data);
     let _ = mpris::read_player_props(data);
     let _ = mpris::read_properties_changed(data);
     let _ = bluez::read_managed_objects(data);
@@ -167,6 +170,9 @@ fn check_shapes(message: &Message<'_>) {
         }
         "oa{sa{sv}}" => {
             let _ = bluez::read_interfaces_added(body);
+        }
+        "(u(ia{sv}av))" => {
+            let _ = proto::read_menu_layout(message.signature, body);
         }
         "oas" => {
             let _ = bluez::read_interfaces_removed(body);

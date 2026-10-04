@@ -857,15 +857,15 @@ socket is one more source in the `poll` loop), which is the
   tooltip over the module lists the shown items' titles.
 - **Clicks, with no binding at all**: a left click is `activate`, a middle
   click `secondary` (the spec's `SecondaryActivate`), a scroll `wheel-up`
-  or `wheel-down`, each on the item under the pointer. A right click does
-  nothing by default; the item's menu (`ContextMenu`, the DBusMenu
-  protocol) is not built: [popups](#popups) exist to draw one in, but the
-  DBusMenu client that reads a layout (`GetLayout`, `Event`,
-  `AboutToShow`, the update signals) and maps it onto popup content does
-  not. The module's actions all take the item's index (`scootbar msg invoke tray activate
-  0`), in the order `query` lists them: `activate`, `secondary`,
-  `wheel-up`, `wheel-down`, and `menu`, which is refused saying menus are
-  not built.
+  or `wheel-down`, each on the item under the pointer. A right click opens
+  the item's menu (as `menu N` does), and a click on an item that is its
+  own menu (`ItemIsMenu`, whose whole point is its menu, which an
+  `Activate` may ignore) does the same instead of activating. The
+  module's actions are `activate`, `secondary`, `wheel-up`, `wheel-down`
+  (each taking the item's index in the order `query` lists them:
+  `scootbar msg invoke tray activate 0`), `menu` (taking the index too),
+  and the popup rows' own `menu-select`, `menu-drill` and `menu-back`
+  (a row's dbusmenu id, or nothing for `menu-back`).
   (The wheel actions are not called `scroll-up` and `scroll-down`: those
   are the names of the interaction keys, and `msg invoke` reads them as
   those.) `Activate` and `SecondaryActivate` are sent with position `(0,
@@ -875,6 +875,29 @@ socket is one more source in the `poll` loop), which is the
   wheel's), and hosts disagree (Waybar sends GTK's, up negative); no item
   was checked against it. Bound to a key (`on-scroll-up = "wheel-up 0"`)
   the notch count of the scroll itself is what is sent.
+- **Menus.** An item's menu (`ContextMenu`, the DBusMenu protocol) opens
+  in a [popup](#popups): the bar reads it with its DBusMenu client
+  (`GetLayout`, `Event`, `AboutToShow`, the `LayoutUpdated` and
+  `ItemsPropertiesUpdated` signals, bounded like the rest of the client)
+  and draws one row per item. A row click sends `Event(id, "clicked",
+  ...)` to the item and closes the menu; a submenu row drills a level
+  deeper in the same popup (a `< Back` row on top walks back out: levels
+  nest in place rather than flatten, so every level of a deep tree stays
+  addressable); a layout update while open re-fills it, and the item
+  vanishing closes it. A level longer than the popup holds (16 widgets,
+  less the back row) is cut, the extras dropped silently like any
+  module's; a scrolled popup pans within its rows, and a row wider than
+  the popup is cut with an ellipsis.
+  An item with no menu to read is asked with `ContextMenu(0, 0)` instead
+  (a bar has no screen coordinates to give); an item without that method
+  ignores the call. Labels keep their accelerators stripped (a lone `_`
+  marks the shortcut and is not drawn, `__` is a literal underscore).
+  Toggles show their state as text (`[x] `/`[ ] ` for a checkmark, `(o) `/
+  `( ) ` for a radio: the popup has no checkmark widget, and text is
+  always in the font). Separators are blank rows between groups, disabled
+  rows plain text (neither is interactive). Icons in menu items are not
+  drawn in this version. Without the `popup` feature the DBusMenu half
+  is refused saying so (`ContextMenu` still goes out).
 - **`query`** reports `{ "watcher": "owner" | "host", "items": [{ "id",
   "title", "status", "shown" }] }` while any item is tracked, and nothing
   while none is.
@@ -893,15 +916,18 @@ socket is one more source in the `poll` loop), which is the
   pixels a side are refused the same way (the entry, or the answer, is
   dropped). A flood of signals (the match rule has no sender, so any peer
    may send what the bar listens for) is read up to 1 MiB + 64 KiB staged
-   (the read watermark: one capped message and a read's worth) and the
-   rest left in the socket, 256 events a wake with the bar's other sources
-   between, and costs the connection nothing; while an over-cap message
-   is discarded, one turn reads at most 256 KiB more (the poll is woken
-   for the rest), so a sender that outruns the reader holds one turn,
-   not the bar. Titles are cut to 128 bytes
+  (the read watermark: one capped message and a read's worth) and the
+  rest left in the socket, 256 events a wake with the bar's other sources
+  between, and costs the connection nothing; while an over-cap message
+  is discarded, one turn reads at most 256 KiB more (the poll is woken
+  for the rest), so a sender that outruns the reader holds one turn,
+  not the bar. Titles are cut to 128 bytes
   with controls stripped; at most 32 items, 8 from one service or one registrant, 8 pixmap
   entries each; one `GetAll` in flight per item however many signals it
-  sends; a call nobody answers is forgotten after 30 seconds when its slot
+  sends; a menu's layout is read bounded the same way (at most 8 levels,
+  64 nodes including the root — 63 drawable rows — one `GetLayout` in flight, re-read no oftener than every
+  50 ms however it floods `LayoutUpdated`), and update signals are
+  accepted only from the item that owns the open menu; a call nobody answers is forgotten after 30 seconds when its slot
   is wanted (no bus times a call out by default, measured on a stock
   `dbus-daemon` and on `dbus-broker`; only a client library does). A bus that stops reading drops the connection, and
   not the bar. The bus
@@ -1338,7 +1364,9 @@ the dmenu-style launcher are still how a click connects); `on-click =
   signal, and the associated one selected. A wheel over the list
   scrolls it a row a notch where it is taller than what the compositor
   configures for it; a row too wide is cut with an ellipsis, as
-  a window title's is. Selecting a row closes the popup and runs
+  a window title's is. A scan that changes the row count while the list
+  is open reopens it at the new size (above), losing the scroll
+  position. Selecting a row closes the popup and runs
   `connect N` on the network module. Keyboard navigation (arrows, Enter)
   is a [separate entry](backlog/popup-list-keyboard.md).
 - **Opened on the press, not the release.** The one exception to "clicks
@@ -1350,6 +1378,15 @@ the dmenu-style launcher are still how a click connects); `on-click =
 - **Where it goes.** Anchored to the module's span on the bar, centered under
   it (above, on a bottom bar), and the compositor slides it along the bar and
   flips it across it where the output's edge would cut it.
+- **A refill that changes the size reopens it.** The content is refilled
+  whenever something changed, and where its computed size differs from the
+  surface it opened at — a tray menu opens on its `...` line and fills a
+  turn later, a network scan adds or drops rows — the popup closes and
+  opens again at the new size with the grab serial the open earned, so the
+  grab survives it. Hover and the scroll position do not survive: the rows
+  moved anyway. A same-size refill keeps the surface it has. The reopened
+  popup reads the same content and revision, so this fires once per size
+  change, never in a loop.
 - **It closes** on: a click anywhere outside it (the compositor's `popup_done`),
   **Escape**, a press on the bar (so a second click on the module toggles it,
   and a click on another module closes it without acting), its module

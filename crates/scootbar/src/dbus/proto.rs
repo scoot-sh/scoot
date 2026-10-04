@@ -1189,6 +1189,164 @@ pub fn read_string(signature: &str, body: &[u8]) -> Result<String, ()> {
     Ok(text.to_owned())
 }
 
+/// How deep a `GetLayout` answer nests/addressing goes: the request asks
+/// for this, and an answer nesting past it is refused (a hostile item may
+/// answer deeper than asked).
+pub const MAX_MENU_DEPTH: usize = 8;
+
+/// How many items one `GetLayout` answer holds, nesting included: a real
+/// menu has dozens; past this the answer is refused, never half-read.
+pub const MAX_MENU_ITEMS: usize = 64;
+
+/// What kind of toggle a menu item is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuToggle {
+    None,
+    Check,
+    Radio,
+}
+
+/// One DBusMenu item, borrowed: what the bar draws of a `GetLayout`
+/// answer. `enabled` and `visible` default to true (an item that omits
+/// them is shown); `toggle_state` is 0 or 1 (`-1`, indeterminate, reads
+/// as off); `submenu` says the item asked for submenu display
+/// (`children-display`), whether or not children arrived (a lazy item
+/// sends none until it is asked).
+#[derive(Debug, Clone)]
+pub struct MenuItem<'a> {
+    pub id: i32,
+    pub label: Option<&'a str>,
+    pub enabled: bool,
+    pub visible: bool,
+    pub separator: bool,
+    pub toggle: MenuToggle,
+    pub toggle_state: i32,
+    pub submenu: bool,
+    pub children: Vec<MenuItem<'a>>,
+}
+
+/// Reads a `GetLayout` reply (`(u(ia{sv}av))`): the revision and the
+/// root's children. Typed like [`read_item_props`]: a known property with
+/// a wrong type is skipped (the default holds), every other one is
+/// skipped by its signature, and anything misshapen refuses the whole
+/// answer — the caller keeps the menu's last state. This is the one
+/// walk, shared by the tray and the fuzz target.
+pub fn read_menu_layout<'a>(
+    signature: &str,
+    body: &'a [u8],
+) -> Result<(u32, Vec<MenuItem<'a>>), ()> {
+    if signature != "(u(ia{sv}av))" {
+        return Err(());
+    }
+    let mut reader = Reader::le(body);
+    reader.enter_struct()?;
+    let revision = reader.u32()?;
+    let mut roots = Vec::new();
+    parse_menu_node(&mut reader, 0, &mut 0, &mut roots)?;
+    reader.leave_struct();
+    if !reader.exhausted() {
+        return Err(());
+    }
+    // The root's own row is the menu, not an item: its children are.
+    let root = roots.pop().ok_or(())?;
+    if !roots.is_empty() {
+        return Err(());
+    }
+    Ok((revision, root.children))
+}
+
+/// Parses one `(ia{sv}av)` node, pushing it onto `out`. `depth` is the
+/// node's own (the root is 0); `seen` counts every node against
+/// [`MAX_MENU_ITEMS`], the root included.
+fn parse_menu_node<'a>(
+    reader: &mut Reader<'a>,
+    depth: usize,
+    seen: &mut usize,
+    out: &mut Vec<MenuItem<'a>>,
+) -> Result<(), ()> {
+    if depth > MAX_MENU_DEPTH {
+        return Err(());
+    }
+    *seen = seen.saturating_add(1);
+    if *seen > MAX_MENU_ITEMS {
+        return Err(());
+    }
+    reader.enter_struct()?;
+    let id = reader.i32()?;
+    let mut entries = reader.elements(8)?;
+    let mut item = MenuItem {
+        id,
+        label: None,
+        enabled: true,
+        visible: true,
+        separator: false,
+        toggle: MenuToggle::None,
+        toggle_state: 0,
+        submenu: false,
+        children: Vec::new(),
+    };
+    while !entries.exhausted() {
+        entries.enter_struct()?;
+        let key = entries.str()?;
+        let sig = entries.signature()?;
+        match (key, sig) {
+            ("label", "s") => item.label = Some(entries.str()?),
+            ("enabled", "b") => item.enabled = entries.boolean()?,
+            ("visible", "b") => item.visible = entries.boolean()?,
+            ("type", "s") => item.separator = entries.str()? == "separator",
+            ("toggle-type", "s") => {
+                item.toggle = match entries.str()? {
+                    "checkmark" => MenuToggle::Check,
+                    "radio" => MenuToggle::Radio,
+                    _ => MenuToggle::None,
+                };
+            }
+            ("toggle-state", "i") => item.toggle_state = entries.i32()?,
+            ("children-display", "s") => item.submenu = entries.str()? == "submenu",
+            _ => entries.skip(sig)?,
+        }
+        entries.leave_struct();
+    }
+    // The children: an array of variants, each one more node. Read
+    // through the array's own reader (message offsets, not slice ones),
+    // so a struct value aligns as the sender padded it.
+    let mut kids = reader.elements(1)?;
+    while !kids.exhausted() {
+        let child = kids.variant(|sig, reader| {
+            if sig != "(ia{sv}av)" {
+                return Err(());
+            }
+            let mut one = Vec::new();
+            parse_menu_node(reader, depth + 1, seen, &mut one)?;
+            if one.len() != 1 {
+                return Err(());
+            }
+            one.pop().ok_or(())
+        })?;
+        item.children.push(child);
+    }
+    reader.leave_struct();
+    out.push(item);
+    Ok(())
+}
+
+/// Reads a `LayoutUpdated` signal body: the revision, with or without the
+/// parent both implementations send. Anything else is not an update.
+pub fn read_layout_updated(signature: &str, body: &[u8]) -> Result<u32, ()> {
+    if signature != "u" && signature != "ui" {
+        return Err(());
+    }
+    let mut reader = Reader::le(body);
+    let revision = reader.u32()?;
+    if signature == "ui" {
+        let _ = reader.i32()?;
+    }
+    if !reader.exhausted() {
+        return Err(());
+    }
+    Ok(revision)
+}
+
 /// A message writer: little-endian, capped at [`MAX_MESSAGE`]. Anything
 /// past a cap sets the overflow, and [`Writer::finish`] returns `None` —
 /// a message that does not fit is never half-sent.

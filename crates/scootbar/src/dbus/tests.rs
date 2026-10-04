@@ -451,6 +451,200 @@ fn dict(count: usize, key: &str, sig: &str, write: impl Fn(&mut Writer)) -> Vec<
     body.take_body().unwrap()
 }
 
+/// A `GetLayout` reply body: `revision` and the root node `write` writes
+/// (id 0 below, through [`menu_node`]).
+fn menu_reply(revision: u32, write: impl Fn(&mut Writer)) -> (String, Vec<u8>) {
+    let mut body = Writer::new();
+    assert!(body.open_struct());
+    body.u32(revision);
+    write(&mut body);
+    body.close_struct();
+    ("(u(ia{sv}av))".to_owned(), body.take_body().unwrap())
+}
+
+/// One `(ia{sv}av)` node: `props` writes the `a{sv}` entries (each an
+/// open struct with a key, a variant signature and a value),
+/// `kids` writes the `av` children (each a variant holding one node).
+fn menu_node(w: &mut Writer, id: i32, props: impl Fn(&mut Writer), kids: impl Fn(&mut Writer)) {
+    assert!(w.open_struct());
+    w.i32(id);
+    let dict = w.open_array(8).unwrap();
+    props(w);
+    w.close_array(dict);
+    let av = w.open_array(1).unwrap();
+    kids(w);
+    w.close_array(av);
+    w.close_struct();
+}
+
+fn menu_prop(w: &mut Writer, key: &str, sig: &str, write: impl Fn(&mut Writer)) {
+    assert!(w.open_struct());
+    w.str(key);
+    w.variant(sig);
+    write(w);
+    w.close_struct();
+}
+
+/// One child, variant-wrapped as the wire holds it.
+fn menu_kid(w: &mut Writer, write: impl Fn(&mut Writer)) {
+    w.variant("(ia{sv}av)");
+    write(w);
+}
+
+#[test]
+fn a_menu_layout_is_read_typed_and_refused_whole_when_hostile() {
+    use super::proto::{
+        MAX_MENU_DEPTH, MAX_MENU_ITEMS, MenuToggle, read_layout_updated, read_menu_layout,
+    };
+    let (sig, body) = menu_reply(12, |w| {
+        menu_node(
+            w,
+            0,
+            |_| {},
+            |w| {
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        1,
+                        |w| menu_prop(w, "label", "s", |w| w.str("Open")),
+                        |_| {},
+                    );
+                });
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        2,
+                        |w| menu_prop(w, "type", "s", |w| w.str("separator")),
+                        |_| {},
+                    );
+                });
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        3,
+                        |w| {
+                            menu_prop(w, "label", "s", |w| w.str("Save"));
+                            menu_prop(w, "enabled", "b", |w| w.boolean(false));
+                        },
+                        |_| {},
+                    );
+                });
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        4,
+                        |w| {
+                            menu_prop(w, "label", "s", |w| w.str("Marks"));
+                            menu_prop(w, "toggle-type", "s", |w| w.str("checkmark"));
+                            menu_prop(w, "toggle-state", "i", |w| w.i32(1));
+                        },
+                        |_| {},
+                    );
+                });
+                menu_kid(w, |w| {
+                    menu_node(
+                        w,
+                        5,
+                        |w| {
+                            menu_prop(w, "label", "s", |w| w.str("More"));
+                            menu_prop(w, "children-display", "s", |w| w.str("submenu"));
+                        },
+                        |w| {
+                            menu_kid(w, |w| {
+                                menu_node(
+                                    w,
+                                    6,
+                                    |w| menu_prop(w, "label", "s", |w| w.str("Deep")),
+                                    |_| {},
+                                );
+                            });
+                        },
+                    );
+                });
+                // A known key with a wrong type is skipped: no label.
+                menu_kid(w, |w| {
+                    menu_node(w, 7, |w| menu_prop(w, "label", "u", |w| w.u32(7)), |_| {});
+                });
+            },
+        );
+    });
+    let (revision, items) = read_menu_layout(&sig, &body).unwrap();
+    assert_eq!(revision, 12);
+    assert_eq!(items.len(), 6);
+    assert_eq!(items[0].label, Some("Open"));
+    assert!(items[0].enabled && items[0].visible && !items[0].separator);
+    assert!(items[1].separator);
+    assert!(!items[2].enabled);
+    assert_eq!(items[3].toggle, MenuToggle::Check);
+    assert_eq!(items[3].toggle_state, 1);
+    assert!(items[4].submenu && items[4].children.len() == 1);
+    assert_eq!(items[4].children[0].id, 6);
+    assert_eq!(items[5].label, None);
+
+    // Nesting past the bound is refused, at it is read.
+    fn nest(depth: usize) -> (String, Vec<u8>) {
+        fn at(w: &mut Writer, left: usize) {
+            if left == 0 {
+                menu_node(w, 1, |_| {}, |_| {});
+            } else {
+                menu_node(
+                    w,
+                    1,
+                    |_| {},
+                    |w| {
+                        menu_kid(w, |w| at(w, left - 1));
+                    },
+                );
+            }
+        }
+        menu_reply(1, |w| at(w, depth))
+    }
+    // Root is depth 0: past `MAX_MENU_DEPTH` levels of children nests
+    // one too many.
+    assert!(read_menu_layout("(u(ia{sv}av))", &nest(MAX_MENU_DEPTH + 1).1).is_err());
+    assert!(read_menu_layout("(u(ia{sv}av))", &nest(MAX_MENU_DEPTH).1).is_ok());
+
+    // Past the item cap is refused, at it is read (the root counts one).
+    fn wide(kids: usize) -> (String, Vec<u8>) {
+        menu_reply(1, |w| {
+            menu_node(
+                w,
+                0,
+                |_| {},
+                |w| {
+                    for id in 0..kids {
+                        menu_kid(w, |w| {
+                            menu_node(w, id as i32, |_| {}, |_| {});
+                        });
+                    }
+                },
+            );
+        })
+    }
+    assert!(read_menu_layout("(u(ia{sv}av))", &wide(MAX_MENU_ITEMS - 1).1).is_ok());
+    assert!(read_menu_layout("(u(ia{sv}av))", &wide(MAX_MENU_ITEMS).1).is_err());
+
+    // Wrong shapes refuse: another signature, trailing bytes, a cut body.
+    assert!(read_menu_layout("a{sv}", &body).is_err());
+    let mut trailing = body.clone();
+    trailing.extend_from_slice(&[0; 8]);
+    assert!(read_menu_layout(&sig, &trailing).is_err());
+    assert!(read_menu_layout(&sig, &body[..body.len() - 3]).is_err());
+    assert!(read_menu_layout(&sig, &[]).is_err());
+
+    // `LayoutUpdated` takes the revision alone or with its parent.
+    let mut updated = Writer::new();
+    updated.u32(9);
+    let bytes = updated.take_body().unwrap();
+    assert_eq!(read_layout_updated("u", &bytes), Ok(9));
+    let mut both = Writer::new();
+    both.u32(9);
+    both.i32(0);
+    let bytes = both.take_body().unwrap();
+    assert_eq!(read_layout_updated("ui", &bytes), Ok(9));
+    assert!(read_layout_updated("s", &bytes).is_err());
+}
+
 #[test]
 fn an_item_answer_is_read_typed_and_refused_whole_when_hostile() {
     use super::proto::{MAX_PROPERTIES, read_item_props};

@@ -17,6 +17,7 @@ use rustix::time::{
 
 use super::Update;
 use super::item::{Fingerprint, Item, fill, get_all_body, is_item_name};
+use super::menu::{MENU_IFACE, MenuOpen, about_body, event_body, fill_menu, get_layout_body};
 use super::{
     FLIGHT_TTL, ITEM_DEFAULT_PATH, ITEM_FDO, ITEM_KDE, ITEM_PROPERTIES, MAX_ITEMS, MAX_PER_SERVICE,
     MIN_REFRESH_GAP, PROTOCOL_VERSION, WATCHER_FDO, WATCHER_KDE, WATCHER_PATH,
@@ -43,6 +44,13 @@ pub(super) struct Live {
     pub(super) hosts: Vec<String>,
     /// Whether the `too many items` warning was said for the current set.
     pub(super) said_full: bool,
+    /// The item's menu that is open, if any: one at a time, transient.
+    pub(super) menu: Option<MenuOpen>,
+    /// A `menu` action asked for the popup surface: taken once by
+    /// [`super::Tray::wants_popup`], which the daemon answers by opening
+    /// it (an invoke cannot open a surface itself).
+    #[cfg(feature = "popup")]
+    pub(super) menu_popup: bool,
 }
 
 /// Whether we own the watcher name (answering registrations) or talk to
@@ -74,6 +82,9 @@ pub(super) enum Op {
     RequestFdo,
     /// The KDE watcher name's owner (host mode): read its list next.
     WatcherOwner,
+    /// A `GetLayout` for the menu of the item with this id, from this
+    /// parent row (0 is the whole tree, any other a lazy submenu).
+    MenuLayout { item: String, parent: i32 },
 }
 
 /// Splits a register argument the KDE way: a leading `/` is a path on the
@@ -226,18 +237,28 @@ impl Live {
 
     /// Forgets the calls the connection gave up on, freeing what they
     /// held: an item whose `GetAll` never answered can be asked again.
-    pub(super) fn reap(&mut self) {
+    /// Says whether an empty menu closed with its call.
+    pub(super) fn reap(&mut self) -> bool {
+        let mut closed = false;
         for token in self.conn.expire(FLIGHT_TTL) {
             let Some(flight) = self.flights.get_mut(token as usize).and_then(Option::take) else {
                 continue;
             };
-            if let Op::Props(id) = flight.op {
-                if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
-                    item.fetching = false;
-                    item.stale = false;
+            match flight.op {
+                Op::Props(id) => {
+                    if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
+                        item.fetching = false;
+                        item.stale = false;
+                    }
                 }
+                Op::MenuLayout { item, .. } => {
+                    self.finish_menu_fetch(&item);
+                    closed |= self.close_menu_if_empty(&item);
+                }
+                _ => {}
             }
         }
+        closed
     }
 
     /// Fires a call that wants no reply (activation): queued, never
@@ -335,7 +356,8 @@ impl Live {
         }
     }
 
-    /// The gap passed: reads again the items that waited.
+    /// The gap passed: reads again the items that waited, and the menu
+    /// that waited.
     pub(super) fn on_coalesce(&mut self) {
         if let Some(timer) = self.coalesce.take() {
             let mut expirations = [0u8; 8];
@@ -353,6 +375,16 @@ impl Live {
             }
             self.refresh(&id);
         }
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|menu| menu.stale && !menu.fetching)
+        {
+            if let Some(menu) = self.menu.as_mut() {
+                menu.stale = false;
+            }
+            self.refresh_menu();
+        }
     }
 
     /// An item's `GetAll` came back (answered or errored): it may be
@@ -364,6 +396,297 @@ impl Live {
                 core::mem::take(&mut item.stale)
             }
             None => false,
+        }
+    }
+
+    /// Opens the item's menu: drops whatever menu was open (one at a
+    /// time), sends `AboutToShow(0)` and the first `GetLayout`, and says
+    /// whether a menu opened (the caller then asks the daemon for the
+    /// popup surface). Refused when the item has no menu path (the
+    /// caller falls back to `ContextMenu`), names nothing, or is not
+    /// verified yet (no owner to match update signals against).
+    #[cfg(feature = "popup")]
+    pub(super) fn open_menu(&mut self, id: &str) -> bool {
+        let Some(item) = self.items.iter().find(|item| item.id == id) else {
+            return false;
+        };
+        if item.menu.is_empty() || item.owner.is_none() {
+            return false;
+        }
+        let menu = MenuOpen::new(
+            &item.id,
+            &item.service,
+            &item.menu,
+            item.owner.as_deref().unwrap_or(""),
+        );
+        self.menu = Some(menu);
+        // `AboutToShow` wants no reply (the layout follows either way,
+        // answered later through `on_menu_layout`).
+        if let Some(bytes) = about_body(0) {
+            let (service, path) = (item.service.clone(), item.menu.clone());
+            self.fire(&service, &path, MENU_IFACE, "AboutToShow", "i", &bytes);
+        }
+        self.ask_layout(id, 0);
+        true
+    }
+
+    /// Queues the item's menu read from `parent` (0 is the whole tree,
+    /// any other a lazy submenu): one at a time, answered later.
+    fn ask_layout(&mut self, id: &str, parent: i32) {
+        let Some(menu) = self.menu.as_mut().filter(|menu| menu.item == id) else {
+            return;
+        };
+        menu.last_asked = Some(Instant::now());
+        menu.fetching = true;
+        let (service, path) = (menu.service.clone(), menu.path.clone());
+        let Some(bytes) = get_layout_body(parent) else {
+            menu.fetching = false;
+            return;
+        };
+        let queued = self.issue(
+            &service,
+            &path,
+            MENU_IFACE,
+            "GetLayout",
+            "iias",
+            &bytes,
+            0,
+            Op::MenuLayout {
+                item: id.to_owned(),
+                parent,
+            },
+        );
+        if !queued {
+            if let Some(menu) = self.menu.as_mut().filter(|menu| menu.item == id) {
+                menu.fetching = false;
+            }
+        }
+    }
+
+    /// Re-reads the open menu, no oftener than the items' floor: one
+    /// that floods `LayoutUpdated` costs a round trip per gap, like a
+    /// runaway icon, and the waiting re-read shares the items' timer.
+    pub(super) fn refresh_menu(&mut self) {
+        let Some(item) = self.menu.as_ref().map(|menu| menu.item.clone()) else {
+            return;
+        };
+        let Some(menu) = self.menu.as_mut() else {
+            return;
+        };
+        if menu.fetching {
+            menu.stale = true;
+            return;
+        }
+        if menu
+            .last_asked
+            .is_some_and(|at| at.elapsed() < MIN_REFRESH_GAP)
+        {
+            menu.stale = true;
+            self.arm_coalesce();
+            return;
+        }
+        self.ask_layout(&item, 0);
+    }
+
+    /// A `GetLayout` came back: answered or errored, the item may be
+    /// asked again, and whether a signal arrived meanwhile.
+    pub(super) fn finish_menu_fetch(&mut self, id: &str) -> bool {
+        match self.menu.as_mut().filter(|menu| menu.item == id) {
+            Some(menu) => {
+                menu.fetching = false;
+                core::mem::take(&mut menu.stale)
+            }
+            None => false,
+        }
+    }
+
+    /// Applies a `GetLayout` answer to the open menu and says whether
+    /// anything shown moved. A misshapen answer is dropped: a first
+    /// load that never parses loses the menu, a later one keeps its
+    /// last state.
+    pub(super) fn on_menu_layout(
+        &mut self,
+        id: &str,
+        parent: i32,
+        signature: &str,
+        body: &[u8],
+    ) -> Update {
+        let stale = self.finish_menu_fetch(id);
+        if self.menu.as_ref().is_none_or(|menu| menu.item != id) {
+            return Update::Unchanged;
+        }
+        let parsed = proto::read_menu_layout(signature, body).ok();
+        let moved = match parsed {
+            None => {
+                let first = self
+                    .menu
+                    .as_ref()
+                    .is_some_and(|menu| menu.root.is_empty() && parent == 0);
+                if first {
+                    self.menu = None;
+                    true
+                } else {
+                    false
+                }
+            }
+            Some((revision, parsed)) => {
+                let Some(menu) = self.menu.as_mut().filter(|menu| menu.item == id) else {
+                    return Update::Unchanged;
+                };
+                let before = (menu.root.clone(), menu.trail.clone());
+                fill_menu(menu, parent, revision, &parsed);
+                (menu.root.clone(), menu.trail.clone()) != before
+            }
+        };
+        if stale {
+            self.refresh_menu();
+        }
+        if moved {
+            Update::Changed
+        } else {
+            Update::Unchanged
+        }
+    }
+
+    /// Works the menu's own signals, accepted only from the item that
+    /// owns the open menu: anything else (another item, a peer's
+    /// forgery) moves nothing. Either update re-reads the layout behind
+    /// the refresh floor; anything else is ignored.
+    pub(super) fn on_menu_signal(
+        &mut self,
+        sender: &str,
+        member: &str,
+        signature: &str,
+        body: &[u8],
+    ) -> Update {
+        if !self.menu.as_ref().is_some_and(|menu| menu.owner == sender) {
+            return Update::Unchanged;
+        }
+        match member {
+            "LayoutUpdated" => {
+                if proto::read_layout_updated(signature, body).is_err() {
+                    return Update::Unchanged;
+                }
+                self.refresh_menu();
+                Update::Unchanged
+            }
+            "ItemsPropertiesUpdated" => {
+                if signature != "a(ia{sv})a(ias)" {
+                    return Update::Unchanged;
+                }
+                self.refresh_menu();
+                Update::Unchanged
+            }
+            _ => Update::Unchanged,
+        }
+    }
+
+    /// Clicks the row with dbusmenu `id`: sends `Event clicked` and
+    /// closes the menu. Refused when no menu is open, the row is gone,
+    /// or it is not a live row (a separator, a disabled row, or one
+    /// that opens a submenu drills instead of clicking).
+    pub(super) fn menu_select(&mut self, id: i32) -> bool {
+        let live = self.menu.as_ref().is_some_and(|menu| {
+            menu.find(id)
+                .is_some_and(|node| node.enabled && !node.separator && !node.opens())
+        });
+        if !live {
+            return false;
+        }
+        let Some(menu) = self.menu.as_ref() else {
+            return false;
+        };
+        let (service, path) = (menu.service.clone(), menu.path.clone());
+        let Some(bytes) = event_body(id) else {
+            return false;
+        };
+        self.fire(&service, &path, MENU_IFACE, "Event", "isvu", &bytes);
+        self.menu = None;
+        true
+    }
+
+    /// Drills into the submenu row with dbusmenu `id`: rows that
+    /// arrived show at once, a lazy one (asked for submenu display with
+    /// no children yet) is asked for first. Refused for anything else.
+    pub(super) fn menu_drill(&mut self, id: i32) -> bool {
+        let Some(item) = self.menu.as_ref().map(|menu| menu.item.clone()) else {
+            return false;
+        };
+        let drill = self.menu.as_ref().and_then(|menu| {
+            let node = menu.find(id)?;
+            if !node.enabled || node.separator || !node.opens() {
+                return None;
+            }
+            Some((node.children.is_empty(), menu.fetching))
+        });
+        let Some((lazy, fetching)) = drill else {
+            return false;
+        };
+        if !lazy {
+            if let Some(menu) = self.menu.as_mut().filter(|menu| menu.item == item) {
+                menu.trail.push(id);
+            }
+            return true;
+        }
+        if fetching {
+            return false;
+        }
+        if let Some(bytes) = about_body(id) {
+            let (service, path) = self
+                .menu
+                .as_ref()
+                .map(|menu| (menu.service.clone(), menu.path.clone()))
+                .unwrap_or_default();
+            if service.is_empty() {
+                return false;
+            }
+            self.fire(&service, &path, MENU_IFACE, "AboutToShow", "i", &bytes);
+        }
+        self.ask_layout(&item, id);
+        true
+    }
+
+    /// Backs out one level, or closes the menu past the root. Always a
+    /// change when a menu is open.
+    pub(super) fn menu_back(&mut self) -> bool {
+        let Some(menu) = self.menu.as_mut() else {
+            return false;
+        };
+        if menu.trail.pop().is_none() {
+            self.menu = None;
+        }
+        true
+    }
+
+    /// Drops the open menu when its item is gone: called after every
+    /// path that retains the items (a crash without unregistering
+    /// retains inline, past [`Live::remove`]).
+    /// Drops the open menu when its item is gone: called after every
+    /// path that retains the items (a crash without unregistering
+    /// retains inline, past [`Live::remove`]).
+    fn close_menu_if_vanished(&mut self) {
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|menu| !self.items.iter().any(|item| item.id == menu.item))
+        {
+            self.menu = None;
+        }
+    }
+
+    /// Closes the item's menu when its first load never landed (an
+    /// empty tree): later failures keep the last state instead.
+    /// Whether one closed.
+    pub(super) fn close_menu_if_empty(&mut self, id: &str) -> bool {
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|menu| menu.item == id && menu.root.is_empty())
+        {
+            self.menu = None;
+            true
+        } else {
+            false
         }
     }
 
@@ -386,6 +709,7 @@ impl Live {
             Op::RequestKde => self.on_request_reply(true, signature, body),
             Op::RequestFdo => self.on_request_reply(false, signature, body),
             Op::WatcherOwner => self.on_watcher_owner_reply(signature, body),
+            Op::MenuLayout { item, parent } => self.on_menu_layout(&item, parent, signature, body),
         }
     }
 
@@ -400,22 +724,41 @@ impl Live {
     /// behind the refresh floor), instead of staying stuck till a reap.
     pub(super) fn on_dropped(&mut self, token: u64) -> Update {
         if token == conn::DROPPED_UNKNOWN {
-            self.reap();
+            let closed = self.reap();
             for item in &mut self.items {
                 if item.fetching {
                     item.fetching = false;
                     item.stale = true;
                 }
             }
+            if let Some(menu) = self.menu.as_mut() {
+                menu.fetching = false;
+                menu.stale = true;
+            }
+            if closed {
+                return Update::Changed;
+            }
             return Update::Unchanged;
         }
         let Some(flight) = self.flights.get_mut(token as usize).and_then(Option::take) else {
             return Update::Unchanged;
         };
-        if let Op::Props(id) = flight.op {
-            // `stale` is not honored: re-reading at once would fetch the
-            // same oversized answer; the next signal asks again.
-            self.finish_fetch(&id);
+        match flight.op {
+            Op::Props(id) => {
+                // `stale` is not honored: re-reading at once would fetch the
+                // same oversized answer; the next signal asks again.
+                self.finish_fetch(&id);
+            }
+            Op::MenuLayout { item, .. } => {
+                // The same, for a menu: a later signal reads it again, and a
+                // first load that never parses loses the menu (see
+                // `on_menu_layout`).
+                self.finish_menu_fetch(&item);
+                if self.close_menu_if_empty(&item) {
+                    return Update::Changed;
+                }
+            }
+            _ => {}
         }
         Update::Unchanged
     }
@@ -428,6 +771,17 @@ impl Live {
             // A `GetAll` that errors is an item gone (or never there): a
             // bogus registration loses itself, silently.
             Op::Props(id) => self.remove(&id),
+            // A `GetLayout` that errors is a menu losing its update: a
+            // first load that never lands loses the menu, a later one
+            // keeps its last state.
+            Op::MenuLayout { item, .. } => {
+                self.finish_menu_fetch(&item);
+                if self.close_menu_if_empty(&item) {
+                    Update::Changed
+                } else {
+                    Update::Unchanged
+                }
+            }
             // `NameHasNoOwner` is an item already gone; anything else
             // leaves the owner unknown (signals still match by sender).
             Op::Owner(id) if name.ends_with("NameHasNoOwner") => self.remove(&id),
@@ -597,6 +951,7 @@ impl Live {
         let before = self.items.len();
         self.items.retain(|item| seen.contains(&item.id));
         if self.items.len() != before {
+            self.close_menu_if_vanished();
             moved = true;
         }
         if moved {
@@ -628,6 +983,9 @@ impl Live {
         }
         if interface == ITEM_KDE || interface == ITEM_FDO {
             return self.on_item_signal(sender, member);
+        }
+        if interface == MENU_IFACE {
+            return self.on_menu_signal(sender, member, signature, body);
         }
         Update::Unchanged
     }
@@ -673,6 +1031,7 @@ impl Live {
             self.items.retain(|item| {
                 item.service != name && item.owner.as_deref() != Some(name.as_str())
             });
+            self.close_menu_if_vanished();
             if self.mode == Mode::Owner {
                 self.emit_unregistered(&name);
             }
@@ -681,8 +1040,15 @@ impl Live {
         for (id, owner) in refresh {
             // The name changed hands: signals now come from the new
             // owner, and the old one vanishing later must not take the
-            // item with it.
-            self.set_owner(&id, owner);
+            // item with it. An open menu follows the owner too, or its
+            // updates stop arriving.
+            self.set_owner(&id, owner.clone());
+            if self.menu.as_ref().is_some_and(|menu| menu.item == id) {
+                if let Some(menu) = self.menu.as_mut() {
+                    menu.owner = owner;
+                }
+                self.refresh_menu();
+            }
             self.refresh(&id);
         }
         Update::Unchanged
@@ -1039,7 +1405,8 @@ impl Live {
     }
 
     /// Drops the item with `id` (or every id under a vanished service),
-    /// saying so to other hosts in owner mode.
+    /// saying so to other hosts in owner mode. An open menu of a dropped
+    /// item closes with it.
     pub(super) fn remove(&mut self, id: &str) -> Update {
         let before = self.items.len();
         self.items
@@ -1050,6 +1417,7 @@ impl Live {
         if self.items.len() < MAX_ITEMS {
             self.said_full = false;
         }
+        self.close_menu_if_vanished();
         if self.mode == Mode::Owner {
             self.emit_unregistered(id);
         }
@@ -1307,6 +1675,10 @@ pub(super) fn setup(conn: Conn) -> Live {
         // from the start in owner mode.
         hosts: Vec::new(),
         said_full: false,
+        // No menu open, and none asked for: both start shut.
+        menu: None,
+        #[cfg(feature = "popup")]
+        menu_popup: false,
     };
     live.hosts.push(live.conn.unique().to_owned());
     live.request(WATCHER_KDE, Op::RequestKde);
@@ -1314,18 +1686,19 @@ pub(super) fn setup(conn: Conn) -> Live {
     live
 }
 
-/// The match rules: owner changes, item signals on both interfaces, and
-/// the other watcher's item signals for host mode. Installed once the
-/// names answer (and again on every re-acquire: a new connection has no
-/// rules, and re-adding to the same one errors silently into the kept
-/// rule).
-pub(super) const MATCH_RULES: [&str; 5] = [
+/// The match rules: owner changes, item signals on both interfaces,
+/// menu updates on the DBusMenu one, and the other watcher's item
+/// signals for host mode. Installed once the names answer (and again on
+/// every re-acquire: a new connection has no rules, and re-adding to the
+/// same one errors silently into the kept rule).
+pub(super) const MATCH_RULES: [&str; 6] = [
     "type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',\
      member='NameOwnerChanged',path='/org/freedesktop/DBus'",
     "type='signal',interface='org.kde.StatusNotifierItem'",
     "type='signal',interface='org.freedesktop.StatusNotifierItem'",
     "type='signal',interface='org.kde.StatusNotifierWatcher'",
     "type='signal',interface='org.freedesktop.StatusNotifierWatcher'",
+    "type='signal',interface='com.canonical.dbusmenu'",
 ];
 
 /// The introspection XML of the watcher object: the two watcher

@@ -8,10 +8,13 @@
 //! bar started (the bus is enumerated at connect). Where another process
 //! already owns the name, the bar runs as a host against it instead —
 //! items still appear, clicks still work — and takes over when the owner
-//! leaves. Item menus (`ContextMenu`, the DBusMenu protocol) are not built:
-//! [popups](../../../../docs/scootbar/backlog/resolved/popups-done.md) exist
-//! to draw one in, but the DBusMenu client that reads a layout does not,
-//! so the `menu` action is refused saying that, loudly, not silently.
+//! leaves. Item menus (`ContextMenu`, the DBusMenu protocol) open through
+//! [popups](../../../../docs/scootbar/backlog/resolved/popups-done.md):
+//! a right click (or the `menu` action) reads the item's layout with the
+//! DBusMenu client (`GetLayout`, `Event clicked`, `AboutToShow`, the
+//! update signals, bounded like the rest) and draws it as popup rows
+//! (see [`menu`] for the mapping). A malformed or hostile menu loses
+//! only itself, never a panic or a hang, never unbounded allocation.
 //!
 //! ## States
 //!
@@ -60,6 +63,7 @@ use crate::icon::Art;
 use crate::text::Text;
 
 mod item;
+mod menu;
 mod watcher;
 
 #[cfg(test)]
@@ -68,6 +72,8 @@ use watcher::{Live, Mode, setup};
 
 #[cfg(test)]
 mod daemon_tests;
+#[cfg(all(test, feature = "popup"))]
+mod menu_tests;
 #[cfg(test)]
 mod tests;
 
@@ -99,6 +105,18 @@ pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
         name: "menu",
         arg: ArgKind::Required,
+    },
+    ActionSpec {
+        name: "menu-select",
+        arg: ArgKind::Required,
+    },
+    ActionSpec {
+        name: "menu-drill",
+        arg: ArgKind::Required,
+    },
+    ActionSpec {
+        name: "menu-back",
+        arg: ArgKind::None,
     },
 ];
 
@@ -362,8 +380,8 @@ impl Module for Tray {
 
     /// A click activates, a middle click secondarily, a scroll scrolls —
     /// each on the item under the pointer, with no binding at all. A
-    /// right click means nothing by default: the menu is not built (no DBusMenu client),
-    /// and silence beats a refusal on every click.
+    /// right click opens the item's menu (as `menu N` does); a click on
+    /// an item that is its own menu does the same instead of activating.
     fn on_input(&self, input: &Input<'_>) -> Option<crate::action::Action> {
         let live = self.link.live()?;
         let slot = Self::hit(
@@ -374,11 +392,17 @@ impl Module for Tray {
         )?;
         let index = live.nth_shown(slot)?;
         let name = match input.trigger {
-            Trigger::Click => "activate",
+            Trigger::Click => {
+                if live.at(index as i32).is_some_and(|item| item.item_is_menu) {
+                    "menu"
+                } else {
+                    "activate"
+                }
+            }
             Trigger::MiddleClick => "secondary",
             Trigger::ScrollUp => "wheel-up",
             Trigger::ScrollDown => "wheel-down",
-            Trigger::RightClick => return None,
+            Trigger::RightClick => "menu",
         };
         Some(crate::action::Action::Module(ModuleAction::new(
             name,
@@ -387,25 +411,79 @@ impl Module for Tray {
     }
 
     /// Carries out the item actions: `activate`, `secondary` and the two
-    /// scrolls call the item (never blocking the bar); `menu` is refused
-    /// saying menus are not built. Every one takes the item index.
+    /// scrolls call the item (never blocking the bar); `menu` opens the
+    /// item's menu in a popup (or calls `ContextMenu` where the item has
+    /// no menu to read); the popup's own rows click, drill and back out
+    /// through `menu-select`, `menu-drill` and `menu-back`. Every one but
+    /// `menu-back` takes a number: the item's index for `menu`, the
+    /// row's dbusmenu id for the rows.
     fn invoke(
         &mut self,
         _output: &OutputView<'_>,
         action: &ModuleAction,
         steps: u32,
     ) -> Result<Update, InvokeError> {
-        let index = action.arg.ok_or(InvokeError::NeedsArg)?;
         let name = match &*action.name {
-            "activate" | "secondary" | "wheel-up" | "wheel-down" | "menu" => &*action.name,
+            "activate" | "secondary" | "wheel-up" | "wheel-down" | "menu" | "menu-select"
+            | "menu-drill" | "menu-back" => &*action.name,
             _ => return Err(InvokeError::Unknown),
         };
         let Some(live) = self.link.live_mut() else {
             return Err(InvokeError::Refused("no bus to call on"));
         };
+        if name == "menu-select" {
+            let id = action.arg.ok_or(InvokeError::NeedsArg)?;
+            return if live.menu_select(id) {
+                Ok(Update::Changed)
+            } else {
+                Err(InvokeError::Refused("no such menu row"))
+            };
+        }
+        if name == "menu-drill" {
+            let id = action.arg.ok_or(InvokeError::NeedsArg)?;
+            return if live.menu_drill(id) {
+                Ok(Update::Changed)
+            } else {
+                Err(InvokeError::Refused("no such submenu"))
+            };
+        }
+        if name == "menu-back" {
+            return if live.menu_back() {
+                Ok(Update::Changed)
+            } else {
+                Err(InvokeError::Refused("no menu is open"))
+            };
+        }
+        let index = action.arg.ok_or(InvokeError::NeedsArg)?;
         let Some(item) = live.at(index) else {
             return Err(InvokeError::Refused("no such tray item"));
         };
+        if name == "menu" {
+            if item.menu.is_empty() {
+                // No menu to read: the item's own fallback, at no
+                // position (a bar has no screen coordinates to give).
+                let (service, path) = (item.service.clone(), item.path.clone());
+                let mut body = Writer::new();
+                body.i32(0);
+                body.i32(0);
+                let Some(bytes) = body.take_body() else {
+                    return Err(InvokeError::Refused("the call does not fit"));
+                };
+                live.fire(&service, &path, ITEM_KDE, "ContextMenu", "ii", &bytes);
+                return Ok(Update::Unchanged);
+            }
+            #[cfg(not(feature = "popup"))]
+            return Err(InvokeError::Refused("tray menus need the popup feature"));
+            #[cfg(feature = "popup")]
+            {
+                let id = item.id.clone();
+                if live.open_menu(&id) {
+                    live.menu_popup = true;
+                    return Ok(Update::Changed);
+                }
+                return Err(InvokeError::Refused("the item is not verified yet"));
+            }
+        }
         let (service, path) = (item.service.clone(), item.path.clone());
         let mut body = Writer::new();
         let (member, signature) = match name {
@@ -430,11 +508,8 @@ impl Module for Tray {
                 body.str("vertical");
                 ("Scroll", "is")
             }
-            _ => {
-                return Err(InvokeError::Refused(
-                    "tray menus are not built: no DBusMenu client yet",
-                ));
-            }
+            // Every other name returned above: unreachable.
+            _ => return Err(InvokeError::Unknown),
         };
         let Some(bytes) = body.take_body() else {
             return Err(InvokeError::Refused("the call does not fit"));
@@ -446,6 +521,36 @@ impl Module for Tray {
     /// A click activates with no binding at all.
     fn handles_input(&self) -> bool {
         true
+    }
+
+    /// The open menu, drawn as popup rows (see [`menu`]): asked when the
+    /// popup opens and whenever the view changes while it is open, so a
+    /// layout update re-fills it. `false` with no menu open closes one.
+    #[cfg(feature = "popup")]
+    fn popup(&mut self, _output: &OutputView<'_>, content: &mut crate::popup::Content) -> bool {
+        let Some(menu) = self.link.live().and_then(|live| live.menu.as_ref()) else {
+            return false;
+        };
+        if menu::fill_popup(menu, content) {
+            return true;
+        }
+        // Nothing parsed yet, and the first read still out: a `...`
+        // line holds the surface for the layout to re-fill.
+        if menu.fetching {
+            menu::fill_loading(content);
+            return true;
+        }
+        false
+    }
+
+    /// Whether the last `invoke` asked for the popup surface (the `menu`
+    /// action): taken once, so every later action does not reopen it.
+    #[cfg(feature = "popup")]
+    fn wants_popup(&mut self) -> bool {
+        self.link
+            .live_mut()
+            .map(|live| core::mem::take(&mut live.menu_popup))
+            .unwrap_or(false)
     }
 
     /// What `query` reports: the mode and the shown items, or nothing
