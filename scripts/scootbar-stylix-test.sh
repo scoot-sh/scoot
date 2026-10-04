@@ -102,7 +102,7 @@ let
   facts = c: {
     settings = c.config.programs.scootbar.settings;
     palette = builtins.mapAttrs (_: v: v) {
-      inherit (c.config.lib.stylix.colors.withHashtag) base00 base03 base05 base08 base0A base0D;
+      inherit (c.config.lib.stylix.colors.withHashtag) base00 base03 base05 base08 base0D;
     };
     desktopSize = c.config.stylix.fonts.sizes.desktop;
     family = c.config.stylix.fonts.sansSerif.name;

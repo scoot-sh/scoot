@@ -152,7 +152,6 @@ let
           base03 = "#303030";
           base05 = "#e0e0e0";
           base08 = "#ff0000";
-          base0A = "#ffff00";
           base0D = "#0000ff";
         };
       };

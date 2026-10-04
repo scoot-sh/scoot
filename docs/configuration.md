@@ -955,8 +955,10 @@ A worked example with a wallpaper, ring colors, a bar and a terminal palette is 
 `image` and `mode` from `stylix.image` and `stylix.imageScalingMode` — see
 [`docs/nix.md`](nix.md#stylix). A value written here always wins, except a
 `color` written next to Stylix's `image`: `image` or `color`, never both,
-so that combination is refused — set your own `image`, or turn the Stylix
-defaults off, for a solid color.)
+so that combination is refused — for a solid color, set
+`programs.scoot.stylix.wallpaper.enable = false` (the themed ring,
+background and cursor stay), or set your own `image`, or turn the Stylix
+defaults off.)
 
 An empty `[wallpaper]` table is a section too: it says "no wallpaper from
 the config" and clears whatever the config set before. For no wallpaper
