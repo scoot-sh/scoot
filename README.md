@@ -191,10 +191,11 @@ open as popups under the bar, and you can add your own buttons and modules
 that show a command's output, without writing Rust.
 
 It's light: idle, it uses around 4 to 5 MB of memory and wakes only when
-something changes (and every 10 seconds to read the WiFi signal, while
-WiFi is shown). It speaks D-Bus, PulseAudio and netlink itself,
-so it needs no GTK and no libpulse, and the binary links nothing beyond
-the C library. It also works on sway, niri, Hyprland and other compositors with
+something changes, plus three steady rhythms: the clock each minute, about
+once a minute while a shown battery discharges, and every 10 seconds to
+read the WiFi signal while WiFi is shown. It speaks D-Bus, PulseAudio and
+netlink itself, so it needs no GTK and no libpulse, and the binary links
+nothing beyond libc and libgcc_s. It also works on sway, niri, Hyprland and other compositors with
 `wlr-layer-shell`, and scripts and agents can read every module's state
 with `scootbar msg query`.
 
