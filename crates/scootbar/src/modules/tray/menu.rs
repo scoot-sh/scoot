@@ -15,8 +15,10 @@
 //!
 //! - a submenu row is a button ending in ` >` (drills in, with a
 //!   `< Back` row on top of every level past the root: nesting in place,
-//!   not flattened, so a wide tree never drops rows past the popup's
-//!   widget cap silently — every level stays addressable);
+//!   not flattened, so every level of a deep tree stays addressable; a
+//!   level longer than the popup holds is still cut like any module's
+//!   ([`fill_popup`]): the extras are dropped silently and have no row
+//!   to click);
 //! - a toggle's state is an ASCII prefix (`[x] `/`[ ] ` for a checkmark,
 //!   `(o) `/`( ) ` for a radio): always in the font, unlike a glyph;
 //! - a separator is an empty text row (a gap between groups, with no

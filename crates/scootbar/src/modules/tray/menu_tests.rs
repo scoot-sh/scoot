@@ -438,6 +438,55 @@ fn a_submenu_drills_in_and_backs_out() {
 }
 
 #[test]
+fn a_level_past_the_widget_cap_drops_its_extras() {
+    // 20 rows a level where the popup holds 16 widgets: the root shows
+    // 16, a submenu Back plus 15, and the rest have no row to click.
+    // Nesting keeps every *level* addressable, not every row: a future
+    // change to this cut must update this test deliberately.
+    let (stream, mut fake) = Fake::pair();
+    fake.add_item(
+        SERVICE,
+        OWNER,
+        fake::item_body_menu(
+            "Player",
+            "Active",
+            4,
+            4,
+            &fake::solid(4, 4, 255, 200, 30, 30),
+            MENU,
+            false,
+        ),
+    );
+    fake.add_menu(SERVICE, MENU, wide_submenu_tree(1, 20));
+    let mut harness = Harness::new(start_connected(stream));
+    until_shown(&mut harness, &mut fake);
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("menu", Some(0)), 1),
+        Ok(Update::Changed)
+    );
+    // The root: the submenu row, then the first 15 leaves (16
+    // widgets); leaves 25..29 are drawn nowhere.
+    let mut want = vec!["button:menu-drill:100:0:More >".to_owned()];
+    for id in 10..25 {
+        want.push(format!("button:menu-select:{id}:1:Row"));
+    }
+    let want_ref: Vec<&str> = want.iter().map(String::as_str).collect();
+    until_rows(&mut harness, &mut fake, &want_ref);
+    // Into the submenu: Back plus its first 15 rows; 215..219 are
+    // drawn nowhere.
+    assert_eq!(
+        harness.invoke(&DP1, &ModuleAction::new("menu-drill", Some(100)), 1),
+        Ok(Update::Changed)
+    );
+    let mut want = vec!["button:menu-back:-1:0:< Back".to_owned()];
+    for id in 200..215 {
+        want.push(format!("button:menu-select:{id}:1:Row"));
+    }
+    let want_ref: Vec<&str> = want.iter().map(String::as_str).collect();
+    until_rows(&mut harness, &mut fake, &want_ref);
+}
+
+#[test]
 fn a_lazy_submenu_is_asked_for_when_drilled_into() {
     let (stream, mut fake) = Fake::pair();
     fake.add_item(
@@ -616,6 +665,40 @@ fn wide_tree(revision: u32, kids: usize) -> Vec<u8> {
             for id in 0..kids {
                 fake::layout_kid(w, &|w| {
                     fake::layout_node(w, id as i32, &label("Row"), &|_| {});
+                });
+            }
+        });
+    })
+}
+
+/// A submenu row first, then `kids` leaf rows at the root, with `kids`
+/// leaf rows inside the submenu: both levels run past the popup's
+/// widget cap, so both are cut.
+fn wide_submenu_tree(revision: u32, kids: usize) -> Vec<u8> {
+    fake::layout_reply(revision, &|w| {
+        fake::layout_node(w, 0, &|_| {}, &|w| {
+            fake::layout_kid(w, &|w| {
+                fake::layout_node(
+                    w,
+                    100,
+                    &|w| {
+                        label("More")(w);
+                        fake::layout_prop(w, "children-display", "s", &|w| {
+                            w.str("submenu");
+                        });
+                    },
+                    &|w| {
+                        for id in 0..kids {
+                            fake::layout_kid(w, &|w| {
+                                fake::layout_node(w, 200 + id as i32, &label("Row"), &|_| {});
+                            });
+                        }
+                    },
+                );
+            });
+            for id in 0..kids {
+                fake::layout_kid(w, &|w| {
+                    fake::layout_node(w, 10 + id as i32, &label("Row"), &|_| {});
                 });
             }
         });
