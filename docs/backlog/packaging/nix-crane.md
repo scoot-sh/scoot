@@ -3,13 +3,13 @@ title: "Nix: crane, so compiled dependencies are cached and CI rebuilds only sco
 status: "open"
 area: "packaging"
 priority: "medium"
-blocked: "nix-publishing"
+blocked: null
 ---
 
 # Nix: crane, so compiled dependencies are cached and CI rebuilds only scoot's crates
 
 Filed 2026-10-03, split out of
-[nix-publishing](nix-publishing.md) (which covers the Cachix and FlakeHub
+[nix-publishing](../resolved/nix-publishing-done.md) (which covers the Cachix and FlakeHub
 half). Serves **daily-drive**: every merge to `main` recompiles Smithay from
 scratch once per packaged binary, so the packaged build stays the slowest
 job in CI and `scoot-gpu` stays too expensive to build there.
@@ -51,4 +51,4 @@ cached; it is the two in-between variants that wait on this.)
 ## Not in this ticket
 
 The Cachix cache and FlakeHub publish themselves
-([nix-publishing](nix-publishing.md)).
+([nix-publishing](../resolved/nix-publishing-done.md)).

@@ -25,7 +25,7 @@ VM..."). Nothing is published; a user reads raw Markdown on GitHub.
 
 - **Split by audience.** `docs/` becomes the site's source, written for
   users: what scoot is, install (Nix, FlakeHub once
-  [nix-publishing](nix-publishing.md) lands), a first session, configure,
+  [nix-publishing](../resolved/nix-publishing-done.md) lands), a first session, configure,
   theming (Stylix), the bar, keybindings, the agent/IPC interface,
   troubleshooting. Backlogs, benches, spikes, forks and ratchet history move
   to a contributor tree that is not published (e.g. `dev/`), with every link

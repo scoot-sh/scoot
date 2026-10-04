@@ -1,9 +1,10 @@
 ---
 title: "Publish: binaries on Cachix, the flake on FlakeHub (no FlakeHub Cache)"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-03"
 ---
 
 # Publish: binaries on Cachix, the flake on FlakeHub (no FlakeHub Cache)
@@ -76,3 +77,31 @@ must show:
 ## Not in this ticket
 
 FlakeHub Cache (declined), crates.io publishing, distro packages.
+
+## Resolution (2026-10-04, PR #410, merge `b49f2ee9b`)
+
+Landed: Cachix (`scoot-sh`) pushes from `main` only, on x86_64-linux and
+aarch64-linux (`ubuntu-24.04-arm`), of `scoot`, `scoot-gpu-xwayland`,
+`scootctl`, `scootbg`, `scootbar`, `scootbar-demo`; the token reaches only
+the step gated to a push to `main` (a `workflow_dispatch` run uses a
+token-less, pull-only step: the review found that `cachix-action` installs
+the token whatever `skipPush` says); the two publishing actions pinned by
+SHA; FlakeHub publishes `scoot-sh/scoot` (rolling, public, no output
+paths) after both builds pass; `flake.nix` `nixConfig` names the cache;
+`docs/nix.md` covers trusting it and installing from FlakeHub; the dev VM's
+config names the cache (applied by the maintainer). Crane moved to
+[nix-crane](../packaging/nix-crane.md).
+
+The first `main` run (37168786109) proved the rest:
+
+- Both build legs and the publish job succeeded.
+- The Cachix push logs show the six packages' outputs on both
+  architectures (14 package paths, scootbar's test variants included).
+- From the aarch64 dev VM: `nix eval` of `scootbar`'s out path at the merge
+  commit, then `nix path-info --store https://scoot-sh.cachix.org` on it,
+  found it in the cache.
+- `nix flake metadata "https://flakehub.com/f/scoot-sh/scoot/0.1.*.tar.gz"`
+  resolves to `0.1.1492+rev-b49f2ee9bd8eb1b14286ae1dacd5f7958e970198`.
+
+Left by hand: adding the cache to the Asahi box's NixOS config, and
+applying `vm/configuration.nix` on the dev VM.
