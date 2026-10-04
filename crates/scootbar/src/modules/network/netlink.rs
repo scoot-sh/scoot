@@ -110,6 +110,10 @@ pub const NL80211_CMD_SET_CQM: u8 = 63;
 pub const NL80211_ATTR_IFINDEX: u16 = 3;
 pub use NL80211_ATTR_IFINDEX as ATTR_IFINDEX;
 const NL80211_ATTR_IFNAME: u16 = 4;
+/// The interface type (`enum nl80211_iftype`, a u32): present on every
+/// interface notice and dump entry, and how an AP-mode interface is told
+/// from a station (`linux-headers-7.1`, `include/linux/nl80211.h`).
+const NL80211_ATTR_IFTYPE: u16 = 5;
 const NL80211_ATTR_STA_INFO: u16 = 21;
 const NL80211_ATTR_BSS: u16 = 47;
 const NL80211_ATTR_SSID: u16 = 52;
@@ -544,6 +548,32 @@ pub struct Wireless {
     pub name_len: u8,
     pub ssid: [u8; 32],
     pub ssid_len: u8,
+    /// The interface type (`enum nl80211_iftype`), 0 where the notice
+    /// carries none (older tests): an absent type reads as unspecified,
+    /// never as AP.
+    pub iftype: u32,
+}
+
+/// The interface types with no useful scan: they host clients instead of
+/// scanning (`linux-headers-7.1`, `include/linux/nl80211.h`).
+pub const NL80211_IFTYPE_AP: u32 = 3;
+pub const NL80211_IFTYPE_AP_VLAN: u32 = 4;
+pub const NL80211_IFTYPE_P2P_GO: u32 = 9;
+/// A station scans: the fake kernel's default interface type, like
+/// `IF_OPER_UP` above.
+#[cfg(test)]
+pub const NL80211_IFTYPE_STATION: u32 = 2;
+
+impl Wireless {
+    /// Whether the interface hosts clients (AP, its VLAN, or a P2P group
+    /// owner) rather than scanning: its cached scan stays empty and is
+    /// never the list.
+    pub fn is_ap(&self) -> bool {
+        matches!(
+            self.iftype,
+            NL80211_IFTYPE_AP | NL80211_IFTYPE_AP_VLAN | NL80211_IFTYPE_P2P_GO
+        )
+    }
 }
 
 pub fn parse_interface(body: &[u8]) -> Wireless {
@@ -568,6 +598,16 @@ pub fn parse_interface(body: &[u8]) -> Wireless {
                 let take = name.len().min(wifi.name.len());
                 wifi.name[..take].copy_from_slice(&name[..take]);
                 wifi.name_len = take as u8;
+            }
+            NL80211_ATTR_IFTYPE => {
+                if attr.payload.len() >= 4 {
+                    wifi.iftype = u32::from_ne_bytes([
+                        attr.payload[0],
+                        attr.payload[1],
+                        attr.payload[2],
+                        attr.payload[3],
+                    ]);
+                }
             }
             NL80211_ATTR_SSID => {
                 // Present on interface info while associated (seen on a

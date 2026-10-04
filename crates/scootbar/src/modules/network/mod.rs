@@ -264,6 +264,10 @@ struct Iface {
     has_v6: bool,
     /// Known wireless (an nl80211 interface notice or dump entry).
     wireless: bool,
+    /// In AP mode (an access point, its VLAN, or a P2P group owner): it
+    /// hosts clients instead of scanning, so its cached scan is never the
+    /// list (see [`Nets::scan_target`]).
+    ap: bool,
     /// Already asked nl80211 about this index; reset by a resync, so a
     /// refusal is not re-asked on every link event.
     queried: bool,
@@ -305,6 +309,10 @@ struct Nets {
     default4: u32,
     default6: u32,
     family: Family,
+    /// The configured interface to show (`Settings::interface`), for scan
+    /// targeting where the routes have not arrived yet; [`Nets::selected`]
+    /// takes it as a parameter, this keeps it where the events are.
+    pinned: Option<String>,
     /// Dumps waiting for the rtnetlink socket, and the one in flight:
     /// the kernel runs one dump per socket.
     rt_dumps: std::collections::VecDeque<Dump>,
@@ -423,6 +431,7 @@ impl Nets {
             if self.scan_of == link.index {
                 self.scan_n = 0;
             }
+            self.retarget();
             return;
         }
         if link.is_empty() || link.is_loopback() {
@@ -441,6 +450,7 @@ impl Nets {
                     has_v4: false,
                     has_v6: false,
                     wireless: false,
+                    ap: false,
                     queried: false,
                     ssid: String::new(),
                     signal: None,
@@ -448,16 +458,107 @@ impl Nets {
             }
         }
         self.query_wifi(link.index);
+        self.retarget();
+    }
+
+    /// The interface whose scan is kept: the shown one (the config's, else
+    /// the default route's) where it is a scanning station, else the most
+    /// recently active station's, else the first associated one, else the
+    /// first idle station. The last resort keeps the picker working
+    /// off-network: with no route and no association, the lone station's
+    /// cache is still dumped (as every interface's was before), instead of
+    /// refusing while it holds a full scan. AP-mode interfaces never
+    /// qualify: their caches stay empty. Zero names none.
+    fn scan_target(&self) -> u32 {
+        if let Some(iface) = self.selected(self.pinned.as_deref()) {
+            if iface.wireless && !iface.ap {
+                return iface.link.index;
+            }
+        }
+        if let Some(iface) = self
+            .ifaces
+            .iter()
+            .find(|iface| iface.link.index == self.station_of)
+        {
+            if iface.wireless && !iface.ap && !iface.ssid.is_empty() {
+                return iface.link.index;
+            }
+        }
+        if let Some(iface) = self
+            .ifaces
+            .iter()
+            .find(|iface| iface.wireless && !iface.ap && !iface.ssid.is_empty())
+        {
+            return iface.link.index;
+        }
+        self.ifaces
+            .iter()
+            .find(|iface| iface.wireless && !iface.ap)
+            .map(|iface| iface.link.index)
+            .unwrap_or(0)
+    }
+
+    /// Moves the kept scan to [`Nets::scan_target`]: drops queued scans
+    /// and stations for anywhere else, and queues the new target's scan
+    /// and station where the scan is not already owed. The list itself
+    /// resets when the new scan goes out (see `pump_genl`), never here: a
+    /// dump still in flight for the old target owns the list until then,
+    /// and its late replies must not land in the newcomer's. Where nothing
+    /// is outstanding the reset is immediate, so no stale radio's list
+    /// outlives its target. A no-op where the target did not move: the
+    /// common event path.
+    fn retarget(&mut self) {
+        let want = self.scan_target();
+        if want == self.scan_of {
+            return;
+        }
+        let mut queued = false;
+        self.genl_dumps.retain(|dump| match dump {
+            GenlDump::Scan(index) => {
+                if *index == want {
+                    queued = true;
+                }
+                *index == want
+            }
+            GenlDump::Station(index) => *index == want,
+            _ => true,
+        });
+        let in_flight = self
+            .genl_busy
+            .is_some_and(|(_, dump)| matches!(dump, GenlDump::Scan(_)));
+        if !queued && !in_flight {
+            self.scan_of = want;
+            self.scan_n = 0;
+        }
+        if want != 0
+            && !queued
+            && !self
+                .genl_busy
+                .is_some_and(|(_, dump)| dump == GenlDump::Scan(want))
+        {
+            self.station_of = want;
+            self.genl_dumps.push_back(GenlDump::Scan(want));
+            self.genl_dumps.push_back(GenlDump::Station(want));
+        }
     }
 
     /// Queues a scan dump for `index`: the replies append to the list,
     /// whatever order the tests feed them in, and on the wire the request
-    /// always precedes its replies. A re-dump of the same scan supersedes
-    /// its list and resets it; a concurrent scan for another radio only
-    /// enqueues — resetting here would attribute the in-flight radio's
-    /// replies to the newcomer (the send resets again if the index moved,
-    /// see `pump_genl`).
+    /// always precedes its replies. Only the scan target's dump is queued
+    /// (see [`Nets::scan_target`]): a second radio's cache never reaches
+    /// the list, and an AP-mode interface's empty one never even goes out.
+    /// A re-dump of the target's scan supersedes its list and resets it,
+    /// unless a dump is still outstanding — the reset then waits for the
+    /// send (see `pump_genl`), so an in-flight dump's late replies are
+    /// never attributed to the newcomer.
     fn queue_scan(&mut self, index: u32) {
+        if index == 0 || index != self.scan_target() {
+            return;
+        }
+        // An AP-mode interface has no useful scan: never even queued.
+        if self.find(index).is_some_and(|iface| iface.ap) {
+            return;
+        }
         let pending = self
             .genl_busy
             .is_some_and(|(_, dump)| matches!(dump, GenlDump::Scan(_)))
@@ -511,6 +612,7 @@ impl Nets {
             10 => iface.has_v6 = present,
             _ => {}
         }
+        self.retarget();
     }
 
     fn on_route(&mut self, event: &RouteEvent) {
@@ -524,6 +626,7 @@ impl Nets {
         } else if *slot == event.oif {
             *slot = 0;
         }
+        self.retarget();
     }
 
     fn on_wireless(&mut self, wifi: &Wireless, present: bool) {
@@ -533,18 +636,21 @@ impl Nets {
         if !present {
             if let Some(iface) = self.find(wifi.index) {
                 iface.wireless = false;
+                iface.ap = false;
                 iface.ssid.clear();
                 iface.signal = None;
             }
             if self.scan_of == wifi.index {
                 self.scan_n = 0;
             }
+            self.retarget();
             return;
         }
         let fresh = self.find(wifi.index).is_some_and(|iface| !iface.wireless);
         if let Some(iface) = self.find(wifi.index) {
             iface.queried = true;
             iface.wireless = true;
+            iface.ap = wifi.is_ap();
             // The interface info carries the current SSID while
             // associated (absent on a fresh interface, which leaves what
             // the scan said).
@@ -554,11 +660,13 @@ impl Nets {
         } else {
             return;
         }
-        if fresh {
+        // A newcomer that is the scan target draws its scan and station
+        // beside it (`retarget` queues both); any other radio's dump
+        // would only replace the shown list with its own cache.
+        if fresh && !wifi.is_ap() {
             self.station_of = wifi.index;
-            self.queue_scan(wifi.index);
-            self.genl_dumps.push_back(GenlDump::Station(wifi.index));
         }
+        self.retarget();
     }
     /// Applies one rtnetlink datagram's messages. Dumps are idempotent
     /// state, so no reply sequence is matched except the in-flight
@@ -650,6 +758,10 @@ impl Nets {
                         iface.ssid.clear();
                         iface.signal = None;
                     }
+                    // The association named the target: without a
+                    // re-target the old radio's scan stays kept until the
+                    // next link/addr/route/wireless event (see `retarget`).
+                    self.retarget();
                 }
                 netlink::NL80211_CMD_NEW_SCAN_RESULTS => {
                     // A bare notice (sequence zero) says a scan finished:
@@ -676,7 +788,17 @@ impl Nets {
                 }
                 netlink::NL80211_CMD_NEW_STATION => {
                     if let Some(signal) = netlink::parse_station(msg.body) {
-                        let of = self.station_of;
+                        // The reply belongs to the in-flight station
+                        // dump's interface, not whatever `station_of` has
+                        // moved to since it was queued (`retarget`
+                        // re-points at queue time, while this dump is
+                        // still outstanding): without this the old
+                        // target's dBm lands on the new target's signal
+                        // until the new target's own reply overwrites it.
+                        let of = match self.genl_busy {
+                            Some((_, GenlDump::Station(index))) => index,
+                            _ => self.station_of,
+                        };
                         if let Some(iface) = self.find(of) {
                             iface.signal = Some(signal);
                         }
@@ -1229,6 +1351,7 @@ impl Network {
                 }
                 if self.rt.is_none() {
                     self.nets = Nets::default();
+                    self.nets.pinned = self.interface.clone();
                     self.timer = None;
                 }
                 self.arm_retry();
@@ -1237,6 +1360,7 @@ impl Network {
                 self.rt = None;
                 self.genl = None;
                 self.nets = Nets::default();
+                self.nets.pinned = self.interface.clone();
                 self.timer = None;
                 self.menu = menu;
                 self.connect = connect;
@@ -1595,6 +1719,7 @@ fn open_inner(settings: &Settings) -> Result<Network, String> {
     let nets = Nets {
         family,
         joined,
+        pinned: settings.interface.clone(),
         ..Nets::default()
     };
     Ok(Network {
@@ -1770,6 +1895,7 @@ fn start_with(settings: &Settings, rt: OwnedFd, genl: OwnedFd, family: u16) -> B
     let _ = rustix::fs::fcntl_setfl(&genl, rustix::fs::OFlags::NONBLOCK);
     let mut nets = Nets::default();
     nets.family.id = family;
+    nets.pinned = settings.interface.clone();
     Box::new(Network {
         interface: settings.interface.clone(),
         show_ssid: settings.show_ssid,

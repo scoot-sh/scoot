@@ -395,6 +395,434 @@ fn request_seq(genl: &[u8], command: u8) -> u32 {
         .expect("the request")
 }
 
+/// The ifindexes of the scan dumps in what the module sent, oldest first:
+/// which radios' caches the list could come from.
+fn scan_targets(genl: &[u8]) -> Vec<u32> {
+    super::netlink::messages(genl)
+        .filter_map(|msg| {
+            super::netlink::genl_of(msg.body).and_then(|(command, fields)| {
+                (command == super::netlink::NL80211_CMD_GET_SCAN
+                    || command == super::netlink::NL80211_CMD_NEW_SCAN_RESULTS)
+                    .then(|| super::netlink::find_u32(fields, super::netlink::ATTR_IFINDEX))
+            })
+        })
+        .collect()
+}
+
+/// A `menu-command` writing what it was fed to a file, with its dir and
+/// file: the menu-free way to read the scan list.
+fn record_menu(tag: &str) -> (Vec<String>, std::path::PathBuf, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!(
+        "scootbar-network-{tag}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("list");
+    (
+        vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            format!("cat > {}", file.display()),
+        ],
+        dir,
+        file,
+    )
+}
+
+/// Two radios, the route on the shown one: the second radio's cache dumps
+/// after the shown one's, and must not replace it.
+#[test]
+fn only_the_shown_radio_s_scan_is_dumped() {
+    const DONGLE: u32 = 4;
+    let (command, dir, file) = record_menu("shown-scan");
+    let settings = Settings {
+        menu_command: command,
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    for (index, name, ssid) in [
+        (WLAN0, "wlan0", &b"Wimbly"[..]),
+        (DONGLE, "wlan1", &b"FarAway"[..]),
+    ] {
+        fake.rt(&fake::link(16, index, UP, 6, name, None));
+        fake.rt(&fake::addr(20, index, 2));
+        fake.genl(&fake::interface(index, name, Some(ssid)));
+    }
+    route_via(&fake, WLAN0);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("Wimbly"));
+    // The shown radio's scan went out first.
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [WLAN0]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    // Its page fills the list; completing the dump must not send the
+    // second radio's: there is nothing of its to send.
+    fake.genl(&fake::scan(&[
+        (b"Wimbly", -5400, true),
+        (b"Cafe", -6000, false),
+    ]));
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    // Complete the station beside the shown scan: the second radio's
+    // scan would go out behind it.
+    let (_, genl) = fake.sent();
+    fake.genl(&fake::station(-54));
+    fake.genl(&fake::done_seq(request_seq(
+        &genl,
+        super::netlink::NL80211_CMD_GET_STATION,
+    )));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    let targets = scan_targets(&genl);
+    assert!(
+        targets.is_empty(),
+        "no second radio's scan goes out: {targets:?}"
+    );
+    // The list is the shown radio's.
+    let menu = ModuleAction::new("menu", None);
+    let output = crate::modules::OutputView { name: None };
+    assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+    let _ = drive(&mut harness);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\nCafe\n");
+    std::fs::remove_dir_all(&dir).ok();
+    let _ = fake.sent();
+}
+
+/// An access-point interface beside the station: up with an address, but
+/// its empty cache is never dumped and never replaces the scan.
+#[test]
+fn an_ap_interface_s_empty_cache_never_replaces_the_scan() {
+    const AP: u32 = 4;
+    let (command, dir, file) = record_menu("ap-scan");
+    let settings = Settings {
+        menu_command: command,
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    wifi(&fake, b"Wimbly", -54);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("Wimbly"));
+    // The station's scan is in flight with its page already in the list;
+    // completing the dump queues the station beside it.
+    let (_, genl) = fake.sent();
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    // The hotspot appears beside the station.
+    fake.rt(&fake::link(16, AP, UP, 6, "wlan1", None));
+    fake.rt(&fake::addr(20, AP, 2));
+    fake.genl(&fake::interface_with_type(
+        AP,
+        "wlan1",
+        None,
+        super::netlink::NL80211_IFTYPE_AP,
+    ));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    // Complete the station beside the shown scan: anything the hotspot
+    // queued behind it would go out now, and nothing may.
+    let (_, genl) = fake.sent();
+    fake.genl(&fake::station(-54));
+    fake.genl(&fake::done_seq(request_seq(
+        &genl,
+        super::netlink::NL80211_CMD_GET_STATION,
+    )));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    let targets = scan_targets(&genl);
+    assert!(
+        targets.is_empty(),
+        "no access point's scan goes out: {targets:?}"
+    );
+    // The list is still the station's.
+    let menu = ModuleAction::new("menu", None);
+    let output = crate::modules::OutputView { name: None };
+    assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+    let _ = drive(&mut harness);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "Wimbly\n");
+    std::fs::remove_dir_all(&dir).ok();
+    let _ = fake.sent();
+}
+
+/// The default route moving to the dongle re-dumps the scan there: the
+/// list follows the shown radio instead of staying stale.
+#[test]
+fn the_default_route_moving_relists_the_new_radio() {
+    const DONGLE: u32 = 4;
+    let (command, dir, file) = record_menu("route-move");
+    let settings = Settings {
+        menu_command: command,
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    for (index, name, ssid) in [
+        (WLAN0, "wlan0", &b"Wimbly"[..]),
+        (DONGLE, "wlan1", &b"FarAway"[..]),
+    ] {
+        fake.rt(&fake::link(16, index, UP, 6, name, None));
+        fake.rt(&fake::addr(20, index, 2));
+        fake.genl(&fake::interface(index, name, Some(ssid)));
+    }
+    route_via(&fake, WLAN0);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("Wimbly"));
+    // Settle the shown scan: only its dump went out.
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [WLAN0]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::scan(&[(b"Wimbly", -5400, true)]));
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    // Settle the station beside it: the second radio's scan would go out
+    // behind it, and must not while the route stands.
+    let (_, genl) = fake.sent();
+    fake.genl(&fake::station(-54));
+    fake.genl(&fake::done_seq(request_seq(
+        &genl,
+        super::netlink::NL80211_CMD_GET_STATION,
+    )));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    let targets = scan_targets(&genl);
+    assert!(
+        targets.is_empty(),
+        "nothing more is owed while the route stands: {targets:?}"
+    );
+    // The route moves: the dongle's scan goes out with the move.
+    route_via(&fake, DONGLE);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("FarAway"));
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [DONGLE]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    // Its page replaces the list (the send reset it).
+    fake.genl(&fake::scan(&[
+        (b"FarAway", -6000, true),
+        (b"Elsewhere", -7000, false),
+    ]));
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let menu = ModuleAction::new("menu", None);
+    let output = crate::modules::OutputView { name: None };
+    assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+    let _ = drive(&mut harness);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "FarAway\nElsewhere\n"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+    let _ = fake.sent();
+}
+
+/// The shown radio vanishing re-dumps the survivor's scan: the picker
+/// keeps working on the radio that is left.
+#[test]
+fn the_shown_radio_vanishing_relists_the_survivor() {
+    const DONGLE: u32 = 4;
+    let (command, dir, file) = record_menu("vanish");
+    let settings = Settings {
+        menu_command: command,
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    wifi(&fake, b"Wimbly", -54);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("Wimbly"));
+    // Settle the shown scan and station: nothing is owed after.
+    let (_, genl) = fake.sent();
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    let station = request_seq(&genl, super::netlink::NL80211_CMD_GET_STATION);
+    fake.genl(&fake::done_seq(station));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    assert!(scan_targets(&genl).is_empty());
+    // A second radio appears beside it: not shown, nothing is owed.
+    fake.rt(&fake::link(16, DONGLE, UP, 6, "wlan1", None));
+    fake.rt(&fake::addr(20, DONGLE, 2));
+    fake.genl(&fake::interface(DONGLE, "wlan1", Some(b"FarAway")));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    // Drain whatever the arrival sent, so what follows is only the
+    // vanishing's answer.
+    let _ = fake.sent();
+    // The shown radio vanishes: its interface and link go away.
+    fake.genl(&fake::del_interface(WLAN0));
+    fake.rt(&fake::link(17, WLAN0, 0, 2, "wlan0", Some("nl80211")));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(harness.view().text(), "offline");
+    // The survivor's scan went out with the vanishing.
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [DONGLE]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::scan(&[(b"FarAway", -6000, true)]));
+    fake.genl(&fake::done_seq(scan));
+    // Unchanged: with no route nothing is selected, so the survivor's
+    // signal moves no view — the menu below proves the list refilled.
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let menu = ModuleAction::new("menu", None);
+    let output = crate::modules::OutputView { name: None };
+    assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+    let _ = drive(&mut harness);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "FarAway\n");
+    std::fs::remove_dir_all(&dir).ok();
+    let _ = fake.sent();
+}
+
+/// An idle station is scanned while nothing is associated: no route, no
+/// SSID anywhere, yet the lone radio's cache is still the list, so the
+/// picker works off-network. A no-regression pin: this passed before the
+/// fix (every interface was dumped) and must keep passing.
+#[test]
+fn an_idle_station_is_scanned_while_nothing_is_associated() {
+    let (command, dir, file) = record_menu("idle-scan");
+    let settings = Settings {
+        menu_command: command,
+        ..Settings::default()
+    };
+    let (mut harness, fake) = Fake::start(&settings);
+    // Up with an address but no route and no association.
+    fake.rt(&fake::link(16, WLAN0, UP, 6, "wlan0", None));
+    fake.rt(&fake::addr(20, WLAN0, 2));
+    fake.genl(&fake::interface(WLAN0, "wlan0", None));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(harness.view().text(), "offline");
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [WLAN0]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::scan(&[(b"Cafe", -6000, false)]));
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let menu = ModuleAction::new("menu", None);
+    let output = crate::modules::OutputView { name: None };
+    assert_eq!(harness.invoke(&output, &menu, 1), Ok(Update::Unchanged));
+    let _ = drive(&mut harness);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "Cafe\n");
+    std::fs::remove_dir_all(&dir).ok();
+    let _ = fake.sent();
+}
+
+/// A deauthentication re-targets the kept scan at once: the shown
+/// interface is ethernet, two stations stand behind it with the
+/// associated one listed second, and its deauth sends the surviving
+/// idle station's scan without waiting for another event.
+#[test]
+fn a_deauth_retargets_the_scan_to_the_surviving_station() {
+    const IDLE: u32 = WLAN0;
+    const ASSOC: u32 = 4;
+    let (mut harness, fake) = Fake::start(&Settings::default());
+    plug(&fake);
+    route_via(&fake, ETH0);
+    // The idle station first, the associated one second: the kept scan
+    // is the associated one's.
+    fake.rt(&fake::link(16, IDLE, UP, 6, "wlan0", None));
+    fake.rt(&fake::addr(20, IDLE, 2));
+    fake.genl(&fake::interface(IDLE, "wlan0", None));
+    fake.rt(&fake::link(16, ASSOC, UP, 6, "wlan1", None));
+    fake.rt(&fake::addr(20, ASSOC, 2));
+    fake.genl(&fake::interface(ASSOC, "wlan1", Some(b"FarAway")));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(harness.view().text(), "eth0");
+    // Settle the associated scan and its station: nothing owed after.
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [ASSOC]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::scan(&[(b"FarAway", -6000, true)]));
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    fake.genl(&fake::station(-60));
+    fake.genl(&fake::done_seq(request_seq(
+        &genl,
+        super::netlink::NL80211_CMD_GET_STATION,
+    )));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    assert!(scan_targets(&genl).is_empty());
+    // The associated station deauthenticates: the idle one's scan goes
+    // out with the notice, not with the next event.
+    fake.genl(&fake::deauth(ASSOC));
+    let _ = drive(&mut harness);
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [IDLE]);
+    let _ = fake.sent();
+}
+
+/// A station reply in flight for the old target does not land on the new
+/// target's signal: the reply belongs to the in-flight dump's interface,
+/// not whatever `station_of` has moved to since it was queued. Fails
+/// with `station_of` read at reply time (the new target briefly shows
+/// the old one's dBm until its own reply overwrites it).
+#[test]
+fn a_late_station_reply_keeps_the_old_target_s_signal() {
+    const OLD: u32 = WLAN0;
+    const NEXT: u32 = 4;
+    let (mut harness, fake) = Fake::start(&Settings::default());
+    for (index, name, ssid) in [
+        (OLD, "wlan0", &b"Wimbly"[..]),
+        (NEXT, "wlan1", &b"FarAway"[..]),
+    ] {
+        fake.rt(&fake::link(16, index, UP, 6, name, None));
+        fake.rt(&fake::addr(20, index, 2));
+        fake.genl(&fake::interface(index, name, Some(ssid)));
+    }
+    route_via(&fake, OLD);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("Wimbly"));
+    // The shown scan is settled; its station is now in flight.
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [OLD]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::scan(&[(b"Wimbly", -5000, true)]));
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let (_, genl) = fake.sent();
+    let station = request_seq(&genl, super::netlink::NL80211_CMD_GET_STATION);
+    // The route moves while the old target's station is outstanding: the
+    // new target's scan queues behind it, and nothing goes out yet.
+    route_via(&fake, NEXT);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("FarAway"));
+    let (_, genl) = fake.sent();
+    assert!(
+        scan_targets(&genl).is_empty(),
+        "nothing goes out while the old station is in flight"
+    );
+    // The old target's reply lands: on the old target, not the shown
+    // one. A different dBm than the scan lent, so a misattribution
+    // shows in the value.
+    fake.genl(&fake::station(-51));
+    fake.genl(&fake::done_seq(station));
+    let _ = drive(&mut harness);
+    let value = harness.value_on(None).expect("a value");
+    assert_eq!(value["ssid"], "FarAway");
+    assert!(
+        value.get("signal").is_none(),
+        "the old target's dBm must not land on the new target: {value}"
+    );
+    // The new target's own cycle then reports its own signal.
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [NEXT]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::scan(&[(b"FarAway", -8000, true)]));
+    fake.genl(&fake::done_seq(scan));
+    let _ = drive(&mut harness);
+    let (_, genl) = fake.sent();
+    fake.genl(&fake::station(-80));
+    fake.genl(&fake::done_seq(request_seq(
+        &genl,
+        super::netlink::NL80211_CMD_GET_STATION,
+    )));
+    let _ = drive(&mut harness);
+    let value = harness.value_on(None).expect("a value");
+    assert_eq!(value["signal"], -80);
+    let _ = fake.sent();
+}
+
 #[test]
 fn two_radios_scans_do_not_mix() {
     let (mut harness, fake) = Fake::start(&Settings::default());
@@ -1362,6 +1790,50 @@ mod popup_list {
         let (shown, content) = content_of(&mut harness);
         assert!(shown);
         assert_eq!(content.widgets().len(), 1);
+        assert_eq!(content.label(&content.widgets()[0]), "Wimbly");
+        let _ = fake.sent();
+    }
+
+    #[test]
+    fn a_plugged_dongle_keeps_the_open_list() {
+        // The list is open on the shown radio's scan; a dongle plugged in
+        // beside it sees nothing, and its empty cache must not reach the
+        // rows.
+        const DONGLE: u32 = 4;
+        let (mut harness, fake) = Fake::start(&Settings::default());
+        wifi_many(&fake, b"Wimbly", -50, &[(b"Cafe", -60), (b"Far", -72)]);
+        assert_eq!(drive(&mut harness), Update::Changed);
+        let (shown, content) = content_of(&mut harness);
+        assert!(shown);
+        assert_eq!(content.widgets().len(), 3);
+        // Complete the shown scan so anything the dongle queues behind it
+        // would go out.
+        let (_, genl) = fake.sent();
+        fake.genl(&fake::done_seq(request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_SCAN,
+        )));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        fake.rt(&fake::link(16, DONGLE, UP, 6, "wlan1", None));
+        fake.rt(&fake::addr(20, DONGLE, 2));
+        fake.genl(&fake::interface(DONGLE, "wlan1", Some(b"Other")));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        // Complete the station beside the shown scan: the dongle's scan
+        // must never go out behind it.
+        let (_, genl) = fake.sent();
+        fake.genl(&fake::station(-50));
+        fake.genl(&fake::done_seq(request_seq(
+            &genl,
+            crate::modules::network::netlink::NL80211_CMD_GET_STATION,
+        )));
+        assert_eq!(drive(&mut harness), Update::Unchanged);
+        let (_, genl) = fake.sent();
+        let targets = scan_targets(&genl);
+        assert!(targets.is_empty(), "no dongle's scan goes out: {targets:?}");
+        // The open list still shows the shown radio's networks.
+        let (shown, content) = content_of(&mut harness);
+        assert!(shown);
+        assert_eq!(content.widgets().len(), 3);
         assert_eq!(content.label(&content.widgets()[0]), "Wimbly");
         let _ = fake.sent();
     }

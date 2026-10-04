@@ -242,6 +242,36 @@ fn an_interface_parses_index_and_name() {
 }
 
 #[test]
+fn an_interface_parses_its_type() {
+    fn typed(iftype: Option<u32>) -> Wireless {
+        let mut body = vec![NL80211_CMD_NEW_INTERFACE, 1, 0, 0];
+        body.extend_from_slice(&attr_of(NL80211_ATTR_IFINDEX, &3u32.to_ne_bytes()));
+        body.extend_from_slice(&attr_of(NL80211_ATTR_IFNAME, b"wlan0\0"));
+        if let Some(iftype) = iftype {
+            body.extend_from_slice(&attr_of(NL80211_ATTR_IFTYPE, &iftype.to_ne_bytes()));
+        }
+        parse_interface(&body)
+    }
+    // The kernel always sends the type (`enum nl80211_iftype`); a station
+    // scans, an access point (its VLAN, a P2P group owner) hosts clients
+    // instead.
+    assert_eq!(typed(Some(2)).iftype, NL80211_IFTYPE_STATION);
+    assert!(!typed(Some(2)).is_ap());
+    for ap in [
+        NL80211_IFTYPE_AP,
+        NL80211_IFTYPE_AP_VLAN,
+        NL80211_IFTYPE_P2P_GO,
+    ] {
+        assert_eq!(typed(Some(ap)).iftype, ap);
+        assert!(typed(Some(ap)).is_ap(), "iftype {ap}");
+    }
+    // Absent reads as unspecified, never as AP (older fixtures carry no
+    // type).
+    assert_eq!(typed(None).iftype, 0);
+    assert!(!typed(None).is_ap());
+}
+
+#[test]
 fn a_scan_folds_the_associated_bss_first() {
     fn bss(ssid: Option<&[u8]>, signal_mbm: i32, status: Option<u32>) -> Vec<u8> {
         let mut nest = Vec::new();
