@@ -1,0 +1,27 @@
+# The "music desk" look for scoot: a paper background, a blue ring around
+# the focused window and a pale grey one around the rest, rounded corners, and the
+# wallpaper in ../../assets/wallpapers. See README.md in this directory.
+#
+#   scoot --config docs/examples/music-desk/scoot.toml
+#
+# Nothing here is a default: every costly part is opt-in (see "What it costs").
+#
+# The previews were taken at scale 1.5 on a 2560x1664 panel: uncomment to match.
+# [output]
+# scale = 1.5
+
+[layout]
+gap = 22
+
+[appearance]
+background_color = "#FCFBFB"          # shows until the wallpaper is up, and behind it
+corner_radius = 14                    # costs a little per frame: 0 is free
+focus_ring_width = 2                  # the color, not the weight, says which is focused
+focus_ring_inactive_width = 2
+focus_ring_active_color = "#3D579A"
+focus_ring_inactive_color = "#D5D7DD"
+
+[wallpaper]
+# A relative path is resolved against this file's directory.
+image = "../../assets/wallpapers/music-desk.png"
+mode = "fill"

@@ -1,0 +1,23 @@
+# The "music desk" prompt for starship, in the wallpaper's palette, for a light
+# translucent terminal. Point starship at it with STARSHIP_CONFIG, e.g.:
+#
+#   env STARSHIP_CONFIG=docs/examples/music-desk/starship.toml bash -i
+#
+add_newline = false
+format = "$directory$git_branch$nix_shell$cmd_duration$character"
+[directory]
+style = "bold #3D579A"
+truncation_length = 3
+[git_branch]
+symbol = " "
+style = "#8A73C4"
+format = "[$symbol$branch]($style) "
+[nix_shell]
+symbol = "󱄅 "
+style = "#3F8A9A"
+format = "[$symbol]($style)"
+[cmd_duration]
+style = "#A2A4A8"
+[character]
+success_symbol = "[❯](bold #E0574A)"
+error_symbol = "[❯](bold #C9962A)"

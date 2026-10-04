@@ -1,0 +1,17 @@
+# The "music desk" Helix setup: relative line numbers, a cursor line, and the
+# scoot-light theme below (transparent background, for a translucent terminal).
+# Copy this file to ~/.config/helix/config.toml and themes/scoot-light.toml to
+# ~/.config/helix/themes/scoot-light.toml.
+theme = "scoot-light"
+[editor]
+line-number = "relative"
+cursorline = true
+bufferline = "never"
+[editor.indent-guides]
+render = true
+character = "▏"
+[editor.statusline]
+left = ["mode", "file-name", "file-modification-indicator"]
+right = ["position", "file-type"]
+[editor.lsp]
+enable = false

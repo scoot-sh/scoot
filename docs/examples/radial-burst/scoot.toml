@@ -5,6 +5,10 @@
 #   scoot --config docs/examples/radial-burst/scoot.toml
 #
 # Nothing here is a default: every costly part is opt-in (see "What it costs").
+#
+# The previews were taken at scale 1.5 on a 2560x1664 panel: uncomment to match.
+# [output]
+# scale = 1.5
 
 [layout]
 gap = 18

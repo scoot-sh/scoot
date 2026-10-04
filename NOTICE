@@ -42,20 +42,25 @@ distributing it, including commercially and without attribution, but not
 compiling images to build a similar or competing service. It is used only by the
 optional example in docs/examples/radial-burst; scoot, scootbar and scootbg do
 not embed it. It stays under the Unsplash License wherever scoot is
-redistributed; remove the file to drop it.
+redistributed; remove the file to drop it. The preview
+docs/assets/radial-burst-preview.png is a screenshot of that example and shows
+the image, so the same applies to it.
 
 ----------------------------------------------------------------------------
 
-docs/assets/scootbar-desktop.png is a screenshot of scoot whose wallpaper is
-not part of scoot's MIT-licensed work and is not covered by its license. The
-wallpaper is the illustration "Musical instruments and audio equipment on a
-white surface" by Alghozy (@artgho), published on Unsplash:
+docs/assets/wallpapers/music-desk.png is not part of scoot's MIT-licensed
+code and is not covered by its license. It is the illustration "Musical
+instruments and audio equipment on a white surface" by Alghozy (@artgho),
+published on Unsplash:
 
   https://unsplash.com/illustrations/musical-instruments-and-audio-equipment-on-a-white-surface-b6Us5E-BO8w
 
 It is free to use under the Unsplash License (https://unsplash.com/license),
 which allows downloading, copying, modifying and distributing it, including
 commercially and without attribution, but not compiling images to build a
-similar or competing service. The wallpaper in that screenshot stays under the
-Unsplash License wherever scoot is redistributed; remove the file (and the
-image above the scootbar section in README.md) to drop it.
+similar or competing service. It is used only by the optional example in
+docs/examples/music-desk; scoot, scootbar and scootbg do not embed it. It
+stays under the Unsplash License wherever scoot is redistributed; remove the
+file (and the `[wallpaper]` table in the example) to drop it. The preview
+docs/assets/music-desk-preview.png is a screenshot of that example and shows
+the image, so the same applies to it.

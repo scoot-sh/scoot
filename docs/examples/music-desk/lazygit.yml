@@ -1,0 +1,21 @@
+# The "music desk" lazygit colors: the wallpaper's palette, rounded borders, no
+# fetch and no update checks. Copy to ~/.config/lazygit/config.yml (lazygit
+# also reads ~/.config/lazygit/config.yaml).
+gui:
+  nerdFontsVersion: "3"
+  showBottomLine: false
+  showRandomTip: false
+  border: rounded
+  theme:
+    activeBorderColor: ["#3D579A", bold]
+    inactiveBorderColor: ["#A2A4A8"]
+    selectedLineBgColor: ["#D7DEEE"]
+    optionsTextColor: ["#3D579A"]
+    cherryPickedCommitFgColor: ["#3D579A"]
+    unstagedChangesColor: ["#E0574A"]
+    defaultFgColor: ["#1A2032"]
+git:
+  autoFetch: false
+  autoRefresh: false
+update:
+  method: never

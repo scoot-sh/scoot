@@ -1,15 +1,15 @@
-# The radial burst look
+# The radial burst look — dark
 
 A dark, high-contrast look built around one wallpaper: colorful rays exploding
 from a dark center. It is an **opt-in example**, not a default: nothing in scoot,
 scootbar or scootbg changes unless you use these files.
 
-![scoot with the radial burst look: one translucent terminal on the left running fastfetch with a thin blue ring, the wallpaper showing through it and filling the right half, under a floating translucent bar with circled workspaces](../../assets/radial-burst-preview.png)
+![scoot with the radial burst look: one translucent terminal on the left running fastfetch with a thin blue ring, the wallpaper showing through it and filling the right half, under a floating translucent bar with circled workspaces, the window title, status icons and the power menu](../../assets/radial-burst-preview.png)
 
 | File | For |
 | --- | --- |
 | [`scoot.toml`](scoot.toml) | the compositor: background, ring colors and widths, rounded corners, column widths with a full-width column on `Super+m`, the wallpaper |
-| [`bar.toml`](bar.toml) | scootbar: a floating, rounded, translucent bar, workspaces as circles, the clock |
+| [`bar.toml`](bar.toml) | scootbar: a floating, rounded, translucent bar, workspaces as circles with the window title, the clock, status modules (WiFi, volume, brightness, bluetooth, battery), the power menu |
 | [`foot.ini`](foot.ini) | foot: the palette, 80% opacity, padding and font size (needs a foot with `[colors-dark]` sections, 1.24 or later) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
