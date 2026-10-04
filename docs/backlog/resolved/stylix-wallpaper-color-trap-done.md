@@ -73,4 +73,4 @@ just the color; file-content check 9b) that fail before the fix
 after; `nix eval
 .#checks.aarch64-linux.scootbar-modules.drvPath` green (stub still
 satisfies every check); `nix fmt -- --check` clean on the three changed
-`.nix` files.
+`.nix` files. PR #426 (unmerged; the coordinator merges after review).
