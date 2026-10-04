@@ -183,7 +183,7 @@ Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
 
 ## Looks
 
-scoot does light and dark, side by side with the same framing. Every color is
+scoot does light and dark. Every color is
 a setting — the bar tokens, scoot's ring and background colors, foot's
 palette — so either look is just a config file. Prefer automatic? The Nix
 modules theme scoot and scootbar from a wallpaper with Stylix

@@ -15,7 +15,7 @@
 # this file: copy both somewhere on your PATH (e.g. ~/.local/bin) first, or
 # point their `command` at wherever you put them.
 
-left = ["workspaces"]
+left = ["workspaces", "window-title"]
 center = ["clock"]
 right = ["load", "cpu", "network", "volume", "battery", "terminal", "browser", "power"]
 
@@ -44,6 +44,11 @@ item-gap = 3           # spaces between the numbers
 margin = 8             # room either side of the module
 disc = true            # grow the span to the disc, so a digit is round at any padding
 inactive-color = "#9AA0B0"
+
+[window-title]
+icon = "\U000F08C6"    # application
+show-app-id = false    # the title alone reads cleaner than "title - app"
+max-width = 320        # the title yields to the clock past this
 
 [clock]
 format = "%-I:%M %P"

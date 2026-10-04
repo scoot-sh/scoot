@@ -1,6 +1,6 @@
 # The "radial burst" look for scootbar: a floating, rounded, slightly translucent bar
-# with the workspaces as circles on the left, the clock in the middle, and status
-# icons plus the power menu on the right.
+# with the workspaces and the focused window's title on the left, the clock in
+# the middle, and status modules plus the power menu on the right.
 #
 #   scootbar daemon --config docs/examples/radial-burst/bar.toml
 #
@@ -11,9 +11,9 @@
 # font = "/path/to/DejaVuSans.ttf"
 # fallback-fonts = ["/path/to/SymbolsNerdFont-Regular.ttf"]
 
-left = ["workspaces"]
+left = ["workspaces", "window-title"]
 center = ["clock"]
-right = ["network", "battery", "power"]
+right = ["network", "volume", "brightness", "bluetooth", "battery", "power"]
 
 [bar]
 height = 40
@@ -40,6 +40,11 @@ item-gap = 4         # spaces between the numbers
 format = "%-I:%M %P"
 icon = "\U000F0150"
 
+[window-title]
+icon = "\U000F08C6"            # application
+show-app-id = false            # the title alone reads cleaner than "title - app"
+max-width = 320                # the title yields to the clock past this
+
 [network]
 icon-wifi = ["\U000F091F", "\U000F0922", "\U000F0925", "\U000F0928"]   # weakest to strongest signal
 icon-ethernet = "\U000F0200"
@@ -49,6 +54,14 @@ show-text = false    # the icon alone; the SSID and signal stay in the tooltip
 icon = ["\U000F008E", "\U000F007B", "\U000F007E", "\U000F0081", "\U000F0079"]   # empty to full
 icon-charging = "\U000F0084"
 icon-full = "\U000F0079"
+
+[brightness]
+icon = ["\U000F00DD", "\U000F00DE", "\U000F00DF", "\U000F00E0"]   # dim to bright
+
+[bluetooth]
+icon-off = "\U000F00B2"
+icon-on = "\U000F00AF"
+icon-connected = "\U000F00B1"
 
 [power]
 icon = "\U000F0425"

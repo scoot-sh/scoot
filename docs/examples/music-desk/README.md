@@ -4,12 +4,12 @@ A light, paper-white look built around one wallpaper: musical instruments on a
 white surface. It is an **opt-in example**, not a default: nothing in scoot,
 scootbar or scootbg changes unless you use these files.
 
-![scoot with the music desk look: an edge-to-edge translucent bar with circled workspaces over three translucent terminal columns (fastfetch, Helix on scoot's source, btop over lazygit), the wallpaper showing through](../../assets/music-desk-preview.png)
+![scoot with the music desk look: an edge-to-edge translucent bar with circled workspaces and the focused window's title over three translucent terminal columns (fastfetch, Helix on scoot's source, btop over lazygit), the wallpaper showing through](../../assets/music-desk-preview.png)
 
 | File | For |
 | --- | --- |
 | [`scoot.toml`](scoot.toml) | the compositor: background, ring colors and widths, rounded corners, gaps, the wallpaper |
-| [`bar.toml`](bar.toml) | scootbar: an edge-to-edge translucent bar, workspaces as discs, the clock, system modules, two command-fed modules, launcher buttons and the power menu |
+| [`bar.toml`](bar.toml) | scootbar: an edge-to-edge translucent bar, workspaces as discs with the focused window's title, the clock, system modules, two command-fed modules, launcher buttons and the power menu |
 | [`foot.ini`](foot.ini) | foot: the palette, 80% opacity, padding and font size |
 | [`starship.toml`](starship.toml) | starship: the prompt in the wallpaper's palette |
 | [`helix/config.toml`](helix/config.toml) | Helix: relative line numbers, cursor line, the theme below |
