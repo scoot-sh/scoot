@@ -89,6 +89,17 @@ pub(super) struct ButtonFile {
 #[serde(deny_unknown_fields, default)]
 pub(super) struct PushFile {
     placeholder: Option<String>,
+    icon: Option<String>,
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// Without the `icon-image` feature the key is still taken, so the
+    /// refusal says what is missing.
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    #[serde(rename = "show-text")]
+    show_text: Option<bool>,
     margin: Option<u32>,
     #[serde(rename = "on-click")]
     on_click: Option<toml::Value>,
@@ -110,6 +121,17 @@ pub(super) struct ExecFile {
     command: Option<toml::Value>,
     format: Option<String>,
     placeholder: Option<String>,
+    icon: Option<String>,
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// Without the `icon-image` feature the key is still taken, so the
+    /// refusal says what is missing.
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    #[serde(rename = "show-text")]
+    show_text: Option<bool>,
     margin: Option<u32>,
     #[serde(rename = "on-click")]
     on_click: Option<toml::Value>,
@@ -201,8 +223,11 @@ pub(super) fn read(path: &Path, tables: &Tables<'_>) -> Result<Defined, Error> {
     if let Some(pushes) = tables.push {
         for (name, table) in pushes {
             let id = claim(path, &defined, "push", name)?;
+            let icon = push_icon(path, name, table)?;
             let settings = crate::modules::push::Settings {
                 placeholder: table.placeholder.clone().unwrap_or_default(),
+                icon,
+                show_text: table.show_text.unwrap_or(true),
             };
             defined.modules.push(Custom {
                 id,
@@ -245,6 +270,8 @@ pub(super) fn read(path: &Path, tables: &Tables<'_>) -> Result<Defined, Error> {
                 format,
                 placeholder: table.placeholder.clone().unwrap_or_default(),
                 restart: crate::modules::exec::Restart::default(),
+                icon: exec_icon(path, name, table)?,
+                show_text: table.show_text.unwrap_or(true),
             };
             defined.modules.push(Custom {
                 id,
@@ -354,6 +381,46 @@ fn icon(path: &Path, name: &str, table: &ButtonFile) -> Result<Option<crate::ico
     super::icon::read(
         &format!("button.{name}"),
         "a button",
+        &super::icon::Keys {
+            icon: table.icon.as_deref(),
+            icon_path: table.icon_path.as_deref(),
+            icon_viewbox: table.icon_viewbox.as_deref(),
+            icon_image: table.icon_image.as_deref(),
+        },
+    )
+    .map_err(|(key, message)| at(path, key, message))
+}
+
+/// A push module's icon from the same four keys under its own name.
+#[cfg(feature = "push")]
+fn push_icon(
+    path: &Path,
+    name: &str,
+    table: &PushFile,
+) -> Result<Option<crate::icon::Icon>, Error> {
+    super::icon::read(
+        &format!("push.{name}"),
+        "a push",
+        &super::icon::Keys {
+            icon: table.icon.as_deref(),
+            icon_path: table.icon_path.as_deref(),
+            icon_viewbox: table.icon_viewbox.as_deref(),
+            icon_image: table.icon_image.as_deref(),
+        },
+    )
+    .map_err(|(key, message)| at(path, key, message))
+}
+
+/// An exec module's icon from the same four keys under its own name.
+#[cfg(feature = "exec")]
+fn exec_icon(
+    path: &Path,
+    name: &str,
+    table: &ExecFile,
+) -> Result<Option<crate::icon::Icon>, Error> {
+    super::icon::read(
+        &format!("exec.{name}"),
+        "an exec",
         &super::icon::Keys {
             icon: table.icon.as_deref(),
             icon_path: table.icon_path.as_deref(),

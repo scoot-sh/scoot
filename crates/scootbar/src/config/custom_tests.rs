@@ -234,6 +234,73 @@ fn a_button_icon_follows_the_clocks_rules_under_its_own_key() {
 }
 
 #[test]
+fn push_and_exec_icons_follow_the_clocks_rules_under_their_own_keys() {
+    for kind in ["push", "exec"] {
+        let table = if kind == "push" {
+            "[push.p]\n".to_owned()
+        } else {
+            "[exec.e]\ncommand = [\"true\"]\n".to_owned()
+        };
+        // One glyph is read.
+        let config = read(&format!("{table}icon = \"x\"\n")).unwrap();
+        let (push_icon, exec_icon) = match &config.modules.custom[0].kind {
+            Kind::Push(push) => (push.icon.clone(), None),
+            Kind::Exec(exec) => (None, exec.icon.clone()),
+            _ => panic!(),
+        };
+        assert!(
+            push_icon.or(exec_icon).is_some(),
+            "{kind}: the icon is read"
+        );
+        // Two are refused naming the second, as the clock's.
+        let error = err(&format!("{table}icon = \"x\"\nicon-path = \"M0 0\"\n"));
+        assert!(
+            error.contains(&format!("{kind}.")) && error.contains("shows one icon"),
+            "{kind}: {error}"
+        );
+        // A viewbox without a path is refused under its own key.
+        let error = err(&format!("{table}icon-viewbox = \"0 0 1 1\"\n"));
+        assert!(error.contains(&format!("{kind}.")), "{kind}: {error}");
+        // Two characters are refused under the icon's own key.
+        let error = err(&format!("{table}icon = \"ab\"\n"));
+        assert!(
+            error.contains(&format!("{kind}.")) && error.contains("one character"),
+            "{kind}: {error}"
+        );
+        #[cfg(not(feature = "icon-image"))]
+        {
+            let error = err(&format!("{table}icon-image = \"/x.png\"\n"));
+            assert!(
+                error.contains(&format!("{kind}.")) && error.contains("`icon-image` Cargo feature"),
+                "{kind}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn push_and_exec_show_text_defaults_to_shown() {
+    let config = read("[push.p]\n[exec.e]\ncommand = [\"true\"]\n").unwrap();
+    for custom in &config.modules.custom {
+        match &custom.kind {
+            Kind::Push(push) => assert!(push.show_text, "push defaults to shown"),
+            Kind::Exec(exec) => assert!(exec.show_text, "exec defaults to shown"),
+            _ => panic!(),
+        }
+    }
+    let config =
+        read("[push.p]\nshow-text = false\n[exec.e]\ncommand = [\"true\"]\nshow-text = false\n")
+            .unwrap();
+    for custom in &config.modules.custom {
+        match &custom.kind {
+            Kind::Push(push) => assert!(!push.show_text),
+            Kind::Exec(exec) => assert!(!exec.show_text),
+            _ => panic!(),
+        }
+    }
+}
+
+#[test]
 fn only_so_many_modules_are_defined_and_only_so_many_execs_placed() {
     // 33 tables, one over.
     let mut text = String::new();

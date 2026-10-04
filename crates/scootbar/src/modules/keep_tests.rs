@@ -53,6 +53,8 @@ fn settings(script: &str) -> Settings {
         format: Format::Text,
         placeholder: "ph".into(),
         restart: FAST,
+        icon: None,
+        show_text: true,
     }
 }
 
@@ -198,6 +200,18 @@ fn an_exec_keeps_its_own_unchanged_table_and_nothing_else() {
         !running.keeps(&table(id, &changed)),
         "a changed restart key starts over"
     );
+    let mut changed = settings.clone();
+    changed.icon = Some(crate::icon::Icon::Glyph('x'));
+    assert!(
+        !running.keeps(&table(id, &changed)),
+        "a changed icon starts over"
+    );
+    let mut changed = settings.clone();
+    changed.show_text = false;
+    assert!(
+        !running.keeps(&table(id, &changed)),
+        "a changed show-text starts over"
+    );
     #[cfg(feature = "button")]
     assert!(
         !running.keeps(&Custom {
@@ -212,6 +226,8 @@ fn an_exec_keeps_its_own_unchanged_table_and_nothing_else() {
             id,
             kind: Kind::Push(super::push::Settings {
                 placeholder: "p".into(),
+                icon: None,
+                show_text: true,
             }),
         }),
         "another kind starts over"
@@ -251,6 +267,8 @@ fn a_button_starts_fresh() {
 fn a_push_starts_fresh() {
     let push = super::push::start(&super::push::Settings {
         placeholder: "p".into(),
+        icon: None,
+        show_text: true,
     });
     let id = intern("keep-push").unwrap();
     assert!(!push.keeps(&table(id, &settings("true"))));

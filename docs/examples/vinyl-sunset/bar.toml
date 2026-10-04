@@ -57,9 +57,11 @@ icon = "\U000F0150"
 
 [exec.load]
 command = ["load.sh"]
+icon = "\U000F061A"   # the load glyph, drawn before the value
 
 [exec.cpu]
 command = ["cpu.sh"]
+icon = "\U000F0EE0"   # the CPU glyph, drawn before the value
 
 [network]
 icon-wifi = ["\U000F091F", "\U000F0922", "\U000F0925", "\U000F0928"]   # weakest to strongest signal

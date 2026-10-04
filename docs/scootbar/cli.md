@@ -174,8 +174,10 @@ icon = "\U000f0e65"
 on-click = { exec = ["scootlaunch"] }
 [exec.weather]
 command = ["sh", "-c", "while :; do curl -s 'wttr.in?format=1'; sleep 600; done"]
+icon = "\U000f0e65"     # one glyph before the text, from a symbol font: see Icons
 [push.status]
 placeholder = "..."
+icon = "\U000f0e65"     # as the exec's
 
 [output."eDP-1"]      # what differs on one output: see Outputs below
 height = 36
@@ -238,7 +240,7 @@ scootbar msg show                   # make them again
 scootbar msg toggle                 # hide if shown, show if hidden
 scootbar msg version                # the daemon's version and protocol, as JSON
 scootbar msg kill                   # stop the daemon, once its reply is sent
-scootbar msg set ID JSON            # write a push module's text, class and tooltip (below)
+scootbar msg set ID JSON            # write a push module's text, class, tooltip and icon (below)
 ```
 
 `query` prints one JSON object: one entry per placed module per output
@@ -1658,6 +1660,14 @@ that is refused (too long, not JSON, a class that does not exist, a
 answered by name. Several `set`s that arrive in one turn of the loop are
 drawn once; one that changes nothing is not drawn.
 
+A static `icon` (one glyph, or `icon-path` with `icon-viewbox`, or
+`icon-image`, at most one, as the [clock's](#icons)) stands before the
+text, and `show-text = false` draws only the icon
+(see [Per-state and per-level icons](#per-state-and-per-level-icons)).
+An update's own `icon` is drawn instead of the static one while set, so a
+script can change it per update (a VPN that drops); with neither the
+module shows text alone, as before.
+
 ### `exec`
 
 Runs a command and shows what it prints, one line per update. **It streams,
@@ -1673,6 +1683,13 @@ minute, so write the loop yourself when you want a different rhythm. `command` i
 run through a shell** (write `["sh", "-c", "..."]` to use one), at most 32
 arguments of at most 4096 bytes. `format` says how a line is read: `text`
 (the line is the text, the default) or `json` (one object per line, below).
+A static `icon` (one glyph, or `icon-path` with `icon-viewbox`, or
+`icon-image`, at most one, as the [clock's](#icons)) stands before the
+text, and `show-text = false` draws only the icon
+(see [Per-state and per-level icons](#per-state-and-per-level-icons)).
+A JSON line's own `icon` is drawn instead of the static one while set; a
+text line carries none, so it shows the static one. With neither the
+module shows text alone, as before.
 
 - **What is shown** is the last line of what the bar read at once (an
   update is a state, so earlier ones in the same read are already stale).
@@ -1738,15 +1755,19 @@ own and **deliberately not Waybar's** (no `alt`, no `percentage`, no class
 lists, nothing to translate), version 1:
 
 ```json
-{"version": 1, "text": "72%", "class": "warn", "tooltip": "battery low"}
+{"version": 1, "text": "72%", "class": "warn", "tooltip": "battery low", "icon": "󰂁"}
 ```
 
 Every key is optional. `text` and `tooltip` are strings, `class` is one of
 `normal`, `warn`, `urgent` or `muted` (colored by the theme's tokens: the
-`urgent` and `dim` colors and so on), `version` is the shape this was
+`urgent` and `dim` colors and so on), `icon` is exactly one character (a
+glyph from a symbol font, as a static `icon` key takes), drawn before the
+text instead of the module's static icon while set, `version` is the shape this was
 written for; a `version` above 1 is refused by name rather than half
 understood, and keys it does not know are ignored, so later versions can add
-some. Text and tooltip are cut at 256 bytes on a character boundary, and
+some. An older bar, whose version 1 speaks no `icon`, reads an update
+carrying one as if it were not there: the key is unknown to it, so it is
+ignored and the text shows as before. Text and tooltip are cut at 256 bytes on a character boundary, and
 every control character (a tab, a carriage return, an escape) becomes a
 space, so nothing but printable text reaches the bar. A line or value
 past 4096 bytes, or JSON nested more than 8 deep, is refused. The tooltip is
@@ -1850,7 +1871,8 @@ bar's memory, as for any font not on a read-only mount; see
 An icon is drawn before a module's text, `em` device pixels on a side (the size
 of the text, at the output's real scale, so it is sharp at 1.5x and never a
 smaller bitmap stretched), with a space after it when text follows. Three keys
-give one, at most one of them per module; the clock, `button`, volume,
+give one, at most one of them per module; the clock, `button`, `push`,
+`exec`, volume,
 microphone, network, battery, brightness, bluetooth, media, window-title
 and power modules take them, and most of those take one glyph per state
 or level besides ([below](#per-state-and-per-level-icons)). The workspaces
@@ -1915,12 +1937,15 @@ vector or PNG icons are out of scope.
 | `media` | `icon-playing`, `icon-paused` | the state (a stopped player shows nothing, so there is no third key) |
 | `window-title` | `icon` | one static glyph, whenever a window is focused (never for the placeholder) |
 | `power` | `icon`, plus `icon-lock`, `icon-logout`, `icon-suspend`, `icon-reboot`, `icon-poweroff` | one glyph per menu row, drawn before its label; a row with none shows its label alone |
+| `push` | `icon` | one static glyph, drawn before the text; an update's own `icon` wins for its own update |
+| `exec` | `icon` | one static glyph, drawn before the text; a JSON line's own `icon` wins for its own line (a text line carries none) |
 
 `show-text = false` draws only the icon, with the text moved into the
 tooltip — which already names what the text said on every one of these
 modules (the battery's `Discharging 72%`, the brightness's device, the
 bluetooth state and device list, the media line, the full window title, the
-network's SSID and signal) — so an icon can stand alone where the text is
+network's SSID and signal, and whatever tooltip a `push` update or an
+`exec` line named, or the text itself where it named none) — so an icon can stand alone where the text is
 just a value: brightness and bluetooth especially. Without any icon the
 module shows text alone, as before.
 

@@ -26,23 +26,44 @@ use serde_json::Value;
 
 use super::payload::{self, Shown};
 use super::{Module, OutputView, SetError, Sources, Update, View};
+use crate::icon::Icon;
 
 #[cfg(test)]
 mod tests;
 
 /// A push module's options.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// Shown until the first `set` (sanitized and bounded as any text).
     pub placeholder: String,
+    /// One static glyph (or path or picture) from the icon keys, drawn
+    /// before the text. An update's own `icon` is drawn instead of it
+    /// while set.
+    pub icon: Option<Icon>,
+    /// Whether the text is drawn beside the icon. `false` draws only the
+    /// icon, with the text moved into the tooltip where the update named
+    /// none.
+    pub show_text: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            placeholder: String::new(),
+            icon: None,
+            show_text: true,
+        }
+    }
 }
 
 pub struct Push {
+    settings: Settings,
     shown: Shown,
 }
 
 pub fn start(settings: &Settings) -> Box<dyn Module> {
     Box::new(Push {
+        settings: settings.clone(),
         shown: Shown::text(&settings.placeholder),
     })
 }
@@ -61,7 +82,8 @@ impl Module for Push {
     }
 
     fn view(&self, _: &OutputView<'_>, view: &mut View) {
-        self.shown.write(view);
+        self.shown
+            .write_with(view, self.settings.show_text, self.settings.icon.as_ref());
     }
 
     fn on_set(&mut self, value: &Value) -> Result<Update, SetError> {
