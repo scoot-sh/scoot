@@ -323,6 +323,7 @@ programs.scoot = {
 | `wallpaper.enable` | `settings ? wallpaper` | Install `wallpaper.package` and set `settings.wallpaper.command` to its store path (a `command` you set yourself wins). On whenever `settings` has a `wallpaper` table; `false` leaves both alone, so `[wallpaper]` runs `scootbg` from `PATH`. See [The wallpaper](#the-wallpaper-scootbg). |
 | `wallpaper.package` | flake's own `scootbg` (Linux), `null` (macOS) | The scootbg to install. `null` installs nothing and sets no `command`. |
 | `stylix.enable` | `true` | Whether to take defaults from Stylix when it is in use (below). |
+| `stylix.wallpaper.enable` | `true` | Whether to take the `[wallpaper]` `image`/`mode` defaults from Stylix (below). Set to `false` to choose your own wallpaper color. |
 
 The example above renders byte-for-byte to:
 
@@ -388,8 +389,10 @@ One combination Stylix can produce is invalid: a `wallpaper.color` you set
 yourself plus Stylix's `image`. scoot takes `image` or `color`, never both,
 so it refuses that section — fail-safe (the session carries on with
 `background_color`, the error in the log naming it), but your wallpaper is
-the background color until you resolve it: set your own `image`, or turn
-`programs.scoot.stylix.enable` off, for a solid color under Stylix.
+the background color until you resolve it: for a solid color under Stylix,
+set `programs.scoot.stylix.wallpaper.enable = false` (the themed ring,
+background and cursor stay), or set your own `image` (it wins over
+Stylix's), or turn `programs.scoot.stylix.enable` off.
 `cursor_color` has no Stylix convention (Stylix's cursor is name, size and
 package only), so theming leaves it at the compositor's default.
 

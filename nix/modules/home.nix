@@ -133,18 +133,42 @@ in
     # the `stylix` detection above); every value below is `lib.mkDefault`
     # at its own leaf, so a value the user wrote in `settings` wins.
     # Nothing here needs Stylix, and nothing changes without it.
-    stylix.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = ''
-        Take defaults from Stylix when it is in use (`config.lib.stylix`
-        exists and `stylix.enable` is on): the `[appearance]` ring and
-        background colors from its base16 palette, `cursor_theme` and
-        `cursor_size` from `stylix.cursor`, and `[wallpaper]` `image` and
-        `mode` from `stylix.image` and `stylix.imageScalingMode`. A value
-        you set in `settings` always wins; this only turns the defaults
-        off. Nothing here needs Stylix, and nothing changes without it.
-      '';
+    stylix = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Take defaults from Stylix when it is in use (`config.lib.stylix`
+          exists and `stylix.enable` is on): the `[appearance]` ring and
+          background colors from its base16 palette, `cursor_theme` and
+          `cursor_size` from `stylix.cursor`, and `[wallpaper]` `image` and
+          `mode` from `stylix.image` and `stylix.imageScalingMode` (the
+          wallpaper pair further gated by `wallpaper.enable` below). A value
+          you set in `settings` always wins; this only turns the defaults
+          off. Nothing here needs Stylix, and nothing changes without it.
+        '';
+      };
+
+      # Just the Stylix wallpaper defaults, so a solid-color background
+      # stays reachable under Stylix: set this to `false` to choose your
+      # own wallpaper color (`settings.wallpaper.color`) without Stylix's
+      # `image` beside it (the two together are refused by scoot). The
+      # themed `[appearance]` and cursor defaults stay. An explicit
+      # switch, read here rather than the merged `settings.wallpaper`,
+      # is what keeps the evaluation acyclic (see the `wallpaper` block
+      # below).
+      wallpaper.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Take the `[wallpaper]` `image` and `mode` defaults from Stylix
+          (`stylix.image` and `stylix.imageScalingMode`) when theming is
+          on. Set to `false` to choose your own wallpaper color instead:
+          the Stylix `image` and `mode` are then not defaulted, so a
+          `color` you set stands alone. The `[appearance]` and cursor
+          defaults are unaffected.
+        '';
+      };
     };
 
     # Where the rendered TOML lands, relative to $XDG_CONFIG_HOME
@@ -324,19 +348,22 @@ in
           cursor_size = lib.mkDefault config.stylix.cursor.size;
         };
       }
-      // lib.optionalAttrs (config.stylix.image != null) {
+      // lib.optionalAttrs (cfg.stylix.wallpaper.enable && config.stylix.image != null) {
         # Gated on `image`: a `mode` without one is meaningless, and an
         # unconditional table would turn `wallpaper.enable` (which
         # follows `settings ? wallpaper`) on for every Stylix user,
         # installing scootbg where no wallpaper was asked for. The five
         # `imageScalingMode` values are exactly scootbg's five `mode`
         # values (`fill | fit | stretch | center | tile`), so the mode
-        # maps one to one. A `color` the user sets themselves does NOT
-        # suppress this: `image` and `color` together are refused by
-        # scoot (fail-safe, the session carries on with
-        # `background_color`, the error in the log naming it) -- set
-        # your own `image`, or turn `stylix.enable` off, for a solid
-        # color under Stylix.
+        # maps one to one. Gated also on
+        # `programs.scoot.stylix.wallpaper.enable` (on by default): set
+        # it to `false` to choose your own wallpaper `color` -- a `color`
+        # beside Stylix's `image` is refused by scoot (fail-safe, the
+        # session carries on with `background_color`, the error in the
+        # log naming it). The condition reads this explicit switch, not
+        # the merged `settings.wallpaper` this block defines, which is
+        # what keeps the evaluation acyclic (a home-manager assertion on
+        # the merged section would cycle the same way).
         wallpaper = {
           image = lib.mkDefault (toString config.stylix.image);
           mode = lib.mkDefault config.stylix.imageScalingMode;

@@ -64,6 +64,9 @@
 #   (`stylix.enable`, `programs.scoot.stylix.enable`) is as if Stylix
 #   were absent; with no `cursor` no cursor keys appear, with no `image`
 #   no `[wallpaper]` table is added (so no scootbg is installed for it);
+#   `programs.scoot.stylix.wallpaper.enable = false` turns off just the
+#   wallpaper pair (a user `color` then stands alone: the trap resolved),
+#   keeping the appearance and cursor defaults;
 #   the cursor package is never installed (Stylix's own cursor target
 #   owns that); and the module evaluates with no Stylix option defined
 #   at all (every pre-existing evaluation below does exactly that).
@@ -491,6 +494,22 @@ let
   hmStylixNoImage = evalHomeStylix { image = null; } {
     enable = true;
     wallpaper.package = fakeBg;
+  };
+  # The wallpaper defaults off (`stylix.wallpaper.enable = false`): no
+  # `[wallpaper]` table added even with an image set (and so no scootbg),
+  # while appearance and cursor stay Stylix's.
+  hmStylixWallpaperOff = evalHomeStylix { } {
+    enable = true;
+    wallpaper.package = fakeBg;
+    stylix.wallpaper.enable = false;
+  };
+  # The trap resolved: a user color with Stylix's image set, wallpaper
+  # defaults off -- just the color, no image beside it.
+  hmStylixColor = evalHomeStylix { } {
+    enable = true;
+    wallpaper.package = fakeBg;
+    stylix.wallpaper.enable = false;
+    settings.wallpaper.color = "#101014";
   };
 
   # --- the flake's wrappers, overlay and Darwin (only from flake.nix) ---
@@ -1258,6 +1277,39 @@ let
         ];
       true
     )
+    # `stylix.wallpaper.enable = false` turns off just the wallpaper
+    # defaults: no `[wallpaper]` table added even with an image set, so
+    # no scootbg is installed for it...
+    (
+      assert !(hmStylixWallpaperOff.config.programs.scoot.settings ? wallpaper);
+      true
+    )
+    (
+      assert !hmStylixWallpaperOff.config.programs.scoot.wallpaper.enable;
+      true
+    )
+    (
+      assert hmStylixWallpaperOff.config.home.packages == [ ];
+      true
+    )
+    # ...while the appearance and cursor defaults stay Stylix's.
+    (
+      assert
+        hmStylixWallpaperOff.config.programs.scoot.settings.appearance
+        == hmStylix.config.programs.scoot.settings.appearance;
+      true
+    )
+    # The trap resolved: a user color with Stylix's image set and the
+    # wallpaper defaults off is just the color (the injected scootbg
+    # `command` joins it at render, as for any `[wallpaper]` table).
+    (
+      assert hmStylixColor.config.programs.scoot.settings.wallpaper == { color = "#101014"; };
+      true
+    )
+    (
+      assert hmStylixColor.config.programs.scoot.wallpaper.enable;
+      true
+    )
 
     # The representable-but-wrong scoot type (a string for `gap`)
     # type-checks: the refusal happens at session start, fail-safe
@@ -1486,6 +1538,7 @@ let
   hmNoWallToml = hmNoWall.config.xdg.configFile."scoot/config.toml".source;
   hmWallNotTableToml = hmWallNotTable.config.xdg.configFile."scoot/config.toml".source;
   hmStylixToml = hmStylix.config.xdg.configFile."scoot/config.toml".source;
+  hmStylixColorToml = hmStylixColor.config.xdg.configFile."scoot/config.toml".source;
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -1775,6 +1828,17 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ python3 ]; } ''
   assert got == want, f"{got} != {want}"
   ' ${hmStylixToml} '${fakeBg}/bin/scootbg' '${styImage}'
   echo "ok: Stylix defaults render (appearance, cursor, wallpaper + command)"
+
+  # 9b. Stylix wallpaper defaults off with a user color: just the color
+  #    (and the injected `command`), no Stylix image beside it -- while
+  #    the themed appearance renders as before.
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["wallpaper"] == {"color": "#101014", "command": sys.argv[2]}, got["wallpaper"]
+  assert got["appearance"]["background_color"] == "#101010", got["appearance"]
+  ' ${hmStylixColorToml} '${fakeBg}/bin/scootbg'
+  echo "ok: stylix.wallpaper.enable = false leaves a user color alone"
 
   touch $out
   echo "scoot-modules: all file-content checks passed"
