@@ -69,8 +69,11 @@ GPU-free default), `scoot-gpu-xwayland` (the full build: `gpu-scanout` and
 `xwayland` features plus Xwayland on `PATH`), `scootctl`, `scootbg`,
 `scootbar` and `scootbar-demo`. Without the cache, installing from the
 flake compiles Smithay from scratch (about 5 minutes on 4 cores). Only
-merges to `main` push: manual workflow runs build without publishing,
-and pull-request code never reaches a cache users trust.
+merges to `main` push: manual workflow runs build without publishing --
+their Cachix step carries no auth token at all (only the push-to-`main`
+step receives `CACHIX_AUTH_TOKEN`), so a manual run cannot publish even
+if its build were tampered with -- and pull-request code never reaches a
+cache users trust.
 
 Anything else builds locally from source: a `scootbar.override` feature
 set, or the in-between compositor variants `scoot-gpu` and

@@ -19,13 +19,41 @@
 # is fixed forward like any other main-red. (Nightly was the other option;
 # it leaves main red for up to a day, which is strictly worse.)
 #
-# CACHIX, PUSHED FROM MAIN ONLY: the `cachix/cachix-action` step below
-# pulls from the public `scoot-sh` cache on every run and pushes what the
-# run built -- but only when the run is a `push` to `main` (`skipPush`
-# otherwise). Unreviewed code must not reach a cache users trust, so
-# manual `workflow_dispatch` runs only pull: they verify the build without
-# publishing it. (PRs never reach this workflow at all -- it triggers on
-# `push` to `main` and manual dispatch only.)
+# CACHIX, PUSHED FROM MAIN ONLY: two `cachix/cachix-action` steps below
+# share one cache name. The authenticated step runs only on a `push` to
+# `main` (`if: github.event_name == 'push' && github.ref ==
+# 'refs/heads/main'`) and carries `authToken: ${{
+# secrets.CACHIX_AUTH_TOKEN }}`; every other run (manual
+# `workflow_dispatch` -- the only other trigger) takes the pull-only step,
+# which passes no `authToken` and references no secret at all, so a
+# dispatch run never receives the token. A step without `authToken` (and
+# without `signingKey`) only runs `cachix use <name>`: it configures the
+# substituter and cannot push (checked against the action's source at the
+# pinned SHA -- `setup()` runs `cachix authtoken` only `if (authToken !==
+# "")`, and with neither token `pushMode` stays `None`). There is no
+# `skipPush` anymore: the `if:` gates are the whole push/pull decision.
+# Unreviewed code must not reach a cache users trust, so dispatches verify
+# the build without publishing it. (PRs never reach this workflow at all
+# -- it triggers on `push` to `main` and manual dispatch only.)
+#
+# RESIDUAL: the gates close the build-code hole, not a malicious-workflow
+# one -- a writer can push a branch with this file itself edited (an `if:`
+# removed) and dispatch that. That is GitHub's standard writer-trust
+# boundary (cf. the action README's "Security" section): only writers can
+# dispatch, and a writer can already push to `main` directly. If the
+# maintainer ever wants that closed too, the option is a protected
+# environment with required reviewers on the push path (not added here),
+# or dropping `workflow_dispatch` entirely.
+#
+# PINS: the two publishing actions here (`cachix-action`, `flakehub-push`)
+# are pinned by commit SHA (tag kept in a trailing comment), harder than
+# the rest of CI's tag pins: this workflow mints the artifacts users trust
+# (cache pushes) and publishes the flake (OIDC), so a tag-move on either
+# action would run attacker code holding a push credential. Each SHA was
+# resolved from its tag via the GitHub API (`gh api
+# repos/<owner>/<repo>/git/ref/tags/<tag>`): cachix-action v17 =
+# 38b082610b782e7e93e209c35fd730d399dee866, flakehub-push v7 =
+# e001ee821cdb763ef120c01f1048bfb2f938bb9c.
 #
 # The `--version` lines turn "it compiled" into "the artifact runs": each
 # prints without starting a session, so they need no seat, no socket and no
@@ -113,15 +141,22 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@v23
 
       # Pull from the public cache on every run; push what was built only
-      # on a push to main (never on manual dispatches: unreviewed code
-      # must not reach a cache users trust). Auth is the org secret
-      # CACHIX_AUTH_TOKEN, scoped to this repo; signing is Cachix-managed,
-      # so the project holds no private key.
-      - uses: cachix/cachix-action@v17
+      # on a push to main. The authenticated step below runs on pushes to
+      # main only and is the sole step that receives the token; manual
+      # dispatches take the pull-only step after it, which carries no
+      # `authToken` and references no secret, so a dispatch run never
+      # receives the token. Auth is the org secret CACHIX_AUTH_TOKEN,
+      # scoped to this repo; signing is Cachix-managed, so the project
+      # holds no private key.
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           name: scoot-sh
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          skipPush: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+        with:
+          name: scoot-sh
 
       - name: nix build .#scoot .#scoot-gpu-xwayland .#scootctl .#scootbg, and run the packaged binaries
         run: |
@@ -181,7 +216,7 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@v23
 
-      - uses: DeterminateSystems/flakehub-push@v7
+      - uses: DeterminateSystems/flakehub-push@e001ee821cdb763ef120c01f1048bfb2f938bb9c # v7
         with:
           # `scoot-sh/scoot` is the default: `{org}/{repo}` of this repo.
           visibility: public
