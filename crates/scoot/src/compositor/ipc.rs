@@ -401,6 +401,7 @@ impl State {
                         | scoot_ipc::Action::FocusWindowId { .. }
                         | scoot_ipc::Action::FocusWorkspace { .. }
                         | scoot_ipc::Action::FocusWorkspaceIndex { .. }
+                        | scoot_ipc::Action::FocusOutputWorkspaceIndex { .. }
                         | scoot_ipc::Action::FocusOutput { .. }
                         | scoot_ipc::Action::FocusOutputIndex { .. }
                         | scoot_ipc::Action::FocusOutputDirection { .. }
@@ -701,6 +702,13 @@ impl State {
     ///   off the focused output rather than the primary one
     ///   `ext_workspace.rs` reads because that is the list the core's own
     ///   `reshape` resolves the index against.
+    /// - `FocusOutputWorkspaceIndex`: the focused output already is that id
+    ///   *and* that output's active workspace already is that index. Either
+    ///   half failing means the core would move something -- a switch, a
+    ///   focus move, or both -- so it stays on the full path, like the
+    ///   out-of-range index above. An unknown id and a stale index both
+    ///   land here, and both keep whatever handling `act` gives them today
+    ///   (which is nothing -- the core ignores both).
     /// - `FocusWorkspace`: the step clamps -- up from the first workspace,
     ///   or down from the last. The same lookup as the index case; the core
     ///   then only re-sets the index it already has and re-normalises an
@@ -742,6 +750,22 @@ impl State {
                 .focused_output()
                 .and_then(|output| self.world.workspaces(output))
                 .is_some_and(|workspaces| workspaces.active == *index),
+            // `FocusOutputWorkspaceIndex`: the focused output already is
+            // that id, and that output's active workspace already is that
+            // index -- both halves, since the core moves focus even onto
+            // the already-active workspace of another output. Read the
+            // index off the named output's list rather than the focused
+            // one's, because that is the list the core resolves it
+            // against; an unknown id matches nothing either way.
+            scoot_ipc::Action::FocusOutputWorkspaceIndex { output, index } => {
+                self.world
+                    .focused_output()
+                    .is_some_and(|focused| focused.0 == *output)
+                    && self
+                        .world
+                        .workspaces(scoot_core::OutputId(*output))
+                        .is_some_and(|workspaces| workspaces.active == *index)
+            }
             scoot_ipc::Action::FocusWorkspace { direction } => self
                 .world
                 .focused_output()

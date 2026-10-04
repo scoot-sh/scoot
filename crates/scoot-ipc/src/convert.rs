@@ -33,6 +33,12 @@ impl From<Action> for scoot_core::Action {
             Action::SetColumnWidth { index } => Self::SetColumnWidth(index),
             Action::FocusWorkspace { direction } => Self::FocusWorkspace(direction.into()),
             Action::FocusWorkspaceIndex { index } => Self::FocusWorkspaceIndex(index),
+            Action::FocusOutputWorkspaceIndex { output, index } => {
+                Self::FocusOutputWorkspaceIndex {
+                    output: scoot_core::OutputId(output),
+                    index,
+                }
+            }
             Action::MoveWindowToWorkspace { direction } => {
                 Self::MoveWindowToWorkspace(direction.into())
             }
@@ -109,6 +115,16 @@ mod tests {
         assert_eq!(
             scoot_core::Action::from(Action::FocusWorkspaceIndex { index: 2 }),
             scoot_core::Action::FocusWorkspaceIndex(2)
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::FocusOutputWorkspaceIndex {
+                output: 2,
+                index: 1
+            }),
+            scoot_core::Action::FocusOutputWorkspaceIndex {
+                output: scoot_core::OutputId(2),
+                index: 1
+            }
         );
         assert_eq!(
             scoot_core::Action::from(Action::MoveWindowToWorkspaceIndex { index: 3 }),

@@ -227,7 +227,8 @@ fn the_action_path_itself_is_closed_while_locked() {
 ///
 /// Output 1 is named deliberately: it is a *valid* output here, so an
 /// unchanged arrangement proves the refusal did it, not a same-output or
-/// unknown-output no-op. The response shape is the other discriminator: a
+/// unknown-output no-op. Index 0 is likewise the already-active workspace,
+/// for the same reason. The response shape is the other discriminator: a
 /// refusal is an `Error`, never an `Ok`.
 #[test]
 fn the_cross_output_actions_are_refused_while_locked() {
@@ -239,6 +240,10 @@ fn the_cross_output_actions_are_refused_while_locked() {
     for action in [
         scoot_ipc::Action::MoveFocusedWindowToOutput { output: 1 },
         scoot_ipc::Action::FocusOutput { output: 1 },
+        scoot_ipc::Action::FocusOutputWorkspaceIndex {
+            output: 1,
+            index: 0,
+        },
         scoot_ipc::Action::FocusOutputDirection {
             direction: scoot_ipc::Horizontal::Left,
         },
@@ -261,6 +266,12 @@ fn the_cross_output_actions_are_refused_while_locked() {
     fixture
         .state
         .act(scoot_core::Action::FocusOutput(scoot_core::OutputId(1)));
+    fixture
+        .state
+        .act(scoot_core::Action::FocusOutputWorkspaceIndex {
+            output: scoot_core::OutputId(1),
+            index: 0,
+        });
     fixture.state.act(scoot_core::Action::FocusOutputDirection(
         scoot_core::Horizontal::Left,
     ));

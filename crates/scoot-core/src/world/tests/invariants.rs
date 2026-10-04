@@ -216,6 +216,19 @@ fn random_action(
         // output steps nowhere).
         28 => Action::FocusOutputDirection(horizontal),
         29 => Action::MoveWindowToOutputDirection(horizontal),
+        // The output-targeted workspace switch: usually a live output and
+        // a plausible position, sometimes a stale id or a wild index off
+        // the same wire -- and the session must survive all of them (an
+        // unknown id or an out-of-range index does nothing, not even
+        // moving focus).
+        23 => Action::FocusOutputWorkspaceIndex {
+            output: random_output(rng, outputs),
+            index: match rng.below(8) {
+                0 => usize::MAX,
+                1 => usize::MAX / 2,
+                other => other,
+            },
+        },
         _ => Action::CloseFocused,
     }
 }

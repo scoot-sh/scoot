@@ -77,14 +77,12 @@
 //!
 //! What `activate` targets is the group its handle came from, not the
 //! focused output: the bounds and already-active checks run against that
-//! output's list. A real switch still goes through
-//! [`Action::FocusWorkspaceIndex`], which is focused-output-relative, so a
-//! switch pending on an output that is not the focused one is ignored rather
-//! than misrouted (see `commit_workspace_requests`). That branch is
-//! unreachable while windows only open on the first output -- every other
-//! output's list is permanently the single empty workspace -- and a later
-//! phase that moves windows across outputs is where it becomes reachable,
-//! alongside an output-targeted action to serve it.
+//! output's list, and a real switch goes through
+//! [`Action::FocusOutputWorkspaceIndex`], which names that output -- so a
+//! switch on one output never moves another's active workspace, and focus
+//! follows the switch to the output that was clicked (a bar click is an
+//! interaction with that monitor, the way a click on a window focuses its
+//! output).
 //!
 //! ## Batching
 //!
@@ -712,26 +710,6 @@ impl State {
             );
             return;
         }
-        // A real switch pending on an output that is not the focused one.
-        // Unreachable while windows only open on the first output (see
-        // `shell.rs`): every other output's list is permanently the single
-        // empty workspace, so a valid, non-active index cannot name one. The
-        // switch below goes through `FocusWorkspaceIndex`, which is
-        // focused-output-relative, so reaching it for another output would
-        // switch the wrong screen -- the harm this phase pins. Ignored
-        // rather than misrouted, loudly in debug builds.
-        if Some(output) != self.world.focused_output() && index != current.active {
-            debug_assert!(
-                false,
-                "workspace switch for a non-focused output has no output-targeted action yet"
-            );
-            tracing::debug!(
-                ?output,
-                index,
-                "ignoring an ext-workspace activate for a non-focused output"
-            );
-            return;
-        }
         // Mirrors `input.rs`'s `focus_under_pointer`, which clears this on the
         // line before its own `act(FocusWindowId)` -- and what
         // `wlr_toplevel_activate` and `request_activation` do for their own
@@ -746,23 +724,37 @@ impl State {
         // `act`'s gate remains as the backstop `shell.rs` describes it as.
         self.clicked_layer = None;
         // Not just an optimisation, and not a behaviour difference either:
-        // activating the already-active workspace is a no-op in the core
-        // (`focus_workspace_index` sets the index it already has and
-        // re-normalises an already-normalised tree). Doing it anyway would
-        // mean a client repeating `activate`+`commit` on the workspace it is
-        // already on could drive a full `apply` -- an arrange, a configure per
-        // window, a render -- as fast as it can write to its socket. So, like
-        // `wlr_toplevel_activate`'s already-focused fast path, this skips
-        // `act` and runs only the keyboard half -- now with `clicked_layer`
-        // already cleared, so it reaches the window rather than stopping at
-        // the taskbar. The same request over IPC (`FocusWorkspaceIndex`, PR
-        // #53) spends the click unconditionally, and this path agrees with it
-        // rather than differing by transport.
-        if index == current.active {
+        // activating the already-active workspace of the focused output is a
+        // no-op in the core (`focus_workspace_index` sets the index it
+        // already has and re-normalises an already-normalised tree). Doing
+        // it anyway would mean a client repeating `activate`+`commit` on the
+        // workspace it is already on could drive a full `apply` -- an
+        // arrange, a configure per window, a render -- as fast as it can
+        // write to its socket. So, like `wlr_toplevel_activate`'s
+        // already-focused fast path, this skips `act` and runs only the
+        // keyboard half -- now with `clicked_layer` already cleared, so it
+        // reaches the window rather than stopping at the taskbar. The same
+        // request over IPC (`FocusWorkspaceIndex`, PR #53) spends the click
+        // unconditionally, and this path agrees with it rather than
+        // differing by transport.
+        //
+        // The fast path is the already-there case only: the switch below
+        // goes through the output-targeted action, which names the output
+        // whose list the index counts within -- never the focused output's
+        // list, so this can neither switch nor disturb the wrong screen.
+        // Focus follows the switch (see
+        // `Action::FocusOutputWorkspaceIndex`): a bar click is an
+        // interaction with that monitor, the way a click on a window
+        // focuses its output -- which is why an `activate` for another
+        // output's already-active workspace still goes through `act`
+        // instead of landing here. An unknown output or a stale index is
+        // refused inside the core, which disturbs nothing -- not even
+        // focus.
+        if Some(output) == self.world.focused_output() && index == current.active {
             self.refresh_keyboard_focus();
             return;
         }
-        self.act(Action::FocusWorkspaceIndex(index));
+        self.act(Action::FocusOutputWorkspaceIndex { output, index });
     }
 
     /// A client bound a `wl_output`. If it is an output this compositor has

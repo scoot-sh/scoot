@@ -199,6 +199,35 @@ pub enum Action {
     /// stable id, and an index only means what it means against the same
     /// [`World::workspaces`](crate::World::workspaces) read it came from.
     FocusWorkspaceIndex(usize),
+    /// Activate one specific workspace of one specific output, by the
+    /// output's [`OutputId`](crate::OutputId) and the workspace's position
+    /// in that output's list -- and move keyboard focus to that output.
+    ///
+    /// Beside [`Action::FocusWorkspaceIndex`] rather than folding an
+    /// optional output into it: the two fail differently on an old shell.
+    /// A sibling tag is a loud refusal there (an unknown action the
+    /// protocol answers with an ordinary error), while an extra field on
+    /// the old tag would decode silently and switch the focused output's
+    /// workspace instead of the one named -- the wrong screen, with no
+    /// error. An id names one specific output for the whole session (ids
+    /// are never reused), so a replugged monitor comes back under a fresh
+    /// one; what names a position that survives a replug is
+    /// [`Action::FocusOutputIndex`] plus [`Action::FocusWorkspaceIndex`],
+    /// in that order.
+    ///
+    /// The same ignore rules as the two halves it joins: an id this core
+    /// doesn't know does nothing, and an index the output doesn't have
+    /// does nothing either -- a refused request disturbs nothing, not even
+    /// focus. On the already-focused output this is exactly
+    /// [`Action::FocusWorkspaceIndex`]. Otherwise focus follows the
+    /// switch, the way a click on a window focuses its output: a bar's
+    /// workspace button is an interaction with that monitor, so clicking
+    /// the already-active workspace of another output still moves focus
+    /// there.
+    FocusOutputWorkspaceIndex {
+        output: OutputId,
+        index: usize,
+    },
     MoveWindowToWorkspace(Vertical),
     /// Carry the focused window to one specific workspace of the focused
     /// output, by its position in [`World::workspaces`](crate::World::workspaces)'
