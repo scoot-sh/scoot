@@ -85,6 +85,27 @@ fn the_indexed_workspace_actions_travel_as_snake_case_with_an_index() {
 }
 
 #[test]
+fn the_targeted_workspace_switch_travels_as_snake_case_with_output_and_index() {
+    // The sibling tag, not an optional field on the focused-output one:
+    // the exact JSON shape a client sends, and the decode of that shape
+    // back into the same request. The old tag's shape is pinned unchanged
+    // by the indexed-workspace test above -- a client that never sends
+    // this tag speaks byte-for-byte what it did before.
+    let request = Request::Action(Action::FocusOutputWorkspaceIndex {
+        output: 2,
+        index: 1,
+    });
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "action", "action": "focus_output_workspace_index", "output": 2, "index": 1 })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+}
+
+#[test]
 fn set_column_width_travels_as_snake_case_with_an_index() {
     // Same pin as the indexed workspace actions above: the exact JSON shape
     // a client sends, and its decode back into the same request.

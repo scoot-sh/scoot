@@ -425,6 +425,31 @@ impl World {
         self.fix_view(o);
     }
 
+    /// Activates one specific workspace of one specific output, and moves
+    /// keyboard focus there -- the output-targeted half of
+    /// [`Action::FocusWorkspaceIndex`], with the same out-of-range rule (an
+    /// index the output doesn't have does nothing, and the target output's
+    /// list is what the index counts within).
+    ///
+    /// An unknown output does nothing at all -- not even moving focus --
+    /// so a stale id can never strand focus on an output that isn't there.
+    /// Otherwise focus always follows, even onto the already-active
+    /// workspace: a bar click is an interaction with that monitor, the way a
+    /// click on a window focuses its output. On the already-focused output
+    /// this ends where [`Output::focus_workspace_index`] does, which is what
+    /// makes it exactly [`Action::FocusWorkspaceIndex`] there.
+    fn focus_output_workspace_index(&mut self, target: OutputId, index: usize) {
+        let Some(o) = self.output_index(target) else {
+            return;
+        };
+        if index >= self.outputs[o].workspaces.len() {
+            return;
+        }
+        self.outputs[o].focus_workspace_index(index);
+        self.focused_output = o;
+        self.fix_view(o);
+    }
+
     /// Takes a window out of the tree, tidying the workspaces behind it.
     fn remove_window(&mut self, loc: Location) {
         let output = &mut self.outputs[loc.output];

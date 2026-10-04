@@ -441,6 +441,14 @@ fn focusing_over_ipc_takes_the_keyboard_back_from_a_clicked_taskbar() {
             direction: scoot_ipc::Vertical::Down,
         },
         scoot_ipc::Action::FocusWorkspaceIndex { index: 0 },
+        // The output-targeted half, same already-there shape on this
+        // fixture (output 1's workspace 0 is active) -- its spend is
+        // pinned here rather than trusted to match the plain index
+        // form's, and the cross-output switch is `targeted.rs`.
+        scoot_ipc::Action::FocusOutputWorkspaceIndex {
+            output: 1,
+            index: 0,
+        },
         // Already-there (a single-output fixture has only output 1), so
         // this leg pins the no-op path's click-spend rather than a real
         // switch -- the real switch is `focus_output_moves_focus_across`
@@ -502,6 +510,15 @@ fn already_focused_actions_spend_the_click_without_an_apply() {
     let noop = [
         scoot_ipc::Action::FocusWindowId { id: focused.0 },
         scoot_ipc::Action::FocusWorkspaceIndex { index: active },
+        // The targeted half, already there: the focused output already is
+        // output 1 and its active workspace already is `active` -- so no
+        // `act`, only the keyboard half, like the plain index form above.
+        // A targeted switch that would move anything (another output, a
+        // stale index) stays on the full path; see the edge test below.
+        scoot_ipc::Action::FocusOutputWorkspaceIndex {
+            output: output.0,
+            index: active,
+        },
         scoot_ipc::Action::FocusWorkspace {
             direction: scoot_ipc::Vertical::Up,
         },
@@ -702,6 +719,66 @@ fn out_of_range_workspace_index_is_not_a_noop() {
         fixture.state.needs_render,
         "an out-of-range workspace index skipped the apply it has always run"
     );
+}
+
+#[test]
+fn unknown_output_and_stale_index_are_not_noops() {
+    // The targeted action's two refusals stay on the full path, like the
+    // out-of-range plain index above: an unknown output id and a stale
+    // index keep whatever handling `act` gives them today (which is
+    // nothing -- the core ignores both, not even moving focus),
+    // `apply` included. Focus does not move, but the click -- this is
+    // still a focus-family action -- is spent, and the keyboard is
+    // re-derived onto the window that kept focus.
+    let mut fixture = Fixture::drive();
+    let focused = fixture.state.focus.expect("a focused window");
+    let output = fixture
+        .state
+        .world
+        .focused_output()
+        .expect("a focused output");
+    let before = fixture
+        .state
+        .world
+        .workspaces(output)
+        .expect("a workspace list");
+
+    for (n, action) in [
+        scoot_ipc::Action::FocusOutputWorkspaceIndex {
+            output: 99,
+            index: 0,
+        },
+        scoot_ipc::Action::FocusOutputWorkspaceIndex {
+            output: output.0,
+            index: 99,
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        fixture.click_taskbar();
+        fixture.state.needs_render = false;
+        let response = fixture.state.handle_request(Request::Action(action));
+        assert!(
+            matches!(response, Response::Ok { locked: false }),
+            "targeted refusal {n} was not served"
+        );
+        assert_eq!(
+            fixture.state.world.workspaces(output),
+            Some(before),
+            "targeted refusal {n} switched workspaces"
+        );
+        assert_eq!(
+            fixture.state.focus,
+            Some(focused),
+            "targeted refusal {n} moved window focus"
+        );
+        fixture.assert_keyboard_follows_focus(&format!("targeted refusal {n}"));
+        assert!(
+            fixture.state.needs_render,
+            "targeted refusal {n} skipped the apply the plain index form runs"
+        );
+    }
 }
 
 #[test]

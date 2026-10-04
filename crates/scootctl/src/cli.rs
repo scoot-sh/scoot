@@ -49,7 +49,7 @@ pub const ACTIONS_HELP: &str = "\
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N [--output ID] | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
@@ -87,7 +87,7 @@ ACTIONS:
     focus-column|move-column|consume-or-expel   left|right
     focus-window|move-window                    up|down
     focus-workspace|move-window-to-workspace    up|down
-    focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
+    focus-window-id ID | focus-workspace-index N [--output ID] | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
     move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ";
@@ -314,9 +314,27 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
         "focus-window-id" => Action::FocusWindowId {
             id: number("a window id", args.next())?,
         },
-        "focus-workspace-index" => Action::FocusWorkspaceIndex {
-            index: number("a workspace index", args.next())?,
-        },
+        "focus-workspace-index" => {
+            let index = number("a workspace index", args.next())?;
+            // The only flag an action takes: without it this names the
+            // focused output's list, with it one specific output's. Anything
+            // else trailing is a loud refusal, the way `screenshot`'s flag
+            // loop answers an unknown flag (binds and autostart reject
+            // trailing text either way).
+            let mut output: Option<u64> = None;
+            let rest: Vec<String> = args.by_ref().collect();
+            let mut rest = rest.into_iter();
+            while let Some(flag) = rest.next() {
+                match flag.as_str() {
+                    "--output" => output = Some(number("an output id", rest.next())?),
+                    other => return Err(Error::Unknown(other.to_owned())),
+                }
+            }
+            match output {
+                Some(output) => Action::FocusOutputWorkspaceIndex { output, index },
+                None => Action::FocusWorkspaceIndex { index },
+            }
+        }
         "move-window-to-workspace-index" => Action::MoveWindowToWorkspaceIndex {
             index: number("a workspace index", args.next())?,
         },
@@ -745,6 +763,33 @@ mod tests {
         // ...which is a number, not a direction: sharing the
         // `focus-workspace` name would make `up`/`down` and `2` ambiguous.
         assert!(parse_msg_args(&["action", "focus-workspace-index", "down"]).is_err());
+    }
+
+    #[test]
+    fn focus_workspace_index_names_an_output_with_the_flag() {
+        // With `--output` this is the targeted switch: one specific
+        // output's list, and focus follows it there.
+        assert_eq!(
+            parse_msg_args(&["action", "focus-workspace-index", "2", "--output", "5"]),
+            Ok(Msg {
+                request: Request::Action(Action::FocusOutputWorkspaceIndex {
+                    output: 5,
+                    index: 2
+                }),
+                out: None,
+            })
+        );
+        // A flag with no id, a non-numeric id, and anything but the flag
+        // are all loud refusals rather than a silent focus-output switch.
+        assert!(parse_msg_args(&["action", "focus-workspace-index", "2", "--output"]).is_err());
+        assert!(
+            parse_msg_args(&["action", "focus-workspace-index", "2", "--output", "x"]).is_err()
+        );
+        assert!(parse_msg_args(&["action", "focus-workspace-index", "2", "5"]).is_err());
+        assert!(
+            parse_msg_args(&["action", "focus-workspace-index", "2", "--output", "5", "x"])
+                .is_err()
+        );
     }
 
     #[test]

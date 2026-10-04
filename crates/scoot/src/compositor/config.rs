@@ -1063,6 +1063,9 @@ fn action_string(action: &Action) -> String {
         Action::FocusWindowId(id) => format!("focus-window-id {}", id.0),
         Action::FocusWorkspace(d) => format!("focus-workspace {}", vertical(d)),
         Action::FocusWorkspaceIndex(index) => format!("focus-workspace-index {index}"),
+        Action::FocusOutputWorkspaceIndex { output, index } => {
+            format!("focus-workspace-index {index} --output {}", output.0)
+        }
         Action::MoveWindowToWorkspace(d) => {
             format!("move-window-to-workspace {}", vertical(d))
         }
@@ -1846,6 +1849,35 @@ mod tests {
             );
             assert_eq!(action_string(&action), spelling);
         }
+    }
+
+    #[test]
+    fn an_output_targeted_workspace_switch_parses_through_a_bind_and_emits_back() {
+        // The config-grammar half of this item: the flagged action string
+        // through the shared `scootctl::action` parser (which is what makes
+        // a per-output workspace switch bindable with no default bind
+        // shipped), and back out through `action_string` byte-identically,
+        // so a `--print-default-config` emission containing one would
+        // reload. The unflagged spelling keeps meaning the focused output.
+        let spelling = "focus-workspace-index 1 --output 2";
+        let action = Action::FocusOutputWorkspaceIndex {
+            output: scoot_core::OutputId(2),
+            index: 1,
+        };
+        let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
+        let loaded = load_from(&path, true).expect("valid config");
+        assert_eq!(
+            loaded.keybindings.match_key(
+                keysym_named("F1").unwrap(),
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(action.clone())),
+            "{spelling} did not parse through a bind"
+        );
+        assert_eq!(action_string(&action), spelling);
     }
 
     #[test]

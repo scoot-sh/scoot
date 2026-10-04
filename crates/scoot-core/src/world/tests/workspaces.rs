@@ -270,6 +270,174 @@ fn moving_by_index_with_no_outputs_does_nothing() {
     assert_eq!(world.workspaces(OutputId(1)), None);
 }
 
+// -- `Action::FocusOutputWorkspaceIndex`, the output-targeted half -------
+
+const SECOND: Rect = Rect::new(1000, 0, 800, 600);
+
+fn add_output(world: &mut World, id: u64) {
+    world.handle_event(Event::OutputAdded {
+        id: OutputId(id),
+        area: SECOND,
+    });
+}
+
+fn open_on(world: &mut World, id: u64, output: u64, focus: bool) {
+    world.handle_event(Event::WindowOpened {
+        id: WindowId(id),
+        info: WindowInfo::default(),
+        output: Some(OutputId(output)),
+        focus,
+    });
+}
+
+/// Two outputs, focus on the first: window 1 on output 1's workspace 1,
+/// window 2 on output 2's workspace 1, each with a trailing empty
+/// workspace behind it.
+fn two_outputs() -> World {
+    let mut world = world();
+    add_output(&mut world, 2);
+    open(&mut world, 1);
+    world.handle_action(Action::FocusWorkspace(Vertical::Down));
+    open_on(&mut world, 2, 2, false);
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    world
+}
+
+#[test]
+fn targeting_an_unfocused_output_switches_it_and_moves_focus_there() {
+    let mut world = two_outputs();
+    world.handle_action(Action::FocusOutputWorkspaceIndex {
+        output: OutputId(2),
+        index: 1,
+    });
+    // Output 2's active workspace moved...
+    assert_eq!(
+        world.workspaces(OutputId(2)),
+        Some(Workspaces {
+            count: 2,
+            active: 1
+        })
+    );
+    // ...focus followed it there, onto the empty workspace, so nothing is
+    // focused -- the same shape as switching onto an empty workspace on
+    // the focused output.
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    assert_eq!(focused(&world), None);
+    // ...and output 1's list never moved.
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 2,
+            active: 1
+        })
+    );
+}
+
+#[test]
+fn targeting_the_already_active_workspace_of_another_output_still_moves_focus() {
+    // The focus-follows decision, pinned: a bar click is an interaction
+    // with that monitor, the way a click on a window focuses its output --
+    // so naming the workspace the other output already shows moves focus
+    // without switching anything.
+    let mut world = two_outputs();
+    world.handle_action(Action::FocusOutputWorkspaceIndex {
+        output: OutputId(2),
+        index: 0,
+    });
+    assert_eq!(
+        world.workspaces(OutputId(2)),
+        Some(Workspaces {
+            count: 2,
+            active: 0
+        })
+    );
+    assert_eq!(world.focused_output(), Some(OutputId(2)));
+    assert_eq!(focused(&world), Some(2));
+}
+
+#[test]
+fn targeting_an_unknown_output_changes_nothing() {
+    // A stale id -- the output was removed, or the caller guessed -- must
+    // not disturb anything, not even focus: focus can never strand on an
+    // output that isn't there.
+    let mut world = two_outputs();
+    let first = world.workspaces(OutputId(1));
+    let second = world.workspaces(OutputId(2));
+    world.handle_action(Action::FocusOutputWorkspaceIndex {
+        output: OutputId(7),
+        index: 0,
+    });
+    assert_eq!(world.workspaces(OutputId(1)), first);
+    assert_eq!(world.workspaces(OutputId(2)), second);
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    assert_eq!(focused(&world), None);
+}
+
+#[test]
+fn targeting_a_stale_index_leaves_focus_where_it_is() {
+    // The list shrank since the caller read it (an emptied workspace was
+    // dropped and everything after it renumbered): silently activating the
+    // last workspace instead would be a switch nobody asked for, and
+    // moving focus there anyway would disturb the session a refused
+    // request must leave alone.
+    let mut world = two_outputs();
+    let second = world.workspaces(OutputId(2));
+    for index in [2, usize::MAX / 2, usize::MAX] {
+        world.handle_action(Action::FocusOutputWorkspaceIndex {
+            output: OutputId(2),
+            index,
+        });
+        assert_eq!(world.workspaces(OutputId(2)), second, "index {index}");
+        assert_eq!(world.focused_output(), Some(OutputId(1)), "index {index}");
+    }
+}
+
+#[test]
+fn targeting_the_focused_output_is_the_plain_index_switch() {
+    // No second code path: naming the output focus is already on ends
+    // exactly where `FocusWorkspaceIndex` does.
+    let mut world = two_outputs();
+    world.handle_action(Action::FocusOutputWorkspaceIndex {
+        output: OutputId(1),
+        index: 0,
+    });
+    assert_eq!(
+        world.workspaces(OutputId(1)),
+        Some(Workspaces {
+            count: 2,
+            active: 0
+        })
+    );
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+    assert_eq!(focused(&world), Some(1));
+}
+
+#[test]
+fn targeting_after_an_unplug_addresses_the_adopter_list() {
+    // Output 2 goes away: its workspaces are adopted by output 1, and the
+    // removed id names nothing. An index then counts within the adopter's
+    // merged list -- wherever the adoption put window 2's workspace,
+    // targeting that position is what reaches it.
+    let mut world = two_outputs();
+    world.handle_event(Event::OutputRemoved { id: OutputId(2) });
+    assert_eq!(world.workspaces(OutputId(2)), None);
+    world.handle_action(Action::FocusOutputWorkspaceIndex {
+        output: OutputId(2),
+        index: 0,
+    });
+    assert_eq!(world.focused_output(), Some(OutputId(1)));
+
+    let (_, adopted, _) = world
+        .window_workspace(WindowId(2))
+        .expect("window 2 was adopted");
+    world.handle_action(Action::FocusOutputWorkspaceIndex {
+        output: OutputId(1),
+        index: adopted,
+    });
+    assert_eq!(focused(&world), Some(2));
+    assert!(placement(&world, 2).visible);
+}
+
 // -- `World::workspace_window_counts` -------------------------------------
 
 /// One window per check: the counts are the histogram of

@@ -1248,14 +1248,14 @@ Worth knowing before you write against it:
   announced it.
 - **`activate` is a request, not a guarantee** (as the protocol says): one
   naming a workspace that vanished between the client reading the list and
-  the `commit` arriving is dropped, one for the workspace that is already
-  active does nothing, and one for an output that is not the focused output
-  is dropped unless it is already active there too — switching another
-  output's workspaces from a bar is a later phase's work, and silently
-  switching the wrong output would be worse than refusing.
+  the `commit` arriving is dropped, and one for the workspace that is already
+  active on the focused output does nothing. An `activate` on any other
+  output's group switches that output's workspaces, and moves keyboard focus
+  there -- the way a click on a bar is an interaction with that monitor.
 - **An agent switches by number too.** `scoot msg action
   focus-workspace-index N` drives the same core action `activate` does, on
-  the focused output.
+  the focused output; `focus-workspace-index N --output ID` names the
+  output, the way a bar's click on another monitor does.
 - **With one output the wire is exactly what it always was** — one group,
   one `done` per batch. A second output adds a second group block before
   that `done`, nothing else.

@@ -18,6 +18,7 @@ use super::*;
 
 mod actions;
 mod keyboard;
+mod targeted;
 mod workspace;
 
 /// Shrinks how much unread data the kernel will hold for writes to `stream`.

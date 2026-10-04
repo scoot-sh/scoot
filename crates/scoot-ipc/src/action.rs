@@ -63,6 +63,29 @@ pub enum Action {
     FocusWorkspaceIndex {
         index: usize,
     },
+    /// One specific workspace of one specific output, by the output id
+    /// `scootctl outputs` reports and the workspace's 0-based position in
+    /// that output's list -- the wire half of
+    /// `scoot_core::Action::FocusOutputWorkspaceIndex`. What
+    /// `focus-workspace-index N --output ID` sends; without the flag it
+    /// sends `FocusWorkspaceIndex`, which keeps meaning the focused
+    /// output's list. The switch moves keyboard focus to that output, the
+    /// way a click on a window focuses its output -- even onto the
+    /// already-active workspace -- while an unknown id or a stale index
+    /// does nothing at all, not even moving focus.
+    ///
+    /// A sibling tag rather than an optional field on `FocusWorkspaceIndex`,
+    /// deliberately: an older server fails a tag it never saw as a decode
+    /// error (answered with an ordinary `Error`, the connection stays --
+    /// see `unknown_action_tags_are_rejected_like_unknown_request_types`),
+    /// while an extra field on the old tag would decode silently and
+    /// switch the focused output's workspace instead of the one named.
+    /// Additive like every other action tag: a client that never sends
+    /// this tag decodes exactly as before, so no `PROTOCOL_VERSION` bump.
+    FocusOutputWorkspaceIndex {
+        output: u64,
+        index: usize,
+    },
     MoveWindowToWorkspace {
         direction: Vertical,
     },

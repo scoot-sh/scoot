@@ -619,7 +619,7 @@ handles `scootctl action ...` (and its `scoot msg` alias) and a config file's
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down
-focus-window-id ID | focus-workspace-index N | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
+focus-window-id ID | focus-workspace-index N [--output ID] | move-window-to-workspace-index N | focus-output ID | move-window-to-output ID | focus-output-index N | move-window-to-output-index N | focus-output-left | focus-output-right | move-window-to-output-left | move-window-to-output-right | cycle-column-width | set-column-width N | toggle-fullscreen | set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off | close | spawn COMMAND... | quit
 toggle-floating | set-floating ID on|off | toggle-floating-focus
 move-floating ID X Y | resize-floating ID WIDTH HEIGHT
 ```
@@ -684,6 +684,14 @@ that output's active workspace and follows it there; `focus-output` focuses
 that output's active workspace (or nothing, when it holds no windows). An
 unknown id does nothing. All six are refused while the session is locked,
 like every other action.
+
+A workspace switch can name its output the same way:
+`"focus-workspace-index 1 --output 2"` switches the second output's
+workspace list and moves focus there, the way a bar's workspace button on
+that monitor does over `ext-workspace-v1`. Without the flag it keeps
+meaning the focused output's list. The same replug rule applies: the id
+names one specific output for the session, so after a replug it names the
+output that went away, and an unknown id does nothing.
 
 A returning monitor also gets its windows back: when an output is removed,
 its workspaces (and their windows, in order) are adopted by the remaining

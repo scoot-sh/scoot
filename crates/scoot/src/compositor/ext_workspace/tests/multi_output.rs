@@ -21,6 +21,7 @@
 
 use super::*;
 use scoot_core::OutputId;
+use scoot_core::WindowId;
 
 use crate::compositor::headless;
 
@@ -44,15 +45,17 @@ fn workspaces_of(fixture: &Fixture, id: u64) -> (usize, usize) {
     (workspaces.count, workspaces.active)
 }
 
-/// The first handle key the log entered into `group` -- what an `activate`
-/// step addresses that group's workspace with.
-fn handle_in_group(log: &[Seen], group: u32) -> usize {
+/// The handle key entered into `group` for its `position`-th workspace
+/// (0-based, in announcement order) -- what an `activate` step addresses
+/// that workspace with.
+fn handle_at(log: &[Seen], group: u32, position: usize) -> usize {
     log.iter()
-        .find_map(|seen| match seen {
+        .filter_map(|seen| match seen {
             Seen::WorkspaceEnter(g, key) if *g == group => Some(*key as usize),
             _ => None,
         })
-        .expect("the log should have entered a handle into that group")
+        .nth(position)
+        .expect("the log should have entered that workspace into that group")
 }
 
 /// What IPC `windows` reports right now. A `windows` request arranges
@@ -132,7 +135,7 @@ fn binding_announces_one_group_per_output() {
 #[test]
 fn activating_on_the_second_output_leaves_the_first_alone() {
     let (mut fixture, burst) = two_windows_first_active();
-    let second = handle_in_group(&burst, 1);
+    let second = handle_at(&burst, 1, 0);
 
     fixture.run(Step::Activate(second));
     fixture.run(Step::Commit(0));
@@ -151,6 +154,19 @@ fn activating_on_the_second_output_leaves_the_first_alone() {
         (1, 0),
         "output 2's workspace is unchanged"
     );
+    // ...but focus follows the click across outputs anyway: a bar click is
+    // an interaction with that monitor, the way a click on a window focuses
+    // its output -- which is why the already-active case still goes through
+    // the targeted action instead of the no-op fast path.
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(2)),
+        "activating another output's workspace moves focus there even when nothing switches"
+    );
+    assert_eq!(
+        fixture.state.focus, None,
+        "output 2's active workspace holds no window"
+    );
 }
 
 /// Switching the first output through its own group's handle still works --
@@ -159,7 +175,7 @@ fn activating_on_the_second_output_leaves_the_first_alone() {
 #[test]
 fn switching_the_first_output_through_its_own_group_still_works() {
     let (mut fixture, burst) = two_windows_first_active();
-    let first = handle_in_group(&burst, 0);
+    let first = handle_at(&burst, 0, 0);
 
     fixture.run(Step::Activate(first));
     fixture.run(Step::Commit(0));
@@ -173,6 +189,206 @@ fn switching_the_first_output_through_its_own_group_still_works() {
         workspaces_of(&fixture, 2),
         (1, 0),
         "output 2's workspace is unchanged"
+    );
+}
+
+/// A fixture with both windows on the second output -- window 1 on its
+/// first workspace, window 2 on its active second -- and focus back on the
+/// first output, which holds no windows: an `activate` on the second
+/// output's group is then a genuine cross-output switch, never the
+/// focused-output path.
+fn two_windows_second_active() -> (Fixture, Vec<Seen>) {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    let mut log = fixture.take_log();
+    // Windows open on the pointer's output, so the pointer moves across
+    // first (a focus change alone would not move it).
+    fixture.state.pointer_move(CANVAS as f64 + 10.0, 10.0);
+    fixture.settle();
+    log.extend(fixture.take_log());
+    fixture.run(Step::MapWindow); // window 1 on output 2's workspace 1
+    log.extend(fixture.take_log());
+    // Onto the trailing empty workspace before mapping the second window,
+    // so the two windows end up on different workspaces.
+    fixture.act(Action::FocusWorkspace(Vertical::Down));
+    log.extend(fixture.take_log());
+    fixture.run(Step::MapWindow); // window 2 on output 2's workspace 2, focused
+    log.extend(fixture.take_log());
+    assert_eq!(
+        workspaces_of(&fixture, 2),
+        (3, 1),
+        "the setup should leave three workspaces with the second active on output 2"
+    );
+    // Focus back on the first output: the switch below moves focus across
+    // outputs rather than along the focused one.
+    fixture.act(Action::FocusOutput(OutputId(1)));
+    log.extend(fixture.take_log());
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(1)),
+        "focus should be back on the first output"
+    );
+    (fixture, log)
+}
+
+/// The route this ticket builds: an `activate` on a non-focused output's
+/// group switches that output's workspaces through the output-targeted
+/// action -- never the focused output's list -- and focus follows it
+/// there, the way a click on a window focuses its output.
+#[test]
+fn activating_a_workspace_on_the_second_output_switches_it_and_moves_focus() {
+    let (mut fixture, log) = two_windows_second_active();
+    let first = handle_at(&log, 1, 0);
+    let second = handle_at(&log, 1, 1);
+
+    fixture.run(Step::Activate(first));
+    fixture.run(Step::Commit(0));
+    assert_eq!(
+        workspaces_of(&fixture, 2),
+        (3, 0),
+        "output 2 switches to its first workspace"
+    );
+    assert_eq!(
+        workspaces_of(&fixture, 1),
+        (1, 0),
+        "output 1's workspace is unchanged"
+    );
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(2)),
+        "the switch moves focus to the output that was clicked"
+    );
+    assert_eq!(
+        fixture.state.focus,
+        Some(WindowId(1)),
+        "focus lands on the activated workspace's window"
+    );
+    // The client is told in one batch: the old workspace off, the new one
+    // on.
+    let (first, second) = (first as u32, second as u32);
+    assert_eq!(
+        fixture.take_log(),
+        &[
+            Seen::State(second, INACTIVE),
+            Seen::State(first, ACTIVE),
+            Seen::Done(0),
+        ]
+    );
+}
+
+/// The lock gate first: a cross-output switch staged and committed behind
+/// the lock screen must disturb nothing -- neither output's list, nor
+/// focus -- and the client is told nothing.
+#[test]
+fn an_activate_on_the_second_output_while_locked_is_refused() {
+    let (mut fixture, log) = two_windows_second_active();
+    let target = handle_at(&log, 1, 0);
+
+    let Ack::Locked = fixture.run(Step::LockSession) else {
+        panic!("the client never took the session lock");
+    };
+    fixture.take_log();
+    assert!(fixture.state.session_lock.is_locked());
+
+    fixture.run(Step::Activate(target));
+    fixture.run(Step::Commit(0));
+    assert_eq!(
+        workspaces_of(&fixture, 2),
+        (3, 1),
+        "a locked session's workspaces must not move"
+    );
+    assert_eq!(
+        workspaces_of(&fixture, 1),
+        (1, 0),
+        "the other output's workspaces must not move either"
+    );
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(1)),
+        "a locked session's focus must not move"
+    );
+    assert_eq!(
+        fixture.take_log(),
+        vec![],
+        "a refused activate announces nothing"
+    );
+}
+
+/// The race the protocol's own batching creates, on the targeted path: the
+/// client acts on the list it last saw, and the compositor decides against
+/// the list it has. Output 2 holds one window plus its trailing empty
+/// workspace; the client stages the trailing one, then the window goes
+/// away and takes the list's second workspace with it.
+#[test]
+fn an_activate_that_goes_stale_before_commit_is_ignored_on_the_targeted_path() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::BindOutputAt(0));
+    fixture.run(Step::BindOutputAt(1));
+    fixture.run(Step::BindManager);
+    let mut log = fixture.take_log();
+    fixture.state.pointer_move(CANVAS as f64 + 10.0, 10.0);
+    fixture.settle();
+    log.extend(fixture.take_log());
+    fixture.run(Step::MapWindow);
+    log.extend(fixture.take_log());
+    assert_eq!(workspaces_of(&fixture, 2), (2, 0));
+    let trailing = handle_at(&log, 1, 1);
+
+    fixture.run(Step::Activate(trailing));
+    // The window goes away, so the staged workspace does too -- while an
+    // `activate` for it is still staged.
+    fixture.run(Step::CloseWindow(0));
+    fixture.run(Step::Commit(0));
+    assert_eq!(workspaces_of(&fixture, 2), (1, 0));
+    assert_eq!(workspaces_of(&fixture, 1), (1, 0));
+    assert_eq!(
+        fixture.state.world.focused_output(),
+        Some(OutputId(2)),
+        "the close keeps focus where it was; the refused activate moves nothing"
+    );
+    // Only the removal, and nothing from the stale activate.
+    let gone = trailing as u32;
+    assert_eq!(
+        fixture.take_log(),
+        &[
+            Seen::WorkspaceLeave(1, gone),
+            Seen::Removed(gone),
+            Seen::Done(0),
+        ]
+    );
+}
+
+/// The output goes away between `activate` and `commit` (a `--tty` monitor
+/// unplugged mid-gesture): the staged request names a group that no longer
+/// exists, so the commit finds nothing to apply -- and the adoption the
+/// removal filed stays exactly as it was.
+#[test]
+fn an_activate_on_a_removed_output_dies_with_its_group() {
+    let (mut fixture, log) = two_windows_second_active();
+    let target = handle_at(&log, 1, 0);
+
+    fixture.run(Step::Activate(target));
+    assert!(fixture.state.remove_output(OutputId(2)));
+    fixture.settle();
+    // The adoption the removal filed: both windows on output 1 now.
+    for window in windows(&mut fixture) {
+        assert_eq!(window.output, 1, "the removal's adoption is disturbed");
+    }
+    let adopted = workspaces_of(&fixture, 1);
+    fixture.take_log();
+
+    fixture.run(Step::Commit(0));
+    assert_eq!(
+        workspaces_of(&fixture, 1),
+        adopted,
+        "the dead request switched nothing"
+    );
+    assert_eq!(
+        fixture.take_log(),
+        vec![],
+        "the dead request announced nothing"
     );
 }
 
@@ -453,7 +669,7 @@ fn removing_an_output_removes_its_group_in_protocol_order() {
     fixture.run(Step::BindOutputAt(1));
     fixture.run(Step::BindManager);
     let burst = fixture.take_log();
-    let handle = handle_in_group(&burst, 1) as u32;
+    let handle = handle_at(&burst, 1, 0) as u32;
 
     assert!(fixture.state.remove_output(OutputId(2)));
     fixture.settle();

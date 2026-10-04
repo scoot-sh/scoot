@@ -97,6 +97,13 @@ impl World {
             // `World::workspaces`, which has the same caveat from the reading
             // side.
             Action::FocusWorkspaceIndex(index) => self.reshape(|o| o.focus_workspace_index(index)),
+            // The output-targeted half: an index into another output's list
+            // cannot go through `reshape`, which only touches the focused
+            // output's tree -- and the switch moves focus there too (see the
+            // action's doc), which `reshape` never does.
+            Action::FocusOutputWorkspaceIndex { output, index } => {
+                self.focus_output_workspace_index(output, index)
+            }
             Action::MoveWindowToWorkspace(dir) => {
                 let mut moved = None;
                 self.reshape(|o| moved = o.move_focused_window_to_workspace(dir));
