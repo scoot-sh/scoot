@@ -183,9 +183,9 @@ Every protocol and version is listed in [docs/protocols.md](docs/protocols.md).
 
 ## Looks
 
-scoot does light and dark. Every color is
+scoot does light, dark and warm. Every color is
 a setting — the bar tokens, scoot's ring and background colors, foot's
-palette — so either look is just a config file. Prefer automatic? The Nix
+palette — so each look is just a config file. Prefer automatic? The Nix
 modules theme scoot and scootbar from a wallpaper with Stylix
 ([docs/nix.md](docs/nix.md#stylix)).
 
@@ -193,10 +193,11 @@ modules theme scoot and scootbar from a wallpaper with Stylix
 <tr>
 <td align="center"><a href="docs/examples/music-desk/"><img src="docs/assets/music-desk-preview.png" alt="scoot with the music desk look: an edge-to-edge translucent bar over three translucent terminal columns"></a><br><b>Light: the <a href="docs/examples/music-desk/">music desk</a> look</b></td>
 <td align="center"><a href="docs/examples/radial-burst/"><img src="docs/assets/radial-burst-preview.png" alt="scoot with the radial burst look: one translucent terminal under a floating translucent bar"></a><br><b>Dark: the <a href="docs/examples/radial-burst/">radial burst</a> look</b></td>
+<td align="center"><a href="docs/examples/vinyl-sunset/"><img src="docs/assets/vinyl-sunset-preview.png" alt="scoot with the vinyl sunset look: a floating translucent bar over two translucent terminal columns, the sunset illustration showing through on the right"></a><br><b>Warm: the <a href="docs/examples/vinyl-sunset/">vinyl sunset</a> look</b></td>
 </tr>
 </table>
 
-<sub>Wallpapers: [musical instruments and audio equipment](https://unsplash.com/illustrations/musical-instruments-and-audio-equipment-on-a-white-surface-b6Us5E-BO8w) by [Alghozy](https://unsplash.com/@artgho), and [colorful radial lines](https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM) by Sufyan pir, both from Unsplash. Each stays under the Unsplash License and is not covered by this repository's MIT license.</sub>
+<sub>Wallpapers: [musical instruments and audio equipment](https://unsplash.com/illustrations/musical-instruments-and-audio-equipment-on-a-white-surface-b6Us5E-BO8w) by [Alghozy](https://unsplash.com/@artgho), and [colorful radial lines](https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM) by Sufyan pir, both from Unsplash and each under the Unsplash License; and [lofi vintage vinyl study audio](https://pixabay.com/illustrations/lofi-vintage-vinyl-study-audio-8390965/) by AninditaErina from Pixabay (marked AI-generated), under the Pixabay Content License, downloaded separately and not shipped here. None is covered by this repository's MIT license.</sub>
 
 ## scootbar
 

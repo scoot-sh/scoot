@@ -1,0 +1,20 @@
+# The "vinyl sunset" lazygit colors: the illustration's palette, rounded borders, no
+# fetch and no update checks. Copy to ~/.config/lazygit/config.yml (lazygit
+# also reads ~/.config/lazygit/config.yaml).
+gui:
+  nerdFontsVersion: "3"
+  showBottomLine: false
+  showRandomTip: false
+  border: rounded
+  theme:
+    activeBorderColor: ["#E59560", bold]
+    inactiveBorderColor: ["#604F50"]
+    selectedLineBgColor: ["#522C27"]
+    optionsTextColor: ["#E59560"]
+    unstagedChangesColor: ["#E0866A"]
+    defaultFgColor: ["#F1E3C6"]
+git:
+  autoFetch: false
+  autoRefresh: false
+update:
+  method: never
