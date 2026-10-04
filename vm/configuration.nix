@@ -146,6 +146,13 @@ in
       "root"
       "dev"
     ];
+    # Prebuilt scoot packages, pushed by CI on every merge to main
+    # (docs/backlog/packaging/nix-publishing.md). `extra-` appends to the
+    # default cache.nixos.org entries rather than replacing them.
+    extra-substituters = [ "https://scoot-sh.cachix.org" ];
+    extra-trusted-public-keys = [
+      "scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4prt30ydDcXJXCo="
+    ];
   };
 
   # /mnt/scoot is a 9p mount of the Mac checkout with no uid mapping, so it

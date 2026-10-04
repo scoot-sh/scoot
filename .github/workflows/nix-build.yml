@@ -2,10 +2,10 @@
 #
 # WHY THIS IS NOT IN ci.yml: `nix build` compiles the full release
 # dependency tree (Smithay included) inside the Nix store, which shares
-# nothing with ci.yml's cargo `target/` cache -- and this repo deliberately
-# keeps no Nix store cache (see ci.yml's note on magic-nix-cache), so every
-# run pays the full build from scratch. Measured 5m10s cold on the 4-vCPU
-# dev VM for both packages together (2026-09-21, branch
+# nothing with ci.yml's cargo `target/` cache -- and until Cachix there
+# was no Nix store cache at all (see ci.yml's note on magic-nix-cache),
+# so every run paid the full build from scratch. Measured 5m10s cold on
+# the 4-vCPU dev VM for both packages together (2026-09-21, branch
 # `backlog/ci-nix-packaging`), which is the same core count as these
 # runners, so that number is representative, not a lower bound. That cost
 # belongs on each merge to main, not on every PR push: ci.yml's every-PR
@@ -18,6 +18,14 @@
 # tax. A red main here names the merge that broke the packaged build, and
 # is fixed forward like any other main-red. (Nightly was the other option;
 # it leaves main red for up to a day, which is strictly worse.)
+#
+# CACHIX, PUSHED FROM MAIN ONLY: the `cachix/cachix-action` step below
+# pulls from the public `scoot-sh` cache on every run and pushes what the
+# run built -- but only when the run is a `push` to `main` (`skipPush`
+# otherwise). Unreviewed code must not reach a cache users trust, so
+# manual `workflow_dispatch` runs only pull: they verify the build without
+# publishing it. (PRs never reach this workflow at all -- it triggers on
+# `push` to `main` and manual dispatch only.)
 #
 # The `--version` lines turn "it compiled" into "the artifact runs": both
 # print without starting a session, so they need no seat, no socket and no
@@ -46,8 +54,19 @@
 # gpu-scanout is deliberately NOT built here: `packages.scoot-gpu` exists
 # since PR #198, but each main-push build pays a full Smithay rebuild the
 # cargo cache can't help with, and the packaged artifacts above are the
-# ones users install. The `-gpu` derivation stays covered the way it was
-# before it existed (local `nix build .#scoot-gpu`).
+# ones users install. Cachix changes who *installs* benefit, not what CI
+# pays to build: without crane (docs/backlog/packaging/nix-crane.md) every
+# extra package derivation recompiles the whole dependency graph, so
+# adding `scoot-gpu` here would buy one more full Smithay compile per push
+# per architecture. Reconsider once crane lands -- that entry says so. The
+# `-gpu` derivation stays covered the way it was before it existed (local
+# `nix build .#scoot-gpu`).
+#
+# FLAKEHUB (below, `publish` job): after both arch builds succeed on a push
+# to main, the flake itself is published to FlakeHub as a rolling release
+# (`scoot-sh/scoot`, public, `0.1.*`), so a published flake version always
+# has its binaries on Cachix. No FlakeHub Cache (`include-output-paths:
+# false`): the maintainer declined it.
 
 name: nix build (packaged artifacts)
 
@@ -71,16 +90,37 @@ concurrency:
 
 jobs:
   build:
-    name: nix build .#scoot .#scootctl .#scootbg .#scootbar
-    runs-on: ubuntu-latest
+    name: nix build .#scoot .#scootctl .#scootbg .#scootbar (${{ matrix.system }})
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            system: x86_64-linux
+          # Free for public repos; the arch the maintainer's Asahi M2 and
+          # the aarch64 dev VM actually install on, so prebuilt binaries
+          # matter most here. Same packages, same `--version` lines, same
+          # scootbar link/closure/override checks: all arch-independent
+          # properties of the packaged artifact.
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
       - uses: DeterminateSystems/nix-installer-action@v23
 
-      # No Nix store cache -- the same deliberate call as ci.yml; see the
-      # header there for why magic-nix-cache is not used.
+      # Pull from the public cache on every run; push what was built only
+      # on a push to main (never on manual dispatches: unreviewed code
+      # must not reach a cache users trust). Auth is the org secret
+      # CACHIX_AUTH_TOKEN, scoped to this repo; signing is Cachix-managed,
+      # so the project holds no private key.
+      - uses: cachix/cachix-action@v17
+        with:
+          name: scoot-sh
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
+
       - name: nix build .#scoot .#scootctl .#scootbg, and run the packaged binaries
         run: |
           nix build .#scoot --out-link result-scoot --print-out-paths
@@ -114,3 +154,33 @@ jobs:
           nix build --impure --out-link result-scootbar-no-modules --print-out-paths --expr \
             '(builtins.getFlake (toString ./.)).packages.${builtins.currentSystem}.scootbar.override { buildNoDefaultFeatures = true; }'
           ./result-scootbar-no-modules/bin/scootbar --help | grep -F 'built with no modules'
+
+  # Publish the flake to FlakeHub once both arch builds pushed their
+  # binaries to Cachix, so a published flake version always has its
+  # binaries cached. Pushes to main only (manual dispatches verify the
+  # build without publishing it). Auth is GitHub OIDC, no secret.
+  publish:
+    name: publish flake to FlakeHub (rolling, public)
+    needs: [build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Rolling versions count commits (`0.1.<count>+rev-<sha>`); a
+          # shallow checkout would miscount.
+          fetch-depth: 0
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - uses: DeterminateSystems/flakehub-push@v7
+        with:
+          # `scoot-sh/scoot` is the default: `{org}/{repo}` of this repo.
+          visibility: public
+          rolling: true
+          # No FlakeHub Cache (declined): resolved store paths stay off.
+          include-output-paths: false

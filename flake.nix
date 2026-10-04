@@ -6,6 +6,20 @@
   # loader rejects anything else.)
   description = "scoot: a scrolling-tiling Wayland compositor that runs without a GPU (on macOS, the scootctl remote-control client only)";
 
+  # Prebuilt binaries of this flake's own packages, pushed by CI
+  # (.github/workflows/nix-build.yml) on every merge to main. A flake's
+  # `nixConfig` is *not* silently trusted: Nix asks whether to accept it on
+  # first use (unless `accept-flake-config` is set), and substituter
+  # settings from it apply only to trusted users -- see docs/nix.md, which
+  # shows the explicit `nix.settings` / `nix.conf` form that needs no
+  # prompt and works for untrusted users too.
+  nixConfig = {
+    extra-substituters = [ "https://scoot-sh.cachix.org" ];
+    extra-trusted-public-keys = [
+      "scoot-sh.cachix.org-1:QMj7CMw8uqZxrvqqm6SggdxTHz6Q4prt30ydDcXJXCo="
+    ];
+  };
+
   # Pinned to the same nixpkgs revision as vm/, so the dev shell and the VM
   # agree on every library and nothing is downloaded twice.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe";
