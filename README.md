@@ -159,6 +159,7 @@ scoot speaks the standard Wayland protocols, so the usual tools work.
 | Have dialogs and pop-ups float | [yes, automatically](docs/configuration.md#floating) |
 | Watch video or play games fullscreen | [yes](docs/protocols.md#fullscreen) |
 | Lock the screen, or lock and dim when idle | [yes](docs/protocols.md#screen-locking-ext-session-lock-v1) |
+| Turn screens off when idle | [yes](docs/protocols.md#screen-power) |
 | Take screenshots or share the screen | [yes](docs/protocols.md#screen-capture-ext-image-copy-capture-v1) |
 | Run GPU apps, even with no GPU on the compositor | [yes](docs/protocols.md#gpu-rendering-clients-zwp_linux_dmabuf_v1) |
 | Use a clipboard manager or middle-click paste | [yes](docs/protocols.md#clipboard-and-primary-selection) |

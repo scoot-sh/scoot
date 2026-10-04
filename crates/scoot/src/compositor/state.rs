@@ -67,6 +67,7 @@ use super::nested::Host;
 use super::output_config::OutputEntries;
 use super::output_identity::OutputIdentity;
 use super::output_management::OutputManagement;
+use super::output_power::OutputPower;
 use super::outputs::Outputs;
 use super::pointer_focus::PointerFocus;
 use super::popup::ActivePopupGrab;
@@ -800,6 +801,13 @@ pub struct State {
     /// protocol objects and the snapshot of what clients have been told.
     /// Read-only: every configuration a client builds is refused.
     pub output_management: OutputManagement,
+    /// `zwlr_output_power_manager_v1` (version 1): what an idle daemon
+    /// (`swayidle` + `wlopm`) powers screens off and on through, and what
+    /// IPC `output-power` drives. Read on every bind, every `set_mode` and
+    /// every power-state change -- see `output_power.rs`, which owns both
+    /// the protocol objects and the on/off state behind them. Unrestricted
+    /// like every other global (see `docs/protocols.md`'s trust note).
+    pub output_power: OutputPower,
     /// `zwp_pointer_constraints_v1` (version 1): pointer lock and confinement,
     /// the half of the games/3D-app pair `relative_pointer.rs` documents.
     /// Held only to keep the global alive -- the constraints themselves live
@@ -1149,6 +1157,7 @@ impl State {
         let input_method_manager_state = InputMethodManagerState::new::<Self, _>(&dh, |_| true);
         let gamma_control = GammaControlState::new(&dh);
         let output_management = OutputManagement::new(&dh);
+        let output_power = OutputPower::new(&dh);
         let pointer_constraints_state = PointerConstraintsState::new::<Self>(&dh);
         let relative_pointer_manager_state = RelativePointerManagerState::new::<Self>(&dh);
         let tablet_manager_state = TabletManagerState::new::<Self>(&dh);
@@ -1289,6 +1298,7 @@ impl State {
             xdg_activation,
             gamma_control,
             output_management,
+            output_power,
             pointer_constraints_state,
             relative_pointer_manager_state,
             tablet_manager_state,

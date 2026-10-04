@@ -27,6 +27,7 @@ read your files anyway.
 | `ext-session-lock-v1` | 1 | [Screen locking](#screen-locking-ext-session-lock-v1). |
 | `ext-idle-notify-v1` | 2 | [Idle detection](#idle-detection). |
 | `idle-inhibit-v1` | 1 | [Idle inhibitors](#idle-detection). |
+| `wlr-output-power-management-v1` | 1 | [Screen power](#screen-power). |
 | `wlr-data-control-v1` | 2 | [Clipboard managers](#clipboard-and-primary-selection). |
 | `ext-data-control-v1` | 1 | Clipboard managers, successor protocol. |
 | `primary-selection-v1` | 1 | Middle-click paste, focus-gated. |
@@ -2041,6 +2042,36 @@ own inhibit policy) ignores inhibitors by design.
 Two things to know: there is no built-in auto-locker — the timeouts and
 commands are the daemon's config, not scoot's, the swayidle way — and an
 inhibitor counts while its surface is *alive*, whether or not it is visible.
+
+## Screen power
+
+`zwlr_output_power_manager_v1` (version 1), so an idle daemon can turn the
+panels off and back on: the standard `swayidle timeout 900 'wlopm --off *'
+resume 'wlopm --on *'` setup (see
+[configuration.md](configuration.md#idle-locking-and-screen-power)). Any
+client may bind it — unrestricted like every other global (see the trust
+note at the top of this file) — and any number of clients may hold a power
+object for one output: the last `set_mode` wins, with no exclusivity
+transfer. Anything but `off` (0) or `on` (1) is `invalid_mode`.
+
+Off means off, on every backend: no page flips, no render work, no frame
+callbacks for the windows and bars only on that output (their clients
+simply paint late; nothing they committed is lost), while the pointer and
+keyboard keep working. Input by itself never turns a screen back on — that
+is the daemon's `resume` job. Every `mode` event goes to every object for
+the output, including when scoot itself changed the mode (the IPC
+`output-power` request, see [ipc.md](ipc.md#requests)); `failed` means the
+object is dead — the output went away, or the hardware refused the change.
+
+Only `--tty` touches hardware (the connector's DPMS property). Under
+`--headless`/`--nested` there is no panel to power down: the mode is
+tracked and reported honestly, the render work is still skipped, and an IPC
+screenshot of a powered-off output is refused rather than answered from its
+stale framebuffer. Locking blanks the screens that are on and leaves the
+dark ones dark (a powered-off output counts as blanked for lock
+confirmation); unplugging an output fails its power objects, and the
+replugged monitor comes back on under a fresh id; a VT switch back
+re-applies the hardware state.
 
 ## Clipboard and primary selection
 

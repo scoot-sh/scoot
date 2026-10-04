@@ -1060,6 +1060,57 @@ impl Tty {
         self.drm.set_gamma(head.presenter.crtc(), red, green, blue)
     }
 
+    /// Powers output `id`'s panel off or on through its connector's DPMS
+    /// property: the hardware half of `zwlr_output_power_v1.set_mode` (see
+    /// `output_power.rs`).
+    ///
+    /// There is no Smithay helper for this -- `drm`'s own `set_property`
+    /// ioctl, on the already-open device, addressed at the head's own
+    /// connector. Only `On` (0) and `Off` (3) are ever written; the
+    /// intermediate `Standby`/`Suspend` levels have no protocol spelling.
+    /// An in-flight flip is unaffected: the ioctl neither cancels it nor
+    /// eats its vblank, so flip bookkeeping settles the usual way.
+    ///
+    /// Any failure (no DRM master after a VT switch, an output this backend
+    /// does not drive, a driver with no DPMS property) is the caller's to
+    /// turn into a `failed` event; the session keeps running, and the
+    /// compositor-side state (no render work for the output) still applies.
+    /// Deliberately no CRTC-disable fallback: disabling the CRTC behind
+    /// Smithay's surface state would fight the next commit on both tiers,
+    /// while a missing DPMS property degrades to render-skipping alone,
+    /// which is still the power saving on the compositor side.
+    pub(super) fn set_power(&self, id: OutputId, on: bool) -> std::io::Result<()> {
+        use smithay::reexports::drm::control::Device as ControlDevice;
+        use std::io::{Error, ErrorKind};
+
+        /// `DRM_MODE_DPMS_ON` / `DRM_MODE_DPMS_OFF`: the two levels the
+        /// protocol's `on`/`off` spell.
+        const DPMS_ON: u64 = 0;
+        const DPMS_OFF: u64 = 3;
+        let head = self
+            .head(id)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "no connector drives this output"))?;
+        let connector = head.connector;
+        let drm = &self.drm;
+        let properties = drm.get_properties(connector)?;
+        let (handles, _) = properties.as_props_and_values();
+        // Looked up by name per call, not cached: properties are per
+        // connector and connectors are re-probed on every hotplug, so a
+        // cached handle could address a dead property; at most MAX_OUTPUTS
+        // connectors times a handful of properties, on a cold path.
+        for prop in handles {
+            let info = drm.get_property(*prop)?;
+            if info.name().to_bytes() == b"DPMS" {
+                let level = if on { DPMS_ON } else { DPMS_OFF };
+                return drm.set_property(connector, *prop, level);
+            }
+        }
+        Err(Error::new(
+            ErrorKind::NotFound,
+            "connector has no DPMS property",
+        ))
+    }
+
     /// Whether this process currently holds DRM master -- the same question
     /// `present()` gates on. Read by `headless::render`, which skips the
     /// whole render (and the frame-callback dispatch) while this is `false`:

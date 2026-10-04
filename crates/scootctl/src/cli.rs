@@ -27,6 +27,9 @@ pub const REQUESTS_HELP: &str = "\
                                     what can be re-applied live
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
+    output-power ID|all on|off        switch an output's panel off or on --
+                                     what an idle daemon drives at idle and
+                                     resume (`outputs` reports the state)
     screenshot [--output ID] [--out FILE] [--no-cursor]
                                     the pointer is drawn in unless
                                     --no-cursor
@@ -69,6 +72,9 @@ REQUESTS:
                                     what can be re-applied live
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
+    output-power ID|all on|off        switch an output's panel off or on --
+                                     what an idle daemon drives at idle and
+                                     resume (`outputs` reports the state)
     screenshot [--output ID] [--out FILE] [--no-cursor]
                                     the pointer is drawn in unless
                                     --no-cursor
@@ -212,6 +218,28 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "windows" => Request::Windows,
         "reload" => Request::Reload,
         "keyboard" => Request::Keyboard,
+        "output-power" => {
+            let target = args.next().ok_or(Error::Missing("an output id or `all`"))?;
+            let output = match target.as_str() {
+                "all" => None,
+                other => Some(number::<u64>("an output id", Some(other.to_owned()))?),
+            };
+            let state = args.next().ok_or(Error::Missing("on or off"))?;
+            let powered = match state.as_str() {
+                "on" => true,
+                "off" => false,
+                _ => {
+                    return Err(Error::Invalid {
+                        what: "power state",
+                        value: state,
+                    });
+                }
+            };
+            if let Some(extra) = args.next() {
+                return Err(Error::Unknown(extra));
+            }
+            Request::OutputPower { output, powered }
+        }
         "action" => Request::Action(action(&mut args)?),
         "screenshot" => {
             let mut output = None;
@@ -650,6 +678,46 @@ mod tests {
                 request: Request::Version,
                 out: None,
             })
+        );
+    }
+
+    #[test]
+    fn output_power_takes_an_id_or_all_and_on_or_off() {
+        assert_eq!(
+            parse_msg_args(&["output-power", "2", "off"]),
+            Ok(Msg {
+                request: Request::OutputPower {
+                    output: Some(2),
+                    powered: false,
+                },
+                out: None,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["output-power", "all", "on"]),
+            Ok(Msg {
+                request: Request::OutputPower {
+                    output: None,
+                    powered: true,
+                },
+                out: None,
+            })
+        );
+        // An id is a number, the state is on/off, nothing trails.
+        assert!(parse_msg_args(&["output-power", "down", "off"]).is_err());
+        assert!(parse_msg_args(&["output-power", "2"]).is_err());
+        assert!(parse_msg_args(&["output-power", "2", "yes"]).is_err());
+        assert!(parse_msg_args(&["output-power", "all", "off", "extra"]).is_err());
+        assert!(parse_msg_args(&["output-power"]).is_err());
+    }
+
+    #[test]
+    fn usage_names_output_power_on_its_own_line() {
+        assert!(
+            USAGE
+                .lines()
+                .any(|line| line.trim().starts_with("output-power ID|all")),
+            "--help hides the output-power verb"
         );
     }
 

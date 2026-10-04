@@ -596,11 +596,34 @@ impl State {
         let mut retry_render = false;
         let mut lock_dropped = false;
         let mut dead_layers = false;
+        // Whether every output so far was skipped for being powered off --
+        // what clears `needs_render` below when no output drew for that
+        // reason (and only that reason: a missing backend keeps the old
+        // "leaves the dirty flag alone" shape).
+        let mut all_off = true;
         let time = self.start_time.elapsed();
         for index in 0..count {
             let Some((id, output)) = self.outputs.at(index) else {
                 continue;
             };
+            if self.output_power.is_off(id) {
+                // Powered off: no draw, no present, no frame callbacks and
+                // no presentation feedback for this output -- the
+                // render-work half of "off" (see `output_power.rs`). A
+                // client starved of callbacks simply paints late; damage
+                // history only advances on a drawn frame, so the power-on
+                // frame repaints whatever accumulated. A pending session
+                // lock still confirms off this output: dark is blank (see
+                // `SessionLock::note_powered_off`), whichever order the
+                // power-off and the lock arrived in.
+                if self.session_lock.awaiting_blank()
+                    && self.session_lock.note_powered_off(id, count)
+                {
+                    self.confirm_lock();
+                }
+                continue;
+            }
+            all_off = false;
             let Some(mut backend) = self.take_backend(id) else {
                 // No render target for this output: skipped, leaving the
                 // others to draw. Unreachable past startup -- both makers
@@ -872,6 +895,15 @@ impl State {
                     dead_layers = true;
                 }
             }
+        }
+        // Every output powered off: nothing can be drawn until one is
+        // powered back on (which asks for a render itself), so leaving the
+        // flag set would tick the frame timer at full rate to find dark
+        // screens. Cleared, the way the VT-pause gate above clears it --
+        // and only in this case, so a frame with nothing to draw for any
+        // other reason keeps the old shape the suites pin down.
+        if !attempted && all_off {
+            self.needs_render = false;
         }
         // A draw that failed (a bind or render error, logged where it
         // happened) left a scene change undrawn: keep it counted as one, so
@@ -1439,6 +1471,7 @@ impl State {
         }
         self.stop_captures_on(id);
         self.gamma_control.forget_output(id);
+        self.output_power.forget_output(id);
         self.retire_workspace_group(id);
         self.forget_workspace_output(id);
         self.leave_removed_output(id);

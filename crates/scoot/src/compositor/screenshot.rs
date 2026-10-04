@@ -253,14 +253,32 @@ impl State {
     /// always means the primary output, the one every single-output session
     /// has always captured.
     pub(super) fn screenshot_refusal(&self, output: Option<u64>) -> Option<String> {
-        let asked = OutputId(output?);
-        if self.outputs.get(asked).is_some() {
-            return None;
+        // `None` -- no `--output` -- means the primary output, resolved
+        // here so a powered-off primary is refused the same way a named
+        // one is. No outputs at all (before the first one exists) is
+        // downstream's error, not this one's.
+        let asked = match output {
+            Some(id) => OutputId(id),
+            None => self.outputs.primary_id()?,
+        };
+        let Some(_) = self.outputs.get(asked) else {
+            return Some(format!(
+                "output {} cannot be captured: this session has no such output",
+                asked.0
+            ));
+        };
+        // A powered-off output keeps its last frame in the framebuffer
+        // (headless/nested) or nothing a read-back could see (tty): either
+        // way there are no current pixels to hand back, and serving the stale
+        // ones would hand an agent a picture labelled "now" that predates the
+        // power-off. Refused, naming the recovery (power it back on first).
+        if self.output_power.is_off(asked) {
+            return Some(format!(
+                "output {} cannot be captured: it is powered off (power it on first)",
+                asked.0
+            ));
         }
-        Some(format!(
-            "output {} cannot be captured: this session has no such output",
-            asked.0
-        ))
+        None
     }
 
     /// Renders anything outstanding, then captures output `id`'s raw pixels,
