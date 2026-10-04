@@ -131,13 +131,21 @@ pub fn del_interface(index: u32) -> Vec<u8> {
 
 /// One `NEW_INTERFACE` notice for a wireless interface: the name travels
 /// NUL-terminated, as the kernel sends it, and the SSID rides along
-/// while associated.
+/// while associated. A station, like the existing tests' interfaces.
 pub fn interface(index: u32, name: &str, ssid: Option<&[u8]>) -> Vec<u8> {
+    interface_with_type(index, name, ssid, netlink::NL80211_IFTYPE_STATION)
+}
+
+/// One `NEW_INTERFACE` notice with an explicit interface type (a station,
+/// an access point, ...): what tells the module which radio's scan to
+/// keep. The kernel always sends the type; the value is `nl80211_iftype`.
+pub fn interface_with_type(index: u32, name: &str, ssid: Option<&[u8]>, iftype: u32) -> Vec<u8> {
     let mut body = vec![netlink::NL80211_CMD_NEW_INTERFACE, 1, 0, 0];
     body.extend_from_slice(&attr(3, &index.to_ne_bytes()));
     let mut terminated = name.as_bytes().to_vec();
     terminated.push(0);
     body.extend_from_slice(&attr(4, &terminated));
+    body.extend_from_slice(&attr(5, &iftype.to_ne_bytes()));
     if let Some(ssid) = ssid {
         body.extend_from_slice(&attr(52, ssid));
     }

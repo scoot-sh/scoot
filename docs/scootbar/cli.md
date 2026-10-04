@@ -719,6 +719,17 @@ no daemon and no child process: two netlink sockets on the bar's own
   keeps it. **`show-ssid`** (default true) hides the SSID when false —
   the bar shows `WiFi`, and `query` omits the SSID — because the bar
   is visible in screenshots and to an agent's `query`.
+- **Which interface's scan is listed.** The picker and the popup list the
+  shown interface's scan where it is a scanning station; where the shown
+  interface is not wireless (ethernet, a tunnel, offline), they list the
+  associated station's instead — or, with none associated, the first idle
+  station's, so the picker still works off-network. An interface in AP mode (an
+  access point, its VLAN, a P2P group owner) has no useful scan: its cache is never
+  dumped and never listed, so a hotspot beside the station cannot empty
+  the list. A second station's cache is never listed either: only the
+  target above is dumped. The default route moving to another radio
+  re-dumps the scan there; the shown radio vanishing falls back to the
+  associated station that is left.
 - **`query`** reports `{"state": "wifi", "ssid": "Wimbly", "signal": -54,
   "bars": 4, "interface": "wlan0", "vpn": false}`, `"ethernet"` and
   `"vpn"` with the interface, or `{"state": "disconnected"}`.
