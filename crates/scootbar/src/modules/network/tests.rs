@@ -706,6 +706,123 @@ fn an_idle_station_is_scanned_while_nothing_is_associated() {
     let _ = fake.sent();
 }
 
+/// A deauthentication re-targets the kept scan at once: the shown
+/// interface is ethernet, two stations stand behind it with the
+/// associated one listed second, and its deauth sends the surviving
+/// idle station's scan without waiting for another event.
+#[test]
+fn a_deauth_retargets_the_scan_to_the_surviving_station() {
+    const IDLE: u32 = WLAN0;
+    const ASSOC: u32 = 4;
+    let (mut harness, fake) = Fake::start(&Settings::default());
+    plug(&fake);
+    route_via(&fake, ETH0);
+    // The idle station first, the associated one second: the kept scan
+    // is the associated one's.
+    fake.rt(&fake::link(16, IDLE, UP, 6, "wlan0", None));
+    fake.rt(&fake::addr(20, IDLE, 2));
+    fake.genl(&fake::interface(IDLE, "wlan0", None));
+    fake.rt(&fake::link(16, ASSOC, UP, 6, "wlan1", None));
+    fake.rt(&fake::addr(20, ASSOC, 2));
+    fake.genl(&fake::interface(ASSOC, "wlan1", Some(b"FarAway")));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert_eq!(harness.view().text(), "eth0");
+    // Settle the associated scan and its station: nothing owed after.
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [ASSOC]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::scan(&[(b"FarAway", -6000, true)]));
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    fake.genl(&fake::station(-60));
+    fake.genl(&fake::done_seq(request_seq(
+        &genl,
+        super::netlink::NL80211_CMD_GET_STATION,
+    )));
+    assert_eq!(drive(&mut harness), Update::Unchanged);
+    let (_, genl) = fake.sent();
+    assert!(scan_targets(&genl).is_empty());
+    // The associated station deauthenticates: the idle one's scan goes
+    // out with the notice, not with the next event.
+    fake.genl(&fake::deauth(ASSOC));
+    let _ = drive(&mut harness);
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [IDLE]);
+    let _ = fake.sent();
+}
+
+/// A station reply in flight for the old target does not land on the new
+/// target's signal: the reply belongs to the in-flight dump's interface,
+/// not whatever `station_of` has moved to since it was queued. Fails
+/// with `station_of` read at reply time (the new target briefly shows
+/// the old one's dBm until its own reply overwrites it).
+#[test]
+fn a_late_station_reply_keeps_the_old_target_s_signal() {
+    const OLD: u32 = WLAN0;
+    const NEXT: u32 = 4;
+    let (mut harness, fake) = Fake::start(&Settings::default());
+    for (index, name, ssid) in [
+        (OLD, "wlan0", &b"Wimbly"[..]),
+        (NEXT, "wlan1", &b"FarAway"[..]),
+    ] {
+        fake.rt(&fake::link(16, index, UP, 6, name, None));
+        fake.rt(&fake::addr(20, index, 2));
+        fake.genl(&fake::interface(index, name, Some(ssid)));
+    }
+    route_via(&fake, OLD);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("Wimbly"));
+    // The shown scan is settled; its station is now in flight.
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [OLD]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::scan(&[(b"Wimbly", -5000, true)]));
+    fake.genl(&fake::done_seq(scan));
+    assert_eq!(drive(&mut harness), Update::Changed);
+    let (_, genl) = fake.sent();
+    let station = request_seq(&genl, super::netlink::NL80211_CMD_GET_STATION);
+    // The route moves while the old target's station is outstanding: the
+    // new target's scan queues behind it, and nothing goes out yet.
+    route_via(&fake, NEXT);
+    assert_eq!(drive(&mut harness), Update::Changed);
+    assert!(harness.view().text().starts_with("FarAway"));
+    let (_, genl) = fake.sent();
+    assert!(
+        scan_targets(&genl).is_empty(),
+        "nothing goes out while the old station is in flight"
+    );
+    // The old target's reply lands: on the old target, not the shown
+    // one. A different dBm than the scan lent, so a misattribution
+    // shows in the value.
+    fake.genl(&fake::station(-51));
+    fake.genl(&fake::done_seq(station));
+    let _ = drive(&mut harness);
+    let value = harness.value_on(None).expect("a value");
+    assert_eq!(value["ssid"], "FarAway");
+    assert!(
+        value.get("signal").is_none(),
+        "the old target's dBm must not land on the new target: {value}"
+    );
+    // The new target's own cycle then reports its own signal.
+    let (_, genl) = fake.sent();
+    assert_eq!(scan_targets(&genl), [NEXT]);
+    let scan = request_seq(&genl, super::netlink::NL80211_CMD_GET_SCAN);
+    fake.genl(&fake::scan(&[(b"FarAway", -8000, true)]));
+    fake.genl(&fake::done_seq(scan));
+    let _ = drive(&mut harness);
+    let (_, genl) = fake.sent();
+    fake.genl(&fake::station(-80));
+    fake.genl(&fake::done_seq(request_seq(
+        &genl,
+        super::netlink::NL80211_CMD_GET_STATION,
+    )));
+    let _ = drive(&mut harness);
+    let value = harness.value_on(None).expect("a value");
+    assert_eq!(value["signal"], -80);
+    let _ = fake.sent();
+}
+
 #[test]
 fn two_radios_scans_do_not_mix() {
     let (mut harness, fake) = Fake::start(&Settings::default());

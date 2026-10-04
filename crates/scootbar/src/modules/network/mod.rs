@@ -758,6 +758,10 @@ impl Nets {
                         iface.ssid.clear();
                         iface.signal = None;
                     }
+                    // The association named the target: without a
+                    // re-target the old radio's scan stays kept until the
+                    // next link/addr/route/wireless event (see `retarget`).
+                    self.retarget();
                 }
                 netlink::NL80211_CMD_NEW_SCAN_RESULTS => {
                     // A bare notice (sequence zero) says a scan finished:
@@ -784,7 +788,17 @@ impl Nets {
                 }
                 netlink::NL80211_CMD_NEW_STATION => {
                     if let Some(signal) = netlink::parse_station(msg.body) {
-                        let of = self.station_of;
+                        // The reply belongs to the in-flight station
+                        // dump's interface, not whatever `station_of` has
+                        // moved to since it was queued (`retarget`
+                        // re-points at queue time, while this dump is
+                        // still outstanding): without this the old
+                        // target's dBm lands on the new target's signal
+                        // until the new target's own reply overwrites it.
+                        let of = match self.genl_busy {
+                            Some((_, GenlDump::Station(index))) => index,
+                            _ => self.station_of,
+                        };
                         if let Some(iface) = self.find(of) {
                             iface.signal = Some(signal);
                         }
