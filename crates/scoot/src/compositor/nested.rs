@@ -42,6 +42,8 @@ mod presenter;
 use std::error::Error;
 
 use calloop_wayland_source::WaylandSource;
+use smithay::backend::input::{AxisRelativeDirection, AxisSource, InputTime};
+use smithay::input::pointer::AxisFrame;
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::wl_compositor::WlCompositor as HostCompositor;
 use wayland_client::protocol::wl_keyboard::WlKeyboard as HostKeyboard;
@@ -58,6 +60,7 @@ use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase as HostWmBase;
 pub(super) use self::gpu::ParamsTag;
 use self::presenter::Presenter;
 use super::State;
+use super::input::{ScrollAxis, scroll_frame};
 use crate::cli::MAX_OUTPUT_DIMENSION;
 
 /// The connection presenting scoot's own framebuffer as a window in a host
@@ -145,6 +148,153 @@ pub struct Host {
     /// fallback to read-back.
     #[cfg(feature = "gpu-scanout")]
     frame_owed: bool,
+    /// Scroll events the host sent since its own last `Frame` (see
+    /// [`PendingAxis`]). Written by `nested_dispatch.rs` once per host
+    /// axis event and drained once per host `Frame` -- which is what keeps
+    /// a host frame's `axis_source`, `axis`, `axis_value120` and
+    /// `axis_stop` arriving at clients as one frame rather than piecemeal.
+    /// Overwritten per direction, never extended (only the latest value
+    /// per axis matters, plus whether each arrived at all), so a frame
+    /// costs a few stores and no allocation, whatever rate the host sends
+    /// them at.
+    pending_axis: PendingAxis,
+}
+
+/// One host pointer frame's worth of scroll, waiting for the host's `Frame`
+/// to become a single [`AxisFrame`].
+///
+/// The host delivers a scroll as several events -- `axis_source`, one
+/// `axis` per direction, optionally `axis_value120` (or the older
+/// `axis_discrete`) and `axis_stop`, then `frame` -- while the [`AxisFrame`]
+/// clients see needs everything at once, and a `value120` may arrive after
+/// the `axis` it belongs to. Buffering until `Frame` is the only way to
+/// forward the frame whole; emitting per event would send the source late
+/// or the detents never. Plain data (two accumulators, a few `Option`s and
+/// flags): no allocation, whatever rate the host sends at.
+#[derive(Default)]
+pub(super) struct PendingAxis {
+    source: Option<AxisSource>,
+    dx: Option<f64>,
+    dy: Option<f64>,
+    v120_x: Option<i32>,
+    v120_y: Option<i32>,
+    stop_x: bool,
+    stop_y: bool,
+    dir_x: Option<AxisRelativeDirection>,
+    dir_y: Option<AxisRelativeDirection>,
+}
+
+impl PendingAxis {
+    /// Adds one host `axis` value. Summed, not overwritten: the protocol
+    /// sends at most one per direction per frame, and adding is what
+    /// [`AxisFrame::value`] would do with two anyway.
+    pub(super) fn push_axis(&mut self, horizontal: bool, value: f64) {
+        let slot = if horizontal {
+            &mut self.dx
+        } else {
+            &mut self.dy
+        };
+        *slot = Some(slot.unwrap_or(0.0) + value);
+    }
+
+    /// Adds one host `axis_value120`. Overwrites: at most one arrives per
+    /// direction per frame, and it wins over `axis_discrete` (see
+    /// [`PendingAxis::push_discrete`]).
+    pub(super) fn push_value120(&mut self, horizontal: bool, steps: i32) {
+        *if horizontal {
+            &mut self.v120_x
+        } else {
+            &mut self.v120_y
+        } = Some(steps);
+    }
+
+    /// Adds one host `axis_discrete`, scaled to 120ths -- unless a
+    /// `value120` already said the same thing in the same frame. A host
+    /// sends either (Smithay's own server sends `value120` to v8+ clients
+    /// and `discrete` below, never both), but counting both when one does
+    /// would double every wheel click, so the discrete step yields.
+    pub(super) fn push_discrete(&mut self, horizontal: bool, discrete: i32) {
+        let slot = if horizontal {
+            &mut self.v120_x
+        } else {
+            &mut self.v120_y
+        };
+        if slot.is_none() {
+            *slot = Some(discrete.saturating_mul(120));
+        }
+    }
+
+    /// Marks one direction stopped (the host's `axis_stop`).
+    pub(super) fn push_stop(&mut self, horizontal: bool) {
+        *if horizontal {
+            &mut self.stop_x
+        } else {
+            &mut self.stop_y
+        } = true;
+    }
+
+    /// Records the host's `axis_source` for the frame being built.
+    pub(super) fn push_source(&mut self, source: AxisSource) {
+        self.source = Some(source);
+    }
+
+    /// Records one direction's `axis_relative_direction`.
+    pub(super) fn push_direction(&mut self, horizontal: bool, direction: AxisRelativeDirection) {
+        *if horizontal {
+            &mut self.dir_x
+        } else {
+            &mut self.dir_y
+        } = Some(direction);
+    }
+
+    /// Whether anything arrived since the last frame: without this the
+    /// host's every (usually scroll-less) `Frame` would build a frame no
+    /// client needs. A bare source with no motion is not a scroll (see
+    /// [`scroll_frame`]), so the source alone does not count -- but once
+    /// anything else arrives the source rides along.
+    pub(super) fn is_empty(&self) -> bool {
+        self.dx.is_none()
+            && self.dy.is_none()
+            && self.v120_x.is_none()
+            && self.v120_y.is_none()
+            && !self.stop_x
+            && !self.stop_y
+    }
+
+    /// Empties the buffer into the [`AxisFrame`] the host's frame becomes,
+    /// or `None` when it held nothing worth sending (see [`scroll_frame`]
+    /// for the other way to get `None`: motion the frame drops, like a
+    /// zero from a non-finger source). Takes (resets to empty) either way,
+    /// so a frame is never forwarded twice and one malformed host frame
+    /// cannot poison the next.
+    ///
+    /// A source-only frame builds to `None` here rather than emitting an
+    /// `axis_source` with no motion behind it -- and a direction-only frame
+    /// the same, since the client never sees a direction without a value
+    /// (the server sends `axis_relative_direction` only alongside a
+    /// nonzero `axis`).
+    pub(super) fn finish(&mut self, time: InputTime) -> Option<AxisFrame> {
+        let pending = std::mem::take(self);
+        if pending.is_empty() {
+            return None;
+        }
+        scroll_frame(
+            time,
+            pending.source,
+            ScrollAxis {
+                value: pending.dx,
+                v120: pending.v120_x,
+                stop: pending.stop_x,
+                direction: pending.dir_x.unwrap_or(AxisRelativeDirection::Identical),
+            },
+            ScrollAxis {
+                value: pending.dy,
+                v120: pending.v120_y,
+                stop: pending.stop_y,
+                direction: pending.dir_y.unwrap_or(AxisRelativeDirection::Identical),
+            },
+        )
+    }
 }
 
 pub fn init(
@@ -237,6 +387,7 @@ pub(super) fn init_on(
         present_skipped: false,
         #[cfg(feature = "gpu-scanout")]
         frame_owed: false,
+        pending_axis: PendingAxis::default(),
     });
 
     WaylandSource::new(conn, event_queue)
@@ -910,6 +1061,20 @@ impl Host {
 
     pub(super) fn set_pointer(&mut self, pointer: HostPointer) {
         self.pointer = Some(pointer);
+    }
+
+    /// The buffer `nested_dispatch.rs` accumulates one host pointer frame's
+    /// scroll into (see [`PendingAxis`]).
+    pub(super) fn pending_axis_mut(&mut self) -> &mut PendingAxis {
+        &mut self.pending_axis
+    }
+
+    /// Takes the accumulated scroll, leaving an empty buffer behind. The
+    /// caller builds the client frame from it (see [`PendingAxis::finish`]);
+    /// `Leave` takes and drops it, so a scroll the host never closed with a
+    /// `Frame` reaches no client.
+    pub(super) fn take_pending_axis(&mut self) -> PendingAxis {
+        std::mem::take(&mut self.pending_axis)
     }
 
     /// Which way frames go out right now, for the suites: `"dmabuf"`,

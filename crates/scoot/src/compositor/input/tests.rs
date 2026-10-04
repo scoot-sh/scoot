@@ -35,7 +35,10 @@ use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::utils::Serial;
-use wayland_client::protocol::{wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_surface};
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_keyboard, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool,
+    wl_surface,
+};
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
@@ -207,6 +210,11 @@ const CANVAS: i32 = 200;
 enum Step {
     /// Map an `xdg_toplevel`, which is what scoot hands keyboard focus to.
     MapWindow,
+    /// Attach a real shm buffer to the mapped window and commit it, so it
+    /// has a size the pointer hit test can land on. A mapped-but-never-
+    /// committed surface has no size, and these tests would prove nothing
+    /// about scroll delivery without pointer focus.
+    PaintWindow,
     /// Report everything the client's own `wl_keyboard` has decoded so far.
     Report,
 }
@@ -214,7 +222,7 @@ enum Step {
 /// What the client's `wl_keyboard` actually received -- the only evidence
 /// that settles "did `type_text` deliver this string", since every wrong
 /// answer this ever gave looked right from the compositor's side.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct Typed {
     /// The text the client decoded, from the keymap the compositor sent it
     /// and the modifier state the compositor told it about -- exactly what a
@@ -227,6 +235,31 @@ struct Typed {
     /// Whether the client holds keyboard focus. Without it every assertion
     /// below would pass vacuously on an empty string.
     focused: bool,
+    /// What the client's `wl_pointer` recorded. The scroll tests assert on
+    /// this; the keyboard tests ignore it.
+    scroll: Scrolled,
+}
+
+/// What the client's `wl_pointer` actually received -- the only evidence
+/// that settles "did this scroll arrive as a finger scroll with a stop",
+/// since every wrong answer looks right from the compositor's side (the
+/// motion arrives either way; the annotations are what Chrome reads).
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Scrolled {
+    /// `axis_source` events, in arrival order.
+    sources: Vec<wl_pointer::AxisSource>,
+    /// `(axis, value)` for every `axis` event, in arrival order.
+    axes: Vec<(wl_pointer::Axis, f64)>,
+    /// `(axis, value120)` for every `axis_value120` event, in arrival order.
+    value120s: Vec<(wl_pointer::Axis, i32)>,
+    /// Every `axis_stop`'s axis, in arrival order.
+    stops: Vec<wl_pointer::Axis>,
+    /// `(axis, direction)` for every `axis_relative_direction`, in order.
+    directions: Vec<(wl_pointer::Axis, wl_pointer::AxisRelativeDirection)>,
+    /// A pointer `enter` arrived. Without pointer focus the client receives
+    /// no scroll at all, and every scroll assertion below would pass
+    /// vacuously on empty vecs -- the same guard `focused` is for keys.
+    entered: bool,
 }
 
 #[derive(Default)]
@@ -234,9 +267,15 @@ struct TestClient {
     compositor: Option<wl_compositor::WlCompositor>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
     seat: Option<wl_seat::WlSeat>,
+    shm: Option<wl_shm::WlShm>,
     /// Created from the seat's `Capabilities` event, so the client never
     /// asks for a keyboard the compositor didn't advertise.
     keyboard: Option<wl_keyboard::WlKeyboard>,
+    /// Created the same way: the scroll tests need a v9 pointer
+    /// (`axis_source` is v5, `axis_value120` v8, `axis_relative_direction`
+    /// v9), which is why the seat binds at 9 rather than 5. Keyboard event
+    /// content is identical at either version.
+    pointer: Option<wl_pointer::WlPointer>,
     /// The client's own xkb state, compiled from the keymap fd the
     /// compositor sent over `wl_keyboard.keymap` -- i.e. the real decoding
     /// path every toolkit uses, not a second copy of the compositor's.
@@ -299,8 +338,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             "wl_compositor" => {
                 client.compositor = Some(registry.bind(name, version.min(4), qh, ()))
             }
+            "wl_shm" => client.shm = Some(registry.bind(name, version.min(1), qh, ())),
             "xdg_wm_base" => client.wm_base = Some(registry.bind(name, version.min(3), qh, ())),
-            "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
+            "wl_seat" => client.seat = Some(registry.bind(name, version.min(9), qh, ())),
             _ => {}
         }
     }
@@ -318,10 +358,13 @@ impl Dispatch<wl_seat::WlSeat, ()> for TestClient {
         if let wl_seat::Event::Capabilities {
             capabilities: WEnum::Value(capabilities),
         } = event
-            && capabilities.contains(wl_seat::Capability::Keyboard)
-            && client.keyboard.is_none()
         {
-            client.keyboard = Some(seat.get_keyboard(qh, ()));
+            if capabilities.contains(wl_seat::Capability::Keyboard) && client.keyboard.is_none() {
+                client.keyboard = Some(seat.get_keyboard(qh, ()));
+            }
+            if capabilities.contains(wl_seat::Capability::Pointer) && client.pointer.is_none() {
+                client.pointer = Some(seat.get_pointer(qh, ()));
+            }
         }
     }
 }
@@ -417,6 +460,43 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for TestClient {
     }
 }
 
+impl Dispatch<wl_pointer::WlPointer, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let seen = &mut client.typed.scroll;
+        match event {
+            wl_pointer::Event::Enter { .. } => seen.entered = true,
+            wl_pointer::Event::AxisSource {
+                axis_source: WEnum::Value(source),
+            } => seen.sources.push(source),
+            wl_pointer::Event::Axis {
+                axis: WEnum::Value(axis),
+                value,
+                ..
+            } => seen.axes.push((axis, value)),
+            wl_pointer::Event::AxisValue120 {
+                axis: WEnum::Value(axis),
+                value120,
+            } => seen.value120s.push((axis, value120)),
+            wl_pointer::Event::AxisStop {
+                axis: WEnum::Value(axis),
+                ..
+            } => seen.stops.push(axis),
+            wl_pointer::Event::AxisRelativeDirection {
+                axis: WEnum::Value(axis),
+                direction: WEnum::Value(direction),
+            } => seen.directions.push((axis, direction)),
+            _ => {}
+        }
+    }
+}
+
 impl Dispatch<xdg_wm_base::XdgWmBase, ()> for TestClient {
     fn event(
         _: &mut Self,
@@ -448,6 +528,9 @@ impl Dispatch<xdg_surface::XdgSurface, ()> for TestClient {
 }
 
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
+wayland_client::delegate_noop!(TestClient: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(TestClient: ignore wl_surface::WlSurface);
 wayland_client::delegate_noop!(TestClient: ignore xdg_toplevel::XdgToplevel);
 
@@ -486,6 +569,7 @@ fn run_client(
 
     let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
     let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
+    let shm = client.shm.clone().ok_or("no wl_shm")?;
     let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
 
     while let Ok(step) = steps.recv() {
@@ -497,12 +581,46 @@ fn run_client(
                 surface.commit();
                 windows.push(surface);
             }
+            Step::PaintWindow => {
+                let surface = windows.first().ok_or("no mapped window to paint")?;
+                let buffer = solid_buffer(&shm, &qh, CANVAS);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage(0, 0, CANVAS, CANVAS);
+                surface.commit();
+            }
             Step::Report => {}
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
         acks.send(client.typed.clone()).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// A `CANVAS`x`CANVAS` solid `wl_buffer` over a real memfd-backed shm pool
+/// -- the same path any toolkit takes to give its surface a size.
+fn solid_buffer(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    size: i32,
+) -> wl_buffer::WlBuffer {
+    use std::io::Write as _;
+    use std::os::fd::AsFd as _;
+    let stride = size * 4;
+    let len = (stride * size) as usize;
+    let fd = rustix::fs::memfd_create("scoot-scroll-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    let pixels: Vec<u8> = [0xff, 0x33, 0x66, 0xff]
+        .iter()
+        .copied()
+        .cycle()
+        .take(len)
+        .collect();
+    file.write_all(&pixels).expect("a filled pool file");
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, size, size, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    buffer
 }
 
 /// A live compositor with a real headless backend and one connected client,
@@ -763,6 +881,7 @@ fn typing_nothing_sends_nothing() {
             text: String::new(),
             keys: 0,
             focused: true,
+            scroll: Scrolled::default(),
         }
     );
 }
@@ -1641,4 +1760,300 @@ fn the_pointer_can_rest_in_a_dead_zone_between_uneven_outputs() {
         (260.0, 150.0),
         "relative motion inside the union box is allowed even over no output"
     );
+}
+
+// -------------------------------------------------------------------------
+// Scroll translation (`scroll_frame`)
+// -------------------------------------------------------------------------
+
+/// One axis for the translation tests: motion without steps, the way a
+/// touchpad reports it.
+fn plain_axis(value: Option<f64>) -> ScrollAxis {
+    ScrollAxis {
+        value,
+        v120: None,
+        stop: false,
+        direction: AxisRelativeDirection::Identical,
+    }
+}
+
+fn no_axis() -> ScrollAxis {
+    plain_axis(None)
+}
+
+/// Fail-first for the Chrome trackpad bug: every source must reach the
+/// frame it names. Before the fix every scroll was rebuilt as a wheel, so
+/// a touchpad arrived with no source at all and Chrome ignored it. A
+/// source that arrives wrong here is invisible from the compositor side --
+/// the motion still reaches the client -- which is why this asserts on the
+/// frame, not on what a client did with it.
+#[test]
+fn every_source_reaches_the_frame_it_names() {
+    for source in [
+        AxisSource::Wheel,
+        AxisSource::Finger,
+        AxisSource::Continuous,
+        AxisSource::WheelTilt,
+    ] {
+        let frame = scroll_frame(
+            InputTime::from_millis(1),
+            Some(source),
+            plain_axis(Some(10.0)),
+            no_axis(),
+        )
+        .expect("motion on one axis is a scroll");
+        assert_eq!(
+            frame.source,
+            Some(source),
+            "{source:?} must be forwarded, not rebuilt as a wheel"
+        );
+        assert_eq!(frame.axis, (10.0, 0.0));
+        assert_eq!(frame.stop, (false, false));
+    }
+}
+
+/// A finger scroll's terminating zero amount is the `stop` the protocol
+/// requires, not motion: libinput guarantees a finger sequence ends with
+/// one, and clients like Chrome wait for the matching `axis_stop` before
+/// treating the gesture as over.
+#[test]
+fn a_finger_zero_is_a_stop_not_motion() {
+    let frame = scroll_frame(
+        InputTime::from_millis(1),
+        Some(AxisSource::Finger),
+        no_axis(),
+        plain_axis(Some(0.0)),
+    )
+    .expect("a terminating zero still ends a scroll");
+    assert_eq!(frame.source, Some(AxisSource::Finger));
+    assert_eq!(
+        frame.axis,
+        (0.0, 0.0),
+        "a terminating zero carries no motion of its own"
+    );
+    assert_eq!(frame.stop, (false, true));
+}
+
+/// Only `Finger` promises a zero means anything: a zero from any other
+/// source is ignored rather than turned into a stop nobody asked for.
+#[test]
+fn a_non_finger_zero_is_neither_motion_nor_stop() {
+    for source in [
+        AxisSource::Wheel,
+        AxisSource::Continuous,
+        AxisSource::WheelTilt,
+    ] {
+        assert!(
+            scroll_frame(
+                InputTime::from_millis(1),
+                Some(source),
+                no_axis(),
+                plain_axis(Some(0.0)),
+            )
+            .is_none(),
+            "{source:?} with a zero value is nothing to send"
+        );
+    }
+}
+
+/// Wheel detents ride `v120` alongside the continuous value: wheel-only
+/// clients listen for the steps, smooth clients for the value, and the
+/// protocol means them as two views of the same motion -- never either/or.
+#[test]
+fn wheel_detents_ride_v120_alongside_the_value() {
+    let frame = scroll_frame(
+        InputTime::from_millis(1),
+        Some(AxisSource::Wheel),
+        no_axis(),
+        ScrollAxis {
+            value: Some(10.0),
+            v120: Some(120),
+            stop: false,
+            direction: AxisRelativeDirection::Identical,
+        },
+    )
+    .expect("a wheel click is a scroll");
+    assert_eq!(frame.v120, Some((0, 120)));
+    assert_eq!(frame.axis, (0.0, 10.0));
+}
+
+/// One event can move on both axes at once (a diagonal touchpad scroll),
+/// and one frame must carry both -- not two frames, and not just one axis.
+#[test]
+fn one_frame_carries_both_directions() {
+    let frame = scroll_frame(
+        InputTime::from_millis(1),
+        Some(AxisSource::Finger),
+        plain_axis(Some(3.0)),
+        plain_axis(Some(-4.0)),
+    )
+    .expect("two-axis motion is a scroll");
+    assert_eq!(frame.axis, (3.0, -4.0));
+    assert_eq!(frame.source, Some(AxisSource::Finger));
+}
+
+/// A bare source with no motion is not a scroll, and neither is motion no
+/// device could have produced: both build to `None` rather than emitting
+/// an `axis_source` (or garbage) with nothing behind it.
+#[test]
+fn nothing_to_send_is_no_frame() {
+    assert!(
+        scroll_frame(
+            InputTime::from_millis(1),
+            Some(AxisSource::Wheel),
+            no_axis(),
+            no_axis(),
+        )
+        .is_none(),
+        "a source with no motion is not a scroll"
+    );
+    assert!(
+        scroll_frame(InputTime::from_millis(1), None, no_axis(), no_axis(),).is_none(),
+        "nothing at all is nothing to send"
+    );
+    assert!(
+        scroll_frame(
+            InputTime::from_millis(1),
+            Some(AxisSource::Finger),
+            plain_axis(Some(f64::NAN)),
+            plain_axis(Some(f64::INFINITY)),
+        )
+        .is_none(),
+        "non-finite motion is dropped, not forwarded"
+    );
+}
+
+/// An explicit stop (the nested host's `axis_stop`) passes through
+/// verbatim, even with no motion on its axis.
+#[test]
+fn an_explicit_stop_passes_through_verbatim() {
+    let frame = scroll_frame(
+        InputTime::from_millis(1),
+        Some(AxisSource::Continuous),
+        ScrollAxis {
+            value: None,
+            v120: None,
+            stop: true,
+            direction: AxisRelativeDirection::Identical,
+        },
+        no_axis(),
+    )
+    .expect("a stop is worth sending");
+    assert_eq!(frame.stop, (true, false));
+    assert_eq!(frame.axis, (0.0, 0.0));
+}
+
+/// Injected `pointer scroll` is a wheel that also carries its detents, so
+/// clients that only listen for steps still see it: eight v120 units per
+/// scroll unit, which makes the `scroll 0 15` that scrolls Chrome exactly
+/// one detent (120). A nonzero motion that would round to zero steps still
+/// carries its sign as one step rather than arriving stepless.
+#[test]
+fn an_injected_scroll_carries_its_detents() {
+    let axis = injected_axis(15.0);
+    assert_eq!(axis.value, Some(15.0));
+    assert_eq!(axis.v120, Some(120));
+    let axis = injected_axis(-15.0);
+    assert_eq!(axis.v120, Some(-120));
+    assert_eq!(injected_axis(1.0).v120, Some(8));
+    assert_eq!(
+        injected_axis(0.01).v120,
+        Some(1),
+        "a nonzero motion must not round down to stepless"
+    );
+    let axis = injected_axis(0.0);
+    assert_eq!(axis.value, None);
+    assert_eq!(axis.v120, None);
+}
+
+// -------------------------------------------------------------------------
+// Scroll delivery to a real client
+// -------------------------------------------------------------------------
+
+/// A live compositor with a painted window under the pointer, so scrolls
+/// have pointer focus to reach. `Fixture::new` maps the window (which
+/// asserts keyboard focus); painting gives it a size, and the move puts
+/// the pointer on it. The `entered` assert is the non-vacuous guard: with
+/// no pointer focus the client receives nothing and every scroll assertion
+/// below would pass against empty vecs.
+struct ScrollFixture {
+    fixture: Fixture,
+}
+
+impl ScrollFixture {
+    fn new() -> Self {
+        let mut fixture = Fixture::new();
+        fixture.run(Step::PaintWindow);
+        fixture.state.pointer_move(100.0, 100.0);
+        let report = fixture.run(Step::Report);
+        assert!(
+            report.scroll.entered,
+            "the pointer never entered the painted window; scrolling would prove nothing"
+        );
+        Self { fixture }
+    }
+
+    fn scroll_report(&mut self) -> Scrolled {
+        self.fixture.run(Step::Report).scroll
+    }
+}
+
+/// Fail-first for the Chrome trackpad bug at the wire level: before the
+/// fix `State::scroll` built its frame from continuous values alone, so an
+/// injected scroll arrived with no `axis_value120` at all. A client that
+/// only listens for steps (like Chrome does for wheels) saw nothing.
+/// Revert `State::scroll` to the continuous-only frame and the `value120s`
+/// assert below fails while everything else still passes.
+#[test]
+fn an_injected_scroll_arrives_as_a_wheel_with_value120() {
+    let mut scroll = ScrollFixture::new();
+    scroll.fixture.state.scroll(0.0, 15.0);
+    scroll.fixture.settle();
+    let seen = scroll.scroll_report();
+    assert_eq!(seen.sources, vec![wl_pointer::AxisSource::Wheel]);
+    assert_eq!(seen.axes, vec![(wl_pointer::Axis::VerticalScroll, 15.0)]);
+    assert_eq!(
+        seen.value120s,
+        vec![(wl_pointer::Axis::VerticalScroll, 120)],
+        "a wheel scroll without detents is invisible to step-only clients"
+    );
+    assert!(seen.stops.is_empty());
+}
+
+/// The finger path end to end: a touchpad scroll arrives with the finger
+/// source its client keys off, and its terminating zero arrives as
+/// `axis_stop` rather than as motion. Built the way the tty arm builds it
+/// (`scroll_frame` plus `emit_scroll`), since no libinput device exists in
+/// a test.
+#[test]
+fn a_finger_scroll_arrives_with_its_source_and_stop() {
+    let mut scroll = ScrollFixture::new();
+    let time = InputTime::from_millis(scroll.fixture.state.millis());
+    let motion = scroll_frame(
+        time,
+        Some(AxisSource::Finger),
+        no_axis(),
+        plain_axis(Some(12.0)),
+    )
+    .expect("finger motion is a scroll");
+    scroll.fixture.state.emit_scroll(motion);
+    let end = scroll_frame(
+        time,
+        Some(AxisSource::Finger),
+        no_axis(),
+        plain_axis(Some(0.0)),
+    )
+    .expect("a terminating zero still ends a scroll");
+    scroll.fixture.state.emit_scroll(end);
+    scroll.fixture.settle();
+    let seen = scroll.scroll_report();
+    assert_eq!(
+        seen.sources,
+        vec![
+            wl_pointer::AxisSource::Finger,
+            wl_pointer::AxisSource::Finger
+        ]
+    );
+    assert_eq!(seen.axes, vec![(wl_pointer::Axis::VerticalScroll, 12.0)]);
+    assert_eq!(seen.stops, vec![wl_pointer::Axis::VerticalScroll]);
 }

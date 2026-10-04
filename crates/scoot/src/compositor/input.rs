@@ -2,7 +2,9 @@
 
 use scoot_core::Action;
 use scoot_ipc::{KeyCombo, KeyboardLayout, Modifier, PointerButton};
-use smithay::backend::input::{Axis, AxisSource, ButtonState, InputTime, KeyState};
+use smithay::backend::input::{
+    Axis, AxisRelativeDirection, AxisSource, ButtonState, InputTime, KeyState,
+};
 use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, Keysym, xkb};
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, MotionEvent, PointerHandle, RelativeMotionEvent,
@@ -61,6 +63,114 @@ pub(super) struct KeyOutcome {
     /// for a plain forwarded key, an `Action` binding, or any release, all
     /// of which never touch VT switching.
     pub vt_switch: Option<VtSwitchOutcome>,
+}
+
+/// One axis of a scroll event, as the compositor forwards it to clients.
+///
+/// Every scroll source (tty libinput, the nested host pointer, injected
+/// [`State::scroll`]) describes its motion through this, and
+/// [`scroll_frame`] turns the pair into the [`AxisFrame`] clients actually
+/// see -- which is what keeps the three from disagreeing about what, say, a
+/// zero finger amount means. Plain data, no allocation.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ScrollAxis {
+    /// Continuous value, in cursor-motion units (a scroll of 1 covers the
+    /// same distance as 1 of pointer motion). `None` when the source
+    /// carried nothing for this axis.
+    pub value: Option<f64>,
+    /// Discrete steps in 120ths, for stepped sources (one wheel click is
+    /// 120). `None` for step-less sources -- a touchpad never sends one.
+    pub v120: Option<i32>,
+    /// This axis has stopped: the host's `axis_stop`, passed through
+    /// verbatim. Backends never synthesize this; the finger terminator
+    /// below is derived by [`scroll_frame`] instead.
+    pub stop: bool,
+    /// Which way the device moved to produce this axis's direction (the
+    /// natural-scroll setting, on sources that have one).
+    pub direction: AxisRelativeDirection,
+}
+
+/// Builds the [`AxisFrame`] one scroll event becomes, or `None` when there
+/// is nothing to send (no motion, no steps, no stop on either axis -- a
+/// bare source with no motion is not a scroll, and no client hears about
+/// it).
+///
+/// Pure: everything the backends know (libinput's `amount` / `amount_v120`
+/// / `relative_direction`, the host's `axis` / `axis_value120` /
+/// `axis_discrete` / `axis_stop` / `axis_relative_direction`) arrives as an
+/// argument, so this is unit-testable with no device attached. No
+/// allocation: the frame is a stack struct, and this only fills it in.
+///
+/// A zero continuous value on an [`AxisSource::Finger`] axis is that
+/// scroll's terminator, not motion: libinput guarantees a finger sequence
+/// ends with one, and the protocol requires the matching `axis_stop` (which
+/// is what tells clients like Chrome the gesture is over). A zero from any
+/// other source means nothing -- only `Finger` promises it does -- and is
+/// ignored, as is any non-finite value no device could have produced.
+pub(super) fn scroll_frame(
+    time: InputTime,
+    source: Option<AxisSource>,
+    horizontal: ScrollAxis,
+    vertical: ScrollAxis,
+) -> Option<AxisFrame> {
+    let mut frame = AxisFrame::new(time);
+    if let Some(source) = source {
+        frame = frame.source(source);
+    }
+    let mut dirty = false;
+    for (axis, report) in [(Axis::Horizontal, horizontal), (Axis::Vertical, vertical)] {
+        frame = frame.relative_direction(axis, report.direction);
+        if let Some(steps) = report.v120 {
+            if steps != 0 {
+                frame = frame.v120(axis, steps);
+                dirty = true;
+            }
+        }
+        if report.stop {
+            frame = frame.stop(axis);
+            dirty = true;
+        }
+        match (report.value, source) {
+            (Some(value), _) if value.is_finite() && value != 0.0 => {
+                frame = frame.value(axis, value);
+                dirty = true;
+            }
+            (Some(0.0), Some(AxisSource::Finger)) => {
+                frame = frame.stop(axis);
+                dirty = true;
+            }
+            _ => {}
+        }
+    }
+    dirty.then_some(frame)
+}
+
+/// One axis of an injected [`State::scroll`]: a wheel that also carries its
+/// detents, so clients that only listen for steps still see the scroll.
+///
+/// Eight v120 units per scroll unit, so the `pointer scroll 0 15` the
+/// coordinator verified scrolling Chrome carries exactly one detent (120).
+/// A nonzero motion that would round to zero steps still carries its sign
+/// as one step rather than arriving stepless. Zero and non-finite deltas
+/// carry nothing, and [`scroll_frame`] then drops a fully empty scroll
+/// rather than sending a sourceless no-op frame.
+fn injected_axis(delta: f64) -> ScrollAxis {
+    let v120 = if delta.is_finite() && delta != 0.0 {
+        let steps = (delta * 8.0).round() as i32;
+        Some(if steps == 0 {
+            delta.signum() as i32
+        } else {
+            steps
+        })
+    } else {
+        None
+    };
+    ScrollAxis {
+        value: (delta.is_finite() && delta != 0.0).then_some(delta),
+        v120,
+        stop: false,
+        direction: AxisRelativeDirection::Identical,
+    }
 }
 
 impl State {
@@ -544,19 +654,28 @@ impl State {
     }
 
     pub fn scroll(&mut self, dx: f64, dy: f64) {
+        let time = InputTime::from_millis(self.millis());
+        let frame = scroll_frame(
+            time,
+            Some(AxisSource::Wheel),
+            injected_axis(dx),
+            injected_axis(dy),
+        );
+        if let Some(frame) = frame {
+            self.emit_scroll(frame);
+        }
+    }
+
+    /// Emits one already-built scroll frame to whatever has pointer focus.
+    /// Every scroll source (libinput, the nested host pointer, injected
+    /// [`State::scroll`]) funnels through here, so there is exactly one
+    /// place that decides the frame boundary: one frame per event.
+    pub(super) fn emit_scroll(&mut self, frame: AxisFrame) {
         self.announce_activity();
         self.note_pointer_activity();
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let mut frame =
-            AxisFrame::new(InputTime::from_millis(self.millis())).source(AxisSource::Wheel);
-        if dx != 0.0 {
-            frame = frame.value(Axis::Horizontal, dx);
-        }
-        if dy != 0.0 {
-            frame = frame.value(Axis::Vertical, dy);
-        }
         pointer.axis(self, frame);
         pointer.frame(self);
     }

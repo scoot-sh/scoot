@@ -147,3 +147,119 @@ fn a_queue_that_comes_back_to_the_current_size_drains_to_nothing() {
     queued.queue(STARTED_AT);
     assert_eq!(queued.take_if_changed(STARTED_AT), None);
 }
+
+// -------------------------------------------------------------------------
+// Scroll buffering (`PendingAxis`)
+// -------------------------------------------------------------------------
+
+use super::PendingAxis;
+use smithay::backend::input::{AxisRelativeDirection, AxisSource, InputTime};
+
+/// One host frame's finger scroll keeps its source, value and stop: the
+/// three events the host sent separately become one client frame, which is
+/// the whole point of buffering until `Frame`.
+#[test]
+fn a_host_finger_frame_keeps_its_source_value_and_stop() {
+    let mut pending = PendingAxis::default();
+    pending.push_source(AxisSource::Finger);
+    pending.push_axis(false, 12.0);
+    let frame = pending
+        .finish(InputTime::from_millis(1))
+        .expect("a finger scroll is worth sending");
+    assert_eq!(frame.source, Some(AxisSource::Finger));
+    assert_eq!(frame.axis, (0.0, 12.0));
+    assert_eq!(frame.stop, (false, false));
+
+    let mut pending = PendingAxis::default();
+    pending.push_source(AxisSource::Finger);
+    pending.push_stop(false);
+    let frame = pending
+        .finish(InputTime::from_millis(2))
+        .expect("a stop is worth sending");
+    assert_eq!(frame.stop, (false, true));
+    assert_eq!(frame.axis, (0.0, 0.0));
+}
+
+/// `value120` wins over `discrete`: a host that sent both for one click
+/// (Smithay's own server never does -- it sends one or the other by client
+/// version -- but a foreign host might) must not double every wheel click.
+#[test]
+fn value120_wins_over_discrete_in_either_order() {
+    for first_value120 in [true, false] {
+        let mut pending = PendingAxis::default();
+        pending.push_source(AxisSource::Wheel);
+        if first_value120 {
+            pending.push_value120(false, 120);
+            pending.push_discrete(false, 1);
+        } else {
+            pending.push_discrete(false, 1);
+            pending.push_value120(false, 120);
+        }
+        let frame = pending
+            .finish(InputTime::from_millis(1))
+            .expect("a wheel click is worth sending");
+        assert_eq!(
+            frame.v120,
+            Some((0, 120)),
+            "counted twice when value120 arrived {}",
+            if first_value120 { "first" } else { "second" }
+        );
+    }
+}
+
+/// `discrete` alone scales to 120ths, so pre-v8 hosts still deliver steps.
+#[test]
+fn discrete_alone_scales_to_120ths() {
+    let mut pending = PendingAxis::default();
+    pending.push_source(AxisSource::Wheel);
+    pending.push_discrete(false, -1);
+    let frame = pending
+        .finish(InputTime::from_millis(1))
+        .expect("a discrete click is worth sending");
+    assert_eq!(frame.v120, Some((0, -120)));
+}
+
+/// An empty buffer finishes to nothing, and finishing resets: a frame is
+/// never forwarded twice, and one malformed host frame cannot poison the
+/// next. A source alone (motion that never arrived) finishes to nothing
+/// too -- a bare source is not a scroll.
+#[test]
+fn an_empty_buffer_finishes_to_nothing_and_resets() {
+    let mut pending = PendingAxis::default();
+    assert!(pending.finish(InputTime::from_millis(1)).is_none());
+    pending.push_source(AxisSource::Finger);
+    assert!(
+        pending.finish(InputTime::from_millis(2)).is_none(),
+        "a source with no motion is not a scroll"
+    );
+    pending.push_source(AxisSource::Finger);
+    pending.push_axis(true, 5.0);
+    let frame = pending
+        .finish(InputTime::from_millis(3))
+        .expect("motion after resets still sends");
+    assert_eq!(frame.axis, (5.0, 0.0));
+    assert!(pending.finish(InputTime::from_millis(4)).is_none());
+}
+
+/// Two `axis` events for one direction in one frame add up, the way
+/// `AxisFrame::value` accumulates -- and the natural-scroll direction
+/// rides along untouched.
+#[test]
+fn axes_accumulate_and_carry_their_direction() {
+    let mut pending = PendingAxis::default();
+    pending.push_source(AxisSource::Continuous);
+    pending.push_axis(false, 4.0);
+    pending.push_axis(false, 6.0);
+    pending.push_direction(false, AxisRelativeDirection::Inverted);
+    let frame = pending
+        .finish(InputTime::from_millis(1))
+        .expect("accumulated motion is a scroll");
+    assert_eq!(frame.axis, (0.0, 10.0));
+    assert_eq!(
+        frame.relative_direction,
+        (
+            AxisRelativeDirection::Identical,
+            AxisRelativeDirection::Inverted
+        )
+    );
+}
